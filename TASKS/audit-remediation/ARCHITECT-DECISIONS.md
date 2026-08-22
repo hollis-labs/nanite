@@ -40,8 +40,8 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 |---|---|---|---|---|---|
 | AD-01 | Linux sandbox behavior when `bwrap` is absent | `02/01` | GO-SEC4-001, GO-SEC4-002, GO-SEC4-006 | **0** | **decided** |
 | AD-02 | Linux network allowlist enforcement level | `02/01` | GO-SEC4-002 | **0** | **decided** |
-| AD-03 | macOS seatbelt read-boundary: disclose, narrow, or accept | `02/02` | GO-SEC4-005 | **0** | open |
-| AD-04 | Plugin-install convergence: concrete integration shape | `01/01` | GO-PLUGIN-001/002/003 | **0** | open |
+| AD-03 | macOS seatbelt read-boundary: disclose, narrow, or accept | `02/02` | GO-SEC4-005 | **0** | **decided** |
+| AD-04 | Plugin-install convergence: concrete integration shape | `01/01` | GO-PLUGIN-001/002/003 | **0** | **decided** |
 | AD-05 | Default/official catalog source: provision a real signing key? | `01/01` follow-up | GO-PLUGIN-001 | 1 | open |
 | AD-06 | Island: grounding memory recall — wire / defer / retire | `09/01` | GO-MEM-001 | 4 | open |
 | AD-07 | Island: Hadron context gate — wire / defer / retire | `09/02` | GO-MEM-002 | 4 | open |
@@ -211,7 +211,23 @@ either coherent answer.
 
 ### AD-03 — macOS seatbelt read-boundary: disclose, narrow, or accept
 
-**Status:** open · **Gates:** `02/02` · **Findings:** GO-SEC4-005 (low)
+**Status:** decided · **Gates:** `02/02` · **Findings:** GO-SEC4-005 (low)
+
+> **Decided (2026-08-22): disclose. Do not narrow the boundary.**
+>
+> The unrestricted file reads, mach-IPC, and process inspection permitted by
+> `internal/sandbox/os_darwin.go`'s seatbelt profile are an accepted,
+> intentional tradeoff. **The code does not change.**
+>
+> The remediation is the *disclosure* gap. `docs/hardening-phase-plan.md`'s
+> Tier 2 description was confirmed by Wave 0 to describe protections the
+> shipped code does not actually provide — that inaccuracy is the live harm
+> here, because it tells an operator they have a boundary they do not have.
+> Correct it to match reality.
+>
+> `findings.json`'s `GO-SEC4-005` is `remediate`, not `accepted-risk`: real
+> work remains. What was accepted is the *code posture*, not the finding as a
+> whole. `02/02` is already scoped for exactly this and needs no re-scope.
 
 `02/02` is written as a documentation task on the assumption the tradeoff is
 intentional and merely undisclosed — it explicitly says
@@ -222,8 +238,62 @@ Tier 2 description, which the task file identifies as **inaccurate** today.
 
 ### AD-04 — Plugin-install convergence: concrete integration shape
 
-**Status:** open · **Gates:** `01/01` · **Findings:** GO-PLUGIN-001 (critical),
+**Status:** decided · **Gates:** `01/01` · **Findings:** GO-PLUGIN-001 (critical),
 GO-PLUGIN-002 (critical), GO-PLUGIN-003 (high)
+
+> **Decided (2026-08-22).** Converge `handleCatalogInstall` onto the CLI's
+> `install.Installer` pipeline, with these six sub-questions resolved. Four
+> were settled by reading current source rather than by preference; two were
+> real calls.
+>
+> **1. Confinement (a real call): `validatePluginID` via `DirStaging`.** Route
+> the API path through `install.DirStaging.Commit` and inherit its
+> `^[a-z][a-z0-9-]{1,62}$` allowlist plus the atomic backup-then-rename. Chosen
+> over `pathsafe.ResolveUnder` because confinement then comes *with* the
+> pipeline rather than being a separate call the next handler author can
+> forget, and because allowlist validation rejects a bad name outright instead
+> of neutralising it. Note this does **not** relieve `08/09` or `12/01` of
+> widening the `forbidigo` `ResolveUnder` rule to `internal/api/` — that rule
+> guards the handlers this decision does *not* re-plumb.
+>
+> **2. Archive formats (a real call, and a gap neither the audit nor `01/01`
+> caught): keep both, via a format-dispatching `Extractor`.**
+> `internal/api/catalog.go:388-391` dispatches on `.zip` vs `.tar.gz`; the CLI
+> installer is wired with `&install.TarGzExtractor{}` only. Converging as-is
+> would have **silently dropped zip support** and broken any catalog entry with
+> a `.zip` archive URL — externally hosted, so possibly not enumerable. Add an
+> `install.Extractor` that dispatches on format, reusing the API's existing
+> `extractZip`/`extractTarGz`, which the audit already reviewed as soundly
+> defended against traversal.
+>
+> **3. Loader — settled by the code.** `pms.runPluginLoadIntoHost`
+> (`internal/api/plugins.go:839`) already exists and is used by all four API
+> handlers. A thin `install.Loader` adapter around it. The CLI's `noopLoader`
+> does not apply because the CLI runs out-of-process.
+>
+> **4. Source — settled by the code.** `catalogArchiveSource`
+> (`cmd/nanite/plugin_install_flow.go:66-89`) already carries
+> sha256/signature/signerKey into `install.Handle` and fits directly. Its only
+> couplings are `install.HTTPDownloader` and CLI-side progress emission; the
+> API path emits to `pluginHost.EmitPluginInstallProgress` instead, so expect
+> to parameterise the emitter rather than fork the type.
+>
+> **5. Legacy retirement — settled by the code, and narrower than the audit
+> implied.** `VerifyChecksum` and `VerifySignature` have exactly **one caller
+> each**, both inside `handleCatalogInstall` (`catalog.go:358`, `:367`); they go
+> fully dead on migration. But `CatalogFetcher` **must survive** — `cs.fetcher`
+> is load-bearing for browse and refresh at `catalog.go:97, 138, 148, 205, 242,
+> 281`. Retire `internal/plugin/signature.go`'s two functions; keep
+> `internal/plugin/catalog.go`'s fetcher. The audit's "retire the old
+> CatalogFetcher" recommendation is wrong on this point.
+>
+> **6. Wiring shape.** Extract a shared constructor usable from both
+> `cmd/nanite` and `internal/api` rather than hand-rolling a second
+> `Installer` wiring site — that second site is how the original divergence
+> happened. CLI behaviour must not change as a side effect; its existing tests
+> pass unmodified.
+>
+> **AD-05 remains open and separate** — it does not gate `01/01`.
 
 The *direction* is not in doubt — converge the GUI/API path onto the CLI's
 already-fail-closed pipeline. The blast radius is why this needs sign-off

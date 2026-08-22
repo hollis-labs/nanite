@@ -32,6 +32,24 @@ requires_regression_test: false
 > - **Gated on:** AD-03 — determines whether this stays docs-only or narrows the tradeoff in code.
 > - **requires_security_review:** true · **requires_regression_test:** false
 
+> ## ✅ AD-03 DECIDED (2026-08-22) — disclose; do not narrow the boundary
+>
+> The unrestricted file reads, mach-IPC, and process inspection permitted by
+> `internal/sandbox/os_darwin.go`'s seatbelt profile are an accepted,
+> intentional tradeoff. **`os_darwin.go` does not change.** This task's own
+> conditional ("not expected to change code-wise unless the architect decision
+> concludes the tradeoff itself should be narrowed") resolves to: it does not.
+>
+> The remediation is the **disclosure gap**, which Wave 0 confirmed is real:
+> `docs/hardening-phase-plan.md`'s Tier 2 description claims protections the
+> shipped code does not provide. Correcting it to match reality is the whole
+> job — that inaccuracy is the live harm, because it tells an operator they
+> have a boundary they do not have.
+>
+> `GO-SEC4-005` is `remediate`, not `accepted-risk`: what was accepted is the
+> code posture, not the finding. This task is otherwise correctly scoped as
+> written.
+
 ## Context
 
 ### Finding addressed

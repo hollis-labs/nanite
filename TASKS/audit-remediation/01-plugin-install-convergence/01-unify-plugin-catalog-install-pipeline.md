@@ -17,6 +17,49 @@
 > - **Gated on:** AD-04 (concrete integration shape). AD-05 is a follow-up, not a blocker.
 > - **requires_security_review:** true · **requires_regression_test:** true
 
+> ## ✅ AD-04 DECIDED (2026-08-22) — all six sub-questions resolved; implement, do not re-open
+>
+> Converge `handleCatalogInstall` onto the CLI's `install.Installer`. The
+> "Proposed direction" section below asks six questions; here are the answers.
+> Where they differ from anything below, **this banner wins**.
+>
+> 1. **Confinement: `validatePluginID` via `install.DirStaging.Commit`** — route
+>    the API path through DirStaging and inherit its allowlist plus atomic
+>    backup-then-rename. Do *not* add a second `pathsafe.ResolveUnder` call on
+>    this path. (This does not relieve `08/09`/`12/01` of widening the
+>    `forbidigo` rule to `internal/api/` — that guards the handlers this task
+>    does not re-plumb.)
+> 2. **Archive formats: keep `.zip` AND `.tar.gz`** via a format-dispatching
+>    `install.Extractor` that reuses the API's existing
+>    `extractZip`/`extractTarGz`. **This was a gap in this task file.**
+>    `internal/api/catalog.go:388-391` dispatches on format; the CLI installer
+>    is wired `TarGzExtractor`-only, so a naive convergence would silently drop
+>    zip support and break externally-hosted catalog entries you cannot
+>    enumerate. Add a regression test covering a `.zip` catalog entry.
+> 3. **Loader: thin adapter around `pms.runPluginLoadIntoHost`**
+>    (`internal/api/plugins.go:839`), already used by all four API handlers.
+>    The CLI's `noopLoader` does not apply — it runs out-of-process.
+> 4. **Source: reuse `catalogArchiveSource`**
+>    (`cmd/nanite/plugin_install_flow.go:66-89`) — it already carries
+>    sha256/signature/signerKey into `install.Handle`. Parameterise the progress
+>    emitter (API emits to `pluginHost.EmitPluginInstallProgress`, CLI to
+>    stdout) rather than forking the type.
+> 5. **Legacy retirement is narrower than this file assumes.** Retire
+>    `internal/plugin/signature.go`'s `VerifyChecksum`/`VerifySignature` — each
+>    has exactly one caller, both in `handleCatalogInstall` (`catalog.go:358`,
+>    `:367`), so both go fully dead. **Keep `internal/plugin/catalog.go`'s
+>    `CatalogFetcher`**: `cs.fetcher` is load-bearing for browse/refresh at
+>    `catalog.go:97, 138, 148, 205, 242, 281`. The audit's "retire the old
+>    CatalogFetcher" recommendation is wrong on this point — do not follow it.
+> 6. **Extract a shared constructor** usable from both `cmd/nanite` and
+>    `internal/api`. A second hand-rolled `Installer` wiring site is exactly how
+>    the original divergence happened. CLI behaviour must not change; its
+>    existing tests pass unmodified.
+>
+> **AD-05** (provision a real signing key for the default seeded catalog
+> source) remains open and does **not** gate this task. Do not scope it in or
+> out silently — flag it as a follow-up per this file's Dependencies section.
+
 ## Context
 
 ### Findings addressed

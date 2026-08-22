@@ -355,4 +355,7 @@ including the 7 new tests.
 Status set back to `implemented`. No escalations raised by this fix.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (fresh reviewer, 2026-08-21, no shared context with either the original worker or the coverage-fix worker).** Confirmed all six directive scenarios genuinely covered across 7 test functions. Performed real mutation testing (not just running the tests as-shipped): disabled the 422/500 classification and the slug-mismatch guard in scratch edits to `internal/api/skills.go`, confirmed the corresponding tests correctly failed each time (the slug-mismatch mutation's failure output showed the exact real bug the guard prevents — a wrong-slug row actually getting created), then reverted and confirmed `git status --short` clean. Independently verified the `t.TempDir()`-scoped `SkillVendor` bonus fix by deleting the side-effect directory and confirming it didn't reappear from this file's tests alone. Confirmed no production code changed. Full build/vet/test clean.
+
+Status: `reviewed`.

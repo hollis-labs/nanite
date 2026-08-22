@@ -856,3 +856,9 @@ No default-protocol decision was made, per the task's own explicit scope fence.
 ## 2026-08-21 — Task `06` fix re-reviewed PASS, task closed
 
 Fresh re-reviewer traced the dedup logic by hand against every code path, confirmed the regression test genuinely exercises the scenario, and confirmed no other behavior regressed (full package re-run under `-race`). Full build/vet/test clean. **Task `06` is fully closed: implemented, validated, reviewed.**
+
+## 2026-08-21 — Task `05` coverage fix re-reviewed PASS, task closed — Wave 4 (05+06) fully complete
+
+Fresh re-reviewer performed real mutation testing (disabled the 422/500 classification and the slug-mismatch guard in scratch edits, confirmed the corresponding tests correctly failed and caught the exact real bug each guard prevents, then reverted cleanly) rather than just re-running the tests as-shipped. Independently verified the vendor-storage-dir bonus fix and confirmed no production code changed. Full build/vet/test clean. **Task `05` is fully closed: implemented, validated, reviewed.**
+
+**Phase 3 (`04`, `05`) and Wave 4 (`05`, `06`) are now both fully closed.** Wave 5 (`07`, needs `04`+`06`; `08`, needs `06`) is unblocked.

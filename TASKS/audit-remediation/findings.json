@@ -341,7 +341,8 @@
       "report_section": "\u00a78.1",
       "task_file": "TASKS/audit-remediation/06-store-correctness/01-fix-deleteagentbyid-error-swallowing.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open, functionally byte-identical: DeleteAgentByID now sits at agents.go:1217-1223 (shifted +2 lines from the audit's 1211-1221 by an unrelated doc-comment edit above it in the file, commit e1ba2ac6 -- the function's own text is unchanged) and is still exactly 'a, err := s.GetAgent(id); if err != nil { return nil }; return s.DeleteAgent(a.Slug)', swallowing every GetAgent error rather than just sql.ErrNoRows. Host.SweepPluginAgentProfiles (internal/plugin/agent_profiles.go:286) is confirmed still the real production caller relying on this. Corrected the task file's stale line-number citations (1211-1214/1211-1221 -> 1213-1216/1213-1223) -- stale-line-numbers-only case, no scope change."
     },
     {
       "id": "GO-STORE-004",
@@ -839,7 +840,8 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: internal/service/chat_generate.go has zero commits since 8feeee5c (byte-identical). generateResponse still spans chat_generate.go:122-2028 (~1906 lines), one unbroken function, exactly matching task file 10/01's own citation. 00/02's refreshed tool baseline (docs/audits/2026-08-21-go-quality/raw-1d3bfd96/DELTA.md) shows gocognit/cyclop/maintidx totals all moved worse repo-wide since the audit (gocognit 227->243, cyclop 250->275, maintidx 25->30), consistent with this finding not having improved."
     },
     {
       "id": "GO-SVCEXEC-002",
@@ -868,7 +870,8 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: internal/service/chat.go has zero commits since 8feeee5c (byte-identical). chatServiceImpl struct still spans chat.go:214-392, matching task file 10/01's citation exactly; the 52-field/84-method counts are unaffected since the file is byte-identical to the audited commit."
     },
     {
       "id": "GO-SVCEXEC-003",
@@ -1269,7 +1272,8 @@
       "report_section": "\u00a78.6",
       "task_file": "TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open at HEAD 531dcfcc -- internal/api/catalog.go, internal/plugin/catalog.go, and internal/plugin/signature.go are byte-identical to the audited commit 8feeee5c (zero commits touched them in between). handleCatalogInstall (catalog.go:248-452) only calls VerifySignature when sourcePublicKey != \"\" and entry.Signature != \"\" (catalog.go:365-371); the seeded 'official' catalog source's INSERT (internal/store/seed.go:176-183) never sets public_key, so sourcePublicKey==\"\" out of the box and verification silently skips (no log line on that branch). Disposition is remediate because the bug itself is unambiguous (AD-04's own framing: 'the direction is not in doubt'); AD-04 decides only the convergence shape, not whether to fix."
     },
     {
       "id": "GO-PLUGIN-002",
@@ -1296,7 +1300,8 @@
       "false_positive_considerations": "The archive-extraction step itself IS soundly defended -- the vulnerable point is specifically the final copyDir from the safely-extracted temp dir to the unguarded final target.",
       "task_file": "TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open, exact line match: internal/api/catalog.go:301 is still a bare target := filepath.Join(cs.pluginsDir, entry.Name) (entry.Name from untrusted catalog.yaml), then copyDir(pluginRoot, target) at :427 with no confinement check in between. Sibling handlers in internal/api/plugins.go use pathsafe.ResolveUnder at 4 call sites (327/416/537/711, confirmed by grep). .golangci.yml:184's forbidigo path-except for the ResolveUnder rule still reads (internal/sandbox/|internal/mcp/|internal/service/install/) at HEAD -- internal/api/ is still not in it, so PREVENTION.md's headline finding is unchanged. Zero commits touched catalog.go since 8feeee5c. Remediate (not needs-architect-decision): the bug is unambiguous; AD-04 picks which confinement mechanism becomes canonical, not whether to fix it."
     },
     {
       "id": "GO-PLUGIN-003",
@@ -1321,7 +1326,8 @@
       "report_section": "\u00a78.6",
       "task_file": "TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both pipelines still coexist unchanged: the weaker CatalogFetcher/VerifyChecksum/VerifySignature path (internal/plugin/catalog.go:246, internal/plugin/signature.go) still feeds handleCatalogInstall exclusively, and the stronger devmode-gated internal/plugin/install.Installer state machine (install.go:116 struct, :153 Install method) still only serves the CLI path -- zero commits touched internal/plugin/ (catalog/signature) or internal/plugin/install/ since 8feeee5c (the one commit touching internal/plugin/, e1ba2ac6, only edited agent_profiles.go doc comments, unrelated). requires_architect_decision:true (already set) is correct and consistent: ARCHITECT-DECISIONS.md's own AD-04 framing says 'the direction is not in doubt -- converge,' so remediate is the disposition; AD-04 decides the concrete integration shape (constructor, Loader, confinement mechanism, how much of CatalogFetcher survives)."
     },
     {
       "id": "GO-PLUGIN-004",
@@ -1810,7 +1816,8 @@
       "false_positive_considerations": "The final path component is always .md-suffixed, constraining (not eliminating) real-world impact. HTTP-layer auth boundary on POST/PUT /api/agents was not independently verified.",
       "task_file": "TASKS/audit-remediation/03-agent-slug-traversal/01-canonical-slug-path-validation.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open, zero drift -- no commits touched managed_files.go, validation.go, agent_config.go, or api/agents.go since 8feeee5c. ManagedAgentPath (managed_files.go:87-95) is still a plain filepath.Join(configRoot, \"agents\", slug+\".md\") with no allow-list; grep confirms 'Slug' is never referenced anywhere in internal/agentvalidation/validation.go. AgentConfigService.Create (agent_config.go:145) has an os.Stat exists-guard, but Update's rename path (agent_config.go:176-197, both the DB-only-materialize branch at :176 and the file-rename branch at :193) computes dest and calls writeManaged with no exists-check at all -- confirmed by direct read, matching the finding's overwrite claim exactly. slugRegexp still exists only in internal/builders/agent_builder.go:12, gating the wizard, not the CRUD endpoints."
     },
     {
       "id": "GO-AGENT-002",
@@ -1834,7 +1841,8 @@
       "report_section": "\u00a78.8",
       "task_file": "TASKS/audit-remediation/03-agent-slug-traversal/01-canonical-slug-path-validation.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed 0% coverage still holds: no managed_files_test.go or source_class_test.go exists in internal/agent/, and a grep for ManagedAgentPath/IsWritablePath/WriteManagedAgentProfile across every *_test.go in internal/agent, internal/service, internal/api returns zero hits. Directly tied to GO-AGENT-001, confirmed still open above."
     },
     {
       "id": "GO-AGENT-003",
@@ -2424,7 +2432,8 @@
       "false_positive_considerations": "None -- direct re-confirmation against current source.",
       "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged and still open: internal/sandbox/ has zero commits since 8feeee5c. os_linux.go:64-71 is an exact match to the audit's citation -- exec.LookPath(\"bwrap\") failure logs a warn-once (line 67-69) and returns func(){}, nil (line 70), a success shape; AgentExec (exec.go:158-161) checks the returned err (always nil on this path) and proceeds unsandboxed with no observable signal. os_other.go (non-darwin/linux) has the identical shape at lines 18-24. Disposition is remediate, not needs-architect-decision: the task's own desired invariant is unconditional ('Nanite must not report sandboxed execution as successfully isolated when required OS isolation is absent') -- AD-01 picks fail-closed vs. visible-opt-in, both of which are fixes, not an accept-as-is option."
     },
     {
       "id": "GO-SEC4-002",
@@ -2447,8 +2456,9 @@
       "report_section": "\u00a78.12",
       "false_positive_considerations": "macOS is unaffected -- seatbelt's network-outbound deny is real and kernel-enforced.",
       "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: os_linux.go:132-148 exact match to citation -- --unshare-net only applied 'if len(networkAllow) == 0' (line 146); when a network allowlist is configured the sandboxed process keeps the host netns and confinement is HTTP(S)_PROXY-convention-only, exactly as the finding states. Unlike GO-SEC4-001, the task file itself (02/01) frames this finding's outcome as genuinely open both ways: 'should each end up either genuinely fixed, or explicitly and visibly documented as an accepted reduced-guarantee mode' -- whether the disposition is remediate (namespace-level enforcement) or an accepted/disclosed tradeoff is exactly what AD-02 must decide, so needs-architect-decision is the correct value here (not remediate)."
     },
     {
       "id": "GO-SEC4-003",
@@ -2521,8 +2531,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/02-macos-seatbelt-read-boundary-disclosure.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: (allow default) at os_darwin.go:98 is byte-identical to the audited commit (internal/sandbox/ has zero commits since 8feeee5c) -- file reads, mach-IPC, and process-inspection remain unrestricted by design, exactly as the finding describes. Also confirmed the disclosure gap task file 02/02 identifies is still real and uncorrected: docs/hardening-phase-plan.md:136-142 still describes Tier 2 macOS as 'Read/write within sandbox CWD only' and 'No process inspection, no signal sending to non-child processes,' which the shipped code does not provide. Pulled forward out of severity order per the task's own instruction. needs-architect-decision because the disposition itself -- narrow the profile (remediate) vs. confirm-and-disclose the existing tradeoff (closer to accepted-risk) -- is exactly AD-03's question, not an implementation detail of an already-settled 'must fix' finding."
     },
     {
       "id": "GO-SEC4-006",
@@ -2683,8 +2694,9 @@
       "report_section": "\u00a78.13",
       "false_positive_considerations": "Substantial documented-intent caveat: an architect may reasonably judge the current tradeoff acceptable for this product's deployment model.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/07-server-auth-bind-tls-posture.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: internal/server/ has zero commits since 8feeee5c. auth.go:15-22 still no-ops (basicAuthMiddleware returns next unmodified) when NANITE_AUTH_USER/PASSWORD are unset; server.go:163-174 still binds to fmt.Sprintf(\":%d\", s.port) (all interfaces, no loopback-only option in config) and serves via plain httpSrv.ListenAndServe() (no TLS anywhere); the one startup log line (server.go:164, slog.Info(\"nanite listening\", \"addr\", addr, \"dev\", s.dev)) reports addr and dev-mode but never auth status. caller_identity.go:14-22 still documents this as the intentional single-user-local-app tradeoff. needs-architect-decision (not remediate): the task file's own 'What to do' names 4 live options including (d) 'explicitly accept the current tradeoff as-is and formally close this finding as accepted-risk' as a legitimate outcome -- the disposition itself, not just the implementation, is AD-15's call."
     },
     {
       "id": "GO-RUNTIME-003",
@@ -2838,5 +2850,6 @@
       "disposition": "remediate",
       "task_status": "not-started"
     }
-  ]
+  ],
+  "revalidated_at_commit": "531dcfccbbf870fcbe80b269546bb8b28622a8f0"
 }

@@ -1,7 +1,7 @@
 # Revalidate all 113 audit findings against frozen HEAD and set real dispositions
 
 **Phase:** Audit remediation — Wave 0 (revalidate the baseline)
-**Status:** not-started
+**Status:** in-progress
 **Depends on:** none — but **hard-gated on the dev freeze** (see Context). Do not start while other batches are still landing code.
 **Blocks:** every task in `01/` through `13/`. This is the batch's dispatch gate. Also blocks **AD-01 through AD-04**, which the operator decides against this task's interim critical/high report — see "Interim report required" under What to do.
 **Parallelizable with:** `00/02` (different tooling; see that task's Non-goals for the `findings.json` merge protocol).
@@ -265,5 +265,60 @@ settle it.
   with `git status` before finishing.
 
 ## Work log
+
+**2026-08-22 — Part 1 of 2 (interim critical/high report), by dispatch instruction.**
+
+Confirmed freeze/baseline first: `git log`, `git status --short` (clean), `git worktree list`.
+HEAD revalidated against: `531dcfccbbf870fcbe80b269546bb8b28622a8f0` (merge commit for
+`00/02`, 2026-08-22 08:44:27 -0500). Set `findings.json`'s new top-level
+`revalidated_at_commit` field to this SHA.
+
+Per the dispatching agent's instruction, this session processed only the 12-finding
+critical/high/pulled-forward-low tranche (3 critical, 8 high, `GO-SEC4-005` pulled forward
+for AD-03) and stopped to report — not the full 113. For every one of the 12, read the
+current source at the finding's cited file(s)/symbol(s) (not the audit-era citation blindly)
+before setting `disposition` + `revalidation_note`. Used `git diff 8feeee5c..HEAD --
+<paths>` per package to confirm exactly which cited files had zero commits since the audit
+(most had none) vs. which had drift (only `internal/store/agents.go` and
+`internal/plugin/agent_profiles.go`, both via one unrelated skills-index commit, `e1ba2ac6`).
+
+Dispositions set: 9 `remediate` (`GO-PLUGIN-001/002/003`, `GO-SEC4-001`, `GO-AGENT-001/002`,
+`GO-STORE-003`, `GO-SVCEXEC-001/002`), 3 `needs-architect-decision` (`GO-SEC4-002`,
+`GO-SEC4-005`, `GO-RUNTIME-002`). All 3 critical and 8 high findings reconfirmed still open
+against current source — none were already-resolved, false-positive, or superseded. See the
+final report delivered to the operator (relayed via the dispatching agent) for the full
+per-finding evidence; not restated here to avoid drift between the two.
+
+**Disposition-vs-`needs-architect-decision` reasoning, since this is the tranche's easiest
+value to misuse:** used `remediate` where the *bug itself* is unambiguous even though its
+concrete fix shape is architect-gated (`GO-PLUGIN-001/002/003` — AD-04 itself says "the
+direction is not in doubt"; `GO-SEC4-001` — the task's own desired invariant is unconditional,
+AD-01's two options are both fixes, not an accept-as-is path). Used `needs-architect-decision`
+where the task file's own text frames the *disposition itself* as open, not just the
+implementation: `GO-SEC4-002` (task file: "should each end up either genuinely fixed, or
+explicitly and visibly documented as an accepted reduced-guarantee mode"), `GO-SEC4-005`
+(task file's two live questions are "does the tradeoff still hold" and "is disclosure
+adequate" — AD-03's job), `GO-RUNTIME-002` (task file's own "What to do" lists explicit
+accepted-risk as one of 4 live options for the architect, not a worker's call).
+
+**Task-file correction (stale line numbers only, case 1 of 3 from "Correct the task files"):**
+`06-store-correctness/01-fix-deleteagentbyid-error-swallowing.md` cited
+`internal/store/agents.go:1211-1214`/`1211-1221` for `DeleteAgentByID`'s doc comment/function.
+Current source has it at `1213-1216`/`1213-1223` — a +2-line shift caused by an unrelated
+doc-comment edit earlier in the same file (commit `e1ba2ac6`, the skills-index-redesign task,
+which also touched `internal/plugin/agent_profiles.go`'s doc comments in a pure 1:1 word swap
+— `agent_skills` -> `agent_known_skills` — with no line-count change, so that file's citations
+needed no correction). Updated all three citations in the task file (lines 28, 32, 105) with an
+explicit revalidation note; the function's own text and the fix's scope are unaffected. No
+other task file among the 12 needed a Context correction — every other citation (`01/01`,
+`02/01`, `02/02`, `03/01`, `08/07`, `10/01`) was verified exact-match against current source,
+because the underlying files are byte-identical to the audited commit (confirmed via
+`git diff 8feeee5c..HEAD -- <path>` returning empty for each).
+
+**No production code touched.** No `## Outcome` section written yet — genuinely incomplete;
+the remaining ~101 findings, the task-file-correction sweep across the rest of `01/`-`13/`,
+the `## Outcome` section, and the final programmatic validation check are Part 2, to follow a
+separate dispatch. `docs/audits/2026-08-21-go-quality/findings.json` (pristine) confirmed
+untouched via `git status`/`git diff --stat` before finishing this part.
 
 ## Review notes

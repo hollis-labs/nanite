@@ -28,6 +28,50 @@ requires_regression_test: true
 > - **Gated on:** AD-01 (fail-closed vs. visible opt-in) **and** AD-02 (network allowlist level) — decide both together; an inconsistent pair is worse than either coherent answer.
 > - **requires_security_review:** true · **requires_regression_test:** true
 
+> ## ✅ AD-01 AND AD-02 DECIDED (2026-08-22) — implement these, do not re-open them
+>
+> **AD-01 — fail closed, with an explicit config opt-in to degrade.** Absent
+> `bwrap`, `AgentExec`/`UserExec` return an error. A new config knob (none
+> exists today) lets an operator deliberately accept unisolated execution; when
+> set, **every** degraded exec logs at warn.
+>
+> - **Delete the `sync.Once`** (`os_linux.go:14`, `os_other.go:11`). Today the
+>   warning fires once per *process lifetime*, so every unsandboxed exec after
+>   the first is silent. That is the actual mechanism of the finding.
+> - **Change `applyOSSandbox`'s return type to carry an isolation verdict.**
+>   `(cleanup func(), err error)` has no third state, so `exec.go:158` and
+>   `exec.go:203` cannot tell "isolated" from "not isolated". This is a
+>   prerequisite, not an option.
+> - **Scope is `os_linux.go` + `os_other.go`** — same fail-open shape, same
+>   `sync.Once`. macOS is unaffected (`sandbox-exec` ships with the OS).
+> - **Accepted consequence:** on Linux without bubblewrap this disables
+>   `internal/mcp/dev_tools.go`, `internal/mcp/code_exec_tools.go`,
+>   `internal/workflow/handlers.go`, and `internal/api/shell.go` until `bwrap`
+>   is installed or the knob is set. Intended, not a regression.
+> - **Test the Linux path deliberately.** The primary dev platform is darwin,
+>   where this code never fires — a default `go test` run proves nothing here.
+> - **Cross-reference `GO-SEC4-006`.** The opt-in re-creates the exact scenario
+>   in which the bypassable command denylist is the *only* remaining control.
+>   Anyone setting the knob is relying on it as their whole security boundary.
+>
+> **AD-02 — fix the network inversion properly.** Implement this file's own
+> `TODO(network-isolation)` (`os_linux.go:141-145`): socket-passing handoff so
+> the allowlist proxy runs inside the sandbox netns, making `--unshare-net`
+> unconditional.
+>
+> - Today `os_linux.go:146` applies `--unshare-net` only `if
+>   len(networkAllow) == 0`, so **configuring an allowlist makes the sandbox
+>   strictly weaker than configuring nothing**, with enforcement reduced to
+>   `HTTP(S)_PROXY` convention that any raw socket ignores.
+> - `GO-SEC4-002` moved `needs-architect-decision` → `remediate` in
+>   `findings.json` as a result.
+>
+> **Re-scope warning.** AD-02 is real engineering — a proxy/socket-passing
+> restructure — not a flag flip, and it is larger than AD-01's change. This
+> task file's scope and effort framing predate both decisions; treat the
+> sections below as evidence and context, and this banner as the instruction
+> where they differ.
+
 ## Context
 
 ### Findings addressed

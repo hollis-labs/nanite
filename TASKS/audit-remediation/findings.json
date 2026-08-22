@@ -2543,9 +2543,9 @@
       "report_section": "\u00a78.12",
       "false_positive_considerations": "macOS is unaffected -- seatbelt's network-outbound deny is real and kernel-enforced.",
       "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md",
-      "disposition": "needs-architect-decision",
+      "disposition": "remediate",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed unchanged: os_linux.go:132-148 exact match to citation -- --unshare-net only applied 'if len(networkAllow) == 0' (line 146); when a network allowlist is configured the sandboxed process keeps the host netns and confinement is HTTP(S)_PROXY-convention-only, exactly as the finding states. Unlike GO-SEC4-001, the task file itself (02/01) frames this finding's outcome as genuinely open both ways: 'should each end up either genuinely fixed, or explicitly and visibly documented as an accepted reduced-guarantee mode' -- whether the disposition is remediate (namespace-level enforcement) or an accepted/disclosed tradeoff is exactly what AD-02 must decide, so needs-architect-decision is the correct value here (not remediate)."
+      "revalidation_note": "Confirmed unchanged: os_linux.go:132-148 exact match to citation -- --unshare-net only applied 'if len(networkAllow) == 0' (line 146); when a network allowlist is configured the sandboxed process keeps the host netns and confinement is HTTP(S)_PROXY-convention-only, exactly as the finding states. Unlike GO-SEC4-001, the task file itself (02/01) frames this finding's outcome as genuinely open both ways: 'should each end up either genuinely fixed, or explicitly and visibly documented as an accepted reduced-guarantee mode' -- whether the disposition is remediate (namespace-level enforcement) or an accepted/disclosed tradeoff is exactly what AD-02 must decide, so needs-architect-decision is the correct value here (not remediate). [AD-02 DECIDED 2026-08-22: fix properly \u2014 implement the os_linux.go:141-145 TODO(network-isolation) so the allowlist proxy runs inside the sandbox netns via socket-passing, making --unshare-net unconditional. Disposition moves needs-architect-decision -> remediate: the open question (whether to enforce at namespace level or accept proxy-convention) is now answered in favour of enforcement.]"
     },
     {
       "id": "GO-SEC4-003",

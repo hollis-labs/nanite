@@ -38,8 +38,8 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 
 | ID | Decision | Gates | Findings | Wave | Status |
 |---|---|---|---|---|---|
-| AD-01 | Linux sandbox behavior when `bwrap` is absent | `02/01` | GO-SEC4-001, GO-SEC4-002, GO-SEC4-006 | **0** | open |
-| AD-02 | Linux network allowlist enforcement level | `02/01` | GO-SEC4-002 | **0** | open |
+| AD-01 | Linux sandbox behavior when `bwrap` is absent | `02/01` | GO-SEC4-001, GO-SEC4-002, GO-SEC4-006 | **0** | **decided** |
+| AD-02 | Linux network allowlist enforcement level | `02/01` | GO-SEC4-002 | **0** | **decided** |
 | AD-03 | macOS seatbelt read-boundary: disclose, narrow, or accept | `02/02` | GO-SEC4-005 | **0** | open |
 | AD-04 | Plugin-install convergence: concrete integration shape | `01/01` | GO-PLUGIN-001/002/003 | **0** | open |
 | AD-05 | Default/official catalog source: provision a real signing key? | `01/01` follow-up | GO-PLUGIN-001 | 1 | open |
@@ -107,8 +107,49 @@ from. This is written into `00/01`'s own instructions.
 
 ### AD-01 — Linux sandbox behavior when `bwrap` is absent
 
-**Status:** open · **Gates:** `02/01` · **Findings:** GO-SEC4-001 (critical),
+**Status:** decided · **Gates:** `02/01` · **Findings:** GO-SEC4-001 (critical),
 GO-SEC4-002 (high), GO-SEC4-006
+
+> **Decided (2026-08-22): fail closed, with an explicit config opt-in to
+> degrade.**
+>
+> Absent `bwrap`, `AgentExec`/`UserExec` return an error rather than executing.
+> A new config knob — none exists today, confirmed by grep — lets an operator
+> accept unisolated execution deliberately. When that knob is set, **every**
+> degraded execution logs at warn.
+>
+> **The `sync.Once` goes.** `os_linux.go:14`/`os_other.go:11` currently gate the
+> warning behind a `sync.Once`, so it fires once per *process lifetime* and
+> every subsequent unsandboxed exec is completely silent. That is materially
+> worse than "logs a warning" and is the concrete mechanism of the "silent
+> degradation" this decision closes.
+>
+> **The return type must carry an isolation verdict, and that part was never
+> optional.** `applyOSSandbox` returns `(cleanup func(), err error)` with no
+> third state, so both call sites (`exec.go:158`, `exec.go:203`) genuinely
+> cannot distinguish "isolated" from "not isolated". Every candidate answer
+> required this change; only what to *do* with the verdict was in question.
+>
+> **Scope: the class is `os_linux.go` + `os_other.go`.** Both have the same
+> fail-open shape and the same `sync.Once`. macOS is unaffected —
+> `sandbox-exec` is built into the OS and always present.
+>
+> **Known consequence, accepted:** on a Linux host without bubblewrap this
+> disables agent shell (`internal/mcp/dev_tools.go`), code execution
+> (`internal/mcp/code_exec_tools.go`), workflow shell steps
+> (`internal/workflow/handlers.go`), and API shell (`internal/api/shell.go`)
+> until an operator either installs `bwrap` or sets the opt-in. This is the
+> intended behaviour, not a regression — but note it is untestable on the
+> primary dev platform (darwin), so `02/01` must exercise the Linux path
+> deliberately rather than relying on the default test run.
+>
+> **Knock-on: this makes `GO-SEC4-006` load-bearing.** That finding (bypassable
+> literal-substring command denylist, low severity in isolation) is described
+> by the audit as becoming "the ONLY remaining control on Linux without bwrap."
+> Fail-closed removes that scenario by default — but the opt-in re-creates it
+> exactly. Anyone who sets the knob is relying on the denylist as their entire
+> security boundary. `GO-SEC4-006` should be re-weighted accordingly and its
+> task cross-referenced from `02/01`.
 
 The single most consequential decision in Wave 1. Today the Linux sandbox
 silently falls back to unisolated execution when `bwrap` is unavailable while
@@ -128,7 +169,39 @@ goes, it applies to both files — decide once, for the class.
 
 ### AD-02 — Linux network allowlist enforcement level
 
-**Status:** open · **Gates:** `02/01` · **Findings:** GO-SEC4-002 (high)
+**Status:** decided · **Gates:** `02/01` · **Findings:** GO-SEC4-002 (high)
+
+> **Decided (2026-08-22): fix it properly — move the proxy inside the sandbox
+> netns.**
+>
+> Implement the plan the code already carries as
+> `TODO(network-isolation)` at `os_linux.go:141-145`: a socket-passing handoff
+> (or a proxy pre-bound to a socket inherited across `unshare`) so the
+> allowlist proxy runs co-located with the sandboxed process, making
+> `--unshare-net` unconditional.
+>
+> **What this fixes is an inversion, not a gap.** `os_linux.go:146` applies
+> `--unshare-net` only `if len(networkAllow) == 0`. So configuring an allowlist
+> *removes* network-namespace isolation and falls back to `HTTP(S)_PROXY`
+> convention — meaning **the operator who configures an allowlist gets a
+> strictly weaker sandbox than one who configures nothing**, and enforcement is
+> bypassed by any process that ignores `HTTP_PROXY` (a raw socket in Go or
+> Python, `curl --noproxy`). After this change, an allowlist is strictly
+> stronger than no allowlist, which is what operators already assume.
+>
+> Chosen over disclosure-only because renaming the feature to admit it is
+> convention-level would leave the inversion in place, and over fail-closed
+> because that disables the allowlist feature on Linux outright while the same
+> engineering work is required either way.
+>
+> `findings.json`'s `GO-SEC4-002` moves `needs-architect-decision` →
+> `remediate`: the open question was whether to enforce at namespace level or
+> accept proxy-convention, and it is now answered in favour of enforcement.
+>
+> **Sequencing note:** this is real engineering, not a flag flip, and it is
+> larger than AD-01's change. `02/01` should be re-scoped to say so — the two
+> land together in the same task, and the task's own estimate predates this
+> decision.
 
 Guide §9 item 2, distinct from AD-01: even with isolation present, how
 strictly is the network allowlist enforced, and what happens when it can't

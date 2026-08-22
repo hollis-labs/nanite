@@ -203,7 +203,7 @@
       "report_section": "\u00a73, extended by \u00a78.3 (GO-SVCCORE-006)",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/02-fix-api-test-container-shutdown-leak.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: grepped all 6 cited internal/api test files -- every one calls service.NewContainer and t.Cleanup(func(){ s.Close() }) for the store, none call svc.Shutdown(). Files unchanged since the audit."
     },
     {

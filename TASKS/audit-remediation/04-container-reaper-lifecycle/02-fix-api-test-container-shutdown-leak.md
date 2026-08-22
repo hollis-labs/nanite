@@ -1,7 +1,7 @@
 # Fix internal/api test suites' Container shutdown leak (no test calls Container.Shutdown())
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none — a test-only, mechanical change independent of task 01 in this folder (constructor cleanup) and task 03 (a *different*, unsolved problem — see below).
 **Touches:** `internal/api/artifacts_test.go`, `internal/api/loom_curator_wake_test.go`, `internal/api/providers_test.go` (4 call sites), `internal/api/tools_call_test.go`, `internal/api/recovery_test.go`, `internal/api/api_test.go`. Possibly `internal/service`'s own test suite, per the audit's recommendation — see "Scope" below for why this task treats that as **out of scope in practice**, deferred to task 03.
 **Requires architect decision:** false — mechanical test-hygiene fix, no design ambiguity.
@@ -179,3 +179,13 @@ Very low risk — purely additive test cleanup code, no production code touched,
   address the repeated fresh-store migration cost (or produce evidence for a
   different cause) before review can pass; the cleanup patch itself should not
   be reverted or rewritten.
+- PASS after correction (2026-08-22): fresh final review verified all ten
+  Container cleanups and all nine direct API store setups. The migrated
+  template is closed before copying, safely published through `sync.Once`,
+  copied into a unique per-test database with errors/permissions handled, and
+  still opened through `store.New`; LIFO Container-before-Store cleanup remains
+  intact. No production code changed.
+- The exact acceptance command was run fresh after `go clean -testcache` and
+  passed with zero race reports and no timeout override (`219.266s` package,
+  `234s` wall). Independent non-race API, API vet, and focused race checks also
+  passed. The earlier gate failure is therefore resolved, not waived.

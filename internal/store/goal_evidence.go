@@ -1,7 +1,7 @@
 package store
 
 // TASKS/loops/02-goal-evidence-schema.md -- Go-side storage + evidence-walk
-// support for the goal_evidence table migration 137_goal_evidence.sql adds.
+// support for the goal_evidence table migration 140_goal_evidence.sql adds.
 // See docs/engineering/architecture/21-loops.md's Decision 2 for the design
 // this table encodes: "Goal evidence is a thin pointer table, not a
 // duplicate content store... It points into workflow_run_steps.verify_json,
@@ -33,7 +33,7 @@ import (
 // located by id.
 var ErrGoalEvidenceNotFound = errors.New("goal evidence not found")
 
-// goal_evidence.evidence_type vocabulary -- migration 137's CHECK
+// goal_evidence.evidence_type vocabulary -- migration 140's CHECK
 // constraint, taken verbatim from this task file's own illustrative DDL.
 const (
 	GoalEvidenceTypeTestSuite       = "test_suite"
@@ -43,7 +43,7 @@ const (
 	GoalEvidenceTypeArtifact        = "artifact"
 )
 
-// validGoalEvidenceTypes is the Go-side mirror of migration 137's CHECK
+// validGoalEvidenceTypes is the Go-side mirror of migration 140's CHECK
 // constraint -- checked before insert so a caller gets a typed Go error
 // instead of a raw sqlite CHECK-constraint-violation error, matching this
 // package's existing enum-validation convention (team_authority.go's
@@ -71,7 +71,7 @@ type GoalEvidence struct {
 
 	// LoopRunID is the LoopRun this evidence was recorded during, if any.
 	// Deliberately a plain nullable TEXT column with NO FK constraint --
-	// see migration 137's own doc comment for why (order-independent
+	// see migration 140's own doc comment for why (order-independent
 	// w.r.t. task 03's loop_runs table, not an oversight). Empty means "no
 	// loop run" -- a goal-only evidence row is a real, valid shape (e.g. a
 	// human acceptance note against a DEFINED goal with no loop launched
@@ -87,7 +87,7 @@ type GoalEvidence struct {
 
 	// EvidenceType is one of the GoalEvidenceType* constants above.
 	// Required, enum-validated by validateGoalEvidence and migration
-	// 137's own CHECK constraint.
+	// 140's own CHECK constraint.
 	EvidenceType string `json:"evidence_type"`
 
 	// RefTable / RefID together point at the structured evidence record

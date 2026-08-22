@@ -119,11 +119,13 @@ real JSON sub-structure column).
 `ls internal/store/migrations/ | sort -t_ -k1 -n | tail -8` showed `134_agent_profiles_protocol_transport.sql`
 as the highest number actually present in this worktree (the `worktree-loops-batch`/loops-only
 worktree never received the `plugin-system`/`skills` batches' migrations, which are isolated in
-their own worktrees) — so the task file's provisional `138` did not apply here. Used **135**:
-`internal/store/migrations/135_goals.sql`.
+their own worktrees) — so the task file's provisional `138` did not apply here. Used **135**
+(later renumbered to **138** to resolve a real collision with the `skills` batch's landed
+`136`/`137` — see `TASKS/ESCALATIONS.md`):
+`internal/store/migrations/138_goals.sql`.
 
 **What was built:**
-- `internal/store/migrations/135_goals.sql` — `CREATE TABLE goals` exactly per the task's
+- `internal/store/migrations/138_goals.sql` — `CREATE TABLE goals` exactly per the task's
   illustrative DDL (self-referencing `parent_goal_id` FK, four JSON sub-structure columns each
   defaulting to `'[]'`, `status` CHECK enum, `idx_goals_parent`/`idx_goals_status` indexes), plain
   transactional Up/Down matching `128_teams.sql`'s "brand-new definition table" shape (no
@@ -164,7 +166,7 @@ their own worktrees) — so the task file's provisional `138` did not apply here
   (DB-level CHECK rejection via a raw INSERT bypassing the Go layer entirely — mirrors this
   package's own `TestAgentSchedule_ScheduleKindCheckRejectsRetiredValues` "confirm the DB, not
   just the Go layer, enforces this" discipline).
-- `internal/store/migration135_goals_backup_test.go` —
+- `internal/store/migration138_goals_backup_test.go` —
   `TestRealBackupGoalsMigrationAppliesCleanly`, matching this package's established real-backup-test
   convention exactly (`migration_130_workflow_run_steps_flex_kind_test.go`'s
   `TestRealBackupWorkflowRunStepsSurviveFlexKindMigration`: copies the real backup file into
@@ -172,12 +174,13 @@ their own worktrees) — so the task file's provisional `138` did not apply here
   the running machine). Confirmed against a real copy of
   `~/.local/share/nanite/workspaces/default/backups/main.db.pre-execution-backup-20260818-132726`
   (343 pre-existing `sessions` rows, confirming a real populated schema, not an empty fixture) that
-  migration 135 applies cleanly alongside every other live table, and that full Goal CRUD
+  migration 138 applies cleanly alongside every other live table, and that full Goal CRUD
   (including the `parent_goal_id` FK and `UpdateGoalStatus`'s `activated_at` side effect) works on
   top of the resulting schema.
 
 **Deviations from the task file, both documented above and repeated here for visibility:**
-1. Migration number `135`, not the task's provisional `138` — expected and instructed
+1. Migration number `135` at dispatch time (since renumbered to `138`; see the Work Log's
+   "Migration number" note), not the task's provisional `138` — expected and instructed
    cross-batch-numbering re-verification, not a real deviation.
 2. `UpdateGoal` excludes `status`/`activated_at`/`completed_at` from its replace set (routed
    through `UpdateGoalStatus` instead) — this is a literal reading of the task's own parenthetical
@@ -222,8 +225,8 @@ scratch copy of a production backup (never the real backup file in place), per E
 **PASS.** Fresh review (no shared context with the implementer), covering: task file + Work
 Log, `docs/engineering/architecture/21-loops.md` Decision 2 and its "Illustrative schema"
 section, `docs/engineering/GLOSSARY.md`'s Goal/Loop/LoopRun entries, the full diff
-(`internal/store/migrations/135_goals.sql`, `internal/store/goals.go`,
-`internal/store/goals_test.go`, `internal/store/migration135_goals_backup_test.go`), and a
+(`internal/store/migrations/138_goals.sql`, `internal/store/goals.go`,
+`internal/store/goals_test.go`, `internal/store/migration138_goals_backup_test.go`), and a
 convention comparison against `internal/store/teams.go`/`internal/store/agent_schedules.go`.
 
 - Schema matches the design doc's illustrative `goals(...)` shape column-for-column: all
@@ -238,13 +241,14 @@ convention comparison against `internal/store/teams.go`/`internal/store/agent_sc
   blocked-doesn't-complete cases both covered in `goals_test.go`).
 - `TestGoal_ParentFKEnforced` and `TestGoal_StatusCheckConstraint` correctly verify DB-level
   (not just Go-level) enforcement, per this package's own established discipline.
-- `migration135_goals_backup_test.go` genuinely exercises a real backup copy (never in
+- `migration138_goals_backup_test.go` genuinely exercises a real backup copy (never in
   place), confirms it's a real populated schema (343 sessions rows), and round-trips full
   Goal CRUD including the FK and status side effects on top of it.
 - Migration-number collision with task `06` (both independently landed on `135` in parallel
   worktrees) is accurately documented in this file's Work Log and
-  `TASKS/ESCALATIONS.md`; resolution (task `06` renumbered to `136`) is correctly reflected
-  in the merged tree.
+  `TASKS/ESCALATIONS.md`; resolution (task `06` renumbered to `136`, both since renumbered
+  again to `138`/`139` respectively to resolve the later cross-batch collision with `skills`)
+  is correctly reflected in the merged tree.
 - `go build ./cmd/nanite/`, `go vet ./internal/store/...`, and `go test ./...` all verified
   green independently (full suite, not just `internal/store`). The two `go vet` findings in
   `internal/service/container.go` are confirmed pre-existing/unrelated (that file isn't

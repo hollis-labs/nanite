@@ -354,7 +354,7 @@ func TestLoopRun_StatusValidation(t *testing.T) {
 	}
 }
 
-// TestLoopRun_StatusCheckConstraint confirms migration 138's DB-level
+// TestLoopRun_StatusCheckConstraint confirms migration 141's DB-level
 // CHECK constraint rejects an invalid status even bypassing Go-layer
 // validation (a raw INSERT), mirroring goals_test.go's
 // TestGoal_StatusCheckConstraint.

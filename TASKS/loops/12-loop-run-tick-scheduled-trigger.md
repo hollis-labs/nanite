@@ -119,7 +119,8 @@ this task's own Context recommends has to check status *before* calling Resume).
 calls `Resume`. `internal/scheduler/store_adapter.go`: `JobTypeLoopRunTick` added to
 `buildPayload`'s existing pass-through case (identical treatment to
 `agent_workflow_run`/`command_run`/`reflex_dispatch` — no producer-specific resolution step
-needed, unlike `durable_agent_wake`'s instance-id resolution). Migration `143` (assigned
+needed, unlike `durable_agent_wake`'s instance-id resolution). Migration `143` (since
+renumbered to `146`; see `TASKS/loops/HANDOFF.md`'s 2026-08-22 renumbering note — assigned
 number, confirmed via `ls internal/store/migrations/ | sort -t_ -k1 -n | tail` that no
 `143_*.sql` existed in this worktree before writing it) widens `agent_schedules.job_type`'s
 CHECK from four values to five, via the identical rename-recreate-copy pattern migration 127
@@ -130,7 +131,7 @@ just an empty fixture**: copied
 scratchpad, ran the real `store.New(ctx, path)` migrate path against the copy via a throwaway
 test in `internal/store` (`TestScratchMigrateRealBackup`, deleted after use, never committed):
 it cut over cleanly through the legacy-ledger seeding path and applied every migration through
-143, and a real `INSERT` of a `job_type='loop_run_tick'` row against the resulting schema
+146, and a real `INSERT` of a `job_type='loop_run_tick'` row against the resulting schema
 succeeded. Confirmed `internal/store/agent_schedules.go`'s `ScheduleJobTypeDurableAgentWake`
 et al. convention (a second, independently-declared job-type constant set, not shared with
 `internal/scheduler`'s) and added `ScheduleJobTypeLoopRunTick` there to match, matching the
@@ -246,7 +247,7 @@ possible-context-leak findings task 08's own Work Log already documented; confir
 `internal/scheduler/runner_adapter_test.go`, `internal/scheduler/store_adapter.go`,
 `internal/scheduler/store_adapter_test.go`, `internal/store/agent_schedules.go` changed, plus
 new files `internal/loop/tick_schedule.go`, `internal/loop/tick_schedule_test.go`,
-`internal/store/migrations/143_agent_schedules_loop_run_tick_job_type.sql`). `go test ./...`
+`internal/store/migrations/146_agent_schedules_loop_run_tick_job_type.sql`). `go test ./...`
 — read the full, real output directly (not the shell's own final exit code, which reflected a
 trailing `grep -E "^(FAIL|--- FAIL)"` finding zero matches — grep's own documented exit-1-on-
 no-match behavior, not a test failure): every one of the 105 listed packages printed `ok` or

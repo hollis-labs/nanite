@@ -663,7 +663,7 @@ func (e *LoopEngine) evaluateDecideAndAct(
 
 	case DecisionWait, DecisionEscalate:
 		// Both land in LoopRunStatusWaitingOnEscalation -- loop_runs.status
-		// (migration 138) has exactly two pause buckets
+		// (migration 141) has exactly two pause buckets
 		// (waiting_on_gate/waiting_on_escalation), one fewer than
 		// decide.go's own WAIT/ESCALATE distinction. This task has no
 		// schema migration in scope to add a third; loop_run_iterations.

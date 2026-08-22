@@ -40,7 +40,7 @@ const (
 	// reaching a terminal state) is what calls Resume on the outer
 	// workflow. This is not new engine behavior, just the third reuse of
 	// a pattern the engine already has twice." This constant (plus the
-	// matching workflow_run_steps.kind CHECK widening, migration 136) is
+	// matching workflow_run_steps.kind CHECK widening, migration 139) is
 	// the schema/const half of TASKS/loops/06-stepkindloop-schema.md;
 	// real loop-step execution behavior (the wait/resume body, launching
 	// the contained LoopRun) is task 09's job, not implemented here.

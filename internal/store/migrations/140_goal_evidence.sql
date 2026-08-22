@@ -14,16 +14,19 @@
 -- EvidenceSatisfiesGoal, this task's real "query" deliverable.
 --
 -- Migration-number note: this worker was explicitly dispatch-assigned
--- migration number 137 (not re-derived by this worker's own re-verify
--- procedure) because a sibling worker was concurrently implementing task
+-- migration number 137 (since renumbered to 140; see
+-- TASKS/loops/HANDOFF.md's 2026-08-22 renumbering note -- not re-derived by
+-- this worker's own re-verify procedure) because a sibling worker was
+-- concurrently implementing task
 -- 03 (loop_runs) off the same base in an isolated worktree, and both
 -- workers independently re-verifying against their own worktree's
 -- only-134-visible state is exactly what produced Loops Wave 1's earlier
--- 135 collision (see TASKS/ESCALATIONS.md). Confirmed via `ls
+-- 135 (now 138) collision (see TASKS/ESCALATIONS.md). Confirmed via `ls
 -- internal/store/migrations/ | sort -t_ -k1 -n | tail -8` immediately
 -- before writing this file that 137_*.sql did not already exist in this
 -- worktree (the latest migration on disk was 136_workflow_run_steps_
--- loop_kind.sql) -- no anomaly, 137 was free as assigned.
+-- loop_kind.sql, now 139_workflow_run_steps_loop_kind.sql) -- no anomaly,
+-- 137 was free as assigned.
 --
 -- This session's own decision on the design doc's open "free-text
 -- evidence" question (21-loops.md's "What this session did not decide" /

@@ -449,7 +449,7 @@ func (e *BuiltinWorkflowEngine) finishRun(
 // waiting step is flex-or-loop but at least one is flex; RunStatusWaitingOnLoop
 // is reported only when every waiting step is a loop step. See
 // agentworkflow.RunStatusWaitingOnFlex/RunStatusWaitingOnLoop's own doc
-// comments and migrations 133/141 for why this has to be a real, distinct,
+// comments and migrations 133/144 for why this has to be a real, distinct,
 // DB-persisted status rather than an in-memory-only distinction.
 //
 // Renamed from the original two-way flexOrGateWaitingStatus by task 09,

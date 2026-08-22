@@ -11,8 +11,12 @@ this doc is the plain-language, what-shipped-and-what-needs-your-attention versi
 deliberately isolated from `main` and from the concurrent `plugin-system`/`skills` batches
 running at the same time, per your own instruction at kickoff. The working tree is currently
 clean (nothing uncommitted). **Merging this branch into `main` — and reconciling this batch's
-migration numbers (`135`-`143`) against whatever `plugin-system`/`skills` land with in the
+migration numbers against whatever `plugin-system`/`skills` land with in the
 meantime — is a decision for you, not something done as part of this batch.**
+**Update, 2026-08-22:** `skills` has since landed real `136`/`137` migrations on `main`,
+directly colliding with this batch's own (then-)`136`/`137`. Resolved via a uniform `+3`
+renumbering of this batch's entire range: `135`-`143` → `138`-`146`. This is the last
+blocking step before this branch merges into `main`.
 
 ---
 
@@ -178,9 +182,9 @@ All 13 tasks done — 0 in-progress, 0 blocked, 0 not-started.
 
 | Phase | Tasks | Status |
 |---|---|---|
-| 1 — Schema & storage foundation | `01`, `02`, `03`, `04`, `05`, `06` | all reviewed (real migrations: `135`, `137`, `138`, `139`, `140`, `136` respectively) |
-| 2 — Runtime engine | `07`, `08`, `09` | all reviewed (`09`'s migration: `141`); `08` includes one real review-found bug, fixed and re-verified |
-| 3 — Trigger surface | `10`, `11`, `12` | all reviewed (`11`'s migration: `142`, `12`'s migration: `143`); `11`/`12` required a dedicated post-merge integration fix, independently re-reviewed sound |
+| 1 — Schema & storage foundation | `01`, `02`, `03`, `04`, `05`, `06` | all reviewed (real migrations: `138`, `140`, `141`, `142`, `143`, `139` respectively) |
+| 2 — Runtime engine | `07`, `08`, `09` | all reviewed (`09`'s migration: `144`); `08` includes one real review-found bug, fixed and re-verified |
+| 3 — Trigger surface | `10`, `11`, `12` | all reviewed (`11`'s migration: `145`, `12`'s migration: `146`); `11`/`12` required a dedicated post-merge integration fix, independently re-reviewed sound |
 | 4 — Presets | `13` | reviewed |
 
 No task in this batch is open, blocked, or awaiting a decision from you. The one real decision

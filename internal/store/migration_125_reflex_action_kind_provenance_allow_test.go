@@ -16,7 +16,7 @@ import (
 // against the fully-migrated live schema (newTestStore applies every
 // migration, not just 125 in isolation), so it also covers
 // TASKS/loops/11-loop-event-predicate-trigger.md's migration
-// 142_agent_reflex_resume_loop_run.sql, which adds resume_loop_run x
+// 145_agent_reflex_resume_loop_run.sql, which adds resume_loop_run x
 // {system, operator} (not plugin, mirroring halt_session/
 // dispatch_to_agent's own restriction). Bump this map (and the row-count
 // checks below) again the next time a migration adds another action kind.
@@ -47,10 +47,10 @@ var wantProvenanceAllow = map[[2]string]bool{
 // TestMigrate125SeedsProvenanceAllowList is the regression test for
 // TASKS/reflex-taxonomy/05-provenance-tier-enforcement.md: exactly 16
 // allowed (kind, tier) rows as of migration 125 itself (plus 2 more from
-// migration 142's own resume_loop_run x {system, operator} addition, 18
+// migration 145's own resume_loop_run x {system, operator} addition, 18
 // total as of this fully-migrated schema), matching the design doc's two
 // named "obvious candidates" for exclusion (halt_session/dispatch_to_agent
-// away from plugin-tier) plus 142's own resume_loop_run exclusion,
+// away from plugin-tier) plus 145's own resume_loop_run exclusion,
 // byte-for-byte.
 func TestMigrate125SeedsProvenanceAllowList(t *testing.T) {
 	s := newTestStore(t)

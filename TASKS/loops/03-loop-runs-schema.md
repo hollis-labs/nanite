@@ -91,24 +91,26 @@ README's "What this session decided" section):
 
 ## Work log
 
-**Migration number.** Used `138`, per this task's explicit dispatch-time assignment (not
-the `140` provisionally claimed in "What to do" §1, and not a self-re-verified number) --
-the orchestrator's own kickoff message fixed `138` to avoid a repeat of Wave 1's
-`01`/`06` migration-number collision, since a sibling worker was concurrently claiming
-`137` for task `02` off the same base. Confirmed no `137_*`/`138_*` file existed in this
-worktree before writing `138_loop_runs.sql`; the latest pre-existing migration visible
-here was `136_workflow_run_steps_loop_kind.sql`.
+**Migration number.** Used `138` (since renumbered to `141`; see
+`TASKS/loops/HANDOFF.md`'s 2026-08-22 renumbering note), per this task's explicit
+dispatch-time assignment (not the `140` provisionally claimed in "What to do" §1, and not
+a self-re-verified number) -- the orchestrator's own kickoff message fixed `138` to avoid
+a repeat of Wave 1's `01`/`06` migration-number collision, since a sibling worker was
+concurrently claiming `137` (now `140`) for task `02` off the same base. Confirmed no
+`137_*`/`138_*` file existed in this worktree at the time (now `140_*`/`141_*`) before
+writing `141_loop_runs.sql`; the
+latest pre-existing migration visible here was `139_workflow_run_steps_loop_kind.sql`.
 
-**Migration** (`internal/store/migrations/138_loop_runs.sql`) -- `loop_runs` table
+**Migration** (`internal/store/migrations/141_loop_runs.sql`) -- `loop_runs` table
 matching the task's illustrative DDL exactly (own `id TEXT PRIMARY KEY`, never keyed by
 or aliased to `workflow_runs.id`, per 21-loops.md's Decision 1 and this task's explicit
 instruction). `goal_id NOT NULL REFERENCES goals(id)` (FK-enforced, confirmed by a test).
 Brand-new table -> plain transactional `CREATE TABLE`, matching `128_teams.sql`/
-`135_goals.sql`'s precedent (no rebuild dance needed, unlike 130/133/136's CHECK-widening
+`138_goals.sql`'s precedent (no rebuild dance needed, unlike 130/133/139's CHECK-widening
 migrations against an already-populated table). Tested by running the full migration
 chain against a real copy of `~/.local/share/nanite/workspaces/default/backups/
 main.db.pre-execution-backup-20260818-132726` (the ~38MB populated backup) via a
-throwaway `cmd/tmp_migration_check138/main.go` (deleted after verification, never
+throwaway `cmd/tmp_migration_check141/main.go` (deleted after verification, never
 committed) that called `store.New` (runs every embedded migration via goose) and then
 exercised `CreateGoal`/`CreateLoopRun`/`GetLoopRun`/`SetBudget`/`UpdateLoopRunStatus`/
 `DeleteLoopRun`/`DeleteGoal` against that real DB copy -- all succeeded.
@@ -177,8 +179,8 @@ the targeted goal), `TestLoopRun_DefaultsAndNotFound`, `TestLoopRun_StatusValida
 the DB CHECK), `TestLoopRun_GoalFKEnforced`.
 
 **Deviation from plan:** none of substance. The only departure from the task file's own
-"What to do" §1 is the migration number (`138` instead of the provisionally-claimed
-`140`), which was an explicit, intentional override from the dispatching orchestrator to
+"What to do" §1 is the migration number (`138`, since renumbered to `141`, instead of the
+provisionally-claimed `140`), which was an explicit, intentional override from the dispatching orchestrator to
 avoid a cross-worktree collision with a concurrently-running sibling task, not a
 deviation I chose.
 
@@ -188,7 +190,7 @@ possible-context-leak lint), confirmed via `git status`/`git diff` to be untouch
 task's changes (only the three new files above are untracked in this worktree) and
 therefore pre-existing; `go vet ./internal/store/...` alone is clean. `go test ./...` --
 all packages pass, including the full `internal/store` suite and the new `loop_runs_test.go`
-tests. Migration `138` also independently verified by running the full embedded migration
+tests. Migration `141` also independently verified by running the full embedded migration
 chain against a real, populated backup DB copy
 (`~/.local/share/nanite/workspaces/default/backups/main.db.pre-execution-backup-20260818-132726`)
 and round-tripping a `Goal`/`LoopRun` pair through it end to end.

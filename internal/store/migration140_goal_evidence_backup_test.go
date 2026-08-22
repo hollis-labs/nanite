@@ -15,10 +15,10 @@ import (
 // not just an empty fixture. Mirrors this package's established
 // real-backup-test convention exactly (see
 // TestRealBackupGoalsMigrationAppliesCleanly in
-// migration135_goals_backup_test.go): brand-new table, so there's no
+// migration138_goals_backup_test.go): brand-new table, so there's no
 // pre-existing goal_evidence data to survive a rebuild -- what matters
 // here is that CREATE TABLE goal_evidence (plus its two indexes and its
-// FK against goals, which migration 135 already added to this same real
+// FK against goals, which migration 138 already added to this same real
 // backup copy) applies without error alongside every other real, populated
 // table already in the backup, and that full GoalEvidence CRUD plus the
 // EvaluateGoalEvidence/EvidenceSatisfiesGoal walk works on top of the
@@ -58,7 +58,7 @@ func TestRealBackupGoalEvidenceMigrationAppliesCleanly(t *testing.T) {
 	ctx := context.Background()
 	rs, err := New(ctx, absPath)
 	if err != nil {
-		t.Fatalf("open+migrate scratch copy of real backup db (migration 137 goal_evidence): %v", err)
+		t.Fatalf("open+migrate scratch copy of real backup db (migration 140 goal_evidence): %v", err)
 	}
 	defer rs.Close()
 
@@ -77,7 +77,7 @@ func TestRealBackupGoalEvidenceMigrationAppliesCleanly(t *testing.T) {
 	t.Logf("real backup copy has %d pre-existing sessions rows; goal_evidence migration applied cleanly alongside them", sessionCount)
 
 	// Full GoalEvidence CRUD plus the evidence-walk evaluation against the
-	// migrated real-backup copy, on top of a real goals row (migration 135,
+	// migrated real-backup copy, on top of a real goals row (migration 138,
 	// already applied earlier in this same migration chain).
 	goal := &Goal{Intent: "real-backup goal_evidence migration smoke test"}
 	if err := goal.SetAcceptanceCriteria([]string{"real_backup_smoke_test_passes"}); err != nil {

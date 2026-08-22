@@ -173,7 +173,7 @@ length in engine.go's own package doc comment. Flagged as a legitimate follow-up
 future migration could give `loop_runs` its own dedicated launch-params column instead of
 overloading this one.
 
-**Real schema gap found: `loop_runs.status` (migration 138) has only two pause buckets
+**Real schema gap found: `loop_runs.status` (migration 141) has only two pause buckets
 (`waiting_on_gate`, `waiting_on_escalation`), one fewer than `Decide`'s own `WAIT`/`ESCALATE`
 distinction.** No migration in scope to add a third. Resolved both `DecisionWait` and
 `DecisionEscalate` into `LoopRunStatusWaitingOnEscalation` — no information is actually lost,

@@ -16,21 +16,21 @@ re-reviewed before being marked done. This doc and `SUMMARY.md` are the closing 
 than originally planned — see "What changed from plan" below), all pure schema + Go CRUD, no
 runtime behavior:
 
-- `135_goals.sql` (task `01`) — `goals` table, full lifecycle (`draft → defined → active →
+- `138_goals.sql` (task `01`) — `goals` table, full lifecycle (`draft → defined → active →
   blocked/satisfied/failed/cancelled/superseded`), `internal/store/goals.go`.
-- `137_goal_evidence.sql` (task `02`) — `goal_evidence` thin pointer table (`ref_table`/`ref_id`
+- `140_goal_evidence.sql` (task `02`) — `goal_evidence` thin pointer table (`ref_table`/`ref_id`
   always required, never free-text), `internal/store/goal_evidence.go`, including the real
   `EvaluateGoalEvidence`/`EvidenceSatisfiesGoal` four-clause `goal_met` walk.
-- `138_loop_runs.sql` (task `03`) — `loop_runs`, a **new peer entity to `WorkflowRun`, not a
+- `141_loop_runs.sql` (task `03`) — `loop_runs`, a **new peer entity to `WorkflowRun`, not a
   `WorkflowRun` itself** (own `id`, own lifecycle), `internal/store/loop_runs.go`, including
   `Budget`/`OnExhausted ∈ {escalate, fail}`.
-- `139_loop_run_iterations.sql` (task `04`) — append-only per-iteration history,
+- `142_loop_run_iterations.sql` (task `04`) — append-only per-iteration history,
   `internal/store/loop_run_iterations.go`.
-- `140_workflow_runs_loop_scoping.sql` (task `05`) — `workflow_runs.loop_run_id`/
+- `143_workflow_runs_loop_scoping.sql` (task `05`) — `workflow_runs.loop_run_id`/
   `loop_iteration` (nullable, no CHECK, plain `ADD COLUMN`), plus
   `Store.UpdateWorkflowRunLoopScope` (a narrow updater, since `WorkflowLauncher.Launch` has no
   natural place to plumb these two fields through — see below).
-- `136_workflow_run_steps_loop_kind.sql` (task `06`) — widens `workflow_run_steps.kind`'s CHECK
+- `139_workflow_run_steps_loop_kind.sql` (task `06`) — widens `workflow_run_steps.kind`'s CHECK
   to add `'loop'`, plus the `agentworkflow.StepKindLoop` constant. Schema-only; task `09` is the
   real executor.
 
@@ -53,7 +53,7 @@ runtime behavior:
   `ParentSessionID`/`TimeoutSeconds`/`WorkflowParams`) — the persisted shape a bare
   `Resume(ctx, loopRunID)` needs to relaunch further iterations with zero caller-supplied
   inputs.
-- `internal/service/workflow_engine_loop.go` + migration `141` (task `09`) — the
+- `internal/service/workflow_engine_loop.go` + migration `144` (task `09`) — the
   `StepKindLoop` step executor: a Workflow can *contain* a Loop. `RunStatusWaitingOnLoop`
   (new, distinct from `waiting_on_gate`/`waiting_on_flex`), a real three-way precedence
   function (`waitingRunStatus`: gate > flex > loop), and a **real push mechanism** — when
@@ -70,12 +70,12 @@ connected to each other.**
   `GET /api/goals/{id}/evidence`, `POST /api/loops`, `GET /api/loops`, `GET /api/loops/{id}`,
   `POST /api/loops/{id}/cancel`, `POST /api/loops/{id}/resolve`,
   `GET /api/loops/{id}/iterations`. Standard operator auth, no new provenance tier.
-- `resume_loop_run` reflex action kind, migration `142` (task `11`) — a real, named reflex
+- `resume_loop_run` reflex action kind, migration `145` (task `11`) — a real, named reflex
   action kind (not a generic `callback`, which the reflex-taxonomy doc already rejected for
   illegibility reasons). Reuses the existing predicate/event/interval trigger-spec AST
   unchanged. `internal/service/loop_resume_reflex.go`'s `EvaluateLoopRunResumeReflexes` is the
   real handler.
-- `loop_run_tick` scheduled `JobType`, migration `143` (task `12`) — the fifth `JobType`
+- `loop_run_tick` scheduled `JobType`, migration `146` (task `12`) — the fifth `JobType`
   alongside Scheduling's four. `internal/loop/tick_schedule.go`'s `scheduleLoopRunTick` is the
   real creator (wired from `LoopEngine`'s own `DecisionWait` branch — nothing else in the
   codebase creates one).
@@ -106,13 +106,19 @@ added by task `13`).
 - **Migration numbers landed completely differently from the plan's provisional `138`-`144`
   sequence**, because two other concurrent batches (`plugin-system`, `skills`) were also
   claiming numbers off the same `134` base in isolated worktrees at the same time. Real landed
-  order: `135`(01) → `136`(06) → `137`(02) → `138`(03) → `139`(04) → `140`(05) → `141`(09) →
-  `142`(11) → `143`(12). If you're auditing this batch's migrations, use this list, not the
-  task files' own "provisionally claims N" text.
+  order (as of this batch's own dispatch/merge): `135`(01) → `136`(06) → `137`(02) → `138`(03)
+  → `139`(04) → `140`(05) → `141`(09) → `142`(11) → `143`(12). **Renumbered again, 2026-08-22**,
+  `+3` uniformly across the whole range, to resolve a real collision discovered after the
+  `skills` batch actually landed its own (different) `136`/`137` migrations on `main` — the
+  current real order is: `138`(01) → `139`(06) → `140`(02) → `141`(03) → `142`(04) → `143`(05)
+  → `144`(09) → `145`(11) → `146`(12). If you're auditing this batch's migrations, use this
+  list, not the task files' own "provisionally claims N" text.
 - **A same-batch migration collision happened anyway, inside Wave 1**: tasks `01` and `06` were
   dispatched fully in parallel, each in its own isolated worktree, and each independently
-  found `134` as the highest number visible from its own worktree — so both wrote `135`.
-  Resolved at merge time by renumbering `06` to `136` (`TASKS/ESCALATIONS.md`, 2026-08-21,
+  found `134` as the highest number visible from its own worktree — so both wrote `135`
+  (now `138`, per the 2026-08-22 renumbering above).
+  Resolved at merge time by renumbering `06` to `136` (now `139`)
+  (`TASKS/ESCALATIONS.md`, 2026-08-21,
   "Loops Wave 1... same-batch migration-number collision"). No operator involvement needed.
   Lesson logged for future batches: expect same-wave collisions on migration numbers as the
   default outcome of parallel-worktree dispatch, not the exception.
@@ -256,10 +262,15 @@ Don't just trust `TASKS/INDEX.md`'s status column — confirm these directly.
 ```
 ls internal/store/migrations/ | sort -t_ -k1 -n | tail -9
 ```
-Expect, in order: `135_goals.sql`, `136_workflow_run_steps_loop_kind.sql`,
-`137_goal_evidence.sql`, `138_loop_runs.sql`, `139_loop_run_iterations.sql`,
-`140_workflow_runs_loop_scoping.sql`, `141_workflow_run_waiting_on_loop_status.sql`,
-`142_agent_reflex_resume_loop_run.sql`, `143_agent_schedules_loop_run_tick_job_type.sql`.
+Expect, in order: `138_goals.sql`, `139_workflow_run_steps_loop_kind.sql`,
+`140_goal_evidence.sql`, `141_loop_runs.sql`, `142_loop_run_iterations.sql`,
+`143_workflow_runs_loop_scoping.sql`, `144_workflow_run_waiting_on_loop_status.sql`,
+`145_agent_reflex_resume_loop_run.sql`, `146_agent_schedules_loop_run_tick_job_type.sql`.
+(Renumbered `+3` from the original `135`-`143` landed order on 2026-08-22 to resolve a
+collision with the `skills` batch's real, landed `136`/`137` — see "What changed from the
+original plan, and why" above. Your own worktree/`main` checkout will also show `main`'s
+own `136_skills_index_redesign.sql`/`137_agent_known_skills_grant_state_and_drop_agent_skills.sql`
+between `134` and `138` once merged — those are `skills`' files, not this batch's.)
 
 **Tables/columns:**
 - `goals`, `goal_evidence`, `loop_runs`, `loop_run_iterations` exist (`sqlite3 <db> ".tables"`).

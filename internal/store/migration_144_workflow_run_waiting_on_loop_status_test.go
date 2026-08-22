@@ -12,7 +12,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// TestMigrate141WidensBothTablesWaitingOnLoopStatus is the regression test
+// TestMigrate144WidensBothTablesWaitingOnLoopStatus is the regression test
 // for TASKS/loops/09-stepkindloop-executor-and-waiting-status.md: setting
 // workflow_runs.status or workflow_run_steps.status to 'waiting_on_loop'
 // must succeed post-migration where it previously violated 133's
@@ -21,25 +21,25 @@ import (
 // working unaffected by the rebuild, and workflow_run_steps' new
 // loop_run_id column must round-trip through UpsertWorkflowRunStep/
 // GetWorkflowRunStepByLoopRunID.
-func TestMigrate141WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
+func TestMigrate144WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 	s := newTestStore(t)
 
 	for _, status := range []string{"running", "completed", "failed", "cancelled", "waiting_on_gate", "waiting_on_flex", "waiting_on_loop"} {
-		runID := "run-141-" + status
+		runID := "run-144-" + status
 		if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: runID, DefinitionName: "loop-status-check", Status: status}); err != nil {
 			t.Fatalf("CreateWorkflowRun(status=%q): %v", status, err)
 		}
 	}
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-141-bogus", DefinitionName: "loop-status-check", Status: "bogus"}); err == nil {
+	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-144-bogus", DefinitionName: "loop-status-check", Status: "bogus"}); err == nil {
 		t.Fatal("CreateWorkflowRun(status=\"bogus\") succeeded, want CHECK violation")
 	}
 
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-141-steps", DefinitionName: "loop-status-check", Status: "running"}); err != nil {
+	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-144-steps", DefinitionName: "loop-status-check", Status: "running"}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
 	for _, status := range []string{"pending", "running", "completed", "failed", "waiting_on_gate", "waiting_on_flex", "waiting_on_loop", "skipped"} {
 		row := &WorkflowRunStepRow{
-			WorkflowRunID: "run-141-steps",
+			WorkflowRunID: "run-144-steps",
 			StepID:        "step-" + status,
 			Kind:          "loop",
 			Status:        status,
@@ -48,7 +48,7 @@ func TestMigrate141WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 			t.Fatalf("UpsertWorkflowRunStep(status=%q): %v", status, err)
 		}
 	}
-	badStep := &WorkflowRunStepRow{WorkflowRunID: "run-141-steps", StepID: "step-bogus", Kind: "loop", Status: "bogus"}
+	badStep := &WorkflowRunStepRow{WorkflowRunID: "run-144-steps", StepID: "step-bogus", Kind: "loop", Status: "bogus"}
 	if err := s.UpsertWorkflowRunStep(badStep); err == nil {
 		t.Fatal("UpsertWorkflowRunStep(status=\"bogus\") succeeded, want CHECK violation")
 	}
@@ -56,13 +56,13 @@ func TestMigrate141WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 	// loop_run_id round-trip -- workflow_run_steps.loop_run_id REFERENCES
 	// loop_runs(id) with FK enforcement on, so this needs a real goals/
 	// loop_runs row chain, not an arbitrary string.
-	loopRunID := createTestLoopRunForMigration141(t, s, "loop-141-check")
+	loopRunID := createTestLoopRunForMigration144(t, s, "loop-144-check")
 	waitingRow := &WorkflowRunStepRow{
 		// Deliberately a distinct StepID from the "step-waiting_on_loop"
 		// row already inserted above — reusing it would UPSERT (update)
 		// that existing row in place rather than add a new one, since
 		// workflowRunStepID's synthetic PK is (workflow_run_id, step_id).
-		WorkflowRunID: "run-141-steps", StepID: "step-loop-round-trip", Kind: "loop", Status: "waiting_on_loop",
+		WorkflowRunID: "run-144-steps", StepID: "step-loop-round-trip", Kind: "loop", Status: "waiting_on_loop",
 		LoopRunID: &loopRunID,
 	}
 	if err := s.UpsertWorkflowRunStep(waitingRow); err != nil {
@@ -72,8 +72,8 @@ func TestMigrate141WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetWorkflowRunStepByLoopRunID: %v", err)
 	}
-	if got.StepID != "step-loop-round-trip" || got.WorkflowRunID != "run-141-steps" {
-		t.Errorf("GetWorkflowRunStepByLoopRunID returned (run=%s, step=%s), want (run-141-steps, step-loop-round-trip)", got.WorkflowRunID, got.StepID)
+	if got.StepID != "step-loop-round-trip" || got.WorkflowRunID != "run-144-steps" {
+		t.Errorf("GetWorkflowRunStepByLoopRunID returned (run=%s, step=%s), want (run-144-steps, step-loop-round-trip)", got.WorkflowRunID, got.StepID)
 	}
 	if got.LoopRunID == nil || *got.LoopRunID != loopRunID {
 		t.Errorf("GetWorkflowRunStepByLoopRunID row LoopRunID = %v, want %q", got.LoopRunID, loopRunID)
@@ -86,9 +86,9 @@ func TestMigrate141WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 
 	// Simulated restart: a second full migrate() must be a clean no-op.
 	if err := s.migrate(); err != nil {
-		t.Fatalf("re-migrate after 141 already applied: %v", err)
+		t.Fatalf("re-migrate after 144 already applied: %v", err)
 	}
-	stepsAfter, err := s.ListWorkflowRunSteps("run-141-steps")
+	stepsAfter, err := s.ListWorkflowRunSteps("run-144-steps")
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps after re-migrate: %v", err)
 	}
@@ -97,10 +97,10 @@ func TestMigrate141WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 	}
 }
 
-// TestMigrate141PreservesIndexes confirms the table rebuild (rename-
-// recreate-copy, same pattern as 130/133/136) leaves every original index
+// TestMigrate144PreservesIndexes confirms the table rebuild (rename-
+// recreate-copy, same pattern as 130/133/139) leaves every original index
 // on both tables in place with their original definitions.
-func TestMigrate141PreservesIndexes(t *testing.T) {
+func TestMigrate144PreservesIndexes(t *testing.T) {
 	s := newTestStore(t)
 
 	assertIndexExists := func(t *testing.T, table, indexName string, wantSubstrings ...string) {
@@ -126,37 +126,37 @@ func TestMigrate141PreservesIndexes(t *testing.T) {
 	assertIndexExists(t, "workflow_run_steps", "idx_workflow_run_steps_status", "workflow_run_id", "status")
 }
 
-// TestRealBackupWorkflowRunWaitingRowsSurviveLoop141Migration is the "no
+// TestRealBackupWorkflowRunWaitingRowsSurviveLoop144Migration is the "no
 // data lost, no false-positive rejection of already-live data" check
 // EXECUTION-PROCESS.md's schema-migration testing requirement and this
 // task's own Done-means both require: every real, pre-existing
 // workflow_runs/workflow_run_steps row from an actual production backup
-// must survive migration 141's table rebuild intact, AND — since this
+// must survive migration 144's table rebuild intact, AND — since this
 // task's Done-means specifically requires verifying preservation of
 // existing flex/gate *waiting* rows across the rebuild — synthetic
 // waiting_on_gate and waiting_on_flex rows are inserted directly against
-// the real backup copy immediately before migration 141 runs (goose
-// DownTo(140) then Up()), because the one real backup available on this
+// the real backup copy immediately before migration 144 runs (goose
+// DownTo(143) then Up()), because the one real backup available on this
 // machine (main.db.pre-execution-backup-20260818-132726) predates
 // 130_workflow_run_steps_flex_kind.sql / 133_workflow_run_flex_waiting_
 // status.sql entirely — its on-disk status CHECK is still the original
 // 5-value set and it has zero gate/flex waiting rows of its own (confirmed
-// by direct inspection this session, mirroring migration 136's own test
-// file's identical finding). Splitting the migration run at the 140/141
+// by direct inspection this session, mirroring migration 139's own test
+// file's identical finding). Splitting the migration run at the 143/144
 // boundary lets this test exercise the exact scenario the Done-means
 // describes using this machine's only real backup as the base.
 //
 // The synthetic rows are inserted via raw SQL, not the Go
 // CreateWorkflowRun/UpsertWorkflowRunStep helpers: those helpers' column
 // lists are written against THIS worktree's head schema (which already
-// includes workflow_run_steps.loop_run_id, added by migration 141 itself)
-// and would fail against the intentionally-rolled-back pre-141 schema this
+// includes workflow_run_steps.loop_run_id, added by migration 144 itself)
+// and would fail against the intentionally-rolled-back pre-144 schema this
 // test inserts into.
 //
 // Per EXECUTION-PROCESS.md, the real backup file is never opened in place
 // — it is copied into t.TempDir() before store.New ever touches it. Skips
 // (rather than fails) when the backup isn't present on this machine.
-func TestRealBackupWorkflowRunWaitingRowsSurviveLoop141Migration(t *testing.T) {
+func TestRealBackupWorkflowRunWaitingRowsSurviveLoop144Migration(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Skipf("cannot resolve home directory: %v", err)
@@ -236,7 +236,7 @@ func TestRealBackupWorkflowRunWaitingRowsSurviveLoop141Migration(t *testing.T) {
 	if len(runsBefore) == 0 || len(stepsBefore) == 0 {
 		t.Fatal("real backup has zero pre-existing workflow_runs/workflow_run_steps rows -- spot-check requires real pre-existing rows")
 	}
-	t.Logf("real backup copy has %d workflow_runs and %d workflow_run_steps rows before the 140->141 boundary replay", len(runsBefore), len(stepsBefore))
+	t.Logf("real backup copy has %d workflow_runs and %d workflow_run_steps rows before the 143->144 boundary replay", len(runsBefore), len(stepsBefore))
 
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
@@ -247,36 +247,36 @@ func TestRealBackupWorkflowRunWaitingRowsSurviveLoop141Migration(t *testing.T) {
 		t.Fatalf("construct goose provider: %v", err)
 	}
 
-	if _, err := provider.DownTo(ctx, 140); err != nil {
-		t.Fatalf("goose DownTo 140 (reverse migration 141 on real backup copy): %v", err)
+	if _, err := provider.DownTo(ctx, 143); err != nil {
+		t.Fatalf("goose DownTo 143 (reverse migration 144 on real backup copy): %v", err)
 	}
 
 	// Insert synthetic waiting_on_gate / waiting_on_flex rows via raw SQL
-	// (pre-141 schema: workflow_run_steps has no loop_run_id column yet;
+	// (pre-144 schema: workflow_run_steps has no loop_run_id column yet;
 	// this task's own Go helpers assume head schema and would fail here).
-	const gateRunID = "real-backup-pre-141-gate-run"
-	const gateStepID = "gate-step-pre-141"
-	const flexRunID = "real-backup-pre-141-flex-run"
-	const flexStepID = "flex-step-pre-141"
+	const gateRunID = "real-backup-pre-144-gate-run"
+	const gateStepID = "gate-step-pre-144"
+	const flexRunID = "real-backup-pre-144-flex-run"
+	const flexStepID = "flex-step-pre-144"
 
 	insertRun := func(id, status string) {
 		if _, err := rs.DB.ExecContext(ctx, `
 			INSERT INTO workflow_runs
 				(id, definition_name, status, input_json, error, started_at, completed_at, updated_at, loop_run_id, loop_iteration)
-			VALUES (?, 'pre-141-waiting-check', ?, '{}', '', datetime('now'), '', datetime('now'), NULL, NULL)`,
+			VALUES (?, 'pre-144-waiting-check', ?, '{}', '', datetime('now'), '', datetime('now'), NULL, NULL)`,
 			id, status,
 		); err != nil {
-			t.Fatalf("insert synthetic workflow_runs row (id=%s, status=%s) at schema version 140: %v", id, status, err)
+			t.Fatalf("insert synthetic workflow_runs row (id=%s, status=%s) at schema version 143: %v", id, status, err)
 		}
 	}
 	insertStep := func(id, runID, stepID, kind, status string) {
 		if _, err := rs.DB.ExecContext(ctx, `
 			INSERT INTO workflow_run_steps
 				(id, workflow_run_id, step_id, kind, status, output, is_error, tool_calls_json, verify_json, error, started_at, completed_at, updated_at, gate_input)
-			VALUES (?, ?, ?, ?, ?, 'pre-141 waiting row', 0, '[]', '', '', '', '', datetime('now'), '')`,
+			VALUES (?, ?, ?, ?, ?, 'pre-144 waiting row', 0, '[]', '', '', '', '', datetime('now'), '')`,
 			id, runID, stepID, kind, status,
 		); err != nil {
-			t.Fatalf("insert synthetic workflow_run_steps row (run=%s, step=%s) at schema version 140: %v", runID, stepID, err)
+			t.Fatalf("insert synthetic workflow_run_steps row (run=%s, step=%s) at schema version 143: %v", runID, stepID, err)
 		}
 	}
 
@@ -286,18 +286,18 @@ func TestRealBackupWorkflowRunWaitingRowsSurviveLoop141Migration(t *testing.T) {
 	insertStep(flexRunID+":"+flexStepID, flexRunID, flexStepID, "flex", "waiting_on_flex")
 
 	if _, err := provider.Up(ctx); err != nil {
-		t.Fatalf("goose Up (replay forward past migration 141 over real backup copy + synthetic waiting rows): %v", err)
+		t.Fatalf("goose Up (replay forward past migration 144 over real backup copy + synthetic waiting rows): %v", err)
 	}
 
 	runsAfter := collectRuns()
 	stepsAfter := collectSteps()
 
 	if len(runsAfter) != len(runsBefore)+2 {
-		t.Fatalf("workflow_runs row count after migration 141 = %d, want %d (the %d real backup rows plus 2 synthetic waiting rows)",
+		t.Fatalf("workflow_runs row count after migration 144 = %d, want %d (the %d real backup rows plus 2 synthetic waiting rows)",
 			len(runsAfter), len(runsBefore)+2, len(runsBefore))
 	}
 	if len(stepsAfter) != len(stepsBefore)+2 {
-		t.Fatalf("workflow_run_steps row count after migration 141 = %d, want %d (the %d real backup rows plus 2 synthetic waiting rows)",
+		t.Fatalf("workflow_run_steps row count after migration 144 = %d, want %d (the %d real backup rows plus 2 synthetic waiting rows)",
 			len(stepsAfter), len(stepsBefore)+2, len(stepsBefore))
 	}
 
@@ -308,11 +308,11 @@ func TestRealBackupWorkflowRunWaitingRowsSurviveLoop141Migration(t *testing.T) {
 	for _, want := range runsBefore {
 		got, ok := runsByID[want.id]
 		if !ok {
-			t.Errorf("real backup workflow_runs row (id=%s) missing after migration 141's rebuild", want.id)
+			t.Errorf("real backup workflow_runs row (id=%s) missing after migration 144's rebuild", want.id)
 			continue
 		}
 		if got.status != want.status {
-			t.Errorf("real backup workflow_runs row (id=%s) status changed across migration 141's rebuild: before=%s after=%s", want.id, want.status, got.status)
+			t.Errorf("real backup workflow_runs row (id=%s) status changed across migration 144's rebuild: before=%s after=%s", want.id, want.status, got.status)
 		}
 	}
 	stepsByKey := map[string]stepRow{}
@@ -322,44 +322,44 @@ func TestRealBackupWorkflowRunWaitingRowsSurviveLoop141Migration(t *testing.T) {
 	for _, want := range stepsBefore {
 		got, ok := stepsByKey[want.workflowRunID+"/"+want.stepID]
 		if !ok {
-			t.Errorf("real backup workflow_run_steps row (run=%s, step=%s) missing after migration 141's rebuild", want.workflowRunID, want.stepID)
+			t.Errorf("real backup workflow_run_steps row (run=%s, step=%s) missing after migration 144's rebuild", want.workflowRunID, want.stepID)
 			continue
 		}
 		if got.kind != want.kind || got.status != want.status {
-			t.Errorf("real backup workflow_run_steps row (run=%s, step=%s) changed across migration 141's rebuild: before kind=%s status=%s, after kind=%s status=%s",
+			t.Errorf("real backup workflow_run_steps row (run=%s, step=%s) changed across migration 144's rebuild: before kind=%s status=%s, after kind=%s status=%s",
 				want.workflowRunID, want.stepID, want.kind, want.status, got.kind, got.status)
 		}
 	}
 
 	gateRun, ok := runsByID[gateRunID]
 	if !ok || gateRun.status != "waiting_on_gate" {
-		t.Errorf("synthetic pre-141 gate run (id=%s) missing or changed after migration 141's rebuild: %+v", gateRunID, gateRun)
+		t.Errorf("synthetic pre-144 gate run (id=%s) missing or changed after migration 144's rebuild: %+v", gateRunID, gateRun)
 	}
 	flexRun, ok := runsByID[flexRunID]
 	if !ok || flexRun.status != "waiting_on_flex" {
-		t.Errorf("synthetic pre-141 flex run (id=%s) missing or changed after migration 141's rebuild: %+v", flexRunID, flexRun)
+		t.Errorf("synthetic pre-144 flex run (id=%s) missing or changed after migration 144's rebuild: %+v", flexRunID, flexRun)
 	}
 	gateStep, ok := stepsByKey[gateRunID+"/"+gateStepID]
 	if !ok || gateStep.kind != "gate" || gateStep.status != "waiting_on_gate" {
-		t.Errorf("synthetic pre-141 gate step missing or changed after migration 141's rebuild: %+v", gateStep)
+		t.Errorf("synthetic pre-144 gate step missing or changed after migration 144's rebuild: %+v", gateStep)
 	}
 	flexStep, ok := stepsByKey[flexRunID+"/"+flexStepID]
 	if !ok || flexStep.kind != "flex" || flexStep.status != "waiting_on_flex" {
-		t.Errorf("synthetic pre-141 flex step missing or changed after migration 141's rebuild: %+v", flexStep)
+		t.Errorf("synthetic pre-144 flex step missing or changed after migration 144's rebuild: %+v", flexStep)
 	}
 
-	t.Logf("verified %d real workflow_runs + %d real workflow_run_steps rows, plus 2 pre-existing synthetic gate/flex waiting rows, all survive migration 141's table rebuild",
+	t.Logf("verified %d real workflow_runs + %d real workflow_run_steps rows, plus 2 pre-existing synthetic gate/flex waiting rows, all survive migration 144's table rebuild",
 		len(runsBefore), len(stepsBefore))
 
 	// And the new capability actually works against this real, migrated
 	// copy: a waiting_on_loop row (both tables) and a loop_run_id value
 	// can now be inserted where they couldn't before.
-	if err := rs.CreateWorkflowRun(&WorkflowRunRow{ID: "post-141-loop-check", DefinitionName: "loop-check", Status: "waiting_on_loop"}); err != nil {
+	if err := rs.CreateWorkflowRun(&WorkflowRunRow{ID: "post-144-loop-check", DefinitionName: "loop-check", Status: "waiting_on_loop"}); err != nil {
 		t.Fatalf("CreateWorkflowRun(status=waiting_on_loop) on real backup copy: %v", err)
 	}
-	realLoopRunID := createTestLoopRunForMigration141(t, rs, "post-141-loop-check")
+	realLoopRunID := createTestLoopRunForMigration144(t, rs, "post-144-loop-check")
 	if err := rs.UpsertWorkflowRunStep(&WorkflowRunStepRow{
-		WorkflowRunID: "post-141-loop-check", StepID: "loop-step", Kind: "loop", Status: "waiting_on_loop",
+		WorkflowRunID: "post-144-loop-check", StepID: "loop-step", Kind: "loop", Status: "waiting_on_loop",
 		LoopRunID: &realLoopRunID,
 	}); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep(status=waiting_on_loop, LoopRunID set) on real backup copy: %v", err)
@@ -373,14 +373,14 @@ func TestRealBackupWorkflowRunWaitingRowsSurviveLoop141Migration(t *testing.T) {
 	}
 }
 
-// createTestLoopRunForMigration141 creates a minimal real goals -> loop_runs
+// createTestLoopRunForMigration144 creates a minimal real goals -> loop_runs
 // row chain and returns the new loop_runs.id — workflow_run_steps.loop_run_id
 // REFERENCES loop_runs(id) with FK enforcement on (this Store always runs
 // with PRAGMA foreign_keys = ON), so an arbitrary string won't satisfy it.
-func createTestLoopRunForMigration141(t *testing.T, s *Store, definitionName string) string {
+func createTestLoopRunForMigration144(t *testing.T, s *Store, definitionName string) string {
 	t.Helper()
 	ctx := context.Background()
-	goal := &Goal{Intent: "migration 141 test goal for " + definitionName}
+	goal := &Goal{Intent: "migration 144 test goal for " + definitionName}
 	if err := s.CreateGoal(ctx, goal); err != nil {
 		t.Fatalf("CreateGoal: %v", err)
 	}

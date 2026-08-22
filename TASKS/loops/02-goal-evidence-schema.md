@@ -97,13 +97,14 @@ plain `CREATE TABLE`, one composite index, no rebuild dance.
 
 ## Work log
 
-**Migration number:** dispatch explicitly assigned `137` (not this task's own
+**Migration number:** dispatch explicitly assigned `137` (since renumbered to `140`; see
+`TASKS/loops/HANDOFF.md`'s 2026-08-22 renumbering note — not this task's own
 re-verify-and-pick procedure) to avoid a repeat of Loops Wave 1's `01`/`06` both
-independently landing on `135` (see `TASKS/ESCALATIONS.md`). Confirmed via `ls
+independently landing on `135` (now `138`) (see `TASKS/ESCALATIONS.md`). Confirmed via `ls
 internal/store/migrations/ | sort -t_ -k1 -n | tail -8` that `137_*.sql` did not already
-exist and that `136_workflow_run_steps_loop_kind.sql` was the latest on disk (task `01`
-actually landed as `135_goals.sql`, not the task file's own provisional `138`) — no
-anomaly, `137` used exactly as assigned. Built `internal/store/migrations/137_goal_evidence.sql`
+exist and that `139_workflow_run_steps_loop_kind.sql` was the latest on disk (task `01`
+actually landed as `138_goals.sql`, not the task file's own provisional `138`) — no
+anomaly, `137` used exactly as assigned. Built `internal/store/migrations/140_goal_evidence.sql`
 following `132_team_authority_grants.sql`'s precedent shape (plain `CREATE TABLE`, two
 composite indexes, no rebuild dance — brand-new table).
 
@@ -121,7 +122,7 @@ since `agent_reflexes.go` already owns the `nullIfNilInt64` name in this package
 `RecordGoalEvidence` (insert, append-only — no `UpdateGoalEvidence`), `GetGoalEvidence`,
 `ListGoalEvidence(ctx, goalID, GoalEvidenceFilter{LoopRunID, EvidenceType})`,
 `DeleteGoalEvidence` (symmetry only, rarely used in practice). `validateGoalEvidence`
-enforces: `goal_id` non-empty, `evidence_type` enum membership (mirrors migration 137's own
+enforces: `goal_id` non-empty, `evidence_type` enum membership (mirrors migration 140's own
 CHECK, same "typed Go error before the DB round-trip" convention as
 `team_authority.go`/`goals.go`), and `ref_table`/`ref_id` both non-empty — the "always
 structured, never free-text-only" decision this task's Context section states as

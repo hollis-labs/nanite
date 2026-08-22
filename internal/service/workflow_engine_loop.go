@@ -63,7 +63,7 @@ package service
 // # Where loop_run_id gets recorded on the step (item 4, "your call,
 // document it")
 //
-// A real column, workflow_run_steps.loop_run_id (migration 141), not a
+// A real column, workflow_run_steps.loop_run_id (migration 144), not a
 // JSON field — this step needs the association looked up in both
 // directions (given the step, read its loop_run_id off the row; given a
 // terminal loop_run_id, find the step waiting on it —

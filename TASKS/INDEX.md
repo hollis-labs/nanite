@@ -750,18 +750,18 @@ resolution of every item on the design doc's own "What this session did not deci
 
 | Task | Phase | Status | Depends on |
 |---|---|---|---|
-| `01-goals-schema` | 1 | reviewed (migration 135) | none |
-| `02-goal-evidence-schema` | 1 | reviewed (migration 137) | `01` |
-| `03-loop-runs-schema` | 1 | reviewed (migration 138) | `01` |
-| `04-loop-run-iterations-schema` | 1 | reviewed (migration 139) | `03` |
-| `05-workflow-runs-loop-scoping-columns` | 1 | reviewed (migration 140) | `03` |
-| `06-stepkindloop-schema` | 1 | reviewed (migration 136) | none |
+| `01-goals-schema` | 1 | reviewed (migration 138) | none |
+| `02-goal-evidence-schema` | 1 | reviewed (migration 140) | `01` |
+| `03-loop-runs-schema` | 1 | reviewed (migration 141) | `01` |
+| `04-loop-run-iterations-schema` | 1 | reviewed (migration 142) | `03` |
+| `05-workflow-runs-loop-scoping-columns` | 1 | reviewed (migration 143) | `03` |
+| `06-stepkindloop-schema` | 1 | reviewed (migration 139) | none |
 | `07-loop-continuation-policy` | 2 | reviewed | `01`, `02`, `03`, `04` |
 | `08-loop-engine-core` | 2 | reviewed | `03`, `04`, `07` |
-| `09-stepkindloop-executor-and-waiting-status` | 2 | reviewed (migration 141) | `06`, `08` |
+| `09-stepkindloop-executor-and-waiting-status` | 2 | reviewed (migration 144) | `06`, `08` |
 | `10-loop-launcher-and-api` | 3 | reviewed | `08` |
-| `11-loop-event-predicate-trigger` | 3 | reviewed (migration 142) | `08` |
-| `12-loop-run-tick-scheduled-trigger` | 3 | reviewed (migration 143) | `08` |
+| `11-loop-event-predicate-trigger` | 3 | reviewed (migration 145) | `08` |
+| `12-loop-run-tick-scheduled-trigger` | 3 | reviewed (migration 146) | `08` |
 | `13-loop-presets` | 4 | reviewed | `07`, `08`, `10` |
 
 **Two real, load-bearing corrections this planning session's own research found against the

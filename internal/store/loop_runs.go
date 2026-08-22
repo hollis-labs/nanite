@@ -16,7 +16,7 @@ import (
 var ErrLoopRunNotFound = errors.New("loop run not found")
 
 // LoopRun status constants -- the CHECK constraint on loop_runs.status
-// (migration 138) keeps DB rows aligned with these values; mismatches
+// (migration 141) keeps DB rows aligned with these values; mismatches
 // surface as INSERT/UPDATE errors, and validateLoopRunStatus (below)
 // rejects them before they ever reach the DB. Per docs/engineering/
 // architecture/21-loops.md's Decision 1, a LoopRun is a peer entity to
@@ -62,7 +62,7 @@ var validLoopRunStatuses = map[string]bool{
 }
 
 // validateLoopRunStatus checks status against the enum the DB CHECK
-// constraint (migration 138) also enforces. A bare enum-membership check is
+// constraint (migration 141) also enforces. A bare enum-membership check is
 // deliberately all this does -- real transition-legality enforcement is a
 // later task's job (the continuation policy engine, 21-loops.md's "decide"
 // function) once something is actually driving transitions, not this
@@ -92,7 +92,7 @@ const (
 // max_runtime, named in that doc's schema ledger section as
 // max_runtime_seconds here), with OnExhausted folded in as one more policy
 // knob in the same blob rather than split into its own column -- see
-// migration 138's own doc comment for why.
+// migration 141's own doc comment for why.
 type Budget struct {
 	MaxIterations           int    `json:"max_iterations"`
 	MaxFailures             int    `json:"max_failures"`
@@ -136,7 +136,7 @@ type LoopRun struct {
 
 	// GoalID is the LoopRun's one required target-state pointer --
 	// "a loop_runs row always has exactly one goal_id" (21-loops.md's
-	// Decision 2). REFERENCES goals(id), FK-enforced (migration 138).
+	// Decision 2). REFERENCES goals(id), FK-enforced (migration 141).
 	GoalID string `json:"goal_id"`
 
 	// DefinitionName is the initial iteration's WorkflowDefinition name (or
@@ -256,7 +256,7 @@ func scanLoopRun(scanner interface{ Scan(...any) error }, lr *LoopRun) error {
 // if lr.ID is empty, defaults Status to LoopRunStatusRunning if unset
 // (validated via validateLoopRunStatus before insert), and defaults
 // BudgetJSON/ContinuationPolicyJSON to "{}" if left empty (matching the
-// column DEFAULTs migration 138 sets, replicated here because every value
+// column DEFAULTs migration 141 sets, replicated here because every value
 // is passed explicitly in this INSERT so SQLite's column DEFAULT never
 // actually applies -- same trade-off goals.go's CreateGoal documents for
 // its own JSON defaults). GoalID and DefinitionName are required.

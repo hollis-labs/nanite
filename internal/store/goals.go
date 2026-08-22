@@ -15,7 +15,7 @@ import (
 var ErrGoalNotFound = errors.New("goal not found")
 
 // Goal status constants -- the CHECK constraint on goals.status (migration
-// 135) keeps DB rows aligned with these values; mismatches surface as
+// 138) keeps DB rows aligned with these values; mismatches surface as
 // INSERT/UPDATE errors, and validateGoalStatus (below) rejects them before
 // they ever reach the DB. Full lifecycle per docs/engineering/architecture/
 // 21-loops.md's Decision 2 and GLOSSARY.md's Goal entry: draft/defined are
@@ -61,7 +61,7 @@ var validGoalStatuses = map[string]bool{
 }
 
 // validateGoalStatus checks status against the enum the DB CHECK constraint
-// (migration 135) also enforces. A bare enum-membership check is
+// (migration 138) also enforces. A bare enum-membership check is
 // deliberately all this does -- real transition-legality enforcement (e.g.
 // rejecting draft -> satisfied directly) is task 08's job once the loop
 // engine, not this storage layer, is the thing driving transitions
@@ -256,7 +256,7 @@ func scanGoal(scanner interface{ Scan(...any) error }, g *Goal) error {
 
 // CreateGoal inserts a new goals row. Generates an ID via uuid.New() if
 // g.ID is empty, defaults every JSON sub-structure column to "[]" if left
-// empty (matching the column DEFAULTs migration 135 sets, replicated here
+// empty (matching the column DEFAULTs migration 138 sets, replicated here
 // because every value is passed explicitly in this INSERT so SQLite's
 // column DEFAULT never actually applies -- same trade-off teams.go's
 // CreateTeam documents for its own JSON defaults), and defaults Status to
@@ -475,7 +475,7 @@ func (s *Store) UpdateGoalStatus(ctx context.Context, id, status string) error {
 // matched. Storage-only: this does not check for or cascade into any
 // loop_runs row launched against this goal (loop_runs is a later task in
 // this batch) or any child goal referencing this row via parent_goal_id --
-// migration 135's parent_goal_id FK has no ON DELETE clause, so SQLite's
+// migration 138's parent_goal_id FK has no ON DELETE clause, so SQLite's
 // default (NO ACTION) applies: deleting a goal that is still some other
 // row's parent fails at the DB layer rather than silently orphaning or
 // cascading. That failure surfaces here as a wrapped error, not

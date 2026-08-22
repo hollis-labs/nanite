@@ -81,18 +81,20 @@ itself — `workflow_run_id` is the pointer back to the real per-step verify rec
 
 ## Work log
 
-**Migration number:** used `139` exactly, per this batch's dispatch instructions (not the
-task file's own provisional "141" placeholder, and not a number re-derived by re-verifying
-"next available" locally). Confirmed via `ls internal/store/migrations/139_*` returning no
-match in this worktree before writing the file — the latest migration actually on disk here
-was `138_loop_runs.sql` (task 03, already landed). No anomaly found.
+**Migration number:** used `139` (since renumbered to `142`; see
+`TASKS/loops/HANDOFF.md`'s 2026-08-22 renumbering note) exactly, per this batch's dispatch
+instructions (not the task file's own provisional "141" placeholder, and not a number
+re-derived by re-verifying "next available" locally). Confirmed via
+`ls internal/store/migrations/139_*` returning no match in this worktree before writing the
+file — the latest migration actually on disk here was `138_loop_runs.sql` (now
+`141_loop_runs.sql`) (task 03, already landed). No anomaly found.
 
 **Files added:**
-- `internal/store/migrations/139_loop_run_iterations.sql` — `loop_run_iterations` table,
+- `internal/store/migrations/142_loop_run_iterations.sql` — `loop_run_iterations` table,
   matching the task's illustrative DDL almost verbatim (decision/progress_state CHECK enums,
   nullable `workflow_run_id`/`decision`/`progress_state`, unique `(loop_run_id,
   iteration_number)` index, non-unique index on `workflow_run_id`). One addition beyond the
-  illustrative DDL: `IF NOT EXISTS` on both indexes (matching 138's own precedent) for
+  illustrative DDL: `IF NOT EXISTS` on both indexes (matching 141's own precedent) for
   idempotent re-run safety.
 - `internal/store/loop_run_iterations.go` — `LoopRunIteration` struct, `Evaluation` struct
   (`RemainingDelta string`, `Confidence float64`, `Regressions []string` — matches the task's
@@ -129,9 +131,9 @@ sibling files it named as precedent):**
   other file in this package already uses.
 - No FK from `loop_run_iterations.loop_run_id` to `loop_runs(id)` needed the
   `goal_evidence.loop_run_id`-style "no FK, ordering-independent" workaround: unlike
-  `goal_evidence` (deliberately unenforced per migration 137's own doc comment, since that
-  table's migration lands before `loop_runs`' own), `loop_run_iterations` (139) is ordered
-  strictly after `loop_runs` (138) and every row is created only once its parent already
+  `goal_evidence` (deliberately unenforced per migration 140's own doc comment, since that
+  table's migration lands before `loop_runs`' own), `loop_run_iterations` (142) is ordered
+  strictly after `loop_runs` (141) and every row is created only once its parent already
   exists — so this table uses an ordinary enforced `REFERENCES loop_runs(id)`, matching
   `132_team_authority_grants.sql`'s cited "normalized sub-table pointing at a parent
   definition row" precedent directly, with no special-casing needed.
@@ -162,7 +164,7 @@ pipe):**
   backup predates the goose cutover entirely (no `goose_db_version` table, only legacy
   pre-migration-128 application tables) — a real exercise of the legacy-ledger-seeding path
   (`isPreGooseDatabase`/`seedLegacyLedger`) followed by every real migration from 95 through
-  139 applying for real, not just this one. Confirmed `goose_db_version` reached 139, the
+  142 applying for real, not just this one. Confirmed `goose_db_version` reached 142, the
   `loop_run_iterations` table exists, and a full `Goal` → `LoopRun` → `LoopRunIteration`
   create/get round-trip succeeded against the migrated copy. The disposable verification
   test file used for this was deleted afterward — not part of this task's committed
@@ -174,12 +176,12 @@ pipe):**
 of the Loops batch, closing out Phase 1.
 
 Checked:
-- Migration `139_loop_run_iterations.sql`: `CREATE TABLE IF NOT EXISTS loop_run_iterations`
+- Migration `142_loop_run_iterations.sql`: `CREATE TABLE IF NOT EXISTS loop_run_iterations`
   matches the illustrative DDL (decision/progress_state CHECK enums, nullable
   `workflow_run_id`/`decision`/`progress_state`, `evaluation_json` default `'{}'`). Confirmed
   `loop_run_id REFERENCES loop_runs(id)` is an ordinary enforced FK (not the
   `goal_evidence`-style deliberately-unenforced pointer) and that this is the correct call
-  given migration ordering (139 lands strictly after 138).
+  given migration ordering (142 lands strictly after 141).
 - `idx_loop_run_iterations_seq` uniqueness is genuinely enforced —
   `TestLoopRunIteration_UniqueSeqConstraint` inserts a duplicate `(loop_run_id,
   iteration_number)` pair and confirms the second insert fails; a different `loop_run_id`
@@ -208,11 +210,11 @@ Checked:
   each of the 7 new `TestLoopRunIteration_*` cases individually passes.
 
 **Consistency-gap note, not a blocking finding:** this is the second Phase 1 task in this
-batch (after task `03`) to skip a permanent `migration_139_..._backup_test.go` in favor of a
+batch (after task `03`) to skip a permanent `migration_142_..._backup_test.go` in favor of a
 throwaway, deleted verification script — see this task's own Work Log for the real-backup
 exercise performed. Both `03` and `04` are brand-new `CREATE TABLE IF NOT EXISTS` migrations
 with no existing rows to preserve and no rebuild dance, which is a materially lower-risk
-migration shape than the rename-recreate-copy rebuilds (`130`/`133`/`136`) that motivated the
+migration shape than the rename-recreate-copy rebuilds (`130`/`133`/`139`) that motivated the
 permanent-backup-test convention in the first place — so the judgment call is defensible on
 its own terms each time. But now that it's happened twice in a row for the same migration
 shape, it's worth the Orchestrator writing down explicitly (e.g. in

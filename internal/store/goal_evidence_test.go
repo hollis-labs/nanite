@@ -58,7 +58,7 @@ func TestGoalEvidence_RoundTrip(t *testing.T) {
 
 	// Loop-scoped evidence: both loop_run_id and iteration_number set. No
 	// loop_runs table exists yet in this task's scope (loop_run_id is a
-	// plain nullable TEXT column with no FK -- migration 137's own doc
+	// plain nullable TEXT column with no FK -- migration 140's own doc
 	// comment), so any string value is accepted here.
 	iteration := int64(3)
 	loopScoped := &GoalEvidence{
@@ -229,7 +229,7 @@ func TestGoalEvidence_Validation(t *testing.T) {
 	}
 }
 
-// TestGoalEvidence_CheckConstraint confirms migration 137's DB-level CHECK
+// TestGoalEvidence_CheckConstraint confirms migration 140's DB-level CHECK
 // constraint rejects an invalid evidence_type even bypassing Go-layer
 // validation (a raw INSERT), mirroring goals_test.go's
 // TestGoal_StatusCheckConstraint precedent.

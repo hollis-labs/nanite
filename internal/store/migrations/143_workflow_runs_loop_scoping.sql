@@ -23,8 +23,8 @@
 -- not FK'd to anything -- it's meaningful only in combination with
 -- loop_run_id (non-NULL), not independently constrained.
 --
--- Referencing loop_runs(id) (migration 138_loop_runs.sql, TASKS/loops/
--- 03-loop-runs-schema.md) -- this migration therefore must run after 138,
+-- Referencing loop_runs(id) (migration 141_loop_runs.sql, TASKS/loops/
+-- 03-loop-runs-schema.md) -- this migration therefore must run after 141,
 -- matching this task file's own stated dependency.
 --
 -- Nothing in this task sets these columns yet -- no engine calls it. That's

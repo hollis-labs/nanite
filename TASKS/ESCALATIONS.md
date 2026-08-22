@@ -832,3 +832,9 @@ No default-protocol decision was made, per the task's own explicit scope fence.
 ## 2026-08-21 — Task `02` fix re-reviewed PASS, task closed
 
 **Fresh re-reviewer** (no shared context with the original worker or the fix worker) independently reproduced both pre-fix failures by reverting to the parent commit's source against current tests, confirmed the fix resolves both, and confirmed no new collision was introduced (`handleUpdateAgentKnownSkill` and the pre-existing non-`AssignSkillToAgent` create/update/delete cycle unaffected). Full build/vet/test clean. Two non-blocking observations logged in the task file's own Review notes for future tasks (`09`'s eventual real grant workflow, and the `DELETE` endpoint's response not distinguishing actual-removal from preserved-due-to-grant-data) — neither blocks closing this task. **Task `02` is fully closed: implemented, validated, reviewed.**
+
+## 2026-08-21 — Task `04` fix re-reviewed PASS, task closed
+
+**Fresh re-reviewer** independently reproduced the pre-fix failure in a disposable `git worktree` at the parent commit (confirmed the exact expected error message, then cleaned up), verified the fix's mechanics and its scope-of-fix reasoning against real code (grepped all `ToStoreSkill()` call sites to confirm `internal/skillinstall` is the only one reaching a real, persisted `CreateSkill`), and confirmed no regression in the pre-existing re-sync tests. Full build/vet/test clean including `-race`. **Task `04` is fully closed: implemented, validated, reviewed.**
+
+**Phase 3 (`04`) is now fully closed.** Wave 4 (`05`, needs `04`; `06`, needs `02`+`03`+`04`) is unblocked.

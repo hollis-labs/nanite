@@ -430,4 +430,7 @@ schema migration involved, so no backup-copy dogfeed against
 `~/.local/share/nanite/workspaces/default/backups/` was needed for this fix.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (fresh re-reviewer, 2026-08-21, no shared context with either the original worker or the fix worker).** Confirmed the fix's mechanics precisely (`fresh.ID = ""` set before `CreateSkill` in the new-install branch only; re-sync branch byte-for-byte untouched) and independently reproduced the pre-fix failure by building a disposable `git worktree` at the parent commit, copying the new regression test into it, and confirming it fails there with exactly the expected message — then cleaned up the worktree. Verified the scope-of-fix reasoning (leaving `ToStoreSkill()` itself unchanged) against real code: `skillServiceImpl.Get`/`GetBySlug` and `convert_test.go`'s own tests genuinely still depend on that ID convention, and grepping confirmed `internal/skillinstall`'s call site is the only one that ever reaches a real, persisted `CreateSkill`. Confirmed no regression in the pre-existing re-sync tests (neither asserts a specific ID string). Full build/vet/test clean, including `-race` on the whole `internal/skillinstall` package.
+
+Status: `reviewed`.

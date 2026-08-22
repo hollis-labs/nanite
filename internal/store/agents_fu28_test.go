@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -180,6 +182,25 @@ func TestDeleteAgentByID(t *testing.T) {
 	// Delete on missing ID must not error.
 	if err := s.DeleteAgentByID(context.Background(), "does-not-exist"); err != nil {
 		t.Errorf("delete missing ID returned error: %v", err)
+	}
+}
+
+func TestDeleteAgentByIDPropagatesLookupError(t *testing.T) {
+	s := newTestStore(t)
+	a := makeTestAgent(t, s, "delete-by-id-lookup-error")
+	if err := s.DB.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+
+	err := s.DeleteAgentByID(context.Background(), a.ID)
+	if err == nil {
+		t.Fatal("DeleteAgentByID returned nil for a database lookup error")
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("DeleteAgentByID error = %v, want non-not-found error", err)
+	}
+	if !strings.Contains(err.Error(), "delete agent by id "+a.ID) {
+		t.Fatalf("DeleteAgentByID error = %q, want operation and agent ID context", err)
 	}
 }
 

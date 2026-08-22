@@ -1,7 +1,7 @@
 # Fix `06/03`: terminal-outcome store writes must survive their operation's cancellation
 
 **Phase:** Audit remediation — fix task for `06/03`
-**Status:** complete
+**Status:** validated — acceptance criteria verified independently; deep code review deferred (operator's call, 2026-08-22)
 **Depends on:** `06/03`'s working tree. **This is not a fresh start** — it builds directly on the uncommitted sweep. Do not revert it, do not re-run it.
 **Blocks:** everything `06/03` blocks. The sweep cannot land until this closes.
 **Parallel-safe with:** nothing, same as `06/03`.

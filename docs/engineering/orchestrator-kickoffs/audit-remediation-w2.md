@@ -7,17 +7,21 @@ units implementing the remediation program derived from
 `docs/audits/2026-08-21-go-quality/REPORT.md` as sequenced by
 `docs/audits/2026-08-21-go-quality/REMEDIATION-GUIDE.md`. You have no memory
 of the audit, the planning pass, or Waves 0/1's own execution — everything you
-need is in the repo. **This kickoff covers twelve tasks: `04/01`, `04/02`,
-`04/03`, `04/04`, `04/05`, `05/01` (W2a), and `06/01`, `06/02`, `07/01`,
-`07/02`, `07/03`, `07/04`, `07/05` (W2b).** Wave 0 and Wave 1 are both closed
+need is in the repo. **This kickoff covers thirteen tasks — six in W2a, seven in W2b:**
+**W2a (6):** `04/01`, `04/02`, `04/03`, `04/04`, `04/05`, `05/01`.
+**W2b (7):** `06/01`, `06/02`, `07/01`, `07/02`, `07/03`, `07/04`, `07/05`.
+*(Corrected 2026-08-22: earlier drafts said "thirteen" while listing thirteen.
+Count from this list, and if any other number appears anywhere below, this
+line wins.)* Wave 0 and Wave 1 are both closed
 (all eight of their tasks `reviewed`) — that is what makes this wave
 dispatchable at all; do not re-open or re-verify their work beyond confirming
 closure, covered below.
 
-**`06/03` — a thirteenth, out-of-wave task in the same `06-store-correctness/`
-folder — is NOT part of this kickoff and must not be dispatched by you.** It
-already landed (`fe16e138`, `validated`, with companion fix `06/04`) before
-this kickoff was written. It matters enormously to everything below anyway —
+**`06/03` and `06/04` — two out-of-wave tasks sharing the
+`06-store-correctness/` folder — are NOT part of this kickoff and must not be
+dispatched by you.** Both already landed (`fe16e138`, both `validated`) before
+this kickoff was written. The folder therefore holds four files of which only
+`06/01` and `06/02` are yours. It matters enormously to everything below anyway —
 see gotcha (A), the most important thing in this entire document.
 
 **You are the Orchestrator, right now, in this plain session — there is no
@@ -50,8 +54,8 @@ any of them even if asked to check on their status in passing.
 ## Five things about this specific wave that won't be obvious from the batch README alone — read all five before doing anything else
 
 **(A) — READ THIS ONE FIRST. `06/03`'s context-propagation sweep landed
-(`fe16e138`) after every one of this wave's twelve task files was authored,
-and it mechanically rewrote six of the eight production files this wave
+(`fe16e138`) after every one of this wave's thirteen task files was authored,
+and it mechanically rewrote seven of the nine production files this wave
 touches.** Independently re-verified against current `HEAD` while writing
 this kickoff:
 
@@ -207,7 +211,7 @@ Log note — flag this to whoever picks up planning after this wave closes.
    15 later-wave decisions are still `open` (AD-05, AD-06 through AD-11,
    AD-12, AD-13, AD-15, AD-16, AD-19 through AD-22) — none of them gate this
    wave, but you'll recognize them if a Wave 3+ cross-reference comes up.
-6. All twelve task files, in full: `04-container-reaper-lifecycle/01-*.md`
+6. All thirteen task files, in full: `04-container-reaper-lifecycle/01-*.md`
    through `05-*.md`, `05-subagent-execution-ordering/01-*.md`,
    `06-store-correctness/01-*.md` and `02-*.md` (**not** `03-*.md` or
    `04-*.md` — those are `06/03`/`06/04`, already landed, not yours to
@@ -340,7 +344,7 @@ subsystems `Shutdown` fans out to, and does not touch
 
 ## At the end
 
-When all twelve tasks are `reviewed` (Part A and Part B of `04/04` both
+When all thirteen tasks are `reviewed` (Part A and Part B of `04/04` both
 closed), dispatch `doc-writer` for the end-of-wave `WAVE-2-HANDOFF.md` and
 `WAVE-2-SUMMARY.md` — mirroring Wave 1's pair, written for whoever authors
 Wave 3's kickoff. Ask it to specifically record: the ctx-sweep drift this

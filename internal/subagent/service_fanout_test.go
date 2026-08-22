@@ -2,7 +2,7 @@ package subagent
 
 // service_fanout_test.go — G3 fan-out semaphore tests (CW-20260426-0003)
 //
-// Six cases:
+// Nine cases:
 //  1. Under-cap parallelism: N=3 spawns complete in ≈ slowest single, not sum.
 //  2. At-cap with queueing: N=5 with cap=3; first 3 run concurrently, last 2
 //     queue; total ≈ 2× single duration.
@@ -12,6 +12,9 @@ package subagent
 //     returns ErrSpawnFanoutCapReached (CW-20260816-0001), not bare ctx.Err().
 //  5. Concurrent approvals obey the same cap as direct spawns.
 //  6. Operator cancellation stops a running-observable run while it is queued.
+//  7. Approval cannot expose running before its cancellation owner is installed.
+//  8. Request cancellation after approval transition does not strand the run.
+//  9. Concurrent duplicate approvals/cancellations create at most one runner.
 
 import (
 	"context"
@@ -126,6 +129,19 @@ func (s *runningRunSink) SubagentStatusChanged(_ string, payload []byte) {
 	select {
 	case s.runIDs <- event.RunID:
 	default:
+	}
+}
+
+type cancellingRunningSink struct {
+	cancel context.CancelFunc
+}
+
+func (s *cancellingRunningSink) SubagentStatusChanged(_ string, payload []byte) {
+	var event struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(payload, &event); err == nil && event.Status == StatusRunning {
+		s.cancel()
 	}
 }
 
@@ -299,6 +315,8 @@ func TestFanout_CancelWhileQueued(t *testing.T) {
 	}
 
 	// Dispatch one extra spawn with a context we'll cancel.
+	runningIDs := make(chan string, 1)
+	svc.SetStreamSink(&runningRunSink{runIDs: runningIDs})
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	extraDone := make(chan error, 1)
 	go func() {
@@ -312,8 +330,12 @@ func TestFanout_CancelWhileQueued(t *testing.T) {
 		extraDone <- err
 	}()
 
-	// Give it a moment to block on the semaphore (slots are full).
-	time.Sleep(20 * time.Millisecond)
+	var queuedRunID string
+	select {
+	case queuedRunID = <-runningIDs:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued run did not publish running status")
+	}
 
 	// Cancel the queued spawn's context.
 	cancel()
@@ -332,6 +354,14 @@ func TestFanout_CancelWhileQueued(t *testing.T) {
 	if runner.started.Load() != int64(cap3) {
 		t.Errorf("runner.started = %d, want %d — cancelled spawn consumed a slot",
 			runner.started.Load(), cap3)
+	}
+	run, err := svc.Status(context.Background(), queuedRunID)
+	if err != nil {
+		t.Fatalf("status cancelled queued run: %v", err)
+	}
+	if run.Status != StatusCancelled || run.CompletedAt == "" {
+		t.Fatalf("cancelled queued run = status %q completed_at %q; want cancelled terminal row",
+			run.Status, run.CompletedAt)
 	}
 
 	// Release the original cap3 and let them finish.
@@ -376,6 +406,8 @@ func TestFanout_CapacityErrorDistinguishable(t *testing.T) {
 	}
 
 	// Dispatch a 4th spawn with a short timeout while all slots are occupied.
+	runningIDs := make(chan string, 1)
+	svc.SetStreamSink(&runningRunSink{runIDs: runningIDs})
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
@@ -396,6 +428,20 @@ func TestFanout_CapacityErrorDistinguishable(t *testing.T) {
 	// not a bare context.DeadlineExceeded.
 	if !errors.Is(err, ErrSpawnFanoutCapReached) {
 		t.Errorf("expected errors.Is(err, ErrSpawnFanoutCapReached), got: %v", err)
+	}
+	var queuedRunID string
+	select {
+	case queuedRunID = <-runningIDs:
+	default:
+		t.Fatal("capacity-blocked run did not publish running status")
+	}
+	run, statusErr := svc.Status(context.Background(), queuedRunID)
+	if statusErr != nil {
+		t.Fatalf("status capacity-blocked run: %v", statusErr)
+	}
+	if run.Status != StatusCancelled || run.CompletedAt == "" {
+		t.Fatalf("capacity-blocked run = status %q completed_at %q; want cancelled terminal row",
+			run.Status, run.CompletedAt)
 	}
 
 	// The 4th spawn must NOT have started the runner.
@@ -554,5 +600,203 @@ func TestFanout_OperatorCancelWhileQueuedPreventsRunner(t *testing.T) {
 	}
 	if run.Status != StatusCancelled {
 		t.Fatalf("queued run status = %q, want %q", run.Status, StatusCancelled)
+	}
+}
+
+// TestApprove_HandoffPrecedesRunningTransition holds the handoff mutex until
+// the request context expires. The historical implementation transitioned the
+// row before trying to take this mutex, leaving a durable running row with no
+// cancellation owner. The fixed implementation cannot make that transition.
+func TestApprove_HandoffPrecedesRunningTransition(t *testing.T) {
+	db, _ := newTestDB(t)
+	runner := newControlledRunner()
+	defer runner.release()
+	settings := stubSettings{us: store.UserSettings{
+		SubagentApprovalRequired:       true,
+		SubagentApprovalTimeoutSeconds: 3600,
+	}}
+	svc := NewService(db, runner, &stubPoster{}, &stubEmitter{}, settings)
+	runID, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-approve-handoff",
+		ParentAgentID:   "parent-agent",
+		Role:            "worker-role",
+		Prompt:          "handoff barrier",
+		Mode:            ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("spawn gated run: %v", err)
+	}
+
+	svc.cancelMu.Lock()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	approveDone := make(chan error, 1)
+	go func() { approveDone <- svc.Approve(ctx, runID) }()
+	<-ctx.Done()
+
+	// Read directly while the handoff mutex is still held. A running status
+	// here would prove the durable transition escaped cancellation ownership.
+	run, statusErr := svc.Status(context.Background(), runID)
+	svc.cancelMu.Unlock()
+	if statusErr != nil {
+		t.Fatalf("status while handoff blocked: %v", statusErr)
+	}
+	if run.Status != StatusRequested {
+		t.Fatalf("status while handoff blocked = %q, want %q", run.Status, StatusRequested)
+	}
+	select {
+	case approveErr := <-approveDone:
+		if !errors.Is(approveErr, context.DeadlineExceeded) {
+			t.Fatalf("approve error = %v, want context deadline exceeded", approveErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("approve did not return after handoff mutex released")
+	}
+	run, err = svc.Status(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("final status: %v", err)
+	}
+	if run.Status != StatusRequested {
+		t.Fatalf("final status = %q, want %q", run.Status, StatusRequested)
+	}
+	if got := runner.started.Load(); got != 0 {
+		t.Fatalf("runner.started = %d, want 0", got)
+	}
+}
+
+func TestApprove_RequestCancellationAfterTransitionRetainsOwner(t *testing.T) {
+	db, _ := newTestDB(t)
+	runner := newControlledRunner()
+	defer runner.release()
+	settings := stubSettings{us: store.UserSettings{
+		SubagentApprovalRequired:       true,
+		SubagentApprovalTimeoutSeconds: 3600,
+	}}
+	svc := NewService(db, runner, &stubPoster{}, &stubEmitter{}, settings)
+	runID, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-approve-request-cancel",
+		ParentAgentID:   "parent-agent",
+		Role:            "worker-role",
+		Prompt:          "cancel request after transition",
+		Mode:            ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("spawn gated run: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	svc.SetStreamSink(&cancellingRunningSink{cancel: cancel})
+	if err := svc.Approve(ctx, runID); err != nil {
+		t.Fatalf("approve after synchronous request cancellation: %v", err)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("running transition did not cancel request context")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && runner.started.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	if got := runner.started.Load(); got != 1 {
+		t.Fatalf("runner.started = %d, want 1; request cancellation escaped into background run", got)
+	}
+	if err := svc.Cancel(context.Background(), runID); err != nil {
+		t.Fatalf("operator cancel after request ended: %v", err)
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		run, statusErr := svc.Status(context.Background(), runID)
+		if statusErr == nil && run.Status == StatusCancelled && len(svc.spawnSem) == 0 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	run, _ := svc.Status(context.Background(), runID)
+	t.Fatalf("run did not settle after operator cancel: status=%q slots=%d", run.Status, len(svc.spawnSem))
+}
+
+func TestApprove_ConcurrentDuplicateApproveCancelSingleOwner(t *testing.T) {
+	db, _ := newTestDB(t)
+	db.SetMaxOpenConns(1)
+	runner := newControlledRunner()
+	defer runner.release()
+	settings := stubSettings{us: store.UserSettings{
+		SubagentApprovalRequired:       true,
+		SubagentApprovalTimeoutSeconds: 3600,
+	}}
+	svc := NewService(db, runner, &stubPoster{}, &stubEmitter{}, settings)
+	runID, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-approve-race",
+		ParentAgentID:   "parent-agent",
+		Role:            "worker-role",
+		Prompt:          "duplicate approve and cancel",
+		Mode:            ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("spawn gated run: %v", err)
+	}
+
+	const callers = 8
+	start := make(chan struct{})
+	approveErrs := make(chan error, callers)
+	cancelErrs := make(chan error, callers)
+	for range callers {
+		go func() {
+			<-start
+			approveErrs <- svc.Approve(context.Background(), runID)
+		}()
+		go func() {
+			<-start
+			cancelErrs <- svc.Cancel(context.Background(), runID)
+		}()
+	}
+	close(start)
+
+	approved := 0
+	for range callers {
+		approveErr := <-approveErrs
+		switch {
+		case approveErr == nil:
+			approved++
+		case errors.Is(approveErr, ErrNotPending):
+		default:
+			t.Fatalf("unexpected approve error: %v", approveErr)
+		}
+		if cancelErr := <-cancelErrs; cancelErr != nil {
+			t.Fatalf("cancel: %v", cancelErr)
+		}
+	}
+	if approved > 1 {
+		t.Fatalf("successful approvals = %d, want at most 1", approved)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		svc.cancelMu.Lock()
+		_, owned := svc.cancelers[runID]
+		svc.cancelMu.Unlock()
+		if !owned && len(svc.spawnSem) == 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	run, err := svc.Status(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("final status: %v", err)
+	}
+	if run.Status != StatusCancelled {
+		t.Fatalf("final status = %q, want %q", run.Status, StatusCancelled)
+	}
+	if got := runner.started.Load(); got > 1 {
+		t.Fatalf("runner.started = %d, want at most 1", got)
+	}
+	svc.cancelMu.Lock()
+	_, owned := svc.cancelers[runID]
+	svc.cancelMu.Unlock()
+	if owned {
+		t.Fatal("cancellation owner leaked after concurrent approvals/cancels")
+	}
+	if got := len(svc.spawnSem); got != 0 {
+		t.Fatalf("spawn slots held = %d, want 0", got)
 	}
 }

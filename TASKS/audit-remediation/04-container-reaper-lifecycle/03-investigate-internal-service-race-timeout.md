@@ -1,7 +1,7 @@
 # [INVESTIGATION, NOT A KNOWN FIX] Determine why internal/service's own `go test -race` times out
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none as a hard blocker, but land after task 02 (`02-fix-api-test-container-shutdown-leak.md`) if convenient — not because this task needs task 02's code, but because task 02's fix removes one theoretical confound from `internal/api` + `internal/service`'s *combined* 25-minute timeout dump (see Context) before this investigation draws conclusions. Sequencing-only.
 **Touches:** No source changes expected as the primary deliverable of this task — see "What to do." If root-causing points to a concrete fix, that fix's scope depends entirely on what's found and is not knowable in advance.
 **Requires architect decision:** false — but this is flagged explicitly as an **investigation task, not an implementation task**. Do not estimate or dispatch this like a task with a known fix; the deliverable is a root-cause determination backed by real evidence, and a *possible* follow-up fix task, not a guaranteed patch in this task itself.
@@ -77,7 +77,45 @@ None — this is a read-only investigation. If it experiments with `GODEBUG` fla
 
 ## Work log
 
-<!-- Worker fills this in as it goes. -->
+- 2026-08-22 — Ran the required package in isolation on the AD-26-hardened
+  baseline: `go test -race -timeout 25m ./internal/service`. It timed out with
+  no `DATA RACE` report (`1500.593s` package time; `/usr/bin/time` real/user/sys
+  `1510.33/1569.80/48.51`). A transient competing-test window from elapsed
+  approximately 4:30–7:35 means the wall time is not a pristine performance
+  benchmark, but it does not affect the timeout dump or incomplete race verdict.
+- The timeout occurred two seconds into
+  `TestPersistPartialAssistant_RealStore`. Its runnable stack was
+  `modernc.org/sqlite` -> Goose `Provider.Up` -> `Store.migrate` -> `Store.New`,
+  applying the repository's 145 migration files. The dump contained about 56
+  live goroutines: 36 `database/sql` connection openers, 14 tests parked at
+  `t.Parallel`, the active migration, one transaction waiter, one Tesseract
+  decay job, one message-stream pump, plus the test alarm/main goroutines.
+  There were zero `safego.Go`, `lifecycle.Manager`, or shutdown stacks.
+  Goroutine ids near 71,000 show churn across the suite, not retained live work.
+- Clean-host bisection confirmed linear setup cost. The timed-out test alone
+  passed under race in `9.933s`; five repetitions passed in `44.978s`. The same
+  five repetitions passed without race instrumentation in `1.666s` (about a
+  27x multiplier), while the full non-race package passed in `85.497s`.
+  A lifecycle-focused AD-26 shard repeated 20 times under race passed in
+  `5.225s` without accumulation. Current static inventory is 145 migrations,
+  at least 59 direct `Store.New` sites across 36 test files, plus 15 shared
+  `newTestStore` calls.
+- Conclusion: candidate 1 is confirmed, specifically cumulative fresh SQLite
+  migration cost under race instrumentation. The historical untracked-
+  goroutine hypothesis is ruled out on the current baseline: AD-26 migrated 23
+  stateful sites, leaves only 10 bounded telemetry sends and one synchronously
+  joined tool child, and neither those sites nor lifecycle shutdown appear in
+  the timeout dump or focused repetition.
+
+## Follow-up candidates
+
+- Add a focused test-performance task to make an actual service-package race
+  verdict obtainable. Prefer a fully migrated SQLite template/snapshot copied
+  per test, or deliberate CI sharding; merely raising the timeout to roughly an
+  hour is a stopgap and does not reduce the repeated 145-migration cost.
+- Audit service tests that create a Store without closing it. The 36 idle
+  `database/sql` connection-opener goroutines were not the timeout's root cause,
+  but missing test-owned `Store.Close` calls are independent lifecycle debt.
 
 ## Review notes
 

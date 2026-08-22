@@ -123,7 +123,26 @@ Very low risk — purely additive test cleanup code, no production code touched,
   desired invariant and orchestrator instruction cover every current
   `internal/api` test construction, rather than knowingly leaving the newly
   added tenth Container leaking.
+- Orchestrator quiet-host rerun of the exact acceptance command
+  `go test -race ./internal/api` again reached the default `10m0s` timeout
+  with zero `DATA RACE` reports. The active test was
+  `TestDurableAgentsAPI_UpdateRejectsSlugTraversal`; its only runnable test
+  goroutine was executing a fresh `store.New` Goose/SQLite migration. Reaper
+  logs showed each owning test's reapers stopping. This independently rules
+  out host contention as the sole explanation for the unmet gate, but it does
+  not turn an incomplete race run into a pass.
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-22 — **FAIL against the explicit Done gate; code-review PASS with no
+  code finding.** Fresh review re-derived ten current `NewContainer` test
+  constructions across seven files and verified exactly one post-success
+  `t.Cleanup(func() { svc.Shutdown() })` per construction, correct LIFO order
+  ahead of store close, no closure-capture or duplicate-shutdown issue, and no
+  production-code change. Focused non-race tests, the active timeout test under
+  race, `go vet ./internal/api`, and diff checks passed. The task remains
+  `implemented` because the exact full-package default-timeout race command has
+  now timed out twice. A focused API race-suite runtime investigation must
+  address the repeated fresh-store migration cost (or produce evidence for a
+  different cause) before review can pass; the cleanup patch itself should not
+  be reverted or rewritten.

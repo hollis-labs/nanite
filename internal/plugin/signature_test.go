@@ -33,7 +33,12 @@ func TestGenerateKeyPair(t *testing.T) {
 	}
 }
 
-func TestSignAndVerify(t *testing.T) {
+// TestSignFile_ProducesValidSignature checks SignFile's output directly
+// against crypto/ed25519.Verify rather than against this package's own
+// (now-retired) VerifySignature — see signature.go's doc comment: the
+// GUI/API and CLI install paths both verify catalog-signed archives via
+// internal/plugin/install.SignatureVerifier now, not this package.
+func TestSignFile_ProducesValidSignature(t *testing.T) {
 	pub, priv, err := GenerateKeyPair()
 	if err != nil {
 		t.Fatalf("GenerateKeyPair: %v", err)
@@ -41,7 +46,8 @@ func TestSignAndVerify(t *testing.T) {
 
 	// Create a test file.
 	f, _ := os.CreateTemp(t.TempDir(), "test-archive-*.tar.gz")
-	f.Write([]byte("this is a fake plugin archive with some content"))
+	body := []byte("this is a fake plugin archive with some content")
+	f.Write(body)
 	f.Close()
 
 	// Sign.
@@ -53,71 +59,28 @@ func TestSignAndVerify(t *testing.T) {
 		t.Errorf("signature hex length: expected 128, got %d", len(sig))
 	}
 
-	// Verify with correct key.
-	if err := VerifySignature(f.Name(), pub, sig); err != nil {
-		t.Errorf("VerifySignature should pass: %v", err)
+	pubBytes, err := hex.DecodeString(pub)
+	if err != nil {
+		t.Fatalf("decode pub: %v", err)
 	}
-}
+	sigBytes, err := hex.DecodeString(sig)
+	if err != nil {
+		t.Fatalf("decode sig: %v", err)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(pubBytes), body, sigBytes) {
+		t.Error("expected signature to verify against the signed file's bytes")
+	}
 
-func TestVerifySignature_WrongKey(t *testing.T) {
-	_, priv, _ := GenerateKeyPair()
+	// A signature produced by a different key must not verify.
 	otherPub, _, _ := GenerateKeyPair()
-
-	f, _ := os.CreateTemp(t.TempDir(), "test-*")
-	f.Write([]byte("plugin archive data"))
-	f.Close()
-
-	sig, _ := SignFile(f.Name(), priv)
-
-	// Verify with wrong key — should fail.
-	err := VerifySignature(f.Name(), otherPub, sig)
-	if err == nil {
-		t.Error("expected verification failure with wrong key")
-	}
-}
-
-func TestVerifySignature_TamperedFile(t *testing.T) {
-	pub, priv, _ := GenerateKeyPair()
-
-	f, _ := os.CreateTemp(t.TempDir(), "test-*")
-	f.Write([]byte("original content"))
-	f.Close()
-
-	sig, _ := SignFile(f.Name(), priv)
-
-	// Tamper with the file.
-	os.WriteFile(f.Name(), []byte("tampered content"), 0644)
-
-	err := VerifySignature(f.Name(), pub, sig)
-	if err == nil {
-		t.Error("expected verification failure after tampering")
-	}
-}
-
-func TestVerifySignature_InvalidInputs(t *testing.T) {
-	tests := []struct {
-		name   string
-		pub    string
-		sig    string
-		errMsg string
-	}{
-		{"bad public key hex", "zzzz", "aa", "decode public key"},
-		{"short public key", "aabb", "aa", "invalid public key size"},
-		{"bad signature hex", "0000000000000000000000000000000000000000000000000000000000000000", "zz", "decode signature"},
-		{"short signature", "0000000000000000000000000000000000000000000000000000000000000000", "aabb", "invalid signature size"},
+	otherPubBytes, _ := hex.DecodeString(otherPub)
+	if ed25519.Verify(ed25519.PublicKey(otherPubBytes), body, sigBytes) {
+		t.Error("expected signature to fail verification against an unrelated public key")
 	}
 
-	f, _ := os.CreateTemp(t.TempDir(), "test-*")
-	f.Write([]byte("data"))
-	f.Close()
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := VerifySignature(f.Name(), tt.pub, tt.sig)
-			if err == nil {
-				t.Error("expected error")
-			}
-		})
+	// A signature over tampered content must not verify.
+	if ed25519.Verify(ed25519.PublicKey(pubBytes), []byte("tampered content"), sigBytes) {
+		t.Error("expected signature to fail verification against tampered content")
 	}
 }
 

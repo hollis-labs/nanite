@@ -240,34 +240,3 @@ func (cf *CatalogFetcher) loadDiskCache(sourceID string) (*CatalogFile, error) {
 	}
 	return &catalog, nil
 }
-
-// VerifyChecksum checks a downloaded file against the catalog entry's checksum.
-// Returns nil if no checksum is specified (user-uploaded trust model).
-func VerifyChecksum(filePath, checksum string) error {
-	if checksum == "" {
-		return nil
-	}
-
-	// Parse "sha256:hex..." format.
-	if len(checksum) < 8 || checksum[:7] != "sha256:" {
-		return fmt.Errorf("unsupported checksum format: %s (expected sha256:hex)", checksum)
-	}
-	expected := checksum[7:]
-
-	f, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("open file for checksum: %w", err)
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return fmt.Errorf("hash file: %w", err)
-	}
-
-	actual := fmt.Sprintf("%x", h.Sum(nil))
-	if actual != expected {
-		return fmt.Errorf("checksum mismatch: expected %s, got %s", expected, actual)
-	}
-	return nil
-}

@@ -32,7 +32,7 @@ func (s *DirStaging) Begin(ctx context.Context, pluginID string) (string, func()
 	if err := s.validate(); err != nil {
 		return "", nil, err
 	}
-	if err := validatePluginID(pluginID); err != nil {
+	if err := ValidatePluginID(pluginID); err != nil {
 		return "", nil, err
 	}
 	if err := os.MkdirAll(s.StagingRoot, 0o755); err != nil {
@@ -77,7 +77,7 @@ func (s *DirStaging) Commit(ctx context.Context, stagingDir, pluginID string) (s
 	if err := s.validate(); err != nil {
 		return "", err
 	}
-	if err := validatePluginID(pluginID); err != nil {
+	if err := ValidatePluginID(pluginID); err != nil {
 		return "", err
 	}
 	if stagingDir == "" {
@@ -132,11 +132,18 @@ func (s *DirStaging) validate() error {
 	return nil
 }
 
-// validatePluginID guards against path traversal via the pluginID. Pattern
+// ValidatePluginID guards against path traversal via the pluginID. Pattern
 // matches the v1 manifest schema + subprocess validator:
 // ^[a-z][a-z0-9-]{1,62}$ — must start with a letter, only lowercase
 // alnum and '-', total length 2-63.
-func validatePluginID(id string) error {
+//
+// Exported so callers that need to confine a catalog- or manifest-derived
+// name before doing anything else with it (e.g. internal/api's catalog
+// install handler) can reuse the exact allowlist DirStaging.Begin/Commit
+// enforce internally, rather than reimplementing it or adding a second,
+// different confinement mechanism (AD-04 item 1,
+// TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md).
+func ValidatePluginID(id string) error {
 	if id == "" {
 		return errors.New("staging: empty plugin id")
 	}

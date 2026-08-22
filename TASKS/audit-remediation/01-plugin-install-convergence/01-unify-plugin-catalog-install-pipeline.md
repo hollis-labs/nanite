@@ -1,7 +1,7 @@
 # Unify the plugin-install security pipeline across CLI, GUI, and API
 
 **Phase:** Audit remediation — Wave 1 (release-blocking trust boundaries)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none (this task is self-contained; task 02 in this folder is sequenced after/with it — see that task's Context for why)
 **Touches:** `internal/api/catalog.go`, `internal/api/plugins.go` (read-only reference for the already-fixed pattern), `internal/plugin/catalog.go`, `internal/plugin/signature.go`, `internal/plugin/catalog/` (`fetch.go`, `trust.go`, `trustedkeys.go`), `internal/plugin/install/` (`install.go`, `verify.go`, `staging.go`, `extract.go`, `download.go`), `cmd/nanite/plugin_install_flow.go` (reference only — do not change the CLI path's behavior), `internal/plugin/devmode/` (reference only)
 **requires_architect_decision:** true — flagged per the remediation guide's §9 decision queue. The direction (converge onto the CLI's pipeline) is not in serious doubt given the audit's evidence, but the blast radius (this is the single most severe finding in the whole audit, touches a user-facing "Plugin Manager" flow, and requires deciding exactly how catalog-sourced archives map onto the CLI's `install.Source`/`Handle`/`Installer` abstractions) means an architect should sign off on the concrete integration shape before a worker starts, not discover it mid-implementation.
@@ -200,5 +200,368 @@ Observable behavior required for PASS: a manual (or automated, if the test harne
 - `go build ./...`, `go vet ./...`, and the verification commands above all pass clean.
 
 ## Work log
+
+Implemented per the `✅ AD-04 DECIDED` banner's six numbered answers, executed
+exactly, not re-derived. Worked from the worktree at
+`.claude/worktrees/agent-a484015a1264996dd/` (all paths below are relative to
+repo root within that worktree).
+
+### Re-confirmed "All production callers" table (at implementation time)
+
+Re-ran the task's own sweep before editing, and again after, to confirm no
+drift and no line-number staleness beyond what's expected from the edits
+themselves:
+
+```
+grep -rn "HandleFunc" internal/api/catalog.go internal/api/plugins.go
+grep -rn "buildInstaller(" cmd/nanite/*.go
+```
+
+| Entry point | Route/command | Handler | Pipeline used (after this task) | Status |
+|---|---|---|---|---|
+| GUI "Plugin Manager" catalog install | `POST /api/plugins/catalog/install` (registered `internal/api/catalog.go:50`) | `handleCatalogInstall` (`internal/api/catalog.go:256`) | Converged: `install.Installer` via the shared `install.NewInstaller` constructor — `install.SignatureVerifier` (fail-closed in production), `install.DirStaging.Commit` (confinement + atomic commit), a format-dispatching `catalogExtractor` (zip/tar.gz), a `hostLoader` adapter around `pms.runPluginLoadIntoHost` | **Fixed — this task's primary target** |
+| GUI "Plugin Manager" install-by-name (git clone) | `POST /api/plugins/install` (registered `internal/api/plugins.go:99`) | `handleInstall` (`internal/api/plugins.go:317`) | Unchanged: no signature verification (git-clone trust model); path confined via `pathsafe.ResolveUnder` | Untouched (Non-goals: out of scope unless AD-04 said otherwise — it didn't) |
+| GUI "Plugin Manager" local install | `POST /api/plugins/install-local` (registered `internal/api/plugins.go:100`) | `handleInstallLocal` (`internal/api/plugins.go:386`) | Unchanged: no signature verification (local trust model); path confined via `pathsafe.ResolveUnder` | Untouched |
+| GUI "Plugin Manager" archive upload | `POST /api/plugins/install-archive` (registered `internal/api/plugins.go:101`) | `handleInstallArchive` (`internal/api/plugins.go:456`) | Unchanged: no signature verification (local trust model); path confined via `pathsafe.ResolveUnder` | Untouched |
+| CLI `nanite plugin install <name\|path>` | `cmd/nanite` subcommand | `plugin_cmd.go` → `plugin_install_flow.go` → `buildInstaller` (`cmd/nanite/plugin_install_flow.go:79`) → `install.Installer.Install` | Same strong pipeline as before (`install.SignatureVerifier` + `install.DirStaging` + `catalog.SignedFetcher`/`KeyRing`), now built via the shared `install.NewInstaller` constructor instead of a hand-rolled struct literal | Unchanged behavior — refactored construction site only (AD-04 item 6); CLI's own test suite (`internal/plugin/install/*_test.go`, `cmd/nanite/plugin_install_flow_test.go`) passes unmodified |
+
+### What was implemented, mapped to the banner's six items
+
+1. **Confinement.** `handleCatalogInstall` calls the newly-exported
+   `install.ValidatePluginID` (renamed from the package-private
+   `validatePluginID` in `internal/plugin/install/staging.go`) on
+   `entry.Name` immediately after the catalog lookup, before any network
+   I/O — the exact same allowlist `install.DirStaging.Begin`/`Commit` apply
+   internally, not a second/different confinement mechanism. No
+   `pathsafe.ResolveUnder` call was added to this path. The install itself
+   routes through `install.DirStaging.Commit` (via `install.NewInstaller`),
+   inheriting its atomic backup-then-rename commit.
+2. **Archive formats.** Added `catalogExtractor`
+   (`internal/api/catalog_install.go`) implementing `install.Extractor`,
+   dispatching on `entry.ArchiveURL`'s `.zip` suffix and delegating to the
+   existing, already-audited `extractZip`/`extractTarGz` helpers in
+   `internal/api/plugins.go` — unchanged. Added a dedicated regression test,
+   `TestHandleCatalogInstall_Success_Zip`, exercising a signed `.zip`
+   catalog entry end-to-end (the gap the banner itself flagged).
+3. **Loader.** Added `hostLoader` (`internal/api/catalog_install.go`), a
+   thin adapter around `pms.runPluginLoadIntoHost` — the same helper all
+   four API install handlers already use. Deliberately preserves the
+   existing handlers' convention of not surfacing a hot-load failure as an
+   HTTP error (files are already safely committed to disk by that point;
+   `runPluginLoadIntoHost`'s bool result is discarded, matching
+   `handleInstall`/`handleInstallLocal`/`handleInstallArchive`'s own
+   behavior) rather than introducing a new failure mode AD-04 didn't ask
+   for.
+4. **Source.** Moved `catalogArchiveSource` out of
+   `cmd/nanite/plugin_install_flow.go` into the shared
+   `internal/plugin/install` package as exported
+   `install.CatalogArchiveSource` (`internal/plugin/install/source.go`).
+   Both `cmd/nanite`'s `installFromCatalog` and
+   `internal/api`'s `handleCatalogInstall` construct it directly; the
+   progress emitter is not part of the type (it was never coupled to it —
+   `Installer.Emit` is what `Source.Download`'s `emit` parameter forwards),
+   so no forking was needed, only relocation + field export.
+5. **Legacy retirement.** Removed `internal/plugin/signature.go`'s
+   `VerifySignature` (its one caller, `handleCatalogInstall`, is gone) and
+   `internal/plugin/catalog.go`'s `VerifyChecksum` (same). Kept
+   `internal/plugin/catalog.go`'s `CatalogFetcher` in full — `cs.fetcher` is
+   still load-bearing for `handleBrowseCatalog`/`handleRefreshCatalog`/
+   `handleCatalogInstall`'s own catalog lookup (`catalog.go:97, 191, 205,
+   242, 276`, current line numbers). `GenerateKeyPair`/`SignFile` in
+   `signature.go` were left untouched — the banner doesn't name them, they
+   have no production caller either way (utility for catalog maintainers
+   per their own doc comment), and removing them wasn't asked for. Updated
+   `internal/plugin/signature.go`'s package-level doc comment to point at
+   `install.SignatureVerifier` as the real verification path.
+6. **Shared constructor.** Added `install.NewInstaller`/`BuildOptions`
+   (`internal/plugin/install/build.go`) as the one canonical `Installer`
+   wiring site. `cmd/nanite/plugin_install_flow.go`'s `buildInstaller` and
+   `internal/api/catalog.go`'s `handleCatalogInstall` both call it now.
+   Also extracted the CLI's private `cliValidator`/`pluginYAMLPresent` into
+   an exported `install.ManifestValidator` (same file) so both callers share
+   the one manifest-validation step, not two copies.
+
+### Deviations from the task file's own draft (all logged, none silent)
+
+- **Path confinement pre-check vs. "no second mechanism."** The task file's
+  Context worried about picking between `pathsafe.ResolveUnder` and
+  `validatePluginID`-style confinement as *the* canonical mechanism. AD-04
+  settled that (DirStaging/`validatePluginID`), but the exported
+  `install.ValidatePluginID` early-exit call added here (before any network
+  I/O, so a malicious catalog entry name is rejected fast instead of only
+  after a full download+staging cycle) is new surface not explicitly spelled
+  out in the banner. Treated as "inheriting its allowlist" (the banner's own
+  phrase) rather than a second mechanism, since it calls the exact same
+  function `DirStaging.Commit` calls internally — not a reimplementation.
+- **Dropped the old handler's "plugin.yaml at root OR single top-level
+  subdir" tolerance.** `handleCatalogInstall`'s pre-convergence code
+  detected a single wrapper directory in the extracted archive and treated
+  it as the plugin root. `install.Installer`'s state machine calls
+  `Validator.Validate(ctx, stagingDir)` directly against the extraction
+  root with no such fallback (matching the CLI's own contract, which the
+  Non-goals section explicitly says not to rewrite). Preserving the
+  tolerance would have meant adding a step the state machine has no hook
+  for, which is out of scope per Non-goals ("do not rewrite
+  `internal/plugin/install/install.go`'s state machine ... used as-is").
+  Catalog-sourced archives converged through this pipeline are now expected
+  to ship `plugin.yaml` at the archive root, same as the CLI's own signed
+  catalog already requires. Flagging this as a real, if minor, behavioral
+  difference for anyone dogfeeding the GUI's catalog-install flow against a
+  catalog whose archives use a wrapper directory.
+- **Dropped the "signed-but-unsigned-plugin" warn-and-proceed branch.** The
+  old code's `else if sourcePublicKey != "" && entry.Signature == ""`
+  branch logged a warning and let the install proceed anyway. Under the
+  converged pipeline this case is indistinguishable from "no signature at
+  all" and is rejected outright (fail-closed), which is the entire point of
+  GO-PLUGIN-001's fix — not treated as a deviation needing separate
+  sign-off, since it's the direct, intended consequence of AD-04's decision
+  and the Risk/rollback section's own framing (a previously-permissive path
+  now rejects) already anticipated exactly this class of change.
+- **Progress-event granularity on the failure path changed slightly.** The
+  pre-convergence code emitted `plugin.install_progress` with `state` set
+  to whichever step failed (e.g. `"downloading"`). `install.Installer.fail`
+  always transitions to and emits `StateFailed` ("failed") on any failure,
+  with the failing phase preserved only in the message text (`"failed in
+  downloading"`) and the wrapped error. Not corrected — this is inherent to
+  reusing the shared, already-tested state machine unmodified (Non-goal:
+  don't rewrite `install.go`), not something this task's own construction
+  code controls. Happy-path progress state strings are unchanged
+  (`install.State`'s own constants already matched the old ad hoc strings
+  byte-for-byte: `"downloading"`, `"verifying"`, `"extracting"`,
+  `"validating"`, `"loading"`, `"ready"`).
+- **`checksumFile` in `internal/api/catalog.go` is pre-existing dead code,
+  left untouched.** Confirmed via grep it had zero callers even before this
+  task (not introduced or orphaned by this change) — out of scope per the
+  task's own file-list ("`internal/api/catalog.go` — `handleCatalogInstall`
+  and its supporting helpers"; `checksumFile` isn't one of
+  `handleCatalogInstall`'s helpers, it's an unrelated pre-existing orphan).
+  Not removed, to avoid scope creep beyond AD-04's six items.
+- **`docs/audits/2026-08-21-go-quality/REPORT.md`'s "retire the old
+  CatalogFetcher" recommendation is confirmed wrong**, exactly as AD-04's
+  item 5 already stated — `CatalogFetcher.Fetch` is load-bearing for browse
+  and now also for the install path's own catalog lookup. No action beyond
+  what AD-04 already directed; noted here per the task file's own
+  instruction to record when a decision-log/audit recommendation doesn't
+  hold up against current code (it doesn't reopen the decision, AD-04
+  already overrode it).
+- **AD-05** (provisioning a real signing key for the default/official
+  seeded catalog source) was not scoped in or out silently. It remains open
+  and untouched by this task, as the banner directs — the default seeded
+  source still has no `public_key` configured, so
+  `catalogKeyLookup`/`SignatureVerifier.Verify` reject any install attempt
+  against it with "unknown signer key id" until an operator either sets a
+  key via `PUT /api/plugins/catalog/sources/{id}/key` or an AD-05 follow-up
+  ships. This is the intended, documented (Risk/rollback section)
+  consequence of the fix, not a regression to chase down in this task.
+
+### Files touched
+
+- `internal/plugin/install/staging.go` — exported `validatePluginID` →
+  `ValidatePluginID` (2 internal call sites updated, doc comment expanded).
+- `internal/plugin/install/build.go` (new) — `BuildOptions`,
+  `install.NewInstaller`, `ManifestValidator` (the shared construction
+  site).
+- `internal/plugin/install/source.go` (new) — `CatalogArchiveSource`
+  (moved/exported from `cmd/nanite`).
+- `cmd/nanite/plugin_install_flow.go` — removed the private
+  `catalogArchiveSource`/`cliValidator`/`pluginYAMLPresent`; `buildInstaller`
+  now calls `install.NewInstaller`; `installFromCatalog` constructs
+  `install.CatalogArchiveSource`. No behavioral change; CLI's own tests
+  (`internal/plugin/install/*_test.go`, `cmd/nanite/plugin_install_flow_test.go`)
+  pass unmodified.
+- `internal/api/catalog.go` — `handleCatalogInstall` rewritten to converge
+  onto `install.Installer` via `install.NewInstaller`; `findSourcePublicKey`
+  kept and repurposed (now called from `catalog_install.go`); removed the
+  `naniteplugin.VerifyChecksum`/`VerifySignature` calls and the manual
+  download/verify/extract implementation; `log/slog` import dropped (its
+  only use was the removed warn-and-proceed branch).
+- `internal/api/catalog_install.go` (new) — `catalogKeyLookup`,
+  `catalogExtractor`, `hostLoader`, `catalogState.catalogInstallEmit`,
+  `stripChecksumPrefix`, `decodeCatalogSignature`,
+  `catalogInstallErrorStatus`.
+- `internal/api/catalog_install_test.go` (new) — regression tests (see
+  below).
+- `internal/plugin/catalog.go` — removed `VerifyChecksum` (dead after
+  migration per AD-04 item 5).
+- `internal/plugin/catalog_test.go` — removed `TestVerifyChecksum`/
+  `TestVerifyChecksum_BadFormat`; dropped now-unused `os` import.
+- `internal/plugin/signature.go` — removed `VerifySignature`; updated the
+  package doc comment to point at `install.SignatureVerifier`.
+- `internal/plugin/signature_test.go` — removed the four `VerifySignature`-
+  dependent tests; replaced `TestSignAndVerify` with
+  `TestSignFile_ProducesValidSignature`, which asserts `SignFile`'s output
+  directly against `crypto/ed25519.Verify` instead of the retired helper
+  (kept coverage of correct-key/wrong-key/tampered-content cases).
+
+### Tests added (`internal/api/catalog_install_test.go`)
+
+- `TestHandleCatalogInstall_RejectsUnsignedEntry` — production-mode
+  (no `devmode` tag), unsigned entry + source with no configured public key
+  (today's default-seeded-source state) → non-2xx, nothing written under
+  `pluginsDir`.
+- `TestHandleCatalogInstall_PathTraversal` — catalog entry named
+  `../../etc/passwd` → 400, error contains "invalid plugin name", nothing
+  written outside `pluginsDir` (asserted by listing `pluginsDir`'s own
+  contents, not just checking the specific escape target).
+- `TestHandleCatalogInstall_Success_TarGz` — validly-signed, checksummed
+  `.tar.gz` entry installs end-to-end (200, `plugin.yaml` present under
+  `pluginsDir`).
+- `TestHandleCatalogInstall_Success_Zip` — same, but `.zip` (AD-04 item 2's
+  explicitly-requested regression test).
+- `TestHandleCatalogInstall_WrongSignature` — checksum-valid but
+  wrong-key-signed entry → rejected, nothing written.
+- `TestHandleCatalogInstall_AlreadyInstalled` — 409 when the plugin dir
+  already exists (parity with the sibling handlers' own coverage).
+- `TestHandleCatalogInstall_NotFound` — 404 when the name isn't in any
+  configured catalog source.
+
+Devmode-bypass survival: no new `devmode`-tagged code was added by this
+task (the API path reuses `install.SignatureVerifier` unmodified). Verified
+existing `internal/plugin/install/verify_dev_bypass_test.go` and
+`verify_prod_enforcement_test.go` still hold under both `go test
+./internal/plugin/install/...` and `go test -tags devmode
+./internal/plugin/install/...` — both pass.
+
+### Baseline check (run repeatedly through the session, not just at the end)
+
+```
+go build ./...                                          # clean
+go vet ./...                                             # clean except 2 pre-existing findings in
+                                                           # internal/service/container.go, unrelated to
+                                                           # this diff (not touched by this task)
+go build -tags devmode ./...                              # clean
+go test ./...                                             # all packages pass
+go test -tags devmode ./internal/plugin/... ./internal/plugin/install/...   # all pass
+go test ./internal/api/... -run 'Catalog|Install' -v      # all pass, including the new tests and the
+                                                           # existing TestHandleInstall_PathTraversal /
+                                                           # TestHandleInstallLocal_ManifestTraversal etc.
+go test ./internal/plugin/... -v                          # all pass
+go test -race ./internal/api/... -run 'Catalog|Install' -v  # all pass, 0 DATA RACE reports, ~146s
+go test -race ./internal/plugin/...                        # ok, ~93s
+gosec ./internal/api/... ./internal/plugin/...             # 98 pre-existing findings, none in the new
+                                                           # files (build.go, source.go, catalog_install.go)
+                                                           # or in the touched portion of catalog.go
+staticcheck ./internal/api/... ./internal/plugin/...       # 27 pre-existing findings (U1000/SA1019 in
+                                                           # files this task never touched, e.g.
+                                                           # adapter-nanite-native, host.go, panels.go,
+                                                           # subprocess/plugin_test.go), plus one
+                                                           # confirming checksumFile (internal/api/
+                                                           # catalog.go) is genuinely unused — the
+                                                           # pre-existing dead helper already identified
+                                                           # and deliberately left alone above. Zero
+                                                           # findings in any new/changed file this task
+                                                           # added (build.go, source.go,
+                                                           # catalog_install.go, or the edited portions
+                                                           # of catalog.go/signature.go/plugin's own
+                                                           # catalog.go).
+gofmt -l <every touched/new file>                          # clean except 2 pre-existing, unrelated
+                                                           # struct-tag misalignments (CatalogEntry in
+                                                           # internal/plugin/catalog.go, catalogEntryLite
+                                                           # in cmd/nanite/plugin_install_flow.go) —
+                                                           # confirmed via git diff neither struct was
+                                                           # touched by this task; left as-is
+```
+
+**One deliberate exception:** `go test -race ./internal/api/...` (the
+*whole* package, unscoped) hits a pre-existing 600s default-timeout
+artifact unrelated to this diff — already independently tracked as its own
+Wave 2 investigation task,
+`TASKS/audit-remediation/04-container-reaper-lifecycle/03-investigate-internal-service-race-timeout.md`
+(`GO-SVCCORE-006`), which documents the same package-wide `-race` timeout
+and explicitly rules out the container-shutdown-leak explanation as the
+sole cause. Confirmed this is not a race in the code this task touched by
+running `go test -race ./internal/api/... -run 'Catalog|Install'` (146s,
+0 `DATA RACE` reports, all pass) — the scoped run isolates exactly the code
+this task modified from that separately-tracked systemic issue. Not
+re-investigated here; out of this task's scope per its own Touches list.
+
+### Legacy `VerifyChecksum`/`VerifySignature` status (Done means)
+
+Both fully removed (zero remaining callers of any kind, production or
+test) rather than left in place with a justification — matches AD-04 item
+5's "go fully dead on migration" and the project's standing
+aggressive-removal-on-genuinely-settled-dead-code default. `CatalogFetcher`
+was explicitly kept per the same item.
+
+### Follow-up (2026-08-22): restored the wrapper-directory extraction tolerance
+
+A fresh reviewer with no shared context re-reviewed the implementation above
+and gave an overall PASS, but flagged one real gap: the pre-convergence
+`handleCatalogInstall` (confirmed via `git show
+main:internal/api/catalog.go:399-410`) tolerated an extracted archive whose
+`plugin.yaml` isn't at the extraction root but inside exactly one
+subdirectory — the shape a plain GitHub "Download ZIP" produces
+(`reponame-branch/`). The convergence pass above (see "Deviations from the
+task file's own draft" → "Dropped the old handler's 'plugin.yaml at root OR
+single top-level subdir' tolerance") deliberately dropped this rather than
+add a hook to `install.Installer`'s state machine. The reviewer's assessment
+— that `install.Extractor` is the right seam for this, since `catalogExtractor`
+(already a new type in a new file, `internal/api/catalog_install.go`) can
+extract to a scratch location and flatten a detected single-wrapper-directory
+shape into `targetDir` before returning, without touching `install.go`,
+`staging.go`, or `extract.go`'s `TarGzExtractor` — was correct. Operator
+decision: restore the tolerance. Preserve the prior GUI/API behavior
+(installing from a plain "Download ZIP"-shaped archive should still work),
+consistent with how AD-04 item 2's zip-format gap was handled — fixed
+in-scope, not silently dropped.
+
+**What changed:**
+
+- `internal/api/catalog_install.go` — `catalogExtractor.Extract` now
+  extracts into a scratch subdirectory of `targetDir` (via `os.MkdirTemp`,
+  same filesystem as `targetDir` since `targetDir` is itself the staging
+  dir `DirStaging.Begin` created under `StagingRoot`), resolves the plugin
+  root against that scratch dir via a new `resolveCatalogPluginRoot`
+  helper — matching the old handler's exact detection rule byte-for-byte
+  (plugin.yaml at the extraction root wins outright; otherwise, if there's
+  exactly one subdirectory, its contents become the plugin root; zero or
+  more than one candidate falls through unresolved, deferring rejection to
+  the existing `Validator.Validate` "plugin.yaml missing" error rather than
+  guessing among ambiguous subdirectories) — and flattens the resolved
+  plugin root's immediate children up into `targetDir` via a new
+  `flattenCatalogPluginRoot` helper (per-entry `os.Rename`, cheaper than a
+  second full-tree copy since both dirs are already on the same
+  filesystem). The scratch dir (and anything left in it, including stray
+  root-level content alongside a wrapper directory) is removed via
+  `defer os.RemoveAll` afterward — matching the old code's own behavior of
+  only ever copying `pluginRoot`'s tree into the target, nothing else.
+- No changes to `internal/plugin/install/install.go`'s state machine,
+  `staging.go`, or `extract.go`'s `TarGzExtractor` — the fix is entirely
+  contained within `catalogExtractor`, as the reviewer's own analysis
+  confirmed was possible and as this follow-up's instructions required.
+- `internal/api/catalog_install_test.go` — added
+  `TestHandleCatalogInstall_Success_WrapperDirectory`: builds an in-memory
+  `.zip` with `plugin.yaml` and a sibling `README.md` inside a single
+  `wrapplug-main/` wrapper directory (not at the archive root), signs and
+  checksums it, POSTs it through the real `handleCatalogInstall` HTTP
+  handler, and asserts a 200, `plugin.yaml`/`README.md` present directly
+  under `pluginsDir/wrapplug` (not nested under the wrapper-dir path), and
+  no leaked `catalog-extract-scratch-*` directory in the committed plugin
+  dir. All pre-existing flat-root tests
+  (`TestHandleCatalogInstall_Success_TarGz`,
+  `TestHandleCatalogInstall_Success_Zip`, and the rest of the suite) pass
+  unmodified — this change is purely additive for the flat-root case, since
+  `resolveCatalogPluginRoot` returns the extraction root unchanged whenever
+  `plugin.yaml` is already there.
+
+**Baseline check (this follow-up):**
+
+```
+go build ./...                                                     # clean
+go build -tags devmode ./...                                       # clean
+go vet ./internal/api/... ./internal/plugin/...                    # clean
+go test ./internal/api/...                                         # ok, 66.257s
+go test ./internal/plugin/...                                      # ok (all subpackages)
+go test ./internal/api/... -run 'TestHandleCatalogInstall' -v      # all 8 pass (7 pre-existing + new)
+go test -race ./internal/api/... -run 'TestHandleCatalogInstall' -v  # all 8 pass, 0 DATA RACE reports, 68.6s
+go test ./internal/api/... -run 'Catalog|Install' -v                # all pass
+gofmt -l internal/api/catalog_install.go internal/api/catalog_install_test.go  # clean
+```
+
+No further deviations. `install.CatalogArchiveSource`, `install.NewInstaller`,
+`install.DirStaging`, and `install.TarGzExtractor` (the CLI's own extractor)
+are untouched by this follow-up — the CLI path continues to use
+`TarGzExtractor` directly and does not go through `catalogExtractor` at all,
+so this change has zero effect on CLI behavior.
 
 ## Review notes

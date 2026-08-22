@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -182,31 +181,6 @@ func TestCatalogFetcher_DiskCacheFallback(t *testing.T) {
 	}
 }
 
-func TestVerifyChecksum(t *testing.T) {
-	// Create a temp file with known content.
-	f, _ := os.CreateTemp(t.TempDir(), "test-*")
-	f.Write([]byte("hello world"))
-	f.Close()
-
-	// Compute expected checksum.
-	// sha256("hello world") = b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
-	expected := "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
-
-	if err := VerifyChecksum(f.Name(), expected); err != nil {
-		t.Errorf("valid checksum failed: %v", err)
-	}
-
-	// Wrong checksum.
-	if err := VerifyChecksum(f.Name(), "sha256:0000"); err == nil {
-		t.Error("expected error for wrong checksum")
-	}
-
-	// Empty checksum (should pass — no verification).
-	if err := VerifyChecksum(f.Name(), ""); err != nil {
-		t.Errorf("empty checksum should pass: %v", err)
-	}
-}
-
 func TestCatalogFetcher_PriorityOverride(t *testing.T) {
 	// Custom source has HIGHER priority and should override official.
 	srv1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -250,15 +224,6 @@ plugins:
 	}
 	if entries[0].SourceName != "Custom Fork" {
 		t.Errorf("expected source 'Custom Fork', got %s", entries[0].SourceName)
-	}
-}
-
-func TestVerifyChecksum_BadFormat(t *testing.T) {
-	f, _ := os.CreateTemp(t.TempDir(), "test-*")
-	f.Close()
-	err := VerifyChecksum(f.Name(), "md5:abc123")
-	if err == nil {
-		t.Error("expected error for unsupported format")
 	}
 }
 

@@ -9,13 +9,22 @@ import (
 	"os"
 )
 
-// Signature verification for catalog-distributed plugins.
+// Signing utilities for catalog-distributed plugins.
 //
-// - Catalog entries include a "signature" field: hex-encoded Ed25519 signature
-//   over the archive file bytes.
+// - Catalog entries carry a "signature" field: hex-encoded Ed25519 signature
+//   over the archive file bytes, produced by SignFile below.
 // - Each catalog source can have a trusted public key (stored in catalog_sources.public_key).
 // - User-uploaded plugins (install-local, install-archive) skip verification entirely.
-// - If a catalog entry has no signature, a warning is logged but install proceeds.
+//
+// Verification itself no longer lives here — internal/api/catalog.go's
+// handleCatalogInstall (the GUI/API catalog-install path) and
+// cmd/nanite's CLI catalog-install flow both converge on
+// internal/plugin/install.SignatureVerifier, which fails closed on a
+// missing/invalid signature in production builds (AD-04,
+// TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-
+// catalog-install-pipeline.md). The VerifySignature function that used to
+// live here was retired as part of that convergence — it had exactly one
+// caller, and that caller is gone.
 
 // GenerateKeyPair creates a new Ed25519 key pair for signing plugin archives.
 // Returns (publicKeyHex, privateKeyHex). This is a utility for catalog maintainers,
@@ -46,38 +55,6 @@ func SignFile(filePath, privateKeyHex string) (string, error) {
 
 	sig := ed25519.Sign(ed25519.PrivateKey(privBytes), data)
 	return hex.EncodeToString(sig), nil
-}
-
-// VerifySignature verifies an Ed25519 signature on a file.
-// publicKeyHex is the hex-encoded 32-byte public key.
-// signatureHex is the hex-encoded 64-byte signature.
-// Returns nil if valid, error if invalid or verification fails.
-func VerifySignature(filePath, publicKeyHex, signatureHex string) error {
-	pubBytes, err := hex.DecodeString(publicKeyHex)
-	if err != nil {
-		return fmt.Errorf("decode public key: %w", err)
-	}
-	if len(pubBytes) != ed25519.PublicKeySize {
-		return fmt.Errorf("invalid public key size: expected %d bytes, got %d", ed25519.PublicKeySize, len(pubBytes))
-	}
-
-	sigBytes, err := hex.DecodeString(signatureHex)
-	if err != nil {
-		return fmt.Errorf("decode signature: %w", err)
-	}
-	if len(sigBytes) != ed25519.SignatureSize {
-		return fmt.Errorf("invalid signature size: expected %d bytes, got %d", ed25519.SignatureSize, len(sigBytes))
-	}
-
-	data, err := readFileBytes(filePath)
-	if err != nil {
-		return err
-	}
-
-	if !ed25519.Verify(ed25519.PublicKey(pubBytes), data, sigBytes) {
-		return fmt.Errorf("signature verification failed: signature does not match file contents")
-	}
-	return nil
 }
 
 // readFileBytes reads an entire file into memory. Plugin archives are bounded

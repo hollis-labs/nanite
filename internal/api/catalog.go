@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/plugin/install"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -244,7 +244,15 @@ func (cs *catalogState) handleRefreshCatalog(w http.ResponseWriter, r *http.Requ
 }
 
 // --- Catalog install ---
-
+//
+// handleCatalogInstall converges onto the CLI's install.Installer pipeline
+// (AD-04, TASKS/audit-remediation/01-plugin-install-convergence/01-unify-
+// plugin-catalog-install-pipeline.md) instead of the older, weaker
+// download/verify/extract implementation that used to live here directly
+// (internal/plugin.VerifyChecksum/VerifySignature — both now fully
+// retired). The supporting install.Extractor/install.Loader adapters and
+// the KeyLookup/checksum/signature-decoding helpers live in
+// catalog_install.go.
 func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Request) {
 	var req CatalogInstallRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
@@ -252,22 +260,9 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	emitProgress := func(state, message string, progress float64) {
-		if cs.pluginHost != nil {
-			cs.pluginHost.EmitPluginInstallProgress(req.Name, state, message, progress)
-		}
-	}
-	emitFailure := func(state string, err error) {
-		emitProgress(state, fmt.Sprintf("failed in %s", state), 0)
-		if cs.pluginHost != nil {
-			cs.pluginHost.EmitPluginLoadFailed(req.Name, fmt.Sprintf("%s: %v", state, err))
-		}
-	}
-
 	// Look up in catalog.
 	sources, err := cs.store.ListCatalogSources()
 	if err != nil {
-		emitFailure("downloading", err)
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -280,7 +275,6 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 
 	entries, err := cs.fetcher.Fetch(r.Context(), fetcherSources)
 	if err != nil {
-		emitFailure("downloading", err)
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -297,7 +291,24 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Check if already installed.
+	// Confine the install target. entry.Name is untrusted — it comes
+	// straight from a catalog.yaml fetched over HTTP from a configured
+	// (and possibly attacker-influenced) source URL. Validate it against
+	// the SAME allowlist install.DirStaging.Commit enforces internally
+	// (^[a-z][a-z0-9-]{1,62}$) before doing anything else with it. This is
+	// not a second, different confinement mechanism (AD-04 item 1
+	// explicitly says not to add a pathsafe.ResolveUnder call here) — it's
+	// an early exit using the pipeline's own validator, so a bad name is
+	// rejected before any network I/O rather than only late inside Commit
+	// (audit finding GO-PLUGIN-002).
+	if err := install.ValidatePluginID(entry.Name); err != nil {
+		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name %q: %v", entry.Name, err))
+		return
+	}
+
+	// Check if already installed. Safe to filepath.Join now that entry.Name
+	// has passed ValidatePluginID above (no "..", no separators, no
+	// absolute-path prefix are possible in a validated plugin id).
 	target := filepath.Join(cs.pluginsDir, entry.Name)
 	if fileExists(filepath.Join(target, "plugin.yaml")) {
 		cs.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", entry.Name))
@@ -309,138 +320,42 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	emitProgress("downloading", "fetching archive", 0)
-	// Download the archive.
-	tmpFile, err := os.CreateTemp("", "nanite-catalog-*.tar.gz")
+	sig, err := decodeCatalogSignature(entry.Signature)
 	if err != nil {
-		cs.errorResp(w, http.StatusInternalServerError, "failed to create temp file")
-		return
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	dlReq, err := http.NewRequestWithContext(r.Context(), "GET", entry.ArchiveURL, nil)
-	if err != nil {
-		tmpFile.Close()
-		emitFailure("downloading", err)
-		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid archive URL: %v", err))
+		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("plugin %q has an invalid signature encoding: %v", entry.Name, err))
 		return
 	}
 
-	resp, err := http.DefaultClient.Do(dlReq)
-	if err != nil {
-		tmpFile.Close()
-		emitFailure("downloading", err)
-		cs.errorResp(w, http.StatusBadGateway, fmt.Sprintf("download failed: %v", err))
+	// entry.SourceID doubles as the install.Handle.SignerKeyID here: the
+	// API's per-entry catalog model has no separate signer-key-id field the
+	// way the CLI's single hardcoded signed catalog does, so the source
+	// that carried the entry IS its signer identity. See catalogKeyLookup.
+	src := &install.CatalogArchiveSource{
+		ID:          entry.Name,
+		ArchiveURL:  entry.ArchiveURL,
+		SHA256:      stripChecksumPrefix(entry.Checksum),
+		Signature:   sig,
+		SignerKeyID: entry.SourceID,
+		Downloader:  &install.HTTPDownloader{},
+	}
+
+	inst, _ := install.NewInstaller(install.BuildOptions{
+		KeyLookup: catalogKeyLookup(sources),
+		Extractor: &catalogExtractor{archiveURL: entry.ArchiveURL},
+		Loader: hostLoader{pms: &pluginManagerState{
+			pluginsDir: cs.pluginsDir,
+			pluginHost: cs.pluginHost,
+			store:      cs.store,
+		}},
+		StagingRoot: filepath.Join(cs.pluginsDir, ".staging"),
+		PluginsRoot: cs.pluginsDir,
+		Emit:        cs.catalogInstallEmit(entry.Name),
+	})
+
+	if _, err := inst.Install(r.Context(), src); err != nil {
+		cs.errorResp(w, catalogInstallErrorStatus(err), fmt.Sprintf("install failed: %v", err))
 		return
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		tmpFile.Close()
-		emitFailure("downloading", fmt.Errorf("http %d", resp.StatusCode))
-		cs.errorResp(w, http.StatusBadGateway, fmt.Sprintf("download returned %d", resp.StatusCode))
-		return
-	}
-
-	// Stream to disk with a 100MB limit.
-	limited := io.LimitReader(resp.Body, 100<<20)
-	if _, err := io.Copy(tmpFile, limited); err != nil {
-		tmpFile.Close()
-		emitFailure("downloading", err)
-		cs.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("download write failed: %v", err))
-		return
-	}
-	tmpFile.Close()
-
-	emitProgress("verifying", "verifying archive", 0)
-	// Verify checksum if present.
-	if err := naniteplugin.VerifyChecksum(tmpPath, entry.Checksum); err != nil {
-		emitFailure("verifying", err)
-		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("checksum verification failed: %v", err))
-		return
-	}
-
-	// Verify signature if the source has a trusted public key.
-	sourcePublicKey := findSourcePublicKey(sources, entry.SourceID)
-	if sourcePublicKey != "" && entry.Signature != "" {
-		if err := naniteplugin.VerifySignature(tmpPath, sourcePublicKey, entry.Signature); err != nil {
-			emitFailure("verifying", err)
-			cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("signature verification failed: %v", err))
-			return
-		}
-	} else if sourcePublicKey != "" && entry.Signature == "" {
-		// Source has a key but plugin is unsigned — warn but allow.
-		slog.Warn("catalog: plugin is unsigned (source has a trusted key)", "name", entry.Name, "source", entry.SourceName)
-	}
-
-	emitProgress("extracting", "extracting archive", 0)
-	// Extract the archive.
-	extractDir, err := os.MkdirTemp("", "nanite-catalog-extract-*")
-	if err != nil {
-		emitFailure("extracting", err)
-		cs.errorResp(w, http.StatusInternalServerError, "failed to create extract dir")
-		return
-	}
-	defer os.RemoveAll(extractDir)
-
-	// Detect format by URL or content.
-	if strings.HasSuffix(entry.ArchiveURL, ".zip") {
-		err = extractZip(tmpPath, extractDir)
-	} else {
-		err = extractTarGz(tmpPath, extractDir)
-	}
-	if err != nil {
-		emitFailure("extracting", err)
-		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("extract failed: %v", err))
-		return
-	}
-
-	// Find plugin root (plugin.yaml at root or single subdir).
-	pluginRoot := extractDir
-	if !fileExists(filepath.Join(pluginRoot, "plugin.yaml")) {
-		entries, _ := os.ReadDir(extractDir)
-		dirs := []string{}
-		for _, e := range entries {
-			if e.IsDir() {
-				dirs = append(dirs, e.Name())
-			}
-		}
-		if len(dirs) == 1 {
-			pluginRoot = filepath.Join(extractDir, dirs[0])
-		}
-	}
-
-	emitProgress("validating", "checking plugin manifest", 0)
-	if !fileExists(filepath.Join(pluginRoot, "plugin.yaml")) {
-		emitFailure("validating", fmt.Errorf("plugin.yaml missing"))
-		cs.errorResp(w, http.StatusBadRequest, "downloaded archive does not contain plugin.yaml")
-		return
-	}
-
-	// Save checksum for future verification.
-	if entry.Checksum != "" {
-		os.WriteFile(filepath.Join(pluginRoot, ".checksum"), []byte(entry.Checksum), 0644)
-	}
-
-	os.MkdirAll(cs.pluginsDir, 0755)
-	if err := copyDir(pluginRoot, target); err != nil {
-		os.RemoveAll(target)
-		emitFailure("validating", err)
-		cs.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("install failed: %v", err))
-		return
-	}
-
-	emitProgress("loading", "loading plugin into host", 0)
-	// Hot-load into running host (reuses the existing helper from plugins.go).
-	pms := &pluginManagerState{
-		pluginsDir: cs.pluginsDir,
-		pluginHost: cs.pluginHost,
-		store:      cs.store,
-	}
-	pms.runPluginLoadIntoHost(filepath.Join(target, "plugin.yaml"), target)
-
-	emitProgress("ready", "install complete", 1)
 
 	cs.jsonResp(w, http.StatusOK, map[string]string{
 		"status":  "installed",

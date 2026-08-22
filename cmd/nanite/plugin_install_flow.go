@@ -62,32 +62,6 @@ func (s *localDirSource) Download(ctx context.Context, stagingDir string, emit i
 	return install.Handle{Kind: "directory", Path: s.absPath}, nil
 }
 
-// catalogArchiveSource implements install.Source by downloading a signed
-// archive from a catalog entry.
-type catalogArchiveSource struct {
-	id         string
-	archiveURL string
-	sha256     string
-	signature  []byte
-	signerKey  string
-	downloader *install.HTTPDownloader
-}
-
-func (s *catalogArchiveSource) PluginID() string { return s.id }
-func (s *catalogArchiveSource) Download(ctx context.Context, stagingDir string, emit install.EventFunc) (install.Handle, error) {
-	path, err := s.downloader.Download(ctx, s.archiveURL, stagingDir, s.id, emit)
-	if err != nil {
-		return install.Handle{}, err
-	}
-	return install.Handle{
-		Kind:           "archive",
-		Path:           path,
-		ExpectedSHA256: s.sha256,
-		Signature:      s.signature,
-		SignerKeyID:    s.signerKey,
-	}, nil
-}
-
 // noopLoader satisfies install.Loader for the CLI path — the host process
 // (nanite) rediscovers the plugin on restart, so the CLI installer does
 // not need to hand anything to an in-process host.
@@ -95,47 +69,24 @@ type noopLoader struct{}
 
 func (noopLoader) Load(ctx context.Context, pluginID, pluginDir string) error { return nil }
 
-// buildInstaller wires the state machine for CLI use. The loader is a
-// no-op; triggerActivation() handles the running-service refresh (hot-reload
-// for a subprocess plugin, triggerRestart() for a builtin) after Run returns
-// successfully.
+// buildInstaller wires the state machine for CLI use via the shared
+// install.NewInstaller constructor (AD-04 item 6 — cmd/nanite and
+// internal/api both call this instead of hand-rolling their own Installer,
+// which is exactly how the API's catalog-install path diverged from this
+// one originally). The loader is a no-op; triggerActivation() handles the
+// running-service refresh (hot-reload for a subprocess plugin,
+// triggerRestart() for a builtin) after Run returns successfully.
 func buildInstaller(emit install.EventFunc) (*install.Installer, *catalog.KeyRing, *install.DirStaging) {
 	ring := catalog.NewKeyRing()
-	staging := &install.DirStaging{
+	inst, staging := install.NewInstaller(install.BuildOptions{
+		KeyLookup:   ring.LookupFunc(),
+		Extractor:   &install.TarGzExtractor{},
+		Loader:      noopLoader{},
 		StagingRoot: resolveStagingRoot(),
 		PluginsRoot: resolvePluginsDir(),
-	}
-	return &install.Installer{
-		Verifier:  &install.SignatureVerifier{KeyLookup: ring.LookupFunc()},
-		Extractor: &install.TarGzExtractor{},
-		Validator: &cliValidator{},
-		Loader:    noopLoader{},
-		Staging:   staging,
-		Emit:      emit,
-	}, ring, staging
-}
-
-// cliValidator adapts ValidateManifest into the install.Validator interface.
-type cliValidator struct{}
-
-func (cliValidator) Validate(ctx context.Context, pluginDir string) error {
-	manifestPath := filepath.Join(pluginDir, "plugin.yaml")
-	if err := pluginYAMLPresent(manifestPath); err != nil {
-		return err
-	}
-	if verr := install.ValidateManifest(manifestPath, pluginDir, install.ValidationOptions{}); verr != nil {
-		if verr.HasRefusals() {
-			return fmt.Errorf("manifest validation failed: %s", verr.Error())
-		}
-	}
-	return nil
-}
-
-func pluginYAMLPresent(path string) error {
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("plugin.yaml not found at %s", path)
-	}
-	return nil
+		Emit:        emit,
+	})
+	return inst, ring, staging
 }
 
 // installLocalFromStateMachine runs the state machine for a local directory
@@ -178,13 +129,13 @@ func installFromCatalog(ctx context.Context, pluginID string) (string, bool, err
 		keyID = "catalog-root"
 	}
 
-	src := &catalogArchiveSource{
-		id:         pluginID,
-		archiveURL: entry.ArchiveURL,
-		sha256:     sha,
-		signature:  sig,
-		signerKey:  keyID,
-		downloader: &install.HTTPDownloader{},
+	src := &install.CatalogArchiveSource{
+		ID:          pluginID,
+		ArchiveURL:  entry.ArchiveURL,
+		SHA256:      sha,
+		Signature:   sig,
+		SignerKeyID: keyID,
+		Downloader:  &install.HTTPDownloader{},
 	}
 	final, err := inst.Install(ctx, src)
 	if err != nil {

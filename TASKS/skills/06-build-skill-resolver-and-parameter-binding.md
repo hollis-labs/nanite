@@ -327,4 +327,7 @@ test, per the fix request's own explicit instruction to keep this contained. Sta
 `implemented`.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (fresh reviewer, 2026-08-21, no shared context with either the original worker or the fix worker).** Traced the `seenMissing` dedup logic by hand against every code path in the function (static-hit, resolved-dynamic, optional-unresolved, required-unresolved) and confirmed correctness and completeness. Confirmed the new regression test genuinely exercises the duplicate-name scenario and passes. Confirmed no other behavior in the file changed (full package re-run under `-race`, all prior tests still pass). Full build/vet/test clean.
+
+Status: `reviewed`.

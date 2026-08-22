@@ -1,7 +1,7 @@
 # Remaining REST surface: list/get, assign/revoke, grants/policy view, invoke/preview, uninstall
 
 **Phase:** 7 — Remaining REST API surface (`TASKS/skills`)
-**Status:** implemented
+**Status:** fix-required (minor, non-blocking)
 **Depends on:** `02`, `05` (install pipeline this uninstall path mirrors), `09` (grant-state
 model this task exposes read/write access to)
 **Touches:** `internal/api/skills.go` (extends whatever task `05` started), `internal/api/api.go`
@@ -259,4 +259,61 @@ parallel-route-family choice, item 4's grant-check design call) are exactly the 
 calls the task file itself invited, all documented above and in the corresponding doc comments.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS.** Fresh reviewer with no shared context independently verified every claim in the Work
+Log against actual code and real test runs (not trusted from prose) — no functional bugs, no
+security regression. Full details logged in `TASKS/ESCALATIONS.md`'s 2026-08-22 entry. Summary:
+
+- **Access-control substance confirmed sound**: independently checked every comparable
+  agent-mutating endpoint in `internal/api/agent_capabilities.go`/`agents.go` — all gate only on
+  `requireMutableAgent` (which agent record), zero caller-identity check anywhere in this
+  codebase's agent-mutation surface. The new grant/revoke/preview endpoints follow this exact same
+  convention — task 12 is exactly as exposed as its siblings, not more. **Not a regression.**
+- Route reuse (`{id}`→`{slug}` rename on `GET`/`DELETE /api/skills/{slug}`), the `Uninstaller`'s
+  vendor-before-index deletion ordering, `LoadRootDefinition`'s behavior-preserving extraction,
+  `skill_delete`'s REST/self-tool parity, and preview's grant-check routing were all independently
+  verified against the actual code and real test runs — all correct as claimed.
+- `go build`/`go vet`/`go test ./...` all pass on `main` HEAD (the one `go vet` finding is the
+  already-confirmed pre-existing, unrelated `container.go` reaper warning).
+
+**Four non-blocking findings**, none reopening the PASS verdict:
+1. **The access-control finding's citation is inaccurate and its wording overstates the case.**
+   The doc comment above `handleGrantAgentSkill` attributes "no per-caller-identity access-control
+   convention anywhere" to task 10's and task 11's own review notes — neither entry actually says
+   that (task 11's is about fork-composition privilege inheritance; task 10's is about
+   REST-settability changing an exploitability bound, a related but different claim). Separately,
+   `internal/server/caller_identity.go`'s `callerIdentityMiddleware` IS a real, wired-in
+   caller-identity mechanism (used by `internal/messaging`'s authz checks) — just never applied to
+   agent-mutation endpoints, so the practical conclusion holds but the categorical wording doesn't.
+   **Fix required**: correct the comment's wording and citation.
+2. **Test-coverage gap on the new typed-nil guard** in `handleDeleteSkill`/`callDeleteSkill` — the
+   guard itself is correct (verified by direct read), but no test actually passes a *typed* nil
+   (`(*skillvendor.Store)(nil)`) through the real REST/self-tool call path; a future "simplification"
+   removing the guard would compile and pass all existing tests. **Fix required**: add a regression
+   test.
+3. Pre-existing typed-nil hazard in task 11's `MaterializerDeps{Subagent: ...}` wiring — real,
+   confirmed via direct trace of `compose.go`'s `runFork`, but inert in production (`Container.Subagent`
+   is always concretely constructed) and correctly out of this task's scope. **Filed as a follow-up
+   candidate, not fixed here.**
+4. Undocumented structural limitation: `handlePreviewSkill` never populates
+   `MaterializeInput.ParentSessionID`, so any `fork`-composed skill will always fail preview with a
+   clean, non-panicking error regardless of grant state (there's no live session for REST to derive
+   one from). Real and cleanly-failing, not silent — worth a note for future authoring tooling.
+   **Filed as a follow-up candidate, not fixed here** (would require a genuine design decision about
+   whether/how preview should support fork composition, out of scope for a documentation fix).
+
+## Fix required (minor, non-blocking)
+
+1. Correct the doc comment above `handleGrantAgentSkill` (`internal/api/skills.go`): scope the
+   access-control observation accurately to "no comparable agent-mutating endpoint in this
+   codebase gates on caller identity, only on `requireMutableAgent`'s which-agent-record check" and
+   either remove the task-10/11 attribution or cite what those entries actually say. Do not
+   restate the inaccurate "no per-caller-identity access-control convention anywhere" framing as
+   if it were a verified, cited fact.
+2. Add a regression test that exercises the typed-nil guard in `handleDeleteSkill`/
+   `callDeleteSkill` for real: set the relevant `SkillVendor` field to a typed nil
+   (`(*skillvendor.Store)(nil)`), call `DELETE /api/skills/{slug}` (or the `skill_delete`
+   self-tool) for a skill with a real `ContentHash`, and assert a clean error is returned, not a
+   panic.
+3. Re-run `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` — all must pass.
+4. Update this file's own Work Log with what was fixed, and set Status to `implemented`.

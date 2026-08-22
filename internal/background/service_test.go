@@ -1,7 +1,9 @@
 package background
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -600,6 +602,45 @@ func TestCompletedJobRetention_AlteredAuthenticationTagIsUnknown(t *testing.T) {
 		parts[2] = "A" + parts[2][1:]
 	}
 	assertUnknownJob(t, svc, strings.Join(parts, ":"))
+}
+
+func TestCompletedJobRetention_NonCanonicalAuthenticationTagIsUnknown(t *testing.T) {
+	svc, backend, _, clock := newRetentionTestService(10, time.Hour)
+	id := submitRetentionJob(t, svc)
+
+	parts := strings.Split(id, ":")
+	if len(parts) != 3 || parts[2] == "" {
+		t.Fatalf("issued job id %q does not contain the expected authentication tag", id)
+	}
+	const rawURLAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := len(parts[2]) - 1
+	canonicalIndex := strings.IndexByte(rawURLAlphabet, parts[2][last])
+	if canonicalIndex < 0 || canonicalIndex%4 != 0 {
+		t.Fatalf("final tag character %q has unexpected raw-base64 index %d", parts[2][last], canonicalIndex)
+	}
+	nonCanonicalTag := parts[2][:last] + string(rawURLAlphabet[canonicalIndex+1])
+	canonicalBytes, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatalf("decode canonical tag: %v", err)
+	}
+	nonCanonicalBytes, err := base64.RawURLEncoding.DecodeString(nonCanonicalTag)
+	if err != nil {
+		t.Fatalf("permissive decode of regression tag: %v", err)
+	}
+	if !bytes.Equal(canonicalBytes, nonCanonicalBytes) {
+		t.Fatal("regression tag must differ only in unused trailing base64 bits")
+	}
+	parts[2] = nonCanonicalTag
+	variantID := strings.Join(parts, ":")
+
+	// A different textual token was never issued, even though permissive
+	// base64 decoding maps its tag to the same bytes as the issued token.
+	assertUnknownJob(t, svc, variantID)
+
+	completeRetentionJob(backend, clock, id, "done")
+	clock.Advance(time.Hour)
+	assertExpiredJob(t, svc, id)
+	assertUnknownJob(t, svc, variantID)
 }
 
 func TestCompletedJobRetention_MalformedTokensAreUnknown(t *testing.T) {

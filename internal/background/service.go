@@ -78,6 +78,8 @@ const (
 	jobIDTokenVersion               = "bg1"
 )
 
+var jobIDTagEncoding = base64.RawURLEncoding.Strict()
+
 // SenderAgentID is the canonical from_agent_id stamped on the
 // completion envelope. Other systems (subagent, inbox UI) recognize
 // this slug to render the envelope correctly.
@@ -328,11 +330,14 @@ func (svc *Service) isIssuedJobIDLocked(jobID string) bool {
 	if err != nil || nonce.String() != nonceText {
 		return false
 	}
-	if len(tagText) != base64.RawURLEncoding.EncodedLen(sha256.Size) {
+	if len(tagText) != jobIDTagEncoding.EncodedLen(sha256.Size) {
 		return false
 	}
-	tag, err := base64.RawURLEncoding.DecodeString(tagText)
+	tag, err := jobIDTagEncoding.DecodeString(tagText)
 	if err != nil || len(tag) != sha256.Size {
+		return false
+	}
+	if jobIDTagEncoding.EncodeToString(tag) != tagText {
 		return false
 	}
 	payload := version + ":" + nonceText
@@ -341,7 +346,7 @@ func (svc *Service) isIssuedJobIDLocked(jobID string) bool {
 
 func (svc *Service) newJobID() string {
 	payload := jobIDTokenVersion + ":" + uuid.NewString()
-	tag := base64.RawURLEncoding.EncodeToString(svc.signJobID(payload))
+	tag := jobIDTagEncoding.EncodeToString(svc.signJobID(payload))
 	return payload + ":" + tag
 }
 

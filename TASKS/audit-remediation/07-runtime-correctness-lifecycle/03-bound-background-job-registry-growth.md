@@ -187,6 +187,17 @@ Direction A carries real risk of evicting a job result before a caller has polle
   in `error`) instead of discarding the typed result as an MCP tool error.
   Unknown ids remain tool errors. Focused regressions reproduced both review
   failures before the correction and cover the public self-tool surface.
+- 2026-08-22 final review correction: raw URL-base64 authentication tags are
+  now decoded with strict trailing-bit validation and must exactly match their
+  canonical re-encoding before the constant-time HMAC comparison. Added a
+  regression whose never-issued token differs from a valid token only in the
+  final character's unused base64 bits; it stays unknown both before and after
+  the valid token expires, while the valid token reports expired. The new test
+  failed against the pre-fix parser (the variant incorrectly reported expired).
+  Focused verification passed: background package race suite once, token
+  regression race run 20 times, and structured self-tool status race tests 20
+  times. Broad repository checks remain deferred while the isolated `04/03`
+  timing investigation is active.
 
 ## Review notes
 

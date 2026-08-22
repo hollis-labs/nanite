@@ -125,7 +125,141 @@ stable to diff against. All mutation happens in
 stated in the batch README and repeated here because it is the single easiest
 thing for a well-meaning worker to get wrong.
 
-## Outcome
+## Outcome (2026-08-22)
 
-_(Filled in when this folder completes. Until this section exists with real
-content, the batch is not cleared for dispatch.)_
+**Revalidated against HEAD `531dcfccbbf870fcbe80b269546bb8b28622a8f0`** (the merge
+commit landing `00/02`'s tool-baseline refresh, 2026-08-22 08:44:27 -0500).
+Freeze confirmed clean at both dispatch points (`git status --short` empty,
+worktree branched exactly from that commit). All 113 findings in
+`TASKS/audit-remediation/findings.json` now carry a `disposition` that is a
+decision plus a `revalidation_note` citing what was read and concluded — the
+placeholder `remediate` is gone. `findings.json`'s new top-level
+`revalidated_at_commit` field records the SHA above.
+
+Dispatched in two parts per the operator's interim-report requirement (see
+`01-revalidate-findings-against-head.md`'s Work Log for the full split):
+Part 1 delivered the 3 critical + 8 high + `GO-SEC4-005` (pulled forward for
+AD-03) tranche as an interim report so AD-01–AD-04 could be decided without
+waiting on the full sweep; Part 2 (this pass) completed the remaining 33
+medium + 45 low + 24 informational findings.
+
+### Disposition counts — all 113
+
+| Severity | remediate | needs-architect-decision | defer | false-positive | needs-more-evidence | Total |
+|---|---:|---:|---:|---:|---:|---:|
+| critical | 3 | 0 | 0 | 0 | 0 | **3** |
+| high | 6 | 2 | 0 | 0 | 0 | **8** |
+| medium | 20 | 13 | 0 | 0 | 0 | **33** |
+| low | 31 | 11 | 2 | 0 | 1 | **45** |
+| informational | 4 | 6 | 10 | 4 | 0 | **24** |
+| **Total** | **64** | **32** | **12** | **4** | **1** | **113** |
+
+### Critical/high re-confirmation (justifies the dev freeze)
+
+All 3 critical and all 8 high findings were re-confirmed **still open** against
+current source — none were already-resolved, false-positive, or superseded.
+For 9 of the 12, the cited files are byte-identical to the audited commit
+`8feeee5c` (`git diff 8feeee5c..HEAD -- <path>` empty); the remaining 3
+(`GO-STORE-003`, and the two touching `internal/service/container.go`-adjacent
+files indirectly) had only cosmetic line-number drift from unrelated
+intervening work, with the flagged code itself unchanged. Full per-finding
+evidence was delivered to the operator as the interim report ahead of
+AD-01–AD-04 (see the dispatching session's relay); dispositions: 9
+`remediate` (`GO-PLUGIN-001/002/003`, `GO-SEC4-001`, `GO-AGENT-001/002`,
+`GO-STORE-003`, `GO-SVCEXEC-001/002`), 3 `needs-architect-decision`
+(`GO-SEC4-002`, `GO-SEC4-005`, `GO-RUNTIME-002`).
+
+### The two catalog gaps corrected
+
+Per `ARCHITECT-DECISIONS.md`'s "gap worth naming" and `TASKS/ESCALATIONS.md`'s
+planning-pass correction: `GO-MEM-002` and `GO-MCPTOOL-003` are now set to
+`needs-architect-decision` (were previously missing `requires_architect_decision: true`
+in `findings.json` despite being two of the six AD-06..AD-11 production
+islands). Both re-confirmed still fully unwired against current source.
+
+### `needs-architect-decision` disposition rationale (32 findings)
+
+Applied consistently: `remediate` where the underlying defect is unambiguous
+and only the *implementation shape* is architect-gated (e.g. `GO-SEC4-001`'s
+fail-closed-vs-visible-opt-in, `GO-MCPTOOL-006`/`GO-SVCEXEC-001/002`'s
+decomposition-boundary-only questions, `GO-RUNTIME-001`'s signature-change-vs-
+cleanup-hook choice) — paralleling how AD-01/AD-12/AD-13/AD-17 were treated.
+`needs-architect-decision` reserved for findings where the *disposition
+itself* (fix vs. accept vs. wire/defer/retire vs. collapse-vs-parity-test) is
+the open question: the six production islands (AD-06–AD-11), the
+gravitational-package review (AD-14, `GO-DEP-002`/`GO-STORE-001`/`GO-STORE-005`),
+the semantic-duplication share-vs-parity-test cluster (AD-19, 9 findings in
+`11-semantic-duplication-migration-drift/`), the config-naming blast-radius
+question (AD-20, `GO-INFRA-001`), the lint-ratchet/gofmt-sweep timing
+questions (AD-21/AD-22, `GO-HYG-001`/`GO-CHAT-007`), and a handful of findings
+whose own false_positive_considerations or task-file text explicitly frame
+the fix-or-accept call as unresolved (`GO-SEC4-002/003`, `GO-API-001/003`,
+`GO-RUNTIME-002/004`, `GO-STORE-008`, `GO-STORE-009`, `GO-CHAT-008`,
+`GO-MEM-004/005`).
+
+### `defer` and `false-positive` dispositions (16 findings, mostly informational)
+
+12 findings — largely the informational "architectural observation" class
+from `10-architectural-concentration/` and `13-mechanical-cleanup/05` — were
+set to `defer`: the audit's own recommendation for each is "no action
+required" or "optional, judgment call," with no live defect and no immediate
+fix planned (`GO-MCPTOOL-007/010`, `GO-PLUGIN-006`, `GO-API-009`, `GO-EXEC-003/004`,
+`GO-SVCCORE-007/009`, `GO-MCPTOOL-005`, `GO-RUNTIME-006`, `GO-CHAT-009`). 4 were
+set to `false-positive`, each engaging directly with the audit's own
+evidence: `GO-DEP-001`/`GO-STORE-002` (the audit's own text concludes
+`Container`/`*Store`'s size is not itself a defect — a legitimate composition
+root and a healthy large package, respectively), `GO-MEM-008` (the audit's
+own text names this an example of its "reported dead != remove" guardrail
+working correctly), and `GO-RUNTIME-008` (`agent.Boot`'s complexity judged
+essential and correctly handled, same shape as `cmdServe`).
+
+### `needs-more-evidence` (1 finding)
+
+`GO-STORE-006` (`SyncDurableAgentInstanceConfig`'s missing transaction wrap).
+The task file's own text says the audit could not complete a
+caller-concurrency trace within its budget, and the fix's correct shape
+depends entirely on that trace's answer. What would settle it: tracing
+whether any real production caller can invoke this method concurrently for
+the same slug; if yes, wrap in a transaction (or adopt the sibling
+self-checking `WHERE`-clause idiom already used elsewhere in the same file).
+
+### Task files corrected (stale line numbers only — none closed, none narrowed)
+
+No task file's premise evaporated (fully or partially) — every one of the 113
+findings was reconfirmed still open in some form (open bug, open island
+decision, or open architect question), so no task got the
+`CLOSED BY WAVE 0 REVALIDATION` banner, and none had its scope narrowed.
+Six task files had stale `internal/service/container.go` / `cmd/nanite/main.go`
+line-number citations corrected in place (the underlying code is unchanged;
+only line numbers shifted, from unrelated additive work by the intervening
+`TASKS/skills/` and `TASKS/loops/` batches — `+2` to `+62` lines depending on
+where in the file):
+
+- `06-store-correctness/01-fix-deleteagentbyid-error-swallowing.md` (`GO-STORE-003`: `agents.go` doc-comment/function citations, `1211-1214`/`1211-1221` → `1213-1216`/`1213-1223`)
+- `04-container-reaper-lifecycle/01-fix-container-constructor-partial-failure-cleanup.md` (`GO-LIFE-001`: reaper-start/struct-capture/error-return citations in `container.go`)
+- `04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md` (`GO-SVCCORE-002`: the wake-reactor precedent comment's `container.go` citation, `1133-1143` → `1184-1194`)
+- `07-runtime-correctness-lifecycle/02-fix-cmdserve-fatal-cleanup-bypass.md` (`GO-RUNTIME-001`: all 7 `slogx.Fatal` call-site line numbers in `cmd/nanite/main.go`, re-confirmed still 7 sites)
+- `07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md` (`GO-RUNTIME-005`: `Container.Shutdown`'s start line and internals in `container.go`, plus its one call site in `main.go`)
+- `08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md` (`GO-API-004`: not a line-number fix — recorded that the in-repo comment's cited blocker, "producers not all landed," is now factually resolved; all three producers confirmed present)
+
+`FINDING-INDEX.md` and `findings.json`'s `task_file` field required no changes
+— no task file was split, merged, or renamed during this pass.
+
+### Refreshed tool baseline (`00/02`, landed separately, `55d9b9c6`/`531dcfcc`)
+
+`docs/audits/2026-08-21-go-quality/raw-1d3bfd96/` holds the frozen-HEAD
+re-run with `DELTA.md` diffing every count-bearing measure against the audit
+era. Cited directly rather than hand-recomputed wherever a finding's
+disposition depended on a count: `gofmt -l` 122→130, gosec G304
+(production) 68→70, `deadcode` 214→202, `internal/store` `dupl` hits
+41→40 (across 22 files, not ~20), govulncheck's 14-vulnerability-ID set
+unchanged.
+
+### What's next
+
+Wave 1 is gated on AD-01 through AD-04 being `decided` in
+`ARCHITECT-DECISIONS.md` (operator track, running against Part 1's interim
+report) — this folder's own work is complete independent of that. The
+programmatic "Done means" check passes (see `01-revalidate-findings-against-head.md`'s
+Work Log for the actual run output); `docs/audits/2026-08-21-go-quality/findings.json`
+(pristine) is confirmed byte-for-byte untouched throughout both parts of this task.

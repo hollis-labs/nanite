@@ -1,7 +1,7 @@
 # Revalidate all 113 audit findings against frozen HEAD and set real dispositions
 
 **Phase:** Audit remediation — Wave 0 (revalidate the baseline)
-**Status:** in-progress
+**Status:** implemented
 **Depends on:** none — but **hard-gated on the dev freeze** (see Context). Do not start while other batches are still landing code.
 **Blocks:** every task in `01/` through `13/`. This is the batch's dispatch gate. Also blocks **AD-01 through AD-04**, which the operator decides against this task's interim critical/high report — see "Interim report required" under What to do.
 **Parallelizable with:** `00/02` (different tooling; see that task's Non-goals for the `findings.json` merge protocol).
@@ -320,5 +320,99 @@ the remaining ~101 findings, the task-file-correction sweep across the rest of `
 the `## Outcome` section, and the final programmatic validation check are Part 2, to follow a
 separate dispatch. `docs/audits/2026-08-21-go-quality/findings.json` (pristine) confirmed
 untouched via `git status`/`git diff --stat` before finishing this part.
+
+**2026-08-22 — Part 2 of 2 (remaining ~101 findings, task-file sweep, Outcome, final check),
+by dispatch instruction after the interim report was relayed to the operator.** Explicitly
+directed to proceed without waiting for AD-01–AD-04, since nothing in the remaining work
+depends on them.
+
+Processed all 33 medium, then 45 low, then 24 informational findings (severity order, per
+the task file). Methodology: for each finding, cross-referenced its cited `files` against
+`git diff --name-only 8feeee5c..HEAD` — 88 of the 101 had zero cited files touched since the
+audit (byte-identical), letting me confirm the specific claimed symbol/behavior directly
+against unchanged source with high confidence; the other 13 (mostly `internal/service/
+container.go`, `cmd/nanite/main.go`, and a few `internal/api/` files touched by the
+skills/loops batches) got a closer read, including diffing the specific hunks to confirm
+whether the finding's flagged code itself moved vs. merely shifted line numbers. Read the
+actual cited symbol/behavior for every one of the 101 (not just the file-level diff) before
+setting a disposition — greps and targeted `Read` calls are cited per-finding in each
+`revalidation_note`.
+
+**Disposition-value discipline, applied consistently across all 101 (same rule stated in
+Part 1, now generalized):** `remediate` when the underlying defect is unambiguous and only
+the *implementation shape* is architect-gated (e.g. `GO-MCPTOOL-006`'s decomposition
+boundaries parallel to Part 1's `GO-SVCEXEC-001/002` treatment; `GO-RUNTIME-001`'s
+signature-vs-cleanup-hook choice parallel to `GO-SEC4-001`'s AD-01 treatment).
+`needs-architect-decision` reserved for findings where the disposition itself — not just the
+fix — is what's undecided: all six production islands (`GO-MEM-001/002`, `GO-SVCEXEC-003`,
+`GO-MCPTOOL-001/002/003`), the gravitational-package review trio gated by AD-14
+(`GO-DEP-002`, `GO-STORE-001`, `GO-STORE-005`), the AD-19 share-vs-parity-test cluster in
+`11-semantic-duplication-migration-drift/` (used each task file's own `Gated on:` field as
+the ground-truth signal — pulled via `grep -rn "Gated on:" TASKS/audit-remediation/*/*.md`
+across the whole batch rather than re-deriving per finding — since some folders separate
+per-sub-finding `requires_architect_decision` overrides from the task file's overall gate,
+e.g. `06/02` explicitly marks `GO-STORE-004`/`GO-STORE-006` as *not* needing architect input
+despite the task file's own overall `Gated on: AD-14`, which applies only to the
+`GO-STORE-005` sub-section), the config-naming (AD-20) and lint/gofmt-timing (AD-21/AD-22)
+questions, and a handful of findings whose own `false_positive_considerations` or task-file
+prose explicitly frame the fix-or-accept call as unresolved (`GO-SEC4-002/003`,
+`GO-API-001/003`, `GO-RUNTIME-002/004`, `GO-STORE-008/009`, `GO-CHAT-008`, `GO-MEM-004/005`).
+
+**Catalog-gap correction, per explicit dispatch instruction:** set `GO-MEM-002` and
+`GO-MCPTOOL-003` to `needs-architect-decision` (bringing `findings.json` in line with
+`ARCHITECT-DECISIONS.md`'s "gap worth naming" and the guide's blanket six-island
+wire/defer/retire requirement) — re-confirmed both islands are still fully unwired in
+production against current source first.
+
+**`defer`/`false-positive`/`needs-more-evidence` used where the allowed-value list's more
+common options didn't fit an honest read of the finding:** 12 `defer` (mostly informational
+observations whose own audit text already concludes "no action required" or "optional,
+judgment call," with no live defect); 4 `false-positive`, each engaging with the audit's own
+evidence string rather than just asserting disagreement (`GO-DEP-001`/`GO-STORE-002`: the
+audit's own text concludes `Container`/`*Store`'s size is not a defect; `GO-MEM-008`: the
+audit's own text names this an example of its "reported dead != remove" guardrail working
+*correctly*; `GO-RUNTIME-008`: `agent.Boot`'s complexity judged essential and correctly
+handled); 1 `needs-more-evidence` (`GO-STORE-006` — the task file's own text says the audit
+could not complete a caller-concurrency trace within budget; noted precisely what would
+settle it).
+
+**Task-file `## Context` corrections (stale line numbers only — no premise evaporated, none
+closed, none narrowed):** 6 task files corrected in place, all citing `internal/service/
+container.go` or `cmd/nanite/main.go` line numbers that shifted (by +2 to +62 lines) from
+unrelated additive work landed by the intervening `TASKS/skills/` and `TASKS/loops/`
+batches — the flagged code itself is unchanged in every case, confirmed by direct diff
+against `8feeee5c`:
+- `06-store-correctness/01-fix-deleteagentbyid-error-swallowing.md` (done in Part 1)
+- `04-container-reaper-lifecycle/01-fix-container-constructor-partial-failure-cleanup.md` (`GO-LIFE-001`: reaper-start/struct-capture/error-return citations, plus the quoted `go vet` output flagged as reflecting audit-era line numbers)
+- `04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md` (`GO-SVCCORE-002`: wake-reactor precedent comment citation, `1133-1143` → `1184-1194`; re-confirmed the file's own already-present drift note on `agent_deps.go`'s zero-`safego.Go` count is still accurate)
+- `07-runtime-correctness-lifecycle/02-fix-cmdserve-fatal-cleanup-bypass.md` (`GO-RUNTIME-001`: all 7 `slogx.Fatal` call sites re-grepped and re-cited; count is still 7, not the audit's approximate "5," confirming the task file's own already-noted discrepancy)
+- `07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md` (`GO-RUNTIME-005`: `Container.Shutdown`'s start/internals in `container.go` and its one call site in `main.go`)
+- `08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md` (`GO-API-004`: not a line-number fix — recorded that the in-repo comment's cited blocker ("producers not all landed") is now factually resolved; all three producers — HTTP handler, reflex hook, self-tool — confirmed present in current source)
+
+No task file's premise evaporated, fully or partially — every one of the 113 findings was
+reconfirmed still open in some form. No task got the `CLOSED BY WAVE 0 REVALIDATION` banner;
+none had its scope narrowed. `FINDING-INDEX.md` and `findings.json`'s `task_file` field
+needed no changes (no task file split/merged/renamed).
+
+**Outcome section written** in `00-revalidate-baseline/README.md` (`## Outcome (2026-08-22)`):
+HEAD SHA, full disposition-count table across all 113, the critical/high re-confirmation, the
+two catalog-gap corrections, the `needs-architect-decision`/`defer`/`false-positive`/
+`needs-more-evidence` rationale, the 6 corrected task files, and a pointer to `00/02`'s
+refreshed tool baseline for count-bearing findings.
+
+**Final programmatic check — actually run, not claimed:**
+
+```
+$ python3 -c "..." # the exact snippet from this task file's 'Done means' section
+no note: []
+bad disposition: []
+missing task file: []
+Counter({'remediate': 64, 'needs-architect-decision': 32, 'defer': 12, 'false-positive': 4, 'needs-more-evidence': 1})
+ALL CHECKS PASSED
+```
+
+`docs/audits/2026-08-21-go-quality/findings.json` (pristine) reconfirmed byte-for-byte
+untouched (`git status --short` / `git diff --stat` both empty for that path) before
+finishing. All "Done means" criteria met; `**Status:**` set to `implemented` above.
 
 ## Review notes

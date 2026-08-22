@@ -1,7 +1,7 @@
 # Sandbox + capability-policy gate for skill script/materializer execution
 
 **Phase:** 5 — Security: sandbox + policy gate (`TASKS/skills`)
-**Status:** in-progress — review found a real secret-leakage bug, fix required (see "Fix required" section below)
+**Status:** implemented — fix landed for the reviewer-found secret-leakage bug (see "Fix applied" section below)
 **Depends on:** `02` (grant-state columns on `agent_known_skills`), `08` (the caller this gate
 serves — task `08` calls into whatever this task builds)
 **Touches:** new file `internal/skill/gate.go` (or extend `internal/skill/exec.go` if task `08`
@@ -383,6 +383,109 @@ scripts that need ordinary env vars like `HOME`/`LANG`/`PATH` beyond that narrow
 "exact shape," but it's actually broader/more conservative (doesn't also require
 `Pinned`/`ActivationCount`/etc. all zero) — the actual security behavior is correct and arguably
 stricter, just an imprecise comment. Optional polish, not required as part of this fix.
+
+## Fix applied (2026-08-22)
+
+**Bug confirmed, reproduced, and fixed as scoped.** `Gate.run` never set `cmd.Env`, so Go's
+`exec.Cmd` "nil `Env` means inherit" default leaked the full, unfiltered host process environment
+— including real secrets held by the running Nanite server process — into every sandboxed skill
+execution, unconditionally, regardless of capability grant. Verified this was real before touching
+anything (not just trusting the report): read `internal/skill/gate.go`'s `Gate.run` as it stood on
+`main`, confirmed no `cmd.Env` assignment existed anywhere in the function or in `composeProfile`.
+
+**Where the fix lives.** `internal/skill/gate.go`'s `Gate.run`: added
+`cmd.Env = filterSecretEnv(os.Environ())` immediately after `cmd.Dir = req.WorkDir` and *before*
+the `sandbox.Apply(cmd, profile, scratchDir)` call, per the fix instructions' explicit ordering
+requirement. Added `strings` to the file's import block (needed by the new helper functions).
+
+**Verified `sandbox.Apply` doesn't itself clobber a caller-set `cmd.Env`, rather than assuming
+it** — read both real backends directly from the vendored `go-sandbox@v0.2.1` module cache:
+`apply_darwin.go` never references `cmd.Env` anywhere (grepped the whole file — zero hits), so a
+pre-set `cmd.Env` passes through completely untouched on macOS (the platform this fix was actually
+run and verified on). `apply_linux.go`'s only `cmd.Env` touch is in its loopback-helper path
+(`useLoopbackHelper`, only active when `!p.Net && (p.AllowLoopback || len(p.LoopbackForwardPorts) >
+0)`), via `inheritedEnv(cmd.Env)` — which only falls back to a fresh, unfiltered `os.Environ()`
+read when `cmd.Env` is `nil`; since this fix always sets a non-nil, already-filtered `cmd.Env`
+before `Apply` is ever called, `inheritedEnv` on Linux now copies the *filtered* environment
+forward as-is instead of re-reading the raw one. This closes the exact secondary leak path the
+"Fix required" section flagged ("`go-sandbox`'s own Linux backend provides no safety net either —
+its loopback-helper path explicitly re-inherits the full unfiltered `os.Environ()`") as a direct
+consequence of fixing `cmd.Env` at the `Gate.run` call site, with no separate change needed inside
+the vendored library.
+
+**Decision: package-local copy, not a cross-package export (fix instructions' item 1 decision
+point).** Added `secretEnvKeyPatterns`/`filterSecretEnv`/`isSecretEnvKey` as `internal/skill`'s own
+local, unexported copies (same patterns: `KEY`/`SECRET`/`TOKEN`/`PASSWORD`/`CREDENTIAL`/`AUTH`,
+same case-insensitive-substring matching logic as `internal/sandbox/exec.go`'s
+`filterSecrets`/`isSecretKey`) rather than exporting `internal/sandbox`'s helpers for cross-package
+reuse. Reasoning: (1) this file's own package doc already establishes and explains the precedent of
+adapting a pattern locally instead of importing it wholesale — `composeProfile` vs.
+`buildSandboxProfile`, `DecisionMode` vs. `policy.Mode` — for the documented reason that the two
+call sites' needs might diverge over time; the env-secret-filtering floor is the same shape of
+decision. (2) Checked what `internal/sandbox` *does* already export for genuine cross-package reuse
+(`AgentExec`, `UserExec`, `CheckDenylist`, `Dir`, `ExecResult`, `*Opts` structs) — every existing
+cross-package caller (`internal/mcp`, `internal/workflow`, `internal/api`, `internal/shell`,
+`internal/service`) uses one of those full, deliberately-public entry points, never an internal
+implementation-detail helper like `filterSecrets`. Exporting `FilterSecrets`/`IsSecretKey`
+specifically and only for this one new call site would be a narrow, unprecedented export of
+`internal/sandbox`'s private internals, not a continuation of that package's existing public
+surface. A local copy keeps `internal/skill` fully decoupled from `internal/sandbox`'s internal
+implementation choices (e.g., if that package's pattern list or matching strategy changes for its
+own `AgentExec`/`UserExec` needs later, this gate's floor doesn't silently change underneath it).
+
+**Regression tests added (`internal/skill/gate_test.go`):**
+- `TestFilterSecretEnv_StripsSecretsKeepsOrdinaryVars` — a narrow, always-run (no sandbox-tool
+  dependency) unit test directly against `filterSecretEnv`, confirming it strips
+  `API_KEY`/`MY_SECRET_VALUE`/`AUTH_TOKEN`/`DB_PASSWORD`/`SOME_CREDENTIAL_BLOB`-shaped entries,
+  keeps `HOME`/`PATH`/`LANG` untouched, and tolerates a malformed (no `=`) entry without panicking.
+  Added in addition to, not instead of, the end-to-end test below, per the fix instructions'
+  explicit "not a unit test against `filterSecrets` in isolation only" requirement — this one
+  exists purely to pin the exact filtering behavior cheaply; it does not by itself prove
+  `Gate.run` applies it.
+- `TestExecuteGated_EnvironmentSecretsFiltered_NotLeaked` — the real, unmocked regression test the
+  fix instructions require: exercises the actual `Gate.run`/`sandbox.Apply` path (gated behind
+  `requireSandboxTool`, matching this task's own established real-sandbox-test discipline — ran for
+  real on this machine, darwin/arm64 with `sandbox-exec` present, not skipped). Sets
+  `NANITE_TEST_SECRET_TOKEN=should-not-leak` and `NANITE_TEST_SAFE_VAR=safe-value-should-pass-through`
+  via `t.Setenv` in the test process's own environment, grants a skill under the **bare default
+  capability posture** (`{}`  — no `FS`, no `Network`, nothing elevated, matching the bug report's own
+  "no capability grant elevation is needed; it's unconditional" framing), runs `/bin/sh -c "env"` as
+  an ordinary marker/compute command through the real gate, and confirms the captured
+  `ExecResult.Stdout` contains neither the secret value nor the secret variable's name, while
+  confirming `NANITE_TEST_SAFE_VAR` and any of `HOME`/`PATH`/`LANG` actually present in the test
+  process's own environment *do* still appear — proving the fix is a blocklist filter, not an
+  allowlist that would break ordinary skill scripts relying on ordinary environment context (fix
+  instructions' item 3).
+
+**Verification run (this fix, 2026-08-22):**
+- `go build ./cmd/nanite/` — clean.
+- `go vet ./...` — only the same two pre-existing, unrelated `stopReaper`/`stopRuntimeReaper`
+  findings in `internal/service/container.go` that this task's own original Work Log (and task
+  `02`'s, via `git blame`) already confirmed pre-existing and out of scope.
+- `go test ./internal/skill/... -race -count=1 -v` — full package suite, all tests pass, including
+  both new tests above and every test from the original landing (grant-decision tests, the real
+  `FS.Write`/`FS.Deny` sandbox-bounds test, the real network-capability test, the hash-mismatch
+  re-approval test, and the single-`sandbox.Apply`-call-site AST check) — nothing in this fix
+  altered any of those other behaviors.
+- `go test ./...` — full repo-wide suite, run after the package-scoped run, all packages pass.
+
+**Scope discipline.** No change to the capability vocabulary (`Capabilities`/`FSCapability`/
+`NetworkCapability`/`SubprocessSpawn`), the no-grant-row resolution, the hash-mismatch/re-approval
+logic, or the `GateDecision`/`DecisionMode` shape — this fix touches only `Gate.run`'s environment
+handling (one new `cmd.Env` assignment, two new small unexported helper functions, and their
+tests) plus the package doc comment describing the now-corrected environment behavior. The
+review's one flagged non-blocking doc-precision nit (the `ApprovedContentHash == ""` comment's
+"exact shape" wording) was left as-is, per the fix instructions' own "optional polish, not
+required" framing.
+
+**GLOSSARY.md.** No new entry needed — `filterSecretEnv`/`isSecretEnvKey`/`secretEnvKeyPatterns`
+are unexported, package-local helpers (matching this file's own precedent of not glossary-entering
+unexported helpers like `appendUniquePath`/`blockDecision`/`logDecision`); checked for name
+collisions anyway (none found).
+
+**Process notes followed.** No `git stash` used anywhere in this session. All live verification
+used `t.TempDir()`/`t.Setenv`-scoped test-local state exclusively — no relative path or real
+tracked directory was touched.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

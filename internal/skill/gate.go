@@ -40,15 +40,34 @@ package skill
 //   - Network maps onto Profile.Net/AllowLoopback.
 //   - SubprocessSpawn maps onto Profile.Subprocess.
 //   - "environment-secret-access" (the fifth resource kind
-//     20-skills.md's illustrative list names) is deliberately absent:
-//     sandbox.Profile has no field expressing environment-variable
-//     scoping at all (confirmed by reading go-sandbox@v0.2.1's Profile
-//     struct directly, sandbox/profile.go) — there is nothing for a grant
-//     of this kind to actually back, and this task's own instruction is
-//     explicit not to invent one. A sandboxed command's environment is
-//     inherited from this process unmodified (exec.Cmd's own "nil Env
-//     means inherit" default) — a known, documented limitation, not an
-//     oversight.
+//     20-skills.md's illustrative list names) is deliberately absent as a
+//     *grantable* capability: sandbox.Profile has no field expressing
+//     environment-variable scoping at all (confirmed by reading
+//     go-sandbox@v0.2.1's Profile struct directly, sandbox/profile.go) —
+//     there is nothing for a grant of this kind to actually back, and this
+//     task's own instruction is explicit not to invent one.
+//
+//     This does NOT mean the sandboxed command's environment is inherited
+//     unmodified, though. A fresh review after this task's initial landing
+//     (TASKS/skills/09's "Fix required" section) found that it previously
+//     was — Gate.run never set cmd.Env at all, so exec.Cmd's own "nil Env
+//     means inherit" default leaked the full, unfiltered host process
+//     environment (including whatever real secrets the running Nanite
+//     server process holds) into every sandboxed skill execution
+//     unconditionally, regardless of capability grant. Gate.run now sets
+//     cmd.Env to a secret-filtered copy of the inherited environment
+//     (filterSecretEnv, below) before calling sandbox.Apply, as a floor
+//     applied to every execution — not something a capability grant can
+//     opt out of, and not itself part of the Capabilities vocabulary above.
+//     This mirrors internal/sandbox/exec.go's own filterSecrets/isSecretKey
+//     pattern (already used there for the identical problem class —
+//     UserExec's own "env := filterSecrets(os.Environ())"), kept here as
+//     this package's own local copy (filterSecretEnv/isSecretEnvKey) rather
+//     than a cross-package export of that package's unexported helpers —
+//     matching this file's own established precedent elsewhere
+//     (composeProfile vs. buildSandboxProfile, DecisionMode vs. policy.Mode)
+//     of adapting a pattern locally rather than always importing across
+//     packages whose two call sites' needs might diverge over time.
 //
 // # A real, load-bearing finding about go-sandbox@v0.2.1's cross-platform
 // enforcement strength — investigated directly against the vendored
@@ -173,6 +192,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/hollis-labs/go-sandbox/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -444,6 +464,19 @@ func (g *Gate) run(ctx context.Context, req ExecRequest, caps Capabilities) (Exe
 	cmd := exec.CommandContext(ctx, req.Command[0], req.Command[1:]...)
 	cmd.Dir = req.WorkDir
 
+	// Secret-filtered environment — a floor applied unconditionally to
+	// every sandboxed execution, independent of any capability grant. Set
+	// before sandbox.Apply so the profile is applied to a command that
+	// already carries the correct (filtered) environment; confirmed by
+	// reading both apply_darwin.go and apply_linux.go directly that neither
+	// backend resets or otherwise clobbers a caller-supplied cmd.Env
+	// (apply_darwin.go never references cmd.Env at all; apply_linux.go's
+	// inheritedEnv only falls back to a fresh os.Environ() read when
+	// cmd.Env is nil, so a non-nil, already-filtered cmd.Env here is
+	// preserved as-is on both platforms). See this file's package doc for
+	// the bug this fixes (TASKS/skills/09's "Fix required" section).
+	cmd.Env = filterSecretEnv(os.Environ())
+
 	cleanup, err := sandbox.Apply(cmd, profile, scratchDir)
 	if err != nil {
 		return ExecResult{}, fmt.Errorf("skill gate: apply sandbox profile: %w", err)
@@ -500,4 +533,56 @@ func appendUniquePath(list []string, v string) []string {
 		}
 	}
 	return append(list, v)
+}
+
+// secretEnvKeyPatterns are substrings that identify environment variable
+// names likely to hold secrets. Matching is case-insensitive. Mirrors
+// internal/sandbox/exec.go's own secretKeyPatterns list exactly (kept as
+// this package's own local copy rather than a cross-package export of that
+// package's unexported helpers — see this file's package doc, "environment-
+// secret-access," for the full reasoning).
+var secretEnvKeyPatterns = []string{
+	"KEY",
+	"SECRET",
+	"TOKEN",
+	"PASSWORD",
+	"CREDENTIAL",
+	"AUTH",
+}
+
+// filterSecretEnv returns a copy of environ (in "KEY=value" form, exactly
+// os.Environ()'s own shape) with every entry whose key matches
+// secretEnvKeyPatterns removed. Applied unconditionally by Gate.run to
+// every sandboxed skill execution, regardless of capability grant — this is
+// a floor, not something a grant can opt out of. Fixes the bug found in
+// fresh review (TASKS/skills/09's "Fix required" section): Gate.run
+// previously never set cmd.Env at all, so exec.Cmd's own "nil Env means
+// inherit" default leaked the full, unfiltered host process environment —
+// including real secrets — into every sandboxed skill's ExecResult.Stdout
+// via an ordinary "compute" marker such as `` !`env` ``, with no elevated
+// capability grant required.
+func filterSecretEnv(environ []string) []string {
+	filtered := make([]string, 0, len(environ))
+	for _, entry := range environ {
+		eqIdx := strings.IndexByte(entry, '=')
+		if eqIdx < 0 {
+			continue
+		}
+		if !isSecretEnvKey(entry[:eqIdx]) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+// isSecretEnvKey reports whether name matches any secretEnvKeyPatterns
+// substring, case-insensitively.
+func isSecretEnvKey(name string) bool {
+	upper := strings.ToUpper(name)
+	for _, pattern := range secretEnvKeyPatterns {
+		if strings.Contains(upper, pattern) {
+			return true
+		}
+	}
+	return false
 }

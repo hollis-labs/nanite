@@ -444,6 +444,118 @@ func TestExecuteGated_NetworkBlockedOutsideGrant_AllowedWithGrant(t *testing.T) 
 	})
 }
 
+// TestFilterSecretEnv_StripsSecretsKeepsOrdinaryVars is a narrow unit test
+// against filterSecretEnv itself, in addition to (not instead of) the
+// end-to-end TestExecuteGated_EnvironmentSecretsFiltered_NotLeaked test
+// below — this one pins the exact filtering behavior without depending on
+// a real sandbox tool being installed, so it always runs regardless of
+// platform.
+func TestFilterSecretEnv_StripsSecretsKeepsOrdinaryVars(t *testing.T) {
+	in := []string{
+		"HOME=/home/test",
+		"PATH=/usr/bin:/bin",
+		"LANG=en_US.UTF-8",
+		"API_KEY=super-secret",
+		"MY_SECRET_VALUE=nope",
+		"AUTH_TOKEN=nope",
+		"DB_PASSWORD=nope",
+		"SOME_CREDENTIAL_BLOB=nope",
+		"malformed-entry-no-equals",
+	}
+	out := filterSecretEnv(in)
+
+	wantKept := []string{"HOME=/home/test", "PATH=/usr/bin:/bin", "LANG=en_US.UTF-8"}
+	for _, w := range wantKept {
+		found := false
+		for _, o := range out {
+			if o == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %q to be kept, got %v", w, out)
+		}
+	}
+
+	wantStripped := []string{"API_KEY", "MY_SECRET_VALUE", "AUTH_TOKEN", "DB_PASSWORD", "SOME_CREDENTIAL_BLOB"}
+	for _, o := range out {
+		eqIdx := strings.IndexByte(o, '=')
+		key := o
+		if eqIdx >= 0 {
+			key = o[:eqIdx]
+		}
+		for _, w := range wantStripped {
+			if key == w {
+				t.Errorf("expected %q to be stripped, but it survived filtering: %v", w, out)
+			}
+		}
+	}
+
+	if len(out) != len(wantKept) {
+		t.Errorf("expected exactly %d surviving entries (%v), got %d: %v", len(wantKept), wantKept, len(out), out)
+	}
+}
+
+// TestExecuteGated_EnvironmentSecretsFiltered_NotLeaked is the regression
+// test for TASKS/skills/09's "Fix required" section: a granted skill run
+// under the bare default capability posture (no FS, no Network, nothing
+// elevated) must NOT see a secret-shaped environment variable from the host
+// process's own environment, via an ordinary "compute" marker/script that
+// reads its own environment (`` !`env` `` / printenv-equivalent) — this is
+// a real, unmocked test exercising the actual Gate.run/sandbox.Apply path
+// (not a unit test against filterSecretEnv in isolation), matching this
+// task's own established real-sandbox-test discipline.
+func TestExecuteGated_EnvironmentSecretsFiltered_NotLeaked(t *testing.T) {
+	requireSandboxTool(t)
+	if _, err := exec.LookPath("env"); err != nil {
+		t.Skip("env not found")
+	}
+
+	// A secret-shaped var (matches the "TOKEN" pattern) that must never
+	// reach the sandboxed command's environment, and a plain, non-secret
+	// var that must pass through unfiltered so a real skill script relying
+	// on ordinary environment context isn't broken by this fix.
+	t.Setenv("NANITE_TEST_SECRET_TOKEN", "should-not-leak")
+	t.Setenv("NANITE_TEST_SAFE_VAR", "safe-value-should-pass-through")
+
+	// Bare default posture — no FS, no Network, nothing elevated. The bug
+	// this test guards against was unconditional: no capability grant
+	// elevation was needed to trigger it.
+	g, agentID, skillSlug := newAuthorizedGate(t, `{}`)
+	req := ExecRequest{
+		SkillSlug: skillSlug, AgentID: agentID,
+		Command: []string{"/bin/sh", "-c", "env"},
+		WorkDir: t.TempDir(),
+		Kind:    ExecKindMarker, Label: "env-leak-test",
+	}
+	res, err := g.ExecuteGated(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ExecuteGated: %v (stdout=%q stderr=%q)", err, res.Stdout, res.Stderr)
+	}
+
+	if strings.Contains(res.Stdout, "should-not-leak") {
+		t.Errorf("secret-shaped env var value leaked into sandboxed command's environment: stdout=%q", res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "NANITE_TEST_SECRET_TOKEN") {
+		t.Errorf("secret-shaped env var name leaked into sandboxed command's environment: stdout=%q", res.Stdout)
+	}
+
+	// Non-secret pass-through: this fix must not become an allowlist that
+	// breaks ordinary skill scripts relying on HOME/PATH/LANG/etc.
+	if !strings.Contains(res.Stdout, "NANITE_TEST_SAFE_VAR=safe-value-should-pass-through") {
+		t.Errorf("expected non-secret env var to pass through unfiltered; stdout=%q", res.Stdout)
+	}
+	for _, key := range []string{"HOME", "PATH", "LANG"} {
+		if os.Getenv(key) == "" {
+			continue
+		}
+		if !strings.Contains(res.Stdout, key+"=") {
+			t.Errorf("expected ordinary env var %s to pass through unfiltered; stdout=%q", key, res.Stdout)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------
 // Structural proof: this package has exactly one sandbox.Apply call site
 // (this file's Gate.run), matching this task's own Done-means grep check.

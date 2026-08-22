@@ -1,7 +1,7 @@
 # Full `context.Context` propagation sweep across `internal/store`
 
 **Phase:** Audit remediation — out-of-wave mechanical sweep
-**Status:** implemented — **not complete**, see `04-cancellation-safety-for-terminal-writes.md`
+**Status:** validated — acceptance criteria verified independently; deep code review deferred (operator's call, 2026-08-22)
 **Depends on:** none technically — but **must not run concurrently with any other task in this batch.** See "Isolation" below; this is the binding constraint on when it runs, not a preference.
 **Blocks:** `06/01`, `06/02`, `11/13`, `13/01`, `13/02` (all touch `internal/store`), and in practice every task touching a caller package.
 **Parallel-safe with:** **nothing.**
@@ -33,7 +33,16 @@
 
 ---
 
-> ## ⚠ NOT CLOSED — fix task `06/04` is outstanding (2026-08-22)
+> ## ✅ CLOSED (2026-08-22) — `06/04` landed with it in `fe16e138`
+>
+> The regression described below was fixed by
+> `04-cancellation-safety-for-terminal-writes.md` and both landed together.
+> Final verified state: store SQL oracles 0/0/0, 371/371 methods with `ctx`,
+> `go test ./...` 0 FAIL / 94 ok, `go vet` exactly the 4 pre-existing
+> `container.go` findings, 246 `context.TODO()` calls with 246 markers.
+> The historical record of the regression follows.
+>
+> ## (historical) NOT CLOSED — fix task `06/04` was outstanding
 >
 > The mechanical sweep verified clean and was independently re-measured:
 > 265 → 0 non-context calls, 141 → 406 context calls (exact conservation),
@@ -278,9 +287,14 @@ report it in the Work log.
   matched only through the opening `(`.
 - Final completeness: non-context `Query` = 0, `Exec` = 0, `QueryRow` = 0;
   exported methods without `ctx` = 0; exported methods with `ctx` = 371.
-- Final `TODO(ctx-sweep)` marker count: **245**. All are in non-test Go
+- Final `TODO(ctx-sweep)` marker count after follow-up `06/04`: **246**. All are in non-test Go
   files, all use `context.TODO()`, and no newly added production call site
   uses `context.Background()`.
+- Follow-up `06/04` found one additional `context.TODO()` in
+  `chatServiceImpl.recordUtilityMetrics` whose selector and call had been
+  split across lines by the sweep's AST rewrite, with an unrelated function
+  comment displaced inside the expression. Restoring the expression and its
+  required marker corrected the reported count from 245 to 246.
 - Mechanical exceptions handled: `ListSessions` is variadic, including two
   zero-option test calls, so caller detection checked the first argument's
   type instead of relying only on arity. Existing store-backed consumer

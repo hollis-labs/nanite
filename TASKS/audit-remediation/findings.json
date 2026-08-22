@@ -403,7 +403,7 @@
       "false_positive_considerations": "May be an intentional, not-yet-reached migration backlog rather than an oversight.",
       "task_file": "TASKS/audit-remediation/06-store-correctness/03-full-context-propagation-sweep.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "validated",
       "revalidation_note": "Confirmed unchanged: `grep -c 'ctx context.Context'` returns 0 for both sessions.go and agents.go, 6 for teams.go -- matches the finding exactly. This is the specific sub-question AD-14 (\"how far to narrow internal/store dependencies\") is scoped to decide; task file 06/02 itself flags this sub-section's `requires_architect_decision: true` as \"the one piece of this task file that is genuinely an architect decision.\" [AD-14 DECIDED 2026-08-22: full context propagation sweep \u2014 all 371 remaining exported *Store methods across 67 files, callers in 32 packages. Executed as a standalone mechanical task (06/03) by an external session, OUTSIDE the wave structure and in isolation, because it is structurally incompatible with concurrent work. task_file reassigned from 06/02 to 06/03; 06/02 re-scoped to its other two findings.]"
     },
     {

@@ -1,7 +1,7 @@
 # Fix `06/03`: terminal-outcome store writes must survive their operation's cancellation
 
 **Phase:** Audit remediation — fix task for `06/03`
-**Status:** not-started
+**Status:** complete
 **Depends on:** `06/03`'s working tree. **This is not a fresh start** — it builds directly on the uncommitted sweep. Do not revert it, do not re-run it.
 **Blocks:** everything `06/03` blocks. The sweep cannot land until this closes.
 **Parallel-safe with:** nothing, same as `06/03`.
@@ -197,4 +197,124 @@ existing workflow launcher tests.
 
 ## Work log
 
+- Reproduced `TestWorkflowLauncher_Launch_RespectsTimeout` failing with
+  `persist result: ... context deadline exceeded` before the fix.
+- Audited all 50 named non-test sites individually: **29 detached** terminal
+  outcome writes and **21 deliberately unchanged** sites.
+- Added
+  `TestBuiltinWorkflowEngine_PersistWorkflowRunStepOutcome_SurvivesCancelledContext`.
+  Its executor cancels the workflow context before the terminal upsert; the
+  stored row is then read back and asserted `failed` with the cancellation
+  outcome.
+- Mutation check passed: replacing the terminal upsert's
+  `context.WithoutCancel(ctx)` with `ctx` makes the new test fail with
+  `context canceled`; restoring it makes the test pass.
+- No timeouts were added to detached writes. They retain context values and
+  shed only cancellation/deadline through `context.WithoutCancel`.
+- Found and corrected one underlying `06/03` marker defect at
+  `chatServiceImpl.recordUtilityMetrics`: the AST sweep had split
+  `context.TODO()` across lines and displaced the following function comment
+  inside the call. The restored marked call changes the truthful final
+  `TODO(ctx-sweep)` count from 245 to **246**; all 246 `context.TODO()` calls
+  now have markers.
+- Bugs noticed but deliberately not fixed: none beyond the in-scope
+  cancellation regression and marker-expression repair above.
+
+### Site dispositions (50/50)
+
+| # | Method and site | Disposition and reason |
+|---:|---|---|
+| 1 | `LogEvent` — `cmd/nanite/admin_export_decisions.go:158` | **Left:** the event row is the export payload itself; cancellation should stop the export. |
+| 2 | `LogEvent` — `internal/agent/reflexes/telemetry.go:279` | **Detached:** records a reflex firing after the action resolves. |
+| 3 | `LogEvent` — `internal/api/sessions.go:241` | **Left:** already uses marked `context.TODO()`; no cancellable operation context is available. |
+| 4 | `LogEvent` — `internal/recovery/orphansweep/orphan_sweep.go:171` | **Left:** already uses marked `context.TODO()` in post-reconciliation logging. |
+| 5 | `LogEvent` — `internal/scheduler/telemetry.go:246` | **Detached:** records the completed schedule dispatch attempt outcome. |
+| 6 | `LogEvent` — `internal/selftools/reactions/telemetry.go:148` | **Detached:** records the completed self-tool reaction outcome. |
+| 7 | `LogEvent` — `internal/selftools/self_tools_dispatch.go:194` | **Detached:** records the broker decision failure returned by `Decide`. |
+| 8 | `LogEvent` — `internal/selftools/self_tools_dispatch.go:202` | **Detached:** records the successful broker decision returned by `Decide`. |
+| 9 | `LogEvent` — `internal/service/agent_deps.go:644` | **Left:** generic runtime-store adapter with no outcome semantics of its own; originating callers choose the context. |
+| 10 | `LogEvent` — `internal/service/chat_generate.go:1136` | **Detached:** records the provider failure after overflow recovery is refused. |
+| 11 | `LogEvent` — `internal/service/chat_generate.go:1196` | **Detached:** records the completed provider-stream failure. |
+| 12 | `LogEvent` — `internal/service/chat_generate.go:1505` | **Detached:** records the provider stream's terminal inactivity timeout. |
+| 13 | `LogEvent` — `internal/service/chat_generate.go:1594` | **Detached:** records the provider response's terminal max-token truncation. |
+| 14 | `LogEvent` — `internal/service/chat_generate.go:1772` | **Detached:** records the completed response-envelope parse outcome. |
+| 15 | `LogEvent` — `internal/service/chat_generate.go:3146` | **Left:** announces an envelope retry before the retry operation runs. |
+| 16 | `LogEvent` — `internal/service/chat_reflexes.go:25` | **Detached:** records the completed reflex-evaluation failure. |
+| 17 | `LogEvent` — `internal/service/chat_tool_executor.go:538` | **Detached:** records the failed tool-call outcome. |
+| 18 | `LogEvent` — `internal/service/chat_tool_executor.go:546` | **Detached:** records the successful tool-call outcome. |
+| 19 | `LogEvent` — `internal/service/chat_tool_executor.go:790` | **Detached:** records the completed tool-result truncation outcome. |
+| 20 | `LogEvent` — `internal/service/container.go:993` | **Detached:** records the same terminal halt persisted immediately before it. |
+| 21 | `LogEvent` — `internal/service/recovery_pack_glue.go:92` | **Left:** already uses marked `context.TODO()`; no cancellable parent context exists. |
+| 22 | `LogEvent` — `internal/subagent/service.go:694` | **Detached:** records the terminal rejection of a recursive spawn. |
+| 23 | `LogEvent` — `internal/subagent/service.go:797` | **Left:** records trusted approval bypass before the subagent dispatch continues. |
+| 24 | `RecordScheduleRunAttempt` — `internal/scheduler/retrying_runner.go:223` | **Detached:** persists the completed successful dispatch attempt. |
+| 25 | `RecordScheduleRunAttempt` — `internal/scheduler/retrying_runner.go:246` | **Detached:** persists terminal retry exhaustion after dispatch failure. |
+| 26 | `RecordScheduleRunAttempt` — `internal/scheduler/retrying_runner.go:258` | **Detached:** persists the failed attempt and next retry window after dispatch. |
+| 27 | `UpsertWorkflowRunStep` — `internal/service/workflow_engine.go:133` | **Left:** pre-registers a pending step before execution. |
+| 28 | `UpsertWorkflowRunStep` — `internal/service/workflow_engine.go:383` | **Detached:** persists a terminal skipped result after dependency failure. |
+| 29 | `UpsertWorkflowRunStep` — `internal/service/workflow_engine.go:536` | **Left:** marks running before step execution. |
+| 30 | `UpsertWorkflowRunStep` — `internal/service/workflow_engine.go:543` | **Left:** marks the nonterminal `waiting_on_gate` transition. |
+| 31 | `UpsertWorkflowRunStep` — `internal/service/workflow_engine.go:561` | **Left:** marks the nonterminal `waiting_on_flex` transition. |
+| 32 | `UpsertWorkflowRunStep` — `internal/service/workflow_engine.go:599` | **Detached:** persists the terminal LLM/tool step result. |
+| 33 | `UpsertWorkflowRunStep` — `internal/service/workflow_engine_flex.go:179` | **Detached:** persists the terminal flex recheck resolution. |
+| 34 | `UpsertWorkflowRunStep` — `internal/service/workflow_engine_loop.go:362` | **Detached:** persists a loop launch that resolved terminally inline. |
+| 35 | `UpsertWorkflowRunStep` — `internal/service/workflow_engine_loop.go:372` | **Left:** marks the nonterminal `waiting_on_loop` transition. |
+| 36 | `UpsertWorkflowRunStep` — `internal/service/workflow_engine_loop.go:387` | **Detached:** terminal failure policy is explicit via `WithoutCancel(TODO)` while retaining the sweep marker for later context plumbing. |
+| 37 | `UpsertWorkflowRunStep` — `internal/service/workflow_engine_loop.go:459` | **Detached:** persists the terminal loop recheck resolution. |
+| 38 | `SetDurableAgentInstanceStatus` — `internal/service/durable_agents.go:335` | **Left:** `starting` is a pre-launch, nonterminal transition. |
+| 39 | `SetDurableAgentInstanceStatus` — `internal/service/durable_agents.go:396` | **Left:** `resume_requested` precedes resume work and is nonterminal. |
+| 40 | `SetDurableAgentInstanceStatus` — `internal/service/durable_agents.go:514` | **Left:** `stop_requested` precedes runtime shutdown and is nonterminal. |
+| 41 | `RecordExecutionMetrics` — `internal/service/chat_generate.go:2004` | **Detached:** records metrics for the completed chat turn. |
+| 42 | `RecordExecutionMetrics` — `internal/service/chat_generate.go:3445` | **Left:** utility-call metrics already use marked `context.TODO()` because the helper has no ambient context. |
+| 43 | `SetAgentRuntimeState` — `internal/service/agent_deps.go:588` | **Left:** adapter callback already uses marked `context.TODO()` and has no ambient operation context. |
+| 44 | `SetAgentRuntimeState` — `internal/service/agent_deps.go:671` | **Left:** manager state-sink callback already uses marked `context.TODO()`. |
+| 45 | `MarkAgentRuntimeFailed` — `internal/service/agent_deps.go:578` | **Left:** runtime adapter callback already uses marked `context.TODO()`. |
+| 46 | `MarkAgentRuntimeOrphaned` — `internal/service/agent_deps.go:637` | **Left:** orphan adapter callback already uses marked `context.TODO()`. |
+| 47 | `MarkSessionHalted` — `internal/service/container.go:985` | **Detached:** persists the terminal halt even if the reflex context is cancelled. |
+| 48 | `CompleteLoopRunIteration` — `internal/loop/engine.go:639` | **Detached:** persists the completed iteration decision after evaluation. |
+| 49 | `MarkReminderFired` — `internal/reminders/engine.go:158` | **Left:** already uses marked `context.TODO()`; the reminder engine has no ambient cancellable context. |
+| 50 | `RecordUsage` — `internal/service/chat_generate.go:1966` | **Detached:** records token usage for the completed chat turn. |
+
+### Verification
+
+- `go build ./...`: pass.
+- `go vet ./...`: exactly four pre-existing findings in
+  `internal/service/container.go` (`stopReaper` and `stopRuntimeReaper` not
+  used on all paths, plus their paired reachable return findings); no fifth.
+- `go test ./...`: pass on the final tree.
+- `go test ./internal/service/ -run TestWorkflowLauncher_Launch_RespectsTimeout -count=3`:
+  pass, three consecutive runs.
+- `go test -race ./internal/store/... ./internal/service/... ./internal/api/...`:
+  pass.
+- Store oracles: non-context `Query` = 0, `Exec` = 0, `QueryRow` = 0.
+- `gofmt -l` on all touched Go files: no output. `git diff --check`: pass.
+- No `internal/store/` signature was changed by this follow-up.
+
 ## Review notes
+
+**2026-08-22 — planner verification pass (not a full code review).** Every
+acceptance criterion re-measured independently rather than accepted from the
+summary: store SQL oracles 0/0/0; 371 total exported methods, 371 with `ctx`, 0
+without (identical to `06/03`, so no signature drift); `go vet` exactly the 4
+pre-existing `container.go` findings; `go test ./...` **0 FAIL / 94 ok** — the
+criterion that failed the prior round; disposition table exactly 50 rows
+splitting 29 detached / 21 left, matching the reported figures; regression test
+present at `internal/service/workflow_launch_test.go:232`; 246 `context.TODO()`
+calls against 246 markers, exact parity; `recordUtilityMetrics`' displaced doc
+comment confirmed correctly repositioned at `chat_generate.go:3429`.
+
+One figure reconciled: 24 `context.WithoutCancel` calls against 29 detached
+sites, explained by `persistCtx`, `finalCtx`, and `toolOutcomeCtx` each being
+declared once and reused.
+
+Judgment quality spot-checked across the disposition table and found sound —
+the 21 "left" calls show the rule being reasoned about rather than
+pattern-matched (an envelope-retry announcement left because it precedes the
+retry; only 2 of 11 `UpsertWorkflowRunStep` sites detached, the rest correctly
+identified as pre-registration or nonterminal `waiting_on_*` transitions).
+
+**Limits of this pass, stated plainly:** 381 changed files were not reviewed
+line by line. Deep review is deferred by operator decision. Status is
+`validated`, not `reviewed`, to reflect that accurately.
+
+

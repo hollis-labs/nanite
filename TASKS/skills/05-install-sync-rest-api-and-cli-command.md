@@ -1,7 +1,7 @@
 # Install/sync REST API + CLI command
 
 **Phase:** 3 — Explicit install/sync (`TASKS/skills`)
-**Status:** implemented
+**Status:** in-progress — review PASS on behavior, real test-coverage gap found, fix required (see "Fix required" section below)
 **Depends on:** `04`
 **Touches:** `internal/api/skills.go` (new file, or extend an existing skill-admin API file if
 one exists — grep `internal/api/` for existing skill routes before creating a duplicate),
@@ -205,6 +205,64 @@ including `internal/api`, `internal/service`, `internal/skillinstall`,
 `internal/skillvendor`).
 
 No escalations. No schema/migration changes needed.
+
+## Fix required (fresh reviewer, 2026-08-21 — see `TASKS/ESCALATIONS.md`'s matching entry)
+
+**Overall verdict was PASS on every behavioral claim** — the reviewer independently re-ran a full
+live dogfeed (real `nanite serve` + real CLI, absolute scratch DB/vendor root) and confirmed
+`SkillVendor` nil-lifecycle (`503`), 422-vs-500 error classification, the sync slug-mismatch
+guard (confirmed via direct `sqlite3` query that a mismatched sync creates nothing), route
+registration, and CLI/REST state parity all work exactly as designed. This is not a behavioral
+bug — it's a real, reasoned test-coverage gap the reviewer flagged as not acceptable to leave
+unaddressed before marking this task fully reviewed.
+
+**The gap:** this task's diff added zero automated tests for any of its new logic.
+`runSkillInstall`'s HTTP-status classification (`internal/api/skills.go`) is genuinely novel,
+non-obvious control flow — it maps an `Install` failure to `422` vs `500` by reading a
+side-channel `lastState` variable populated by the `Installer`'s own `Emit` callback ordering,
+not by inspecting the returned error directly. The sync slug-mismatch guard
+(`handleSyncSkill`/`skillSyncCmd`) is a real, security-relevant invariant — a caller must never be
+able to mutate a different skill's row by supplying a mismatched path/slug pair. Neither is
+covered by any test, despite `internal/api` having an extremely well-established `httptest`-based
+convention for exactly this kind of coverage (`api_test.go`'s `newTestAPI` helper, used by 35
+sibling `*_test.go` files in this same package). A future refactor of `Install`'s state
+transitions, or a reordering of `Emit` calls, could silently break the 422/500 classification with
+nothing in the suite catching it.
+
+**What to do:** add a new `internal/api/skills_install_test.go` (or extend the existing
+`internal/api/skills_test.go`) using the `newTestAPI(t)` helper (`api_test.go`) — the same
+pattern every other `internal/api` handler test already follows. Cover, against real HTTP
+requests through the real `mux` `newTestAPI` returns:
+
+1. A successful install (`POST /api/skills/install`) against a real test fixture — reuse
+   `internal/skillinstall/testdata/fixtures/sample-skill` (you can reference it by relative path
+   from `internal/api/`, or copy it into a new `internal/api/testdata/` fixture if that reads more
+   consistently with this package's existing conventions — check whether `internal/api` already
+   has a `testdata/` convention before deciding). Assert `201` and the response shape.
+2. A malformed-package install (reuse `internal/skillinstall/testdata/fixtures/malformed-frontmatter`
+   or `malformed-missing-script`) — assert `422`, not `500` or a panic.
+3. `SkillVendor == nil` (construct the test `API`/container such that the vendor store never
+   initializes, or directly set `a.Services.SkillVendor = nil` on the test API instance if that's
+   simpler) — assert `503` from both `handleInstallSkill` and `handleSyncSkill`.
+4. Sync against an unknown slug — assert `404`.
+5. Sync against a real, already-installed slug but a package declaring a *different* slug — assert
+   `409`, and assert (via the test's own store handle) that no new skill row was created as a
+   side effect of the rejected attempt.
+6. Idempotent re-sync (same content) — assert `200` and `reused: true` in the response.
+
+**Note on `container.go`'s `SkillVendor` test-side-effect** (a separate, minor, explicitly
+non-blocking finding also logged in `TASKS/ESCALATIONS.md` — you are not required to fix it as
+part of this coverage task, but be aware of it while writing your tests): when `AppConfig` is
+nil/empty, `SkillVendor` defaults to a repo-root-relative `data/skills/vendor` directory rather
+than a `t.TempDir()`-scoped one, so running these new tests will create real (harmless,
+`.gitignore`d) directories under `internal/api/data/skills/vendor/` — matching the exact same
+pre-existing behavior `ArtifactsConfig.StorageDir` already has for `internal/api/data/artifacts/`.
+If you find a clean, small way to scope `SkillVendor` to a per-test temp directory while adding
+your coverage (e.g. by setting `AppConfig` in your test's `ContainerConfig`), that's a welcome
+bonus — but don't let it block or complicate the core coverage task if the fix isn't
+straightforward.
+
+Re-verify `go build`/`go vet`/`go test ./internal/api/...` (and the full suite) clean when done.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

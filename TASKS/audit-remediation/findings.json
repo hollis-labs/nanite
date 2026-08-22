@@ -2918,7 +2918,7 @@
       "report_section": "\u00a78.13",
       "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/05-fix-mcp-config-silent-decode-errors.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: loadPersistedMCPServers (cmd/nanite/main.go:1295, shifted from the audit's 1233 by unrelated file growth) still discards the Args/Env json.Unmarshal errors at lines 1310/1314 while correctly warn-logging the EnvAllowlist error right next to them at 1317-1323."
     },
     {

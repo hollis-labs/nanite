@@ -1,7 +1,7 @@
 # Fix `loadPersistedMCPServers` silently discarding Args/Env JSON decode errors
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `cmd/nanite/main.go` (`loadPersistedMCPServers`, lines 1233-1277). No other files need changes.
 
@@ -113,4 +113,12 @@ Very low risk — purely additive logging plus an explicit (already-implicit) ze
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail, what was independently re-verified. -->
+- PASS (2026-08-22): independent review replayed both malformed-row cases
+  against the parent and observed the partial Args/Env values reach the child
+  process with no warning. On the fixed merge, the real SQLite→loader→manager→
+  subprocess path received empty values and emitted the field-specific warning
+  with server name and decode error.
+- Valid JSON behavior and the EnvAllowlist, SSE/default, and AddStdioServer
+  paths remain unchanged. Focused race/repetition, command build/vet/test,
+  full vet/test, and diff checks passed. `errcheck` reports neither corrected
+  site; its remaining command-package findings are pre-existing and unrelated.

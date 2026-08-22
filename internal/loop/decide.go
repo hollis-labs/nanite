@@ -44,15 +44,32 @@ package loop
 //     this table needing to be revisited") -- ContinuationPolicy (this file)
 //     is that shape.
 //
-// Everything else stays a pure function of (goal, evidence, evaluation,
+//  3. goalMet bool, in place of the design doc's implicit "Decide walks
+//     evidence itself" framing -- task 08's own resolution of
+//     TASKS/ESCALATIONS.md's 2026-08-21 entry ("Task 07's Decide()
+//     re-implements task 02's goal-evidence formula locally instead of
+//     reusing it"). This file originally re-implemented
+//     store.EvaluateGoalEvidence's four-clause formula locally
+//     (evidenceSatisfiesGoal, since removed) specifically to keep Decide
+//     DB-free apart from its one LLM call, since store.EvaluateGoalEvidence
+//     always issues its own s.GetGoal/s.ListGoalEvidence reads. That
+//     duplication is exactly what the escalation flagged as a real drift
+//     risk (no test cross-checked the two copies stayed in sync). Task 08
+//     took the escalation's option (a): the caller
+//     (internal/loop.LoopEngine.Run/Resume) queries
+//     store.EvidenceSatisfiesGoal itself and passes the already-computed
+//     bool in here, so the four-clause formula now has exactly one
+//     implementation (internal/store/goal_evidence.go) and Decide's own
+//     tests only need to exercise its reaction to a bare bool. This was
+//     judged practical, not "impractical for a real reason" (the
+//     escalation's own bar for falling back to option (b) instead) --
+//     nothing about goalMet requires a DB read Decide couldn't otherwise
+//     avoid, and the caller already has a live *store.Store in hand to
+//     make the one extra call.
+//
+// Everything else stays a pure function of (goal, goalMet, evaluation,
 // history, budget) plus the one real side effect (the reasoning-fallback
-// LLM call) -- Decide never touches the DB itself. Branch 1's goal-met check
-// is task 02's EvidenceSatisfiesGoal walk re-implemented locally
-// (evidenceSatisfiesGoal, below) against the evidence slice the caller
-// already queried -- see that function's own doc comment for why this is a
-// re-implementation rather than a call into internal/store (Decide must stay
-// DB-free apart from the LLM call, and store.EvaluateGoalEvidence always
-// does its own DB reads).
+// LLM call) -- Decide never touches the DB itself.
 
 import (
 	"context"
@@ -74,7 +91,13 @@ import (
 // leaves that choice to the implementer). IterationResult aliases
 // store.LoopRunIteration directly: its IterationNumber/Decision/
 // ProgressState fields and Evaluation() accessor are exactly what Decide
-// needs to read a loop's history, with nothing to convert.
+// needs to read a loop's history, with nothing to convert. GoalEvidence is
+// no longer consumed by Decide itself (see this file's own doc comment,
+// deviation #3) -- kept as an alias anyway since task 08's LoopEngine
+// (internal/loop/engine.go) still names store.GoalEvidence values when it
+// calls store.EvidenceSatisfiesGoal, and callers of this package
+// (including its own tests) benefit from one consistent set of type names
+// regardless of which function in this package touches a given value.
 type (
 	Goal            = store.Goal
 	GoalEvidence    = store.GoalEvidence
@@ -170,9 +193,11 @@ type ContinuationPolicy struct {
 // loop iteration, deterministic-first per 21-loops.md's "Continuation
 // policy" section:
 //
-//  1. goal_met (evidenceSatisfiesGoal, task 02's EvidenceSatisfiesGoal walk
-//     re-implemented locally against the already-queried evidence slice) ->
-//     COMPLETE.
+//  1. goal_met (goalMet, computed by the caller via
+//     store.EvidenceSatisfiesGoal against goal.ID's evidence trail -- see
+//     this file's own package-level doc comment, deviation #3, for why
+//     Decide takes this as a plain bool rather than walking []GoalEvidence
+//     itself) -> COMPLETE.
 //  2. Budget exhausted (iteration count, regression count, or elapsed
 //     runtime against budget's own thresholds) -> ESCALATE or FAIL, per
 //     budget.OnExhausted (task 03's Budget.OnExhausted, defaulting to
@@ -199,24 +224,20 @@ type ContinuationPolicy struct {
 // wants direct access to it.
 //
 // Decide is DB-free apart from the one LLM call in decideByReasoning: it
-// never queries internal/store itself, and the goal/evidence/evaluation/
-// history/budget values it's given are exactly what the caller (task 08)
-// already read.
+// never queries internal/store itself, and the goal/goalMet/evaluation/
+// history/budget values it's given are exactly what the caller (task 08's
+// LoopEngine) already read.
 func Decide(
 	ctx context.Context,
 	exec agentworkflow.StepExecutor,
 	goal Goal,
-	evidence []GoalEvidence,
+	goalMet bool,
 	evaluation Evaluation,
 	history []IterationResult,
 	budget Budget,
 	policy ContinuationPolicy,
 ) (Decision, error) {
-	met, err := evidenceSatisfiesGoal(goal, evidence)
-	if err != nil {
-		return Decision{}, fmt.Errorf("loop: decide: evaluate goal evidence: %w", err)
-	}
-	if met {
+	if goalMet {
 		return Decision{
 			Kind:   DecisionComplete,
 			Reason: "goal evidence satisfies acceptance criteria, constraints, and invariants",
@@ -243,74 +264,6 @@ func Decide(
 		Kind:   DecisionContinue,
 		Reason: "no terminal condition met; continuing",
 	}, nil
-}
-
-// evidenceSatisfiesGoal is task 02's EvidenceSatisfiesGoal/
-// EvaluateGoalEvidence algorithm (internal/store/goal_evidence.go), applied
-// locally to an already-loaded Goal and already-queried []GoalEvidence
-// rather than issuing its own DB reads -- store.EvaluateGoalEvidence always
-// calls s.GetGoal and s.ListGoalEvidence internally, which would require
-// Decide to hold a *store.Store and stop being DB-free apart from the LLM
-// call (this task's own "What to do" #2: "prefer the caller (task 08) doing
-// the evidence-walk query ... keeping Decide DB-free apart from the one LLM
-// call"). This re-implements the identical formula (goal_met =
-// acceptance_criteria_satisfied AND constraints_satisfied AND
-// invariants_preserved AND required_evidence_present, matching evidence to a
-// named criterion/constraint/invariant string by an exact match against
-// GoalEvidence.Summary) rather than calling into internal/store, since this
-// task's Touches section does not include modifying internal/store to
-// expose a DB-free variant.
-func evidenceSatisfiesGoal(goal Goal, evidence []GoalEvidence) (bool, error) {
-	covered := make(map[string]bool, len(evidence))
-	for _, e := range evidence {
-		if e.Summary != "" {
-			covered[e.Summary] = true
-		}
-	}
-
-	acceptanceCriteria, err := goal.AcceptanceCriteria()
-	if err != nil {
-		return false, err
-	}
-	constraints, err := goal.Constraints()
-	if err != nil {
-		return false, err
-	}
-	invariants, err := goal.Invariants()
-	if err != nil {
-		return false, err
-	}
-
-	if len(missingFromCoverage(acceptanceCriteria, covered)) > 0 {
-		return false, nil
-	}
-	if len(missingFromCoverage(constraints, covered)) > 0 {
-		return false, nil
-	}
-	if len(missingFromCoverage(invariants, covered)) > 0 {
-		return false, nil
-	}
-	// required_evidence_present: a goal cannot be reported goal_met with no
-	// evidence trail whatsoever, even if all three lists above are
-	// (vacuously) empty -- matches store.EvaluateGoalEvidence's own fourth
-	// clause exactly.
-	return len(evidence) > 0, nil
-}
-
-// missingFromCoverage returns the subset of items not present as a key in
-// covered, preserving items' original order. Mirrors
-// internal/store/goal_evidence.go's own helper of the same name (a
-// different package, so no collision) -- kept as a small, duplicated pure
-// function rather than an internal/store export, per evidenceSatisfiesGoal's
-// own doc comment.
-func missingFromCoverage(items []string, covered map[string]bool) []string {
-	missing := make([]string, 0)
-	for _, item := range items {
-		if !covered[item] {
-			missing = append(missing, item)
-		}
-	}
-	return missing
 }
 
 // budgetExhausted checks history and budget against every threshold

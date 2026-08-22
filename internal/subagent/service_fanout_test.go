@@ -2,7 +2,7 @@ package subagent
 
 // service_fanout_test.go — G3 fan-out semaphore tests (CW-20260426-0003)
 //
-// Four cases:
+// Six cases:
 //  1. Under-cap parallelism: N=3 spawns complete in ≈ slowest single, not sum.
 //  2. At-cap with queueing: N=5 with cap=3; first 3 run concurrently, last 2
 //     queue; total ≈ 2× single duration.
@@ -10,14 +10,19 @@ package subagent
 //     it returns cleanly without consuming a slot.
 //  4. Capacity error distinguishable: fill cap, then timeout a queued spawn;
 //     returns ErrSpawnFanoutCapReached (CW-20260816-0001), not bare ctx.Err().
+//  5. Concurrent approvals obey the same cap as direct spawns.
+//  6. Operator cancellation stops a running-observable run while it is queued.
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // controlledRunner allows tests to govern when each Run call starts, blocks,
@@ -27,6 +32,7 @@ type controlledRunner struct {
 	// gate is closed by the test to release all blocked Run calls at once.
 	// Each individual call blocks on gate until it's closed.
 	gate chan struct{}
+	once sync.Once
 
 	// started is incremented when Run begins executing (before blocking).
 	started atomic.Int64
@@ -42,7 +48,7 @@ func newControlledRunner() *controlledRunner {
 }
 
 // release unblocks all currently waiting Run invocations.
-func (r *controlledRunner) release() { close(r.gate) }
+func (r *controlledRunner) release() { r.once.Do(func() { close(r.gate) }) }
 
 // highWaterMark returns the peak concurrent count observed across all Run calls.
 func (r *controlledRunner) highWaterMark() int {
@@ -100,6 +106,27 @@ func spawnAsync(t *testing.T, svc *Service, ctx context.Context, n int) <-chan s
 		}()
 	}
 	return ch
+}
+
+// runningRunSink reports the ID of every run whose running transition is
+// emitted. Tests install it only after the fan-out cap is full, so the next ID
+// observed belongs to the run queued behind the cap.
+type runningRunSink struct {
+	runIDs chan string
+}
+
+func (s *runningRunSink) SubagentStatusChanged(_ string, payload []byte) {
+	var event struct {
+		RunID  string `json:"run_id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil || event.Status != StatusRunning {
+		return
+	}
+	select {
+	case s.runIDs <- event.RunID:
+	default:
+	}
 }
 
 // TestFanout_UnderCap_RunsConcurrently dispatches 3 spawns (= cap) with
@@ -389,3 +416,143 @@ func TestFanout_CapacityErrorDistinguishable(t *testing.T) {
 	}
 }
 
+func TestFanout_ApproveObeysConcurrencyCap(t *testing.T) {
+	db, _ := newTestDB(t)
+	db.SetMaxOpenConns(1)
+	runner := newControlledRunner()
+	defer runner.release()
+	settings := stubSettings{us: store.UserSettings{
+		SubagentApprovalRequired:       true,
+		SubagentApprovalTimeoutSeconds: 3600,
+	}}
+	svc := NewService(db, runner, &stubPoster{}, &stubEmitter{}, settings)
+
+	const total = 5
+	runIDs := make([]string, 0, total)
+	for i := range total {
+		runID, err := svc.Spawn(context.Background(), SpawnRequest{
+			ParentSessionID: "sess-approve-fanout",
+			ParentAgentID:   "parent-agent",
+			Role:            "worker-role",
+			Prompt:          "approval " + string(rune('A'+i)),
+			Mode:            ModeAsync,
+		})
+		if err != nil {
+			t.Fatalf("spawn gated run %d: %v", i, err)
+		}
+		runIDs = append(runIDs, runID)
+	}
+
+	approveErrs := make(chan error, total)
+	for _, runID := range runIDs {
+		runID := runID
+		go func() {
+			approveErrs <- svc.Approve(context.Background(), runID)
+		}()
+	}
+	for range total {
+		if err := <-approveErrs; err != nil {
+			t.Fatalf("approve: %v", err)
+		}
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && runner.started.Load() < spawnFanoutCap {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := runner.started.Load(); got != spawnFanoutCap {
+		t.Fatalf("runners started before release = %d, want exactly %d", got, spawnFanoutCap)
+	}
+
+	// Give dispatches that incorrectly bypass the semaphore enough time to
+	// enter Run; the gate remains closed throughout this observation window.
+	time.Sleep(100 * time.Millisecond)
+	if got := runner.started.Load(); got != spawnFanoutCap {
+		t.Fatalf("runners started while cap held = %d, want %d", got, spawnFanoutCap)
+	}
+	if got := runner.highWaterMark(); got > spawnFanoutCap {
+		t.Fatalf("runner high-water mark = %d, exceeds cap %d", got, spawnFanoutCap)
+	}
+
+	runner.release()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && runner.started.Load() < total {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := runner.started.Load(); got != total {
+		t.Fatalf("runners started after release = %d, want %d", got, total)
+	}
+}
+
+func TestFanout_OperatorCancelWhileQueuedPreventsRunner(t *testing.T) {
+	db, _ := newTestDB(t)
+	db.SetMaxOpenConns(1)
+	runner := newControlledRunner()
+	defer runner.release()
+	svc := NewService(db, runner, &stubPoster{}, nil, stubSettings{})
+
+	fillCh := spawnAsync(t, svc, context.Background(), spawnFanoutCap)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && runner.started.Load() < spawnFanoutCap {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := runner.started.Load(); got != spawnFanoutCap {
+		t.Fatalf("runners started while filling cap = %d, want %d", got, spawnFanoutCap)
+	}
+
+	runningIDs := make(chan string, 1)
+	svc.SetStreamSink(&runningRunSink{runIDs: runningIDs})
+	extraDone := make(chan error, 1)
+	go func() {
+		_, err := svc.Spawn(context.Background(), SpawnRequest{
+			ParentSessionID: "sess-fanout",
+			ParentAgentID:   "parent-agent",
+			Role:            "worker-role",
+			Prompt:          "operator-cancelled-while-queued",
+			Mode:            ModeAsync,
+		})
+		extraDone <- err
+	}()
+
+	var queuedRunID string
+	select {
+	case queuedRunID = <-runningIDs:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued run did not emit its running transition")
+	}
+	if err := svc.Cancel(context.Background(), queuedRunID); err != nil {
+		t.Fatalf("cancel queued run: %v", err)
+	}
+
+	select {
+	case <-extraDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("operator-cancelled queued spawn did not unblock promptly")
+	}
+	if got := runner.started.Load(); got != spawnFanoutCap {
+		t.Fatalf("runner.started = %d, want %d; cancelled queued runner executed", got, spawnFanoutCap)
+	}
+
+	runner.release()
+	for range spawnFanoutCap {
+		select {
+		case <-fillCh:
+		case <-time.After(3 * time.Second):
+			t.Fatal("original spawn did not return after release")
+		}
+	}
+
+	// Leave enough time for an incorrectly queued runner to acquire the freed
+	// slot and enter Run before checking the durable terminal state.
+	time.Sleep(100 * time.Millisecond)
+	if got := runner.started.Load(); got != spawnFanoutCap {
+		t.Fatalf("runner.started after release = %d, want %d", got, spawnFanoutCap)
+	}
+	run, err := svc.Status(context.Background(), queuedRunID)
+	if err != nil {
+		t.Fatalf("status queued run: %v", err)
+	}
+	if run.Status != StatusCancelled {
+		t.Fatalf("queued run status = %q, want %q", run.Status, StatusCancelled)
+	}
+}

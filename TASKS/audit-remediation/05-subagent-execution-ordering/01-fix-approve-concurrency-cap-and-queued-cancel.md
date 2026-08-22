@@ -1,7 +1,7 @@
 # Route `Approve()` through the spawn concurrency cap; make a queued-run `Cancel()` actually stop the run
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency (per remediation guide §4)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch (single-task folder; no sibling task in
 `05-subagent-execution-ordering/` to sequence against).
 **Touches:** `internal/subagent/service.go` (`Spawn`, `Approve`, `Cancel`,
@@ -534,7 +534,35 @@ Observable behavior required for PASS:
 
 ## Work log
 
-<Worker fills this in.>
+- 2026-08-22 — Re-derived the current `Spawn`, `Approve`, `Cancel`,
+  semaphore, and runner-cleanup signatures after the Wave 2 lifecycle work.
+  The landed 04/04 changes alter `internal/service` lifecycle ownership but do
+  not change `internal/subagent/service.go`'s existing `safego` launch surface,
+  so this task kept that boundary intact.
+- Chose GO-EXEC-001 direction **(b)**: `Approve` registers cancellation before
+  emitting `running`, returns without waiting for capacity, and acquires the
+  same `spawnSem` slot inside its background dispatch before calling
+  `executeWithSlot`. This preserves the HTTP approval path's existing prompt
+  response while enforcing the cap.
+- Chose GO-EXEC-002 direction **(a)**: introduced one per-run cancellation hook
+  before the `running` event is observable. The hook cancels both the
+  caller-governed semaphore wait and the background-derived execution context,
+  so it needs no queued-to-running promotion. A post-acquire context check
+  releases capacity without invoking the runner when cancellation and slot
+  availability race. Applied the shared path to sync, async/API, and approved
+  runs.
+- Added `TestFanout_ApproveObeysConcurrencyCap` and
+  `TestFanout_OperatorCancelWhileQueuedPreventsRunner`. Pre-fix proof:
+  `go test ./internal/subagent -run
+  'TestFanout_(ApproveObeysConcurrencyCap|OperatorCancelWhileQueuedPreventsRunner)$'
+  -count=1 -v` failed both regressions — approvals started 4 runners while the
+  cap remained held at 3, and operator cancellation did not unblock the queued
+  spawn within 500ms. The same command passes after the fix.
+- Verification passed: `go build ./internal/subagent/...`; `go vet
+  ./internal/subagent/...`; `go test ./internal/subagent/... -run
+  'Fanout|Approve|Cancel' -count=1 -v`; `go test -race
+  ./internal/subagent/... -timeout 25m` (809.733s, no race); `go build ./...`;
+  `go vet ./...`; and `go test ./...`.
 
 ## Review notes
 

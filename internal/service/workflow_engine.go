@@ -45,6 +45,19 @@ type BuiltinWorkflowEngine struct {
 	// wired. See workflow_engine_flex.go.
 	teamMembers TeamMembershipStore
 	flexState   FlexStepStateCollector
+
+	// loopRuns / loopLauncher are the StepKindLoop (TASKS/loops/
+	// 09-stepkindloop-executor-and-waiting-status.md) dependencies a loop
+	// step needs: loopLauncher.LaunchLoop actually starts the contained
+	// LoopRun (a bridge to internal/loop.LoopEngine.Run that avoids an
+	// internal/service <-> internal/loop import cycle — see
+	// workflow_engine_loop.go's own package-level doc comment for the full
+	// reasoning), and loopRuns reads a loop_runs row's live status back to
+	// decide whether a waiting_on_loop step can now resolve. Both nil
+	// until WithLoopSupport is called — every existing llm/tool/gate/flex
+	// workflow is unaffected either way.
+	loopRuns     LoopRunStatusStore
+	loopLauncher LoopStepLauncher
 }
 
 // NewBuiltinWorkflowEngine constructs the built-in WorkflowEngine.
@@ -66,6 +79,24 @@ func NewBuiltinWorkflowEngine(runStore WorkflowRunStore) *BuiltinWorkflowEngine 
 func (e *BuiltinWorkflowEngine) WithFlexSupport(teamMembers TeamMembershipStore, stateCollector FlexStepStateCollector) *BuiltinWorkflowEngine {
 	e.teamMembers = teamMembers
 	e.flexState = stateCollector
+	return e
+}
+
+// WithLoopSupport attaches the loop_runs read surface and the
+// LoopEngine.Run bridge (LoopStepLauncher) a StepKindLoop step needs to
+// ever launch or resolve (TASKS/loops/09-stepkindloop-executor-and-
+// waiting-status.md). Kept as a post-construction setter — not a
+// NewBuiltinWorkflowEngine parameter — mirroring WithFlexSupport's own
+// reasoning exactly: the many pre-existing call sites that never touch a
+// StepKindLoop step don't all need to thread through a new dependency. An
+// engine constructed without it still runs every llm/tool/gate/flex
+// workflow exactly as before; a loop step reached without it resolves to a
+// clear, terminal config error rather than hanging forever (see
+// startLoopStep/recheckLoopStep in workflow_engine_loop.go). Returns e for
+// convenient chaining at the call site.
+func (e *BuiltinWorkflowEngine) WithLoopSupport(loopRuns LoopRunStatusStore, launcher LoopStepLauncher) *BuiltinWorkflowEngine {
+	e.loopRuns = loopRuns
+	e.loopLauncher = launcher
 	return e
 }
 
@@ -153,8 +184,8 @@ func (e *BuiltinWorkflowEngine) Resume(ctx context.Context, runID string, wf age
 		switch row.Status {
 		case "pending", "running":
 			continue
-		case "waiting_on_gate", "waiting_on_flex":
-			// Both bucket into the same in-memory `waiting` map here —
+		case "waiting_on_gate", "waiting_on_flex", "waiting_on_loop":
+			// All three bucket into the same in-memory `waiting` map here —
 			// execute()'s per-level loop is what actually treats them
 			// differently: a gate stays untouched until an external
 			// caller resolves it (store.ResolveGate) before ever calling
@@ -166,6 +197,25 @@ func (e *BuiltinWorkflowEngine) Resume(ctx context.Context, runID string, wf age
 			// itself is computed here rather than supplied externally,
 			// since (unlike a gate's human-authored approval) it's
 			// entirely derivable from already-persisted session state.
+			//
+			// A loop step (TASKS/loops/09-stepkindloop-executor-and-
+			// waiting-status.md) gets the same "real, active re-check on
+			// every Resume-driven pass" treatment (recheckLoopStep) — but
+			// unlike flex, this is NOT the lazy piggyback-on-some-
+			// unrelated-caller's-Resume pattern the design doc's own
+			// "Real trigger-fire mechanism" note explicitly rules out for
+			// loop: the reason THIS run ever gets a fresh Resume call
+			// while a loop step is waiting is the real push
+			// (LoopEngine's OuterResumeNotifier calling this same
+			// .Resume the moment the contained LoopRun goes terminal).
+			// This per-level recheck is the correctness/idempotency layer
+			// on top of that push (re-deriving the resolution from
+			// loop_runs.status rather than trusting that Resume was only
+			// ever called because of a genuine terminal transition) — it
+			// still resolves to "still legitimately waiting" (no store
+			// write, stays waiting_on_loop) if some OTHER, unrelated
+			// caller resumes this same run while the loop is genuinely
+			// still in flight.
 			waiting[row.StepID] = true
 			continue
 		}
@@ -205,13 +255,16 @@ func (e *BuiltinWorkflowEngine) execute(
 		blocked bool
 		skipped bool
 		outcome stepRunOutcome
-		// flexResolved marks an outcome produced by recheckFlexStep
-		// rather than a fresh runStep dispatch — the post-processing loop
-		// below uses it to also drop the step out of the `waiting` map
-		// (a flex step's own first entry sets waiting[stepID]=true; a
-		// llm/tool/gate step's first-and-only outcome never needs this,
-		// since it was never in `waiting` to begin with).
-		flexResolved bool
+		// resolvedFromWait marks an outcome produced by recheckFlexStep or
+		// recheckLoopStep (task 09 renamed this from flexResolved when
+		// loop steps became the second kind to reuse this same "already
+		// waiting, re-check on this Resume pass" path) rather than a
+		// fresh runStep dispatch — the post-processing loop below uses it
+		// to also drop the step out of the `waiting` map (a flex/loop
+		// step's own first entry sets waiting[stepID]=true; a llm/tool/gate
+		// step's first-and-only outcome never needs this, since it was
+		// never in `waiting` to begin with).
+		resolvedFromWait bool
 	}
 
 	for _, level := range levels {
@@ -230,18 +283,21 @@ func (e *BuiltinWorkflowEngine) execute(
 			if waiting[step.ID] {
 				// A step already in `waiting` (loaded by Resume, or set
 				// by this same execute() call for a sibling level
-				// visited earlier — flex steps have no dependents that
-				// would reach a later level before this one resolves,
-				// so in practice this is always the Resume-reload case)
-				// stays blocked for every kind except flex: a flex
-				// step's exit trigger is fully re-derivable from
-				// already-persisted state, so every Resume-driven pass
-				// through this loop gets a real chance to close it,
+				// visited earlier — flex/loop steps have no dependents
+				// that would reach a later level before this one
+				// resolves, so in practice this is always the
+				// Resume-reload case) stays blocked for every kind
+				// except flex and loop: both have a resolution condition
+				// fully re-derivable from already-persisted state (a
+				// flex step's exit trigger; a loop step's contained
+				// LoopRun's own persisted status), so every Resume-driven
+				// pass through this loop gets a real chance to close it,
 				// dispatched through the same goroutine+outcomes[i]
 				// machinery as a fresh step so it can't race the
 				// concurrent reads other same-level goroutines are
 				// doing against results/waiting.
-				if step.Kind == agentworkflow.StepKindFlex {
+				switch step.Kind {
+				case agentworkflow.StepKindFlex:
 					i, step := i, step
 					wg.Add(1)
 					go func() {
@@ -255,7 +311,36 @@ func (e *BuiltinWorkflowEngine) execute(
 							return // still legitimately waiting; outcomes[i] stays zero-value (stepID == "") and is ignored below.
 						}
 						outcomes[i] = levelOutcome{
-							stepID: step.ID, flexResolved: true,
+							stepID: step.ID, resolvedFromWait: true,
+							outcome: stepRunOutcome{Kind: outcomeCompleted, Result: sr},
+						}
+					}()
+				case agentworkflow.StepKindLoop:
+					// See this task's Context (TASKS/loops/
+					// 09-stepkindloop-executor-and-waiting-status.md) on
+					// why this is NOT the same "lazy re-check piggybacked
+					// on an unrelated caller's Resume" pattern flex uses:
+					// the reason this run gets a Resume call at all while
+					// a loop step is waiting is the real push
+					// (OuterResumeNotifier.NotifyLoopRunTerminal, called
+					// directly by LoopEngine the moment the contained
+					// LoopRun goes terminal — internal/loop/engine.go).
+					// This recheck is the idempotent correctness layer on
+					// top of that push, not the trigger itself.
+					i, step := i, step
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						resolved, sr, lerr := e.recheckLoopStep(ctx, runID, step)
+						if lerr != nil {
+							outcomes[i] = levelOutcome{stepID: step.ID, outcome: stepRunOutcome{Err: lerr}}
+							return
+						}
+						if !resolved {
+							return // still legitimately waiting; outcomes[i] stays zero-value (stepID == "") and is ignored below.
+						}
+						outcomes[i] = levelOutcome{
+							stepID: step.ID, resolvedFromWait: true,
 							outcome: stepRunOutcome{Kind: outcomeCompleted, Result: sr},
 						}
 					}()
@@ -306,7 +391,7 @@ func (e *BuiltinWorkflowEngine) execute(
 				waiting[oc.stepID] = true
 			default:
 				results[oc.stepID] = oc.outcome.Result
-				if oc.flexResolved {
+				if oc.resolvedFromWait {
 					delete(waiting, oc.stepID)
 				}
 			}
@@ -333,7 +418,7 @@ func (e *BuiltinWorkflowEngine) finishRun(
 		}
 	}
 	if status == agentworkflow.RunStatusCompleted && len(waiting) > 0 {
-		status = flexOrGateWaitingStatus(byID, waiting)
+		status = waitingRunStatus(byID, waiting)
 	}
 
 	completedAt := time.Time{}
@@ -352,20 +437,50 @@ func (e *BuiltinWorkflowEngine) finishRun(
 	return agentworkflow.WorkflowResult{RunID: runID, Status: status, StepResults: stepResults, Error: errMsg}, nil
 }
 
-// flexOrGateWaitingStatus picks the run-level RunStatus for a run with at
-// least one step still waiting. A gate step takes priority over a flex
-// step (RunStatusWaiting == "waiting_on_gate") since a gate genuinely needs
-// a human; RunStatusWaitingOnFlex is reported only when every waiting step
-// is a flex step. See agentworkflow.RunStatusWaitingOnFlex's doc comment
-// and migration 133 for why this has to be a real, distinct, DB-persisted
-// status rather than an in-memory-only distinction.
-func flexOrGateWaitingStatus(byID map[string]agentworkflow.StepDefinition, waiting map[string]bool) agentworkflow.RunStatus {
+// waitingRunStatus picks the run-level RunStatus for a run with at least
+// one step still waiting — gate > flex > loop precedence
+// (docs/engineering/architecture/21-loops.md Decision 1, quoted directly in
+// TASKS/loops/09-stepkindloop-executor-and-waiting-status.md's Context: "If
+// a run is blocked by more than one kind at once, gate still takes
+// priority..., then flex, then loop — the least human-attention-demanding
+// kind loses the tie-break"). A gate step's presence takes priority over
+// both flex and loop (RunStatusWaiting == "waiting_on_gate") since a gate
+// genuinely needs a human; RunStatusWaitingOnFlex is reported when every
+// waiting step is flex-or-loop but at least one is flex; RunStatusWaitingOnLoop
+// is reported only when every waiting step is a loop step. See
+// agentworkflow.RunStatusWaitingOnFlex/RunStatusWaitingOnLoop's own doc
+// comments and migrations 133/141 for why this has to be a real, distinct,
+// DB-persisted status rather than an in-memory-only distinction.
+//
+// Renamed from the original two-way flexOrGateWaitingStatus by task 09,
+// which extended (not replaced) this precedence function per its own "What
+// to do" instruction — gate and flex keep their exact prior behavior; loop
+// is the new, lowest-priority tier.
+func waitingRunStatus(byID map[string]agentworkflow.StepDefinition, waiting map[string]bool) agentworkflow.RunStatus {
+	sawFlex := false
+	sawLoop := false
 	for stepID := range waiting {
-		if byID[stepID].Kind != agentworkflow.StepKindFlex {
+		switch byID[stepID].Kind {
+		case agentworkflow.StepKindFlex:
+			sawFlex = true
+		case agentworkflow.StepKindLoop:
+			sawLoop = true
+		default:
 			return agentworkflow.RunStatusWaiting
 		}
 	}
-	return agentworkflow.RunStatusWaitingOnFlex
+	if sawFlex {
+		return agentworkflow.RunStatusWaitingOnFlex
+	}
+	if sawLoop {
+		return agentworkflow.RunStatusWaitingOnLoop
+	}
+	// Unreachable in practice — finishRun only calls this when
+	// len(waiting) > 0, so at least one of the two flags above is always
+	// set by the loop — but a defensive fallback that mirrors gate's own
+	// "least surprising default" is safer than a nonsensical zero-value
+	// RunStatus.
+	return agentworkflow.RunStatusWaiting
 }
 
 // stepOutcomeKind distinguishes a step that reached a terminal result from
@@ -388,10 +503,11 @@ type stepRunOutcome struct {
 }
 
 // runStep executes one step: llm/tool steps resolve their templated config
-// and dispatch to the matching StepExecutor method (never for gate or flex
-// steps — both are engine-native pausing, StepExecutor has no gate/flex
-// method); gate steps mark themselves waiting_on_gate and stop there. Every
-// transition (running, then terminal) is persisted immediately.
+// and dispatch to the matching StepExecutor method (never for gate, flex,
+// or loop steps — all three are engine-native pausing, StepExecutor has no
+// gate/flex/loop method); gate steps mark themselves waiting_on_gate and
+// stop there. Every transition (running, then terminal) is persisted
+// immediately.
 //
 // flex steps (StepKindFlex, docs/engineering/architecture/15-teams.md
 // Decision 2) reuse that identical pause shape on first entry — marking
@@ -401,6 +517,13 @@ type stepRunOutcome struct {
 // here: see execute()'s per-level loop and recheckFlexStep/evaluateFlexExit
 // in workflow_engine_flex.go for what makes a flex step's wait actually
 // end.
+//
+// loop steps (StepKindLoop, docs/engineering/architecture/21-loops.md
+// Decision 1) are the third reuse of the same pause shape, but with real
+// work on first entry (unlike gate/flex, which just mark themselves
+// waiting): startLoopStep (workflow_engine_loop.go) resolves the step's
+// config and actually launches the contained LoopRun before deciding
+// whether to resolve immediately or park as waiting_on_loop.
 func (e *BuiltinWorkflowEngine) runStep(
 	ctx context.Context,
 	runID string,
@@ -440,6 +563,18 @@ func (e *BuiltinWorkflowEngine) runStep(
 			return stepRunOutcome{Err: fmt.Errorf("mark waiting_on_flex: %w", err)}
 		}
 		return stepRunOutcome{Kind: outcomeWaiting, Result: agentworkflow.StepResult{StepID: step.ID, Kind: step.Kind}}
+	}
+
+	if step.Kind == agentworkflow.StepKindLoop {
+		// First entry only — a step already waiting_on_loop never reaches
+		// runStep again (Resume buckets it into `waiting` and execute()
+		// dispatches recheckLoopStep instead; see startLoopStep's own doc
+		// comment in workflow_engine_loop.go for the full behavior:
+		// resolve config, launch the contained LoopRun, and either resolve
+		// immediately (the LoopRun already reached a terminal state
+		// synchronously within this one launch call) or mark
+		// waiting_on_loop and return.
+		return e.startLoopStep(ctx, runID, step, input)
 	}
 
 	sr, verify := e.executeLLMOrTool(ctx, runID, step, results, input, exec)
@@ -517,17 +652,18 @@ func (e *BuiltinWorkflowEngine) executeLLMOrTool(
 		}
 
 	}
-	// No case for StepKindGate or StepKindFlex here, deliberately — both
-	// are engine-native pausing intercepted earlier in runStep, before
-	// executeLLMOrTool is ever called (TASKS/teams/06-stepkindflex-
-	// executor.md: task 03's placeholder case here, which used to fail
-	// clearly rather than silently no-op now that migration 130 makes
-	// kind='flex' a DB-valid row, is superseded by that earlier
-	// interception — a flex step now genuinely never reaches this switch
-	// on the happy path, so there is nothing for this switch to guard
-	// against here anymore; StepDefinition.Kind isn't attacker-controlled
-	// input, and agentworkflow.Validate already rejects any kind outside
-	// {llm,tool,gate,flex} before a run is ever created).
+	// No case for StepKindGate, StepKindFlex, or StepKindLoop here,
+	// deliberately — all three are engine-native pausing intercepted
+	// earlier in runStep, before executeLLMOrTool is ever called
+	// (TASKS/teams/06-stepkindflex-executor.md: task 03's placeholder case
+	// here, which used to fail clearly rather than silently no-op now that
+	// migration 130 makes kind='flex' a DB-valid row, is superseded by
+	// that earlier interception — a flex or loop step now genuinely never
+	// reaches this switch on the happy path, so there is nothing for this
+	// switch to guard against here anymore; StepDefinition.Kind isn't
+	// attacker-controlled input, and agentworkflow.Validate already
+	// rejects any kind outside {llm,tool,gate,flex,loop} before a run is
+	// ever created).
 
 	if step.Verify == nil {
 		return sr, nil

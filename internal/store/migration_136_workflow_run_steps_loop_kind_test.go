@@ -250,14 +250,23 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 		t.Fatalf("goose DownTo 134 (reverse migration 136 on real backup copy): %v", err)
 	}
 
-	if err := rs.UpsertWorkflowRunStep(&WorkflowRunStepRow{
-		WorkflowRunID: flexRunID,
-		StepID:        flexStepID,
-		Kind:          "flex",
-		Status:        "waiting_on_flex",
-		Output:        "flex row inserted before migration 136's rebuild",
-	}); err != nil {
-		t.Fatalf("UpsertWorkflowRunStep(kind=flex) on real backup copy at schema version 134: %v", err)
+	// Inserted via raw SQL, not the Go UpsertWorkflowRunStep helper: task
+	// 09 (TASKS/loops/09-stepkindloop-executor-and-waiting-status.md)
+	// widened workflowRunStepColumns to always include the new
+	// workflow_run_steps.loop_run_id column it added in migration 141 —
+	// that helper's INSERT statement is written against this worktree's
+	// HEAD schema and fails against the intentionally-rolled-back schema
+	// version 134 this test runs at here (no loop_run_id column exists
+	// yet at that version). The row shape below matches 133's own rebuilt
+	// CREATE TABLE exactly (the live schema at version 134 — no 'loop'
+	// kind, no loop_run_id column, both added later by 136/141).
+	if _, err := rs.DB.ExecContext(ctx, `
+		INSERT INTO workflow_run_steps
+			(id, workflow_run_id, step_id, kind, status, output, is_error, tool_calls_json, verify_json, error, started_at, completed_at, updated_at, gate_input)
+		VALUES (?, ?, ?, 'flex', 'waiting_on_flex', ?, 0, '[]', '', '', '', '', datetime('now'), '')`,
+		flexRunID+":"+flexStepID, flexRunID, flexStepID, "flex row inserted before migration 136's rebuild",
+	); err != nil {
+		t.Fatalf("insert synthetic flex row on real backup copy at schema version 134: %v", err)
 	}
 
 	// Replay all the way back to this worktree's head (not just UpTo(136))

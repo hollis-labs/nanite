@@ -226,6 +226,14 @@ type LoopEngine struct {
 	store    *store.Store
 	registry *agentworkflow.Registry
 	launcher *service.WorkflowLauncher
+
+	// outerResume is the push mechanism a LoopRun launched from a
+	// StepKindLoop step needs — TASKS/loops/
+	// 09-stepkindloop-executor-and-waiting-status.md, see outer_resume.go.
+	// nil until WithOuterResumeNotifier is called; every existing Run/
+	// Resume behavior is unaffected either way (notifyOuterOnTerminal is a
+	// no-op with no notifier configured).
+	outerResume OuterResumeNotifier
 }
 
 // NewLoopEngine constructs a LoopEngine. All three arguments are required
@@ -523,6 +531,10 @@ func (e *LoopEngine) escalateOnBoundedContextExceeded(ctx context.Context, lr *s
 	if err := e.store.UpdateLoopRunStatus(ctx, lr.ID, status, completedAt); err != nil {
 		return LoopResult{}, fmt.Errorf("loop: run: max_runtime_seconds exceeded, and updating loop_run status failed: %w", err)
 	}
+	// notifyOuterOnTerminal itself checks status against the terminal set
+	// (it's a no-op for status == LoopRunStatusWaitingOnEscalation, the
+	// escalate branch) — see that function's own doc comment.
+	e.notifyOuterOnTerminal(ctx, lr.ID, status)
 	return LoopResult{LoopRunID: lr.ID, Status: status, CurrentIteration: lr.CurrentIteration}, nil
 }
 
@@ -675,6 +687,12 @@ func (e *LoopEngine) evaluateDecideAndAct(
 		if err := e.store.UpdateLoopRunStatus(ctx, lr.ID, store.LoopRunStatusCompleted, &now); err != nil {
 			return LoopResult{}, true, fullHistory, fmt.Errorf("loop: update loop_run status: %w", err)
 		}
+		// TASKS/loops/09-stepkindloop-executor-and-waiting-status.md: the
+		// real push — if a StepKindLoop step's outer WorkflowRun is
+		// waiting on this LoopRun, tell it to resume now, synchronously,
+		// rather than leaving it to a lazy re-check some unrelated caller
+		// might never trigger.
+		e.notifyOuterOnTerminal(ctx, lr.ID, store.LoopRunStatusCompleted)
 		return LoopResult{LoopRunID: lr.ID, Status: store.LoopRunStatusCompleted, CurrentIteration: lr.CurrentIteration, LastDecision: decision}, true, fullHistory, nil
 
 	case DecisionFail:
@@ -682,6 +700,7 @@ func (e *LoopEngine) evaluateDecideAndAct(
 		if err := e.store.UpdateLoopRunStatus(ctx, lr.ID, store.LoopRunStatusFailed, &now); err != nil {
 			return LoopResult{}, true, fullHistory, fmt.Errorf("loop: update loop_run status: %w", err)
 		}
+		e.notifyOuterOnTerminal(ctx, lr.ID, store.LoopRunStatusFailed)
 		return LoopResult{LoopRunID: lr.ID, Status: store.LoopRunStatusFailed, CurrentIteration: lr.CurrentIteration, LastDecision: decision}, true, fullHistory, nil
 
 	default:
@@ -789,14 +808,17 @@ func (e *LoopEngine) resumeBlockedIteration(ctx context.Context, lr *store.LoopR
 }
 
 // isPausedRunStatus reports whether status means "this WorkflowRun made
-// all the progress it currently can, but is not done" -- the two
+// all the progress it currently can, but is not done" -- the three
 // non-terminal RunStatus values a built-in-engine run can return
-// (agentworkflow/types.go). RunStatusWaitingOnLoop does not exist yet
-// (StepKindLoop's own execution behavior is task 09's job, per
-// 21-loops.md's Decision 1 -- not implemented here).
+// (agentworkflow/types.go). RunStatusWaitingOnLoop (task 09, StepKindLoop's
+// own execution behavior) is included for the nested case: one loop
+// iteration's own WorkflowRun can itself contain a StepKindLoop step, and
+// a paused iteration must not be evaluated/decided (evaluateDecideAndAct)
+// until it's genuinely resolved, exactly like the existing gate/flex
+// cases.
 func isPausedRunStatus(status agentworkflow.RunStatus) bool {
 	switch status {
-	case agentworkflow.RunStatusWaiting, agentworkflow.RunStatusWaitingOnFlex:
+	case agentworkflow.RunStatusWaiting, agentworkflow.RunStatusWaitingOnFlex, agentworkflow.RunStatusWaitingOnLoop:
 		return true
 	default:
 		return false
@@ -827,7 +849,15 @@ func classifyIterationProgress(res *service.WorkflowLaunchResult) (store.Evaluat
 	}
 
 	switch res.Status {
-	case agentworkflow.RunStatusWaiting, agentworkflow.RunStatusWaitingOnFlex:
+	case agentworkflow.RunStatusWaiting, agentworkflow.RunStatusWaitingOnFlex, agentworkflow.RunStatusWaitingOnLoop:
+		// Defensive, not reached in practice for the same reason
+		// isPausedRunStatus's own doc comment gives: driveIterations/
+		// resumeBlockedIteration both already filter every paused status
+		// out via isPausedRunStatus before classifyIterationProgress is
+		// ever called (task 09 added RunStatusWaitingOnLoop to that same
+		// filter for the nested-loop-in-a-loop-iteration case). Kept here
+		// for three-way symmetry with that filter, not because this
+		// branch is exercised.
 		return store.Evaluation{RemainingDelta: fmt.Sprintf("iteration workflow run is itself waiting (%s)", res.Status)}, store.LoopRunIterationProgressBlocked
 	case agentworkflow.RunStatusCancelled:
 		return store.Evaluation{RemainingDelta: "iteration workflow run was cancelled"}, store.LoopRunIterationProgressBlocked

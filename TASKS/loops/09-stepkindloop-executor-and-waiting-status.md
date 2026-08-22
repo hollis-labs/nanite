@@ -1,7 +1,7 @@
 # `StepKindLoop` executor + `RunStatusWaitingOnLoop`
 
 **Phase:** 2 — Runtime engine (`TASKS/loops`)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** `06-stepkindloop-schema.md`, `08-loop-engine-core.md`
 **Touches:** `internal/store/migrations/` (new migration — widens `status` CHECK, see
 below), `internal/agentworkflow/types.go` (new `RunStatus` constant), `internal/service/workflow_engine.go`
@@ -122,8 +122,184 @@ container-build time, avoiding the cycle. Document your actual resolution.
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why,
-anything escalated.>
+
+**Migration number.** Used `141` exactly as the dispatch instruction required (confirmed
+`ls internal/store/migrations/ | sort -t_ -k1 -n | tail -3` showed `140_workflow_runs_loop_scoping.sql`
+as the highest landed migration; no `141_*` existed yet). File:
+`internal/store/migrations/141_workflow_run_waiting_on_loop_status.sql`. Widens
+`workflow_runs.status` and `workflow_run_steps.status` CHECKs to add `'waiting_on_loop'`
+(mirroring 133's exact dual-table rebuild pattern, in one migration as 133 established), and —
+bundled into the same rebuild since `workflow_run_steps` was already being rebuilt for the
+CHECK widening — adds a new nullable `workflow_run_steps.loop_run_id TEXT REFERENCES
+loop_runs(id)` column (this task's own "your call" resolution to item 4's "where does the
+loop_run_id get recorded on the step" question: a real, indexable column, not a JSON field,
+since it's looked up in both directions — given a step, read its loop_run_id; given a
+terminal loop_run_id, find the step waiting on it, `GetWorkflowRunStepByLoopRunID`). Verified
+against a real production backup copy
+(`~/.local/share/nanite/workspaces/default/backups/main.db.pre-execution-backup-20260818-132726`,
+copied into a scratch path first, per EXECUTION-PROCESS.md): that backup predates migration 130
+entirely (zero gate/flex waiting rows of its own — same finding migration 136's own test
+already documented), so the "existing flex/gate waiting rows survive" requirement was verified
+the same way migration 136's test precedent handles this: `goose DownTo(140)`, insert synthetic
+`waiting_on_gate`/`waiting_on_flex` rows via raw SQL (not the Go helpers — see below), then
+`Up()` to replay through 141, confirming every real pre-existing row plus both synthetic rows
+survive unchanged, and that `waiting_on_loop`/`loop_run_id` are now usable. Test:
+`internal/store/migration_141_workflow_run_waiting_on_loop_status_test.go`.
+
+**Real gap found and fixed in already-landed schema-task scope, not just this task's own
+work.** `agentworkflow.Validate` (`internal/agentworkflow/validate.go`) still rejected
+`StepKindLoop` in its step-kind switch — task 06 ("schema/const half") added the DB-level
+`kind='loop'` CHECK widening (migration 136) and the `StepKindLoop` constant, but never updated
+`Validate`'s own switch, so a `WorkflowDefinition` with a loop step would have failed
+`agentworkflow.Validate(wf)` before ever reaching the engine, making `StepKindLoop` completely
+unusable regardless of how correct this task's own runtime logic is. Fixed by adding
+`StepKindLoop` to `Validate`'s accepted-kinds switch — a one-line, unambiguous correction (not
+a design question), noted here per this project's "note the correction and do the task anyway"
+policy rather than treated as a blocker.
+
+**Import-cycle resolution — verified, then corrected the task file's own stated reasoning
+while keeping its recommended shape.** Confirmed directly (`grep` on both packages' imports):
+`internal/loop` already imports `internal/service` (task 08's `WorkflowLauncher` dependency) —
+**not** the reverse, which is what the task file's own parenthetical guessed ("internal/service
+likely already imports internal/loop"). This flips which direction is actually the cycle risk:
+- The **notify** direction (`internal/loop` calling back into `internal/service` to resume an
+  outer run) has **zero** cycle risk — `internal/loop` already imports `internal/service`, so a
+  concrete type reference there would compile fine regardless. Built it as an interface anyway
+  (`OuterResumeNotifier`, declared in `internal/loop/outer_resume.go`, the consumer) purely for
+  the same narrow-dependency-footprint reason `TeamMembershipStore`/`FlexStepStateCollector`
+  exist in `workflow_engine_flex.go`, not because of a cycle. Implemented by
+  `service.LoopResumeNotifier` (`internal/service/workflow_engine_loop.go`), wired at
+  container-build time (`cmd/nanite/main.go`).
+- The **launch** direction (`internal/service`'s new `StepKindLoop` step executor needing to
+  call `LoopEngine.Run`) is the *genuine* cycle risk: `internal/service` importing
+  `internal/loop` for `LoopEngine`/`LoopDefinition`/`LoopInput`/`LoopResult` types would create
+  `internal/service -> internal/loop -> internal/service`, given `internal/loop`'s existing
+  import. Fixed with a `LoopStepLauncher` interface declared in `internal/service`
+  (`workflow_engine_loop.go`), speaking only `internal/service`-native request/result types
+  (`LoopStepLaunchRequest`/`LoopStepLaunchResult` — no `internal/loop` type ever appears in that
+  file's exported surface), satisfied structurally by a `LaunchLoop` method added directly onto
+  `*loop.LoopEngine` (`internal/loop/step_launcher.go` — legal since `internal/loop` already
+  imports `internal/service`, so that method can freely reference those types).
+- The task file's *recommended shape* (a small notifier interface, implemented in
+  `internal/service`, wired at container-build time) was correct and is exactly what got built
+  — only the stated reasoning for *why* was backwards, and the *other* direction (launch) turned
+  out to be the one that actually needed the interface-based fix.
+
+**A2A status mapping.** `waiting_on_loop` → `a2a.TaskStateWorking` (`deriveFromWorkflowRun`,
+`internal/service/a2a_task_manager.go`) — the task file's own recommended default, taken as-is:
+a loop-waiting run is a contained `LoopRun` making progress toward its goal, not blocked on a
+human. A `LoopRun` that itself escalates (`loop_runs.status = 'waiting_on_escalation'`) is
+deliberately *not* surfaced through this outer `WorkflowRun`'s A2A state — that's a separate
+signal on the `LoopRun`'s own status, left for whichever future task builds a `LoopRun`
+escalation surface (task 10+). Tested: `TestTaskManager_deriveFromWorkflowRun`'s new
+`waiting_on_loop` case (`internal/service/a2a_task_manager_test.go`).
+
+**Three-way precedence.** `flexOrGateWaitingStatus` renamed to `waitingRunStatus`
+(`internal/service/workflow_engine.go`) and extended to gate > flex > loop: any gate present
+wins immediately; else any flex present wins over loop; else (only loop steps waiting) reports
+`waiting_on_loop`. Tested with all 7 required cases (gate-only, flex-only, loop-only, gate+flex,
+gate+loop, flex+loop, all-three) in `TestWaitingRunStatus_Precedence`
+(`internal/service/workflow_engine_loop_test.go`) — the mixed gate+loop / flex+loop / all-three
+cases confirm gate wins over both, and flex wins over loop specifically (per the task's own
+called-out requirement).
+
+**Config-schema shape for a `StepKindLoop` step (item 4, "your call, document it").** Full
+schema documented on `parseLoopStepConfig`'s own doc comment
+(`internal/service/workflow_engine_loop.go`): `workflow_name`/`agent_profile_id` required;
+exactly one of `goal_id` or an inline `goal: {...}` block (mirrors `LoopInput`'s own
+GoalID/Goal union rule); optional `budget`/`continuation_policy` sub-objects mirroring
+`store.Budget`/`loop.ContinuationPolicy`'s own fields; optional `workflow_params`,
+`project_id`, `parent_session_id`, `timeout_seconds`. Documented default for "how
+outer-workflow params map to the inner Loop's overrides": `workflow_params`, when the step's
+own `Config` omits it, defaults to forwarding the *outer* run's own `WorkflowInput.Params`
+verbatim — an explicit, low-machinery default (no new templating support invented) rather than
+requiring every loop step to repeat the outer run's params by hand. Deliberately **not** run
+through `resolveStepConfig`'s `{{ }}` templating, matching `StepKindGate`/`StepKindFlex`'s own
+precedent (neither templates its Config either). Tested in `TestParseLoopStepConfig` (8 sub-cases).
+
+**Where `loop_run_id` gets recorded on the step (item 4, second half).** A real column,
+`workflow_run_steps.loop_run_id` (migration 141), populated on every write from the moment
+`LoopEngine.Run` first returns a `loop_run_id` (whether the step then resolves immediately or
+parks `waiting_on_loop`) through to its terminal resolution — see migration's own doc comment
+for the "why a column, not JSON" reasoning (bidirectional lookup: step→loop_run_id via the row;
+terminal loop_run_id→step via the new `GetWorkflowRunStepByLoopRunID` store method).
+
+**`StepKindLoop` step executor** (`internal/service/workflow_engine_loop.go`,
+`workflow_engine.go`'s `runStep`/`execute()`): first entry (`startLoopStep`) resolves config,
+calls `LoopStepLauncher.LaunchLoop`, and either resolves the step immediately (the contained
+`LoopRun` already went terminal synchronously within that one launch call — the common
+Ralph-shaped case, per `internal/loop`'s own "drives iteration-to-iteration synchronously
+within one call" framing) or records `loop_run_id` and marks `waiting_on_loop`. A step already
+`waiting_on_loop` never re-enters `runStep`; `execute()`'s per-level dispatch loop instead
+dispatches `recheckLoopStep` on every `Resume` pass (mirrors `StepKindFlex`'s own
+`recheckFlexStep` dispatch shape, renamed the shared `flexResolved` outcome-loop field to
+`resolvedFromWait` since both kinds now use it) — re-reading the step's own recorded
+`loop_run_id` and the `LoopRun`'s live status, resolving only on a genuine terminal state.
+This recheck is **not** flex's lazy "piggyback on any unrelated caller's Resume" pattern: the
+reason the outer run ever gets a fresh `Resume` call while a loop step is waiting is the real
+push (`OuterResumeNotifier.NotifyLoopRunTerminal`, called synchronously by `LoopEngine` the
+moment it persists a terminal `loop_runs.status`, at `DecisionComplete`/`DecisionFail` in
+`evaluateDecideAndAct` and the fail branch of `escalateOnBoundedContextExceeded`) — `execute()`'s
+recheck is the idempotency/correctness layer on top of that push, not the trigger itself.
+`isPausedRunStatus` and `classifyIterationProgress` in `internal/loop/engine.go` were also
+extended to recognize `RunStatusWaitingOnLoop` as non-terminal, for the nested case (one loop
+iteration's own `WorkflowRun` can itself contain a `StepKindLoop` step).
+
+**End-to-end integration test** (not reduced to unit tests, per the task's explicit
+instruction): `internal/loop/stepkindloop_integration_test.go`,
+`TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume`. Builds a real outer
+`WorkflowDefinition` with one `StepKindLoop` step whose inner `WorkflowDefinition` is a single
+gate step (deliberately, so the `LoopRun`'s first iteration pauses `waiting_on_gate` rather
+than completing synchronously within the first launch call — otherwise the outer run would go
+straight to `RunStatusCompleted` and never genuinely sit in `RunStatusWaitingOnLoop`, defeating
+the point of the test). Wires one shared `*service.BuiltinWorkflowEngine` for both the outer
+run and the loop's own iterations (matching production wiring exactly), a real `*loop.LoopEngine`
+with `WithOuterResumeNotifier` pointed at a real `service.LoopResumeNotifier`, and confirms: (1)
+the outer run genuinely reaches and persists `RunStatusWaitingOnLoop`; (2) after resolving the
+inner gate and recording qualifying goal evidence, calling `Resume` **only on the inner
+`LoopRun`** (never on the outer run) drives the `LoopRun` to `completed`, and the outer
+`workflow_runs` row is independently confirmed to have transitioned to `completed` purely as a
+side effect of `NotifyLoopRunTerminal` calling `BuiltinWorkflowEngine.Resume` on the outer run
+internally — this test never calls `.Resume`/`.Run` on the outer run itself after the initial
+launch, satisfying "not a manually-triggered test-only `.Resume()` call standing in for it."
+
+**Production wiring** (`cmd/nanite/main.go`): after `workflowLauncher` is constructed,
+`loop.NewLoopEngine(container.Store, workflowDefinitionsRegistry, workflowLauncher)` and
+`service.NewLoopResumeNotifier(container.Store, workflowDefinitionsRegistry, workflowLauncher)`
+are built reusing the exact same registry/launcher every other workflow-launching path already
+shares, wired together via `WithOuterResumeNotifier`, and `workflowEngine.WithLoopSupport(...)`
+attaches loop support to the one shared `BuiltinWorkflowEngine` instance.
+
+**Collateral fix to a pre-existing migration-boundary test.** Widening
+`workflowRunStepColumns`/`UpsertWorkflowRunStep` to always include the new `loop_run_id` column
+broke `internal/store/migration_136_workflow_run_steps_loop_kind_test.go`'s
+`TestRealBackupWorkflowRunStepsSurviveLoopKindMigration`, which calls the Go `UpsertWorkflowRunStep`
+helper directly against a database intentionally rolled back to schema version 134 (before
+`loop_run_id` existed) — the helper's INSERT statement is written against this worktree's head
+schema and failed with "no such column: loop_run_id" at that rolled-back version. Fixed by
+switching that one synthetic-row insertion to raw SQL matching the literal schema at version
+134 (matching the same technique this task's own new migration-141 test already uses for its
+synthetic rows). Confirmed the fix doesn't weaken that test's own assertions — same row shape,
+same table, only the insertion mechanism changed.
+
+**`go build ./cmd/nanite/`, `go vet ./...`, `go test ./...`** — all verified by reading the
+actual command output text directly (redirected to a file, then read with the `Read` tool),
+never through a piped/masked exit code:
+- `go build ./cmd/nanite/`: clean, empty output, exit 0.
+- `go test ./...`: exit 0, zero `FAIL`/`panic` lines across the full run (93 packages report
+  `ok`, confirmed after `go clean -testcache` to rule out stale cached passes).
+- `go vet ./...`: exit 1, but the **only** reported issues are pre-existing lostcancel warnings
+  in `internal/service/container.go` (lines 1180/1200/1260, part of commit `92caae84` "Phase
+  6/04" work, confirmed via `git log`/`git status` to be a file this session never touched).
+  `go vet` scoped to every package this task actually modified
+  (`./internal/service/... ./internal/loop/... ./internal/store/... ./internal/agentworkflow/...
+  ./cmd/nanite/...`) reports the identical, sole pre-existing failure — no new vet issue was
+  introduced by this task's changes. Not fixed here: out of this task's scope and unrelated to
+  loops/StepKindLoop.
+
+**No deviation from the task's core design asks.** Every "What to do" item (1–5) and every
+"Done means" bullet is implemented and tested as specified, including the exact tie-break order
+(gate > flex > loop) and the required end-to-end push-mechanism test.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

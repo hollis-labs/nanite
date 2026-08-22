@@ -82,8 +82,23 @@ const (
 	// misreport a flex-waiting run as needing human input). If a run has
 	// both an unresolved gate and an unresolved flex step blocking it at
 	// once, RunStatusWaiting (gate) takes priority — see
-	// BuiltinWorkflowEngine.finishRun's flexOrGateWaitingStatus.
+	// BuiltinWorkflowEngine.finishRun's waitingRunStatus.
 	RunStatusWaitingOnFlex RunStatus = "waiting_on_flex"
+	// RunStatusWaitingOnLoop means the run made all the progress it
+	// currently can and every remaining-blocked step is a loop step
+	// (StepKindLoop) waiting on its contained LoopRun to reach a terminal
+	// state — never a gate, never a flex step.
+	// TASKS/loops/09-stepkindloop-executor-and-waiting-status.md, quoting
+	// docs/engineering/architecture/21-loops.md Decision 1 verbatim: "a
+	// workflow paused on a contained loop needs its own distinct status...
+	// A loop is not a gate and is not a flex phase — an outer consumer
+	// needs to tell all three apart." Precedence when a run is blocked by
+	// more than one kind at once: gate, then flex, then loop — "the least
+	// human-attention-demanding kind loses the tie-break" — see
+	// BuiltinWorkflowEngine.finishRun's waitingRunStatus (formerly
+	// flexOrGateWaitingStatus, extended to this three-way precedence by
+	// task 09).
+	RunStatusWaitingOnLoop RunStatus = "waiting_on_loop"
 )
 
 // ToolCallRecord is one literal tool invocation made during an llm step's

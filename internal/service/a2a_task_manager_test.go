@@ -144,6 +144,19 @@ func TestTaskManager_deriveFromWorkflowRun(t *testing.T) {
 			wantState: a2a.TaskStateWorking,
 		},
 		{
+			// TASKS/loops/09-stepkindloop-executor-and-waiting-status.md:
+			// a loop-waiting WorkflowRun is a contained LoopRun making
+			// progress toward its goal, not blocked on a human --
+			// deliberately mapped the same way waiting_on_flex is (working,
+			// not input-required), per this task's documented mapping
+			// choice: a LoopRun that itself escalates is a separate signal
+			// surfaced via the LoopRun's own status, not overloaded onto
+			// this outer WorkflowRun's A2A TaskState.
+			name:      "waiting_on_loop workflow maps to working, not input-required",
+			runStatus: "waiting_on_loop",
+			wantState: a2a.TaskStateWorking,
+		},
+		{
 			// "cancelled" is a real, schema-valid workflow_runs.status (see
 			// the CHECK constraint) that deriveFromWorkflowRun's switch
 			// doesn't explicitly map -- exercises the same default-fallback

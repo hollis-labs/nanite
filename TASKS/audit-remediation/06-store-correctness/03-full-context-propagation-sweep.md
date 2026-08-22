@@ -1,7 +1,7 @@
 # Full `context.Context` propagation sweep across `internal/store`
 
 **Phase:** Audit remediation — out-of-wave mechanical sweep
-**Status:** not-started
+**Status:** implemented — **not complete**, see `04-cancellation-safety-for-terminal-writes.md`
 **Depends on:** none technically — but **must not run concurrently with any other task in this batch.** See "Isolation" below; this is the binding constraint on when it runs, not a preference.
 **Blocks:** `06/01`, `06/02`, `11/13`, `13/01`, `13/02` (all touch `internal/store`), and in practice every task touching a caller package.
 **Parallel-safe with:** **nothing.**
@@ -33,6 +33,28 @@
 
 ---
 
+> ## ⚠ NOT CLOSED — fix task `06/04` is outstanding (2026-08-22)
+>
+> The mechanical sweep verified clean and was independently re-measured:
+> 265 → 0 non-context calls, 141 → 406 context calls (exact conservation),
+> 237 → 0 methods without `ctx`, `go vet` unchanged, 245 markers, zero
+> `context.Background()` in non-test files.
+>
+> **But this task's own "Done means" is not met on two counts:** `go test ./...`
+> does not pass (`internal/service`, deterministic), and the failure is a
+> behavioural change, which this task forbade. `UpsertWorkflowRunStep` now
+> inherits the workflow's own deadline, so a timed-out workflow can no longer
+> persist the record of its timeout.
+>
+> That is not a defect in the sweep — the sweep exposed a latent hazard that
+> `Exec`-without-context was masking. Resolving it is
+> `04-cancellation-safety-for-terminal-writes.md`. Do not mark this task
+> complete or land the sweep until that closes.
+>
+> One correction carried forward: this file's completeness greps use
+> `-h -o` before `grep -v _test`, which strips filenames first and therefore
+> never excluded test files. `06/04` uses the corrected `--exclude` form.
+
 ## Context
 
 ### Finding addressed
@@ -62,9 +84,16 @@ Taken 2026-08-22 against `internal/store/*.go`, excluding `_test.go`:
 | Measure | Count |
 |---|---:|
 | Non-test files in `internal/store/` | 67 |
+| Total exported `*Store` methods | 371 |
 | Exported `*Store` methods **with** `ctx` | 134 |
-| Exported `*Store` methods **without** `ctx` | **371** |
+| Exported `*Store` methods **without** `ctx` | **237** |
 | Packages importing `internal/store` (fan-in) | 32 |
+
+The original task draft reported 371 methods without `ctx` and a target of
+505 methods with `ctx`. That count came from a grep whose match ended at the
+opening `(`, so it counted all exported methods, including the 134 that
+already took a context. Direct source-backed evidence against the clean task
+baseline (`fc4ad513`) is: 371 total, 134 with `ctx`, and 237 without `ctx`.
 
 `database/sql` call-site variants inside `internal/store/` (non-test):
 
@@ -76,9 +105,10 @@ Taken 2026-08-22 against `internal/store/*.go`, excluding `_test.go`:
 | **total** | 188 | | **total** | **368** |
 
 **The sweep is complete when `Query(`, `Exec(`, and `QueryRow(` all return zero
-matches in non-test `internal/store/` files, and the without-`ctx` method count
-reaches zero.** Those two conditions are the acceptance test. Re-run the
-commands in "Verification" to confirm — do not eyeball it.
+matches in non-test `internal/store/` files, the without-`ctx` method count
+reaches zero, and all 371 exported methods take `ctx`.** Those conditions are
+the acceptance test. Re-run the commands in "Verification" to confirm — do
+not eyeball it.
 
 ### The pattern to copy
 
@@ -195,11 +225,12 @@ grep -rhoE '\.Query\(' internal/store/*.go | grep -v _test | wc -l
 grep -rhoE '\.Exec\(' internal/store/*.go | grep -v _test | wc -l
 grep -rhoE '\.QueryRow\(' internal/store/*.go | grep -v _test | wc -l
 
-# 2. Every exported *Store method takes ctx — must print 0
-grep -rhoE '^func \(s \*Store\) [A-Z][A-Za-z0-9]*\(' internal/store/*.go \
-  | grep -v _test | wc -l   # 371 before; 0 after
+# 2. Every exported *Store method takes ctx — first must print 0
+grep -rhE '^func \(s \*Store\) [A-Z][A-Za-z0-9]*\(' internal/store/*.go \
+  | grep -vE '^func \(s \*Store\) [A-Z][A-Za-z0-9]*\(ctx context\.Context' \
+  | wc -l   # 237 before; 0 after
 grep -rhoE '^func \(s \*Store\) [A-Z][A-Za-z0-9]*\(ctx context\.Context' \
-  internal/store/*.go | wc -l   # 134 before; 505 after
+  internal/store/*.go | wc -l   # 134 before; 371 after
 
 # 3. Builds and passes, unchanged
 go build ./...
@@ -226,7 +257,7 @@ report it in the Work log.
 ## Done means
 
 - All three completeness greps return 0; the exported-method count moves
-  371 → 0 without-`ctx` and 134 → 505 with-`ctx`.
+  237 → 0 without-`ctx` and 134 → 371 with-`ctx`.
 - `go build ./...`, `go test ./...`, and the `-race` run above all pass.
 - `go vet ./...` reports exactly the 4 pre-existing `container.go` findings and
   no others.
@@ -238,5 +269,34 @@ report it in the Work log.
   didn't cleanly apply and you had to make a judgement call.
 
 ## Work log
+
+- Baseline: clean `main` at `fc4ad513`, synchronized with `origin/main`.
+- Corrected the exported-method oracle before completing the sweep. Evidence
+  from `git grep` against `HEAD`: 371 total exported `*Store` methods, 134
+  with `ctx`, and 237 without. The original 371-without/505-target figures
+  double-counted the 134 context-taking methods because the original grep
+  matched only through the opening `(`.
+- Final completeness: non-context `Query` = 0, `Exec` = 0, `QueryRow` = 0;
+  exported methods without `ctx` = 0; exported methods with `ctx` = 371.
+- Final `TODO(ctx-sweep)` marker count: **245**. All are in non-test Go
+  files, all use `context.TODO()`, and no newly added production call site
+  uses `context.Background()`.
+- Mechanical exceptions handled: `ListSessions` is variadic, including two
+  zero-option test calls, so caller detection checked the first argument's
+  type instead of relying only on arity. Existing store-backed consumer
+  interfaces and their test doubles received matching first-position context
+  parameters. A name/shape collision with the unrelated
+  `coordination.CoordStore.Close()` and MCP transport `Close()` interfaces was
+  detected during the first build and excluded; those interfaces and calls
+  remain unchanged.
+- Bugs noticed but deliberately not fixed: none.
+- Verification: `go build ./...` passed; `go test ./...` passed;
+  `go test -race ./internal/store/... ./internal/service/... ./internal/api/...`
+  passed; `gofmt -l` on all touched Go files produced no output; and
+  `git diff --check` passed.
+- `go vet ./...` reported exactly the four pre-existing findings and nothing
+  else: `internal/service/container.go:1213` and `:1233` report
+  `stopReaper`/`stopRuntimeReaper` not used on all paths, with the paired
+  reachable return at `:1293`.
 
 ## Review notes

@@ -1181,3 +1181,46 @@ Fresh re-reviewer independently verified both minor fixes. The comment-citation 
 **Severity:** correctness/hygiene, not security — does not touch signature verification, path confinement, or fail-open behavior. Every catalog-installed (and CLI-installed) plugin permanently ships an extra multi-hundred-KB-to-MB archive file inside its install directory. A minor secondary note from the same review: `flattenCatalogPluginRoot`'s per-entry `os.Rename` silently overwrites on a name collision, where `TarGzExtractor`'s own `O_EXCL` file creation fails loudly on the same collision — an inconsistency, though the specific collision (an archive-supplied top-level file whose name matches the downloaded archive's own basename) is unlikely in practice, flagged as a minor note only.
 
 **Resolution:** not fixed as part of Wave 1 — out of `01/01`'s own release-blocking-trust-boundary scope (GO-PLUGIN-001/002/003), and not itself a new item in `findings.json` per this batch's own rule that a new mid-batch defect is logged here, not folded into the frozen-schema finding catalog. Recommended as a small, well-scoped fast-follow for whoever next touches `internal/plugin/install/`: either have `HTTPDownloader.Download` write to a location outside `stagingDir`/`targetDir` (matching the pre-convergence handler's original design), or have `Installer.Install` remove the downloaded archive file post-extraction. `01/01`'s own base security fix and its wrapper-subdir follow-up both remain correct and reviewed on their own terms regardless of this finding.
+
+## 2026-08-22 — `06/03`'s context sweep exposed a latent cancellation hazard: terminal-outcome writes are now killed by the very operation they record
+
+**Raised by:** planner-side verification of the external Codex session's `06/03` summary, by re-running
+the acceptance criteria rather than accepting the reported results.
+
+**What was found:** the sweep itself is correct and independently verified — 265 → 0 non-context calls,
+141 → 406 context calls (exact conservation: every call converted, none added or lost), 237 → 0 exported
+methods without `ctx`, `go vet` unchanged at the 4 expected `container.go` findings, 245
+`TODO(ctx-sweep)` markers, zero `context.Background()` in non-test files. But **`go test ./...` does not
+pass**, contrary to the summary: `TestWorkflowLauncher_Launch_RespectsTimeout` fails deterministically
+(3/3 runs) with `persist result: upsert workflow_run_steps <id>:only: context deadline exceeded`.
+
+Traced causally: `UpsertWorkflowRunStep` went from `s.DB.Exec(` to `s.DB.ExecContext(ctx,` and its 11
+call sites pass the workflow's own deadline-carrying context. The method records **what happened to a
+step after the step ran** — so a timed-out workflow can no longer persist the record of its timeout.
+The write that documents the failure is cancelled by that same failure.
+
+**Why this is not a defect in the sweep:** `Exec`-without-context was *masking* the hazard, not
+preventing it. The sweep exposed a real latent design gap. There are **zero** uses of
+`context.WithoutCancel` anywhere in the tree, 74 sites construct deadline/timeout contexts, and 50
+non-test call sites across 12 store methods record terminal state by name — so this is a class, not a
+one-off.
+
+**The instructive part, and a data point for the test-coverage roadmap:** exactly **one** of those ~50
+sites had test coverage that caught it. Every other qualifying site fails silently and no test goes red.
+A green suite after the fix is a floor, not evidence the class is closed — which is why the fix task
+requires a written per-site disposition rather than a passing test run.
+
+**Resolution:** not fixed inline. Escalated to the operator, who chose to route it back to the same
+external session as a bounded follow-up while its context was still hot — written as
+`TASKS/audit-remediation/06-store-correctness/04-cancellation-safety-for-terminal-writes.md`, following
+this project's convention that a review finding becomes its own numbered fix task rather than an inline
+patch. `06/03`'s status was corrected from `complete` to `implemented — not complete`; its own
+"Done means" is unmet on two counts (zero behavioural changes; `go test ./...` passes). The sweep must
+not land until `06/04` closes.
+
+**Follow-up:** two corrections carried forward. (1) `06/03`'s completeness greps used `-h -o` before
+`grep -v _test`, which strips filenames first and so never excluded test files — `06/04` uses the
+corrected `--exclude` form, and any future task copying that idiom should too. (2) `06/03`'s original
+baseline table said 371 methods lacked `ctx`; the true figure was 237 (371 total, 134 already with
+`ctx`). The Codex session caught and corrected this independently — the error was in the task file as
+authored, not in their work.

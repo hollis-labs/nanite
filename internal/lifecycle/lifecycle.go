@@ -42,6 +42,10 @@ type Manager struct {
 	// observed as zero; otherwise Shutdown may return before an admitted
 	// goroutine is actually tracked.
 	admissionMu sync.Mutex
+	// testBeforeAdmissionAdd is a narrow deterministic test seam. When set,
+	// Go invokes it after the closed check and while admissionMu is still held,
+	// immediately before WaitGroup.Add. Production managers leave it nil.
+	testBeforeAdmissionAdd func()
 
 	// active counts currently-running goroutines (for diagnostics).
 	active atomic.Int64
@@ -85,6 +89,9 @@ func (m *Manager) Go(label string, fn func(ctx context.Context)) {
 	if m.closed {
 		m.admissionMu.Unlock()
 		return
+	}
+	if m.testBeforeAdmissionAdd != nil {
+		m.testBeforeAdmissionAdd()
 	}
 	m.wg.Add(1)
 	m.active.Add(1)

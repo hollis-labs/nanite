@@ -66,3 +66,17 @@ func TestDelegateSubTasks_AllWorkersSucceedInOriginalOrder(t *testing.T) {
 		t.Fatalf("results = %#v, want successful input order", results)
 	}
 }
+
+func TestDelegateSubTasks_NilOwnerExecutesInline(t *testing.T) {
+	results, err := delegateSubTasks(context.Background(), nil,
+		workerSpawnerFunc(func(context.Context, worker.SpawnRequest) (*worker.Result, error) {
+			panic("bare owner panic")
+		}),
+		[]chat.SubTask{{Title: "bare owner"}}, "parent", "model")
+	if err != nil {
+		t.Fatalf("delegateSubTasks: %v", err)
+	}
+	if len(results) != 1 || !strings.Contains(results[0].Error, "worker panicked: bare owner panic") {
+		t.Fatalf("results = %#v, want inline synthetic panic result", results)
+	}
+}

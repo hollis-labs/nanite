@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -83,8 +84,9 @@ type ChatService interface {
 	// when a turn is in flight.
 	RecoverSession(ctx context.Context, sessionID string) (RebootResult, error)
 
-	// Shutdown kills all tracked CLI processes.
-	Shutdown()
+	// Shutdown kills all tracked CLI processes and reports whether every
+	// lifecycle-owned callback drained successfully.
+	Shutdown() error
 }
 
 // ChatServiceConfig holds dependencies for constructing a ChatService.
@@ -980,16 +982,22 @@ func (s *chatServiceImpl) GetStream(messageID string) (<-chan chat.StreamEvent, 
 // Shutdown implements ChatService. It kills tracked CLI processes, drains
 // active runtime sessions, and then cancels the service's lifecycle
 // context, waiting up to chatShutdownMaxWait for in-flight goroutines to
-// exit. Any goroutines still running after the timeout are logged; see
-// lifecycle.ShutdownTimeoutError.
-func (s *chatServiceImpl) Shutdown() {
+// exit. Any incomplete drain is logged and returned so the container can
+// decline plugin unload; see lifecycle.ShutdownTimeoutError.
+func (s *chatServiceImpl) Shutdown() error {
+	return s.shutdownWithMaxWait(chatShutdownMaxWait)
+}
+
+func (s *chatServiceImpl) shutdownWithMaxWait(maxWait time.Duration) error {
+	var shutdownErrs []error
 	if s.processTracker != nil {
 		s.processTracker.KillAll()
 	}
 	if s.agentSessionsManager != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), chatShutdownMaxWait)
+		ctx, cancel := context.WithTimeout(context.Background(), maxWait)
 		if err := s.agentSessionsManager.Shutdown(ctx); err != nil {
 			slog.Warn("chat-service: agent sessions shutdown", "err", err)
+			shutdownErrs = append(shutdownErrs, fmt.Errorf("agent sessions shutdown: %w", err))
 		}
 		cancel()
 	}
@@ -1002,17 +1010,20 @@ func (s *chatServiceImpl) Shutdown() {
 	// direct replacement: stop every session runtimeagent.Dependencies is
 	// still tracking as live.
 	if s.agentDeps != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), chatShutdownMaxWait)
+		ctx, cancel := context.WithTimeout(context.Background(), maxWait)
 		if err := s.agentDeps.StopAllLiveSessions(ctx); err != nil {
 			slog.Warn("chat-service: wrapper-driven agent sessions shutdown", "err", err)
+			shutdownErrs = append(shutdownErrs, fmt.Errorf("wrapper-driven agent sessions shutdown: %w", err))
 		}
 		cancel()
 	}
 	if s.lifecycle != nil {
-		if err := s.lifecycle.Shutdown(chatShutdownMaxWait); err != nil {
+		if err := s.lifecycle.Shutdown(maxWait); err != nil {
 			slog.Warn("chat-service: lifecycle shutdown", "err", err)
+			shutdownErrs = append(shutdownErrs, fmt.Errorf("lifecycle shutdown: %w", err))
 		}
 	}
+	return errors.Join(shutdownErrs...)
 }
 
 // SetWorkers injects the worker manager after construction to break the

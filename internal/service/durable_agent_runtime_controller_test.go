@@ -66,7 +66,7 @@ func (f *callerCapturingChatService) RecoverSession(context.Context, string) (Re
 	return RebootResult{}, nil
 }
 
-func (f *callerCapturingChatService) Shutdown() {}
+func (f *callerCapturingChatService) Shutdown() error { return nil }
 
 // TestChatDurableAgentRuntimeController_SendMessage_StampsCallerBackground
 // is the direct regression test for the mistagging bug: it invokes

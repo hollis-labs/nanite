@@ -37,25 +37,31 @@ func delegateSubTasks(ctx context.Context, owner *lifecycle.Manager, workers ful
 	for i, st := range subTasks {
 		idx := i
 		sub := st
-		owner.Go("delegation.delegateAndAggregate.spawnWorker", func(ownerCtx context.Context) {
+		execute := func(ownerCtx context.Context) (ir indexedResult) {
+			ir.idx = idx
+			ir.result.Title = sub.Title
 			// Always publish exactly one result, including a synthetic error
-			// when SpawnFull (or closure bookkeeping) panics pre-send.
+			// when SpawnFull (or closure bookkeeping) panics before returning.
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					slog.Error("delegation: worker panicked before publishing result",
 						"idx", idx+1, "title", sub.Title, "panic", recovered)
-					ch <- indexedResult{idx: idx, result: chat.SubTaskResult{
+					ir.result = chat.SubTaskResult{
 						Title: sub.Title,
 						Error: fmt.Sprintf("worker panicked: %v", recovered),
-					}}
+					}
 				}
 			}()
-			workerCtx, cancel := context.WithCancel(ctx)
-			stopOwnerCancel := context.AfterFunc(ownerCtx, cancel)
-			defer func() {
-				stopOwnerCancel()
-				cancel()
-			}()
+			workerCtx := ctx
+			if ownerCtx != nil {
+				var cancel context.CancelFunc
+				workerCtx, cancel = context.WithCancel(ctx)
+				stopOwnerCancel := context.AfterFunc(ownerCtx, cancel)
+				defer func() {
+					stopOwnerCancel()
+					cancel()
+				}()
+			}
 			slog.Info("delegation: spawning worker", "idx", idx+1, "total", len(subTasks), "title", sub.Title)
 			wr, err := workers.SpawnFull(workerCtx, worker.SpawnRequest{
 				ParentSessionID: parentSessionID,
@@ -63,27 +69,41 @@ func delegateSubTasks(ctx context.Context, owner *lifecycle.Manager, workers ful
 				Description:     sub.Description,
 				Model:           model,
 			})
-			r := chat.SubTaskResult{Title: sub.Title}
 			if err != nil {
-				r.Error = err.Error()
+				ir.result.Error = err.Error()
 			} else {
-				r.Output = wr.Content
+				ir.result.Output = wr.Content
 				if !wr.Success {
-					r.Error = wr.Error
+					ir.result.Error = wr.Error
 				}
 			}
-			ch <- indexedResult{idx: idx, result: r}
+			return ir
+		}
+
+		if owner == nil {
+			// Bare chatServiceImpl values are common in focused unit tests. Match
+			// goTracked's ownership rule: execute inline rather than creating an
+			// unowned manager or goroutine.
+			ch <- execute(nil)
+			continue
+		}
+		owner.Go("delegation.delegateAndAggregate.spawnWorker", func(ownerCtx context.Context) {
+			ch <- execute(ownerCtx)
 		})
 	}
 
 	results := make([]chat.SubTaskResult, len(subTasks))
+	var ownerDone <-chan struct{}
+	if owner != nil {
+		ownerDone = owner.Context().Done()
+	}
 	for range subTasks {
 		select {
 		case ir := <-ch:
 			results[ir.idx] = ir.result
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-owner.Context().Done():
+		case <-ownerDone:
 			return nil, context.Canceled
 		}
 	}

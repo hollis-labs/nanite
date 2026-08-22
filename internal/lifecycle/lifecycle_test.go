@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"context"
 	"errors"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,45 +34,44 @@ func TestGo_RunsAndShutdownDrains(t *testing.T) {
 	}
 }
 
-// TestGoConcurrentWithShutdownNeverStartsAfterReturn is the admission-gate
-// regression. Historically Go checked closed separately from wg.Add, allowing
-// Shutdown to observe a zero WaitGroup and return in between those operations.
-func TestGoConcurrentWithShutdownNeverStartsAfterReturn(t *testing.T) {
-	for round := 0; round < 200; round++ {
-		m := NewManager("admission-race")
-		start := make(chan struct{})
-		var callers sync.WaitGroup
-		var shutdownReturned atomic.Bool
-		var startedAfterReturn atomic.Bool
+// TestGoAdmissionGateCoversWaitGroupAdd deterministically pauses Go in the
+// historical check-vs-Add gap. The admission mutex must remain held at that
+// exact point, preventing Shutdown's closed transition and Wait from slipping
+// through before the goroutine is counted.
+func TestGoAdmissionGateCoversWaitGroupAdd(t *testing.T) {
+	m := NewManager("admission-race")
+	gapReached := make(chan struct{})
+	releaseAdd := make(chan struct{})
+	workStarted := make(chan struct{})
+	m.testBeforeAdmissionAdd = func() {
+		close(gapReached)
+		<-releaseAdd
+	}
 
-		for i := 0; i < 32; i++ {
-			callers.Add(1)
-			go func() {
-				defer callers.Done()
-				<-start
-				m.Go("racer", func(ctx context.Context) {
-					if shutdownReturned.Load() {
-						startedAfterReturn.Store(true)
-					}
-					<-ctx.Done()
-				})
-			}()
-		}
+	go m.Go("racer", func(ctx context.Context) {
+		close(workStarted)
+		<-ctx.Done()
+	})
+	<-gapReached
 
-		shutdownDone := make(chan error, 1)
-		go func() {
-			<-start
-			shutdownDone <- m.Shutdown(time.Second)
-		}()
-		close(start)
-		if err := <-shutdownDone; err != nil {
-			t.Fatalf("round %d shutdown: %v", round, err)
-		}
-		shutdownReturned.Store(true)
-		callers.Wait()
-		if startedAfterReturn.Load() {
-			t.Fatalf("round %d admitted work started after Shutdown returned", round)
-		}
+	// This is the deterministic assertion: Go is paused after the closed check
+	// and before Add, and the same gate Shutdown needs must still be held.
+	if m.admissionMu.TryLock() {
+		m.admissionMu.Unlock()
+		t.Fatal("admission gate was not held across the closed-check/WaitGroup.Add gap")
+	}
+
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- m.Shutdown(time.Second) }()
+	close(releaseAdd)
+
+	select {
+	case <-workStarted:
+	case <-time.After(time.Second):
+		t.Fatal("admitted work did not start")
+	}
+	if err := <-shutdownDone; err != nil {
+		t.Fatalf("shutdown: %v", err)
 	}
 }
 

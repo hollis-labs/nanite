@@ -159,6 +159,77 @@ func storeAgent(slug, name, source string) *store.AgentProfile {
 	}
 }
 
+// TestManagedAgentUpdate_RejectsSlugTraversal is the HTTP-level regression
+// test for GO-AGENT-001's "more severe than Create" rename-branch
+// traversal: a crafted slug on PUT /api/agents/{id} must be rejected with a
+// clean 400 before any filesystem write, must not write or overwrite
+// anything outside the managed agents/ directory, and must leave the
+// original managed file untouched.
+func TestManagedAgentUpdate_RejectsSlugTraversal(t *testing.T) {
+	a, mux := newTestAPI(t)
+
+	w, body := mgReq(t, mux, "POST", "/api/agents", `{
+		"name":"Atlas Curator","slug":"atlas-curator","system_prompt":"You curate."
+	}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create = %d body=%s", w.Code, body)
+	}
+	var created agentViewResp
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	originalPath := filepath.Join(a.Services.ManagedConfigRoot, "agents", "atlas-curator.md")
+
+	// One level above agents/ — where the pre-fix code's raw
+	// filepath.Join(filepath.Dir(existing.SourceRef), slug+".md") would have
+	// landed for a "../evil" slug.
+	escapePath := filepath.Join(a.Services.ManagedConfigRoot, "evil.md")
+
+	for _, malicious := range []string{
+		"../evil",
+		"../../etc/evil",
+		"a/b",
+		"UPPER",
+	} {
+		payload, _ := json.Marshal(map[string]string{"slug": malicious, "revision": created.Revision})
+		w, body = mgReq(t, mux, "PUT", "/api/agents/"+created.ID, string(payload))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("rename with slug %q = %d, want 400; body=%s", malicious, w.Code, body)
+		}
+		if !strings.Contains(string(body), `"validation_failed"`) {
+			t.Fatalf("rename with slug %q: expected a validation_failed body, got %s", malicious, body)
+		}
+	}
+	if _, err := os.Stat(escapePath); !os.IsNotExist(err) {
+		t.Fatalf("rejected rename wrote outside the managed agents/ directory: %v", err)
+	}
+	if _, err := os.Stat(originalPath); err != nil {
+		t.Fatalf("original managed file missing after rejected rename attempts: %v", err)
+	}
+}
+
+// TestManagedAgentCreate_RejectsSlugTraversal is the create-path HTTP-level
+// counterpart: agentvalidation.ValidateAgentConfig must reject an unsafe
+// slug with a clean 400 before AgentConfigService.Create is ever called.
+func TestManagedAgentCreate_RejectsSlugTraversal(t *testing.T) {
+	a, mux := newTestAPI(t)
+	w, body := mgReq(t, mux, "POST", "/api/agents", `{
+		"name":"Evil","slug":"../evil","system_prompt":"x"
+	}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("create with traversal slug = %d, want 400; body=%s", w.Code, body)
+	}
+	if !strings.Contains(string(body), `"validation_failed"`) {
+		t.Fatalf("expected a validation_failed body, got %s", body)
+	}
+	// Pre-fix, ManagedAgentPath(configRoot, "../evil") would have joined to
+	// filepath.Join(configRoot, "agents", "../evil.md") == configRoot/evil.md
+	// — one level up from agents/, landing inside ManagedConfigRoot itself.
+	if _, err := os.Stat(filepath.Join(a.Services.ManagedConfigRoot, "evil.md")); !os.IsNotExist(err) {
+		t.Fatalf("rejected create wrote outside the managed agents/ directory: %v", err)
+	}
+}
+
 // TestCopyPluginAgentToManaged pins the make-editable path: a read-only
 // plugin agent is rejected for in-place edits but can be forked into an
 // editable managed copy with a fresh identity.

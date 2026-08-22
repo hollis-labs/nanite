@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/pathsafe"
 	"github.com/hollis-labs/nanite/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -84,6 +85,11 @@ func UserManagedAgentPath(homeDir, slug string) (string, error) {
 	return filepath.Join(home, ".nanite", "agents", slug+".md"), nil
 }
 
+// ManagedAgentPath resolves an agent slug to its managed-file path under
+// configRoot's "agents" subdirectory. slug is validated against the
+// canonical URL-safe slug pattern (ValidateSlug) before the join, and the
+// join itself is confined via pathsafe.ResolveUnder as defense in depth —
+// see GO-AGENT-001. Both guards run on every caller of this function.
 func ManagedAgentPath(configRoot, slug string) (string, error) {
 	if strings.TrimSpace(configRoot) == "" {
 		return "", fmt.Errorf("agent: managed config root is required")
@@ -91,7 +97,15 @@ func ManagedAgentPath(configRoot, slug string) (string, error) {
 	if strings.TrimSpace(slug) == "" {
 		return "", fmt.Errorf("agent: slug is required")
 	}
-	return filepath.Join(configRoot, "agents", slug+".md"), nil
+	if err := ValidateSlug(slug); err != nil {
+		return "", fmt.Errorf("agent: %w", err)
+	}
+	agentsDir := filepath.Join(configRoot, "agents")
+	resolved, err := pathsafe.ResolveUnder(agentsDir, slug+".md")
+	if err != nil {
+		return "", fmt.Errorf("agent: resolve managed path: %w", err)
+	}
+	return resolved, nil
 }
 
 func WriteManagedAgentProfile(path string, profile *store.AgentProfile, procedures []ProcedureDefinition) error {

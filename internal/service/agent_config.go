@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/pathsafe"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -190,8 +191,31 @@ func (s *AgentConfigService) Update(existing, updated *store.AgentProfile, proce
 				return nil, ErrAgentRevisionConflict
 			}
 		}
-		dest = filepath.Join(filepath.Dir(existing.SourceRef), updated.Slug+".md")
-		if dest != existing.SourceRef {
+		// The rename branch bypasses ManagedAgentPath entirely — it targets
+		// the existing file's own directory, not necessarily s.managedRoot —
+		// so it needs its own explicit slug-format + confinement check right
+		// here. This is GO-AGENT-001's "more severe than Create" site: with
+		// no guard, a crafted updated.Slug could join outside
+		// filepath.Dir(existing.SourceRef) entirely.
+		if err := agent.ValidateSlug(updated.Slug); err != nil {
+			return nil, err
+		}
+		renameDir := filepath.Dir(existing.SourceRef)
+		if updated.Slug == existing.Slug {
+			// No rename: keep the exact existing path. Deliberately not
+			// routed through pathsafe.ResolveUnder here — its symlink-
+			// normalized, absolute result would not compare equal to
+			// existing.SourceRef (which may be relative, or pre-date
+			// symlink resolution), and that mismatch would make the
+			// oldPath-cleanup logic below believe a rename happened and
+			// delete the file this very call just wrote.
+			dest = existing.SourceRef
+		} else {
+			resolved, err := pathsafe.ResolveUnder(renameDir, updated.Slug+".md")
+			if err != nil {
+				return nil, fmt.Errorf("agent: resolve rename path: %w", err)
+			}
+			dest = resolved
 			oldPath = existing.SourceRef
 		}
 	}

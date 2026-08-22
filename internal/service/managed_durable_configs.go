@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/pathsafe"
 	"github.com/hollis-labs/nanite/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -79,6 +80,12 @@ func UserManagedDurableAgentPath(homeDir, slug string) (string, error) {
 	return filepath.Join(home, ".nanite", "durable-agents", slug+".yaml"), nil
 }
 
+// ManagedDurableAgentPath resolves a durable-agent slug to its managed-file
+// path under configRoot's "durable-agents" subdirectory. slug is validated
+// against the canonical URL-safe slug pattern (agent.ValidateSlug) before
+// the join, and the join itself is confined via pathsafe.ResolveUnder as
+// defense in depth — the durable-agent-config sibling of GO-AGENT-001, same
+// defect shape, same fix.
 func ManagedDurableAgentPath(configRoot, slug string) (string, error) {
 	if strings.TrimSpace(configRoot) == "" {
 		return "", fmt.Errorf("managed durable config root is required")
@@ -86,7 +93,15 @@ func ManagedDurableAgentPath(configRoot, slug string) (string, error) {
 	if strings.TrimSpace(slug) == "" {
 		return "", fmt.Errorf("managed durable slug is required")
 	}
-	return filepath.Join(configRoot, "durable-agents", slug+".yaml"), nil
+	if err := agent.ValidateSlug(slug); err != nil {
+		return "", fmt.Errorf("managed durable agent: %w", err)
+	}
+	durableDir := filepath.Join(configRoot, "durable-agents")
+	resolved, err := pathsafe.ResolveUnder(durableDir, slug+".yaml")
+	if err != nil {
+		return "", fmt.Errorf("managed durable agent: resolve managed path: %w", err)
+	}
+	return resolved, nil
 }
 
 func WriteManagedDurableAgentConfig(path string, cfg ManagedDurableAgentConfig) error {

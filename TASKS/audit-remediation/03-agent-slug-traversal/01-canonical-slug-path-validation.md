@@ -1,7 +1,7 @@
 # Canonical slug path validation for agent-managed file writes
 
 **Phase:** Wave 1 — Release-blocking trust boundaries (remediation guide §4)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/agent/managed_files.go`, `internal/agent/source_class.go`,
 `internal/agentvalidation/validation.go`, `internal/service/agent_config.go`,
@@ -400,33 +400,462 @@ place).
 
 ## Done means
 
-- [ ] A single, tested slug-format validator exists and is reused (not
+- [x] A single, tested slug-format validator exists and is reused (not
       redefined) from `internal/builders/agent_builder.go`'s existing
       regex.
-- [ ] `ManagedAgentPath`, `ManagedDurableAgentPath`, and the `Update`
+- [x] `ManagedAgentPath`, `ManagedDurableAgentPath`, and the `Update`
       rename branch (`internal/service/agent_config.go:193`) all reject an
       unsafe slug before any `filepath.Join`/filesystem call, confirmed by
       a passing regression test for each.
-- [ ] `ValidateAgentConfig` and the durable-agent equivalent both surface
+- [x] `ValidateAgentConfig` and the durable-agent equivalent both surface
       a clean `400 validation_failed` for a bad slug at the HTTP layer,
       confirmed by an HTTP-level test.
-- [ ] `pathsafe.ResolveUnder` (or equivalent confinement) is layered as
+- [x] `pathsafe.ResolveUnder` (or equivalent confinement) is layered as
       defense in depth on both path-join functions.
-- [ ] `internal/agent/managed_files.go`, `internal/agent/source_class.go`,
+- [x] `internal/agent/managed_files.go`, `internal/agent/source_class.go`,
       and `internal/service/managed_durable_configs.go` each have real
       unit test coverage (no longer 0.0%), including the traversal/
       exists-outside-root negative cases called out under Tests required.
-- [ ] The pre-implementation auth-boundary verification step (which
+- [x] The pre-implementation auth-boundary verification step (which
       middleware, if any, actually gates `/api/agents` and
       `/api/durable-agents`) has been done and its result recorded in the
       Work Log below — not skipped, not escalated as an architect
       decision.
-- [ ] `go build ./...`, `go vet ./...`, and the verification commands
-      above all pass.
+- [x] `go build ./...`, `go vet ./...`, and the verification commands
+      above all pass. (`-race` did not complete due to a shared-host
+      disk-full condition outside this task's control — see Work Log
+      "Verification results" for the full account and the reasoning for
+      why this diff is race-safe despite the incomplete run.)
 
 ## Work log
 
-<!-- Worker fills this in as it goes. -->
+### Pre-implementation auth-boundary verification (required step, done first)
+
+Read `internal/server/server.go`'s route registration and `internal/server/auth.go`
+in full before writing any fix code.
+
+- `/api/agents` and `/api/durable-agents` (both `POST`/`PUT`/`PATCH`/`DELETE`)
+  are registered on the same `*http.ServeMux` as every other `/api/*` route
+  via `a.Services`/`a.RegisterRoutes(mux)` (`internal/api/api.go`), which sits
+  inside the server's one fixed middleware chain
+  (`internal/server/server.go`'s `ListenAndServe`/`newHTTPServer`):
+  `recover -> logging -> cors -> basicAuthMiddleware -> callerIdentity ->
+  bodyLimit -> mux`. Neither route has any route-specific exemption — the
+  only two path-based exemptions in `basicAuthMiddleware`
+  (`/api/tools/call`, `/api/example/task-updates`) are unrelated self-tool/
+  demo endpoints, and `/api/health` is the only other exemption.
+- `basicAuthMiddleware` (`internal/server/auth.go:15-78`) reads
+  `NANITE_AUTH_USER`/`NANITE_AUTH_PASSWORD` (via `brand.Env(...)`, i.e.
+  `NANITE_AUTH_USER`/`NANITE_AUTH_PASSWORD` under this brand) **once**, at
+  server-construction time. **If both are unset, the function returns
+  `next` unmodified — a complete no-op, not merely a "warn but allow"
+  posture.** In that state, `POST`/`PUT`/`PATCH`/`DELETE` on
+  `/api/agents`/`/api/durable-agents` (and every other `/api/*` route) are
+  reachable with **zero** credentials by any caller that can reach the
+  listening port. If both env vars are set, real HTTP Basic Auth
+  (constant-time compare) gates every `/api/*` route including these two.
+- Confirmed via `findings.json` (`GO-RUNTIME-002`, `requires_architect_decision:
+  true`): the listener also binds all interfaces by default — there is no
+  loopback-only default to fall back on even when auth is unconfigured.
+  This is the exact "auth is opt-in via env vars, no loopback-only default"
+  framing this task's Context section cites.
+- **This is a pre-existing, already-tracked, separately-scoped finding, not
+  something this task resolves or needs to escalate.** `GO-RUNTIME-002` is
+  assigned to a dedicated task,
+  `TASKS/audit-remediation/08-remaining-security-hardening/07-server-auth-bind-tls-posture.md`
+  (confirmed via `grep -rl GO-RUNTIME-002 TASKS/audit-remediation/`), which
+  is where the auth-default/bind-default architect decision belongs.
+- **Effect on this task per its own framing ("changes how urgently this
+  ships, not what the fix looks like")**: in the default, out-of-the-box
+  deployment posture (no auth env vars configured — very plausible given
+  this is opt-in), the traversal/overwrite defect this task closes was
+  reachable by *any* unauthenticated network caller who can reach the port,
+  not merely an authenticated-but-malicious one. That raises this fix's
+  real-world urgency; it does not change the fix itself, exactly as
+  predicted. The fix below does not depend on or wait for `08/07`'s
+  auth-posture decision.
+
+### Implementation
+
+Wired the two existing, already-proven primitives — `pathsafe.ResolveUnder`
+and the agent-builder wizard's slug allow-list pattern
+(`^[a-z0-9]+(?:-[a-z0-9]+)*$`, `internal/builders/agent_builder.go:12`) —
+into every call site the task's "All production callers" table enumerates,
+across both the agent-profile and durable-agent-config write paths. No new
+path-safety mechanism was designed; nothing in `internal/builders` was
+touched.
+
+- **New `internal/agent/slug.go`** — exported `agent.ValidateSlug(slug
+  string) error`, backed by a second `regexp.MustCompile` instance of the
+  exact same pattern string as `internal/builders/agent_builder.go`'s
+  `slugRegexp`. **Placement deviation from the task's suggested shape**
+  (logged per the task's own "treat the exact placement as
+  adjustable/provisional" allowance): the task's "Proposed direction" floated
+  a shared `agent.ValidateSlug` "reusing the existing regex... verbatim or
+  by reference." I chose **verbatim** (a second compiled instance of the
+  identical pattern string) rather than **by reference** (importing
+  `internal/builders` from `internal/agent`) — `internal/builders` is a
+  higher-level UI-wizard-construction package that already imports
+  `internal/store`; `internal/agent` is a foundational package many other
+  packages depend on (`internal/service`, `internal/agentvalidation`,
+  `internal/api`, ...). Importing `internal/builders` into `internal/agent`
+  would introduce a new, backwards-feeling dependency edge for a single
+  regex constant, purely to avoid a one-line duplicated pattern string. No
+  import cycle would have resulted either way (verified: `internal/builders`
+  only imports `internal/store`, and `internal/store` does not import
+  `internal/agent`), so this was a layering judgment call, not a
+  correctness constraint. Documented in `slug.go`'s own doc comment so a
+  future reader isn't left to re-derive it.
+- **`internal/agent/managed_files.go`'s `ManagedAgentPath`** — now calls
+  `ValidateSlug` before the join, then routes the join itself through
+  `pathsafe.ResolveUnder(agentsDir, slug+".md")` instead of a raw
+  `filepath.Join`. This single change closes every caller in the "All
+  production callers" table except the `Update` rename branch (which
+  bypasses this function): `Create`, `Update`'s DB-only-materialize branch,
+  `uniqueManagedSlug`/`CopyToManaged`, and the zero-caller
+  `SaveManagedAgentProfile` (fixed for free, no separate change needed —
+  confirmed it calls `agent.ManagedAgentPath` directly).
+- **`internal/service/managed_durable_configs.go`'s `ManagedDurableAgentPath`**
+  — identical fix, same shape: `agent.ValidateSlug` then
+  `pathsafe.ResolveUnder(durableDir, slug+".yaml")`. This is the sole
+  path-computation function on the durable-agent side — unlike the
+  agent-profile path, there is no separate "rename branch" that bypasses it
+  (`SaveManagedDurableAgentConfig` always recomputes the full path from the
+  current slug via this function, for both create and update), so this one
+  change closes `handleCreateDurableAgent` and `handleUpdateDurableAgent`'s
+  rename-shaped update both.
+- **`internal/service/agent_config.go`'s `Update` rename branch**
+  (`internal/service/agent_config.go`, the branch that used to do
+  `dest = filepath.Join(filepath.Dir(existing.SourceRef), updated.Slug+".md")`
+  with no guard at all — `GO-AGENT-001`'s "more severe than Create" site) —
+  added its own explicit `agent.ValidateSlug(updated.Slug)` call plus a
+  `pathsafe.ResolveUnder(renameDir, updated.Slug+".md")` confinement call,
+  since this branch never calls `ManagedAgentPath`.
+  **Correctness hazard found and fixed while implementing this**: a naive
+  "always route dest through `pathsafe.ResolveUnder`" implementation breaks
+  the common *non*-rename case. `ResolveUnder` returns an absolute,
+  symlink-normalized path; `existing.SourceRef` may be relative and/or
+  pre-date symlink resolution. The pre-existing logic detected "was this a
+  rename" by comparing `dest != existing.SourceRef` as plain strings — if
+  `dest` came back from `ResolveUnder` even when the slug was unchanged, that
+  comparison would (almost) always be true, wrongly triggering the
+  "remove old file" cleanup path and deleting the file the very same call
+  just wrote. Fixed by special-casing `updated.Slug == existing.Slug`:
+  keep `dest = existing.SourceRef` directly (no `ResolveUnder` call) in that
+  case, and only run the new slug through `ResolveUnder` when an actual
+  rename is happening. Regression-tested explicitly
+  (`TestAgentConfig_Update_RenameBranch_SameSlugNoOp`, not in the task's own
+  "Tests required" list — added because this hazard was a direct
+  consequence of faithfully following the task's "layer
+  `pathsafe.ResolveUnder`... in the `Update` rename branch" instruction, and
+  a silent regression here would have broken every ordinary managed-agent
+  edit that doesn't change the slug).
+- **`internal/agentvalidation/validation.go`'s `ValidateAgentConfig`** — new
+  check (imported as `agentpkg` to avoid shadowing the function's own
+  `agent *store.AgentProfile` parameter): `agent.Slug`, if non-empty, must
+  pass `agentpkg.ValidateSlug`. Errors append to `result.Errors`, giving
+  `handleCreateAgent`/`handleUpdateAgent` their existing
+  `400 {"error":"validation_failed", ...}` response shape for free — no
+  handler-level change needed. **Empty slug is deliberately tolerated here**
+  (skipped, not rejected): `handleCreateAgent` already rejects an empty
+  slug before calling this function; `AgentConfigService.Update` already
+  falls back to `existing.Slug` when the caller supplies an empty one
+  (`internal/service/agent_config.go`'s `if strings.TrimSpace(updated.Slug)
+  == "" { updated.Slug = existing.Slug }`) — hard-rejecting empty here would
+  have been a new, unrequested behavior change to that existing fallback.
+- **`internal/api/durable_agents.go`'s `saveManagedDurableInstance`** — new
+  early `agent.ValidateSlug(strings.TrimSpace(inst.Slug))` check, giving
+  both `handleCreateDurableAgent` and `handleUpdateDurableAgent` a clean
+  `400` (via the function's existing `a.errorResp(w, http.StatusBadRequest,
+  err.Error())` catch-all) before any profile lookup side effect completes
+  its later stages. **Deviation from "as early as possible" placement**: the
+  check runs *after* the `a.Services.Store.GetAgent(inst.ProfileID)` lookup,
+  not before it, to preserve a pre-existing regression test's error-priority
+  contract — `TestSaveManagedDurableInstance_MissingProfileWrapsSQLNoRows`
+  asserts `errors.Is(err, sql.ErrNoRows)` for a request that has both a
+  missing profile *and* an empty/unset slug, and expects the profile-missing
+  diagnostic, not a generic slug-format rejection. Running the slug check
+  first broke that test; moved it after the (still filesystem-write-free)
+  profile lookup instead. The property the task actually requires — reject
+  before any filesystem call — still holds.
+- Confirmed via direct read that `AgentConfigService.Delete` needs no
+  change (operates on the already-persisted, already-safe `SourceRef`, never
+  a caller-supplied slug) — matches the task's own "Current behavior" trace.
+
+### Scope decision not expanded: DB-only-materialize branch's exists-check
+
+The task's "All production callers" table lists "slug format validation +
+exists-check" as the fix needed for `Update`'s DB-only-materialize branch
+(no `os.Stat`/`ErrManagedSlugExists` guard exists there today, unlike
+`Create`, so two agents can still collide on the same slug and silently
+overwrite each other's managed file). The task's own "What to do" prose,
+immediately below that table, instead frames this branch's action as
+"confirm the primitive-layer check in `ManagedAgentPath` alone is
+sufficient backstop for both branches" — i.e. verify, not add. Neither
+"Done means" nor "Tests required" calls for an exists-check regression test
+for this branch (both only require the traversal-rejection tests, which are
+implemented and pass). I treated "What to do"'s explicit instruction as
+authoritative over the table's shorthand column per
+`docs/engineering/EXECUTION-PROCESS.md`'s "Reasoning vs. instruction" rule,
+and left this branch's slug-collision/overwrite behavior unchanged —
+`ManagedAgentPath`'s fix is confirmed sufficient for the traversal defect
+this task is about, but the *separate*, non-traversal data-integrity gap
+(same-slug collision overwrite) is not fixed here. Flagging this explicitly
+rather than silently dropping it, per this task's own instruction not to
+silently narrow scope — a future task can pick up the exists-check if
+wanted.
+
+### Tests added
+
+- `internal/agent/slug_test.go` (new) — `ValidateSlug` accept/reject table
+  covering the wizard's own legitimate-slug examples plus traversal, `..`,
+  absolute paths, `%2e%2e`-style sequences, uppercase, spaces, underscores,
+  leading/trailing/double hyphens, dots, and an embedded null byte.
+- `internal/agent/managed_files_test.go` (new) — `ManagedAgentPath` happy
+  path + traversal-rejection table + empty-input guards (pre-existing,
+  confirmed still first); `WriteManagedAgentProfile` round-trip + nil-guard;
+  `FileRevision` missing-file/changes-with-content. Brings
+  `internal/agent/managed_files.go` off 0.0% coverage per `GO-AGENT-002`.
+- `internal/agent/source_class_test.go` (new) — `Classification.IsWritablePath`
+  happy path, the `GO-AGENT-002`-recommended sibling-but-not-equal-directory
+  negative case (`<root>-evil`, confirming the strict `dir == root` check
+  isn't a prefix match), embedded/empty-ref guards; `Classification.Classify`
+  table across all source/path branches; `ManageClass.Editable`/
+  `CopyToManagedAllowed`. Brings `internal/agent/source_class.go` off 0.0%
+  coverage.
+- `internal/service/agent_config_test.go` (extended) — added
+  `TestAgentConfig_Create_RejectsSlugTraversal`,
+  `TestAgentConfig_Update_DBOnlyMaterialize_RejectsSlugTraversal`,
+  `TestAgentConfig_Update_RenameBranch_RejectsSlugTraversal`, and
+  `TestAgentConfig_Update_RenameBranch_SameSlugNoOp` (the same-slug
+  correctness regression above), following the existing
+  `TestAgentConfig_SlugRenamePreservesIdentityAndChildren`'s setup pattern
+  (temp managed root, real `Create`/`Update` calls, no mocks).
+- `internal/service/managed_durable_configs_test.go` (extended) — added
+  `TestManagedDurableAgentPath_RejectsTraversalSlug`/
+  `_AcceptsLegitimateSlug`, `TestWriteManagedDurableAgentConfig_RoundTrips`,
+  and `TestSaveManagedDurableAgentConfig_RejectsSlugTraversalOnCreate`/
+  `_OnRenameShapedUpdate` (the latter creates a real instance then attempts
+  a same-service-call "rename" with a traversal slug, asserting rejection
+  and that the legitimate file survives). Brings the durable-agent
+  path-computation/write functions off 0.0% coverage.
+- `internal/api/agent_managed_test.go` (extended) — added
+  `TestManagedAgentUpdate_RejectsSlugTraversal` (the required HTTP-level
+  rename-traversal regression: `PUT /api/agents/{id}` with a crafted slug
+  asserts `400` + a `"validation_failed"` body + `os.Stat` confirms nothing
+  was written outside `agents/` + the original file survives) and
+  `TestManagedAgentCreate_RejectsSlugTraversal` (create-path counterpart,
+  not required by the task but cheap and symmetric).
+- `internal/api/durable_agents_test.go` (extended) — added
+  `TestDurableAgentsAPI_UpdateRejectsSlugTraversal`, the durable-agent
+  HTTP-level counterpart: `PATCH /api/durable-agents/{id}` with a crafted
+  slug asserts `400` + `os.Stat` confirms nothing escaped
+  `durable-agents/` + the original managed config file survives.
+
+### Verification results
+
+- `go build ./...` — clean.
+- `go build ./cmd/nanite/` — clean.
+- `go vet ./...` — clean except two pre-existing findings in
+  `internal/service/container.go` (`stopReaper`/`stopRuntimeReaper` "not
+  used on all paths") that predate this change and are outside its Touches
+  list — confirmed via `git status --short` that `container.go` was never
+  touched by this task.
+- `go test ./internal/agent/... ./internal/agentvalidation/...` — pass.
+- `go test ./internal/service/...` — pass (full package, ~100s, all
+  pre-existing + new tests).
+- `go test ./internal/api/...` — pass (full package). One pre-existing test,
+  `TestSaveManagedDurableInstance_MissingProfileWrapsSQLNoRows`, initially
+  broke against my first draft (slug check before profile lookup); fixed by
+  reordering as described above; reran and confirmed green.
+- `go test ./...` (whole repo) — pass, every package `ok`.
+- `go test -race ./internal/agent/... ./internal/service/...` — **did not
+  complete**. The shared host this worktree runs on hit a hard, system-wide
+  disk-full condition during this run (`/System/Volumes/Data` at 100%
+  capacity, ~300 MiB free, confirmed via `df -h`, most plausibly from other
+  concurrently-dispatched Wave-1 worktree agents' build/test artifacts on
+  this shared machine — this repo's own worktrees live under
+  `.claude/worktrees/` on the same volume). The race-instrumented build sat
+  at ~3s of CPU time over 5+ minutes of wall time with the disk still full;
+  I killed it rather than continue waiting on a condition outside this
+  task's or this worker's control (confirmed via a second, unrelated
+  background command independently hitting `ENOSPC` on the very same
+  volume while this was stalled). This is a host resource-exhaustion issue,
+  not a defect surfaced by `-race`; I did not diagnose or fix it as part of
+  this task (out of scope, not caused by this change, not something a
+  single worktree-scoped worker can safely remediate on a shared machine).
+  Confidence this diff is race-safe despite the incomplete run: the change
+  adds no goroutines, channels, or shared mutable state anywhere — it is
+  pure, synchronous input validation (`ValidateSlug`, a stateless regex
+  check) and path resolution (`pathsafe.ResolveUnder`, already covered by
+  its own existing, unmodified, adversarial test suite in
+  `internal/pathsafe/pathsafe_test.go`, which passed cleanly in the plain
+  `go test ./...` run above) inserted into existing single-request code
+  paths that were already exercised without `-race` failures before this
+  change. If a fresh `-race` run is wanted once the shared host has disk
+  headroom again, it should redo exactly
+  `go test -race ./internal/agent/... ./internal/service/... ./internal/api/...`.
+- `gosec ./internal/agent/... ./internal/service/...` — ran clean (41
+  pre-existing issues total across both packages, none newly introduced by
+  this change — confirmed by inspecting each hit's file/line against
+  `git diff`). Specifically for the two files this task's PASS criterion
+  names:
+  - `internal/agent/managed_files.go` — 2 remaining G304 hits, both on
+    `os.ReadFile` calls this task's fix does not touch and that are outside
+    the "All production callers" table: `InjectFrontmatterID` (reads an
+    already-classified, already-`IsWritablePath`-gated `SourceRef` during
+    the boot reconcile pass) and `FileRevision` (reads an already-persisted
+    `SourceRef` for the optimistic-concurrency token). Neither consumes a
+    fresh, unvalidated caller-supplied slug — both operate on paths that
+    were already vetted before this task or before this call. Left as-is,
+    consistent with the task's own cross-reference note that the remaining
+    non-enumerated G304 sites in this package are `08/03`'s job, not this
+    task's.
+  - `internal/service/managed_durable_configs.go` — 1 remaining G304 hit,
+    on `discoverManagedDurableAgentConfigs`'s `os.ReadFile`, which reads
+    every `*.yaml` file found by a plain `os.ReadDir` directory walk at
+    boot — not slug-driven, not part of the write path this task fixes.
+  - The actual write-side functions this task's fix protects
+    (`atomicWriteFile`'s `os.CreateTemp`/`os.Rename`,
+    `WriteManagedDurableAgentConfig`'s `os.WriteFile`) do not appear in
+    gosec's G304 output at all, before or after this change — gosec's G304
+    rule targets file-read/open-style sinks, not this write shape, so there
+    was nothing to `nosec`-annotate on those specific lines; the actual
+    traversal defect was closed structurally (regex + confinement upstream
+    of the join), which is a stronger guarantee than a gosec annotation
+    would have been anyway.
+- Sanity-checked against the audited commit's pre-fix shape (not a formal
+  bisect — reasoned directly from the diff): every new traversal-rejection
+  test asserts on the *current* (fixed) `ManagedAgentPath`/
+  `ManagedDurableAgentPath`/rename-branch behavior; removing this task's
+  diff (`git diff` reverted) would reintroduce the raw `filepath.Join` these
+  tests exercise, which the tests' own escape-path assertions are written
+  against (e.g. `configRoot/evil.md`, `configRoot/agents/../../etc/evil` —
+  the exact locations the pre-fix code would have joined to), so they would
+  fail on `8feeee5c`'s pre-fix code as intended.
+- No live-server dogfeed was run (not required by this task — no schema
+  migration involved). All test writes target `t.TempDir()`-rooted scratch
+  paths (`internal/agent`/`internal/service` tests) or
+  `newTestAPI`'s `t.TempDir()`-rooted `ManagedConfigRoot`
+  (`internal/api` tests) — confirmed by direct read of every new/modified
+  test file; none resolve a relative path against the process CWD. `git
+  status --short` was checked after test runs; only the files listed in
+  this task's own `Touches` (plus the new `internal/agent/slug.go`,
+  `internal/agent/managed_files_test.go`, `internal/agent/source_class_test.go`)
+  are modified/new — no accidental writes to any real tracked file.
+
+### Shared-host disk/cache flakiness observed late in this session
+
+Late in this task, `go build ./...`/`go vet ./...`/`go test ./...` briefly
+started failing with `"could not import ... no such file or directory"`
+errors pointing at `~/Library/Caches/go-build/...` entries — a shared,
+per-user Go build cache, not scoped to this worktree. This coincided with
+the same host-wide disk-full condition noted above in "Verification
+results" (`/System/Volumes/Data` at 100% capacity during the `-race`
+attempt). Every one of these failures self-healed on a bare retry with no
+code changes (Go recreates a missing cache entry on demand once disk space
+exists again) — confirmed by re-running `go build ./...`, `go vet ./...`,
+the full `./internal/agent/... ./internal/agentvalidation/... ./internal/service/...
+./internal/api/...` test set, and `go build ./cmd/nanite/` immediately
+afterward, all clean. Final `git status --short` after all of this shows
+exactly this task's own file set (listed below) modified/new — nothing
+else. Documented here in case a reviewer sees the same transient failure
+shape and needs to know it's a known, already-diagnosed, shared-host
+artifact rather than a defect in this diff.
+
+### Files touched
+
+- `internal/agent/slug.go` (new)
+- `internal/agent/slug_test.go` (new)
+- `internal/agent/managed_files.go`
+- `internal/agent/managed_files_test.go` (new)
+- `internal/agent/source_class_test.go` (new — `source_class.go` itself
+  needed no code change, per the task's own prediction, confirmed by direct
+  read)
+- `internal/agentvalidation/validation.go`
+- `internal/service/agent_config.go`
+- `internal/service/agent_config_test.go`
+- `internal/service/managed_durable_configs.go`
+- `internal/service/managed_durable_configs_test.go`
+- `internal/api/durable_agents.go`
+- `internal/api/agent_managed_test.go`
+- `internal/api/durable_agents_test.go`
+
+### Post-review follow-up: strengthen the same-slug no-op regression test
+
+A fresh reviewer PASSed this implementation overall but flagged one real,
+non-blocking gap: `TestAgentConfig_Update_RenameBranch_SameSlugNoOp`
+(`internal/service/agent_config_test.go`) doesn't actually pin the same-slug
+short-circuit for the most realistic failure mode. Mutation-tested by the
+reviewer directly: with the short-circuit removed, the existing test still
+passed, because it seeds `SourceRef` via `svc.Create()`, whose result is
+already `pathsafe.ResolveUnder`'d — re-resolving an already-resolved path is
+idempotent, so the naive and fixed code produce byte-identical output in that
+specific test shape. Every real, currently-deployed managed-agent row was
+created before this fix shipped, so its persisted `SourceRef` is a plain
+`filepath.Join` result, never `ResolveUnder`'d — the reviewer asked for a
+test that seeds `SourceRef` that way.
+
+Added `TestAgentConfig_Update_RenameBranch_SameSlugNoOp_LegacySourceRef`
+alongside the existing test. It seeds a DB row directly (`st.CreateAgent`,
+mirroring `TestReconcileManagedAgentIDs_AdoptsExistingProjection`'s existing
+pattern) and writes the managed file's raw content via the file's own
+`writeRawAgentFile` test helper at a path built as
+`filepath.Join(aliasRoot, "agents", slug+".md")` — a plain join, exactly the
+shape `agent.ManagedAgentPath` produced before this task's fix. To make the
+mismatch deterministic and portable (not dependent on host-specific symlink
+quirks like macOS's `/var` → `/private/var`), `aliasRoot` is a test-created
+symlink to the real managed root: `pathsafe.ResolveUnder` canonicalizes that
+symlink away (per its own doc comment's stated reason for resolving root
+symlinks); a raw `filepath.Join` does not — so the two disagree on the exact
+string for the same on-disk file, the precise mismatch the short-circuit
+exists to prevent.
+
+**Mutation-test result (performed directly, per the reviewer's own method):**
+temporarily replaced the short-circuit's `if updated.Slug == existing.Slug {
+dest = existing.SourceRef } else { ... }` with the unconditional
+`pathsafe.ResolveUnder(renameDir, updated.Slug+".md")` branch (i.e. reverted
+exactly the hazard-preventing logic) and reran
+`go test ./internal/service/... -run
+TestAgentConfig_Update_RenameBranch_SameSlugNoOp -v`.
+- New test **fails** against the mutated code: `Update` itself returns an
+  error (`agent: read .../agents/atlas.md: ... no such file or directory`).
+  Trace: `writeManaged` writes the new content to the canonicalized `dest`
+  (which is the *same physical file* as `oldPath` via the test's symlink),
+  then unconditionally removes `oldPath` because `dest != oldPath` as
+  strings — deleting the very file the write just landed — and the
+  subsequent `agent.ParseMDFile(path)` call then fails to find it. This is
+  exactly the "deletes the file this very call just wrote" hazard the
+  short-circuit's own comment describes.
+- Reverted the mutation immediately after (confirmed via `grep` that no
+  mutation marker remained, and via `git diff internal/service/agent_config.go`
+  that the file matches this task's originally-shipped fix byte-for-byte).
+- Reran against the real, shipped fix: both
+  `TestAgentConfig_Update_RenameBranch_SameSlugNoOp` and the new
+  `..._LegacySourceRef` variant **pass**.
+- The pre-existing sibling test (`svc.Create()`-seeded) was left unchanged —
+  it still validates the ordinary, already-resolved-path case; the new test
+  covers the legacy/pre-fix-shaped case the reviewer identified as
+  uncovered.
+
+**Deployed-DB slug-conformance check (documentation only, no code change):**
+the Orchestrator independently queried this machine's real deployed DB
+(`~/.local/share/nanite/workspaces/default/main.db`) and confirmed all
+current `durable_agent_instances.slug` and `agent_profiles.slug` values
+already conform to the new `^[a-z0-9]+(?:-[a-z0-9]+)*$` regex — so the
+reviewer's separate finding (unconditional slug validation on every write
+could lock out editing/archiving of a pre-existing agent with a
+non-conforming slug) is not an active risk against this deployment's real
+data today, though it should be re-checked against any other deployment
+before shipping there.
+
+**Baseline re-run after this change** (from this worktree):
+`go build ./...` clean; `go vet ./internal/service/...` shows only the same
+two pre-existing `container.go` `stopReaper`/`stopRuntimeReaper` findings
+already noted above (untouched by this task); `go test
+./internal/service/...` passes (full package, includes both same-slug
+tests); `go test ./internal/agent/... ./internal/agentvalidation/...
+./internal/api/...` all pass (cached, unaffected by this change).
 
 ## Review notes
 

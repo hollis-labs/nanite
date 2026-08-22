@@ -219,6 +219,195 @@ func TestAgentConfig_CopyToManaged_AlreadyManagedWhenPersisted(t *testing.T) {
 	}
 }
 
+// TestAgentConfig_Create_RejectsSlugTraversal is GO-AGENT-001's Create-path
+// regression: a crafted slug must be rejected before any filesystem call,
+// not silently joined into a path outside the managed root.
+func TestAgentConfig_Create_RejectsSlugTraversal(t *testing.T) {
+	st := newConfigTestStore(t)
+	root := t.TempDir()
+	svc := NewAgentConfigService(st, agent.NewClassification(root, ""), root, nil)
+
+	for _, malicious := range []string{
+		"../evil",
+		"../../etc/passwd",
+		"a/b",
+		"UPPER",
+		"with space",
+	} {
+		if _, err := svc.Create(&store.AgentProfile{Name: "Evil", Slug: malicious, SystemPrompt: "x"}, nil); err == nil {
+			t.Errorf("slug %q: expected rejection, got nil error", malicious)
+		}
+	}
+	// Nothing escaped the managed root (one level above configRoot/agents,
+	// and configRoot itself).
+	if _, err := os.Stat(filepath.Join(root, "evil.md")); !os.IsNotExist(err) {
+		t.Fatalf("traversal wrote inside configRoot but outside agents/: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "evil.md")); !os.IsNotExist(err) {
+		t.Fatalf("traversal wrote above configRoot: %v", err)
+	}
+}
+
+// TestAgentConfig_Update_DBOnlyMaterialize_RejectsSlugTraversal covers the
+// DB-only-materialize branch (existing.SourceRef == "", the un-guarded
+// sibling of Create GO-AGENT-001 flags as worse than Create) — it routes
+// through the same agent.ManagedAgentPath as Create, so the fix inside that
+// function is the backstop for this branch too.
+func TestAgentConfig_Update_DBOnlyMaterialize_RejectsSlugTraversal(t *testing.T) {
+	st := newConfigTestStore(t)
+	root := t.TempDir()
+	classification := agent.NewClassification(root, "")
+	svc := NewAgentConfigService(st, classification, root, nil)
+
+	// A DB-only operator agent: no on-disk file yet (SourceRef == "").
+	existing := &store.AgentProfile{Name: "Ghost", Slug: "ghost", SystemPrompt: "x", Source: "user"}
+	if err := st.CreateAgent(existing); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if existing.SourceRef != "" {
+		t.Fatalf("precondition: expected no SourceRef, got %q", existing.SourceRef)
+	}
+
+	for _, malicious := range []string{"../evil", "../../etc/passwd", "a/b"} {
+		updated := *existing
+		updated.Slug = malicious
+		if _, err := svc.Update(existing, &updated, nil, ""); err == nil {
+			t.Errorf("slug %q: expected rejection on DB-only-materialize branch", malicious)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "evil.md")); !os.IsNotExist(err) {
+		t.Fatalf("traversal wrote above configRoot: %v", err)
+	}
+}
+
+// TestAgentConfig_Update_RenameBranch_RejectsSlugTraversal covers the
+// second, worse gap GO-AGENT-001 calls out by name: the rename branch
+// (existing.SourceRef != "") bypasses agent.ManagedAgentPath entirely and
+// does its own raw join — it needs its own explicit validator +
+// pathsafe.ResolveUnder call, which this pins.
+func TestAgentConfig_Update_RenameBranch_RejectsSlugTraversal(t *testing.T) {
+	st := newConfigTestStore(t)
+	root := t.TempDir()
+	classification := agent.NewClassification(root, "")
+	svc := NewAgentConfigService(st, classification, root, nil)
+
+	created, err := svc.Create(&store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x"}, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	for _, malicious := range []string{"../evil", "../../etc/evil", "a/b", "UPPER"} {
+		updated := *created.Profile
+		updated.Slug = malicious
+		if _, err := svc.Update(created.Profile, &updated, nil, created.Revision); err == nil {
+			t.Errorf("slug %q: expected rejection on rename branch", malicious)
+		}
+	}
+	// The original file must survive every rejected rename attempt, and
+	// nothing must have escaped agents/ into configRoot.
+	if _, err := os.Stat(created.Profile.SourceRef); err != nil {
+		t.Fatalf("original managed file missing after rejected rename attempts: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "evil.md")); !os.IsNotExist(err) {
+		t.Fatalf("traversal escaped agents/ into configRoot: %v", err)
+	}
+}
+
+// TestAgentConfig_Update_RenameBranch_SameSlugNoOp is a correctness
+// regression for the fix's own implementation: an update that does not
+// change the slug must not be misclassified as a rename (which would
+// delete the file this very call just wrote — see agent_config.go's
+// "No rename" comment on the branch this pins).
+func TestAgentConfig_Update_RenameBranch_SameSlugNoOp(t *testing.T) {
+	st := newConfigTestStore(t)
+	root := t.TempDir()
+	classification := agent.NewClassification(root, "")
+	svc := NewAgentConfigService(st, classification, root, nil)
+
+	created, err := svc.Create(&store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x"}, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	updated := *created.Profile
+	updated.Description = "same slug, different field"
+	res, err := svc.Update(created.Profile, &updated, nil, created.Revision)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if res.Profile.SourceRef != created.Profile.SourceRef {
+		t.Fatalf("SourceRef changed on a non-rename edit: %q -> %q", created.Profile.SourceRef, res.Profile.SourceRef)
+	}
+	if _, err := os.Stat(created.Profile.SourceRef); err != nil {
+		t.Fatalf("file must still exist after a same-slug edit: %v", err)
+	}
+	if got, err := st.GetAgentBySlug("atlas"); err != nil || got.Description != "same slug, different field" {
+		t.Fatalf("edit did not persist: %+v err=%v", got, err)
+	}
+}
+
+// TestAgentConfig_Update_RenameBranch_SameSlugNoOp_LegacySourceRef is a
+// stricter variant of TestAgentConfig_Update_RenameBranch_SameSlugNoOp that
+// actually pins the same-slug short-circuit against the most realistic
+// failure mode: editing an agent whose managed file predates this fix.
+//
+// The sibling test above seeds SourceRef via svc.Create(), which already
+// routes the path through pathsafe.ResolveUnder — so re-resolving it a
+// second time is idempotent and does not exercise the hazard the
+// short-circuit exists to prevent. Every real, currently-deployed managed
+// agent row was created before this fix shipped, i.e. its persisted
+// SourceRef is a plain filepath.Join result (agent.ManagedAgentPath's old
+// shape), never ResolveUnder'd. This test seeds SourceRef exactly that way:
+// filepath.Join(managedRoot, "agents", slug+".md") through a directory that
+// itself contains a symlink component (a stand-in for any real-world case
+// where the managed root is reached through a symlink — macOS
+// /var -> /private/var, a symlinked project checkout, a bind mount — the
+// same shape ResolveUnder's own doc comment calls out as the reason it
+// normalizes symlinks). ResolveUnder canonicalizes that symlink; a raw
+// filepath.Join does not — so the two disagree on the exact string for the
+// very same on-disk file, which is precisely the mismatch the short-circuit
+// guards against.
+func TestAgentConfig_Update_RenameBranch_SameSlugNoOp_LegacySourceRef(t *testing.T) {
+	st := newConfigTestStore(t)
+
+	realRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(realRoot, "agents"), 0o755); err != nil {
+		t.Fatalf("mkdir real agents dir: %v", err)
+	}
+	// aliasRoot is a symlink to realRoot. A plain filepath.Join through
+	// aliasRoot never gets canonicalized; pathsafe.ResolveUnder always does.
+	aliasRoot := filepath.Join(t.TempDir(), "legacy-alias")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Fatalf("symlink alias: %v", err)
+	}
+	legacyAgentsDir := filepath.Join(aliasRoot, "agents")
+
+	// Seed the DB row the way a real, already-ingested managed agent looks.
+	seed := &store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x", Source: "user"}
+	if err := st.CreateAgent(seed); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	legacyPath := writeRawAgentFile(t, legacyAgentsDir, "atlas",
+		"---\nid: "+seed.ID+"\nname: Atlas\nslug: atlas\n---\nlegacy body\n")
+	// This is the "pre-fix" / "already-deployed" shape: a plain
+	// filepath.Join result, never run through pathsafe.ResolveUnder.
+	seed.SourceRef = legacyPath
+
+	svc := NewAgentConfigService(st, agent.NewClassification(realRoot, ""), realRoot, nil)
+
+	updated := *seed
+	updated.Description = "same slug, legacy sourceref"
+	if _, err := svc.Update(seed, &updated, nil, ""); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		t.Fatalf("legacy-style managed file must survive a same-slug edit: %v", err)
+	}
+	if got, err := st.GetAgentBySlug("atlas"); err != nil || got.Description != "same slug, legacy sourceref" {
+		t.Fatalf("edit did not persist: %+v err=%v", got, err)
+	}
+}
+
 // TestAgentConfig_RevisionConflict verifies the optimistic-concurrency guard.
 func TestAgentConfig_RevisionConflict(t *testing.T) {
 	st := newConfigTestStore(t)

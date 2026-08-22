@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 
+	agentpkg "github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -50,6 +51,20 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 	// protecting the operator from anything real.
 
 	// --- v2 field validation ---
+
+	// 4a. Validate slug (GO-AGENT-001): the slug is later joined into a
+	// managed-config filesystem path (agent.ManagedAgentPath) — reject an
+	// unsafe value here so the HTTP layer returns a clean
+	// `400 validation_failed` instead of the caller discovering the
+	// rejection at the filesystem layer. Empty is tolerated here (a blank
+	// slug on Update falls back to the existing agent's slug at the service
+	// layer, internal/service.AgentConfigService.Update; Create's HTTP
+	// handler already rejects an empty slug before validation runs).
+	if s := strings.TrimSpace(agent.Slug); s != "" {
+		if err := agentpkg.ValidateSlug(s); err != nil {
+			result.Errors = append(result.Errors, err.Error())
+		}
+	}
 
 	// 5. Validate tools (JSON string array with name/glob entries)
 	if t := strings.TrimSpace(agent.Tools); t != "" && t != "[]" {

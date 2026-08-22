@@ -8,6 +8,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,6 +36,66 @@ func TestSaveManagedDurableInstance_MissingProfileWrapsSQLNoRows(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "auto-ingest agent") {
 		t.Fatalf("expected an actionable message pointing at startup ingestion logs, got: %v", err)
+	}
+}
+
+// TestDurableAgentsAPI_UpdateRejectsSlugTraversal is the HTTP-level
+// regression test for the durable-agent sibling of GO-AGENT-001: a crafted
+// slug on PATCH/PUT /api/durable-agents/{id} (the rename-shaped update
+// handleUpdateDurableAgent performs at durable_agents.go:139-141) must be
+// rejected before any filesystem write, and the existing managed config
+// file must survive untouched.
+func TestDurableAgentsAPI_UpdateRejectsSlugTraversal(t *testing.T) {
+	a, mux := newTestAPI(t)
+	profile := &store.AgentProfile{Name: "Traversal Profile", Slug: "traversal-profile", SystemPrompt: "x"}
+	if err := a.Services.Store.CreateAgent(profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	body, _ := json.Marshal(CreateDurableAgentRequest{
+		Name:             "Torque Supervisor",
+		Slug:             "torque-supervisor-traversal",
+		ProfileID:        profile.ID,
+		LifecycleClass:   store.DurableAgentClassProcess,
+		Provider:         "anthropic",
+		Model:            "claude-sonnet-4",
+		RuntimeKind:      "api",
+		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
+	})
+	req := httptest.NewRequest("POST", "/api/durable-agents", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST /api/durable-agents = %d body=%s", w.Code, w.Body.String())
+	}
+	var created store.DurableAgentInstance
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	legitPath := filepath.Join(a.Services.ManagedConfigRoot, "durable-agents", "torque-supervisor-traversal.yaml")
+	if _, err := os.Stat(legitPath); err != nil {
+		t.Fatalf("precondition: legit managed config file missing: %v", err)
+	}
+	// Pre-fix, ManagedDurableAgentPath(configRoot, "../evil") would have
+	// joined to configRoot/evil.yaml — one level up from durable-agents/.
+	escapePath := filepath.Join(a.Services.ManagedConfigRoot, "evil.yaml")
+
+	for _, malicious := range []string{"../evil", "../../etc/evil", "a/b", "UPPER"} {
+		patch, _ := json.Marshal(UpdateDurableAgentRequest{Slug: &malicious})
+		req = httptest.NewRequest("PATCH", "/api/durable-agents/"+created.ID, bytes.NewReader(patch))
+		req.Header.Set("Content-Type", "application/json")
+		w = httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("rename with slug %q = %d, want 400; body=%s", malicious, w.Code, w.Body.String())
+		}
+	}
+	if _, err := os.Stat(escapePath); !os.IsNotExist(err) {
+		t.Fatalf("rejected rename wrote outside the managed durable-agents/ directory: %v", err)
+	}
+	if _, err := os.Stat(legitPath); err != nil {
+		t.Fatalf("original managed config file missing after rejected rename attempts: %v", err)
 	}
 }
 

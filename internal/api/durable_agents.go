@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -45,6 +47,21 @@ func (a *API) handleCreateDurableAgent(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusCreated, saved)
 }
 
+// saveManagedDurableInstance is the shared write path for
+// POST /api/durable-agents (create) and PUT/PATCH /api/durable-agents/{id}
+// (update, including a slug rename via req.Slug — the durable-agent sibling
+// of GO-AGENT-001's agent-profile rename risk). No dedicated validation
+// function exists for ManagedDurableAgentConfig/DurableAgentInstance the way
+// agentvalidation.ValidateAgentConfig exists for agent profiles, so the slug
+// is checked explicitly here, before any filesystem call —
+// service.ManagedDurableAgentPath (called downstream via
+// SaveManagedDurableAgentConfig) independently re-validates and confines the
+// same slug, so this is early-rejection UX on top of that backstop, not the
+// only gate. The slug check runs after the profile lookup, not before it,
+// so a request with both a missing profile and an unset/invalid slug (e.g.
+// TestSaveManagedDurableInstance_MissingProfileWrapsSQLNoRows's fixture)
+// still surfaces the more specific "profile not found" diagnostic rather
+// than a generic slug-format rejection.
 func (a *API) saveManagedDurableInstance(inst *store.DurableAgentInstance, archived bool) (*store.DurableAgentInstance, error) {
 	profile, err := a.Services.Store.GetAgent(inst.ProfileID)
 	if err != nil {
@@ -58,6 +75,9 @@ func (a *API) saveManagedDurableInstance(inst *store.DurableAgentInstance, archi
 			return nil, fmt.Errorf("agent profile %s not found in agent_profiles — its source file may have failed database ingestion; check server startup logs for \"auto-ingest agent\" errors: %w", inst.ProfileID, err)
 		}
 		return nil, err
+	}
+	if err := agent.ValidateSlug(strings.TrimSpace(inst.Slug)); err != nil {
+		return nil, fmt.Errorf("slug: %w", err)
 	}
 	metadata, err := durableMetadataMap(inst.MetadataJSON)
 	if err != nil {

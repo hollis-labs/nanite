@@ -1,7 +1,7 @@
 # Build the Skill Resolver and parameter binding
 
 **Phase:** 4 — Materialization pipeline (`TASKS/skills`)
-**Status:** in-progress — review found one small doc/code mismatch, fix required (see "Fix required" section below)
+**Status:** implemented
 **Depends on:** `02`, `03`, `04` (reuses `04`'s parsed `Parameters []ParameterSpec` declaration
 shape on `skill.Definition`)
 **Touches:** new file `internal/skill/resolver.go`, `internal/runtime/agent/context_resolver.go`
@@ -295,6 +295,36 @@ guarantee over an implicit cross-package invariant. Add a small regression test:
 with two `ParameterSpec` entries sharing the same `Required`, unresolvable `Name` should produce
 a `MissingSkillParameterError.Names` with exactly one entry, not two. Re-verify
 `go build`/`go vet`/`go test ./internal/skill/...` clean.
+
+**2026-08-21 — Fix applied.** Addressed the fresh reviewer's finding directly: `ResolveSkillParameters`'s
+missing-parameter collection loop in `internal/skill/resolver.go` now tracks already-added names via a
+`seenMissing map[string]bool` before appending to `missing`, so a `Definition` with two (or more)
+`ParameterSpec` entries sharing the same `Name` — both `Required` and both unresolvable — produces a
+`MissingSkillParameterError.Names` with exactly one entry per distinct name, matching the doc comment's
+existing "sorted, deduplicated" claim exactly instead of only half of it. `sort.Strings(missing)` is
+unchanged (dedupe happens at collection time, immediately before the name is appended, rather than as a
+separate post-pass over the slice — equivalent result, one fewer pass). No other logic in
+`ResolveSkillParameters`, `resolveNeededDynamicBindings`, or `ResolveDependencyAddresses` was touched.
+
+Added one regression test, `TestResolveSkillParameters_MissingRequiredParameterNamesAreDeduplicated`
+(`internal/skill/resolver_test.go`, placed immediately before the existing
+`TestResolveSkillParameters_MissingRequiredParameter_UnconfiguredResolverSlot`): a `Definition` with two
+`ParameterSpec` entries both named `"target"`, both `Required: true`, neither bound to a `ResolverSlot`
+nor covered by a static arg — asserts the resulting `*MissingSkillParameterError.Names` has exactly one
+entry (`"target"`), not two, confirmed via `errors.As`.
+
+Validation: `go build ./cmd/nanite/` clean. `go vet ./...` — same two pre-existing, unrelated
+`internal/service/container.go` `stopReaper`/`stopRuntimeReaper` findings the original Work Log already
+confirmed via `git blame` predate this task (re-confirmed again here via `git blame -L 1190,1220
+internal/service/container.go`; both findings sit in code from commits `76df826a3` (2026-05-11) and
+`7a0e37936` (2026-05-19)/`df08da8b5` (2026-08-18), nowhere near `internal/skill`) — unchanged by this fix.
+`go test ./internal/skill/... -race -count=1` — all tests pass, including the new regression test and
+every pre-existing test in the package. `go test ./...` (full suite) — exit code 0, every package `ok` or
+`[no test files]`.
+
+No scope expansion beyond `ResolveSkillParameters`'s missing-collection loop and its one new regression
+test, per the fix request's own explicit instruction to keep this contained. Status set back to
+`implemented`.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

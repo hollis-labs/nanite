@@ -192,6 +192,31 @@ func TestResolveSkillParameters_MissingRequiredParameterProducesNamedError(t *te
 	}
 }
 
+func TestResolveSkillParameters_MissingRequiredParameterNamesAreDeduplicated(t *testing.T) {
+	// Two distinct ParameterSpec entries sharing the same Name can both be
+	// Required and both unresolvable (no static arg, no ResolverSlot) — a
+	// Definition constructed directly (not through the installer's
+	// duplicate-name validation) has no structural guarantee against this.
+	// MissingSkillParameterError.Names' own doc comment promises a
+	// deduplicated list, so this must produce exactly one entry, not two.
+	def := Definition{
+		Slug: "needs-input",
+		Parameters: []ParameterSpec{
+			{Name: "target", Required: true},
+			{Name: "target", Required: true},
+		},
+	}
+
+	_, err := ResolveSkillParameters(context.Background(), def, "some-agent", nil, "", nil)
+	var merr *MissingSkillParameterError
+	if !errors.As(err, &merr) {
+		t.Fatalf("expected a *MissingSkillParameterError, got %T: %v", err, err)
+	}
+	if len(merr.Names) != 1 || merr.Names[0] != "target" {
+		t.Errorf("MissingSkillParameterError.Names = %v, want exactly one entry [target]", merr.Names)
+	}
+}
+
 func TestResolveSkillParameters_MissingRequiredParameter_UnconfiguredResolverSlot(t *testing.T) {
 	// The parameter names a ResolverSlot, but the agent has no resolver
 	// row for that slot at all (not merely disabled) — this must still

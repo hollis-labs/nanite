@@ -171,6 +171,7 @@ func ResolveSkillParameters(
 
 	out := make(map[string]string, len(def.Parameters))
 	var missing []string
+	seenMissing := make(map[string]bool)
 	for _, p := range def.Parameters {
 		if v, ok := staticArgs[p.Name]; ok {
 			out[p.Name] = v
@@ -182,7 +183,8 @@ func ResolveSkillParameters(
 				continue
 			}
 		}
-		if p.Required {
+		if p.Required && !seenMissing[p.Name] {
+			seenMissing[p.Name] = true
 			missing = append(missing, p.Name)
 		}
 	}

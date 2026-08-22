@@ -163,12 +163,15 @@ func (l *LoopLauncher) configured() error {
 	return nil
 }
 
-// Launch resolves req's Budget override into a LoopInput and delegates
-// straight to LoopEngine.Run -- see this file's own package doc comment for
-// why the GoalID/InlineGoal union check and the one-active-LoopRun-per-
-// goal_id check are both left to Run rather than duplicated here. Returns
-// loop.ErrLoopRunAlreadyActive (unwrapped via errors.Is) when goal_id
-// already has an active LoopRun.
+// Launch resolves req's DefinitionName (either a preset name or an ordinary
+// WorkflowDefinition name -- see resolvePresetDefaults, below) and Budget
+// override into a LoopInput and delegates straight to LoopEngine.Run -- see
+// this file's own package doc comment for why the GoalID/InlineGoal union
+// check and the one-active-LoopRun-per-goal_id check are both left to Run
+// rather than duplicated here. Returns loop.ErrLoopRunAlreadyActive
+// (unwrapped via errors.Is) when goal_id already has an active LoopRun, or
+// ErrPresetNotImplemented (unwrapped via errors.Is) when req.DefinitionName
+// names a registered-but-stubbed preset (presets.go).
 func (l *LoopLauncher) Launch(ctx context.Context, req LoopLaunchRequest) (LoopResult, error) {
 	if err := l.configured(); err != nil {
 		return LoopResult{}, err
@@ -177,16 +180,16 @@ func (l *LoopLauncher) Launch(ctx context.Context, req LoopLaunchRequest) (LoopR
 		return LoopResult{}, fmt.Errorf("loop: launch: definition_name is required")
 	}
 
-	budget := Budget{}
-	if req.BudgetOverrides != nil {
-		budget = *req.BudgetOverrides
+	defName, budget, policy, err := l.resolvePresetDefaults(req)
+	if err != nil {
+		return LoopResult{}, err
 	}
 
 	input := LoopInput{
 		GoalID:             stringFromPtr(req.GoalID),
 		Goal:               req.InlineGoal,
 		Budget:             budget,
-		ContinuationPolicy: req.ContinuationPolicy,
+		ContinuationPolicy: policy,
 		WorkflowParams:     req.WorkflowParams,
 		AgentProfileID:     req.AgentProfileID,
 		ProjectID:          req.ProjectID,
@@ -194,7 +197,89 @@ func (l *LoopLauncher) Launch(ctx context.Context, req LoopLaunchRequest) (LoopR
 		TimeoutSeconds:     req.TimeoutSeconds,
 	}
 
-	return l.engine.Run(ctx, LoopDefinition{WorkflowName: req.DefinitionName}, input)
+	return l.engine.Run(ctx, LoopDefinition{WorkflowName: defName}, input)
+}
+
+// resolvePresetDefaults implements TASKS/loops/13-loop-presets.md's own
+// "What to do" #4: "DefinitionName field should accept either a real
+// WorkflowDefinition name (as today) or a preset name, resolved via
+// GetPreset first before falling back to the registry lookup." Preset names
+// are checked FIRST and win any collision -- that task's own recommendation,
+// which this task's own collision check (below) confirmed is safe against
+// the current codebase.
+//
+// Collision check performed (TASKS/loops/13-loop-presets.md's own explicit
+// instruction, "confirm no existing registered WorkflowDefinition is
+// actually named ralph/test-fix/.../self-improve"): grepped every *.yaml/
+// *.yml under the repo for a `name:` field matching any of the seven preset
+// names, and grepped every *.go file for a string literal matching one of
+// them used as a WorkflowName/workflow definition Name. The only hits were
+// (1) internal/store/loop_runs.go's own doc comment, which already uses
+// "ralph" purely as an illustrative example of a preset name, not a real
+// registered definition, and (2) the unrelated word "durable" appearing
+// throughout internal/store/teams.go and internal/service/team_run_launcher.go
+// as a TeamSlotDefinition.Resolution enum VALUE ("durable"/"fresh") -- a
+// completely different namespace (a Team slot's resolution mode, not a
+// WorkflowDefinition or LoopPreset name) with no actual collision, even
+// though the bare word is shared. The repo's one example WorkflowDefinition
+// (examples/workflow-definitions/worker-reviewer-gate.yaml) is named
+// "worker-reviewer-gate," not any of the seven. No real collision found --
+// preset-name-first precedence is safe as implemented.
+//
+// When req.DefinitionName names a registered preset, this also applies that
+// preset's own Budget/ContinuationPolicy as defaults -- but ONLY when the
+// caller left the corresponding LoopLaunchRequest field unset (nil
+// BudgetOverrides / zero-value ContinuationPolicy) -- an explicit
+// caller-supplied value always wins over a preset's own default, mirroring
+// BudgetOverrides' own existing "explicit beats default" doc comment.
+func (l *LoopLauncher) resolvePresetDefaults(req LoopLaunchRequest) (defName string, budget Budget, policy ContinuationPolicy, err error) {
+	budget = Budget{}
+	if req.BudgetOverrides != nil {
+		budget = *req.BudgetOverrides
+	}
+	policy = req.ContinuationPolicy
+
+	preset, ok := GetPreset(req.DefinitionName)
+	if !ok {
+		// Not a preset name -- treat req.DefinitionName as an ordinary,
+		// already-registered WorkflowDefinition name, exactly as before this
+		// task. LoopEngine.Run/the underlying WorkflowLauncher.Launch
+		// surface "unknown workflow" clearly if it isn't actually registered.
+		return req.DefinitionName, budget, policy, nil
+	}
+	if !preset.implemented() {
+		return "", Budget{}, ContinuationPolicy{}, fmt.Errorf("%w: %q", ErrPresetNotImplemented, req.DefinitionName)
+	}
+
+	// Idempotent registration: the same preset name is reused, unchanged,
+	// across every launch (unlike TeamRun's per-launch-unique compiled
+	// definition names) -- register the template into the shared registry
+	// only the first time this preset is actually launched in this process.
+	// See presets.go's own package doc comment ("Wiring into
+	// LoopLaunchRequest") for the known process-restart limitation this
+	// leaves in place (out of this task's own stated scope, which touches
+	// only presets.go and this file).
+	if _, found := l.engine.registry.Get(preset.Name); !found {
+		if regErr := l.engine.registry.Register(preset.DefinitionTemplate); regErr != nil {
+			return "", Budget{}, ContinuationPolicy{}, fmt.Errorf("loop: launch: register preset %q workflow definition: %w", req.DefinitionName, regErr)
+		}
+	}
+
+	if req.BudgetOverrides == nil {
+		budget = preset.Budget
+	}
+	if isZeroContinuationPolicy(policy) {
+		policy = preset.ContinuationPolicy
+	}
+	return preset.Name, budget, policy, nil
+}
+
+// isZeroContinuationPolicy reports whether p is the ContinuationPolicy zero
+// value. Not a plain p == ContinuationPolicy{} comparison -- ContinuationPolicy
+// carries a Tools []string field, and Go does not allow == on a struct with
+// a slice field.
+func isZeroContinuationPolicy(p ContinuationPolicy) bool {
+	return p.Provider == "" && p.Model == "" && p.AgentID == "" && p.SessionID == "" && len(p.Tools) == 0
 }
 
 // Cancel sets loop_runs.status = 'cancelled' directly -- an operator-

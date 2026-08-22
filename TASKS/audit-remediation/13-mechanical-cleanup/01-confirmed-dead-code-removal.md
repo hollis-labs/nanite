@@ -1,0 +1,57 @@
+# Remove confirmed dead code across 7 packages (deadcode-tool-verified)
+
+**Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, unsequenced — see folder README)
+**Status:** not-started
+**Depends on:** none within this batch.
+**Touches:** `internal/store/skill_mode_filter.go`, `internal/store/skills_source.go`, `internal/agent/managed_files.go`, `internal/agentvalidation/validation.go`, `internal/contextbroker/intent.go`, `internal/contextbroker/broker.go`, `internal/recovery/orphansweep/orphan_sweep.go`, `internal/runtime/agent/deps.go` (comment only), `internal/store/agent_runtime.go` (comment only), `internal/service/agent_cycles.go`, `internal/mcp/tool_ctx.go`, `internal/coordination/keys.go`, `internal/recovery/broker/broker.go` (review only, no edit expected).
+
+## Context
+
+Per the remediation guide's Wave 8 ("confirmed dead code" is one of the named mechanical-cleanup categories) and its explicit instruction not to create one task per occurrence, this task batches 8 independent dead-code findings from `docs/audits/2026-08-21-go-quality/REPORT.md` (§8.1, §8.3, §8.7, §8.8, §8.9, §8.11) that all share the same underlying signal — `deadcode` tool confirmation plus manual grep — but land in unrelated packages. They do **not** share a root cause; they are grouped only because the disposition-decision shape ("is this safe to delete?") is the same across all of them.
+
+That disposition shape splits into three buckets, and the split matters more than any shared narrative:
+
+- **A — Clean removal candidates.** No caller anywhere, no competing "this is intentional scaffolding" claim in the code itself. Safe to delete once a worker re-confirms zero callers against current `HEAD` (the audit's baseline commit is `8feeee5c`; re-run `deadcode` and grep before deleting, don't trust the citation blindly — see the project's own guardrail on stale citations).
+- **B — Needs an explicit keep-or-remove decision.** These are self-documented in the code as *intentional forward-looking scaffolding* — a writer exists and is live, but the reader has no callers yet. Deleting the reader would be premature if the scaffolding is still wanted; leaving it costs nothing but a small amount of dead-code noise. **`requires_architect_decision: true`** for this bucket specifically — an implementer should not unilaterally decide whether planned-but-unbuilt functionality gets removed.
+- **C — No action needed.** Reviewed by the audit and found to be a `deadcode`-tool false positive with a documented reason. Included here only so a future pass doesn't re-flag it.
+
+## What to do
+
+### Bucket A — clean removal candidates (`requires_architect_decision: false`)
+
+| Finding | File(s) | What |
+|---|---|---|
+| `GO-STORE-008` | `internal/store/skill_mode_filter.go:34,59,84` (`ParseSkillModeIDs`, `MarshalSkillModeIDs`, `SkillMatchesMode`); `internal/store/skills_source.go:23` (`ClassifySkillSource`) | All 4 confirmed unreachable by `deadcode` (`raw/deadcode.log:152-155`) and whole-module grep. **The doc comment at `skill_mode_filter.go:18-21` is factually wrong, not just silent**: it claims the trio is "still consumed by `internal/service/ingest.go`'s frontmatter → mode_ids resolution" — `ingest.go` calls none of the three (only a test-file comment mentions them). This is worse than no comment at all, since it actively misleads a reader deciding whether removal is safe. Before deleting: confirm `ClassifySkillSource`'s described FE (frontend) gating was genuinely never built (the audit found no FE-side equivalent either) — if it's dead because the described feature was never finished rather than because it's obsolete, note that distinction in the Work Log even though this bucket doesn't require an architect sign-off. Delete all 4 symbols and their now-unused imports; remove or correct the false doc-comment claim regardless of whether the code stays or goes.
+| `GO-AGENT-003` | `internal/agent/managed_files.go` (`EnsureManagedDirs`, `UserManagedAgentPath`); `internal/agentvalidation/validation.go` (`ValidationResult.Error`) | 3 exported symbols confirmed unreachable under both normal and `-test` reachability. REPORT.md §8.8 does not cite exact line numbers for these three — grep the two files for the symbol names before editing; confirm zero callers with a fresh `deadcode ./...` run rather than trusting the citation as-is. Confirm none of the three is part of an external/plugin-consumed API surface (the audit's own recommendation) before deleting.
+| `GO-MEM-003` | `internal/contextbroker/intent.go` (`BudgetForIntent`, `IntentSourcePriority`); `internal/contextbroker/broker.go` (`DefaultBudget()`'s `SourceWeights` map) | `BudgetForIntent`/`IntentSourcePriority` are a second, dead budget-allocation strategy alongside the one actually used — delete both. Separately (same finding, same file cluster): `DefaultBudget()`'s `SourceWeights` includes an `"engine": 0.15` entry with **no backing `ContextSource` implementation anywhere in the repo** — inert, misleading configuration rather than a functional bug. Either drop the `"engine"` weight entry, or — only if a real `EngineSource` is imminently planned — leave a comment saying so instead of silently deleting (this sub-item leans toward "confirm before removing" even though it doesn't rise to a full architect decision; use judgment and record the call).
+| `GO-MEM-007` | `internal/recovery/orphansweep/orphan_sweep.go` (`SweepOrphans`); stale doc-comment cross-references in `internal/runtime/agent/deps.go` and `internal/store/agent_runtime.go` | `SweepOrphans` is dead in production — bypassed by `RuntimeReaper.SweepOnce`, which calls the inner sweep function directly rather than through this wrapper. This is dead-code *and* a stale-cross-reference-comment problem together: two **other** files' doc comments (not `orphan_sweep.go`'s own) still describe `SweepOrphans` as the live entry point. Either delete the now-redundant wrapper and update both stale cross-file doc comments to point at `RuntimeReaper.SweepOnce` instead, or — if there's a reason to keep the wrapper as a public API shim — keep it but still fix the two stale comments, since they're wrong regardless of which way the deletion call goes.
+
+### Bucket B — documented-as-intentional scaffolding, needs an explicit keep-or-remove decision (`requires_architect_decision: true`)
+
+| Finding | File(s) | What |
+|---|---|---|
+| `GO-SVCCORE-007` | `internal/service/agent_cycles.go` (`WithAgentCycleKindForAPI`) | The context value this function writes is set by 2 real `internal/api` call sites, but has **zero readers anywhere**. The function's own doc comment concedes this is intentional forward-looking scaffolding — not a defect, but genuinely inert until something reads the value. **Decision needed:** keep as documented scaffolding (and make that explicit somewhere more durable than the function's own comment, e.g. a short tracking note, so it isn't rediscovered as "dead code" and cleaned up by someone unaware of the plan) OR remove the writer + both `internal/api` call sites if the planned reader is no longer intended. Do not delete unilaterally.
+| `GO-MCPTOOL-005` | `internal/mcp/tool_ctx.go` (`WithTurnToolNames` — writer, live, called on every tool dispatch; `TurnToolNamesFromContext` — reader, zero callers) | Same shape as `GO-SVCCORE-007`: a live writer paying a small per-call cost, a dead reader, self-documented as deliberate scaffolding for a future check. **Decision needed:** keep (and track it so a future cleanup pass doesn't remove the writer out of ignorance of the plan) OR remove both writer and reader if the future check is no longer planned.
+| `GO-CHAT-005` | `internal/coordination/keys.go` (`PrefixLock`, `PrefixState`, `LockTTL`) | Zero consumers anywhere for any of the three — looks like a planned-but-never-built "resource lock" feature layered on `CoordStore`, distinct from the real, consumed `PrefixHeartbeat`/`PrefixTask`/`PrefixWorker` constants in the same file. Unlike the two rows above, there is no live writer half here — nothing currently depends on these three existing. **Decision needed:** either wire an actual lock-acquire/release helper using these constants (if the resource-lock feature is still wanted), or remove all three until the feature is actually built. This is the cleanest candidate in Bucket B for "just remove it" since there's no live half to preserve, but it's grouped here rather than Bucket A because it represents unbuilt intended functionality, not an obsolete implementation — an architect should confirm the feature is genuinely abandoned before deleting the vocabulary for it.
+
+### Bucket C — reviewed, no action needed (do not re-flag)
+
+| Finding | File(s) | What |
+|---|---|---|
+| `GO-MEM-008` | `internal/recovery/broker/broker.go` (`With*` constructor options) | `deadcode` flags the `With*` constructor options, but the equivalent `Set*` post-construction setters (which *are* live) exist for a documented, legitimate reason: 2 of the 3 hooks close over state that's only constructed **after** the broker itself, so late-binding via `Set*` is structurally required — `With*` can't replace them. The audit recorded this explicitly as an example of its own "reported dead ≠ remove" guardrail working correctly. **No code change.** This row exists purely so a future dead-code sweep doesn't re-flag `With*` and propose deleting it — leave a short comment near the `With*` declarations (or confirm one already exists) noting why they coexist with `Set*`, if none exists today.
+
+## Done means
+
+- [ ] Bucket A: all 4+3+2(+comment cleanup)=9 confirmed-dead symbols removed after a fresh zero-caller re-verification against current `HEAD`; `GO-STORE-008`'s false doc-comment claim is corrected or removed regardless of the code-removal outcome; `GO-MEM-007`'s two stale cross-file comments (`internal/runtime/agent/deps.go`, `internal/store/agent_runtime.go`) are updated to reference `RuntimeReaper.SweepOnce`.
+- [ ] Bucket B: an explicit keep-or-remove decision is recorded for each of `GO-SVCCORE-007`, `GO-MCPTOOL-005`, `GO-CHAT-005` before any code changes; if "remove" is chosen for any, the corresponding writer/caller sites are also cleaned up, not just the dead reader.
+- [ ] Bucket C: `GO-MEM-008` closed with no code change; a short "why `With*` coexists with `Set*`" note added near the declarations if one doesn't already exist.
+- [ ] `go build ./...` and `go vet ./...` pass after all Bucket A/B deletions.
+- [ ] A fresh `deadcode ./...` (and `deadcode -test ./...`) run after changes lands no new surprises in the touched packages.
+
+## Work log
+
+<!-- Worker fills this in as it goes: what was actually done per bucket, any deviation, and — for Bucket B — the decision reached and who made it. -->
+
+## Review notes
+
+<!-- Reviewer fills this in: pass/fail per bucket, what was independently re-verified (e.g. re-ran deadcode/grep rather than trusting the worker's claim). -->

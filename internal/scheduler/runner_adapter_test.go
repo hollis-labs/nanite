@@ -9,6 +9,7 @@ import (
 	gosched "github.com/hollis-labs/go-scheduler"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
+	"github.com/hollis-labs/nanite/internal/loop"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -67,6 +68,28 @@ func (f *fakeCommandExecutor) Execute(ctx context.Context, agentID, toolName str
 		f.result = &service.ToolResult{Output: "ok"}
 	}
 	return f.result, f.err
+}
+
+type fakeLoopResumer struct {
+	gotLoopRunID string
+	result       loop.LoopResult
+	err          error
+	called       bool
+}
+
+func (f *fakeLoopResumer) Resume(ctx context.Context, loopRunID string) (loop.LoopResult, error) {
+	f.called = true
+	f.gotLoopRunID = loopRunID
+	return f.result, f.err
+}
+
+func fakeLoopRunLookupFor(rows map[string]*store.LoopRun) LoopRunLookup {
+	return func(ctx context.Context, id string) (*store.LoopRun, error) {
+		if r, ok := rows[id]; ok {
+			return r, nil
+		}
+		return nil, store.ErrLoopRunNotFound
+	}
 }
 
 func fakeReflexLookupFor(rows map[string]*store.AgentReflex) ReflexLookup {
@@ -317,11 +340,130 @@ func TestEnqueue_ReflexDispatch_UnknownReflexIsAnError(t *testing.T) {
 	}
 }
 
+// --- loop_run_tick dispatch tests (TASKS/loops/12) ------------------------
+
+func TestEnqueue_LoopRunTick_WaitingOnEscalation_ResumesLoop(t *testing.T) {
+	resumer := &fakeLoopResumer{}
+	r := &RunnerAdapter{
+		Loops: resumer,
+		LoopRunLookup: fakeLoopRunLookupFor(map[string]*store.LoopRun{
+			"lr-1": {ID: "lr-1", Status: store.LoopRunStatusWaitingOnEscalation},
+		}),
+	}
+
+	job := gosched.Job{
+		RunID:   "run-7",
+		JobType: JobTypeLoopRunTick,
+		Payload: mustJSON(t, LoopRunTickPayload{LoopRunID: "lr-1"}),
+	}
+	if err := r.Enqueue(context.Background(), job); err != nil {
+		t.Fatalf("Enqueue: unexpected error: %v", err)
+	}
+	if !resumer.called {
+		t.Fatalf("expected Resume to be called")
+	}
+	if resumer.gotLoopRunID != "lr-1" {
+		t.Errorf("gotLoopRunID = %q, want lr-1", resumer.gotLoopRunID)
+	}
+}
+
+func TestEnqueue_LoopRunTick_WaitingOnGate_ResumesLoop(t *testing.T) {
+	resumer := &fakeLoopResumer{}
+	r := &RunnerAdapter{
+		Loops: resumer,
+		LoopRunLookup: fakeLoopRunLookupFor(map[string]*store.LoopRun{
+			"lr-2": {ID: "lr-2", Status: store.LoopRunStatusWaitingOnGate},
+		}),
+	}
+
+	job := gosched.Job{
+		RunID:   "run-7b",
+		JobType: JobTypeLoopRunTick,
+		Payload: mustJSON(t, LoopRunTickPayload{LoopRunID: "lr-2"}),
+	}
+	if err := r.Enqueue(context.Background(), job); err != nil {
+		t.Fatalf("Enqueue: unexpected error: %v", err)
+	}
+	if !resumer.called {
+		t.Fatalf("expected Resume to be called")
+	}
+}
+
+// TestEnqueue_LoopRunTick_NotResumableStatusIsNotAnError proves this task's
+// own no-op guard: a tick against a LoopRun no longer in a resumable status
+// (running, completed, failed, cancelled) is a cheap no-op, not an error --
+// and, critically, Resume is never called (calling it would itself return a
+// hard error, per *loop.LoopEngine.Resume's own switch).
+func TestEnqueue_LoopRunTick_NotResumableStatusIsNotAnError(t *testing.T) {
+	for _, status := range []string{
+		store.LoopRunStatusRunning,
+		store.LoopRunStatusCompleted,
+		store.LoopRunStatusFailed,
+		store.LoopRunStatusCancelled,
+	} {
+		t.Run(status, func(t *testing.T) {
+			resumer := &fakeLoopResumer{}
+			r := &RunnerAdapter{
+				Loops: resumer,
+				LoopRunLookup: fakeLoopRunLookupFor(map[string]*store.LoopRun{
+					"lr-3": {ID: "lr-3", Status: status},
+				}),
+			}
+			job := gosched.Job{
+				RunID:   "run-8-" + status,
+				JobType: JobTypeLoopRunTick,
+				Payload: mustJSON(t, LoopRunTickPayload{LoopRunID: "lr-3"}),
+			}
+			if err := r.Enqueue(context.Background(), job); err != nil {
+				t.Fatalf("Enqueue: expected nil error for status %q, got %v", status, err)
+			}
+			if resumer.called {
+				t.Fatalf("status %q: Resume should not have been called", status)
+			}
+		})
+	}
+}
+
+func TestEnqueue_LoopRunTick_UnknownLoopRunIsAnError(t *testing.T) {
+	resumer := &fakeLoopResumer{}
+	r := &RunnerAdapter{
+		Loops:         resumer,
+		LoopRunLookup: fakeLoopRunLookupFor(nil),
+	}
+	job := gosched.Job{
+		RunID:   "run-9",
+		JobType: JobTypeLoopRunTick,
+		Payload: mustJSON(t, LoopRunTickPayload{LoopRunID: "does-not-exist"}),
+	}
+	if err := r.Enqueue(context.Background(), job); err == nil {
+		t.Fatalf("Enqueue: expected error for unknown loop_run_id")
+	}
+	if resumer.called {
+		t.Fatalf("Resume should not have been called")
+	}
+}
+
+func TestEnqueue_LoopRunTick_MissingLoopRunID(t *testing.T) {
+	resumer := &fakeLoopResumer{}
+	r := &RunnerAdapter{Loops: resumer, LoopRunLookup: fakeLoopRunLookupFor(nil)}
+	job := gosched.Job{
+		RunID:   "run-9b",
+		JobType: JobTypeLoopRunTick,
+		Payload: mustJSON(t, LoopRunTickPayload{}),
+	}
+	if err := r.Enqueue(context.Background(), job); err == nil {
+		t.Fatalf("Enqueue: expected error for missing loop_run_id")
+	}
+	if resumer.called {
+		t.Fatalf("Resume should not have been called")
+	}
+}
+
 // --- not-configured guard -------------------------------------------------
 
 func TestEnqueue_NotConfiguredReturnsClearError(t *testing.T) {
 	r := &RunnerAdapter{}
-	for _, jobType := range []string{JobTypeDurableAgentWake, JobTypeAgentWorkflowRun, JobTypeCommandRun, JobTypeReflexDispatch} {
+	for _, jobType := range []string{JobTypeDurableAgentWake, JobTypeAgentWorkflowRun, JobTypeCommandRun, JobTypeReflexDispatch, JobTypeLoopRunTick} {
 		job := gosched.Job{RunID: "run-x", JobType: jobType, Payload: []byte(`{}`)}
 		if err := r.Enqueue(context.Background(), job); err == nil {
 			t.Errorf("job type %q: expected a not-configured error on a zero-value RunnerAdapter", jobType)
@@ -374,6 +516,15 @@ func TestEnqueue_MalformedPayload_ReturnsErrorNotPanic(t *testing.T) {
 			},
 			jobType: JobTypeReflexDispatch,
 			payload: []byte(`["not", "an", "object"]`),
+		},
+		{
+			name: "loop_run_tick invalid JSON",
+			r: &RunnerAdapter{
+				Loops:         &fakeLoopResumer{},
+				LoopRunLookup: fakeLoopRunLookupFor(nil),
+			},
+			jobType: JobTypeLoopRunTick,
+			payload: []byte(`{"loop_run_id":`),
 		},
 	}
 

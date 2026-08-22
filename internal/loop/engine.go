@@ -680,6 +680,22 @@ func (e *LoopEngine) evaluateDecideAndAct(
 		if err := e.store.UpdateLoopRunStatus(ctx, lr.ID, store.LoopRunStatusWaitingOnEscalation, nil); err != nil {
 			return LoopResult{}, true, fullHistory, fmt.Errorf("loop: update loop_run status: %w", err)
 		}
+		if decision.Kind == DecisionWait {
+			// TASKS/loops/12-loop-run-tick-scheduled-trigger.md, item 5:
+			// the real (and, confirmed this session, only) creator of a
+			// loop_run_tick agent_schedules row -- see tick_schedule.go's
+			// own package doc comment for why WAIT specifically (not
+			// ESCALATE) is the trigger-surface moment this corresponds to,
+			// and why it is not gated on a "durable preset" marker that
+			// does not exist in the codebase yet.
+			cfg, cfgErr := decodeLoopRunPersistentConfig(lr.ContinuationPolicyJSON)
+			if cfgErr != nil {
+				return LoopResult{}, true, fullHistory, fmt.Errorf("loop: schedule loop_run_tick: decode continuation policy for %s: %w", lr.ID, cfgErr)
+			}
+			if err := e.scheduleLoopRunTick(ctx, lr.ID, cfg.AgentProfileID); err != nil {
+				return LoopResult{}, true, fullHistory, err
+			}
+		}
 		return LoopResult{LoopRunID: lr.ID, Status: store.LoopRunStatusWaitingOnEscalation, CurrentIteration: lr.CurrentIteration, LastDecision: decision}, true, fullHistory, nil
 
 	case DecisionComplete:

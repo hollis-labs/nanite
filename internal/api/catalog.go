@@ -339,9 +339,22 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		Downloader:  &install.HTTPDownloader{},
 	}
 
+	// AllowUnsigned is threaded from user_settings.allow_unsigned_plugins
+	// (AD-25, TASKS/audit-remediation/01-plugin-install-convergence/02-wire-
+	// allow-unsigned-plugins-setting.md). Only has an observable effect in a
+	// devmode build — see SignatureVerifier.AllowUnsigned and
+	// devmode.HostDevSigningBypass's own doc comments. A settings-read
+	// failure fails safe to false (unsigned installs stay rejected), same as
+	// the CLI's resolveAllowUnsignedPlugins.
+	allowUnsigned := false
+	if us, err := cs.store.GetUserSettings(); err == nil {
+		allowUnsigned = us.AllowUnsignedPlugins
+	}
+
 	inst, _ := install.NewInstaller(install.BuildOptions{
-		KeyLookup: catalogKeyLookup(sources),
-		Extractor: &catalogExtractor{archiveURL: entry.ArchiveURL},
+		KeyLookup:     catalogKeyLookup(sources),
+		AllowUnsigned: allowUnsigned,
+		Extractor:     &catalogExtractor{archiveURL: entry.ArchiveURL},
 		Loader: hostLoader{pms: &pluginManagerState{
 			pluginsDir: cs.pluginsDir,
 			pluginHost: cs.pluginHost,

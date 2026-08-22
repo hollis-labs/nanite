@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/catalog"
 	"github.com/hollis-labs/nanite/internal/plugin/install"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // defaultCatalogURL is the primary signed catalog for nanite plugins.
@@ -76,17 +77,47 @@ func (noopLoader) Load(ctx context.Context, pluginID, pluginDir string) error { 
 // one originally). The loader is a no-op; triggerActivation() handles the
 // running-service refresh (hot-reload for a subprocess plugin,
 // triggerRestart() for a builtin) after Run returns successfully.
+//
+// AllowUnsigned is threaded from user_settings.allow_unsigned_plugins (AD-25,
+// TASKS/audit-remediation/01-plugin-install-convergence/02-wire-allow-
+// unsigned-plugins-setting.md) via resolveAllowUnsignedPlugins. Only has an
+// observable effect in a devmode build — see SignatureVerifier.AllowUnsigned
+// and devmode.HostDevSigningBypass's own doc comments.
 func buildInstaller(emit install.EventFunc) (*install.Installer, *catalog.KeyRing, *install.DirStaging) {
 	ring := catalog.NewKeyRing()
 	inst, staging := install.NewInstaller(install.BuildOptions{
-		KeyLookup:   ring.LookupFunc(),
-		Extractor:   &install.TarGzExtractor{},
-		Loader:      noopLoader{},
-		StagingRoot: resolveStagingRoot(),
-		PluginsRoot: resolvePluginsDir(),
-		Emit:        emit,
+		KeyLookup:     ring.LookupFunc(),
+		AllowUnsigned: resolveAllowUnsignedPlugins(resolveDBPath()),
+		Extractor:     &install.TarGzExtractor{},
+		Loader:        noopLoader{},
+		StagingRoot:   resolveStagingRoot(),
+		PluginsRoot:   resolvePluginsDir(),
+		Emit:          emit,
 	})
 	return inst, ring, staging
+}
+
+// resolveAllowUnsignedPlugins reads user_settings.allow_unsigned_plugins from
+// the database at dbPath so buildInstaller can thread it into the
+// SignatureVerifier it constructs (AD-25). Only has an observable effect in a
+// devmode build: install.SignatureVerifier only consults AllowUnsigned when
+// devmode.HostDevSigningBypass is true, which is compiled to false outside a
+// `-tags devmode` build regardless of what this function returns.
+//
+// Any failure to open or read the store (first run before the DB exists,
+// corrupt row, etc.) fails safe to false — "couldn't read the setting" must
+// never be silently treated as "allow unsigned."
+func resolveAllowUnsignedPlugins(dbPath string) bool {
+	s, err := store.New(context.Background(), dbPath)
+	if err != nil {
+		return false
+	}
+	defer s.Close()
+	us, err := s.GetUserSettings()
+	if err != nil {
+		return false
+	}
+	return us.AllowUnsignedPlugins
 }
 
 // installLocalFromStateMachine runs the state machine for a local directory

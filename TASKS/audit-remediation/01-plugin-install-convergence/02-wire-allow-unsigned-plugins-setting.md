@@ -1,9 +1,11 @@
 # Wire (or retire) the allow_unsigned_plugins setting's promised CLI effect
 
 **Phase:** Audit remediation — Wave 1 (release-blocking trust boundaries)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** `01-unify-plugin-catalog-install-pipeline.md` (this folder) — **sequencing only**, not a technical/compile dependency. See Context below for why sequencing (not blocking) is the right relationship.
 **Touches:** `cmd/nanite/plugin_install_flow.go` (`buildInstaller`), `internal/plugin/install/verify.go` (`SignatureVerifier.AllowUnsigned` doc comment, if the setting is retired rather than wired), `internal/plugin/devmode/devmode_on.go` / `devmode_off.go` (doc comments only, if behavior changes), `internal/store/user_settings.go` (reference only — the storage/API-exposure side is already correct and out of scope), `internal/api/settings.go` (reference only, same reason)
+
+> **Actual touches (post-`01/01`, recorded at implementation time — see Work log for the re-verification):** `cmd/nanite/plugin_install_flow.go` (`buildInstaller` + new `resolveAllowUnsignedPlugins` helper), `internal/api/catalog.go` (`handleCatalogInstall`, the second production caller `01/01` introduced), `internal/plugin/install/verify.go` (doc comment only — wired, not retired). `internal/plugin/devmode/devmode_on.go`/`devmode_off.go` and `internal/plugin/install/build.go` were re-read but needed no edits (already accurate). New test files: `cmd/nanite/plugin_install_flow_devmode_test.go`, `internal/api/catalog_install_devmode_test.go`.
 **requires_architect_decision:** true — is this dev-workflow opt-in still wanted at all, given task 01 in this folder is converging every plugin-install entry point onto a fail-closed pipeline? Wiring a bypass and simultaneously hardening the rest of the system in the same wave is a real tension worth an explicit call, not a default "wire it because the doc comment says so."
 
 > **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
@@ -140,5 +142,59 @@ Observable behavior required for PASS: whichever direction is chosen, `verify.go
 - `go build ./...` (with and without `-tags devmode`), `go vet ./...`, and the relevant package tests all pass clean.
 
 ## Work log
+
+**Decision (recorded here per Done-means item 1, not re-derived — already settled by AD-25):** wire it, do not retire. `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`'s AD-25 section (decided 2026-08-22, operator confirmation) resolved this task's own stale `requires_architect_decision: true` header against `findings.json`'s `GO-PLUGIN-008` disposition (`requires_architect_decision: false`), in favor of wiring. Rationale: the rest of this wave (`01/01`, `02/01`, `03/01`) closes paths where an *untrusted, external* input reaches a security-relevant sink; this setting is the opposite shape — a developer explicitly opts in, on a `devmode`-tagged build that never ships to production, to skip signature checks on their own machine. Production (`!devmode`) behavior is provably unaffected either way per `devmode.HostDevSigningBypass`'s compile-time-`false` guarantee.
+
+**Post-`01/01` construction-site re-verification (per this task's own instruction to re-check before implementing).** `01/01` landed on `main` before this task started (confirmed via `git log`: `02c7f0e9 TASKS/audit-remediation/01/01: unify plugin-install pipeline across CLI, GUI, API`, already present in this worktree). Re-ran the task's own greps against the current tree:
+
+- `grep -rn "SignatureVerifier{" --include="*.go" .` → exactly **one** hit outside test files: `internal/plugin/install/build.go:60`, inside `install.NewInstaller`. This is the shared constructor `01/01` introduced — `BuildOptions` already had an `AllowUnsigned bool` field that gets forwarded straight to `SignatureVerifier{..., AllowUnsigned: opts.AllowUnsigned}` (build.go was already correct; nothing to change there).
+- `grep -rn "install.NewInstaller(" --include="*.go" .` → exactly **two** production callers, confirming the task file's own prediction ("N sites, all needing the same wiring"): `cmd/nanite/plugin_install_flow.go:80` (`buildInstaller`, called by both `installLocalFromStateMachine` and `installFromCatalog`) and `internal/api/catalog.go:342` (`handleCatalogInstall`). Neither caller populated `BuildOptions.AllowUnsigned` before this task — both left it at the Go zero value (`false`), reproducing the original GO-PLUGIN-008 gap at both post-convergence sites, not just the old CLI-only one.
+
+So the pre-`01/01` "one production construction site" premise in this file's own Context/`### All production callers` section is now stale (as task 01's own file predicted it would become); the corrected count is **one shared constructor (`install.NewInstaller`/`BuildOptions`, already correctly shaped) with two production callers that both needed the same one-line wiring fix.**
+
+**What was implemented:**
+
+1. `cmd/nanite/plugin_install_flow.go` — added `resolveAllowUnsignedPlugins(dbPath string) bool`, a small helper that opens the store at `dbPath` via `store.New`, reads `user_settings.allow_unsigned_plugins` via `GetUserSettings()`, and fails safe to `false` on *any* error (store won't open, DB doesn't exist yet, row missing, etc.) — "couldn't read the setting" is never silently treated as "allow unsigned." `buildInstaller` now passes `AllowUnsigned: resolveAllowUnsignedPlugins(resolveDBPath())` into `install.BuildOptions`. `buildInstaller`'s own signature is unchanged (per the task's "not a reason to restructure buildInstaller's signature" instruction) — both its callers (`installLocalFromStateMachine`, `installFromCatalog`) needed no changes.
+2. `internal/api/catalog.go` — `handleCatalogInstall` now reads `cs.store.GetUserSettings()` (the same `*store.Store` it already holds — no new dependency) immediately before constructing `install.BuildOptions`, and sets `AllowUnsigned` from `AllowUnsignedPlugins`, failing safe to `false` on a read error (same discipline as the CLI side).
+3. `internal/plugin/install/verify.go` — corrected `SignatureVerifier.AllowUnsigned`'s doc comment: it previously described the wiring in aspirational/uncertain language ("Callers wire this from user_settings.allow_unsigned_plugins, but..."); it now names both concrete production construction sites and states plainly that in production builds the field is read into the struct but never consulted by `Verify`.
+4. `internal/plugin/devmode/devmode_on.go` and `devmode_off.go` — re-read side-by-side with the final wiring per the Done-means checklist. **No changes needed** — both already described the intended *final* behavior in present-tense, unconditional language ("Per-plugin signatures are bypassed ONLY when the operator also opts in via user_settings.allow_unsigned_plugins = true"; "user_settings.allow_unsigned_plugins is intentionally inert... in a production binary"). That language was aspirationally *inaccurate* before this task (the setting wasn't actually wired anywhere) but is now literally true, so no edit was required — confirmed by direct comparison, not assumed.
+5. `internal/plugin/install/build.go` (`BuildOptions.AllowUnsigned` doc comment) — left unchanged; already accurately described as "threads user_settings.allow_unsigned_plugins through to the SignatureVerifier," which was already true of the field's mechanics (it was the *callers'* job to populate it that was missing, not this comment).
+
+**Tests added** (both under `//go:build devmode`, matching `verify_dev_bypass_test.go`'s existing pattern, added at the level where the setting is actually read since a shared-constructor-level test would be redundant with `build.go`'s already-correct, already-untested-but-trivial field-forwarding):
+
+- `cmd/nanite/plugin_install_flow_devmode_test.go` — three tests against `resolveAllowUnsignedPlugins`, each using an explicit `t.TempDir()`-rooted scratch DB path (never `resolveDBPath()`'s real XDG default — confirmed via `go-apppaths/paths.Resolve`'s source that a non-`WithoutMaterialize()` call `MkdirAll`s real `~/.local/share`/`~/.local/state` directories even when only the DB path itself is overridden by `NANITE_DB_PATH`, so calling `buildInstaller()`/`resolveDBPath()` directly from a test was deliberately avoided per `EXECUTION-PROCESS.md`'s "explicit scratch path, never a relative/ambient default" guidance):
+  - `TestBuildInstaller_ResolveAllowUnsignedPlugins_ThreadsSetting` — seeds `user_settings` with `allow_unsigned_plugins=1`, asserts `resolveAllowUnsignedPlugins` returns `true`, then mirrors `buildInstaller`'s own `install.NewInstaller` call and asserts the constructed `*install.SignatureVerifier.AllowUnsigned == true`.
+  - `TestBuildInstaller_ResolveAllowUnsignedPlugins_DefaultsFalse` — a freshly-migrated DB with **no** `user_settings` row at all (the real state before `nanite serve` has ever run `Store.Seed()` — `cmd/nanite`'s CLI plugin-install path never calls `Seed()` itself) resolves to `false` via the same fail-safe path as a read error.
+  - `TestBuildInstaller_ResolveAllowUnsignedPlugins_FailsSafeWhenStoreCannotOpen` — a `dbPath` that is itself a directory (so `store.New` cannot open it as SQLite) fails safe to `false`.
+- `internal/api/catalog_install_devmode_test.go` — two tests against `handleCatalogInstall`, reusing `catalog_install_test.go`'s existing `setupCatalogTestState`/`buildTarGzArchive`/`addCatalogSource` fixtures:
+  - `TestHandleCatalogInstall_DevmodeAllowsUnsignedWhenSettingEnabled` — the positive counterpart to the existing production-mode `TestHandleCatalogInstall_RejectsUnsignedEntry`: the *same* unsigned catalog entry that a production build rejects now installs successfully (200, `plugin.yaml` written) once `allow_unsigned_plugins=true` under this file's `devmode` tag.
+  - `TestHandleCatalogInstall_DevmodeStillRejectsUnsignedWhenSettingDisabled` — the devmode build tag alone is not sufficient; with the setting left at its default `false`, the same unsigned entry is still rejected even under `-tags devmode`, proving the two-factor gate (`devmode.HostDevSigningBypass && v.AllowUnsigned`) is intact, not just the build tag half.
+  - Both tests seed only the `user_settings` singleton row directly (`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`, via a small `seedUserSettingsRow` helper) rather than calling `cs.store.Seed()` — `Seed()` also inserts a real external `catalog_sources` row (`https://raw.githubusercontent.com/hollis-labs/plugin-catalog/main/catalog.yaml`) that `handleCatalogInstall`'s `ListCatalogSources`/`cs.fetcher.Fetch` step would then try to fetch over the network, which would make these tests flaky/network-dependent for no reason connected to what they're testing.
+
+**Deviation from the task file's literal test guidance:** the task's own "Tests required" section anticipated extending `verify_dev_bypass_test.go` itself or adding "a `cmd/nanite`-level test." Since `01/01` converged the construction site into two production callers (CLI + API) of one shared `install.NewInstaller`, and the setting is read independently at each caller (not inside the shared constructor, which only forwards a bool it's given), I added coverage at **both** the CLI level and the API level rather than just one — matching the dispatch instruction's explicit verification command (`go test -tags devmode ./cmd/nanite/... ./internal/api/... -run Install -v`, which names both packages) over the task file's own narrower, pre-`01/01`-landing text.
+
+**Verification run (this worktree, HEAD includes `01/01`):**
+```
+go build ./cmd/nanite/                                                  # PASS
+go build ./...                                                          # PASS
+go build -tags devmode ./...                                            # PASS
+go vet ./...                                                            # pre-existing, unrelated findings only
+                                                                          # (internal/service/container.go:1213/1233/1293,
+                                                                          #  stopReaper/stopRuntimeReaper possible context
+                                                                          #  leak — confirmed via `git diff --stat` that this
+                                                                          #  task's diff never touches container.go)
+go test ./internal/plugin/install/... -v                                # PASS, all cases including
+                                                                          # TestVerify_ProductionRefusesUnsigned
+go test -tags devmode ./cmd/nanite/... ./internal/api/... -run Install -v  # PASS — all 3 new CLI-level +
+                                                                          # 2 new API-level tests, plus every
+                                                                          # pre-existing Install-matching test
+go test ./...                                                           # PASS, zero FAIL across every package
+                                                                          # (production/no-tag build — includes
+                                                                          # TestHandleCatalogInstall_RejectsUnsignedEntry,
+                                                                          # confirming production posture unchanged)
+```
+`git status --short` after every verification run showed only the intended new/modified files — no stray writes to real tracked files or real XDG data/state directories (checked directly, per the two prior-incident recommendations in `docs/engineering/EXECUTION-PROCESS.md`'s "Promote recommendations, don't just log them" section, since this task involved a store-backed live read path).
+
+**Incidental finding, not fixed (out of scope):** `gofmt -l cmd/nanite/plugin_install_flow.go` flags a pre-existing struct-tag alignment drift in `catalogEntryLite` (untouched by this diff — confirmed via `git show HEAD:...` piped through `gofmt -l`, which flags the same file at the pre-`01/02` revision). Left as-is; not part of this task's scope and not introduced by this change.
 
 ## Review notes

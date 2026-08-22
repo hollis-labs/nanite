@@ -37,11 +37,18 @@ type SignatureVerifier struct {
 	// signature / signer key and to skip Ed25519 verification entirely.
 	// Shasum verification still runs so archive integrity is preserved.
 	//
+	// Both production construction sites — cmd/nanite/plugin_install_flow.go's
+	// buildInstaller (via resolveAllowUnsignedPlugins) and
+	// internal/api/catalog.go's handleCatalogInstall — read
+	// user_settings.allow_unsigned_plugins and set this field accordingly,
+	// through install.NewInstaller/BuildOptions.AllowUnsigned (AD-25,
+	// TASKS/audit-remediation/01-plugin-install-convergence/02-wire-allow-
+	// unsigned-plugins-setting.md).
+	//
 	// In production builds (devmode.HostDevSigningBypass == false) this
-	// field is ignored — signatures are always enforced. Callers wire
-	// this from user_settings.allow_unsigned_plugins, but the production
-	// binary folds the read path out via dead-code elimination on the
-	// compile-time constant.
+	// field's value is still read into the struct, but Verify never consults
+	// it — signatures are always enforced regardless of what user_settings
+	// holds.
 	AllowUnsigned bool
 }
 

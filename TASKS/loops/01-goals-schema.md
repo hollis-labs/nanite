@@ -1,7 +1,7 @@
 # Goals schema — `goals` table, Go types, store CRUD
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/loops`)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/store/migrations/` (new migration — see numbering note below),
 `internal/store/goals.go` (new — `Goal` struct, CRUD), `docs/engineering/GLOSSARY.md` (no
@@ -114,8 +114,108 @@ real JSON sub-structure column).
   `go test ./...` pass with no dangling reference.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why,
-anything escalated.>
+
+**Migration number.** Re-verified at dispatch time per the assignment's own instruction:
+`ls internal/store/migrations/ | sort -t_ -k1 -n | tail -8` showed `134_agent_profiles_protocol_transport.sql`
+as the highest number actually present in this worktree (the `worktree-loops-batch`/loops-only
+worktree never received the `plugin-system`/`skills` batches' migrations, which are isolated in
+their own worktrees) — so the task file's provisional `138` did not apply here. Used **135**:
+`internal/store/migrations/135_goals.sql`.
+
+**What was built:**
+- `internal/store/migrations/135_goals.sql` — `CREATE TABLE goals` exactly per the task's
+  illustrative DDL (self-referencing `parent_goal_id` FK, four JSON sub-structure columns each
+  defaulting to `'[]'`, `status` CHECK enum, `idx_goals_parent`/`idx_goals_status` indexes), plain
+  transactional Up/Down matching `128_teams.sql`'s "brand-new definition table" shape (no
+  `PRAGMA foreign_keys`/rebuild dance — nothing to preserve). Added `IF NOT EXISTS` on the two
+  indexes (128_teams.sql's own precedent for its unique index) though the task's illustrative DDL
+  didn't include it — harmless, and consistent with the rest of the file already using
+  `IF NOT EXISTS` on the table itself.
+- `internal/store/goals.go` — `Goal` struct mirroring every column; `GoalStatus*` constants plus
+  `validateGoalStatus` (Go-layer enum check, same "validation over a JSON/CHECK-backed column"
+  approach `teams.go`'s `validateTeamSlots`/`agent_schedules.go`'s status switch already use);
+  typed `[]string` accessor pairs for all four JSON sub-structure columns
+  (`DesiredState`/`SetDesiredState`, `Constraints`/`SetConstraints`,
+  `AcceptanceCriteria`/`SetAcceptanceCriteria`, `Invariants`/`SetInvariants`) sharing one
+  decode/encode helper pair since all four are the identical shape; `ErrGoalNotFound` sentinel;
+  `CreateGoal` (insert-time `uuid.New()` ID gen if empty, JSON-column `'[]'` defaults replicated
+  Go-side per `CreateTeam`'s own documented reason — every column is passed explicitly so SQLite's
+  DDL `DEFAULT` never actually fires); `GetGoal`; `ListGoals(ctx, GoalFilter{Status, ParentGoalID})`
+  (both filters from the task's "at minimum" list, `AND`-composed, ordered by `created_at ASC`);
+  `UpdateGoal` (full replace of every mutable "definition" column — `parent_goal_id`, `intent`,
+  the four JSON columns, `priority`, `scope`, `owner`, `source` — deliberately *not*
+  `status`/`activated_at`/`completed_at`, which are the "independently-evolving runtime columns"
+  the task called out as needing their own narrow updater); `UpdateGoalStatus(ctx, id, status)`
+  (narrow — validates the enum, sets `activated_at` via `COALESCE(activated_at, now)` on transition
+  into `active` so a redundant call never clobbers the first activation time, sets `completed_at`
+  the same COALESCE way on transition into any of the four terminal statuses
+  `satisfied`/`failed`/`cancelled`/`superseded` — `blocked` is treated as paused-not-terminal and
+  does not set `completed_at`, matching the design doc's Decision 2 framing of `blocked` as a
+  resumable state, not an end state); `DeleteGoal`.
+- `internal/store/goals_test.go` — `TestGoal_RoundTrip` (full CRUD including all four JSON
+  columns, a `parent_goal_id` self-reference, `UpdateGoal`'s definition-only replace confirmed not
+  to touch `status`, `UpdateGoalStatus`'s `activated_at`/`completed_at` side effects including the
+  "redundant call doesn't clobber" case and the "blocked doesn't set completed_at" case),
+  `TestGoal_ParentFKEnforced` (unknown `parent_goal_id` rejected at insert; deleting a
+  still-referenced parent rejected — this codebase runs `PRAGMA foreign_keys=1`, confirmed live
+  rather than assumed), `TestGoal_DefaultsAndNotFound` (JSON `'[]'` defaults;
+  `ErrGoalNotFound` on every read/update/status-update/delete against an unknown ID, per Done
+  means), `TestGoal_StatusValidation` (Go-layer rejection), `TestGoal_StatusCheckConstraint`
+  (DB-level CHECK rejection via a raw INSERT bypassing the Go layer entirely — mirrors this
+  package's own `TestAgentSchedule_ScheduleKindCheckRejectsRetiredValues` "confirm the DB, not
+  just the Go layer, enforces this" discipline).
+- `internal/store/migration135_goals_backup_test.go` —
+  `TestRealBackupGoalsMigrationAppliesCleanly`, matching this package's established real-backup-test
+  convention exactly (`migration_130_workflow_run_steps_flex_kind_test.go`'s
+  `TestRealBackupWorkflowRunStepsSurviveFlexKindMigration`: copies the real backup file into
+  `t.TempDir()`, never opens it in place; skips rather than fails when the backup isn't present on
+  the running machine). Confirmed against a real copy of
+  `~/.local/share/nanite/workspaces/default/backups/main.db.pre-execution-backup-20260818-132726`
+  (343 pre-existing `sessions` rows, confirming a real populated schema, not an empty fixture) that
+  migration 135 applies cleanly alongside every other live table, and that full Goal CRUD
+  (including the `parent_goal_id` FK and `UpdateGoalStatus`'s `activated_at` side effect) works on
+  top of the resulting schema.
+
+**Deviations from the task file, both documented above and repeated here for visibility:**
+1. Migration number `135`, not the task's provisional `138` — expected and instructed
+   cross-batch-numbering re-verification, not a real deviation.
+2. `UpdateGoal` excludes `status`/`activated_at`/`completed_at` from its replace set (routed
+   through `UpdateGoalStatus` instead) — this is a literal reading of the task's own parenthetical
+   ("goals has no independently-evolving runtime columns beyond status/activated_at/completed_at,
+   which get their own narrow updater"), not an invented narrowing.
+3. Added `IF NOT EXISTS` to the two new indexes in the migration (task's illustrative DDL omitted
+   it) — cosmetic, matches `128_teams.sql`'s own index precedent, no behavior change.
+
+**Incident during this task, fully resolved, no data lost:** while confirming `go vet ./...`'s two
+pre-existing `internal/service/container.go` failures were unrelated to this change, I ran
+`git stash` (reported "No local changes to save" — this task's new files are untracked, so nothing
+of mine was stashed) followed by `git stash pop`, which popped an old, unrelated, pre-existing
+stash entry already sitting in this worktree (`stash@{0}: "wip: parallel phase-0/2-9 reorg
+(pre-merge stash for phase-1-execution merge)"`, a `main`-branch WIP with no relationship to this
+task or this worktree's `HEAD`). That partially applied (three-way merge conflicts in
+`TASKS/INDEX.md`, `docs/engineering/architecture/09-plugin-system.md`, and a rename/delete
+conflict on `TASKS/phase-7/01-rename-pty-naming-scrub.md`, plus one stray untracked file). Because
+the pop could not fully complete (an unrelated untracked-file restore conflict), git did not drop
+the stash entry — confirmed via `git stash list` before and after that it was still present and
+unchanged. Recovery: `git checkout HEAD -- <the three conflicted paths>` to discard the merge
+conflict markers and restore each to its pre-pop `HEAD` content, `rm` the one stray untracked file
+the pop had introduced, then confirmed `git diff HEAD --stat` was empty and `git stash list` still
+showed all 8 entries including the untouched `stash@{0}`. Verified via `git status --short`
+afterward that the worktree was back to exactly its pre-incident state (only this task's three new
+files untracked). No data lost; the pre-existing stash entry was never touched beyond git's own
+failed, no-op pop attempt. Lesson for future sessions in this worktree: don't reach for
+`git stash`/`git stash pop` to "protect" untracked new files before a diagnostic command — they're
+untracked and unaffected by any of the commands run here regardless; `git stash` was unnecessary in
+the first place.
+
+**Baseline checks:** `go build ./cmd/nanite/` passes. `go vet ./...` passes for everything this task
+touched (`go vet ./internal/store/...` is clean); the two pre-existing failures in
+`internal/service/container.go` (`stopRuntimeReaper`/`stopReaper` possible-context-leak lints) are
+unrelated to this task — confirmed this file was never touched by this task's changes, and those
+same two failures are present on a byte-for-byte-identical `internal/service/container.go` outside
+this task's diff. `go test ./...` passes in full (every package `ok`, exit code 0) — `internal/store`
+specifically at 29.073s including all six new Goal tests. Migration tested against a real, isolated
+scratch copy of a production backup (never the real backup file in place), per EXECUTION-PROCESS.md.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

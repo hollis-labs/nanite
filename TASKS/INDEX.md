@@ -756,7 +756,7 @@ resolution of every item on the design doc's own "What this session did not deci
 | `04-loop-run-iterations-schema` | 1 | reviewed (migration 139) | `03` |
 | `05-workflow-runs-loop-scoping-columns` | 1 | reviewed (migration 140) | `03` |
 | `06-stepkindloop-schema` | 1 | reviewed (migration 136) | none |
-| `07-loop-continuation-policy` | 2 | not-started | `01`, `02`, `03`, `04` |
+| `07-loop-continuation-policy` | 2 | implemented | `01`, `02`, `03`, `04` |
 | `08-loop-engine-core` | 2 | not-started | `03`, `04`, `07` |
 | `09-stepkindloop-executor-and-waiting-status` | 2 | not-started | `06`, `08` |
 | `10-loop-launcher-and-api` | 3 | not-started | `08` |

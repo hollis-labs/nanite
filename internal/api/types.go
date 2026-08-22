@@ -673,6 +673,23 @@ type AssignAgentSkillRequest struct {
 	Config  string `json:"config"`
 }
 
+// InstallSkillRequest is the body for POST /api/skills/install and
+// POST /api/skills/{slug}/sync (TASKS/skills/05 -- the REST trigger for
+// task 04's internal/skillinstall.Installer pipeline). Path-only for this
+// batch: TASKS/skills/README.md's ecosystem-format-adaptation scope fence
+// covers upload support, deferred to a later batch (see task 05's Work Log).
+type InstallSkillRequest struct {
+	Path string `json:"path"`
+}
+
+// InstallSkillResponse is the shared success shape for install and sync --
+// the resulting index row plus the vendored-store address it now points at.
+type InstallSkillResponse struct {
+	Skill   store.Skill `json:"skill"`
+	Address string      `json:"address"`
+	Reused  bool        `json:"reused"`
+}
+
 // --- Approvals ---
 
 type RespondApprovalRequest struct {

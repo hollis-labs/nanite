@@ -48,6 +48,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/skill"
+	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/task"
@@ -70,6 +71,22 @@ type Container struct {
 	// configs (GUI/API/CLI/MCP all route mutations through it).
 	AgentConfig *AgentConfigService
 	Skills      SkillService
+	// SkillVendor is the content-addressed vendored skill store (internal/
+	// skillvendor, TASKS/skills/03) that backs the explicit install/sync
+	// pipeline (internal/skillinstall, TASKS/skills/04/05 --
+	// docs/engineering/architecture/20-skills.md's "The model: DB is an
+	// index, a vendored store is content"). Store itself is safe for
+	// concurrent use (its own doc comment), but a *skillinstall.Installer
+	// is NOT: its State()/Emit are single-call-scoped, mirroring internal/
+	// plugin/install's own "build a fresh Installer per invocation"
+	// convention (cmd/nanite/plugin_install_flow.go's buildInstaller).
+	// Callers (internal/api/skills.go's install/sync handlers, cmd/nanite's
+	// `nanite skill install/sync` subcommands) construct a fresh
+	// &skillinstall.Installer{Vendor: SkillVendor, Index: Store} per call
+	// rather than reusing one instance across concurrent requests. nil
+	// when the vendor root failed to initialize at container-build time
+	// (surfaced as a 503 by the API layer, not a container-boot failure).
+	SkillVendor *skillvendor.Store
 	Tools       ToolService
 	Chat        ChatService
 	Context     ContextService
@@ -560,6 +577,24 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Skills:     cfg.Store,
 		FileSkills: nil,
 	})
+
+	// TASKS/skills/05: the content-addressed vendored skill store backing
+	// the explicit install/sync pipeline. Rooted at AppConfig.Skills.
+	// VendorStorageDir, mirroring ArtifactsConfig.StorageDir's own
+	// load/default/override pattern (cmd/nanite/main.go's initMCP). A
+	// construction failure (e.g. an unwritable root) degrades to a nil
+	// SkillVendor rather than failing container boot entirely -- install/
+	// sync becomes unavailable (503 at the API layer) rather than taking
+	// the whole service down over a skills-only storage path problem.
+	skillVendorRoot := config.DefaultAppConfig().Skills.VendorStorageDir
+	if cfg.AppConfig != nil && cfg.AppConfig.Skills.VendorStorageDir != "" {
+		skillVendorRoot = cfg.AppConfig.Skills.VendorStorageDir
+	}
+	skillVendor, skillVendorErr := skillvendor.New(skillVendorRoot)
+	if skillVendorErr != nil {
+		slog.Warn("service container: skill vendor store init failed", "root", skillVendorRoot, "err", skillVendorErr)
+		skillVendor = nil
+	}
 
 	// Internal todo/plan service (SQLite-backed, always available).
 	todos := NewTodoService(TodoServiceConfig{
@@ -1345,6 +1380,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Sessions:            sessions,
 		Agents:              agents,
 		Skills:              skills,
+		SkillVendor:         skillVendor,
 		Tools:               tools,
 		Chat:                chatSvc,
 		Context:             ctxService,

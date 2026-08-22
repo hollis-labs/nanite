@@ -1,10 +1,14 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/skill"
+	"github.com/hollis-labs/nanite/internal/skillinstall"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -239,6 +243,143 @@ func (a *API) handleGetDevMode(w http.ResponseWriter, r *http.Request) {
 		"dev_mode": a.devModeEnabled(r),
 		"env_flag": envDevModeOn(),
 	})
+}
+
+// TASKS/skills/05: install/sync REST surface — the operator-facing trigger
+// for task 04's explicit, single-target install/sync pipeline (internal/
+// skillinstall.Installer), per docs/engineering/architecture/20-skills.md's
+// "API surface" section: "Install/sync a skill package (by path or upload)
+// into the vendored store + index; re-sync re-hashes and re-vendors on
+// change." Local-path-only for this batch — upload support is deferred, see
+// task 05's Work Log for why.
+//
+// A *skillinstall.Installer is deliberately never shared across requests —
+// see service.Container.SkillVendor's doc comment. Both handlers below build
+// a fresh one per call from the two stateless, concurrency-safe primitives
+// the container does share: SkillVendor (the vendored store) and Store (the
+// index, satisfying skillinstall.IndexStore directly).
+
+// runSkillInstall builds a fresh *skillinstall.Installer and runs task 04's
+// Parse -> Validate -> Vendor -> Index pipeline against path. The returned
+// int is the HTTP status a caller should use when err is non-nil: a
+// Parsing/Validating-step failure is the caller's malformed package (422
+// Unprocessable Entity — this task's Done-means: "a malformed package
+// produces a clear error response ... not a panic or an opaque 500"); a
+// Vendoring/Indexing-step failure is a server-side/infra problem (500).
+// Classification reads the Installer's own Emit stream rather than parsing
+// error message text — Install's wrapped errors ("parse: %w", "validate:
+// %w", ...) are for a human, not for control flow.
+func (a *API) runSkillInstall(ctx context.Context, path string) (skillinstall.Result, int, error) {
+	var lastState skillinstall.State
+	installer := &skillinstall.Installer{
+		Vendor: a.Services.SkillVendor,
+		Index:  a.Services.Store,
+		Emit: func(e skillinstall.Event) {
+			if e.Err == nil {
+				lastState = e.State
+			}
+		},
+	}
+
+	result, err := installer.Install(ctx, skillinstall.Source{Path: path})
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch lastState {
+		case skillinstall.StateParsing, skillinstall.StateValidating:
+			status = http.StatusUnprocessableEntity
+		}
+		return skillinstall.Result{}, status, err
+	}
+	return result, http.StatusOK, nil
+}
+
+func toInstallSkillResponse(r skillinstall.Result) InstallSkillResponse {
+	return InstallSkillResponse{Skill: r.Skill, Address: r.Address, Reused: r.Reused}
+}
+
+// handleInstallSkill implements POST /api/skills/install: install (or
+// re-sync, if the package's own frontmatter slug already matches an
+// existing index row — task 04's Installer decides create-vs-update
+// internally, keyed on the parsed package's slug, not a caller-supplied
+// distinction) a skill package from a local directory path.
+func (a *API) handleInstallSkill(w http.ResponseWriter, r *http.Request) {
+	if a.Services.SkillVendor == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "skill install/sync unavailable: vendor store not initialized")
+		return
+	}
+
+	var req InstallSkillRequest
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Path) == "" {
+		a.errorResp(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	result, status, err := a.runSkillInstall(r.Context(), req.Path)
+	if err != nil {
+		a.errorResp(w, status, "skill install failed: "+err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusCreated, toInstallSkillResponse(result))
+}
+
+// handleSyncSkill implements POST /api/skills/{slug}/sync: re-runs task 04's
+// install pipeline against the same source path for an already-indexed
+// skill. Requires the target slug to already exist in the index (404
+// otherwise) and requires the freshly parsed package at path to declare that
+// same slug in its own SKILL.md frontmatter (409 otherwise) — this endpoint
+// re-syncs a known skill, it does not let a caller relabel one skill
+// package's content onto a different skill's slug. The slug check parses
+// the package (skill.ParsePackageDir — a pure read, no vendoring/indexing
+// side effect) before ever calling the real Installer, so a mismatched sync
+// target is rejected without mutating anything.
+func (a *API) handleSyncSkill(w http.ResponseWriter, r *http.Request) {
+	if a.Services.SkillVendor == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "skill install/sync unavailable: vendor store not initialized")
+		return
+	}
+	slug := r.PathValue("slug")
+
+	existing, err := a.Services.Store.GetSkillBySlug(slug)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if existing == nil {
+		a.errorResp(w, http.StatusNotFound, "skill not found: "+slug)
+		return
+	}
+
+	var req InstallSkillRequest
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Path) == "" {
+		a.errorResp(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	def, _, err := skill.ParsePackageDir(req.Path)
+	if err != nil {
+		a.errorResp(w, http.StatusUnprocessableEntity, "skill sync failed: parse: "+err.Error())
+		return
+	}
+	if def.Slug != slug {
+		a.errorResp(w, http.StatusConflict, fmt.Sprintf(
+			"package at %q declares slug %q, does not match sync target %q", req.Path, def.Slug, slug))
+		return
+	}
+
+	result, status, err := a.runSkillInstall(r.Context(), req.Path)
+	if err != nil {
+		a.errorResp(w, status, "skill sync failed: "+err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, toInstallSkillResponse(result))
 }
 
 // TASKS/skills/02: handleForkSkillToUser (POST /api/skills/{id}/fork-to-user)

@@ -356,6 +356,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/skills/{id}", a.handleGetSkill)
 	mux.HandleFunc("PUT /api/skills/{id}", a.handleUpdateSkill)
 	mux.HandleFunc("DELETE /api/skills/{id}", a.handleDeleteSkill)
+	// TASKS/skills/05: install/sync REST surface — the operator-facing
+	// trigger for task 04's internal/skillinstall.Installer pipeline. See
+	// internal/api/skills.go's doc comment above handleInstallSkill.
+	mux.HandleFunc("POST /api/skills/install", a.handleInstallSkill)
+	mux.HandleFunc("POST /api/skills/{slug}/sync", a.handleSyncSkill)
 	// TASKS/skills/02: the dev-mode "fork to user override" route
 	// (POST /api/skills/{id}/fork-to-user) is removed along with
 	// handleForkSkillToUser and ForkSkillToUserRequest — see

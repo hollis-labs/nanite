@@ -53,6 +53,13 @@ internal/server/ui_dist/assets/
 # Scratch artifact-tool output (session-local, not build output)
 /data/artifacts/
 
+# Vendored skill packages (internal/skillvendor, TASKS/skills/03/05) --
+# content-addressed install output, not source. Was incidentally caught by
+# the bare `vendor/` rule above (the default root is data/skills/vendor/),
+# but that's a coincidence of the current directory name, not a deliberate
+# ignore -- listed explicitly so it stays ignored regardless.
+/data/skills/
+
 # Plugins
 /plugins/
 

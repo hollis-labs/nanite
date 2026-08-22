@@ -2843,8 +2843,8 @@
       "report_section": "\u00a78.13",
       "false_positive_considerations": "Real-world impact scales with background_job submission volume, which was not measured.",
       "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/03-bound-background-job-registry-growth.md",
-      "disposition": "needs-architect-decision",
-      "task_status": "not-started",
+      "disposition": "remediate",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed unchanged: the only `delete(svc.jobs, jobID)` in internal/background/service.go is on the immediate backend.Start failure path (line 126); every job that starts successfully stays in the map forever. The doc-comment falsely claiming reaping is unconditionally required per AD-18, but the actual retention policy (TTL/LRU/persist-and-evict/accept) is AD-18's open question -- task file 07/03 explicitly separates the two."
     },
     {

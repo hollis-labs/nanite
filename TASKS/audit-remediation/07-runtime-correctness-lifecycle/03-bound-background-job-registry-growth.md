@@ -1,7 +1,7 @@
 # Decide and fix `internal/background` job-registry unbounded growth (+ fix the false "reaped" claim)
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/background/service.go` (`Service`, `jobRecord`, `Submit`, `onBackendComplete`, `Status`, `Result`); `internal/background/pty.go` (`PTYBackend`, `ptyJob`, `Status`'s doc comment). **This task requires an architect decision before the retention-policy half is implemented** — see Context and What to do. The doc-comment fix is required regardless of that decision.
 
@@ -201,4 +201,17 @@ Direction A carries real risk of evicting a job result before a caller has polle
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail, what was independently re-verified. -->
+- PASS (2026-08-22): final independent review verified the 24-hour TTL and
+  100-completed-result cap, active-job exclusion, deterministic eviction,
+  late/duplicate callback safety, and immediate PTY record cleanup after
+  process reaping. Focused race and high-count probes passed.
+- The first review correctly rejected the disclosed-prefix issuance test and
+  unreachable production `expired` result. The corrected version uses a
+  per-Service 256-bit HMAC secret and returns structured expiry through
+  `background_status`, while unknown ids remain tool errors.
+- A second independent review found raw-base64 trailing-bit malleability. The
+  final parser uses strict decoding plus exact canonical re-encoding before
+  constant-time comparison. A fresh final review replayed the alternate-last-
+  character regression and confirmed forged, malformed, altered, and prior-
+  Service tokens remain unknown before and after a valid token's eviction;
+  valid evicted tokens alone return expired. No findings remain.

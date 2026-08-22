@@ -1055,7 +1055,7 @@ must not be dispatched.
 | `06/04` | `06-store-correctness/04-cancellation-safety-for-terminal-writes.md` | validated | `06/03` | — (fix task for `06/03`) |
 | `07/01` | `07-runtime-correctness-lifecycle/01-fix-worktree-orphan-branch-cleanup.md` | reviewed | `00/01` | — |
 | `07/02` | `07-runtime-correctness-lifecycle/02-fix-cmdserve-fatal-cleanup-bypass.md` | reviewed | `00/01` | AD-17 |
-| `07/03` | `07-runtime-correctness-lifecycle/03-bound-background-job-registry-growth.md` | not-started | `00/01` | AD-18 |
+| `07/03` | `07-runtime-correctness-lifecycle/03-bound-background-job-registry-growth.md` | reviewed | `00/01` | AD-18 |
 | `07/04` | `07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md` | reviewed | `04/01` | — |
 | `07/05` | `07-runtime-correctness-lifecycle/05-fix-mcp-config-silent-decode-errors.md` | reviewed | `07/02` | — |
 

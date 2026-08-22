@@ -1,7 +1,12 @@
 [
   {
-    "title": "Delete a non-builtin skill",
-    "args": { "id": "skl-01HZ..." },
-    "notes": "Irreversible. Builtin skills cannot be deleted — this returns an error."
+    "title": "Uninstall a skill by slug",
+    "args": { "slug": "release-review" },
+    "notes": "Irreversible — removes both the skill-catalog index row and the vendored package copy (SKILL.md, scripts/, references/, assets/). Reinstalling from the original source package is the only way to bring it back."
+  },
+  {
+    "title": "Uninstall a skill by catalog row ID (fallback)",
+    "args": { "id": "9862748f-a427-4d2c-9993-8e16a5425aaf" },
+    "notes": "Use only when the slug is unknown — get it from skill_list otherwise."
   }
 ]

@@ -81,16 +81,23 @@ func selfToolDefinitions() []mcp.Tool {
 		},
 		{
 			Name: "skill_delete",
-			Description: "Permanently delete a skill by ID. Irreversible.\n\n" +
-				"**When to use:** When the user explicitly asks to remove a skill.\n\n" +
-				"**Required context:** You need the skill ID — get it from skill_list if you only have the name.\n\n" +
-				"**Output shape:** \"Deleted skill <id>\" on success. Returns an error if the skill is not found.",
+			Description: "Permanently uninstall a skill: removes both its skill-catalog index row AND its vendored " +
+				"package copy (SKILL.md body, scripts/, references/, assets/). Irreversible — a deleted skill must be " +
+				"reinstalled from its original source package to come back, and any agent grant approved against it " +
+				"is orphaned (silently excluded from that agent's skill list, per this batch's existing " +
+				"since-deleted-dependency convention) rather than automatically cleaned up.\n\n" +
+				"**When to use:** When the user explicitly asks to remove/uninstall a skill.\n\n" +
+				"**Required context:** Provide either `slug` (preferred — from skill_list's output) or `id` " +
+				"(the skill's catalog row ID) if you only have that.\n\n" +
+				"**Output shape:** \"Deleted skill <id> (slug=<slug>, vendor_deleted=<bool>)\" on success — " +
+				"vendor_deleted is false only for a skill that was never installed/vendored (a bare admin-created " +
+				"row with no content). Returns an error if the skill is not found.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{"type": "string", "description": "Skill ID to delete"},
+					"slug": map[string]any{"type": "string", "description": "Skill slug to delete (preferred)"},
+					"id":   map[string]any{"type": "string", "description": "Skill catalog row ID to delete (fallback, if slug is unknown)"},
 				},
-				"required": []string{"id"},
 			},
 		},
 		// TASKS/skills/11: skill_get — the real entry point into the Resolver

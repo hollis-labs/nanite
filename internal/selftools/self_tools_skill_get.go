@@ -28,9 +28,16 @@ package selftools
 //  3. internal/skill.ResolveInlineMarkers (task 08) — executes any
 //     `` !`cmd` `` marker present in the FINAL composed output (the root's
 //     own body, or a spliced-in inline dependency's) through the same Gate,
-//     attributed to the ROOT skill's slug — see loadRootSkillDefinition's
-//     own doc comment for why that attribution is correct, not an
-//     oversight.
+//     attributed to the ROOT skill's slug — see the comment above this
+//     file's own call to ResolveInlineMarkers for why that attribution is
+//     correct, not an oversight.
+//
+// internal/skill.LoadRootDefinition (TASKS/skills/12) reads the root
+// skill's vendored package and re-parses its SKILL.md — extracted into
+// the internal/skill package (originally this file's own unexported
+// loadRootSkillDefinition, task 11) so this self-tool and task 12's
+// POST /api/skills/{slug}/preview REST endpoint share one implementation
+// rather than two independent copies.
 //
 // Note that MaterializeSkill (task 07) does NOT itself call
 // ResolveInlineMarkers (task 08) — confirmed directly against
@@ -48,17 +55,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/skill"
-	"github.com/hollis-labs/nanite/internal/skillvendor"
-	"github.com/hollis-labs/nanite/internal/store"
 )
-
-// skillMDFileName mirrors internal/skill's own unexported skillFileName
-// constant (parser.go) — kept as this package's own local copy rather than
-// exporting that package's private convention purely for this one read,
-// matching this batch's own established precedent elsewhere for a small,
-// call-site-specific duplication (e.g. internal/skill/gate.go's own
-// filterSecretEnv vs internal/sandbox's unexported filterSecrets).
-const skillMDFileName = "SKILL.md"
 
 // callSkillGet implements skill_get. See this file's package doc for the
 // full pipeline this assembles.
@@ -111,7 +108,7 @@ func (st *SelfToolsTransport) callSkillGet(ctx context.Context, args map[string]
 		return mcp.ErrorResult(fmt.Sprintf("skill_get: %v", err)), nil
 	}
 
-	def, pkgDir, err := loadRootSkillDefinition(st.SkillVendor, sk)
+	def, pkgDir, err := skill.LoadRootDefinition(st.SkillVendor, sk)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("skill_get: %v", err)), nil
 	}
@@ -157,59 +154,27 @@ func (st *SelfToolsTransport) callSkillGet(ctx context.Context, args map[string]
 	// vendored package directory) is used as the exec working directory
 	// so a marker can reference the package's own scripts/references by
 	// relative path, matching ExecuteScript's own pkgDir convention.
+	//
+	// Every marker found here — including one that originated inside an
+	// inline-spliced dependency's own body — is attributed to THIS root
+	// Definition's slug (def.Slug, from skill.LoadRootDefinition below) for
+	// the Gate's grant lookup, never a nested dependency's own slug. This is
+	// a deliberate property of composition itself (task 07), not something
+	// this file narrows or widens: "inline" composition is pure content
+	// splicing ("before the model ever sees either," 20-skills.md's
+	// "Composition" section) — once spliced, the nested content is
+	// indistinguishable from the parent's own body, and there is no
+	// per-line provenance for ResolveInlineMarkers to key a different grant
+	// lookup on. A skill package that wants its own markers executed under
+	// its own, separately-granted identity uses `fork` composition instead,
+	// which carries a real, separate trust boundary (subagent.SpawnRequest's
+	// own trust resolution).
 	resolved, err := skill.ResolveInlineMarkers(ctx, gate, *def, agentID, pkgDir, materialized.Content, skill.ExecOptions{})
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("skill_get: resolve inline markers: %v", err)), nil
 	}
 
 	return mcp.TextResult(resolved), nil
-}
-
-// loadRootSkillDefinition reads sk's vendored package and re-parses its
-// SKILL.md into a skill.Definition — "Materialization always reads the
-// vendored copy live, every time a skill is used" per
-// docs/engineering/architecture/20-skills.md's "The model" section.
-// Mirrors internal/skill/compose.go's own unexported loadDependencyDefinition
-// (used there for a NESTED dependency during composition), applied here to
-// the ROOT skill instead, since MaterializeSkill's own entry point takes an
-// already-loaded root Definition rather than an address to load one from
-// itself.
-//
-// Every marker ResolveInlineMarkers later finds in the final composed
-// output — including one that originated inside an inline-spliced
-// dependency's own body — is attributed to THIS root Definition's slug for
-// the Gate's grant lookup, never a nested dependency's own slug. This is a
-// deliberate property of composition itself (task 07), not something this
-// file narrows or widens: "inline" composition is pure content splicing
-// ("before the model ever sees either," 20-skills.md's "Composition"
-// section) — once spliced, the nested content is indistinguishable from
-// the parent's own body, and there is no per-line provenance for
-// ResolveInlineMarkers to key a different grant lookup on. A skill package
-// that wants its own markers executed under its own, separately-granted
-// identity uses `fork` composition instead, which carries a real, separate
-// trust boundary (subagent.SpawnRequest's own trust resolution).
-func loadRootSkillDefinition(vendor *skillvendor.Store, sk *store.Skill) (def *skill.Definition, pkgDir string, err error) {
-	pkgDir, err = vendor.Path(sk.ContentHash)
-	if err != nil {
-		return nil, "", fmt.Errorf("resolve vendored package path for %q: %w", sk.Slug, err)
-	}
-	files, err := vendor.ReadFiles(sk.ContentHash)
-	if err != nil {
-		return nil, "", fmt.Errorf("read vendored package for %q: %w", sk.Slug, err)
-	}
-	data, ok := files[skillMDFileName]
-	if !ok {
-		return nil, "", fmt.Errorf("vendored package for %q has no %s", sk.Slug, skillMDFileName)
-	}
-	def, err = skill.ParseMD(data)
-	if err != nil {
-		return nil, "", fmt.Errorf("parse %s for %q: %w", skillMDFileName, sk.Slug, err)
-	}
-	if def.Slug == "" {
-		def.Slug = sk.Slug
-	}
-	def.SourceRef = sk.ContentHash
-	return def, pkgDir, nil
 }
 
 // skillGetParamsArg decodes the optional `params` object argument into the

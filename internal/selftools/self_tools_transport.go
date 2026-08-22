@@ -29,6 +29,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service/install"
+	"github.com/hollis-labs/nanite/internal/skillinstall"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
@@ -633,16 +634,58 @@ func (st *SelfToolsTransport) callListSkills(args map[string]any) (*mcp.ToolResu
 	return mcp.TextResult(sb.String()), nil
 }
 
+// callDeleteSkill implements skill_delete — TASKS/skills/12's forward
+// pointer from task 01: this now performs a real uninstall (vendored copy
+// + index row, via skillinstall.Uninstaller) rather than the old flat
+// index-row-only st.Store.DeleteSkill(id) call, and shares that exact
+// uninstall implementation with DELETE /api/skills/{slug}
+// (internal/api/skills.go's handleDeleteSkill) — see Uninstaller's own doc
+// comment in internal/skillinstall/uninstall.go. Accepts either "slug"
+// (this batch's addressing convention throughout the rest of the skill
+// self-tools — skill_get, install/sync) or the older "id" argument
+// (skill_list still surfaces both; kept working for any existing caller
+// that only has an ID).
 func (st *SelfToolsTransport) callDeleteSkill(args map[string]any) (*mcp.ToolResult, error) {
-	id := strArg(args, "id", "")
-	if id == "" {
-		return mcp.ErrorResult("id is required"), nil
+	ref := strArg(args, "slug", "")
+	if ref == "" {
+		ref = strArg(args, "id", "")
+	}
+	if ref == "" {
+		return mcp.ErrorResult("slug or id is required"), nil
 	}
 
-	if err := st.Store.DeleteSkill(id); err != nil {
+	sk, err := st.Store.GetSkillBySlug(ref)
+	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil
 	}
-	return mcp.TextResult(fmt.Sprintf("Deleted skill %s", id)), nil
+	if sk == nil {
+		sk, err = st.Store.GetSkill(ref)
+		if err != nil {
+			return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil
+		}
+	}
+	if sk == nil {
+		return mcp.ErrorResult(fmt.Sprintf("skill %q not found", ref)), nil
+	}
+
+	// st.SkillVendor is a *skillvendor.Store that may itself be a nil
+	// pointer when unwired (e.g. this package's own test harness,
+	// newSelfTools). It must never be assigned directly into the
+	// UninstallVendorer interface field in that case — see
+	// internal/api/skills.go's handleDeleteSkill for the full "typed nil"
+	// reasoning this mirrors.
+	var vendor skillinstall.UninstallVendorer
+	if st.SkillVendor != nil {
+		vendor = st.SkillVendor
+	}
+	u := &skillinstall.Uninstaller{Vendor: vendor, Index: st.Store}
+	result, err := u.Uninstall(sk)
+	if err != nil {
+		return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil
+	}
+	return mcp.TextResult(fmt.Sprintf(
+		"Deleted skill %s (slug=%s, vendor_deleted=%t)", result.Skill.ID, result.Skill.Slug, result.VendorDeleted,
+	)), nil
 }
 
 // --- agent handlers ---

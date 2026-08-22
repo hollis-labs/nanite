@@ -875,6 +875,14 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 
 	// G-5: emit running event so the parent UI can render "subagent
 	// spawned" before the runner does any work.
+	var slotWait *spawnSlotWait
+	switch mode {
+	case ModeSync, ModeAsync, ModeAPI:
+		// Register operator cancellation before publishing the running event.
+		// A sink consumer can call Cancel as soon as that event is visible,
+		// including while this goroutine is still waiting for capacity.
+		slotWait = svc.registerSpawnSlotWait(ctx, run.ID)
+	}
 	svc.emitStatus(run, "")
 
 	switch mode {
@@ -887,14 +895,11 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		// Acquire the fan-out semaphore before executing. The
 		// caller's ctx governs the wait; if it cancels while
 		// queued we return cleanly without consuming a slot.
-		if err := svc.acquireSpawnSlot(ctx); err != nil {
+		if err := svc.acquireSpawnSlotForRun(run.ID, slotWait); err != nil {
 			return "", err
 		}
-		execCtx, execCancel := context.WithCancel(context.Background())
-		svc.cancelMu.Lock()
-		svc.cancelers[run.ID] = execCancel
-		svc.cancelMu.Unlock()
-		svc.executeWithSlot(execCtx, run, req.ParentAgentID)
+		defer slotWait.cancel()
+		svc.executeWithSlot(slotWait.runCtx, run, req.ParentAgentID)
 	case ModeAsync, ModeAPI:
 		// Non-blocking: fire-and-forget goroutine. The reply lands
 		// in the parent session's inbox (async) or chat (api).
@@ -905,15 +910,12 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		// Acquire the fan-out semaphore before launching the
 		// goroutine. The caller's ctx governs the wait so a
 		// queued async spawn can be cancelled before it starts.
-		if err := svc.acquireSpawnSlot(ctx); err != nil {
+		if err := svc.acquireSpawnSlotForRun(run.ID, slotWait); err != nil {
 			return "", err
 		}
-		runCtx, runCancel := context.WithCancel(context.Background())
-		svc.cancelMu.Lock()
-		svc.cancelers[run.ID] = runCancel
-		svc.cancelMu.Unlock()
 		safego.Go(context.Background(), "subagent.run", func() {
-			svc.executeWithSlot(runCtx, run, req.ParentAgentID)
+			defer slotWait.cancel()
+			svc.executeWithSlot(slotWait.runCtx, run, req.ParentAgentID)
 		})
 	}
 
@@ -1107,18 +1109,75 @@ func (svc *Service) Approve(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
+	// Register cancellation before publishing the running transition. Approve
+	// acquires capacity in the background so its HTTP caller remains fast, but
+	// Cancel can stop that queued wait from the moment the run is observable.
+	slotWait := svc.registerSpawnSlotWait(context.Background(), run.ID)
 	svc.emitStatus(run, "")
 
-	// Launch runner with independent ctx + registered cancel, matching the
-	// async branch pattern in Spawn.
-	runCtx, runCancel := context.WithCancel(context.Background())
-	svc.cancelMu.Lock()
-	svc.cancelers[run.ID] = runCancel
-	svc.cancelMu.Unlock()
+	// Acquire inside the dispatched goroutine so approval responses do not
+	// inherit queue latency. The same semaphore and cancellation registration
+	// used by Spawn govern the approved run.
 	safego.Go(context.Background(), "subagent.run", func() {
-		svc.execute(runCtx, run, run.ParentAgentID)
+		if err := svc.acquireSpawnSlotForRun(run.ID, slotWait); err != nil {
+			return
+		}
+		defer slotWait.cancel()
+		svc.executeWithSlot(slotWait.runCtx, run, run.ParentAgentID)
 	})
 	return nil
+}
+
+// spawnSlotWait holds the two cancellation scopes needed while a run crosses
+// the spawn semaphore boundary. queueCtx combines the caller's queue-wait
+// lifetime with operator cancellation; runCtx is background-derived so a
+// request ending after acquisition does not stop an executing subagent.
+type spawnSlotWait struct {
+	queueCtx context.Context
+	runCtx   context.Context
+	cancel   context.CancelFunc
+}
+
+// registerSpawnSlotWait installs the Cancel(runID) hook before a running
+// transition becomes observable. The single hook cancels both the semaphore
+// wait and the eventual runner context, so it does not need promotion or
+// replacement when capacity becomes available.
+func (svc *Service) registerSpawnSlotWait(waitCtx context.Context, runID string) *spawnSlotWait {
+	queueCtx, queueCancel := context.WithCancel(waitCtx)
+	runCtx, runCancel := context.WithCancel(context.Background())
+	cancel := func() {
+		queueCancel()
+		runCancel()
+	}
+	svc.cancelMu.Lock()
+	svc.cancelers[runID] = cancel
+	svc.cancelMu.Unlock()
+	return &spawnSlotWait{queueCtx: queueCtx, runCtx: runCtx, cancel: cancel}
+}
+
+// acquireSpawnSlotForRun acquires capacity for a registered run. The runCtx
+// check closes the race where Cancel wakes the semaphore wait at the same
+// instant a slot becomes available: a cancelled run releases that slot without
+// ever invoking the runner.
+func (svc *Service) acquireSpawnSlotForRun(runID string, wait *spawnSlotWait) error {
+	if err := svc.acquireSpawnSlot(wait.queueCtx); err != nil {
+		svc.clearRunCanceler(runID)
+		wait.cancel()
+		return err
+	}
+	if err := wait.runCtx.Err(); err != nil {
+		svc.releaseSpawnSlot()
+		svc.clearRunCanceler(runID)
+		wait.cancel()
+		return err
+	}
+	return nil
+}
+
+func (svc *Service) clearRunCanceler(runID string) {
+	svc.cancelMu.Lock()
+	delete(svc.cancelers, runID)
+	svc.cancelMu.Unlock()
 }
 
 // acquireSpawnSlot blocks until a slot in the fan-out semaphore is

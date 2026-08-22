@@ -1494,20 +1494,27 @@ func (c *Container) RefreshUtilitySettings(prov, model string) {
 	}
 }
 
-// containerShutdownMaxWait bounds total time spent shutting down subsystems.
-// Individual subsystems may use a share of this — they are run in parallel so
-// the ceiling applies to the slowest one, not the sum.
+// containerShutdownMaxWait bounds admission to plugin unload and waiting for
+// independent subsystem shutdowns. Once plugin unload begins it is joined
+// before return, because the plugin API has no context-bounded shutdown form;
+// a blocking plugin Unload may therefore extend total shutdown beyond this
+// duration rather than being abandoned after teardown has begun.
 const containerShutdownMaxWait = 10 * time.Second
 
-// Shutdown performs graceful shutdown of all services. Subsystems are shut
-// down in parallel under a single max-wait ceiling so one stuck component
-// cannot stall the others indefinitely. Returns when all subsystems have
-// exited or the ceiling is hit, whichever comes first.
+// Shutdown performs graceful shutdown of all services. Independent subsystems
+// run in parallel. Plugin unload is admitted only after Chat reports a
+// successful lifecycle drain, and once admitted is joined before return.
 func (c *Container) Shutdown() {
 	c.shutdownOnce.Do(c.shutdown)
 }
 
 func (c *Container) shutdown() {
+	c.shutdownWithMaxWait(containerShutdownMaxWait)
+}
+
+func (c *Container) shutdownWithMaxWait(maxWait time.Duration) {
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), maxWait)
+	defer cancelShutdown()
 	var wg sync.WaitGroup
 
 	run := func(label string, fn func()) {
@@ -1562,31 +1569,14 @@ func (c *Container) shutdown() {
 
 	if c.Workers != nil {
 		run("workers", func() {
-			if err := c.Workers.Shutdown(containerShutdownMaxWait); err != nil {
+			if err := c.Workers.Shutdown(maxWait); err != nil {
 				slog.Warn("shutdown: workers", "err", err)
-			}
-		})
-	}
-	// Plugin event callbacks are owned by Chat's lifecycle. Drain that owner
-	// before unloading the plugin host so no callback can race a plugin's
-	// teardown. The dependency is explicit even though both shutdowns remain
-	// inside the container's bounded parallel shutdown group.
-	chatDone := make(chan struct{})
-	run("chat", func() {
-		defer close(chatDone)
-		c.Chat.Shutdown()
-	})
-	if c.Plugins != nil {
-		run("plugins", func() {
-			<-chatDone
-			if err := c.Plugins.Shutdown(); err != nil {
-				slog.Warn("shutdown: plugins", "err", err)
 			}
 		})
 	}
 	if c.Tasks != nil {
 		run("tasks", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), containerShutdownMaxWait)
+			ctx, cancel := context.WithTimeout(context.Background(), maxWait)
 			defer cancel()
 			if err := c.Tasks.Snapshot(ctx); err != nil {
 				slog.Warn("shutdown: task snapshot", "err", err)
@@ -1614,12 +1604,65 @@ func (c *Container) shutdown() {
 		})
 	}
 
+	// Plugin callbacks are owned by Chat's lifecycle. Chat runs separately
+	// from the generic wait group so a container deadline can decline plugin
+	// unload permanently if Chat is blocked or late. No goroutine waits on the
+	// result and triggers unload after this method has returned.
+	chatResult := make(chan error, 1)
+	if c.Chat == nil {
+		chatResult <- nil
+	} else {
+		go func() {
+			var err error
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					err = fmt.Errorf("panic: %v", recovered)
+				}
+				chatResult <- err
+			}()
+			err = c.Chat.Shutdown()
+		}()
+	}
+
+	chatDrained := false
+	select {
+	case err := <-chatResult:
+		if err != nil {
+			slog.Warn("shutdown: chat did not drain; skipping plugin unload", "err", err)
+		} else {
+			select {
+			case <-shutdownCtx.Done():
+				slog.Warn("shutdown: chat drain completed after deadline; skipping plugin unload", "timeout", maxWait.String())
+			default:
+				chatDrained = true
+			}
+		}
+	case <-shutdownCtx.Done():
+		slog.Warn("shutdown: chat timed out; skipping plugin unload", "timeout", maxWait.String())
+	}
+
+	if chatDrained && c.Plugins != nil {
+		// The plugin host has no context-aware Shutdown contract. Once teardown
+		// begins, join it rather than returning while Unload can still mutate
+		// plugin state in the background.
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					slog.Error("shutdown: subsystem panic", "label", "plugins", "panic", recovered)
+				}
+			}()
+			if err := c.Plugins.Shutdown(); err != nil {
+				slog.Warn("shutdown: plugins", "err", err)
+			}
+		}()
+	}
+
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(containerShutdownMaxWait):
-		slog.Warn("shutdown: timeout — some subsystems may still be running", "timeout", containerShutdownMaxWait.String())
+	case <-shutdownCtx.Done():
+		slog.Warn("shutdown: timeout — some subsystems may still be running", "timeout", maxWait.String())
 	}
 }
 

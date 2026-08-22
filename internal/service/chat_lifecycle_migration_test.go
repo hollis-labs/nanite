@@ -66,3 +66,25 @@ func TestAutoTitle_ChatShutdownCancelsAndDrainsJob(t *testing.T) {
 		t.Fatalf("lifecycle context error = %v, want canceled", svc.lifecycle.Context().Err())
 	}
 }
+
+func TestChatService_ShutdownReportsLifecycleDrainFailure(t *testing.T) {
+	owner := lifecycle.NewManager("chat-drain-failure-test")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	owner.Go("blocked-callback", func(context.Context) {
+		close(started)
+		<-release
+	})
+	<-started
+	svc := &chatServiceImpl{lifecycle: owner}
+
+	err := svc.shutdownWithMaxWait(20 * time.Millisecond)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shutdown error = %v, want context deadline exceeded", err)
+	}
+
+	close(release)
+	if err := owner.Shutdown(time.Second); err != nil {
+		t.Fatalf("drain cleanup: %v", err)
+	}
+}

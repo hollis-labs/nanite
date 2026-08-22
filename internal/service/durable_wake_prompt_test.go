@@ -178,7 +178,7 @@ func (f *fakeWakePromptChatService) RecoverSession(context.Context, string) (Reb
 	return RebootResult{}, nil
 }
 
-func (f *fakeWakePromptChatService) Shutdown() {}
+func (f *fakeWakePromptChatService) Shutdown() error { return nil }
 
 // TestDurableAgentWakeEndToEndPersistsPromptAsSessionMessage exercises the
 // full real path (DurableAgentWakeService -> durableAgentService.Start ->

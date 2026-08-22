@@ -47,7 +47,7 @@ func (s *chatCancelStub) RebootSessionAgent(context.Context, string) (service.Re
 func (s *chatCancelStub) RecoverSession(context.Context, string) (service.RebootResult, error) {
 	panic("RecoverSession not used in cancel-endpoint tests")
 }
-func (s *chatCancelStub) Shutdown() {}
+func (s *chatCancelStub) Shutdown() error { return nil }
 
 // TestChatCancelEndpoint_HappyPath verifies that POST
 // /api/sessions/{id}/chat/cancel dispatches the cancel through the

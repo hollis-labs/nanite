@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"path/filepath"
 	"runtime/pprof"
 	"strings"
@@ -20,13 +21,17 @@ import (
 type blockingShutdownChatService struct {
 	ChatService
 	shutdownCalls atomic.Int32
+	shutdownErr   error
 	started       chan struct{}
 	release       chan struct{}
+	finished      chan struct{}
 	startedOnce   sync.Once
 }
 
 type shutdownOrderingPlugin struct {
-	unloaded atomic.Bool
+	unloaded      atomic.Bool
+	unloadStarted chan struct{}
+	unloadRelease chan struct{}
 }
 
 func (*shutdownOrderingPlugin) ID() string                { return "shutdown-ordering" }
@@ -35,15 +40,28 @@ func (*shutdownOrderingPlugin) Version() string           { return "test" }
 func (*shutdownOrderingPlugin) Description() string       { return "test" }
 func (*shutdownOrderingPlugin) Dependencies() []string    { return nil }
 func (*shutdownOrderingPlugin) Load(pluginsdk.Host) error { return nil }
-func (p *shutdownOrderingPlugin) Unload() error           { p.unloaded.Store(true); return nil }
+func (p *shutdownOrderingPlugin) Unload() error {
+	if p.unloadStarted != nil {
+		close(p.unloadStarted)
+	}
+	if p.unloadRelease != nil {
+		<-p.unloadRelease
+	}
+	p.unloaded.Store(true)
+	return nil
+}
 func (*shutdownOrderingPlugin) Status() pluginsdk.PluginStatus {
 	return pluginsdk.PluginStatus{Loaded: true}
 }
 
-func (s *blockingShutdownChatService) Shutdown() {
+func (s *blockingShutdownChatService) Shutdown() error {
 	s.shutdownCalls.Add(1)
 	s.startedOnce.Do(func() { close(s.started) })
 	<-s.release
+	if s.finished != nil {
+		close(s.finished)
+	}
+	return s.shutdownErr
 }
 
 func TestNewRuntimeAdapterRegistry_RegistersBuiltins(t *testing.T) {
@@ -147,6 +165,105 @@ func TestContainer_ShutdownDrainsChatBeforeUnloadingPlugins(t *testing.T) {
 	}
 	if !p.unloaded.Load() {
 		t.Fatal("plugin host was not shut down after chat drained")
+	}
+}
+
+func TestContainer_ChatDrainFailureSkipsPluginUnload(t *testing.T) {
+	chatService := &blockingShutdownChatService{
+		started:     make(chan struct{}),
+		release:     make(chan struct{}),
+		shutdownErr: errors.New("lifecycle did not drain"),
+	}
+	close(chatService.release)
+	host := hostplugin.NewHost(nil, hostplugin.NewLogger("shutdown-failed-drain-test"))
+	p := &shutdownOrderingPlugin{}
+	if err := host.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	t.Cleanup(func() { _ = host.Shutdown() })
+
+	container := &Container{Chat: chatService, Plugins: host}
+	container.Shutdown()
+	if p.unloaded.Load() {
+		t.Fatal("plugin unloaded after chat reported a failed lifecycle drain")
+	}
+}
+
+func TestContainer_ShutdownJoinsPluginUnloadOnceStarted(t *testing.T) {
+	chatService := &blockingShutdownChatService{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	close(chatService.release)
+	host := hostplugin.NewHost(nil, hostplugin.NewLogger("shutdown-join-unload-test"))
+	p := &shutdownOrderingPlugin{
+		unloadStarted: make(chan struct{}),
+		unloadRelease: make(chan struct{}),
+	}
+	if err := host.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	container := &Container{Chat: chatService, Plugins: host}
+
+	done := make(chan struct{})
+	go func() { container.Shutdown(); close(done) }()
+	select {
+	case <-p.unloadStarted:
+	case <-time.After(time.Second):
+		t.Fatal("plugin unload did not start after chat drained")
+	}
+	select {
+	case <-done:
+		t.Fatal("Container.Shutdown returned while plugin unload was blocked")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(p.unloadRelease)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Container.Shutdown did not join completed plugin unload")
+	}
+}
+
+func TestContainer_ShutdownTimeoutDoesNotUnloadPluginsLater(t *testing.T) {
+	chatService := &blockingShutdownChatService{
+		started:  make(chan struct{}),
+		release:  make(chan struct{}),
+		finished: make(chan struct{}),
+	}
+	host := hostplugin.NewHost(nil, hostplugin.NewLogger("shutdown-timeout-order-test"))
+	p := &shutdownOrderingPlugin{}
+	if err := host.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	t.Cleanup(func() { _ = host.Shutdown() })
+	container := &Container{Chat: chatService, Plugins: host}
+
+	done := make(chan struct{})
+	go func() { container.shutdownWithMaxWait(25 * time.Millisecond); close(done) }()
+	select {
+	case <-chatService.started:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not reach chat")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("container shutdown did not honor its timeout")
+	}
+	if p.unloaded.Load() {
+		t.Fatal("plugin unloaded while chat shutdown was blocked")
+	}
+
+	close(chatService.release)
+	select {
+	case <-chatService.finished:
+	case <-time.After(time.Second):
+		t.Fatal("late chat shutdown did not finish after release")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if p.unloaded.Load() {
+		t.Fatal("plugin unloaded after Container.Shutdown returned")
 	}
 }
 

@@ -46,7 +46,7 @@ func (s *harnessChatStub) RebootSessionAgent(context.Context, string) (service.R
 func (s *harnessChatStub) RecoverSession(context.Context, string) (service.RebootResult, error) {
 	panic("RecoverSession not used in harness tests")
 }
-func (s *harnessChatStub) Shutdown() {}
+func (s *harnessChatStub) Shutdown() error { return nil }
 
 func TestHarnessV1InitializeAndCapabilities(t *testing.T) {
 	_, mux := newTestAPI(t)

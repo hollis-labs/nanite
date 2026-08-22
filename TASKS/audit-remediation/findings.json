@@ -1,0 +1,2842 @@
+{
+  "catalog_kind": "working-remediation-view",
+  "derived_from": "docs/audits/2026-08-21-go-quality/findings.json (pristine audit snapshot \u2014 do not edit that copy; this file is the mutable tracking view)",
+  "audit_version": 1,
+  "commit": "8feeee5c",
+  "audit_date": "2026-08-21",
+  "guide": "nanite-go-code-quality-audit-guide.md",
+  "report": "docs/audits/2026-08-21-go-quality/REPORT.md",
+  "remediation_guide": "nanite-audit-triage-remediation-planning-guide.md (originally at ~/dev/chrispian/inbox/, referenced by TASKS/audit-remediation/README.md)",
+  "finding_count": 113,
+  "allowed_dispositions": [
+    "remediate",
+    "already-resolved",
+    "accepted-risk",
+    "false-positive",
+    "superseded",
+    "defer",
+    "retire-feature",
+    "needs-architect-decision",
+    "needs-more-evidence"
+  ],
+  "allowed_task_statuses": [
+    "not-started",
+    "in-progress",
+    "implemented",
+    "validated",
+    "reviewed",
+    "done"
+  ],
+  "findings": [
+    {
+      "id": "GO-LIFE-001",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "concurrency",
+        "lifecycle"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/container.go"
+      ],
+      "symbols": [
+        "NewContainer"
+      ],
+      "summary": "Subagent/runtime reaper goroutines leak on two NewContainer constructor error paths.",
+      "evidence": [
+        "go vet flags both cancel funcs directly: stopReaper (line 1162) and stopRuntimeReaper (line 1182) not used on all paths.",
+        "Two confirmed early-return paths (container.go:1242, 1246) return (nil, err) after the reapers are already started but before the cancel funcs are captured into the struct at lines 1398/1400.",
+        "Caller never receives a *Container on these paths, so it has no way to stop the leaked reaper goroutines."
+      ],
+      "recommendation": "Ensure every error return between reaper start and struct assembly also calls stopReaper()/stopRuntimeReaper(), matching the existing stopCatalog() cleanup pattern already present at both flagged sites.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a73",
+      "false_positive_considerations": "If NewContainer failures are effectively fatal (process exits immediately), the leak is real but inconsequential in practice.",
+      "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/01-fix-container-constructor-partial-failure-cleanup.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC-001",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "security",
+        "dependency"
+      ],
+      "package": "internal/otel",
+      "files": [
+        "internal/otel/otel.go",
+        "go.mod"
+      ],
+      "symbols": [
+        "otel.Init"
+      ],
+      "summary": "Reachable third-party vulnerability: go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.41.0 has an oversized-response memory-exhaustion bug (GO-2026-4985), fixed in v1.43.0.",
+      "evidence": [
+        "govulncheck ./... reports GO-2026-4985 reachable via otel.Init -> otlptracehttp.New / client.UploadTraces."
+      ],
+      "recommendation": "Bump go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp (and sibling otel modules for consistency) to >= v1.43.0. Standard dependency bump.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a73",
+      "false_positive_considerations": "Reachability requires OTel export enabled at runtime and a malicious/misbehaving collector endpoint.",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC-002",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "security",
+        "dependency"
+      ],
+      "package": "go.mod",
+      "files": [
+        "go.mod"
+      ],
+      "symbols": [],
+      "summary": "Go toolchain pinned at go 1.26.2; govulncheck reports 13 distinct reachable stdlib vulnerabilities fixed in go1.26.3-go1.26.6 (TLS, HTTP/2, html/template, textproto, x509, asn1).",
+      "evidence": [
+        "govulncheck ./... lists GO-2026-6218,6091,6090,6089,5972,5856,5039,5037,5026,4982,4980,4971,4918, all reachable from application code."
+      ],
+      "recommendation": "Bump the toolchain/go.mod go directive to 1.26.6 (or latest patch at remediation time) as a standard patch upgrade.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a73",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-HYG-001",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "repository-hygiene",
+        "testing"
+      ],
+      "package": "repo-wide",
+      "files": [
+        "lefthook.yml",
+        "Makefile"
+      ],
+      "symbols": [],
+      "summary": "Full-repo uncapped golangci-lint (make lint) exists and is correctly configured, but no hook or CI ever runs it \u2014 pre-commit only lints changed lines (--new), pre-push only runs tests, and there is no .github/workflows directory at all.",
+      "evidence": [
+        "lefthook.yml pre-commit go-lint runs `golangci-lint run --new --timeout 30s` (changed lines only); pre-push runs only `go test ./...`.",
+        "Running `make lint` directly surfaces 2,338 issues under the project's own already-approved linter set with no enforcement point ever re-measuring it."
+      ],
+      "recommendation": "Architect decision: wire make lint (or a scoped subset) into a nightly/scheduled job or merge-to-main gate per the guide's Tier B suggestion, not into pre-commit/pre-push.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a73",
+      "false_positive_considerations": "Possible the project plans a separate CI system outside GitHub Actions that already runs make lint; no evidence of one found in-repo.",
+      "task_file": "TASKS/audit-remediation/12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC-003",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": [
+        "security",
+        "architecture"
+      ],
+      "package": "internal/agent, cmd/nanite",
+      "files": [
+        "internal/agent/managed_files.go",
+        "internal/agent/managed_section.go",
+        "cmd/nanite/mcp_cmd.go",
+        "cmd/nanite/plugin_cmd.go",
+        "cmd/nanite/plugin_logs.go",
+        "cmd/nanite/serve_autostart.go"
+      ],
+      "symbols": [],
+      "summary": "gosec G304 (path traversal via variable) found at 68 production call sites outside the pathsafe.ResolveUnder forbidigo-tracked adoption scope; the tracker's forbidigo rules only enforce ResolveUnder inside internal/sandbox/, internal/mcp/, internal/service/install/.",
+      "evidence": [
+        "Sampled 10/68: os.ReadFile/os.Open/os.OpenFile calls on a local path variable with no visible sanitization at the call site."
+      ],
+      "recommendation": "Have the architect (or the Phase-1-Wave-1 migration owner) walk the 68-site list and classify each by trust boundary (CLI-flag-driven vs. externally reachable); internal/agent/managed_* sites are the highest-priority subset (see GO-AGENT-001 for a fully-traced example).",
+      "requires_architect_decision": true,
+      "report_section": "\u00a73, extended by \u00a78.8",
+      "metrics": {
+        "count": 68
+      },
+      "false_positive_considerations": "gosec's G304 rule fires on any variable-driven file open regardless of whether the variable is already constrained; a meaningful fraction of the 68 are plausibly already safe by construction.",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/03-triage-remaining-gosec-g304-sites.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-TEST-001",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "testing",
+        "concurrency"
+      ],
+      "package": "internal/api, internal/service",
+      "files": [
+        "internal/api/artifacts_test.go",
+        "internal/api/loom_curator_wake_test.go",
+        "internal/api/providers_test.go",
+        "internal/api/tools_call_test.go",
+        "internal/api/recovery_test.go",
+        "internal/api/api_test.go"
+      ],
+      "symbols": [],
+      "summary": "internal/api's (and internal/service's own) test suites construct many service.Container instances via NewContainer and never call Shutdown() on any of them, leaking 2 reaper goroutines per test that accumulate across the run and, under go test -race, prevent internal/api and internal/service from completing even at 2.5x the default timeout.",
+      "evidence": [
+        "288 goroutines traced to NewContainer reaper-start calls counted in the 25-minute timeout dump, up from 56 at 10 minutes.",
+        "Grepped all 6 internal/api test files calling NewContainer: every t.Cleanup closes the store, none call Shutdown() on the Container.",
+        "Confirmed NOT a production defect: cmd/nanite/main.go:747 does call container.Shutdown() on the real exit path."
+      ],
+      "recommendation": "Add t.Cleanup(func() { container.Shutdown() }) alongside the existing store cleanup in each of the 6 call sites; check internal/service's own test suite for a related but distinct cause (see GO-SVCCORE-006).",
+      "requires_architect_decision": false,
+      "report_section": "\u00a73, extended by \u00a78.3 (GO-SVCCORE-006)",
+      "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/02-fix-api-test-container-shutdown-leak.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-DEP-001",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "god-object",
+        "architecture"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/container.go"
+      ],
+      "symbols": [],
+      "summary": "internal/service / Container struct: 60-field composition root, 31.6K prod LOC across 83 files, fan-out 64. Directly confirmed by \u00a78.3's read: Container itself is genuinely wiring-only (2 methods), but the package's mass (real behavior) actually lives in chatServiceImpl (see GO-SVCEXEC-002), not Container.",
+      "evidence": [
+        "Container has 60 fields but only 2 methods (RefreshUtilitySettings, Shutdown); NewContainer is ~1065 lines of overwhelmingly constructor calls and error propagation."
+      ],
+      "recommendation": "No decomposition of Container itself is warranted (it is a legitimate composition root). Focus any god-object remediation on chatServiceImpl (GO-SVCEXEC-002) and SelfToolsTransport (GO-MCPTOOL-006) instead.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a75, resolved by \u00a78.3",
+      "metrics": {
+        "field_count": 60,
+        "method_count": 2,
+        "fan_out": 64,
+        "loc": 31654
+      },
+      "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-DEP-002",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "dependency",
+        "architecture"
+      ],
+      "package": "internal/store",
+      "files": [
+        "internal/store/store.go"
+      ],
+      "symbols": [],
+      "summary": "internal/store: fan-in 30, the single most gravitational package in the codebase. \u00a78.1 confirmed the dominant caller pattern is injecting the whole concrete *store.Store (76 direct references in internal/service alone) rather than a narrower domain interface, though two healthy consumer-defined-interface counter-examples already exist in the codebase (TrustResolver, ConsultationLogger).",
+      "evidence": [
+        "76 direct *store.Store field/parameter references counted in internal/service/*.go alone.",
+        "349 methods on *Store across 63 files backing ~25+ distinct domain areas."
+      ],
+      "recommendation": "Architect to identify 2-3 highest-fan-out consumer domains and evaluate a narrow consumer-defined interface only where real pain (test friction, unwanted recompilation) is identified.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a75, extended by \u00a78.1 (GO-STORE-001)",
+      "metrics": {
+        "fan_in": 30,
+        "fan_out": 5,
+        "loc": 14802,
+        "method_count": 349
+      },
+      "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-STORE-001",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "package-cohesion",
+        "dependency",
+        "architecture"
+      ],
+      "package": "internal/store",
+      "files": [
+        "internal/store/store.go"
+      ],
+      "symbols": [],
+      "summary": "Nearly all callers depend on the concrete *store.Store handle rather than narrower domain interfaces; 76 direct *store.Store references counted in internal/service alone (fan-in 30 overall).",
+      "evidence": [
+        "Contrast: dispatch.TrustResolver and grounding.ConsultationLogger are consumer-defined narrow interfaces store satisfies structurally without importing them -- proves the pattern is known, just not the default."
+      ],
+      "recommendation": "Identify 2-3 highest-fan-out consumer domains and evaluate a narrow consumer-defined interface only where real pain is identified, not repo-wide.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.1",
+      "false_positive_considerations": "A single shared persistence facade is a defensible, normal choice at this scale.",
+      "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-STORE-002",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "god-object"
+      ],
+      "package": "internal/store",
+      "files": [
+        "internal/store/*.go"
+      ],
+      "symbols": [],
+      "summary": "*Store's 349-method surface spans ~25+ unrelated domain concepts (sessions, agents, teams, plugins, schedules, reflexes, etc).",
+      "evidence": [
+        "349 methods / 84 exported struct types counted directly across 63 files."
+      ],
+      "recommendation": "Do not split merely for size; a natural side effect if GO-STORE-001 is pursued, otherwise an observation only.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.1",
+      "metrics": {
+        "method_count": 349
+      },
+      "false_positive_considerations": "File-per-domain-concept within one package is the guide's own example of a healthy large package.",
+      "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-STORE-003",
+      "severity": "high",
+      "confidence": "high",
+      "category": [
+        "error-handling",
+        "correctness"
+      ],
+      "package": "internal/store",
+      "files": [
+        "internal/store/agents.go",
+        "internal/plugin/agent_profiles.go"
+      ],
+      "symbols": [
+        "DeleteAgentByID"
+      ],
+      "summary": "DeleteAgentByID silently converts every GetAgent error (not just not-found) into a successful no-op, so a transient DB failure during plugin-uninstall cascade cleanup silently looks like 'already gone' with nothing logged.",
+      "evidence": [
+        "agents.go:1211-1221: `a, err := s.GetAgent(id); if err != nil { return nil }` swallows any error, not just sql.ErrNoRows.",
+        "Confirmed by golangci's nilerr linter.",
+        "Real caller: Host.SweepPluginAgentProfiles (plugin-unload cascade cleanup) relies on this to know whether cleanup succeeded."
+      ],
+      "recommendation": "Distinguish sql.ErrNoRows (legitimate no-op) from any other error (should propagate) in DeleteAgentByID.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.1",
+      "task_file": "TASKS/audit-remediation/06-store-correctness/01-fix-deleteagentbyid-error-swallowing.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-STORE-004",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "error-handling",
+        "duplication"
+      ],
+      "package": "internal/store",
+      "files": [
+        "internal/store/plugin_settings.go"
+      ],
+      "symbols": [],
+      "summary": "ListPluginSettings has two unchecked json.Unmarshal calls; GetPluginSettings checks the identical unmarshal on the same columns, producing inconsistent behavior for the same malformed data.",
+      "evidence": [
+        "plugin_settings.go:134-135 unchecked vs :46-51 checked, same operation."
+      ],
+      "recommendation": "Align ListPluginSettings's error handling with GetPluginSettings's.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.1",
+      "task_file": "TASKS/audit-remediation/06-store-correctness/02-triage-store-context-and-transaction-gaps.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-STORE-005",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "go-idiom",
+        "concurrency"
+      ],
+      "package": "internal/store",
+      "files": [
+        "internal/store/sessions.go",
+        "internal/store/agents.go"
+      ],
+      "symbols": [],
+      "summary": "Inconsistent context.Context propagation across the package: only 22/63 files reference context.Context at all; sessions.go and agents.go (the two hottest tables) have no context-taking methods at all, while teams.go's methods all take ctx.",
+      "evidence": [
+        "231 plain DB calls vs 116 context-aware equivalents counted package-wide."
+      ],
+      "recommendation": "Architect decision on whether to backfill ctx through sessions.go/agents.go and the rest of the plain-DB.Query files.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.1",
+      "false_positive_considerations": "May be an intentional, not-yet-reached migration backlog rather than an oversight.",
+      "task_file": "TASKS/audit-remediation/06-store-correctness/02-triage-store-context-and-transaction-gaps.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-STORE-006",
+      "severity": "low",
+      "confidence": "medium",
+      "category": [
+        "concurrency",
+        "lifecycle"
+      ],
+      "package": "internal/store",
+      "files": [
+        "internal/store/durable_agents.go"
+      ],
+      "symbols": [],
+      "summary": "SyncDurableAgentInstanceConfig reads-then-branches-then-writes without a transaction, unlike sibling methods that push the check into a single atomic UPDATE with a RowsAffected check.",
+      "evidence": [
+        "durable_agents.go:301-367 has no Begin()/transaction wrapping the read-decide-write sequence."
+      ],
+      "recommendation": "Evaluate whether concurrent same-slug calls are a live risk; if so, wrap in a transaction or adopt the self-checking WHERE-clause idiom siblings already use.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.1",
+      "false_positive_considerations": "Caller concurrency was not traced within budget; confidence is medium specifically for this reason.",
+      "task_file": "TASKS/audit-remediation/06-store-correctness/02-triage-store-context-and-transaction-gaps.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-STORE-007",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "duplication"
+      ],
+      "package": "internal/store",
+      "files": [
+        "internal/store/*.go"
+      ],
+      "symbols": [],
+      "summary": "Mechanical 'query -> scan-loop -> append' duplication across ~20+ list methods; 41 dupl hits confirmed inside internal/store, no shared generic scanRows helper exists.",
+      "evidence": [
+        "Manually sampled 2 pairs, confirmed genuine structural duplication of the scan-N-rows-into-a-slice concept."
+      ],
+      "recommendation": "Optional: a generic scanRows[T any](...) helper could collapse this; every site is already individually correct.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.1",
+      "metrics": {
+        "count": 41
+      },
+      "false_positive_considerations": "Repeated boilerplate that is individually correct and readable is a legitimate design choice; no bug found riding on this duplication.",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/13-store-scan-loop-duplication.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-STORE-008",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "comments"
+      ],
+      "package": "internal/store",
+      "files": [
+        "internal/store/skill_mode_filter.go",
+        "internal/store/skills_source.go"
+      ],
+      "symbols": [],
+      "summary": "4 exported functions confirmed dead code; one's doc comment falsely claims a live caller (internal/service/ingest.go) that does not exist.",
+      "evidence": [
+        "deadcode.log confirms all 4 unreachable; whole-module grep confirms zero real call sites for any."
+      ],
+      "recommendation": "Owner to confirm whether skill_mode_filter.go's trio is still needed and whether ClassifySkillSource's described FE gating was ever implemented; retire or wire up.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.1",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-STORE-009",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "comments"
+      ],
+      "package": "internal/store",
+      "files": [
+        "internal/store/*.go"
+      ],
+      "symbols": [],
+      "summary": "Pervasive task-ID/date references (~40 CW-YYYYMMDD-NNNN, ~23 TASKS/*.md paths) embedded in permanent production comments across 25+ files.",
+      "evidence": [],
+      "recommendation": "Not a blanket removal; architect could scope a trim pass for pure task-ID citations without added rationale, keeping load-bearing invariant comments.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.1",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-INFRA-001",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "package-cohesion",
+        "naming"
+      ],
+      "package": "internal/config",
+      "files": [
+        "internal/config/config.go",
+        "internal/config/appconfig.go",
+        "internal/config/layout.go"
+      ],
+      "symbols": [],
+      "summary": "internal/config bundles three distinct concerns under one generic name: Config (reads project-root nanite.yaml), AppConfig (reads config/nanite.yaml, a different file with the same base name), and pure XDG path resolution.",
+      "evidence": [
+        "config.go:122 reads './nanite.yaml'; AppConfig loads 'config/' + brand.ConfigFileName + '.yaml' = 'config/nanite.yaml' -- two different files, two unrelated structs, same base filename."
+      ],
+      "recommendation": "Rename one file/struct to disambiguate, or split the package along the Config/AppConfig boundary.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.2",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/08-config-package-naming-collision.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-INFRA-002",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "duplication"
+      ],
+      "package": "internal/inspector, internal/service",
+      "files": [
+        "internal/inspector/service.go",
+        "internal/service/inspector_producers.go"
+      ],
+      "symbols": [],
+      "summary": "inspector.trafficLight is unreachable in production (only its own test calls it); internal/service/inspector_producers.go's trafficLightFor is a byte-for-byte reimplementation, created because trafficLight is unexported.",
+      "evidence": [],
+      "recommendation": "Export inspector.TrafficLight and have internal/service call it, removing the duplicate.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.2",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/04-traffic-light-calculation-duplication.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-INFRA-003",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "error-handling"
+      ],
+      "package": "internal/task",
+      "files": [
+        "internal/task/snapshot.go"
+      ],
+      "symbols": [],
+      "summary": "scanTask silently discards json.Unmarshal/time.Parse errors on metadata/created_at/updated_at during durable-recovery Restore -- a malformed row silently produces empty Metadata/zero-value timestamps with zero observability.",
+      "evidence": [
+        "snapshot.go:94-121: `_ = json.Unmarshal(...)`, `t.CreatedAt, _ = time.Parse(...)`."
+      ],
+      "recommendation": "At minimum log a warning with the task ID on parse failure.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.2",
+      "false_positive_considerations": "Sibling LocalBackend.List/Snapshot already treat similar failures as skip-and-continue without logging, so this may be a deliberate 'best-effort restore' convention.",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-INFRA-004",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "duplication",
+        "error-handling"
+      ],
+      "package": "internal/llm/openai, internal/llm/anthropic",
+      "files": [
+        "internal/llm/openai/stream.go",
+        "internal/llm/anthropic/stream.go"
+      ],
+      "symbols": [],
+      "summary": "OpenAI streaming aborts the entire turn on the first malformed tool-call-argument JSON (EventError then return, dropping other queued tool calls, usage, and EventDone); Anthropic's equivalent path degrades gracefully with a fallback instead.",
+      "evidence": [
+        "stream.go:96-123 (OpenAI) vs stream.go:232-253 (Anthropic), confirmed control-flow divergence for the same failure class."
+      ],
+      "recommendation": "Architect decision on whether OpenAI's path should adopt the same graceful fallback Anthropic uses.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.2",
+      "false_positive_considerations": "A comment at stream.go:104-105 suggests the early return may be a deliberate 'fail loud' choice, not an oversight.",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/06-provider-streaming-error-handling-divergence.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCCORE-001",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "concurrency"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/delegation.go"
+      ],
+      "symbols": [
+        "DelegateAndAggregate"
+      ],
+      "summary": "DelegateAndAggregate's concurrent-worker collector can hang forever if a spawned goroutine panics before writing its result, because the collector uses an unconditional blocking receive with no select/timeout/ctx.Done, unlike its sibling DelegateTask.",
+      "evidence": [
+        "delegation.go:349-386; safego.Go recovers the panic but nothing writes a fallback result to the channel."
+      ],
+      "recommendation": "Give the collector the same timeout/cancel select DelegateTask already uses, or have each closure's deferred recover write a synthetic error result.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.3",
+      "false_positive_considerations": "Only reachable if worker.Manager.SpawnFull (or the closure) can actually panic in practice -- not independently verified.",
+      "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCCORE-002",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "concurrency",
+        "lifecycle"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/events_composite.go",
+        "internal/service/delegation.go",
+        "internal/service/agent_deps.go"
+      ],
+      "symbols": [],
+      "summary": "Inconsistent goroutine-lifecycle tracking: ~18 safego.Go call sites are bare fire-and-forget spawns with no owner Container.Shutdown() can drain, unlike one specific wake-reactor spawn already migrated to lifecycle.Manager after a PR review flagged exactly this risk.",
+      "evidence": [
+        "container.go:1133-1143's own comment documents the one fix that WAS applied; the same fix was not applied to events_composite.go/delegation.go/agent_deps.go sites."
+      ],
+      "recommendation": "Decide package-wide which safego.Go sites are genuinely fire-and-forget-safe vs. need lifecycle.Manager tracking like the wake-reactor got.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.3",
+      "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCCORE-003",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "comments"
+      ],
+      "package": "internal/service/install",
+      "files": [
+        "internal/service/install/adapters.go",
+        "internal/service/install/adapter_cleanup.go"
+      ],
+      "symbols": [
+        "cleanupRemovedAdapters",
+        "snapshotAdapterTargets"
+      ],
+      "summary": "snapshotAdapterTargets is dead code, but cleanupRemovedAdapters's doc comment falsely claims a rollback snapshot pass runs before it -- the destructive cleanup (stripping content from CLAUDE.md/AGENTS.md) has no actual rollback safety net despite the comment's claim.",
+      "evidence": [
+        "Traced the only production call path (freshScaffold): no call to snapshotAdapterTargets exists before cleanupRemovedAdapters; no Rollback function exists anywhere in the repo."
+      ],
+      "recommendation": "Either wire snapshotAdapterTargets back in and build the promised Rollback, or correct the comment to state no rollback exists today.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.3",
+      "false_positive_considerations": "Blast radius is bounded -- only strips Nanite's own previously-written managed markers, not arbitrary user content.",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCCORE-004",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": [
+        "security"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/a2a_push_notifier.go",
+        "internal/service/a2a_task_manager.go"
+      ],
+      "symbols": [],
+      "summary": "A2A push-notification webhook URL (caller-supplied at task-submit time) has no validation -- no scheme allowlist, no private-IP/localhost block -- before an outbound HTTP request is made. Classic webhook-callback SSRF pattern.",
+      "evidence": [
+        "a2a_push_notifier.go:152-166; gosec's G107 rule doesn't catch this idiom (targets http.Get/Post directly, not NewRequestWithContext+client.Do)."
+      ],
+      "recommendation": "Validate the URL at submission or delivery time against a scheme allowlist and reject loopback/link-local/private-range hosts unless explicitly trusted.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.3",
+      "false_positive_considerations": "A2A endpoint's auth boundary (whether only trusted peer agents can submit tasks) was not independently verified.",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/01-a2a-webhook-url-validation.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCCORE-005",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "repository-hygiene"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/recovery_envelope_sink.go"
+      ],
+      "symbols": [],
+      "summary": "//nolint:gosec correctly suppresses under golangci-lint but a bare gosec binary run doesn't understand that syntax, producing one avoidable false HIGH (G404) in any raw gosec ./... run the guide itself recommends.",
+      "evidence": [],
+      "recommendation": "Note in the audit runbook that //nolint:gosec won't suppress bare gosec runs; consider adding a matching #nosec comment for consistency.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.3",
+      "task_file": "TASKS/audit-remediation/12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCCORE-006",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "testing",
+        "concurrency"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service"
+      ],
+      "symbols": [],
+      "summary": "internal/service's own go test -race timeout is NOT the Container-reaper-leak mechanism GO-TEST-001 describes -- zero of the package's 126 test files ever call NewContainer. GO-TEST-001's recommended fix will do nothing for this package's timeout; the real cause needs separate investigation.",
+      "evidence": [
+        "Exhaustive grep across all 126 internal/service test files: zero calls to NewContainer."
+      ],
+      "recommendation": "Investigate internal/service's -race timeout as a distinct question from internal/api's -- candidates are sheer suite size (776 test functions) x -race overhead, and/or the GO-SVCCORE-002 untracked-goroutine accumulation.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.3, corrects GO-TEST-001's scope",
+      "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/03-investigate-internal-service-race-timeout.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCCORE-007",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "dead-code"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/agent_cycles.go"
+      ],
+      "symbols": [],
+      "summary": "WithAgentCycleKindForAPI's context value is written by 2 real internal/api call sites but has zero readers anywhere -- live-but-inert plumbing, self-documented as intentional forward-looking scaffolding.",
+      "evidence": [],
+      "recommendation": "Leave as documented scaffolding, or note it explicitly in a tracking doc so it isn't mistaken for wired behavior.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.3",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCCORE-008",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "naming",
+        "go-idiom"
+      ],
+      "package": "internal/service/install",
+      "files": [
+        "internal/service/install/adapters.go"
+      ],
+      "symbols": [],
+      "summary": "A local `var any bool` shadows the Go builtin any type for the rest of that function's scope.",
+      "evidence": [
+        "adapters.go:159,169"
+      ],
+      "recommendation": "Trivial rename (e.g. hasManaged).",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.3",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/03-naming-and-formatting-fixes.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCCORE-009",
+      "severity": "informational",
+      "confidence": "medium",
+      "category": [
+        "comments"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/ingest.go",
+        "internal/service/known_tools_backfill.go",
+        "internal/service/cli_structured_input_fallback.go",
+        "internal/service/agent_deps.go"
+      ],
+      "symbols": [],
+      "summary": "Several files carry 15-50 line task-ID/PR-review-history comments approaching implementation-diary territory, though each explains a real invariant rather than being pure filler.",
+      "evidence": [],
+      "recommendation": "No immediate action; candidate for a future documentation-consolidation pass.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.3",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCEXEC-001",
+      "severity": "high",
+      "confidence": "high",
+      "category": [
+        "complexity"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/chat_generate.go"
+      ],
+      "symbols": [
+        "generateResponse",
+        "chatServiceImpl"
+      ],
+      "summary": "generateResponse is a ~1,900-line, cognitive-complexity-458, cyclomatic-225-228, maintainability-index-0 function -- the single highest-complexity function found anywhere in this audit (~5x the next-sharpest outlier), missed entirely by the mechanical triage pass. Coverage is 36.5%.",
+      "evidence": [
+        "raw/golangci-audit-complexity.log confirms cognitive 458, cyclomatic 225-228, funlen 1188, maintidx 0.",
+        "Structurally one unbroken ~970-line tool-use loop with budget enforcement, plugin hooks, telemetry, provider streaming, error/compaction recovery, and tool dispatch all inlined, despite the file having an established pattern of extracting helpers elsewhere."
+      ],
+      "recommendation": "Architect review of whether the loop's phases can be extracted into named methods without changing the mutate-in-place state-machine shape; prioritize closing the coverage gap on error/recovery branches independent of any refactor.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.4",
+      "metrics": {
+        "cyclomatic_complexity": 225,
+        "loc": 1900
+      },
+      "task_file": "TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCEXEC-002",
+      "severity": "high",
+      "confidence": "high",
+      "category": [
+        "god-object"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/chat.go"
+      ],
+      "symbols": [
+        "chatServiceImpl"
+      ],
+      "summary": "chatServiceImpl has 52 fields and 84 methods -- more than double the guide's own god-object thresholds on both axes -- and fails the wiring-only test decisively via generateResponse and dozens of other multi-hundred-line methods implementing real behavior directly.",
+      "evidence": [
+        "Field count/method count counted directly across the package's production files."
+      ],
+      "recommendation": "The PTY/agent-runtime session-lifecycle field cluster (7 fields, already cohesive) is the most promising extraction candidate; StreamManager is direct in-repo precedent for exactly this kind of split.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.4",
+      "metrics": {
+        "field_count": 52,
+        "method_count": 84
+      },
+      "task_file": "TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCEXEC-003",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "architecture"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/team_routing.go",
+        "internal/api/team_runs.go"
+      ],
+      "symbols": [
+        "TeamRoutingService",
+        "InstallTeamRunRouting"
+      ],
+      "summary": "Team semantic routing (TeamRoutingService's entire production surface) has zero production callers -- the intended wiring point (handleLaunchTeam) shipped later but calls only LaunchTeamRun, never InstallTeamRunRouting. TASKS/teams/HANDOFF.md already names this exact risk.",
+      "evidence": [
+        "Confirmed by deadcode + direct grep; ResolveLazySlot is transitively unreachable too though deadcode's heuristic doesn't catch it since its enclosing type is live."
+      ],
+      "recommendation": "Wire TeamRoutingService into handleLaunchTeam per the original design intent, or explicitly mark the feature as deferred/shelved in the Teams architecture doc.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.4",
+      "task_file": "TASKS/audit-remediation/09-production-islands/03-team-semantic-routing.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCEXEC-004",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "duplication"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/messaging_reactor.go",
+        "internal/service/subagent_reactor.go"
+      ],
+      "symbols": [
+        "resolveMessageWakePolicy",
+        "resolveSubagentCompletionPolicy"
+      ],
+      "summary": "Two near-identical 'resolve policy -> busy-check -> trigger' reactors have diverged on mechanism: resolveMessageWakePolicy uses the shared override.Resolve cascade primitive; resolveSubagentCompletionPolicy hand-rolls the identical walk independently. Self-acknowledged as siblings in the package comment.",
+      "evidence": [],
+      "recommendation": "Migrate resolveSubagentCompletionPolicy onto override.Resolve the same way its sibling was, since the two documented reasons they're separate resolvers don't require different merge mechanisms.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.4",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/01-subagent-completion-vs-message-wake-policy.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCEXEC-005",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "testing"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/tool_cache_wiring.go",
+        "internal/service/managed_durable_configs.go"
+      ],
+      "symbols": [
+        "buildRepairConfig",
+        "discoverManagedDurableAgentConfigs"
+      ],
+      "summary": "buildRepairConfig (C2 auto-repair pipeline's 4-level provider/model/timeout fallback chain) and discoverManagedDurableAgentConfigs (boot-time config loader) are both 0.0% test-covered, standing out against a package where coverage is otherwise unevenly-but-not-uniformly thin.",
+      "evidence": [
+        "coverage-func.log confirms both at 0.0% against sibling functions in the same files at 77-95%."
+      ],
+      "recommendation": "Add targeted unit tests for both; neither requires heavy fixtures.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.4",
+      "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/05-close-untested-service-config-functions.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCEXEC-006",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "error-handling"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/durable_wake.go"
+      ],
+      "symbols": [
+        "RunDue"
+      ],
+      "summary": "durable_wake.go:232-233's best-effort store write marks a one-shot schedule 'expired' -- the file's own doc comment says this is the mechanism preventing a documented double-fire race, but its failure is silently swallowed with no log line.",
+      "evidence": [],
+      "recommendation": "Log (not necessarily propagate) the error at this specific call site, consistent with sibling failure paths in the same file.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.4",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SVCEXEC-007",
+      "severity": "low",
+      "confidence": "medium",
+      "category": [
+        "comments"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/chat_reflex_dispatch.go",
+        "internal/service/team_routing.go"
+      ],
+      "symbols": [],
+      "summary": "chat_reflex_dispatch.go's 99-line package header and team_routing.go's 43-line priority-clamp justification both duplicate content that also lives in the referenced task file's Work Log -- a consistent house style across this half of the package.",
+      "evidence": [],
+      "recommendation": "No specific edit proposed; worth an architect pass on whether this house style should tighten toward invariant-only comments with a pointer to the task file.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.4",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-API-001",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/api",
+      "files": [
+        "internal/api/autocomplete.go",
+        "internal/api/projects.go"
+      ],
+      "symbols": [],
+      "summary": "Autocomplete file listing walks project.RepoPath with no validation anywhere in the chain; any authenticated caller can point a project at / or $HOME and enumerate filenames/sizes/mtimes (metadata only) up to depth 8.",
+      "evidence": [
+        "resolveRoot (autocomplete.go:135-164) has no validation; handleCreateProject/handleUpdateProject store RepoPath verbatim."
+      ],
+      "recommendation": "Decide whether repo_path should be constrained to an operator-configured allowlist of directories.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.5",
+      "false_positive_considerations": "In a single-operator local deployment, 'authenticated caller' and 'the person who set repo_path' are the same person.",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-API-002",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "security",
+        "testing"
+      ],
+      "package": "internal/api",
+      "files": [
+        "internal/api/artifacts.go"
+      ],
+      "symbols": [
+        "handlePlaceArtifact"
+      ],
+      "summary": "handlePlaceArtifact accepts an unrestricted StoragePath at write time with zero sanitization, unlike sibling handleUploadArtifact which correctly uses pathsafe.ResolveUnder. Not currently exploitable (download path independently confines) but has zero test coverage.",
+      "evidence": [
+        "Download path confirmed hardened by existing regression test TestDownloadDoesNotLeakAbsoluteEscapingPath."
+      ],
+      "recommendation": "Apply the same pathsafe.ResolveUnder-based confinement at write time and add a regression test mirroring the download-side tests.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.5",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-API-003",
+      "severity": "low",
+      "confidence": "medium",
+      "category": [
+        "security"
+      ],
+      "package": "internal/api",
+      "files": [
+        "internal/api/catalog.go"
+      ],
+      "symbols": [
+        "handleCatalogInstall"
+      ],
+      "summary": "Catalog plugin install fetches entry.ArchiveURL via http.DefaultClient with no explicit timeout and no host/scheme restriction beyond http/https -- standard package-manager-registry SSRF shape.",
+      "evidence": [],
+      "recommendation": "Give the download http.Client an explicit timeout; consider whether catalog sources should be treated as fully trusted or need an outbound-URL allowlist.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.5",
+      "false_positive_considerations": "Adding a catalog source is itself an explicit, privileged, operator-initiated action.",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-API-004",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "package-cohesion",
+        "duplication"
+      ],
+      "package": "internal/api",
+      "files": [
+        "internal/api/schedules.go",
+        "internal/api/settings.go"
+      ],
+      "symbols": [],
+      "summary": "Schedule and settings field validation live in the transport layer; the schedules case is self-documented in-repo as a known, real duplication across 3 independent producers (HTTP handler, reflex hook, self-tool handler).",
+      "evidence": [
+        "schedules.go:117-137's own comment already names this as a real follow-up candidate, not new discovery."
+      ],
+      "recommendation": "Consolidate once all three producers exist, per the in-repo comment's own proposed fix path.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.5",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-API-005",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "correctness"
+      ],
+      "package": "internal/api",
+      "files": [
+        "internal/api/memories.go"
+      ],
+      "symbols": [
+        "handleListMemories"
+      ],
+      "summary": "handleListMemories caps its underlying fetch to limit+offset BEFORE applying status/q filters, then reports total as the post-filter page length rather than a real match count -- silently under-returns below the requested limit when more matches exist beyond the capped window.",
+      "evidence": [
+        "memories.go:93-98 sets opts.Limit=limit+offset before filtering at :116-137; :149-151 reports total: len(out)."
+      ],
+      "recommendation": "Push status/q filtering (and a true total count) into memory.RecallOpts/Recall itself, before the limit/offset window is applied.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.5",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-API-006",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "duplication"
+      ],
+      "package": "internal/api",
+      "files": [
+        "internal/api/api.go",
+        "internal/api/catalog.go",
+        "internal/api/plugins.go",
+        "internal/api/provider_manage.go",
+        "internal/api/plugin_config.go"
+      ],
+      "symbols": [],
+      "summary": "Response/decode boilerplate duplicated across 3 parallel handler-state types; 2 are architecturally justified (different receiver types) but 3 *API-receiver call sites bypass the existing shared a.decode helper for no apparent reason.",
+      "evidence": [],
+      "recommendation": "Mechanical cleanup, low priority; fold into any future pass touching these files.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.5",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/15-api-response-boilerplate-duplication.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-API-007",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "duplication"
+      ],
+      "package": "internal/api",
+      "files": [
+        "internal/api/harness_v1.go",
+        "internal/api/durable_agents.go",
+        "internal/api/durable_agent_wake.go"
+      ],
+      "symbols": [],
+      "summary": "Harness v1 durable-agent start/resume/wake handlers are confirmed byte-for-byte duplicates (via dupl) of the native /api/durable-agents/* handlers, hand-copied rather than delegating.",
+      "evidence": [
+        "dupl-flagged pairs: durable_agents.go:226 <-> harness_v1.go:411 (25 lines); durable_agent_wake.go:54 <-> harness_v1.go:437 (16 lines)."
+      ],
+      "recommendation": "Have the Harness v1 handlers call the native handler functions (or a shared private helper) directly.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.5",
+      "false_positive_considerations": "Possibly deliberate protocol-stability choice insulating an external control-plane contract from internal refactors -- no comment states this rationale though.",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/02-harness-v1-vs-native-durable-agent-handlers.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-API-008",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "duplication",
+        "security"
+      ],
+      "package": "internal/api",
+      "files": [
+        "internal/api/plugins.go"
+      ],
+      "symbols": [],
+      "summary": "The plugin-UI static-file route hand-rolls its own Clean+HasPrefix path-confinement check instead of pathsafe.ResolveUnder -- sound against traversal but doesn't call EvalSymlinks, so a symlink inside an installed plugin's ui/ dir pointing outside its root would not be caught.",
+      "evidence": [
+        "plugins.go:107-120."
+      ],
+      "recommendation": "Route through pathsafe.ResolveUnder(baseDir, file) for consistency and to close the symlink gap.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.5",
+      "false_positive_considerations": "Requires an already-installed plugin (privileged action, subject to signature verification elsewhere).",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-API-009",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "duplication"
+      ],
+      "package": "internal/api",
+      "files": [
+        "internal/api/agent_capabilities.go"
+      ],
+      "symbols": [],
+      "summary": "7 dupl-flagged pairs within agent_capabilities.go's 4 parallel CRUD families (known-tools/known-skills/procedures/knowledge-seeds) -- mechanical, low-risk.",
+      "evidence": [],
+      "recommendation": "Judgment call on whether a generic helper is worth the abstraction cost; not required.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.5",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/15-api-response-boilerplate-duplication.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-API-010",
+      "severity": "low",
+      "confidence": "medium",
+      "category": [
+        "error-handling"
+      ],
+      "package": "internal/api",
+      "files": [
+        "internal/api/bookmarks.go"
+      ],
+      "symbols": [],
+      "summary": "bookmarks.go:90 uses err != sql.ErrNoRows instead of errors.Is -- would silently misclassify a legitimate not-found as an internal error if the underlying call is ever wrapped with %w.",
+      "evidence": [],
+      "recommendation": "Use errors.Is(err, sql.ErrNoRows).",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.5",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-PLUGIN-001",
+      "severity": "critical",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/api, internal/plugin",
+      "files": [
+        "internal/api/catalog.go",
+        "internal/plugin/catalog.go",
+        "internal/plugin/signature.go"
+      ],
+      "symbols": [
+        "handleCatalogInstall",
+        "VerifyChecksum",
+        "VerifySignature"
+      ],
+      "summary": "GUI/API plugin-catalog-install path (POST /api/plugins/catalog/install, the actual Plugin Manager UI) bypasses signature/checksum verification by default -- VerifyChecksum returns nil if no checksum specified, and the signature branch only runs if the source has a configured public key, which the default seeded 'official' catalog source does not have. Not devmode-gated -- identical in production and dev builds.",
+      "evidence": [
+        "handleCatalogInstall (catalog.go:248-452): signature branch only fires if sourcePublicKey != '' && entry.Signature != ''.",
+        "Default seeded catalog source's INSERT never sets a public_key column value.",
+        "Confirmed reachable: frontend CatalogBrowser/PluginManager components call this exact endpoint.",
+        "Git history confirms a solid, devmode-gated, fail-closed signature pipeline was built later (2026-04-13) for the CLI install path; this handler was never migrated onto it.",
+        "Zero test coverage for this handler at all."
+      ],
+      "recommendation": "Route handleCatalogInstall through the same pipeline the CLI already uses (internal/plugin/install.Installer + install.SignatureVerifier + catalog.SignedFetcher/KeyRing), which fail closed by default.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.6",
+      "task_file": "TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-PLUGIN-002",
+      "severity": "critical",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/api",
+      "files": [
+        "internal/api/catalog.go"
+      ],
+      "symbols": [
+        "handleCatalogInstall"
+      ],
+      "summary": "handleCatalogInstall also has an unconfined path-traversal write: target := filepath.Join(cs.pluginsDir, entry.Name) uses a plain filepath.Join (not pathsafe.ResolveUnder) where entry.Name comes from an untrusted catalog.yaml. Sibling handlers in the same file were already fixed for this exact bug class.",
+      "evidence": [
+        "catalog.go:301: target := filepath.Join(cs.pluginsDir, entry.Name); :427: copyDir(pluginRoot, target).",
+        "handleInstall/handleInstallLocal (plugins.go) both already use pathsafe.ResolveUnder with inline comments citing 'audit finding: Critical -- path traversal'."
+      ],
+      "recommendation": "Apply pathsafe.ResolveUnder(cs.pluginsDir, entry.Name) at line 301, matching the pattern already used in the sibling handlers.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.6",
+      "false_positive_considerations": "The archive-extraction step itself IS soundly defended -- the vulnerable point is specifically the final copyDir from the safely-extracted temp dir to the unguarded final target.",
+      "task_file": "TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-PLUGIN-003",
+      "severity": "high",
+      "confidence": "high",
+      "category": [
+        "duplication",
+        "architecture"
+      ],
+      "package": "internal/plugin",
+      "files": [
+        "internal/plugin/catalog.go",
+        "internal/plugin/signature.go",
+        "internal/plugin/catalog/fetch.go",
+        "internal/plugin/install"
+      ],
+      "symbols": [],
+      "summary": "Two full parallel 'fetch catalog -> verify -> download -> extract -> install' implementations exist side by side -- the weaker one (feeding the vulnerable API handler) and the stronger, devmode-gated one (feeding only the CLI). Direct architectural cause of GO-PLUGIN-001/002.",
+      "evidence": [],
+      "recommendation": "Converge the API handler onto the stronger pipeline; retire the old CatalogFetcher/VerifyChecksum/VerifySignature once the caller is migrated (no other callers today).",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.6",
+      "task_file": "TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-PLUGIN-004",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "complexity",
+        "concurrency"
+      ],
+      "package": "internal/plugin",
+      "files": [
+        "internal/plugin/host.go"
+      ],
+      "symbols": [
+        "UnloadPlugin"
+      ],
+      "summary": "UnloadPlugin (cyclomatic 63, 346 lines): essential complexity dominates (documented 18-category lock-disciplined teardown sweep), but ~10 categories are still hand-inlined map-iterate-delete logic that could be extracted like the other ~8 already are. Separately, a real narrow TOCTOU gap: a concurrent LoadPlugin(B) where B depends on the plugin being unloaded can pass its own dependency check in the window before the unload completes.",
+      "evidence": [
+        "host.go:1240-1585; dependency check at 1249-1260 under lock, p.Unload() at 1264 runs lock-free by design (to avoid deadlock on re-entrant plugin calls)."
+      ],
+      "recommendation": "Extract remaining inlined categories into small sweepXByPlugin helpers mirroring the established pattern; consider an unloading-in-progress guard to close the TOCTOU window if concurrent load/unload of interdependent plugins is a scenario worth defending.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.6",
+      "metrics": {
+        "cyclomatic_complexity": 63,
+        "loc": 346
+      },
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-PLUGIN-005",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "complexity"
+      ],
+      "package": "internal/plugin/install",
+      "files": [
+        "internal/plugin/install/validate.go"
+      ],
+      "symbols": [],
+      "summary": "validateCrossRefs (cyclomatic 35, 126 lines) is mechanically repetitive (9 near-identical per-section uniqueness checks) but not incorrect -- a guide \u00a75 'may be clearer than fragmented helpers' case.",
+      "evidence": [],
+      "recommendation": "Optional: a generic checkUniqueKeys[T] helper could collapse ~80 lines with no behavior change; not urgent.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.6",
+      "metrics": {
+        "cyclomatic_complexity": 35,
+        "loc": 126
+      },
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-PLUGIN-006",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "god-object",
+        "package-cohesion"
+      ],
+      "package": "internal/plugin",
+      "files": [
+        "internal/plugin/host.go"
+      ],
+      "symbols": [
+        "Host"
+      ],
+      "summary": "Host has 38 fields / 123 methods across 9 files, above both guide thresholds, but is a single coherent domain ('everything a plugin can register'). ~1/4 of registration categories are already extracted into dedicated sub-registry types with their own locks; the rest remain raw maps.",
+      "evidence": [],
+      "recommendation": "The established sub-registry pattern (cardRulesRegistry, panelRegistry, FilterRegistry, MutablePluginMux) is the natural extension path if the architect wants to reduce Host's footprint.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.6",
+      "metrics": {
+        "field_count": 38,
+        "method_count": 123
+      },
+      "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-PLUGIN-007",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "duplication"
+      ],
+      "package": "internal/plugin/builtin",
+      "files": [
+        "internal/plugin/builtin/adapter-claude",
+        "internal/plugin/builtin/adapter-codex",
+        "internal/plugin/builtin/adapter-gemini",
+        "internal/plugin/builtin/adapter-opencode"
+      ],
+      "symbols": [],
+      "summary": "4 CLI-ecosystem adapter plugins duplicate ~35-45 lines each of manifest-loading/registration/lifecycle boilerplate, byte-for-byte aside from names/strings.",
+      "evidence": [],
+      "recommendation": "A shared plugin.LoadEmbeddedManifest/plugin.BasePlugin helper could remove most of it without touching per-adapter logic.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.6",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/14-adapter-plugin-boilerplate-duplication.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-PLUGIN-008",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "error-handling"
+      ],
+      "package": "internal/plugin, internal/store",
+      "files": [
+        "internal/plugin/install/verify.go",
+        "cmd/nanite/plugin_install_flow.go",
+        "internal/store/user_settings.go"
+      ],
+      "symbols": [],
+      "summary": "user_settings.allow_unsigned_plugins is stored and API-exposed but never actually wired into the CLI signature verifier -- SignatureVerifier.AllowUnsigned is left at its zero-value false at the one production construction site, despite verify.go's doc comment describing the setting as the intended wiring.",
+      "evidence": [
+        "grep confirms zero production `AllowUnsigned: true` assignments anywhere."
+      ],
+      "recommendation": "Wire user_settings.AllowUnsignedPlugins into buildInstaller's SignatureVerifier construction, or update the doc comments to stop claiming this wiring exists.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.6",
+      "false_positive_considerations": "Opposite-direction of a security risk (stricter than documented, not weaker).",
+      "task_file": "TASKS/audit-remediation/01-plugin-install-convergence/02-wire-allow-unsigned-plugins-setting.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-001",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "duplication",
+        "package-cohesion"
+      ],
+      "package": "internal/tool",
+      "files": [
+        "internal/tool/tool.go",
+        "internal/tool/builder.go",
+        "internal/tool/register.go",
+        "internal/tool/adapt.go",
+        "internal/tool/yaml_loader.go"
+      ],
+      "symbols": [],
+      "summary": "internal/tool's canonical Tool-interface/builder architecture is entirely dead (every exported symbol deadcode-flagged); only ResultCache is live. tool.go's package doc still actively claims this is 'the primary way to construct tools in Go code' -- false of the current runtime.",
+      "evidence": [
+        "A prior task's own comment in internal/service/tool_concurrency_classification.go already reached this conclusion and left it in place."
+      ],
+      "recommendation": "Confirm with the architect whether this represents an abandoned migration (delete) or a planned future direction (update the doc comment to say so explicitly).",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.7",
+      "task_file": "TASKS/audit-remediation/09-production-islands/04-tool-builder-yaml-architecture.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-002",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "duplication",
+        "complexity"
+      ],
+      "package": "internal/toolclient",
+      "files": [
+        "internal/toolclient/ranking.go",
+        "internal/toolclient/broker.go"
+      ],
+      "symbols": [
+        "RankTools",
+        "SelectWithSignals",
+        "SelectToolsAugmented"
+      ],
+      "summary": "Reasoning-augmented tool selection (RankTools/SelectWithSignals/SelectToolsAugmented) is dead in the production request path -- its former consumer (a debug SQL row) was removed by an earlier task. Explains 2 of the base report's previously-unjudged complexity outliers.",
+      "evidence": [
+        "ranking.go:292-297's own comment documents the removal; the real production selection entry point (SelectToolsAsProvider) does not call this path."
+      ],
+      "recommendation": "Confirm whether reasoning-augmented selection is a planned re-activation or an abandoned experiment; remove the dead code and its per-boot wiring cost (skills-dir load, memory-recaller construction) if abandoned.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.7",
+      "task_file": "TASKS/audit-remediation/09-production-islands/05-reasoning-augmented-tool-selection.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-003",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "duplication"
+      ],
+      "package": "internal/toolclient",
+      "files": [
+        "internal/toolclient/tool_knowledge.go"
+      ],
+      "symbols": [],
+      "summary": "tool_knowledge.go's entire curated-catalog intent-matching mechanism (405 lines) has zero callers -- a third parallel 'what tools match this intent' mechanism alongside the live intent.go keyword scorer and the dead RankTools.",
+      "evidence": [],
+      "recommendation": "Confirm dead, then remove.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.7",
+      "task_file": "TASKS/audit-remediation/09-production-islands/06-curated-tool-knowledge-matcher.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-004",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "comments"
+      ],
+      "package": "internal/mcp",
+      "files": [
+        "internal/mcp/elicitation.go"
+      ],
+      "symbols": [],
+      "summary": "elicitation.go's package doc describes a client-side direction (ClientElicitMiddleware) that does not exist anywhere in the codebase -- purely aspirational documentation. The functions implementing that direction are confirmed dead under both normal and -test reachability.",
+      "evidence": [],
+      "recommendation": "Either build the missing ClientElicitMiddleware or delete the client-side functions and correct the package doc.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.7",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/09-elicitation-client-side-duplication-and-dead-doc.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-005",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "performance"
+      ],
+      "package": "internal/mcp",
+      "files": [
+        "internal/mcp/tool_ctx.go"
+      ],
+      "symbols": [],
+      "summary": "Per-turn tool-name context is written every single tool dispatch (real production caller) but the reader has zero callers -- small but needless per-call cost; the write side's own comment frames this as deliberate scaffolding.",
+      "evidence": [],
+      "recommendation": "Either remove the write side or track it in a doc so it isn't rediscovered as dead code and cleaned up out of ignorance of the plan.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.7",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-006",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "god-object"
+      ],
+      "package": "internal/selftools",
+      "files": [
+        "internal/selftools/self_tools_transport.go"
+      ],
+      "symbols": [
+        "SelfToolsTransport"
+      ],
+      "summary": "SelfToolsTransport is the strongest god-object candidate in this cluster: 31 fields, 81 methods, a single flat CallTool switch dispatching to ~62 tool names spanning ~15 largely-unrelated capability domains, implemented as real 2,431-line business logic, not thin adapters.",
+      "evidence": [],
+      "recommendation": "Assess whether tool-domain families (todo/plan, messaging, subagent-dispatch, workflow, panels, python, learning) could be split into per-domain handler sets composed into SelfToolsTransport.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.7",
+      "metrics": {
+        "field_count": 31,
+        "method_count": 81
+      },
+      "task_file": "TASKS/audit-remediation/10-architectural-concentration/02-selftoolstransport-decomposition.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-007",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "god-object"
+      ],
+      "package": "internal/toolclient",
+      "files": [
+        "internal/toolclient/broker.go",
+        "internal/toolclient/intent.go",
+        "internal/toolclient/ranking.go",
+        "internal/toolclient/meta_tools.go"
+      ],
+      "symbols": [
+        "ToolClient"
+      ],
+      "summary": "ToolClient has 26 methods across 4 files backing 3 self-described responsibilities ('selection, permissions, and execution').",
+      "evidence": [],
+      "recommendation": "No action implied; record for the architect's holistic pass.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.7",
+      "metrics": {
+        "method_count": 26
+      },
+      "task_file": "TASKS/audit-remediation/10-architectural-concentration/02-selftoolstransport-decomposition.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-008",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/mcp",
+      "files": [
+        "internal/mcp/dev_tools.go"
+      ],
+      "symbols": [
+        "callGrep"
+      ],
+      "summary": "callGrep's gosec G122 hit is real: resolveAllowed correctly validates the top-level dir argument once (symlink-aware) before the walk begins, but the filepath.Walk callback then calls os.Open on every discovered file with no per-entry re-validation or symlink check -- a symlink inside an already-granted directory would leak file content outside the grant boundary.",
+      "evidence": [
+        "dev_tools.go:690-871, os.Open at line 779 inside the walk callback."
+      ],
+      "recommendation": "Exclude symlinked entries in the walk, or re-run pathsafe.ResolveUnder per discovered file before os.Open.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.7",
+      "false_positive_considerations": "Requires either write access to the granted directory or a pre-existing malicious symlink -- a local-filesystem TOCTOU class, not remotely triggerable via MCP input.",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/02-mcp-dev-grep-symlink-toctou.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-009",
+      "severity": "low",
+      "confidence": "medium",
+      "category": [
+        "concurrency",
+        "lifecycle"
+      ],
+      "package": "internal/mcp",
+      "files": [
+        "internal/mcp/manager.go"
+      ],
+      "symbols": [
+        "RemoveServer"
+      ],
+      "summary": "Manager.RemoveServer holds the registry-wide lock for the full duration of subprocess kill+reap (no timeout) -- every other Manager operation for unrelated MCP servers queues behind the same lock while one server tears down.",
+      "evidence": [],
+      "recommendation": "Consider releasing the manager lock before calling closer.Close().",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.7",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-010",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "duplication"
+      ],
+      "package": "internal/selftools, internal/service",
+      "files": [
+        "internal/selftools/self_tools_dispatch.go",
+        "internal/service/chat_reflex_dispatch.go"
+      ],
+      "symbols": [],
+      "summary": "Self-documented, deliberately independent second evaluation of the same dispatch_to_agent reflex rows -- the code's own comment argues this is intentional (two genuinely different decision points), though nothing tests that the two evaluators can never diverge.",
+      "evidence": [],
+      "recommendation": "Record for architect awareness; consider a test asserting the two evaluators stay in sync.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.7",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/11-dispatch-reflex-double-evaluation.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-011",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "duplication",
+        "naming"
+      ],
+      "package": "internal/mcp, internal/toolclient",
+      "files": [
+        "internal/mcp/naming.go",
+        "internal/toolclient/broker.go"
+      ],
+      "symbols": [],
+      "summary": "DevServerName = \"dev\" independently declared in both internal/mcp and internal/toolclient, despite the latter already importing the former.",
+      "evidence": [],
+      "recommendation": "Reference mcp.DevServerName directly.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.7",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/12-devservername-constant-duplication.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-012",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "duplication"
+      ],
+      "package": "internal/mcp",
+      "files": [
+        "internal/mcp/manager.go"
+      ],
+      "symbols": [],
+      "summary": "Manager.ExecuteTool/ExecuteToolOnServer textually duplicate the entire post-CallTool result-processing pipeline (assemble, validate size, span attributes); both call sites are genuinely necessary, only the shared tail is duplicated.",
+      "evidence": [],
+      "recommendation": "Extract the shared post-CallTool pipeline into a private helper both functions call.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.7",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/05-mcp-result-processing-tail-duplication.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MCPTOOL-013",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "error-handling"
+      ],
+      "package": "internal/mcpconfig",
+      "files": [
+        "internal/mcpconfig/mcpconfig.go"
+      ],
+      "symbols": [],
+      "summary": "mcpconfig.Export silently drops 2 json.Unmarshal errors on stored Args/Env -- part of the base report's already-tracked errcheck cluster, cited here with a precise location.",
+      "evidence": [
+        "mcpconfig.go:145,150."
+      ],
+      "recommendation": "Log at slog.Warn on unmarshal failure.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.7",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-AGENT-001",
+      "severity": "high",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/agent, internal/service, internal/api",
+      "files": [
+        "internal/agent/managed_files.go",
+        "internal/agentvalidation/validation.go",
+        "internal/service/agent_config.go",
+        "internal/api/agents.go"
+      ],
+      "symbols": [
+        "ManagedAgentPath",
+        "ValidateAgentConfig",
+        "AgentConfigService.Create",
+        "AgentConfigService.Update"
+      ],
+      "summary": "Agent slug is never validated for path-safety before being joined into a managed-config file path, on both create and update. Full traced chain from POST /api/agents through ValidateAgentConfig (never references Slug) to ManagedAgentPath's plain filepath.Join to atomicWriteFile.",
+      "evidence": [
+        "ManagedAgentPath (managed_files.go:87-95): filepath.Join(configRoot, 'agents', slug+'.md') with no character allow-list, no traversal rejection.",
+        "agentvalidation.ValidateAgentConfig never references Slug anywhere in its body.",
+        "handleUpdateAgent's rename path has no 'already exists' guard, so a crafted slug can OVERWRITE an existing arbitrary *.md file, not just create one.",
+        "A slug-format allow-list regex already exists elsewhere (internal/builders/agent_builder.go) gating a different endpoint -- never applied to the direct CRUD endpoints."
+      ],
+      "recommendation": "Validate Slug against a strict allow-list (mirroring the existing regex) inside ValidateAgentConfig or at the top of AgentConfigService.Create/Update, before ManagedAgentPath is ever called.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.8",
+      "false_positive_considerations": "The final path component is always .md-suffixed, constraining (not eliminating) real-world impact. HTTP-layer auth boundary on POST/PUT /api/agents was not independently verified.",
+      "task_file": "TASKS/audit-remediation/03-agent-slug-traversal/01-canonical-slug-path-validation.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-AGENT-002",
+      "severity": "high",
+      "confidence": "high",
+      "category": [
+        "testing"
+      ],
+      "package": "internal/agent",
+      "files": [
+        "internal/agent/managed_files.go",
+        "internal/agent/source_class.go"
+      ],
+      "symbols": [],
+      "summary": "Every function in managed_files.go and source_class.go is at 0.0% test coverage, including Classification.IsWritablePath, the codebase's own trust-boundary gate for 'is this a writable managed path'. Directly tied to GO-AGENT-001 -- a fix currently has no safety net.",
+      "evidence": [
+        "coverage-func.log confirms 0.0% for every function in both files; no test file exists for either."
+      ],
+      "recommendation": "Add direct unit tests for ManagedAgentPath/WriteManagedAgentProfile (including a traversal-rejection case once GO-AGENT-001 is fixed) and for Classification.Classify/IsWritablePath.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.8",
+      "task_file": "TASKS/audit-remediation/03-agent-slug-traversal/01-canonical-slug-path-validation.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-AGENT-003",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "dead-code"
+      ],
+      "package": "internal/agent, internal/agentvalidation",
+      "files": [
+        "internal/agent/managed_files.go",
+        "internal/agentvalidation/validation.go"
+      ],
+      "symbols": [],
+      "summary": "3 exported symbols (EnsureManagedDirs, UserManagedAgentPath, ValidationResult.Error) confirmed unreachable under both normal and -test reachability.",
+      "evidence": [],
+      "recommendation": "Confirm not part of an external/plugin-consumed API surface, then remove or add the intended caller.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.8",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-AGENT-004",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "naming"
+      ],
+      "package": "internal/agent",
+      "files": [
+        "internal/agent/permissions_test.go"
+      ],
+      "symbols": [],
+      "summary": "permissions_test.go's only remaining tests (after a prior removal task) test an unrelated concern (ParentDispatchAllowlist), not permissions -- stale filename.",
+      "evidence": [],
+      "recommendation": "Rename to parent_dispatch_allowlist_test.go or fold into convert_test.go.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.8",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/03-naming-and-formatting-fixes.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-AGENT-005",
+      "severity": "low",
+      "confidence": "medium",
+      "category": [
+        "naming",
+        "correctness"
+      ],
+      "package": "internal/agent/builtin",
+      "files": [
+        "internal/agent/builtin/embed_mux_devmode.go",
+        "internal/agent/builtin/profiles.go"
+      ],
+      "symbols": [],
+      "summary": "A devmode-only builtin agent still stamps the legacy Source='builtin' value the sibling package's own doc says is retired -- traced the consequence: this profile falls through to ManageClassManaged (GUI/API-editable) instead of the hidden/read-only treatment every other embedded harness profile gets. Devmode-only blast radius.",
+      "evidence": [],
+      "recommendation": "Change embed_mux_devmode.go:21 to stamp SourceInternal to match the rest of the package's convention.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.8",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-CHAT-001",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "duplication",
+        "architecture"
+      ],
+      "package": "internal/chat, internal/envelope, internal/plugin",
+      "files": [
+        "internal/chat/envelope.go",
+        "internal/envelope/validator.go",
+        "internal/plugin/host.go"
+      ],
+      "symbols": [],
+      "summary": "Three independent packages each hold their own separate copy of the shared *envelopes.Registry pointer, requiring main.go to remember 3 manual setter calls with nothing enforcing they stay in sync.",
+      "evidence": [],
+      "recommendation": "Consider a single shared registry holder rather than three independently-set copies, especially before any future hot-reload/test-isolation feature is added.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.9",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/10-envelope-registry-triplication.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-CHAT-002",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "duplication"
+      ],
+      "package": "internal/chat, internal/recovery/pack",
+      "files": [
+        "internal/chat/structured.go",
+        "internal/recovery/pack/pack.go"
+      ],
+      "symbols": [],
+      "summary": "chat.replayContent and recovery/pack.MessagePlainText implement the identical StructuredMessage-JSON-unwrap algorithm -- one using the full shared type, the other a hand-rolled anonymous struct re-deriving the same two fields. Self-documented as intentional (avoiding a cross-package import) but the reviewer found no actual cycle risk in that direction.",
+      "evidence": [],
+      "recommendation": "Consider exporting a minimal shared unwrap helper both packages call, after confirming the import-cycle constraint is real.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.9",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/03-structuredmessage-unwrap-duplication.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-CHAT-003",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "duplication",
+        "repository-hygiene"
+      ],
+      "package": "internal/elicitation",
+      "files": [
+        "internal/elicitation/service_test_helpers.go"
+      ],
+      "symbols": [],
+      "summary": "service_test_helpers.go has no _test.go suffix, so it compiles into the production binary -- including elicitWithDuration, a near line-for-line reimplementation of Elicit's body that could silently diverge from real Elicit behavior.",
+      "evidence": [],
+      "recommendation": "Rename to export_test.go pattern so it's excluded from production builds.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.9",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-CHAT-004",
+      "severity": "low",
+      "confidence": "medium",
+      "category": [
+        "duplication",
+        "error-handling"
+      ],
+      "package": "internal/mcp",
+      "files": [
+        "internal/mcp/elicitation.go"
+      ],
+      "symbols": [],
+      "summary": "ElicitUserInput/routeClientElicitation are near-duplicate ~25-line bodies with inconsistent context.Canceled handling -- one swallows it into a graceful cancel result, the other surfaces it as both a cancel payload and a non-nil error.",
+      "evidence": [],
+      "recommendation": "Extract the shared 'call Elicit, translate to response' logic into one helper both call, or document why the two paths need different error contracts.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.9",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/09-elicitation-client-side-duplication-and-dead-doc.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-CHAT-005",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "dead-code"
+      ],
+      "package": "internal/coordination",
+      "files": [
+        "internal/coordination/keys.go"
+      ],
+      "symbols": [],
+      "summary": "PrefixLock/PrefixState/LockTTL declared with zero consumers anywhere -- a planned-but-never-built 'resource lock' feature layered on CoordStore.",
+      "evidence": [],
+      "recommendation": "Either wire an actual lock-acquire/release helper, or remove until the feature is built.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.9",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-CHAT-006",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "comments",
+        "dead-code"
+      ],
+      "package": "internal/chat",
+      "files": [
+        "internal/chat/hint_catalog.go"
+      ],
+      "symbols": [],
+      "summary": "hint_catalog.go's package doc claims the loader reads config/think-hints/hints.yaml; the actual go:embed directive embeds a different file. The two are currently byte-identical but no build step copies one into the other.",
+      "evidence": [],
+      "recommendation": "Fix the doc comment to point at the real embedded path, or add a generate/build step if the config/ file is meant to be an editable source of truth.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.9",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-CHAT-007",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "repository-hygiene"
+      ],
+      "package": "internal/chat, internal/messaging, internal/envelope, internal/elicitation, internal/coordination",
+      "files": [],
+      "symbols": [],
+      "summary": "12 files in this cluster fail gofmt -l (part of the pre-existing repo-wide 122-file gap already covered by GO-HYG-001).",
+      "evidence": [],
+      "recommendation": "gofmt -w is safe and mechanical; batchable with the repo-wide cleanup.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.9",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/03-naming-and-formatting-fixes.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-CHAT-008",
+      "severity": "informational",
+      "confidence": "medium",
+      "category": [
+        "package-cohesion",
+        "architecture"
+      ],
+      "package": "internal/chat",
+      "files": [
+        "internal/chat"
+      ],
+      "symbols": [],
+      "summary": "internal/chat's wide fan-out (11 internal packages) mixes broadly-consumed wire-vocabulary types with subsystem-specific response-handler wiring in the same package -- not a cycle, but means a caller wanting only Envelope/ResponseV1 transitively depends on the entire subagent+elicitation+mcp+plugin graph anyway.",
+      "evidence": [],
+      "recommendation": "Consider whether subsystem-specific response handlers belong in their own thin wiring files/subpackage separate from the pure-vocabulary core.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.9",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-CHAT-009",
+      "severity": "informational",
+      "confidence": "medium",
+      "category": [
+        "concurrency"
+      ],
+      "package": "internal/elicitation",
+      "files": [
+        "internal/elicitation/service.go"
+      ],
+      "symbols": [],
+      "summary": "Elicit's three-way select has a theoretical response/timeout race inherent to any select-based timeout; negligible at production's 5-minute default, proportionally larger (still very unlikely) at the sub-second timeouts the GO-CHAT-003 test helper uses.",
+      "evidence": [],
+      "recommendation": "None recommended; recorded for completeness.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.9",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-EXEC-001",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "concurrency"
+      ],
+      "package": "internal/subagent",
+      "files": [
+        "internal/subagent/service.go"
+      ],
+      "symbols": [
+        "Approve",
+        "Spawn"
+      ],
+      "summary": "Approve() bypasses the fan-out concurrency semaphore entirely -- Spawn's ungated paths correctly acquire a slot from the documented cap-of-3 semaphore before dispatching, but Approve launches its dispatch goroutine directly with no slot acquisition. Multiple approvals in quick succession can drive concurrently-executing runners past the stated cap.",
+      "evidence": [
+        "service.go: Spawn's acquireSpawnSlot calls vs. Approve's direct goroutine launch with no acquisition."
+      ],
+      "recommendation": "Route Approve's dispatch through executeWithSlot (acquiring the slot before or as part of approval), or explicitly document the exemption.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.10",
+      "task_file": "TASKS/audit-remediation/05-subagent-execution-ordering/01-fix-approve-concurrency-cap-and-queued-cancel.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-EXEC-002",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": [
+        "concurrency",
+        "lifecycle"
+      ],
+      "package": "internal/subagent",
+      "files": [
+        "internal/subagent/service.go"
+      ],
+      "symbols": [
+        "Cancel",
+        "Spawn",
+        "acquireSpawnSlot"
+      ],
+      "summary": "A run cancelled while still queued for a spawn slot is not actually stopped -- only relabeled after it finishes running anyway. The cancellation hook is only registered after the slot is acquired, but the run is broadcast as 'running' before that.",
+      "evidence": [
+        "Traced: emitStatus broadcasts 'running' before acquireSpawnSlot; cancelers[run.ID] only registered after slot acquisition; finalizeRun's re-read reconciliation eventually corrects the terminal status but the run itself was not interrupted."
+      ],
+      "recommendation": "Register a lightweight 'queued' cancellation hook before acquireSpawnSlot is attempted, or re-check the row's current status immediately after acquiring a slot before invoking the runner.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.10",
+      "false_positive_considerations": "Data integrity is not at risk -- finalizeRun's reconciliation correctly prevents a stale/wrong terminal status; only the run itself proceeds when it shouldn't.",
+      "task_file": "TASKS/audit-remediation/05-subagent-execution-ordering/01-fix-approve-concurrency-cap-and-queued-cancel.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-EXEC-003",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "naming"
+      ],
+      "package": "internal/workflow, internal/workflowrunner, internal/agentworkflow",
+      "files": [],
+      "symbols": [],
+      "summary": "Three 'workflow'-branded packages implement three different execution models. The maintainers were already aware (agentworkflow/doc.go explicitly documents why it wasn't nested as a workflow subpackage) -- deliberate, not an oversight, but still a real grep/mental-model cost.",
+      "evidence": [],
+      "recommendation": "No action required beyond continued awareness.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.10",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/16-workflow-naming-and-dispatch-naming-collisions.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-EXEC-004",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "naming"
+      ],
+      "package": "internal/dispatch, internal/dispatcher",
+      "files": [],
+      "symbols": [],
+      "summary": "internal/dispatch vs internal/dispatcher -- similar names, genuinely different well-documented concepts.",
+      "evidence": [],
+      "recommendation": "No rename recommended without architect review; flagged for awareness only.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.10",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/16-workflow-naming-and-dispatch-naming-collisions.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MEM-001",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "architecture"
+      ],
+      "package": "internal/grounding",
+      "files": [
+        "internal/grounding/recall.go",
+        "internal/grounding/outcome.go"
+      ],
+      "symbols": [],
+      "summary": "internal/grounding's entire pre-strategy memory-recall subsystem is fully built and tested but never wired in production -- GroundingRecaller/GroundingLogger fields exist on the self-tools transport, but zero production code anywhere constructs and assigns a *grounding.Recaller to them.",
+      "evidence": [
+        "deadcode + exhaustive grep confirm zero production assignment; also gated behind an env var defaulting off."
+      ],
+      "recommendation": "Either wire GroundingRecaller/GroundingLogger into the composition root, or treat as an abandoned Phase-5 feature and schedule removal.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.11",
+      "task_file": "TASKS/audit-remediation/09-production-islands/01-grounding-memory-recall.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MEM-002",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "correctness"
+      ],
+      "package": "internal/contextbroker",
+      "files": [
+        "internal/contextbroker/gate_hadron_blueprints.go"
+      ],
+      "symbols": [
+        "HadronBlueprintGate",
+        "calculateRelevance"
+      ],
+      "summary": "contextbroker/gate_hadron_blueprints.go's entire ContextGate/HadronBlueprintGate is confirmed entirely dead, and contains a latent unbounded-relevance-score bug (additive scoring with no clamp against a documented 0.0-1.0 contract) that would corrupt cross-source ranking if ever revived unfixed.",
+      "evidence": [
+        "Never registered as a ContextSource in the composition root, unlike its 4 live siblings; calculateRelevance sums up to 6 bonuses with no clamp."
+      ],
+      "recommendation": "Remove if genuinely abandoned, or fix the unbounded scoring before wiring in if reviving.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.11",
+      "task_file": "TASKS/audit-remediation/09-production-islands/02-hadron-context-gate.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MEM-003",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "repository-hygiene"
+      ],
+      "package": "internal/contextbroker",
+      "files": [
+        "internal/contextbroker/intent.go",
+        "internal/contextbroker/broker.go"
+      ],
+      "symbols": [],
+      "summary": "BudgetForIntent/IntentSourcePriority unused (a second, dead budget-allocation strategy); DefaultBudget()'s SourceWeights includes an 'engine': 0.15 entry with no backing ContextSource implementation anywhere in the repo -- inert, misleading configuration.",
+      "evidence": [],
+      "recommendation": "Remove BudgetForIntent/IntentSourcePriority if superseded; drop the 'engine' weight entry or implement the promised EngineSource.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.11",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MEM-004",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "duplication",
+        "go-idiom"
+      ],
+      "package": "internal/contextbroker",
+      "files": [
+        "internal/contextbroker/source_pcc.go",
+        "internal/contextbroker/source_memory.go",
+        "internal/contextbroker/source_conduit.go"
+      ],
+      "symbols": [],
+      "summary": "Each contextbroker source computes ContextItem.Relevance via an unrelated method yet all are merged and cross-compared on one global scale with no shared contract beyond 'roughly 0-1'.",
+      "evidence": [],
+      "recommendation": "Document/enforce a shared relevance-normalization contract before merging cross-source lists.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.11",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MEM-005",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "duplication"
+      ],
+      "package": "internal/context, internal/contextbroker",
+      "files": [
+        "internal/context/tokens.go",
+        "internal/contextbroker/broker.go"
+      ],
+      "symbols": [],
+      "summary": "Two independent 'chars/4' token-estimation formulas (one floors, one always rounds up) measure the same content at two different stages of the same budget pipeline, diverging by a few tokens for any length not a multiple of 4.",
+      "evidence": [],
+      "recommendation": "Converge on one estimator; contextbroker's deliberate one-way dependency away from internal/context means this would need a shared lower-level package.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.11",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MEM-006",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "lifecycle",
+        "performance"
+      ],
+      "package": "internal/loopdetect",
+      "files": [
+        "internal/loopdetect/detector.go"
+      ],
+      "symbols": [],
+      "summary": "Detector.windows map has no production eviction path -- Reset(sessionID) exists specifically for this but has zero production callers; for a long-running daemon, every distinct session that ever calls a tool adds a permanent entry.",
+      "evidence": [],
+      "recommendation": "Call Detector.Reset(sessionID) on session end, or add a bounded LRU/TTL eviction inside Detector itself.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.11",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MEM-007",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "dead-code",
+        "comments"
+      ],
+      "package": "internal/recovery/orphansweep",
+      "files": [
+        "internal/recovery/orphansweep/orphan_sweep.go"
+      ],
+      "symbols": [],
+      "summary": "orphansweep.SweepOrphans is dead in production (bypassed by RuntimeReaper.SweepOnce calling the inner function directly), but multiple other files' doc comments still describe it as the live entry point.",
+      "evidence": [],
+      "recommendation": "Delete the now-redundant SweepOrphans wrapper, or update the stale cross-file doc comments.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.11",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MEM-008",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "dead-code"
+      ],
+      "package": "internal/recovery/broker",
+      "files": [
+        "internal/recovery/broker/broker.go"
+      ],
+      "symbols": [],
+      "summary": "recovery/broker's With* constructor options are deadcode-flagged but the equivalent Set* post-construction setters exist for a documented, legitimate late-binding reason -- recorded specifically so a future reviewer doesn't re-flag this as real dead code.",
+      "evidence": [],
+      "recommendation": "No action needed; example of the guide's own 'reported dead != remove' guardrail working correctly.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.11",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-MEM-009",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "lifecycle"
+      ],
+      "package": "internal/recovery/orphansweep",
+      "files": [
+        "internal/recovery/orphansweep/orphan_sweep.go"
+      ],
+      "symbols": [],
+      "summary": "RuntimeReaper's sweep function explicitly discards its own ctx parameter (_ = ctx), so an in-flight DB call cannot be cancelled mid-flight by the shutdown signal -- Stop() simply blocks until that call returns on its own.",
+      "evidence": [],
+      "recommendation": "Propagate ctx into the underlying DB calls so shutdown can cancel an in-flight sweep.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.11",
+      "false_positive_considerations": "Low risk in practice -- local SQLite call, bounded.",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC4-001",
+      "severity": "critical",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/sandbox",
+      "files": [
+        "internal/sandbox/os_linux.go",
+        "internal/sandbox/exec.go"
+      ],
+      "symbols": [
+        "applyOSSandbox",
+        "AgentExec"
+      ],
+      "summary": "On Linux, if bwrap (bubblewrap) isn't installed, applyOSSandbox silently falls back to no OS-level isolation and returns success -- AgentExec treats this identically to a real sandbox being applied. Re-confirmed still-open from the 2026-04-10 dedicated sandbox-hardening audit.",
+      "evidence": [
+        "os_linux.go:64-71: LookPath failure logs a warn once and returns func(){}, nil (success shape) rather than an error; AgentExec proceeds unsandboxed."
+      ],
+      "recommendation": "Fail closed by default on Linux (return an error rather than a warning) with an explicit opt-out env var for CI/dev.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.12",
+      "false_positive_considerations": "None -- direct re-confirmation against current source.",
+      "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC4-002",
+      "severity": "high",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/sandbox",
+      "files": [
+        "internal/sandbox/os_linux.go"
+      ],
+      "symbols": [],
+      "summary": "Linux network allowlist is not enforced at the OS/namespace level in proxy mode -- when NetworkAllow is non-empty, the sandboxed process keeps the host's network namespace; confinement relies entirely on HTTP_PROXY/HTTPS_PROXY env-var convention, which any tool can ignore.",
+      "evidence": [
+        "os_linux.go:132-148: --unshare-net only applied when networkAllow is empty."
+      ],
+      "recommendation": "Enforce egress at the namespace level (co-locate the proxy inside the sandbox netns, or a veth/socket-passing approach), or explicitly document/gate proxy-mode network access as reduced-guarantee.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.12",
+      "false_positive_considerations": "macOS is unaffected -- seatbelt's network-outbound deny is real and kernel-enforced.",
+      "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC4-003",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": [
+        "security",
+        "error-handling"
+      ],
+      "package": "internal/permission",
+      "files": [
+        "internal/permission/engine.go",
+        "internal/service/tool.go"
+      ],
+      "symbols": [
+        "Engine.Check",
+        "defaultDecision"
+      ],
+      "summary": "permission.Engine's ModeDefault doesn't actually ask before non-destructive writes, contradicting its own doc comment ('prompt for destructive/write operations') -- dev_write/dev_edit match neither the read-only nor destructive name-heuristic pattern, so both flags resolve false, and ModeDefault's switch has no {false,false} branch (falls through to Allow). ModeAcceptEdits has the missing branch right next to it.",
+      "evidence": [
+        "engine.go:156-180; untested exact case: the existing test table doesn't cover ToolMeta{} under ModeDefault."
+      ],
+      "recommendation": "Confirm intended architecture (PathGrants-governs-writability vs. per-call-prompt) with the architect before changing; if a real gap, classify dev_write/dev_edit as destructive or add the missing branch to ModeDefault.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.12",
+      "false_positive_considerations": "PathGrants' own documented design philosophy ('explicit-mention auto-grant, no nag-again') may mean this is a stale-comment issue, not a live regression.",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/04-permission-default-mode-write-gap.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC4-004",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/sandbox",
+      "files": [
+        "internal/sandbox/exec.go"
+      ],
+      "symbols": [
+        "isSecretKey"
+      ],
+      "summary": "Secret-key-name substring heuristic still misses DATABASE_URL, REDIS_URL, SLACK_WEBHOOK_URL, GH_PAT, and other credential-bearing names that don't contain the tracked substrings. Unchanged from the 2026-04-10 audit finding.",
+      "evidence": [],
+      "recommendation": "Combine the substring heuristic with an exact-match hard-deny list for known credential-bearing *_URL/*_TOKEN-adjacent names, or switch AgentExec's overlay to an explicit allowlist model.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.12",
+      "false_positive_considerations": "Highest-risk surface is AgentExec (agent/LLM-influenced code), not UserExec (user's own shell).",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/05-secret-key-heuristic-hardening.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC4-005",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/sandbox",
+      "files": [
+        "internal/sandbox/os_darwin.go"
+      ],
+      "symbols": [],
+      "summary": "macOS seatbelt profile stays (allow default) for file reads/mach-IPC/process-inspection by design -- tracked, deliberate beta-stage tradeoff from the 2026-04-10 audit, not new. Restated for visibility alongside GO-SEC4-002 (both platforms leave the read boundary unenforced by design).",
+      "evidence": [],
+      "recommendation": "Confirm this tradeoff is disclosed to end users; not re-litigated in full here.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.12",
+      "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/02-macos-seatbelt-read-boundary-disclosure.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC4-006",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/sandbox",
+      "files": [
+        "internal/sandbox/denylist.go"
+      ],
+      "symbols": [
+        "CheckDenylist"
+      ],
+      "summary": "Command denylist remains a bypassable literal-substring blocklist (whitespace variation, flag reordering, or interpreter wrapping all defeat it). Low severity in isolation but becomes the ONLY remaining control on Linux without bwrap (GO-SEC4-001).",
+      "evidence": [],
+      "recommendation": "Reframe in comments as advisory/defense-in-depth rather than a hard block, or replace with real shell-tokenization.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.12",
+      "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC4-007",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "duplication",
+        "security"
+      ],
+      "package": "internal/sandbox, internal/mcp",
+      "files": [
+        "internal/sandbox/proxy.go",
+        "internal/mcp/general_tools.go"
+      ],
+      "symbols": [],
+      "summary": "SSRF-defense CIDR denylist is independently duplicated between internal/sandbox/proxy.go and internal/mcp/general_tools.go, with the sandbox copy's own comment stating the intent is parity -- but nothing enforces that parity mechanically. If one is updated and the other isn't, the two egress paths silently drift apart.",
+      "evidence": [],
+      "recommendation": "Extract the shared CIDR set into one place both packages import, or add a test that asserts the two lists are identical.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.12",
+      "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/07-ssrf-cidr-denylist-duplication.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC4-008",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/sandbox",
+      "files": [
+        "internal/sandbox/proxy.go"
+      ],
+      "symbols": [],
+      "summary": "Sandbox proxy's http.Server has no ReadHeaderTimeout (gosec G112, Slowloris). Real exposure is narrow (loopback-only bind, reachable only by the sandboxed subprocess itself) but it's a zero-risk one-line fix.",
+      "evidence": [],
+      "recommendation": "Set ReadHeaderTimeout (e.g. 10s) on the http.Server.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.12",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/06-sandbox-proxy-header-timeout.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC4-009",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "repository-hygiene",
+        "concurrency"
+      ],
+      "package": "internal/sandbox, internal/permission, internal/secrets, internal/pathsafe, internal/fsutil",
+      "files": [
+        "Makefile"
+      ],
+      "symbols": [],
+      "summary": "make lint-goroutines's scanned-package list omits every package in this trust-boundary cluster; manually confirmed the one bare go func() found in scope is benign, but the guardrail tooling itself doesn't cover this cluster.",
+      "evidence": [],
+      "recommendation": "Add these five packages to lint-goroutines's scanned path list.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.12",
+      "task_file": "TASKS/audit-remediation/12-quality-ratchet-and-standards/03-goroutine-lint-coverage-gap.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-SEC4-010",
+      "severity": "informational",
+      "confidence": "medium",
+      "category": [
+        "error-handling"
+      ],
+      "package": "internal/secrets",
+      "files": [
+        "internal/secrets/keyring.go"
+      ],
+      "symbols": [],
+      "summary": "secrets.Get collapses key-not-found and keychain-access-error into the identical silent empty-string return with no logging, unlike its sibling Delete which does log on failure.",
+      "evidence": [],
+      "recommendation": "Log at debug/warn on the error path, or return (string, error) for callers that need to distinguish.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.12",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-RUNTIME-001",
+      "severity": "low",
+      "confidence": "high",
+      "category": [
+        "lifecycle",
+        "error-handling"
+      ],
+      "package": "cmd/nanite",
+      "files": [
+        "cmd/nanite/main.go",
+        "internal/slogx/slogx.go"
+      ],
+      "symbols": [
+        "cmdServe"
+      ],
+      "summary": "cmdServe's slogx.Fatal exit paths (os.Exit(1), doesn't run deferred functions) bypass every deferred cleanup registered earlier in the function -- log-handler close, OTel flush, SQLite store close, Badger coordination-store close -- on 5 real startup-failure call sites.",
+      "evidence": [],
+      "recommendation": "Replace slogx.Fatal on these 5 call sites with return/structured propagation so the existing defers execute, or make slogx.Fatal accept a cleanup-hook slice.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.13",
+      "false_positive_considerations": "Bounded blast radius -- process always terminates immediately after, no accumulating leak.",
+      "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/02-fix-cmdserve-fatal-cleanup-bypass.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-RUNTIME-002",
+      "severity": "high",
+      "confidence": "high",
+      "category": [
+        "security"
+      ],
+      "package": "internal/server",
+      "files": [
+        "internal/server/auth.go",
+        "internal/server/server.go",
+        "internal/server/caller_identity.go"
+      ],
+      "symbols": [],
+      "summary": "Auth is entirely opt-in via env vars (no-op middleware if unset), the listener binds all interfaces by default (no loopback-only option exists), no TLS anywhere, and no startup-time log line announces whether auth is enabled or disabled.",
+      "evidence": [
+        "caller_identity.go explicitly documents this as an intentional design decision for a single-user local app."
+      ],
+      "recommendation": "Consider defaulting the listener to 127.0.0.1 unless an explicit bind-all opt-in is set, and/or log a clear startup warning when auth is unconfigured.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.13",
+      "false_positive_considerations": "Substantial documented-intent caveat: an architect may reasonably judge the current tradeoff acceptable for this product's deployment model.",
+      "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/07-server-auth-bind-tls-posture.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-RUNTIME-003",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "correctness",
+        "lifecycle",
+        "duplication"
+      ],
+      "package": "internal/worktree",
+      "files": [
+        "internal/worktree/manager.go"
+      ],
+      "symbols": [
+        "CleanupOrphaned",
+        "Create"
+      ],
+      "summary": "worktree.gitManager.CleanupOrphaned computes the wrong (8-char-truncated) branch name and therefore never deletes the actual orphaned git branch Create made with the full ULID session ID -- runs on every daemon boot, so every cleanup leaves a permanent stray branch, accumulating unboundedly across restarts/crashes.",
+      "evidence": [
+        "manager.go:86 (Create, full sessionID) vs :166-170 (CleanupOrphaned, truncated to 8 chars); existing regression test only asserts directory removal, never that the branch is gone."
+      ],
+      "recommendation": "CleanupOrphaned should reconstruct the branch name identically to Create (full sessionID, no truncation).",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.13",
+      "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/01-fix-worktree-orphan-branch-cleanup.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-RUNTIME-004",
+      "severity": "medium",
+      "confidence": "medium",
+      "category": [
+        "lifecycle",
+        "performance"
+      ],
+      "package": "internal/background",
+      "files": [
+        "internal/background/service.go",
+        "internal/background/pty.go"
+      ],
+      "symbols": [],
+      "summary": "background.Service/PTYBackend job registries grow unboundedly for the process's entire lifetime -- every job that starts stays in the map forever except one narrow immediate-failure path; jobRecord retains up to 1 MiB of captured output per job indefinitely. PTYBackend.Status's own doc comment falsely claims completed jobs are 'reaped'.",
+      "evidence": [],
+      "recommendation": "Add a TTL/LRU eviction policy for terminal jobs, or explicitly acknowledge unbounded retention is intentional for this MVP scope and fix the inaccurate comment either way.",
+      "requires_architect_decision": true,
+      "report_section": "\u00a78.13",
+      "false_positive_considerations": "Real-world impact scales with background_job submission volume, which was not measured.",
+      "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/03-bound-background-job-registry-growth.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-RUNTIME-005",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "lifecycle"
+      ],
+      "package": "internal/service",
+      "files": [
+        "internal/service/container.go",
+        "internal/lifecycle/lifecycle.go"
+      ],
+      "symbols": [
+        "Container.Shutdown"
+      ],
+      "summary": "service.Container.Shutdown has no idempotency guard at all, unlike its sibling lifecycle.Manager.Shutdown which is correctly idempotent. Currently dormant (exactly one production call site).",
+      "evidence": [],
+      "recommendation": "Add the same sync.Once/atomic-bool guard lifecycle.Manager.Shutdown already uses, for consistency and defense-in-depth.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.13",
+      "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-RUNTIME-006",
+      "severity": "informational",
+      "confidence": "medium",
+      "category": [
+        "comments"
+      ],
+      "package": "cmd/nanite, internal/runtime/agent, internal/scheduler",
+      "files": [
+        "cmd/nanite/main.go",
+        "internal/runtime/agent/agent.go"
+      ],
+      "symbols": [],
+      "summary": "Systemic ticket-archaeology comment density across this cluster -- cmdServe is roughly half comment-lines to code-lines. Not a functional defect; some content is genuinely load-bearing invariant documentation.",
+      "evidence": [],
+      "recommendation": "An architect-level pass (not mechanical stripping) could migrate pure-history portions to docs/decisions/.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.13",
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-RUNTIME-007",
+      "severity": "medium",
+      "confidence": "high",
+      "category": [
+        "error-handling"
+      ],
+      "package": "cmd/nanite",
+      "files": [
+        "cmd/nanite/main.go"
+      ],
+      "symbols": [
+        "loadPersistedMCPServers"
+      ],
+      "summary": "loadPersistedMCPServers silently discards 2 of 3 JSON decode errors on persisted MCP server config (Args, Env) while correctly warn-logging the third (EnvAllowlist) right next to them in the same function -- a malformed persisted row silently launches with empty args/env.",
+      "evidence": [
+        "main.go:1233-1277: Args/Env unmarshal errors discarded, EnvAllowlist's is correctly warn-logged."
+      ],
+      "recommendation": "Apply the same check-and-warn pattern used for EnvAllowlist to Args/EnvVars.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.13",
+      "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/05-fix-mcp-config-silent-decode-errors.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    },
+    {
+      "id": "GO-RUNTIME-008",
+      "severity": "informational",
+      "confidence": "high",
+      "category": [
+        "complexity"
+      ],
+      "package": "internal/runtime/agent",
+      "files": [
+        "internal/runtime/agent/agent.go"
+      ],
+      "symbols": [
+        "Boot"
+      ],
+      "summary": "agent.Boot is the second-highest cyclomatic complexity function in the entire codebase (50/cognitive 59, maintainability index 10, 234 lines) -- missed by the mechanical triage table and this cluster's pre-flagged list; judged essential, same shape as cmdServe, with a correctly-applied cleanup closure at every early-return point.",
+      "evidence": [
+        "Should be added to the master complexity/Top-10 tracking alongside cmdServe/UnloadPlugin/Executor.Run/Service.Spawn."
+      ],
+      "recommendation": "No fix required -- essential complexity, correctly handled. Optional readability extraction of 2 cohesive sub-blocks noted, not required.",
+      "requires_architect_decision": false,
+      "report_section": "\u00a78.13",
+      "metrics": {
+        "cyclomatic_complexity": 50,
+        "loc": 234
+      },
+      "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
+      "disposition": "remediate",
+      "task_status": "not-started"
+    }
+  ]
+}

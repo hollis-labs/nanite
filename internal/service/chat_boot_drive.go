@@ -17,7 +17,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/fsutil"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -497,7 +496,7 @@ func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtim
 // stopDisplacedSession cooperatively tears down prev — the session
 // adoptReplacementSession (TASKS/agent-host-acp/21) just displaced from
 // activeSessions in favor of a broker-dispatched replacement. Runs on its
-// own goroutine (safego.Go) with a bounded grace period so
+// own lifecycle-tracked goroutine with a bounded grace period so
 // adoptReplacementSession — documented as running synchronously on the
 // broker's own orchestration loop — never blocks on prev's cooperative
 // SIGTERM-then-SIGKILL escalation.
@@ -516,8 +515,8 @@ func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtim
 // task 21 names explicitly).
 func (s *chatServiceImpl) stopDisplacedSession(sessionID string, prev *runtimeagent.Session) {
 	s.displacedSessions.Store(prev, struct{}{})
-	safego.Go(context.Background(), "service.chat.recovery.stop-displaced-session", func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), stopRebootGrace)
+	s.goTracked("recovery.stop-displaced-session", func(ownerCtx context.Context) {
+		stopCtx, cancel := context.WithTimeout(ownerCtx, stopRebootGrace)
 		defer cancel()
 		if err := prev.Stop(stopCtx); err != nil {
 			slog.Warn("adoptReplacementSession: stop displaced session failed",

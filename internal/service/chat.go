@@ -28,7 +28,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/tool"
@@ -208,6 +207,10 @@ type ChatServiceConfig struct {
 	// nil-safe: when absent, the route hint stays purely informative
 	// and every turn runs the chat-direct loop.
 	EnvelopeRenderExecutor dispatch.Executor
+	// Lifecycle is supplied by the composition root so CompositeEmitter and
+	// direct chat work share one shutdown/drain boundary. Nil creates a
+	// private manager for focused tests and standalone construction.
+	Lifecycle *lifecycle.Manager
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -228,7 +231,7 @@ type chatServiceImpl struct {
 	pluginHost         PluginEventSink
 	processTracker     *chat.ProcessTracker
 	tasks              task.Service
-	workers            *worker.Manager
+	workers            fullWorkerSpawner
 	sessionEventWriter SessionEventWriter
 	subagentInbox      SubagentResultInbox
 
@@ -399,6 +402,25 @@ type inFlightGen struct {
 	cancel context.CancelFunc
 }
 
+// goTracked schedules asynchronous chat work on the service lifecycle. Bare
+// chatServiceImpl values used by focused unit tests have no composition-root
+// lifecycle; in that case execute inline rather than creating an unowned
+// goroutine. Production construction always supplies a manager.
+func (s *chatServiceImpl) goTracked(label string, fn func(context.Context)) {
+	if s.lifecycle == nil {
+		fn(context.Background())
+		return
+	}
+	s.lifecycle.Go(label, fn)
+}
+
+func (s *chatServiceImpl) trackedDone() <-chan struct{} {
+	if s.lifecycle == nil {
+		return nil
+	}
+	return s.lifecycle.Context().Done()
+}
+
 // NewChatService creates a ChatService from its dependencies.
 func NewChatService(cfg ChatServiceConfig) ChatService {
 	// Utility provider/model default to the system default when not
@@ -441,7 +463,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		modelCatalog:            cfg.ModelCatalog,
 		dbPath:                  cfg.DBPath,
 		adapterRegistry:         cfg.AdapterRegistry,
-		lifecycle:               lifecycle.NewManager("service.chat"),
+		lifecycle:               cfg.Lifecycle,
 		activeGen:               make(map[string]*inFlightGen),
 		sessionEventWriter:      cfg.SessionEventWriter,
 		subagentInbox:           cfg.SubagentInbox,
@@ -454,6 +476,9 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		agentEventBridge:        cfg.AgentEventBridge,
 		agentBootDirAdapter:     cfg.AgentBootDirAdapter,
 		envelopeRenderExecutor:  cfg.EnvelopeRenderExecutor,
+	}
+	if impl.lifecycle == nil {
+		impl.lifecycle = lifecycle.NewManager("service.chat")
 	}
 	// CW-20260512-0121 (SP-20260512-0011): wire the single dispatcher
 	// door. The Dispatcher delegates to chatServiceImpl.generateResponse
@@ -701,7 +726,7 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 
 	// Emit message.sent plugin event with the real user message ID.
 	if s.pluginHost != nil {
-		safego.Go(ctx, "service.chat.emit.message-sent", func() {
+		s.goTracked("emit.message-sent", func(context.Context) {
 			s.pluginHost.EmitMessageSent(sessionID, userMsg.ID, content, "user", 0)
 		})
 	}
@@ -1264,7 +1289,7 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 	inferred := chat.InferProvider(model)
 	if p, ok := s.providers.Get(inferred); ok {
 		if requested != "" && requested != inferred && s.pluginHost != nil {
-			safego.Go(context.Background(), "service.chat.emit.provider-fallback-inferred", func() {
+			s.goTracked("emit.provider-fallback-inferred", func(context.Context) {
 				s.pluginHost.EmitProviderFallback(sessionID, requested, inferred)
 			})
 		}
@@ -1272,7 +1297,7 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 	}
 	if chat.IsCLIProvider(inferred) {
 		if requested != "" && requested != inferred && s.pluginHost != nil {
-			safego.Go(context.Background(), "service.chat.emit.provider-fallback-inferred", func() {
+			s.goTracked("emit.provider-fallback-inferred", func(context.Context) {
 				s.pluginHost.EmitProviderFallback(sessionID, requested, inferred)
 			})
 		}

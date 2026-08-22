@@ -12,7 +12,6 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // HTTP-stream cause + error-class constants synthesized when the chat
@@ -95,7 +94,7 @@ const httpStreamMetaSource = "http_chat_stream"
 // resolve nothing, and omitting the field falls through to the default
 // profile, which can refresh credentials for the wrong agent.
 //
-// The broker call runs on a safego.Go goroutine — OnSessionExit may
+// The broker call runs on a lifecycle-tracked goroutine — OnSessionExit may
 // dispatch a replacement session via agent.Boot, which is too heavy to
 // run on the SSE-response-closing path. The chat-side response is
 // already finalized when this helper fires (every call site is
@@ -134,7 +133,7 @@ func (s *chatServiceImpl) persistPartialAssistantAndNotifyBrokerPreClassified(
 
 // notifyRecoveryBrokerForHTTPStreamError is the broker-side half of the
 // HTTP-stream error helper: synthesizes the ExitError + meta bag and
-// dispatches OnSessionExit on safego.Go. Persistence is the caller's job
+// dispatches OnSessionExit on the chat lifecycle. Persistence is the caller's job
 // — both persistPartialAssistantAndNotifyBroker (regular) and
 // persistPartialAssistantAndNotifyBrokerPreClassified (skip-redundant-
 // suppression) invoke this same helper after their respective persist
@@ -217,7 +216,7 @@ func (s *chatServiceImpl) notifyRecoveryBrokerForHTTPStreamError(
 		"cause", cause,
 		"error_class", errorClass)
 
-	safego.Go(ctx, "service.chat.recovery.http-notify", func() {
+	s.goTracked("recovery.http-notify", func(context.Context) {
 		broker.OnSessionExit(sessionID, exit, meta)
 	})
 }

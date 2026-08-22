@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,6 +32,48 @@ func TestGo_RunsAndShutdownDrains(t *testing.T) {
 	}
 	if got := m.Active(); got != 0 {
 		t.Fatalf("active after shutdown = %d, want 0", got)
+	}
+}
+
+// TestGoConcurrentWithShutdownNeverStartsAfterReturn is the admission-gate
+// regression. Historically Go checked closed separately from wg.Add, allowing
+// Shutdown to observe a zero WaitGroup and return in between those operations.
+func TestGoConcurrentWithShutdownNeverStartsAfterReturn(t *testing.T) {
+	for round := 0; round < 200; round++ {
+		m := NewManager("admission-race")
+		start := make(chan struct{})
+		var callers sync.WaitGroup
+		var shutdownReturned atomic.Bool
+		var startedAfterReturn atomic.Bool
+
+		for i := 0; i < 32; i++ {
+			callers.Add(1)
+			go func() {
+				defer callers.Done()
+				<-start
+				m.Go("racer", func(ctx context.Context) {
+					if shutdownReturned.Load() {
+						startedAfterReturn.Store(true)
+					}
+					<-ctx.Done()
+				})
+			}()
+		}
+
+		shutdownDone := make(chan error, 1)
+		go func() {
+			<-start
+			shutdownDone <- m.Shutdown(time.Second)
+		}()
+		close(start)
+		if err := <-shutdownDone; err != nil {
+			t.Fatalf("round %d shutdown: %v", round, err)
+		}
+		shutdownReturned.Store(true)
+		callers.Wait()
+		if startedAfterReturn.Load() {
+			t.Fatalf("round %d admitted work started after Shutdown returned", round)
+		}
 	}
 }
 

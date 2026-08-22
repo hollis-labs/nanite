@@ -28,7 +28,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/messaging"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/reminders"
-	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
@@ -601,7 +600,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// Emit context.assembled event after tool selection and filters are applied.
 	if s.pluginHost != nil {
-		safego.Go(ctx, "service.chat.emit.context-assembled", func() {
+		s.goTracked("emit.context-assembled", func(context.Context) {
 			s.pluginHost.EmitContextAssembled(sessionID, len(systemPrompt), len(chatMessages), len(tools))
 		})
 	}
@@ -644,7 +643,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// Emit agent.loaded plugin event (fire-and-forget).
 	if s.pluginHost != nil {
-		safego.Go(ctx, "service.chat.emit.agent-loaded", func() {
+		s.goTracked("emit.agent-loaded", func(context.Context) {
 			s.pluginHost.EmitAgentLoaded(sessionID, agent.ID, agent.Name, fmt.Sprintf("%d", agent.Version))
 		})
 	}
@@ -1144,7 +1143,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 				if s.pluginHost != nil {
 					errMsg := err.Error()
-					safego.Go(ctx, "service.chat.emit.provider-error", func() {
+					s.goTracked("emit.provider-error", func(context.Context) {
 						s.pluginHost.EmitProviderError(sessionID, providerName, model, errMsg)
 					})
 				}
@@ -1206,7 +1205,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// Emit provider.error plugin event.
 			if s.pluginHost != nil {
 				errMsg := err.Error()
-				safego.Go(ctx, "service.chat.emit.provider-error", func() {
+				s.goTracked("emit.provider-error", func(context.Context) {
 					s.pluginHost.EmitProviderError(sessionID, providerName, model, errMsg)
 				})
 			}
@@ -1833,7 +1832,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if s.pluginHost != nil {
 			envType := env.Type
 			envData := env.Data
-			safego.Go(ctx, "service.chat.emit.envelope-rendered", func() {
+			s.goTracked("emit.envelope-rendered", func(context.Context) {
 				s.pluginHost.EmitEnvelopeRendered(sessionID, envType, envData)
 			})
 		}
@@ -2027,12 +2026,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// Auto-title and auto-tags.
 	if session.Title == "" {
-		safego.Go(ctx, "service.chat.autoTitle", func() {
-			s.autoTitle(sessionID, userContent)
+		s.goTracked("autoTitle", func(bgCtx context.Context) {
+			s.autoTitle(bgCtx, sessionID, userContent)
 		})
 	}
-	safego.Go(ctx, "service.chat.autoTags", func() {
-		s.autoTags(sessionID)
+	s.goTracked("autoTags", func(bgCtx context.Context) {
+		s.autoTags(bgCtx, sessionID)
 	})
 }
 
@@ -2613,7 +2612,7 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 	}
 	if s.pluginHost != nil {
 		stages := append([]string(nil), cr.StagesApplied...)
-		safego.Go(ctx, "service.chat.emit.context-compacted", func() {
+		s.goTracked("emit.context-compacted", func(context.Context) {
 			s.pluginHost.EmitContextCompacted(sessionID, tokensBefore-tokensAfter, stages)
 		})
 	}
@@ -3204,7 +3203,7 @@ const autoTitleSystemPrompt = "Generate a short conversation label (2-5 words, m
 	"Do not refuse. Do not apologize. Do not write a sentence."
 
 // autoTitle generates a title for a session from the first user message.
-func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
+func (s *chatServiceImpl) autoTitle(ctx context.Context, sessionID, userContent string) {
 	prov, ok := s.providers.Get(s.utilityProvider)
 	if !ok {
 		return
@@ -3215,7 +3214,7 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 	}
 
 	start := time.Now()
-	raw, err := prov.Complete(context.Background(), llmtypes.ChatRequest{
+	raw, err := prov.Complete(ctx, llmtypes.ChatRequest{
 		SystemPrompt: autoTitleSystemPrompt,
 		Messages:     msgs,
 		Model:        s.utilityModel,
@@ -3230,13 +3229,13 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 	}
 
 	// One retry if the first response is refusal-shaped or empty after
-	// sanitization. autoTitle runs in safego.Go so the extra round-trip is off
+	// sanitization. autoTitle runs on the chat lifecycle so the extra round-trip is off
 	// the chat hot path.
 	var retryRaw string
 	if sanitizeAutoTitle(raw) == "" || looksLikeRefusal(raw) {
 		retryStart := time.Now()
 		var retryErr error
-		retryRaw, retryErr = prov.Complete(context.Background(), llmtypes.ChatRequest{
+		retryRaw, retryErr = prov.Complete(ctx, llmtypes.ChatRequest{
 			SystemPrompt: autoTitleSystemPrompt,
 			Messages:     msgs,
 			Model:        s.utilityModel,
@@ -3252,21 +3251,19 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 		return
 	}
 
-	sess, err := s.store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
+	sess, err := s.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return
 	}
 	sess.Title = title
-	_ = s.store.UpdateSession(context.TODO(
-
-	// sanitizeAutoTitle normalises a raw utility-model response into a stored
-	// session title (CW-20260512-0004). Strips newlines, collapses whitespace,
-	// trims wrapping quotes/punctuation, and hard-caps length at autoTitleMaxLen.
-	// Returns "" when the input is empty after cleanup so the caller can fall
-	// back. This is the load-bearing guard — the prompt is best-effort.
-	), sess)
+	_ = s.store.UpdateSession(ctx, sess)
 }
 
+// sanitizeAutoTitle normalises a raw utility-model response into a stored
+// session title (CW-20260512-0004). Strips newlines, collapses whitespace,
+// trims wrapping quotes/punctuation, and hard-caps length at autoTitleMaxLen.
+// Returns "" when the input is empty after cleanup so the caller can fall
+// back. This is the load-bearing guard — the prompt is best-effort.
 func sanitizeAutoTitle(raw string) string {
 	if raw == "" {
 		return ""
@@ -3379,13 +3376,13 @@ func truncateToRune(s string, max int) string {
 }
 
 // autoTags generates tags for a session based on recent messages.
-func (s *chatServiceImpl) autoTags(sessionID string) {
+func (s *chatServiceImpl) autoTags(ctx context.Context, sessionID string) {
 	prov, ok := s.providers.Get(s.utilityProvider)
 	if !ok {
 		return
 	}
 
-	msgs, err := s.store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, 10)
+	msgs, err := s.store.ListMessages(ctx, sessionID, 10)
 	if err != nil || len(msgs) < 2 {
 		return
 	}
@@ -3405,7 +3402,7 @@ func (s *chatServiceImpl) autoTags(sessionID string) {
 	tagMsgs := []llmtypes.ChatMessage{{Role: "user", Content: sb.String()}}
 
 	start := time.Now()
-	raw, err := prov.Complete(context.Background(), llmtypes.ChatRequest{
+	raw, err := prov.Complete(ctx, llmtypes.ChatRequest{
 		SystemPrompt: prompt,
 		Messages:     tagMsgs,
 		Model:        s.utilityModel,
@@ -3423,7 +3420,7 @@ func (s *chatServiceImpl) autoTags(sessionID string) {
 		return
 	}
 	tagsJSON, _ := json.Marshal(tags)
-	_ = s.store.UpdateSessionTags(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, string(tagsJSON))
+	_ = s.store.UpdateSessionTags(ctx, sessionID, string(tagsJSON))
 }
 
 // recordUtilityMetrics records execution metrics for utility calls.

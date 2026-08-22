@@ -31,6 +31,7 @@ import (
 	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/filter"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
+	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
@@ -384,12 +385,20 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	// --- Foundation (Wave 0) ---
 
-	// Event emitter: fans out to activity + plugin sinks.
+	// Event emitter: fans out to activity + plugin sinks. Plugin dispatch and
+	// direct chat work deliberately share one lifecycle/drain boundary.
+	chatLifecycle := lifecycle.NewManager("service.chat")
+	chatLifecycleCommitted := false
+	defer func() {
+		if !chatLifecycleCommitted {
+			_ = chatLifecycle.Shutdown(time.Second)
+		}
+	}()
 	var pluginSink PluginEventSink
 	if cfg.Plugins != nil {
 		pluginSink = cfg.Plugins
 	}
-	events := NewCompositeEmitter(cfg.Activity, pluginSink)
+	events := NewCompositeEmitter(cfg.Activity, pluginSink, chatLifecycle)
 
 	// --- Domain services (Wave 1) ---
 
@@ -1115,6 +1124,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// non-chat-direct routes. nil-safe — when omitted, the route
 		// classifier's hint stays purely informative.
 		EnvelopeRenderExecutor: envelope_render.New(),
+		Lifecycle:              chatLifecycle,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed runner.
@@ -1469,6 +1479,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		stopRuntimeReaper:   stopRuntimeReaper,
 	}
 	containerCommitted = true
+	chatLifecycleCommitted = true
 	return container, nil
 }
 
@@ -1556,7 +1567,23 @@ func (c *Container) shutdown() {
 			}
 		})
 	}
-	run("chat", func() { c.Chat.Shutdown() })
+	// Plugin event callbacks are owned by Chat's lifecycle. Drain that owner
+	// before unloading the plugin host so no callback can race a plugin's
+	// teardown. The dependency is explicit even though both shutdowns remain
+	// inside the container's bounded parallel shutdown group.
+	chatDone := make(chan struct{})
+	run("chat", func() {
+		defer close(chatDone)
+		c.Chat.Shutdown()
+	})
+	if c.Plugins != nil {
+		run("plugins", func() {
+			<-chatDone
+			if err := c.Plugins.Shutdown(); err != nil {
+				slog.Warn("shutdown: plugins", "err", err)
+			}
+		})
+	}
 	if c.Tasks != nil {
 		run("tasks", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), containerShutdownMaxWait)

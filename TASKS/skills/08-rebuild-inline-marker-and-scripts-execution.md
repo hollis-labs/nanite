@@ -320,4 +320,7 @@ subtests), 12.888s. `go test ./...` for the whole repo also passes, exit code 0,
 `internal/skill` reported as `ok` in that full run.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (fresh re-reviewer, 2026-08-21, no shared context with either the original worker or the fix worker).** Confirmed the fix matches the real spec's stated rule verbatim (re-fetched live). Independently, empirically verified the byte-vs-rune safety claim: wrote a scratch program encoding every valid Unicode code point and confirmed no multi-byte UTF-8 trailing byte ever equals ASCII space/tab, so the byte-position check cannot false-positive. Confirmed all three regression test subtests are real and distinct, ran the full package under `-race` with no regression in fence-awareness or any other test, and confirmed no other call site bypasses the new check. Full build/vet/test clean.
+
+Status: `reviewed`.

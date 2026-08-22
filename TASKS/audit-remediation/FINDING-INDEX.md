@@ -22,6 +22,12 @@ dependencies, parallelization, and architect-decision gating live in `README.md`
 The decision queue is `ARCHITECT-DECISIONS.md`; the guide's output-format D
 (prevention/rules table) is `PREVENTION.md`.
 
+**Two task files map to no finding by design:** `06/04`
+(`04-cancellation-safety-for-terminal-writes.md`) is a fix task for `06/03`,
+created 2026-08-22 for a regression the sweep exposed rather than for an audit
+finding — the same fix-as-new-task convention this project uses for review
+findings. `12/02` is guide-derived. Neither is an unmapped-finding error.
+
 | Finding | Severity | Task file |
 |---|---|---|
 | `GO-PLUGIN-001` | critical | `01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md` |

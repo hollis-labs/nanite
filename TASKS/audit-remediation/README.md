@@ -276,12 +276,13 @@ order because AD-03 needs it.
 | `04/01` container constructor partial-failure cleanup | W0 | — | `NewContainer` only |
 | `04/02` API test container shutdown leak | W0 | — | Test files only |
 | `04/03` investigate `internal/service` race timeout | `04/02` | — | Needs a clean baseline first — hard dependency, not sequencing |
-| `04/04` track untracked goroutine spawns | W0 | — | ~18 `safego.Go` sites |
+| `04/04` track untracked goroutine spawns | W0 | **AD-26** (Part B only) | ~18 `safego.Go` sites |
 | `04/05` close untested service config functions | W0 | — | Test-only |
 | `05/01` approve concurrency cap + queued cancel | W0 | — | `internal/subagent` only — fully independent |
 | `06/01` `DeleteAgentByID` error swallowing | W0 | — | High. Already in `nilerr` output — see correction 3 |
-| `06/02` store context/transaction gaps triage | `06/01` | — | **Re-scoped by AD-14 (2026-08-22):** `GO-STORE-005` moved out to `06/03`; now just `GO-STORE-004` + `GO-STORE-006`. Architect gate lifted. |
-| `06/03` full `context.Context` propagation sweep | none technically | AD-14 | **Decided 2026-08-22: full sweep.** Out-of-wave, standalone, run in isolation — see parallelization note below. Not part of Wave 2a/2b dispatch units. |
+| `06/02` store context/transaction gaps triage | ~~`06/01`~~ **none** | — | **Re-scoped by AD-14 (2026-08-22):** `GO-STORE-005` moved out to `06/03`; now just `GO-STORE-004` + `GO-STORE-006`. Architect gate lifted. |
+| `06/04` cancellation safety for terminal writes | `06/03` | — | **Landed** `fe16e138`. `validated`. Fix task for `06/03` — 50 sites audited, 29 detached / 21 left. |
+| `06/03` full `context.Context` propagation sweep | none technically | AD-14 | **Landed** `fe16e138` with companion fix `06/04`. `validated`: 371/371 methods take `ctx`, 0 non-context calls, `go test ./...` 0 FAIL, `go vet` at the expected 4 pre-existing findings. Out-of-wave, not part of Wave 2a/2b dispatch units — but no longer blocks them from proceeding. |
 | `07/01` worktree orphan branch cleanup | W0 | — | `internal/worktree` only — independent |
 | `07/02` `cmdServe` fatal cleanup bypass | W0 | AD-17 | Gates `07/05`, `08/07`, `11/10` (same file) |
 | `07/03` bound background job registry growth | W0 | AD-18 | Doc-comment half needs no decision |

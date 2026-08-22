@@ -16,6 +16,38 @@
 > - **Gated on:** none
 > - **requires_security_review:** false · **requires_regression_test:** true
 
+> ## ⚠ EVERY CODE SNIPPET BELOW IS PRE-SWEEP AND WILL NOT COMPILE (2026-08-22)
+>
+> `06/03`'s context-propagation sweep landed in `fe16e138` **after** this file
+> was written and rewrote the exact functions it targets. Current signatures:
+>
+> ```go
+> func (s *Store) DeleteAgentByID(ctx context.Context, id string) error   // agents.go:1218
+> func (s *Store) GetAgent(ctx context.Context, id string) (*AgentProfile, error)  // agents.go:438
+> ```
+>
+> This file's snippets still show `DeleteAgentByID(id string)` and
+> `s.GetAgent(id)`. **Copying them verbatim produces code that does not
+> compile.** Thread `ctx` through — the corrected shape is:
+>
+> ```go
+> func (s *Store) DeleteAgentByID(ctx context.Context, id string) error {
+>     a, err := s.GetAgent(ctx, id)
+>     if err != nil {
+>         if errors.Is(err, sql.ErrNoRows) {
+>             return nil          // genuine not-found — unchanged behaviour
+>         }
+>         return err              // real DB error — the actual fix
+>     }
+>     return s.DeleteAgent(ctx, a.Slug)
+> }
+> ```
+>
+> The **defect is unchanged** — the sweep was mechanical and did not touch the
+> error-swallowing this task fixes. Only signatures moved. Line-number
+> citations below have also shifted; re-locate before editing rather than
+> trusting them.
+
 ## Context
 
 `requires_architect_decision: false` — this is a clear, high-priority bug fix with no design ambiguity. It is the single sharpest correctness finding the audit produced against `internal/store` and is flagged **release-priority within Wave 2** by the remediation guide's own "Store correctness" section: *"Prioritize `GO-STORE-003`: distinguish true not-found from real DB errors in `DeleteAgentByID`. Then triage `GO-STORE-004/005/006`. Do not turn this into a repository-wide Store abstraction rewrite."* This task is that prioritized fix; task `02-triage-store-context-and-transaction-gaps.md` in this same folder covers the other three.

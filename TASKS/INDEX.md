@@ -1050,21 +1050,27 @@ must not be dispatched.
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
 | `06/01` | `06-store-correctness/01-fix-deleteagentbyid-error-swallowing.md` | not-started | `00/01` | — |
-| `06/02` | `06-store-correctness/02-triage-store-context-and-transaction-gaps.md` | not-started | `06/01` | — (re-scoped by AD-14, gate lifted) |
-| `06/03` | `06-store-correctness/03-full-context-propagation-sweep.md` | not-started | none technically — must not run concurrently with anything else in the batch | AD-14 |
+| `06/02` | `06-store-correctness/02-triage-store-context-and-transaction-gaps.md` | not-started | **none** (was `06/01`; corrected 2026-08-22 — file-disjoint, parallel-safe) | — (re-scoped by AD-14, gate lifted) |
+| `06/03` | `06-store-correctness/03-full-context-propagation-sweep.md` | validated | none technically — must not run concurrently with anything else in the batch | AD-14 (decided; sweep landed) |
+| `06/04` | `06-store-correctness/04-cancellation-safety-for-terminal-writes.md` | validated | `06/03` | — (fix task for `06/03`) |
 | `07/01` | `07-runtime-correctness-lifecycle/01-fix-worktree-orphan-branch-cleanup.md` | not-started | `00/01` | — |
 | `07/02` | `07-runtime-correctness-lifecycle/02-fix-cmdserve-fatal-cleanup-bypass.md` | not-started | `00/01` | AD-17 |
 | `07/03` | `07-runtime-correctness-lifecycle/03-bound-background-job-registry-growth.md` | not-started | `00/01` | AD-18 |
 | `07/04` | `07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md` | not-started | `04/01` | — |
 | `07/05` | `07-runtime-correctness-lifecycle/05-fix-mcp-config-silent-decode-errors.md` | not-started | `07/02` | — |
 
-**`06/03` is out-of-wave, not part of the Wave 2b dispatch unit.** It rewrites
-every signature in `internal/store` (67 non-test files, 32 importing
-packages) and cannot run concurrently with `06/01`, `06/02`, `11/13`,
-`13/01`, `13/02`, or anything else with an open worktree — a half-swept
-package does not compile. Must start from a clean `main`, land in one merge,
-before those resume. Written self-contained for an external session with no
-repo context (see the file's own "READ THIS FIRST").
+**`04/04` Part B is gated on AD-26**, added 2026-08-22 — `GO-SVCCORE-002`
+carried `requires_architect_decision: true` with no queue entry, the same gap
+AD-25 exposed in Wave 1. Part A (`GO-SVCCORE-001`) is unaffected.
+
+**`06/03` has landed** (`fe16e138`, with companion fix `06/04` for a
+behavioral regression it exposed — see `06-store-correctness/04-*.md`) —
+`validated`, not yet deep-reviewed line-by-line (operator's call). Store SQL
+oracles 0/0/0, 371/371 exported methods take `ctx`, `go test ./...` 0 FAIL,
+`go vet` clean at the expected 4 pre-existing `container.go` findings. It was
+out-of-wave and not part of the Wave 2b dispatch unit while in flight — that
+constraint is now moot, `06/01`/`06/02`/`11/13`/`13/01`/`13/02` are unblocked
+to proceed against the post-sweep signatures.
 
 ### Wave 3 — Remaining security hardening
 

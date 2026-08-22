@@ -6,11 +6,19 @@ decisions."* This file is that separation. It is the batch's single
 authoritative list of calls that must be made **by the operator/architect**,
 not by a worker mid-task.
 
-**24 decisions**, of which **2 are decided** (AD-23, AD-24) and 22 remain
-open. 22 are grounded in one or more of the **44 findings** that carry
-`requires_architect_decision: true` in `findings.json`, plus the guide's own
-§9 list; 2 (AD-23, AD-24) were surfaced by this batch's planning pass and are
-process decisions rather than finding-derived.
+**26 decisions**, of which **10 are decided** (AD-01–AD-04, AD-14, AD-17,
+AD-18, AD-23, AD-24, AD-25) and 16 remain open. Most are grounded in the **44
+findings** carrying `requires_architect_decision: true` in `findings.json`,
+plus the guide's own §9 list; AD-23 and AD-24 are process decisions surfaced by
+the planning pass.
+
+**Two were found missing after the fact, both by kickoff authors doing
+pre-flight verification** — AD-25 (Wave 1) and AD-26 (Wave 2). In each case a
+finding carried `requires_architect_decision: true` with no entry in this
+queue. That is the failure mode this file exists to prevent, and it has now
+been caught twice by the same mechanism: **a kickoff author cross-checking
+`findings.json`'s flag against this queue before dispatch.** Keep doing that
+check when writing each wave's kickoff.
 
 **AD-01 through AD-04 were moved from Wave 1 to Wave 0** by operator direction
 on 2026-08-21 — see the note below the queue table.
@@ -62,6 +70,7 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-22 | Repo-wide `gofmt` sweep: now, never, or ratchet-only | `13/03` | GO-HYG-001, GO-CHAT-007 | 8 | open |
 | AD-23 | Accept ~8 MB of audit evidence into the repo | `00/02` step 1 | — (process) | 0 | **decided** |
 | AD-24 | Dev-freeze scope and exit criteria | **every batch in the repo** | — (process) | 0 | **decided** |
+| AD-26 | Untracked `safego.Go` spawns: adopt an owner, or accept fire-and-forget | `04/04` (Part B) | GO-SVCCORE-002 | 2a | open |
 | AD-25 | `allow_unsigned_plugins` devmode bypass: wire or retire | `01/02` | GO-PLUGIN-008 | 1 | **decided** |
 
 ### A gap worth naming
@@ -328,6 +337,32 @@ fixes the *bypass*, but leaves the intended common case failing rather than
 verifying. Provisioning a real key is potentially external work (key
 generation, distribution, rotation policy) — hence a separate decision.
 `01/01` is instructed not to silently scope this in or out.
+
+### AD-26 — Untracked `safego.Go` spawns: adopt an owner, or accept fire-and-forget
+
+**Status:** open · **Gates:** `04/04` Part B · **Findings:** GO-SVCCORE-002
+
+**Found by the Wave 2 kickoff author, 2026-08-21** — the same class of gap as
+AD-25: `GO-SVCCORE-002` carries `requires_architect_decision: true` in
+`findings.json` and had **no corresponding entry in this queue**. Recorded here
+so the decision lives in the queue rather than only inside a kickoff prompt,
+which is precisely the hole AD-25 exposed.
+
+The finding: ~18 `safego.Go` call sites are bare fire-and-forget spawns with no
+owner that `Container.Shutdown()` can drain, unlike one wake-reactor spawn
+already migrated to a tracked pattern. Part A of `04/04` (`GO-SVCCORE-001`,
+`DelegateAndAggregate`) is unaffected and needs no decision.
+
+The call: adopt the tracked-owner pattern across all ~18 sites, adopt it
+selectively where shutdown-drain actually matters, or accept fire-and-forget as
+the intended semantics and close the finding as `accepted-risk`. Worth deciding
+against a real answer to "what breaks today if one of these is still running at
+shutdown?" rather than on principle — the guide's Lifecycle Ownership standard
+argues for owners, but 18 mechanical migrations that drain nothing real is the
+kind of ceremony it also warns against.
+
+`04/04`'s Part B must not be dispatched until this is decided. The Wave 2
+kickoff gates on it.
 
 ### AD-25 — `allow_unsigned_plugins` devmode bypass: wire or retire
 

@@ -3,14 +3,14 @@
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
 **Status:** not-started
 **Depends on:** none within this batch. Sequencing note only: this task is not blocked by `01-fix-deleteagentbyid-error-swallowing.md`, but the remediation guide's own "Store correctness" section lists `GO-STORE-003` first and this trio second — a planner may still choose to schedule `01` first for that reason, without it being a real code dependency.
-**Touches:** `internal/store/plugin_settings.go` (`ListPluginSettings`), `internal/store/sessions.go` and `internal/store/agents.go` (package-wide method signatures — see GO-STORE-005 sub-section for the scope caveat), `internal/store/durable_agents.go` (`SyncDurableAgentInstanceConfig`). Three unrelated files/findings triaged in one pass per the remediation guide's explicit grouping — see Context.
+**Touches:** `internal/store/plugin_settings.go` (`ListPluginSettings`) and `internal/store/durable_agents.go` (`SyncDurableAgentInstanceConfig`). ~~`sessions.go`/`agents.go`~~ removed 2026-08-22 — those belonged to `GO-STORE-005`, which AD-14 moved to `06/03`. Three unrelated files/findings triaged in one pass per the remediation guide's explicit grouping — see Context.
 
 > **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
 > line above wherever they differ — that line predates cross-folder analysis.
 > Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
 >
 > - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2b`
-> - **Depends on:** `06/01` (same file, `internal/store/agents.go`)
+> - **Depends on:** ~~`06/01`~~ **none — corrected 2026-08-22.** That dependency was "same file, `internal/store/agents.go`", but `agents.go` belonged to this task only through `GO-STORE-005`, which AD-14 moved to `06/03`. The remaining scope (`plugin_settings.go`, `durable_agents.go`) is file-disjoint from `06/01`, so the two are **parallel-safe**.
 > - **Blocks:** `11/13`
 > - **Parallel-safe with:** `07/01`, `07/03`
 > - **Gated on:** AD-14 — this task's scope depends **entirely** on it. The package-wide context-propagation option is a large mechanical diff across a high-fan-in package; do not start until the decision says whether that is in scope.

@@ -1,7 +1,7 @@
 # Sandbox + capability-policy gate for skill script/materializer execution
 
 **Phase:** 5 — Security: sandbox + policy gate (`TASKS/skills`)
-**Status:** implemented
+**Status:** in-progress — review found a real secret-leakage bug, fix required (see "Fix required" section below)
 **Depends on:** `02` (grant-state columns on `agent_known_skills`), `08` (the caller this gate
 serves — task `08` calls into whatever this task builds)
 **Touches:** new file `internal/skill/gate.go` (or extend `internal/skill/exec.go` if task `08`
@@ -325,6 +325,64 @@ paths exclusively — no relative path or real tracked directory was ever touche
 --short` confirms only this task's two new files (`internal/skill/gate.go`,
 `internal/skill/gate_test.go`) plus the `GLOSSARY.md` edit and this task file's own edits are
 present.
+
+## Fix required (fresh reviewer, 2026-08-21 — see `TASKS/ESCALATIONS.md`'s matching entry)
+
+**Bug, reproduced directly: sandboxed skill execution leaks the full, unfiltered host process
+environment — a real secret-exfiltration path.** `Gate.run` (`internal/skill/gate.go`) never sets
+`cmd.Env`, so Go's `exec.Cmd` inherits the current process's environment verbatim — including
+whatever real secrets the running Nanite server process holds. A skill granted the tightest
+possible default posture (no `FS`, no `Network`, nothing elevated) can run `` !`env` `` or
+`` !`printenv` `` as an ordinary "compute" marker and get the full host environment back verbatim
+in `ExecResult.Stdout` — which flows straight into model-visible materialized content. No
+capability grant elevation is needed; it's unconditional. `go-sandbox`'s own Linux backend
+provides no safety net either (its loopback-helper path explicitly re-inherits the full
+unfiltered `os.Environ()`).
+
+**Why this is this gate's own responsibility, not a library limitation to work around:**
+environment filtering is a plain Go-level `cmd.Env` decision, entirely orthogonal to
+`sandbox.Profile`/`sandbox.Apply` — nothing about `go-sandbox`'s own design needs to back this.
+This codebase already has a working, actively-used implementation of exactly this control for the
+identical problem class (agent-triggered subprocess execution): `internal/sandbox/exec.go`'s
+`filterSecrets(environ []string) []string` (strips any env var whose name contains
+`KEY`/`SECRET`/`TOKEN`/`PASSWORD`/`CREDENTIAL`/`AUTH`, via `isSecretKey`) — already used by that
+same file's own `UserExec` path (`env := filterSecrets(os.Environ())`). That file also has a
+stricter `buildAgentEnv` (minimal allowlist: `HOME`/`USER`/`LANG`/`TERM` plus a restricted `PATH`,
+used for MCP dev-tool execution), but the reviewer's recommendation — and this fix's required
+floor — is the `filterSecrets` blocklist approach: unconditional secret-stripping of the full
+inherited environment, not a switch to an allowlist (which risks breaking legitimate skill
+scripts that need ordinary env vars like `HOME`/`LANG`/`PATH` beyond that narrow allowlist).
+
+**What to do:**
+
+1. In `Gate.run`, before calling `sandbox.Apply`, set `cmd.Env` to a secret-filtered copy of the
+   inherited environment — apply the equivalent of `internal/sandbox.filterSecrets(os.Environ())`
+   unconditionally, independent of any capability grant (this is a floor, not something a grant
+   can opt out of). Decide, and document your reasoning in the Work Log: reuse
+   `internal/sandbox`'s `filterSecrets`/`isSecretKey` directly (requires exporting them from that
+   package, since they're currently unexported — check whether that's a reasonable, narrow export
+   or whether a package-local equivalent in `internal/skill` reads cleaner, matching this batch's
+   own established precedent of adapting a pattern rather than always importing across packages
+   when the two call sites' needs might diverge over time).
+2. Add a regression test: a granted skill (any capability posture, including the bare default) run
+   with a marker or script that reads its own environment (e.g. `` !`env` `` or an equivalent
+   `printenv`-style command) must NOT see a secret-shaped environment variable your test
+   deliberately sets before running it (e.g. set `NANITE_TEST_SECRET_TOKEN=should-not-leak` in the
+   test process's own environment via `t.Setenv`, then confirm the sandboxed command's captured
+   stdout does not contain `should-not-leak`). This must be a real, unmocked test exercising the
+   actual `Gate.run`/`sandbox.Apply` path, matching this task's own established real-sandbox-test
+   discipline — not a unit test against `filterSecrets` in isolation only (that alone doesn't prove
+   `Gate.run` actually applies it).
+3. Confirm non-secret environment variables (e.g. `HOME`, `PATH`, `LANG`) still pass through
+   correctly after filtering, so a real skill script relying on ordinary environment context isn't
+   broken by this fix — add or extend a test confirming this.
+4. Re-verify `go build`/`go vet`/`go test ./internal/skill/... -race -count=1` clean when done.
+
+**One minor, non-blocking doc-precision nit from the review, not required to fix:** the code's
+`ApprovedContentHash == ""` check comment describes matching `store.AgentKnownSkill.IsBareAssignment()`'s
+"exact shape," but it's actually broader/more conservative (doesn't also require
+`Pinned`/`ActivationCount`/etc. all zero) — the actual security behavior is correct and arguably
+stricter, just an imprecise comment. Optional polish, not required as part of this fix.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

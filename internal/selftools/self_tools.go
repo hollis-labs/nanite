@@ -93,6 +93,43 @@ func selfToolDefinitions() []mcp.Tool {
 				"required": []string{"id"},
 			},
 		},
+		// TASKS/skills/11: skill_get — the real entry point into the Resolver
+		// -> Materializer -> Policy/Sandbox -> Materialized Skill pipeline
+		// (docs/engineering/architecture/20-skills.md's "The invocation gap").
+		// The skill_list catalog teaser above stays a lightweight name/
+		// description listing by design; this is the tool an agent calls to
+		// get a granted skill's actual, fully materialized content.
+		{
+			Name: "skill_get",
+			Description: "Fetch a granted skill's fully materialized content by slug.\n\n" +
+				"**What this does:** resolves the skill's declared parameters (your `params` argument, or an agent_context_resolvers dynamic binding), splices in any `inline`-composed dependency's own materialized content, delegates any `fork`-composed dependency to a real subagent turn and folds back its result, then executes any `` !`cmd` `` inline marker in the resulting text through the same capability/sandbox gate every skill execution routes through. What comes back is ready-to-read instructional content — not JSON, not a summary.\n\n" +
+				"**When to use:** When the skill catalog already in your context (name + description only, by design) names a skill relevant to the current task and you need its actual content, not just the one-line teaser.\n\n" +
+				"**Grant required:** you must be explicitly granted this skill, and the grant must be approved against the skill's current installed content. An ungranted skill, or one whose approval is stale (the skill was re-installed since you were approved), is refused with a clear error — never silently empty or partial content.\n\n" +
+				"**Fork composition:** if this skill composes a `fork`-mode dependency, pass `fork_role` naming the role slug the delegated subagent should run as — there is no default role, since only the caller knows what role fits. A fork delegation that requires human approval under this deployment's trust policy comes back as a clear pending-approval error naming a run_id — poll `subagent_status(run_id=...)` once it's approved, then call skill_get again.\n\n" +
+				"**Output shape:** the skill's final materialized text on success. On denial or failure, a clear error string naming the specific reason (not-granted / re-approval-required / pending-approval / execution failure) — never a bare \"failed\".",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"slug": map[string]any{
+						"type":        "string",
+						"description": "The skill's slug — from skill_list's output or your boot context's skill catalog block.",
+					},
+					"params": map[string]any{
+						"type":        "object",
+						"description": "Optional static invocation arguments, keyed by the skill's declared parameter names. A value supplied here always overrides that same parameter's agent_context_resolvers dynamic binding, when both exist.",
+					},
+					"fork_role": map[string]any{
+						"type":        "string",
+						"description": "Role slug to boot a fork-composed nested dependency's delegated subagent with. Required only when this skill (or a dependency it composes) actually declares a fork-mode dependency; omit otherwise.",
+					},
+					"fork_timeout_seconds": map[string]any{
+						"type":        "integer",
+						"description": "Optional wall-clock cap for a fork-composed dependency's delegated subagent run. 0 uses the subagent service's own default.",
+					},
+				},
+				"required": []string{"slug"},
+			},
+		},
 		{
 			Name: "agent_create",
 			Description: "Create a new agent profile with a name, slug, system prompt, and optional default model.\n\n" +

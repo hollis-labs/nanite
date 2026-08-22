@@ -204,7 +204,7 @@ func TestAutoIngestAgents_UnknownToolNameIsLoud(t *testing.T) {
 			SystemPrompt: "x",
 			Source:       "project",
 			RoleTools:    []string{"dev_read", "bash_run"}, // dev_read real, bash_run not
-			Tools:        []string{"skill_get"},            // not real either
+			Tools:        []string{"skill_frobnicate"},     // not real either (TASKS/skills/11 made skill_get a real tool)
 		},
 	}
 
@@ -224,8 +224,8 @@ func TestAutoIngestAgents_UnknownToolNameIsLoud(t *testing.T) {
 	if !strings.Contains(logOutput, "typo-agent") {
 		t.Errorf("expected the log to name the affected slug, got: %s", logOutput)
 	}
-	if !strings.Contains(logOutput, "bash_run") || !strings.Contains(logOutput, "skill_get") {
-		t.Errorf("expected the log to name both unknown tools (bash_run, skill_get), got: %s", logOutput)
+	if !strings.Contains(logOutput, "bash_run") || !strings.Contains(logOutput, "skill_frobnicate") {
+		t.Errorf("expected the log to name both unknown tools (bash_run, skill_frobnicate), got: %s", logOutput)
 	}
 	if strings.Contains(logOutput, `"dev_read"`) {
 		t.Errorf("dev_read is a real known tool and must not be flagged, got: %s", logOutput)

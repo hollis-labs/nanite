@@ -628,6 +628,7 @@ func cmdServe(args []string) {
 	selfTools.TodoStore = s
 	selfTools.Messaging = container.Messaging
 	selfTools.Subagent = container.Subagent
+	selfTools.SkillVendor = container.SkillVendor
 	selfTools.Background = container.Background
 	selfTools.Work = container.Streams
 	// Task 34: wire the shared managed-agent write path's classifier so

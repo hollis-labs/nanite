@@ -367,13 +367,40 @@ func (g *Gate) ExecuteGated(ctx context.Context, req ExecRequest) (ExecResult, e
 		return ExecResult{}, fmt.Errorf("skill gate: %s %q: empty command", req.Kind, req.Label)
 	}
 
-	caps, decision, err := g.authorize(ctx, req)
-	logDecision(decision, err)
+	caps, err := g.Authorize(ctx, req.SkillSlug, req.AgentID)
 	if err != nil {
 		return ExecResult{}, err
 	}
 
 	return g.run(ctx, req, caps)
+}
+
+// Authorize confirms agentID has a valid, currently-approved capability
+// grant for skillSlug, returning the grant's parsed Capabilities on
+// success — the same trust-validity decision ExecuteGated makes before
+// ever executing anything, exposed directly (TASKS/skills/11) so a caller
+// that needs to confirm access WITHOUT executing a command can reuse the
+// exact same check and the exact same typed errors (GrantRequiredError /
+// ReapprovalRequiredError) instead of re-deriving the decision from
+// scratch. TASKS/skills/11's skill_get self-tool is the motivating
+// caller: a skill with no `` !`cmd` `` markers or scripts/ entries (plain
+// instructional content, the common case) never reaches ExecuteGated any
+// other way, since ResolveInlineMarkers is a no-op on a body with no
+// markers — without this exposed method, an ungranted or stale-approval
+// agent could fetch such a skill's full content with zero enforcement.
+// ExecuteGated itself is unchanged behaviorally: it now calls this method
+// internally instead of the unexported authorize() directly, so there
+// remains exactly one place this decision is made.
+func (g *Gate) Authorize(ctx context.Context, skillSlug, agentID string) (Capabilities, error) {
+	if g.Skills == nil || g.Grants == nil {
+		return Capabilities{}, fmt.Errorf("skill gate: not configured (Skills and Grants stores are both required)")
+	}
+	if skillSlug == "" || agentID == "" {
+		return Capabilities{}, fmt.Errorf("skill gate: SkillSlug and AgentID are both required")
+	}
+	caps, decision, err := g.authorize(ctx, ExecRequest{SkillSlug: skillSlug, AgentID: agentID})
+	logDecision(decision, err)
+	return caps, err
 }
 
 // authorize is the decision half of this task's own "gate's entry point"

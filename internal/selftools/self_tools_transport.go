@@ -29,6 +29,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service/install"
+	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
@@ -98,6 +99,13 @@ type SelfToolsTransport struct {
 	Messaging *messaging.Service
 	// Subagent is set post-construction from the container; nil-safe.
 	Subagent *subagent.Service
+	// SkillVendor is the content-addressed vendored skill store (internal/
+	// skillvendor, TASKS/skills/03) skill_get reads a granted skill's
+	// vendored SKILL.md content from — the same *skillvendor.Store instance
+	// service.Container.SkillVendor wires everywhere else it's needed. Set
+	// post-construction from main.go; nil-safe (skill_get returns a clear
+	// errorResult when unwired). TASKS/skills/11.
+	SkillVendor *skillvendor.Store
 	// Background is the P9 background-job dispatch service. Set post-
 	// construction from the container; nil-safe (callers receive an
 	// errorResult for the nanite_background_* tools when unset).
@@ -422,6 +430,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callListSkills(args)
 	case "skill_delete":
 		return st.callDeleteSkill(args)
+	case "skill_get":
+		return st.callSkillGet(ctx, args)
 	case "agent_create":
 		return st.callCreateAgent(args)
 	case "agent_list":

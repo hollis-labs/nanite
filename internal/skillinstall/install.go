@@ -113,6 +113,12 @@ type Installer struct {
 	// (DefaultValidator{}) when set.
 	Validate Validator
 
+	// MaxDependencyDepth overrides DefaultMaxDependencyDepth for this
+	// Installer's install-time cycle/recursion-limit check
+	// (dependency_graph.go, TASKS/skills/07) when set to a positive
+	// value. Zero (the default) uses DefaultMaxDependencyDepth.
+	MaxDependencyDepth int
+
 	Emit EventFunc
 
 	mu    sync.Mutex
@@ -140,6 +146,15 @@ func (i *Installer) transition(slug string, s State, msg string) {
 	if i.Emit != nil {
 		i.Emit(Event{Slug: slug, State: s, Message: msg})
 	}
+}
+
+// maxDependencyDepth returns i.MaxDependencyDepth when it's been set to
+// a positive value, or DefaultMaxDependencyDepth otherwise.
+func (i *Installer) maxDependencyDepth() int {
+	if i.MaxDependencyDepth > 0 {
+		return i.MaxDependencyDepth
+	}
+	return DefaultMaxDependencyDepth
 }
 
 func (i *Installer) fail(slug string, from State, err error) error {
@@ -192,6 +207,19 @@ func (i *Installer) Install(ctx context.Context, src Source) (Result, error) {
 		return Result{}, i.fail(slug, StateValidating, fmt.Errorf("validate: %w", err))
 	}
 	deps := extractDeclaredDependencies(def)
+
+	// TASKS/skills/07: install-time cycle/recursion-limit detection
+	// against the graph of already-installed skills' own declared
+	// dependencies — docs/engineering/architecture/20-skills.md's own
+	// explicit instruction that this check runs once here, not
+	// discovered live during a materialization pass. Runs as part of
+	// the same Validating phase since it's still a pre-vendor gate; a
+	// package whose own single-package shape (DefaultValidator, above)
+	// is fine can still be rejected here for what it would do to the
+	// broader, already-installed graph.
+	if err := checkDependencyGraph(i.Index, slug, deps, i.maxDependencyDepth()); err != nil {
+		return Result{}, i.fail(slug, StateValidating, fmt.Errorf("dependency graph: %w", err))
+	}
 
 	i.transition(slug, StateVendoring, "vendoring package")
 	wr, err := i.Vendor.Write(ctx, skillvendor.FileMap(files))

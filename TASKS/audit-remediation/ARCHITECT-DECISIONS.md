@@ -62,6 +62,7 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-22 | Repo-wide `gofmt` sweep: now, never, or ratchet-only | `13/03` | GO-HYG-001, GO-CHAT-007 | 8 | open |
 | AD-23 | Accept ~8 MB of audit evidence into the repo | `00/02` step 1 | — (process) | 0 | **decided** |
 | AD-24 | Dev-freeze scope and exit criteria | **every batch in the repo** | — (process) | 0 | **decided** |
+| AD-25 | `allow_unsigned_plugins` devmode bypass: wire or retire | `01/02` | GO-PLUGIN-008 | 1 | **decided** |
 
 ### A gap worth naming
 
@@ -327,6 +328,51 @@ fixes the *bypass*, but leaves the intended common case failing rather than
 verifying. Provisioning a real key is potentially external work (key
 generation, distribution, rotation policy) — hence a separate decision.
 `01/01` is instructed not to silently scope this in or out.
+
+### AD-25 — `allow_unsigned_plugins` devmode bypass: wire or retire
+
+**Status:** decided · **Gates:** `01/02` · **Findings:** GO-PLUGIN-008 (low)
+
+> **Decided (2026-08-22): wire it.**
+>
+> `buildInstaller` (or its post-AD-04 successor, once `01/01`'s shared
+> constructor lands) reads `user_settings.allow_unsigned_plugins` and sets it
+> on the constructed `SignatureVerifier.AllowUnsigned`, making the setting's
+> documented effect real on a `devmode`-tagged build. Production (`!devmode`)
+> builds are unaffected either way — `devmode.HostDevSigningBypass` compiles
+> to `false` outside `devmode` builds, so `AllowUnsigned`'s value is dead-code-
+> eliminated there regardless of this decision.
+>
+> **Why wire rather than retire, given the rest of this wave is hardening the
+> same trust boundary elsewhere:** the tension `01/02`'s own file raises is
+> real but not disqualifying — `01/01`/`02/01`/`03/01` all close paths where
+> an *untrusted, external* input (a catalog entry, a missing sandbox tool, an
+> agent slug) reaches a security-relevant sink without validation. This
+> setting is the opposite shape: a developer explicitly opts in, on a build
+> that is never shipped to production, to skip signature checks on plugins
+> they are installing on their own machine. Wave 0's own revalidation of this
+> finding (`findings.json`'s `GO-PLUGIN-008` entry) already concluded
+> `requires_architect_decision: false` and "no architect input needed" for
+> the same reason — this decision formalizes that call as a real `AD-NN`
+> record rather than leaving it resting on the task file's own contradictory
+> header, which is the gap this decision closes.
+>
+> **Scope stays as `01/02`'s file already specifies:** thread the setting
+> through, do not remove `user_settings.allow_unsigned_plugins`'s storage/API
+> surface (that's a separate, larger follow-up if ever wanted), and correct
+> `verify.go`/`devmode_on.go`/`devmode_off.go`'s doc comments to match
+> whatever the final construction site looks like once `01/01` lands.
+>
+> `findings.json`'s `GO-PLUGIN-008` disposition (`remediate`) is unchanged —
+> this decision doesn't move it, it resolves the task file's own
+> `requires_architect_decision: true` header against the finding record's
+> `false`, in favor of proceeding.
+
+`01/02`'s own header claimed `requires_architect_decision: true` with no
+matching `AD-NN` entry anywhere in this file — a real planning-pass gap, not
+a decision anyone had made (see the W1 kickoff's item D). Found and closed
+during Wave 1 dispatch prep, 2026-08-22, by direct operator confirmation
+rather than a default guess.
 
 ---
 

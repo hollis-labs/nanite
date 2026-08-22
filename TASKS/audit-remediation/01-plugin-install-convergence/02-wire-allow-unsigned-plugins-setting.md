@@ -14,8 +14,28 @@
 > - **Depends on:** `01/01` — sequencing, not compilation: both edit the same `SignatureVerifier` construction site, and one pass avoids two conflicting edits
 > - **Blocks:** none
 > - **Parallel-safe with:** none in-wave (follows `01/01`)
-> - **Gated on:** none
+> - **Gated on:** AD-25 (wire vs. retire) — decided, see banner below.
 > - **requires_security_review:** true · **requires_regression_test:** true
+
+> ## ✅ AD-25 DECIDED (2026-08-22) — wire it, do not retire
+>
+> Thread `user_settings.allow_unsigned_plugins` into whatever
+> `SignatureVerifier` construction site exists once `01/01` lands (its shared
+> constructor, if `01/01`'s convergence introduces one) and set
+> `AllowUnsigned` accordingly. Production (`!devmode`) builds are unaffected
+> either way — `devmode.HostDevSigningBypass` is `false` outside `devmode`
+> builds, so this is dead-code-eliminated there regardless.
+>
+> **This task's own `requires_architect_decision: true` header had no
+> matching `AD-NN` entry anywhere in `ARCHITECT-DECISIONS.md`** — a real
+> planning-pass gap (not a decision anyone had made), found and closed during
+> Wave 1 dispatch prep. Resolved by direct operator confirmation, recorded as
+> AD-25. Full reasoning: `ARCHITECT-DECISIONS.md`'s AD-25 section.
+>
+> Scope is otherwise exactly as this file already specifies: wire the one
+> field, do not remove `user_settings.allow_unsigned_plugins`'s storage/API
+> surface, correct the three doc-comment locations (`verify.go`,
+> `devmode_on.go`, `devmode_off.go`) to match the final wiring.
 
 ## Context
 

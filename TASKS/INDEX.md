@@ -1028,7 +1028,7 @@ must not be dispatched.
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
 | `01/01` | `01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md` | not-started | `00/01`, `00/02` | AD-04 |
-| `01/02` | `01-plugin-install-convergence/02-wire-allow-unsigned-plugins-setting.md` | not-started | `01/01` | — |
+| `01/02` | `01-plugin-install-convergence/02-wire-allow-unsigned-plugins-setting.md` | not-started | `01/01` | AD-25 |
 | `02/01` | `02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md` | not-started | `00/01`, `00/02` | AD-01, AD-02 |
 | `02/02` | `02-linux-sandbox-fail-open/02-macos-seatbelt-read-boundary-disclosure.md` | not-started | `00/01` | AD-03 |
 | `03/01` | `03-agent-slug-traversal/01-canonical-slug-path-validation.md` | not-started | `00/01`, `00/02` | — |

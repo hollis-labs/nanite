@@ -2,7 +2,7 @@ package subagent
 
 // service_fanout_test.go — G3 fan-out semaphore tests (CW-20260426-0003)
 //
-// Ten cases:
+// Twelve cases:
 //  1. Under-cap parallelism: N=3 spawns complete in ≈ slowest single, not sum.
 //  2. At-cap with queueing: N=5 with cap=3; first 3 run concurrently, last 2
 //     queue; total ≈ 2× single duration.
@@ -16,6 +16,8 @@ package subagent
 //  8. Request cancellation after approval transition does not strand the run.
 //  9. Concurrent duplicate approvals/cancellations create at most one runner.
 //  10. Approval/cancellation events remain ordered with one terminal emit.
+//  11. A blocked callback for one run cannot reorder another run's events.
+//  12. A panicking callback cannot wedge later run emissions.
 
 import (
 	"context"
@@ -193,6 +195,70 @@ func (s *blockingOrderedSink) statuses(runID string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.events[runID]...)
+}
+
+type selectiveBlockingSink struct {
+	mu             sync.Mutex
+	events         map[string][]string
+	blockRunID     string
+	blocked        chan struct{}
+	releaseBlocked chan struct{}
+	blockOnce      sync.Once
+	panicRunID     string
+	panicOnce      sync.Once
+}
+
+func newSelectiveBlockingSink(blockRunID string) *selectiveBlockingSink {
+	return &selectiveBlockingSink{
+		events:         make(map[string][]string),
+		blockRunID:     blockRunID,
+		blocked:        make(chan struct{}),
+		releaseBlocked: make(chan struct{}),
+	}
+}
+
+func (s *selectiveBlockingSink) SubagentStatusChanged(_ string, payload []byte) {
+	var event struct {
+		RunID  string `json:"run_id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return
+	}
+	if event.RunID == s.blockRunID && event.Status == StatusRunning {
+		s.blockOnce.Do(func() { close(s.blocked) })
+		<-s.releaseBlocked
+	}
+	if event.RunID == s.panicRunID && event.Status == StatusRunning {
+		shouldPanic := false
+		s.panicOnce.Do(func() { shouldPanic = true })
+		if shouldPanic {
+			panic("synthetic status sink panic")
+		}
+	}
+	s.mu.Lock()
+	s.events[event.RunID] = append(s.events[event.RunID], event.Status)
+	s.mu.Unlock()
+}
+
+func (s *selectiveBlockingSink) statuses(runID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.events[runID]...)
+}
+
+func waitForStatus(t *testing.T, svc *Service, runID, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		run, err := svc.Status(context.Background(), runID)
+		if err == nil && run.Status == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	run, err := svc.Status(context.Background(), runID)
+	t.Fatalf("run %s did not reach %q: run=%+v err=%v", runID, want, run, err)
 }
 
 // TestFanout_UnderCap_RunsConcurrently dispatches 3 spawns (= cap) with
@@ -748,6 +814,129 @@ func TestApprove_CancelEmissionOrdering(t *testing.T) {
 	// drains. Give that cleanup goroutine time to observe the cancelled owner
 	// before newTestDB closes the database at test cleanup.
 	time.Sleep(25 * time.Millisecond)
+}
+
+func TestApprove_BlockedRunDoesNotReorderAnotherRun(t *testing.T) {
+	db, _ := newTestDB(t)
+	db.SetMaxOpenConns(1)
+	settings := stubSettings{us: store.UserSettings{
+		SubagentApprovalRequired:       true,
+		SubagentApprovalTimeoutSeconds: 3600,
+	}}
+	svc := NewService(db, EchoRunner{}, &stubPoster{}, &stubEmitter{}, settings)
+	spawnRequested := func(prompt string) string {
+		t.Helper()
+		runID, err := svc.Spawn(context.Background(), SpawnRequest{
+			ParentSessionID: "sess-cross-run-order",
+			ParentAgentID:   "parent-agent",
+			Role:            "worker-role",
+			Prompt:          prompt,
+			Mode:            ModeAsync,
+		})
+		if err != nil {
+			t.Fatalf("spawn gated run: %v", err)
+		}
+		return runID
+	}
+	runA := spawnRequested("block run A callback")
+	runB := spawnRequested("finish run B quickly")
+	sink := newSelectiveBlockingSink(runA)
+	svc.SetStreamSink(sink)
+
+	approveA := make(chan error, 1)
+	go func() { approveA <- svc.Approve(context.Background(), runA) }()
+	select {
+	case <-sink.blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("run A running callback did not block")
+	}
+	if err := svc.Approve(context.Background(), runB); err != nil {
+		close(sink.releaseBlocked)
+		t.Fatalf("approve run B: %v", err)
+	}
+	waitForStatus(t, svc, runB, StatusCompleted)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(sink.statuses(runB)) < 2 {
+		time.Sleep(time.Millisecond)
+	}
+	statusesB := sink.statuses(runB)
+
+	close(sink.releaseBlocked)
+	select {
+	case err := <-approveA:
+		if err != nil {
+			t.Fatalf("approve run A: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("approve run A did not return after callback release")
+	}
+	waitForStatus(t, svc, runA, StatusCompleted)
+	if len(statusesB) != 2 || statusesB[0] != StatusRunning || statusesB[1] != StatusCompleted {
+		t.Fatalf("run B events while run A callback blocked = %v; want [running completed]", statusesB)
+	}
+}
+
+func TestApprove_PanickingCallbackDoesNotWedgeOtherRuns(t *testing.T) {
+	db, _ := newTestDB(t)
+	db.SetMaxOpenConns(1)
+	settings := stubSettings{us: store.UserSettings{
+		SubagentApprovalRequired:       true,
+		SubagentApprovalTimeoutSeconds: 3600,
+	}}
+	svc := NewService(db, EchoRunner{}, &stubPoster{}, &stubEmitter{}, settings)
+	spawnRequested := func(prompt string) string {
+		t.Helper()
+		runID, err := svc.Spawn(context.Background(), SpawnRequest{
+			ParentSessionID: "sess-panic-order",
+			ParentAgentID:   "parent-agent",
+			Role:            "worker-role",
+			Prompt:          prompt,
+			Mode:            ModeAsync,
+		})
+		if err != nil {
+			t.Fatalf("spawn gated run: %v", err)
+		}
+		return runID
+	}
+	runA := spawnRequested("panic run A callback")
+	runB := spawnRequested("run B after callback panic")
+	sink := newSelectiveBlockingSink("")
+	sink.panicRunID = runA
+	svc.SetStreamSink(sink)
+
+	var (
+		approveErr error
+		panicValue any
+	)
+	func() {
+		defer func() { panicValue = recover() }()
+		approveErr = svc.Approve(context.Background(), runA)
+	}()
+	if panicValue != nil {
+		// Clean up the transitioned run on the pre-fix path where the panic
+		// escaped before approval could launch its runner.
+		_ = svc.Cancel(context.Background(), runA)
+	}
+	if err := svc.Approve(context.Background(), runB); err != nil {
+		t.Fatalf("approve run B: %v", err)
+	}
+	waitForStatus(t, svc, runB, StatusCompleted)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(sink.statuses(runB)) < 2 {
+		time.Sleep(time.Millisecond)
+	}
+	statusesB := sink.statuses(runB)
+
+	if panicValue != nil {
+		t.Fatalf("status callback panic escaped approval: %v", panicValue)
+	}
+	if approveErr != nil {
+		t.Fatalf("approve run A: %v", approveErr)
+	}
+	waitForStatus(t, svc, runA, StatusCompleted)
+	if len(statusesB) != 2 || statusesB[0] != StatusRunning || statusesB[1] != StatusCompleted {
+		t.Fatalf("run B events after run A callback panic = %v; want [running completed]", statusesB)
+	}
 }
 
 // TestApprove_HandoffPrecedesRunningTransition holds the handoff mutex until

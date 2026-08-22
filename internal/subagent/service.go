@@ -397,15 +397,6 @@ type Service struct {
 	cancelMu  sync.Mutex
 	cancelers map[string]*spawnSlotWait
 
-	// statusEmitMu protects the small FIFO used by lifecycle transitions that
-	// must publish in the same order they commit. The queue is drained without
-	// holding cancelMu or statusEmitMu, so a stream callback may safely call
-	// back into Cancel without deadlocking or reordering a later terminal event
-	// ahead of the running event that made the run observable.
-	statusEmitMu       sync.Mutex
-	statusEmitQueue    []statusEmission
-	statusEmitDraining bool
-
 	// spawnSem is a buffered-channel semaphore that bounds the number of
 	// Spawn invocations with an in-flight runner to spawnFanoutCap.
 	// Sends acquire a slot; receives release it. FIFO ordering is a
@@ -479,12 +470,13 @@ func (svc *Service) emitStatus(run *Run, summaryPreview string) {
 	if event == nil {
 		return
 	}
-	event.sink.SubagentStatusChanged(event.parentSessionID, event.payload)
+	deliverStatusEmission(*event)
 }
 
 type statusEmission struct {
 	sink            SubagentStreamSink
 	parentSessionID string
+	runID           string
 	payload         []byte
 }
 
@@ -505,51 +497,68 @@ func (svc *Service) prepareStatusEmission(run *Run, summaryPreview string) *stat
 		slog.Warn("subagent: marshal status payload", "err", err, "run_id", run.ID)
 		return nil
 	}
-	return &statusEmission{sink: sink, parentSessionID: run.ParentSessionID, payload: payload}
+	return &statusEmission{sink: sink, parentSessionID: run.ParentSessionID, runID: run.ID, payload: payload}
 }
 
-// enqueueStatusEmission records a fully-materialized status event. Callers
-// that need transition ordering enqueue while holding cancelMu, then release
-// cancelMu before draining. This reserves event order at the same boundary as
-// the durable transition without ever invoking callbacks under a lifecycle
-// lock.
-func (svc *Service) enqueueStatusEmission(run *Run, summaryPreview string) bool {
+// deliverStatusEmission contains a misbehaving sink. Status propagation is a
+// best-effort observer path; a callback panic must not crash approval or wedge
+// later lifecycle emissions.
+func deliverStatusEmission(event statusEmission) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			slog.Error("subagent: status sink panicked", "panic", recovered, "run_id", event.runID)
+		}
+	}()
+	event.sink.SubagentStatusChanged(event.parentSessionID, event.payload)
+}
+
+// enqueueStatusEmission records a fully-materialized event on one run's
+// lifecycle owner. Callers enqueue while holding cancelMu, reserving event
+// order at the same boundary as the durable transition.
+func (svc *Service) enqueueStatusEmission(owner *spawnSlotWait, run *Run, summaryPreview string) {
 	event := svc.prepareStatusEmission(run, summaryPreview)
 	if event == nil {
-		return false
-	}
-	svc.statusEmitMu.Lock()
-	svc.statusEmitQueue = append(svc.statusEmitQueue, *event)
-	svc.statusEmitMu.Unlock()
-	return true
-}
-
-// drainStatusEmissions delivers queued events FIFO. Reentrant drains simply
-// return; the active drainer observes any event appended by the callback on
-// its next iteration. Neither lifecycle nor queue locks are held while the
-// external sink runs.
-func (svc *Service) drainStatusEmissions() {
-	svc.statusEmitMu.Lock()
-	if svc.statusEmitDraining {
-		svc.statusEmitMu.Unlock()
 		return
 	}
-	svc.statusEmitDraining = true
-	svc.statusEmitMu.Unlock()
+	owner.statusEmitMu.Lock()
+	owner.statusEmitQueue = append(owner.statusEmitQueue, *event)
+	owner.statusEmitMu.Unlock()
+}
+
+// drainStatusEmissions delivers one run's events FIFO. Approval passes wait=true
+// so its running event is fully ordered before runner launch even if a racing
+// Cancel became the drainer. Cancel passes wait=false, which makes a reentrant
+// cancellation callback safe: the active drainer will observe its terminal
+// event on the next iteration. No lifecycle or queue lock is held while the
+// external sink runs, and unrelated runs never share a drainer or backlog.
+func (svc *Service) drainStatusEmissions(owner *spawnSlotWait, wait bool) {
+	owner.statusEmitMu.Lock()
+	if owner.statusEmitDraining {
+		done := owner.statusEmitDone
+		owner.statusEmitMu.Unlock()
+		if wait {
+			<-done
+		}
+		return
+	}
+	owner.statusEmitDraining = true
+	owner.statusEmitDone = make(chan struct{})
+	owner.statusEmitMu.Unlock()
 
 	for {
-		svc.statusEmitMu.Lock()
-		if len(svc.statusEmitQueue) == 0 {
-			svc.statusEmitDraining = false
-			svc.statusEmitMu.Unlock()
+		owner.statusEmitMu.Lock()
+		if len(owner.statusEmitQueue) == 0 {
+			owner.statusEmitDraining = false
+			close(owner.statusEmitDone)
+			owner.statusEmitMu.Unlock()
 			return
 		}
-		event := svc.statusEmitQueue[0]
-		svc.statusEmitQueue[0] = statusEmission{}
-		svc.statusEmitQueue = svc.statusEmitQueue[1:]
-		svc.statusEmitMu.Unlock()
+		event := owner.statusEmitQueue[0]
+		owner.statusEmitQueue[0] = statusEmission{}
+		owner.statusEmitQueue = owner.statusEmitQueue[1:]
+		owner.statusEmitMu.Unlock()
 
-		event.sink.SubagentStatusChanged(event.parentSessionID, event.payload)
+		deliverStatusEmission(event)
 	}
 }
 
@@ -1040,7 +1049,8 @@ func (svc *Service) Cancel(ctx context.Context, runID string) error {
 	svc.cancelMu.Lock()
 	run, loadErr := svc.Status(ctx, runID)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	var terminalQueued bool
+	cancelOwner := svc.cancelers[runID]
+	var directTerminal *statusEmission
 	var err error
 	if loadErr == nil {
 		var res sql.Result
@@ -1057,19 +1067,25 @@ func (svc *Service) Cancel(ctx context.Context, runID string) error {
 				run.Status = StatusCancelled
 				run.CompletedAt = now
 				run.Error = ""
-				terminalQueued = svc.enqueueStatusEmission(run, "")
+				if cancelOwner != nil {
+					svc.enqueueStatusEmission(cancelOwner, run, "")
+				} else {
+					directTerminal = svc.prepareStatusEmission(run, "")
+				}
 			}
 		}
 	} else if !errors.Is(loadErr, sql.ErrNoRows) {
 		err = loadErr
 	}
-	if owner, ok := svc.cancelers[runID]; ok {
-		owner.cancel()
+	if cancelOwner != nil {
+		cancelOwner.cancel()
 		delete(svc.cancelers, runID)
 	}
 	svc.cancelMu.Unlock()
-	if terminalQueued {
-		svc.drainStatusEmissions()
+	if cancelOwner != nil {
+		svc.drainStatusEmissions(cancelOwner, false)
+	} else if directTerminal != nil {
+		deliverStatusEmission(*directTerminal)
 	}
 	if err != nil {
 		return fmt.Errorf("cancel run: %w", err)
@@ -1211,7 +1227,7 @@ func (svc *Service) Approve(ctx context.Context, runID string) error {
 				run.ApprovedBy = ""
 				run.StartedAt = now
 				slotWait = svc.registerSpawnSlotWaitLocked(context.Background(), run.ID)
-				svc.enqueueStatusEmission(run, "")
+				svc.enqueueStatusEmission(slotWait, run, "")
 			}
 		}
 	}
@@ -1226,7 +1242,7 @@ func (svc *Service) Approve(ctx context.Context, runID string) error {
 	// Ownership is installed before publishing the running transition. Approve
 	// acquires capacity in the background so its HTTP caller remains fast, but
 	// Cancel can stop that queued wait from the moment the run is observable.
-	svc.drainStatusEmissions()
+	svc.drainStatusEmissions(slotWait, true)
 
 	// Acquire inside the dispatched goroutine so approval responses do not
 	// inherit queue latency. The same semaphore and cancellation registration
@@ -1248,6 +1264,14 @@ type spawnSlotWait struct {
 	queueCtx context.Context
 	runCtx   context.Context
 	cancel   context.CancelFunc
+
+	// Status emission ordering is per run. At most the observable running
+	// transition and one authoritative terminal transition can queue here, so
+	// a blocked callback cannot create an unbounded service-wide backlog.
+	statusEmitMu       sync.Mutex
+	statusEmitQueue    []statusEmission
+	statusEmitDraining bool
+	statusEmitDone     chan struct{}
 }
 
 // registerSpawnSlotWait installs the Cancel(runID) hook before a running

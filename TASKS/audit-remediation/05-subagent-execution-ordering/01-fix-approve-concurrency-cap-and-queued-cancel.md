@@ -619,6 +619,23 @@ Observable behavior required for PASS:
   passed. The already-clean 842.432s full package race gate from the preceding
   correction was not repeated for this narrow delta while another exact gate
   had quiet-host priority.
+- 2026-08-22 third review correction — Replaced the service-wide status FIFO
+  with a per-run FIFO and completion barrier owned by `spawnSlotWait`. The
+  global drainer allowed an approval for run B to return while run A's callback
+  was blocked; B's runner could then emit `completed` directly before B's
+  queued `running` event. Approval now waits for its own running-event drain
+  before runner launch, including when a racing `Cancel` became that run's
+  drainer. Cancellation remains non-waiting so a callback can reenter `Cancel`
+  without self-deadlock, and unrelated runs share no queue, lock, or backlog.
+- Status delivery now contains callback panics and continues draining the same
+  run; a panicking observer cannot crash approval or leave a drainer permanently
+  marked active. Pre-fix deterministic regressions observed run B events as
+  `[completed]` while run A was blocked and caught the callback panic escaping
+  `Approve`. Both pass after the redesign with run B ordered as `[running
+  completed]` and the panic logged/contained. The adversarial approval trio
+  passed 100 non-race repetitions (72.746s) and 20 race repetitions (506.749s).
+  Package build/vet and the full non-race package suite (25.722s) also passed;
+  the full package race gate remained deferred as directed.
 
 ## Review notes
 

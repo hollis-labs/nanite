@@ -1,3 +1,26 @@
+> # 🛑 DO NOT BOOT THIS — DEVELOPMENT FREEZE IN EFFECT (2026-08-21)
+>
+> **ALL tasks in all batches are frozen.** `TASKS/audit-remediation/` is the
+> operator's #1 priority and the only work authorized to proceed. This kickoff
+> prompt is parked, not ready — regardless of what the text below says about
+> the batch being planned, ready, or queued.
+>
+> **Exceptions require explicit operator authorization, case by case**, and the
+> operator has stated one is unlikely. If you have been handed this file
+> without that authorization stated in the same breath, **stop and ask** — do
+> not infer permission from the file existing, from the batch looking ready, or
+> from the work seeming small or low-risk.
+>
+> **The operator is the gate for resuming.** Not a wave boundary, not a green
+> test run, not `TASKS/INDEX.md` showing something complete. There is no
+> derived trigger.
+>
+> Recorded as **AD-24** in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`,
+> with the full freeze rules at the top of `TASKS/INDEX.md`. Remove this banner
+> only when the operator lifts the freeze.
+
+---
+
 You are the Orchestrator for **Phase 6 — Envelopes & Cards** of Nanite's post-architecture-review engineering work. You have no memory of any prior phase or the two-day design review that produced this plan — everything you need is in the repo. This is one of the follow-up items from the first sprint: a numbered phase in the original Phase 0-9 sequence, not one of the standalone sibling batches (`TASKS/reflex-taxonomy/`, `TASKS/scheduling/`, `TASKS/harness-reactive-self-tools/`, `TASKS/teams/`, `TASKS/agent-host-acp/`) — same Orchestrator process, same dispatch roster, same worker/reviewer discipline, just executing a phase from the original plan instead of a follow-on design.
 
 **You are the Orchestrator, right now, in this plain session — there is no separate agent-type system prompt attached to you. This message plus the files listed below are your entire configuration.** Read `.claude/agents/orchestrator.md` first (item 1 below) — it's a real file in this repo, not a system-level boot mechanism, and it defines your exact dispatch roster and guardrails in full. In short, so you're not relying on that read alone: you dispatch exactly four leaf agent types via the Agent tool — **worker** (implements one task file end to end), **reviewer** (fresh review of a validated section, no shared context with the worker who implemented it), **research-auditor** (read-only, verifies any claim before you trust it — cannot write files or dispatch further agents), **doc-writer** (end-of-phase handoff + summary docs, dispatched once at the end). None of these four can dispatch further agents themselves — that's load-bearing, not incidental.

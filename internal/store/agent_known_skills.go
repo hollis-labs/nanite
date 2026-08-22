@@ -48,6 +48,33 @@ type AgentKnownSkill struct {
 	CapabilitiesGranted string `json:"capabilities_granted"`
 }
 
+// IsBareAssignment reports whether this row carries no known-skill-specific
+// data beyond bare (agent_id, skill_name) existence — i.e. it was created
+// only by skills.go's AssignSkillToAgent (the "Assigned Skills" step
+// underlying POST/DELETE /api/agents/{id}/skills) and has never been touched
+// by the known-skills REST handlers (internal/api/agent_capabilities.go's
+// POST/PUT/DELETE /api/agents/{id}/known-skills) or a grant workflow.
+//
+// TASKS/skills/02's fix-required section (2026-08-21 review): AssignSkillToAgent
+// and the known-skills handlers now read/write the identical
+// (agent_id, skill_name) row space, so both handleCreateAgentKnownSkill's
+// pre-existence check and RemoveSkillFromAgent's delete-vs-preserve decision
+// key off this exact test to keep the two REST surfaces safely independent.
+// AddedAt is deliberately excluded — InsertAgentKnownSkill always defaults it
+// to the current timestamp on first insert, so it is never empty regardless
+// of which path created the row and is not evidence of a real grant.
+func (t AgentKnownSkill) IsBareAssignment() bool {
+	return !t.Pinned &&
+		t.ActivationCount == 0 &&
+		t.LastUsedAt == "" &&
+		t.TTLSeconds == 0 &&
+		t.Reason == "" &&
+		t.ApprovedContentHash == "" &&
+		t.GrantedAt == "" &&
+		t.GrantedBy == "" &&
+		t.CapabilitiesGranted == ""
+}
+
 const agentKnownSkillColumns = `agent_id, skill_name, pinned, activation_count,
        COALESCE(last_used_at,''), added_at, COALESCE(ttl_seconds,0), reason,
        COALESCE(approved_content_hash,''), COALESCE(granted_at,''),

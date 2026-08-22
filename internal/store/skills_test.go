@@ -1,6 +1,10 @@
 package store
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+)
 
 // TestListAgentSkills_ColumnAlignment is a regression guard for the audit
 // finding where the SELECT column list was missing `icon`, causing Scan to
@@ -103,5 +107,87 @@ func TestAssignSkillToAgent_RejectsOrphanedAgentID(t *testing.T) {
 
 	if err := s.AssignSkillToAgent("agent-does-not-exist", sk.ID, ""); err == nil {
 		t.Fatal("expected AssignSkillToAgent to fail for a nonexistent agent_id, got nil error")
+	}
+}
+
+// TestRemoveSkillFromAgent_DeletesBareAssignment is the "row is truly bare"
+// half of TASKS/skills/02's fix-required regression coverage: a plain
+// AssignSkillToAgent assignment, with no known-skill grant/telemetry data
+// ever layered onto it via the separate /known-skills REST surface, is
+// physically removed by RemoveSkillFromAgent exactly as before this fix.
+func TestRemoveSkillFromAgent_DeletesBareAssignment(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	agent := makeTestAgent(t, s, "remove-bare-assignment")
+
+	sk := &Skill{Name: "Bare Assignment Skill", Slug: "bare-assignment-skill"}
+	if err := s.CreateSkill(sk); err != nil {
+		t.Fatalf("CreateSkill: %v", err)
+	}
+	if err := s.AssignSkillToAgent(agent.ID, sk.ID, ""); err != nil {
+		t.Fatalf("AssignSkillToAgent: %v", err)
+	}
+
+	if err := s.RemoveSkillFromAgent(agent.ID, sk.ID); err != nil {
+		t.Fatalf("RemoveSkillFromAgent: %v", err)
+	}
+
+	if _, err := s.GetAgentKnownSkill(ctx, agent.ID, sk.Slug); !errors.Is(err, ErrAgentKnownSkillNotFound) {
+		t.Fatalf("GetAgentKnownSkill after removing bare assignment: got %v, want ErrAgentKnownSkillNotFound", err)
+	}
+}
+
+// TestRemoveSkillFromAgent_PreservesKnownSkillGrantData reproduces the fresh
+// reviewer's second finding directly (TASKS/skills/02's fix-required
+// section, 2026-08-21): a real known-skill grant/telemetry row set via the
+// separate /known-skills REST surface (internal/api/agent_capabilities.go)
+// must survive a call to RemoveSkillFromAgent (the /skills "unassign"
+// endpoint) against the same agent+skill — "assignment" isn't a real column
+// on agent_known_skills, just row existence, so unassigning must not destroy
+// grant data a different write path owns.
+func TestRemoveSkillFromAgent_PreservesKnownSkillGrantData(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	agent := makeTestAgent(t, s, "remove-preserves-grant")
+
+	sk := &Skill{Name: "Granted Skill", Slug: "granted-skill"}
+	if err := s.CreateSkill(sk); err != nil {
+		t.Fatalf("CreateSkill: %v", err)
+	}
+
+	// Real known-skill grant data, set the way the Agent Capabilities Panel
+	// (or a future task 09 grant workflow) would via InsertAgentKnownSkill
+	// directly, not via AssignSkillToAgent's bare-row path.
+	granted := AgentKnownSkill{
+		AgentID:             agent.ID,
+		SkillName:           sk.Slug,
+		Pinned:              true,
+		Reason:              "operator pin",
+		ApprovedContentHash: "skl-vendor-deadbeefcafefeed",
+		GrantedAt:           "2026-08-21T00:00:00Z",
+		GrantedBy:           "operator",
+		CapabilitiesGranted: `{"read":true}`,
+	}
+	if err := s.InsertAgentKnownSkill(ctx, granted); err != nil {
+		t.Fatalf("InsertAgentKnownSkill: %v", err)
+	}
+
+	// RemoveSkillFromAgent must report success (matching the Wizard's own
+	// "unassign" semantics, and the frontend's removeSkillFromAgent call,
+	// which surfaces no error UI for this endpoint) without touching the
+	// grant data.
+	if err := s.RemoveSkillFromAgent(agent.ID, sk.ID); err != nil {
+		t.Fatalf("RemoveSkillFromAgent: expected nil (no-op) error, got %v", err)
+	}
+
+	got, err := s.GetAgentKnownSkill(ctx, agent.ID, sk.Slug)
+	if err != nil {
+		t.Fatalf("GetAgentKnownSkill after RemoveSkillFromAgent: %v", err)
+	}
+	if !got.Pinned || got.Reason != "operator pin" ||
+		got.ApprovedContentHash != "skl-vendor-deadbeefcafefeed" ||
+		got.GrantedAt != "2026-08-21T00:00:00Z" || got.GrantedBy != "operator" ||
+		got.CapabilitiesGranted != `{"read":true}` {
+		t.Fatalf("known-skill grant data was not preserved: %+v", got)
 	}
 }

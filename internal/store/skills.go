@@ -1,7 +1,9 @@
 package store
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -281,7 +283,26 @@ func (s *Store) AssignSkillToAgent(agentID, skillID, _ string) error {
 }
 
 // RemoveSkillFromAgent removes a skill assignment from an agent.
+//
 // TASKS/skills/02: backed by agent_known_skills — see AssignSkillToAgent.
+//
+// TASKS/skills/02's fix-required section (2026-08-21 review): this "unassign"
+// endpoint (DELETE /api/agents/{id}/skills/{id}) shares agent_known_skills'
+// row space with the completely separate known-skills grant/telemetry
+// surface (POST/PUT/DELETE /api/agents/{id}/known-skills,
+// internal/api/agent_capabilities.go). "Assignment" isn't a real column
+// here — just row existence — so an unconditional DELETE would destroy any
+// pinned/activation_count/last_used_at/ttl_seconds/reason/
+// approved_content_hash/granted_at/granted_by/capabilities_granted data that
+// other surface separately set for the same agent+skill. Only a bare row
+// (AgentKnownSkill.IsBareAssignment — no known-skill data of its own) is
+// physically deleted; a row carrying real known-skill data is left intact
+// and this call still reports success (nil error) — from the assignment
+// endpoint's own perspective the skill is unassigned, and the frontend
+// caller (AgentProfileManager.tsx's removeSkillMutation) surfaces no error
+// UI for this call regardless, so a silent no-op here is strictly safer
+// than either destroying grant data or leaving the caller with an
+// unactionable failure.
 func (s *Store) RemoveSkillFromAgent(agentID, skillID string) error {
 	sk, err := s.GetSkill(skillID)
 	if err != nil {
@@ -289,6 +310,16 @@ func (s *Store) RemoveSkillFromAgent(agentID, skillID string) error {
 	}
 	if sk == nil {
 		return fmt.Errorf("remove skill from agent: skill %q not found", skillID)
+	}
+	existing, err := s.GetAgentKnownSkill(context.Background(), agentID, sk.Slug)
+	if err != nil {
+		if errors.Is(err, ErrAgentKnownSkillNotFound) {
+			return fmt.Errorf("skill assignment not found")
+		}
+		return fmt.Errorf("remove skill from agent: %w", err)
+	}
+	if !existing.IsBareAssignment() {
+		return nil
 	}
 	res, err := s.DB.Exec(
 		`DELETE FROM agent_known_skills WHERE agent_id = ? AND skill_name = ?`,

@@ -1,7 +1,7 @@
 # Redesign `skills` as an index-only table; extend `agent_known_skills` as the grant/attachment table
 
 **Phase:** 2 — Index + vendored store (`TASKS/skills`)
-**Status:** in-progress — review found a real bug, fix required (see "Fix required" section below)
+**Status:** implemented
 **Depends on:** `01` (both touch `internal/store/skills.go` and its migrations — real collision
 risk if run concurrently, sequence the merge)
 **Touches:** `internal/store/skills.go` (`Skill` struct, all exported functions),
@@ -466,6 +466,110 @@ Concretely:
    exercises the *same skill* through both `/api/agents/{id}/skills` and
    `/api/agents/{id}/known-skills` for the same agent (not two different skills, which is what the
    original dogfeed did) to prove the collision is actually gone end-to-end.
+
+## Work log — fix-required follow-up (2026-08-21)
+
+**Scope of this pass.** Only the "Fix required" section above — the main body's decision (drop
+`agent_skills`, extend `agent_known_skills` in place) is not revisited, per that section's own
+"Not a re-litigation" framing.
+
+**Root cause, confirmed exactly as the fresh reviewer described.** `ListAgentSkills`/
+`AssignSkillToAgent`/`RemoveSkillFromAgent` (`internal/store/skills.go`) and
+`InsertAgentKnownSkill`/`GetAgentKnownSkill`/`DeleteAgentKnownSkill`
+(`internal/store/agent_known_skills.go`) share the identical `(agent_id, skill_name)` row space on
+`agent_known_skills` now that the old `agent_skills` join table is gone. `handleCreateAgentKnownSkill`
+(`internal/api/agent_capabilities.go`) hard-rejected with `409` on *any* pre-existing row, and
+`RemoveSkillFromAgent` did an unconditional full-row `DELETE` — neither could distinguish a bare
+row `AssignSkillToAgent` left behind from a real known-skill grant row the separate `/known-skills`
+REST surface owns.
+
+**Fix: a shared "is this row bare" test, used by both write paths.**
+
+1. Added `AgentKnownSkill.IsBareAssignment()` (`internal/store/agent_known_skills.go`) — true iff
+   every known-skill-specific column is at its zero value (`Pinned=false`, `ActivationCount=0`,
+   `LastUsedAt=""`, `TTLSeconds=0`, `Reason=""`, and all four grant-state columns empty).
+   Deliberately excludes `AddedAt` — `InsertAgentKnownSkill` always defaults it to the current
+   timestamp on first insert regardless of which path created the row, so it's never empty and
+   isn't evidence of a real grant.
+2. `handleCreateAgentKnownSkill` (`internal/api/agent_capabilities.go`): when a pre-existing row is
+   found, it now checks `IsBareAssignment()` first. A bare row (created only by
+   `AssignSkillToAgent`) is upserted onto — carrying forward its `ActivationCount`/`LastUsedAt`/
+   `AddedAt` the same way `handleUpdateAgentKnownSkill` already does for a real edit, so the
+   original assignment timestamp survives — and returns `201`, not `409`. A row that already
+   carries real known-skill data still returns `409` unchanged. This directly fixes the
+   `AgentBuilderWizard.tsx` half-configured-agent bug (`assignBuilderCapabilities` assigns via
+   `assigned_skill_ids`/`assigned_skill_slugs`, then separately creates via `known_skills`, for
+   potentially the same skill in the same submission).
+3. `RemoveSkillFromAgent` (`internal/store/skills.go`): now resolves the existing
+   `agent_known_skills` row (via `s.GetAgentKnownSkill(context.Background(), agentID, sk.Slug)` —
+   `context.Background()` used deliberately here, matching the one existing production precedent
+   for this pattern in `internal/store/store.go:124`, since this function's own signature predates
+   context and is kept unchanged per the task's own "existing frontend must keep working unmodified"
+   constraint) before deleting. A bare row is still physically deleted (unchanged behavior for a
+   plain assign-then-unassign with no known-skill data ever layered on). A row carrying real
+   known-skill grant/telemetry data is left completely untouched and the call still returns `nil`
+   (success) — chosen over rejecting with an error after reading
+   `ui/src/components/settings/AgentProfileManager.tsx`'s `removeSkillMutation`
+   (lines 141-147: `mutationFn: () => api.removeSkillFromAgent(...)`, `onSuccess` only — no
+   `onError` handler at all, unlike `updateMutation`/`deleteMutation`/`copyToManagedMutation` in the
+   same file, which do set `actionError`). A rejected/`500` response here would leave the click
+   silently no-op from the user's perspective anyway (no error surfaces in this component's UI for
+   this specific mutation), so returning success and preserving the grant data is strictly safer
+   than either destroying it or leaving an unactionable failure. Net effect: from the `/skills`
+   endpoint's own perspective the skill is "unassigned" (assignment was never a real column, just
+   row existence); `GET /api/agents/{id}/skills` will continue to list a skill whose
+   `agent_known_skills` row still carries real grant data after an "unassign" call — this is the
+   documented, deliberate trade-off the fix-required section's option (a) describes, not an
+   oversight.
+
+**Regression tests, each independently confirmed to fail against the pre-fix code before the fix
+was reapplied** (temporarily reverted `internal/api/agent_capabilities.go` and
+`internal/store/skills.go` via `git checkout --` in this same worktree — not a repo-global `git
+stash` — ran the new tests to confirm they reproduce the reviewer's exact findings, then restored
+both files via a saved `git diff`/`git apply` round-trip and reran the full suite):
+- `internal/store/agent_known_skills_test.go`'s `TestAgentKnownSkill_IsBareAssignment` — unit test
+  for the bareness predicate itself, one subtest per known-skill-specific column plus the
+  `AddedAt`-doesn't-count case.
+- `internal/store/skills_test.go`'s `TestRemoveSkillFromAgent_DeletesBareAssignment` (bare row still
+  physically deleted — unchanged behavior) and
+  `TestRemoveSkillFromAgent_PreservesKnownSkillGrantData` (reviewer's finding 2, reproduced directly
+  — **failed against pre-fix code** with `GetAgentKnownSkill after RemoveSkillFromAgent: agent known
+  skill not found`, confirming the unconditional DELETE destroyed the grant row; passes after the
+  fix with all six grant fields intact).
+- `internal/api/agent_capabilities_test.go`'s
+  `TestAgentCapabilitiesAPI_CreateKnownSkill_UpsertsOntoBareAssignment` (reviewer's finding 1,
+  reproduced directly at the HTTP layer — **failed against pre-fix code** with `got 409, want 201`;
+  passes after the fix, and also asserts a *second* create against the now-real grant row still
+  correctly 409s, proving the fix only relaxes the bare-row case).
+
+**Real dogfeed, same skill through both endpoints** (per item 4's explicit requirement — the
+original dogfeed used different skills per path, which is exactly what missed this bug). Built a
+throwaway binary, ran `serve -db <scratch>.db -port 18199` with the process's CWD set to an absolute
+scratch directory under the session scratchpad (confirmed via `git status --short` before and after
+that a stray `.nanite/agents/dogfeed-agent-02.md` landed in the scratch dir, not the worktree — the
+same near-miss the original Work Log flagged, checked again here since it's a real, easy-to-repeat
+mistake). Against a fresh scratch DB:
+- Assigned a skill via `POST /api/agents/{id}/skills` (Wizard's `assigned_skill_ids` path) — `201`.
+- Created a known-skill row for the **same** skill via `POST /api/agents/{id}/known-skills` (Wizard's
+  `known_skills` path) — `201` (previously would have been `409`), `pinned`/`reason` correctly set.
+- A second `POST /api/agents/{id}/known-skills` against the same skill correctly still `409`s (real
+  grant now exists).
+- `DELETE /api/agents/{id}/skills/{id}` (Wizard-style "unassign") on that same skill returned
+  `{"status":"removed"}` (`200`), and a follow-up `GET /api/agents/{id}/known-skills/{name}`
+  confirmed the grant data (`pinned=true`, `reason="role carry"`) was still fully intact —
+  the exact collision the reviewer described is gone.
+- Separately, a plain bare assignment (no known-skills touch at all) through the same
+  assign-then-remove sequence still physically deletes the row — confirmed via a follow-up `GET
+  /api/agents/{id}/known-skills/{name}` returning `404` afterward.
+- Killed the scratch server, deleted the throwaway binary and scratch directory; `git status
+  --short` confirmed only the intended source/test file changes remain.
+
+**`go build ./cmd/nanite/`, `go vet ./...`, `go test ./...`** all pass. `go vet`'s only findings
+are the same two pre-existing, unrelated `stopReaper`/`stopRuntimeReaper` findings in
+`internal/service/container.go` the original Work Log already confirmed pre-existing.
+
+**Not escalated.** This is a direct implementation of the fresh reviewer's own "What to do" list —
+no new ambiguity, no doc gap, no item-vs-item contradiction encountered.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

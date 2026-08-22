@@ -2763,7 +2763,7 @@
       "false_positive_considerations": "Bounded blast radius -- process always terminates immediately after, no accumulating leak.",
       "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/02-fix-cmdserve-fatal-cleanup-bypass.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: slogx.Fatal (slogx.go:138-141) still calls os.Exit(1) directly, bypassing deferred cleanup; cmd/nanite/main.go still has 7 slogx.Fatal call sites. AD-17 decides only the implementation shape (signature change vs. cleanup-hook mechanism), not whether cleanup-bypass is a real gap -- parallel to how AD-01 was treated for GO-SEC4-001 in Part 1."
     },
     {

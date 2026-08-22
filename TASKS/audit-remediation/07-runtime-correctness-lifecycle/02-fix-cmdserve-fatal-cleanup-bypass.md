@@ -1,7 +1,7 @@
 # Decide and fix `cmdServe`'s `slogx.Fatal` bypassing deferred startup cleanup
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `cmd/nanite/main.go` (`cmdServe`'s `slogx.Fatal` call sites, and possibly `cmdServe`'s own signature plus `main()`'s `case "serve":` branch, depending on which direction is chosen — see below). Possibly `internal/slogx/slogx.go` (`Fatal`, `FatalContext`) if the cleanup-hook direction is chosen. **This task requires an architect decision before implementation** — see Context and What to do.
 
@@ -185,4 +185,13 @@ Direction A: low-medium risk — changing `cmdServe`'s signature from `func(args
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail, what was independently re-verified. -->
+- PASS (2026-08-22, after one focused correction): independent review verified
+  all seven former `cmdServe` fatal exits now log and return wrapped errors,
+  while `main()` performs process exit only after `cmdServe` and its defers
+  return. The 15 out-of-scope fatal sites remain unchanged.
+- The initial return-only regression was rejected because it could not observe
+  cleanup. The corrected parameterized seam has no mutable globals and proves
+  both logging and OTel cleanup execute exactly once after a real store-open
+  failure; bypassing either defer makes the test fail.
+- Focused race testing (50x), command build/vet/test, full vet/test, and diff
+  checks all passed on the reviewed merge.

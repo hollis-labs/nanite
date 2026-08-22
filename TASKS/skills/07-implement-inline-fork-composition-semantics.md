@@ -1,7 +1,7 @@
 # Implement `inline`/`fork` composition semantics + install-time cycle detection
 
 **Phase:** 4 — Materialization pipeline (`TASKS/skills`)
-**Status:** implemented
+**Status:** in-progress — review found a production-blocking bug, fix required (see "Fix required" section below)
 **Depends on:** `04` (install-time dependency graph), `06` (Resolver's nested-dependency address
 lookup)
 **Touches:** new file `internal/skill/compose.go`, `internal/skillinstall/` (task `04`'s
@@ -284,6 +284,71 @@ future task to adopt, rename, or extend rather than silently re-guessing. The on
 question the task file raised — whether a real subagent/fork entry point exists at all — resolved to
 "yes, it exists and is directly usable" after the required grep, so no escalation was warranted per
 the dispatch note's own explicit instruction to only escalate if it turned out not to exist.
+
+## Fix required (fresh reviewer, 2026-08-21 — see `TASKS/ESCALATIONS.md`'s matching entry)
+
+**Bug, reproduced directly: `fork` composition is unreachable under this codebase's own documented
+production default.** `runFork`'s (`internal/skill/compose.go`) own doc comment claims
+`subagent.Service`'s `ModeSync` branch "already blocks `Spawn` until the run is terminal... (bar a
+vanishingly rare race)." This is factually wrong, not a rare race: `internal/subagent/service.go`'s
+`Spawn`, when trust doesn't resolve to `TrustTrusted` and `SubagentApprovalRequired &&
+!DeveloperMode` (the **documented production default** — `SubagentApprovalRequired` defaults to
+`true`), inserts the run as `StatusRequested` and returns *before ever reaching* the `ModeSync`
+blocking-exec branch — a distinct, deterministic control-flow path, not a race window. `runFork`
+has no handling for this: it falls into its generic `!subagent.IsTerminalStatus(run.Status)`
+branch and returns an opaque `fmt.Errorf("... did not terminate synchronously ...")`,
+indistinguishable from any other internal failure, with no reference to the approval envelope
+that was actually emitted and no typed/sentinel error a caller could branch on. Reviewer verified
+this empirically (scratch test, removed after): with `SubagentApprovalRequired: true`, the runner
+is never invoked and the failure is generic.
+
+**Why this matters:** `fork` composition has a passing test today only because that test uses
+`settings: nil` (a documented test-only bypass). Under the real, already-live default
+configuration, every `fork`-composed skill materialization would fail on first contact for any
+non-`TrustTrusted` role — wired, with a passing test, but not actually reachable in production.
+The sibling caller of this exact same `Spawn`/`Status` API
+(`internal/selftools.callSpawnSubagent`/`subagent.EnvelopeFromRun`) already has correct, tested
+handling for precisely this case — `EnvelopeFromRun`'s own doc comment: *"StatusRequested /
+StatusApproved → Success=true... This is NOT a failure — the spawn is gated on human approval...
+Pending-approval IS the design (SubagentApprovalRequired defaults true in production)."*
+
+**What to do:**
+
+1. Correct `runFork`'s doc comment — remove the incorrect "vanishingly rare race" framing; state
+   plainly that an approval-gated spawn returning `StatusRequested`/`StatusApproved` without
+   executing is a real, common, by-design outcome under the production default, not an edge case.
+2. Special-case `run.Status == subagent.StatusRequested` or `subagent.StatusApproved` in `runFork`
+   as a distinguishable outcome from a genuine failure — mirroring `EnvelopeFromRun`'s own "this is
+   NOT a failure" framing, adapted to composition's own constraint (materialization needs real
+   content to splice/fold back *now*; it can't wait for an asynchronous human approval the way a
+   chat-turn reply can). Concretely: introduce a typed error or sentinel (e.g. a
+   `ForkPendingApprovalError{RunID string, EnvelopeInstanceID string}` a caller can `errors.As`
+   against, or an exported `ErrForkPendingApproval` sentinel similar to the existing
+   `ErrForkNotConfigured`) carrying enough identifying information (at minimum the run ID) that a
+   future caller (e.g. task `11`'s `skill_get` self-tool) can build real UX around "this fork
+   composition is waiting on a human" rather than treating it as an opaque internal error. This
+   composition attempt still does not produce materialized content in this case — the point is
+   making the *reason* attributable and actionable, not making pending-approval silently succeed
+   with placeholder text.
+3. Fix the secondary, non-blocking finding in the same function: `forkResultText`'s doc comment
+   claims a genuinely structured `ResultJSON` is "folded back verbatim," but its actual
+   discriminator (any JSON with a non-empty top-level `summary` string) also matches
+   `internal/subagent`'s own documented **partial-capture** shape
+   (`{"partial":true,"summary":...,"envelope":{...},"tools":{...}}`, see `service.go`'s
+   `extractLiftableEnvelopes`) — a subagent run cut mid-task but with real captured state would
+   have its `envelope`/`tools` fields silently dropped, keeping only the truncated summary. Check
+   for the partial-capture shape's own discriminator field (`"partial"`) before falling back to
+   the plain-summary extraction, so a genuinely structured partial result folds back verbatim as
+   the doc comment already claims it should.
+4. Add regression tests: (a) a fork composition against a run that lands in `StatusRequested`
+   (construct the test the same way the reviewer's scratch test did — a real `subagent.Service`
+   with `SubagentApprovalRequired: true` settings, mirroring `internal/selftools`'s own established
+   gated-test pattern) must surface the new distinguishable error/sentinel, not the old generic
+   message; (b) `forkResultText` against a genuine partial-capture-shaped `ResultJSON`
+   (`{"partial":true,"summary":"...","envelope":{...}}`) must return the full JSON verbatim, not
+   just the extracted `summary` string.
+5. Re-verify `go build`/`go vet`/`go test ./internal/skill/... ./internal/skillinstall/... -race
+   -count=1` clean when done.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

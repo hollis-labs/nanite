@@ -1,7 +1,7 @@
 # Rebuild inline deterministic execution (code-fence-aware) + `scripts/` execution
 
 **Phase:** 4 — Materialization pipeline (`TASKS/skills`)
-**Status:** implemented
+**Status:** in-progress — review found a real bug, fix required (see "Fix required" section below)
 **Depends on:** `06`
 **Touches:** new file `internal/skill/exec.go` (the rebuilt replacement for the old,
 fully-deleted `internal/skill/context.go` marker logic — task `01` deleted the old file's
@@ -219,6 +219,50 @@ brief. Flagging in case a batch-wide `go vet` gate elsewhere depends on this bei
 (exit code 0, `internal/skill` package: 24 new tests plus all pre-existing tests green,
 7.52s). `go vet ./...` fails only on the pre-existing, unrelated `internal/service/container.go`
 finding described above — zero new vet findings from this task's own files.
+
+## Fix required (fresh reviewer, 2026-08-21 — see `TASKS/ESCALATIONS.md`'s matching entry)
+
+**Bug, reproduced directly:** the real Agent-Skills-spec (`https://code.claude.com/docs/en/skills`,
+the same page this task's own Work Log already cited for the scripts-execution convention)
+states: *"The inline form is only recognized when `!` appears at the start of a line or
+immediately after whitespace. If `!` follows another character, as in `` KEY=!`cmd` ``, the
+placeholder is left as literal text and the command does not run."* `markerPattern`/
+`FindInlineMarkers` (`internal/skill/exec.go`) apply the marker regex against the whole
+fence-eligible line with no check on what character precedes `!`. Reproduced directly: a body
+containing `` KEY=!`echo should-not-run-per-spec` `` is reported as a real marker and would
+execute — a documentation-adjacent string (very plausible prose, e.g. explaining an env-var
+convention) executing as if it were a real command. This is a second, distinct instance of the
+exact bug class this task exists to eliminate (the first being fence-unawareness, already fixed
+correctly) — this one triggered by mid-line positioning rather than fence context, and not caught
+by the existing suite because every real-marker test case happens to place the marker at
+line-start or immediately after whitespace.
+
+**Everything else in this task is confirmed correct** (fence-awareness including mismatched-fence-
+character and unterminated-fence edge cases, the AST-based no-subprocess-spawn proof, the
+`GatedExecutor` interface design, timeout/concurrency correctness, and `ExecuteScript`'s
+validation order/path-traversal safety) — this is one specific, well-scoped fix, not a rejection
+of the file's overall design.
+
+**What to do:** in `FindInlineMarkers`, before accepting a `markerPattern` match as a real marker,
+require that the character immediately preceding the matched `!` is either absent (the marker is
+at the very start of the line) or whitespace. A match failing this check is not a marker — leave
+it as literal text, exactly as the spec requires. Add a regression test using the spec's own
+example: a body containing `` KEY=!`cmd` `` (no leading whitespace before `!`) must produce zero
+markers; a body containing `` VALUE = !`cmd` `` (whitespace before `!`) must still produce a real
+marker, to confirm the fix doesn't over-correct into rejecting the legitimate "preceded by
+whitespace" case the spec explicitly allows. Also add a case for `!` at the very start of a line
+with no preceding character at all (already covered by existing tests implicitly, but confirm
+explicitly once this check is added, since it's now conditional logic that could regress that
+case).
+
+**Two non-blocking notes from the review, not required to fix as part of this task:** (1) a marker
+whose command text itself contains a raw backtick truncates at the first inner backtick —
+inherited from the old, deleted marker's own regex shape, not a new regression this task
+introduced; (2) if an injected `GatedExecutor` panics rather than hanging, `runGated` currently
+reports a misleading "timed out" error rather than surfacing the panic (bounded correctly either
+way, just a cosmetic mislabel) — optional polish, not required.
+
+Re-verify `go build`/`go vet`/`go test ./internal/skill/... -race -count=1` clean when done.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

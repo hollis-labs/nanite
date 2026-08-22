@@ -1,29 +1,38 @@
 package service
 
-// J7 (CW-20260421-0011): skills/agents DB ingestion.
+// J7 (CW-20260421-0011): agent DB ingestion.
 //
 // This file lives in the service package so it can import both store and
-// agent/skill without creating an import cycle (store → agent/skill →
-// store is the cycle; service sits above both).
+// agent without creating an import cycle (store → agent → store is the
+// cycle; service sits above both).
 //
 // Auto-ingestion is called from NewContainer after Discover() returns.
 // It makes the DB the runtime source of truth: files are the import path,
 // DB is where the runtime reads from.
 //
 // TASKS/phase-1/08 ("Kill the file-reingest-on-boot pattern, in full"):
-// AutoIngestAgents/AutoIngestSkills run unconditionally on every boot, but
-// once a def has already been ingested into a DB row, that row's content is
-// frozen against further boot-time file-parse passes -- the file stays the
-// *first-ingest* path, not a standing sync. The one exception is a genuine
-// provenance transition (existing.Source != the incoming def's Source,
-// e.g. the historical builtin->internal migration flip, CW-20260512-0111)
-// -- that's a deliberate, one-time reclassification, not an ordinary
-// repeated boot, so it still content-syncs once. A real, deliberate
-// re-import (an agent edited through the managed-agent write path,
+// AutoIngestAgents runs unconditionally on every boot, but once a def has
+// already been ingested into a DB row, that row's content is frozen against
+// further boot-time file-parse passes -- the file stays the *first-ingest*
+// path, not a standing sync. The one exception is a genuine provenance
+// transition (existing.Source != the incoming def's Source, e.g. the
+// historical builtin->internal migration flip, CW-20260512-0111) -- that's
+// a deliberate, one-time reclassification, not an ordinary repeated boot,
+// so it still content-syncs once. A real, deliberate re-import (an agent
+// edited through the managed-agent write path,
 // AgentConfigService.Update/writeManaged/SaveManagedAgentProfile, all of
 // which call IngestAgentDefinition directly, not through the boot-time
 // AutoIngestAgents pass) is unaffected by the freeze -- see upsertAgentDef's
 // bootPass parameter.
+//
+// TASKS/skills/01: this file used to carry the skill-side counterpart,
+// AutoIngestSkills/upsertSkillDef/resolveSkillModeIDs, feeding
+// skill.Discover()'s (always-empty) result plus the 8 embedded builtin
+// skills into the DB. Both the discovery/builtin sources and this ingest
+// pass are deleted in full per docs/engineering/architecture/20-skills.md's
+// "Migration: clean slate, no carried-forward content" section — skills are
+// authored packages installed explicitly (TASKS/skills/04-05), not a
+// boot-time file-reingest target.
 
 import (
 	"context"
@@ -33,7 +42,6 @@ import (
 	"time"
 
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
-	skillpkg "github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -150,29 +158,6 @@ func IngestAgentDefinition(st *store.Store, def *agentpkg.Definition) error {
 		return fmt.Errorf("definition slug is required")
 	}
 	return upsertAgentDef(st, def, false /* bootPass: explicit reimport always syncs */)
-}
-
-// AutoIngestSkills upserts all discovered skill definitions into the DB.
-// Called once at container startup, and again every subsequent boot. Errors
-// per-definition are logged and skipped; the function returns the count of
-// successful ingestions.
-//
-// TASKS/phase-1/08: a skill row, once ingested under its current source, is
-// frozen against this boot-time pass -- see upsertSkillDef's freeze for the
-// exact rule (and the provenance-transition exception).
-func AutoIngestSkills(st *store.Store, defs []*skillpkg.Definition) int {
-	count := 0
-	for _, def := range defs {
-		if def == nil || def.Slug == "" {
-			continue
-		}
-		if err := upsertSkillDef(st, def); err != nil {
-			slog.Warn("service: auto-ingest skill", "slug", def.Slug, "err", err)
-			continue
-		}
-		count++
-	}
-	return count
 }
 
 // upsertAgentDef inserts or updates one agent_profiles row from a Definition.
@@ -414,104 +399,9 @@ func seedProcedures(ctx context.Context, st *store.Store, agentID string, procs 
 	}
 }
 
-// upsertSkillDef inserts or updates one skills row from a Definition.
-// Uses ToStoreSkill() for field mapping; sets ingestion metadata.
-//
-// E2 (CW-20260428-0017): translates def.Modes (slugs) → mode IDs and
-// stores them as a JSON array in skills.mode_ids. Unresolved slugs are
-// dropped silently — the file is the input, the DB is the runtime, and
-// a typo upstream should not crash ingestion.
-func upsertSkillDef(st *store.Store, def *skillpkg.Definition) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	source := def.Source
-	if source == "" {
-		source = "user"
-	}
-
-	// ToStoreSkill() maps Definition → store.Skill.
-	sk := def.ToStoreSkill()
-	sk.ModeIDs = resolveSkillModeIDs(st, def.Modes)
-
-	existing, err := st.GetSkillBySlug(def.Slug)
-	if err != nil {
-		return fmt.Errorf("lookup: %w", err)
-	}
-
-	if existing == nil {
-		// DB rows get real UUIDs; strip the deterministic file-ID prefix.
-		sk.ID = ""
-		sk.IsBuiltin = false
-		sk.Source = source
-		sk.ImportedAt = now
-		sk.OriginSystem = "nanite"
-		sk.Format = "markdown"
-		sk.Version = 1
-		if err := st.CreateSkill(sk); err != nil {
-			return fmt.Errorf("create: %w", err)
-		}
-		return nil
-	}
-
-	// TASKS/phase-1/08: once a row already exists under its current source,
-	// AutoIngestSkills' boot-time pass no longer content-syncs it -- the DB
-	// is authoritative, the file is not re-parsed-and-overwritten on every
-	// process start. upsertSkillDef has exactly one caller (AutoIngestSkills
-	// -- confirmed via grep; the REST CRUD path's handleUpdateSkill writes
-	// through st.UpdateSkill directly, never through this function), so
-	// unlike upsertAgentDef there is no separate "explicit reimport" caller
-	// to preserve a resync path for. The one exception is a genuine
-	// provenance transition (the row's source differs from this def's
-	// source) -- a deliberate one-time reclassification, not an ordinary
-	// repeated boot, so it still syncs once and bumps the version if the
-	// content also changed.
-	if existing.Source == source {
-		return nil
-	}
-
-	// Update existing row; bump version when content changes.
-	contentChanged := existing.Prompt != def.Prompt ||
-		existing.ToolBindings != sk.ToolBindings ||
-		existing.ModeIDs != sk.ModeIDs
-	newVersion := existing.Version
-	if contentChanged {
-		newVersion++
-	}
-
-	existing.Name = sk.Name
-	existing.Description = sk.Description
-	existing.Category = sk.Category
-	existing.ToolBindings = sk.ToolBindings
-	existing.Settings = sk.Settings
-	existing.Prompt = def.Prompt
-	existing.ModeIDs = sk.ModeIDs
-	existing.Source = source
-	existing.ImportedAt = now
-	existing.OriginSystem = "nanite"
-	existing.Format = "markdown"
-	existing.Version = newVersion
-
-	if err := st.UpdateSkill(existing); err != nil {
-		return fmt.Errorf("update: %w", err)
-	}
-	return nil
-}
-
-// resolveSkillModeIDs marshals a skill definition's frontmatter `modes:`
-// slugs into the JSON-array string written to skills.mode_ids. Empty input
-// → "[]" (back-compat: skill is available in every mode).
-//
-// Phase 0 item 21 ("Cut Modes, in full") deleted the `modes` catalog table
-// and store.GetModeBySlug — this function used to resolve each slug against
-// that table and store the resolved row ID. There is no more catalog to
-// resolve against, so the slugs are stored directly as their own identity,
-// unresolved.
-//
-// Phase 0 item 22 (decision log §11): skills.mode_ids' other reader —
-// internal/skillbroker's mode-bound relevance bonus, which only ever
-// checked whether the column was non-empty, never a specific ID — is
-// retired along with the rest of the Skill Broker. This write path is
-// kept as-is; the column just has no active reader today.
-func resolveSkillModeIDs(_ *store.Store, slugs []string) string {
-	return store.MarshalSkillModeIDs(slugs)
-}
+// TASKS/skills/01: upsertSkillDef and resolveSkillModeIDs (the
+// AutoIngestSkills-only helpers that upserted a skills row from a
+// file-parsed skill.Definition) are deleted along with AutoIngestSkills
+// itself — see docs/engineering/architecture/20-skills.md's "Migration:
+// clean slate, no carried-forward content" section. Nothing else called
+// either function (confirmed via grep before deletion).

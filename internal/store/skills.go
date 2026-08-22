@@ -248,78 +248,10 @@ func (s *Store) RemoveSkillFromAgent(agentID, skillID string) error {
 	return nil
 }
 
-// BuiltinSkills defines the default skills matching existing tools.
-var BuiltinSkills = []Skill{
-	{
-		Name:         "Dev Read",
-		Slug:         "dev-read",
-		Description:  "Read file contents with optional line range",
-		Category:     "dev",
-		ToolBindings: `["dev_read"]`,
-	},
-	{
-		Name:         "Dev Write",
-		Slug:         "dev-write",
-		Description:  "Write content to a file",
-		Category:     "dev",
-		ToolBindings: `["dev_write"]`,
-	},
-	{
-		Name:         "Dev Grep",
-		Slug:         "dev-grep",
-		Description:  "Search files matching a regex pattern",
-		Category:     "dev",
-		ToolBindings: `["dev_grep"]`,
-	},
-	{
-		Name:         "Dev Bash",
-		Slug:         "dev-bash",
-		Description:  "Execute shell commands",
-		Category:     "dev",
-		ToolBindings: `["dev_bash"]`,
-	},
-	{
-		Name:         "Dev Glob",
-		Slug:         "dev-glob",
-		Description:  "Find files matching a glob pattern",
-		Category:     "dev",
-		ToolBindings: `["dev_glob"]`,
-	},
-	{
-		Name:         "Dev Edit",
-		Slug:         "dev-edit",
-		Description:  "Edit a file by replacing a string",
-		Category:     "dev",
-		ToolBindings: `["dev_edit"]`,
-	},
-	{
-		Name:         "Math Evaluate",
-		Slug:         "math-evaluate",
-		Description:  "Evaluate arithmetic expressions",
-		Category:     "general",
-		ToolBindings: `["math_eval"]`,
-	},
-	{
-		Name:         "Encoding Convert",
-		Slug:         "encoding-convert",
-		Description:  "Base64, URL encoding/decoding, and hashing",
-		Category:     "general",
-		ToolBindings: `["base64_encode","base64_decode","url_encode","url_decode","hash"]`,
-	},
-}
-
-// SeedBuiltinSkills inserts built-in skills if they don't exist.
-func (s *Store) SeedBuiltinSkills() error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	for _, sk := range BuiltinSkills {
-		_, err := s.DB.Exec(
-			`INSERT OR IGNORE INTO skills (id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, '{}', 1, '{}', ?, ?)`,
-			uuid.New().String(), sk.Name, sk.Slug, sk.Description, sk.Category, sk.ToolBindings, now, now,
-		)
-		if err != nil {
-			return fmt.Errorf("seed skill %s: %w", sk.Slug, err)
-		}
-	}
-	return nil
-}
+// TASKS/skills/01: BuiltinSkills (the DB-seed-only list of the 8 default
+// skills) and SeedBuiltinSkills (its inserter, confirmed via grep to have no
+// caller anywhere) are deleted in full — see
+// docs/engineering/architecture/20-skills.md's "Migration: clean slate, no
+// carried-forward content" section. This was a second, independent list of
+// the same 8 skills already embedded as .md files under
+// internal/skill/builtin/ (also deleted).

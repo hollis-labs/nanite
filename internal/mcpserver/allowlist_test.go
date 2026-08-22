@@ -83,7 +83,7 @@ func TestToolAllowlist_DiscoveryIsRestricted(t *testing.T) {
 	// Spot-check a couple of tools that exist on the unrestricted catalog
 	// (see TestToolAllowlist_Unrestricted_SeesFullCatalog) but must be
 	// absent here.
-	for _, name := range []string{"todo_create", "dev_read", "skill_create"} {
+	for _, name := range []string{"todo_create", "dev_read", "agent_create"} {
 		if got[name] {
 			t.Errorf("out-of-scope tool %q leaked into the restricted discovery list", name)
 		}
@@ -149,6 +149,14 @@ func TestToolAllowlist_DispatchIsRestricted(t *testing.T) {
 // is unset) must keep seeing and dispatching the full self+dev catalog
 // exactly as before CW-20260814-0006. This guards the ticket's explicit
 // non-goal: no behavior change for Claude/Codex/Opencode.
+//
+// TASKS/skills/01: the example self-tool name used here (and in the
+// restricted-listing spot-check above) was "skill_create" — deleted along
+// with the rest of the ad-hoc skill-authoring self-tools (see
+// docs/engineering/architecture/20-skills.md's "Scope" section). Swapped for
+// "agent_create", another still-live self-tool with the same
+// present-in-unrestricted/absent-from-a-narrow-allowlist shape this test
+// needs.
 func TestToolAllowlist_Unrestricted_SeesFullCatalog(t *testing.T) {
 	srv := newAllowlistedTestServer(t, nil)
 	cs := connectClient(t, srv)
@@ -161,7 +169,7 @@ func TestToolAllowlist_Unrestricted_SeesFullCatalog(t *testing.T) {
 	for _, tool := range res.Tools {
 		got[tool.Name] = true
 	}
-	for _, name := range []string{"todo_create", "dev_read", "skill_create", "workflow_execute_llm_step"} {
+	for _, name := range []string{"todo_create", "dev_read", "agent_create", "workflow_execute_llm_step"} {
 		if !got[name] {
 			t.Errorf("expected unrestricted server to list %q, it did not; got %v", name, toolNames(res.Tools))
 		}

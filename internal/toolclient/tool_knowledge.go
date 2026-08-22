@@ -12,8 +12,8 @@ type ToolEntry struct {
 	Name             string   `json:"name"`
 	Category         string   `json:"category"`
 	ShortDescription string   `json:"short_description"` // max 80 chars
-	Server           string   `json:"server"`             // MCP server name (hadron, conduit, etc.)
-	UseCases         []string `json:"use_cases"`          // 2-3 brief use-case phrases
+	Server           string   `json:"server"`            // MCP server name (hadron, conduit, etc.)
+	UseCases         []string `json:"use_cases"`         // 2-3 brief use-case phrases
 }
 
 // ToolKnowledge is a curated catalog of available tools organized by category.
@@ -373,13 +373,11 @@ func DefaultToolKnowledge() *ToolKnowledge {
 					Server:           "self",
 					UseCases:         []string{"builder flow", "step-by-step form", "guided input"},
 				},
-				{
-					Name:             "skill_create",
-					Category:         "general",
-					ShortDescription: "Create a new skill binding tools to a category",
-					Server:           "self",
-					UseCases:         []string{"new skill", "tool binding", "skill creation"},
-				},
+				// TASKS/skills/01: skill_create is deleted in full (see
+				// docs/engineering/architecture/20-skills.md's "Scope: skills
+				// are authored packages only" section) — dropped from this
+				// knowledge base too, not just left as a recommendation for a
+				// tool that would now fail with "unknown tool" at dispatch.
 				{
 					Name:             "agent_create",
 					Category:         "general",

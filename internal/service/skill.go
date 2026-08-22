@@ -36,9 +36,16 @@ type skillServiceImpl struct {
 }
 
 // SkillServiceConfig holds dependencies for constructing a SkillService.
+//
+// TASKS/skills/01: FileSkills' former source (skill.Discover() + the 8
+// embedded builtin skills) is cut in full — see
+// docs/engineering/architecture/20-skills.md's "Migration" section. The
+// container currently always passes nil here; a future non-file source
+// (the install/sync pipeline, TASKS/skills/04-05) is a candidate to feed it
+// again, out of this task's scope.
 type SkillServiceConfig struct {
 	Skills     SkillStore
-	FileSkills []*skill.Definition // from skill.Discover() + builtin
+	FileSkills []*skill.Definition
 }
 
 // NewSkillService creates a SkillService from its required dependencies.

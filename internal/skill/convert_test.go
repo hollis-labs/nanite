@@ -15,7 +15,6 @@ func TestToStoreSkill(t *testing.T) {
 		Effort:       "low",
 		Context:      "fork",
 		Tags:         []string{"code", "lint"},
-		BrokerHints:  []string{"code"},
 		Source:       "project",
 		SourceRef:    "/path/to/go-lint.md",
 	}

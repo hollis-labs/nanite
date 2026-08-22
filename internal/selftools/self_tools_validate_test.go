@@ -220,18 +220,25 @@ func TestValidate_ShowCard_UnknownEnvelopeType(t *testing.T) {
 // TestValidate_NonEnvelopeSelfTool exercises the non-envelope path: a
 // plain self-tool's input schema is checked against the args.
 //
-// skill_create has required {name, slug, description}; an empty
-// args object should yield three missing-property errors.
+// agent_create has required {name, slug, system_prompt}; an empty args
+// object should yield three missing-property errors.
+//
+// TASKS/skills/01: this used to exercise skill_create (also required
+// {name, slug, description}) — skill_create is deleted in full per
+// docs/engineering/architecture/20-skills.md's "Scope: skills are authored
+// packages only" section, so this generic-validation-path coverage moved to
+// agent_create, another still-live non-envelope self-tool with the same
+// three-required-fields shape.
 func TestValidate_NonEnvelopeSelfTool(t *testing.T) {
 	st := newSelfTools(t)
 	resp := callValidateForTest(t, st, map[string]any{
-		"tool_name": "skill_create",
+		"tool_name": "agent_create",
 		"args":      map[string]any{},
 	})
 	if resp.Valid {
 		t.Fatalf("expected valid=false for empty args")
 	}
-	missing := map[string]bool{"name": false, "slug": false, "description": false}
+	missing := map[string]bool{"name": false, "slug": false, "system_prompt": false}
 	for _, e := range resp.Errors {
 		for k := range missing {
 			if strings.Contains(e.Reason, k) {
@@ -251,11 +258,11 @@ func TestValidate_NonEnvelopeSelfTool(t *testing.T) {
 func TestValidate_NonEnvelopeSelfTool_HappyPath(t *testing.T) {
 	st := newSelfTools(t)
 	resp := callValidateForTest(t, st, map[string]any{
-		"tool_name": "skill_create",
+		"tool_name": "agent_create",
 		"args": map[string]any{
-			"name":        "X",
-			"slug":        "x",
-			"description": "y",
+			"name":          "X",
+			"slug":          "x",
+			"system_prompt": "y",
 		},
 	})
 	if !resp.Valid {

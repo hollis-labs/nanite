@@ -1,6 +1,11 @@
 package service
 
-// J7 (CW-20260421-0011): tests for the skills/agents DB ingestion pipeline.
+// J7 (CW-20260421-0011): tests for the agent DB ingestion pipeline.
+//
+// TASKS/skills/01: this file used to also cover AutoIngestSkills/
+// upsertSkillDef — deleted along with those functions (see
+// docs/engineering/architecture/20-skills.md's "Migration" section), so the
+// internal/skill import is gone too.
 
 import (
 	"bytes"
@@ -11,7 +16,6 @@ import (
 	"testing"
 
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
-	skillpkg "github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -25,159 +29,12 @@ func newIngestTestStore(t *testing.T) *store.Store {
 	return s
 }
 
-// TestAutoIngestSkills_InsertNewSkill verifies that a previously unknown skill
-// is inserted into the DB with the correct metadata columns.
-func TestAutoIngestSkills_InsertNewSkill(t *testing.T) {
-	st := newIngestTestStore(t)
-
-	defs := []*skillpkg.Definition{
-		{
-			Name:        "My Skill",
-			Slug:        "my-skill",
-			Description: "Does something useful",
-			Source:      "user",
-			SourceRef:   "/home/user/.nanite/skills/my-skill.md",
-			Prompt:      "## My Skill\nDo the thing.",
-		},
-	}
-
-	n := AutoIngestSkills(st, defs)
-	if n != 1 {
-		t.Fatalf("expected 1 ingested skill, got %d", n)
-	}
-
-	sk, err := st.GetSkillBySlug("my-skill")
-	if err != nil {
-		t.Fatalf("GetSkillBySlug: %v", err)
-	}
-	if sk == nil {
-		t.Fatal("expected skill in DB, got nil")
-	}
-	if sk.Source != "user" {
-		t.Errorf("Source: got %q, want %q", sk.Source, "user")
-	}
-	if sk.ImportedAt == "" {
-		t.Error("ImportedAt should be set after ingest")
-	}
-	if sk.OriginSystem != "nanite" {
-		t.Errorf("OriginSystem: got %q, want %q", sk.OriginSystem, "nanite")
-	}
-	if sk.Format != "markdown" {
-		t.Errorf("Format: got %q, want %q", sk.Format, "markdown")
-	}
-	if sk.Version != 1 {
-		t.Errorf("Version: got %d, want 1", sk.Version)
-	}
-	if sk.IsBuiltin {
-		t.Error("file-dropped skill should not be marked is_builtin")
-	}
-}
-
-// TestAutoIngestSkills_IdempotentReingest verifies that re-ingesting the same
-// skill without content changes is a no-op (version stays at 1).
-func TestAutoIngestSkills_IdempotentReingest(t *testing.T) {
-	st := newIngestTestStore(t)
-
-	def := &skillpkg.Definition{
-		Name:   "Stable Skill",
-		Slug:   "stable-skill",
-		Source: "user",
-		Prompt: "same content",
-	}
-
-	AutoIngestSkills(st, []*skillpkg.Definition{def})
-	AutoIngestSkills(st, []*skillpkg.Definition{def}) // re-ingest same content
-
-	sk, err := st.GetSkillBySlug("stable-skill")
-	if err != nil || sk == nil {
-		t.Fatalf("GetSkillBySlug: %v, %v", sk, err)
-	}
-	if sk.Version != 1 {
-		t.Errorf("Version should stay 1 on no-op reingest, got %d", sk.Version)
-	}
-}
-
-// TestAutoIngestSkills_ContentChangeDoesNotOverwriteExistingRow is
-// TASKS/phase-1/08's core regression for skills: once a row has been
-// ingested via AutoIngestSkills' boot-time pass, a subsequent boot's
-// re-parse of the same (now-changed) file must NOT overwrite the DB row's
-// content or bump its version -- the file is the first-ingest path, not a
-// standing sync. (Before this fix, re-ingesting with a changed prompt under
-// the same source bumped the version and overwrote the content on every
-// boot -- see this test's prior name/assertions,
-// TestAutoIngestSkills_VersionBumpsOnContentChange.)
-func TestAutoIngestSkills_ContentChangeDoesNotOverwriteExistingRow(t *testing.T) {
-	st := newIngestTestStore(t)
-
-	def := &skillpkg.Definition{
-		Name:   "Evolving Skill",
-		Slug:   "evolving-skill",
-		Source: "user",
-		Prompt: "v1 content",
-	}
-	AutoIngestSkills(st, []*skillpkg.Definition{def})
-
-	def.Prompt = "v2 content — changed"
-	AutoIngestSkills(st, []*skillpkg.Definition{def})
-
-	sk, err := st.GetSkillBySlug("evolving-skill")
-	if err != nil || sk == nil {
-		t.Fatalf("GetSkillBySlug: %v, %v", sk, err)
-	}
-	if sk.Version != 1 {
-		t.Errorf("Version should stay frozen at 1 on boot-time reingest, got %d", sk.Version)
-	}
-	if sk.Prompt != "v1 content" {
-		t.Errorf("Prompt: got %q, want frozen v1 content (boot-time reingest must not overwrite an existing row)", sk.Prompt)
-	}
-}
-
-// TestAutoIngestSkills_SourceChangeStillSyncsOnce is the provenance-
-// transition exception to the freeze above: if a skill's source genuinely
-// changes between boots (e.g. the file relocated from one discovery tier to
-// another), that's a deliberate one-time reclassification, not an ordinary
-// repeated boot -- the content sync (and version bump, if content also
-// changed) still happens once.
-func TestAutoIngestSkills_SourceChangeStillSyncsOnce(t *testing.T) {
-	st := newIngestTestStore(t)
-
-	def := &skillpkg.Definition{
-		Name:   "Relocating Skill",
-		Slug:   "relocating-skill",
-		Source: "user",
-		Prompt: "v1 content",
-	}
-	AutoIngestSkills(st, []*skillpkg.Definition{def})
-
-	def.Source = "project"
-	def.Prompt = "v2 content — relocated"
-	AutoIngestSkills(st, []*skillpkg.Definition{def})
-
-	sk, err := st.GetSkillBySlug("relocating-skill")
-	if err != nil || sk == nil {
-		t.Fatalf("GetSkillBySlug: %v, %v", sk, err)
-	}
-	if sk.Source != "project" {
-		t.Errorf("Source: got %q, want %q after the provenance transition", sk.Source, "project")
-	}
-	if sk.Prompt != "v2 content — relocated" {
-		t.Errorf("Prompt: got %q, want the synced v2 content", sk.Prompt)
-	}
-	if sk.Version != 2 {
-		t.Errorf("Version should bump once on the provenance-transition sync, got %d", sk.Version)
-	}
-
-	// A further boot pass under the new (now-stable) source freezes again.
-	def.Prompt = "v3 content — should be ignored"
-	AutoIngestSkills(st, []*skillpkg.Definition{def})
-	sk2, err := st.GetSkillBySlug("relocating-skill")
-	if err != nil || sk2 == nil {
-		t.Fatalf("GetSkillBySlug (2nd check): %v, %v", sk2, err)
-	}
-	if sk2.Prompt != "v2 content — relocated" {
-		t.Errorf("Prompt after re-freeze: got %q, want frozen v2 content", sk2.Prompt)
-	}
-}
+// TASKS/skills/01: every AutoIngestSkills/upsertSkillDef test formerly here
+// (insert, idempotent reingest, content-freeze, provenance-transition sync)
+// is deleted along with the functions themselves — see
+// docs/engineering/architecture/20-skills.md's "Migration: clean slate, no
+// carried-forward content" section. There is no more file-based skill
+// ingestion pass to regression-test.
 
 // TestAutoIngestAgents_InsertNewAgent verifies that a previously unknown agent
 // is inserted into the DB with the correct metadata and H1 trust tier.
@@ -775,15 +632,20 @@ func TestAutoIngestAgents_NewInternalDefStillIngestedAlongsideFrozenRow(t *testi
 // internal/ found store.CreateRole/UpdateRole called only from
 // internal/api/roles.go's REST handlers; no boot-time or file-parse call
 // site references either function) and reinforced here at the ingest-pass
-// level: running AutoIngestAgents/AutoIngestSkills must never create,
-// alter, or seed a roles row.
+// level: running AutoIngestAgents must never create, alter, or seed a roles
+// row.
+//
+// TASKS/skills/01: this test used to also run AutoIngestSkills over a
+// skillDefs slice as a second negative check -- that function no longer
+// exists (skill file-reingest is cut in full), so the roles-table assertion
+// now covers AutoIngestAgents alone.
 func TestAutoIngestAgents_RolesTableUntouched(t *testing.T) {
 	st := newIngestTestStore(t)
 
 	// The only supported write path for roles is store.CreateRole (the REST
-	// API) -- seed one directly so the boot passes below can be proven not
-	// to touch it, in either direction (no accidental creation of a second
-	// row, no accidental mutation of this one).
+	// API) -- seed one directly so the boot pass below can be proven not to
+	// touch it, in either direction (no accidental creation of a second row,
+	// no accidental mutation of this one).
 	role := &store.Role{Slug: "sme", Name: "Subject Matter Expert", SystemPrompt: "v1"}
 	if err := st.CreateRole(role); err != nil {
 		t.Fatalf("CreateRole: %v", err)
@@ -792,25 +654,21 @@ func TestAutoIngestAgents_RolesTableUntouched(t *testing.T) {
 	agentDefs := []*agentpkg.Definition{
 		{Slug: "some-agent", Name: "Some Agent", SystemPrompt: "x", Source: "project"},
 	}
-	skillDefs := []*skillpkg.Definition{
-		{Slug: "some-skill", Name: "Some Skill", Source: "user", Prompt: "x"},
-	}
 	AutoIngestAgents(st, agentDefs, nil)
-	AutoIngestSkills(st, skillDefs)
 
 	roles, err := st.ListRoles()
 	if err != nil {
 		t.Fatalf("ListRoles: %v", err)
 	}
 	if len(roles) != 1 {
-		t.Fatalf("expected exactly the 1 directly-seeded role to remain, got %d -- AutoIngestAgents/AutoIngestSkills must never write to roles", len(roles))
+		t.Fatalf("expected exactly the 1 directly-seeded role to remain, got %d -- AutoIngestAgents must never write to roles", len(roles))
 	}
 	got, err := st.GetRoleBySlug("sme")
 	if err != nil || got == nil {
 		t.Fatalf("GetRoleBySlug: %v, %v", got, err)
 	}
 	if got.SystemPrompt != "v1" {
-		t.Errorf("SystemPrompt: got %q, want unchanged %q (AutoIngestAgents/AutoIngestSkills must never write to roles)", got.SystemPrompt, "v1")
+		t.Errorf("SystemPrompt: got %q, want unchanged %q (AutoIngestAgents must never write to roles)", got.SystemPrompt, "v1")
 	}
 }
 
@@ -895,16 +753,6 @@ func TestAutoIngestAgents_SourceFlipFromBuiltinToInternal(t *testing.T) {
 	}
 }
 
-// TestAutoIngestSkills_EmptyDefsIsNoOp verifies that passing an empty def slice
-// returns 0 and doesn't error.
-func TestAutoIngestSkills_EmptyDefsIsNoOp(t *testing.T) {
-	st := newIngestTestStore(t)
-	n := AutoIngestSkills(st, nil)
-	if n != 0 {
-		t.Errorf("expected 0 for nil input, got %d", n)
-	}
-}
-
 // TestAutoIngestAgents_EmptyDefsIsNoOp verifies that passing an empty def slice
 // returns 0 and doesn't error.
 func TestAutoIngestAgents_EmptyDefsIsNoOp(t *testing.T) {
@@ -915,61 +763,12 @@ func TestAutoIngestAgents_EmptyDefsIsNoOp(t *testing.T) {
 	}
 }
 
-// TestAutoIngestSkills_StoresModeSlugsUnresolved is the E2 (CW-20260428-0017)
-// happy-path, updated for Phase 0 item 21 ("Cut Modes, in full"): a skill
-// frontmatter with `modes: [plan, work]` is ingested with those slugs
-// serialized directly into mode_ids. Before the cut, resolveSkillModeIDs
-// resolved each slug against the now-deleted `modes` catalog table (dropping
-// unresolved slugs); there is no more catalog to resolve against, so the
-// slugs are now stored as their own identity, unresolved — see
-// resolveSkillModeIDs's doc comment in ingest.go.
-func TestAutoIngestSkills_StoresModeSlugsUnresolved(t *testing.T) {
-	st := newIngestTestStore(t)
-
-	defs := []*skillpkg.Definition{
-		{
-			Name:        "Plan-Bound Skill",
-			Slug:        "plan-bound",
-			Description: "only in plan",
-			Source:      "user",
-			Modes:       []string{"plan", "nonexistent"},
-		},
-		{
-			Name:   "Universal Skill",
-			Slug:   "universal-skill",
-			Source: "user",
-		},
-	}
-	if n := AutoIngestSkills(st, defs); n != 2 {
-		t.Fatalf("expected 2 ingested, got %d", n)
-	}
-
-	planSkill, err := st.GetSkillBySlug("plan-bound")
-	if err != nil {
-		t.Fatalf("GetSkillBySlug plan-bound: %v", err)
-	}
-	if planSkill == nil {
-		t.Fatal("plan-bound not in DB")
-	}
-	gotIDs := store.ParseSkillModeIDs(planSkill.ModeIDs)
-	wantIDs := []string{"plan", "nonexistent"}
-	if len(gotIDs) != len(wantIDs) {
-		t.Fatalf("plan-bound mode_ids: got %v, want %v", gotIDs, wantIDs)
-	}
-	for i, want := range wantIDs {
-		if gotIDs[i] != want {
-			t.Errorf("plan-bound mode_ids[%d] = %q, want %q", i, gotIDs[i], want)
-		}
-	}
-
-	universal, err := st.GetSkillBySlug("universal-skill")
-	if err != nil {
-		t.Fatalf("GetSkillBySlug universal-skill: %v", err)
-	}
-	if universal == nil {
-		t.Fatal("universal-skill not in DB")
-	}
-	if universal.ModeIDs != "[]" {
-		t.Errorf("universal mode_ids should be empty, got %q", universal.ModeIDs)
-	}
-}
+// TASKS/skills/01: TestAutoIngestSkills_EmptyDefsIsNoOp and
+// TestAutoIngestSkills_StoresModeSlugsUnresolved (the E2/CW-20260428-0017
+// mode-slug-storage regression) are deleted along with AutoIngestSkills
+// itself — see docs/engineering/architecture/20-skills.md's "Migration"
+// section. store.ParseSkillModeIDs/MarshalSkillModeIDs/SkillMatchesMode are
+// untouched (out of this task's scope — skill_mode_filter.go's own doc
+// comment already flags them as surviving, independently-useful primitives
+// with no other production caller today); only the AutoIngestSkills-side
+// writer of skills.mode_ids is gone.

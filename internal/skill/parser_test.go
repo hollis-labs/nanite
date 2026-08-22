@@ -17,7 +17,6 @@ model: haiku
 effort: low
 context: fork
 tags: [code, lint, go]
-broker-hints: [code]
 ---
 
 Run golangci-lint on the specified package.
@@ -56,9 +55,6 @@ Current files:
 	}
 	if len(def.Tags) != 3 || def.Tags[2] != "go" {
 		t.Errorf("Tags = %v", def.Tags)
-	}
-	if len(def.BrokerHints) != 1 || def.BrokerHints[0] != "code" {
-		t.Errorf("BrokerHints = %v", def.BrokerHints)
 	}
 	if def.Prompt == "" {
 		t.Error("Prompt should not be empty")

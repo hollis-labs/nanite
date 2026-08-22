@@ -63,25 +63,6 @@ func selfToolDefinitions() []mcp.Tool {
 		// 08-agent-self-tool.md).
 		scheduleCreateToolDefinition(),
 		{
-			Name: "skill_create",
-			Description: "Create a new skill that binds a set of tool names to a named category.\n\n" +
-				"**When to use:** When the user asks to define a new skill, workflow, or named capability that groups related tools.\n\n" +
-				"**When NOT to use:** Do not create duplicate slugs — use skill_update to modify an existing one.\n\n" +
-				"**Output shape:** \"Created skill <name> (<id>)\" on success. Use skill_list to verify afterward.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":          map[string]any{"type": "string", "description": "Human-readable skill name"},
-					"slug":          map[string]any{"type": "string", "description": "URL-safe slug (unique)"},
-					"description":   map[string]any{"type": "string", "description": "What this skill does"},
-					"category":      map[string]any{"type": "string", "description": "Category (e.g. dev, general, custom)"},
-					"tool_bindings": map[string]any{"type": "string", "description": "JSON array of tool names this skill binds"},
-					"input_schema":  map[string]any{"type": "string", "description": "JSON schema for skill inputs (optional)"},
-				},
-				"required": []string{"name", "slug", "description"},
-			},
-		},
-		{
 			Name: "skill_list",
 			// Description is the canonical base string declared once in
 			// self_tools_describer.go (skillListBaseDescription). The
@@ -96,26 +77,6 @@ func selfToolDefinitions() []mcp.Tool {
 				"properties": map[string]any{
 					"category": map[string]any{"type": "string", "description": "Filter by category (optional)"},
 				},
-			},
-		},
-		{
-			Name: "skill_update",
-			Description: "Update an existing skill by ID. Only the fields you provide are changed (partial update).\n\n" +
-				"**When to use:** When the user asks to rename, re-categorize, or change the tool bindings of an existing skill.\n\n" +
-				"**Required context:** You need the skill ID — get it from skill_list first if you only have the name or slug.\n\n" +
-				"**Output shape:** \"Updated skill <id>\" on success.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id":            map[string]any{"type": "string", "description": "Skill ID to update"},
-					"name":          map[string]any{"type": "string", "description": "New name (optional)"},
-					"slug":          map[string]any{"type": "string", "description": "New slug (optional)"},
-					"description":   map[string]any{"type": "string", "description": "New description (optional)"},
-					"category":      map[string]any{"type": "string", "description": "New category (optional)"},
-					"tool_bindings": map[string]any{"type": "string", "description": "New tool bindings JSON array (optional)"},
-					"input_schema":  map[string]any{"type": "string", "description": "New input schema JSON (optional)"},
-				},
-				"required": []string{"id"},
 			},
 		},
 		{
@@ -295,7 +256,7 @@ func selfToolDefinitions() []mcp.Tool {
 			Name: "builder_start",
 			Description: "Start a step-by-step creation wizard for a new agent or skill.\n\n" +
 				"**When to use:** When the user wants to interactively create a new agent or skill and you want to gather the required fields one step at a time.\n\n" +
-				"**When NOT to use:** NOT for asking arbitrary questions — this builder only drives entity creation (agent / skill). Do not call this for read or update operations. If you already have all required fields, use agent_create or skill_create directly.\n\n" +
+				"**When NOT to use:** NOT for asking arbitrary questions — this builder only drives entity creation (agent / skill). Do not call this for read or update operations. If you already have all required fields for an agent, use agent_create directly.\n\n" +
 				"**Required context:** You MUST supply builder_name. Omit it only to list available builder types.\n\n" +
 				"**Output shape:** Returns the first step prompt. Pass the response to builder_step to advance through subsequent steps.\n\n" +
 				"**Chaining:** Always follow with builder_step for each subsequent step until the builder signals completion.",

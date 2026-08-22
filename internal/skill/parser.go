@@ -22,11 +22,10 @@ type Definition struct {
 
 	// Behavior
 	ArgumentHint string   `yaml:"argument-hint"` // hint text for argument input
-	AllowedTools []string `yaml:"allowed-tools"`  // tool allowlist during execution
-	Model        string   `yaml:"model"`          // preferred model override
-	Effort       string   `yaml:"effort"`         // low, medium, high
-	Context      string   `yaml:"context"`        // "inline" (default) or "fork"
-	BrokerHints  []string `yaml:"broker-hints"`   // Nanite extension: hints for broker mode
+	AllowedTools []string `yaml:"allowed-tools"` // tool allowlist during execution
+	Model        string   `yaml:"model"`         // preferred model override
+	Effort       string   `yaml:"effort"`        // low, medium, high
+	Context      string   `yaml:"context"`       // "inline" (default) or "fork"
 	// E2 (CW-20260428-0017): mode binding. Slugs of modes the skill is bound to.
 	// Empty / missing = available in every mode (back-compat). Slugs are
 	// resolved → mode IDs at ingest time by service/ingest.go.

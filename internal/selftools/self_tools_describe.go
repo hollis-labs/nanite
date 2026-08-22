@@ -119,9 +119,12 @@ var describeRelations = map[string]struct {
 	"plan_delete": {
 		relatedTools: []string{"plan_list"},
 	},
-	"skill_create":  {relatedTools: []string{"skill_list", "skill_update", "skill_delete"}},
-	"skill_list":    {relatedTools: []string{"skill_create", "skill_update"}},
-	"skill_update":  {relatedTools: []string{"skill_list", "skill_delete"}},
+	// TASKS/skills/01: skill_create/skill_update are cut in full (see
+	// docs/engineering/architecture/20-skills.md's "Scope: skills are
+	// authored packages only" section) — dropped from both sides of this
+	// map, not just left as dangling relatedTools entries pointing at
+	// tools that no longer exist.
+	"skill_list":    {relatedTools: []string{"skill_delete"}},
 	"skill_delete":  {relatedTools: []string{"skill_list"}},
 	"agent_create":  {relatedTools: []string{"agent_list", "agent_update"}},
 	"agent_list":    {relatedTools: []string{"agent_create", "agent_update"}},

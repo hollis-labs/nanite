@@ -48,7 +48,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/skill"
-	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/task"
@@ -550,33 +549,16 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Warn("service container: ensure skill home dirs", "err", err)
 	}
 
-	// Discover skill definitions. TASKS/phase-1/08 cut every file-based
-	// discovery tier (project, user, .claude/skills/, plugin) in full;
-	// skill.Discover always returns empty now, kept as a call site for
-	// symmetry with agent discovery in case a real non-file source is added
-	// later.
-	skillDefs, err := skill.Discover(skill.DiscoverOptions{})
-	if err != nil {
-		slog.Warn("service container: skill discovery", "err", err)
-	}
-	// Append built-in skills as lowest priority.
-	if builtinDefs, bErr := skillbuiltin.BuiltinSkills(); bErr == nil {
-		skillDefs = append(skillDefs, builtinDefs...)
-	} else {
-		slog.Warn("service container: built-in skills", "err", bErr)
-	}
-	slog.Info("service container: discovered file-based skills", "count", len(skillDefs))
-
-	// J7 (CW-20260421-0011): auto-ingest discovered skill definitions into DB.
-	// Skills from ~/.nanite/skills/ (Source="user") land as non-builtin rows.
-	// Errors per-def are logged non-fatal via AutoIngestSkills.
-	if n := AutoIngestSkills(cfg.Store, skillDefs); n > 0 {
-		slog.Info("service container: auto-ingested skills into DB", "count", n)
-	}
-
+	// TASKS/skills/01: file-based skill discovery, boot-time builtin loading,
+	// and the AutoIngestSkills boot pass are all cut in full — see
+	// docs/engineering/architecture/20-skills.md's "Migration: clean slate,
+	// no carried-forward content" section. skill.Discover/DiscoverOptions and
+	// internal/skill/builtin no longer exist; there is no file-based skill
+	// source to feed SkillServiceConfig.FileSkills until the install/sync
+	// pipeline (TASKS/skills/04-05) lands.
 	skills := NewSkillService(SkillServiceConfig{
 		Skills:     cfg.Store,
-		FileSkills: skillDefs,
+		FileSkills: nil,
 	})
 
 	// Internal todo/plan service (SQLite-backed, always available).
@@ -1360,62 +1342,62 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	slog.Info("service container: all services wired")
 
 	return &Container{
-		Sessions:               sessions,
-		Agents:                 agents,
-		Skills:                 skills,
-		Tools:                  tools,
-		Chat:                   chatSvc,
-		Context:                ctxService,
-		Streams:                streams,
-		Events:                 events,
-		Providers:              cfg.Providers,
-		Commands:               commands,
-		Plugins:                cfg.Plugins,
-		MCP:                    cfg.MCP,
-		Messaging:              messagingSvc,
-		Subagent:               subagentSvc,
-		Background:             backgroundSvc,
-		Elicitation:            elicitSvc,
-		Todos:                  todos,
-		Conduit:                conduitInstance,
-		Memory:                 memorySvc,
-		EmbeddingStatus:        embeddingStatus,
-		EmbeddingProvider:      embeddingProviderID,
-		EmbeddingModel:         embeddingModel,
-		Coord:                  cfg.CoordStore,
-		DurableAgents:          durableAgents,
-		DurableWake:            durableWake,
-		DurableAgentRecipes:    durableAgentRecipes,
-		Tasks:                  tasks,
-		Workers:                workers,
-		Worktrees:              cfg.Worktrees,
-		Store:                  cfg.Store,
-		ToolClient:             cfg.ToolClient,
-		ProcessTracker:         processTracker,
-		Orchestrator:           orchestrator,
-		Activity:               cfg.Activity,
-		UtilityProvider:        cfg.UtilityProvider,
-		UtilityModel:           cfg.UtilityModel,
-		ModelSelector:          modelSelector,
-		Permissions:            permissions,
-		PathGrants:             pathGrants,
-		AdapterRegistry:        adapterRegistry,
-		ProviderCatalog:        cfg.ProviderCatalog,
-		Recovery:               recoveryBrokerOrNil(agentDeps),
-		Inspector:              inspectorSvc,
-		LoopDetector:           loopDetector,
-		ReminderEngine:         reminderEngine,
-		RunStore:               runStore,
-		WorkflowBroadcaster:    workflowBroadcaster,
-		AppConfig:              cfg.AppConfig,
-		WorkingDir:             workingDir,
-		ManagedConfigRoot:      managedConfigRoot,
-		AgentConfig:            agentConfig,
-		stopModelCatalog:       stopCatalog,
-		subagentReaper:         subagentReaper,
-		stopSubagentReaper:     stopReaper,
-		runtimeReaper:          runtimeReaper,
-		stopRuntimeReaper:      stopRuntimeReaper,
+		Sessions:            sessions,
+		Agents:              agents,
+		Skills:              skills,
+		Tools:               tools,
+		Chat:                chatSvc,
+		Context:             ctxService,
+		Streams:             streams,
+		Events:              events,
+		Providers:           cfg.Providers,
+		Commands:            commands,
+		Plugins:             cfg.Plugins,
+		MCP:                 cfg.MCP,
+		Messaging:           messagingSvc,
+		Subagent:            subagentSvc,
+		Background:          backgroundSvc,
+		Elicitation:         elicitSvc,
+		Todos:               todos,
+		Conduit:             conduitInstance,
+		Memory:              memorySvc,
+		EmbeddingStatus:     embeddingStatus,
+		EmbeddingProvider:   embeddingProviderID,
+		EmbeddingModel:      embeddingModel,
+		Coord:               cfg.CoordStore,
+		DurableAgents:       durableAgents,
+		DurableWake:         durableWake,
+		DurableAgentRecipes: durableAgentRecipes,
+		Tasks:               tasks,
+		Workers:             workers,
+		Worktrees:           cfg.Worktrees,
+		Store:               cfg.Store,
+		ToolClient:          cfg.ToolClient,
+		ProcessTracker:      processTracker,
+		Orchestrator:        orchestrator,
+		Activity:            cfg.Activity,
+		UtilityProvider:     cfg.UtilityProvider,
+		UtilityModel:        cfg.UtilityModel,
+		ModelSelector:       modelSelector,
+		Permissions:         permissions,
+		PathGrants:          pathGrants,
+		AdapterRegistry:     adapterRegistry,
+		ProviderCatalog:     cfg.ProviderCatalog,
+		Recovery:            recoveryBrokerOrNil(agentDeps),
+		Inspector:           inspectorSvc,
+		LoopDetector:        loopDetector,
+		ReminderEngine:      reminderEngine,
+		RunStore:            runStore,
+		WorkflowBroadcaster: workflowBroadcaster,
+		AppConfig:           cfg.AppConfig,
+		WorkingDir:          workingDir,
+		ManagedConfigRoot:   managedConfigRoot,
+		AgentConfig:         agentConfig,
+		stopModelCatalog:    stopCatalog,
+		subagentReaper:      subagentReaper,
+		stopSubagentReaper:  stopReaper,
+		runtimeReaper:       runtimeReaper,
+		stopRuntimeReaper:   stopRuntimeReaper,
 	}, nil
 }
 

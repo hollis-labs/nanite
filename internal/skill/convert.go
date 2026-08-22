@@ -68,9 +68,6 @@ func (d *Definition) ToStoreSkill() *store.Skill {
 	if d.ArgumentHint != "" {
 		settings["argument_hint"] = d.ArgumentHint
 	}
-	if len(d.BrokerHints) > 0 {
-		settings["broker_hints"] = d.BrokerHints
-	}
 	if d.Source != "" {
 		settings["source"] = d.Source
 	}

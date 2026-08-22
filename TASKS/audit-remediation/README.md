@@ -280,7 +280,8 @@ order because AD-03 needs it.
 | `04/05` close untested service config functions | W0 | — | Test-only |
 | `05/01` approve concurrency cap + queued cancel | W0 | — | `internal/subagent` only — fully independent |
 | `06/01` `DeleteAgentByID` error swallowing | W0 | — | High. Already in `nilerr` output — see correction 3 |
-| `06/02` store context/transaction gaps triage | `06/01` | AD-14 | Scope depends entirely on AD-14 |
+| `06/02` store context/transaction gaps triage | `06/01` | — | **Re-scoped by AD-14 (2026-08-22):** `GO-STORE-005` moved out to `06/03`; now just `GO-STORE-004` + `GO-STORE-006`. Architect gate lifted. |
+| `06/03` full `context.Context` propagation sweep | none technically | AD-14 | **Decided 2026-08-22: full sweep.** Out-of-wave, standalone, run in isolation — see parallelization note below. Not part of Wave 2a/2b dispatch units. |
 | `07/01` worktree orphan branch cleanup | W0 | — | `internal/worktree` only — independent |
 | `07/02` `cmdServe` fatal cleanup bypass | W0 | AD-17 | Gates `07/05`, `08/07`, `11/10` (same file) |
 | `07/03` bound background job registry growth | W0 | AD-18 | Doc-comment half needs no decision |
@@ -394,6 +395,13 @@ un-shutdown test containers measures the wrong thing.
 `04/01` → `07/04`. Note `07/04` is a Wave 2b task with a Wave 2a dependency —
 if the two units run back to back this is free; if they run concurrently,
 `07/04` waits.
+
+**`06/03` runs alone, outside this or any other unit's parallel set.** It
+rewrites every signature in `internal/store` (67 non-test files) plus call
+sites across the 32 importing packages — a half-swept package does not
+compile, so it cannot run concurrently with `06/01`, `06/02`, `11/13`,
+`13/01`, `13/02`, or anything else with an open worktree. It must start from
+a clean `main` and land in one merge before any of those resume.
 
 **Wave 3** — mostly parallel: `08/01` ∥ `08/02` ∥ `08/04` ∥ `08/06` ∥ `08/10`.
 Sequenced: `08/05` after `02/01` (same file), `08/07` after `07/02` (same

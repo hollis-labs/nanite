@@ -1050,12 +1050,21 @@ must not be dispatched.
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
 | `06/01` | `06-store-correctness/01-fix-deleteagentbyid-error-swallowing.md` | not-started | `00/01` | — |
-| `06/02` | `06-store-correctness/02-triage-store-context-and-transaction-gaps.md` | not-started | `06/01` | AD-14 |
+| `06/02` | `06-store-correctness/02-triage-store-context-and-transaction-gaps.md` | not-started | `06/01` | — (re-scoped by AD-14, gate lifted) |
+| `06/03` | `06-store-correctness/03-full-context-propagation-sweep.md` | not-started | none technically — must not run concurrently with anything else in the batch | AD-14 |
 | `07/01` | `07-runtime-correctness-lifecycle/01-fix-worktree-orphan-branch-cleanup.md` | not-started | `00/01` | — |
 | `07/02` | `07-runtime-correctness-lifecycle/02-fix-cmdserve-fatal-cleanup-bypass.md` | not-started | `00/01` | AD-17 |
 | `07/03` | `07-runtime-correctness-lifecycle/03-bound-background-job-registry-growth.md` | not-started | `00/01` | AD-18 |
 | `07/04` | `07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md` | not-started | `04/01` | — |
 | `07/05` | `07-runtime-correctness-lifecycle/05-fix-mcp-config-silent-decode-errors.md` | not-started | `07/02` | — |
+
+**`06/03` is out-of-wave, not part of the Wave 2b dispatch unit.** It rewrites
+every signature in `internal/store` (67 non-test files, 32 importing
+packages) and cannot run concurrently with `06/01`, `06/02`, `11/13`,
+`13/01`, `13/02`, or anything else with an open worktree — a half-swept
+package does not compile. Must start from a clean `main`, land in one merge,
+before those resume. Written self-contained for an external session with no
+repo context (see the file's own "READ THIS FIRST").
 
 ### Wave 3 — Remaining security hardening
 

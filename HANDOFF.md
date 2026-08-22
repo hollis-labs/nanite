@@ -221,8 +221,12 @@ someone's in that file, so it stops reading as more unapproved than it is.
 - `TASKS/INDEX.md` — live status tracker, always re-read fresh. Freeze banner
   at the top.
 - `TASKS/audit-remediation/ARCHITECT-DECISIONS.md` — 25 decisions total
-  (AD-01 through AD-25); all decided as of `eebe0f32`, no open decisions
-  remain in the batch's original queue.
+  (AD-01 through AD-25). **All of Wave 2's gates are decided** (AD-14, AD-17,
+  AD-18, as of `eebe0f32`) — nothing blocks Wave 2's kickoff on this front.
+  Several later-wave decisions are still genuinely `open` though — don't
+  assume the whole queue is clear: AD-05 (Wave 1 follow-up, non-blocking),
+  AD-15/AD-16 (Wave 3), AD-12/AD-13 (Wave 5), AD-19/AD-20/AD-21/AD-22
+  (Wave 6-8). Re-check this file fresh when scoping those waves.
 - `TASKS/audit-remediation/WAVE-1-HANDOFF.md` / `WAVE-1-SUMMARY.md` — the
   detailed and operator-facing records of what Wave 1 actually did.
 - `TASKS/ESCALATIONS.md` — latest real entries are Wave 1's leftover-archive-file

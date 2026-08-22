@@ -706,7 +706,7 @@ reasoning.
 | `09-sandbox-and-capability-policy-gate-for-skill-execution` | 5 | reviewed | `02`, `08` |
 | `10-cli-hosted-native-skill-delivery-boot-dir-planting` | 6 | reviewed | `02`, `03` |
 | `11-api-direct-skill-get-self-tool` | 6 | reviewed | `06`, `07`, `08`, `09` |
-| `12-remaining-skills-rest-api-list-grants-preview-uninstall` | 7 | not-started | `02`, `05`, `09` |
+| `12-remaining-skills-rest-api-list-grants-preview-uninstall` | 7 | reviewed | `02`, `05`, `09` |
 
 **Three real, load-bearing corrections/decisions this planning session's own research made,
 each logged in full in `TASKS/ESCALATIONS.md`'s 2026-08-21 entry, not silently baked into a
@@ -763,10 +763,15 @@ for the first time; reviving `internal/skillbroker`'s rule-matching layer (cut i
 `TASKS/phase-0/22`, not reproposed here).
 
 **Executing.** Operator sign-off recorded in `docs/engineering/architecture/20-skills.md`'s
-`## Status` section, 2026-08-21. Waves 1-6 (tasks `01`-`09`) are implemented, validated, and
-reviewed. Wave 7 (`10`-`11`) is fully complete: both implemented, validated, and reviewed (`10`
-required one fix round for a real high-severity path-traversal bug, re-reviewed PASS — see
-`TASKS/ESCALATIONS.md`). Wave 8 (`12`) is gated on `02`+`05`+`09` (all landed) and is next.
+`## Status` section, 2026-08-21. **All 8 waves (tasks `01`-`12`) are implemented, validated,
+and reviewed. The batch is fully complete.** Fresh independent review found and fixed seven real
+bugs across `02`/`04`/`05`/`06`/`07`/`08`/`09`, one high-severity path-traversal bug in `10`
+(fixed in one round, fuzz-verified against ~25 adversarial slugs), and two minor accuracy
+findings in `12` (fixed in one round, mutation-tested) — every fix independently re-reviewed
+PASS. Full detail in `TASKS/ESCALATIONS.md`'s 2026-08-21/22 entries. Two genuine follow-up
+candidates remain filed, not fixed, as explicitly out of scope: a production-inert typed-nil
+hazard in `11`'s fork-composition wiring, and `12`'s preview endpoint's inability to
+materialize `fork`-composed skills (a structural "no live session" limitation, not a bug).
 
 ## Loops (`TASKS/loops/`, outside the Phase 0-9 sequence)
 

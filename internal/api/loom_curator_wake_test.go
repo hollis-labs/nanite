@@ -110,6 +110,7 @@ func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
+	t.Cleanup(func() { svc.Shutdown() })
 
 	a := New(svc)
 	mux := http.NewServeMux()

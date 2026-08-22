@@ -37,6 +37,7 @@ func newToolCallTestAPI(t *testing.T) (*API, *store.Store) {
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
+	t.Cleanup(func() { svc.Shutdown() })
 	return New(svc), s
 }
 

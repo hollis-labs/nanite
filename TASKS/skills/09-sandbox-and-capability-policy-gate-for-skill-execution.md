@@ -488,4 +488,9 @@ used `t.TempDir()`/`t.Setenv`-scoped test-local state exclusively — no relativ
 tracked directory was touched.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (fresh re-reviewer, 2026-08-21/22, no shared context with either the original worker or the fix worker).** Independently verified all three `go-sandbox@v0.2.1` backends against real vendored source: neither `apply_darwin.go` nor `apply_linux.go` clobbers a pre-set, non-nil `cmd.Env` (Linux's `inheritedEnv` only falls back to a fresh `os.Environ()` read when the argument is nil). Mutation-tested the fix directly by commenting out the `cmd.Env` line and re-running the real end-to-end test — it genuinely failed, dumping the full unfiltered host environment (including a real live `CLAUDE_CODE_MESSAGING_TOKEN` value) into the sandboxed command's output, proving both the original vulnerability and the fix's necessity beyond doubt. Confirmed the false-positive tradeoff (e.g. a hypothetical `OAUTH_CALLBACK_PORT`) is identical to the pre-existing `internal/sandbox.filterSecrets` precedent, not a new regression. Confirmed `Gate` remains the sole `GatedExecutor` implementation and the sole `sandbox.Apply` call site. Full `-race` re-run of the whole package (all original + new tests) clean. Build/vet/test clean.
+
+One non-blocking observation for context, not a finding against this fix: no production caller currently wires a real `Gate` into an actual invocation path yet — by design, task `11` (not yet dispatched) is where that wiring lands.
+
+Status: `reviewed`.

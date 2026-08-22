@@ -1,7 +1,7 @@
 # Add unit tests for buildRepairConfig and discoverManagedDurableAgentConfigs (both 0.0% covered)
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none — independently landable, pure test-debt closure.
 **Touches:** New/expanded test files for `internal/service/tool_cache_wiring.go` (`buildRepairConfig`) and `internal/service/managed_durable_configs.go` (`discoverManagedDurableAgentConfigs`). No production code changes expected.
 **Requires architect decision:** false — pure test-debt closure, no design ambiguity.
@@ -85,7 +85,19 @@ Essentially zero risk — additive test-only changes. Rollback is a trivial reve
 - Coverage evidence: before this change, the current checkout measured `buildRepairConfig` at 39.3% (the task's cited 0.0% baseline had already drifted) and `discoverManagedDurableAgentConfigs` at 0.0%; after the tests, both measure 100.0% with `go test -coverprofile=<temp> ./internal/service` and `go tool cover -func=<temp>`.
 - Verification passed: focused tests; `go test -race ./internal/service -run 'TestBuildRepairConfig|TestDiscoverManagedDurableAgentConfigs' -count=5`; `go build ./cmd/nanite/`; `go vet ./...`; and `go test ./...`. The proposed per-function/file coverage ratchet remains deliberately assigned to the out-of-scope Wave 7 quality-ratchet work.
 - 2026-08-22 review correction: strengthened the discovery ordering fixture so lexical filename order (`10-zeta.yml`, then `20-alpha.yaml`) conflicts with the required slug order (`alpha`, then `zeta`), while retaining filename-derived-slug coverage as its own case. A disposable mutation removing the production `sort.Slice` passed before this correction, then failed the corrected focused test with `slugs = [zeta alpha], want [alpha zeta]`; production code was restored unchanged. The focused non-race test passed after restoration. The orchestrator deliberately terminated and deferred the focused race repetition because its package test binary was consuming a full CPU and distorting the separately isolated 04/03 investigation; this was resource isolation, not a test failure.
+- After the 04/03 isolation window closed, the exact deferred focused race run
+  passed: `go test -race ./internal/service -run
+  'TestBuildRepairConfig|TestDiscoverManagedDurableAgentConfigs' -count=5`
+  (`213.260s`).
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- PASS (2026-08-22): independent review confirmed no production changes and
+  reproduced 100.0% focused coverage for both target functions. The provider
+  precedence, gates, timeout parsing, discovery filtering/error behavior,
+  duplicate precedence, and deterministic output are meaningfully exercised.
+- The first review rejected the original ordering fixture because deleting the
+  production sort still passed every added test. After the adversarial fixture
+  correction, a fresh reviewer replayed that mutation and observed the precise
+  `zeta alpha` versus `alpha zeta` failure. Focused non-race and five-repeat
+  race runs pass on the restored production implementation.

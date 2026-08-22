@@ -982,7 +982,7 @@
       "report_section": "\u00a78.4",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/05-close-untested-service-config-functions.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed: buildRepairConfig (tool_cache_wiring.go:113) and discoverManagedDurableAgentConfigs (managed_durable_configs.go:311) both still exist; grep across all internal/service *_test.go files finds zero references to either name."
     },
     {

@@ -704,7 +704,7 @@ reasoning.
 | `07-implement-inline-fork-composition-semantics` | 4 | reviewed | `04`, `06` |
 | `08-rebuild-inline-marker-and-scripts-execution` | 4 | reviewed | `06` |
 | `09-sandbox-and-capability-policy-gate-for-skill-execution` | 5 | reviewed | `02`, `08` |
-| `10-cli-hosted-native-skill-delivery-boot-dir-planting` | 6 | review FAIL, fix dispatched | `02`, `03` |
+| `10-cli-hosted-native-skill-delivery-boot-dir-planting` | 6 | reviewed | `02`, `03` |
 | `11-api-direct-skill-get-self-tool` | 6 | reviewed | `06`, `07`, `08`, `09` |
 | `12-remaining-skills-rest-api-list-grants-preview-uninstall` | 7 | not-started | `02`, `05`, `09` |
 
@@ -764,11 +764,9 @@ for the first time; reviving `internal/skillbroker`'s rule-matching layer (cut i
 
 **Executing.** Operator sign-off recorded in `docs/engineering/architecture/20-skills.md`'s
 `## Status` section, 2026-08-21. Waves 1-6 (tasks `01`-`09`) are implemented, validated, and
-reviewed. Wave 7 (`10`-`11`) is landed on `main`; `11` is reviewed and closed. `10`'s fresh
-review found a real high-severity path-traversal bug (an unvalidated skill slug can cancel out
-its destination prefix via `path.Join`, silently overwriting Nanite-authored boot-dir files) —
-fix dispatched, see `TASKS/ESCALATIONS.md`. Wave 8 (`12`) is gated on `02`+`05`+`09` (all
-landed) and will follow once `10`'s fix re-reviews PASS.
+reviewed. Wave 7 (`10`-`11`) is fully complete: both implemented, validated, and reviewed (`10`
+required one fix round for a real high-severity path-traversal bug, re-reviewed PASS — see
+`TASKS/ESCALATIONS.md`). Wave 8 (`12`) is gated on `02`+`05`+`09` (all landed) and is next.
 
 ## Loops (`TASKS/loops/`, outside the Phase 0-9 sequence)
 

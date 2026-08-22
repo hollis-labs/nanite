@@ -427,4 +427,7 @@ Pending-approval IS the design (SubagentApprovalRequired defaults true in produc
    -count=1` clean when done.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (fresh re-reviewer, 2026-08-21, no shared context with either the original worker or the fix worker).** Confirmed the status-check ordering is correct (pending-approval checked before the generic non-terminal branch). Independently mutation-tested by temporarily removing the fix and confirming the shipped regression test fails with exactly the pre-fix symptom, then restoring cleanly. Traced `subagent.Service.Spawn`'s gated path directly to confirm `RunID`/`EnvelopeInstanceID` on the new error are real, non-placeholder values. Confirmed the `forkResultText` partial-discriminator mirrors `extractLiftableEnvelopes` exactly, with both new tests exercising genuinely different shapes. No regression in any pre-existing test (`internal/skill` and `internal/skillinstall`, full `-race` runs). Full build/vet/test clean.
+
+Status: `reviewed`.

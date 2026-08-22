@@ -888,3 +888,9 @@ Fresh re-reviewer performed real mutation testing (disabled the 422/500 classifi
 ## 2026-08-21 — Task `08` fix re-reviewed PASS, task closed
 
 Fresh re-reviewer empirically verified the byte-vs-rune safety claim (a scratch program encoding every valid Unicode code point, confirming no UTF-8 trailing byte ever collides with ASCII space/tab), confirmed the fix matches the real spec verbatim, and confirmed no regression anywhere in the package. Full build/vet/test clean. **Task `08` is fully closed: implemented, validated, reviewed.**
+
+## 2026-08-21 — Task `07` fix re-reviewed PASS, task closed — Wave 5 (07+08) and Phase 4 fully complete
+
+Fresh re-reviewer independently mutation-tested the fix (temporarily removed it, confirmed the shipped regression test fails with exactly the pre-fix symptom, restored cleanly), traced `subagent.Service.Spawn`'s gated path directly to confirm the new error's `RunID`/`EnvelopeInstanceID` fields are real values, and confirmed no regression anywhere (full `-race` runs on both `internal/skill` and `internal/skillinstall`). Full build/vet/test clean. **Task `07` is fully closed: implemented, validated, reviewed.**
+
+**Phase 4 (tasks `06`, `07`, `08`) and Wave 5 are now fully closed.** Wave 6 (`09`, solo — the sandbox/capability-policy gate everything downstream routes through) is unblocked.

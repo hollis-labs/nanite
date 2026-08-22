@@ -376,7 +376,7 @@
       "report_section": "\u00a78.1",
       "task_file": "TASKS/audit-remediation/06-store-correctness/02-triage-store-context-and-transaction-gaps.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open and unchanged: GetPluginSettings checks its json.Unmarshal errors (plugin_settings.go:48-53) but ListPluginSettings's identical unmarshal calls in its scan loop do not. Task file 06/02 explicitly marks this sub-section `requires_architect_decision: false` -- a clear, small, mechanical fix, independent of the sub-file's overall AD-14 gate (which applies only to the GO-STORE-005 sub-section)."
     },
     {
@@ -429,7 +429,7 @@
       "false_positive_considerations": "Caller concurrency was not traced within budget; confidence is medium specifically for this reason.",
       "task_file": "TASKS/audit-remediation/06-store-correctness/02-triage-store-context-and-transaction-gaps.md",
       "disposition": "needs-more-evidence",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "SyncDurableAgentInstanceConfig (durable_agents.go:301, exact match to audit citation) still reads-then-branches-then-writes with no transaction wrapper. Task file 06/02 itself flags this sub-section's fix as `requires_architect_decision: false for the fix itself, but this task's first step is a caller-concurrency trace, not an architect decision -- the audit explicitly could not complete this trace within its budget.` What would settle it: tracing whether any real caller can invoke this with the same slug concurrently; if yes, wrap in a transaction or adopt the sibling self-checking-WHERE-clause idiom."
     },
     {

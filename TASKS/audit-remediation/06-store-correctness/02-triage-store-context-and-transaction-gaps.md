@@ -1,7 +1,7 @@
 # Triage `internal/store`'s remaining error-handling, context-propagation, and transaction gaps
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch. Sequencing note only: this task is not blocked by `01-fix-deleteagentbyid-error-swallowing.md`, but the remediation guide's own "Store correctness" section lists `GO-STORE-003` first and this trio second — a planner may still choose to schedule `01` first for that reason, without it being a real code dependency.
 **Touches:** `internal/store/plugin_settings.go` (`ListPluginSettings`) and `internal/store/durable_agents.go` (`SyncDurableAgentInstanceConfig`). ~~`sessions.go`/`agents.go`~~ removed 2026-08-22 — those belonged to `GO-STORE-005`, which AD-14 moved to `06/03`. Three unrelated files/findings triaged in one pass per the remediation guide's explicit grouping — see Context.
 
@@ -290,4 +290,16 @@ go test -race ./internal/store/... -run TestSyncDurableAgentInstanceConfig   # o
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail per sub-section, what was independently re-verified (e.g. re-ran the sub-section C trace's grep independently rather than trusting the worker's claim). -->
+- PASS (2026-08-22): independent review found no blocking correctness,
+  concurrency, or scope issue. The reviewer re-traced the two production
+  callers and confirmed the concurrent HTTP save path makes same-slug races
+  live, while the boot reconciliation path is serial.
+- The malformed-settings/schema regressions and the archive-vs-refresh
+  concurrency regression both failed against the parent commit and passed
+  after the fix. The atomic upsert was independently checked for create
+  defaults, validation/profile checks, stable ID/creation time, advancing
+  update time, runtime-state preservation, monotonic archive behavior, and
+  untorn config/metadata updates.
+- Focused tests (10x), the archive race regression under `-race` (10x), full
+  store build/vet/test, command build, repository vet/test, and diff checks all
+  passed. `GO-STORE-005` and its files remained untouched.

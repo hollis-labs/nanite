@@ -278,16 +278,24 @@ func TestDiscoverManagedDurableAgentConfigs_LoadsSortsAndFilters(t *testing.T) {
 			wantNames: []string{"Only"},
 		},
 		{
-			name: "multiple are sorted with filename fallback and first duplicate wins",
+			name: "filename derived slug",
 			files: map[string]string{
-				"10-alpha.yaml":    "name: Alpha\nprofile_slug: alpha-profile\n",
-				"20-zeta.yml":      "name: Zeta First\nslug: zeta\nprofile_slug: zeta-profile\n",
+				"derived.yaml": "name: Derived\nprofile_slug: derived-profile\n",
+			},
+			wantSlugs: []string{"derived"},
+			wantNames: []string{"Derived"},
+		},
+		{
+			name: "multiple are sorted by slug and first duplicate wins",
+			files: map[string]string{
+				"10-zeta.yml":      "name: Zeta First\nslug: zeta\nprofile_slug: zeta-profile\n",
+				"20-alpha.yaml":    "name: Alpha\nslug: alpha\nprofile_slug: alpha-profile\n",
 				"30-zeta.yaml":     "name: Zeta Duplicate\nslug: zeta\nprofile_slug: duplicate-profile\n",
 				"40-ignored.json":  `{"slug":"ignored","profile_slug":"ignored"}`,
 				"README-no-suffix": "not a config",
 			},
 			dirs:      []string{"50-directory.yaml"},
-			wantSlugs: []string{"10-alpha", "zeta"},
+			wantSlugs: []string{"alpha", "zeta"},
 			wantNames: []string{"Alpha", "Zeta First"},
 		},
 	}

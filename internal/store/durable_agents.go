@@ -299,72 +299,74 @@ func (s *Store) UpdateDurableAgentInstance(ctx context.Context, id string, upd D
 	return s.GetDurableAgentInstance(ctx, id)
 }
 
+// SyncDurableAgentInstanceConfig atomically inserts or refreshes one managed
+// config by slug. An omitted status preserves the runtime-owned lifecycle
+// state; an explicit archive cannot be undone by a concurrent config refresh.
 func (s *Store) SyncDurableAgentInstanceConfig(ctx context.Context, inst *DurableAgentInstance) (*DurableAgentInstance, error) {
 	if inst == nil {
 		return nil, errors.New("SyncDurableAgentInstanceConfig: nil instance")
 	}
-	existing, err := s.GetDurableAgentInstanceBySlug(ctx, inst.Slug)
-	if err == nil && existing != nil {
-		if _, err := s.GetAgent(ctx, inst.ProfileID); err != nil {
-			return nil, fmt.Errorf("SyncDurableAgentInstanceConfig: profile %s: %w", inst.ProfileID, err)
-		}
-		if inst.ID == "" {
-			inst.ID = existing.ID
-		}
-		if inst.Status == "" {
-			inst.Status = existing.Status
-		}
-		if inst.Status != DurableAgentStatusArchived {
-			inst.CurrentSessionID = existing.CurrentSessionID
-			inst.FailureReason = existing.FailureReason
-			inst.ArchivedAt = existing.ArchivedAt
-		}
-		if inst.CreatedAt.IsZero() {
-			inst.CreatedAt = existing.CreatedAt
-		}
-		inst.UpdatedAt = time.Now().UTC()
-		if inst.Status == DurableAgentStatusArchived && inst.ArchivedAt == nil {
-			now := inst.UpdatedAt
-			inst.ArchivedAt = &now
-		}
-		if err := validateDurableAgentInstance(inst); err != nil {
-			return nil, err
-		}
-		_, err := s.DB.ExecContext(ctx,
-			`UPDATE durable_agent_instances
-			    SET name = ?, slug = ?, profile_id = ?, lifecycle_class = ?, provider = ?, model = ?,
-			        runtime_kind = ?, launch_source_type = ?, launch_source_id = ?, work_root = ?,
-			        status = ?, current_session_id = ?, failure_reason = ?, metadata_json = ?,
-			        updated_at = ?, archived_at = ?
-			  WHERE id = ?`,
-			inst.Name, inst.Slug, inst.ProfileID, inst.LifecycleClass, inst.Provider, inst.Model,
-			inst.RuntimeKind, inst.LaunchSourceType, inst.LaunchSourceID, inst.WorkRoot,
-			inst.Status, inst.CurrentSessionID, inst.FailureReason, inst.MetadataJSON,
-			inst.UpdatedAt.UTC().Format(time.RFC3339Nano), formatOptionalTime(inst.ArchivedAt),
-			existing.ID,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("sync durable_agent_instances %s: %w", existing.ID, err)
-		}
-		return s.GetDurableAgentInstance(ctx, existing.ID)
+	preserveLifecycleState := inst.Status == ""
+	if inst.Status == "" && inst.ArchivedAt != nil {
+		inst.Status = DurableAgentStatusArchived
 	}
-	if errors.Is(err, ErrDurableAgentInstanceNotFound) {
-		if inst.Status == "" {
-			if inst.ArchivedAt != nil {
-				inst.Status = DurableAgentStatusArchived
-			} else {
-				inst.Status = DurableAgentStatusSleeping
-			}
-		}
-		if err := s.CreateDurableAgentInstance(ctx, inst); err != nil {
-			return nil, err
-		}
-		return s.GetDurableAgentInstance(ctx, inst.ID)
+	applyDurableAgentInstanceDefaults(inst)
+	if err := validateDurableAgentInstance(inst); err != nil {
+		return nil, err
 	}
+	if _, err := s.GetAgent(ctx, inst.ProfileID); err != nil {
+		return nil, fmt.Errorf("SyncDurableAgentInstanceConfig: profile %s: %w", inst.ProfileID, err)
+	}
+
+	updatedAt := time.Now().UTC()
+	archiveTime := formatOptionalTime(inst.ArchivedAt)
+	_, err := s.DB.ExecContext(ctx,
+		`INSERT INTO durable_agent_instances (`+durableAgentInstanceColumns+`)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(slug) DO UPDATE SET
+		     name = excluded.name,
+		     profile_id = excluded.profile_id,
+		     lifecycle_class = excluded.lifecycle_class,
+		     provider = excluded.provider,
+		     model = excluded.model,
+		     runtime_kind = excluded.runtime_kind,
+		     launch_source_type = excluded.launch_source_type,
+		     launch_source_id = excluded.launch_source_id,
+		     work_root = excluded.work_root,
+		     status = CASE WHEN ? THEN durable_agent_instances.status ELSE excluded.status END,
+		     current_session_id = CASE
+		         WHEN NOT ? AND excluded.status = 'archived' THEN excluded.current_session_id
+		         ELSE durable_agent_instances.current_session_id
+		     END,
+		     failure_reason = CASE
+		         WHEN NOT ? AND excluded.status = 'archived' THEN excluded.failure_reason
+		         ELSE durable_agent_instances.failure_reason
+		     END,
+		     metadata_json = excluded.metadata_json,
+		     updated_at = ?,
+		     archived_at = CASE
+		         WHEN NOT ? AND excluded.status = 'archived' THEN COALESCE(excluded.archived_at, ?)
+		         ELSE durable_agent_instances.archived_at
+		     END`,
+		inst.ID, inst.Name, inst.Slug, inst.ProfileID, inst.LifecycleClass,
+		inst.Provider, inst.Model, inst.RuntimeKind, inst.LaunchSourceType,
+		inst.LaunchSourceID, inst.WorkRoot, inst.Status, inst.CurrentSessionID,
+		inst.FailureReason, inst.MetadataJSON,
+		inst.CreatedAt.UTC().Format(time.RFC3339Nano),
+		inst.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		archiveTime,
+		preserveLifecycleState, preserveLifecycleState, preserveLifecycleState,
+		updatedAt.Format(time.RFC3339Nano), preserveLifecycleState, updatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sync durable_agent_instances %s: %w", inst.Slug, err)
+	}
+	saved, err := s.GetDurableAgentInstanceBySlug(ctx, inst.Slug)
 	if err != nil {
 		return nil, err
 	}
-	return existing, nil
+	*inst = *saved
+	return saved, nil
 }
 
 func (s *Store) SetDurableAgentInstanceStatus(ctx context.Context, id, status string) (*DurableAgentInstance, error) {

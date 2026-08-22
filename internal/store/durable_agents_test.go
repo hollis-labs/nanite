@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -104,6 +106,95 @@ func TestDurableAgentInstanceValidationAndImmutableUpdate(t *testing.T) {
 	}
 	if updated.Provider != "anthropic" || updated.Model != "model-a" || updated.RuntimeKind != "api" {
 		t.Fatalf("immutable launch fields changed: %+v", updated)
+	}
+}
+
+func TestSyncDurableAgentInstanceConfigConcurrentArchiveIsMonotonic(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	profile := makeTestAgent(t, s, "durable-sync-concurrent")
+	inst := &DurableAgentInstance{
+		Name:             "Managed",
+		Slug:             "managed-concurrent",
+		ProfileID:        profile.ID,
+		LifecycleClass:   DurableAgentClassProcess,
+		LaunchSourceType: DurableAgentLaunchDurableAdvisor,
+		MetadataJSON:     `{"writer":"initial"}`,
+	}
+	if err := s.CreateDurableAgentInstance(ctx, inst); err != nil {
+		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	}
+
+	const configWriters = 16
+	for round := 0; round < 25; round++ {
+		if _, err := s.DB.ExecContext(ctx,
+			`UPDATE durable_agent_instances
+			    SET status = ?, archived_at = NULL, name = ?, metadata_json = ?
+			  WHERE id = ?`,
+			DurableAgentStatusActive, "Managed", `{"writer":"initial"}`, inst.ID,
+		); err != nil {
+			t.Fatalf("round %d reset instance: %v", round, err)
+		}
+
+		start := make(chan struct{})
+		errs := make(chan error, configWriters+1)
+		validWrites := map[string]string{"Archived": `{"writer":"archive"}`}
+		var wg sync.WaitGroup
+		for writer := 0; writer < configWriters; writer++ {
+			writer := writer
+			name := fmt.Sprintf("Managed %d", writer)
+			metadata := fmt.Sprintf(`{"writer":"config-%d"}`, writer)
+			validWrites[name] = metadata
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, err := s.SyncDurableAgentInstanceConfig(ctx, &DurableAgentInstance{
+					Name:             name,
+					Slug:             inst.Slug,
+					ProfileID:        profile.ID,
+					LifecycleClass:   DurableAgentClassProcess,
+					LaunchSourceType: DurableAgentLaunchDurableAdvisor,
+					MetadataJSON:     metadata,
+				})
+				errs <- err
+			}()
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := s.SyncDurableAgentInstanceConfig(ctx, &DurableAgentInstance{
+				Name:             "Archived",
+				Slug:             inst.Slug,
+				ProfileID:        profile.ID,
+				LifecycleClass:   DurableAgentClassProcess,
+				LaunchSourceType: DurableAgentLaunchDurableAdvisor,
+				Status:           DurableAgentStatusArchived,
+				MetadataJSON:     `{"writer":"archive"}`,
+			})
+			errs <- err
+		}()
+
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d concurrent sync: %v", round, err)
+			}
+		}
+
+		got, err := s.GetDurableAgentInstance(ctx, inst.ID)
+		if err != nil {
+			t.Fatalf("round %d GetDurableAgentInstance: %v", round, err)
+		}
+		if got.Status != DurableAgentStatusArchived || got.ArchivedAt == nil {
+			t.Fatalf("round %d final archive state = status %q archived_at %v; concurrent config sync resurrected archived instance", round, got.Status, got.ArchivedAt)
+		}
+		if wantMetadata, ok := validWrites[got.Name]; !ok || got.MetadataJSON != wantMetadata {
+			t.Fatalf("round %d final config is torn: name %q metadata_json %q", round, got.Name, got.MetadataJSON)
+		}
 	}
 }
 

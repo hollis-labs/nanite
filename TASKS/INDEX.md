@@ -1056,7 +1056,7 @@ must not be dispatched.
 | `07/01` | `07-runtime-correctness-lifecycle/01-fix-worktree-orphan-branch-cleanup.md` | reviewed | `00/01` | — |
 | `07/02` | `07-runtime-correctness-lifecycle/02-fix-cmdserve-fatal-cleanup-bypass.md` | not-started | `00/01` | AD-17 |
 | `07/03` | `07-runtime-correctness-lifecycle/03-bound-background-job-registry-growth.md` | not-started | `00/01` | AD-18 |
-| `07/04` | `07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md` | not-started | `04/01` | — |
+| `07/04` | `07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md` | reviewed | `04/01` | — |
 | `07/05` | `07-runtime-correctness-lifecycle/05-fix-mcp-config-silent-decode-errors.md` | not-started | `07/02` | — |
 
 **`04/04` Part B is gated on AD-26**, added 2026-08-22 — `GO-SVCCORE-002`

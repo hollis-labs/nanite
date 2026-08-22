@@ -1,7 +1,7 @@
 # Add an idempotency guard to `service.Container.Shutdown`
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/service/container.go` (`Container` struct fields, `Container.Shutdown`). No other package needs changes.
 
@@ -125,4 +125,13 @@ Very low risk — wrapping an existing function body in `sync.Once` does not cha
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail, what was independently re-verified. -->
+- 2026-08-22: Fresh-context reviewer PASS with no findings. Confirmed
+  `sync.Once.Do` wraps the complete prior shutdown body, blocks concurrent
+  callers until the first returns, and has no bypass callers. The reviewed
+  commit did not modify subsystem shutdown implementations or runtime-agent
+  lifecycle code.
+- The load-bearing test passed 100 race-enabled repetitions and would produce
+  two observed Chat shutdown calls without the guard. Focused Container race
+  tests, full non-race service tests, service build, and service vet passed.
+  The broader service race suite hit the separately catalogued package timeout
+  with no race report; its named test passed independently under `-race`.

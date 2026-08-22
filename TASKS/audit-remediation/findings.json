@@ -2869,7 +2869,7 @@
       "report_section": "\u00a78.13",
       "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: Container.Shutdown (container.go:1477, current) has no sync.Once/atomic-bool idempotency guard at its top, unlike lifecycle.Manager.Shutdown's established pattern. Simple, no-architect-needed consistency fix; currently dormant per the finding's own note (one production call site)."
     },
     {

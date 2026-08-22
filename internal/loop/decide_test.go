@@ -57,15 +57,21 @@ func newTestGoal(t *testing.T, acceptance, constraints, invariants []string) Goa
 }
 
 // --- Branch 1: goal_met -> COMPLETE ---
+//
+// Task 08's own resolution of TASKS/ESCALATIONS.md's 2026-08-21 "Decide()
+// re-implements task 02's goal-evidence formula locally" entry: Decide no
+// longer walks []GoalEvidence itself (evidenceSatisfiesGoal is gone) --
+// the caller (internal/loop.LoopEngine.Run/Resume, task 08) queries
+// store.EvidenceSatisfiesGoal itself and passes the already-computed bool
+// in. Evidence-coverage-specific behavior (partial coverage, zero evidence)
+// is exercised once, in internal/store/goal_evidence_test.go
+// (TestEvidenceSatisfiesGoal_*), not duplicated here -- Decide's own tests
+// only need to confirm it reacts correctly to a bare goalMet bool.
 
 func TestDecide_GoalMet_ReturnsComplete(t *testing.T) {
-	goal := newTestGoal(t, []string{"tests pass"}, nil, nil)
-	evidence := []GoalEvidence{
-		{GoalID: "g1", EvidenceType: store.GoalEvidenceTypeTestSuite, RefTable: "workflow_run_steps", RefID: "s1", Summary: "tests pass"},
-	}
 	exec := &fakeStepExecutor{}
 
-	d, err := Decide(context.Background(), exec, goal, evidence, Evaluation{}, nil, Budget{MaxIterations: 10}, ContinuationPolicy{})
+	d, err := Decide(context.Background(), exec, unmetGoal(t), true, Evaluation{}, nil, Budget{MaxIterations: 10}, ContinuationPolicy{})
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
 	}
@@ -77,35 +83,15 @@ func TestDecide_GoalMet_ReturnsComplete(t *testing.T) {
 	}
 }
 
-func TestDecide_GoalMet_PartialEvidence_DoesNotComplete(t *testing.T) {
-	goal := newTestGoal(t, []string{"tests pass", "docs updated"}, nil, nil)
-	// Only one of two acceptance criteria has matching evidence.
-	evidence := []GoalEvidence{
-		{GoalID: "g1", EvidenceType: store.GoalEvidenceTypeTestSuite, RefTable: "workflow_run_steps", RefID: "s1", Summary: "tests pass"},
-	}
+func TestDecide_GoalNotMet_DoesNotComplete(t *testing.T) {
 	exec := &fakeStepExecutor{}
 
-	d, err := Decide(context.Background(), exec, goal, evidence, Evaluation{}, nil, Budget{MaxIterations: 10, MaxNoProgressIterations: 10}, ContinuationPolicy{})
+	d, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, nil, Budget{MaxIterations: 10, MaxNoProgressIterations: 10}, ContinuationPolicy{})
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
 	}
 	if d.Kind == DecisionComplete {
-		t.Fatalf("expected partial evidence to NOT satisfy the goal, got %+v", d)
-	}
-}
-
-func TestDecide_GoalMet_NoEvidenceAtAll_DoesNotComplete(t *testing.T) {
-	// Vacuously-empty acceptance/constraints/invariants lists, but zero
-	// evidence rows recorded -- required_evidence_present must still fail.
-	goal := newTestGoal(t, nil, nil, nil)
-	exec := &fakeStepExecutor{}
-
-	d, err := Decide(context.Background(), exec, goal, nil, Evaluation{}, nil, Budget{MaxIterations: 10, MaxNoProgressIterations: 10}, ContinuationPolicy{})
-	if err != nil {
-		t.Fatalf("Decide returned error: %v", err)
-	}
-	if d.Kind == DecisionComplete {
-		t.Fatalf("expected zero evidence rows to NOT satisfy the goal, got %+v", d)
+		t.Fatalf("expected goalMet=false to NOT return DecisionComplete, got %+v", d)
 	}
 }
 
@@ -123,7 +109,7 @@ func TestDecide_BudgetExhausted_MaxIterations_Escalate(t *testing.T) {
 	}
 	exec := &fakeStepExecutor{}
 
-	d, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+	d, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxIterations: 5, OnExhausted: store.LoopRunOnExhaustedEscalate}, ContinuationPolicy{})
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
@@ -142,7 +128,7 @@ func TestDecide_BudgetExhausted_MaxIterations_Fail(t *testing.T) {
 		history[i] = IterationResult{IterationNumber: i + 1, ProgressState: store.LoopRunIterationProgressProgress}
 	}
 
-	d, err := Decide(context.Background(), &fakeStepExecutor{}, unmetGoal(t), nil, Evaluation{}, history,
+	d, err := Decide(context.Background(), &fakeStepExecutor{}, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxIterations: 5, OnExhausted: store.LoopRunOnExhaustedFail}, ContinuationPolicy{})
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
@@ -157,7 +143,7 @@ func TestDecide_BudgetExhausted_DefaultsOnExhaustedToEscalate(t *testing.T) {
 
 	// OnExhausted left unset ("") -- SetBudget's own "default escalate"
 	// convention (internal/store/loop_runs.go) applies here too.
-	d, err := Decide(context.Background(), &fakeStepExecutor{}, unmetGoal(t), nil, Evaluation{}, history,
+	d, err := Decide(context.Background(), &fakeStepExecutor{}, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxIterations: 1}, ContinuationPolicy{})
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
@@ -175,7 +161,7 @@ func TestDecide_BudgetNotExhausted_ZeroMaxIterationsMeansUnbounded(t *testing.T)
 
 	// Budget{} zero value: MaxIterations == 0 must mean "no cap," not
 	// "already exhausted at iteration 1."
-	d, err := Decide(context.Background(), &fakeStepExecutor{}, unmetGoal(t), nil, Evaluation{}, history, Budget{}, ContinuationPolicy{})
+	d, err := Decide(context.Background(), &fakeStepExecutor{}, unmetGoal(t), false, Evaluation{}, history, Budget{}, ContinuationPolicy{})
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
 	}
@@ -190,7 +176,7 @@ func TestDecide_BudgetExhausted_MaxFailures(t *testing.T) {
 		{IterationNumber: 2, ProgressState: store.LoopRunIterationProgressRegression},
 	}
 
-	d, err := Decide(context.Background(), &fakeStepExecutor{}, unmetGoal(t), nil, Evaluation{}, history,
+	d, err := Decide(context.Background(), &fakeStepExecutor{}, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxFailures: 2, OnExhausted: store.LoopRunOnExhaustedEscalate}, ContinuationPolicy{})
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
@@ -211,7 +197,7 @@ func TestDecide_BudgetExhausted_MaxRuntimeSeconds(t *testing.T) {
 		},
 	}
 
-	d, err := Decide(context.Background(), &fakeStepExecutor{}, unmetGoal(t), nil, Evaluation{}, history,
+	d, err := Decide(context.Background(), &fakeStepExecutor{}, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxRuntimeSeconds: 60 * 60, OnExhausted: store.LoopRunOnExhaustedFail}, ContinuationPolicy{})
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
@@ -229,7 +215,7 @@ func TestDecide_NoTerminalCondition_ReturnsContinue(t *testing.T) {
 	}
 	exec := &fakeStepExecutor{}
 
-	d, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+	d, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxIterations: 20, MaxNoProgressIterations: 3}, ContinuationPolicy{})
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
@@ -261,7 +247,7 @@ func TestDecide_NoProgressStreak_CallsReasoningFallback(t *testing.T) {
 	}
 	policy := ContinuationPolicy{Provider: "anthropic", Model: "claude"}
 
-	d, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{RemainingDelta: "unchanged"}, history,
+	d, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{RemainingDelta: "unchanged"}, history,
 		Budget{MaxIterations: 20, MaxNoProgressIterations: 2}, policy)
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
@@ -284,7 +270,7 @@ func TestDecide_NoProgressStreak_BelowThreshold_DoesNotCallReasoningFallback(t *
 	history := noProgressHistory(1)
 	exec := &fakeStepExecutor{}
 
-	d, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+	d, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxIterations: 20, MaxNoProgressIterations: 2}, ContinuationPolicy{})
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
@@ -319,7 +305,7 @@ func TestDecide_NoProgressStreak_AllSixEligibleDecisions(t *testing.T) {
 			}
 			policy := ContinuationPolicy{Provider: "anthropic", Model: "claude"}
 
-			d, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+			d, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 				Budget{MaxNoProgressIterations: 2}, policy)
 			if err != nil {
 				t.Fatalf("Decide returned error: %v", err)
@@ -341,7 +327,7 @@ func TestDecide_NoProgressStreak_ExcludesContinueAndComplete(t *testing.T) {
 		}
 		policy := ContinuationPolicy{Provider: "anthropic", Model: "claude"}
 
-		_, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+		_, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 			Budget{MaxNoProgressIterations: 2}, policy)
 		if err == nil {
 			t.Fatalf("expected an error for a reasoning-ineligible decision %q, got none", raw)
@@ -360,7 +346,7 @@ func TestDecide_NoProgressStreak_Rearchitect_CarriesRevision(t *testing.T) {
 	}
 	policy := ContinuationPolicy{Provider: "anthropic", Model: "claude"}
 
-	d, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+	d, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxNoProgressIterations: 2}, policy)
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
@@ -388,7 +374,7 @@ func TestDecide_NoProgressStreak_NonRearchitectDecision_HasNoRevision(t *testing
 	}
 	policy := ContinuationPolicy{Provider: "anthropic", Model: "claude"}
 
-	d, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+	d, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxNoProgressIterations: 2}, policy)
 	if err != nil {
 		t.Fatalf("Decide returned error: %v", err)
@@ -409,7 +395,7 @@ func TestDecide_NoProgressStreak_MalformedResponse_ReturnsError_NotContinue(t *t
 	}
 	policy := ContinuationPolicy{Provider: "anthropic", Model: "claude"}
 
-	d, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+	d, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxNoProgressIterations: 2}, policy)
 	if err == nil {
 		t.Fatalf("expected an error for an unparseable reasoning response, got Decision %+v", d)
@@ -428,7 +414,7 @@ func TestDecide_NoProgressStreak_InvalidJSON_ReturnsError(t *testing.T) {
 	}
 	policy := ContinuationPolicy{Provider: "anthropic", Model: "claude"}
 
-	_, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+	_, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxNoProgressIterations: 2}, policy)
 	if err == nil {
 		t.Fatal("expected an error for invalid JSON in the reasoning response")
@@ -444,7 +430,7 @@ func TestDecide_NoProgressStreak_UnknownDecision_ReturnsError(t *testing.T) {
 	}
 	policy := ContinuationPolicy{Provider: "anthropic", Model: "claude"}
 
-	_, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+	_, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxNoProgressIterations: 2}, policy)
 	if err == nil {
 		t.Fatal("expected an error for a decision value outside the reasoning-eligible set")
@@ -460,7 +446,7 @@ func TestDecide_NoProgressStreak_ExecuteLLMStepError_Propagates(t *testing.T) {
 	}
 	policy := ContinuationPolicy{Provider: "anthropic", Model: "claude"}
 
-	_, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+	_, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxNoProgressIterations: 2}, policy)
 	if err == nil {
 		t.Fatal("expected ExecuteLLMStep's own error to propagate")
@@ -471,7 +457,7 @@ func TestDecide_NoProgressStreak_NilExecutor_ReturnsError(t *testing.T) {
 	history := noProgressHistory(2)
 	policy := ContinuationPolicy{Provider: "anthropic", Model: "claude"}
 
-	_, err := Decide(context.Background(), nil, unmetGoal(t), nil, Evaluation{}, history,
+	_, err := Decide(context.Background(), nil, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxNoProgressIterations: 2}, policy)
 	if err == nil {
 		t.Fatal("expected an error when no StepExecutor is given but the reasoning fallback is reached")
@@ -482,7 +468,7 @@ func TestDecide_NoProgressStreak_MissingPolicyProviderOrModel_ReturnsError(t *te
 	history := noProgressHistory(2)
 	exec := &fakeStepExecutor{}
 
-	_, err := Decide(context.Background(), exec, unmetGoal(t), nil, Evaluation{}, history,
+	_, err := Decide(context.Background(), exec, unmetGoal(t), false, Evaluation{}, history,
 		Budget{MaxNoProgressIterations: 2}, ContinuationPolicy{})
 	if err == nil {
 		t.Fatal("expected an error when ContinuationPolicy has no Provider/Model")

@@ -1,7 +1,7 @@
 # LoopEngine core — `internal/loop.LoopEngine.Run`/`.Resume`
 
 **Phase:** 2 — Runtime engine (`TASKS/loops`)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** `03-loop-runs-schema.md`, `04-loop-run-iterations-schema.md`,
 `07-loop-continuation-policy.md`
 **Touches:** new `internal/loop/engine.go`, `internal/service/workflow_launch.go`
@@ -114,8 +114,159 @@ follows this exact pattern for resuming a paused iteration's `WorkflowRun`, not 
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why,
-anything escalated.>
+
+Built `internal/loop/types.go` (`LoopDefinition`, `LoopGoalSpec`, `LoopInput`, `LoopResult`)
+and `internal/loop/engine.go` (`LoopEngine`, `NewLoopEngine`, `Run`, `Resume`, and their
+private helpers), plus `internal/loop/engine_test.go`. Confirmed directly against the real
+code (not the design doc's paraphrase) before writing anything: `CompileTeam`
+(`internal/service/team_compiler.go:104`), `TeamRunLauncher`/`LaunchTeamRun`
+(`internal/service/team_run_launcher.go:156,226`), `WorkflowLauncher.Launch`/`GetEngine`
+(`internal/service/workflow_launch.go:101,122`), `BuiltinWorkflowEngine.Resume`
+(`internal/service/workflow_engine.go:125`), and `a2a_task_manager.go`'s `resumeWorkflowRun`
+(lines 708-762) — `WorkflowLauncher` really has no bare `.Resume`; the two-step
+`GetEngine`+concrete-engine-`.Resume(ctx, runID, wf, exec)` pattern is exactly what
+`resumeBlockedIteration` follows.
+
+**Evidence-formula duplication escalation (`TASKS/ESCALATIONS.md`, 2026-08-21) — resolved via
+option (a).** Changed `Decide`'s signature (`internal/loop/decide.go`) to take a precomputed
+`goalMet bool` instead of `evidence []GoalEvidence`, and deleted `evidenceSatisfiesGoal` and
+its `missingFromCoverage` helper from `internal/loop` entirely — the four-clause `goal_met`
+formula now has exactly one implementation, `internal/store/goal_evidence.go`'s
+`EvaluateGoalEvidence`/`EvidenceSatisfiesGoal`. `LoopEngine.evaluateDecideAndAct` (engine.go)
+is the one caller: it queries `store.EvidenceSatisfiesGoal(ctx, goal.ID)` itself, every
+iteration, and passes the bool straight into `Decide`. Judged option (a) practical, not
+"impractical for a real reason" (the escalation's own bar for falling back to option (b)
+instead) — nothing about `goalMet` needs a DB read `Decide` couldn't otherwise avoid, and the
+caller already holds a live `*store.Store`. Updated `internal/loop/decide_test.go` to match:
+removed `TestDecide_GoalMet_PartialEvidence_DoesNotComplete` and
+`TestDecide_GoalMet_NoEvidenceAtAll_DoesNotComplete` (they tested evidence-coverage nuance that
+moved entirely out of `Decide`'s scope and is already covered once, in
+`internal/store/goal_evidence_test.go`'s `TestEvidenceSatisfiesGoal_*` tests), added
+`TestDecide_GoalNotMet_DoesNotComplete`, and updated all 20 other call sites' `nil` evidence
+arg to `false`. All 24 `decide_test.go` tests pass with the new signature.
+
+**One-active-`LoopRun`-per-`goal_id` — enforced in `Run` itself**, per the task's own
+"pick one owner" instruction: queries
+`store.ListLoopRuns(ctx, LoopRunFilter{GoalID, Statuses: LoopRunActiveStatuses})` before
+creating any row, returning `ErrLoopRunAlreadyActive` (wrapped, `errors.Is`-checkable) if a
+`running`/`waiting_on_gate`/`waiting_on_escalation` row already exists for that goal. Enforced
+regardless of caller, not just an HTTP path task 10 might add later.
+
+**`LoopEngine` is a concrete struct, not an interface** — a documented deviation from
+21-loops.md's bare illustrative sketch, following `TeamRunLauncher`'s own real precedent (a
+struct wrapping its collaborators: `*store.Store`, `*agentworkflow.Registry`,
+`*service.WorkflowLauncher`). Nothing in this task needs a second, swappable implementation.
+
+**Real gap found and resolved: `Resume(ctx, loopRunID)` has no parameters, but relaunching a
+further iteration hard-requires `AgentProfileID`.** `WorkflowLaunchRequest.AgentProfileID` is a
+required, NOT-NULL-FK-backed field, and nothing in the existing schema (no migration in this
+task's scope) gives `loop_runs` a place to persist launch-time params for a bare, no-argument
+`Resume` to recover later. Resolved by finishing what task 07 explicitly left open:
+`loop_runs.continuation_policy_json` was documented as "task 07 defines and consumes its real
+shape without this table needing to be revisited" — task 07 only ever needed
+`ContinuationPolicy`'s own four fields. This task defines the column's actual, full stored
+shape as `loopRunPersistentConfig` (engine.go, unexported): `ContinuationPolicy` nested
+unchanged (so task 07's own type/doc-comments stay accurate) plus `AgentProfileID`/
+`ProjectID`/`ParentSessionID`/`TimeoutSeconds`/`WorkflowParams`. `Run` encodes this once at
+launch; `Resume` decodes it to relaunch further iterations with zero new inputs. Documented at
+length in engine.go's own package doc comment. Flagged as a legitimate follow-up candidate: a
+future migration could give `loop_runs` its own dedicated launch-params column instead of
+overloading this one.
+
+**Real schema gap found: `loop_runs.status` (migration 138) has only two pause buckets
+(`waiting_on_gate`, `waiting_on_escalation`), one fewer than `Decide`'s own `WAIT`/`ESCALATE`
+distinction.** No migration in scope to add a third. Resolved both `DecisionWait` and
+`DecisionEscalate` into `LoopRunStatusWaitingOnEscalation` — no information is actually lost,
+since `loop_run_iterations.decision` (persisted every iteration) already carries the exact,
+undegraded `wait`/`escalate` distinction for any downstream reader; only the coarser
+`loop_runs.status` column collapses the two. `LoopRunStatusWaitingOnGate` is reserved
+specifically for "this iteration's own contained WorkflowRun is itself blocked mid-run"
+(`RunStatusWaiting`/`RunStatusWaitingOnFlex`), a structurally different pause than a
+LoopRun-level continuation-policy verdict. Documented as a real follow-up candidate (a future
+migration could add a distinct `waiting` status for `WAIT`, mirroring `RunStatusWaitingOnFlex`'s
+own precedent for exactly this problem) — not fixed here since it is a schema change and this
+task has none in scope.
+
+**Iteration ordering: `Launch` happens before `CreateLoopRunIteration`, not after**, so the
+in-flight row always has `WorkflowRunID` populated even before a decision exists — matches
+21-loops.md's own illustrative `loop_run_iterations` example (iteration 3, `decision: null`,
+already carries `workflow_run_id: wr_ghi`) and is what makes `resumeBlockedIteration` able to
+find and resume a still-in-flight iteration's `WorkflowRun` at all. `CreateLoopRunIteration`'s
+own doc comment already explicitly allows this ("a caller that already knows all three fields
+up front ... may set them directly") — no store-layer change needed.
+
+**Evaluation rollup (`classifyIterationProgress`)** reads `WorkflowLaunchResult.StepResults`
+directly (each `StepResult` already carries its own decoded `VerifyResult`, populated by the
+builtin engine from `workflow_run_steps.verify_json`) — no new DB query, no new evaluator
+subsystem, per the design doc's "reuses `Verify` wholesale" instruction. A step that errored or
+failed its `Verify` counts as a regression data point; a cleanly-completed run with zero such
+data points (including the common case of no `Verify` configured at all, e.g. Ralph's plain
+one-`llm`-step preset) is classified `PROGRESS` — documented as a deliberately minimal v1
+heuristic, matching 21-loops.md's own "no-progress/convergence detection... minimal v1...
+deeper heuristics deferred" framing. `GOAL_MET` is never returned by this function; it is
+overlaid by `evaluateDecideAndAct` once it has the caller-supplied `goalMet` bool.
+
+**Bounding the synchronous loop (item 3) — judged a genuine second guard, not redundant with
+`Decide`'s own budget-exhausted branch, for `MaxRuntimeSeconds` specifically; NOT duplicated
+for `MaxIterations`.** `driveIterations` derives a `context.WithTimeout` from
+`budget.MaxRuntimeSeconds` (when set) wrapping every iteration's `Launch` call and `Decide`'s
+own `ctx`. Reasoning: `Decide`'s own `budgetExhausted` check only ever fires *between*
+iterations (after a `WorkflowRun` returns); each individual iteration is already separately
+bounded by its own `WorkflowLaunchRequest.TimeoutSeconds` (defaulting to 1800s), but a `LoopRun`
+with `MaxIterations` left at 0 ("no cap") and `MaxRuntimeSeconds` set could otherwise run an
+unbounded *number* of individually-bounded iterations before the history-based check ever
+fires. A wall-clock context deadline closes that gap and can also cut off a single
+overrunning iteration sooner than its own `TimeoutSeconds` would (Go composes two nested
+context deadlines to the earlier one). `MaxIterations`, by contrast, is NOT given a second
+in-`Run` check: `Decide` already compares `len(history) >= budget.MaxIterations` against the
+exact same history slice this file builds and hands it — a second copy of that identical
+comparison would be true redundancy, no new information. A `LoopRun` with both
+`MaxIterations==0` and `MaxRuntimeSeconds==0` is treated as an explicit, intentional
+"run until COMPLETE/FAIL" configuration (matching `budgetExhausted`'s own "0 means no cap"
+convention) — no hidden default iteration ceiling was invented to override that, since the
+task's own wording asks to guard against an *accidental* unbounded loop, not to second-guess a
+deliberate one. Known, documented limitation: a context deadline expiring *while* a `Launch` or
+`Decide` reasoning-fallback LLM call is already in flight surfaces as a plain propagated error,
+not a gracefully persisted `ESCALATE`/`FAIL` status — handling that race fully was judged real
+additional complexity beyond what "Done means" requires (the tested, common path is the
+between-iterations check).
+
+**v1 scope, documented, not escalated:** `REPLAN` relaunches the same `WorkflowDefinition` as
+`CONTINUE`/`RETRY` — 21-loops.md's own "What this session did not decide" leaves REPLAN's/
+REARCHITECT's concrete "different approach" mechanism unresolved, and `Decide`'s `Decision`
+type carries no alternate-definition payload for `REPLAN` (only `REARCHITECT` gets a
+`Revision`, and that only ever touches the Goal's own `desired_state`/`acceptance_criteria`,
+never a `WorkflowDefinition`). Not invented here; a future task that defines a real "different
+approach" mechanism can extend `LoopDefinition`/`Decision` together.
+
+**Tests** (`internal/loop/engine_test.go`, all against a real `t.TempDir()`-rooted SQLite
+`*store.Store` + real `BuiltinWorkflowEngine`/`WorkflowLauncher`, only the leaf
+`StepExecutor` stubbed — mirrors `workflow_engine_test.go`/`team_run_launcher_test.go`'s own
+convention):
+- `TestLoopEngine_Run_MultiIterationLoop_CompletesOnGoalMet` — 3 real iterations against a
+  trivial single-`llm`-step `WorkflowDefinition`; the 3rd iteration's own step records the
+  qualifying `goal_evidence` row as a side effect. Asserts `loop_run_iterations` rows created/
+  completed in order (`continue, continue, complete`), each with a real `workflow_run_id` whose
+  `workflow_runs` row carries the correct `loop_run_id`/`loop_iteration` (task 05's scoping),
+  `loop_runs.current_iteration == 3`, `no_progress_streak == 0`, final status `completed`.
+- `TestLoopEngine_Run_BudgetExhausted_EscalatesThenResumeContinues` — `Budget{MaxIterations:2}`
+  drives 2 iterations to `ESCALATE`; asserts `Run` returns `waiting_on_escalation` without
+  blocking, then `Resume` (called twice, proving idempotent re-entry) launches one real further
+  iteration each time by recovering `AgentProfileID`/budget/policy purely from persisted state.
+- `TestLoopEngine_Run_RejectsSecondActiveLoopRunForSameGoal` — a pre-existing `running` row
+  rejects a second `Run` before any `WorkflowRun` launches (`exec.calls == 0`); also confirms
+  `waiting_on_escalation` counts as active and `completed` does not.
+- Two bonus tests: inline `LoopGoalSpec` upsert + budget-exhausted `FAIL` path, and the
+  GoalID/Goal mutual-exclusivity error paths.
+
+**Verification:** `go build ./cmd/nanite/` — pass (read the actual command output directly,
+no build errors). `go vet ./...` — pre-existing, unrelated failures only
+(`internal/service/container.go:1180/1200/1260`, `stopReaper`/`stopRuntimeReaper` possible
+context leak; confirmed via `git diff --stat`/`git status` that this file is untouched by this
+task — zero files besides `internal/loop/*` changed). `go test ./...` — every package printed
+`ok`, including `internal/loop` (2.845s); zero `FAIL` lines anywhere in the full, un-piped
+output, read directly from a file the test run was redirected to (not trusted via `$?` alone,
+per this batch's own standing instruction).
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

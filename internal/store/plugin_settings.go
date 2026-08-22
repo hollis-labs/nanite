@@ -132,8 +132,12 @@ func (s *Store) ListPluginSettings(ctx context.Context) ([]*PluginSettings, erro
 			Icon:      icon,
 			UpdatedAt: updatedAt,
 		}
-		json.Unmarshal([]byte(settingsJSON), &ps.Settings)
-		json.Unmarshal([]byte(schemaJSON), &ps.Schema)
+		if err := json.Unmarshal([]byte(settingsJSON), &ps.Settings); err != nil {
+			return nil, fmt.Errorf("parse plugin settings %s: %w", pid, err)
+		}
+		if err := json.Unmarshal([]byte(schemaJSON), &ps.Schema); err != nil {
+			return nil, fmt.Errorf("parse plugin schema %s: %w", pid, err)
+		}
 		results = append(results, ps)
 	}
 	return results, nil

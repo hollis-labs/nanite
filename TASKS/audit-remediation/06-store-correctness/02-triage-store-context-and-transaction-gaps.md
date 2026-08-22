@@ -1,7 +1,7 @@
 # Triage `internal/store`'s remaining error-handling, context-propagation, and transaction gaps
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch. Sequencing note only: this task is not blocked by `01-fix-deleteagentbyid-error-swallowing.md`, but the remediation guide's own "Store correctness" section lists `GO-STORE-003` first and this trio second — a planner may still choose to schedule `01` first for that reason, without it being a real code dependency.
 **Touches:** `internal/store/plugin_settings.go` (`ListPluginSettings`) and `internal/store/durable_agents.go` (`SyncDurableAgentInstanceConfig`). ~~`sessions.go`/`agents.go`~~ removed 2026-08-22 — those belonged to `GO-STORE-005`, which AD-14 moved to `06/03`. Three unrelated files/findings triaged in one pass per the remediation guide's explicit grouping — see Context.
 
@@ -246,7 +246,47 @@ go test -race ./internal/store/... -run TestSyncDurableAgentInstanceConfig   # o
 
 ## Work log
 
-<!-- Worker fills in per sub-section: what was actually done, the sub-section C trace's conclusion and how it was reached, and the sub-section B decision once made (or a note that it's still pending architect input). -->
+- Re-derived the post-`06/03` signatures from current source before editing:
+  `ListPluginSettings(ctx context.Context)` and
+  `SyncDurableAgentInstanceConfig(ctx context.Context, inst ...)`. Per the
+  2026-08-22 re-scope banner and AD-14, this implementation did no
+  `GO-STORE-005` work and did not touch `agents.go`, `sessions.go`, store
+  interfaces, or the Store abstraction.
+- **GO-STORE-004:** made `ListPluginSettings` fail closed on malformed
+  `settings` or `schema` JSON, matching `GetPluginSettings`, and included the
+  offending `plugin_id` in the wrapped list error. Added table-driven coverage
+  for both columns; each case proves both Get and List surface the same parse
+  category rather than List silently returning a zero value.
+- **GO-STORE-006 caller trace:** there are exactly two direct production call
+  sites, both in `internal/service/managed_durable_configs.go`. The archive of
+  managed files missing at boot and the per-file discovery loop inside
+  `SyncManagedDurableAgentConfigs` are serial. The other call is inside
+  `syncManagedDurableAgentConfig`, which is also reached by
+  `SaveManagedDurableAgentConfig`; that exported save path backs concurrent
+  HTTP handlers for durable-agent create, update, archive, and recipe apply.
+  Go's HTTP server supplies no same-slug serialization, so concurrent calls for
+  the same slug are a live production path, not an accepted-risk-only boot
+  reconciliation shape.
+- **GO-STORE-006 direction:** replaced the read/branch/write sequence with one
+  atomic `INSERT ... ON CONFLICT(slug) DO UPDATE`. The conflict update keeps
+  runtime-owned lifecycle/session/failure/archive state when the managed config
+  omits status, while an explicit archive is monotonic and supplies an archive
+  timestamp when needed. This is the smallest SQL-atomic solution for both the
+  update and create branches and avoids adding transaction lifecycle code.
+- Added a real concurrent regression with 16 ordinary same-slug config writers
+  racing one archive writer across 25 rounds. Before the fix, round 0 ended
+  `status = active` and `archived_at = nil`, proving a stale config writer could
+  resurrect the archived instance. After the fix it passed 10 ordinary runs
+  and 3 race-enabled runs; removing the JSON checks likewise made both malformed
+  JSON list cases fail with a nil error before the fix.
+- Verification: `go build ./internal/store/...`, `go vet ./internal/store/...`,
+  `go test ./internal/store/...`,
+  `go test -race ./internal/store -run TestSyncDurableAgentInstanceConfigConcurrentArchiveIsMonotonic -count=3`,
+  `go build ./cmd/nanite/`, and `go vet ./...` passed. The first `go test ./...`
+  run hit the repository's documented pre-existing
+  `TestService_WriteSessionEvent` ordering flake; its isolated `-count=10`
+  rerun and a second full `go test ./...` both passed. `git diff --check` passed.
+- Deviations from the re-scoped plan: none.
 
 ## Review notes
 

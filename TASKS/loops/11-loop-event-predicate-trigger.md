@@ -1,7 +1,7 @@
 # Event/predicate trigger — new `resume_loop_run` reflex action kind
 
 **Phase:** 3 — Trigger surface (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `08-loop-engine-core.md`
 **Touches:** `internal/agent/reflexes/` (new action kind), `internal/store/migrations/`
 (new migration — widen whatever `CHECK` constrains `agent_reflexes.action_kind` or its
@@ -321,4 +321,26 @@ built, only which literal `EvaluateLoopRunResumeReflexes` checks — noted per t
 "note the correction, do the task anyway" policy, not escalated.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+PASS. Reviewed migration 142, the `engine.go`/`executor.go` diffs, `api/reflexes.go`'s
+validation diff, `store/agent_reflexes.go`'s `ListAgentReflexesForLoopRun`,
+`loop_resume_reflex.go`, `reflex_resume.go`, and both test files in full. Confirmed the
+no-op/real-handler split genuinely mirrors `dispatch_to_agent`, the `waiting_on_escalation`
+guard is correct and matches `LoopEngine.Resume`'s real branching (`waiting_on_gate` routes to
+`resumeBlockedIteration`, a different path — verified directly, not just asserted), Facet 4
+recurrence and `EmitFirings` telemetry are correctly wired, provenance tier correctly denies
+`plugin`, and the end-to-end test genuinely drives `LoopEngine.Resume` via the reflex path
+(never a direct call standing in for it). No `callback`-style escape hatch introduced. Import-
+cycle resolution independently re-verified (`internal/loop`→`internal/service`→
+`internal/agent/reflexes`, no reverse edge). `go build`/`go vet`/`go test` all verified
+directly (vet's only output is the pre-existing `container.go` lostcancel warnings; full
+`go test -count=1 ./...` after `go clean -testcache`: zero `FAIL`/`panic`).
+
+One minor, non-blocking observation: no dedicated API-level test rejects an empty
+`loop_run_id` for `resume_loop_run` — but this matches the equally-untested pre-existing
+`dispatch_to_agent`/`agent_slug` precedent, not a new gap this task introduced.
+
+The known `11`/`12` scheduled-tick wiring gap (see `TASKS/ESCALATIONS.md`'s most recent entry)
+is tracked and being fixed separately — it reflects a cross-task integration seam neither
+task's own file anticipated, not a defect in this task's own implementation, which is complete
+and correct on its own terms.

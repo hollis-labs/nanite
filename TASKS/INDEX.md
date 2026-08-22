@@ -760,7 +760,7 @@ resolution of every item on the design doc's own "What this session did not deci
 | `08-loop-engine-core` | 2 | reviewed | `03`, `04`, `07` |
 | `09-stepkindloop-executor-and-waiting-status` | 2 | reviewed (migration 141) | `06`, `08` |
 | `10-loop-launcher-and-api` | 3 | reviewed | `08` |
-| `11-loop-event-predicate-trigger` | 3 | implemented (migration 142) | `08` |
+| `11-loop-event-predicate-trigger` | 3 | reviewed (migration 142) | `08` |
 | `12-loop-run-tick-scheduled-trigger` | 3 | implemented (migration 143) | `08` |
 | `13-loop-presets` | 4 | not-started | `07`, `08`, `10` |
 

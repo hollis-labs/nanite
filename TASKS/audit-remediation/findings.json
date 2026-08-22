@@ -55,7 +55,7 @@
       "false_positive_considerations": "If NewContainer failures are effectively fatal (process exits immediately), the leak is real but inconsequential in practice.",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/01-fix-container-constructor-partial-failure-cleanup.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: container.go changed since the audit (additive SkillVendor/ReflexEngine wiring), but the bug is intact -- exactly 2 return-nil-err paths exist between reaper start (line 1213) and struct assembly (durableAgentRecipes err at :1291-1293, SyncManagedDurableAgentConfigs err at :1295-1297, shifted from the audit's 1242/1246), and neither calls stopReaper()/stopRuntimeReaper(). Matches the finding's recommended fix pattern (mirror stopCatalog()) exactly."
     },
     {

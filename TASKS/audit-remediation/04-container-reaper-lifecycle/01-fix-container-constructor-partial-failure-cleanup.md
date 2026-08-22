@@ -1,7 +1,7 @@
 # Fix Container constructor partial-failure cleanup (reaper goroutines leak on NewContainer error paths)
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none — self-contained within `internal/service/container.go`'s `NewContainer`.
 **Touches:** `internal/service/container.go` (`NewContainer` only; no other symbol).
 **Requires architect decision:** false. Note: `findings.json`'s raw entry for `GO-LIFE-001` carries `requires_architect_decision: true`, but its own `recommendation` text is a concrete mechanical direction ("match the existing `stopCatalog()` cleanup pattern already present at both flagged sites"), not an open design question — this task file sets the flag to `false` per this batch's own stated convention (README.md: "flags `requires_architect_decision: true` wherever the underlying finding's recommendation was 'architect decision' in the audit"). Flagging this explicitly in case the `true` value in `findings.json` is a data-entry inconsistency rather than deliberate signal; a planner should treat `false` as this task's working assumption but can override.
@@ -125,4 +125,12 @@ Low risk — the change is additive cleanup code on already-identified error pat
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-22: Fresh-context reviewer PASS with no findings. Independently
+  re-derived both post-reaper constructor error paths and confirmed the
+  constructor-wide defers stop both reapers on failure while
+  `containerCommitted = true` transfers ownership on success.
+- Mutation verification reversed only the production fix and confirmed
+  `TestNewContainer_PostReaperFailureStopsReapers` fails with both loop counts
+  increasing; the fixed test passed 20 consecutive runs. Independent
+  `go test ./internal/service/... -count=1`, `go vet ./internal/service`,
+  `go vet ./...`, `go build ./...`, and `git diff --check` all passed.

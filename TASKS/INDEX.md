@@ -1038,7 +1038,7 @@ must not be dispatched.
 
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
-| `04/01` | `04-container-reaper-lifecycle/01-fix-container-constructor-partial-failure-cleanup.md` | not-started | `00/01` | — |
+| `04/01` | `04-container-reaper-lifecycle/01-fix-container-constructor-partial-failure-cleanup.md` | reviewed | `00/01` | — |
 | `04/02` | `04-container-reaper-lifecycle/02-fix-api-test-container-shutdown-leak.md` | not-started | `00/01` | — |
 | `04/03` | `04-container-reaper-lifecycle/03-investigate-internal-service-race-timeout.md` | not-started | `04/02` | — |
 | `04/04` | `04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md` | not-started | `00/01` | — |

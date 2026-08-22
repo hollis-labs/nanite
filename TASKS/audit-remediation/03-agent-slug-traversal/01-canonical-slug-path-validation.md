@@ -859,4 +859,22 @@ tests); `go test ./internal/agent/... ./internal/agentvalidation/...
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+**2026-08-22, fresh reviewer round 1 (no shared context with the worker). Verdict: PASS, with two findings worth follow-up (neither blocking).**
+
+Independently re-verified every claim in the Work Log against the actual code and by running the tests:
+
+1. **Pre-implementation auth-boundary verification — PASS.** Read `internal/server/server.go`/`auth.go` directly; confirmed `basicAuthMiddleware` is a complete no-op when `NANITE_AUTH_USER`/`NANITE_AUTH_PASSWORD` are both unset (the default), with no route-specific exemption on `/api/agents`/`/api/durable-agents`.
+2. **All 7 rows of "All production callers" — PASS**, with one caveat: the DB-only-materialize branch's separate collision-overwrite gap (a crafted slug colliding with an existing managed file) was left unfixed. The task's own "Done means"/"Tests required" don't actually require it, so this is a defensible reading of the acceptance bar, though the Work Log's own citation for that call was imprecise (cited a Context/What-to-do split that doesn't quite apply here) — should have gone to `TASKS/ESCALATIONS.md` rather than just a Work Log note, but not a defect in the fix itself.
+3. **One shared validator — PASS.** `internal/agent/slug.go`'s regex is byte-identical to `internal/builders/agent_builder.go:12`'s. The "verbatim second instance rather than importing `internal/builders`" placement is a legitimate, transparently-documented layering call (no import cycle either way).
+4. **`pathsafe.ResolveUnder` as defense in depth — PASS**, confirmed correct usage at all three sites.
+5. **Test coverage/build/vet/test — PASS**, all independently re-run (not just re-read), including `gosec` reproducing the exact same G304 line numbers the Work Log claims.
+6. **Scope discipline — PASS.** `internal/builders`, `internal/pathsafe`, `internal/agent/managed_section.go` all untouched; `GO-AGENT-003`'s dead code untouched.
+7. **Same-slug no-op short-circuit — mutation-tested directly by the reviewer.** The fix itself is real and correct, but the original regression test (`TestAgentConfig_Update_RenameBranch_SameSlugNoOp`) didn't actually pin it for the realistic failure mode (a legacy/pre-fix-shaped `SourceRef`, i.e. every currently-deployed managed-agent row) — it seeds via `svc.Create()`, whose `SourceRef` is already `ResolveUnder`'d, making the test idempotent under mutation. A targeted reviewer-authored probe against a raw `filepath.Join`-shaped `SourceRef` confirmed the mutated (hazard-reintroduced) code genuinely deletes the file; the real shipped code survives it.
+
+**Additional finding, outside this task's stated scope:** durable-agent slugs previously had zero format validation; the new unconditional `agent.ValidateSlug` on every `saveManagedDurableInstance` write means any pre-existing durable-agent instance with a non-conforming slug would become un-editable/un-archivable until corrected. Flagged for the Orchestrator to confirm no live non-conforming data exists before shipping.
+
+**Resolution:** the Orchestrator independently queried this machine's real deployed DB (`~/.local/share/nanite/workspaces/default/main.db`) — all current `durable_agent_instances.slug` and `agent_profiles.slug` values (35 checked) already conform to the new regex; no active risk today. Dispatched a fix for the test-pinning gap: added `TestAgentConfig_Update_RenameBranch_SameSlugNoOp_LegacySourceRef`, seeding `SourceRef` via a plain `filepath.Join` (not `ResolveUnder`'d) through a symlinked alias directory, reproducing the exact mismatch shape the original review found missing.
+
+**2026-08-22, fresh reviewer round 2 (re-review of the test-pinning fix, no shared context with either prior worker). Verdict: PASS — ready to merge.**
+
+Independently reproduced the mutation test: reverted the same-slug short-circuit, confirmed the new test fails (`no such file or directory`, exactly the hazard described) while the original test still passes under the same mutation (confirming the original gap). Restored the file (byte-identical to pre-mutation state, verified via diff), reran: both same-slug tests pass, full `go test -count=1 ./internal/service/... ./internal/agent/... ./internal/agentvalidation/... ./internal/api/...` passes on a fresh, uncached run. Confirmed the fix is test-only (no production code touched) and the DB slug-conformance sentence in the Work Log describes an actual performed check, not a bare assertion — independently re-ran the same DB query and got zero non-conforming rows. Aligns with `docs/engineering/standards/testing.md`'s "a regression test should reproduce the actual reported failure" standard.

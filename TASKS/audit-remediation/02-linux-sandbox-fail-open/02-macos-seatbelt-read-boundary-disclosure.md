@@ -556,4 +556,15 @@ run (nothing it could regress).
 
 ## Review notes
 
-<Reviewer fills this in.>
+**2026-08-22, fresh reviewer (no shared context with the worker). Verdict: PASS.**
+
+Independently re-verified every factual claim against the actual code, not just the Work Log's assertions:
+
+1. **Code posture unchanged** — the worktree's own diff touches exactly two `docs/*.md` files plus the task file; zero `.go` files. (A wider `git diff main --stat` initially looked broader, but that was confirmed to be an artifact of `main` having advanced with unrelated, already-merged Wave 1 commits since this worktree branched — re-confirmed via `git log` that neither doc file under review was touched by that intervening history.)
+2. **`os_darwin.go` disclosure claims — factually accurate.** Read all of `os_darwin.go` directly: `(allow default)`, the `(deny file-write* ...)` block scoped exactly to sandbox dir/extra write path/`/private/tmp`/`/tmp`/`/dev/null`/`/dev/tty`/`/dev/fd`, and the network deny-all-or-allow-localhost-only block all match the new doc text literally. No `file-read*`/`process-exec*`/`mach-lookup`/`mach-register`/`signal`/`sysctl` denies exist anywhere in the file. Also independently confirmed the Linux comparison text against `internal/sandbox/os_linux.go` (`bwrapRoBindCandidates`, unconditional PID/IPC/UTS namespace unsharing).
+3. **The `python_run` finding — independently re-traced, confirmed true.** `RunPythonSandbox` (`internal/selftools/self_tools_python.go`) builds `exec.CommandContext` directly and calls only `applySandboxSysProcAttr` (sets `Setpgid` only) — no `sandbox.AgentExec`/`applyOSSandbox` call anywhere in the function or its one call site. Confirmed `sandbox.AgentExec`/`UserExec` are used elsewhere (`dev_tools.go`, `code_exec_tools.go`, `workflow/handlers.go`, `api/shell.go`) but never for `python_run`. A genuine, previously-undisclosed gap, correctly found and fixed.
+4. **Scope discipline** — the second-doc fix is squarely inside this task's own Verification checklist item (repo-wide search for other docs making the same class of claim); independently reran the worker's cited greps with matching results; the hits left uncorrected genuinely don't need correction (external-comparison material, mechanism-name-only mentions, or already-accurate).
+5. **No silent narrowing** — `hardening-phase-plan.md` uses a dated correction blockquote plus inline strikethrough, preserving the original text as a marked, superseded design-intent record.
+6. **Work Log completeness** — all checkboxes checked with inline justification, the quoted AD-03 text matches `ARCHITECT-DECISIONS.md` verbatim, a definitive (non-hedged) yes/no on disclosure adequacy is given with evidence, and the non-touching of `os_darwin.go` is explicitly confirmed and justified.
+
+**Non-blocking observation:** `docs/programmatic-tool-calling-safety.md`'s header still calls the tool `nanite_run_python` while the registered tool name in code is `python_run` — a pre-existing mismatch (confirmed via `git show main:...`), not introduced by this change and not perpetuated by the new correction text (which correctly uses `python_run` throughout). Not this task's scope. No fix dispatch needed.

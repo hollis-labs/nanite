@@ -565,3 +565,28 @@ are untouched by this follow-up — the CLI path continues to use
 so this change has zero effect on CLI behavior.
 
 ## Review notes
+
+**2026-08-22, fresh reviewer round 1 (no shared context with the worker). Verdict: PASS, with one item requiring operator attention and one minor documentation nit.**
+
+Reviewed the diff (`internal/api/catalog.go`, `internal/plugin/install/staging.go`, `internal/plugin/catalog.go`/`catalog_test.go`, `internal/plugin/signature.go`/`signature_test.go`, `cmd/nanite/plugin_install_flow.go`, plus new `internal/api/catalog_install.go`/`catalog_install_test.go`, `internal/plugin/install/build.go`/`source.go`) against AD-04's six sub-answers, all independently confirmed correctly implemented:
+
+1. **Confinement** — `install.ValidatePluginID` early exit + `DirStaging.Commit`; no second `pathsafe.ResolveUnder` added.
+2. **Archive formats** — new `catalogExtractor` dispatches `.zip`/`.tar.gz`; `TestHandleCatalogInstall_Success_Zip` genuinely exercises the real handler over `httptest.NewServer`, ran under `-race`, passes.
+3. **Loader** — `hostLoader` confirmed a thin wrapper around `pms.runPluginLoadIntoHost`, not a reimplementation.
+4. **Source** — `catalogArchiveSource` moved to exported `install.CatalogArchiveSource`, used by both `cmd/nanite` and `internal/api`, not forked.
+5. **Legacy retirement** — `grep` confirms zero production callers of `VerifyChecksum`/`VerifySignature`; `CatalogFetcher` confirmed still load-bearing at 6 real call sites.
+6. **Shared constructor** — `install.NewInstaller`/`BuildOptions` confirmed called from both `cmd/nanite/plugin_install_flow.go` and `internal/api/catalog.go`, one canonical wiring site.
+
+Re-ran the task's own production-caller grep sweep independently — every line number in the Work Log's table matches current source. `internal/api/plugins.go` shows zero diff (scope fence held — `handleInstall`/`handleInstallLocal`/`handleInstallArchive` untouched). `internal/plugin/catalog/`, `internal/plugin/devmode/`, `internal/plugin/install/verify.go`/`install.go` all show zero diff (trust model reused, not redesigned). Fail-closed behavior verified both by reading `SignatureVerifier.Verify` and by independently running `TestHandleCatalogInstall_RejectsUnsignedEntry`/`WrongSignature`/`PathTraversal` — all pass under `-race`. Full baseline independently re-run clean (`go build`, `go build -tags devmode`, `go vet`, `go test -race`, `go test -tags devmode ./internal/plugin/install/...`, `go test ./cmd/nanite/...`).
+
+**Minor nit (non-blocking):** the Work Log's `CatalogFetcher` call-site citation has one wrong line number (191 instead of 138) — the underlying claim (still load-bearing, not dead) is correct and independently verified; just a citation-precision slip.
+
+**Real finding requiring operator attention:** the converged pipeline dropped the pre-convergence handler's tolerance for an archive whose `plugin.yaml` sits in a single wrapper subdirectory (the shape a plain GitHub "Download ZIP" produces). The CLI's own `TarGzExtractor` never had this tolerance either, so it's not a capability the "good" pipeline lost — but the reviewer determined a clean, in-scope fix was available (extend the new `catalogExtractor`, without touching `install.go`'s state machine) and wasn't taken; the worker's own cited Non-goals fence didn't actually forbid it. Assessed as "should have been escalated, not resolved unilaterally," though disclosed (not silent) and not a security regression.
+
+**Resolution:** operator decision, 2026-08-22 — restore the tolerance. Fix dispatched into the same worktree: `catalogExtractor` now detects a single-wrapper-subdirectory shape (matching the old handler's exact detection rule) and flattens it into `targetDir`, entirely within its own new file — `install.go`, `staging.go`, and `extract.go` remain untouched. New regression test `TestHandleCatalogInstall_Success_WrapperDirectory` added; all existing flat-root tests confirmed unmodified and still passing.
+
+**2026-08-22, fresh reviewer round 2 (re-review of the wrapper-subdir fix, no shared context with either prior worker/reviewer). Verdict: PASS on the fix itself.**
+
+Independently confirmed: detection logic (`resolveCatalogPluginRoot`) matches the old handler's exact rule (root `plugin.yaml` wins; else exactly one subdir promotes; else falls through to the existing "missing" rejection — verified with two extra ad hoc tests for the zero-subdir and two-subdir ambiguous cases, both correctly reject); `internal/plugin/install/install.go`/`extract.go` confirmed genuinely untouched; the new wrapper-directory test builds a real signed zip and POSTs through the actual HTTP handler, confirmed passing; all 8 `TestHandleCatalogInstall_*` subtests pass including under `-race`; full baseline re-run clean.
+
+**New finding surfaced during this second review round, outside this follow-up's own scope:** the downloaded archive file is never cleaned up after extraction in either the API or CLI install path — every catalog-installed (and CLI-installed) plugin directory ends up permanently containing the archive file alongside the extracted plugin. A real regression versus the pre-convergence handler (which downloaded to a fully separate OS temp file). Not a security issue — hygiene/correctness only. **Not fixed as part of Wave 1** — logged as a new mid-batch discovery in `TASKS/ESCALATIONS.md` (2026-08-22 entry) per the batch's own rule for new findings, recommended as a fast-follow for whoever next touches `internal/plugin/install/`. Does not affect the correctness or completeness of this task's own GO-PLUGIN-001/002/003 security fixes.

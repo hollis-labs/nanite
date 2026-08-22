@@ -348,4 +348,15 @@ No escalation needed — no ambiguity in what to do, nothing with zero
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail, what was independently re-verified. -->
+**2026-08-22, fresh reviewer (no shared context with the worker). Verdict: PASS, no findings.**
+
+Independently re-verified all six review criteria against the worktree diff, the task file's own quoted `## Context` section, `PREVENTION.md`, and `GLOSSARY.md`:
+
+1. **Byte-exact normative wording** — programmatically extracted all six blockquotes from both the task file and `coding-standards.md` and diffed them string-for-string: all six match exactly, no paraphrasing, no dropped/added words.
+2. **"Why" lines drawn from `PREVENTION.md`, not the task file's own condensed prose** — spot-checked three (more than the required two): Silent Security Degradation's why-line cites the `sourcePublicKey != "" && entry.Signature != ""` "false by default" framing and the specific GO-PLUGIN-001 detail, present in `PREVENTION.md` item 1 but absent from the task file's own paragraph; Trust-Boundary Paths' why-line cites the `forbidigo`/`path-except` scoping detail, which comes specifically from `PREVENTION.md`'s "headline finding" section; Lifecycle Ownership's why-line cites `go vet` flagging the reaper leak directly and the "~18" untracked goroutine figure, both `PREVENTION.md`-specific. Confirms genuine condensation, not re-pasted task-file prose.
+3. **Existing content preserved** — all four pre-existing stub bullets untouched; "Not yet documented" section present with only the allowed light narrowing.
+4. **Self-contained** — all six standards carry their full blockquoted text inline; none is a bare pointer to the external guide.
+5. **Scope discipline** — exactly two files touched (the task file and `coding-standards.md`); no lint/CI files touched; no seventh/invented standard; no second competing standards doc exists; no new vocabulary collides with `GLOSSARY.md`.
+6. **Verification claim, independently re-run** — `grep -c` on the six standard names returns exactly `6` on the worktree branch, matching the worker's claim; confirmed the six matches are the six `###` headings only, and confirmed the "Not yet documented" line's rewording (naming both standards generically rather than by name) was specifically what kept the count from becoming 7.
+
+Also cross-checked every `TASKS/audit-remediation/*` folder path cited in the new why-lines actually exists, and the "2026-08-21 Go quality audit" heading date matches the real audit date used consistently elsewhere in the batch. No fix dispatch needed.

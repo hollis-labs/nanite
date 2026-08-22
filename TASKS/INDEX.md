@@ -672,7 +672,7 @@ reasoning.
 | `05-install-sync-rest-api-and-cli-command` | 3 | reviewed | `04` |
 | `06-build-skill-resolver-and-parameter-binding` | 4 | reviewed | `02`, `03`, `04` |
 | `07-implement-inline-fork-composition-semantics` | 4 | validated | `04`, `06` |
-| `08-rebuild-inline-marker-and-scripts-execution` | 4 | in-progress (review found a real bug, fix dispatched) | `06` |
+| `08-rebuild-inline-marker-and-scripts-execution` | 4 | implemented (fix landed, re-review pending) | `06` |
 | `09-sandbox-and-capability-policy-gate-for-skill-execution` | 5 | not-started | `02`, `08` |
 | `10-cli-hosted-native-skill-delivery-boot-dir-planting` | 6 | not-started | `02`, `03` |
 | `11-api-direct-skill-get-self-tool` | 6 | not-started | `06`, `07`, `08`, `09` |

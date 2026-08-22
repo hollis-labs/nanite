@@ -155,5 +155,14 @@ branch. `go test ./...` passes in full (93 packages, all `ok`, including
 No deviations from the task's own instructions beyond the real-backup-flex-row adaptation
 documented above, and using `136` in place of the provisional `143`.
 
+**Orchestrator fix, post-review (2026-08-21):** the fresh reviewer flagged one stale
+doc-comment reference — `internal/agentworkflow/types.go`'s `StepKindLoop` comment still said
+"migration 135" after the merge-time renumbering to `136` (every other reference was correctly
+updated). Non-behavioral, one-line comment correction applied directly by the Orchestrator
+rather than a full worker dispatch, given the fix was exactly specified and zero-risk;
+`go build ./cmd/nanite/` re-confirmed clean after the edit. Left for the next reviewer pass to
+confirm and mark `reviewed`, per this project's log-integrity discipline (only the reviewer
+that actually checked it attests `reviewed`).
+
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

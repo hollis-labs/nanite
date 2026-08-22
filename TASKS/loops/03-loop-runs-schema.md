@@ -1,7 +1,7 @@
 # LoopRun schema — `loop_runs` table, Go types, store CRUD
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/loops`)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** `01-goals-schema.md` (`goal_id NOT NULL` FK)
 **Touches:** `internal/store/migrations/` (new migration), `internal/store/loop_runs.go`
 (new — `LoopRun` struct, CRUD).
@@ -90,8 +90,111 @@ README's "What this session decided" section):
   `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why,
-anything escalated.>
+
+**Migration number.** Used `138`, per this task's explicit dispatch-time assignment (not
+the `140` provisionally claimed in "What to do" §1, and not a self-re-verified number) --
+the orchestrator's own kickoff message fixed `138` to avoid a repeat of Wave 1's
+`01`/`06` migration-number collision, since a sibling worker was concurrently claiming
+`137` for task `02` off the same base. Confirmed no `137_*`/`138_*` file existed in this
+worktree before writing `138_loop_runs.sql`; the latest pre-existing migration visible
+here was `136_workflow_run_steps_loop_kind.sql`.
+
+**Migration** (`internal/store/migrations/138_loop_runs.sql`) -- `loop_runs` table
+matching the task's illustrative DDL exactly (own `id TEXT PRIMARY KEY`, never keyed by
+or aliased to `workflow_runs.id`, per 21-loops.md's Decision 1 and this task's explicit
+instruction). `goal_id NOT NULL REFERENCES goals(id)` (FK-enforced, confirmed by a test).
+Brand-new table -> plain transactional `CREATE TABLE`, matching `128_teams.sql`/
+`135_goals.sql`'s precedent (no rebuild dance needed, unlike 130/133/136's CHECK-widening
+migrations against an already-populated table). Tested by running the full migration
+chain against a real copy of `~/.local/share/nanite/workspaces/default/backups/
+main.db.pre-execution-backup-20260818-132726` (the ~38MB populated backup) via a
+throwaway `cmd/tmp_migration_check138/main.go` (deleted after verification, never
+committed) that called `store.New` (runs every embedded migration via goose) and then
+exercised `CreateGoal`/`CreateLoopRun`/`GetLoopRun`/`SetBudget`/`UpdateLoopRunStatus`/
+`DeleteLoopRun`/`DeleteGoal` against that real DB copy -- all succeeded.
+
+**`on_exhausted` placement.** Encoded inside `budget_json` (not a separate column), per
+the task's own instruction and this planning session's decision (Context section):
+`on_exhausted` is one policy knob among several already JSON-blobbed together
+(`max_iterations`/`max_failures`/`max_runtime_seconds`/`max_no_progress_iterations`), and
+splitting only this one field into its own column while leaving the rest blobbed would be
+an arbitrary asymmetry. `Budget.OnExhausted` defaults to `LoopRunOnExhaustedEscalate`
+inside `SetBudget` when left empty (this session's "default escalate" decision), then
+`validateBudget` enforces the two-value enum + non-negative-int invariants before
+encoding -- an invalid `OnExhausted` (or a negative `max_*` field) is rejected by
+`SetBudget` before it ever reaches `BudgetJSON`, let alone the DB.
+
+**Go types + store CRUD** (`internal/store/loop_runs.go`), mirroring `goals.go`'s and
+`agent_schedules.go`'s conventions exactly:
+- `LoopRun` struct with all schema columns; `Status` defaults to `LoopRunStatusRunning`
+  and `BudgetJSON`/`ContinuationPolicyJSON` default to `"{}"` at `CreateLoopRun` (same
+  "SQLite column DEFAULT never actually applies because every value is passed explicitly"
+  trade-off `goals.go`/`agent_schedules.go` already document).
+- `Budget` struct exactly as specified (`MaxIterations`, `MaxFailures`,
+  `MaxRuntimeSeconds`, `MaxNoProgressIterations` all `int`; `OnExhausted string`), decoded/
+  encoded via the `Budget()`/`SetBudget()` typed accessor pair (mirrors `goals.go`'s
+  `DesiredState()`/`SetDesiredState()`-style convention). `validateBudget` lives at
+  package scope and is invoked from `SetBudget`, not from `CreateLoopRun` -- documented
+  in-code why: Budget is the first JSON sub-structure in this package carrying a real
+  enum, so its own accessor is the validation gate, the same way `validateGoalStatus`
+  gates a top-level column rather than a JSON blob.
+- `ContinuationPolicyJSON` left as a plain-string placeholder field, no typed accessor --
+  task `07`'s job, per the task file's own instruction and the same "don't guess a shape
+  another task owns" discipline `TASKS/teams/01` set for `authority_json`/`routing_json`.
+- `CreateLoopRun`, `GetLoopRun`, `ListLoopRuns(filter LoopRunFilter)` (filters by
+  `GoalID` and/or `Statuses []string`, the latter via a `status IN (...)` clause so task
+  `10`'s one-active-run-per-goal check can pass a status *set*, not just one value),
+  `UpdateLoopRunStatus(ctx, id, status, completedAt *time.Time)` (narrow updater mirroring
+  `agent_schedules.go`'s `UpdateAgentScheduleStatus`; `completedAt` is nil-means-untouched
+  rather than internally derived from a terminal-status set, since the caller -- the
+  continuation policy engine, task `08` -- already knows whether a transition is
+  terminal), `BumpLoopRunIteration` (narrow, `+1`, mirrors `BumpAgentScheduleFireCount`),
+  `UpdateLoopRunNoProgressStreak(ctx, id, streak int)` (narrow, a direct *set* not an
+  increment, per the task's own description of task `08`'s call pattern), `DeleteLoopRun`.
+  All narrow updaters also bump `updated_at` to now, since that column exists in the
+  schema and nothing else was going to keep it meaningful.
+- `ErrLoopRunNotFound` sentinel, `LoopRunStatus*` constants + `validateLoopRunStatus`
+  (enum-membership only, matching `validateGoalStatus`'s explicit "real transition-
+  legality enforcement is a later task's job" scope fence), `LoopRunOnExhausted*`
+  constants.
+- Added one small addition beyond the task's literal list: an exported
+  `LoopRunActiveStatuses = []string{running, waiting_on_gate, waiting_on_escalation}` var,
+  so task `10`'s launcher (and anything else needing "is this LoopRun still in play")
+  shares one definition of "active" instead of each caller re-declaring the same three-
+  value list the task's own Context section names verbatim. Not an enforcement mechanism
+  by itself -- documented as such in its doc comment.
+
+**Tests** (`internal/store/loop_runs_test.go`, new): `TestLoopRun_RoundTrip` (full CRUD +
+status/iteration/streak narrow updaters + completedAt handling),
+`TestLoopRun_BudgetOnExhaustedBothValues` (both enum values round-trip, plus the
+"unset defaults to escalate" behavior), `TestLoopRun_BudgetValidation` (invalid
+`OnExhausted` and each negative `max_*` field rejected by `SetBudget` before touching the
+DB), `TestLoopRun_ListLoopRuns_GoalAndActiveStatusFilter` (the task's explicit "Done
+means" regression test -- multiple `LoopRun`s across two goals and all six statuses;
+`ListLoopRuns(GoalID, LoopRunActiveStatuses)` returns exactly the three active rows for
+the targeted goal), `TestLoopRun_DefaultsAndNotFound`, `TestLoopRun_StatusValidation`,
+`TestLoopRun_StatusCheckConstraint` (raw INSERT bypassing Go validation still rejected by
+the DB CHECK), `TestLoopRun_GoalFKEnforced`.
+
+**Deviation from plan:** none of substance. The only departure from the task file's own
+"What to do" §1 is the migration number (`138` instead of the provisionally-claimed
+`140`), which was an explicit, intentional override from the dispatching orchestrator to
+avoid a cross-worktree collision with a concurrently-running sibling task, not a
+deviation I chose.
+
+**Verification:** `go build ./cmd/nanite/` -- pass. `go vet ./...` -- one pre-existing,
+unrelated finding in `internal/service/container.go` (`stopReaper`/`stopRuntimeReaper`
+possible-context-leak lint), confirmed via `git status`/`git diff` to be untouched by this
+task's changes (only the three new files above are untracked in this worktree) and
+therefore pre-existing; `go vet ./internal/store/...` alone is clean. `go test ./...` --
+all packages pass, including the full `internal/store` suite and the new `loop_runs_test.go`
+tests. Migration `138` also independently verified by running the full embedded migration
+chain against a real, populated backup DB copy
+(`~/.local/share/nanite/workspaces/default/backups/main.db.pre-execution-backup-20260818-132726`)
+and round-tripping a `Goal`/`LoopRun` pair through it end to end.
+
+No engine, launcher, or continuation-policy logic was added -- this task is storage-only,
+per its own "Done means" scope fence.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

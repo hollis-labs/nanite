@@ -25,7 +25,7 @@
 
 ### Root cause
 
-Mechanical "query → scan-loop → append" duplication exists across ~20+ list methods in `internal/store` — 41 `dupl`-tool hits confirmed inside the package (`raw/golangci-audit-complexity.log`), with 2 pairs manually sampled and confirmed as genuine structural duplication of "scan N rows into a typed slice." No shared generic `scanRows[T any](...)` helper exists, even though Go generics are available in this codebase (confirm current Go version supports the generics feature set assumed here before implementing — check `go.mod`'s `go` directive).
+Mechanical "query → scan-loop → append" duplication exists across ~20+ list methods in `internal/store` — **40** `dupl`-tool hits confirmed inside the package across **22** files (was **41** hits across ~20 files at the audited commit `8feeee5c`, `raw/golangci-audit-complexity.log`; refreshed at frozen HEAD `1d3bfd96` by `00/02` — see `docs/audits/2026-08-21-go-quality/raw-1d3bfd96/DELTA.md`, raw: `raw-1d3bfd96/golangci-baseline.json`/`.log`). The raw hit count ticked down by one but the duplication *spread* to 2 additional files — treat this task's scope as unchanged or slightly larger, not smaller. 2 pairs were manually sampled and confirmed as genuine structural duplication of "scan N rows into a typed slice." No shared generic `scanRows[T any](...)` helper exists, even though Go generics are available in this codebase (confirm current Go version supports the generics feature set assumed here before implementing — check `go.mod`'s `go` directive).
 
 ### Why this is explicitly optional — quote the audit directly
 

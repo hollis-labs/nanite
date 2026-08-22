@@ -1,7 +1,7 @@
 # CLI-hosted delivery — plant vendored skill packages into each provider's native boot-dir location
 
 **Phase:** 6 — Delivery (`TASKS/skills`)
-**Status:** fix-required
+**Status:** implemented
 **Depends on:** `02`, `03`
 **Touches:** new file `internal/runtime/agent/skill_plant.go` (a shared helper feeding all three
 providers), `internal/runtime/agent/bootdir_claude.go`/`bootdir_codex.go`/`bootdir_opencode.go`
@@ -312,3 +312,126 @@ oversight. Full details logged in `TASKS/ESCALATIONS.md`'s 2026-08-22 entry. Sum
 3. Re-run `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` — all must pass.
 4. Update this file's own Work Log with what was actually fixed and how it was verified
    (including the adversarial-slug test's exact assertion), and set Status to `implemented`.
+
+## Fix Work Log (2026-08-22)
+
+**Bug 1 fixed — path traversal via unvalidated skill slug
+(`internal/runtime/agent/skill_plant.go`).**
+
+- Added `skillDestPrefixSafe(root, slug string) (dest string, ok bool)`: joins `root` and
+  `slug` exactly the way `claudeSkillDestPrefixes`/`opencodeSkillDestPrefixes` already did
+  (`path.Join(root, slug)`, which internally `path.Clean`s), then compares the result against
+  the **literal, uncleaned** string concatenation `root + "/" + slug`. A slug with no
+  `.`/`..` segments produces byte-identical strings on both sides; any slug that cancels part
+  or all of `root` via `..` diverges the two (the cleaned join loses components the literal
+  concatenation still has), which is treated as an escape attempt and rejected — `("", false)`.
+  This is exactly the "compare against a literal, not-yet-cleaned prefix" technique the
+  escalation's own fix guidance suggested, and it needs no path-component enumeration or
+  `filepath.Rel` gymnastics: `path.Clean`'s own cancellation behavior is precisely what makes
+  the literal-vs-cleaned strings diverge whenever `..` actually ate into `root`.
+- `claudeSkillDestPrefixes`/`opencodeSkillDestPrefixes` now return `([]string, bool)` instead
+  of a bare `[]string`; `false` means "this skill's destination(s) are unsafe, do not plant it
+  anywhere." OpenCode's two-destination variant requires **both** candidate destinations to
+  pass the check — a slug unsafe for the shorter `"skills"` root but coincidentally still safe
+  for `.opencode/skills` (or vice versa) still gets the skill skipped entirely, never a partial
+  plant to only the destination that happened to check out.
+- `SkillPlantFiles`'s `destPrefixes` callback signature changed to
+  `func(slug string) ([]string, bool)` to match; when a skill's callback returns `false`, that
+  skill is `continue`d past entirely — never merged into the returned `Files` map, never
+  redirected to any fallback/"sanitized" path, and (per the task's instruction not to plant a
+  partial/mangled version) the vendored tree is never even read via
+  `SkillVendorReader.ReadFiles` for that skill.
+- `skillFilesForProvider` wraps the raw per-provider dispatch function in a closure that logs
+  `slog.Warn("agent: skipping skill plant — destination would escape its own per-skill subtree
+  (adversarial or malformed slug)", "agent_id", ..., "provider", ..., "skill_slug", ...)` on a
+  `false` — this is where `agent_id`/`provider` context lives (the lower-level
+  `SkillPlantFiles`/`skillDestPrefixSafe` functions only ever see the bare skill slug), so the
+  warning identifies both the skill and the agent, per the fix's own requirement.
+- Verified the actual invariant, not just the two literal reproduction slugs named in the
+  finding: `TestSkillDestPrefixSafe` (new, `internal/runtime/agent/skill_plant_test.go`) is a
+  table test covering a normal slug (accepted, destination == `root/slug`), `".."` against both
+  a two-segment root (`.claude/skills`) and a one-segment root (`skills` — the OpenCode
+  "shorter prefix" case), `"../.."`, `"../../.."`, an internal-cancellation slug
+  (`"valid/../valid2"` — rejected even though its cleaned result technically stays under
+  `root/`, since it doesn't match its own literal per-skill subtree), an embedded-mid-slug
+  cancellation (`"a/../../b"`), and an empty slug — plus an explicit assertion that whenever the
+  function reports `ok`, the destination is both `!= root` and has `root+"/"` as a genuine path
+  prefix.
+- `TestClaudeSkillDestPrefixes_AdversarialSlugBlocked` / `TestOpencodeSkillDestPrefixes_AdversarialSlugBlocked`
+  pin the exact two reproduction cases from the escalation: `claudeSkillDestPrefixes("../..")`
+  and `opencodeSkillDestPrefixes("..")` both return `(nil, false)`.
+- `TestSkillPlantFiles_AdversarialSlugBlocked` is the task's own required regression test, run
+  as a table over both provider shapes. For each case it (a) confirms `SkillPlantFiles` returns
+  zero files for the adversarial-slug skill (the escape is blocked), (b) confirms the malicious
+  skill's slug produces **no** entries in the returned `Files` map at all (omitted, not
+  relocated), and (c) merges the (empty) result into a stand-in "already-planted" file map
+  containing a sentinel at the exact collision key each case's canceled prefix would otherwise
+  hit — `"CLAUDE.md"` for the claude `"../.."` case (the real key `claudePlantSpec` uses for the
+  agent's system prompt) and `"agents.json"` for the opencode `".."` case (a stand-in for
+  opencode's own real top-level config key) — and asserts the sentinel's content is unchanged
+  after the merge, proving no clobber.
+- `TestSkillFilesForProvider_AdversarialSlugSkippedButOthersPlanted` exercises the fix at the
+  layer the reviewer's own finding traced the vulnerability to: `store.Skill.Slug` itself (not
+  just the grant's skill name) carries the adversarial value (mirroring "REST-settable via
+  `POST /api/skills`, no format validation"), granted alongside a second, legitimate skill for
+  the same agent. Confirms the legitimate skill still plants normally
+  (`.claude/skills/good/SKILL.md` present) while the adversarial one is fully omitted and no
+  planted key falls outside `.claude/skills/` — proving the fix rejects only the offending
+  skill, not the whole per-agent batch.
+- Updated the existing `TestSkillPlantFiles_MultiplePrefixes`/`_EmptyInputs` call sites' inline
+  closures to the new `([]string, bool)` return shape; no behavioral change to those tests.
+
+**Bug 2 fixed — unconditional per-turn skill-replant call didn't guard ACP sessions
+(`internal/service/chat_boot_drive.go`).**
+
+- `driveBootSession`'s active-session branch now gates the `runtimeagent.PlantAgentSkillFiles`
+  call on `sess.BootDir != ""` in addition to the existing `agent != nil && agent.ID != ""`
+  check: `if agent != nil && agent.ID != "" && sess.BootDir != "" { ... }`. ACP-protocol
+  sessions (`internal/runtime/agent/agent_acp.go`'s `bootACP`) leave `Session.BootDir`
+  permanently empty by design (confirmed directly in that file — `BootDir: "",` with a comment
+  explaining native CLI runtimes populate it, ACP does not), so this guard is a direct,
+  structural match for "this session has a real boot dir to plant into," not an incidental
+  side-effect of some other gate. Updated both the call site's own inline comment and the
+  function's top-of-file doc comment to describe the guard and why it's needed (steady-state
+  per-turn log noise otherwise, since `PlantAgentSkillFiles` itself errors on an empty
+  `bootDir`) and to note `regenerateBootDirSlots` has the identical failure mode but is masked
+  by only firing when `slotsChangedFor` is true — this call runs unconditionally every turn, so
+  it needed its own explicit guard rather than inheriting that incidental tolerance.
+- `TestDriveBootSession_ACPSessionSkipsSkillReplant` (new,
+  `internal/service/chat_boot_drive_test.go`) drives the **real, unmocked**
+  `driveBootSession`/`PlantAgentSkillFiles` code path end-to-end against a pre-registered
+  `*runtimeagent.Session{Provider: "claude-acp", BootDir: ""}` (the exact shape `bootACP` leaves
+  a session in) and an `agent.ID` set so the guard's other two conditions are already true. It
+  captures `slog`'s default logger output into a goroutine-safe buffer (`syncBuffer`, new in the
+  test file — a background `SendInput`-failure logger elsewhere in the same function makes a
+  bare `bytes.Buffer` a race hazard under `-race`) and asserts the string
+  `"driveBootSession: skill replant failed"` never appears in it. This exploits
+  `PlantAgentSkillFiles`'s own deterministic "empty bootDir" error as the observable signal
+  rather than mocking the function: without the guard, the call fires unconditionally, always
+  errors for an empty `bootDir`, and the call site's own `slog.Warn` logs that exact string —
+  so the test is a genuine, real-implementation proof that the call is skipped, not merely that
+  no error surfaced. **Verified as a true regression test, not just a passing assertion**: with
+  the guard's `&& sess.BootDir != ""` clause temporarily removed and the test re-run, it failed
+  exactly as expected — `PlantAgentSkillFiles was invoked for an ACP-shaped session (empty
+  BootDir) — guard did not skip it; log: ...msg="driveBootSession: skill replant failed"
+  session_id=sess-acp-guard-1 err="agent: PlantAgentSkillFiles: empty bootDir"` — before the
+  guard was restored and the suite re-confirmed green.
+- Added `TestDriveBootSession_RealBootDirStillTriggersSkillReplant` as the positive control:
+  same active-session path, but with a real `t.TempDir()` `BootDir` and a granted skill wired
+  through `runtimeagent.Dependencies.Skills`/`SkillVendor` (two small package-local fakes,
+  `fakeSkillStoreForBootDrive`/`fakeSkillVendorForBootDrive`, satisfying the exported
+  `runtimeagent.SkillStore`/`SkillVendorReader` interfaces — `internal/runtime/agent`'s own test
+  doubles are unexported and package-private, so this package needs its own). Confirms the
+  skill's `SKILL.md` genuinely lands on disk at `.claude/skills/demo/SKILL.md` inside the real
+  boot dir after `driveBootSession` returns — proving the new guard doesn't overzealously
+  suppress the legitimate (non-ACP) case too.
+
+**Baseline checks (post-fix):** `go build ./cmd/nanite/`, `go vet ./...` (same two
+pre-existing, unrelated `stopReaper`/`stopRuntimeReaper` warnings in `container.go`,
+reconfirmed via `git log`/`git diff` against this worktree's base commit to predate this whole
+task, not just this fix), and a full `go test ./...` across every package in the module — all
+pass.
+
+**No scope creep.** Both fixes are confined to `internal/runtime/agent/skill_plant.go` and
+`internal/service/chat_boot_drive.go` (plus their two test files) exactly as the Fix-required
+section scoped them; no other file in the original task's "Touches" list was modified.

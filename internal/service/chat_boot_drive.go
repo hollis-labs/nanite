@@ -40,11 +40,14 @@ const staleResumeFastExitWindow = 5 * time.Second
 //     boot dir and SendInput a re-read instruction so the agent reloads
 //     context. Independent of that slot-hash gate — TASKS/skills/10:
 //     (re)plant this agent's plantable skill set into the boot dir every
-//     turn of an already-active session, so a newly-granted skill appears
-//     without a full session restart (skill grants are structurally
-//     invisible to the slot hash, since CLI-hosted skill delivery adds
-//     nothing to any prompt slot — see PlantAgentSkillFiles's call site
-//     below for the full reasoning).
+//     turn of an already-active session with a real boot dir, so a
+//     newly-granted skill appears without a full session restart (skill
+//     grants are structurally invisible to the slot hash, since
+//     CLI-hosted skill delivery adds nothing to any prompt slot — see
+//     PlantAgentSkillFiles's call site below for the full reasoning).
+//     Skipped entirely for a session with no boot dir (ACP-protocol
+//     sessions — internal/runtime/agent/agent_acp.go — leave
+//     Session.BootDir permanently empty by design).
 //  3. Construct a per-turn turnCh, bind it on the agentEventBridge so the
 //     runtime's EventFanout routes events here instead of broadcasting SSE.
 //     Spawn a watcher goroutine that unbinds + closes turnCh on ctx cancel.
@@ -228,7 +231,22 @@ func (s *chatServiceImpl) driveBootSession(
 		// idempotent/additive (SkillPlantFiles + writePlantedFile), so
 		// re-checking every turn is the correct granularity for "a newly
 		// granted skill appears without a full session restart."
-		if agent != nil && agent.ID != "" {
+		//
+		// Guarded on sess.BootDir != "" (TASKS/skills/10's Fix-required
+		// item 2 / ESCALATIONS.md's 2026-08-22 MEDIUM finding): ACP-
+		// protocol sessions (internal/runtime/agent/agent_acp.go's
+		// bootACP) leave Session.BootDir permanently empty by design —
+		// there is no native-CLI boot dir to plant skill files into at
+		// all for that backend. Without this guard,
+		// PlantAgentSkillFiles's own "empty bootDir" error fired (and
+		// got logged) on every single turn of every ACP-driven agent,
+		// forever — real steady-state log noise for a currently-shipped
+		// session type. regenerateBootDirSlots above has the identical
+		// failure mode on an empty bootDir but is gated behind
+		// slotsChangedFor, so it only misfires occasionally; this call
+		// runs unconditionally every turn, so it needs its own explicit
+		// guard rather than relying on the same incidental tolerance.
+		if agent != nil && agent.ID != "" && sess.BootDir != "" {
 			if err := runtimeagent.PlantAgentSkillFiles(ctx, s.agentDeps, sess.BootDir, sess.Provider, agent.ID); err != nil {
 				slog.Warn("driveBootSession: skill replant failed",
 					"session_id", sessionID, "err", err)

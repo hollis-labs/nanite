@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/skillvendor"
@@ -121,8 +122,8 @@ func TestSkillPlantFiles_MultiplePrefixes(t *testing.T) {
 	}}
 	skills := []PlantableSkill{{Slug: "hello-skill", ContentHash: skillAddrGood}}
 
-	got, err := SkillPlantFiles(context.Background(), skills, vendor, func(slug string) []string {
-		return []string{"prefix-a/" + slug, "prefix-b/" + slug}
+	got, err := SkillPlantFiles(context.Background(), skills, vendor, func(slug string) ([]string, bool) {
+		return []string{"prefix-a/" + slug, "prefix-b/" + slug}, true
 	})
 	if err != nil {
 		t.Fatalf("SkillPlantFiles: %v", err)
@@ -224,6 +225,180 @@ func TestSkillFilesForProvider_NoWiring(t *testing.T) {
 	got, err := skillFilesForProvider(context.Background(), "claude", params)
 	if err != nil || got != nil {
 		t.Errorf("got (%v, %v), want (nil, nil)", got, err)
+	}
+}
+
+// TestSkillDestPrefixSafe covers the invariant the path-traversal fix
+// (TASKS/skills/10's "Fix required" section / ESCALATIONS.md's 2026-08-22
+// HIGH finding) actually needs to hold: "no skill's planted files can
+// ever land outside <providerPrefix>/<own-slug>/" — not merely that the
+// two literal reproduction slugs from the finding are blocked.
+func TestSkillDestPrefixSafe(t *testing.T) {
+	cases := []struct {
+		name    string
+		root    string
+		slug    string
+		wantOK  bool
+		wantDst string
+	}{
+		{"normal slug", ".claude/skills", "demo-skill", true, ".claude/skills/demo-skill"},
+		{"double-dotdot cancels entire root", ".claude/skills", "../..", false, ""},
+		{"single dotdot escapes one level", ".claude/skills", "..", false, ""},
+		{"single dotdot escapes short root entirely", "skills", "..", false, ""},
+		{"triple dotdot escapes past root", ".claude/skills", "../../..", false, ""},
+		{"partial internal cancellation still rejected", ".claude/skills", "valid/../valid2", false, ""},
+		{"embedded dotdot mid-slug", ".claude/skills", "a/../../b", false, ""},
+		{"empty slug", ".claude/skills", "", false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dest, ok := skillDestPrefixSafe(tc.root, tc.slug)
+			if ok != tc.wantOK {
+				t.Fatalf("skillDestPrefixSafe(%q, %q) ok = %v, want %v (dest=%q)", tc.root, tc.slug, ok, tc.wantOK, dest)
+			}
+			if ok && dest != tc.wantDst {
+				t.Fatalf("skillDestPrefixSafe(%q, %q) dest = %q, want %q", tc.root, tc.slug, dest, tc.wantDst)
+			}
+			// The stronger, general invariant: whenever ok is true, dest
+			// must genuinely be nested under root's own subtree — never
+			// equal to root itself, and always root+"/" as a real path
+			// prefix.
+			if ok {
+				if dest == tc.root {
+					t.Fatalf("skillDestPrefixSafe(%q, %q) returned root itself as dest, not a per-skill subtree", tc.root, tc.slug)
+				}
+				if !strings.HasPrefix(dest+"/", tc.root+"/") {
+					t.Fatalf("skillDestPrefixSafe(%q, %q) dest %q does not stay under root", tc.root, tc.slug, dest)
+				}
+			}
+		})
+	}
+}
+
+// TestClaudeSkillDestPrefixes_AdversarialSlugBlocked and
+// TestOpencodeSkillDestPrefixes_AdversarialSlugBlocked are the exact two
+// reproduction cases named in TASKS/skills/10's "Fix required" section:
+// claude's longer root needs a full "../.." to cancel out entirely,
+// opencode's shorter "skills" root needs only a bare "..".
+func TestClaudeSkillDestPrefixes_AdversarialSlugBlocked(t *testing.T) {
+	if prefixes, ok := claudeSkillDestPrefixes("../.."); ok || prefixes != nil {
+		t.Fatalf("claudeSkillDestPrefixes(\"../..\") = (%v, %v), want (nil, false)", prefixes, ok)
+	}
+}
+
+func TestOpencodeSkillDestPrefixes_AdversarialSlugBlocked(t *testing.T) {
+	if prefixes, ok := opencodeSkillDestPrefixes(".."); ok || prefixes != nil {
+		t.Fatalf("opencodeSkillDestPrefixes(\"..\") = (%v, %v), want (nil, false)", prefixes, ok)
+	}
+}
+
+// TestSkillPlantFiles_AdversarialSlugBlocked is the task's own required
+// regression test: an adversarial slug must (a) have its escape blocked,
+// (b) be omitted from the resulting Files map entirely (not landed
+// elsewhere), and (c) never clobber an already-planted file at the
+// collision path a canceled prefix would otherwise land on (e.g. the
+// exact "CLAUDE.md" key claudePlantSpec uses for the agent's own real
+// system prompt, or opencode's own top-level config stand-in).
+func TestSkillPlantFiles_AdversarialSlugBlocked(t *testing.T) {
+	cases := []struct {
+		name         string
+		slug         string
+		destPrefixes func(string) ([]string, bool)
+		sentinelKey  string // stand-in for an already-planted real boot-dir file
+	}{
+		{
+			name:         "claude: \"../..\" cancels the entire .claude/skills root",
+			slug:         "../..",
+			destPrefixes: claudeSkillDestPrefixes,
+			sentinelKey:  "CLAUDE.md", // claudePlantSpec's real system-prompt key
+		},
+		{
+			name:         "opencode: bare \"..\" escapes the shorter skills/ root",
+			slug:         "..",
+			destPrefixes: opencodeSkillDestPrefixes,
+			sentinelKey:  "agents.json", // stand-in for opencodePlantSpec's own real config key
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			vendor := &fakeSkillVendor{files: map[string]skillvendor.FileMap{
+				skillAddrGood: {"SKILL.md": []byte("MALICIOUS OVERWRITE")},
+			}}
+			skills := []PlantableSkill{{Slug: tc.slug, ContentHash: skillAddrGood}}
+
+			got, err := SkillPlantFiles(context.Background(), skills, vendor, tc.destPrefixes)
+			if err != nil {
+				t.Fatalf("SkillPlantFiles: %v", err)
+			}
+			// (a) + (b): the escape is blocked and the malicious skill is
+			// omitted from the Files map entirely.
+			if len(got) != 0 {
+				t.Fatalf("expected no files planted for adversarial slug %q, got %v", tc.slug, keysOf(got))
+			}
+
+			// (c): merging `got` into an already-"planted" boot dir's file
+			// map (matching claudePlantSpec/opencodePlantSpec's own
+			// map-merge pattern for combining skill files with every
+			// other boot-dir content source) must never clobber the
+			// sentinel — since `got` is empty this is definitionally
+			// satisfied, but assert it explicitly so a future regression
+			// that makes SkillPlantFiles return a non-empty map for an
+			// unsafe slug is caught here too.
+			files := map[string][]byte{tc.sentinelKey: []byte("REAL BOOT CONTENT")}
+			for k, v := range got {
+				files[k] = v
+			}
+			if string(files[tc.sentinelKey]) != "REAL BOOT CONTENT" {
+				t.Fatalf("sentinel file %q was clobbered: got %q", tc.sentinelKey, files[tc.sentinelKey])
+			}
+		})
+	}
+}
+
+// TestSkillFilesForProvider_AdversarialSlugSkippedButOthersPlanted proves
+// the fix at the same layer the reviewer's finding traced the bug to:
+// store.Skill.Slug is REST-settable with no format validation, so a
+// catalog row's Slug field itself (not just the agent_known_skills grant
+// name) can carry the adversarial value. Confirms the malicious skill is
+// omitted while a co-granted, legitimate skill still plants normally
+// (proving the fix rejects only the offending skill, not the whole
+// batch).
+func TestSkillFilesForProvider_AdversarialSlugSkippedButOthersPlanted(t *testing.T) {
+	vendor := &fakeSkillVendor{files: map[string]skillvendor.FileMap{
+		skillAddrGood: {"SKILL.md": []byte("good")},
+	}}
+	sstore := &fakeSkillStore{
+		skills: map[string]*store.Skill{
+			"good": {Slug: "good", ContentHash: skillAddrGood},
+			"evil": {Slug: "../..", ContentHash: skillAddrGood}, // adversarial catalog Slug
+		},
+		known: map[string][]store.AgentKnownSkill{
+			"agent-1": {
+				{AgentID: "agent-1", SkillName: "good", ApprovedContentHash: skillAddrGood},
+				{AgentID: "agent-1", SkillName: "evil", ApprovedContentHash: skillAddrGood},
+			},
+		},
+	}
+	params := SetupParams{
+		AgentProfile: &store.AgentProfile{ID: "agent-1"},
+		Skills:       sstore,
+		SkillVendor:  vendor,
+	}
+
+	got, err := skillFilesForProvider(context.Background(), "claude", params)
+	if err != nil {
+		t.Fatalf("skillFilesForProvider: %v", err)
+	}
+	if _, ok := got[".claude/skills/good/SKILL.md"]; !ok {
+		t.Errorf("expected legitimate co-granted skill still planted, got %v", keysOf(got))
+	}
+	for k := range got {
+		if !strings.HasPrefix(k, ".claude/skills/") {
+			t.Errorf("adversarial skill leaked a file outside its own subtree: %q", k)
+		}
+	}
+	if len(got) != 1 {
+		t.Errorf("expected exactly 1 planted file (only the legitimate skill), got %v", keysOf(got))
 	}
 }
 

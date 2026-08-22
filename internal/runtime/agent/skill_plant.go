@@ -91,6 +91,39 @@ package agent
 //     contribution, and skillFilesForProvider below returns (nil, nil)
 //     for "codex" rather than guessing at a path.
 //
+// # Path-traversal guard on the skill slug (TASKS/skills/10 Fix required)
+//
+// store.Skill.Slug carries NO format validation anywhere in the codebase
+// (confirmed across internal/api/skills.go, internal/skill/parser.go,
+// internal/skillinstall/validate.go, and the skills-table migration —
+// UNIQUE only, no CHECK) and IS REST-settable today via POST /api/skills.
+// claudeSkillDestPrefixes/opencodeSkillDestPrefixes below build each
+// skill's destination via path.Join(providerRoot, slug); because
+// path.Join calls path.Clean internally, a slug containing ".." segments
+// can cancel out part or all of providerRoot itself —
+// path.Join(".claude/skills", "../..") == "." would otherwise land a
+// vendored file at the exact boot-dir key claudePlantSpec uses for the
+// agent's own real system prompt, silently overwriting it with zero
+// error. ValidateBootDirRelPath (the primitive writePlantedFile calls)
+// can't catch this downstream: by the time it inspects the already-
+// path.Clean'd result, no ".." segments remain in it to reject.
+//
+// skillDestPrefixSafe below closes this at the one place it can actually
+// be caught: compare the real (cleaned) path.Join result against the
+// literal, UNCLEANED string concatenation providerRoot+"/"+slug. A slug
+// with no "."/".." segments produces byte-identical strings on both
+// sides. Any slug that cancels part or all of providerRoot diverges the
+// two — the cleaned join loses components the literal concatenation
+// still has — which this function treats as an escape attempt and
+// refuses. claudeSkillDestPrefixes/opencodeSkillDestPrefixes below run
+// every candidate destination through this check and report
+// (nil, false) — "unsafe, don't plant this skill anywhere" — the moment
+// any one of them fails, rather than partially planting a skill at only
+// its safe destinations. SkillPlantFiles' caller (skillFilesForProvider)
+// treats a false as "skip this skill entirely," logging a warning
+// identifying the skill slug and agent — never a silent redirect to some
+// other "sanitized" path.
+//
 // # Additive-only; no removal-on-revoke (documented scope boundary)
 //
 // Every write in this codebase's boot-dir mechanism (writePlantedFile,
@@ -116,6 +149,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path"
 
 	"github.com/hollis-labs/nanite/internal/skillvendor"
@@ -217,11 +251,18 @@ func ResolvePlantableSkills(ctx context.Context, grants SkillGrantStore, catalog
 // boot dir — see this file's package doc for why OpenCode gets two).
 // Returns (nil, nil) when vendor is nil or skills is empty.
 //
+// destPrefixes returns (prefixes, false) when slug's per-provider
+// destination(s) would escape their own intended subtree (see this file's
+// package doc, "Path-traversal guard on the skill slug") — that skill is
+// skipped entirely (a logged warning, no partial/mangled plant, never a
+// silent redirect to some other path) rather than merged into the
+// returned map.
+//
 // Every relPath this produces still passes through the shared
 // writePlantedFile path-safety gate at the point each provider's Planter
 // actually writes it (plantSpec/claudePlantSpec etc.) — this function only
 // builds the map; it never touches the filesystem itself.
-func SkillPlantFiles(ctx context.Context, skills []PlantableSkill, vendor SkillVendorReader, destPrefixes func(slug string) []string) (map[string][]byte, error) {
+func SkillPlantFiles(ctx context.Context, skills []PlantableSkill, vendor SkillVendorReader, destPrefixes func(slug string) ([]string, bool)) (map[string][]byte, error) {
 	if vendor == nil || len(skills) == 0 {
 		return nil, nil
 	}
@@ -230,11 +271,24 @@ func SkillPlantFiles(ctx context.Context, skills []PlantableSkill, vendor SkillV
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		prefixes, safe := destPrefixes(sk.Slug)
+		if !safe {
+			// Path-traversal guard tripped — see this file's package doc.
+			// Skip this skill entirely; never plant a partial/mangled
+			// version of it and never redirect it to a "sanitized"
+			// fallback path. skillFilesForProvider's caller wraps
+			// destPrefixes with agent/provider-identifying logging before
+			// it reaches here.
+			continue
+		}
+		if len(prefixes) == 0 {
+			continue
+		}
 		files, err := vendor.ReadFiles(sk.ContentHash)
 		if err != nil {
 			return nil, fmt.Errorf("agent: plant skill %q: read vendored files: %w", sk.Slug, err)
 		}
-		for _, prefix := range destPrefixes(sk.Slug) {
+		for _, prefix := range prefixes {
 			for relPath, content := range files {
 				out[path.Join(prefix, relPath)] = content
 			}
@@ -243,22 +297,57 @@ func SkillPlantFiles(ctx context.Context, skills []PlantableSkill, vendor SkillV
 	return out, nil
 }
 
+// skillDestPrefixSafe joins root and slug (root+"/"+slug, path.Clean'd —
+// exactly what claudeSkillDestPrefixes/opencodeSkillDestPrefixes actually
+// plant under) and reports whether the result genuinely stays under
+// root's own per-skill subtree, rather than a ".."-laden slug canceling
+// part or all of root itself via path.Join's internal path.Clean. See
+// this file's package doc, "Path-traversal guard on the skill slug," for
+// the full reasoning and the ESCALATIONS.md finding this closes.
+//
+// ok is false for an empty slug (never a valid destination) or whenever
+// the cleaned path.Join result differs from the literal, UNCLEANED
+// concatenation root+"/"+slug — the signature of a slug that ate into
+// root via ".."/"." segments.
+func skillDestPrefixSafe(root, slug string) (dest string, ok bool) {
+	if slug == "" {
+		return "", false
+	}
+	dest = path.Join(root, slug)
+	literal := root + "/" + slug
+	if dest != literal {
+		return "", false
+	}
+	return dest, true
+}
+
 // claudeSkillDestPrefixes is claude's native skill-delivery convention —
-// see this file's package doc.
-func claudeSkillDestPrefixes(slug string) []string {
-	return []string{path.Join(".claude/skills", slug)}
+// see this file's package doc. Returns (nil, false) when slug would
+// escape ".claude/skills/"'s own per-skill subtree.
+func claudeSkillDestPrefixes(slug string) ([]string, bool) {
+	dest, ok := skillDestPrefixSafe(".claude/skills", slug)
+	if !ok {
+		return nil, false
+	}
+	return []string{dest}, true
 }
 
 // opencodeSkillDestPrefixes is opencode's native skill-delivery
 // convention. Plants to BOTH candidate destinations given real,
 // unresolved doc ambiguity about which one Nanite's own
 // OPENCODE_CONFIG_DIR env amendment reaches — see this file's package doc
-// for the full investigation.
-func opencodeSkillDestPrefixes(slug string) []string {
-	return []string{
-		path.Join("skills", slug),          // OPENCODE_CONFIG_DIR-relative convention
-		path.Join(".opencode/skills", slug), // project-local convention (== cwd == bootDir today)
+// for the full investigation. Returns (nil, false) — no partial plant to
+// only the destination(s) that happen to check out — when EITHER
+// candidate destination would escape its own per-skill subtree (the
+// shorter "skills/" root is exactly the case ESCALATIONS.md's 2026-08-22
+// finding calls out: a bare ".." slug alone is enough to escape it).
+func opencodeSkillDestPrefixes(slug string) ([]string, bool) {
+	configRelative, okA := skillDestPrefixSafe("skills", slug)         // OPENCODE_CONFIG_DIR-relative convention
+	projectLocal, okB := skillDestPrefixSafe(".opencode/skills", slug) // project-local convention (== cwd == bootDir today)
+	if !okA || !okB {
+		return nil, false
 	}
+	return []string{configRelative, projectLocal}, true
 }
 
 // skillFilesForProvider returns providerName's plant.Spec-ready
@@ -273,12 +362,12 @@ func skillFilesForProvider(ctx context.Context, providerName string, params Setu
 		return nil, nil
 	}
 
-	var destPrefixes func(slug string) []string
+	var rawDestPrefixes func(slug string) ([]string, bool)
 	switch normalizeProviderName(providerName) {
 	case "claude", "claude-code", "claudecode":
-		destPrefixes = claudeSkillDestPrefixes
+		rawDestPrefixes = claudeSkillDestPrefixes
 	case "opencode":
-		destPrefixes = opencodeSkillDestPrefixes
+		rawDestPrefixes = opencodeSkillDestPrefixes
 	default:
 		// codex (no native skill mechanism) and anything unrecognized: no
 		// skill planting. Not an error — a legitimate terminal outcome.
@@ -291,6 +380,21 @@ func skillFilesForProvider(ctx context.Context, providerName string, params Setu
 	}
 	if len(skills) == 0 {
 		return nil, nil
+	}
+
+	agentID := params.AgentProfile.ID
+	// Wrap the raw per-provider dispatch with agent/provider-identifying
+	// logging for the path-traversal guard (this file's package doc,
+	// "Path-traversal guard on the skill slug") — SkillPlantFiles itself
+	// only knows the skill's slug, not which agent/provider triggered the
+	// plant.
+	destPrefixes := func(slug string) ([]string, bool) {
+		prefixes, ok := rawDestPrefixes(slug)
+		if !ok {
+			slog.Warn("agent: skipping skill plant — destination would escape its own per-skill subtree (adversarial or malformed slug)",
+				"agent_id", agentID, "provider", providerName, "skill_slug", slug)
+		}
+		return prefixes, ok
 	}
 	return SkillPlantFiles(ctx, skills, params.SkillVendor, destPrefixes)
 }

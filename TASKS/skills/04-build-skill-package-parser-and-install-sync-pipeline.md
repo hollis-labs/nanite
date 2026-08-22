@@ -1,7 +1,7 @@
 # Build the real SKILL.md package parser and explicit install/sync pipeline
 
 **Phase:** 3 — Explicit install/sync (`TASKS/skills`)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** `02`, `03`
 **Touches:** `internal/skill/parser.go` (extend `Definition` to recognize `scripts:`/
 `references:`/`assets:` directory conventions and a new `parameters:` frontmatter field), new
@@ -101,8 +101,202 @@ this task builds the pipeline itself and is not responsible for how it gets invo
   requires an explicit, single target path per call; nothing runs automatically at boot.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why,
-anything escalated.>
+
+**Pre-flight.** Confirmed the stated dependency base: `internal/skillvendor` exists with `New`,
+`Write`, `Path`, `ReadFiles`, `Delete`, `Address`/`ValidateAddress`, address family
+`skl-vendor-<hash[:16]>` (task `03`, implemented). `internal/store/skills.go`'s `Skill` struct has
+`ID/Name/Slug/Description/Category/Icon/InputSchema/SourceTier/ContentHash/Version/Enabled/
+DeclaredDependencies/InstalledAt/UpdatedAt` and no `Prompt`/`ToolBindings`/`IsBuiltin`/`Settings`/
+`ModeIDs` (task `02`, implemented). Both matched the task file's own sanity-check description — no
+anomaly, proceeded. Read `docs/engineering/architecture/20-skills.md` in full,
+`TASKS/skills/README.md`, and tasks `02`/`03`/`05`/`06`/`07` (siblings this task's own text asks to
+coordinate shape with) before writing any code, per the task's own coordination hedges.
+
+**1. `skill.Definition` extension (`internal/skill/parser.go`).** Added `Parameters
+[]ParameterSpec` (new type: `Name`, `Description`, `Required bool`, `ResolverSlot string` — the
+last field is the binding point task `06`'s Skill Resolver will read, naming an existing
+`agent_context_resolvers` row by its `slot_name` column; not yet consumed by anything since task
+`06` hasn't landed, but shaped to match that table's real column name so task `06` doesn't have to
+guess or rename). Added `Scripts`, `References`, `Assets []string` — frontmatter-declared,
+package-relative path lists (e.g. `scripts/run.sh`) that install-time validation (below) confirms
+actually exist in the package's file map; **note**: no established Agent-Skills-spec convention
+requires these as explicit frontmatter *lists* (the real spec treats `scripts/`/`references/`/
+`assets/` as pure directory conventions, discovered by walking, not declared by name) — this
+batch's Done-means explicitly wants "a `scripts:` entry pointing at a file that doesn't exist" to
+be a distinct validation failure, which requires *something* to name path-by-path; recognizing
+declared entries as an explicit frontmatter list (while `ParsePackageDir`, below, still walks and
+vendors the *entire* directory tree regardless of whether every file is declared) satisfies both
+the task's literal validation requirement and the real spec's "everything under scripts/ is part
+of the package" behavior. Added `Dependencies []string` (frontmatter key `dependencies:`) for the
+declared-dependency extraction item `3` asks for — also not an established spec convention (task's
+own text: "whatever composition-declaration shape task `07` needs — coordinate... if sequencing
+allows"); task `07` hadn't landed at the time of this work, so this is this task's own provisional
+choice, documented here for task `07` to adopt, rename, or extend rather than silently guessing at
+a shape that was never written down.
+
+Added `PackageFiles = map[string][]byte` (structurally identical to, but not importing,
+`skillvendor.FileMap` — this package doesn't need a dependency on `internal/skillvendor` just for a
+map-shape alias; `internal/skillinstall` does the explicit type conversion at its one call site) and
+`ParsePackageDir(dir string) (*Definition, PackageFiles, error)`: reads `SKILL.md` at the package
+root via the existing `ParseMD`, falls back to the package directory's own base name for the slug
+(mirroring `ParseMDFile`'s filename-fallback), then walks the whole directory tree into a
+`PackageFiles` map keyed by forward-slash, dir-relative path (every file under the root, not just
+declared `scripts:`/`references:`/`assets:` entries — the whole tree is what task `03`'s store
+hashes and vendors). `ParsePackageDir` deliberately does not itself check that a declared
+`scripts:`/`references:`/`assets:`/`dependencies:` entry is well-formed or actually present — that
+is `internal/skillinstall`'s Validator step's job (a distinct install-time concern, per the task's
+own item 2), not a parse-time one; a package that will later fail validation still parses
+successfully here.
+
+Did **not** add a separate `Version`/content-hash-precursor field to `Definition` itself, per the
+task's own hedge ("if not already covered by task 03's own hashing... this task computes the
+canonical file map task 03 hashes; it does not duplicate the hashing logic itself"): the
+`PackageFiles` map `ParsePackageDir` produces *is* that canonical file map — `skillvendor.Address`/
+`Write` hash it directly. The numeric `Version` that actually needs incrementing lives on
+`store.Skill` (task `02`'s column) and is owned by the install pipeline's index-upsert step, not by
+the parsed `Definition`.
+
+**Also extended `internal/skill/convert.go`'s `ToStoreSkill()`** to derive `InputSchema` from
+`Definition.Parameters` (a minimal JSON Schema: `type: object`, one string-typed `properties` entry
+per parameter with its `description` if set, a `required` array for parameters marked `Required`)
+via a new `inputSchemaFromParameters` helper, rather than leaving `InputSchema` hardcoded to `"{}"`
+unconditionally. This directly closes task `02`'s own forward-reference: `store.Skill`'s doc comment
+already says `InputSchema` is "schema for declared parameters, now sourced from the package's own
+frontmatter via task 04's parser" — task `02` couldn't build this itself since `Parameters` didn't
+exist on `Definition` yet at that point. A skill with no declared parameters still gets `"{}"`
+(verified via the existing, unmodified `TestToStoreSkill`/`TestToStoreSkill_DefaultsSourceTierToUser`
+tests, both still green) — this is additive, not a behavior change for the pre-parameters case.
+
+**2. `internal/skillinstall/` package** (`doc.go`, `install.go`, `validate.go`,
+`install_test.go`, plus `testdata/fixtures/{sample-skill,malformed-missing-script,
+malformed-frontmatter}/`). Pattern-matched `internal/plugin/install/`'s shape per the task's own
+explicit instruction, adapted to this batch's genuinely narrower scope (local-directory-drop
+install only — no download/signature/archive-extraction steps exist for a skill package, per
+`TASKS/skills/README.md`'s ecosystem-format scope fence):
+
+- `Source{Path string}` — a local package directory (this batch's only supported kind, unlike
+  `plugin/install`'s `Source` interface with archive vs. directory `Handle.Kind`).
+- State machine: `NotInstalled → Parsing → Validating → Vendoring → Indexing → Ready`, with
+  `Failed` as the universal failure sink — narrower than `plugin/install`'s
+  `Downloading/Verifying/Extracting/Loading` states since those steps don't apply here (no archive,
+  no runtime "load into a running host" step — that's tasks `06`/`08`/`10`/`11`'s job, not this
+  one's). Every failure routes through one `fail()` helper, mirroring `plugin/install.go`'s own
+  discipline exactly.
+- `Validator` interface + `DefaultValidator{}` (used when `Installer.Validate` is nil, matching
+  `plugin/install`'s always-required-but-swappable `Validator` shape): enforces the real
+  Agent-Skills-spec's mandatory `name`/`description` frontmatter fields are non-empty, `Context` is
+  exactly `"inline"`/`"fork"`, every declared `scripts:`/`references:`/`assets:` entry
+  normalizes to a well-formed package-relative path and is actually present in the parsed file map,
+  every declared parameter has a non-empty unique name, and every declared dependency slug is
+  non-empty/unique/not-self-referential (a single-package sanity check only — real
+  cycle/recursion-limit detection against the *installed* graph is explicitly task `07`'s job per
+  both this task's own text and `07`'s own task file, not duplicated here). All failures aggregate
+  into one `*ValidationError` so a caller sees every problem in one pass, not one-typo-per-attempt.
+- `Vendorer`/`vendorDeleter`/`IndexStore` interfaces narrowly slice `*skillvendor.Store`'s and
+  `*store.Store`'s real, already-existing methods (`Write`; optional `Delete`; `GetSkillBySlug`/
+  `CreateSkill`/`UpdateSkill`) — both concrete types satisfy these interfaces as-is with zero
+  wrapper code needed in production; the interfaces exist purely so tests can inject fakes for the
+  failure/rollback-path coverage below, matching `plugin/install`'s own DI-for-testability
+  rationale rather than DI-for-multiple-real-implementations (there's only ever one real
+  `Vendorer`/`IndexStore` in production).
+- `Install(ctx, Source) (Result, error)` is the **only** entry point — there is no separate `Sync`
+  method. Re-sync (task item 5) is the *same* pipeline run again against the same source path: the
+  Indexing step looks up the parsed package's own slug via `GetSkillBySlug` and decides internally
+  whether to `CreateSkill` (first install) or `UpdateSkill` (existing row) — never re-deriving a new
+  row ID on re-sync, and only bumping `Version`/`ContentHash` when the vendored address actually
+  changed (an unchanged re-sync is a real no-op beyond refreshing
+  name/description/category/declared-dependencies from the package, matching `skillvendor`'s own
+  `Reused=true` idempotency contract one level up).
+- Declared-dependency extraction (item 3): `extractDeclaredDependencies` copies
+  `Definition.Dependencies` (already validated well-formed by this point) into the JSON array stored
+  in `store.Skill.DeclaredDependencies` — extraction only, no cycle detection, no `inline`/`fork`
+  behavior, exactly the scope task `07`'s own task file confirms is *its* job, not this one's.
+- Failure handling (item 4): a `Validate` failure runs *before* `Vendor.Write` is ever called, so a
+  malformed package leaves literally nothing on disk or in the index — verified directly by a test
+  that walks the vendor store's root after a validation failure and asserts zero non-staging
+  entries exist. An `Indexing`-step failure that happens *after* a fresh (non-`Reused`) vendor write
+  triggers a best-effort rollback (`Vendor.(vendorDeleter).Delete(address)`) so a failed install
+  never strands an unindexed vendored copy; a `Reused` write is deliberately **never** rolled back
+  this way, since its content already existed before this call (e.g. shared with another already-
+  installed skill, or a benign re-sync-of-unchanged-content race) and an unrelated indexing failure
+  must not delete content something else may depend on — both branches have dedicated tests using a
+  fake `Vendorer`/`IndexStore` pair.
+- No sweep/directory-scan path exists anywhere in this package — `Install` requires a non-empty
+  `Source.Path` per call (verified by `TestInstall_RequiresExplicitSourcePath`, which also asserts
+  zero filesystem/index side effects from the rejected empty-`Source` call), and grepping this
+  package finds no exported function that accepts "a root directory of many packages" or is wired
+  to any boot-time hook.
+
+**3. GLOSSARY.md.** Re-checked the file before writing anything (per this repo's standing
+discipline) and decided **not** to add a new entry, using the task's own explicit "use judgment...
+not documenting every noun" hedge (item 6): the existing **Skill**/**Skill catalog**/**Skill vendor
+store** entries (task `02`/`03`, already landed) already describe "installed explicitly" as part of
+the **Skill** definition itself, and this task introduces no new *product-facing* vocabulary beyond
+that — `Source`/`Validator`/`Vendorer`/`IndexStore`/`ParameterSpec`/`PackageFiles` are internal Go
+type names mirroring `internal/plugin/install`'s own naming convention (itself not glossary-listed),
+not new terms a human operator or another task would need disambiguated. `Parameters`/`Scripts`/
+`References`/`Assets`/`Dependencies` are frontmatter field names, already covered conceptually by
+the architecture doc's own "The model" section language. No collision risk either way (grepped the
+current 96-line file for `Parameter`, `Vendorer`, `Validator`, `PackageFiles`, `Dependencies` before
+deciding — zero hits).
+
+**Coordination notes for tasks `06`/`07`, since both were `not-started` at the time this task
+landed and their own task files ask this task to leave a decidable shape behind, not to block on
+their sequencing:**
+- Task `06`'s Resolver: `ParameterSpec.ResolverSlot` is the binding field, named to match
+  `store.AgentContextResolver.SlotName` (`internal/store/agent_context_resolvers.go`) exactly, so
+  task `06` can look the row up by that string with no translation layer.
+- Task `07`'s cycle detection: `store.Skill.DeclaredDependencies` is populated as a plain JSON array
+  of slug strings (`["other-skill"]`, or `"[]"` for none) at install time by this task, exactly the
+  shape task `02`'s own column doc comment already specified — task `07`'s Installer-pipeline
+  extension (its own item 3) can read this column directly for every already-installed skill to
+  build its graph; this task does not attempt cycle detection itself, per both task files' explicit
+  scope split.
+
+**Test fixtures** (`internal/skillinstall/testdata/fixtures/`): `sample-skill/` is a real,
+complete `SKILL.md` + `scripts/run.sh` + `references/notes.md` + `assets/logo.txt` package with two
+declared parameters (one required, one not) and one declared dependency slug (`other-skill` — not
+itself installed anywhere in this task's tests, since this task's own scope is extraction, not
+resolution). `malformed-missing-script/` declares a `scripts:` entry that doesn't exist on disk.
+`malformed-frontmatter/` omits the mandatory `name` field. All three exercise the Done-means
+end-to-end/malformed-package requirements directly (see test list below).
+
+**Validation.** `go build ./cmd/nanite/`, `go vet ./...` (only the two pre-existing
+`container.go` `stopReaper`/`stopRuntimeReaper` findings tasks `01`/`02`/`03` already confirmed
+predate this batch via `git blame`), and the full `go test ./...` suite all pass — including the new
+`internal/skillinstall` package (8 tests) and the extended `internal/skill` package (added
+`TestParsePackageDir_FullPackage`, `TestParsePackageDir_SlugFallsBackToDirName`,
+`TestParsePackageDir_MissingSkillFile`, `TestToStoreSkill_InputSchemaFromParameters`, all passing
+alongside the existing, unmodified skill-package tests). Key `internal/skillinstall` tests, mapped
+to Done-means:
+`TestInstall_EndToEnd` (real fixture installs end-to-end: parsed, validated, vendored — confirmed
+via `vendor.ReadFiles` — and indexed with the right `ContentHash`/`DeclaredDependencies`/non-default
+`InputSchema`); `TestInstall_MalformedPackage_MissingScript` /
+`TestInstall_MalformedFrontmatter_FailsCleanly` (malformed packages fail with a specific
+`*ValidationError` or parse error, zero vendored entries, zero index rows);
+`TestInstall_Resync_IdenticalContent_IsIdempotent` (`Reused=true`, `Version` unchanged);
+`TestInstall_Resync_ChangedContent_NewAddressAndVersionBump` (new address, `Version` bumped, same
+row `ID` updated in place, **old vendored address independently re-read and confirmed byte-for-byte
+unmodified** — the literal immutability check the Done-means asks for);
+`TestInstall_RequiresExplicitSourcePath` (no-sweep guarantee);
+`TestInstall_IndexFailureAfterFreshVendorWrite_RollsBackVendoredAddress` /
+`TestInstall_IndexFailureAfterReusedVendorWrite_DoesNotDelete` (the rollback/no-rollback failure
+paths, using fakes since the real `*skillvendor.Store`/`*store.Store` don't offer an easy way to
+force an index-write failure after a real vendor write in an in-process test).
+
+Did not perform a separate live `nanite serve` dogfeed for this task: task `05` (not yet started at
+the time of this work) is the REST/CLI trigger surface that actually exercises this pipeline through
+a running server/CLI process, and this task's own Done-means criteria are all satisfiable — and were
+satisfied — through direct, real (non-mocked, except for the two narrow rollback-path tests)
+package-level tests against a real `*skillvendor.Store` rooted at a temp directory and a real
+`*store.Store` built via `store.New` against a temp SQLite file with migrations applied. No
+`.nanite/`-relative paths, no repo-root-relative writes, and no schema migration was touched by this
+task (task `02` already landed `136`/`137`), so `EXECUTION-PROCESS.md`'s scratch-path/backup-copy
+discipline for schema or live-server verification doesn't apply here.
+
+`git status --short` after all changes: only `internal/skill/{convert,parser}.go` and their
+`_test.go` files modified, plus the new `internal/skillinstall/` directory added — no other files
+touched, no stray writes.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

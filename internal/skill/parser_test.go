@@ -130,6 +130,122 @@ Prompt body here.
 	}
 }
 
+func TestParsePackageDir_FullPackage(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "SKILL.md", `---
+name: Package Skill
+slug: package-skill
+description: A full package with scripts, references, assets, parameters, and dependencies.
+context: inline
+scripts:
+  - scripts/run.sh
+references:
+  - references/notes.md
+assets:
+  - assets/logo.txt
+parameters:
+  - name: target
+    description: what to target
+    required: true
+  - name: verbose
+    resolver_slot: verbosity
+dependencies:
+  - other-skill
+---
+Body content.
+`)
+	writeFile(t, dir, "scripts/run.sh", "#!/bin/sh\necho hi\n")
+	writeFile(t, dir, "references/notes.md", "# notes\n")
+	writeFile(t, dir, "assets/logo.txt", "logo\n")
+
+	def, files, err := ParsePackageDir(dir)
+	if err != nil {
+		t.Fatalf("ParsePackageDir: %v", err)
+	}
+
+	if def.Slug != "package-skill" {
+		t.Errorf("Slug = %q, want %q", def.Slug, "package-skill")
+	}
+	if def.SourceRef != dir {
+		t.Errorf("SourceRef = %q, want %q", def.SourceRef, dir)
+	}
+	if len(def.Scripts) != 1 || def.Scripts[0] != "scripts/run.sh" {
+		t.Errorf("Scripts = %v", def.Scripts)
+	}
+	if len(def.References) != 1 || def.References[0] != "references/notes.md" {
+		t.Errorf("References = %v", def.References)
+	}
+	if len(def.Assets) != 1 || def.Assets[0] != "assets/logo.txt" {
+		t.Errorf("Assets = %v", def.Assets)
+	}
+	if len(def.Parameters) != 2 {
+		t.Fatalf("Parameters = %v, want 2 entries", def.Parameters)
+	}
+	if def.Parameters[0].Name != "target" || !def.Parameters[0].Required {
+		t.Errorf("Parameters[0] = %+v", def.Parameters[0])
+	}
+	if def.Parameters[1].ResolverSlot != "verbosity" {
+		t.Errorf("Parameters[1].ResolverSlot = %q, want %q", def.Parameters[1].ResolverSlot, "verbosity")
+	}
+	if len(def.Dependencies) != 1 || def.Dependencies[0] != "other-skill" {
+		t.Errorf("Dependencies = %v", def.Dependencies)
+	}
+
+	for _, want := range []string{"SKILL.md", "scripts/run.sh", "references/notes.md", "assets/logo.txt"} {
+		if _, ok := files[want]; !ok {
+			t.Errorf("PackageFiles missing %q, got keys %v", want, keysOf(files))
+		}
+	}
+}
+
+func TestParsePackageDir_SlugFallsBackToDirName(t *testing.T) {
+	dir := t.TempDir()
+	pkgDir := filepath.Join(dir, "my-package")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, pkgDir, "SKILL.md", `---
+name: No Slug Package
+description: Frontmatter omits slug entirely.
+---
+Body.
+`)
+
+	def, _, err := ParsePackageDir(pkgDir)
+	if err != nil {
+		t.Fatalf("ParsePackageDir: %v", err)
+	}
+	if def.Slug != "my-package" {
+		t.Errorf("Slug = %q, want %q (directory-name fallback)", def.Slug, "my-package")
+	}
+}
+
+func TestParsePackageDir_MissingSkillFile(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, err := ParsePackageDir(dir); err == nil {
+		t.Fatal("expected an error for a package directory with no SKILL.md")
+	}
+}
+
+func writeFile(t *testing.T, root, relPath, content string) {
+	t.Helper()
+	full := filepath.Join(root, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir for %s: %v", relPath, err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", relPath, err)
+	}
+}
+
+func keysOf(m PackageFiles) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func TestSlugFromFilename(t *testing.T) {
 	tests := []struct {
 		input string

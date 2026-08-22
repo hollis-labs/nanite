@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -43,7 +44,7 @@ func (d *Definition) ToStoreSkill() *store.Skill {
 		Description:          d.Description,
 		Category:             categoryFromTags(d.Tags),
 		Icon:                 "",
-		InputSchema:          "{}",
+		InputSchema:          inputSchemaFromParameters(d.Parameters),
 		SourceTier:           sourceTierFromDefinition(d),
 		Version:              1,
 		Enabled:              true,
@@ -51,6 +52,51 @@ func (d *Definition) ToStoreSkill() *store.Skill {
 		InstalledAt:          now,
 		UpdatedAt:            now,
 	}
+}
+
+// inputSchemaFromParameters builds a minimal JSON Schema object describing
+// a skill's declared Parameters — TASKS/skills/02's own note on
+// store.Skill.InputSchema: "schema for declared parameters, now sourced
+// from the package's own frontmatter via task 04's parser, not
+// agent-authored." Returns "{}" (matching the pre-parameters default) when
+// the skill declares no parameters at all, so a skill with no
+// `parameters:` frontmatter round-trips identically to before this field
+// existed.
+func inputSchemaFromParameters(params []ParameterSpec) string {
+	if len(params) == 0 {
+		return "{}"
+	}
+
+	properties := make(map[string]any, len(params))
+	required := make([]string, 0, len(params))
+	for _, p := range params {
+		prop := map[string]any{"type": "string"}
+		if p.Description != "" {
+			prop["description"] = p.Description
+		}
+		properties[p.Name] = prop
+		if p.Required {
+			required = append(required, p.Name)
+		}
+	}
+
+	schema := map[string]any{
+		"type":       "object",
+		"properties": properties,
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+
+	data, err := json.Marshal(schema)
+	if err != nil {
+		// Marshal of a map[string]any built entirely from strings/bools
+		// cannot realistically fail; fall back to the pre-parameters
+		// default rather than propagating an error from a conversion
+		// function with no error return.
+		return "{}"
+	}
+	return string(data)
 }
 
 // sourceTierFromDefinition maps the file-based Definition's Source field

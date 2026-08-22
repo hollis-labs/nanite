@@ -1,7 +1,7 @@
 # Build the Skill Resolver and parameter binding
 
 **Phase:** 4 — Materialization pipeline (`TASKS/skills`)
-**Status:** implemented
+**Status:** in-progress — review found one small doc/code mismatch, fix required (see "Fix required" section below)
 **Depends on:** `02`, `03`, `04` (reuses `04`'s parsed `Parameters []ParameterSpec` declaration
 shape on `skill.Definition`)
 **Touches:** new file `internal/skill/resolver.go`, `internal/runtime/agent/context_resolver.go`
@@ -273,6 +273,28 @@ writing anything and resolved without needing to guess, and the one deviation fr
 literal fixture-reuse wording (building fresh fixtures in `internal/skill` rather than reusing
 `internal/skillinstall`'s testdata) is a mechanical scope-boundary choice with a documented
 rationale, not an ambiguity about what the task wanted.
+
+## Fix required (fresh reviewer, 2026-08-21 — see `TASKS/ESCALATIONS.md`'s matching entry)
+
+**Overall verdict was PASS** — this is one small, non-blocking finding, not a rejection.
+
+`MissingSkillParameterError.Names`'s doc comment (`internal/skill/resolver.go`) claims it is
+"the sorted, **deduplicated** list of missing required parameter names," but
+`ResolveSkillParameters`'s implementation only sorts (`sort.Strings(missing)` before returning) —
+it never dedupes. Not currently reachable via the one real production path (`internal/skillinstall`'s
+`DefaultValidator` already rejects a package with duplicate parameter names before a `Definition`
+ever reaches this function), but `ResolveSkillParameters` is an exported function with no such
+precondition documented or enforced on its own `Definition` argument, so a caller constructing one
+directly (or from some future unvalidated source) could get a `Names` slice with a duplicate entry,
+contradicting the doc's own claim.
+
+**What to do:** add a real dedupe step when collecting `missing` in `ResolveSkillParameters` (e.g.
+track already-added names via a `map[string]bool` before appending, or dedupe the slice
+immediately before `sort.Strings`) — matching this project's stated preference for a real
+guarantee over an implicit cross-package invariant. Add a small regression test: a `Definition`
+with two `ParameterSpec` entries sharing the same `Required`, unresolvable `Name` should produce
+a `MissingSkillParameterError.Names` with exactly one entry, not two. Re-verify
+`go build`/`go vet`/`go test ./internal/skill/...` clean.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

@@ -16,6 +16,29 @@
 > - **Gated on:** AD-18 — **retention half only.** The doc-comment fix is required regardless and is not gated.
 > - **requires_security_review:** false · **requires_regression_test:** true
 
+> ## ✅ AD-18 DECIDED (2026-08-22) — TTL plus count cap; evicted must not read as unknown
+>
+> Evict completed jobs on a TTL with a hard ceiling on retained records.
+>
+> **`Status`/`Result` must return a distinct "expired" state, not not-found.**
+> Silently turning "job succeeded" into "job unknown" is a different bug, not a
+> fix — this is the part most likely to be got wrong, so make it explicit in
+> the type, not just the docs.
+>
+> Rejected: count-only LRU (a burst can evict a result before its owner reads
+> it, with no time-based guarantee) and persist-to-store (needs a schema
+> migration this batch otherwise claims none of, and turns a correctness fix
+> into a storage feature).
+>
+> **The leak has a concrete rate.** The only `delete(svc.jobs, jobID)` in
+> `internal/background/service.go` is on the immediate `backend.Start` failure
+> path (`:126`); every job that actually *starts* is retained for the process
+> lifetime holding up to `DefaultMaxOutputBytes` (1 MiB) of output. Roughly
+> 1 MiB leaked per background job, indefinitely.
+>
+> **The doc-comment fix is no longer gated** — `PTYBackend.Status` falsely
+> claims completed jobs are "reaped". Required regardless of the retention work.
+
 ## Context
 
 `requires_architect_decision: true` — either add a TTL/LRU eviction policy, or explicitly accept unbounded retention as intentional for this package's current MVP scope. Either way, `PTYBackend.Status`'s doc comment must be corrected — it currently states something the code does not do.

@@ -265,9 +265,9 @@
         "method_count": 349
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
-      "disposition": "needs-architect-decision",
+      "disposition": "accepted-risk",
       "task_status": "not-started",
-      "revalidation_note": "internal/store/store.go and the *Store fan-in pattern are unchanged in substance (76+ direct-reference count not hand-recomputed per the guide's own instruction not to chase this metric). Task 10/03 is explicitly a review-note-only task (no code changes) and AD-14 gates it precisely because the guide directs \"not a mandatory split\" -- whether any narrow interface is warranted at all is the open question, not an agreed fix's shape."
+      "revalidation_note": "internal/store/store.go and the *Store fan-in pattern are unchanged in substance (76+ direct-reference count not hand-recomputed per the guide's own instruction not to chase this metric). Task 10/03 is explicitly a review-note-only task (no code changes) and AD-14 gates it precisely because the guide directs \"not a mandatory split\" -- whether any narrow interface is warranted at all is the open question, not an agreed fix's shape. [AD-14 DECIDED 2026-08-22: no new consumer-defined interfaces. Per the remediation guide's directive \u2014 'gravitational-package review, not a mandatory split\u2026 narrow consumer-defined interfaces only where they solve demonstrated coupling/testability problems' \u2014 and its guardrail against 'repository interfaces everywhere because Store has high fan-in'. The two existing counter-examples (dispatch.TrustResolver, grounding.ConsultationLogger) stand as the pattern for when one IS warranted. 10/03 remains review-note-only, no code changes.]"
     },
     {
       "id": "GO-STORE-001",
@@ -292,9 +292,9 @@
       "report_section": "\u00a78.1",
       "false_positive_considerations": "A single shared persistence facade is a defensible, normal choice at this scale.",
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
-      "disposition": "needs-architect-decision",
+      "disposition": "accepted-risk",
       "task_status": "not-started",
-      "revalidation_note": "Same package/evidence as GO-DEP-002 (both surfaced by task 10/03's gravitational-package review). Confirmed dispatch.TrustResolver and grounding.ConsultationLogger still exist as the narrow consumer-defined-interface counter-examples cited. AD-14 decides whether/where more of this pattern is warranted."
+      "revalidation_note": "Same package/evidence as GO-DEP-002 (both surfaced by task 10/03's gravitational-package review). Confirmed dispatch.TrustResolver and grounding.ConsultationLogger still exist as the narrow consumer-defined-interface counter-examples cited. AD-14 decides whether/where more of this pattern is warranted. [AD-14 DECIDED 2026-08-22: no new consumer-defined interfaces. Per the remediation guide's directive \u2014 'gravitational-package review, not a mandatory split\u2026 narrow consumer-defined interfaces only where they solve demonstrated coupling/testability problems' \u2014 and its guardrail against 'repository interfaces everywhere because Store has high fan-in'. The two existing counter-examples (dispatch.TrustResolver, grounding.ConsultationLogger) stand as the pattern for when one IS warranted. 10/03 remains review-note-only, no code changes.]"
     },
     {
       "id": "GO-STORE-002",
@@ -401,10 +401,10 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.1",
       "false_positive_considerations": "May be an intentional, not-yet-reached migration backlog rather than an oversight.",
-      "task_file": "TASKS/audit-remediation/06-store-correctness/02-triage-store-context-and-transaction-gaps.md",
-      "disposition": "needs-architect-decision",
+      "task_file": "TASKS/audit-remediation/06-store-correctness/03-full-context-propagation-sweep.md",
+      "disposition": "remediate",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed unchanged: `grep -c 'ctx context.Context'` returns 0 for both sessions.go and agents.go, 6 for teams.go -- matches the finding exactly. This is the specific sub-question AD-14 (\"how far to narrow internal/store dependencies\") is scoped to decide; task file 06/02 itself flags this sub-section's `requires_architect_decision: true` as \"the one piece of this task file that is genuinely an architect decision.\""
+      "revalidation_note": "Confirmed unchanged: `grep -c 'ctx context.Context'` returns 0 for both sessions.go and agents.go, 6 for teams.go -- matches the finding exactly. This is the specific sub-question AD-14 (\"how far to narrow internal/store dependencies\") is scoped to decide; task file 06/02 itself flags this sub-section's `requires_architect_decision: true` as \"the one piece of this task file that is genuinely an architect decision.\" [AD-14 DECIDED 2026-08-22: full context propagation sweep \u2014 all 371 remaining exported *Store methods across 67 files, callers in 32 packages. Executed as a standalone mechanical task (06/03) by an external session, OUTSIDE the wave structure and in isolation, because it is structurally incompatible with concurrent work. task_file reassigned from 06/02 to 06/03; 06/02 re-scoped to its other two findings.]"
     },
     {
       "id": "GO-STORE-006",

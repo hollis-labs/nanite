@@ -51,11 +51,11 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-11 | Island: curated tool-knowledge matcher — wire / defer / retire | `09/06` | GO-MCPTOOL-003 | 4 | open |
 | AD-12 | `chatServiceImpl` / `generateResponse` decomposition boundaries | `10/01` | GO-SVCEXEC-001/002 | 5 | open |
 | AD-13 | `SelfToolsTransport` decomposition boundaries | `10/02` | GO-MCPTOOL-006 | 5 | open |
-| AD-14 | How far to narrow `internal/store` dependencies | `10/03`, `06/02` | GO-DEP-002, GO-STORE-001, GO-STORE-005 | 5 | open |
+| AD-14 | How far to narrow `internal/store` dependencies | `10/03`, `06/02`, **`06/03`** | GO-DEP-002, GO-STORE-001, GO-STORE-005 | 5 | **decided** |
 | AD-15 | Default auth / bind / TLS / startup-warning posture | `08/07` | GO-RUNTIME-002 | 3 | open |
 | AD-16 | File/directory permission policy (default mode) | `08/04` | GO-SEC4-003 | 3 | open |
-| AD-17 | `cmdServe` fatal-path cleanup: direction | `07/02` | GO-RUNTIME-001 | 2b | open |
-| AD-18 | Background job registry: retention policy | `07/03` | GO-RUNTIME-004 | 2b | open |
+| AD-17 | `cmdServe` fatal-path cleanup: direction | `07/02` | GO-RUNTIME-001 | 2b | **decided** |
+| AD-18 | Background job registry: retention policy | `07/03` | GO-RUNTIME-004 | 2b | **decided** |
 | AD-19 | Duplicated semantics: share implementation vs. parity tests | Wave 6a (all) | GO-SVCEXEC-004, GO-API-007, GO-CHAT-002, GO-INFRA-004 | 6a | open |
 | AD-20 | `internal/config` naming collision: rename direction | `11/08` | GO-INFRA-001 | 6a | open |
 | AD-21 | Which historical lint classes become blocking | `12/01` | GO-HYG-001 | 7 | open |
@@ -380,7 +380,27 @@ rather than a default guess.
 
 ### AD-17 — `cmdServe` fatal-path cleanup: direction
 
-**Status:** open · **Gates:** `07/02` · **Findings:** GO-RUNTIME-001 (low)
+**Status:** decided · **Gates:** `07/02` · **Findings:** GO-RUNTIME-001 (low)
+
+> **Decided (2026-08-22): `cmdServe` returns `error`; `main()` does the exit.**
+>
+> Change `cmdServe`'s signature to return `error` and let `main()`'s
+> `case "serve":` branch perform the `os.Exit`. No new mechanism, no cleanup
+> registry — the deferred cleanups already exist and are already correctly
+> placed; they simply never fire today. Rejected the `slogx` cleanup-hook
+> alternative because it introduces a process-global exit hook nobody owns and
+> a second shutdown path competing with the defers.
+>
+> **This finding's "low" severity undersells it.** `slogx.Fatal` is
+> `slog.Error` + `os.Exit(1)` (`internal/slogx/slogx.go:138-141`), and
+> `os.Exit` runs **no deferred functions**. `cmdServe` registers four:
+> `logCloser.Close()` (`main.go:143`), `otelShutdown(otelCtx)` (`:174`),
+> `s.Close()` (`:182`, the store), and `coordStore.Close()` (`:331`). There are
+> seven `slogx.Fatal` sites (`:180 :186 :189 :199 :406 :433 :824`), and
+> **`:824` is the terminal statement of `cmdServe`** —
+> `if err := srv.ListenAndServe(); err != nil { slogx.Fatal(...) }`. So *every*
+> abnormal server exit drops telemetry spans, leaves the log buffer unflushed,
+> and skips both SQLite closes. Fix all seven sites, not just the terminal one.
 
 `slogx.Fatal` in `cmdServe` bypasses cleanup. Two shapes, per the task file:
 change `cmdServe`'s signature (and `main()`'s `case "serve":` branch) to
@@ -393,8 +413,28 @@ later — so decide it early rather than letting it drift to the back.
 
 ### AD-18 — Background job registry: retention policy
 
-**Status:** open · **Gates:** `07/03` (the retention half only)
-· **Findings:** GO-RUNTIME-004 (medium)
+**Status:** decided · **Gates:** `07/03` · **Findings:** GO-RUNTIME-004 (medium)
+
+> **Decided (2026-08-22): TTL plus a hard count cap, and evicted must not read
+> as unknown.**
+>
+> Evict completed jobs on a TTL with a ceiling on retained records.
+> **`Status`/`Result` must return a distinct "expired" state, not not-found** —
+> silently turning "job succeeded" into "job unknown" is a different bug, not a
+> fix. Rejected count-only LRU (a burst can evict a result before its owner
+> reads it, with no time guarantee) and persist-to-store (needs a migration
+> this batch otherwise claims none of, and turns a correctness task into a
+> storage feature).
+>
+> **The leak has a concrete rate.** The only `delete(svc.jobs, jobID)` in
+> `internal/background/service.go` is on the immediate `backend.Start` failure
+> path (`:126`). Every job that actually *starts* is retained for the process
+> lifetime, each holding up to `DefaultMaxOutputBytes` (1 MiB) of captured
+> output. A long-running service leaks roughly 1 MiB per background job,
+> indefinitely.
+>
+> The doc-comment fix — `PTYBackend.Status` falsely claims completed jobs are
+> "reaped" — is required regardless and is no longer gated on anything.
 
 `internal/background`'s job registry grows unbounded. The doc-comment half of
 `07/03` is required regardless; the retention half needs a policy — TTL, max
@@ -405,8 +445,44 @@ bug, not a fix.
 
 ### AD-14 — How far to narrow `internal/store` dependencies
 
-**Status:** open · **Gates:** `10/03`, `06/02` · **Findings:** GO-DEP-002,
-GO-STORE-001, GO-STORE-005
+**Status:** decided · **Gates:** `10/03`, `06/02`, `06/03` · **Findings:**
+GO-DEP-002, GO-STORE-001, GO-STORE-005
+
+> **Decided (2026-08-22), in two halves.**
+>
+> **Context propagation (`GO-STORE-005`): full sweep — all 371 methods.**
+> Executed as a **standalone mechanical task, `06/03`, outside the wave
+> structure**, handed to an external session so it stays out of the main
+> workstream. Measured scope: 67 non-test files, 505 exported `*Store` methods
+> of which 371 lack `ctx`, 368 non-context `database/sql` calls, callers across
+> 32 packages.
+>
+> **Isolation is the binding constraint, not a preference.** This sweep is
+> structurally incompatible with concurrent work — same hazard class as the
+> repo-wide `gofmt` sweep (AD-22): it must run alone from a clean `main` and
+> land in one merge, because a half-swept package does not compile. It
+> conflicts directly with `06/01` (which edits `agents.go`, one of the two
+> zero-adoption hot tables), `06/02`, `11/13`, `13/01`, `13/02`, and in
+> practice any task touching a caller package — `internal/service` alone holds
+> 76 direct `*store.Store` references.
+>
+> `GO-STORE-005`'s `task_file` moves from `06/02` to `06/03`, and **`06/02` is
+> re-scoped to its remaining two findings** (`GO-STORE-004`, `GO-STORE-006`),
+> which shrinks it considerably and removes its architect gate.
+>
+> **Narrow interfaces (`GO-STORE-001`, `GO-DEP-002`): none. Accepted as-is.**
+> Following the guide's own directive — *"gravitational-package review, not a
+> mandatory split… narrow consumer-defined interfaces only where they solve
+> demonstrated coupling/testability problems"* — and its explicit guardrail
+> against *"creat[ing] repository interfaces everywhere because Store has high
+> fan-in."* Both findings move to `accepted-risk`. The two existing
+> counter-examples (`dispatch.TrustResolver`, `grounding.ConsultationLogger`)
+> stand as the pattern for when one *is* warranted. `10/03` remains
+> review-note-only with no code changes.
+>
+> *(This half was not explicitly stated in the operator's answer, which
+> addressed the sweep. It applies the guide's documented default and is
+> recorded here so it is visible and correctable rather than silently assumed.)*
 
 The guide is unusually directive here and the decision should not relitigate
 it: *"Treat as a gravitational-package review, not a mandatory split. Add

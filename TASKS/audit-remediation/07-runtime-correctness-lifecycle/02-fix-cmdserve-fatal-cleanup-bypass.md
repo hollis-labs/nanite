@@ -16,6 +16,29 @@
 > - **Gated on:** AD-17 (signature change vs. slogx cleanup hook)
 > - **requires_security_review:** false · **requires_regression_test:** true
 
+> ## ✅ AD-17 DECIDED (2026-08-22) — `cmdServe` returns `error`, `main()` exits
+>
+> Change `cmdServe`'s signature to return `error`; `main()`'s `case "serve":`
+> branch performs the `os.Exit`. The four deferred cleanups already exist and
+> are already correctly placed — they simply never fire. Returning the error
+> makes them start working with no new mechanism. The `slogx` cleanup-hook
+> alternative was rejected: it adds a process-global exit hook nobody owns and
+> a second shutdown path competing with the defers.
+>
+> **Fix all seven `slogx.Fatal` sites**, not just the terminal one:
+> `cmd/nanite/main.go:180, 186, 189, 199, 406, 433, 824`.
+>
+> **This finding's "low" severity undersells the impact.** `slogx.Fatal` is
+> `slog.Error` + `os.Exit(1)` (`internal/slogx/slogx.go:138-141`), and
+> `os.Exit` runs no deferred functions. `cmdServe` defers
+> `logCloser.Close()` (`:143`), `otelShutdown(otelCtx)` (`:174`), `s.Close()`
+> (`:182`, the store), and `coordStore.Close()` (`:331`). Site `:824` is the
+> **terminal statement of `cmdServe`** — `if err := srv.ListenAndServe(); err
+> != nil { slogx.Fatal(...) }` — so every abnormal server exit drops telemetry
+> spans, leaves the log buffer unflushed, and skips both SQLite closes.
+>
+> Note `07/05` also edits `cmd/nanite/main.go` and is sequenced after this task.
+
 ## Context
 
 `requires_architect_decision: true` — the remediation guide's own recommendation offers two directions (replace `slogx.Fatal` with return/structured-error propagation at these sites, **or** make `slogx.Fatal` itself accept a cleanup-hook slice), and this task's own investigation found `slogx.Fatal` has real call sites well beyond `cmdServe` — a scope question the audit did not resolve and that materially affects which direction is cheaper/safer. Per this project's guardrails, an implementation agent must not silently pick one direction; an architect (or the operator) must decide first.

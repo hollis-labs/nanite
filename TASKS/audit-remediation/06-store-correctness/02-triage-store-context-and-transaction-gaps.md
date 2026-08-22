@@ -16,6 +16,28 @@
 > - **Gated on:** AD-14 — this task's scope depends **entirely** on it. The package-wide context-propagation option is a large mechanical diff across a high-fan-in package; do not start until the decision says whether that is in scope.
 > - **requires_security_review:** false · **requires_regression_test:** true
 
+> ## ⚠ RE-SCOPED 2026-08-22 BY AD-14 — GO-STORE-005 IS NO LONGER THIS TASK'S JOB
+>
+> **`GO-STORE-005` (context propagation) has moved to `06/03`**
+> (`03-full-context-propagation-sweep.md`), a standalone mechanical sweep run
+> in isolation by an external session. Everything below about package-wide
+> method-signature changes, `sessions.go`/`agents.go` ctx adoption, or how far
+> to propagate context is **no longer in scope here** — do not implement it,
+> and do not treat its absence as an omission.
+>
+> **This task is now just two findings:** `GO-STORE-004`
+> (`ListPluginSettings`) and `GO-STORE-006`
+> (`SyncDurableAgentInstanceConfig`). That is a substantially smaller task than
+> the file below describes.
+>
+> **Its architect gate is also gone.** AD-14 was the only decision blocking
+> this task, and it is decided. Nothing here needs further sign-off.
+>
+> **Sequencing:** `06/03`'s sweep will rewrite every signature in this package.
+> If `06/03` has not yet run, expect this task's diff to be rewritten by it; if
+> it has, work against the post-sweep signatures. Coordinate with the operator
+> on ordering rather than assuming.
+
 ## Context
 
 The remediation guide's "Store correctness" section (Wave 2) is explicit: *"Prioritize `GO-STORE-003` ... Then triage `GO-STORE-004/005/006`. Do not turn this into a repository-wide Store abstraction rewrite."* This task is that triage. It is deliberately **not** a single uniform fix — the three findings below have almost nothing in common except living in the same package and being lower-priority than `GO-STORE-003`. They are grouped into one task file only because the guide groups them for a single review pass, not because they share a root cause. Each sub-section below is independently scoped, independently gated, and should be independently reviewable; a worker or reviewer should feel free to treat them as three small pieces of work executed in sequence within this one file, not one merged change.

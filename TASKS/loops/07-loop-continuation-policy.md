@@ -1,7 +1,7 @@
 # Continuation policy — the `decide()` function
 
 **Phase:** 2 — Runtime engine (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `01-goals-schema.md`, `02-goal-evidence-schema.md`,
 `03-loop-runs-schema.md`, `04-loop-run-iterations-schema.md`
 **Touches:** new `internal/loop/decide.go` (new package — first file in it; needs a
@@ -292,4 +292,37 @@ Phase 6 task) and by `container.go` not appearing in `git status` against
 this worktree's own changes.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+PASS. Fresh review confirmed: deterministic-first order matches
+21-loops.md exactly; Decide() genuinely does not route through
+reflexes.Resolve (verified resolve.go:177 and taxonomy doc:120 directly);
+verifyAgent's ExecuteLLMStep call shape is correctly reused (confirmed
+pre-diff line 355 citation was accurate); malformed-LLM-response fail-safe
+returns an error and never defaults to CONTINUE, tested by 6 dedicated
+cases; reasoningEligibleKinds correctly excludes CONTINUE/COMPLETE, enforced
+in code via a map lookup, tested for all 8 values; tests_pass/lint_pass
+correctly reuse VerifySubject.IsError/.Output with no new subsystem,
+6 dedicated tests added; doc.go's three-way disambiguation independently
+verified against the real internal/loopdetect, internal/workflow.LoopStep,
+and agentworkflow/dag.go|types.go files, not just trusted from the doc
+comment. Both documented signature deviations (ctx/exec; policy
+ContinuationPolicy) are well-reasoned — the ContinuationPolicy addition is
+directly pre-authorized by internal/store/loop_runs.go's own
+ContinuationPolicyJSON comment naming this task as its owner.
+
+go build ./cmd/nanite/: exit 0. go vet ./...: exit 1, but only the two
+pre-existing, unrelated internal/service/container.go findings (confirmed
+via git log/git show against this commit's diff). go test -count=1 ./...:
+all 93 packages ok, including internal/loop and internal/service.
+
+Non-blocking follow-up logged, not fixed here: decide.go's
+evidenceSatisfiesGoal re-implements store.EvaluateGoalEvidence's formula
+locally rather than either (a) extracting a shared DB-free core function in
+internal/store/goal_evidence.go, or (b) having Decide take a precomputed
+bool from its caller (the option the task's own "What to do" §2 text
+appears to prefer, and one that would have required zero internal/store
+changes). Functionally identical to the original today, but nothing
+guards against the two drifting apart if task 02's formula changes later
+(e.g. when Result-vocabulary-aware evaluation lands, per goal_evidence.go's
+own noted future work). Recommend task 08 or a fast-follow revisit this;
+not a blocker for Phase 2 proceeding.

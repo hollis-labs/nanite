@@ -16,6 +16,8 @@ You implement exactly one task. You have zero memory of anything else — you ge
 
 Do the work. Run the baseline check — `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` (or the frontend equivalent) — when you're done, not just at the end of a phase. If your task involves a schema migration, test it against a real copy of the backed-up database (`~/.local/share/nanite/workspaces/default/backups/`), not an empty fixture.
 
+**Never run `git stash` (plain or `-u`), from your worktree or anywhere else.** `refs/stash` is shared across every worktree of this repo, not scoped to yours — this has already caused real cross-worktree incidents, more than once, despite being called out every time. If you need to inspect prior state or shelve something, use `git blame`/`git log` directly, or a worktree-local throwaway branch/commit — never the shared stash.
+
 ## Decision vs. rationale
 
 Your task file's stated action is settled — it's not reopened by finding that the reasoning behind it (in the decision log or an architecture doc) doesn't hold up against the code. Note the correction in your Work Log and do the task anyway; if the correction means the job is bigger than it looked (a live UI attached to what sounded like a dead table, say), do the full job — don't stop and ask whether to still do it.

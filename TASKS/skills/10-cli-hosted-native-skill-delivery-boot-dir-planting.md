@@ -1,7 +1,7 @@
 # CLI-hosted delivery — plant vendored skill packages into each provider's native boot-dir location
 
 **Phase:** 6 — Delivery (`TASKS/skills`)
-**Status:** implemented
+**Status:** fix-required
 **Depends on:** `02`, `03`
 **Touches:** new file `internal/runtime/agent/skill_plant.go` (a shared helper feeding all three
 providers), `internal/runtime/agent/bootdir_claude.go`/`bootdir_codex.go`/`bootdir_opencode.go`
@@ -270,4 +270,45 @@ this change), and `go test ./...` all pass.
   handlers, unrelated to this task's own scope, not fixed here.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**FAIL.** Fresh reviewer with no shared context found one HIGH-severity bug and one MEDIUM
+oversight. Full details logged in `TASKS/ESCALATIONS.md`'s 2026-08-22 entry. Summary:
+
+1. **HIGH — path traversal via unvalidated skill slug.** `skill_plant.go`'s
+   `claudeSkillDestPrefixes`/`opencodeSkillDestPrefixes` build each skill's destination via
+   `path.Join(<providerPrefix>, slug)` with no validation of `slug`. `store.Skill.Slug` has no
+   format validation anywhere in the codebase (confirmed across `internal/api/skills.go`,
+   `internal/skill/parser.go`, `internal/skillinstall/validate.go`, and the migration's schema).
+   `path.Clean` (called internally by `path.Join`) lets a `..`-laden slug cancel out the entire
+   destination prefix — e.g. `path.Join(".claude/skills", "../..")` → `"."`, landing a vendored
+   `CLAUDE.md` at the exact key used for the agent's real system prompt, silently overwritten
+   with zero error. `ValidateBootDirRelPath` doesn't catch this because the canceled-clean path
+   itself contains no remaining `..`. Fix: validate that each skill's cleaned destination
+   genuinely stays under its own intended prefix before merging into the `Files` map (e.g.
+   `strings.HasPrefix(cleaned, prefix+"/")`), or validate `slug` itself against an allow-list
+   pattern before it's ever used in `path.Join`.
+2. **MEDIUM — unconditional per-turn replant call doesn't guard ACP sessions.**
+   `chat_boot_drive.go`'s new `PlantAgentSkillFiles` call in `driveBootSession`'s active-session
+   branch runs on every turn with no `sess.BootDir != ""` guard. ACP-protocol sessions have a
+   permanently empty `BootDir` by design (`internal/runtime/agent/agent_acp.go`), so every turn
+   of every ACP-driven agent now logs a `slog.Warn` forever. Fix: guard the call with the same
+   emptiness check (or protocol check) `regenerateBootDirSlots` already implicitly tolerates via
+   its occasional-firing gate.
+
+## Fix required
+
+1. In `internal/runtime/agent/skill_plant.go`, after computing each skill's per-provider
+   destination path(s), assert the cleaned result stays under the intended prefix
+   (`.claude/skills/<slug>/`, `skills/<slug>/`, `.opencode/skills/<slug>/`) before adding any
+   entry to the `Files` map. Reject (skip, with a logged warning — do not silently plant into a
+   sanitized fallback path) any skill whose slug would escape its own prefix. Add a regression
+   test with an adversarial slug (e.g. `"../.."`, `".."`) proving the escape is blocked and the
+   skill is omitted rather than landing elsewhere.
+2. In `internal/service/chat_boot_drive.go`, guard the new unconditional `PlantAgentSkillFiles`
+   call in `driveBootSession`'s active-session branch with a check that the session actually has
+   a boot dir (`sess.BootDir != ""`, or equivalent protocol-based check) before calling it. Add or
+   extend a test confirming an ACP-style session (empty `BootDir`) does not trigger a per-turn
+   warning log.
+3. Re-run `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` — all must pass.
+4. Update this file's own Work Log with what was actually fixed and how it was verified
+   (including the adversarial-slug test's exact assertion), and set Status to `implemented`.

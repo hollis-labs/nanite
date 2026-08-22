@@ -572,4 +572,9 @@ are the same two pre-existing, unrelated `stopReaper`/`stopRuntimeReaper` findin
 no new ambiguity, no doc gap, no item-vs-item contradiction encountered.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (fresh re-reviewer, 2026-08-21, no shared context with either the original worker or the fix worker).** Independently reproduced both pre-fix failures by checking out the parent commit's source against current tests (`internal/store` failed to compile — `IsBareAssignment` didn't exist; `TestAgentCapabilitiesAPI_CreateKnownSkill_UpsertsOntoBareAssignment` failed `got 409, want 201`), then restored the fix and confirmed everything green. Verified `IsBareAssignment()`'s zero-value check is complete and correct against the real migration schema (`069`/`137`), confirmed the frontend justification for silent-preserve-on-remove by reading `AgentProfileManager.tsx`'s `removeSkillMutation` directly (genuinely has no `onError` handler), and confirmed `handleUpdateAgentKnownSkill` and the pre-existing non-colliding create/update/delete cycle are unaffected. Full build/vet/test clean.
+
+Two non-blocking observations for future tasks, not requesting changes here: (1) `20-skills.md`'s "Assign/revoke... the actual grant" framing is in some tension with a bare `AssignSkillToAgent` row explicitly not counting as a real grant — already deferred to task `09`'s real grant workflow, not this task's to resolve; (2) `DELETE /api/agents/{id}/skills/{id}` returns the same `200 {"status":"removed"}` whether a row was actually deleted or preserved due to real grant data — worth revisiting if task `09` builds a real revoke workflow, not a regression from this fix.
+
+Status: `reviewed`.

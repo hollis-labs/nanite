@@ -1,11 +1,39 @@
 package main
 
 import (
+	"log/slog"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/go-providers/provider"
 )
+
+func TestCmdServeStartupFailureReturns(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("NANITE_OTEL_DISABLED", "1")
+
+	// SQLite cannot open a directory as a database file. The directory itself
+	// is resolvable by go-apppaths, so this reaches a real store.New failure
+	// after the logging and OTel cleanup defers have been registered, without
+	// requiring a composition-root dependency-injection seam.
+	dbPath := t.TempDir()
+
+	originalLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(originalLogger) })
+
+	err := cmdServe([]string{"--db", dbPath, "--dev"})
+	if err == nil {
+		t.Fatal("cmdServe returned nil for an unopenable database path")
+	}
+	if !strings.Contains(err.Error(), "failed to open store") {
+		t.Fatalf("cmdServe error = %q, want failed-to-open-store context", err)
+	}
+}
 
 // Phase 4c.6 (CW-20260508-0002): TestRegisterLegacyPTYAliasPrefersRegisteredClaudeProvider
 // removed — the registerLegacyPTYAlias function it covered was deleted along

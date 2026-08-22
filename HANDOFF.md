@@ -131,18 +131,20 @@ class of gap as Wave 1's tracking-hygiene fixes. Fixed this session:
 - `TASKS/INDEX.md` — same fix in the Wave 2b table, plus an explanatory note
   that `06/03` is out-of-wave and not part of the Wave 2b dispatch unit.
 
-## Still open — resolve before writing Wave 2's kickoff
+## `06/03` dispatch — resolved (see headline)
 
-**What does "handed to an external session" mean for `06/03` concretely?**
-Has it actually been dispatched anywhere (a separate Torque/Mux session, a
-worker outside the normal Orchestrator flow), or is that just the task
-file's own instruction for whoever eventually runs it? This determines
-whether Wave 2's kickoff should treat `06/03` as already-claimed (don't
-re-dispatch, just track it) or as still needing dispatch. **This is a
-question for the operator, not something to assume.** Once answered, Wave
-2a's task list (`04/*`, `05/01`, `06/01`, re-scoped `06/02`, `07/*`) is
-otherwise ready to kick off — none of those depend on `06/03` landing first
-(they conflict with it running *concurrently*, not with it being unstarted).
+The "what does 'handed to an external session' mean" question is answered:
+dispatched to a Codex session 2026-08-22, batch paused until it lands. See
+the headline's ⏸ bullet for the binding-constraint rationale. **Note: commit
+`a62c5109`'s message promises a "verification checklist to run against
+06/03's summary" — it is not actually in this file's body (checked, not
+present anywhere below). Don't trust that it exists; write one before
+06/03's summary comes back, or ask whoever dispatched it where it really
+lives.** Once `06/03` lands, Wave 2a's task list (`04/*`, `05/01`) and Wave
+2b (`06/01`, re-scoped `06/02`, `07/*`) are otherwise ready to kick off —
+nothing in either depends on `06/03` *landing first*, they only conflict with
+it running *concurrently*, so the kickoff itself can be drafted now; just
+don't dispatch until the pause lifts.
 
 ## Kickoffs I've written for this batch so far
 
@@ -182,7 +184,7 @@ what was written. Read them as worked examples before writing Wave 2's.
 
 | Batch | Status | Notes |
 |---|---|---|
-| **Audit Remediation** | **executing — the only authorized work** | Wave 0 ✅, Wave 1 ✅, Wave 2 next (kickoff not yet written — see above) |
+| **Audit Remediation** | **⏸ paused on `06/03`** | Wave 0 ✅, Wave 1 ✅, `06/03` (out-of-wave ctx sweep) executing externally — see headline. Wave 2 kickoff can be drafted now, dispatch blocked until `06/03` lands. |
 | Filesystem Snapshots | frozen at 1/3 done | Was queued to run right after Skills per the operator's own plan; now blocked by the freeze instead. Kickoff ready (`filesystem-snapshots.md`) for whenever the freeze lifts. |
 | Plugin System | frozen, not-started | Kickoff ready (`plugin-system.md`). Migration `135` still unclaimed. |
 | Turn vs. Run | frozen, not-started | Kickoff ready (`turn-vs-run.md`). No migration needed. |
@@ -223,8 +225,10 @@ someone's in that file, so it stops reading as more unapproved than it is.
 - `TASKS/audit-remediation/ARCHITECT-DECISIONS.md` — 25 decisions total
   (AD-01 through AD-25). **All of Wave 2's gates are decided** (AD-14, AD-17,
   AD-18, as of `eebe0f32`) — nothing blocks Wave 2's kickoff on this front.
-  Several later-wave decisions are still genuinely `open` though — don't
-  assume the whole queue is clear: AD-05 (Wave 1 follow-up, non-blocking),
+  15 of 25 are still genuinely `open` — don't assume the whole queue is
+  clear: AD-05 (Wave 1 follow-up, non-blocking), AD-06 through AD-11 (all
+  six Wave 4 production-island wire/defer/retire calls — Wave 0's
+  reachability report they wait on is done, but none are decided yet),
   AD-15/AD-16 (Wave 3), AD-12/AD-13 (Wave 5), AD-19/AD-20/AD-21/AD-22
   (Wave 6-8). Re-check this file fresh when scoping those waves.
 - `TASKS/audit-remediation/WAVE-1-HANDOFF.md` / `WAVE-1-SUMMARY.md` — the
@@ -243,13 +247,17 @@ someone's in that file, so it stops reading as more unapproved than it is.
 
 ## What's next
 
-1. **Resolve the `06/03` dispatch question** (see "Still open" above) with
-   the operator — this is now the only real blocker on Wave 2's kickoff.
-2. **Write Wave 2's kickoff** once #1 is settled — Wave 2a (`04/01`-`05`,
-   `05/01`) and Wave 2b (`06/01`, re-scoped `06/02`, `07/01`-`05`) per the
-   batch README/INDEX, both now synced against `eebe0f32`'s decisions (see
-   "Tracking sync done this session"). `06/03` is tracked separately,
-   out-of-wave — don't fold it into either unit's dispatch.
+1. **Wait for `06/03` to land** — the batch is paused (see headline). Draft
+   count against Wave 2a/2b as ready, but do not dispatch either unit while
+   `06/03` is in flight in its external Codex session.
+2. **Write Wave 2's kickoff now, dispatch once the pause lifts** — Wave 2a
+   (`04/01`-`05`, `05/01`) and Wave 2b (`06/01`, re-scoped `06/02`,
+   `07/01`-`05`) per the batch README/INDEX, both now synced against
+   `eebe0f32`'s decisions (see "Tracking sync done this session"). `06/03` is
+   tracked separately, out-of-wave — don't fold it into either unit's
+   dispatch, and write a verification pass for its summary before trusting
+   it (see the note above — the checklist commit `a62c5109` claims to add
+   isn't actually in this file).
 3. **The freeze stays in effect for everything else** — do not dispatch
    Filesystem Snapshots, Plugin System, or anything else no matter how ready
    its kickoff looks, without explicit fresh operator authorization.

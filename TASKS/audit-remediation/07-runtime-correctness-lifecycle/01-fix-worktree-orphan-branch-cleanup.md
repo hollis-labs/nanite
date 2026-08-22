@@ -1,7 +1,7 @@
 # Fix `worktree.gitManager.CleanupOrphaned` deleting the wrong (truncated) branch name
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/worktree/manager.go` (`Create`, `CleanupOrphaned`); `internal/worktree/manager_test.go` (`TestCleanupOrphaned`). No other packages need code changes — `CleanupOrphaned` has exactly one production caller (see Context) and its call signature does not change.
 
@@ -106,7 +106,11 @@ Low risk, single-file (plus one test file) change, narrowly scoped. The fix can 
 
 ## Work log
 
-<!-- Worker fills in: what was actually done, any deviation from plan and why. -->
+- 2026-08-22: Re-derived the implementation and callers from branch `HEAD` before editing. `Create` still used the full session ID at `internal/worktree/manager.go:86`, `CleanupOrphaned` still truncated at lines 166-170, and `cmd/nanite/main.go` remained the sole production caller. The audit finding reproduced unchanged.
+- Added `workerBranchName(sessionID)` as the package-local source of truth and used it from both `Create` and `CleanupOrphaned`. `Cleanup` remains unchanged and continues to use its stored `wt.Branch`; the best-effort `cmd.Run()` behavior also remains unchanged.
+- Extended `TestCleanupOrphaned` to prove `worker-orphan-session` exists before cleanup and is absent afterward while retaining the prior cleanup-count and active-list assertions. With only the test change applied, `go test ./internal/worktree/... -run '^TestCleanupOrphaned$' -count=1 -v` failed because the orphan branch remained; after the production fix, the same command passed.
+- Verification passed: `go build ./internal/worktree/...`, `go vet ./internal/worktree/...`, `go test ./internal/worktree/... -count=1`, `go build ./cmd/nanite/`, `go vet ./...`, and `go test ./...`.
+- No deviations from the requested scope.
 
 ## Review notes
 

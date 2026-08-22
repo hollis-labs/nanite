@@ -47,6 +47,10 @@ type gitManager struct {
 	active   map[string]*Worktree
 }
 
+func workerBranchName(sessionID string) string {
+	return "worker-" + sessionID
+}
+
 // NewManager creates a worktree manager. baseDir is the directory under which
 // worktrees will be created (e.g., ".nanite/worktrees"). The current directory
 // must be inside a git repository.
@@ -83,7 +87,7 @@ func (m *gitManager) Create(sessionID string) (string, error) {
 		return wt.Path, nil
 	}
 
-	branch := "worker-" + sessionID
+	branch := workerBranchName(sessionID)
 	wtPath := filepath.Join(m.baseDir, sessionID)
 
 	// Create the worktree with a new branch.
@@ -163,11 +167,7 @@ func (m *gitManager) CleanupOrphaned(activeSessionIDs map[string]bool) (int, err
 		}
 
 		wtPath := filepath.Join(m.baseDir, sessionID)
-		short := sessionID
-		if len(short) > 8 {
-			short = short[:8]
-		}
-		branch := "worker-" + short
+		branch := workerBranchName(sessionID)
 
 		// Remove worktree.
 		cmd := exec.Command("git", "worktree", "remove", wtPath, "--force")

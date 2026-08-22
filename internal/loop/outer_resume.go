@@ -36,6 +36,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -96,3 +97,13 @@ func (e *LoopEngine) notifyOuterOnTerminal(ctx context.Context, loopRunID, statu
 			"loop_run_id", loopRunID, "status", status, "error", err)
 	}
 }
+
+// Compile-time assertion that service.LoopResumeNotifier satisfies
+// OuterResumeNotifier -- the symmetric counterpart to step_launcher.go's
+// own `var _ service.LoopStepLauncher = (*LoopEngine)(nil)` assertion for
+// the other direction. Legal here (not in internal/service) for the same
+// reason step_launcher.go's own assertion lives in this package: this
+// package already imports internal/service, so referencing its concrete
+// type carries no cycle risk, while internal/service declaring the
+// reverse would.
+var _ OuterResumeNotifier = (*service.LoopResumeNotifier)(nil)

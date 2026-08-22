@@ -758,7 +758,7 @@ resolution of every item on the design doc's own "What this session did not deci
 | `06-stepkindloop-schema` | 1 | reviewed (migration 136) | none |
 | `07-loop-continuation-policy` | 2 | reviewed | `01`, `02`, `03`, `04` |
 | `08-loop-engine-core` | 2 | reviewed | `03`, `04`, `07` |
-| `09-stepkindloop-executor-and-waiting-status` | 2 | implemented (migration 141) | `06`, `08` |
+| `09-stepkindloop-executor-and-waiting-status` | 2 | reviewed (migration 141) | `06`, `08` |
 | `10-loop-launcher-and-api` | 3 | not-started | `08` |
 | `11-loop-event-predicate-trigger` | 3 | not-started | `08` |
 | `12-loop-run-tick-scheduled-trigger` | 3 | not-started | `08` |

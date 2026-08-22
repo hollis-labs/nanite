@@ -1,7 +1,7 @@
 # `StepKindLoop` executor + `RunStatusWaitingOnLoop`
 
 **Phase:** 2 — Runtime engine (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `06-stepkindloop-schema.md`, `08-loop-engine-core.md`
 **Touches:** `internal/store/migrations/` (new migration — widens `status` CHECK, see
 below), `internal/agentworkflow/types.go` (new `RunStatus` constant), `internal/service/workflow_engine.go`
@@ -302,4 +302,34 @@ never through a piped/masked exit code:
 (gate > flex > loop) and the required end-to-end push-mechanism test.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+Reviewed 2026-08-21 — pass, with one minor, non-blocking gap found and fixed. Deep review
+covering: the corrected import-cycle resolution (independently confirmed `internal/loop`
+imports `internal/service`, not the reverse; zero `internal/loop` imports anywhere in
+`internal/service`'s non-test files), the three-way gate>flex>loop precedence (all 7 required
+cases plus 3 extra, all correct), the real synchronous push mechanism (traced
+`notifyOuterOnTerminal`'s call sites — fires immediately after the terminal status persists,
+never deferred or conditional on an unrelated caller), the race-condition handling (confirmed
+`startLoopStep`'s own immediate terminal-status check resolves the step correctly independent
+of whatever the notifier already attempted), the end-to-end integration test (re-ran directly,
+confirmed it never calls `.Resume()`/`.Run()` on the outer `WorkflowRun` — only on the inner
+`LoopRun` — and asserts the outer run's `completed` transition against real persisted state),
+all cross-cutting edits to already-shipped Teams/A2A code (both purely additive, no existing
+case altered), the migration-136 collateral fix (assertions byte-for-byte unchanged), and
+`cmd/nanite/main.go`'s wiring (reuses the same registry/launcher/store instances, both
+`WithLoopSupport`/`WithOuterResumeNotifier` genuinely called).
+
+**Gap found:** `LoopStepLauncher` had a compile-time interface-satisfaction assertion
+(`var _ service.LoopStepLauncher = (*LoopEngine)(nil)`, `internal/loop/step_launcher.go`) but
+the symmetric `OuterResumeNotifier` side did not — a future signature drift on
+`NotifyLoopRunTerminal` could go undetected unless it also happened to touch one of the two
+real call sites that currently exercise it. Fixed directly (non-behavioral, one-line, exact
+fix already specified) by the Orchestrator: added
+`var _ OuterResumeNotifier = (*service.LoopResumeNotifier)(nil)` to
+`internal/loop/outer_resume.go`. `go build ./cmd/nanite/`, `go vet ./internal/loop/...`, and
+`go test -count=1 ./internal/loop/... ./internal/service/...` all confirmed green after the
+fix.
+
+`go build ./cmd/nanite/`: exit 0. `go vet ./...`: exit 1, only the same pre-existing, unrelated
+`internal/service/container.go` findings. `go test -count=1 ./...`: exit 0, zero `FAIL`/`panic`
+across the full suite.

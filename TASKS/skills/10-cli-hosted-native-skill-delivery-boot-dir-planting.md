@@ -1,7 +1,7 @@
 # CLI-hosted delivery — plant vendored skill packages into each provider's native boot-dir location
 
 **Phase:** 6 — Delivery (`TASKS/skills`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `02`, `03`
 **Touches:** new file `internal/runtime/agent/skill_plant.go` (a shared helper feeding all three
 providers), `internal/runtime/agent/bootdir_claude.go`/`bootdir_codex.go`/`bootdir_opencode.go`
@@ -435,3 +435,43 @@ pass.
 **No scope creep.** Both fixes are confined to `internal/runtime/agent/skill_plant.go` and
 `internal/service/chat_boot_drive.go` (plus their two test files) exactly as the Fix-required
 section scoped them; no other file in the original task's "Touches" list was modified.
+
+## Re-review notes (2026-08-22)
+
+**PASS.** Fresh re-reviewer, no shared context, verified commit `671c1e7e` against `main` HEAD.
+
+- **Bug 1 fix confirmed sound in general, not just against the two known reproduction cases.**
+  Proved the invariant `skillDestPrefixSafe` enforces is `path.Clean(root+"/"+slug) ==
+  root+"/"+slug` byte-for-byte — since `root` is always a hardcoded canonical literal, this holds
+  iff every `/`-separated segment of `slug` is non-empty, non-`.`, non-`..`. Fuzzed ~25 adversarial
+  slugs (`".."`, `"../.."`, leading `/`, `"."`, trailing slashes, embedded `"../.."`, empty string,
+  `"\x00"`, `"~"`, URL-encoded `"..%2f.."`) against all three provider roots — every accepted slug
+  keeps the root as a genuine prefix, every rejecting case is a real escape attempt. Confirmed via
+  direct code read that a rejected skill is fully skipped before `vendor.ReadFiles` is even called
+  — not a partial plant, not a redirect.
+- **Mutation-tested both fixes**, matching this batch's established verification bar: stubbed
+  `skillDestPrefixSafe` to always return safe — all five new/updated tests failed with the exact
+  pre-fix symptom (vendored file landing at the boot-dir root); removed the ACP `BootDir` guard —
+  the ACP test failed with the exact predicted "empty bootDir" warning. Both reverted and
+  reconfirmed green.
+- **Two non-blocking observations, not reasons to fail:**
+  1. The Work Log's rationale for OpenCode's "both destinations must pass" check slightly
+     overclaims — since the safety check's outcome depends only on `slug`'s own structure (not
+     which hardcoded root it's appended to), the two checks are mathematically guaranteed to
+     always agree; the code is still correct and safe, just marginally more defensive than the
+     stated rationale requires. No code change needed.
+  2. `TestSkillPlantFiles_AdversarialSlugBlocked`'s "no clobber" sub-assertion uses a sentinel
+     filename (`"CLAUDE.md"`) that doesn't match the vendor fixture's actual filename
+     (`"SKILL.md"`), so that one sub-assertion is trivially satisfied rather than independently
+     exercising a real same-key collision. The core protection this test proves (zero files
+     planted for a blocked skill) is sound and is what the mutation test actually falsified — a
+     cosmetic test-fidelity gap, not a gap in the fix.
+- **A pre-existing, unrelated flaky race was surfaced during verification**, not introduced by
+  this diff: a `send on closed channel` panic in `driveBootSession`'s background `SendInput`
+  failure-handling goroutine (`chat_boot_drive.go`, a TOCTOU race against a concurrent channel
+  close), confirmed via `git blame` to predate this task by months. Logged separately in
+  `TASKS/ESCALATIONS.md` as a follow-up candidate, not a blocker for this task.
+- Build/vet/test all pass on `main` HEAD (`671c1e7e`); the one `go vet` finding is the
+  already-confirmed pre-existing, unrelated `container.go` reaper warning.
+
+**Task `10` is fully closed: implemented, validated, reviewed. Wave 7 (`10`, `11`) is complete.**

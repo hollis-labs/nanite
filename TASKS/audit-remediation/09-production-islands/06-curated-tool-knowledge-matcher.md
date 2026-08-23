@@ -299,4 +299,10 @@ above.
   evidence. Application behavior and unrelated task statuses were unchanged.
   Current-reference, Markdown table/link-target, and `git diff --check` checks
   passed, as did `go build ./cmd/nanite/`, `go vet ./...`, and `go test ./...`.
-- 2026-08-23: Fresh re-review pending.
+- 2026-08-23: Fresh re-review result: **FAIL** (low). The first fix removed the
+  deleted file from `.nanite/agents/backend.md`'s package tree, but the same
+  file's package-inventory row still described `internal/toolclient` as
+  containing a live "tool knowledge base."
+- 2026-08-23: Second bounded fix applied: replaced only that stale phrase
+  with the live `SelectByIntent` keyword-scoring responsibility. Fresh
+  re-review pending; no pass is claimed here.

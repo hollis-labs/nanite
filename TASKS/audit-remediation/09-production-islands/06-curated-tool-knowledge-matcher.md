@@ -286,4 +286,17 @@ above.
 
 ## Review notes
 
-<Reviewer fills this in.>
+- 2026-08-23: Fresh review result: **FAIL**. The code retirement itself and
+  its focused/full verification passed, but four current-state documents still
+  described the deleted curated matcher as live:
+  `docs/engineering/architecture/13-memory-and-knowledge-tools.md`,
+  `.nanite/agents/backend.md`, `.nanite/agents/reviewer-backend.md`, and this
+  folder's `README.md`.
+- 2026-08-23: Fix applied in a bounded worker pass: those four documents now
+  record AD-11's implemented retirement and direct current tool-intent readers
+  to `internal/toolclient/intent.go`'s live `SelectByIntent` path. Dated audit,
+  planning, and handoff records were deliberately preserved as historical
+  evidence. Application behavior and unrelated task statuses were unchanged.
+  Current-reference, Markdown table/link-target, and `git diff --check` checks
+  passed, as did `go build ./cmd/nanite/`, `go vet ./...`, and `go test ./...`.
+- 2026-08-23: Fresh re-review pending.

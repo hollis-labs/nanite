@@ -171,7 +171,7 @@
       "false_positive_considerations": "gosec's G304 rule fires on any variable-driven file open regardless of whether the variable is already constrained; a meaningful fraction of the 68 are plausibly already safe by construction.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/03-triage-remaining-gosec-g304-sites.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "in-progress",
       "revalidation_note": "gosec G304 production-site count is a 00/02-refreshed metric: 68 (audit) -> 70 (frozen HEAD 1d3bfd96), per docs/audits/2026-08-21-go-quality/raw-1d3bfd96/DELTA.md -- did not hand-recompute. Task 08/03's scope (triage the refreshed list) is unaffected by the +2 delta."
     },
     {

@@ -1,7 +1,7 @@
 # Triage the remaining gosec G304 path-traversal-via-variable sites
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** in-progress
 **Depends on:** sequencing only — should be read alongside `TASKS/audit-remediation/03-agent-slug-traversal/01-canonical-slug-path-validation.md` (that folder was empty at the time this task was authored; the cross-reference below is written against the finding it's expected to cover). Not a hard blocking dependency — this task's own list-production step (Step 1) simply must exclude that task's scope rather than re-analyze it.
 **Touches:** repo-wide read-only triage first; downstream code touches are **not yet known** — they depend entirely on Step 1's filtered list. Do not assume a package list before that list exists.
 **Requires architect decision:** true (matches `findings.json`) — per the audit's own recommendation: "have the architect (or whoever owns the Phase-1-Wave-1 migration) walk the [filtered] list."
@@ -77,7 +77,14 @@ Risk depends entirely on which sites Step 3 confirms need fixing — likely low-
 
 ## Work log
 
-<!-- Worker fills this in. -->
+### 2026-08-22 — mandatory pre-implementation checkpoint (Steps 1–3 only)
+
+No production code, tests, or lint configuration were changed. The refreshed
+70-site inventory, exclusions, per-site trust classification, origin traces,
+proposed Step-4 footprint, and architect questions are recorded in
+[`03-gosec-g304-triage-checkpoint.md`](03-gosec-g304-triage-checkpoint.md).
+Step 4 remains blocked pending architect sign-off; this task is intentionally
+left `in-progress`, not `implemented`.
 
 ## Review notes
 

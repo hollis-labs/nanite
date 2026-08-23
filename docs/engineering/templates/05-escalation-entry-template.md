@@ -46,6 +46,56 @@ about — a named, deliberately-deferred piece of work, a "revisit if X ever
 happens" note.>
 ```
 
+
+## Where a finding belongs: this log, or the wave handoff?
+
+Three times in one batch, a real finding was written **only** into a
+`WAVE-N-HANDOFF.md` and never reached this log. Each time it was a genuine
+item somebody would need later; each time it was one wave away from being
+invisible.
+
+**A wave handoff is read once — by the next wave's kickoff author — and then
+becomes historical.** `ESCALATIONS.md` is the project's single running log
+across every batch. They are not interchangeable, and "I wrote it down" is not
+the same as "it will be found."
+
+### The test
+
+> **If the next kickoff author never reads this, does it still need to
+> survive?**
+
+Yes → `ESCALATIONS.md`. No → the wave handoff. **Both**, when an item is
+durable *and* immediately actionable — write it here in full and reference it
+from the handoff rather than restating it.
+
+### Goes in `ESCALATIONS.md`, always
+
+- **A real defect found and deliberately not fixed.** Out-of-scope is the
+  correct call; leaving it only in a handoff is not.
+- **A deferred verification gate** — any task closing below `reviewed`, and
+  why. *(Missed once: a deferred `-race` gate on the only task in its wave that
+  didn't reach `reviewed`.)*
+- **A newly discovered unwired feature, dead subsystem, or island.** *(Missed
+  once: an unwired messaging path found while wiring something adjacent.)*
+- **A process incident and its fix** — especially anything that touched
+  operator data or state outside the repo.
+- **A correction to a stated fact** in a task file, design doc, or guide.
+- **Anything whose owner is "to be determined."** No owner is exactly why it
+  needs a durable home.
+
+### Goes in the wave handoff
+
+Things the next kickoff author needs *right now*, which expire once they've
+used them: which citations drifted, what parallelization changed, which tasks
+are safe to trust as dependencies, verification commands to re-run.
+
+### The failure is quiet
+
+Nothing breaks when an item lands only in a handoff. It reads as diligent —
+the finding *was* recorded. It simply becomes unfindable two waves later, when
+whoever needs it has no reason to open a handoff for a wave they weren't part
+of.
+
 ## What actually goes in this log — patterns from real entries
 
 - **Two unrelated batches' own provisional migration-number claims

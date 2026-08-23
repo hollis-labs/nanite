@@ -134,6 +134,50 @@ moved. Every count in a kickoff — task totals, file counts, findings closed,
 statuses — should be re-derived against current `HEAD` while writing it, not
 copied from the batch README or a prior wave's handoff.
 
+
+## Logging discipline — put this in every kickoff, verbatim if you like
+
+Copy this into the kickoff's closing instructions. It closes a gap that
+recurred three times in one batch.
+
+```markdown
+## Where your findings go — read before you write your handoff
+
+Anything you or your reviewers find that must **outlive this wave** goes to
+`TASKS/ESCALATIONS.md`, not only into `WAVE-N-HANDOFF.md`. Your handoff is
+read once, by the next wave's kickoff author, and then becomes historical.
+`ESCALATIONS.md` is the project's running log across every batch.
+
+Apply this test to each finding before you close:
+
+> **If the next kickoff author never reads my handoff, does this still need to
+> survive?**
+
+If yes, write it in `ESCALATIONS.md` in full and reference it from the handoff.
+Do not restate it in both — one authoritative copy, referenced.
+
+Always durable, always `ESCALATIONS.md`:
+- a real defect found and deliberately not fixed (out-of-scope is correct;
+  handoff-only is not)
+- any task you close **below `reviewed`**, and why
+- any newly discovered unwired feature, dead subsystem, or island
+- any process incident, especially one touching operator data or state outside
+  the repo
+- any correction to a stated fact in a task file or doc
+- anything whose owner is undetermined
+
+Use `docs/engineering/templates/05-escalation-entry-template.md`'s Shape B for
+these. They are findings-for-the-record, not stop-and-escalate.
+
+**Say in your handoff which items you logged**, so the next author can confirm
+nothing was lost between the two files.
+```
+
+**Why this is worth the words:** the failure is silent. An item recorded only
+in a handoff reads as diligent — it *was* written down — and simply becomes
+unfindable two waves later. Nothing errors. Nobody notices until the work is
+rediscovered from scratch or, worse, isn't.
+
 ## Notes for whoever fills this in
 
 - **Every `{{...}}` needs the batch's own real content.** If you can't fill one

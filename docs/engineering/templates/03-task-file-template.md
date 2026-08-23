@@ -73,6 +73,10 @@ own Context flagged something as adjustable.>
 ## Review notes
 
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.
+**A defect you find and correctly decline to fix goes to
+`TASKS/ESCALATIONS.md`, not only here** — a Review-notes entry is found only by
+someone already reading this task file, which is nobody once the task closes.
+See `05-escalation-entry-template.md`'s "Where a finding belongs".
 A strong review note names what was independently re-verified (re-ran the
 regression test, re-traced the logic by hand, re-grepped for a claimed-absent
 pattern) rather than just restating the worker's own claims.>

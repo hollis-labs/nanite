@@ -13,6 +13,11 @@ looked right.
 
 Four classes, four different defenses. They don't substitute for each other.
 
+**Companion doc:** `tracking-integrity.md` covers a fifth — the same data
+tracked in several places with no designated authority, so drift becomes
+undetectable rather than merely present. It also specifies the checker that
+catches classes 2 and 3 mechanically.
+
 ---
 
 ## 1. Tool edges — the command answers a different question than you asked

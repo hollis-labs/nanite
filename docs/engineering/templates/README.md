@@ -210,6 +210,7 @@ than a missing one, because it gets trusted without verification.
 | `04-index-section-template.md` | The `TASKS/INDEX.md` section a new batch adds. |
 | `05-escalation-entry-template.md` | One `TASKS/ESCALATIONS.md` entry — for either a genuine stop-and-escalate or a logged-and-resolved planning-pass finding. |
 | `../failure-modes.md` | **Required reading before any of the below.** How measurements and documents mislead — tool edges, derive-don't-store, stale premises, docs-as-ground-truth, rule scope inflation. All examples real. |
+| `../tracking-integrity.md` | Designated sources for duplicated tracking data, and the eight checks that catch drift between them. Spec for a checker; every assertion caught real drift. |
 | `06-orchestrator-kickoff-template-sibling-batch.md` | The kickoff prompt template for a sibling batch — this role's main deliverable. |
 
 Not duplicated here, referenced instead (single source of truth):

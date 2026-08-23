@@ -31,7 +31,7 @@ their wave's predecessors only.
 
 ## Candidates — logged, not yet tasks
 
-`TASKS/ESCALATIONS.md` carries **seven** follow-up candidates as of 2026-08-23.
+`TASKS/ESCALATIONS.md` carries **eight** follow-up candidates as of 2026-08-23.
 Listed here so they are visible in one place rather than only in a chronological
 log. Promoting any of these into a task is the operator's call; none is
 promoted by default, because each was deliberately judged out of scope by the
@@ -62,6 +62,15 @@ review that found it.
    can pass for the wrong reason in an unprivileged container (`02/01`
    review), and `TestDurableAgentStopRuntimeErrorMarksFailed` is an observed
    non-reproducing event-order flake (Wave 2).
+
+8. **`SendToSlot`/`ResolveLazySlot` have no production caller** (Wave 4). A
+   seventh production island, found while wiring AD-08 and correctly scoped out
+   of it — installed routing reflexes dispatch through
+   `chat_reflex_dispatch`/`task_execute` and never invoke the explicit
+   Team-Slot messaging path. Not one of the audit's six, so no finding, AD, or
+   task covers it. Decide it the way the other six were decided; the open
+   question is whether explicit `@Team Slot` messaging is intended product
+   direction, which belongs with whoever owns Teams.
 
 Candidates 4 and 6 are the two with leverage beyond their own line items —
 one unblocks a deferred verification gate and a standing performance

@@ -1292,3 +1292,34 @@ repeatedly applying migrations, which is a test-infrastructure defect that infla
 in the repo, not just this one. That is the higher-value fix and is unclaimed. Note it is also the
 same surface as the deferred `internal/service` race-suite performance follow-up carried from
 Wave 2.
+
+## 2026-08-23 — Wave 4 identified a seventh production island: `SendToSlot`/`ResolveLazySlot` have no production caller
+
+**Raised by:** planner verification of the Wave 4 closeout, checking which findings reached this log
+versus only the wave handoff.
+
+**Question / mismatch:** `WAVE-4-HANDOFF.md` records that `SendToSlot` and `ResolveLazySlot` — the
+explicit Team-Slot messaging path — **still have no production self-tool or UI caller**. Installed
+semantic/coordinator `dispatch_to_agent` reflexes execute through
+`chat_reflex_dispatch`/`task_execute` and never invoke them. Wave 4 correctly did not invent that
+caller: AD-08 made *routing installation* production-reachable, which is a different thing from
+explicit `@Team Slot` messaging.
+
+That scoping call was right. But the result is a fully-built, unwired feature — **the exact class
+Wave 4 existed to resolve** — and it was recorded only in the wave handoff, which is read once by
+the next wave's kickoff author and then becomes historical. It is not one of the six islands the
+audit found, so no finding, no AD, and no task covers it.
+
+This is the third occurrence of the same shape: Wave 2's flaky test reached this log correctly,
+Wave 3's deferred `08/08` race gate did not, and now this. A wave handoff is the wrong home for
+anything that must outlive its wave.
+
+**Resolution:** No change to Wave 4's scope, which was correct. Logged here so the item survives
+independently of `WAVE-4-HANDOFF.md`, and added to `14-followups/README.md`'s candidate register.
+
+**Follow-up:** Decide it the way the other six islands were decided — wire, defer, or retire —
+against the same reachability evidence. It is a candidate, deliberately not promoted to a task,
+because nobody has yet established whether explicit Team-Slot messaging is intended product
+direction. That question is the decision, and it belongs with whoever owns Teams. Note the related
+accepted limitation recorded in the same handoff: a Team Slot resolved lazily after routing
+installation does not retroactively receive asking-side semantic-routing rows.

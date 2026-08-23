@@ -160,6 +160,9 @@ Always durable, always `ESCALATIONS.md`:
 - a real defect found and deliberately not fixed (out-of-scope is correct;
   handoff-only is not)
 - any task you close **below `reviewed`**, and why
+- any verification gate that **did not run or did not complete** — even when
+  the task is legitimately `reviewed`. A passing task list and an unrun race
+  suite are not the same claim
 - any newly discovered unwired feature, dead subsystem, or island
 - any process incident, especially one touching operator data or state outside
   the repo

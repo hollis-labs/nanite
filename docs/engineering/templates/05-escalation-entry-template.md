@@ -72,8 +72,12 @@ from the handoff rather than restating it.
 
 - **A real defect found and deliberately not fixed.** Out-of-scope is the
   correct call; leaving it only in a handoff is not.
-- **A deferred verification gate** — any task closing below `reviewed`, and
-  why. *(Missed once: a deferred `-race` gate on the only task in its wave that
+- **A deferred, unrun, or incomplete verification gate** — any task closing
+  below `reviewed` **and** any task closing *at* `reviewed` with a gate that
+  did not run or did not complete. *(This second half was added after a wave
+  closed correctly at `reviewed` while its aggregate `-race` suites timed out —
+  the original wording didn't reach it.)* A green status table and an unrun
+  gate are different claims, and only one of them survives in a status table. *(Missed once: a deferred `-race` gate on the only task in its wave that
   didn't reach `reviewed`.)*
 - **A newly discovered unwired feature, dead subsystem, or island.** *(Missed
   once: an unwired messaging path found while wiring something adjacent.)*

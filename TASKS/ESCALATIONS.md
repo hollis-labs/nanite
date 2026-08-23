@@ -1440,3 +1440,63 @@ migration sweep is rejected. AD-14 and the Wave 8 `13/05` task record the same c
 Host step and evidence-gathering boundary. After it, seed a separate narrow sub-registry task only
 if a named category still clears the documented pain threshold. Otherwise schedule no further
 Host decomposition. Container and Store receive no follow-up from metrics alone.
+
+## 2026-08-23 — Wave 5's aggregate race suites did not complete: four waves running, `-race` has not produced a verdict, and the cause is known
+
+**Raised by:** planner verification of the Wave 5 closeout, checking which findings reached this log
+versus only `WAVE-5-HANDOFF.md`.
+
+**Question / mismatch:** Wave 5's aggregate `internal/service` and `internal/selftools` race suites
+both **timed out in SQLite migration setup after 20 minutes**. Neither emitted a race report;
+neither is recorded as passing. `WAVE-5-HANDOFF.md` handles this correctly and says so plainly —
+*"do not describe the two 20-minute aggregate race results as passes unless a future run
+independently completes with exit 0."* The focused AD-12/AD-13 race suites did pass, and the
+handoff is explicit that focused passes do not convert an aggregate timeout into a pass.
+
+The tasks are legitimately `reviewed` on their own terms. The problem is cumulative and now visible
+only by looking across waves:
+
+- **Wave 2** — `internal/service` combined-package `-race` timeout logged as "real, pre-existing,
+  non-blocking."
+- **Wave 3** — `08/08` closed `implemented`, not `reviewed`, because a focused `internal/selftools`
+  race run took **1,446.675s** and passed only under a 30-minute timeout.
+- **Wave 5** — both aggregate suites now fail to complete at all.
+
+**This is the fourth occurrence, and it has stopped being a performance complaint.** Wave 5 was the
+batch's largest refactor: `10/01` decomposed a 3,684-line function into six actions, `10/02`
+restructured a 2,481-line transport. Concurrent-correctness changes of exactly the kind `-race`
+exists to validate — and no aggregate race verdict exists for either.
+
+The cause is not mysterious. Wave 3 attributed it to **test fixtures repeatedly applying SQLite
+migrations**, which inflates every race run in the repo. That was filed as follow-up candidate 4 in
+`14-followups/README.md` and left unpromoted.
+
+**Resolution:** No change to Wave 5's status, which is correctly recorded. **Candidate 4 is promoted
+to a real task** — `14-followups/03-test-fixture-migration-cost.md`. It is no longer a hygiene
+improvement; it is the thing preventing race verification on the highest-risk changes in the batch,
+and it will prevent it again in Waves 6–8 unless fixed.
+
+**Follow-up:** Closing it also closes `08/08`'s deferred gate and the Wave 2 `internal/service`
+follow-up — three items, one fix. Until it lands, treat any wave's aggregate race result as
+**unrun**, not as passing, and do not let a later document quietly upgrade it.
+
+## 2026-08-23 — Fourth item recorded only in a wave handoff; the logging rule needed one more case
+
+**Raised by:** the same verification pass. Meta-entry about the rule itself.
+
+**Question / mismatch:** `docs/engineering/templates/05-escalation-entry-template.md`'s "always
+durable" list includes *"any task you close below `reviewed`."* Wave 5's race gap does not match
+that clause — the tasks closed **at** `reviewed`, correctly, with a verification gate that never
+ran. The rule as written did not catch it, and the item landed only in the handoff. That is the
+fourth occurrence of handoff-only recording, after Wave 3's `08/08` gate and Wave 4's
+`SendToSlot`/`ResolveLazySlot` island.
+
+**Resolution:** Clause added to both templates: *any verification gate that did not run or did not
+complete, even when the task is legitimately `reviewed`.* A green task list and an unrun gate are
+not the same claim, and only one of them survives in a status table.
+
+**Follow-up:** Worth watching whether the rule needs a third revision. Each miss so far has been a
+case the previous wording didn't anticipate rather than a case someone ignored, which suggests
+enumerating cases is the weaker half of the fix — the test question ("if the next kickoff author
+never reads my handoff, does this still need to survive?") has caught every one of them and should
+lead.

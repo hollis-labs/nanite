@@ -1,5 +1,12 @@
 # `chatServiceImpl` responsibility map and `generateResponse` phase proposal
 
+> **This is an evidence document, not a task file.** It is AD-12's prerequisite
+> deliverable and carries no `**Status:**` line deliberately. It shares the `01-`
+> prefix with `01-chatserviceimpl-generateresponse-decomposition.md`, which *is*
+> the task — so a status sweep globbing `10-*/[0-9]*.md` will report an empty
+> status for it. Expected; do not add a Status line, and do not count it toward
+> Wave 5's task total. Wave 5 is **5 tasks**.
+
 This document was the architect-review input required by audit-remediation task
 `10/01`. It describes current source as of 2026-08-23. **The operator expressly
 approved its six-phase action shape on 2026-08-23 under AD-12**, with

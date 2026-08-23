@@ -28,10 +28,11 @@ their wave's predecessors only.
 |---|---|---|
 | `01-remove-default-seeded-catalog-source.md` | **AD-05** | Decided 2026-08-22; was filed as a `01/01` follow-up and never became a task |
 | `02-error-handling-backlog-paydown.md` | **AD-21** | Stage 2's 365-finding prerequisite. `13/04` touches five files and nothing else covers it |
+| `03-test-fixture-migration-cost.md` | promoted candidate | Fourth occurrence; blocks aggregate `-race` verification. **Consider running before Wave 6** rather than in wave order |
 
 ## Candidates — logged, not yet tasks
 
-`TASKS/ESCALATIONS.md` carries **eight** follow-up candidates as of 2026-08-23.
+`TASKS/ESCALATIONS.md` carries **eight** follow-up candidates (one since promoted) as of 2026-08-23.
 Listed here so they are visible in one place rather than only in a chronological
 log. Promoting any of these into a task is the operator's call; none is
 promoted by default, because each was deliberately judged out of scope by the
@@ -48,10 +49,12 @@ review that found it.
    corrected; the underlying `ringLen`-before-modulo bug is not.
 3. **`08/08`'s deferred full race gate** (Wave 3). The task is `implemented`,
    not `reviewed`, by operator decision.
-4. **Test-fixture migration cost inflating every race run** (Waves 2–3). The
-   attributed cause of `08/08`'s deferral — a focused `internal/selftools` race
-   run took 1,446.675s. This is the higher-value fix: it closes candidate 3 and
-   the `internal/service` race-suite performance follow-up together.
+4. ~~**Test-fixture migration cost inflating every race run**~~ —
+   **PROMOTED TO TASK `14/03` on 2026-08-23**, after a fourth occurrence: both
+   of Wave 5's aggregate race suites timed out in migration setup at 20 minutes
+   with no verdict, on the batch's largest refactor. No longer hygiene — it is
+   what prevents race verification, and it will recur in Waves 6–8. Closing it
+   also closes candidate 3 and the Wave 2 `internal/service` follow-up.
 5. **246 `TODO(ctx-sweep)` markers** (`06/03`). A greppable map of every call
    site with no context plumbing at all. Newly visible work, never scoped.
 6. **Test isolation: `Container`-constructing tests must redirect *all*

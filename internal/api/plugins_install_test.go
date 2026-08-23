@@ -246,6 +246,37 @@ func TestHandleInstallLocal_ManifestTraversal(t *testing.T) {
 	}
 }
 
+// TestPluginUIRouteRejectsSymlinkEscape is GO-API-008's regression. The old
+// Clean+HasPrefix check accepted a symlink planted under ui/ even when its
+// target lived outside the installed plugin directory.
+func TestPluginUIRouteRejectsSymlinkEscape(t *testing.T) {
+	pluginsDir := t.TempDir()
+	uiDir := filepath.Join(pluginsDir, "ui-plugin", "ui")
+	if err := os.MkdirAll(uiDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	outside := filepath.Join(t.TempDir(), "secret.js")
+	if err := os.WriteFile(outside, []byte("window.SECRET = true"), 0o600); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(uiDir, "escape.js")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterPluginManagementRoutes(mux, pluginsDir, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/plugins/ui-plugin/ui/escape.js", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for plugin UI symlink escape, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "window.SECRET") {
+		t.Fatalf("response leaked symlink target: %s", rec.Body.String())
+	}
+}
+
 func TestCopyDir(t *testing.T) {
 	src := t.TempDir()
 	os.MkdirAll(filepath.Join(src, "sub"), 0755)

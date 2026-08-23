@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/ssrf"
 )
 
 // DefaultMaxArchiveBytes caps plugin archive size at 100 MiB. Matches the
@@ -24,9 +27,12 @@ const DefaultDownloadTimeout = 2 * time.Minute
 // HTTPDownloader fetches a plugin archive over HTTP(S) with a size cap,
 // overall-request timeout, and progress events.
 type HTTPDownloader struct {
-	Client   *http.Client
-	MaxBytes int64
-	Timeout  time.Duration
+	Client         *http.Client
+	MaxBytes       int64
+	Timeout        time.Duration
+	Resolver       ssrf.Resolver
+	Dialer         func(ctx context.Context, network, addr string) (net.Conn, error)
+	AllowLocalhost bool
 }
 
 // Download fetches url into destDir as "<basename(url)>" (or "plugin.tar.gz"
@@ -40,10 +46,18 @@ func (d *HTTPDownloader) Download(ctx context.Context, url, destDir, pluginID st
 		return "", errors.New("download: empty destDir")
 	}
 
-	client := d.Client
-	if client == nil {
-		client = http.DefaultClient
+	parsed, err := neturl.Parse(url)
+	if err != nil {
+		return "", fmt.Errorf("download: parse url: %w", err)
 	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("download: unsupported scheme %q", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return "", errors.New("download: url missing host")
+	}
+
+	client := d.secureHTTPClient()
 	timeout := d.Timeout
 	if timeout <= 0 {
 		timeout = DefaultDownloadTimeout
@@ -95,11 +109,11 @@ func (d *HTTPDownloader) Download(ctx context.Context, url, destDir, pluginID st
 	// LimitReader to a single byte past the cap so we can detect overrun.
 	limited := io.LimitReader(resp.Body, maxBytes+1)
 	pw := &progressWriter{
-		out:       out,
-		total:     resp.ContentLength,
-		emit:      emit,
-		pluginID:  pluginID,
-		state:     StateDownloading,
+		out:      out,
+		total:    resp.ContentLength,
+		emit:     emit,
+		pluginID: pluginID,
+		state:    StateDownloading,
 	}
 
 	n, err := io.Copy(pw, limited)
@@ -124,11 +138,57 @@ func (d *HTTPDownloader) Download(ctx context.Context, url, destDir, pluginID st
 	return dest, nil
 }
 
+// secureHTTPClient preserves non-transport client settings supplied by a
+// caller, but always installs the shared SSRF policy at the actual dial seam.
+// Each DNS answer is checked once and the returned IP literal is what gets
+// dialed, so redirects are re-checked and DNS cannot rebind after validation.
+func (d *HTTPDownloader) secureHTTPClient() *http.Client {
+	client := &http.Client{}
+	if d.Client != nil {
+		*client = *d.Client
+	}
+	resolver := d.Resolver
+	if resolver == nil {
+		resolver = ssrf.DefaultResolver
+	}
+	innerDial := d.Dialer
+	if innerDial == nil {
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		innerDial = dialer.DialContext
+	}
+	client.Transport = &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			pinned, err := ssrf.ResolveAndPin(ctx, resolver, host, d.AllowLocalhost)
+			if err != nil {
+				return nil, err
+			}
+			return innerDial(ctx, network, net.JoinHostPort(pinned.String(), port))
+		},
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		DisableKeepAlives:     true,
+	}
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("download: too many redirects")
+		}
+		if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+			return fmt.Errorf("download: redirect to unsupported scheme %q", req.URL.Scheme)
+		}
+		return nil
+	}
+	return client
+}
+
 // deriveArchiveName extracts a safe file name from rawURL, ignoring query
 // strings and fragments. Falls back to "plugin.tar.gz" when the URL has
 // no usable path component.
 func deriveArchiveName(rawURL string) string {
-	u, err := url.Parse(rawURL)
+	u, err := neturl.Parse(rawURL)
 	if err == nil && u.Path != "" {
 		b := path.Base(u.Path)
 		if b != "" && b != "." && b != "/" {

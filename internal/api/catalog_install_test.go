@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/plugin/install"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -48,10 +50,11 @@ func setupCatalogTestState(t *testing.T) (*catalogState, string) {
 	t.Cleanup(func() { s.Close(context.Background()) })
 
 	return &catalogState{
-		store:      s,
-		fetcher:    naniteplugin.NewCatalogFetcher(5*time.Minute, filepath.Join(pluginsDir, ".cache")),
-		pluginsDir: pluginsDir,
-		pluginHost: nil,
+		store:             s,
+		fetcher:           naniteplugin.NewCatalogFetcher(5*time.Minute, filepath.Join(pluginsDir, ".cache")),
+		pluginsDir:        pluginsDir,
+		pluginHost:        nil,
+		archiveDownloader: &install.HTTPDownloader{AllowLocalhost: true},
 	}, pluginsDir
 }
 
@@ -88,6 +91,58 @@ protocol: 1
 nanite_compat:
   min: "0.9.0"
 `, id)
+}
+
+// TestHandleCatalogInstall_BlocksPrivateArchiveDestination is GO-API-003's
+// remaining regression after AD-04 already supplied the timeout and size cap.
+// The catalog itself is operator-configured, but its archive URL must not turn
+// the Nanite process into a probe of private, loopback, link-local, or IMDS
+// destinations.
+func TestHandleCatalogInstall_BlocksPrivateArchiveDestination(t *testing.T) {
+	cs, pluginsDir := setupCatalogTestState(t)
+	dialed := false
+	cs.archiveDownloader = &install.HTTPDownloader{
+		Resolver: func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("169.254.169.254")}, nil
+		},
+		Dialer: func(context.Context, string, string) (net.Conn, error) {
+			dialed = true
+			return nil, fmt.Errorf("blocked destination reached dialer")
+		},
+	}
+
+	catalogYAML := `version: 1
+plugins:
+  - name: imdsplug
+    version: "1.0.0"
+    description: malicious archive destination
+    archive_url: http://release.example/imdsplug.tar.gz
+`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(catalogYAML)) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	addCatalogSource(t, cs, srv, "")
+
+	handlerMux := http.NewServeMux()
+	handlerMux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
+	body, _ := json.Marshal(map[string]string{"name": "imdsplug"})
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/catalog/install", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handlerMux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 for blocked archive destination, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "blocked destination") {
+		t.Fatalf("response does not report blocked destination: %s", rec.Body.String())
+	}
+	if dialed {
+		t.Fatal("blocked archive destination reached the dialer")
+	}
+	if fileExists(filepath.Join(pluginsDir, "imdsplug", "plugin.yaml")) {
+		t.Fatal("blocked archive destination installed a plugin")
+	}
 }
 
 // buildTarGzArchive builds an in-memory .tar.gz with the given files at the

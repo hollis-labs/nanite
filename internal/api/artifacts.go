@@ -94,12 +94,10 @@ func (a *API) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Confine the stored path under the configured artifacts root. This
-	// blocks the two-step attack where handlePlaceArtifact or any other
-	// path accepts an attacker-supplied StoragePath pointing at a
-	// sensitive file (e.g. /etc/passwd), which download would otherwise
-	// serve verbatim.
+	// preserves defense in depth for legacy/corrupted rows even though
+	// handlePlaceArtifact now applies the same check at write time.
 	root := a.artifactsStorageDir()
-	resolved, err := pathsafe.ResolveUnder(root, artifact.StoragePath)
+	resolved, err := resolveArtifactStoragePath(root, artifact.StoragePath)
 	if err != nil {
 		var escape *pathsafe.EscapeError
 		if errors.As(err, &escape) {
@@ -261,6 +259,16 @@ func (a *API) handlePlaceArtifact(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "session_id, name, and storage_path are required")
 		return
 	}
+	storagePath, err := resolveArtifactStoragePath(a.artifactsStorageDir(), req.StoragePath)
+	if err != nil {
+		var escape *pathsafe.EscapeError
+		if errors.As(err, &escape) {
+			a.errorResp(w, http.StatusBadRequest, "artifact path outside storage root")
+			return
+		}
+		a.errorResp(w, http.StatusBadRequest, "invalid storage_path: "+err.Error())
+		return
+	}
 	if req.MimeType == "" {
 		ext := filepath.Ext(req.Name)
 		req.MimeType = mime.TypeByExtension(ext)
@@ -269,10 +277,14 @@ func (a *API) handlePlaceArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get file size if the file exists.
-	var sizeBytes int64
-	if info, err := os.Stat(req.StoragePath); err == nil {
-		sizeBytes = info.Size()
+	info, err := os.Stat(storagePath)
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, "storage_path must name an existing file: "+err.Error())
+		return
+	}
+	if !info.Mode().IsRegular() {
+		a.errorResp(w, http.StatusBadRequest, "storage_path must name a regular file")
+		return
 	}
 
 	artifact := &store.Artifact{
@@ -280,8 +292,8 @@ func (a *API) handlePlaceArtifact(w http.ResponseWriter, r *http.Request) {
 		MessageID:      req.MessageID,
 		Name:           req.Name,
 		MimeType:       req.MimeType,
-		SizeBytes:      sizeBytes,
-		StoragePath:    req.StoragePath,
+		SizeBytes:      info.Size(),
+		StoragePath:    storagePath,
 		Origin:         store.ArtifactOriginPlaced,
 		SourceAgentID:  req.AgentID,
 		SourcePluginID: req.PluginID,
@@ -299,6 +311,44 @@ func (a *API) handlePlaceArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusCreated, artifact)
+}
+
+// resolveArtifactStoragePath composes absolute-path callers with
+// pathsafe.ResolveUnder correctly. ResolveUnder intentionally treats an
+// absolute userPath as root-relative, so an already-canonical artifact path
+// must first be converted to a path relative to the artifacts root. Relative
+// callers can delegate directly.
+func resolveArtifactStoragePath(root, storagePath string) (string, error) {
+	if !filepath.IsAbs(storagePath) {
+		return pathsafe.ResolveUnder(root, storagePath)
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve artifacts root: %w", err)
+	}
+	if canonical, evalErr := filepath.EvalSymlinks(absRoot); evalErr == nil {
+		absRoot = canonical
+	}
+	absTarget, err := filepath.Abs(storagePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve artifact path: %w", err)
+	}
+	if canonical, evalErr := filepath.EvalSymlinks(absTarget); evalErr == nil {
+		absTarget = canonical
+	}
+	rel, err := filepath.Rel(absRoot, absTarget)
+	if err != nil {
+		return "", fmt.Errorf("resolve artifact path relative to root: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", &pathsafe.EscapeError{
+			Root:     absRoot,
+			Attempt:  storagePath,
+			Resolved: absTarget,
+			Cause:    errors.New("resolved path outside root"),
+		}
+	}
+	return pathsafe.ResolveUnder(absRoot, rel)
 }
 
 // handleListArtifactsByOrigin returns artifacts filtered by origin type.

@@ -2,7 +2,9 @@ package install
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/ssrf"
 )
 
 func TestDownload_HappyPath(t *testing.T) {
@@ -21,7 +25,7 @@ func TestDownload_HappyPath(t *testing.T) {
 	defer srv.Close()
 
 	dir := t.TempDir()
-	d := &HTTPDownloader{}
+	d := &HTTPDownloader{AllowLocalhost: true}
 	path, err := d.Download(context.Background(), srv.URL+"/plugin.tar.gz", dir, "giphy", nil)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
@@ -44,7 +48,7 @@ func TestDownload_ContentLengthOverCap(t *testing.T) {
 		_, _ = w.Write(make([]byte, 10))
 	}))
 	defer srv.Close()
-	d := &HTTPDownloader{MaxBytes: 100}
+	d := &HTTPDownloader{MaxBytes: 100, AllowLocalhost: true}
 	_, err := d.Download(context.Background(), srv.URL+"/a.tgz", t.TempDir(), "x", nil)
 	if err == nil || !strings.Contains(err.Error(), "content-length") {
 		t.Fatalf("err = %v", err)
@@ -60,7 +64,7 @@ func TestDownload_BodyOverCap(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	d := &HTTPDownloader{MaxBytes: 250}
+	d := &HTTPDownloader{MaxBytes: 250, AllowLocalhost: true}
 	_, err := d.Download(context.Background(), srv.URL+"/a.tgz", t.TempDir(), "x", nil)
 	if err == nil || !strings.Contains(err.Error(), "exceeds cap") {
 		t.Fatalf("err = %v", err)
@@ -72,7 +76,7 @@ func TestDownload_Non200(t *testing.T) {
 		w.WriteHeader(404)
 	}))
 	defer srv.Close()
-	d := &HTTPDownloader{}
+	d := &HTTPDownloader{AllowLocalhost: true}
 	_, err := d.Download(context.Background(), srv.URL+"/a.tgz", t.TempDir(), "x", nil)
 	if err == nil || !strings.Contains(err.Error(), "http status") {
 		t.Fatalf("err = %v", err)
@@ -90,7 +94,7 @@ func TestDownload_Timeout(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}))
 	defer slow.Close()
-	d := &HTTPDownloader{Timeout: 50 * time.Millisecond}
+	d := &HTTPDownloader{Timeout: 50 * time.Millisecond, AllowLocalhost: true}
 	_, err := d.Download(context.Background(), slow.URL+"/a.tgz", t.TempDir(), "x", nil)
 	if err == nil {
 		t.Fatal("want timeout error")
@@ -113,7 +117,7 @@ func TestDownload_EmitsProgress(t *testing.T) {
 
 	var events []Event
 	emit := func(e Event) { events = append(events, e) }
-	d := &HTTPDownloader{}
+	d := &HTTPDownloader{AllowLocalhost: true}
 	_, err := d.Download(context.Background(), srv.URL+"/a.tgz", t.TempDir(), "giphy", emit)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
@@ -131,3 +135,48 @@ func TestDownload_EmitsProgress(t *testing.T) {
 	}
 }
 
+func TestDownload_BlocksPrivateAndIMDSDestinations(t *testing.T) {
+	tests := []string{"10.0.0.1", "127.0.0.1", "169.254.169.254", "fe80::1"}
+	for _, blocked := range tests {
+		t.Run(blocked, func(t *testing.T) {
+			dialed := false
+			d := &HTTPDownloader{
+				Resolver: func(context.Context, string) ([]net.IP, error) {
+					return []net.IP{net.ParseIP(blocked)}, nil
+				},
+				Dialer: func(context.Context, string, string) (net.Conn, error) {
+					dialed = true
+					return nil, errors.New("unexpected dial")
+				},
+			}
+			_, err := d.Download(context.Background(), "https://catalog.example/plugin.tar.gz", t.TempDir(), "x", nil)
+			if !errors.Is(err, ssrf.ErrBlocked) {
+				t.Fatalf("Download error = %v, want ssrf.ErrBlocked", err)
+			}
+			if dialed {
+				t.Fatal("blocked destination reached the dialer")
+			}
+		})
+	}
+}
+
+func TestDownload_PinsValidatedDNSAnswer(t *testing.T) {
+	var dialAddr string
+	dialErr := errors.New("stop after pinned dial")
+	d := &HTTPDownloader{
+		Resolver: func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("203.0.113.25")}, nil
+		},
+		Dialer: func(_ context.Context, _ string, addr string) (net.Conn, error) {
+			dialAddr = addr
+			return nil, dialErr
+		},
+	}
+	_, err := d.Download(context.Background(), "https://catalog.example/plugin.tar.gz", t.TempDir(), "x", nil)
+	if !errors.Is(err, dialErr) {
+		t.Fatalf("Download error = %v, want dial sentinel", err)
+	}
+	if dialAddr != "203.0.113.25:443" {
+		t.Fatalf("dial address = %q, want pinned literal", dialAddr)
+	}
+}

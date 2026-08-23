@@ -14,60 +14,24 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/nanite/internal/ssrf"
 )
 
 // ProxyResolver resolves a hostname to IP addresses. Tests replace this to
 // control what IPs the proxy pins against without real DNS lookups. Matches
 // the signature used by internal/mcp web_fetch so the pattern stays
 // consistent across the codebase.
-type ProxyResolver func(ctx context.Context, host string) ([]net.IP, error)
+type ProxyResolver = ssrf.Resolver
 
 // defaultProxyResolver uses the system resolver.
 func defaultProxyResolver(ctx context.Context, host string) ([]net.IP, error) {
-	return net.DefaultResolver.LookupIP(ctx, "ip", host)
-}
-
-// proxyDeniedCIDRs is the set of IP ranges the proxy refuses to dial.
-// Mirrors internal/mcp general_tools.go:ssrfDeniedCIDRs so both network
-// egress paths enforce the same policy: loopback, link-local / cloud IMDS,
-// RFC1918, CGNAT, unspecified, IPv6 loopback, ULA, and IPv6 link-local.
-// Loopback is gated separately so the AllowLocalhost flag can permit it
-// without weakening the rest.
-var proxyDeniedCIDRs = mustParseSandboxCIDRs([]string{
-	"169.254.0.0/16", // link-local incl. cloud IMDS
-	"10.0.0.0/8",     // RFC1918
-	"172.16.0.0/12",  // RFC1918
-	"192.168.0.0/16", // RFC1918
-	"0.0.0.0/8",      // unspecified
-	"100.64.0.0/10",  // CGNAT
-	"fc00::/7",       // IPv6 ULA
-	"fe80::/10",      // IPv6 link-local
-	"::/128",         // IPv6 unspecified
-})
-
-// proxyLoopbackCIDRs covers 127.0.0.0/8 and ::1/128. Separated so the
-// AllowLocalhost flag can gate them.
-var proxyLoopbackCIDRs = mustParseSandboxCIDRs([]string{
-	"127.0.0.0/8",
-	"::1/128",
-})
-
-func mustParseSandboxCIDRs(cidrs []string) []*net.IPNet {
-	out := make([]*net.IPNet, 0, len(cidrs))
-	for _, c := range cidrs {
-		_, block, err := net.ParseCIDR(c)
-		if err != nil {
-			panic(fmt.Sprintf("sandbox: invalid CIDR %q: %v", c, err))
-		}
-		out = append(out, block)
-	}
-	return out
+	return ssrf.DefaultResolver(ctx, host)
 }
 
 // errProxySSRFBlocked is the sentinel used for SSRF-class rejections so
 // tests can distinguish validator errors from transport errors via
 // errors.Is.
-var errProxySSRFBlocked = errors.New("proxy: blocked destination")
+var errProxySSRFBlocked = ssrf.ErrBlocked
 
 // allowedCONNECTPorts restricts CONNECT to the TLS ports sandboxed tools
 // legitimately need. Everything else is refused before any dial.
@@ -246,41 +210,11 @@ func (p *Proxy) handleRequest(w http.ResponseWriter, r *http.Request) {
 // first validated IP. The caller then dials the IP literal so DNS cannot
 // rebind between validation and dial.
 func (p *Proxy) resolveAndPin(ctx context.Context, host string) (net.IP, error) {
-	if isLocalhostName(host) && !p.AllowLocalhost {
-		return nil, fmt.Errorf("%w: localhost name %q", errProxySSRFBlocked, host)
-	}
 	resolver := p.Resolver
 	if resolver == nil {
 		resolver = defaultProxyResolver
 	}
-	ips, err := resolver(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("%w: no IPs for %q", errProxySSRFBlocked, host)
-	}
-	for _, ip := range ips {
-		if !p.AllowLocalhost {
-			for _, block := range proxyLoopbackCIDRs {
-				if block.Contains(ip) {
-					return nil, fmt.Errorf("%w: loopback %s", errProxySSRFBlocked, ip)
-				}
-			}
-		}
-		for _, block := range proxyDeniedCIDRs {
-			if block.Contains(ip) {
-				return nil, fmt.Errorf("%w: %s in %s", errProxySSRFBlocked, ip, block)
-			}
-		}
-		if ip.IsUnspecified() {
-			return nil, fmt.Errorf("%w: unspecified %s", errProxySSRFBlocked, ip)
-		}
-	}
-	// Pin to the first validated IP. The caller supplies a literal address
-	// to the dialer, so DNS rebinding between this check and the dial is
-	// impossible.
-	return ips[0], nil
+	return ssrf.ResolveAndPin(ctx, resolver, host, p.AllowLocalhost)
 }
 
 func (p *Proxy) innerDial(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -303,13 +237,6 @@ func (p *Proxy) connectPortAllowed(port string) bool {
 		}
 	}
 	return false
-}
-
-// isLocalhostName matches "localhost" and any subdomain of ".localhost"
-// (RFC 6761 reserves both). Case-insensitive.
-func isLocalhostName(host string) bool {
-	h := strings.ToLower(strings.TrimSuffix(host, "."))
-	return h == "localhost" || strings.HasSuffix(h, ".localhost")
 }
 
 // handleConnect handles HTTPS tunneling via the CONNECT method.

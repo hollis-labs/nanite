@@ -108,11 +108,11 @@ func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *st
 		name := r.PathValue("name")
 		file := r.PathValue("file")
 
-		// Resolve the allowed base directory and the requested path,
-		// then verify the target stays within the plugin's ui/ directory.
+		// Resolve the requested path through the canonical confinement
+		// primitive so symlinks inside ui/ cannot escape the plugin root.
 		baseDir := filepath.Join(pluginsDir, name, "ui")
-		target := filepath.Clean(filepath.Join(baseDir, file))
-		if !strings.HasPrefix(target, filepath.Clean(baseDir)+string(filepath.Separator)) && target != filepath.Clean(baseDir) {
+		target, err := pathsafe.ResolveUnder(baseDir, file)
+		if err != nil {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}

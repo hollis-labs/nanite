@@ -19,10 +19,11 @@ import (
 
 // catalogState holds dependencies for catalog API handlers.
 type catalogState struct {
-	store      *store.Store
-	fetcher    *naniteplugin.CatalogFetcher
-	pluginsDir string
-	pluginHost *naniteplugin.Host
+	store             *store.Store
+	fetcher           *naniteplugin.CatalogFetcher
+	pluginsDir        string
+	pluginHost        *naniteplugin.Host
+	archiveDownloader *install.HTTPDownloader
 }
 
 // RegisterCatalogRoutes adds catalog management endpoints to the mux.
@@ -336,7 +337,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		SHA256:      stripChecksumPrefix(entry.Checksum),
 		Signature:   sig,
 		SignerKeyID: entry.SourceID,
-		Downloader:  &install.HTTPDownloader{},
+		Downloader:  cs.archiveDownloader,
 	}
 
 	// AllowUnsigned is threaded from user_settings.allow_unsigned_plugins

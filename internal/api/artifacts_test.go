@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -225,6 +226,70 @@ func TestDownloadRejectsRelativeTraversalStoragePath(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 on relative-traversal StoragePath, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPlaceArtifactRejectsEscapingStoragePath is GO-API-002's write-time
+// regression. Before the fix the handler persisted any caller-supplied path;
+// only a later download happened to re-check confinement.
+func TestPlaceArtifactRejectsEscapingStoragePath(t *testing.T) {
+	a, artifactsRoot := newArtifactTestAPI(t)
+	outside := filepath.Join(filepath.Dir(artifactsRoot), "placed-secret.txt")
+	if err := os.WriteFile(outside, []byte("SECRET"), 0o600); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	body, _ := json.Marshal(map[string]string{
+		"session_id":   "sess1",
+		"name":         "placed-secret.txt",
+		"storage_path": outside,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/artifacts/place", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	a.handlePlaceArtifact(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for escaping storage_path, got %d: %s", rec.Code, rec.Body.String())
+	}
+	artifacts, err := a.Services.Store.ListArtifacts(context.Background(), "sess1")
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if len(artifacts) != 0 {
+		t.Fatalf("escaping path was persisted: %+v", artifacts)
+	}
+}
+
+func TestPlaceArtifactAcceptsConfinedAbsolutePath(t *testing.T) {
+	a, artifactsRoot := newArtifactTestAPI(t)
+	placedDir := filepath.Join(artifactsRoot, "sess1")
+	if err := os.MkdirAll(placedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	placed := filepath.Join(placedDir, "report.txt")
+	if err := os.WriteFile(placed, []byte("REPORT"), 0o600); err != nil {
+		t.Fatalf("write placed file: %v", err)
+	}
+	body, _ := json.Marshal(map[string]string{
+		"session_id":   "sess1",
+		"name":         "report.txt",
+		"storage_path": placed,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/artifacts/place", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	a.handlePlaceArtifact(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for confined storage_path, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var artifact store.Artifact
+	if err := json.Unmarshal(rec.Body.Bytes(), &artifact); err != nil {
+		t.Fatalf("decode artifact: %v", err)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, "/api/artifacts/"+artifact.ID+"/download", nil)
+	downloadReq.SetPathValue("id", artifact.ID)
+	downloadRec := httptest.NewRecorder()
+	a.handleDownloadArtifact(downloadRec, downloadReq)
+	if downloadRec.Code != http.StatusOK || downloadRec.Body.String() != "REPORT" {
+		t.Fatalf("download placed artifact = %d body=%q", downloadRec.Code, downloadRec.Body.String())
 	}
 }
 

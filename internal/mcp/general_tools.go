@@ -11,7 +11,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -23,15 +22,17 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/hollis-labs/nanite/internal/ssrf"
 )
 
 // ssrfResolver resolves a hostname to IP addresses. Tests replace this to
 // control what IPs the dialer pins against without real DNS lookups.
-type ssrfResolver func(ctx context.Context, host string) ([]net.IP, error)
+type ssrfResolver = ssrf.Resolver
 
 // defaultSSRFResolver uses the system resolver.
 func defaultSSRFResolver(ctx context.Context, host string) ([]net.IP, error) {
-	return net.DefaultResolver.LookupIP(ctx, "ip", host)
+	return ssrf.DefaultResolver(ctx, host)
 }
 
 // GeneralToolsTransport provides general-purpose utility tools
@@ -57,45 +58,9 @@ func NewGeneralToolsTransport() *GeneralToolsTransport {
 	return &GeneralToolsTransport{}
 }
 
-// ssrfDeniedCIDRs is the set of IP ranges that web_fetch refuses to dial.
-// Covers loopback, link-local (AWS/GCP/Azure IMDS at 169.254.169.254),
-// RFC1918 private ranges, CGNAT, unspecified, IPv6 loopback, ULA, and IPv6
-// link-local. Localhost is handled separately so AllowLocalhost can override.
-var ssrfDeniedCIDRs = mustParseCIDRs([]string{
-	"169.254.0.0/16", // link-local incl. cloud IMDS
-	"10.0.0.0/8",     // RFC1918
-	"172.16.0.0/12",  // RFC1918
-	"192.168.0.0/16", // RFC1918
-	"0.0.0.0/8",      // unspecified
-	"100.64.0.0/10",  // CGNAT
-	"fc00::/7",       // IPv6 ULA
-	"fe80::/10",      // IPv6 link-local
-	"::/128",         // IPv6 unspecified
-})
-
-// ssrfLoopbackCIDRs covers 127.0.0.0/8 and ::1/128. Separated so the allow
-// flag can gate them.
-var ssrfLoopbackCIDRs = mustParseCIDRs([]string{
-	"127.0.0.0/8",
-	"::1/128",
-})
-
-func mustParseCIDRs(cidrs []string) []*net.IPNet {
-	out := make([]*net.IPNet, 0, len(cidrs))
-	for _, c := range cidrs {
-		_, block, err := net.ParseCIDR(c)
-		if err != nil {
-			panic(fmt.Sprintf("ssrf: invalid CIDR %q: %v", c, err))
-		}
-		out = append(out, block)
-	}
-	return out
-}
-
-// errSSRFBlocked is the sentinel used for every SSRF-class rejection so
-// callers (and tests) can distinguish validator errors from transport errors
-// via errors.Is.
-var errSSRFBlocked = errors.New("ssrf: blocked destination")
+// errSSRFBlocked preserves the package-level classifier used by web-fetch
+// resilience while the semantic policy itself lives in internal/ssrf.
+var errSSRFBlocked = ssrf.ErrBlocked
 
 // ListTools returns the general utility tools.
 func (g *GeneralToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
@@ -344,39 +309,14 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 		if splitErr != nil {
 			return nil, splitErr
 		}
-		// Reject `localhost` and `*.localhost` unless explicitly allowed.
-		if !allowLocal && isLocalhostName(host) {
-			return nil, fmt.Errorf("%w: localhost name %q", errSSRFBlocked, host)
-		}
-		ips, resolveErr := resolver(ctx, host)
+		pinned, resolveErr := ssrf.ResolveAndPin(ctx, resolver, host, allowLocal)
 		if resolveErr != nil {
 			return nil, resolveErr
-		}
-		if len(ips) == 0 {
-			return nil, fmt.Errorf("%w: no IPs for %q", errSSRFBlocked, host)
-		}
-		for _, ip := range ips {
-			if !allowLocal {
-				for _, block := range ssrfLoopbackCIDRs {
-					if block.Contains(ip) {
-						return nil, fmt.Errorf("%w: loopback %s", errSSRFBlocked, ip)
-					}
-				}
-			}
-			for _, block := range ssrfDeniedCIDRs {
-				if block.Contains(ip) {
-					return nil, fmt.Errorf("%w: %s in %s", errSSRFBlocked, ip, block)
-				}
-			}
-			if ip.IsUnspecified() {
-				return nil, fmt.Errorf("%w: unspecified %s", errSSRFBlocked, ip)
-			}
 		}
 		// Pin to the first validated IP. DNS cannot rebind between the
 		// resolver call above and the dial below because we supply a literal
 		// address, not a name.
-		pinned := ips[0].String()
-		return innerDial(ctx, network, net.JoinHostPort(pinned, port))
+		return innerDial(ctx, network, net.JoinHostPort(pinned.String(), port))
 	}
 
 	transport := &http.Transport{
@@ -572,13 +512,6 @@ func sanitizeEnvelopeField(s string) string {
 		sb.WriteRune(r)
 	}
 	return strings.TrimSpace(sb.String())
-}
-
-// isLocalhostName matches "localhost" and any subdomain of ".localhost"
-// (RFC 6761 reserves both). Case-insensitive.
-func isLocalhostName(host string) bool {
-	h := strings.ToLower(strings.TrimSuffix(host, "."))
-	return h == "localhost" || strings.HasSuffix(h, ".localhost")
 }
 
 func (g *GeneralToolsTransport) callJSONParse(args map[string]any) (*ToolResult, error) {

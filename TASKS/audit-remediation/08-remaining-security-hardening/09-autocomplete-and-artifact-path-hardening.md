@@ -1,10 +1,10 @@
-# Autocomplete repo_path exposure, artifact write-path confinement, catalog fetch timeout, plugin-UI symlink gap
+# Project repo-path validation, artifact/plugin-UI confinement, and catalog SSRF policy
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
-**Touches:** `internal/api/autocomplete.go` (`resolveRoot`), `internal/api/projects.go` (`handleCreateProject`/`handleUpdateProject`), `internal/api/artifacts.go` (`handlePlaceArtifact`), `internal/api/catalog.go` (`handleCatalogInstall`), `internal/api/plugins.go` (plugin-UI static-file route, lines 107-120), `internal/pathsafe` (`ResolveUnder` — reused, not modified)
-**Requires architect decision:** **mixed — see per-finding note below**
+**Touches:** `internal/api/projects.go` (`handleCreateProject`/`handleUpdateProject`), `internal/api/artifacts.go` (`handlePlaceArtifact`/download defense in depth), `internal/api/catalog.go` (`handleCatalogInstall`), `internal/api/plugins.go` (plugin-UI static-file route), `internal/plugin/install/download.go`, `internal/mcp/general_tools.go`, `internal/sandbox/proxy.go`, new `internal/ssrf`, and focused tests; `internal/pathsafe.ResolveUnder` is reused, not modified
+**Requires architect decision:** resolved by AD-27 and AD-28
 
 > **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
 > line above wherever they differ — that line predates cross-folder analysis.
@@ -26,13 +26,13 @@
 > `install.HTTPDownloader` (`catalog.go:339`), which applies
 > `DefaultDownloadTimeout` (2 min) and `DefaultMaxArchiveBytes` on zero values.
 > **The timeout half is already fixed, plus a size cap the finding never asked
-> for.** Only the host/scheme allowlist remains open. Do not re-add a timeout.
+> for.** Only destination-address policy remains open. Do not re-add a timeout.
 >
 > **`GO-API-001` is intact** — `resolveRoot` (`autocomplete.go:136-154`) still
 > returns `p.RepoPath` unvalidated; only the ctx sweep touched that file.
 >
-> **✅ AD-27 and AD-28 are now DECIDED (2026-08-22). This task gained a third
-> finding.**
+> **✅ AD-27 and AD-28 are now DECIDED (2026-08-22). This task now covers five
+> findings.**
 >
 > **AD-27 (`GO-API-001`) — validate `repo_path` at write time.** Constrain it
 > in `handleCreateProject`/`handleUpdateProject` (which this task already
@@ -65,12 +65,16 @@
 
 ## Findings addressed
 
-- **GO-API-001** (low severity, high confidence, security) — report §8.5. Requires architect decision: **true** (matches `findings.json`).
+- **GO-API-001** (low severity, high confidence, security) — report §8.5. Architect decision resolved by AD-27.
 - **GO-API-002** (low severity, high confidence, security + testing) — report §8.5. Requires architect decision: **false** (matches `findings.json`).
-- **GO-API-003** (low severity, medium confidence, security) — report §8.5. Requires architect decision: **false** (task-authoring call — see divergence note).
+- **GO-API-003** (low severity, medium confidence, security) — report §8.5. Architect decision resolved by AD-28.
 - **GO-API-008** (low severity, high confidence, duplication + security-consistency) — report §8.5. Requires architect decision: **false** (matches `findings.json`).
+- **GO-SEC4-007** (medium severity, high confidence, duplication + security) — report §8.12. Requires architect decision: **resolved by AD-28**.
 
-> **Divergence from `findings.json` on GO-API-003:** the catalog flags this finding's `requires_architect_decision` as `true`. This task sets it to `false` because the concrete part of the fix — an explicit client timeout — is unambiguous and needs no architect input. The report's own recommendation additionally raises a genuine open policy question ("whether catalog sources should be treated as fully trusted or need an outbound-URL allowlist"); this task flags that separately below as a narrower, optional follow-on decision, not a blocker for the timeout fix.
+> **Re-baselined disposition:** AD-04 already supplied the bounded download
+> timeout and archive-size cap. AD-28 resolves the remaining destination
+> policy and assigns GO-SEC4-007 here so the catalog does not become a third
+> independent copy of the same CIDR rule.
 
 ## Context
 
@@ -83,34 +87,35 @@
 
 **GO-API-002:** `handlePlaceArtifact` (`artifacts.go`) accepts an unrestricted `StoragePath` at write time with zero sanitization, unlike its sibling `handleUploadArtifact` which correctly uses `pathsafe.ResolveUnder`. Not currently exploitable for content disclosure — the *download* path independently confines via `pathsafe.ResolveUnder`, confirmed by the existing regression test `TestDownloadDoesNotLeakAbsoluteEscapingPath` — but it's an inconsistency inviting future drift, and this specific write path has **zero test coverage**.
 
-**GO-API-003:** `handleCatalogInstall` (`catalog.go`) fetches `entry.ArchiveURL` via `http.DefaultClient` with **no explicit timeout** (bounded only by the inbound request's own context, if any) and no host/scheme restriction beyond http/https — the standard package-manager-registry SSRF shape. Response size is separately confirmed correctly capped at 100 MiB.
+**GO-API-003:** after AD-04, `handleCatalogInstall` fetches `entry.ArchiveURL` through `install.HTTPDownloader`, which already supplies a two-minute timeout and 100 MiB cap. The remaining standard package-manager-registry SSRF shape is destination policy: a catalog-controlled archive URL can still resolve to private, loopback, link-local, or IMDS addresses unless the actual dial is validated and pinned.
 
 **GO-API-008:** the plugin-UI static-file route (`plugins.go:107-120`) hand-rolls its own `Clean`+`HasPrefix` path-confinement check instead of `pathsafe.ResolveUnder` — sound against `..`/absolute-path traversal, but doesn't call `EvalSymlinks`, so a symlink inside an installed plugin's `ui/` dir pointing outside its root would not be caught.
 
+**GO-SEC4-007:** MCP web fetch and the sandbox proxy independently carry the same SSRF CIDR list. AD-28 adds catalog download as a third consumer, so the semantic rule must be extracted rather than copied again.
+
 ## What to do
 
-Four distinct, independently-landable fixes:
+Five fixes under the re-baselined decisions:
 
-**1. GO-API-001 (architect decision required first):** decide whether `repo_path` should be constrained to an operator-configured allowlist of directories. This is a real policy question, not an implementation detail — an allowlist changes what a legitimate operator can point a project at, which is a product-behavior decision. Do not implement an allowlist speculatively; wait for the architect's direction. If the architect declines (judging the single-operator trust model sufficient, matching the audit's own mitigating framing), formally disposition this finding as **accepted-risk** rather than leaving it silently unresolved.
+1. **GO-API-001 / AD-27:** validate `repo_path` when create/update writes it. Empty remains allowed; non-empty paths must resolve to an existing directory. Reject filesystem root, home itself while allowing home subdirectories, and the named system trees `/etc`, `/usr`, `/var`, and `/System`. Leave autocomplete unchanged. Choose and record existing-row handling.
+2. **GO-API-002:** confine `handlePlaceArtifact` storage paths under the configured artifacts root through `pathsafe.ResolveUnder`, reject escaping paths before persistence, and keep the download-side defense in depth.
+3. **GO-API-003 / AD-28:** keep `HTTPDownloader`'s existing two-minute timeout and 100 MiB cap unchanged. Block private/RFC1918, loopback, link-local, IMDS, and the existing sibling-denylist ranges at the dial seam; validate every DNS answer and dial the checked literal so DNS rebinding and redirect targets cannot bypass the check.
+4. **GO-API-008:** replace the plugin-UI route's `Clean`+`HasPrefix` check with `pathsafe.ResolveUnder` and reject a symlink escape.
+5. **GO-SEC4-007:** before adding the catalog consumer, extract the duplicate CIDR policy from `internal/mcp/general_tools.go` and `internal/sandbox/proxy.go` into one narrowly-layered shared package; make all three egress paths consume it. Preserve `08/06`'s `ReadHeaderTimeout`.
 
-**2. GO-API-002:** apply the same `pathsafe.ResolveUnder`-based confinement at write time in `handlePlaceArtifact` that `handleUploadArtifact` already uses correctly — bring the two sibling handlers into parity. Add a regression test mirroring the download-side's existing `TestDownloadDoesNotLeakAbsoluteEscapingPath` pattern, since this write path currently has zero test coverage.
-
-**3. GO-API-003:** give `handleCatalogInstall`'s download `http.Client` an explicit timeout (the fetch currently relies only on the inbound request's own context, if any, which may not exist or may be unbounded). This is the concrete, unambiguous part of the fix. Separately — flag, do not implement speculatively — whether catalog sources should be treated as fully trusted or need an outbound-URL allowlist is a genuine, narrower open policy question the audit's own recommendation raises; note it for a future architect pass rather than blocking the timeout fix on it.
-
-**4. GO-API-008:** route the plugin-UI static-file handler through `pathsafe.ResolveUnder(baseDir, file)` instead of its hand-rolled `Clean`+`HasPrefix` check, for consistency with the rest of the codebase's confinement pattern and to close the symlink gap (`pathsafe.ResolveUnder` calls `EvalSymlinks`; the hand-rolled check doesn't).
-
-**All production callers:** for GO-API-002/008 (shared-primitive-adjacent fixes bringing a handler into line with an existing pattern), confirm there are no other handlers in `internal/api` that duplicate either the missing-`pathsafe`-adoption pattern (GO-API-002) or the hand-rolled `Clean`+`HasPrefix` pattern (GO-API-008) beyond the ones named — the guide's "fix every sibling path" principle applies even to a low-severity finding if a third sibling turns out to exist that the audit's own package review didn't happen to sample.
+Enumerate sibling `internal/api` hand-rolled path checks relevant to GO-API-002/008 and widen only with concrete evidence.
 
 ## Non-goals
 
-These four findings are bundled in one file because they're all `internal/api` findings that didn't fit elsewhere in this folder's grouping — say this explicitly rather than forcing a shared root cause that doesn't exist. GO-API-001 is a policy/allowlist question; GO-API-002/008 are "apply the existing `pathsafe.ResolveUnder` pattern consistently" fixes; GO-API-003 is a missing-timeout fix. Do not attempt to unify these into a new shared abstraction — `pathsafe.ResolveUnder` itself is the only real shared primitive among them, and it already exists; this task is about consistent adoption, not building something new.
+These five findings share a dispatch unit, not one root cause. Do not build a general URL-policy framework or change autocomplete confinement. Do not re-add or replace `HTTPDownloader`'s already-landed timeout/size cap. The only new shared abstraction is the narrow SSRF destination-address policy AD-28 explicitly requires.
 
 ## Tests required
 
 - **GO-API-002:** new regression test for `handlePlaceArtifact` mirroring `TestDownloadDoesNotLeakAbsoluteEscapingPath`'s pattern, asserting a traversal/absolute-path `StoragePath` is rejected at write time.
-- **GO-API-003:** a test asserting the catalog-install download respects a bounded timeout (e.g., against a deliberately slow/hanging test server).
+- **GO-API-003:** private/loopback/link-local/IMDS rejection plus a pinned-literal regression showing the checked DNS answer is the address dialed; retain the existing timeout regression unchanged.
 - **GO-API-008:** a regression test planting a symlink inside an installed plugin's `ui/` directory pointing outside its root, asserting the static-file route now rejects it (mirrors the symlink-escape test shape report §8.12 confirms already exists elsewhere for `pathsafe.ResolveUnder`).
-- **GO-API-001:** none required until/unless the architect decision results in an allowlist implementation — if so, a test asserting a project pointed outside the allowlist is rejected.
+- **GO-API-001:** create/update policy coverage for root, home, home subdirectories, system trees, nonexistent paths, files, and existing-row handling.
+- **GO-SEC4-007:** shared-policy tests plus unchanged consumer regressions for web fetch and sandbox proxy.
 
 ## Prevention
 
@@ -118,22 +123,59 @@ GO-API-002 and GO-API-008 are both instances of the guide's own "Trust-Boundary 
 
 ## Verification
 
-`go build ./...`; `go test ./internal/api/...` (new/updated tests for artifact placement, catalog install, plugin-UI static serving); `gosec ./internal/api/...` re-run confirming no regression.
+Focused adversarial tests for `internal/ssrf`, plugin download, MCP web fetch, sandbox proxy, and the affected API handlers; relevant `gosec`; then `go build ./cmd/nanite/`, `go vet ./...`, and `go test ./...` without a prolonged full-repo race run.
 
 ## Risk / rollback
 
-GO-API-002/003/008 are all low-risk, additive-confinement or additive-timeout changes — should not break any legitimate current caller, since they only reject inputs that were already invalid/unsafe. Rollback is a straightforward revert for any of the three. GO-API-001 carries the only real behavior-change risk (an allowlist, if adopted, would reject some currently-accepted `repo_path` values) — flagged above as architect-gated for exactly this reason.
+The behavior changes reject unsafe project roots, artifact paths outside the configured root, plugin-UI symlink escapes, and catalog archives resolving to non-public destinations. Existing project rows are not swept. Local catalog-download tests and explicit local development callers must opt into localhost; production defaults remain fail-closed.
 
 ## Done means
 
-- [ ] GO-API-001: architect decision recorded (allowlist adopted, or finding dispositioned accepted-risk)
-- [ ] GO-API-002: `pathsafe.ResolveUnder` applied to `handlePlaceArtifact`; regression test added and passing
-- [ ] GO-API-003: explicit client timeout added to `handleCatalogInstall`'s download; test added and passing
-- [ ] GO-API-008: plugin-UI static-file route routed through `pathsafe.ResolveUnder`; symlink-escape regression test added and passing
+- [x] GO-API-001: AD-27 write-time validation implemented in create/update, with policy and existing-row behavior covered
+- [x] GO-API-002: artifact placement is confined with `pathsafe.ResolveUnder`; escaping-path and positive download regressions pass
+- [x] GO-API-003: shared destination blocking and DNS-answer pinning protect catalog downloads; existing timeout/size caps remain intact
+- [x] GO-API-008: plugin-UI static files use `pathsafe.ResolveUnder`; symlink escape is rejected
+- [x] GO-SEC4-007: one shared CIDR policy backs MCP web fetch, sandbox proxy, and catalog download
 
 ## Work log
 
-<!-- Worker fills this in. -->
+- Implemented all five re-baselined findings. `internal/ssrf` is deliberately
+  narrow: `Resolver`, `DefaultResolver`, `ResolveAndPin`, `IsLocalhostName`,
+  and classifiable `ErrBlocked`. Its CIDR slices stay private; callers cannot
+  mutate or fork the policy. This is the package/API shape `08/01` can import.
+- `HTTPDownloader` keeps `DefaultDownloadTimeout` (2 minutes) and
+  `DefaultMaxArchiveBytes` (100 MiB) unchanged. Its transport now validates
+  every DNS answer through `ssrf.ResolveAndPin`, rejects the whole answer if
+  any IP is denied, disables ambient proxy routing, and dials the validated IP
+  literal. Redirects remain HTTP(S)-only and run through the same dial check.
+- AD-27 policy choice: canonicalize non-empty repo paths (including symlink
+  resolution), require an existing directory, reject filesystem root, home
+  itself, and the named system trees `/etc`, `/usr`, `/var`, `/System`; allow
+  home subdirectories explicitly. Empty repo paths remain valid. **Existing
+  rows use next-repo-path-update-only handling**: no sweep, and unrelated
+  updates do not fail because of a legacy value.
+- Artifact placement converts absolute paths to a root-relative candidate
+  before calling `pathsafe.ResolveUnder`, rejects escape/nonexistent/non-file
+  targets before persistence, and stores the canonical confined path. The
+  download handler uses the same helper for defense in depth and compatibility
+  with existing canonical absolute rows.
+- The plugin-UI route now uses `pathsafe.ResolveUnder`; its symlink-escape
+  regression returns 403 without exposing the target.
+- Sibling enumeration: the only `internal/api` `Clean`+`HasPrefix` path
+  confinement was the named plugin-UI route. Artifact upload already uses
+  `ResolveUnder` for both directory and file placement; archive extraction and
+  four plugin install/uninstall paths already use it too. The other relevant
+  `filepath.Rel` use is autocomplete response formatting, not confinement, so
+  scope was not widened.
+- Focused adversarial tests passed with `-count=1` for `internal/ssrf`,
+  `internal/plugin/install`, `internal/mcp`, `internal/sandbox`, and
+  `internal/api`. The relevant gosec sweep completed; it reported the repo's
+  existing known-noise set (including taint warnings at `pathsafe`-confined
+  sinks) and no new catalog-download SSRF finding. `go build ./cmd/nanite/`
+  and `go vet ./...` passed. The first `go test ./...` run hit the known
+  intermittent `internal/service` `driveBootSession` send-on-closed-channel
+  panic; `go test ./internal/service` then passed, and a clean full
+  `go test ./...` rerun passed. No full-repo race campaign was launched.
 
 ## Review notes
 

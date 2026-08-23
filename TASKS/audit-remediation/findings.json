@@ -1544,8 +1544,8 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/09-production-islands/04-tool-builder-yaml-architecture.md",
       "disposition": "retire-feature",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed still dead: zero production callers of tool.NewBuilder/tool.Register/adapt.Convert-style symbols outside internal/tool/ itself and its own tests. Wire/defer/retire is AD-09's explicit call; AD-09's outcome also changes 13/01's scope per the batch README. [AD-09 DECIDED 2026-08-22: retire except cache.go. Verified only NewResultCache/ResultCache/ResultCacheConfig are used outside the package (internal/service/chat.go, container.go). Delete adapt.go, builder.go, register.go, tool.go, yaml_loader.go and their tests. Do not carry tool.go's false package doc over to cache.go.]"
+      "task_status": "implemented",
+      "revalidation_note": "Confirmed still dead: zero production callers of tool.NewBuilder/tool.Register/adapt.Convert-style symbols outside internal/tool/ itself and its own tests. Wire/defer/retire is AD-09's explicit call; AD-09's outcome also changes 13/01's scope per the batch README. [AD-09 DECIDED 2026-08-22: retire except cache.go. Verified NewResultCache/ResultCache/ResultCacheConfig remain live in internal/service/chat.go and container.go. Implementation revalidation also found the live internal/tool/stash categorizer depended on the retiring root Tool interface/category constants; it was detached to stash-local category constants with behavior coverage while the live stash package was preserved. Deleted adapt.go, builder.go, register.go, tool.go, yaml_loader.go and their tests, and did not carry tool.go's false package doc over.]"
     },
     {
       "id": "GO-MCPTOOL-002",

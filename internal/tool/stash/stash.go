@@ -25,10 +25,10 @@ import (
 // the plugin manifest grows a `category:` field (tracked follow-up).
 const CategoryOther = "other"
 
-// Categorizer reports the category name for a tool. Implementations are
-// typically thin wrappers over the broker registry's Category() method.
-// Returning empty for an unknown name causes the stash to bucket the tool
-// under CategoryOther.
+// Categorizer reports the category name for a tool. NewManager accepts a
+// caller-provided implementation; production uses BuiltinCategorizer.
+// Returning empty for an unknown name causes the stash to bucket the tool under
+// CategoryOther.
 type Categorizer interface {
 	Categorize(toolName string) string
 }

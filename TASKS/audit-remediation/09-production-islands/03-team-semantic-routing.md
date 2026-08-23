@@ -392,9 +392,10 @@ Regression coverage locks both halves of that policy:
   composition-root wiring returns 503 before the workflow-run count changes.
 - `TestTeamRunLaunchAPI_RoutingInstallFailureReturnsRunAndCleansPartialRows`
   uses a valid-first/invalid-second routing definition: the first rule inserts
-  two rows, the unknown target Team Slot fails the second rule, the response
-  returns the persistent run and member state, and partial cleanup leaves zero
-  run-scoped reflex rows.
+  two rows, the unknown target Team Slot fails the second rule, and the
+  response returns the persistent run id/status plus the routing error. The
+  test separately reads the store to verify that the run and member rows
+  persist, while partial cleanup leaves zero run-scoped reflex rows.
 
 `TASKS/teams/HANDOFF.md` now closes its original open wiring question, records
 the failure policy, preserves the lazy-Team-Slot-after-install limitation, and
@@ -411,4 +412,13 @@ was involved.
 
 ## Review notes
 
-<Reviewer fills this in.>
+**Fresh review (2026-08-23): FAIL — tracking-only corrections required.** The
+reviewer found no runtime-code defect. Two low-severity documentation/tracking
+issues remained: `TASKS/INDEX.md` still showed `09/03` as `not-started`, and
+the Work log said the structured 500 returned member state even though its
+actual fields are the persistent run id, status, and routing error.
+
+**Fix applied.** Synchronized the index row to `implemented` and corrected the
+failure-test description to distinguish response fields from the separately
+verified persisted `team_run_members` store rows. Runtime code and tests were
+not changed. Final re-review is pending; no pass is claimed here.

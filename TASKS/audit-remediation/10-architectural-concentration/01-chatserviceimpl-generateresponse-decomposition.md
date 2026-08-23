@@ -1,7 +1,7 @@
 # `chatServiceImpl` / `generateResponse` — responsibility map, phase boundaries, and characterization tests
 
 **Phase:** Audit remediation — Wave 5 (architectural concentration)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none (self-contained planning/characterization task). Sequencing note: any future extraction-execution tasks this task's own output proposes should not be scoped or dispatched until an architect has reviewed and approved this task's responsibility map and phase-boundary proposal — see `requires_architect_decision` below.
 **Touches:** `internal/service/chat_generate.go` (`generateResponse` and its private helpers), `internal/service/chat.go` (`chatServiceImpl` struct definition and its 84 methods, spread across this file and others in the package), new characterization/regression test files under `internal/service/` (exact filenames TBD by the worker — likely `chat_generate_characterization_test.go` plus targeted additions to existing `chat_generate_*_test.go` files for the coverage-gap branches). Read-only reference: `internal/service/stream.go` (`StreamManager` — the in-repo precedent for this exact kind of extraction).
 **requires_architect_decision:** true — per the remediation guide's §9 decision queue item 5 ("`chatServiceImpl` decomposition boundaries"). This task's own deliverable (the responsibility map + phase-boundary proposal) is explicitly the input to that decision, not a substitute for it. No extraction may begin — in this task or any follow-on task — until an architect has reviewed and signed off on the proposed boundaries.
@@ -239,4 +239,23 @@ Observable behavior required for PASS: the characterization suite exists, passes
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail, what was independently re-verified (re-traced line numbers against current source, re-ran coverage measurement, checked each characterization test against real code rather than trusting the worker's description). -->
+- Fresh review independently traced all required scenarios through
+  `Dispatcher.Run` → `chatRunnerAdapter` → `generateResponse`, reproduced the
+  focused coverage figures, and passed focused non-race, focused `-race`,
+  service build/vet, diff, and scope checks. It confirmed the real SQLite,
+  StreamManager, Context Service/compaction, tool-dispatch, and plugin-host
+  paths are exercised and the provider-error, recovery, tool ordering, and
+  persistence assertions are load-bearing.
+- The first review failed two points: field ownership listed all 52 fields but
+  repeated 22 across capability rows, and plugin coverage exercised only
+  `message.sending` cancellation, not cancellation propagation through
+  `tool.executing`. Correction commit `f77076a9` added the canonical exactly-once
+  field inventory and the real production-door tool-cancellation case.
+- Fresh re-review passed. It independently matched both the canonical table and
+  per-capability ownership lists to the live struct at 52/52 unique fields with
+  zero missing, extra, or duplicate owners; retained the exact 87-method
+  reconciliation; reproduced expanded plugin-cancel coverage at 1/26 (3.8%) →
+  26/26 (100%); and confirmed the tool hook skips execution, preserves blocked
+  event/result propagation, continues the provider turn, and persists the
+  completed assistant response. No production files, extraction task, or
+  architect approval were introduced.

@@ -1,7 +1,7 @@
 # `SelfToolsTransport` — capability-domain map and dispatch-direction decision
 
 **Phase:** Audit remediation — Wave 5 (architectural concentration)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none (self-contained planning task, independent of `01-chatserviceimpl-generateresponse-decomposition.md` — different package, different type, no shared code)
 **Touches:** `internal/selftools/self_tools_transport.go` (`SelfToolsTransport` struct and `CallTool` switch), the other files implementing `SelfToolsTransport`'s handler methods in `internal/selftools/` (exact file list to be confirmed by the worker — the type's 81 methods are not all in one file). Read-only reference: `internal/toolclient/broker.go`, `internal/toolclient/intent.go`, `internal/toolclient/ranking.go`, `internal/toolclient/meta_tools.go` (`ToolClient` — a separate type, covered as the second finding in this same file, see below).
 **requires_architect_decision:** true — per the remediation guide's §9 decision queue item 6 ("`SelfToolsTransport` decomposition boundaries").
@@ -244,4 +244,24 @@ Zero production risk for both parts — this task produces a written map and two
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail, what was independently re-verified (re-counted switch cases/fields/methods against current source, checked the map's domain groupings against the real code rather than trusting the worker's description). -->
+### 2026-08-23 — Fresh review, one correction round, PASS
+
+- The first fresh review independently reconciled all 31 fields, all 82
+  production receiver methods across 19 files, and all 68 `CallTool` names in
+  66 clauses. It confirmed each tool name appeared in exactly one appropriate
+  capability row, the selective-delegation recommendation was based on real
+  cohesion/coupling evidence, the four first candidates were defensible, and
+  `ToolClient` was correctly recounted as 20 methods across three files with
+  `ranking.go` absent. Build, vet, targeted tests, diff, and scope checks passed.
+- Review failed the first revision on one factual coupling claim: the map and
+  Work Log said `RecallToolLearnings` also served chat slot assembly, but a
+  current-source caller trace found only `callToolDescribe` in production.
+- A focused worker correction removed the nonexistent cross-layer seam,
+  reclassified recall under discovery/description, and re-evaluated learning
+  capture as cleanly extractable but lower leverage because it is a single
+  handler. No production code changed.
+- Fresh re-review independently confirmed the sole production caller, exact
+  inventory reconciliation, corrected learning-domain judgment, unchanged
+  evidence-supported recommendation/candidate order, and passing targeted
+  tests/diff checks. **PASS.** AD-13 remains open pending operator review of
+  the map; no extraction or follow-on task is authorized by this review.

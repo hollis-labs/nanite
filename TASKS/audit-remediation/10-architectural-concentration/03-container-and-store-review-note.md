@@ -1,7 +1,7 @@
 # REVIEW NOTE (not a work task) — `Container` and `internal/store`: do not schedule a god-object refactor
 
 **Phase:** Audit remediation — Wave 5 (architectural concentration)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** nothing. This file recommends **no code changes** to `internal/service/container.go`, `internal/store/*.go`, or `internal/plugin/host.go`. It exists purely so the underlying findings have a documented disposition instead of silently disappearing from tracking.
 **requires_architect_decision:** true — **satisfied by the operator on 2026-08-23**. The remediation guide requires every finding to reach an explicit disposition (§4 Wave 5, §7 output C), and "confirmed, no action needed" is itself a disposition an architect/operator must actually make, not one a planning pass can assume.
@@ -109,7 +109,7 @@ None — this task changes no code. If a future architect decision reverses the 
 - [x] This file's cited metrics are re-confirmed against current source, with counting definitions and material drift recorded above and in the Work log.
 - [x] The operator reviewed the current-source evidence and recorded explicit dispositions for all five findings on 2026-08-23. `Container` is accepted as a composition root; Store breadth is accepted subject to the named-consumer pain threshold; Host may decompose selectively only through the existing `GO-PLUGIN-004` driver, never as an all-category sweep.
 - [x] No code in `internal/service/container.go`, `internal/store/*.go`, or `internal/plugin/host.go` is modified as a result of this task.
-- [ ] `FINDING-INDEX.md`'s disposition for `GO-DEP-001`, `GO-DEP-002`, `GO-STORE-001`, `GO-STORE-002`, and `GO-PLUGIN-006` reflects this file's outcome once the architect decision lands (a future planner-pass action, not this task's own — but noted here so the link isn't lost).
+- [x] `findings.json`'s status and revalidation record for `GO-DEP-001`, `GO-DEP-002`, `GO-STORE-001`, `GO-STORE-002`, and `GO-PLUGIN-006` reflects this file's outcome. `FINDING-INDEX.md` maps findings to task files only and intentionally carries no disposition column.
 
 ## Work log
 
@@ -123,9 +123,19 @@ None — this task changes no code. If a future architect decision reverses the 
 - Confirmed all four cited plugin sub-registries and their own locks remain in current source: `cardRulesRegistry`, `panelRegistry`, `FilterRegistry`, and `MutablePluginMux`.
 - Read AD-14 as recorded on 2026-08-22. It explicitly accepts `GO-DEP-002` and `GO-STORE-001` as-is and requires no new consumer-defined Store interfaces. It did not name or decide `GO-DEP-001`, `GO-STORE-002`, or `GO-PLUGIN-006`; that documentation gap was reported rather than inferred.
 - The operator closed the gap on 2026-08-23: no `Container` decomposition; no blanket Store split and narrow interfaces only for demonstrated named-consumer friction; selective `Host` sub-registry extraction only where the existing `UnloadPlugin`/`GO-PLUGIN-004` pain identifies and justifies a named category, with an all-category sweep rejected. The operator expressly approved this balance and authorized this task to proceed as implemented.
-- No application code or shared tracker file was changed. The orchestrator must centrally update `TASKS/INDEX.md`, `TASKS/audit-remediation/FINDING-INDEX.md`, `TASKS/audit-remediation/findings.json`, and any durable decision record with the operator's disposition.
+- No application code or shared tracker file was changed. The orchestrator must centrally update `TASKS/INDEX.md`, `TASKS/audit-remediation/findings.json`, and the durable decision record with the operator's disposition. `FINDING-INDEX.md` already maps all five findings to this task and has no status/disposition field to update.
 - Baseline verification passed despite the documentation-only scope: `go build ./cmd/nanite/`, `go vet ./...`, and `go test ./...` all exited 0.
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail — for this file, "review" means confirming the architect decision was actually obtained and recorded, and that no code was touched, not the usual code-correctness review. -->
+- Fresh documentary review passed with no findings. The reviewer independently
+  reproduced all Container, Store, import/coupling, and Host counts; confirmed
+  the live consumer-defined interfaces and Wave 4 grounding removal; and
+  inspected `NewContainer`'s sole production caller and wiring/lifecycle shape.
+- The task-local decision, AD-14 supplement, and Wave 8 `GO-PLUGIN-004`
+  constraint all preserve the operator-approved balance: no Container
+  decomposition; no blanket Store split/interface pass; selective Host work
+  only after the existing helper extraction identifies a named category, with
+  any sub-registry work separately scoped and an all-category sweep rejected.
+  AD-12 and AD-13 remain open. Scope and `git diff --check` passed; no
+  production or test file changed.

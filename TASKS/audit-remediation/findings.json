@@ -234,8 +234,8 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
       "disposition": "false-positive",
-      "task_status": "not-started",
-      "revalidation_note": "Engages with the audit's own evidence: Container (container.go) is confirmed still wiring-only (RefreshUtilitySettings, Shutdown -- still just 2 methods; the file grew via additive fields like SkillVendor/ReflexEngine, which doesn't change the method count). The finding's own conclusion is explicit -- \"no decomposition of Container itself is warranted, it is a legitimate composition root\" -- i.e. the audit itself judged the god-object framing does not apply here; false-positive reflects that conclusion, not a Wave-0 disagreement with new evidence."
+      "task_status": "reviewed",
+      "revalidation_note": "Wave 5 current-source recount: Container has 64 named fields (58 exported composition/configuration fields plus 6 private lifecycle fields) and 4 production receiver methods (RefreshUtilitySettings, Shutdown, and 2 private shutdown helpers). NewContainer remains wiring/lifecycle orchestration with one production caller. Operator approved 2026-08-23: confirmed false-positive as a decomposition target; no Container decomposition. Address concrete growing pains rather than field/method counts."
     },
     {
       "id": "GO-DEP-002",
@@ -266,8 +266,8 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
       "disposition": "accepted-risk",
-      "task_status": "not-started",
-      "revalidation_note": "internal/store/store.go and the *Store fan-in pattern are unchanged in substance (76+ direct-reference count not hand-recomputed per the guide's own instruction not to chase this metric). Task 10/03 is explicitly a review-note-only task (no code changes) and AD-14 gates it precisely because the guide directs \"not a mandatory split\" -- whether any narrow interface is warranted at all is the open question, not an agreed fix's shape. [AD-14 DECIDED 2026-08-22: no new consumer-defined interfaces. Per the remediation guide's directive \u2014 'gravitational-package review, not a mandatory split\u2026 narrow consumer-defined interfaces only where they solve demonstrated coupling/testability problems' \u2014 and its guardrail against 'repository interfaces everywhere because Store has high fan-in'. The two existing counter-examples (dispatch.TrustResolver, grounding.ConsultationLogger) stand as the pattern for when one IS warranted. 10/03 remains review-note-only, no code changes.]"
+      "task_status": "reviewed",
+      "revalidation_note": "Wave 5 current-source recount: 32 production package directories import the exact root internal/store package; internal/service contains 61 literal *store.Store occurrences across 25 non-test files. Prefix matching reports 33 only by misclassifying internal/store's import of internal/store/seedcatalog. AD-14 remains binding: no new blanket consumer-interface pass. Operator reaffirmed 2026-08-23 that a narrow consumer-owned interface is justified only when a specific named consumer demonstrates concrete coupling or testability friction."
     },
     {
       "id": "GO-STORE-001",
@@ -293,8 +293,8 @@
       "false_positive_considerations": "A single shared persistence facade is a defensible, normal choice at this scale.",
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
       "disposition": "accepted-risk",
-      "task_status": "not-started",
-      "revalidation_note": "Same package/evidence as GO-DEP-002 (both surfaced by task 10/03's gravitational-package review). Confirmed dispatch.TrustResolver and grounding.ConsultationLogger still exist as the narrow consumer-defined-interface counter-examples cited. AD-14 decides whether/where more of this pattern is warranted. [AD-14 DECIDED 2026-08-22: no new consumer-defined interfaces. Per the remediation guide's directive \u2014 'gravitational-package review, not a mandatory split\u2026 narrow consumer-defined interfaces only where they solve demonstrated coupling/testability problems' \u2014 and its guardrail against 'repository interfaces everywhere because Store has high fan-in'. The two existing counter-examples (dispatch.TrustResolver, grounding.ConsultationLogger) stand as the pattern for when one IS warranted. 10/03 remains review-note-only, no code changes.]"
+      "task_status": "reviewed",
+      "revalidation_note": "Same current coupling evidence and operator disposition as GO-DEP-002. The audit-era grounding.ConsultationLogger example was retired by Wave 4; live consumer-defined slices include dispatch.TrustResolver, internal/service's domain interfaces, selftools/reactions.Store, and scheduler.ScheduleRunStore. These prove the pattern is available when useful but do not establish a named current pain point. AD-14's accepted-as-is/no-blanket-interface decision stands."
     },
     {
       "id": "GO-STORE-002",
@@ -321,8 +321,8 @@
       "false_positive_considerations": "File-per-domain-concept within one package is the guide's own example of a healthy large package.",
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
       "disposition": "false-positive",
-      "task_status": "not-started",
-      "revalidation_note": "Engages with the audit's own false_positive_considerations verbatim: \"file-per-domain-concept within one package is the guide's own example of a healthy large package.\" *Store's method count wasn't hand-recomputed (guide instruction: don't chase this metric), but the qualitative shape (many domain files, each individually cohesive) is unchanged and the audit's own recommendation is \"do not split merely for size... otherwise an observation only.\""
+      "task_status": "reviewed",
+      "revalidation_note": "Wave 5 current-source recount: Store remains a 2-field database handle with 372 production receiver methods (367 exported, 5 private) across 62 method-bearing/66 total production Go files, plus 90 exported structs and 145 SQL migrations. File-per-domain cohesion remains intact. Operator approved 2026-08-23: no blanket package/type split; method breadth alone is not a decomposition driver."
     },
     {
       "id": "GO-STORE-003",
@@ -874,7 +874,7 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed unchanged: internal/service/chat_generate.go has zero commits since 8feeee5c (byte-identical). generateResponse still spans chat_generate.go:122-2028 (~1906 lines), one unbroken function, exactly matching task file 10/01's own citation. 00/02's refreshed tool baseline (docs/audits/2026-08-21-go-quality/raw-1d3bfd96/DELTA.md) shows gocognit/cyclop/maintidx totals all moved worse repo-wide since the audit (gocognit 227->243, cyclop 250->275, maintidx 25->30), consistent with this finding not having improved."
     },
     {
@@ -904,7 +904,7 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed unchanged: internal/service/chat.go has zero commits since 8feeee5c (byte-identical). chatServiceImpl struct still spans chat.go:214-392, matching task file 10/01's citation exactly; the 52-field/84-method counts are unaffected since the file is byte-identical to the audited commit."
     },
     {
@@ -1461,8 +1461,8 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
       "disposition": "defer",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed Host (plugin/host.go) still spans the described 38-field/123-method footprint with the established sub-registry extraction pattern (cardRulesRegistry, panelRegistry, FilterRegistry, MutablePluginMux) still partially applied. Recommendation leaves the extension optional (\"if the architect wants to reduce Host's footprint\") -- deferred, no immediate action, revisit if Host's growth becomes a live pain point."
+      "task_status": "reviewed",
+      "revalidation_note": "Wave 5 current-source recount confirms Host at 38 fields and 123 production receiver methods (103 exported, 20 private) across 9 files, with cardRulesRegistry, panelRegistry, FilterRegistry, and MutablePluginMux independently synchronized. Operator approved 2026-08-23: selective decomposition only when existing UnloadPlugin/GO-PLUGIN-004 work identifies a named category whose ownership, teardown, locking, or tests justify a sub-registry; reject an all-category migration sweep."
     },
     {
       "id": "GO-PLUGIN-007",
@@ -1672,7 +1672,7 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/02-selftoolstransport-decomposition.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still a god-object, slightly worse: self_tools_transport.go grew from 2,431 to 2,493 lines since the audit (unrelated additive changes), and method count grew from 81 to 82 (`grep -c '^func (.*\\*SelfToolsTransport)'` across the package). The god-object finding itself is unambiguous (parallel to GO-SVCEXEC-001/002's treatment) -- AD-13 decides only the decomposition boundaries, per the guide's explicit framing (\"do not split solely to reduce field/method counts\") which presupposes a split is warranted, not whether one is."
     },
     {
@@ -1702,7 +1702,7 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/02-selftoolstransport-decomposition.md",
       "disposition": "defer",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed ToolClient (broker.go/intent.go/ranking.go/meta_tools.go) still spans the described method/file footprint. The finding's own recommendation is \"no action implied; record for the architect's holistic pass\" -- folded into AD-13's SelfToolsTransport-cluster review rather than a standalone fix."
     },
     {

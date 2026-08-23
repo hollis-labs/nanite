@@ -44,6 +44,24 @@ Everything else in this batch is `requires_architect_decision: false`.
 | `GO-PLUGIN-004` (medium — **heavier item, has a real concurrency finding**, `requires_architect_decision: true`) | `internal/plugin/host.go:1240-1585` (`UnloadPlugin`, cyclomatic 63, 346 lines) | Two separable things: (1) essential complexity dominates — a documented, carefully lock-disciplined 18-category teardown sweep; ~10 of the 18 categories are still hand-inlined map-iterate-delete logic that could be extracted into small `sweepXByPlugin` helpers mirroring the pattern the file already uses for the other ~8 categories, purely mechanical, no behavior change. (2) Separately, a real narrow TOCTOU gap: the dependency check runs under an early lock/unlock (`host.go:1249-1260`), then `p.Unload()` runs lock-free by design at `host.go:1264` (documented, to avoid deadlock on re-entrant plugin calls) — a concurrent `LoadPlugin(B)` where B depends on the plugin being unloaded can pass its own dependency check in that window, leaving B loaded with a now-missing dependency. This is traced as a real, narrow race, not speculative. **Decision needed** on the TOCTOU gap: whether an unloading-in-progress guard is worth adding (closing the window) given concurrent load/unload of interdependent plugins is a real but likely rare scenario, versus accepting it as a known, documented limitation. The extraction-for-readability half can proceed independently of that decision — do the mechanical extraction regardless, and treat the TOCTOU decision as the item requiring sign-off. **Consider recommending to whoever sequences this batch that the TOCTOU-gap portion be split into its own dedicated task** if the decision is "close the gap" (a real fix, not hygiene) rather than "accept and document" — this task doesn't perform that split, it only flags the option.
 | `GO-RUNTIME-008` (informational, **no code change**) | `internal/runtime/agent/agent.go:323` (`Boot`) | Second-highest cyclomatic complexity function in the entire codebase (cyclomatic 50, cognitive 59, maintainability index 10, 234 lines) — missed by the mechanical-scan-sorted table and this cluster's own pre-flagged list. Judged **essential**, same shape as `cmdServe`: a correctly-applied `cleanup` closure verified at every one of ~12 early-return points, a genuinely necessary 3-way `select` at the end. **The only action for this row is administrative**: add `agent.Boot` to the project's master complexity/Top-10 tracking list alongside `cmdServe`/`UnloadPlugin`/`Executor.Run`/`Service.Spawn` (wherever that list is maintained — check `12-quality-ratchet-and-standards/` for the tracking doc this should feed into). Do not refactor `Boot`.
 
+### Wave 5 constraint on `GO-PLUGIN-004` / `GO-PLUGIN-006`
+
+The operator approved a selective, pressure-driven decomposition posture for
+plugin `Host` on 2026-08-23. This task's already-scoped extraction of
+`UnloadPlugin`'s hand-inlined category sweeps into named helpers is the current
+step and the evidence-gathering boundary; it is **not** authorization to migrate
+every remaining raw registration map into a sub-registry.
+
+After the helper extraction, record whether any specific named registration
+category still has materially split registration/unregistration ownership,
+unsafe or hard-to-reason-about lock coordination, or demonstrable testability
+friction. Only such a category may seed a separate narrow sub-registry task,
+following the existing `cardRulesRegistry`, `panelRegistry`, `FilterRegistry`,
+or `MutablePluginMux` pattern. If no category clears that bar, no additional
+`Host` decomposition is scheduled. This carries forward `10/03`'s approved
+principle: address concrete growing pains, not field/method counts by
+themselves.
+
 ## Done means
 
 - [ ] `GO-MCPTOOL-009`: `RemoveServer` no longer holds the registry-wide lock across the full subprocess kill+reap; a test (or existing coverage) confirms unrelated `Manager` operations aren't blocked during one server's teardown.
@@ -54,6 +72,11 @@ Everything else in this batch is `requires_architect_decision: false`.
 - [ ] `GO-MEM-009`: `ctx` propagated into `RuntimeReaper`'s underlying DB calls; shutdown can cancel an in-flight sweep.
 - [ ] `GO-CHAT-003`: `service_test_helpers.go` renamed so it no longer compiles into the production binary; production build size/symbol table no longer includes `elicitWithDuration`.
 - [ ] `GO-PLUGIN-004`: the ~10 hand-inlined teardown categories extracted into helpers mirroring the existing pattern (mechanical, done regardless); TOCTOU-gap decision recorded (close vs. accept-and-document), and if "close," either implemented here or explicitly handed off as a new follow-on task per the split option above.
+- [ ] `GO-PLUGIN-004` / `GO-PLUGIN-006`: after helper extraction, any remaining
+  named category-level ownership/locking/testability pain is recorded; either a
+  narrow sub-registry follow-up is seeded for that category or the record says
+  no category justified further decomposition. No all-category migration sweep
+  is performed.
 - [ ] `GO-RUNTIME-008`: `agent.Boot` added to the master complexity tracking list; zero code changes to `Boot` itself.
 - [ ] `go build ./...`, `go vet ./...`, and `go test ./internal/mcp/... ./internal/plugin/... ./internal/agent/... ./internal/contextbroker/... ./internal/loopdetect/... ./internal/recovery/... ./internal/elicitation/...` pass.
 

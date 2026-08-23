@@ -716,6 +716,28 @@ GO-DEP-002, GO-STORE-001, GO-STORE-005
 > addressed the sweep. It applies the guide's documented default and is
 > recorded here so it is visible and correctable rather than silently assumed.)*
 
+> **Supplemental `10/03` operator disposition (2026-08-23).** The operator
+> expressly approved treating the remaining three shape findings separately:
+>
+> - **`GO-DEP-001` / `Container`: confirmed false-positive as a decomposition
+>   target.** Its current size is accepted because it remains a wiring and
+>   lifecycle composition root; no decomposition is scheduled.
+> - **`GO-STORE-002` / `Store` method breadth: no blanket split.** The
+>   no-new-interface decision above remains binding. A consumer-defined narrow
+>   interface is justified only when a specific named consumer demonstrates
+>   concrete coupling or testability friction.
+> - **`GO-PLUGIN-006` / plugin `Host`: selective, pressure-driven
+>   decomposition only.** The existing `GO-PLUGIN-004` `UnloadPlugin` work is
+>   the concrete growing pain and the coordination point. Its already-scoped
+>   teardown-helper extraction proceeds; a later sub-registry extraction is
+>   justified only for a named registration category whose ownership,
+>   teardown, locking, or tests remain materially clearer after that step. An
+>   all-category migration sweep is explicitly rejected.
+>
+> The operator's governing rationale is to address growing pains as they
+> appear, rather than decompose for the sake of lowering field or method
+> counts. This is the approved balance for closing `10/03`.
+
 The guide is unusually directive here and the decision should not relitigate
 it: *"Treat as a gravitational-package review, not a mandatory split. Add
 narrow consumer-defined interfaces only where they solve demonstrated

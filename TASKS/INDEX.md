@@ -1102,9 +1102,9 @@ to proceed against the post-sweep signatures.
 
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
-| `10/01` | `10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md` | not-started | Wave 4 complete | AD-12 |
-| `10/02` | `10-architectural-concentration/02-selftoolstransport-decomposition.md` | not-started | `09/01` | AD-13 |
-| `10/03` | `10-architectural-concentration/03-container-and-store-review-note.md` | not-started | none | AD-14 |
+| `10/01` | `10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md` | reviewed | Wave 4 complete | AD-12 |
+| `10/02` | `10-architectural-concentration/02-selftoolstransport-decomposition.md` | reviewed | `09/01` | AD-13 |
+| `10/03` | `10-architectural-concentration/03-container-and-store-review-note.md` | reviewed | none | AD-14 |
 
 ### Wave 6a — Semantic divergence and migration drift
 

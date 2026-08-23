@@ -1323,3 +1323,120 @@ because nobody has yet established whether explicit Team-Slot messaging is inten
 direction. That question is the decision, and it belongs with whoever owns Teams. Note the related
 accepted limitation recorded in the same handoff: a Team Slot resolved lazily after routing
 installation does not retroactively receive asking-side semantic-routing rows.
+
+## 2026-08-23 — Wave 8's three mechanical-cleanup tasks carry six `requires_architect_decision` items with no queue entry
+
+**Raised by:** the Wave 5 kickoff author, running the `requires_architect_decision`-vs-`ARCHITECT-DECISIONS.md`
+cross-check across all remaining waves (not just the wave being kicked off), per the planner's
+standing instruction that this check "caught a gap in all three prior waves." Wave 5 itself (AD-12,
+AD-13, AD-14) comes up clean. Wave 8 does not.
+
+**Question / mismatch:** Six findings across `13/01`, `13/02`, and `13/05` are treated by their own
+task files as needing an explicit keep/remove/fix decision, and none has a corresponding `AD-NN`
+entry in `ARCHITECT-DECISIONS.md` — the same shape as AD-25 (`01/02`) and AD-26 (`04/04`), just not
+yet caught because Wave 8 is still three waves out. Two are `findings.json`-flagged
+`requires_architect_decision: true` and the task file agrees:
+- `GO-SVCCORE-003` (`13/02`, `internal/service/install/adapter_cleanup.go`) — wire the promised
+  rollback snapshot into `freshScaffold`, or correct the doc comment that falsely claims one exists.
+- `GO-PLUGIN-004` (`13/05`, `internal/plugin/host.go:UnloadPlugin`) — close the traced TOCTOU window
+  in concurrent plugin load/unload, or accept it as a documented limitation.
+
+Four more are `findings.json`-flagged `false`, but the task file's own authoring pass concluded a
+real decision is needed anyway and said so directly ("Decision needed:... Do not delete
+unilaterally" / equivalent) — these are task-file-driven upgrades past the audit's own triage, not
+task-file downgrades of the kind this batch's convention already treats as settled:
+- `GO-SVCCORE-007` (`13/01` Bucket B, `internal/service/agent_cycles.go`) — keep as documented
+  forward-looking scaffolding, or remove the writer and its two `internal/api` call sites.
+- `GO-MCPTOOL-005` (`13/01` Bucket B, `internal/mcp/tool_ctx.go`) — same shape, keep or remove.
+- `GO-CHAT-005` (`13/01` Bucket B, `internal/coordination/keys.go`) — wire an actual lock feature
+  using the three unconsumed constants, or remove them.
+- `GO-CHAT-006` (`13/02`, `internal/chat/hint_catalog.go`) — fix the doc comment to point at the
+  real `//go:embed` path, or add a generate step that makes the documented path real.
+
+A softer, lower-stakes trio in `13/05` (`GO-MEM-004`, `GO-MEM-005`, `GO-CHAT-008`) is also
+`findings.json`-flagged `true` with no queue entry, but that task's own Done-means already resolves
+them as "document the observation, no functional change required to close this task" — closer to
+accepted-risk-with-a-note than a live blocker. Listed here for completeness, not counted among the
+six above.
+
+**Resolution:** Not resolved — genuinely open. No change to Wave 5's own dispatch; none of these six
+gate anything in Wave 5. Recorded here, not only in `WAVE-5-HANDOFF.md`, so Wave 8's kickoff author
+doesn't have to rediscover it from scratch three waves from now.
+
+**Follow-up:** Before Wave 8's kickoff is written, each of the six needs either a real `AD-NN` entry
+in `ARCHITECT-DECISIONS.md` (mirroring how AD-25/AD-26 closed the same shape of gap) or an explicit
+operator confirmation that the task's own in-body decision process is sufficient and no queue entry
+is needed for this class of task-file-local call. Whoever writes Wave 8's kickoff should re-verify
+this list against current source first — three waves is enough time for one of these six to have
+been resolved or drifted.
+
+## 2026-08-23 — Wave 5 `10/02` found stale comments for a retired chat-slot learning consumer
+
+**Question / mismatch:** `internal/selftools/self_tools_transport.go:276-280` says
+`LearningRecaller` is read by chat-layer slot assembly, the method comment at
+`internal/selftools/self_tools_transport.go:385-390` describes `RecallToolLearnings` as a
+chat-layer slot extension, and `cmd/nanite/main.go:790-793` says the recaller is wired for that
+extension. Current production-source search finds exactly one caller of `RecallToolLearnings`:
+`internal/selftools/self_tools_describe.go:249`, where it enriches `tool_describe`; no chat-slot
+assembler calls it. The stale comments caused the first `10/02` capability map to overstate
+cross-domain coupling until fresh review caught the error.
+
+**Resolution:** The capability map and task Work Log were corrected in Wave 5 and passed fresh
+re-review. No production behavior is defective: learning recall is currently a tool-discovery
+concern, while `lesson_capture` remains the separate learning-write surface. The source comments
+were not changed because `10/02` is explicitly documentation/task-file only.
+
+**Follow-up:** Correct these three source-comment blocks in a future authorized cleanup. Wave 8
+task `13/02` is the nearest existing stale-comment pass, but its current file list and non-goals do
+not authorize silently absorbing these additional files; its kickoff author should either expand
+that scope explicitly or create a narrow follow-up.
+
+## 2026-08-23 — Wave 5 `10/01` corrected the ChatService and StreamManager inventory premises
+
+**Question / mismatch:** Task `10/01`'s audit-era context says `chatServiceImpl` has 84 methods
+(`01-chatserviceimpl-generateresponse-decomposition.md:27,65`) and treats the listed seven maps plus
+two companions as one cohesive runtime-session cluster (`:65-77`). Current-source reconciliation
+finds 52 fields and 87 production pointer-receiver methods across 19 files. The proposed cluster is
+not cohesive as written: `toolPartitionStates` is tool-selection state, while a real runtime-session
+owner also needs `agentDeps`, `agentSessionsManager`, and `activeSessionContextBlocks` from
+`internal/service/chat.go:295-301,376-386`. The task's StreamManager description also drifted:
+`internal/service/stream.go:17-33` now contains seven `sync.Map`s, one duration, and one atomic
+counter, with 25 production pointer-receiver methods. The same inventory found `commands`,
+`dbPath`, and `adapterRegistry` (`internal/service/chat.go:232,261-264`) are assigned during
+construction but have zero production receiver reads.
+
+**Resolution:** Wave 5's reviewed responsibility map records the current 52-field/87-method shape,
+assigns every field and method exactly once, corrects the runtime-session boundary, and uses the
+current 9-field/25-method StreamManager shape as precedent. No production field was moved or
+removed and no extraction task was created; this was characterization and architect-decision input
+only.
+
+**Follow-up:** AD-12 remains open for operator review of the map. Do not schedule an extraction
+until that decision. If a later authorized cleanup touches ChatService construction, re-verify
+whether `commands`, `dbPath`, and `adapterRegistry` should be wired to a real receiver use or
+removed; the zero-read observation alone is not authorization to delete them.
+
+## 2026-08-23 — Wave 5 `10/03` corrected concentration metrics and a retired Store-interface example
+
+**Question / mismatch:** Task `10/03` carried audit-era counts of Container 60 fields/2 methods,
+Store 349 methods, 30 package importers/76 `internal/service` references, and cited
+`grounding.ConsultationLogger` as a live consumer-defined Store interface. Current-source
+reconciliation finds Container at 64 named fields and 4 production receiver methods (the two new
+private methods are shutdown helpers), Store at 372 production receiver methods across 62 of 66
+production Go files, 32 exact root-package importers, and 61 literal `*store.Store` occurrences
+across 25 `internal/service` non-test files. Wave 4 commit `cc019cff` retired
+`grounding.ConsultationLogger` and `internal/store/grounding_log.go`. Prefix-based Store-import
+counting returns 33 only by incorrectly counting `internal/store`'s import of its distinct
+`internal/store/seedcatalog` subpackage.
+
+**Resolution:** The reviewed `10/03` note and all five findings' revalidation records now carry the
+current metrics and live narrow-interface examples. The operator expressly approved the balanced
+disposition on 2026-08-23: no Container decomposition; no blanket Store split or interface pass;
+and selective Host decomposition only when the existing `GO-PLUGIN-004` work identifies a named
+category with concrete ownership, teardown, locking, or testability pain. An all-category Host
+migration sweep is rejected. AD-14 and the Wave 8 `13/05` task record the same constraint.
+
+**Follow-up:** `GO-PLUGIN-004`'s already-scoped `UnloadPlugin` helper extraction is the immediate
+Host step and evidence-gathering boundary. After it, seed a separate narrow sub-registry task only
+if a named category still clears the documented pain threshold. Otherwise schedule no further
+Host decomposition. Container and Store receive no follow-up from metrics alone.

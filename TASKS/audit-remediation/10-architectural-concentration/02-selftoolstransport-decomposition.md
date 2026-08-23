@@ -1,7 +1,7 @@
 # `SelfToolsTransport` — capability-domain map and dispatch-direction decision
 
 **Phase:** Audit remediation — Wave 5 (architectural concentration)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none (self-contained planning task, independent of `01-chatserviceimpl-generateresponse-decomposition.md` — different package, different type, no shared code)
 **Touches:** `internal/selftools/self_tools_transport.go` (`SelfToolsTransport` struct and `CallTool` switch), the other files implementing `SelfToolsTransport`'s handler methods in `internal/selftools/` (exact file list to be confirmed by the worker — the type's 81 methods are not all in one file). Read-only reference: `internal/toolclient/broker.go`, `internal/toolclient/intent.go`, `internal/toolclient/ranking.go`, `internal/toolclient/meta_tools.go` (`ToolClient` — a separate type, covered as the second finding in this same file, see below).
 **requires_architect_decision:** true — per the remediation guide's §9 decision queue item 6 ("`SelfToolsTransport` decomposition boundaries").
@@ -153,18 +153,79 @@ Zero production risk for both parts — this task produces a written map and two
 
 ## Done means
 
-- [ ] Part A: a capability-domain map for `SelfToolsTransport` exists, covering every tool name in the current `CallTool` switch (re-verified against current source, not assumed from this task's sampled list), with fields/methods/shared-state/dependencies noted per domain.
-- [ ] Part A: an explicit direction recommendation exists (delegate to narrower capability owners, or not), grounded in the map's evidence, with a stated rationale.
-- [ ] Part A: if the direction is "delegate," 2-4 candidate domains for a first follow-on extraction are named, without any extraction being performed in this task.
-- [ ] Part A: the "do not split solely to reduce field/method counts" instruction is explicitly honored — the recommendation's rationale references domain cohesion/coupling evidence, not raw counts.
-- [ ] Part B: `ToolClient`'s shape is re-confirmed against current source and recorded as a closed, no-action finding in the Work Log.
-- [ ] No production code in `internal/selftools/` or `internal/toolclient/` is modified by this task.
+- [x] Part A: a capability-domain map for `SelfToolsTransport` exists, covering every tool name in the current `CallTool` switch (re-verified against current source, not assumed from this task's sampled list), with fields/methods/shared-state/dependencies noted per domain.
+- [x] Part A: an explicit direction recommendation exists (delegate to narrower capability owners, or not), grounded in the map's evidence, with a stated rationale.
+- [x] Part A: if the direction is "delegate," 2-4 candidate domains for a first follow-on extraction are named, without any extraction being performed in this task.
+- [x] Part A: the "do not split solely to reduce field/method counts" instruction is explicitly honored — the recommendation's rationale references domain cohesion/coupling evidence, not raw counts.
+- [x] Part B: `ToolClient`'s shape is re-confirmed against current source and recorded as a closed, no-action finding in the Work Log.
+- [x] No production code in `internal/selftools/` or `internal/toolclient/` is modified by this task.
 - [ ] An architect has reviewed and signed off on Part A's direction recommendation before any follow-on `SelfToolsTransport` extraction task is created or dispatched.
-- [ ] `go build ./...`, `go vet ./...`, and `go test ./internal/selftools/... ./internal/toolclient/...` all pass clean.
+- [x] `go build ./...`, `go vet ./...`, and `go test ./internal/selftools/... ./internal/toolclient/...` all pass clean.
 
 ## Work log
 
-<!-- Worker fills in: the capability-domain map (inline or linked), the direction recommendation and its rationale, the ToolClient re-confirmation, any deviation from plan and why. -->
+### 2026-08-23 — Worker implementation
+
+- Produced the full capability map at
+  [`docs/engineering/selftoolstransport-capability-map.md`](../../../docs/engineering/selftoolstransport-capability-map.md).
+  It accounts for all 68 current `CallTool` names, all 31 fields, and all 82
+  production receiver methods across the 19 files that implement methods on
+  `SelfToolsTransport`. The three `scratchpad_*` names are included explicitly
+  as one inline transport-rejection clause because their real state is owned by
+  the chat loop.
+- Current-source corrections to the audit/task baseline: the primary file is
+  now 2,481 lines (not 2,431), the type has 82 production receiver methods (not
+  81), and the dispatch has 68 names in 66 case clauses (not approximately 62).
+  Wave 4's grounding retirement remains complete: there is no
+  `internal/grounding` import; the two `grounding` matches in
+  `self_tools_transport.go` are comments describing source/tool-use-ID
+  validation and are unrelated to the retired subsystem.
+- Recommendation for AD-13: use **selective delegation**. Keep
+  `SelfToolsTransport` as the MCP catalog/dispatch adapter; extract only domains
+  whose cohesive policy and state would actually move. Do not impose a uniform
+  owner per domain on stateless singletons or handlers already delegating to a
+  narrow service. This conclusion is based on field/helper sharing and service
+  boundaries, not on the raw field/method totals.
+- Subject to architect sign-off, the four strongest first candidates are:
+  messaging plus messaging's session-handoff operations; todo/plan work
+  tracking; agent-profile management/source resolution; and one combined
+  card/panel presentation boundary that keeps the shared trust gate singular.
+  No extraction or follow-on task was created.
+- Explicitly mapped the main hard seams: the widely shared `Store`, subagent
+  use by both lifecycle and skill composition, `DispatchWrapper` shared by task
+  and workflow launch, panel access shared by cards and panel signals, learning
+  recall's non-dispatch caller, and the shared recursion/project-resolution
+  helpers.
+- Coverage observation only (no scope expansion): messaging operations beyond
+  directive-send elicitation, background create/cancel, and Engine
+  navigate/refresh have notably thin direct handler coverage in this package.
+  No tests were added because production behavior did not change.
+
+#### Part B — `ToolClient` current-source confirmation
+
+- `ToolClient` now has **20** production receiver methods across **3** files:
+  `broker.go` (18), `intent.go` (1), and `meta_tools.go` (1). The audit's 26/4
+  shape is stale: Wave 4 deleted `ranking.go` and the augmented-selection path.
+  `permissions.go` remains as package-level safety helpers but implements no
+  `ToolClient` receiver methods.
+- The remaining methods still implement the type's three adjacent concerns —
+  catalog/selection, grant/policy filtering, and execution — on one coherent
+  tool-broker surface. The source does not show an unrelated responsibility or
+  a state boundary that would justify new collaborators. GO-MCPTOOL-007 is
+  therefore closed as **no action**: no split, extraction, follow-on task, or
+  restoration of deleted ranking support.
+
+#### Verification
+
+- `go build ./internal/selftools/...` — pass.
+- `go vet ./internal/selftools/...` — pass.
+- `go test ./internal/selftools/...` — pass.
+- `go build ./...` — pass.
+- `go vet ./...` — pass.
+- `go test ./internal/selftools/... ./internal/toolclient/...` — pass.
+- `git diff --check` — pass.
+- Scope check: documentation/task metadata only; no production or test file in
+  `internal/selftools/` or `internal/toolclient/` changed.
 
 ## Review notes
 

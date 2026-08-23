@@ -366,6 +366,26 @@ func TestGenerateResponseCharacterization_PlainNoToolTurn(t *testing.T) {
 	}
 }
 
+func TestGenerateResponseCharacterization_PersistenceFailureSuppressesStreamEnd(t *testing.T) {
+	f := newCharacterizationFixture(t, nil)
+	f.provider.steps = []characterizationProviderStep{{
+		events: doneEvents("cannot persist"),
+		beforeReturn: func() {
+			if err := f.st.Close(context.Background()); err != nil {
+				t.Fatalf("close store before final persistence: %v", err)
+			}
+		},
+	}}
+	events := f.run(t, "assistant-persistence-failure")
+
+	if findEvent(events, "error") == nil {
+		t.Fatalf("events = %v, want persistence error", eventTypes(events))
+	}
+	if findEvent(events, "stream_end") != nil {
+		t.Fatalf("events = %v, stream_end must follow successful persistence", eventTypes(events))
+	}
+}
+
 func TestGenerateResponseCharacterization_DisabledAgentTerminatesBeforeStreamStart(t *testing.T) {
 	f := newCharacterizationFixture(t, []characterizationProviderStep{{events: doneEvents("must not run")}})
 	f.svc.agents.(*characterizationAgents).agent.Status = "disabled"

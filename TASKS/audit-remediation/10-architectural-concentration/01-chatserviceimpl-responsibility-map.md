@@ -481,3 +481,7 @@ inbox + 3 inspector + 7 enrichment/utility + 1 handoff + 1 loop-termination =
   ordered move. The provider/tool loop remains visible in the coordinator and
   interprets explicit continuation/finish outcomes. Current coordinator
   complexity is cognitive 358 / cyclop 164 / gocyclo 162.
+- Phase 6 (`finalizeRun`) extracted on 2026-08-23 as the fourth dependency-
+  ordered move. Persistence, outcome bookkeeping, terminal events, and title/
+  tag scheduling remain one ordered action. Current coordinator complexity is
+  cognitive 284 / cyclop 108 / gocyclo 106.

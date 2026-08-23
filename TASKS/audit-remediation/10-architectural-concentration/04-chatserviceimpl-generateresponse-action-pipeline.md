@@ -284,3 +284,15 @@ read-only and must not edit or claim operator approval.
   `run.tools` only as the Go state expression. Added a production-door
   pre-stream provider-error assertion pinning structured detail key `tools`
   and explicitly rejecting `run.tools`.
+- Phase 6 complete (fourth extraction): extracted `finalizeRun` with pending-
+  envelope emission before parsing, envelope-data filtering before routed
+  broadcasts, assistant persistence before usage/metrics and `stream_end`, PTY
+  success immediately before `stream_end`, and post-response scheduling in the
+  characterized order. Added a production-door persistence-failure test that
+  proves an error suppresses `stream_end`. Focused behavior passed; focused
+  race passed in 119.369s; full non-race service passed in 88.659s; service/all
+  build and vet and diff check passed. Audit lint exited 1 on historical
+  diagnostics; coordinator complexity decreased to cognitive 284 / cyclop 108
+  / gocyclo 106. `finalizeRun` is cohesive at cognitive 75 / cyclop 58 /
+  gocyclo 58 / maintainability 9, well below and distinct from the original
+  coordinator monolith.

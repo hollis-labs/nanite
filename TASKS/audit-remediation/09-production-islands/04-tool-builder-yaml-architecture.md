@@ -381,7 +381,19 @@ comment for `adapt.go` specifically.
   contains no symbol from the retired root-tool architecture; its remaining
   findings are pre-existing, out-of-scope items (including
   `stash.ComposeCategorizers`). No escalation.
+- 2026-08-23 review-fix worker pass — Updated three comments that survived the
+  retirement but still described the removed root-tool adapter/registry
+  architecture. `GetToolMeta` now describes its actual suffix/substring
+  checks, `Categorizer` names `BuiltinCategorizer` as the production
+  implementation, and `ComposeCategorizers` describes generic ordered
+  fallback composition. Runtime behavior is unchanged. Focused stash and
+  service metadata tests passed, as did `gofmt` and `git diff --check`.
 
 ## Review notes
 
-<Reviewer fills this in.>
+- Fresh-review failure dispatched for correction: three comments still pointed
+  readers toward the retired adapter/registry architecture in
+  `internal/service/tool.go`, `internal/tool/stash/stash.go`, and
+  `internal/tool/stash/categories.go`.
+- Review-fix worker updated all three comments to describe current behavior
+  only. Independent re-review remains pending.

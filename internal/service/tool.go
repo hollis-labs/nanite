@@ -694,11 +694,11 @@ func (s *toolServiceImpl) ListSummaries() []toolclient.ToolSummary {
 
 // GetToolMeta implements ToolService. Returns safety metadata for a tool.
 //
-// IsReadOnly/IsDestructive still use name-based heuristics consistent with
-// internal/tool/adapt.go patterns -- those two fields are out of scope for
-// TASKS/phase-4/07-tool-concurrency-safety-classification.md, which only
-// covers IsConcurrencySafe (see that task file and architecture/
-// 03-steering.md's "Two correctness gaps carried into implementation").
+// IsReadOnly/IsDestructive use the name-based suffix and substring checks
+// below. Those two fields are out of scope for TASKS/phase-4/07-tool-
+// concurrency-safety-classification.md, which only covers IsConcurrencySafe
+// (see that task file and architecture/03-steering.md's "Two correctness gaps
+// carried into implementation").
 //
 // IsConcurrencySafe reads the tool's DECLARED classification from the
 // known_tools catalog (known_tools.concurrency_safe, populated at boot by

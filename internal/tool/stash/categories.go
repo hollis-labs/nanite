@@ -114,8 +114,8 @@ func BuiltinCategorizer() Categorizer {
 }
 
 // ComposeCategorizers returns a Categorizer that tries each input in order and
-// returns the first non-empty result. Useful for stacking (e.g., plugin-
-// specific map + registry fallback).
+// returns the first non-empty result. This lets callers layer more-specific
+// categorizers ahead of broader fallbacks.
 func ComposeCategorizers(cs ...Categorizer) Categorizer {
 	return CategorizerFunc(func(name string) string {
 		for _, c := range cs {

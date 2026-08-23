@@ -1,7 +1,7 @@
 # `generateResponse` — implement the approved six-action pipeline
 
 **Phase:** Audit remediation — Wave 5 reopened implementation beat
-**Status:** in-progress
+**Status:** implemented
 **Depends on:** reviewed evidence/characterization task `10/01`; AD-12 decided
 **Gated on:** none — the operator expressly approved AD-12 on 2026-08-23
 **Findings:** GO-SVCEXEC-001, GO-SVCEXEC-002
@@ -155,28 +155,28 @@ wrong, characterize and log it; do not silently fix it.
 
 ## Acceptance criteria
 
-- [ ] The six named actions exist as private methods with explicit state and
+- [x] The six named actions exist as private methods with explicit state and
       typed outcomes.
-- [ ] `generateResponse` remains the only coordinator and visibly owns all
+- [x] `generateResponse` remains the only coordinator and visibly owns all
       loop/terminal routing and lifecycle cleanup.
-- [ ] Each extraction is a separate commit with its focused tests and recorded
+- [x] Each extraction is a separate commit with its focused tests and recorded
       complexity delta.
-- [ ] The existing production-door characterization suite remains green.
-- [ ] Provider cancel/span ownership is exactly-once and retry iteration
+- [x] The existing production-door characterization suite remains green.
+- [x] Provider cancel/span ownership is exactly-once and retry iteration
       accounting is unchanged.
-- [ ] Streaming, tool-event, envelope/filter, persistence, PTY, and terminal
+- [x] Streaming, tool-event, envelope/filter, persistence, PTY, and terminal
       event ordering remain unchanged.
-- [ ] Cognitive and cyclomatic complexity of `generateResponse` decreases
+- [x] Cognitive and cyclomatic complexity of `generateResponse` decreases
       after every extraction; no step merely moves the complete original
       complexity into one new action.
-- [ ] The final coordinator is recognizable and materially smaller; extracted
+- [x] The final coordinator is recognizable and materially smaller; extracted
       actions are cohesive even if a particular action remains above generic
       audit thresholds because of essential local branching.
-- [ ] No production edit is needed outside `chat_generate.go` and the new
+- [x] No production edit is needed outside `chat_generate.go` and the new
       action/state files. Any need to edit `chat.go`, `chat_loop_state.go`,
       `chat_tool_executor.go`, `context.go`, or `tool.go` must stop for
       orchestrator review as scope drift.
-- [ ] No `chatServiceImpl` field cluster/type extraction or rewrite is included.
+- [x] No `chatServiceImpl` field cluster/type extraction or rewrite is included.
 
 ## Per-phase verification
 
@@ -241,7 +241,7 @@ read-only and must not edit or claim operator approval.
   `generationLifecycle`, and immutable `turnSetup` handoff; added a
   production-door disabled-agent characterization that pins termination before
   `stream_start` and provider invocation.
-- Phase 1 complete: extracted `prepareTurn` without moving root-span or deferred
+- Phase 1 complete at `4c7111b9`: extracted `prepareTurn` without moving root-span or deferred
   cleanup ownership. Focused behavior passed; focused race passed in 102.333s;
   full non-race service passed in 87.641s; service/all build and vet and
   `git diff --check` passed. The required aggregate service race reproduced the
@@ -254,7 +254,7 @@ read-only and must not edit or claim operator approval.
   cognitive 397 / cyclop 185 / gocyclo 183. `prepareTurn` is cohesive at
   cognitive 62 / cyclop 45 / gocyclo 44 / maintainability 8 rather than a move
   of the original monolith.
-- Phase 2 complete: extracted `initializeRun` and established pointer-owned
+- Phase 2 complete at `fa915a77`: extracted `initializeRun` and established pointer-owned
   `runState` for the loop, mutable request state, accumulators, usage, and
   reasoning configuration. `stream_start` still precedes the pre-loop
   compaction gate; a strengthened production-door test pins that order. The
@@ -267,7 +267,7 @@ read-only and must not edit or claim operator approval.
   complexity decreased again to cognitive 389 / cyclop 177 / gocyclo 175.
   `initializeRun` did not trigger cognitive/cyclomatic/maintainability
   diagnostics (only the configured >100-line `funlen` diagnostic at 114).
-- Phase 5 complete (third extraction in the required dependency order):
+- Phase 5 complete at `a04e7e98` (third extraction in the required dependency order):
   extracted `settleToolTurn`, composing the existing discovery/precheck/batch/
   postprocess pipeline and returning explicit continue/finish outcomes to the
   coordinator. Existing serial, multi-tool ordering, and real plugin policy
@@ -277,14 +277,14 @@ read-only and must not edit or claim operator approval.
   diagnostics; coordinator complexity decreased to cognitive 358 / cyclop 164
   / gocyclo 162. `settleToolTurn` is cognitive 21 / cyclop 17 / gocyclo 17,
   a bounded composition action rather than relocated coordinator complexity.
-- Review correction after the Phase 2 midpoint review: the mechanical mutable-
+- Review correction at `97607ff8` after the Phase 2 midpoint review: the mechanical mutable-
   state qualification had leaked `run.tools` into observable telemetry keys,
   JSON detail keys, and continuation reason text. Restored all observable
   literals to their characterized `tools` spelling while retaining
   `run.tools` only as the Go state expression. Added a production-door
   pre-stream provider-error assertion pinning structured detail key `tools`
   and explicitly rejecting `run.tools`.
-- Phase 6 complete (fourth extraction): extracted `finalizeRun` with pending-
+- Phase 6 complete at `290a95b1` (fourth extraction): extracted `finalizeRun` with pending-
   envelope emission before parsing, envelope-data filtering before routed
   broadcasts, assistant persistence before usage/metrics and `stream_end`, PTY
   success immediately before `stream_end`, and post-response scheduling in the
@@ -296,7 +296,7 @@ read-only and must not edit or claim operator approval.
   / gocyclo 106. `finalizeRun` is cohesive at cognitive 75 / cyclop 58 /
   gocyclo 58 / maintainability 9, well below and distinct from the original
   coordinator monolith.
-- Phase 4 complete (fifth extraction): extracted `consumeProviderIteration`
+- Phase 4 complete at `38572740` (fifth extraction): extracted `consumeProviderIteration`
   with the provider channel/timer loop, event normalization, phase-delayed
   delta flushing, usage aggregation, PTY presence, and mid-stream recovery.
   `providerAttempt` now provides idempotent cancel/span ownership for the
@@ -313,7 +313,7 @@ read-only and must not edit or claim operator approval.
   `consumeProviderIteration` is cognitive 109 / cyclop 52 / gocyclo 51 /
   maintainability 9, a stream-normalization action rather than a relocation of
   the original coordinator.
-- Phase 3 complete (sixth extraction): extracted `requestProviderIteration`
+- Phase 3 complete at `7b2c0b0b` (sixth extraction): extracted `requestProviderIteration`
   with hard stops, cancellation/budget termination, plugin hooks, request
   telemetry, API/CLI invocation, and all pre-stream recovery outcomes. The
   coordinator visibly owns request and consume retry decrements plus every
@@ -329,3 +329,14 @@ read-only and must not edit or claim operator approval.
   maintainability 27. `requestProviderIteration` is cognitive 87 / cyclop 47 /
   gocyclo 46 / maintainability 5; the six actions are distinct bounded phase
   owners and the original 458 / 228 / 225 coordinator monolith is gone.
+- Final verification: the one coordinated final-state aggregate race command,
+  `go test -race ./internal/service/... -timeout 20m -count=1`, exited 1 after
+  1200.838s with `test timed out after 20m0s` while
+  `TestDurableAgentStartCreatesOrReusesSession` was in SQLite-backed test-store
+  setup. No `DATA RACE` report appeared. This reproduces the known
+  migration-heavy aggregate limitation and is recorded as a TIMEOUT, not a
+  pass. The required repository-wide `go test ./... -count=1` passed, including
+  `internal/service` in 95.338s. Fresh final review passed at `7b2c0b0b`,
+  independently confirming all six actions, coordinator-only routing and
+  lifecycle ownership, exactly-once provider cleanup, preserved ordering,
+  additive coverage, scope compliance, and the monotonic complexity decrease.

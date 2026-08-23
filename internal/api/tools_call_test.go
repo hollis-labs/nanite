@@ -378,7 +378,7 @@ func TestHandleSelfToolCall_CardShowBroadcastsEnvelope(t *testing.T) {
 func TestHandleSelfToolCall_StampsSessionAndDispatches(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
 	st := selftools.NewSelfToolsTransport(s)
-	st.TodoStore = s // *store.Store satisfies the TodoStore interface
+	st.WorkTrackingTools = selftools.NewWorkTrackingTools(s, s, nil)
 	a.SetSelfTools(st)
 
 	rec := postToolCall(t, a, map[string]any{

@@ -59,7 +59,7 @@ func (st *SelfToolsTransport) callSetReminder(ctx context.Context, args map[stri
 	projectID := strArg(args, "project_id", "")
 	if scope == store.ReminderScopeProject {
 		if projectID == "" {
-			projectID = st.resolveProjectIDFromSession(sessionID)
+			projectID = resolveProjectIDFromSession(st.Store, sessionID)
 		}
 		if projectID == "" {
 			return mcp.ErrorResult("set_reminder: scope=project requires project_id (current session has no project)"), nil
@@ -123,7 +123,7 @@ func (st *SelfToolsTransport) callPin(ctx context.Context, args map[string]any) 
 	projectID := strArg(args, "project_id", "")
 	if scope == store.PinScopeProject {
 		if projectID == "" {
-			projectID = st.resolveProjectIDFromSession(sessionID)
+			projectID = resolveProjectIDFromSession(st.Store, sessionID)
 		}
 		if projectID == "" {
 			return mcp.ErrorResult("pin: scope=project requires project_id (current session has no project)"), nil

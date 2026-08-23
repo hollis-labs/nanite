@@ -720,15 +720,15 @@ func cmdServeWithInitializers(
 		slog.Info("main: seeded task_update_report reactions", "count", n)
 	}
 
-	// Wire todo/plan store into the self-tools transport.
-	selfTools.TodoStore = s
+	// Replace the nil-safe work-tracking collaborator once persistence and
+	// stream broadcasting are both available.
+	selfTools.WorkTrackingTools = selftools.NewWorkTrackingTools(s, s, container.Streams)
 	// Messaging + its directive-elicitation policy are one collaborator;
 	// replace the constructor's nil-safe instance once runtime services exist.
 	selfTools.MessagingTools = selftools.NewMessagingTools(container.Messaging, container.Elicitation)
 	selfTools.Subagent = container.Subagent
 	selfTools.SkillVendor = container.SkillVendor
 	selfTools.Background = container.Background
-	selfTools.Work = container.Streams
 	// Task 34: wire the shared managed-agent write path's classifier so
 	// agent_create/agent_update gate on ManageClass.Editable() the same
 	// way the REST API's requireMutableAgent does — container.AgentConfig

@@ -197,9 +197,9 @@ func (b *countingBroadcaster) BroadcastWorkChanged() { b.calls++ }
 // not. CW-20260418-0044.
 func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 	st := newSelfTools(t)
-	st.TodoStore = st.Store
+	st.WorkTrackingTools.Store = st.Store
 	b := &countingBroadcaster{}
-	st.Work = b
+	st.WorkTrackingTools.Broadcaster = b
 	ctx := context.Background()
 
 	// Create todo → 1 broadcast.
@@ -212,36 +212,85 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 	if b.calls != 1 {
 		t.Fatalf("expected 1 broadcast after todo_create, got %d", b.calls)
 	}
+	todos, err := st.Store.ListTodos(context.Background(), store.TodoFilter{Scope: "session", ScopeID: "sess-wire"})
+	if err != nil || len(todos) != 1 {
+		t.Fatalf("expected 1 todo, got %d (err=%v)", len(todos), err)
+	}
+
+	// Update todo → exactly one additional broadcast.
+	r, err = st.CallTool(ctx, "todo_update", map[string]any{"id": todos[0].ID, "status": "done"})
+	if err != nil || r.IsError {
+		t.Fatalf("todo_update failed: %v / %s", err, r.Content[0].Text)
+	}
+	if b.calls != 2 {
+		t.Fatalf("expected 2 broadcasts after todo_update, got %d", b.calls)
+	}
 
 	// List is read-only — no broadcast.
 	if _, err := st.CallTool(ctx, "todo_list", map[string]any{"scope": "session"}); err != nil {
 		t.Fatal(err)
 	}
-	if b.calls != 1 {
-		t.Fatalf("expected 1 broadcast after read-only list, got %d", b.calls)
+	if b.calls != 2 {
+		t.Fatalf("expected 2 broadcasts after read-only list, got %d", b.calls)
 	}
 
-	// Create plan → 2 broadcasts.
+	// Create plan → exactly one additional broadcast.
 	if _, err := st.CallTool(ctx, "plan_create", map[string]any{
 		"title": "wire plan", "scope": "session", "scope_id": "sess-wire",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if b.calls != 2 {
-		t.Fatalf("expected 2 broadcasts after plan_create, got %d", b.calls)
+	if b.calls != 3 {
+		t.Fatalf("expected 3 broadcasts after plan_create, got %d", b.calls)
 	}
 
 	plans, _ := st.Store.ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "sess-wire"})
 	if len(plans) != 1 {
 		t.Fatalf("expected 1 plan, got %d", len(plans))
 	}
+	planID := plans[0].ID
 
-	// Delete plan → 3 broadcasts.
-	if _, err := st.CallTool(ctx, "plan_delete", map[string]any{"id": plans[0].ID}); err != nil {
-		t.Fatal(err)
+	// Plan list/get are read-only.
+	for _, read := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "plan_list", args: map[string]any{"scope": "session", "scope_id": "sess-wire"}},
+		{name: "plan_get", args: map[string]any{"id": planID}},
+	} {
+		r, err := st.CallTool(ctx, read.name, read.args)
+		if err != nil || r.IsError {
+			t.Fatalf("%s failed: %v / %#v", read.name, err, r.Content)
+		}
 	}
 	if b.calls != 3 {
-		t.Fatalf("expected 3 broadcasts after plan_delete, got %d", b.calls)
+		t.Fatalf("expected reads not to broadcast, got %d calls", b.calls)
+	}
+
+	// Plan update and step add each broadcast exactly once.
+	for _, mutation := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "plan_update", args: map[string]any{"id": planID, "status": "in_progress"}},
+		{name: "plan_step_add", args: map[string]any{"plan_id": planID, "steps": `[{"title":"wire step"}]`}},
+	} {
+		before := b.calls
+		r, err := st.CallTool(ctx, mutation.name, mutation.args)
+		if err != nil || r.IsError {
+			t.Fatalf("%s failed: %v / %#v", mutation.name, err, r.Content)
+		}
+		if b.calls != before+1 {
+			t.Fatalf("%s broadcasts = %d, want exactly one additional call", mutation.name, b.calls-before)
+		}
+	}
+
+	// Delete plan → exactly one additional broadcast.
+	if _, err := st.CallTool(ctx, "plan_delete", map[string]any{"id": planID}); err != nil {
+		t.Fatal(err)
+	}
+	if b.calls != 6 {
+		t.Fatalf("expected 6 total successful-mutation broadcasts, got %d", b.calls)
 	}
 }
 
@@ -253,7 +302,7 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 // correctly. CW-20260418-0045.
 func TestSelfToolsTransport_TodoListEmitsEnvelope(t *testing.T) {
 	st := newSelfTools(t)
-	st.TodoStore = st.Store
+	st.WorkTrackingTools.Store = st.Store
 	ctx := context.Background()
 
 	// With scope: envelope must appear and carry scope + scope_id.
@@ -296,7 +345,7 @@ func TestSelfToolsTransport_TodoListEmitsEnvelope(t *testing.T) {
 // filter never matches).
 func TestSelfToolsTransport_PlanCreate_AutoFillsSessionIDFromCtx(t *testing.T) {
 	st := newSelfTools(t)
-	st.TodoStore = st.Store
+	st.WorkTrackingTools.Store = st.Store
 	ctx := mcp.WithSessionID(context.Background(), "ctx-session-xyz")
 
 	r, err := st.CallTool(ctx, "plan_create", map[string]any{
@@ -318,7 +367,7 @@ func TestSelfToolsTransport_PlanCreate_AutoFillsSessionIDFromCtx(t *testing.T) {
 // rather than silently writing an empty scope_id.
 func TestSelfToolsTransport_PlanCreate_ErrorsWithoutSessionID(t *testing.T) {
 	st := newSelfTools(t)
-	st.TodoStore = st.Store
+	st.WorkTrackingTools.Store = st.Store
 
 	r, _ := st.CallTool(context.Background(), "plan_create", map[string]any{
 		"title": "no scope_id",
@@ -329,12 +378,72 @@ func TestSelfToolsTransport_PlanCreate_ErrorsWithoutSessionID(t *testing.T) {
 	}
 }
 
+// TestSelfToolsTransport_ProjectScopeAutofillCharacterization pins the source
+// correction found during 10/05: todo/reminder/pin share session-to-project
+// lookup, while plans have no project_id field and retain their older
+// non-workspace scope_id=session_id behavior.
+func TestSelfToolsTransport_ProjectScopeAutofillCharacterization(t *testing.T) {
+	st := newSelfTools(t)
+	st.WorkTrackingTools.Store = st.Store
+
+	project := &store.Project{ID: "project-autofill", Name: "Autofill Project"}
+	if err := st.Store.CreateProject(t.Context(), project); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	session := &store.Session{ProjectID: project.ID}
+	if err := st.Store.CreateSession(t.Context(), session); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	ctx := mcp.WithSessionID(t.Context(), session.ID)
+
+	for _, call := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "todo_create", args: map[string]any{"title": "project todo", "scope": store.TodoScopeProject}},
+		{name: "reminder_set", args: map[string]any{
+			"text": "project reminder", "scope": store.ReminderScopeProject,
+			"trigger": map[string]any{"type": "turn_count", "n": 1},
+		}},
+		{name: "context_pin", args: map[string]any{"content": "project pin", "scope": store.PinScopeProject}},
+	} {
+		res, err := st.CallTool(ctx, call.name, call.args)
+		if err != nil || res.IsError {
+			t.Fatalf("%s failed: %v / %#v", call.name, err, res.Content)
+		}
+	}
+
+	todos, err := st.Store.ListTodos(t.Context(), store.TodoFilter{Scope: store.TodoScopeProject, ProjectID: project.ID})
+	if err != nil || len(todos) != 1 || todos[0].ProjectID != project.ID || todos[0].ScopeID != project.ID {
+		t.Fatalf("project todo autofill = %#v (err=%v), want project_id/scope_id %q", todos, err, project.ID)
+	}
+	reminders, err := st.Store.ListUnfiredReminders(t.Context(), session.ID)
+	if err != nil || len(reminders) != 1 || reminders[0].ProjectID != project.ID {
+		t.Fatalf("project reminder autofill = %#v (err=%v), want project_id %q", reminders, err, project.ID)
+	}
+	pins, err := st.Store.ListPinnedContent(t.Context(), session.ID)
+	if err != nil || len(pins) != 1 || pins[0].ProjectID != project.ID {
+		t.Fatalf("project pin autofill = %#v (err=%v), want project_id %q", pins, err, project.ID)
+	}
+
+	// Preserve the pre-extraction plan rule: project is merely another
+	// non-workspace plan scope, so missing scope_id is filled with session ID.
+	res, err := st.CallTool(ctx, "plan_create", map[string]any{"title": "legacy project plan", "scope": "project"})
+	if err != nil || res.IsError {
+		t.Fatalf("plan_create failed: %v / %#v", err, res.Content)
+	}
+	plans, err := st.Store.ListPlans(t.Context(), store.PlanFilter{Scope: "project", ScopeID: session.ID})
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plan project-scope characterization = %#v (err=%v), want scope_id=session %q", plans, err, session.ID)
+	}
+}
+
 // TestSelfToolsTransport_PlanStepAdd_HappyPath verifies appending steps via
 // the MCP tool surface returns success, preserves existing step IDs, and
 // emits the appended-step JSON. CW-20260430-0001 (SP1).
 func TestSelfToolsTransport_PlanStepAdd_HappyPath(t *testing.T) {
 	st := newSelfTools(t)
-	st.TodoStore = st.Store
+	st.WorkTrackingTools.Store = st.Store
 	ctx := context.Background()
 
 	// Seed a plan with one step via plan_create.
@@ -397,7 +506,7 @@ func TestSelfToolsTransport_PlanStepAdd_HappyPath(t *testing.T) {
 // no-op. CW-20260430-0001 (SP1).
 func TestSelfToolsTransport_PlanStepAdd_PlanIDNotFound(t *testing.T) {
 	st := newSelfTools(t)
-	st.TodoStore = st.Store
+	st.WorkTrackingTools.Store = st.Store
 	ctx := context.Background()
 
 	r, err := st.CallTool(ctx, "plan_step_add", map[string]any{
@@ -550,7 +659,7 @@ func TestExtractLiteralSubagentOutput_NonLiteralPrompt(t *testing.T) {
 // self-service tools (create → list → get → delete).
 func TestSelfToolsTransport_PlanCRUD(t *testing.T) {
 	st := newSelfTools(t)
-	st.TodoStore = st.Store
+	st.WorkTrackingTools.Store = st.Store
 	ctx := context.Background()
 
 	createResult, err := st.CallTool(ctx, "plan_create", map[string]any{

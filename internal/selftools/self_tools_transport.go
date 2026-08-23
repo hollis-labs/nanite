@@ -33,14 +33,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
-// WorkBroadcaster notifies connected UI clients that session-scoped todos or
-// plans have changed so the Work drawer can refresh. Defined as a local
-// interface to avoid importing the service package (which would be circular).
-// CW-20260418-0044.
-type WorkBroadcaster interface {
-	BroadcastWorkChanged()
-}
-
 // PanelSignalSink is the narrow surface the panel-control tools use to push
 // panel_signal stream events onto the originating chat session. The signature
 // is a (sessionID, type, jsonPayload) triple rather than a chat.StreamEvent —
@@ -66,35 +58,15 @@ type PanelLookup func() []string
 // adapts the same value through this interface.
 type PanelTrustResolver = dispatch.TrustResolver
 
-// TodoStoreInterface is the subset of store.Store needed by todo/plan MCP tools.
-// Defined here to avoid circular imports with the service package. Uses raw
-// store methods instead of the service layer's update structs.
-type TodoStoreInterface interface {
-	CreateTodo(ctx context.Context, t *store.Todo) error
-	GetTodo(ctx context.Context, id string) (*store.Todo, error)
-	ListTodos(ctx context.Context, f store.TodoFilter) ([]store.Todo, error)
-	UpdateTodo(ctx context.Context, t *store.Todo) error
-	UpdateTodoScope(ctx context.Context, id, scope, scopeID, projectID string) error
-	DeleteTodo(ctx context.Context, id string) error
-
-	CreatePlan(ctx context.Context, p *store.Plan) error
-	GetPlan(ctx context.Context, id string) (*store.Plan, error)
-	ListPlans(ctx context.Context, f store.PlanFilter) ([]store.Plan, error)
-	UpdatePlan(ctx context.Context, p *store.Plan) error
-	UpdatePlanStep(ctx context.Context, planID, stepID string, updates store.PlanStep) error
-	AppendPlanSteps(ctx context.Context, planID string, steps []store.PlanStep) ([]store.PlanStep, error)
-	DeletePlan(ctx context.Context, id string) error
-}
-
 // SelfToolsTransport provides self-service tools that let the agent
 // create and manage its own skills, agent profiles, and workflows
 // through the same store layer the API uses.
 type SelfToolsTransport struct {
-	Store           *store.Store
-	BuilderRegistry *builders.Registry
-	BuilderSessions *builders.SessionManager
-	TodoStore       TodoStoreInterface // nil-safe; set after construction
-	MessagingTools  *MessagingTools
+	Store             *store.Store
+	BuilderRegistry   *builders.Registry
+	BuilderSessions   *builders.SessionManager
+	MessagingTools    *MessagingTools
+	WorkTrackingTools *WorkTrackingTools
 	// Subagent is set post-construction from the container; nil-safe.
 	Subagent *subagent.Service
 	// SkillVendor is the content-addressed vendored skill store (internal/
@@ -109,11 +81,6 @@ type SelfToolsTransport struct {
 	// errorResult for the nanite_background_* tools when unset).
 	// CW-20260420-0016.
 	Background *background.Service
-	// Work is set post-construction from the container; nil-safe. When set,
-	// mutating todo/plan tools fire BroadcastWorkChanged after a successful
-	// write so the Work drawer rehydrates. CW-20260418-0044.
-	Work WorkBroadcaster
-
 	// Dispatch is the executeTask dispatch primitive. Set post-
 	// construction from the container; nil-safe (callers receive an
 	// errorResult). The transport translates the task_execute
@@ -356,22 +323,15 @@ func agentNotEditableError(slug string, class agent.ManageClass) string {
 	return fmt.Sprintf("%s (slug=%q, manage_class=%s)", msg, slug, string(class))
 }
 
-// notifyWorkChanged fires a work_changed presence broadcast if a broadcaster
-// is wired. Called after every successful mutating todo/plan tool call.
-func (st *SelfToolsTransport) notifyWorkChanged() {
-	if st.Work != nil {
-		st.Work.BroadcastWorkChanged()
-	}
-}
-
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
 func NewSelfToolsTransport(s *store.Store) *SelfToolsTransport {
 	return &SelfToolsTransport{
-		Store:            s,
-		BuilderRegistry:  builders.DefaultRegistry(s),
-		BuilderSessions:  builders.NewSessionManager(),
-		MessagingTools:   NewMessagingTools(nil, nil),
-		RememberCounters: newRememberSessionCounters(),
+		Store:             s,
+		BuilderRegistry:   builders.DefaultRegistry(s),
+		BuilderSessions:   builders.NewSessionManager(),
+		MessagingTools:    NewMessagingTools(nil, nil),
+		WorkTrackingTools: NewWorkTrackingTools(nil, s, nil),
+		RememberCounters:  newRememberSessionCounters(),
 	}
 }
 
@@ -434,23 +394,23 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	case "builder_step":
 		return st.callBuilderStep(args)
 	case "todo_create":
-		return st.callTodoCreate(ctx, args)
+		return st.WorkTrackingTools.callTodoCreate(ctx, args)
 	case "todo_update":
-		return st.callTodoUpdate(args)
+		return st.WorkTrackingTools.callTodoUpdate(args)
 	case "todo_list":
-		return st.callTodoList(ctx, args)
+		return st.WorkTrackingTools.callTodoList(ctx, args)
 	case "plan_create":
-		return st.callPlanCreate(ctx, args)
+		return st.WorkTrackingTools.callPlanCreate(ctx, args)
 	case "plan_update":
-		return st.callPlanUpdate(args)
+		return st.WorkTrackingTools.callPlanUpdate(args)
 	case "plan_step_add":
-		return st.callPlanStepAdd(args)
+		return st.WorkTrackingTools.callPlanStepAdd(args)
 	case "plan_list":
-		return st.callPlanList(ctx, args)
+		return st.WorkTrackingTools.callPlanList(ctx, args)
 	case "plan_get":
-		return st.callPlanGet(args)
+		return st.WorkTrackingTools.callPlanGet(args)
 	case "plan_delete":
-		return st.callPlanDelete(args)
+		return st.WorkTrackingTools.callPlanDelete(args)
 	case "install_home":
 		return st.callInstallHome(args)
 	case "install_project":
@@ -996,8 +956,8 @@ func (st *SelfToolsTransport) resolveShowCardRenderTarget(ctx context.Context, e
 
 // --- todo/plan handlers ---
 
-func (st *SelfToolsTransport) callTodoCreate(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.TodoStore == nil {
+func (wt *WorkTrackingTools) callTodoCreate(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
+	if wt == nil || wt.Store == nil {
 		return mcp.ErrorResult("todo service not available"), nil
 	}
 	title, _ := args["title"].(string)
@@ -1021,7 +981,7 @@ func (st *SelfToolsTransport) callTodoCreate(ctx context.Context, args map[strin
 	switch scope {
 	case store.TodoScopeProject:
 		if projectID == "" {
-			projectID = st.resolveProjectIDFromSession(sessionID)
+			projectID = resolveProjectIDFromSession(wt.Projects, sessionID)
 		}
 		if projectID == "" {
 			return mcp.ErrorResult("scope=project requires project_id (current session has no project)"), nil
@@ -1050,31 +1010,17 @@ func (st *SelfToolsTransport) callTodoCreate(ctx context.Context, args map[strin
 		CreatedBy:   "agent",
 	}
 
-	if err := st.TodoStore.CreateTodo(ctx, t); err != nil {
+	if err := wt.Store.CreateTodo(ctx, t); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("create todo: %v", err)), nil
 	}
 
-	st.notifyWorkChanged()
+	wt.notifyWorkChanged()
 	out, _ := json.Marshal(t)
 	return mcp.TextResult(fmt.Sprintf("Created todo %q (id=%s, scope=%s)\n%s", t.Title, t.ID, t.Scope, string(out))), nil
 }
 
-// resolveProjectIDFromSession looks up the project_id for the given session.
-// Returns "" when sessionID is empty, the lookup fails, or the session has no
-// project. Used by self-tools to auto-fill project_id when the LLM omits it.
-func (st *SelfToolsTransport) resolveProjectIDFromSession(sessionID string) string {
-	if sessionID == "" || st.Store == nil {
-		return ""
-	}
-	sess, err := st.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
-	if err != nil || sess == nil {
-		return ""
-	}
-	return sess.ProjectID
-}
-
-func (st *SelfToolsTransport) callTodoUpdate(args map[string]any) (*mcp.ToolResult, error) {
-	if st.TodoStore == nil {
+func (wt *WorkTrackingTools) callTodoUpdate(args map[string]any) (*mcp.ToolResult, error) {
+	if wt == nil || wt.Store == nil {
 		return mcp.ErrorResult("todo service not available"), nil
 	}
 	id := strArg(args, "id", "")
@@ -1082,7 +1028,7 @@ func (st *SelfToolsTransport) callTodoUpdate(args map[string]any) (*mcp.ToolResu
 		return mcp.ErrorResult("id is required"), nil
 	}
 
-	t, err := st.TodoStore.GetTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+	t, err := wt.Store.GetTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("get todo: %v", err)), nil
 	}
@@ -1103,16 +1049,16 @@ func (st *SelfToolsTransport) callTodoUpdate(args map[string]any) (*mcp.ToolResu
 		t.Labels = v
 	}
 
-	if err := st.TodoStore.UpdateTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, t); err != nil {
+	if err := wt.Store.UpdateTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, t); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("update todo: %v", err)), nil
 	}
 
-	st.notifyWorkChanged()
+	wt.notifyWorkChanged()
 	return mcp.TextResult(fmt.Sprintf("Updated todo %q (id=%s, status=%s, priority=%s)", t.Title, t.ID, t.Status, t.Priority)), nil
 }
 
-func (st *SelfToolsTransport) callTodoList(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.TodoStore == nil {
+func (wt *WorkTrackingTools) callTodoList(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
+	if wt == nil || wt.Store == nil {
 		return mcp.ErrorResult("todo service not available"), nil
 	}
 
@@ -1132,7 +1078,7 @@ func (st *SelfToolsTransport) callTodoList(ctx context.Context, args map[string]
 		}
 	case store.TodoScopeProject:
 		if projectIDArg == "" {
-			projectIDArg = st.resolveProjectIDFromSession(sessionID)
+			projectIDArg = resolveProjectIDFromSession(wt.Projects, sessionID)
 		}
 		if scopeIDArg == "" {
 			scopeIDArg = projectIDArg
@@ -1147,7 +1093,7 @@ func (st *SelfToolsTransport) callTodoList(ctx context.Context, args map[string]
 		Priority:  strArg(args, "priority", ""),
 	}
 
-	todos, err := st.TodoStore.ListTodos(ctx, f)
+	todos, err := wt.Store.ListTodos(ctx, f)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("list todos: %v", err)), nil
 	}
@@ -1200,8 +1146,8 @@ func (st *SelfToolsTransport) callTodoList(ctx context.Context, args map[string]
 	return mcp.TextResult(sb.String()), nil
 }
 
-func (st *SelfToolsTransport) callPlanCreate(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.TodoStore == nil {
+func (wt *WorkTrackingTools) callPlanCreate(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
+	if wt == nil || wt.Store == nil {
 		return mcp.ErrorResult("todo service not available"), nil
 	}
 	title, _ := args["title"].(string)
@@ -1229,17 +1175,17 @@ func (st *SelfToolsTransport) callPlanCreate(ctx context.Context, args map[strin
 		CreatedBy:   "agent",
 	}
 
-	if err := st.TodoStore.CreatePlan(ctx, p); err != nil {
+	if err := wt.Store.CreatePlan(ctx, p); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("create plan: %v", err)), nil
 	}
 
-	st.notifyWorkChanged()
+	wt.notifyWorkChanged()
 	out, _ := json.Marshal(p)
 	return mcp.TextResult(fmt.Sprintf("Created plan %q (id=%s, scope=%s)\n%s", p.Title, p.ID, p.Scope, string(out))), nil
 }
 
-func (st *SelfToolsTransport) callPlanUpdate(args map[string]any) (*mcp.ToolResult, error) {
-	if st.TodoStore == nil {
+func (wt *WorkTrackingTools) callPlanUpdate(args map[string]any) (*mcp.ToolResult, error) {
+	if wt == nil || wt.Store == nil {
 		return mcp.ErrorResult("todo service not available"), nil
 	}
 	id := strArg(args, "id", "")
@@ -1254,15 +1200,15 @@ func (st *SelfToolsTransport) callPlanUpdate(args map[string]any) (*mcp.ToolResu
 			Status: strArg(args, "status", ""),
 			Notes:  strArg(args, "notes", ""),
 		}
-		if err := st.TodoStore.UpdatePlanStep(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, stepID, stepUpdates); err != nil {
+		if err := wt.Store.UpdatePlanStep(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, stepID, stepUpdates); err != nil {
 			return mcp.ErrorResult(fmt.Sprintf("update plan step: %v", err)), nil
 		}
-		st.notifyWorkChanged()
+		wt.notifyWorkChanged()
 		return mcp.TextResult(fmt.Sprintf("Updated step %s in plan %s", stepID, id)), nil
 	}
 
 	// Otherwise update plan-level fields.
-	p, err := st.TodoStore.GetPlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+	p, err := wt.Store.GetPlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("get plan: %v", err)), nil
 	}
@@ -1274,18 +1220,18 @@ func (st *SelfToolsTransport) callPlanUpdate(args map[string]any) (*mcp.ToolResu
 		p.Status = v
 	}
 
-	if err := st.TodoStore.UpdatePlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, p); err != nil {
+	if err := wt.Store.UpdatePlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, p); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("update plan: %v", err)), nil
 	}
 
-	st.notifyWorkChanged()
+	wt.notifyWorkChanged()
 	return mcp.TextResult(fmt.Sprintf("Updated plan %q (id=%s, status=%s)", p.Title, p.ID, p.Status)), nil
 }
 
 // callPlanStepAdd appends one or more steps to an existing plan without
 // re-creating it. CW-20260430-0001 (SP1) — closes the c120 workaround.
-func (st *SelfToolsTransport) callPlanStepAdd(args map[string]any) (*mcp.ToolResult, error) {
-	if st.TodoStore == nil {
+func (wt *WorkTrackingTools) callPlanStepAdd(args map[string]any) (*mcp.ToolResult, error) {
+	if wt == nil || wt.Store == nil {
 		return mcp.ErrorResult("todo service not available"), nil
 	}
 	planID := strArg(args, "plan_id", "")
@@ -1322,12 +1268,12 @@ func (st *SelfToolsTransport) callPlanStepAdd(args map[string]any) (*mcp.ToolRes
 		return mcp.ErrorResult("steps must contain at least one step"), nil
 	}
 
-	appended, err := st.TodoStore.AppendPlanSteps(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, planID, newSteps)
+	appended, err := wt.Store.AppendPlanSteps(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, planID, newSteps)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("append plan steps: %v", err)), nil
 	}
 
-	st.notifyWorkChanged()
+	wt.notifyWorkChanged()
 
 	out, _ := json.Marshal(map[string]any{
 		"plan_id":        planID,
@@ -1337,8 +1283,8 @@ func (st *SelfToolsTransport) callPlanStepAdd(args map[string]any) (*mcp.ToolRes
 	return mcp.TextResult(fmt.Sprintf("Appended %d step(s) to plan %s\n%s", len(appended), planID, string(out))), nil
 }
 
-func (st *SelfToolsTransport) callPlanList(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.TodoStore == nil {
+func (wt *WorkTrackingTools) callPlanList(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
+	if wt == nil || wt.Store == nil {
 		return mcp.ErrorResult("todo service not available"), nil
 	}
 
@@ -1357,7 +1303,7 @@ func (st *SelfToolsTransport) callPlanList(ctx context.Context, args map[string]
 		Status:  strArg(args, "status", ""),
 	}
 
-	plans, err := st.TodoStore.ListPlans(ctx, f)
+	plans, err := wt.Store.ListPlans(ctx, f)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("list plans: %v", err)), nil
 	}
@@ -1379,8 +1325,8 @@ func (st *SelfToolsTransport) callPlanList(ctx context.Context, args map[string]
 	return mcp.TextResult(sb.String()), nil
 }
 
-func (st *SelfToolsTransport) callPlanGet(args map[string]any) (*mcp.ToolResult, error) {
-	if st.TodoStore == nil {
+func (wt *WorkTrackingTools) callPlanGet(args map[string]any) (*mcp.ToolResult, error) {
+	if wt == nil || wt.Store == nil {
 		return mcp.ErrorResult("todo service not available"), nil
 	}
 	id := strArg(args, "id", "")
@@ -1388,7 +1334,7 @@ func (st *SelfToolsTransport) callPlanGet(args map[string]any) (*mcp.ToolResult,
 		return mcp.ErrorResult("id is required"), nil
 	}
 
-	p, err := st.TodoStore.GetPlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+	p, err := wt.Store.GetPlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("get plan: %v", err)), nil
 	}
@@ -1397,8 +1343,8 @@ func (st *SelfToolsTransport) callPlanGet(args map[string]any) (*mcp.ToolResult,
 	return mcp.TextResult(string(out)), nil
 }
 
-func (st *SelfToolsTransport) callPlanDelete(args map[string]any) (*mcp.ToolResult, error) {
-	if st.TodoStore == nil {
+func (wt *WorkTrackingTools) callPlanDelete(args map[string]any) (*mcp.ToolResult, error) {
+	if wt == nil || wt.Store == nil {
 		return mcp.ErrorResult("todo service not available"), nil
 	}
 	id := strArg(args, "id", "")
@@ -1406,10 +1352,10 @@ func (st *SelfToolsTransport) callPlanDelete(args map[string]any) (*mcp.ToolResu
 		return mcp.ErrorResult("id is required"), nil
 	}
 
-	if err := st.TodoStore.DeletePlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err != nil {
+	if err := wt.Store.DeletePlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("delete plan: %v", err)), nil
 	}
-	st.notifyWorkChanged()
+	wt.notifyWorkChanged()
 	return mcp.TextResult(fmt.Sprintf("Deleted plan %s", id)), nil
 }
 

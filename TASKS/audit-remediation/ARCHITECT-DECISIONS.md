@@ -60,8 +60,8 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-12 | `chatServiceImpl` / `generateResponse` decomposition boundaries | `10/01` | GO-SVCEXEC-001/002 | 5 | open |
 | AD-13 | `SelfToolsTransport` decomposition boundaries | `10/02` | GO-MCPTOOL-006 | 5 | open |
 | AD-14 | How far to narrow `internal/store` dependencies | `10/03`, `06/02`, **`06/03`** | GO-DEP-002, GO-STORE-001, GO-STORE-005 | 5 | **decided** |
-| AD-15 | Default auth / bind / TLS / startup-warning posture | `08/07` | GO-RUNTIME-002 | 3 | open |
-| AD-16 | File/directory permission policy (default mode) | `08/04` | GO-SEC4-003 | 3 | open |
+| AD-15 | Default auth / bind / TLS / startup-warning posture | `08/07` | GO-RUNTIME-002 | 3 | **decided** |
+| AD-16 | `permission.Engine` `ModeDefault`: does it prompt for writes? | `08/04` | GO-SEC4-003 | 3 | **decided** |
 | AD-17 | `cmdServe` fatal-path cleanup: direction | `07/02` | GO-RUNTIME-001 | 2b | **decided** |
 | AD-18 | Background job registry: retention policy | `07/03` | GO-RUNTIME-004 | 2b | **decided** |
 | AD-19 | Duplicated semantics: share implementation vs. parity tests | Wave 6a (all) | GO-SVCEXEC-004, GO-API-007, GO-CHAT-002, GO-INFRA-004 | 6a | open |
@@ -642,7 +642,52 @@ Wave 2b.
 
 ### AD-15 — Default auth / bind / TLS / startup-warning posture
 
-**Status:** open · **Gates:** `08/07` · **Findings:** GO-RUNTIME-002 (high)
+**Status:** decided · **Gates:** `08/07`, and informs AD-27 · **Findings:**
+GO-RUNTIME-002 (high)
+
+> **Decided (2026-08-22): the audit's literal recommendation — bind loopback by
+> default, require an explicit opt-in to bind wide, and always log auth status
+> at startup.**
+>
+> Three concrete changes:
+> 1. `server.go:163` — `addr := fmt.Sprintf(":%d", s.port)` becomes
+>    `127.0.0.1:<port>` unless an explicit bind-all/bind-address option is set.
+>    That option does not exist today and must be added (`internal/config`).
+> 2. `server.go:164` — the startup line reports `addr` and `dev` but never auth
+>    status. It must always state whether auth is enabled, and warn when it is
+>    not. This is the same silent-degradation class AD-01 closed: the service
+>    must not be quiet about running unauthenticated.
+> 3. `auth.go:15-22` — `basicAuthMiddleware` returning `next` unmodified when
+>    both env vars are unset stays as-is behaviourally, but is no longer
+>    *silent* after (2).
+>
+> **TLS is explicitly out of scope.** It is ceremony on loopback, and a reverse
+> proxy is the right answer for the wide case. `08/07` should not add it.
+>
+> ### ⚠ This is a breaking change for existing deployments — treat it as one
+>
+> Anything currently relying on the bind-all default stops working on upgrade:
+> Docker port mapping, LAN access, remote dev, any reverse proxy pointed at a
+> non-loopback interface. There is no deprecation window, and the failure mode
+> is silent from the operator's side — the service starts fine and simply
+> stops being reachable.
+>
+> `08/07` must therefore: name the new opt-in option in its Done-means, and
+> produce operator-facing release-note text stating the change, the symptom
+> ("service starts but is no longer reachable from other hosts"), and the
+> one-line fix. A migration note is part of this task, not a follow-up.
+>
+> Rejected: warning-only (leaves the substantive half of the batch's last
+> high-severity finding open) and accept-as-is (would close a high finding with
+> no observable change). Also considered and not taken: coupling auth to bind
+> width rather than defaulting to loopback — more surgical, but it lets a
+> misconfiguration stay reachable, and the operator chose the stronger default.
+>
+> **Downstream:** AD-27 (`GO-API-001`, unconstrained autocomplete walk) was
+> deliberately sequenced after this. A loopback default means an authenticated
+> caller is on the same machine, which strengthens the accept case for AD-27 —
+> but the bind-wide opt-in is exactly where that reasoning stops holding.
+> Decide AD-27 with that conditional in view.
 
 The highest-severity finding in Wave 3. What does Nanite bind to by default,
 does it require auth by default, is TLS expected/optional/absent, and what
@@ -651,9 +696,47 @@ decision as much as a security one — a local-first dev tool and a shared
 service want different defaults, and `08/07` touches `internal/config` and
 `cmd/nanite`'s composition root either way.
 
-### AD-16 — File/directory permission policy (default mode)
+### AD-16 — `permission.Engine` `ModeDefault`: does it prompt for writes?
 
-**Status:** open · **Gates:** `08/04` · **Findings:** GO-SEC4-003 (medium)
+**Status:** decided · **Gates:** `08/04` · **Findings:** GO-SEC4-003 (medium)
+
+> **Title corrected 2026-08-22.** This decision was originally filed as
+> "file/directory permission policy (default mode)" from the guide's §9 item 8.
+> That is not what `GO-SEC4-003` is about — "default mode" here means
+> `permission.Mode`'s `ModeDefault`, not filesystem mode bits. No filesystem
+> permission question is in this batch.
+>
+> **Decided (2026-08-22): `PathGrants` governs writability. The code is right
+> and the comment is stale — fix the comment.**
+>
+> `ModeDefault`'s const comment (`engine.go:25`) promises *"prompt for
+> destructive/write operations"*, but the switch (`engine.go:171-178`) asks on
+> destructive, allows on read-only, and falls through to Allow otherwise —
+> so `dev_write`/`dev_edit`, which match neither name heuristic, are allowed
+> silently. `ModeAcceptEdits` has the missing `{false,false}` branch right next
+> to it, which is what makes the omission look like a bug.
+>
+> It is not. Writes are governed by `PathGrants`
+> (`internal/permission/path_grants.go`) — session-scoped, explicit-mention
+> grants with a documented "no nag-again" philosophy. Per-call prompting for
+> every write would contradict that design, not complete it. Rejected adding
+> the Ask branch (re-introduces nagging, changes default UX for every write in
+> the product) and the PathGrants-consulting hybrid (largest change, and
+> unnecessary if the architecture is already as intended).
+>
+> ### The decision has a falsifiable premise — `08/04` must test it, not assume it
+>
+> This rests on `Check()` actually consulting `PathGrants` on the write path.
+> `Check()` (`engine.go:117-122`) reads `e.sessionGrants[sessionID]`, which is
+> **not obviously the same thing** as `PathGrants`. `08/04`'s first step is to
+> trace it and confirm.
+>
+> **If `PathGrants` does not in fact gate writes reached through `ModeDefault`,
+> this decision's premise is false and the finding is a live gap, not a stale
+> comment.** In that case `08/04` must stop and re-open AD-16 rather than
+> fixing the comment to describe a guarantee nothing provides — which would
+> convert a code bug into a documentation lie. Make that verification an
+> explicit Done-means item.
 
 Guide §9 item 8. `08/04` covers the permission engine's default-mode write
 gap; the underlying question is what the project's default file/directory

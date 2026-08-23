@@ -17,6 +17,32 @@
 > - **Gated on:** AD-16 (default file/directory permission policy)
 > - **requires_security_review:** true · **requires_regression_test:** true
 
+> ## ✅ AD-16 DECIDED (2026-08-22) — the comment is stale, not the code. But verify first.
+>
+> **`PathGrants` governs writability.** `ModeDefault` falling through to Allow
+> for non-destructive, non-read-only operations is intended: writes are gated by
+> `PathGrants`' session-scoped explicit-mention grants
+> (`internal/permission/path_grants.go`) under a documented "no nag-again"
+> philosophy. Per-call prompting would contradict that design, not complete it.
+>
+> **The remediation is fixing `ModeDefault`'s const comment** (`engine.go:25`),
+> which promises *"prompt for destructive/write operations"* and is wrong.
+> **Do not** add the `{false,false}` → Ask branch, and do not reclassify
+> `dev_write`/`dev_edit` as destructive — both were considered and rejected.
+>
+> ### ⚠ Verify the premise before you write the comment
+>
+> This decision assumes `Check()` actually consults `PathGrants` on the write
+> path. `Check()` (`engine.go:117-122`) reads `e.sessionGrants[sessionID]`,
+> which is **not obviously the same mechanism**. Trace it first.
+>
+> **If `PathGrants` does not gate writes reached through `ModeDefault`, the
+> premise is false — stop and re-open AD-16.** Writing a comment that describes
+> a guarantee nothing provides would convert a code bug into a documentation
+> lie, which is strictly worse than the stale comment you started with. Make
+> this verification an explicit Done-means item with its result recorded either
+> way.
+
 ## Findings addressed
 
 - **GO-SEC4-003** (medium severity, **medium confidence** — needs architect confirmation of intent; category security + error-handling) — report §8.12.

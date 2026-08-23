@@ -17,6 +17,33 @@
 > - **Gated on:** AD-15 (default auth/bind/TLS/warning posture) — a product decision as much as a security one
 > - **requires_security_review:** true · **requires_regression_test:** true
 
+> ## ✅ AD-15 DECIDED (2026-08-22) — loopback default, explicit bind-wide opt-in, always announce auth
+>
+> Three changes:
+> 1. **`server.go:163`** — `fmt.Sprintf(":%d", s.port)` becomes `127.0.0.1:<port>`
+>    unless an explicit bind-address/bind-all option is set. **That option does
+>    not exist today** — add it in `internal/config` as part of this task.
+> 2. **`server.go:164`** — the startup line reports `addr` and `dev` but never
+>    auth status. It must always state whether auth is on, and warn when it is
+>    not. Same silent-degradation class AD-01 closed.
+> 3. **`auth.go:15-22`** — `basicAuthMiddleware`'s no-op-when-unset behaviour is
+>    unchanged; (2) is what stops it being silent.
+>
+> **TLS is explicitly out of scope.** Ceremony on loopback, and a reverse proxy
+> is the right answer for the wide case. Do not add it.
+>
+> ### ⚠ This is a breaking change and this task owns the migration note
+>
+> Every deployment relying on the bind-all default breaks on upgrade — Docker
+> port mapping, LAN access, remote dev, a reverse proxy aimed at a non-loopback
+> interface. The failure is silent from the operator's side: the service starts
+> normally and simply stops being reachable.
+>
+> **Done-means must include** the new opt-in option named explicitly, and
+> operator-facing release-note text giving the change, the symptom ("starts fine
+> but is no longer reachable from other hosts"), and the one-line fix. The
+> migration note is part of this task, not a follow-up.
+
 ## Findings addressed
 
 - **GO-RUNTIME-002** (**HIGH severity**, high confidence, security — **with a substantial documented-intent caveat**) — report §8.13.

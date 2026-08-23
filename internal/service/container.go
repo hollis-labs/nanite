@@ -263,6 +263,12 @@ type Container struct {
 	// built from in main.go's own boot sequence.
 	TeamRunLauncher *TeamRunLauncher
 
+	// TeamRouting installs run-scoped semantic/coordinator-fallback reflexes
+	// after TeamRunLauncher has produced the run and its resolved Team Slot
+	// members. Set post-hoc from main.go immediately after TeamRunLauncher,
+	// and nil-checked by the launch API before any run is created.
+	TeamRouting *TeamRoutingService
+
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
 

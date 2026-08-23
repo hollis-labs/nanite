@@ -27,12 +27,12 @@ For whoever picks up Teams-related work next — most likely whoever wires a sel
 - `workflow_engine_flex.go` — the flex-step executor (`parseFlexStepConfig`, `activeMembersForSlots`, `recheckFlexStep`, `evaluateFlexExit`, `standDownFlexMembers`). Wired into `BuiltinWorkflowEngine` via a post-construction `WithFlexSupport(store, stateCollector)` call (see `cmd/nanite/main.go`).
 - `team_compiler.go` — `CompileTeam(name, phases, resolvedMembers) (agentworkflow.WorkflowDefinition, error)`. Pure function, no I/O. `Engine` is hard-coded to `EngineBuiltin` with no override path. `resolvedMembers` is accepted but deliberately unconsumed — flex `active_slots` in the compiled `Config` always holds slot *names*, re-resolved live at flex-step entry, never baked-in `(agent_id, session_id)` tuples.
 - `team_run_launcher.go` — `TeamRunLauncher`, `LaunchTeamRun(ctx, teamID, TeamRunOverrides)`, `ResolveLazySlot(ctx, workflowRunID, teamID, slotName, overrides)`. Wired into `Container.TeamRunLauncher` / `cmd/nanite/main.go` by task `11` (it shipped unwired from task `08` itself).
-- `team_routing.go` — `TeamRoutingService`, `SendToSlot` (explicit `@slot` addressing, broadcast-to-all-active default), `InstallTeamRunRouting(ctx, runID, teamID)` (semantic + coordinator-fallback routing, installs run-scoped `agent_reflexes` rows). **Not called from inside `LaunchTeamRun`** — must be called after it, by whatever launches a TeamRun (currently only task `11`'s HTTP handler does this composition; check whether it still does before assuming any other caller wires it).
+- `team_routing.go` — `TeamRoutingService`, `SendToSlot` (explicit `@slot` addressing, broadcast-to-all-active default), `InstallTeamRunRouting(ctx, runID, teamID)` (semantic + coordinator-fallback routing, installs run-scoped `agent_reflexes` rows). **Audit remediation AD-08 closed the original wiring gap on 2026-08-23:** `cmd/nanite/main.go` constructs `Container.TeamRouting` beside `TeamRunLauncher`, and `handleLaunchTeam` calls `InstallTeamRunRouting` after `LaunchTeamRun` returns the real run id and member rows. Routing installation is required for the HTTP operation: an install failure returns a structured HTTP 500 containing the already-persisted `workflow_run_id`/status and explicit routing error; any returned partial reflex ids are cleaned up best-effort. The launch itself is not transactionally rolled back and the response says so, preventing a blind retry from silently duplicating a live run.
 - `internal/agentworkflow/registry.go` — `Registry.Register`/`Unregister` (both added this batch; the registry had no mutation API before task `08`), `TeamRunDefinitionNamePrefix = "team-run:"`, `IsTeamRunDefinitionName`.
 
 **API surface (`internal/api/`):**
 - `teams.go` — `POST/GET /api/teams`, `GET/PATCH/DELETE /api/teams/{id}`. Standard uniform middleware chain, no new auth tier.
-- `team_runs.go` — `POST /api/teams/{id}/launch`, accepting a `TeamRunOverrides`-shaped body, calling `LaunchTeamRun`. Response includes `workflow_run_id`, `status`, resolved `team_run_members` rows.
+- `team_runs.go` — `POST /api/teams/{id}/launch`, accepting a `TeamRunOverrides`-shaped body, calling `LaunchTeamRun` and then the required `InstallTeamRunRouting`. A successful response includes `workflow_run_id`, `status`, and resolved `team_run_members` rows; a routing-install failure returns HTTP 500 with the persistent run id/status and routing error rather than claiming rollback.
 
 ## Five real load-bearing corrections found during planning (and why they mattered)
 
@@ -69,6 +69,18 @@ The design doc's own "Validating this design" section named these "likely the me
 - **The Team/Workflow definition split (one Team, multiple phase-sequence shapes) is not built.** Tasks `01`/`07` kept the phase sequence as its own addressable sub-structure (`Team.Phases()`/`SetPhases()`, a separate input to `CompileTeam`) specifically so this split is a future call-site change, not a rewrite — but the split itself doesn't exist.
 - **A run-scoped Team Slot resolved lazily *after* `InstallTeamRunRouting` runs does not retroactively get its own asking-side semantic-routing rows.** Task `09`'s Work Log documents this as a known, flagged limitation of the per-`agent_id` reflex-row installation approach, not silently discovered later.
 
+### AD-08 source correction: semantic routing vs. explicit Team-Slot messaging
+
+The audit-remediation task's original Context conflated these two paths. The
+run-scoped `dispatch_to_agent` reflexes installed by
+`InstallTeamRunRouting` execute through `chat_reflex_dispatch`/`task_execute`;
+they do **not** call `SendToSlot`. `SendToSlot` and `ResolveLazySlot` remain the
+separate explicit `@Team Slot` messaging path, with no self-tool or UI caller
+yet. AD-08 deliberately wired the architect-decided semantic/coordinator
+routing installation from the HTTP launch handler; it did not invent a new
+explicit-addressing surface. The lazy-after-install limitation above remains
+unchanged and accepted.
+
 ## Where to look for more detail, by subsystem
 
 - **Schema/storage decisions and the migration-numbering discipline:** task `01`'s Work Log (naming, GLOSSARY, deviations) and task `04`'s Work Log (the `TrustTier` vs. `parent_dispatch_allowlist` research, the fail-closed test discipline).
@@ -95,7 +107,7 @@ The design doc's own "Validating this design" section named these "likely the me
 - `internal/service/workflow_engine_flex.go` — `parseFlexStepConfig`, `evaluateFlexExit`, `standDownFlexMembers`; `BuiltinWorkflowEngine.WithFlexSupport` called in `cmd/nanite/main.go`.
 - `internal/service/team_compiler.go` — `CompileTeam`.
 - `internal/service/team_run_launcher.go` — `TeamRunLauncher`, `LaunchTeamRun`, `ResolveLazySlot`; `Container.TeamRunLauncher` is non-nil on a real booted process (check `cmd/nanite/main.go`'s construction site).
-- `internal/service/team_routing.go` — `TeamRoutingService`, `SendToSlot`, `InstallTeamRunRouting`.
+- `internal/service/team_routing.go` — `TeamRoutingService`, `SendToSlot`, `InstallTeamRunRouting`; `Container.TeamRouting` is constructed in `cmd/nanite/main.go`, and `internal/api/team_runs.go` invokes installation after launch.
 - `internal/agentworkflow/registry.go` — `Register`/`Unregister`/`IsTeamRunDefinitionName`; confirm exactly one `*agentworkflow.Registry` instance is shared between `TeamRunLauncher` and `AgentCardGenerator` in `main.go` (this is the load-bearing correctness fact the registry-growth fix depends on — task `11`'s reviewer verified this by grepping every `NewAgentCardGenerator(`/`NewTeamRunLauncher(`/`NewWorkflowLauncher(` call site).
 - `internal/api/teams.go` / `internal/api/team_runs.go` exist; `internal/api/api.go` registers `GET/POST /api/teams`, `GET/PATCH/DELETE /api/teams/{id}`, `POST /api/teams/{id}/launch`.
 

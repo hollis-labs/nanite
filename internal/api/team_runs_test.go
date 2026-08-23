@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/a2a"
@@ -44,6 +45,7 @@ func newTestAPIWithTeamRunLauncher(t *testing.T) (*API, *http.ServeMux, *store.S
 	launcher := service.NewWorkflowLauncher(registry, engines, &fakeAPIStepExecutor{}, durable)
 
 	a.Services.TeamRunLauncher = service.NewTeamRunLauncher(st, registry, launcher, durable)
+	a.Services.TeamRouting = service.NewTeamRoutingService(st, a.Services.Messaging, a.Services.TeamRunLauncher)
 	a.Services.AgentCardGenerator = service.NewAgentCardGenerator(registry, "http://example.test", "test")
 
 	return a, mux, st
@@ -118,6 +120,16 @@ func buildTeamRunAPITestTeam(t *testing.T, st *store.Store) *store.Team {
 	}
 	if err := team.SetPhases(phases); err != nil {
 		t.Fatalf("SetPhases: %v", err)
+	}
+	if err := team.SetRouting(store.TeamRouting{
+		Rules: []store.TeamRoutingRule{{
+			Name:       "engineering_question",
+			Phrases:    []string{"engineering"},
+			TargetSlot: "engineer",
+		}},
+		CoordinatorSlot: "orchestrator",
+	}); err != nil {
+		t.Fatalf("SetRouting: %v", err)
 	}
 	if err := st.CreateTeam(ctx, team); err != nil {
 		t.Fatalf("CreateTeam: %v", err)
@@ -194,6 +206,39 @@ func TestTeamRunLaunchAPI_EndToEnd_ReachesRealWorkflowRunAndTeamRunMembers(t *te
 	if len(members) != len(resp.Members) {
 		t.Fatalf("response.members len = %d, store members len = %d, want equal", len(resp.Members), len(members))
 	}
+
+	// AD-08's reachability proof: the real HTTP handler must invoke routing
+	// installation, and the resulting run-scoped rows must be observable
+	// through the same store lookup the turn-time reflex path uses. Each
+	// distinct resolved asking agent gets the Team's semantic rule plus its
+	// structural coordinator fallback. The two concurrent engineer sessions
+	// deliberately share one agent identity and therefore one pair of rows.
+	distinctAgentIDs := make(map[string]struct{})
+	for _, member := range members {
+		distinctAgentIDs[member.AgentID] = struct{}{}
+	}
+	installedIDs := make(map[string]struct{})
+	for agentID := range distinctAgentIDs {
+		rows, err := st.ListAgentReflexesForWorkflowRun(context.Background(), resp.WorkflowRunID, agentID, "")
+		if err != nil {
+			t.Fatalf("ListAgentReflexesForWorkflowRun(%s): %v", agentID, err)
+		}
+		if len(rows) != 2 {
+			t.Fatalf("routing reflexes for agent %s = %d, want semantic + coordinator fallback", agentID, len(rows))
+		}
+		for _, row := range rows {
+			if row.WorkflowRunID != resp.WorkflowRunID {
+				t.Fatalf("routing reflex workflow_run_id = %q, want %q", row.WorkflowRunID, resp.WorkflowRunID)
+			}
+			if row.ActionKind != store.ReflexActionDispatchToAgent {
+				t.Fatalf("routing reflex action_kind = %q, want %q", row.ActionKind, store.ReflexActionDispatchToAgent)
+			}
+			installedIDs[row.ID] = struct{}{}
+		}
+	}
+	if len(installedIDs) != 4 {
+		t.Fatalf("unique installed routing reflexes = %d, want 4 (2 rules x 2 distinct asking agents)", len(installedIDs))
+	}
 }
 
 // TestTeamRunLaunchAPI_UnknownTeam404 proves the not-found path, matching
@@ -254,6 +299,100 @@ func TestTeamRunLaunchAPI_ServiceUnavailableWhenLauncherNotWired(t *testing.T) {
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("launch without a wired launcher = %d, want 503 body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestTeamRunLaunchAPI_ServiceUnavailableWhenRoutingNotWired proves the
+// composition-root dependency is checked before LaunchTeamRun creates any
+// persistent run state. This is distinct from a configured routing service
+// failing during installation, covered below.
+func TestTeamRunLaunchAPI_ServiceUnavailableWhenRoutingNotWired(t *testing.T) {
+	a, mux, st := newTestAPIWithTeamRunLauncher(t)
+	createTeamRunTestRoleBoundAgent(t, st, "orchestrator")
+	createTeamRunTestRoleBoundAgent(t, st, "engineer")
+	team := buildTeamRunAPITestTeam(t, st)
+	a.Services.TeamRouting = nil
+
+	var before int
+	if err := st.DB.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM workflow_runs`).Scan(&before); err != nil {
+		t.Fatalf("count workflow_runs before request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/teams/"+team.ID+"/launch", bytes.NewBufferString(`{}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("launch without TeamRouting = %d, want 503 body=%s", w.Code, w.Body.String())
+	}
+	var after int
+	if err := st.DB.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM workflow_runs`).Scan(&after); err != nil {
+		t.Fatalf("count workflow_runs after request: %v", err)
+	}
+	if after != before {
+		t.Fatalf("workflow_runs count changed from %d to %d despite missing pre-launch routing dependency", before, after)
+	}
+}
+
+// TestTeamRunLaunchAPI_RoutingInstallFailureReturnsRunAndCleansPartialRows
+// locks the operator-approved failure policy. The first valid rule inserts
+// two rows (one per distinct asking agent), then the second rule's unknown
+// Team Slot fails installation. The HTTP operation fails closed, reports the
+// already-persisted run id/status, and removes the partial rows rather than
+// pretending the durable launch rolled back.
+func TestTeamRunLaunchAPI_RoutingInstallFailureReturnsRunAndCleansPartialRows(t *testing.T) {
+	_, mux, st := newTestAPIWithTeamRunLauncher(t)
+	createTeamRunTestRoleBoundAgent(t, st, "orchestrator")
+	createTeamRunTestRoleBoundAgent(t, st, "engineer")
+	team := buildTeamRunAPITestTeam(t, st)
+	team.RoutingJSON = `{"rules":[{"name":"valid_first","phrases":["engineering"],"target_slot":"engineer"},{"name":"invalid_second","phrases":["unknown"],"target_slot":"does-not-exist"}],"coordinator_slot":"orchestrator"}`
+	if err := st.UpdateTeam(context.Background(), team); err != nil {
+		t.Fatalf("UpdateTeam with cross-field-invalid routing fixture: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/teams/"+team.ID+"/launch", bytes.NewBufferString(`{}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("launch with routing-install failure = %d, want 500 body=%s", w.Code, w.Body.String())
+	}
+
+	var resp teamLaunchResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode failure response: %v", err)
+	}
+	if resp.WorkflowRunID == "" {
+		t.Fatal("failure response.workflow_run_id is empty; caller cannot reconcile the persistent run")
+	}
+	if resp.Status != string(agentworkflow.RunStatusWaitingOnFlex) {
+		t.Fatalf("failure response.status = %q, want %q", resp.Status, agentworkflow.RunStatusWaitingOnFlex)
+	}
+	if !strings.Contains(resp.Error, "team routing installation failed") ||
+		!strings.Contains(resp.Error, "workflow run remains persisted") ||
+		!strings.Contains(resp.Error, "cleaned 2 partially installed routing reflex(es)") {
+		t.Fatalf("failure response.error = %q, want explicit persistence and partial-cleanup details", resp.Error)
+	}
+
+	run, err := st.GetWorkflowRun(context.Background(), resp.WorkflowRunID)
+	if err != nil {
+		t.Fatalf("persistent GetWorkflowRun after routing failure: %v", err)
+	}
+	if run.Status != string(agentworkflow.RunStatusWaitingOnFlex) {
+		t.Fatalf("persistent run status = %q, want %q", run.Status, agentworkflow.RunStatusWaitingOnFlex)
+	}
+	members, err := st.ListTeamRunMembersByRun(context.Background(), resp.WorkflowRunID)
+	if err != nil {
+		t.Fatalf("persistent ListTeamRunMembersByRun after routing failure: %v", err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("persistent team_run_members = %d, want 2", len(members))
+	}
+	var routingRows int
+	if err := st.DB.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM agent_reflexes WHERE workflow_run_id = ?`, resp.WorkflowRunID,
+	).Scan(&routingRows); err != nil {
+		t.Fatalf("count partial routing rows: %v", err)
+	}
+	if routingRows != 0 {
+		t.Fatalf("partial routing rows remaining = %d, want 0 after cleanup", routingRows)
 	}
 }
 

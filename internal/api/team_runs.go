@@ -1,8 +1,9 @@
 // This file implements TASKS/teams/11-team-run-launch-api.md: the "launch a
 // saved Team by name, with invocation-time overrides" surface
 // 15-teams.md's "Runtime overrides follow the existing cascade" section
-// requires, calling task 08's already-merged LaunchTeamRun
-// (internal/service/team_run_launcher.go).
+// requires. It composes task 08's LaunchTeamRun
+// (internal/service/team_run_launcher.go) with AD-08's required
+// InstallTeamRunRouting call (internal/service/team_routing.go).
 //
 // --- Surface choice: REST, not a self-tool or an A2A skill target
 // (this task's own required step-1 research finding) ---------------------
@@ -68,7 +69,9 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/hollis-labs/nanite/internal/service"
@@ -124,13 +127,22 @@ type teamLaunchResponse struct {
 // package-level doc comment for why REST (not a self-tool or an A2A skill
 // target) is this task's chosen surface, and task 08's LaunchTeamRun
 // (internal/service/team_run_launcher.go) for the actual slot-resolution /
-// compile / launch behavior this handler is a thin wrapper over.
+// compile / launch behavior, followed by team_routing.go's run-scoped
+// semantic/coordinator routing installation.
 //
 // POST /api/teams/{id}/launch
 func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if a.Services == nil || a.Services.TeamRunLauncher == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "team run launcher not available")
+		return
+	}
+	// Routing is part of a complete TeamRun launch, not optional response
+	// enrichment. Check the production wiring before creating any durable
+	// launch state so a missing composition-root dependency cannot produce
+	// an unrouted run.
+	if a.Services.TeamRouting == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "team routing service not available")
 		return
 	}
 
@@ -163,6 +175,48 @@ func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 		// fault -- a 400, same posture teams.go's own validateTeamDefinition
 		// path already uses for launch-time-adjacent rejections.
 		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	installedRoutingIDs, routingErr := a.Services.TeamRouting.InstallTeamRunRouting(r.Context(), result.RunID, id)
+	if routingErr != nil {
+		// LaunchTeamRun has already committed sessions, the workflow run, and
+		// team_run_members by this point; there is no transactional rollback
+		// or DeleteWorkflowRun path. Fail the HTTP operation, but preserve the
+		// run id/status in the response so a caller can observe/reconcile the
+		// live run instead of blindly retrying and creating a duplicate.
+		// InstallTeamRunRouting returns the ids inserted before its error, so
+		// remove those best-effort to avoid leaving a partially-routed run.
+		var cleanupErr error
+		if len(installedRoutingIDs) > 0 {
+			if a.Services.Store == nil {
+				cleanupErr = errors.New("store not available for partial routing cleanup")
+			} else {
+				// Installation can itself fail because the request was cancelled;
+				// cleanup protects persistent rows and must still get one attempt.
+				cleanupCtx := context.WithoutCancel(r.Context())
+				for _, reflexID := range installedRoutingIDs {
+					if err := a.Services.Store.DeleteAgentReflex(cleanupCtx, reflexID); err != nil {
+						cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete reflex %s: %w", reflexID, err))
+					}
+				}
+			}
+		}
+
+		errMessage := fmt.Sprintf(
+			"team routing installation failed after workflow run was created; workflow run remains persisted: %v",
+			routingErr,
+		)
+		if cleanupErr != nil {
+			errMessage += fmt.Sprintf("; partial routing cleanup also failed: %v", cleanupErr)
+		} else if len(installedRoutingIDs) > 0 {
+			errMessage += fmt.Sprintf("; cleaned %d partially installed routing reflex(es)", len(installedRoutingIDs))
+		}
+		a.jsonResp(w, http.StatusInternalServerError, teamLaunchResponse{
+			WorkflowRunID: result.RunID,
+			Status:        string(result.Status),
+			Error:         errMessage,
+		})
 		return
 	}
 

@@ -19,13 +19,11 @@ package service
 // LaunchTeamRun itself. Instead, InstallTeamRunRouting (below) is a
 // standalone, independently-callable function, intended to be invoked by
 // whatever caller assembles a full "launch a TeamRun" operation AFTER
-// TeamRunLauncher.LaunchTeamRun returns a real workflow_runs.id — most
-// concretely, TASKS/teams/11-team-run-launch-api.md's future HTTP launch
-// handler (not yet built as of this task), which calls LaunchTeamRun then
-// InstallTeamRunRouting in sequence, the same two-step composition this
-// file's own tests use. This is a real, documented follow-up need (task 08
-// itself is not changed to call this automatically) — flagged explicitly
-// per this task's own Context instruction, not a silent retrofit.
+// TeamRunLauncher.LaunchTeamRun returns a real workflow_runs.id. Audit
+// remediation AD-08 closes the original follow-up: cmd/nanite/main.go
+// constructs TeamRoutingService beside TeamRunLauncher, and
+// internal/api/team_runs.go's handleLaunchTeam calls LaunchTeamRun then
+// InstallTeamRunRouting in sequence. Task 08 itself remains unchanged.
 //
 // # Explicit @slot addressing — multi-member default (provisional, v1)
 //

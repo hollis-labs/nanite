@@ -1234,3 +1234,13 @@ authored, not in their work.
 **Resolution:** **Operator, 2026-08-23.** Approved the orchestrator recommendation: keep the already-scoped DNS-rebind-safe SSRF remediation, reuse the reviewed shared `internal/ssrf` policy from `08/09`, correct the finding's trust classification to external unauthenticated, and revisit its severity. Do not expand this task into an A2A authentication redesign.
 
 **Follow-up:** Resume branch `codex/w3-08-01`; record the corrected boundary in the task Work Log/findings metadata, implement pinned dialing and redirect revalidation, then send through fresh security review.
+
+## 2026-08-23 — Wave 3 `08/08`: full race-suite acceptance gate exceeds known SQLite migration timeout — RESOLVED BY DEFERRAL
+
+**Raised by:** fresh review of `TASKS/audit-remediation/08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md`.
+
+**Question / mismatch:** The dependency/toolchain remediation itself is implemented and passes `govulncheck ./...`, build, vet, the full non-race suite, module verification, and tidy verification. The task also required `go test -race ./...`. Two exact full race runs emitted no data-race warning but exceeded the default ten-minute per-package timeout while SQLite/Goose test stores were applying migrations under aggregate race instrumentation. A focused `internal/selftools` race run likewise exceeded the default timeout and passed only with a 30-minute timeout in 1,446.675 seconds. Continuing repeated full race campaigns stalled the Wave without producing evidence of a code race.
+
+**Resolution:** **Operator, 2026-08-23.** Explicitly defer the full-race acceptance gate and close Wave 3 without another prolonged race campaign. Keep `08/08` and GO-SEC-001/GO-SEC-002 at `implemented`, not `reviewed`; retain the exact timeout qualification in the task Work Log and `TASKS/INDEX.md`. This deferral does not waive future race validation under a fixture/runtime setup that can complete within a practical test budget.
+
+**Follow-up:** A future test-infrastructure pass may isolate or pre-migrate SQLite fixtures, serialize the migration-heavy packages, or establish an explicit extended race timeout before re-running the gate. No additional dependency change is required by this deferral.

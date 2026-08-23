@@ -1,7 +1,7 @@
 # Dependency and toolchain version bumps for reachable CVEs
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** implemented — full race-suite acceptance gate deferred by operator on 2026-08-23
 **Depends on:** none
 **Touches:** `go.mod`, `go.sum`, the toolchain/`go` directive in `go.mod`
 **Requires architect decision:** false (matches `findings.json` for both findings)
@@ -79,4 +79,5 @@ Low — both are patch/point-release bumps to already-adopted dependencies/toolc
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-22: Fresh dependency/code review confirmed Go 1.26.7 and the aligned OpenTelemetry v1.45.0 module set are current and correctly scoped, production OTel wiring still builds, and focused OTel tests pass. Review verdict remained FAIL solely because the explicit full `go test -race ./...` acceptance gate timed out; no race warning or dependency defect was found.
+- 2026-08-23: The operator explicitly deferred that full-race gate after the repeated migration-bound timeouts stalled Wave 3. The task remains `implemented`, not `reviewed`; the unchecked Done-means item and exact qualification above are intentional. The final merged Wave 3 `go build ./...`, `go vet ./...`, and `go test ./...` baseline passed.

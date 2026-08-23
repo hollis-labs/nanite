@@ -173,13 +173,19 @@ Observable behavior required for PASS: the characterization suite exists, passes
   single-tool, deterministic multi-tool, mid-stream provider error, successful
   provider-overflow compaction/retry, and real `plugin.Host`
   `message.sending` cancellation. A seventh production-door case pins the
-  pre-loop budget/compaction gate, and a targeted helper case pins forced
-  rate-budget recovery.
+  pre-loop budget/compaction gate; an additional production-door case pins
+  `tool.executing` cancellation through tool settlement; and a targeted helper
+  case pins forced rate-budget recovery.
 - The overflow case proves two provider calls, a real `drop_enrichment`
   compaction stage, `slot_changed`, retry completion, `stream_end`, and the
   persisted recovered assistant response. The provider-error case pins the
   exact assistant row ID and role, buffered partial content, and
   `had_error:true` metadata.
+- The `tool.executing` cancellation case uses a real `plugin.Host`, proves the
+  hook payload, verifies `ToolService.Execute` is skipped, pins blocked
+  `tool_call` → `tool_result` ordering/error output, finds the refusal block in
+  the continuation provider request, and verifies terminal stream completion
+  plus the persisted assistant result.
 - Added the architect-review input at
   `TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-responsibility-map.md`.
   It contains the six-phase `generateResponse` proposal, the complete
@@ -187,6 +193,11 @@ Observable behavior required for PASS: the characterization suite exists, passes
   current `StreamManager` comparison, the recognizable-outer-flow constraint,
   and per-extraction behavior/race/complexity rerun requirements. It creates no
   follow-on task and does not constitute architect approval.
+- Corrected the responsibility map's ambiguous repeated field ownership with a
+  canonical exactly-once inventory. It assigns all 52 current struct fields to
+  one primary capability, reconciles `7 + 9 + 7 + 10 + 3 + 3 + 1 + 9 + 0 + 0 + 3 = 52`,
+  and was mechanically compared with the live struct: 52 names, 52 unique
+  names, zero missing, zero extra.
 - Re-verified current source rather than relying on stale task citations:
   `chat_generate.go` is 3,684 lines (`generateResponse` lines 121–2,036),
   `chat.go` is 1,407 lines, and `chatServiceImpl` has 52 fields / 87 production
@@ -198,14 +209,16 @@ Observable behavior required for PASS: the characterization suite exists, passes
   package 62.3%; `generateResponse` 36.7%;
   `recoverFromContextOverflow` 23.4%; `enforceBudgetOrCompact` 5.9%.
   Start-line-weighted branch-family ranges were provider error 1/111 statements
-  (0.9%), compaction recovery 15/111 (13.5%), and plugin cancel 1/11 (9.1%).
-- After coverage (`go test ./internal/service/... -coverprofile=/tmp/w5-10-01-after.out`):
-  package 65.2%; `generateResponse` 53.2%;
+  (0.9%), compaction recovery 15/111 (13.5%), and the expanded plugin-cancel
+  family 1/26 (3.8%).
+- Final coverage (`go test ./internal/service/... -coverprofile=/tmp/w5-10-01-after-tool-cancel.out`):
+  package 65.6%; `generateResponse` 53.7%;
   `recoverFromContextOverflow` 78.7%; `enforceBudgetOrCompact` 67.6%.
   The same scoped ranges are provider error 28/111 (25.2%), compaction recovery
-  59/111 (53.2%), and plugin cancel 11/11 (100.0%). The measured ranges were
+  59/111 (53.2%), and plugin cancel 26/26 (100.0%). The measured ranges were
   provider error 1,067–1,260 plus 1,396–1,451; compaction recovery 651–653,
-  1,067–1,188, 1,396–1,421, and 2,265–2,395; plugin cancel 908–929.
+  1,067–1,188, 1,396–1,421, and 2,265–2,395; plugin cancel
+  `chat_generate.go` 908–929 plus `chat_tool_executor.go` 252–276.
 - Verification results: `go build ./internal/service/...` exit 0;
   `go vet ./internal/service/...` exit 0;
   `go test ./internal/service/... -run 'GenerateResponse|Characterization' -v`
@@ -216,6 +229,11 @@ Observable behavior required for PASS: the characterization suite exists, passes
   `TestResolveProvider_StoredProviderID_UsesRuntimeProviderType` was opening and
   migrating SQLite; no race report occurred. This is the already-tracked
   GO-SVCCORE-006 condition, not a timeout or race introduced by the new tests.
+- Review correction verification: focused characterization/recovery non-race
+  exit 0 (2.655s), focused `-race` exit 0 (84.086s), service build exit 0, and
+  service vet exit 0. The first full coverage-profile attempt hit an unrelated
+  existing `driveBootSession` send-on-closed-channel panic; the identical retry
+  passed in 85.282s and produced the final profile above.
 - No production implementation was changed: `internal/service/chat.go` and
   `internal/service/chat_generate.go` are untouched.
 

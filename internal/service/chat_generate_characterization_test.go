@@ -164,6 +164,12 @@ func (p *characterizationProvider) callCount() int {
 	return len(p.requests)
 }
 
+func (p *characterizationProvider) requestsSnapshot() []llmtypes.ChatRequest {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]llmtypes.ChatRequest(nil), p.requests...)
+}
+
 var _ llmcontracts.Provider = (*characterizationProvider)(nil)
 
 type characterizationFixture struct {
@@ -526,6 +532,106 @@ func TestGenerateResponseCharacterization_PluginInitiatedCancel(t *testing.T) {
 	}
 	if !blocked || findEvent(events, "stream_end") == nil {
 		t.Fatalf("plugin-cancel events = %v", eventTypes(events))
+	}
+}
+
+type characterizationToolCancelHook struct {
+	called bool
+	event  sdkplugin.Event
+}
+
+func (h *characterizationToolCancelHook) Handle(_ context.Context, event sdkplugin.Event) error {
+	h.called = true
+	h.event = event
+	return sdkplugin.ErrCancelled
+}
+func (h *characterizationToolCancelHook) EventTypes() []string {
+	return []string{pluginpkg.EventToolExecuting}
+}
+func (h *characterizationToolCancelHook) PluginID() string {
+	return "characterization-tool-cancel"
+}
+
+func TestGenerateResponseCharacterization_PluginToolExecutingCancel(t *testing.T) {
+	tu := llmtypes.ToolUseBlock{ID: "tool-blocked", Name: "echo", Input: map[string]any{"value": "blocked"}}
+	f := newCharacterizationFixture(t, []characterizationProviderStep{
+		{events: toolTurnEvents(tu)},
+		{events: doneEvents("continued after blocked tool")},
+	}, "echo")
+	host := pluginpkg.NewHost(http.NewServeMux(), pluginpkg.NewLogger("characterization"))
+	t.Cleanup(func() { _ = host.Shutdown() })
+	hook := &characterizationToolCancelHook{}
+	if err := host.RegisterEventHook([]string{pluginpkg.EventToolExecuting}, hook); err != nil {
+		t.Fatalf("RegisterEventHook: %v", err)
+	}
+	f.svc.pluginHost = host
+	events := f.run(t, "assistant-tool-plugin-cancel")
+
+	if !hook.called {
+		t.Fatal("tool.executing hook was not invoked")
+	}
+	if got := hook.event.Data["tool_name"]; got != "echo" {
+		t.Fatalf("tool.executing tool_name = %v, want echo", got)
+	}
+	if got := hook.event.Data["tool_id"]; got != "tool-blocked" {
+		t.Fatalf("tool.executing tool_id = %v, want tool-blocked", got)
+	}
+	if got := f.tools.calls(); len(got) != 0 {
+		t.Fatalf("ToolService.Execute calls = %v, want none", got)
+	}
+	if got := toolEventSequence(events); !reflect.DeepEqual(got, []string{"tool_call:echo", "tool_result:echo"}) {
+		t.Fatalf("blocked tool event sequence = %v", got)
+	}
+	var blockedCall *chat.StreamEvent
+	var blockedResult *chat.StreamEvent
+	for i := range events {
+		if events[i].Type == "tool_call" && events[i].ToolID == "tool-blocked" {
+			blockedCall = &events[i]
+		}
+		if events[i].Type == "tool_result" && events[i].ToolID == "tool-blocked" {
+			blockedResult = &events[i]
+		}
+	}
+	if blockedCall == nil || blockedCall.Tool != "echo" {
+		t.Fatalf("blocked tool call = %+v", blockedCall)
+	}
+	if blockedResult == nil || !blockedResult.IsError || !strings.Contains(blockedResult.Summary, "refused by a policy plugin") {
+		t.Fatalf("blocked tool result = %+v", blockedResult)
+	}
+	if findEvent(events, "stream_end") == nil || findEvent(events, "error") != nil {
+		t.Fatalf("tool-cancel terminal events = %v", eventTypes(events))
+	}
+
+	requests := f.provider.requestsSnapshot()
+	if len(requests) != 2 {
+		t.Fatalf("provider requests = %d, want tool turn plus continuation", len(requests))
+	}
+	var continuationBlock *llmtypes.ContentBlock
+	var continuationRole string
+	for _, msg := range requests[1].Messages {
+		for i := range msg.ContentBlocks {
+			block := &msg.ContentBlocks[i]
+			if block.Type == "tool_result" && block.ToolUseID == "tool-blocked" {
+				continuationBlock = block
+				continuationRole = msg.Role
+				break
+			}
+		}
+	}
+	if continuationBlock == nil || continuationRole != "user" || !strings.Contains(continuationBlock.Content, "refused by a policy plugin") {
+		t.Fatalf("continuation blocked tool result role/block = %q/%+v", continuationRole, continuationBlock)
+	}
+
+	msgs, err := f.st.ListMessages(context.Background(), f.session, 20)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	var persisted bool
+	for _, msg := range msgs {
+		persisted = persisted || (msg.ID == "assistant-tool-plugin-cancel" && msg.Role == "assistant" && strings.Contains(msg.Content, "continued after blocked tool"))
+	}
+	if !persisted {
+		t.Fatalf("completed assistant row missing: %+v", msgs)
 	}
 }
 

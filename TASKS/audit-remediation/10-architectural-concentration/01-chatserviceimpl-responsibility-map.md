@@ -173,17 +173,41 @@ default; this mapping found no concrete reason incremental extraction is unsafe.
 ## `chatServiceImpl` responsibility map
 
 Each entry uses the audit guide's required fields. Shared dependencies are
-listed where they are actually used; field repetition is intentional because
-the current type shares several cross-cutting sinks across capabilities.
+listed where they are actually used; `fields owned` is reserved for the one
+primary owner assigned by the canonical inventory below.
+
+### Canonical exactly-once field ownership
+
+This table is the authoritative field inventory. It supersedes any descriptive
+cross-capability field mention elsewhere in the map: each of the 52 struct
+fields has exactly one primary capability owner here, while other capabilities'
+access appears only as shared state or a dependency.
+
+| Primary capability | Count | Fields owned exactly once |
+|---|---:|---|
+| 1. Message entry, dispatch, stream, and in-flight run ownership | 7 | `sessions`, `streams`, `processTracker`, `lifecycle`, `activeGenMu`, `activeGen`, `dispatcher` |
+| 2. Harness/provider/context/recovery state machine | 9 | `agents`, `context`, `events`, `providers`, `store`, `pluginHost`, `sessionEventWriter`, `modelCatalog`, `reminderEngine` |
+| 3. Tool selection, execution, result handling, and per-session tool state | 7 | `tools`, `permissions`, `pathGrants`, `argValidator`, `resultCache`, `toolPartitionStates`, `loopDetector` |
+| 4. CLI-based subprocess session lifecycle and recovery | 10 | `agentDeps`, `agentSessionsManager`, `activeSessions`, `freshBootSessions`, `agentEventBridge`, `agentBootDirAdapter`, `activeSessionSlots`, `rebootingSessions`, `displacedSessions`, `activeSessionContextBlocks` |
+| 5. Delegation, task tracking, and worker orchestration | 3 | `orchestrator`, `tasks`, `workers` |
+| 6. Reflexes, route dispatch, inbox injection, and wake policies | 3 | `reflexEngine`, `envelopeRenderExecutor`, `subagentInbox` |
+| 7. Inspector and broker diagnostics | 1 | `inspector` |
+| 8. Output enrichment, artifacts, embedding warning, and utility LLM calls | 9 | `embeddingStatus`, `embeddingProvider`, `embeddingWarnedMu`, `embeddingWarnedSessions`, `embeddingWarnedOrder`, `utilityProvider`, `utilityModel`, `appConfig`, `outputFilter` |
+| 9. Glass-4 pre-compaction handoff integration | 0 | none |
+| 10. Loop-termination card emission | 0 | none |
+| 11. Construction-only wiring residue | 3 | `commands`, `dbPath`, `adapterRegistry` |
+
+Arithmetic reconciliation: 7 + 9 + 7 + 10 + 3 + 3 + 1 + 9 + 0 + 0 + 3 =
+52 fields. The 52 names in the table are unique; there are no omissions or
+duplicate primary owners.
 
 ### 1. Message entry, dispatch, stream, and in-flight run ownership
 
 - **capability:** accept chat/background messages, create streams, enforce
   takeover or reject-if-busy semantics, route through the one Dispatcher door,
   and drain on shutdown.
-- **fields owned:** `sessions`, `agents`, `streams`, `store`, `lifecycle`,
-  `activeGenMu`, `activeGen`, `dispatcher`, `processTracker`; shared use of
-  `pluginHost`, `pathGrants`, `events`, `agentDeps`, `agentSessionsManager`.
+- **fields owned:** `sessions`, `streams`, `processTracker`, `lifecycle`,
+  `activeGenMu`, `activeGen`, `dispatcher`.
 - **methods owned:** `goTracked`, `trackedDone`, `Dispatcher`,
   `registerGeneration`, `deregisterGeneration`, `registerGenerationIfIdle`,
   `CancelActiveGeneration`, `launchGeneration`, `runGeneration`,
@@ -208,10 +232,8 @@ the current type shares several cross-cutting sinks across capabilities.
 - **capability:** assemble a turn, resolve/provider-call it, run the bounded
   tool-settling loop, recover from budget/provider failures, persist partial or
   final output, and emit completion/error telemetry.
-- **fields owned:** shared `sessions`, `agents`, `tools`, `streams`, `context`,
-  `events`, `providers`, `store`, `pluginHost`, `outputFilter`,
-  `sessionEventWriter`, `modelCatalog`, `reminderEngine`, `reflexEngine`,
-  `subagentInbox`, `inspector`, `envelopeRenderExecutor`.
+- **fields owned:** `agents`, `context`, `events`, `providers`, `store`,
+  `pluginHost`, `sessionEventWriter`, `modelCatalog`, `reminderEngine`.
 - **methods owned:** `generateResponse`, `tryProviderCandidate`,
   `resolveProvider`, `classifyNilProvider`, `assembleTurnContext`,
   `contextWindowSize`, `enforceBudgetOrCompact`, `buildSummarizer`,
@@ -239,8 +261,7 @@ the current type shares several cross-cutting sinks across capabilities.
   serial/parallel execution, result caching/truncation, loop detection and tool
   event construction.
 - **fields owned:** `tools`, `permissions`, `pathGrants`, `argValidator`,
-  `resultCache`, `toolPartitionStates`, `loopDetector`; shared `store`,
-  `streams`, `pluginHost`, `events`, `inspector`, `orchestrator`, `appConfig`.
+  `resultCache`, `toolPartitionStates`, `loopDetector`.
 - **methods owned:** `handleRequestTools`, `detectStuckLoop`, `preCheckTools`,
   `executeToolBatch`, `executeSingleTool`, `postProcessToolResults`,
   `handleResultCacheMetaTool`, `handleFetchToolResult`,
@@ -256,7 +277,11 @@ the current type shares several cross-cutting sinks across capabilities.
   coherent internal pipeline. A later `toolTurnExecutor` is plausible, but it
   should follow—not precede—the phase extraction and must receive a narrow
   dependency bundle. `toolPartitionStates` belongs here, not in the runtime
-  session owner merely because runtime teardown currently deletes it.
+  session owner merely because runtime teardown currently deletes it. Preserve
+  the characterized `tool.executing` cancellation contract: skip
+  `ToolService.Execute`, emit blocked `tool_call` then `tool_result`, append the
+  blocked result to the continuation provider request, and finish/persist the
+  run normally.
 
 ### 4. CLI-based subprocess session lifecycle and recovery
 
@@ -266,8 +291,7 @@ the current type shares several cross-cutting sinks across capabilities.
 - **fields owned:** `agentDeps`, `agentSessionsManager`, `activeSessions`,
   `freshBootSessions`, `agentEventBridge`, `agentBootDirAdapter`,
   `activeSessionSlots`, `rebootingSessions`, `displacedSessions`,
-  `activeSessionContextBlocks`; shared `store`, `streams`, `lifecycle`,
-  `activeGenMu`/`activeGen`.
+  `activeSessionContextBlocks`.
 - **methods owned:** `CloseAgentSession`, `driveBootSession`,
   `resolveAgentContextForBoot`, `slotsChangedFor`, `adoptReplacementSession`,
   `stopDisplacedSession`, `observeSessionForRecovery`,
@@ -316,8 +340,7 @@ state call unless a general per-session cleanup hook is introduced.
 
 - **capability:** synchronous delegation, decomposition, worker fan-out,
   aggregation and optional task lifecycle tracking.
-- **fields owned:** `orchestrator`, `tasks`, `workers`; shared `sessions`,
-  `agents`, `tools`, `streams`, `store`, `lifecycle`, `dispatcher`.
+- **fields owned:** `orchestrator`, `tasks`, `workers`.
 - **methods owned:** `SetWorkers`, `DelegateTask`, `DelegateAndAggregate`.
 - **shared mutable state:** durable worker sessions/messages/tasks; lifecycle
   goroutines; worker manager.
@@ -333,8 +356,7 @@ state call unless a general per-session cleanup hook is introduced.
 
 - **capability:** inject reflex/subagent context, emit dispatch side channels,
   and resolve message/subagent wake policy.
-- **fields owned:** `reflexEngine`, `envelopeRenderExecutor`, `subagentInbox`;
-  shared `store`, `streams`, `inspector`, `pluginHost`.
+- **fields owned:** `reflexEngine`, `envelopeRenderExecutor`, `subagentInbox`.
 - **methods owned:** `attemptReflexDispatch`, `evaluateAndInjectReflexes`,
   `attemptRouteDispatch`, `evaluateAndInjectSubagentResults`,
   `resolveMessageWakePolicy`, `resolveSubagentCompletionPolicy`.
@@ -352,7 +374,7 @@ state call unless a general per-session cleanup hook is introduced.
 
 - **capability:** capture assembled slots, provider message views and broker
   decisions for the developer inspector.
-- **fields owned:** `inspector`; shared `store` and current turn state.
+- **fields owned:** `inspector`.
 - **methods owned:** `recordInspectorSlots`, `recordInspectorLLMMessages`,
   `persistBrokerCallEx`.
 - **shared mutable state:** inspector's synchronized per-turn records.
@@ -368,8 +390,7 @@ state call unless a general per-session cleanup hook is introduced.
   correction, title/tag generation, debug-mode lookup and utility metrics.
 - **fields owned:** `embeddingStatus`, `embeddingProvider`,
   `embeddingWarnedMu`, `embeddingWarnedSessions`, `embeddingWarnedOrder`,
-  `utilityProvider`, `utilityModel`; shared `appConfig`, `providers`, `store`,
-  `events`, `pluginHost`, `outputFilter`.
+  `utilityProvider`, `utilityModel`, `appConfig`, `outputFilter`.
 - **methods owned:** `maybeEmitEmbeddingWarning`, `maybeCreateAutoArtifact`,
   `retryEnvelopeCorrection`, `autoTitle`, `autoTags`, `recordUtilityMetrics`,
   `isGlobalDebugMode`.
@@ -385,7 +406,7 @@ state call unless a general per-session cleanup hook is introduced.
 
 - **capability:** deterministically ensure a continuity handoff exists before
   compaction.
-- **fields owned:** shared `store` only.
+- **fields owned:** none.
 - **methods owned:** `ensureGlass4HandoffPreCompact`.
 - **shared mutable state:** durable handoff stash and Context Broker handoff
   slot (through sibling functions).
@@ -398,7 +419,7 @@ state call unless a general per-session cleanup hook is introduced.
 ### 10. Loop-termination card emission
 
 - **capability:** render the typed terminal card/status for bounded-loop exits.
-- **fields owned:** shared `pluginHost`/stream only through helper calls.
+- **fields owned:** none.
 - **methods owned:** `emitChatLoopTerminated`.
 - **shared mutable state:** none beyond current `loopState` and stream output.
 - **dependencies:** Cards/envelope rendering and `loopState`.

@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/dispatcher"
+	"github.com/hollis-labs/nanite/internal/effort"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
+	"github.com/hollis-labs/nanite/internal/messaging"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -34,6 +38,192 @@ type generationLifecycle struct {
 	ptyTurnStarted   bool
 	ptyTurnSucceeded bool
 	ptyProviderName  string
+}
+
+func (s *chatServiceImpl) initializeRun(
+	ctx context.Context,
+	sessionID string,
+	assistantMsgID string,
+	setup *turnSetup,
+	lifecycle *generationLifecycle,
+	ch chan chat.StreamEvent,
+) initializeRunResult {
+	agent := setup.agent
+	constraints := setup.constraints
+	model := setup.model
+	providerName := setup.providerName
+	tools := setup.tools
+	userContent := setup.userContent
+	slotResult := setup.slotResult
+	chatMessages := setup.chatMessages
+	systemPrompt := setup.systemPrompt
+	inspectorTurnID := setup.inspectorTurnID
+	var startCancel context.CancelFunc
+	// --- Stream start ---
+	ch <- chat.StreamEvent{Type: "stream_start", MessageID: assistantMsgID, AgentID: agent.ID}
+
+	presenceStart := chat.PresenceEvent{
+		Type:      "stream_start",
+		SessionID: sessionID,
+		AgentID:   agent.ID,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	s.streams.SetActivePresence(sessionID, presenceStart)
+	s.streams.BroadcastPresence(presenceStart)
+
+	if s.events != nil {
+		// Phase 0 item 21 ("Cut Modes, in full") deleted store.AgentMode —
+		// there is no more per-agent mode slug to report. "default" matches
+		// the literal already used at session.go's own EmitSessionStart call
+		// site for the same event.
+		s.events.EmitSessionStart(ctx, sessionID, agent.ID, model, "default")
+	}
+
+	// CW-20260420-0032: PTY observability — emit pty_turn_start so
+	// session_diagnose can reconstruct what happened. The deferred
+	// closer emits pty_turn_complete or pty_turn_failed when the function
+	// returns. Only emitted for PTY-provider sessions; API-path sessions
+	// already have sufficient observability via event_log + execution_metrics.
+	if chat.IsPTYProvider(providerName) && s.sessionEventWriter != nil {
+		lifecycle.ptyTurnStarted = true
+		lifecycle.ptyProviderName = providerName
+		startPayload := fmt.Sprintf(`{"message_id":%q,"provider":%q,"agent_id":%q,"model":%q}`,
+			assistantMsgID, providerName, agent.ID, model)
+		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		startCancel = cancel
+		s.sessionEventWriter.WriteSessionEvent(
+			startCtx, sessionID, messaging.EventPTYTurnStart, providerName, startPayload)
+	}
+
+	// Emit agent.loaded plugin event (fire-and-forget).
+	if s.pluginHost != nil {
+		s.goTracked("emit.agent-loaded", func(context.Context) {
+			s.pluginHost.EmitAgentLoaded(sessionID, agent.ID, agent.Name, fmt.Sprintf("%d", agent.Version))
+		})
+	}
+
+	// --- Pre-loop budget / compaction gate (pt3 T4) ---
+	chatMessages, tools = s.enforceBudgetOrCompact(ctx, sessionID, slotResult, agent, chatMessages, tools, ch)
+
+	// --- Loop state ---
+	toolNames := make([]string, len(tools))
+	for i, t := range tools {
+		toolNames[i] = t.Name
+	}
+	// Debug mode: per-agent setting or global developer_mode.
+	debugMode := isAgentDebugEnabled(agent.Settings) || s.isGlobalDebugMode()
+
+	// P3 (CW-20260420-0013): pre-loop classification. Runs once per
+	// generation; downstream consumers read via loopState.Classification().
+	// CW-20260519-0073: the dispatch caller selects the loop's
+	// inactivity-timeout window. A subagent dispatch uses the
+	// Torque-parity liveness window (subagentIdleTimeoutSeconds) — the
+	// fixed 300s wall-clock deadline that used to bound subagent runs
+	// has been removed, so the chat loop's idle-timeout terminator is
+	// now the governing liveness signal.
+	ls := newLoopState(constraints, toolNames, debugMode, dispatcher.CallerTypeFromContext(ctx))
+	// P3 (CW-20260420-0013): pre-loop classification. Downstream consumers
+	// read via loopState.Classification().
+	classifyAndAttach(ls, sessionID, userContent, toolNames)
+
+	// I1 (CW-20260426-0004): attach turn ID to loop state so broker/tool
+	// producers can record to the same snapshot.
+	ls.inspectorTurnID = inspectorTurnID
+
+	// I1 (CW-20260426-0004): record scope tier to inspector (B2 already shipped).
+	if s.inspector != nil && inspectorTurnID != "" {
+		classifiedTier, _ := ls.Classification()
+		s.inspector.RecordScopeTier(sessionID, inspectorTurnID, classifiedTier.String())
+	}
+
+	// Phase 4 item 02
+	// (TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md):
+	// dispatch_to_agent reflex evaluation (upstream seam) — replaces the
+	// retired agent-broker call site (attemptBrokerDispatch/
+	// buildBrokerInput, formerly chat_broker_dispatch.go, deleted in
+	// full). Runs BEFORE the chat-loop entry: on a firing reflex,
+	// synthesizes a task_execute call so the resulting envelope reaches
+	// the FE as a plugin_envelope SSE event, matching the pattern
+	// attemptRouteDispatch uses for the B2 route hint. Nil-safe when the
+	// reflex engine isn't wired. See chat_reflex_dispatch.go's header
+	// comment for the Rule-1-feed / broker-subsumption design decision.
+	//
+	// Ordered BEFORE attemptRouteDispatch for the same reason the old
+	// broker call was: this is the dispatch DECISION layer; the route
+	// hint and the existing reflex/grounding scaffold in callExecuteTask
+	// (internal/mcp/self_tools_dispatch.go — a deliberately independent
+	// second consumer, untouched by this task) enrich the dispatch CALL.
+	s.attemptReflexDispatch(ctx, sessionID, inspectorTurnID, userContent, agent.ID, agent.Class, ls, ch)
+
+	// B2 (CW-20260429-0031): route-dispatch seam. When the classifier
+	// emits a non-chat-direct route AND the envelope-render executor is
+	// wired, dispatch the executor and emit the resulting envelope (if
+	// any) onto the SSE stream as a side-channel plugin_envelope event.
+	// The chat-direct LLM loop runs regardless — the route is
+	// INFORMATIVE per docs/architecture/classifier-routing.md §1, and
+	// short-circuit on success is reserved for B5 / Phase 2 graduation
+	// (executor-handoff.md §6).
+	s.attemptRouteDispatch(ctx, sessionID, userContent, ls, ch)
+
+	// F1 (CW-20260420-0014): Effort scalar. Extracted from request context;
+	// defaults to EffortNormal when the caller did not set it. Biases the
+	// per-iteration token budget ceiling and reasoning-block configuration.
+	// Orthogonal to ScopeTier — does NOT change roles, tools, or turn counts.
+	turnEffort := effort.FromContext(ctx)
+	ls.SetEffort(turnEffort)
+	reasoningCfg := turnEffort.ReasoningCfg()
+	slog.Debug("chat-service: effort scalar",
+		"session_id", sessionID,
+		"effort", turnEffort.String(),
+		"budget_multiplier", turnEffort.BudgetMultiplier(),
+		"reasoning_enabled", reasoningCfg.Enabled,
+		"reasoning_budget_tokens", reasoningCfg.BudgetTokens,
+	)
+
+	// Load per-tool cap from UserSettings.
+	if us, err := s.store.GetUserSettings(ctx); err == nil && us.ToolPerTurnCap > 0 {
+		ls.limits.defaultPerToolCap = us.ToolPerTurnCap
+	}
+
+	// CW-20260418-0043 diagnostic — log effective loop config on entry.
+	diagLogLoopStart(sessionID, assistantMsgID, agent.ID, ls, cap(ch))
+
+	// --- Tool-use loop ---
+	var fullContent strings.Builder
+	// F4 (CW-20260419-0029) — separate narration and final text accumulators.
+	// narrationContent captures inter-iteration prose (iterations that end with
+	// tool_use). finalContent captures the post-end_turn text (the answer).
+	// Only finalContent is stored as message.Content; narrationContent is saved
+	// in metadata.thinking for the expand-thinking affordance.
+	var narrationContent strings.Builder
+	var finalContent strings.Builder
+	var finalUsage *chat.Usage
+	var breakdown *chat.TokenBreakdown
+
+	// F3 (CW-20260420-0023) — interleaved thinking block accumulator.
+	// Collects signed thinking blocks emitted by the Anthropic provider when
+	// the interleaved-thinking-2025-05-14 beta is active. Blocks are stored in
+	// metadata.thinking_blocks for the post-stream pill and round-tripped as
+	// assistant message ContentBlocks on subsequent turns.
+	var thinkingBlocks []llmtypes.ThinkingBlock
+
+	return initializeRunResult{
+		directive: generationProceed,
+		run: &runState{
+			loop:             ls,
+			chatMessages:     chatMessages,
+			tools:            tools,
+			systemPrompt:     systemPrompt,
+			reasoningConfig:  reasoningCfg,
+			fullContent:      fullContent,
+			narrationContent: narrationContent,
+			finalContent:     finalContent,
+			finalUsage:       finalUsage,
+			breakdown:        breakdown,
+			thinkingBlocks:   thinkingBlocks,
+			startCancel:      startCancel,
+		},
+	}
 }
 
 type turnSetup struct {
@@ -62,6 +252,26 @@ type turnSetup struct {
 type prepareTurnResult struct {
 	directive generationDirective
 	setup     *turnSetup
+}
+
+type runState struct {
+	loop             *loopState
+	chatMessages     []llmtypes.ChatMessage
+	tools            []llmtypes.ToolDefinition
+	systemPrompt     string
+	reasoningConfig  effort.ReasoningConfig
+	fullContent      strings.Builder
+	narrationContent strings.Builder
+	finalContent     strings.Builder
+	finalUsage       *chat.Usage
+	breakdown        *chat.TokenBreakdown
+	thinkingBlocks   []llmtypes.ThinkingBlock
+	startCancel      context.CancelFunc
+}
+
+type initializeRunResult struct {
+	directive generationDirective
+	run       *runState
 }
 
 func (s *chatServiceImpl) prepareTurn(

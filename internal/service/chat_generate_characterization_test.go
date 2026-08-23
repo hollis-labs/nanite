@@ -509,6 +509,18 @@ func TestGenerateResponseCharacterization_PreLoopBudgetCompaction(t *testing.T) 
 	if f.provider.callCount() != 1 || findEvent(events, "slot_changed") == nil || findEvent(events, "stream_end") == nil {
 		t.Fatalf("pre-loop compaction calls/events = %d/%v", f.provider.callCount(), eventTypes(events))
 	}
+	var streamStartAt, slotChangedAt = -1, -1
+	for i, event := range events {
+		if event.Type == "stream_start" {
+			streamStartAt = i
+		}
+		if event.Type == "slot_changed" {
+			slotChangedAt = i
+		}
+	}
+	if streamStartAt < 0 || slotChangedAt < 0 || streamStartAt >= slotChangedAt {
+		t.Fatalf("initialization ordering = %v, want stream_start before pre-loop compaction slot_changed", eventTypes(events))
+	}
 }
 
 type characterizationCancelHook struct{ called bool }

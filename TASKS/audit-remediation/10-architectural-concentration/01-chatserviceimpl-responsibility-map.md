@@ -473,3 +473,7 @@ inbox + 3 inspector + 7 enrichment/utility + 1 handoff + 1 loop-termination =
   tracing and deferred cleanup, and receives an immutable `turnSetup` through a
   typed directive outcome. Current coordinator complexity after this phase is
   cognitive 397 / cyclop 185 / gocyclo 183 (baseline 458 / 228 / 225).
+- Phase 2 (`initializeRun`) extracted on 2026-08-23. `runState` now owns loop
+  state and mutable per-run accumulators without copying a used builder; the
+  coordinator registers the returned stream-start timeout cancel. Current
+  coordinator complexity is cognitive 389 / cyclop 177 / gocyclo 175.

@@ -254,3 +254,16 @@ read-only and must not edit or claim operator approval.
   cognitive 397 / cyclop 185 / gocyclo 183. `prepareTurn` is cohesive at
   cognitive 62 / cyclop 45 / gocyclo 44 / maintainability 8 rather than a move
   of the original monolith.
+- Phase 2 complete: extracted `initializeRun` and established pointer-owned
+  `runState` for the loop, mutable request state, accumulators, usage, and
+  reasoning configuration. `stream_start` still precedes the pre-loop
+  compaction gate; a strengthened production-door test pins that order. The
+  stream-start timeout cancel is returned to and deferred by the coordinator,
+  preserving its lifetime and defer position. Focused behavior passed; focused
+  race passed in 105.052s; service/all build and vet and diff check passed.
+  The first full non-race service run hit the existing `driveBootSession`
+  send-on-closed-channel panic after 10.916s; the identical retry passed in
+  87.532s. Audit lint exited 1 on historical diagnostics; coordinator
+  complexity decreased again to cognitive 389 / cyclop 177 / gocyclo 175.
+  `initializeRun` did not trigger cognitive/cyclomatic/maintainability
+  diagnostics (only the configured >100-line `funlen` diagnostic at 114).

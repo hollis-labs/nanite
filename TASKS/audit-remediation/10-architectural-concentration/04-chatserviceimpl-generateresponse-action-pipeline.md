@@ -267,3 +267,13 @@ read-only and must not edit or claim operator approval.
   complexity decreased again to cognitive 389 / cyclop 177 / gocyclo 175.
   `initializeRun` did not trigger cognitive/cyclomatic/maintainability
   diagnostics (only the configured >100-line `funlen` diagnostic at 114).
+- Phase 5 complete (third extraction in the required dependency order):
+  extracted `settleToolTurn`, composing the existing discovery/precheck/batch/
+  postprocess pipeline and returning explicit continue/finish outcomes to the
+  coordinator. Existing serial, multi-tool ordering, and real plugin policy
+  denial coverage protect the move. Focused behavior passed; focused race
+  passed in 103.296s; full non-race service passed in 88.184s; service/all
+  build and vet and diff check passed. Audit lint exited 1 on historical
+  diagnostics; coordinator complexity decreased to cognitive 358 / cyclop 164
+  / gocyclo 162. `settleToolTurn` is cognitive 21 / cyclop 17 / gocyclo 17,
+  a bounded composition action rather than relocated coordinator complexity.

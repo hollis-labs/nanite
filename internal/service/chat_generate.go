@@ -24,7 +24,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/effort"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
-	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/sandbox"
@@ -197,7 +196,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	providerName := setup.providerName
 	prov := setup.provider
 	cacheStrategy := setup.cacheStrategy
-	selection := setup.selection
 	fctx := setup.filterContext
 	lazyToolCount := setup.lazyToolCount
 	essentialToolCount := setup.essentialToolCount
@@ -216,6 +214,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		defer run.startCancel()
 	}
 
+generationLoop:
 	for run.loop.iteration = 0; ; run.loop.iteration++ {
 		// CW-20260418-0043 diagnostic.
 		diagCurrentIter = run.loop.iteration
@@ -311,18 +310,18 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			}
 			ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Context too large after all reductions",
 				map[string]interface{}{
-					"total":     run.breakdown.Total,
-					"ceiling":   run.breakdown.Ceiling,
-					"system":    run.breakdown.System,
-					"msgs":      run.breakdown.Messages,
-					"run.tools": run.breakdown.Tools,
+					"total":   run.breakdown.Total,
+					"ceiling": run.breakdown.Ceiling,
+					"system":  run.breakdown.System,
+					"msgs":    run.breakdown.Messages,
+					"tools":   run.breakdown.Tools,
 				})
 			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, budgetErr) // CW-20260419-0019, CW-20260512-0001
 			return
 		}
 		// Log compaction continuation if budget enforcement reduced context.
 		if len(run.chatMessages) < preBudgetMsgCount || len(run.tools) < preBudgetToolCount {
-			run.loop.continueWith(ContinueCompaction, fmt.Sprintf("budget reduced: msgs %d→%d, run.tools %d→%d",
+			run.loop.continueWith(ContinueCompaction, fmt.Sprintf("budget reduced: msgs %d→%d, tools %d→%d",
 				preBudgetMsgCount, len(run.chatMessages), preBudgetToolCount, len(run.tools)))
 		}
 
@@ -345,7 +344,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		provSpan.SetAttributes(
 			attribute.String("nanite.model", model),
 			attribute.Int("nanite.iteration", run.loop.iteration),
-			attribute.Int("nanite.run.tools.count", len(run.tools)),
+			attribute.Int("nanite.tools.count", len(run.tools)),
 			attribute.Int("nanite.messages.count", len(run.chatMessages)),
 			attribute.Int("nanite.tokens.total", run.breakdown.Total),
 			attribute.Int("nanite.tokens.ceiling", run.breakdown.Ceiling),
@@ -403,7 +402,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		var provCh <-chan llmtypes.StreamEvent
 		if len(run.tools) > 0 {
 			slog.Debug("chat-service: tool-use iteration",
-				"iter", run.loop.iteration, "run.tools", len(run.tools), "messages", len(run.chatMessages),
+				"iter", run.loop.iteration, "tools", len(run.tools), "messages", len(run.chatMessages),
 				"tokens", run.breakdown.Total, "ceiling", run.breakdown.Ceiling)
 		}
 
@@ -597,7 +596,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				// Outcome bookkeeping must survive cancellation of the provider request it records.
 				s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "provider_error", "error",
 					fmt.Sprintf("iteration %d: %v (recovery refused, trigger=%s)", run.loop.iteration, err, triggerKind),
-					fmt.Sprintf(`{"model":%q,"run.tools":%d,"messages":%d,"trigger_kind":%q}`, model, len(run.tools), len(run.chatMessages), triggerKind))
+					fmt.Sprintf(`{"model":%q,"tools":%d,"messages":%d,"trigger_kind":%q}`, model, len(run.tools), len(run.chatMessages), triggerKind))
 				if s.events != nil {
 					s.events.EmitError(ctx, sessionID, "provider_error", err.Error())
 					if chat.ClassifyError(err) == chat.ErrorCodeRateLimit {
@@ -657,7 +656,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// Outcome bookkeeping must survive cancellation of the provider request it records.
 			s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "provider_error", "error",
 				fmt.Sprintf("iteration %d: %v", run.loop.iteration, err),
-				fmt.Sprintf(`{"model":%q,"run.tools":%d,"messages":%d}`, model, len(run.tools), len(run.chatMessages)))
+				fmt.Sprintf(`{"model":%q,"tools":%d,"messages":%d}`, model, len(run.tools), len(run.chatMessages)))
 			if s.events != nil {
 				errCode := chat.ClassifyError(err)
 				s.events.EmitError(ctx, sessionID, "provider_error", err.Error())
@@ -714,7 +713,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			if s.suppressSurfaceIfSubagentCaused(sessionID, "provider_stream_error", run.fullContent.String()) {
 				return
 			}
-			errDetails := map[string]interface{}{"raw": err.Error(), "model": model, "run.tools": len(run.tools)}
+			errDetails := map[string]interface{}{"raw": err.Error(), "model": model, "tools": len(run.tools)}
 			ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(err), "Provider streaming failed", errDetails)
 			ch <- chat.ErrorEvent(chat.ClassifyError(err), "Provider streaming failed", errDetails)
 			// Suppression already checked at line above; use the pre-classified
@@ -1065,130 +1064,17 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			break
 		}
 
-		// --- Build assistant message with tool_use blocks ---
-		var assistantBlocks []llmtypes.ContentBlock
-		// F3 (CW-20260420-0023): thinking blocks MUST precede text and tool_use
-		// blocks in the assistant message. Anthropic verifies signatures on round-trip;
-		// preserve Thinking and Signature verbatim.
-		for _, tb := range run.thinkingBlocks {
-			assistantBlocks = append(assistantBlocks, llmtypes.ContentBlock{
-				Type:      "thinking",
-				Text:      tb.Thinking,
-				Signature: tb.Signature,
-			})
-		}
-		if text := turnContent.String(); text != "" {
-			assistantBlocks = append(assistantBlocks, llmtypes.ContentBlock{Type: "text", Text: text})
-		}
-		for _, tu := range toolUseBlocks {
-			input := tu.Input
-			if input == nil {
-				input = map[string]any{}
-			}
-			assistantBlocks = append(assistantBlocks, llmtypes.ContentBlock{
-				Type: "tool_use", ID: tu.ID, Name: tu.Name, Input: &input,
-			})
-		}
-		run.chatMessages = append(run.chatMessages, llmtypes.ChatMessage{
-			Role: "assistant", ContentBlocks: assistantBlocks,
-		})
-		// Reset per-iteration thinking accumulator so next iteration starts fresh.
-		run.thinkingBlocks = run.thinkingBlocks[:0]
-
-		// --- Execute tools (pre-check → parallel/serial → post-process) ---
-
-		// Handle request_tools meta-tool calls first.
-		var resultBlocks []llmtypes.ContentBlock
-		var regularTools []llmtypes.ToolUseBlock
-		for _, tu := range toolUseBlocks {
-			if tu.Name == "request_tools" && selection.Progressive {
-				resultBlocks, run.loop.toolCallRefs = s.handleRequestTools(
-					ctx, tu, ch, run.tools, run.loop.loadedTools,
-					&run.loop.consecutiveEmptyRequests, &run.loop.totalRequestToolsCalls, run.loop.maxRequestToolsCalls,
-					resultBlocks, run.loop.toolCallRefs,
-					sessionID, &run.loop.reflectionFired,
-					run.loop.inspectorTurnID,
-				)
-			} else {
-				regularTools = append(regularTools, tu)
-			}
-		}
-
-		// Pre-check regular tools: permission, blocked, concurrency safety.
-		plans := s.preCheckTools(ctx, sessionID, agentID, regularTools, run.loop, ch, selection, run.tools)
-
-		// Execute tools: concurrent-safe in parallel, serial one at a time.
-		execResults := s.executeToolBatch(ctx, plans, run.loop, agentID, ch, sessionID)
-
-		// Post-process: stuck loop detection, truncation, envelopes, artifacts.
-		// model is threaded through so truncate.OutputForModel can size the
-		// per-call MaxChars budget from the model's context window — see
-		// CW-20260430-0008 (P2 pilot conversion).
-		newBlocks, newRefs := s.postProcessToolResults(ctx, plans, execResults, run.loop, ch, sessionID, agentID, assistantMsgID, model)
-		resultBlocks = append(resultBlocks, newBlocks...)
-		run.loop.toolCallRefs = append(run.loop.toolCallRefs, newRefs...)
-		if run.loop.directReturn != "" {
-			run.fullContent.Reset()
-			run.fullContent.WriteString(run.loop.directReturn)
-			// F4: directReturn replaces all accumulated text; treat as final.
-			run.finalContent.Reset()
-			run.finalContent.WriteString(run.loop.directReturn)
-			ch <- chat.StreamEvent{Type: "replace_content", Content: run.loop.directReturn}
-			diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "done:direct_return=subagent_literal", len(run.loop.toolCallRefs), ch)
-			break
-		}
-
-		// Append tool results as user message.
-		run.chatMessages = append(run.chatMessages, llmtypes.ChatMessage{
-			Role: "user", ContentBlocks: resultBlocks,
-		})
-
-		// Update activity timestamp.
-		run.loop.touchActivity()
-
-		// Log continuation site: tool results ready, feeding back to provider.
-		reason := fmt.Sprintf("%d run.tools executed", len(toolUseBlocks))
-		run.loop.continueWith(ContinueToolResults, reason)
-
-		// Capture turn snapshot for debugging.
-		if run.loop.debugMode {
-			var snapshotTools []ToolCallSnapshot
-			for _, r := range execResults {
-				snapshotTools = append(snapshotTools, ToolCallSnapshot{
-					Name:       r.ref.Name,
-					DurationMs: float64(r.duration.Milliseconds()),
-					Success:    !r.isError,
-				})
-			}
-			tokensUsed := 0
-			if run.breakdown != nil {
-				tokensUsed = run.breakdown.Total
-			}
-			run.loop.captureSnapshotWithTools(ContinueToolResults, reason, tokensUsed, len(run.chatMessages), snapshotTools)
-		}
-
-		// Future continuation sites (wired when features are implemented):
-		// - ContinueAgentReturn:  sub-agent or sideloaded task returned results
-		// - ContinueHookModified: plugin hook modified state (injected context, changed tools)
-		// - ContinueModeChange:   mode switch mid-turn (plan mode, worktree, agent switch)
-
-		// Brief pause between iterations.
-		if run.loop.iteration > 0 {
-			time.Sleep(1 * time.Second)
-		}
-
-		// Check circuit breaker.
-		if ap, ok := prov.(*nllmanthropic.Client); ok && ap.CircuitBreaker != nil && ap.CircuitBreaker.IsOpen() {
-			slog.Warn("chat-service: circuit breaker open, stopping", "iter", run.loop.iteration)
-			if s.events != nil {
-				s.events.EmitCircuitBreakerTripped(ctx, sessionID, "anthropic")
-			}
-			ch <- chat.StreamEvent{
-				Type:    "circuit_open",
-				Content: "Provider rate limited. Tool-use loop stopped. Would you like to retry?",
-			}
-			diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "circuit_open", len(run.loop.toolCallRefs), ch)
-			break
+		settleResult := s.settleToolTurn(ctx, sessionID, assistantMsgID, setup, run, providerTurn{
+			content:       turnContent.String(),
+			toolUseBlocks: toolUseBlocks,
+		}, ch)
+		switch settleResult.directive {
+		case generationContinueIteration:
+			continue
+		case generationFinishRun:
+			break generationLoop
+		case generationTerminate:
+			return
 		}
 	}
 

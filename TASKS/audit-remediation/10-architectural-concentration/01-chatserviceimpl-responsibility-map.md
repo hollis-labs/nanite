@@ -477,3 +477,7 @@ inbox + 3 inspector + 7 enrichment/utility + 1 handoff + 1 loop-termination =
   state and mutable per-run accumulators without copying a used builder; the
   coordinator registers the returned stream-start timeout cancel. Current
   coordinator complexity is cognitive 389 / cyclop 177 / gocyclo 175.
+- Phase 5 (`settleToolTurn`) extracted on 2026-08-23 as the third dependency-
+  ordered move. The provider/tool loop remains visible in the coordinator and
+  interprets explicit continuation/finish outcomes. Current coordinator
+  complexity is cognitive 358 / cyclop 164 / gocyclo 162.

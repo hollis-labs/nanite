@@ -40,6 +40,148 @@ type generationLifecycle struct {
 	ptyProviderName  string
 }
 
+func (s *chatServiceImpl) settleToolTurn(
+	ctx context.Context,
+	sessionID string,
+	assistantMsgID string,
+	setup *turnSetup,
+	run *runState,
+	turn providerTurn,
+	ch chan chat.StreamEvent,
+) settleToolTurnResult {
+	agentID := setup.agentID
+	model := setup.model
+	selection := setup.selection
+	prov := setup.provider
+	// --- Build assistant message with tool_use blocks ---
+	var assistantBlocks []llmtypes.ContentBlock
+	// F3 (CW-20260420-0023): thinking blocks MUST precede text and tool_use
+	// blocks in the assistant message. Anthropic verifies signatures on round-trip;
+	// preserve Thinking and Signature verbatim.
+	for _, tb := range run.thinkingBlocks {
+		assistantBlocks = append(assistantBlocks, llmtypes.ContentBlock{
+			Type:      "thinking",
+			Text:      tb.Thinking,
+			Signature: tb.Signature,
+		})
+	}
+	if text := turn.content; text != "" {
+		assistantBlocks = append(assistantBlocks, llmtypes.ContentBlock{Type: "text", Text: text})
+	}
+	for _, tu := range turn.toolUseBlocks {
+		input := tu.Input
+		if input == nil {
+			input = map[string]any{}
+		}
+		assistantBlocks = append(assistantBlocks, llmtypes.ContentBlock{
+			Type: "tool_use", ID: tu.ID, Name: tu.Name, Input: &input,
+		})
+	}
+	run.chatMessages = append(run.chatMessages, llmtypes.ChatMessage{
+		Role: "assistant", ContentBlocks: assistantBlocks,
+	})
+	// Reset per-iteration thinking accumulator so next iteration starts fresh.
+	run.thinkingBlocks = run.thinkingBlocks[:0]
+
+	// --- Execute tools (pre-check → parallel/serial → post-process) ---
+
+	// Handle request_tools meta-tool calls first.
+	var resultBlocks []llmtypes.ContentBlock
+	var regularTools []llmtypes.ToolUseBlock
+	for _, tu := range turn.toolUseBlocks {
+		if tu.Name == "request_tools" && selection.Progressive {
+			resultBlocks, run.loop.toolCallRefs = s.handleRequestTools(
+				ctx, tu, ch, run.tools, run.loop.loadedTools,
+				&run.loop.consecutiveEmptyRequests, &run.loop.totalRequestToolsCalls, run.loop.maxRequestToolsCalls,
+				resultBlocks, run.loop.toolCallRefs,
+				sessionID, &run.loop.reflectionFired,
+				run.loop.inspectorTurnID,
+			)
+		} else {
+			regularTools = append(regularTools, tu)
+		}
+	}
+
+	// Pre-check regular tools: permission, blocked, concurrency safety.
+	plans := s.preCheckTools(ctx, sessionID, agentID, regularTools, run.loop, ch, selection, run.tools)
+
+	// Execute tools: concurrent-safe in parallel, serial one at a time.
+	execResults := s.executeToolBatch(ctx, plans, run.loop, agentID, ch, sessionID)
+
+	// Post-process: stuck loop detection, truncation, envelopes, artifacts.
+	// model is threaded through so truncate.OutputForModel can size the
+	// per-call MaxChars budget from the model's context window — see
+	// CW-20260430-0008 (P2 pilot conversion).
+	newBlocks, newRefs := s.postProcessToolResults(ctx, plans, execResults, run.loop, ch, sessionID, agentID, assistantMsgID, model)
+	resultBlocks = append(resultBlocks, newBlocks...)
+	run.loop.toolCallRefs = append(run.loop.toolCallRefs, newRefs...)
+	if run.loop.directReturn != "" {
+		run.fullContent.Reset()
+		run.fullContent.WriteString(run.loop.directReturn)
+		// F4: directReturn replaces all accumulated text; treat as final.
+		run.finalContent.Reset()
+		run.finalContent.WriteString(run.loop.directReturn)
+		ch <- chat.StreamEvent{Type: "replace_content", Content: run.loop.directReturn}
+		diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "done:direct_return=subagent_literal", len(run.loop.toolCallRefs), ch)
+		return settleToolTurnResult{directive: generationFinishRun}
+	}
+
+	// Append tool results as user message.
+	run.chatMessages = append(run.chatMessages, llmtypes.ChatMessage{
+		Role: "user", ContentBlocks: resultBlocks,
+	})
+
+	// Update activity timestamp.
+	run.loop.touchActivity()
+
+	// Log continuation site: tool results ready, feeding back to provider.
+	reason := fmt.Sprintf("%d tools executed", len(turn.toolUseBlocks))
+	run.loop.continueWith(ContinueToolResults, reason)
+
+	// Capture turn snapshot for debugging.
+	if run.loop.debugMode {
+		var snapshotTools []ToolCallSnapshot
+		for _, r := range execResults {
+			snapshotTools = append(snapshotTools, ToolCallSnapshot{
+				Name:       r.ref.Name,
+				DurationMs: float64(r.duration.Milliseconds()),
+				Success:    !r.isError,
+			})
+		}
+		tokensUsed := 0
+		if run.breakdown != nil {
+			tokensUsed = run.breakdown.Total
+		}
+		run.loop.captureSnapshotWithTools(ContinueToolResults, reason, tokensUsed, len(run.chatMessages), snapshotTools)
+	}
+
+	// Future continuation sites (wired when features are implemented):
+	// - ContinueAgentReturn:  sub-agent or sideloaded task returned results
+	// - ContinueHookModified: plugin hook modified state (injected context, changed tools)
+	// - ContinueModeChange:   mode switch mid-turn (plan mode, worktree, agent switch)
+
+	// Brief pause between iterations.
+	if run.loop.iteration > 0 {
+		time.Sleep(1 * time.Second)
+	}
+
+	// Check circuit breaker.
+	if ap, ok := prov.(*nllmanthropic.Client); ok && ap.CircuitBreaker != nil && ap.CircuitBreaker.IsOpen() {
+		slog.Warn("chat-service: circuit breaker open, stopping", "iter", run.loop.iteration)
+		if s.events != nil {
+			s.events.EmitCircuitBreakerTripped(ctx, sessionID, "anthropic")
+		}
+		ch <- chat.StreamEvent{
+			Type:    "circuit_open",
+			Content: "Provider rate limited. Tool-use loop stopped. Would you like to retry?",
+		}
+		diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "circuit_open", len(run.loop.toolCallRefs), ch)
+		return settleToolTurnResult{directive: generationFinishRun}
+	}
+
+	return settleToolTurnResult{directive: generationContinueIteration}
+}
+
 func (s *chatServiceImpl) initializeRun(
 	ctx context.Context,
 	sessionID string,
@@ -272,6 +414,15 @@ type runState struct {
 type initializeRunResult struct {
 	directive generationDirective
 	run       *runState
+}
+
+type providerTurn struct {
+	content       string
+	toolUseBlocks []llmtypes.ToolUseBlock
+}
+
+type settleToolTurnResult struct {
+	directive generationDirective
 }
 
 func (s *chatServiceImpl) prepareTurn(

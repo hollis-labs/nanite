@@ -1105,8 +1105,8 @@ to proceed against the post-sweep signatures.
 | `10/01` | `10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md` | reviewed | Wave 4 complete | AD-12 |
 | `10/02` | `10-architectural-concentration/02-selftoolstransport-decomposition.md` | reviewed | `09/01` | AD-13 |
 | `10/03` | `10-architectural-concentration/03-container-and-store-review-note.md` | reviewed | none | AD-14 |
-| `10/04` | `10-architectural-concentration/04-chatserviceimpl-generateresponse-action-pipeline.md` | not-started | `10/01` | AD-12 (decided) |
-| `10/05` | `10-architectural-concentration/05-selftoolstransport-selective-delegation.md` | not-started | `10/02` | AD-13 (decided) |
+| `10/04` | `10-architectural-concentration/04-chatserviceimpl-generateresponse-action-pipeline.md` | in-progress | `10/01` | AD-12 (decided) |
+| `10/05` | `10-architectural-concentration/05-selftoolstransport-selective-delegation.md` | in-progress | `10/02` | AD-13 (decided) |
 
 ### Wave 6a — Semantic divergence and migration drift
 

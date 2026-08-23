@@ -2,8 +2,12 @@ package memory
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	conduit "github.com/hollis-labs/tesseract"
 	conduitMemory "github.com/hollis-labs/tesseract/memory"
@@ -17,8 +21,43 @@ func newTestConduit(t *testing.T) (*conduit.Conduit, func()) {
 	if err != nil {
 		t.Fatalf("conduit.Open: %v", err)
 	}
+	var dbFile string
+	rows, err := c.MemoryStore().DB().Query("PRAGMA database_list")
+	if err != nil {
+		_ = c.Close()
+		t.Fatalf("PRAGMA database_list: %v", err)
+	}
+	for rows.Next() {
+		var seq int
+		var name, path string
+		if err := rows.Scan(&seq, &name, &path); err != nil {
+			_ = rows.Close()
+			_ = c.Close()
+			t.Fatalf("scan database_list: %v", err)
+		}
+		if name == "main" {
+			dbFile = path
+			break
+		}
+	}
+	_ = rows.Close()
+	if dbFile == "" || !memoryTestPathUnder(dir, dbFile) {
+		canonicalDir, dirErr := filepath.EvalSymlinks(dir)
+		canonicalDB, dbErr := filepath.EvalSymlinks(dbFile)
+		if dirErr == nil && dbErr == nil && memoryTestPathUnder(canonicalDir, canonicalDB) {
+			cleanup := func() { _ = c.Close() }
+			return c, cleanup
+		}
+		_ = c.Close()
+		t.Fatalf("test Tesseract DB %q escapes temp root %q (canonical root=%q err=%v; db=%q err=%v)", dbFile, dir, canonicalDir, dirErr, canonicalDB, dbErr)
+	}
 	cleanup := func() { _ = c.Close() }
 	return c, cleanup
+}
+
+func memoryTestPathUnder(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 func TestMemoryStore(t *testing.T) {
@@ -155,6 +194,23 @@ func TestMemoryRecallPage_PreservesActivationRankingAndTotal(t *testing.T) {
 			t.Fatalf("store %s: %v", tc.key, err)
 		}
 	}
+	// A second revision of the low-ranked logical memory proves both paths
+	// join through memory_state.current_revision rather than returning history.
+	if err := svc.Store(ctx, Memory{
+		Namespace: namespace, MemoryKey: "low", Summary: "Unicode CAFÉ match updated",
+		Origin: "user", Trigger: "manual", Confidence: 0.3,
+		SessionID: "ranked-page", Status: "reviewed",
+	}); err != nil {
+		t.Fatalf("store updated low revision: %v", err)
+	}
+
+	tesseractOrder, err := svc.Recall(ctx, RecallOpts{
+		Namespaces: []string{namespace}, Ranking: "activation",
+		Statuses: []string{"reviewed"}, Limit: 3,
+	})
+	if err != nil {
+		t.Fatalf("Tesseract Recall: %v", err)
+	}
 
 	page, err := svc.RecallPage(ctx, RecallOpts{
 		Namespaces: []string{namespace}, Ranking: "activation",
@@ -168,6 +224,142 @@ func TestMemoryRecallPage_PreservesActivationRankingAndTotal(t *testing.T) {
 	}
 	if page.Memories[0].MemoryKey != "high" || page.Memories[1].MemoryKey != "middle" {
 		t.Fatalf("activation order = [%s %s], want [high middle]", page.Memories[0].MemoryKey, page.Memories[1].MemoryKey)
+	}
+	if len(tesseractOrder) != 3 || page.Memories[0].MemoryKey != tesseractOrder[0].MemoryKey || page.Memories[1].MemoryKey != tesseractOrder[1].MemoryKey {
+		t.Fatalf("list order [%s %s] differs from pinned Tesseract order %+v", page.Memories[0].MemoryKey, page.Memories[1].MemoryKey, tesseractOrder)
+	}
+	if tesseractOrder[2].MemoryKey != "low" || !strings.Contains(tesseractOrder[2].Summary, "updated") {
+		t.Fatalf("current-revision result = %+v, want updated low revision", tesseractOrder[2])
+	}
+}
+
+func TestMemoryRecallPage_LegacyTimestampParsingAndOrdering(t *testing.T) {
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
+	ctx := context.Background()
+	namespace := "user/legacy-time/memory"
+	for _, key := range []string{"legacy_old", "legacy_new"} {
+		if err := svc.Store(ctx, Memory{
+			Namespace: namespace, MemoryKey: key, Summary: key,
+			Origin: "user", Trigger: "manual", Confidence: 0.8,
+			SessionID: "legacy-time", Status: "reviewed",
+		}); err != nil {
+			t.Fatalf("store %s: %v", key, err)
+		}
+	}
+	db := c.MemoryStore().DB()
+	legacyRows := []struct {
+		key          string
+		createdAt    string
+		lastAccessed string
+	}{
+		{key: "legacy_old", createdAt: "2024-01-02 03:04:05", lastAccessed: time.Now().UTC().Add(-40 * 24 * time.Hour).Format(time.DateTime)},
+		{key: "legacy_new", createdAt: "2025-02-03 04:05:06", lastAccessed: time.Now().UTC().Add(-time.Hour).Format(time.DateTime)},
+	}
+	for _, row := range legacyRows {
+		if _, err := db.ExecContext(ctx, `UPDATE memory_revisions SET created_at = ? WHERE namespace = ? AND memory_key = ?`, row.createdAt, namespace, row.key); err != nil {
+			t.Fatalf("update legacy created_at %s: %v", row.key, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE memory_state SET last_accessed_at = ? WHERE namespace = ? AND memory_key = ?`, row.lastAccessed, namespace, row.key); err != nil {
+			t.Fatalf("update legacy last_accessed_at %s: %v", row.key, err)
+		}
+	}
+
+	activationPage, err := svc.RecallPage(ctx, RecallOpts{
+		Namespaces: []string{namespace}, Ranking: "activation", Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("activation RecallPage: %v", err)
+	}
+	if activationPage.Total != 2 || len(activationPage.Memories) != 1 || activationPage.Memories[0].MemoryKey != "legacy_new" {
+		t.Fatalf("legacy activation page = %+v total=%d, want legacy_new first and total 2", activationPage.Memories, activationPage.Total)
+	}
+
+	chronologicalPage, err := svc.RecallPage(ctx, RecallOpts{
+		Namespaces: []string{namespace}, Ranking: "chronological", Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("chronological RecallPage: %v", err)
+	}
+	if len(chronologicalPage.Memories) != 2 || chronologicalPage.Memories[0].MemoryKey != "legacy_new" || chronologicalPage.Memories[1].MemoryKey != "legacy_old" {
+		t.Fatalf("legacy chronological order = %+v, want [legacy_new legacy_old]", chronologicalPage.Memories)
+	}
+}
+
+func TestMemoryRecallPage_ReinforcesOnlyReturnedPage(t *testing.T) {
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
+	ctx := context.Background()
+	namespace := "user/page-reinforcement/memory"
+	for _, tc := range []struct {
+		key        string
+		summary    string
+		confidence float64
+	}{
+		{key: "filtered_out", summary: "unrelated", confidence: 1.0},
+		{key: "offset_skipped", summary: "needle", confidence: 0.9},
+		{key: "page_a", summary: "needle", confidence: 0.8},
+		{key: "page_b", summary: "needle", confidence: 0.7},
+		{key: "after_page", summary: "needle", confidence: 0.6},
+	} {
+		if err := svc.Store(ctx, Memory{
+			Namespace: namespace, MemoryKey: tc.key, Summary: tc.summary,
+			Origin: "user", Trigger: "manual", Confidence: tc.confidence,
+			SessionID: "page-reinforcement", Status: "reviewed",
+		}); err != nil {
+			t.Fatalf("store %s: %v", tc.key, err)
+		}
+	}
+
+	page, err := svc.RecallPage(ctx, RecallOpts{
+		Namespaces: []string{namespace}, Ranking: "activation",
+		Statuses: []string{"reviewed"}, Search: "needle", Limit: 2, Offset: 1,
+	})
+	if err != nil {
+		t.Fatalf("RecallPage: %v", err)
+	}
+	if page.Total != 4 || len(page.Memories) != 2 || page.Memories[0].MemoryKey != "page_a" || page.Memories[1].MemoryKey != "page_b" {
+		t.Fatalf("page = %+v total=%d, want [page_a page_b] total=4", page.Memories, page.Total)
+	}
+
+	rows, err := c.MemoryStore().DB().QueryContext(ctx, `
+		SELECT s.memory_key, s.activation, s.access_count, s.last_accessed_at
+		FROM memory_state s WHERE s.namespace = ?`, namespace)
+	if err != nil {
+		t.Fatalf("query memory_state: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	seen := map[string]bool{}
+	for rows.Next() {
+		var key string
+		var activation float64
+		var accessCount int64
+		var lastAccessed sql.NullString
+		if err := rows.Scan(&key, &activation, &accessCount, &lastAccessed); err != nil {
+			t.Fatalf("scan memory_state: %v", err)
+		}
+		returned := key == "page_a" || key == "page_b"
+		seen[key] = true
+		if returned {
+			if accessCount != 1 || !lastAccessed.Valid || activation < 1.099 || activation > 1.101 {
+				t.Errorf("returned %s state: activation=%f access_count=%d last=%v", key, activation, accessCount, lastAccessed)
+			}
+			if _, err := parseMemoryTimestamp(lastAccessed.String); err != nil {
+				t.Errorf("returned %s last_accessed_at %q: %v", key, lastAccessed.String, err)
+			}
+		} else if accessCount != 0 || lastAccessed.Valid || activation < 0.999 || activation > 1.001 {
+			t.Errorf("non-returned %s was reinforced: activation=%f access_count=%d last=%v", key, activation, accessCount, lastAccessed)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("memory_state rows: %v", err)
+	}
+	for _, key := range []string{"filtered_out", "offset_skipped", "page_a", "page_b", "after_page"} {
+		if !seen[key] {
+			t.Errorf("missing memory_state row for %s", key)
+		}
 	}
 }
 

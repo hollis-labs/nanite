@@ -220,6 +220,7 @@ func (s *Service) RecallPage(ctx context.Context, opts RecallOpts) (RecallPage, 
 
 type rankedMemory struct {
 	memory         Memory
+	memoryID       string
 	createdAt      time.Time
 	activation     float64
 	lastAccessedAt *time.Time
@@ -278,7 +279,7 @@ func (s *Service) recallFilteredPage(ctx context.Context, opts RecallOpts) (Reca
 	where = append(where, "(r.expires_at IS NULL OR r.expires_at > ?)")
 	args = append(args, time.Now().UTC().Format(time.RFC3339Nano))
 
-	query := `SELECT r.namespace, COALESCE(r.memory_key, ''),
+	query := `SELECT r.memory_id, r.namespace, COALESCE(r.memory_key, ''),
 		       COALESCE(r.payload_summary, ''), COALESCE(r.payload_body, ''),
 		       r.origin, r."trigger", r.confidence, r.tags, r.session_id,
 		       r.revision_id, r.status, r.created_at,
@@ -299,7 +300,7 @@ func (s *Service) recallFilteredPage(ctx context.Context, opts RecallOpts) (Reca
 		var tagsJSON, createdAt string
 		var lastAccessed sql.NullString
 		if err := rows.Scan(
-			&candidate.memory.Namespace, &candidate.memory.MemoryKey,
+			&candidate.memoryID, &candidate.memory.Namespace, &candidate.memory.MemoryKey,
 			&candidate.memory.Summary, &candidate.memory.Body,
 			&candidate.memory.Origin, &candidate.memory.Trigger,
 			&candidate.memory.Confidence, &tagsJSON, &candidate.memory.SessionID,
@@ -311,9 +312,9 @@ func (s *Service) recallFilteredPage(ctx context.Context, opts RecallOpts) (Reca
 		if err := json.Unmarshal([]byte(tagsJSON), &candidate.memory.Tags); err != nil {
 			return RecallPage{}, fmt.Errorf("memory_recall page tags: %w", err)
 		}
-		candidate.createdAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		candidate.createdAt, _ = parseMemoryTimestamp(createdAt)
 		if lastAccessed.Valid {
-			parsed, _ := time.Parse(time.RFC3339Nano, lastAccessed.String)
+			parsed, _ := parseMemoryTimestamp(lastAccessed.String)
 			candidate.lastAccessedAt = &parsed
 		}
 		if !memoryMatchesSearch(candidate.memory, search) {
@@ -362,8 +363,15 @@ func (s *Service) recallFilteredPage(ctx context.Context, opts RecallOpts) (Reca
 		end = total
 	}
 	memories := make([]Memory, end-offset)
-	for i, candidate := range ranked[offset:end] {
+	pageCandidates := ranked[offset:end]
+	for i, candidate := range pageCandidates {
 		memories[i] = candidate.memory
+	}
+	// Tesseract Recall reinforces successful reads best-effort. Preserve that
+	// side effect for this uncapped list path, but only for records actually
+	// returned to the caller—not filtered-out or offset-skipped candidates.
+	if err := s.reinforceListPage(ctx, pageCandidates); err != nil {
+		slog.Warn("memory: page access reinforcement failed", "err", err)
 	}
 	return RecallPage{Memories: memories, Total: total}, nil
 }
@@ -381,6 +389,45 @@ func memoryMatchesSearch(memory Memory, foldedSearch string) bool {
 	}
 	return strings.Contains(strings.ToLower(memory.Summary), foldedSearch) ||
 		strings.Contains(strings.ToLower(memory.Body), foldedSearch)
+}
+
+func parseMemoryTimestamp(value string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err == nil {
+		return parsed, nil
+	}
+	return time.Parse(time.DateTime, value)
+}
+
+func (s *Service) reinforceListPage(ctx context.Context, page []rankedMemory) error {
+	if len(page) == 0 {
+		return nil
+	}
+	tx, err := s.store.DB().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin reinforcement: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	stmt, err := tx.PrepareContext(ctx, `
+		UPDATE memory_state
+		SET activation = activation + 0.1 * (2.0 - activation),
+		    access_count = access_count + 1,
+		    last_accessed_at = ?
+		WHERE memory_id = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare reinforcement: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, candidate := range page {
+		if _, err := stmt.ExecContext(ctx, now, candidate.memoryID); err != nil {
+			return fmt.Errorf("reinforce %s: %w", candidate.memoryID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit reinforcement: %w", err)
+	}
+	return nil
 }
 
 // memoryActivationScore mirrors the pinned Tesseract activation ranking

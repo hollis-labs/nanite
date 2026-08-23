@@ -119,6 +119,30 @@ GO-API-004's consolidation carries real regression risk **if the three producers
 - Correction verification passed focused normal and race tests across API,
   memory, store, service, and self-tools; focused vet; and the full non-race
   `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` baseline.
+- Second correction pass 2026-08-23: the API fixture had isolated Nanite's DB
+  but not the independently resolved embedded Tesseract DB. The 510-row
+  regression could therefore open and write the operator path during tests,
+  and concurrent runs surfaced `SQLITE_BUSY`. API tests now pin all XDG roots
+  and `TESSERACT_DB_PATH` before any container construction; `newTestAPI`
+  asserts both the pre-open resolved path and SQLite's actual `main` file are
+  under its `t.TempDir`, while package `TestMain` protects direct container
+  fixtures. Memory tests similarly inspect their explicit temp Conduit DB.
+  No cleanup or mutation of the operator DB was attempted; that remains
+  outside this worker's scope.
+- The uncapped list path now parses timestamps exactly like pinned Tesseract:
+  RFC3339Nano first, then legacy `time.DateTime`. Tests write legacy
+  `created_at` and `last_accessed_at` values and pin chronological and
+  activation ordering. A current-revision test also compares the list order
+  with Tesseract Recall's own activation order.
+- List reads again preserve Tesseract's best-effort access reinforcement
+  semantics (`activation + 0.1*(2-activation)`, access count, RFC3339Nano last
+  access), applied only to records actually returned after filtering and
+  offset. Tests prove filtered, offset-skipped, and after-page records remain
+  unchanged while total and returned order stay correct.
+- Second-correction verification passed an isolated-path proof before the
+  affected regressions, focused API/memory tests, focused API/memory race
+  tests, focused vet, and the full non-race `go build ./cmd/nanite/`,
+  `go vet ./...`, `go test ./...` baseline.
 
 ## Review notes
 

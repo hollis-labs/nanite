@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -18,6 +20,29 @@ import (
 func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	t.Helper()
 	root := t.TempDir()
+	// NewContainer resolves its embedded Tesseract store independently of the
+	// Nanite test DB. Pin every XDG root plus the explicit Tesseract DB before
+	// construction so an API test can never open the operator's real store.
+	for env, dir := range map[string]string{
+		"XDG_DATA_HOME":   filepath.Join(root, "xdg", "data"),
+		"XDG_STATE_HOME":  filepath.Join(root, "xdg", "state"),
+		"XDG_CACHE_HOME":  filepath.Join(root, "xdg", "cache"),
+		"XDG_CONFIG_HOME": filepath.Join(root, "xdg", "config"),
+	} {
+		t.Setenv(env, dir)
+	}
+	tesseractDB := filepath.Join(root, "tesseract", "main.db")
+	t.Setenv("TESSERACT_DB_PATH", tesseractDB)
+	t.Setenv("TESSERACT_WORKSPACE", "api-test")
+	layout, err := config.ResolveTesseractLayout()
+	if err != nil {
+		t.Fatalf("ResolveTesseractLayout: %v", err)
+	}
+	assertTestPathUnder(t, root, layout.MainDB())
+	if layout.MainDB() != tesseractDB {
+		t.Fatalf("resolved Tesseract DB = %q, want explicit test DB %q", layout.MainDB(), tesseractDB)
+	}
+
 	dbPath := filepath.Join(root, "test.db")
 	prepareAPIStoreDB(t, dbPath)
 	s, err := store.New(context.Background(), dbPath)
@@ -46,6 +71,49 @@ func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	})
 	a.RegisterRoutes(mux)
 	return a, mux
+}
+
+func assertTestPathUnder(t *testing.T, root, path string) {
+	t.Helper()
+	if testPathUnder(root, path) {
+		return
+	}
+	canonicalRoot, rootErr := filepath.EvalSymlinks(root)
+	canonicalPath, pathErr := filepath.EvalSymlinks(path)
+	if rootErr == nil && pathErr == nil && testPathUnder(canonicalRoot, canonicalPath) {
+		return
+	}
+	t.Fatalf("test path %q escapes temp root %q (canonical root=%q err=%v; path=%q err=%v)", path, root, canonicalRoot, rootErr, canonicalPath, pathErr)
+}
+
+func testPathUnder(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+func TestNewTestAPI_TesseractDBIsTempIsolated(t *testing.T) {
+	a, _ := newTestAPI(t)
+	var dbFile string
+	rows, err := a.Services.Conduit.MemoryStore().DB().Query("PRAGMA database_list")
+	if err != nil {
+		t.Fatalf("PRAGMA database_list: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var seq int
+		var name, path string
+		if err := rows.Scan(&seq, &name, &path); err != nil {
+			t.Fatalf("scan database_list: %v", err)
+		}
+		if name == "main" {
+			dbFile = path
+			break
+		}
+	}
+	if dbFile == "" {
+		t.Fatal("Tesseract main DB path not found")
+	}
+	assertTestPathUnder(t, a.Services.WorkingDir, dbFile)
 }
 
 func TestHealthEndpoint(t *testing.T) {

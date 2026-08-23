@@ -1,7 +1,7 @@
 # Project repo-path validation, artifact/plugin-UI confinement, and catalog SSRF policy
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/api/projects.go` (`handleCreateProject`/`handleUpdateProject`), `internal/api/artifacts.go` (`handlePlaceArtifact`/download defense in depth), `internal/api/catalog.go` (`handleCatalogInstall`), `internal/api/plugins.go` (plugin management and UI static-file routes), `cmd/nanite/plugin_cmd.go`, `internal/plugin/manage.go` plus canonical plugin-ID validation, `internal/plugin/install/download.go`, `internal/mcp/general_tools.go`, `internal/sandbox/proxy.go`, new `internal/ssrf`, and focused tests; `internal/pathsafe.ResolveUnder` is reused, not modified
 **Requires architect decision:** resolved by AD-27 and AD-28
@@ -207,4 +207,4 @@ The behavior changes reject unsafe project roots, artifact paths outside the con
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-22 — Initial fresh review verified the five planned fixes but found an in-scope sibling plugin lifecycle traversal (`uninstall`/`disable`/`enable`), stale five-finding mappings, and missing CGNAT/ULA/unspecified policy test cases. A focused correction centralized canonical plugin-ID validation across API, CLI, installer compatibility, and the shared management sink; added adversarial mutation tests; corrected the trackers/AD severity; and locked the full CIDR set in shared-policy and downloader tests. Fresh re-review independently exercised the adversarial paths, verified no layering/import-cycle or valid-ID regression, confirmed the single shared `internal/ssrf` policy feeds all three consumers, and passed focused race/package/build/vet checks: **PASS**.

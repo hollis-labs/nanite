@@ -1055,7 +1055,7 @@
       "false_positive_considerations": "In a single-operator local deployment, 'authenticated caller' and 'the person who set repo_path' are the same person.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: resolveRoot (autocomplete.go:135-164, exact match) has no validation on project.RepoPath before the directory walk. The finding's own false_positive_considerations (\"in a single-operator local deployment, authenticated caller and the person who set repo_path are the same person\") squarely questions whether this is worth constraining at all -- a genuine disposition-level question, not just an implementation detail. [UPDATE 2026-08-22: re-confirmed intact post-Wave-2 \u2014 resolveRoot (autocomplete.go:136-154) still returns p.RepoPath unvalidated; only the ctx sweep touched the file. Tracked as AD-27, which is downstream of AD-15.] [AD-27 DECIDED 2026-08-22: validate repo_path at write time in handleCreateProject/handleUpdateProject, not by confining the walk. Suggested policy: reject /, $HOME itself, and system dirs; require an existing directory. Disposition -> remediate.]"
     },
     {
@@ -1082,7 +1082,7 @@
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: handlePlaceArtifact accepts an unvalidated StoragePath at write time, unlike sibling handleUploadArtifact's pathsafe.ResolveUnder-based confinement. Concrete, low-risk, no-architect-needed fix (apply the same existing pattern)."
     },
     {
@@ -1107,7 +1107,7 @@
       "false_positive_considerations": "Adding a catalog source is itself an explicit, privileged, operator-initiated action.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: handleCatalogInstall's archive download still uses http.DefaultClient with no explicit timeout or host/scheme allowlist beyond http/https. The finding's own false_positive_considerations (\"adding a catalog source is itself an explicit, privileged, operator-initiated action\") leaves genuinely open whether a host allowlist is warranted at all versus just adding a timeout -- the timeout half is uncontroversial but the disposition as a whole (accept current trust model vs. add restriction) needs architect judgment, consistent with AD-04's confinement-mechanism scope for this same file. [UPDATE 2026-08-22, post-Wave-1: half-resolved by 01/01's AD-04 convergence, which landed after Wave 0 measured this. http.DefaultClient is gone from internal/api/catalog.go; the download now runs through install.HTTPDownloader (catalog.go:339), which applies DefaultDownloadTimeout (2m) and DefaultMaxArchiveBytes on zero values. The timeout half is fixed and a size cap came with it. Only the host/scheme allowlist remains \u2014 now tracked as AD-28.] [AD-28 DECIDED 2026-08-22: block private/loopback/link-local destinations using the existing CIDR machinery, consolidated rather than copied. Disposition -> remediate.]"
     },
     {
@@ -1238,7 +1238,7 @@
       "false_positive_considerations": "Requires an already-installed plugin (privileged action, subject to signature verification elsewhere).",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open, exact citation match: the plugin-UI static route (plugins.go:107-120) still hand-rolls filepath.Clean+strings.HasPrefix confinement instead of pathsafe.ResolveUnder, with no EvalSymlinks call. Concrete, low-risk fix, consistency-only change."
     },
     {
@@ -2669,7 +2669,7 @@
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed the CIDR denylist still exists independently in internal/sandbox/proxy.go and internal/mcp/general_tools.go with no shared source or parity test. Task file 11/07's own Gated-on field is AD-19 despite findings.json's requires_architect_decision:false -- following the task file (the authoritative per-task dispatch signal) rather than the finding-catalog flag, since AD-19's collapse-vs-parity-test question applies here as directly as to its siblings in this folder. [TRACKING CORRECTION + AD-28, 2026-08-22: this finding was an orphan \u2014 its task_file pointed at 11/07, which disclaims being an implementation task and defers to 08-remaining-security-hardening/, where no task for it was ever written (that folder was empty when 11/07 was authored). Reassigned to 08/09, whose AD-28 work adds a third CIDR consumer and therefore must consolidate rather than copy. Disposition needs-architect-decision -> remediate.]"
     },
     {

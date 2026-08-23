@@ -1,7 +1,7 @@
 # A2A push-notification webhook URL has no SSRF validation
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; this task-creation batch is sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/service/a2a_push_notifier.go`, `internal/service/a2a_push_notifier_test.go`; task/finding tracking metadata
 **Requires architect decision:** false — the operator approved the traced external-unauthenticated disposition and narrow delivery-seam remediation; A2A authentication redesign remains out of scope
@@ -135,4 +135,4 @@ Low risk — validation is additive and only rejects previously-unchecked values
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-23: Fresh security review at `60137399ac5c1d6dbae17f9bec238cb1da0afd44` passed with no findings. The reviewer independently confirmed the external-unauthenticated/high-severity correction, sole outbound URL consumer, HTTPS-only all-answer validation, pinned-literal dialing, fresh redirect resolution, and absence of production bypasses for the unexported test seams. Host/SNI/auth handling and existing timeout/retry/backoff behavior remain intact. Focused adversarial tests, race tests, service/SSRF packages, API/server boundary checks, G107/G704 gosec, build, vet, and diff checks passed.

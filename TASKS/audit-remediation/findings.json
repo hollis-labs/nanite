@@ -723,7 +723,7 @@
       "false_positive_considerations": "The prior auth-boundary uncertainty is resolved: optional Basic Auth is a no-op when unset and no A2A-specific gate exists. The loopback-default listener reduces default exposure but operators may explicitly bind non-loopback while leaving auth unset, so it does not change the external-unauthenticated classification.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/01-a2a-webhook-url-validation.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Auth/caller trace confirms external unauthenticated: POST /api/a2a/jsonrpc -> SendMessage -> handleTaskSubmit -> TaskManager.SubmitTask accepts PushNotificationConfig, while common Basic Auth is a no-op when NANITE_AUTH_USER/PASSWORD are unset and there is no A2A-specific gate. Severity/confidence are corrected to high/high because an unauthenticated caller can direct an authenticated server-side POST toward internal destinations; the loopback-default bind lowers default exposure but explicitly exposed auth-unset deployments remain possible. The operator approved the narrow SSRF remediation and left A2A authentication redesign out of scope. A2APushNotifier is the sole outbound URL consumer and now reuses the internal/ssrf policy consolidated by GO-SEC4-007/task 08/09: HTTPS-only default, all-answer validation, pinned-literal dialing, and redirect revalidation. Focused parity/adversarial/race tests pass and existing retry/backoff semantics are preserved. No review or orchestrator approval is claimed."
     },
     {

@@ -1244,3 +1244,23 @@ authored, not in their work.
 **Resolution:** **Operator, 2026-08-23.** Explicitly defer the full-race acceptance gate and close Wave 3 without another prolonged race campaign. Keep `08/08` and GO-SEC-001/GO-SEC-002 at `implemented`, not `reviewed`; retain the exact timeout qualification in the task Work Log and `TASKS/INDEX.md`. This deferral does not waive future race validation under a fixture/runtime setup that can complete within a practical test budget.
 
 **Follow-up:** A future test-infrastructure pass may isolate or pre-migrate SQLite fixtures, serialize the migration-heavy packages, or establish an explicit extended race timeout before re-running the gate. No additional dependency change is required by this deferral.
+
+## 2026-08-23 — Wave 3 `08/10` regression tests wrote synthetic memories to the operator Tesseract database — CLOSED AND CLEANED
+
+**Raised by:** fresh re-review of `TASKS/audit-remediation/08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md`.
+
+**Question / mismatch:** The new memories-pagination API regression used a temporary Nanite database but did not redirect the independently resolved Tesseract XDG database. Repeated and concurrent review runs therefore opened `/Users/chrispian/.local/share/tesseract/workspaces/default/main.db`, committed synthetic `pagination-test` memories, and eventually collided with `SQLITE_BUSY`. Read-only accounting found exactly 515 synthetic logical keys, 4,655 `memory_revisions`, and corresponding FTS entries. The same review then found service-package `NewContainer` fixtures could open the global Tesseract DB and start its write-capable decay job even when their Nanite DB was temporary.
+
+**Resolution:** The operator approved exact cleanup. Before deletion, the orchestrator created and integrity-checked `/Users/chrispian/.local/share/tesseract/workspaces/default/main.db.pre-wave3-test-cleanup-20260823-0042`. One transaction deleted exactly the 515 identified synthetic `memory_state` rows; foreign-key cascades and FTS triggers removed the 4,655 matching revisions/index entries. Post-cleanup verification found zero matching revisions, zero matching state rows, zero foreign-key violations, and `PRAGMA integrity_check = ok`. Corrections `d0ff47e9` and `85931355` isolate API, memory, and service tests under disposable HOME/XDG/Tesseract roots and assert SQLite's actually opened `main` path via `PRAGMA database_list`. Final fresh review passed without opening the operator DB.
+
+**Follow-up:** Keep the backup until the operator decides normal retention can remove it. Future tests that construct a service Container must prove all independently resolved stores—not only Nanite's primary DB—land under disposable roots.
+
+## 2026-08-23 — Wave 3 `08/02` review exposed a pre-existing first-line `callGrep` context panic — FOLLOW-UP CANDIDATE
+
+**Raised by:** fresh review of `TASKS/audit-remediation/08-remaining-security-hardening/02-mcp-dev-grep-symlink-toctou.md`.
+
+**Question / mismatch:** The initial symlink regression could pass for the wrong reason because a match on the first input line panics before exercising confinement. In `internal/mcp/dev_tools.go`, the pre-context loop computes `(j - ringStart) % ringLen` before checking whether `ringLen == 0`; a first-line match with an empty context ring therefore divides by zero. This behavior predates and is independent of `08/02`'s symlink/TOCTOU fix.
+
+**Resolution:** Not fixed in `08/02`. Its regression fixture was corrected to place the secret after a nonmatching first line, and deterministic post-validation swap tests plus mutation testing independently proved the scoped confinement fix. The task passed fresh re-review on its own acceptance criteria.
+
+**Follow-up:** Add a narrow correctness task for `callGrep` first-line matches: check `ringLen` before modulo/index calculation and add `context=0` plus first-line/default-context regressions. This is not a security-scope reopening of `08/02`.

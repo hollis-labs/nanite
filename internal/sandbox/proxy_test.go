@@ -244,6 +244,18 @@ func TestProxy_StopCleansUp(t *testing.T) {
 	}
 }
 
+func TestProxy_ReadHeaderTimeout(t *testing.T) {
+	proxy := NewProxy([]string{"example.com"})
+	if err := proxy.Start(); err != nil {
+		t.Fatalf("proxy.Start() error: %v", err)
+	}
+	defer proxy.Stop()
+
+	if got, want := proxy.server.ReadHeaderTimeout, 10*time.Second; got != want {
+		t.Errorf("ReadHeaderTimeout = %v, want %v", got, want)
+	}
+}
+
 // TestProxy_CONNECT_BlocksIMDS verifies that a stub resolver returning the
 // EC2 IMDS link-local address for an allowlisted hostname causes the
 // CONNECT dial to be refused. This is the core DNS-based SSRF regression.

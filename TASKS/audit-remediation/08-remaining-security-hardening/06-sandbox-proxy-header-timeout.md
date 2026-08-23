@@ -1,7 +1,7 @@
 # Sandbox proxy's http.Server has no ReadHeaderTimeout
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/sandbox/proxy.go`
 **Requires architect decision:** false (matches `findings.json`)
@@ -55,12 +55,14 @@ Negligible — a legitimate slow client (if any exists) hitting the header-timeo
 
 ## Done means
 
-- [ ] `ReadHeaderTimeout` set on the proxy's `http.Server`
-- [ ] `gosec` G112 no longer flags `proxy.go`
+- [x] `ReadHeaderTimeout` set on the proxy's `http.Server`
+- [x] `gosec` G112 no longer flags `proxy.go`
 
 ## Work log
 
-<!-- Worker fills this in. -->
+- 2026-08-22: Set the sandbox proxy server's `ReadHeaderTimeout` to 10 seconds; no other `http.Server` timeout was added.
+- Added `TestProxy_ReadHeaderTimeout` to lock the server configuration to the intended non-zero value.
+- Verification passed: `go test ./internal/sandbox/...`; `gosec ./internal/sandbox/...` reported no G112 finding on `proxy.go` (11 pre-existing unrelated findings remain in the package scan); `go build ./cmd/nanite/`; `go vet ./...`; `go test ./...`; `git diff --check`.
 
 ## Review notes
 

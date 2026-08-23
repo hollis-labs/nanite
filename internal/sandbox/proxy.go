@@ -154,7 +154,8 @@ func (p *Proxy) Start() error {
 	p.lc = lifecycle.NewManager("sandbox.proxy")
 
 	p.server = &http.Server{
-		Handler: http.HandlerFunc(p.handleRequest),
+		Handler:           http.HandlerFunc(p.handleRequest),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	p.wg.Add(1)

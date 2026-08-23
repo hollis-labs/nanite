@@ -2691,7 +2691,7 @@
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/06-sandbox-proxy-header-timeout.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "implemented",
       "revalidation_note": "Confirmed still open: internal/sandbox/proxy.go's http.Server construction (line 156-158) sets only Handler, no ReadHeaderTimeout. One-line fix, no architect input needed."
     },
     {

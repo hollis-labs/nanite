@@ -1,7 +1,7 @@
 # Decide the fate of the curated tool-knowledge intent matcher (`tool_knowledge.go`)
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch — see this folder's `README.md` for a
 non-blocking cross-reference note relating this task to
 `04-tool-builder-yaml-architecture.md` and `05-reasoning-augmented-tool-selection.md`.
@@ -243,10 +243,10 @@ above.
 
 ## Done means
 
-- [ ] Current-source reachability re-verified (deadcode + grep) and
+- [x] Current-source reachability re-verified (deadcode + grep) and
       confirmed still open, or disposition corrected if it's changed since
       the audit.
-- [ ] Architect decision recorded: wire, defer, or retire.
+- [x] Architect decision recorded: wire, defer, or retire.
 - [ ] If **wire**: a real production call site consults `ToolKnowledge`, and
       its interaction (or lack thereof) with `04`/`05`'s own dispositions in
       this folder is noted so the resulting selection landscape doesn't grow
@@ -254,15 +254,35 @@ above.
 - [ ] If **defer**: trigger/owner stated explicitly, acknowledging the
       thinner evidentiary basis for deferral versus the folder's other
       islands, per the note above.
-- [ ] If **retire**: `tool_knowledge.go` and `tool_knowledge_test.go`
+- [x] If **retire**: `tool_knowledge.go` and `tool_knowledge_test.go`
       removed; `deadcode -test ./internal/toolclient/...` confirms no
       orphaned dependents.
-- [ ] `go build ./...` and `go test ./...` pass after whichever direction is
+- [x] `go build ./...` and `go test ./...` pass after whichever direction is
       implemented.
 
 ## Work log
 
-<Worker fills this in.>
+- 2026-08-23: Re-verified current-source reachability before editing. `deadcode
+  -test ./internal/toolclient/...` did not flag the curated matcher because its
+  package-local tests exercised it, so the required direct checks were used:
+  a Go-source-only grep outside `tool_knowledge.go` and
+  `tool_knowledge_test.go` found no `ToolKnowledge`, `DefaultToolKnowledge`,
+  `CuratedCatalog`, or curated `ForIntent` caller. Targeted checks of
+  `broker.go`, `ranking.go`, `intent.go`, and `meta_tools.go` likewise found no
+  new caller. `deadcode ./...` independently reported
+  `ToolKnowledge.ForIntent`, `entryMatchesKeywords`, `ToolKnowledge.Summary`,
+  `containsStr`, and `DefaultToolKnowledge` as unreachable. The live
+  `intent.go` `SelectByIntent` path remained present through `meta_tools.go`
+  and was not changed.
+- 2026-08-23: Implemented decided AD-11 **retire** by deleting exactly
+  `internal/toolclient/tool_knowledge.go` (405 production lines) and
+  `internal/toolclient/tool_knowledge_test.go` (162 test lines). No `09/04` or
+  `09/05` files or dispositions were changed.
+- 2026-08-23: Post-deletion verification passed. `deadcode -test
+  ./internal/toolclient/...` reported only pre-existing symbols in other
+  `toolclient` files and no orphaned dependent of the removed matcher;
+  `go test ./internal/toolclient/...`, `go build ./...`, `go vet ./...`, and
+  `go test ./...` all passed.
 
 ## Review notes
 

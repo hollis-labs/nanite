@@ -25,6 +25,21 @@ requires_regression_test: true
 > - **Gated on:** AD-08 (wire / defer / retire)
 > - **requires_security_review:** false · **requires_regression_test:** true
 
+> ## ✅ AD-08 DECIDED (2026-08-22) — WIRE IT. The only island of six that is kept.
+>
+> Call `InstallTeamRunRouting` from `handleLaunchTeam`
+> (`internal/api/team_runs.go`), which today calls only `LaunchTeamRun`.
+>
+> **Unit tests are not sufficient to close this.** The guide's four-step
+> reachability proof is the acceptance bar: production entry point →
+> construction/registration/wiring → feature invocation → observable behaviour.
+> Being unwired-but-well-tested is precisely how this island came to exist.
+>
+> Why this one and not the other five: **927 lines of tests against 771 of
+> implementation**, and `TASKS/teams/HANDOFF.md` named the missing wiring as a
+> known risk rather than leaving it accidental. This is a feature that ran out
+> of runway one call short.
+
 ## Context
 
 ### Findings addressed

@@ -25,6 +25,25 @@ requires_regression_test: true
 > - **Gated on:** AD-07 (wire / defer / retire). Note this finding is **not** flagged `requires_architect_decision` in `findings.json` — see the batch README's correction 4.
 > - **requires_security_review:** false · **requires_regression_test:** true
 
+> ## ✅ AD-07 DECIDED (2026-08-22) — RETIRE
+>
+> Delete `internal/contextbroker/gate_hadron_blueprints.go` and its test file
+> (302 prod / 0 test).
+>
+> **The reasoning is architectural, not reachability-based**, and the operator
+> stated it directly: this is *"code in core that's specific to another
+> application."* That argument would hold even if the gate were wired — do not
+> treat "but it could be useful later" as a counter. Apply the same test to
+> anything similar that surfaces.
+>
+> This also disposes of the latent bug `GO-MEM-002` flagged — additive
+> relevance scoring with no clamp against a documented 0.0–1.0 contract, which
+> would corrupt cross-source ranking if the gate were ever revived unfixed.
+> Deleting removes the hazard rather than carrying it forward.
+>
+> `13/01`'s `internal/contextbroker` entries shrink accordingly — re-derive its
+> list after this lands rather than trusting the authored version.
+
 ## Context
 
 ### Findings addressed

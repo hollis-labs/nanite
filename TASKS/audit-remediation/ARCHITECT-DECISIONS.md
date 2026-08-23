@@ -51,12 +51,12 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-03 | macOS seatbelt read-boundary: disclose, narrow, or accept | `02/02` | GO-SEC4-005 | **0** | **decided** |
 | AD-04 | Plugin-install convergence: concrete integration shape | `01/01` | GO-PLUGIN-001/002/003 | **0** | **decided** |
 | AD-05 | Default/official catalog source: provision a real signing key? | `01/01` follow-up | GO-PLUGIN-001 | 1 | open |
-| AD-06 | Island: grounding memory recall — wire / defer / retire | `09/01` | GO-MEM-001 | 4 | open |
-| AD-07 | Island: Hadron context gate — wire / defer / retire | `09/02` | GO-MEM-002 | 4 | open |
-| AD-08 | Island: team semantic routing — wire / defer / retire | `09/03` | GO-SVCEXEC-003 | 4 | open |
-| AD-09 | Island: tool builder / YAML architecture — wire / defer / retire | `09/04` | GO-MCPTOOL-001 | 4 | open |
-| AD-10 | Island: reasoning-augmented tool selection — wire / defer / retire | `09/05` | GO-MCPTOOL-002 | 4 | open |
-| AD-11 | Island: curated tool-knowledge matcher — wire / defer / retire | `09/06` | GO-MCPTOOL-003 | 4 | open |
+| AD-06 | Island: grounding memory recall — wire / defer / retire | `09/01` | GO-MEM-001 | 4 | **decided** |
+| AD-07 | Island: Hadron context gate — wire / defer / retire | `09/02` | GO-MEM-002 | 4 | **decided** |
+| AD-08 | Island: team semantic routing — wire / defer / retire | `09/03` | GO-SVCEXEC-003 | 4 | **decided** |
+| AD-09 | Island: tool builder / YAML architecture — wire / defer / retire | `09/04` | GO-MCPTOOL-001 | 4 | **decided** |
+| AD-10 | Island: reasoning-augmented tool selection — wire / defer / retire | `09/05` | GO-MCPTOOL-002 | 4 | **decided** |
+| AD-11 | Island: curated tool-knowledge matcher — wire / defer / retire | `09/06` | GO-MCPTOOL-003 | 4 | **decided** |
 | AD-12 | `chatServiceImpl` / `generateResponse` decomposition boundaries | `10/01` | GO-SVCEXEC-001/002 | 5 | open |
 | AD-13 | `SelfToolsTransport` decomposition boundaries | `10/02` | GO-MCPTOOL-006 | 5 | open |
 | AD-14 | How far to narrow `internal/store` dependencies | `10/03`, `06/02`, **`06/03`** | GO-DEP-002, GO-STORE-001, GO-STORE-005 | 5 | **decided** |
@@ -816,8 +816,69 @@ down rather than a value chosen at one call site.
 
 ## Wave 4 decisions — the six production islands
 
-All six share one shape, so the guide's own proof obligation is stated once
-here rather than six times. For each, choose exactly one:
+> ## ✅ ALL SIX DECIDED (2026-08-22) — five retire, one wire
+>
+> | | Island | Call | Scale removed / added |
+> |---|---|---|---|
+> | AD-06 | Grounding memory recall | **retire** | −534 prod / −361 test |
+> | AD-07 | Hadron context gate | **retire** | −302 prod / 0 test |
+> | AD-08 | Team semantic routing | **wire** | +1 call site |
+> | AD-09 | Tool builder / YAML | **retire except `cache.go`** | −~1.8k prod / −~1.7k test |
+> | AD-10 | Reasoning-augmented selection | **retire** | −342 prod / −210 test |
+> | AD-11 | Curated tool-knowledge matcher | **retire** | −405 prod / −162 test |
+>
+> Roughly **3,400 production lines and 2,600 test lines deleted**, against one
+> added call. Wave 4 is therefore mostly a deletion wave — mechanically
+> low-risk, but every retire must confirm nothing outside the island imports
+> what it removes. Decided against `00/01`'s reachability evidence, which
+> re-confirmed all six still unwired at frozen HEAD.
+>
+> **AD-07 — the operator's reasoning, recorded because it generalises:** the
+> Hadron gate is *"code in core that's specific to another application."*
+> That is an architectural boundary argument, not a reachability one — it would
+> hold even if the gate were wired. Apply the same test to anything similar
+> that surfaces later. It also disposes of the latent unbounded-relevance-score
+> bug (additive scoring with no clamp against a documented 0.0–1.0 contract)
+> that `GO-MEM-002` warned would corrupt cross-source ranking if revived
+> unfixed — deleting the gate removes the hazard rather than deferring it.
+>
+> **AD-08 — why this one is wired when five are retired:** `team_routing.go`
+> carries **927 lines of tests against 771 of implementation**, and
+> `TASKS/teams/HANDOFF.md` named the missing wiring as a known risk rather than
+> leaving it accidental. That is a feature that ran out of runway one call
+> short, not an abandoned experiment. Wiring is `InstallTeamRunRouting` from
+> `handleLaunchTeam`, plus the four-step reachability proof.
+>
+> **AD-09 — verified live surface, because the audit's claim was worth
+> checking:** only `cache.go`'s `NewResultCache` / `ResultCache` /
+> `ResultCacheConfig` are used outside the package, by
+> `internal/service/chat.go` and `container.go`. Delete `adapt.go`,
+> `builder.go`, `register.go`, `tool.go`, `yaml_loader.go` and their tests; the
+> package survives as `cache.go` alone. **`tool.go` holds the package doc that
+> falsely calls this "the primary way to construct tools in Go code" — that doc
+> must not be carried over to `cache.go`.** Write a new one describing a
+> result-cache package.
+>
+> **AD-10 + AD-11 — decided as one question**, since both answer "what tools
+> match this intent" alongside the live `intent.go` (119 lines). Three
+> mechanisms, two dead. Retiring both leaves one. Also closes 2 of the audit's
+> previously-unjudged complexity outliers, which `ranking.go` accounts for.
+> `ranking.go` was orphaned when an *earlier task in this project* removed its
+> debug-SQL consumer — worth noting as a reminder that removals create islands.
+>
+> ### Deletion coupling — three tasks inherit scope changes
+>
+> - **AD-06 reaches into `internal/selftools`.** Retiring grounding must also
+>   remove `self_tools_transport.go:219-231` (both fields and their comments)
+>   and `self_tools_dispatch.go:109-118` (the E2 pre-strategy recall block).
+>   That shrinks `10/02`'s decomposition surface and touches a file `11/11`
+>   also edits.
+> - **AD-07 and AD-09 shrink `13/01`.** Dead code those tasks delete is dead
+>   code `13/01` no longer has to. Re-derive `13/01`'s list after Wave 4 rather
+>   than trusting its authored version.
+> - **AD-10/AD-11 shrink `11/12`**, which touches `internal/toolclient/broker.go`.
+
+For each, choose exactly one:
 
 - **wire** — intended feature; connect the real production path and prove it
   end to end: `production entry point → construction/registration/wiring →

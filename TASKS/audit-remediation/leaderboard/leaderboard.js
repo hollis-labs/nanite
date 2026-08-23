@@ -4,10 +4,12 @@ export const STATUS_PROGRESS = {
   "not-started": 0,
   "in-progress": 25,
   implemented: 55,
-  validated: 75,
-  reviewed: 90,
+  validated: 100,
+  reviewed: 100,
   done: 100,
 };
+
+const TERMINAL_STATUSES = new Set(["validated", "reviewed", "done"]);
 
 const SEVERITY_WEIGHT = {
   critical: 500,
@@ -41,7 +43,11 @@ export function statusProgress(status) {
 }
 
 export function isOpen(finding) {
-  return finding.task_status !== "done" && !CLOSED_DISPOSITIONS.has(finding.disposition);
+  return !TERMINAL_STATUSES.has(finding.task_status) && !CLOSED_DISPOSITIONS.has(finding.disposition);
+}
+
+export function findingProgress(finding) {
+  return isOpen(finding) ? statusProgress(finding.task_status) : 100;
 }
 
 export function priorityScore(finding) {
@@ -97,7 +103,7 @@ export function summarize(findings) {
     (finding) => isOpen(finding) && finding.requires_architect_decision,
   ).length;
   const progress = total
-    ? Math.round(findings.reduce((sum, finding) => sum + statusProgress(finding.task_status), 0) / total)
+    ? Math.round(findings.reduce((sum, finding) => sum + findingProgress(finding), 0) / total)
     : 0;
 
   return { total, open, urgent, decisions, progress };
@@ -143,7 +149,7 @@ export function filterAndSort(findings, filters) {
       return SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) || a.id.localeCompare(b.id);
     }
     if (filters.sort === "progress") {
-      return statusProgress(b.task_status) - statusProgress(a.task_status) || priorityScore(b) - priorityScore(a);
+      return findingProgress(b) - findingProgress(a) || priorityScore(b) - priorityScore(a);
     }
     if (filters.sort === "id") return a.id.localeCompare(b.id, undefined, { numeric: true });
     return priorityScore(b) - priorityScore(a) || a.id.localeCompare(b.id);

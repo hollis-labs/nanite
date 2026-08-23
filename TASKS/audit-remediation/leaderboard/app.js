@@ -1,10 +1,10 @@
 import {
   SEVERITY_ORDER,
   filterAndSort,
+  findingProgress,
   normalizeCatalog,
   priorityScore,
   severityCounts,
-  statusProgress,
   summarize,
   uniqueValues,
 } from "./leaderboard.js";
@@ -180,7 +180,7 @@ function renderRows() {
     statusCell.append(badge(finding.task_status, "status"));
     const microProgress = node("span", "micro-progress");
     const microFill = node("span");
-    microFill.style.width = `${statusProgress(finding.task_status)}%`;
+    microFill.style.width = `${findingProgress(finding)}%`;
     microProgress.append(microFill);
     statusCell.append(microProgress);
     row.append(statusCell);

@@ -31,6 +31,26 @@ requires_regression_test: true
 > - **Gated on:** AD-09 (wire / defer / retire)
 > - **requires_security_review:** false · **requires_regression_test:** true
 
+> ## ✅ AD-09 DECIDED (2026-08-22) — RETIRE, PRESERVE `cache.go`
+>
+> Delete `adapt.go`, `builder.go`, `register.go`, `tool.go`, `yaml_loader.go`
+> and their test files. **Keep `cache.go`.** The package survives as a
+> result-cache package.
+>
+> **Verified live surface** (do not re-derive from the audit's prose, which is
+> looser): exactly three symbols are used outside `internal/tool` —
+> `NewResultCache`, `ResultCache`, `ResultCacheConfig` — by
+> `internal/service/chat.go` and `internal/service/container.go`. Nothing else
+> escapes the package.
+>
+> **⚠ `tool.go` holds the package doc that falsely calls this "the primary way
+> to construct tools in Go code."** Do not carry it over to `cache.go`. Write a
+> new package doc describing what the package actually becomes. Carrying the
+> old text forward would preserve the exact misstatement this finding is about.
+>
+> Largest deletion in the batch (~1.8k prod / ~1.7k test). `13/01`'s dead-code
+> list shrinks — re-derive it after this lands.
+
 ## Context
 
 ### Findings addressed

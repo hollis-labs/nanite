@@ -25,6 +25,17 @@ requires_regression_test: false
 > - **Gated on:** AD-11 (wire / defer / retire). Note this finding is **not** flagged `requires_architect_decision` in `findings.json` — see the batch README's correction 4.
 > - **requires_security_review:** false · **requires_regression_test:** true
 
+> ## ✅ AD-11 DECIDED (2026-08-22) — RETIRE
+>
+> Delete `internal/toolclient/tool_knowledge.go` and its test (405 / 162).
+>
+> Decided jointly with **AD-10** — see that task for the shared reasoning. This
+> is the third parallel intent-matching mechanism; the live `intent.go` keyword
+> scorer remains and becomes the only one.
+>
+> Self-contained: confirm zero references outside the file and its test before
+> deleting.
+
 ## Context
 
 ### Findings addressed

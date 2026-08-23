@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   filterAndSort,
+  findingProgress,
   isOpen,
   normalizeCatalog,
   priorityScore,
@@ -44,9 +45,11 @@ const sample = normalizeCatalog({
   ],
 });
 
-test("normalizes defaults and recognizes closed dispositions", () => {
+test("normalizes defaults and recognizes handled findings", () => {
   assert.equal(sample.findings[0].recommendation, "No recommendation provided.");
+  assert.equal(isOpen(sample.findings[1]), false, "reviewed is terminal");
   assert.equal(isOpen(sample.findings[2]), false);
+  assert.equal(findingProgress(sample.findings[2]), 100, "closed dispositions get full credit");
 });
 
 test("priority favors urgent unresolved work", () => {
@@ -57,11 +60,26 @@ test("priority favors urgent unresolved work", () => {
 test("summarizes progress and actionable work", () => {
   assert.deepEqual(summarize(sample.findings), {
     total: 3,
-    open: 2,
+    open: 1,
     urgent: 1,
     decisions: 1,
-    progress: 60,
+    progress: 67,
   });
+});
+
+test("validated and reviewed are terminal while implemented remains open", () => {
+  const findings = normalizeCatalog({
+    findings: [
+      { id: "VALIDATED", task_status: "validated", disposition: "remediate" },
+      { id: "REVIEWED", task_status: "reviewed", disposition: "remediate" },
+      { id: "IMPLEMENTED", task_status: "implemented", disposition: "remediate" },
+    ],
+  }).findings;
+
+  assert.equal(isOpen(findings[0]), false);
+  assert.equal(isOpen(findings[1]), false);
+  assert.equal(isOpen(findings[2]), true);
+  assert.equal(findingProgress(findings[2]), 55);
 });
 
 test("filters across categories and searchable text", () => {

@@ -26,6 +26,20 @@ requires_regression_test: true
 > - **Gated on:** AD-06 (wire / defer / retire)
 > - **requires_security_review:** false · **requires_regression_test:** true
 
+> ## ✅ AD-06 DECIDED (2026-08-22) — RETIRE
+>
+> Delete `internal/grounding/` (534 prod / 361 test). **The deletion reaches
+> outside that package** and the task is not done until these go too:
+> - `internal/selftools/self_tools_transport.go:219-231` — the
+>   `GroundingRecaller` / `GroundingLogger` fields and their comments.
+> - `internal/selftools/self_tools_dispatch.go:109-118` — the E2 pre-strategy
+>   recall block guarded by `if st.GroundingRecaller != nil`, plus the
+>   explanatory comment at `:29`.
+>
+> Confirm nothing else references `grounding.` before deleting. Note `10/02`
+> (Wave 5) decomposes `SelfToolsTransport` and `11/11` edits
+> `self_tools_dispatch.go` — both surfaces shrink because of this task.
+
 ## Context
 
 ### Findings addressed

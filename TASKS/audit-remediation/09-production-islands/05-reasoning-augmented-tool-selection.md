@@ -27,6 +27,23 @@ requires_regression_test: true
 > - **Gated on:** AD-10 (wire / defer / retire)
 > - **requires_security_review:** false · **requires_regression_test:** true
 
+> ## ✅ AD-10 DECIDED (2026-08-22) — RETIRE
+>
+> Delete `internal/toolclient/ranking.go` and its tests (342 / 210) —
+> `RankTools`, `SelectWithSignals`, `SelectToolsAugmented`.
+>
+> Decided jointly with **AD-11**: both answer "what tools match this intent"
+> alongside the live `intent.go` keyword scorer (119 lines). Three mechanisms
+> for one job, two dead. After both retires, `intent.go` is the single
+> mechanism.
+>
+> Closes 2 of the audit's previously-unjudged complexity outliers, which this
+> file accounts for. Worth noting how it died: an **earlier task in this
+> project** removed its only consumer (a debug SQL row), stranding it. Removals
+> create islands — check what a deletion orphans.
+>
+> `11/12` (`internal/toolclient/broker.go`) shrinks accordingly.
+
 ## Context
 
 ### Findings addressed

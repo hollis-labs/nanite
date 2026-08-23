@@ -933,7 +933,7 @@
       "report_section": "\u00a78.4",
       "task_file": "TASKS/audit-remediation/09-production-islands/03-team-semantic-routing.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Originally confirmed still unwired: `InstallTeamRunRouting(` was referenced only inside its defining file and handleLaunchTeam called only LaunchTeamRun. [AD-08 DECIDED 2026-08-22: wire.] [IMPLEMENTED 2026-08-23: Container.TeamRouting is constructed in main.go; handleLaunchTeam requires it and invokes InstallTeamRunRouting after launch; HTTP coverage observes real run-scoped agent_reflexes rows. Routing-install failure is fail-closed with partial-reflex cleanup and a structured 500 containing the already-persisted workflow_run_id/status.]"
     },
     {

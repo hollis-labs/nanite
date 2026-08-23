@@ -1,7 +1,7 @@
 # Decide the fate of team semantic routing (`TeamRoutingService`) — a self-flagged, unresolved risk
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch.
 **Touches:** `internal/service/team_routing.go`,
 `internal/service/container.go`, `cmd/nanite/main.go`,
@@ -422,3 +422,7 @@ actual fields are the persistent run id, status, and routing error.
 failure-test description to distinguish response fields from the separately
 verified persisted `team_run_members` store rows. Runtime code and tests were
 not changed. Final re-review is pending; no pass is claimed here.
+
+**Fresh re-review (2026-08-23): PASS.** The reviewer confirmed both tracking
+corrections, preserved neighboring Wave 4 statuses and Markdown table shape,
+and verified that the fix changed no runtime code. No findings remain.

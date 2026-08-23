@@ -6,17 +6,17 @@ decisions."* This file is that separation. It is the batch's single
 authoritative list of calls that must be made **by the operator/architect**,
 not by a worker mid-task.
 
-**26 decisions**, of which **10 are decided** (AD-01–AD-04, AD-14, AD-17,
+**28 decisions**, of which **11 are decided** (AD-01–AD-04, AD-14, AD-17,
 AD-18, AD-23, AD-24, AD-25) and 16 remain open. Most are grounded in the **44
 findings** carrying `requires_architect_decision: true` in `findings.json`,
 plus the guide's own §9 list; AD-23 and AD-24 are process decisions surfaced by
 the planning pass.
 
-**Two were found missing after the fact, both by kickoff authors doing
-pre-flight verification** — AD-25 (Wave 1) and AD-26 (Wave 2). In each case a
+**Four were found missing after the fact, by pre-flight verification** —
+AD-25 (Wave 1), AD-26 (Wave 2), and AD-27/AD-28 (Wave 3). In each case a
 finding carried `requires_architect_decision: true` with no entry in this
 queue. That is the failure mode this file exists to prevent, and it has now
-been caught twice by the same mechanism: **a kickoff author cross-checking
+been caught three waves running by the same mechanism: **a kickoff author cross-checking
 `findings.json`'s flag against this queue before dispatch.** Keep doing that
 check when writing each wave's kickoff.
 
@@ -71,6 +71,8 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-23 | Accept ~8 MB of audit evidence into the repo | `00/02` step 1 | — (process) | 0 | **decided** |
 | AD-24 | Dev-freeze scope and exit criteria | **every batch in the repo** | — (process) | 0 | **decided** |
 | AD-26 | Untracked `safego.Go` spawns: adopt an owner, or accept fire-and-forget | `04/04` (Part B) | GO-SVCCORE-002 | 2a | **decided** |
+| AD-27 | Autocomplete `repo_path` enumeration: constrain, or accept the local-operator trust model | `08/09` | GO-API-001 | 3 | open |
+| AD-28 | Catalog archive fetch: add a host/scheme allowlist, or accept operator-configured sources | `08/09` | GO-API-003 | 3 | open |
 | AD-25 | `allow_unsigned_plugins` devmode bypass: wire or retire | `01/02` | GO-PLUGIN-008 | 1 | **decided** |
 
 ### A gap worth naming
@@ -395,6 +397,77 @@ kind of ceremony it also warns against.
 
 `04/04`'s Part B must not be dispatched until this is decided. The Wave 2
 kickoff gates on it.
+
+### AD-27 — Autocomplete `repo_path` enumeration: constrain, or accept the local-operator trust model
+
+**Status:** open · **Gates:** `08/09` · **Findings:** GO-API-001 (low)
+
+Found by the Wave 3 pre-flight cross-check, 2026-08-22 — the third instance of
+the AD-25/AD-26 pattern. `GO-API-001` carries `disposition:
+needs-architect-decision`, meaning Wave 0 deferred the disposition *itself* to
+a decision that was never created. Verified still open against current source:
+`resolveRoot` (`internal/api/autocomplete.go:136-154`) returns `p.RepoPath`
+straight from the store with no validation, so any authenticated caller can
+point a project at `/` or `$HOME` and enumerate filenames, sizes, and mtimes
+(metadata only, no contents) to depth 8.
+
+**The question is whether that is a vulnerability or the product working as
+designed.** The audit's own `false_positive_considerations` says it plainly:
+*"in a single-operator local deployment, authenticated caller and the person
+who set `repo_path` are the same person."* Wave 0 judged that *"a genuine
+disposition-level question, not just an implementation detail."*
+
+**This decision is downstream of AD-15.** AD-15 sets the default auth/bind/TLS
+posture. If it lands on "single-user local app" — which
+`internal/server/caller_identity.go:14-22` currently documents as the
+intentional tradeoff — then AD-27 is plausibly `accepted-risk` and `08/09`
+sheds this finding. If AD-15 moves toward auth-by-default or non-loopback bind,
+"authenticated caller" stops meaning "the operator" and this becomes real.
+**Decide AD-15 first, then AD-27 in its light.** Deciding them independently
+risks a permissive bind with an unconstrained walk behind it.
+
+Options: constrain (validate `repo_path` against an allowlist or confine the
+walk under a configured root); accept and close as `accepted-risk`, recording
+the trust assumption; or defer with AD-15 named as the trigger.
+
+### AD-28 — Catalog archive fetch: add a host/scheme allowlist, or accept operator-configured sources
+
+**Status:** open · **Gates:** `08/09` · **Findings:** GO-API-003 (low)
+
+Same pre-flight cross-check, same missing-entry pattern. **But this finding is
+now half-resolved, and by work that landed after Wave 0 measured it** — worth
+knowing before deciding, because it narrows the question considerably.
+
+`GO-API-003` was *"`http.DefaultClient` with no explicit timeout and no
+host/scheme restriction."* `01/01`'s convergence (AD-04) removed
+`http.DefaultClient` from `internal/api/catalog.go` entirely; the download now
+runs through `install.HTTPDownloader` (`catalog.go:339`), whose `Download`
+applies `DefaultDownloadTimeout` (2 minutes) and `DefaultMaxArchiveBytes`
+whenever the zero value is left in place — so **the timeout half is fixed, and
+a size cap the finding never asked for came with it.**
+
+What remains is only the host/scheme allowlist: nothing in
+`internal/plugin/install/download.go` restricts the target beyond http/https.
+Wave 0's own note anticipated this split — *"the timeout half is
+uncontroversial but the disposition as a whole (accept current trust model vs.
+add restriction) needs architect judgment."* The uncontroversial half is done;
+only the judgment call is left.
+
+The case for accepting: per the audit's own
+`false_positive_considerations`, *"adding a catalog source is itself an
+explicit, privileged, operator-initiated action"* — an allowlist constrains
+someone who already had to be trusted to add the source. The case against: this
+is the standard package-manager-registry SSRF shape, and a compromised or
+malicious catalog source controls `entry.ArchiveURL` without further operator
+involvement.
+
+**Related, not duplicate:** AD-05 (provision a real signing key for the default
+seeded catalog source) addresses whether catalog *content* is trustworthy;
+AD-28 addresses where the fetch may *go*. Signature verification failing closed
+(AD-04, landed) already blunts the payload risk, so what an allowlist adds is
+protection against the *request itself* as a probe — internal network
+enumeration from the server's vantage point. Weigh it on that, not on payload
+trust, which is already handled.
 
 ### AD-25 — `allow_unsigned_plugins` devmode bypass: wire or retire
 

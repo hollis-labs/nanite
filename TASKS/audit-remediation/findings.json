@@ -1056,7 +1056,7 @@
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
       "disposition": "needs-architect-decision",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed still open: resolveRoot (autocomplete.go:135-164, exact match) has no validation on project.RepoPath before the directory walk. The finding's own false_positive_considerations (\"in a single-operator local deployment, authenticated caller and the person who set repo_path are the same person\") squarely questions whether this is worth constraining at all -- a genuine disposition-level question, not just an implementation detail."
+      "revalidation_note": "Confirmed still open: resolveRoot (autocomplete.go:135-164, exact match) has no validation on project.RepoPath before the directory walk. The finding's own false_positive_considerations (\"in a single-operator local deployment, authenticated caller and the person who set repo_path are the same person\") squarely questions whether this is worth constraining at all -- a genuine disposition-level question, not just an implementation detail. [UPDATE 2026-08-22: re-confirmed intact post-Wave-2 \u2014 resolveRoot (autocomplete.go:136-154) still returns p.RepoPath unvalidated; only the ctx sweep touched the file. Tracked as AD-27, which is downstream of AD-15.]"
     },
     {
       "id": "GO-API-002",
@@ -1108,7 +1108,7 @@
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
       "disposition": "needs-architect-decision",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed still open: handleCatalogInstall's archive download still uses http.DefaultClient with no explicit timeout or host/scheme allowlist beyond http/https. The finding's own false_positive_considerations (\"adding a catalog source is itself an explicit, privileged, operator-initiated action\") leaves genuinely open whether a host allowlist is warranted at all versus just adding a timeout -- the timeout half is uncontroversial but the disposition as a whole (accept current trust model vs. add restriction) needs architect judgment, consistent with AD-04's confinement-mechanism scope for this same file."
+      "revalidation_note": "Confirmed still open: handleCatalogInstall's archive download still uses http.DefaultClient with no explicit timeout or host/scheme allowlist beyond http/https. The finding's own false_positive_considerations (\"adding a catalog source is itself an explicit, privileged, operator-initiated action\") leaves genuinely open whether a host allowlist is warranted at all versus just adding a timeout -- the timeout half is uncontroversial but the disposition as a whole (accept current trust model vs. add restriction) needs architect judgment, consistent with AD-04's confinement-mechanism scope for this same file. [UPDATE 2026-08-22, post-Wave-1: half-resolved by 01/01's AD-04 convergence, which landed after Wave 0 measured this. http.DefaultClient is gone from internal/api/catalog.go; the download now runs through install.HTTPDownloader (catalog.go:339), which applies DefaultDownloadTimeout (2m) and DefaultMaxArchiveBytes on zero values. The timeout half is fixed and a size cap came with it. Only the host/scheme allowlist remains \u2014 now tracked as AD-28.]"
     },
     {
       "id": "GO-API-004",

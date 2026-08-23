@@ -17,6 +17,37 @@
 > - **Gated on:** AD-04 — specifically the canonical-confinement sub-question. If `01/01` and this task pick different mechanisms for the same file, the batch has reintroduced the inconsistency it exists to remove.
 > - **requires_security_review:** true · **requires_regression_test:** true
 
+> ## ⚠ RE-BASELINED 2026-08-22 — two decisions added, one finding half-resolved
+>
+> **`GO-API-003`'s scope shrank.** It was *"`http.DefaultClient`, no timeout, no
+> host/scheme restriction."* `01/01`'s AD-04 convergence landed after Wave 0
+> measured this and removed `http.DefaultClient` from
+> `internal/api/catalog.go` entirely — the download now runs through
+> `install.HTTPDownloader` (`catalog.go:339`), which applies
+> `DefaultDownloadTimeout` (2 min) and `DefaultMaxArchiveBytes` on zero values.
+> **The timeout half is already fixed, plus a size cap the finding never asked
+> for.** Only the host/scheme allowlist remains open. Do not re-add a timeout.
+>
+> **`GO-API-001` is intact** — `resolveRoot` (`autocomplete.go:136-154`) still
+> returns `p.RepoPath` unvalidated; only the ctx sweep touched that file.
+>
+> **Two new decisions gate the parts of this task they name**, added because
+> both findings carried `disposition: needs-architect-decision` with no queue
+> entry (the third occurrence of the AD-25/AD-26 pattern):
+>
+> - **AD-27** — `GO-API-001`: constrain the walk, or accept the local-operator
+>   trust model. **Downstream of AD-15** — decide the auth/bind/TLS posture
+>   first, because "authenticated caller" only means "the operator" under some
+>   of AD-15's outcomes.
+> - **AD-28** — `GO-API-003`: add a host/scheme allowlist, or accept
+>   operator-configured sources. Weigh it as request-side SSRF (internal
+>   network probing from the server's vantage), not payload trust — signature
+>   verification already fails closed after AD-04.
+>
+> The task's other findings are unaffected and dispatchable once AD-27/AD-28
+> land. Citations in this file predate both `01/01` and the ctx sweep —
+> re-locate before editing.
+
 ## Findings addressed
 
 - **GO-API-001** (low severity, high confidence, security) — report §8.5. Requires architect decision: **true** (matches `findings.json`).

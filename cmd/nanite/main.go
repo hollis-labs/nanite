@@ -729,13 +729,10 @@ func cmdServeWithInitializers(
 	selfTools.Subagent = container.Subagent
 	selfTools.SkillVendor = container.SkillVendor
 	selfTools.Background = container.Background
-	// Task 34: wire the shared managed-agent write path's classifier so
-	// agent_create/agent_update gate on ManageClass.Editable() the same
-	// way the REST API's requireMutableAgent does — container.AgentConfig
-	// already carries the real writable-managed-roots configuration
-	// (project .nanite / user nanite data dir), so this reuses it rather
-	// than re-deriving a second, possibly-diverging classification.
-	selfTools.AgentClassifier = container.AgentConfig
+	// Agent CRUD/source resolution keeps the store-backed local-MCP path,
+	// while production supplies the same root-aware editability classifier
+	// used by the REST layer.
+	selfTools.AgentProfileTools = selftools.NewAgentProfileTools(s, container.AgentConfig)
 	// CW-20260421-0010 (B3): wire the executeTask dispatch primitive.
 	// Adapts subagent.Service.Spawn to dispatch.Spawner so the chat
 	// agent's task_execute tool can drive role-based dispatch.

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/hollis-labs/agentkit/broker"
-	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/background"
@@ -67,6 +66,7 @@ type SelfToolsTransport struct {
 	BuilderSessions   *builders.SessionManager
 	MessagingTools    *MessagingTools
 	WorkTrackingTools *WorkTrackingTools
+	AgentProfileTools *AgentProfileTools
 	// Subagent is set post-construction from the container; nil-safe.
 	Subagent *subagent.Service
 	// SkillVendor is the content-addressed vendored skill store (internal/
@@ -254,20 +254,6 @@ type SelfToolsTransport struct {
 	// a clear errorResult.
 	WorkflowExecutor agentworkflow.StepExecutor
 
-	// AgentClassifier resolves an agent profile's ManageClass so
-	// agent_create/agent_update can gate writes on ManageClass.Editable() —
-	// the same rule internal/api/agent_capabilities.go's requireMutableAgent
-	// enforces at the REST layer. Set post-construction from the container's
-	// AgentConfigService (cmd/nanite/main.go), which already threads the
-	// real writable-managed-roots configuration. Nil-safe: when unwired,
-	// classifyAgent falls back to a zero-value agent.Classification (no
-	// configured managed roots). That fallback still correctly rejects
-	// internal/plugin-sourced profiles — the concrete threat this gate
-	// exists to close (CW-... task 34) — it only loses precision
-	// distinguishing "managed in a real root" from "external" for
-	// file-backed profiles when no roots are configured.
-	AgentClassifier AgentClassifier
-
 	// Reactions is the harness-reactive self-tools' reaction engine
 	// (internal/selftools/reactions, TASKS/harness-reactive-self-tools/
 	// 03-reaction-engine-core.md). task_update_report
@@ -282,47 +268,6 @@ type SelfToolsTransport struct {
 	Reactions *reactions.Engine
 }
 
-// AgentClassifier resolves the management class of an agent profile.
-// Declared here (rather than referencing *service.AgentConfigService
-// directly) because internal/service already imports internal/mcp —
-// importing it back would create an import cycle. *service.AgentConfigService
-// satisfies this interface structurally via its existing
-// Classify(p *store.AgentProfile) agent.ManageClass method.
-type AgentClassifier interface {
-	Classify(p *store.AgentProfile) agent.ManageClass
-}
-
-// classifyAgent resolves p's ManageClass, preferring the wired
-// AgentClassifier (root-aware, matches the REST API's classification
-// exactly) and falling back to a zero-value agent.Classification when
-// unwired. See the AgentClassifier field comment for what the fallback
-// does and doesn't cover.
-func (st *SelfToolsTransport) classifyAgent(a *store.AgentProfile) agent.ManageClass {
-	if st.AgentClassifier != nil {
-		return st.AgentClassifier.Classify(a)
-	}
-	var fallback agent.Classification
-	return fallback.Classify(a.Source, a.SourceRef)
-}
-
-// agentNotEditableError formats the same rejection message shape used by
-// internal/api/agents.go's writeNotManaged for a REST-layer editability
-// rejection (CW-20260818, task 34), so a chat agent hitting this self-tool
-// gate and an API client hitting requireMutableAgent see equivalent
-// guidance for the same underlying rule.
-func agentNotEditableError(slug string, class agent.ManageClass) string {
-	msg := "agent is not a writable managed config"
-	switch class {
-	case agent.ManageClassInternal:
-		msg = "agent is an embedded internal harness profile and is managed by Nanite, not editable here"
-	case agent.ManageClassPlugin:
-		msg = "agent is plugin/vendor-provided (read-only); copy it to the managed layer to edit"
-	case agent.ManageClassExternal:
-		msg = "agent is not in a writable managed location (read-only); copy it to the managed layer to edit"
-	}
-	return fmt.Sprintf("%s (slug=%q, manage_class=%s)", msg, slug, string(class))
-}
-
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
 func NewSelfToolsTransport(s *store.Store) *SelfToolsTransport {
 	return &SelfToolsTransport{
@@ -331,6 +276,7 @@ func NewSelfToolsTransport(s *store.Store) *SelfToolsTransport {
 		BuilderSessions:   builders.NewSessionManager(),
 		MessagingTools:    NewMessagingTools(nil, nil),
 		WorkTrackingTools: NewWorkTrackingTools(nil, s, nil),
+		AgentProfileTools: NewAgentProfileTools(s, nil),
 		RememberCounters:  newRememberSessionCounters(),
 	}
 }
@@ -366,13 +312,13 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	case "skill_get":
 		return st.callSkillGet(ctx, args)
 	case "agent_create":
-		return st.callCreateAgent(args)
+		return st.AgentProfileTools.callCreateAgent(args)
 	case "agent_list":
-		return st.callListAgents(args)
+		return st.AgentProfileTools.callListAgents(args)
 	case "agent_update":
-		return st.callUpdateAgent(args)
+		return st.AgentProfileTools.callUpdateAgent(args)
 	case agentSourceResolveToolName:
-		return st.callAgentSourceResolve(args)
+		return st.AgentProfileTools.callAgentSourceResolve(args)
 	case "workflow_execute_llm_step":
 		return st.callWorkflowExecuteLLMStep(ctx, args)
 	case "workflow_execute_tool_step":
@@ -622,7 +568,7 @@ func (st *SelfToolsTransport) callDeleteSkill(args map[string]any) (*mcp.ToolRes
 
 // --- agent handlers ---
 
-func (st *SelfToolsTransport) callCreateAgent(args map[string]any) (*mcp.ToolResult, error) {
+func (at *AgentProfileTools) callCreateAgent(args map[string]any) (*mcp.ToolResult, error) {
 	name, _ := args["name"].(string)
 	slug, _ := args["slug"].(string)
 	prompt, _ := args["system_prompt"].(string)
@@ -638,8 +584,8 @@ func (st *SelfToolsTransport) callCreateAgent(args map[string]any) (*mcp.ToolRes
 	// slug UNIQUE constraint with a raw SQL error; this check runs first
 	// so the caller gets the same clear, classified rejection as
 	// callUpdateAgent instead).
-	if existing, err := st.Store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug); err == nil && existing != nil {
-		if class := st.classifyAgent(existing); !class.Editable() {
+	if existing, err := at.Store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug); err == nil && existing != nil {
+		if class := at.classifyAgent(existing); !class.Editable() {
 			return mcp.ErrorResult(agentNotEditableError(existing.Slug, class)), nil
 		}
 	}
@@ -652,7 +598,7 @@ func (st *SelfToolsTransport) callCreateAgent(args map[string]any) (*mcp.ToolRes
 		DefaultModel: strArg(args, "default_model", ""),
 	}
 
-	if err := st.Store.CreateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
+	if err := at.Store.CreateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("create agent: %v", err)), nil
 	}
 
@@ -660,8 +606,8 @@ func (st *SelfToolsTransport) callCreateAgent(args map[string]any) (*mcp.ToolRes
 	return mcp.TextResult(fmt.Sprintf("Created agent %q (id=%s)\n%s", a.Name, a.ID, string(out))), nil
 }
 
-func (st *SelfToolsTransport) callListAgents(args map[string]any) (*mcp.ToolResult, error) {
-	agents, err := st.Store.ListAgents(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+func (at *AgentProfileTools) callListAgents(args map[string]any) (*mcp.ToolResult, error) {
+	agents, err := at.Store.ListAgents(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("list agents: %v", err)), nil
 	}
@@ -683,13 +629,13 @@ func (st *SelfToolsTransport) callListAgents(args map[string]any) (*mcp.ToolResu
 	return mcp.TextResult(sb.String()), nil
 }
 
-func (st *SelfToolsTransport) callUpdateAgent(args map[string]any) (*mcp.ToolResult, error) {
+func (at *AgentProfileTools) callUpdateAgent(args map[string]any) (*mcp.ToolResult, error) {
 	id := strArg(args, "id", "")
 	if id == "" {
 		return mcp.ErrorResult("id is required"), nil
 	}
 
-	a, err := st.Store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+	a, err := at.Store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("get agent: %v", err)), nil
 	}
@@ -699,7 +645,7 @@ func (st *SelfToolsTransport) callUpdateAgent(args map[string]any) (*mcp.ToolRes
 	// internal/api/agent_capabilities.go's requireMutableAgent gate at the
 	// REST layer. Classify the target's *current* class (source/source_ref
 	// as loaded, before any of the args below could mutate it).
-	if class := st.classifyAgent(a); !class.Editable() {
+	if class := at.classifyAgent(a); !class.Editable() {
 		return mcp.ErrorResult(agentNotEditableError(a.Slug, class)), nil
 	}
 
@@ -719,7 +665,7 @@ func (st *SelfToolsTransport) callUpdateAgent(args map[string]any) (*mcp.ToolRes
 		a.DefaultModel = v
 	}
 
-	if err := st.Store.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
+	if err := at.Store.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("update agent: %v", err)), nil
 	}
 	return mcp.TextResult(fmt.Sprintf("Updated agent %q (id=%s)", a.Name, a.ID)), nil

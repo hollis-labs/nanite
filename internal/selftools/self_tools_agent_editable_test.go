@@ -5,8 +5,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+type recordingAgentClassifier struct {
+	class  agent.ManageClass
+	called int
+}
+
+func (c *recordingAgentClassifier) Classify(*store.AgentProfile) agent.ManageClass {
+	c.called++
+	return c.class
+}
 
 // Task 34: agent_update/agent_create must reject writes against non-editable
 // (internal/plugin/external) agent profiles, matching the gate
@@ -33,6 +44,26 @@ func seedAgent(t *testing.T, s *store.Store, name, slug, source, sourceRef strin
 		t.Fatalf("seed agent %s: %v", slug, err)
 	}
 	return a
+}
+
+func TestAgentProfileTools_UsesInjectedClassifier(t *testing.T) {
+	st := newSelfTools(t)
+	seeded := seedAgent(t, st.Store, "Managed by fallback", "injected-classifier", "", "")
+	classifier := &recordingAgentClassifier{class: agent.ManageClassPlugin}
+	st.AgentProfileTools.Classifier = classifier
+
+	result, err := st.CallTool(t.Context(), "agent_update", map[string]any{
+		"id": seeded.ID, "name": "must not update",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError || !strings.Contains(result.Content[0].Text, "plugin/vendor-provided") {
+		t.Fatalf("result = %#v, want injected plugin classification rejection", result)
+	}
+	if classifier.called != 1 {
+		t.Fatalf("classifier calls = %d, want 1", classifier.called)
+	}
 }
 
 // TestSelfToolsTransport_UpdateAgent_RejectsNonEditableClasses verifies

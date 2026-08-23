@@ -94,8 +94,8 @@ type agentSourceResolveResult struct {
 // SoT and returns it in an agentlaunch-compatible shape. It accepts an
 // agent id OR slug — a caller holding a directory handle only knows the
 // registered name, which is the slug.
-func (st *SelfToolsTransport) callAgentSourceResolve(args map[string]any) (*mcp.ToolResult, error) {
-	if st == nil || st.Store == nil {
+func (at *AgentProfileTools) callAgentSourceResolve(args map[string]any) (*mcp.ToolResult, error) {
+	if at == nil || at.Store == nil {
 		return mcp.ErrorResult("agent_source_resolve: store not available"), nil
 	}
 	ref := strings.TrimSpace(strArg(args, "agent", ""))
@@ -103,7 +103,7 @@ func (st *SelfToolsTransport) callAgentSourceResolve(args map[string]any) (*mcp.
 		return mcp.ErrorResult("agent_source_resolve: `agent` (id or slug) is required"), nil
 	}
 
-	agent := resolveAgentByRef(st.Store, ref)
+	agent := resolveAgentByRef(at.Store, ref)
 	if agent == nil {
 		return mcp.ErrorResult(fmt.Sprintf("agent_source_resolve: no agent profile found for %q", ref)), nil
 	}
@@ -136,7 +136,7 @@ func (st *SelfToolsTransport) callAgentSourceResolve(args map[string]any) (*mcp.
 // registers an agent under its slug), then falls back to id. A failed
 // lookup on either path returns nil rather than an error so the caller
 // emits a single clean not-found message.
-func resolveAgentByRef(s *store.Store, ref string) *store.AgentProfile {
+func resolveAgentByRef(s AgentProfileStore, ref string) *store.AgentProfile {
 	if a, err := s.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, ref); err == nil && a != nil {
 		return a
 	}

@@ -219,6 +219,50 @@ func TestDevGlob_SkipsSymlinkOutsideAllowedDirectory(t *testing.T) {
 	}
 }
 
+func TestDevGlob_BlocksSymlinkSwapAfterEntryValidation(t *testing.T) {
+	dt, dir := tempDevTools(t)
+	entry := filepath.Join(dir, "candidate.txt")
+	if err := os.WriteFile(entry, []byte("inside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	swapped := false
+	dt.walkEntryValidated = func(path string) {
+		if swapped || path != entry {
+			return
+		}
+		if err := os.Remove(entry); err != nil {
+			t.Fatalf("remove validated entry: %v", err)
+		}
+		if err := os.Symlink(outside, entry); err != nil {
+			t.Fatalf("replace validated entry with symlink: %v", err)
+		}
+		swapped = true
+	}
+
+	result, err := dt.CallTool(context.Background(), "dev_glob", map[string]any{
+		"pattern":   "*.txt",
+		"directory": dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].Text)
+	}
+	if !swapped {
+		t.Fatal("test hook did not swap the entry after validation")
+	}
+	if strings.Contains(result.Content[0].Text, "candidate.txt") {
+		t.Fatalf("post-validation outside symlink was listed: %s", result.Content[0].Text)
+	}
+}
+
 func TestDevGlob_PreservesSymlinkInsideAllowedDirectory(t *testing.T) {
 	dt, dir := tempDevTools(t)
 	target := filepath.Join(dir, "target.data")
@@ -379,7 +423,7 @@ func TestDevGrep_SkipsSymlinkOutsideAllowedDirectory(t *testing.T) {
 	dt, dir := tempDevTools(t)
 	outsideDir := t.TempDir()
 	outside := filepath.Join(outsideDir, "outside.txt")
-	if err := os.WriteFile(outside, []byte("outside-only-secret\n"), 0o644); err != nil {
+	if err := os.WriteFile(outside, []byte("nonmatching-prefix\noutside-only-secret\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(dir, "leak.txt")
@@ -400,6 +444,51 @@ func TestDevGrep_SkipsSymlinkOutsideAllowedDirectory(t *testing.T) {
 	if strings.Contains(result.Content[0].Text, "outside-only-secret") ||
 		strings.Contains(result.Content[0].Text, "leak.txt") {
 		t.Fatalf("outside-target symlink content was returned: %s", result.Content[0].Text)
+	}
+}
+
+func TestDevGrep_BlocksSymlinkSwapAfterEntryValidation(t *testing.T) {
+	dt, dir := tempDevTools(t)
+	entry := filepath.Join(dir, "candidate.txt")
+	if err := os.WriteFile(entry, []byte("prefix\ninside-safe\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "outside.txt")
+	if err := os.WriteFile(outside, []byte("nonmatching-prefix\npost-validation-secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	swapped := false
+	dt.walkEntryValidated = func(path string) {
+		if swapped || path != entry {
+			return
+		}
+		if err := os.Remove(entry); err != nil {
+			t.Fatalf("remove validated entry: %v", err)
+		}
+		if err := os.Symlink(outside, entry); err != nil {
+			t.Fatalf("replace validated entry with symlink: %v", err)
+		}
+		swapped = true
+	}
+
+	result, err := dt.CallTool(context.Background(), "dev_grep", map[string]any{
+		"pattern":   "post-validation-secret",
+		"directory": dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].Text)
+	}
+	if !swapped {
+		t.Fatal("test hook did not swap the entry after validation")
+	}
+	if strings.Contains(result.Content[0].Text, "post-validation-secret") ||
+		strings.Contains(result.Content[0].Text, "candidate.txt") {
+		t.Fatalf("post-validation outside symlink content was returned: %s", result.Content[0].Text)
 	}
 }
 

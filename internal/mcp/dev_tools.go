@@ -41,6 +41,12 @@ var (
 type DevToolsTransport struct {
 	AllowedPaths []string // Absolute directory paths tools may access.
 
+	// walkEntryValidated is an optional test hook invoked after a walk entry
+	// passes pathsafe validation but before its root-scoped filesystem
+	// operation. It lets regression tests deterministically exercise a
+	// validate/use filesystem mutation without weakening production checks.
+	walkEntryValidated func(string)
+
 	// agentExec is the sandbox execution entry point. Nil means use the
 	// package default (sandbox.AgentExec). Tests override this to capture
 	// invocations without running real commands.
@@ -782,6 +788,9 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 		if err != nil {
 			return nil
 		}
+		if d.walkEntryValidated != nil {
+			d.walkEntryValidated(path)
+		}
 		entryInfo, err := root.Stat(resolvedEntry)
 		if err != nil || !entryInfo.Mode().IsRegular() {
 			return nil
@@ -1062,6 +1071,9 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 			resolvedEntry, err := resolveWalkEntry(dir, path)
 			if err != nil {
 				return nil
+			}
+			if d.walkEntryValidated != nil {
+				d.walkEntryValidated(path)
 			}
 			info, err := root.Stat(resolvedEntry)
 			if err != nil || !info.Mode().IsRegular() {

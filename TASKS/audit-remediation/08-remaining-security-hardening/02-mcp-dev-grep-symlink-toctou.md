@@ -99,6 +99,19 @@ Low — the fix only tightens what's readable, never expands it. Rollback is a s
   `dev_tools.go`; it exits nonzero on 18 pre-existing findings from other rules
   (including existing G703/G304/G301/G306 reports in `dev_tools.go`) that are
   outside this task.
+- 2026-08-22 correction: added a narrow per-transport test hook at the exact
+  boundary between per-entry `ResolveUnder` validation and the root-scoped
+  stat/open. New deterministic grep and glob tests replace a validated regular
+  file with an outside-target symlink at that boundary and prove `os.Root`
+  blocks both the content read and metadata listing. The static grep escape
+  fixture now puts its secret on line 2 after a nonmatching prefix, ensuring a
+  vulnerable implementation fails for the intended leak instead of the
+  unrelated pre-existing line-1 context panic. Mutation evidence: temporarily
+  replacing `root.Stat`/`root.Open` with ordinary path-based `os.Stat`/`os.Open`
+  made glob list `candidate.txt` and grep return `post-validation-secret`; the
+  rooted operations were then restored with no mutation left. Post-restoration
+  `go test ./internal/mcp/... -count=1`, focused `go test -race`, `go vet
+  ./internal/mcp/...`, and `gosec -include=G122 ./internal/mcp/...` all passed.
 
 ## Review notes
 

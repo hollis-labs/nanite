@@ -16,6 +16,23 @@
 > - **Gated on:** AD-22 — now, never, or ratchet-only.
 > - **requires_security_review:** false · **requires_regression_test:** false
 
+> ## ✅ AD-22 DECIDED (2026-08-22) — ratchet now, one sweep as the batch's final act
+>
+> `gofmt` enforcement on new and changed code lands with `12/01`. **This task
+> performs one repo-wide sweep, and it is the last thing that lands in the
+> entire batch** — alone, no other worktree open. That ordering was already
+> this task's constraint; AD-22 confirms it rather than changing it.
+>
+> **Re-measure immediately before sweeping — do not trust any number in this
+> file.** The backlog has moved three times: 122 at the audited commit, 130 at
+> frozen HEAD, **105 at 2026-08-22**, falling because Waves 1–3 formatted what
+> they touched. Waves 4–7 will move it again; Wave 4 alone deletes ~3,400
+> production lines.
+>
+> Measure with `gofmt -l ./internal ./cmd ./pkg`, **not** `gofmt -l .` — the
+> latter descends into `.claude/worktrees/` (88 repo copies at last count) and
+> returns a five-figure number.
+
 ## Context
 
 All three findings in this task are trivial, mechanical, zero-design-ambiguity fixes — `requires_architect_decision: false` for all. Root cause / all-production-callers analysis is n/a for this task: none of these three touches a shared primitive, a security boundary, or a semantic contract; each is a local, self-contained fix.

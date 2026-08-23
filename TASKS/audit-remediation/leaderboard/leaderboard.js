@@ -99,14 +99,16 @@ export function summarize(findings) {
   const urgent = findings.filter(
     (finding) => isOpen(finding) && ["critical", "high"].includes(finding.severity),
   ).length;
+  const urgentTotal = findings.filter((finding) => ["critical", "high"].includes(finding.severity)).length;
   const decisions = findings.filter(
     (finding) => isOpen(finding) && finding.requires_architect_decision,
   ).length;
+  const decisionTotal = findings.filter((finding) => finding.requires_architect_decision).length;
   const progress = total
     ? Math.round(findings.reduce((sum, finding) => sum + findingProgress(finding), 0) / total)
     : 0;
 
-  return { total, open, urgent, decisions, progress };
+  return { total, open, urgent, urgentTotal, decisions, decisionTotal, progress };
 }
 
 export function severityCounts(findings) {

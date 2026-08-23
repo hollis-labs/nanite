@@ -20,6 +20,21 @@ requires_architect_decision: true
 > - **Gated on:** AD-20 — decide before scheduling the wave, not during it: the answer is the difference between a two-line rename and a tree-wide sweep.
 > - **requires_security_review:** false · **requires_regression_test:** true
 
+> ## ✅ AD-20 DECIDED (2026-08-22) — rename both types by role
+>
+> Give both `config.Config` and `config.AppConfig` names that state their role.
+> `Config` inside a package called `config` carries no information, and
+> renaming only one leaves the asymmetry.
+>
+> **⚠ This file's scope warning is wrong.** It says the fix "may reach every
+> caller of `config.Config` and `config.AppConfig` across the tree." Measured at
+> HEAD: **11 references total** — `Config` ×5, `AppConfig` ×6 — in
+> `cmd/nanite/main.go` and `internal/service/{chat,container,slot_stash}.go`.
+>
+> Consequence: **this task no longer needs to run alone.** The batch README and
+> this file's sequencing block both say it must if AD-20 picks a tree-wide
+> rename. It didn't, because there is no tree-wide rename to pick.
+
 ## Context
 
 ### Findings addressed

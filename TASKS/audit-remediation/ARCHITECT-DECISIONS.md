@@ -50,7 +50,7 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-02 | Linux network allowlist enforcement level | `02/01` | GO-SEC4-002 | **0** | **decided** |
 | AD-03 | macOS seatbelt read-boundary: disclose, narrow, or accept | `02/02` | GO-SEC4-005 | **0** | **decided** |
 | AD-04 | Plugin-install convergence: concrete integration shape | `01/01` | GO-PLUGIN-001/002/003 | **0** | **decided** |
-| AD-05 | Default/official catalog source: provision a real signing key? | `01/01` follow-up | GO-PLUGIN-001 | 1 | open |
+| AD-05 | Default/official catalog source: provision a real signing key? | `01/01` follow-up | GO-PLUGIN-001 | 1 | **decided** |
 | AD-06 | Island: grounding memory recall — wire / defer / retire | `09/01` | GO-MEM-001 | 4 | **decided** |
 | AD-07 | Island: Hadron context gate — wire / defer / retire | `09/02` | GO-MEM-002 | 4 | **decided** |
 | AD-08 | Island: team semantic routing — wire / defer / retire | `09/03` | GO-SVCEXEC-003 | 4 | **decided** |
@@ -65,9 +65,9 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-17 | `cmdServe` fatal-path cleanup: direction | `07/02` | GO-RUNTIME-001 | 2b | **decided** |
 | AD-18 | Background job registry: retention policy | `07/03` | GO-RUNTIME-004 | 2b | **decided** |
 | AD-19 | Duplicated semantics: share implementation vs. parity tests | Wave 6a (all) | GO-SVCEXEC-004, GO-API-007, GO-CHAT-002, GO-INFRA-004 | 6a | open |
-| AD-20 | `internal/config` naming collision: rename direction | `11/08` | GO-INFRA-001 | 6a | open |
-| AD-21 | Which historical lint classes become blocking | `12/01` | GO-HYG-001 | 7 | open |
-| AD-22 | Repo-wide `gofmt` sweep: now, never, or ratchet-only | `13/03` | GO-HYG-001, GO-CHAT-007 | 8 | open |
+| AD-20 | `internal/config` naming collision: rename direction | `11/08` | GO-INFRA-001 | 6a | **decided** |
+| AD-21 | Which historical lint classes become blocking | `12/01` | GO-HYG-001 | 7 | **decided** |
+| AD-22 | Repo-wide `gofmt` sweep: now, never, or ratchet-only | `13/03` | GO-HYG-001, GO-CHAT-007 | 8 | **decided** |
 | AD-23 | Accept ~8 MB of audit evidence into the repo | `00/02` step 1 | — (process) | 0 | **decided** |
 | AD-24 | Dev-freeze scope and exit criteria | **every batch in the repo** | — (process) | 0 | **decided** |
 | AD-26 | Untracked `safego.Go` spawns: adopt an owner, or accept fire-and-forget | `04/04` (Part B) | GO-SVCCORE-002 | 2a | **decided** |
@@ -326,6 +326,29 @@ the same file and will otherwise pick differently.
 ---
 
 ## Wave 1 decisions
+
+### AD-05 — DECIDED: remove the default seeded catalog source
+
+> **Decided (2026-08-22): remove it. Do not provision a key.**
+>
+> After AD-04's fail-closed convergence, a seeded source with no `public_key`
+> produces a default that **rejects every install out of the box**. A shipped
+> default that always fails is worse than no default — it teaches operators the
+> feature is broken rather than that it needs configuring.
+>
+> Operators add and key their own catalog sources deliberately. Provisioning an
+> official key was rejected as real external work with no owner: keypair
+> generation, secure private-key custody, a rotation and revocation policy, and
+> a signing step in whatever publishes the catalog — none of which exists.
+>
+> Consequence to state plainly in the implementing task: **no out-of-box
+> catalog browsing.** `handleBrowseCatalog`/`handleRefreshCatalog` will have no
+> source to list until one is configured. That is intended, and the UI should
+> say so rather than render an empty list that looks like a failure.
+>
+> This has no task file — it was filed as a `01/01` follow-up. Needs one, in
+> whichever wave the operator prefers; it touches the seed path, not the
+> install pipeline, so it is independent of Wave 3's remaining work.
 
 ### AD-05 — Default/official catalog source: provision a real signing key?
 
@@ -965,6 +988,20 @@ behavior | migration drift | intentionally independent`
 Prioritize **semantic divergence** and **migration drift**; LOC reduction is
 explicitly not the goal.
 
+### AD-20 — DECIDED: rename both types by role
+
+> **Decided (2026-08-22): give both types names that say what they are.**
+> `Config` inside a package named `config` carries no information; renaming
+> only one leaves the asymmetry.
+>
+> **The task file's scope warning is wrong and should not be trusted.** `11/08`
+> says the fix "may reach every caller of `config.Config` and
+> `config.AppConfig` across the tree." Measured at HEAD: **11 references
+> total** — `config.Config` ×5, `config.AppConfig` ×6 — across
+> `cmd/nanite/main.go` and three files in `internal/service`
+> (`chat.go`, `container.go`, `slot_stash.go`). This is a bounded rename, and
+> `11/08` no longer needs to run alone.
+
 ### AD-20 — `internal/config` naming collision: rename direction
 
 **Status:** open · **Gates:** `11/08` · **Findings:** GO-INFRA-001 (low)
@@ -979,6 +1016,39 @@ exactly why it needs deciding before dispatch and not during.
 
 ## Wave 7–8 decisions
 
+### AD-21 — DECIDED: regression-gate everything, zero-tolerance on the correctness three
+
+> **Decided (2026-08-22): baseline every linter and fail on any increase —
+> plus require `errcheck`, `errorlint`, and `nilerr` to reach and stay at
+> zero.**
+>
+> The regression half is the guide's own instruction and is immediately
+> actionable. The measured drift justifies it empirically: across 40 commits of
+> ordinary development, gosec +35, cyclop +25, gocyclo +25, gocognit +16,
+> errcheck +10. Nothing was watching.
+>
+> The correctness three are singled out on evidence, not taste: **`nilerr` is
+> the linter that already caught `GO-STORE-003`** (high severity) and was
+> ignored because the fast gate runs `--new` and cannot see pre-existing
+> findings in untouched code.
+>
+> ### ⚠ The zero-tolerance half has a 365-finding prerequisite that no task owns
+>
+> Current counts: **errcheck 294, errorlint 49, nilerr 22 = 365**. `13/04`
+> (low-risk error-handling batch) touches five files — it is nowhere near this.
+> **No task in the batch owns that paydown.**
+>
+> So `12/01` must ship in two stages, and its Done-means should say so:
+> 1. **Now:** the regression gate over all linters. Fully actionable today.
+> 2. **On a named trigger:** zero-tolerance on the correctness three, activated
+>    once the backlog reaches zero — not before, because a gate that fails on
+>    every merge from day one gets disabled within a week.
+>
+> Whether the paydown becomes a new task in this batch or later work is the
+> operator's call; staging it this way means `12/01` is not blocked either way.
+> Do **not** let an implementer quietly interpret "zero-tolerance" as
+> "regression-gate these three too" — that is a different and weaker decision.
+
 ### AD-21 — Which historical lint classes become blocking
 
 **Status:** open · **Gates:** `12/01` · **Findings:** GO-HYG-001
@@ -989,6 +1059,26 @@ and reject regressions/new actionable findings."* So the decision is not
 "which do we fix" but **which classes block a merge going forward**, with
 history baselined. The audit's own totals (errcheck 284, etc. — `REPORT.md:290`)
 are the input; `00/02` refreshes them at the frozen HEAD.
+
+### AD-22 — DECIDED: ratchet now, single sweep as the batch's final act
+
+> **Decided (2026-08-22): enforce `gofmt` on new and changed code immediately,
+> and land one repo-wide sweep as the last commit of the batch, alone, with no
+> other worktree open.**
+>
+> Backlog measured at HEAD: **105 files** — down from 122 at the audited commit
+> and 130 at frozen HEAD, because Waves 1–3 formatted what they touched. The
+> ratchet is already working organically; the sweep exists to close the
+> remainder definitively so the gate can be simple rather than
+> baseline-aware.
+>
+> **Ordering is absolute and unchanged**: `13/03` is the last thing that lands
+> in the batch. Sweeping before Wave 4 was rejected — Wave 4 deletes ~3,400
+> production lines, and formatting files that are about to be deleted is waste
+> with conflict risk attached.
+>
+> Re-measure immediately before the sweep. The count has moved three times
+> already (122 → 130 → 105) and will move again as Waves 4–7 land.
 
 ### AD-22 — Repo-wide `gofmt` sweep: now, never, or ratchet-only
 

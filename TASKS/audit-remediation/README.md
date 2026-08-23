@@ -311,8 +311,8 @@ before.**
 
 | Task | Depends on | Gated on | Notes |
 |---|---|---|---|
-| `09/01` grounding memory recall | `04/01`, `07/04` | AD-06 | Wires into `container.go` |
-| `09/02` Hadron context gate | `04/01`, `07/04` | AD-07 | Wires into `container.go` `sources` slice |
+| `09/01` grounding memory recall | `04/01`, `07/04` | AD-06 | **Decided retire (2026-08-22)** — does not touch `container.go`; deletion reaches into `internal/selftools/self_tools_transport.go`/`self_tools_dispatch.go` instead |
+| `09/02` Hadron context gate | `04/01`, `07/04` | AD-07 | **Decided retire (2026-08-22)** — does not touch `container.go`'s `sources` slice |
 | `09/03` team semantic routing | W2 | AD-08 | Check `TASKS/teams/` for original intent |
 | `09/04` tool builder / YAML architecture | W2 | AD-09 | **Outcome changes `13/01`'s scope** |
 | `09/05` reasoning-augmented tool selection | W2 | AD-10 | |
@@ -412,10 +412,13 @@ other open worktree also carries, so a parallel run guarantees conflicts in
 every branch. The guide's "independent dependency upgrades can run in
 parallel" does not survive contact with worktree-based dispatch.
 
-**Wave 4** — `09/03` ∥ `09/04` ∥ `09/05` ∥ `09/06` freely. `09/01` and `09/02`
-both edit `internal/service/container.go` if their decisions are "wire" — run
-them **sequentially against each other**, and only after `04/01`/`07/04` have
-landed their own `container.go` changes.
+**Wave 4** — **all six run fully parallel.** The sequencing note that used to
+live here (`09/01`/`09/02` run sequentially against each other because both
+edit `container.go` if wired) is obsolete as of AD-06/AD-07 (decided
+2026-08-22, both **retire**): neither touches `container.go` — verified,
+zero real grounding-wiring references and the one string match on "hadron"
+in that file is an unrelated comment about a different app's binary name.
+All six tasks are file-disjoint.
 
 **Wave 5** — effectively serial. `10/01` takes an **exclusive lock on
 `internal/service`**: it is a multi-phase extraction of an 84-method type,

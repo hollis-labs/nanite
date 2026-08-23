@@ -25,6 +25,31 @@ runbook note; it does not touch any Go source.
 > - **Gated on:** AD-21 — which historical lint classes become blocking. Constraint from the guide: baseline history, reject regressions; do **not** require the backlog to reach zero first.
 > - **requires_security_review:** false · **requires_regression_test:** false
 
+> ## ✅ AD-21 DECIDED (2026-08-22) — ship in two stages
+>
+> **Stage 1, now:** baseline every linter in the audit config and fail the gate
+> on any increase. Justified empirically — across 40 commits of ordinary
+> development the counts moved gosec +35, cyclop +25, gocyclo +25, gocognit
+> +16, errcheck +10, with nothing watching.
+>
+> **Stage 2, on a named trigger:** zero-tolerance on `errcheck`, `errorlint`,
+> and `nilerr`. These three are singled out on evidence — **`nilerr` already
+> caught `GO-STORE-003`** (high severity) and was ignored because the fast hook
+> runs `--new` and cannot see pre-existing findings in untouched code.
+>
+> ### ⚠ Stage 2 has a 365-finding prerequisite that no task owns
+>
+> errcheck **294** + errorlint **49** + nilerr **22** = **365**. `13/04` touches
+> five files; it is nowhere near this, and nothing else in the batch covers it.
+>
+> **Do not activate stage 2 until that backlog is zero.** A gate that fails
+> every merge from day one gets disabled within a week, taking stage 1 with it.
+> Record the trigger explicitly in whatever config you ship.
+>
+> **Do not** reinterpret "zero-tolerance" as "regression-gate these three as
+> well" — that is a weaker decision than the one made, and it would silently
+> discard the reason those three were separated out.
+
 ## Context
 
 `requires_architect_decision: true`. Two independent open questions block

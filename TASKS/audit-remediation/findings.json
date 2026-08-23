@@ -138,7 +138,7 @@
       "task_file": "TASKS/audit-remediation/12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md",
       "disposition": "needs-architect-decision",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed still accurate and refreshed by 00/02: lefthook.yml's pre-commit still runs `golangci-lint run --new` (changed-lines only); no .github/workflows exists; `make lint`'s uncapped run total moved from 2,338 (audit-era baseline log) to a larger total at frozen HEAD (raw-1d3bfd96/golangci-baseline.log, per DELTA.md's per-linter table showing across-the-board increases). AD-21 (which lint classes become blocking) is this finding's own explicit gate on task 12/01."
+      "revalidation_note": "Confirmed still accurate and refreshed by 00/02: lefthook.yml's pre-commit still runs `golangci-lint run --new` (changed-lines only); no .github/workflows exists; `make lint`'s uncapped run total moved from 2,338 (audit-era baseline log) to a larger total at frozen HEAD (raw-1d3bfd96/golangci-baseline.log, per DELTA.md's per-linter table showing across-the-board increases). AD-21 (which lint classes become blocking) is this finding's own explicit gate on task 12/01. [AD-21/AD-22 DECIDED 2026-08-22: regression-gate all linters plus staged zero-tolerance on errcheck/errorlint/nilerr; gofmt ratchets now with one repo-wide sweep as the batch's final commit. Backlog 105 files at HEAD.]"
     },
     {
       "id": "GO-SEC-003",
@@ -531,9 +531,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.2",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/08-config-package-naming-collision.md",
-      "disposition": "needs-architect-decision",
+      "disposition": "remediate",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed both Config (config.go:23, reads project-root nanite.yaml) and AppConfig (appconfig.go:12, reads config/nanite.yaml) still exist as described. Task file 11/08's own Gated-on (AD-20) frames the blast radius itself -- two-line rename vs. tree-wide sweep across every caller -- as the undetermined question, not merely the mechanics of an agreed rename."
+      "revalidation_note": "Confirmed both Config (config.go:23, reads project-root nanite.yaml) and AppConfig (appconfig.go:12, reads config/nanite.yaml) still exist as described. Task file 11/08's own Gated-on (AD-20) frames the blast radius itself -- two-line rename vs. tree-wide sweep across every caller -- as the undetermined question, not merely the mechanics of an agreed rename. [AD-20 DECIDED 2026-08-22: rename both types by role. Measured 11 references total, not tree-wide as 11/08 claims.]"
     },
     {
       "id": "GO-INFRA-002",
@@ -2137,7 +2137,7 @@
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/03-naming-and-formatting-fixes.md",
       "disposition": "needs-architect-decision",
       "task_status": "not-started",
-      "revalidation_note": "gofmt count is 00/02-refreshed: 130 files fail gofmt -l at frozen HEAD (was 122 at the audit, +8), per raw-1d3bfd96/DELTA.md and gofmt-l.txt -- did not hand-recompute. This finding's own task file (13/03) frames the 12-vs-130-file scope choice as recorded in the Work Log once decided, and the batch's AD-22 (repo-wide gofmt sweep: now/never/ratchet-only, sequencing hazard against every other open worktree) is the gate for that scope decision."
+      "revalidation_note": "gofmt count is 00/02-refreshed: 130 files fail gofmt -l at frozen HEAD (was 122 at the audit, +8), per raw-1d3bfd96/DELTA.md and gofmt-l.txt -- did not hand-recompute. This finding's own task file (13/03) frames the 12-vs-130-file scope choice as recorded in the Work Log once decided, and the batch's AD-22 (repo-wide gofmt sweep: now/never/ratchet-only, sequencing hazard against every other open worktree) is the gate for that scope decision. [AD-21/AD-22 DECIDED 2026-08-22: regression-gate all linters plus staged zero-tolerance on errcheck/errorlint/nilerr; gofmt ratchets now with one repo-wide sweep as the batch's final commit. Backlog 105 files at HEAD.]"
     },
     {
       "id": "GO-CHAT-008",

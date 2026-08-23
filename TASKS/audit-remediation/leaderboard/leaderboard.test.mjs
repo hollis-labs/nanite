@@ -62,7 +62,9 @@ test("summarizes progress and actionable work", () => {
     total: 3,
     open: 1,
     urgent: 1,
+    urgentTotal: 2,
     decisions: 1,
+    decisionTotal: 1,
     progress: 67,
   });
 });

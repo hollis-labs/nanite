@@ -233,6 +233,14 @@ h1 {
   font-size: 1.3rem;
 }
 
+.score__value .score__fraction {
+  margin-left: 4px;
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.08em;
+}
+
 .score__note {
   margin: 7px 0 0;
   color: var(--muted);

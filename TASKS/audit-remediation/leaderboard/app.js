@@ -32,7 +32,9 @@ const elements = {
   openValue: document.querySelector("#open-value"),
   totalNote: document.querySelector("#total-note"),
   urgentValue: document.querySelector("#urgent-value"),
+  urgentTotal: document.querySelector("#urgent-total"),
   decisionValue: document.querySelector("#decision-value"),
+  decisionTotal: document.querySelector("#decision-total"),
   auditCoordinate: document.querySelector("#audit-coordinate"),
   auditMeta: document.querySelector("#audit-meta"),
   severityLanes: document.querySelector("#severity-lanes"),
@@ -108,7 +110,9 @@ function renderSummary() {
   elements.openValue.textContent = summary.open;
   elements.totalNote.textContent = `of ${summary.total} cataloged`;
   elements.urgentValue.textContent = summary.urgent;
+  elements.urgentTotal.textContent = summary.urgentTotal;
   elements.decisionValue.textContent = summary.decisions;
+  elements.decisionTotal.textContent = summary.decisionTotal;
   elements.auditCoordinate.textContent = state.catalog.commit || "No commit";
   elements.auditMeta.textContent = state.catalog.audit_date
     ? `Audit ${state.catalog.audit_date}`

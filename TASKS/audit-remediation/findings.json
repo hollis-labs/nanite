@@ -2332,7 +2332,7 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/09-production-islands/02-hadron-context-gate.md",
       "disposition": "retire-feature",
-      "task_status": "not-started",
+      "task_status": "implemented",
       "revalidation_note": "Confirmed still unwired: zero hits for HadronBlueprintGate construction/registration anywhere in the composition root. Per this task's dispatch instructions and the batch's own ARCHITECT-DECISIONS.md \"gap worth naming\" / ESCALATIONS.md correction: this finding is not flagged `requires_architect_decision: true` in findings.json even though it is squarely one of the six wire/defer/retire islands the remediation guide's \u00a74 Wave 4 requires a decision for (AD-07). Setting disposition to needs-architect-decision brings the catalog in line with that guide requirement and with task file 09/02's own explicit note about this exact gap. [AD-07 DECIDED 2026-08-22: retire, on an architectural-boundary argument rather than reachability -- core must not contain code specific to another application. Also disposes of the latent unbounded-relevance-score bug rather than deferring it.]"
     },
     {

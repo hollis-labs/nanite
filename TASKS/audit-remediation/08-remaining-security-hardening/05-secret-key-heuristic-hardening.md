@@ -1,7 +1,7 @@
 # Secret-key-name substring heuristic misses common credential-bearing env var names
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/sandbox/exec.go` (`isSecretKey` and its call sites in the AgentExec/UserExec environment-overlay construction path)
 **Requires architect decision:** false
@@ -81,4 +81,4 @@ Option 1 (hard-deny list) is low-risk/additive — rollback is a simple revert. 
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-22: Fresh review at `cdd00b72e17ff5d20f171a8cfba6960924dfe890` passed with no findings. The review independently traced all production AgentExec and UserExec callers, confirmed workflow `ShellStep` is the sole AgentExec caller with an environment overlay, verified the exact deny set is AgentExec-only and case-insensitive, and confirmed UserExec retains the legacy substring-only behavior. Focused package tests, `go test -race ./internal/sandbox`, focused vet, and `git diff --check` passed.

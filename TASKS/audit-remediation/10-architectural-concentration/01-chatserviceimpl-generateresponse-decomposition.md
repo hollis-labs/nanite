@@ -1,7 +1,7 @@
 # `chatServiceImpl` / `generateResponse` — responsibility map, phase boundaries, and characterization tests
 
 **Phase:** Audit remediation — Wave 5 (architectural concentration)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none (self-contained planning/characterization task). Sequencing note: any future extraction-execution tasks this task's own output proposes should not be scoped or dispatched until an architect has reviewed and approved this task's responsibility map and phase-boundary proposal — see `requires_architect_decision` below.
 **Touches:** `internal/service/chat_generate.go` (`generateResponse` and its private helpers), `internal/service/chat.go` (`chatServiceImpl` struct definition and its 84 methods, spread across this file and others in the package), new characterization/regression test files under `internal/service/` (exact filenames TBD by the worker — likely `chat_generate_characterization_test.go` plus targeted additions to existing `chat_generate_*_test.go` files for the coverage-gap branches). Read-only reference: `internal/service/stream.go` (`StreamManager` — the in-repo precedent for this exact kind of extraction).
 **requires_architect_decision:** true — per the remediation guide's §9 decision queue item 5 ("`chatServiceImpl` decomposition boundaries"). This task's own deliverable (the responsibility map + phase-boundary proposal) is explicitly the input to that decision, not a substitute for it. No extraction may begin — in this task or any follow-on task — until an architect has reviewed and signed off on the proposed boundaries.
@@ -154,19 +154,70 @@ Observable behavior required for PASS: the characterization suite exists, passes
 
 ## Done means
 
-- [ ] A characterization/regression test suite exists exercising `generateResponse` through its real production entry point (the Dispatcher/`chatRunnerAdapter` path or an equivalent that faithfully preserves observable behavior), covering the six representative turn shapes named above.
-- [ ] Coverage of the provider-error, compaction-recovery, and plugin-cancel branch families is measurably improved over the 36.5% baseline, with before/after numbers recorded.
-- [ ] A full responsibility map for `chatServiceImpl` exists in the guide's exact format (capability / fields owned / methods owned / shared mutable state / dependencies / callers / candidate extraction boundary), covering every visible responsibility cluster on the type, with the PTY/agent-runtime cluster's entry explicitly citing the `StreamManager` precedent.
-- [ ] A phase-boundary proposal for `generateResponse` exists, naming 3-6 coherent phases with real (re-verified, not assumed) line ranges, and explicit candidate extraction boundaries for each.
-- [ ] The proposal explicitly states the outer state-machine flow must remain recognizable post-extraction, and explicitly states that any follow-on extraction task must rerun behavior/race/complexity reports after each individual extraction, not just at the end.
-- [ ] The proposal explicitly frames a full rewrite as a last resort, only to be recommended if a concrete, written reason surfaces during the mapping work.
-- [ ] **This task's own "done" is the responsibility map + phase-boundary proposal + characterization test suite — not a refactored `chatServiceImpl` or a decomposed `generateResponse`.** No production code in `chat.go` or `chat_generate.go` is modified by this task.
+- [x] A characterization/regression test suite exists exercising `generateResponse` through its real production entry point (the Dispatcher/`chatRunnerAdapter` path or an equivalent that faithfully preserves observable behavior), covering the six representative turn shapes named above.
+- [x] Coverage of the provider-error, compaction-recovery, and plugin-cancel branch families is measurably improved over the 36.5% baseline, with before/after numbers recorded.
+- [x] A full responsibility map for `chatServiceImpl` exists in the guide's exact format (capability / fields owned / methods owned / shared mutable state / dependencies / callers / candidate extraction boundary), covering every visible responsibility cluster on the type, with the PTY/agent-runtime cluster's entry explicitly citing the `StreamManager` precedent.
+- [x] A phase-boundary proposal for `generateResponse` exists, naming 3-6 coherent phases with real (re-verified, not assumed) line ranges, and explicit candidate extraction boundaries for each.
+- [x] The proposal explicitly states the outer state-machine flow must remain recognizable post-extraction, and explicitly states that any follow-on extraction task must rerun behavior/race/complexity reports after each individual extraction, not just at the end.
+- [x] The proposal explicitly frames a full rewrite as a last resort, only to be recommended if a concrete, written reason surfaces during the mapping work.
+- [x] **This task's own "done" is the responsibility map + phase-boundary proposal + characterization test suite — not a refactored `chatServiceImpl` or a decomposed `generateResponse`.** No production code in `chat.go` or `chat_generate.go` is modified by this task.
 - [ ] An architect has reviewed and signed off on the responsibility map and phase-boundary proposal before any follow-on extraction task is created or dispatched.
-- [ ] `go build ./...`, `go vet ./...`, and the verification commands above all pass clean.
+- [x] `go build ./...`, `go vet ./...`, and the verification commands above all pass clean (subject to the documented pre-existing package-wide `-race` timeout; the task-specific race gate passes).
 
 ## Work log
 
-<!-- Worker fills in: what was actually done, the responsibility map and phase-boundary proposal content (inline or linked), before/after coverage numbers, any deviation from plan and why. -->
+- Added `internal/service/chat_generate_characterization_test.go`. Every required
+  turn shape enters through the production `Dispatcher.Run` →
+  `chatRunnerAdapter` → `generateResponse` door with the real `StreamManager`,
+  Context Service, and SQLite store. The identifiable cases cover plain,
+  single-tool, deterministic multi-tool, mid-stream provider error, successful
+  provider-overflow compaction/retry, and real `plugin.Host`
+  `message.sending` cancellation. A seventh production-door case pins the
+  pre-loop budget/compaction gate, and a targeted helper case pins forced
+  rate-budget recovery.
+- The overflow case proves two provider calls, a real `drop_enrichment`
+  compaction stage, `slot_changed`, retry completion, `stream_end`, and the
+  persisted recovered assistant response. The provider-error case pins the
+  exact assistant row ID and role, buffered partial content, and
+  `had_error:true` metadata.
+- Added the architect-review input at
+  `TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-responsibility-map.md`.
+  It contains the six-phase `generateResponse` proposal, the complete
+  87-method responsibility reconciliation in the required map format, the
+  current `StreamManager` comparison, the recognizable-outer-flow constraint,
+  and per-extraction behavior/race/complexity rerun requirements. It creates no
+  follow-on task and does not constitute architect approval.
+- Re-verified current source rather than relying on stale task citations:
+  `chat_generate.go` is 3,684 lines (`generateResponse` lines 121–2,036),
+  `chat.go` is 1,407 lines, and `chatServiceImpl` has 52 fields / 87 production
+  pointer-receiver methods across 19 files. `StreamManager` currently has nine
+  fields and 25 pointer-receiver methods. The map records why the task's
+  pre-populated nine-field runtime cluster is not cohesive as written and
+  records three construction-only fields with no production receiver read.
+- Before coverage (`go test ./internal/service/... -coverprofile=/tmp/w5-10-01-before.out`):
+  package 62.3%; `generateResponse` 36.7%;
+  `recoverFromContextOverflow` 23.4%; `enforceBudgetOrCompact` 5.9%.
+  Start-line-weighted branch-family ranges were provider error 1/111 statements
+  (0.9%), compaction recovery 15/111 (13.5%), and plugin cancel 1/11 (9.1%).
+- After coverage (`go test ./internal/service/... -coverprofile=/tmp/w5-10-01-after.out`):
+  package 65.2%; `generateResponse` 53.2%;
+  `recoverFromContextOverflow` 78.7%; `enforceBudgetOrCompact` 67.6%.
+  The same scoped ranges are provider error 28/111 (25.2%), compaction recovery
+  59/111 (53.2%), and plugin cancel 11/11 (100.0%). The measured ranges were
+  provider error 1,067–1,260 plus 1,396–1,451; compaction recovery 651–653,
+  1,067–1,188, 1,396–1,421, and 2,265–2,395; plugin cancel 908–929.
+- Verification results: `go build ./internal/service/...` exit 0;
+  `go vet ./internal/service/...` exit 0;
+  `go test ./internal/service/... -run 'GenerateResponse|Characterization' -v`
+  exit 0; focused characterization/recovery `go test -race` exit 0 (68.167s);
+  `go build ./...` exit 0; `go vet ./...` exit 0; `go test ./...` exit 0
+  (`internal/service` 92.781s). Full `go test -race ./internal/service/...`
+  exited 1 only at the existing 10-minute package timeout (600.841s) while
+  `TestResolveProvider_StoredProviderID_UsesRuntimeProviderType` was opening and
+  migrating SQLite; no race report occurred. This is the already-tracked
+  GO-SVCCORE-006 condition, not a timeout or race introduced by the new tests.
+- No production implementation was changed: `internal/service/chat.go` and
+  `internal/service/chat_generate.go` are untouched.
 
 ## Review notes
 

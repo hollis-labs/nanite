@@ -102,11 +102,10 @@ internal/
 │   ├── skills.go            # Skill CRUD + agent-skill bindings
 │   ├── modes.go             # Mode CRUD + agent-mode assignments
 │   └── ...                  # usage, templates, a2a, etc.
-├── toolclient/              # Tool broker client (selection, permissions, knowledge)
+├── toolclient/              # Tool broker client (selection and permissions)
 │   ├── broker.go            # ToolClient struct + tool selection (308 lines)
-│   ├── tool_knowledge.go    # Tool knowledge base (495 lines)
 │   ├── permissions.go       # Permission checking
-│   ├── intent.go            # Intent-based tool discovery
+│   ├── intent.go            # Live intent-based tool discovery (SelectByIntent)
 │   └── meta_tools.go        # request_tools meta-tool definition
 ├── truncate/                # Tool output truncation + cleanup
 └── workflow/                # YAML-driven workflow engine

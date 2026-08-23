@@ -6,8 +6,9 @@ fully-built, extensively-tested Go features that were — per the audit's
 from any production entry point** as of the audited commit (`8feeee5c`). The
 reachability descriptions below are retained as historical pre-remediation
 evidence until each task closes; a row with an implemented disposition records
-the post-remediation state instead. AD-06's grounding retirement and AD-07's
-Hadron-gate retirement are represented in that completed form.
+the post-remediation state instead. AD-06's grounding retirement, AD-07's
+Hadron-gate retirement, and AD-11's curated-matcher retirement are represented
+in that completed form.
 
 ## Read this before touching any file in this folder
 
@@ -82,7 +83,7 @@ in `ARCHITECT-DECISIONS.md`.
 | Team semantic routing | `GO-SVCEXEC-003` (medium, high confidence) | Built: `internal/service/team_routing.go`'s entire production surface (`TeamRoutingService`, `SendToSlot`, `InstallTeamRunRouting`, `resolveAgentSlugForSlot`). Tested: extensively, per the file's own test suite. Unreachable: the intended wiring point, `internal/api/team_runs.go`'s `handleLaunchTeam`, calls only `LaunchTeamRun` (line 152), never `InstallTeamRunRouting`. **Self-flagged**: `TASKS/teams/HANDOFF.md:30` already names this exact risk and asks a future reader to verify it — this audit did. | _(architect to fill in)_ | See `03-team-semantic-routing.md`. |
 | Tool builder/YAML architecture | `GO-MCPTOOL-001` (medium, high confidence) | Built: `internal/tool/tool.go`, `builder.go`, `register.go`, `adapt.go`, `yaml_loader.go`. Unreachable: every exported symbol `deadcode`-flagged; only `ResultCache` (a different, live part of the same package) survives. `tool.go`'s package doc still actively claims this is "the primary way to construct tools in Go code" — false of the current runtime. A prior task's own comment (`internal/service/tool_concurrency_classification.go:36-40`) already reached the same "not wired into the live runtime" conclusion. | _(architect to fill in)_ | See `04-tool-builder-yaml-architecture.md`. "Wire" here is a materially bigger lift than the other five islands — see task file. |
 | Reasoning-augmented tool selection | `GO-MCPTOOL-002` (medium, high confidence) | Built: `RankTools`/`SelectWithSignals` (`internal/toolclient/ranking.go`), `SelectToolsAugmented` (`internal/toolclient/broker.go:170-193`). Unreachable: former consumer (a debug SQL row) removed by `TASKS/phase-0/23-export-and-drop-decision-tables.md`, per `ranking.go:292-297`'s own comment. Production entry point `SelectToolsAsProvider` (`broker.go:416`) never calls this path. Per-boot wiring cost (skills-dir load, memory-recaller construction — `internal/service/container.go:692-710`) is still paid regardless, feeding only this dead path. | _(architect to fill in)_ | See `05-reasoning-augmented-tool-selection.md`. |
-| Curated tool knowledge matcher | `GO-MCPTOOL-003` (low, high confidence) | Built: `internal/toolclient/tool_knowledge.go`, 405 lines. Unreachable: zero callers outside its own file and test file — confirmed by grep. Third parallel "what tools match this intent" mechanism (alongside the live `intent.go` keyword scorer and the dead `RankTools`, finding above). Smallest LOC and thinnest test investment of the six islands. | _(architect to fill in)_ | See `06-curated-tool-knowledge-matcher.md`. |
+| Curated tool knowledge matcher | `GO-MCPTOOL-003` (low, high confidence) | **Retired by `09/06` (2026-08-23):** deleted `internal/toolclient/tool_knowledge.go` (405 production lines) and its 162-line package-local test after re-confirming zero external callers. The live `internal/toolclient/intent.go` `SelectByIntent` keyword scorer remains unchanged. | **Retire — AD-11, implemented** | See `06-curated-tool-knowledge-matcher.md` Work Log. |
 
 The remaining placeholder cells are the task-creation pass's historical
 snapshot. Their authoritative calls live in `ARCHITECT-DECISIONS.md`; update a
@@ -92,15 +93,11 @@ pre-remediation evidence early.
 ## A note on `internal/toolclient`'s three-island cluster
 
 Findings 04, 05, and 06 (tool builder/YAML architecture, reasoning-augmented
-selection, curated tool knowledge) are three of what the audit counted as
+selection, curated tool knowledge) were three of what the audit counted as
 **five independent "what tools match/should exist for this intent" mechanisms**
 in the tool-selection cluster (REPORT.md §8.7's "Duplication synthesis"
-paragraph) — the other two (`stash.BuiltinCategorizer`, `toolclient.SelectByIntent`)
-are live and serve genuinely different purposes. No file/type dependency ties
-these three task files together, so this pass does not sequence them — but an
-architect resolving one may want visibility into the other two before
-deciding, since a "wire" call on one could make a "retire" call on another
-more or less attractive (e.g. building real `mcp.Manager` integration for the
-`internal/tool` architecture, per finding 04's "wire" option, could plausibly
-absorb or obsolete what finding 06's curated matcher does). Each of the three
-task files cross-references this note; none assumes a sequencing order.
+paragraph). AD-11's implemented retirement removes the curated matcher from
+the current architecture. The live `toolclient.SelectByIntent` keyword scorer
+remains the intent-selection source of truth; `stash.BuiltinCategorizer` is
+also live and serves a different bucketing purpose. Findings 04 and 05 retain
+their own task records and dispositions rather than being resolved here.

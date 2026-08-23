@@ -83,7 +83,7 @@ These are the Nanite subsystems a deep review should touch first. They concentra
 - `internal/mcp/dev_tools.go` — `grep`, `read`, `write`, `glob`, `edit` built-ins. **Path traversal** and **command injection** are the primary risks here. Every path argument should be validated and confined to the intended directory.
 - `internal/mcp/general_tools.go` — `web_fetch`, `web_search`. **SSRF** is the primary risk. Check URL validation, redirect handling, outbound proxy awareness.
 - `internal/toolclient/permissions.go` — permission checking on tool execution. Gaps here = privilege escalation.
-- `internal/toolclient/broker.go` and `tool_knowledge.go` — progressive discovery logic, tool selection.
+- `internal/toolclient/broker.go` and `intent.go` — progressive discovery logic and live `SelectByIntent` tool selection. The former curated matcher in `tool_knowledge.go` was retired by AD-11.
 
 ### 4. Sandbox & subprocess management
 

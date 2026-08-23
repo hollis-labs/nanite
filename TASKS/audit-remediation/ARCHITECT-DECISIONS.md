@@ -844,7 +844,7 @@ down rather than a value chosen at one call site.
 > | | Island | Call | Scale removed / added |
 > |---|---|---|---|
 > | AD-06 | Grounding memory recall | **retire** | −534 prod / −361 test |
-> | AD-07 | Hadron context gate | **retire** | −302 prod / 0 test |
+> | AD-07 | Hadron context gate | **retire** | −302 prod / −337 test |
 > | AD-08 | Team semantic routing | **wire** | +1 call site |
 > | AD-09 | Tool builder / YAML | **retire except `cache.go`** | −~1.8k prod / −~1.7k test |
 > | AD-10 | Reasoning-augmented selection | **retire** | −342 prod / −210 test |

@@ -28,7 +28,7 @@ requires_regression_test: true
 > ## ✅ AD-07 DECIDED (2026-08-22) — RETIRE
 >
 > Delete `internal/contextbroker/gate_hadron_blueprints.go` and its test file
-> (302 prod / 0 test).
+> (−302 prod / −337 test).
 >
 > **The reasoning is architectural, not reachability-based**, and the operator
 > stated it directly: this is *"code in core that's specific to another
@@ -281,10 +281,10 @@ grep restricted to non-test files.
 
 ## Done means
 
-- [ ] Current-source reachability and bug-presence re-verified against
+- [x] Current-source reachability and bug-presence re-verified against
       current source, disposition corrected if either has changed since the
       audit.
-- [ ] Architect decision recorded: wire, defer, or retire.
+- [x] Architect decision recorded: wire, defer, or retire.
 - [ ] If **wire**: `calculateRelevance`'s unclamped-sum bug fixed and covered
       by a dedicated regression test *before* the gate is registered in
       `container.go`'s `sources` slice; cross-source sort behavior verified
@@ -292,9 +292,9 @@ grep restricted to non-test files.
 - [ ] If **defer**: the unclamped-relevance risk documented directly on
       `calculateRelevance` regardless of deferred status; confirmed no
       boot/runtime cost is paid.
-- [ ] If **retire**: file and test file removed; `deadcode -test ./internal/contextbroker/...`
+- [x] If **retire**: file and test file removed; `deadcode -test ./internal/contextbroker/...`
       confirms no orphaned dependents.
-- [ ] `go build ./...` and `go test ./...` pass after whichever direction is
+- [x] `go build ./...` and `go test ./...` pass after whichever direction is
       implemented.
 
 ## Work log
@@ -327,6 +327,19 @@ grep restricted to non-test files.
   reference scan found no remaining gate symbols.
 - Verification passed: `go test ./internal/contextbroker/...`,
   `go build ./...`, `go vet ./...`, and `go test ./...`.
+
+### 2026-08-23 — fresh-review tracking fix
+
+- Fresh review failed the task on tracking accuracy: the folder decision
+  table still presented AD-07 as awaiting an architect decision, the
+  applicable Done-means boxes remained unchecked, and the current deletion
+  scale omitted the 337-line test file.
+- Corrected the folder table to record the implemented AD-07 retirement,
+  checked only the applicable reachability/decision/retire/verification
+  criteria, and normalized current Wave 4 tracking to −302 production /
+  −337 test lines. Historical audit evidence remains unchanged.
+- Re-review is pending; this entry records the fix and does not assert a
+  reviewer pass.
 
 ## Review notes
 

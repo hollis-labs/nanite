@@ -104,6 +104,21 @@ GO-API-004's consolidation carries real regression risk **if the three producers
 - Verification passed: focused schedule/memory tests; full relevant-package
   tests; `go test ./internal/api/... -count=1`; focused `go vet`; and the
   non-race baseline `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...`.
+- Correction pass 2026-08-23: removed the finite 500-candidate prefilter from
+  list paging. `RecallPage` now queries all metadata-matching current revisions,
+  applies one Go Unicode-aware summary/body predicate, reproduces the pinned
+  Tesseract activation/chronological score order, derives total from that exact
+  filtered set, and only then applies offset/limit. The 500 ceiling remains only
+  as the per-page maximum. Regressions cover 505 higher-ranked text nonmatches,
+  a status-only offset of 500, Unicode case matching with identical page/total,
+  and preserved activation order.
+- The same correction tightened the shared schedule domain rule so whitespace-
+  only `Name` and `Body` are invalid for every row producer. HTTP, reflex,
+  self-tool, and producer-shaped validator tests now cover this second parity
+  rule in addition to malformed cron.
+- Correction verification passed focused normal and race tests across API,
+  memory, store, service, and self-tools; focused vet; and the full non-race
+  `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` baseline.
 
 ## Review notes
 

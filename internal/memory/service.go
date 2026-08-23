@@ -11,8 +11,11 @@ package memory
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -116,6 +119,13 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 	if s.store == nil {
 		return nil, fmt.Errorf("memory service: no memory store configured")
 	}
+	if opts.Search != "" || opts.Offset != 0 {
+		page, err := s.recallFilteredPage(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		return page.Memories, nil
+	}
 
 	// Map caller string → Conduit Ranking. Empty passes through empty so
 	// Conduit's smart default (relevance-when-query, else activation) fires.
@@ -145,16 +155,6 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 20
-	}
-	offset := opts.Offset
-	if offset < 0 {
-		offset = 0
-	}
-	fetchLimit := limit + offset
-	if opts.Search != "" {
-		// Tesseract currently caps recall at 500. Fetch its full supported
-		// candidate window so text filtering happens before this caller's page.
-		fetchLimit = 500
 	}
 
 	// Build filters.
@@ -193,7 +193,7 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 		Namespaces: opts.Namespaces,
 		Ranking:    ranking,
 		Query:      opts.Query,
-		Limit:      fetchLimit,
+		Limit:      limit,
 		Filters:    filters,
 	}
 
@@ -206,42 +206,45 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 	for _, r := range results {
 		memories = append(memories, revisionToMemory(r.Revision))
 	}
-	if search := strings.ToLower(opts.Search); search != "" {
-		filtered := memories[:0]
-		for _, m := range memories {
-			if strings.Contains(strings.ToLower(m.Summary), search) || strings.Contains(strings.ToLower(m.Body), search) {
-				filtered = append(filtered, m)
-			}
-		}
-		memories = filtered
-	}
-	if offset >= len(memories) {
-		return []Memory{}, nil
-	}
-	if offset > 0 {
-		memories = memories[offset:]
-	}
-	if len(memories) > limit {
-		memories = memories[:limit]
-	}
 	return memories, nil
 }
 
 // RecallPage recalls a page and computes a true filtered total independently
 // of the page length. Existing semantic-recall callers continue using Recall.
 func (s *Service) RecallPage(ctx context.Context, opts RecallOpts) (RecallPage, error) {
-	memories, err := s.Recall(ctx, opts)
-	if err != nil {
-		return RecallPage{}, err
+	if s.store == nil {
+		return RecallPage{}, fmt.Errorf("memory service: no memory store configured")
 	}
-	total, err := s.countRecallMatches(ctx, opts)
-	if err != nil {
-		return RecallPage{}, err
-	}
-	return RecallPage{Memories: memories, Total: total}, nil
+	return s.recallFilteredPage(ctx, opts)
 }
 
-func (s *Service) countRecallMatches(ctx context.Context, opts RecallOpts) (int, error) {
+type rankedMemory struct {
+	memory         Memory
+	createdAt      time.Time
+	activation     float64
+	lastAccessedAt *time.Time
+	score          float64
+}
+
+// recallFilteredPage is the uncapped list-query path. Tesseract Recall is
+// intentionally capped at 500 for semantic/context recall, so it cannot back
+// an offset-based API: filtering after that cap can hide later matches. This
+// query reads every metadata-filtered current revision, applies the one shared
+// Unicode-aware text predicate, preserves Tesseract's activation or
+// chronological ordering, and only then computes Total and the requested page.
+func (s *Service) recallFilteredPage(ctx context.Context, opts RecallOpts) (RecallPage, error) {
+	if opts.Query != "" || (opts.Ranking != "" && opts.Ranking != "activation" && opts.Ranking != "chronological") {
+		return RecallPage{}, fmt.Errorf("memory_recall page: only activation or chronological list ranking is supported")
+	}
+	if len(opts.Namespaces) == 0 {
+		return RecallPage{}, fmt.Errorf("memory_recall page: at least one namespace is required")
+	}
+	for _, namespace := range opts.Namespaces {
+		if strings.TrimSpace(namespace) == "" {
+			return RecallPage{}, fmt.Errorf("memory_recall page: namespace entries must be non-empty")
+		}
+	}
+
 	var where []string
 	var args []any
 	where = append(where, "r.namespace IN ("+queryPlaceholders(len(opts.Namespaces))+")")
@@ -266,11 +269,6 @@ func (s *Service) countRecallMatches(ctx context.Context, opts RecallOpts) (int,
 		where = append(where, "r.confidence >= ?")
 		args = append(args, opts.MinConfidence)
 	}
-	if opts.Search != "" {
-		pattern := "%" + escapeLike(strings.ToLower(opts.Search)) + "%"
-		where = append(where, "(LOWER(COALESCE(r.payload_summary, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(r.payload_body, '')) LIKE ? ESCAPE '\\')")
-		args = append(args, pattern, pattern)
-	}
 	if len(opts.Tags) > 0 {
 		where = append(where, "EXISTS (SELECT 1 FROM json_each(r.tags) WHERE value IN ("+queryPlaceholders(len(opts.Tags))+"))")
 		for _, tag := range opts.Tags {
@@ -280,15 +278,94 @@ func (s *Service) countRecallMatches(ctx context.Context, opts RecallOpts) (int,
 	where = append(where, "(r.expires_at IS NULL OR r.expires_at > ?)")
 	args = append(args, time.Now().UTC().Format(time.RFC3339Nano))
 
-	query := `SELECT COUNT(*)
+	query := `SELECT r.namespace, COALESCE(r.memory_key, ''),
+		       COALESCE(r.payload_summary, ''), COALESCE(r.payload_body, ''),
+		       r.origin, r."trigger", r.confidence, r.tags, r.session_id,
+		       r.revision_id, r.status, r.created_at,
+		       s.activation, s.last_accessed_at
 		FROM memory_revisions r
 		INNER JOIN memory_state s ON s.current_revision = r.revision_id
 		WHERE ` + strings.Join(where, " AND ")
-	var total int
-	if err := s.store.DB().QueryRowContext(ctx, query, args...).Scan(&total); err != nil {
-		return 0, fmt.Errorf("memory_recall count: %w", err)
+	rows, err := s.store.DB().QueryContext(ctx, query, args...)
+	if err != nil {
+		return RecallPage{}, fmt.Errorf("memory_recall page: %w", err)
 	}
-	return total, nil
+	defer func() { _ = rows.Close() }()
+
+	search := strings.ToLower(opts.Search)
+	var ranked []rankedMemory
+	for rows.Next() {
+		var candidate rankedMemory
+		var tagsJSON, createdAt string
+		var lastAccessed sql.NullString
+		if err := rows.Scan(
+			&candidate.memory.Namespace, &candidate.memory.MemoryKey,
+			&candidate.memory.Summary, &candidate.memory.Body,
+			&candidate.memory.Origin, &candidate.memory.Trigger,
+			&candidate.memory.Confidence, &tagsJSON, &candidate.memory.SessionID,
+			&candidate.memory.RevisionID, &candidate.memory.Status, &createdAt,
+			&candidate.activation, &lastAccessed,
+		); err != nil {
+			return RecallPage{}, fmt.Errorf("memory_recall page scan: %w", err)
+		}
+		if err := json.Unmarshal([]byte(tagsJSON), &candidate.memory.Tags); err != nil {
+			return RecallPage{}, fmt.Errorf("memory_recall page tags: %w", err)
+		}
+		candidate.createdAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		if lastAccessed.Valid {
+			parsed, _ := time.Parse(time.RFC3339Nano, lastAccessed.String)
+			candidate.lastAccessedAt = &parsed
+		}
+		if !memoryMatchesSearch(candidate.memory, search) {
+			continue
+		}
+		ranked = append(ranked, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return RecallPage{}, fmt.Errorf("memory_recall page rows: %w", err)
+	}
+
+	now := time.Now().UTC()
+	for i := range ranked {
+		if opts.Ranking == "chronological" {
+			ranked[i].score = float64(ranked[i].createdAt.UnixNano())
+		} else {
+			ranked[i].score = memoryActivationScore(ranked[i], now)
+		}
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].score == ranked[j].score {
+			return ranked[i].createdAt.After(ranked[j].createdAt)
+		}
+		return ranked[i].score > ranked[j].score
+	})
+
+	total := len(ranked)
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 500 {
+		// Preserve Tesseract Recall's per-page maximum without using it as a
+		// finite prefilter candidate window.
+		limit = 500
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		return RecallPage{Memories: []Memory{}, Total: total}, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	memories := make([]Memory, end-offset)
+	for i, candidate := range ranked[offset:end] {
+		memories[i] = candidate.memory
+	}
+	return RecallPage{Memories: memories, Total: total}, nil
 }
 
 func queryPlaceholders(n int) string {
@@ -298,10 +375,66 @@ func queryPlaceholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
-func escapeLike(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `%`, `\%`)
-	return strings.ReplaceAll(value, `_`, `\_`)
+func memoryMatchesSearch(memory Memory, foldedSearch string) bool {
+	if foldedSearch == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(memory.Summary), foldedSearch) ||
+		strings.Contains(strings.ToLower(memory.Body), foldedSearch)
+}
+
+// memoryActivationScore mirrors the pinned Tesseract activation ranking
+// for the uncapped list path above. Semantic/context callers still use
+// Tesseract Recall directly; this copy exists only because its 500-result cap
+// makes correct offset pagination impossible.
+func memoryActivationScore(candidate rankedMemory, now time.Time) float64 {
+	statusWeight := memoryStatusWeight(candidate.memory.Status)
+	originWeight := memoryOriginWeight(candidate.memory.Origin)
+	recency := 0.75
+	if candidate.lastAccessedAt != nil {
+		days := now.Sub(*candidate.lastAccessedAt).Hours() / 24
+		switch {
+		case days <= 0:
+			recency = 1
+		case days >= 30:
+			recency = 0.5
+		default:
+			recency = 1 - 0.5*(days/30)
+		}
+	}
+	return candidate.activation * statusWeight * candidate.memory.Confidence * originWeight * recency
+}
+
+func memoryStatusWeight(status string) float64 {
+	switch status {
+	case "canonical":
+		return 1
+	case "reviewed":
+		return 0.9
+	case "draft":
+		return 0.6
+	case "deprecated":
+		return 0.1
+	default:
+		return 0
+	}
+}
+
+func memoryOriginWeight(origin string) float64 {
+	switch origin {
+	case "feedback":
+		return 1.3
+	case "user":
+		return 1.1
+	case "project":
+		return 1
+	case "reference":
+		return 0.9
+	case "observation":
+		return 0.8
+	default:
+		return 0
+	}
 }
 
 // Get fetches a single memory by namespace and key.

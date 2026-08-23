@@ -134,7 +134,8 @@ func TestCallScheduleCreate_CallerProfileContext_CronRow(t *testing.T) {
 // TestCallScheduleCreate_OneShot_DueNow proves a one_shot row computes
 // next_run as "due now" (matching the table's existing one_shot semantics,
 // per internal/store/agent_schedules.go's ComputeAgentScheduleNextRun doc
-// comment), and that an omitted name gets a derived default.
+// comment), and that a whitespace-only optional name gets a nonblank derived
+// default before it reaches the shared domain validator.
 func TestCallScheduleCreate_OneShot_DueNow(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
@@ -145,6 +146,7 @@ func TestCallScheduleCreate_OneShot_DueNow(t *testing.T) {
 	res, err := st.CallTool(ctx, scheduleCreateToolName, map[string]any{
 		"kind":    "one_shot",
 		"message": "pick this back up",
+		"name":    " \t\n ",
 	})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
@@ -319,6 +321,11 @@ func TestCallScheduleCreate_ValidationErrors(t *testing.T) {
 		{
 			name: "missing message",
 			args: map[string]any{"kind": "one_shot"},
+			want: "message is required",
+		},
+		{
+			name: "whitespace-only message",
+			args: map[string]any{"kind": "one_shot", "message": " \t\n "},
 			want: "message is required",
 		},
 	}

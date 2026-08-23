@@ -183,8 +183,10 @@ func (s *Store) InsertAgentSchedule(ctx context.Context, row AgentSchedule) erro
 }
 
 // ValidateAgentSchedule is the shared domain rule for every producer of an
-// agent_schedules row. Empty status/on_fail/job_type/job_payload values are
-// accepted because InsertAgentSchedule applies their documented defaults.
+// agent_schedules row. Required text rejects whitespace-only values while
+// otherwise preserving caller content. Empty status/on_fail/job_type/
+// job_payload values are accepted because InsertAgentSchedule applies their
+// documented defaults.
 func ValidateAgentSchedule(row AgentSchedule) error {
 	if row.ID == "" {
 		return fmt.Errorf("id is required")
@@ -192,10 +194,10 @@ func ValidateAgentSchedule(row AgentSchedule) error {
 	if row.AgentID == "" {
 		return fmt.Errorf("agent_id is required")
 	}
-	if row.Name == "" {
+	if strings.TrimSpace(row.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
-	if row.Body == "" {
+	if strings.TrimSpace(row.Body) == "" {
 		return fmt.Errorf("body is required")
 	}
 	switch row.ScheduleKind {

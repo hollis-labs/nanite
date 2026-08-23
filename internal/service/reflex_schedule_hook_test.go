@@ -167,6 +167,14 @@ func TestBuildReflexAgentSchedule_MalformedSpecs(t *testing.T) {
 			},
 		},
 		{
+			name: "whitespace-only name",
+			spec: map[string]interface{}{
+				"name":          " \t\n ",
+				"schedule_kind": "one_shot",
+				"body":          "body",
+			},
+		},
+		{
 			name: "missing schedule_kind",
 			spec: map[string]interface{}{
 				"name": "n",
@@ -212,6 +220,14 @@ func TestBuildReflexAgentSchedule_MalformedSpecs(t *testing.T) {
 			spec: map[string]interface{}{
 				"name":          "n",
 				"schedule_kind": "one_shot",
+			},
+		},
+		{
+			name: "whitespace-only body",
+			spec: map[string]interface{}{
+				"name":          "n",
+				"schedule_kind": "one_shot",
+				"body":          " \t\n ",
 			},
 		},
 		{

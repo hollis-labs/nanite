@@ -51,6 +51,45 @@ func TestValidateAgentSchedule_ProducerParity(t *testing.T) {
 	}
 }
 
+func TestValidateAgentSchedule_WhitespaceRequiredFieldParity(t *testing.T) {
+	base := AgentSchedule{
+		ID: "schedule-id", AgentID: "agent-id", Name: "name",
+		ScheduleKind: ScheduleKindOneShot, Body: "body",
+	}
+	producers := map[string]func(AgentSchedule) AgentSchedule{
+		"http": func(row AgentSchedule) AgentSchedule { return row },
+		"reflex": func(row AgentSchedule) AgentSchedule {
+			row.ID = "reflex-schedule-id"
+			row.CreatedBy = "reflex:add_schedule"
+			return row
+		},
+		"self-tool": func(row AgentSchedule) AgentSchedule {
+			row.ID = "self-schedule-id"
+			row.CreatedBy = "self:agent-id"
+			row.JobType = ScheduleJobTypeDurableAgentWake
+			return row
+		},
+	}
+	fields := map[string]struct {
+		mutate func(*AgentSchedule)
+		want   string
+	}{
+		"name": {mutate: func(row *AgentSchedule) { row.Name = " \t\n " }, want: "name is required"},
+		"body": {mutate: func(row *AgentSchedule) { row.Body = " \t\n " }, want: "body is required"},
+	}
+	for producer, shape := range producers {
+		for field, tc := range fields {
+			t.Run(producer+"/"+field, func(t *testing.T) {
+				row := shape(base)
+				tc.mutate(&row)
+				if err := ValidateAgentSchedule(row); err == nil || err.Error() != tc.want {
+					t.Fatalf("ValidateAgentSchedule() = %v, want %q", err, tc.want)
+				}
+			})
+		}
+	}
+}
+
 func TestValidateAgentSchedule_AcceptsLoopRunTick(t *testing.T) {
 	err := ValidateAgentSchedule(AgentSchedule{
 		ID:           "loop-schedule-id",

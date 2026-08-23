@@ -252,6 +252,28 @@ func TestSchedulesAPI_CreateRejectsMalformedCronSpec(t *testing.T) {
 	}
 }
 
+func TestSchedulesAPI_CreateRejectsWhitespaceRequiredFields(t *testing.T) {
+	a, mux := newTestAPI(t)
+	agent := createScheduleTestAgent(t, a, "sched-whitespace-fields")
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "name", body: fmt.Sprintf(`{"agent_id":%q,"name":" \t ","schedule_kind":"one_shot","body":"b"}`, agent.ID), want: "name is required"},
+		{name: "body", body: fmt.Sprintf(`{"agent_id":%q,"name":"n","schedule_kind":"one_shot","body":" \n "}`, agent.ID), want: "body is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/schedules", bytes.NewBufferString(tc.body))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatalf("whitespace %s = %d body=%s, want 400 containing %q", tc.name, w.Code, w.Body.String(), tc.want)
+			}
+		})
+	}
+}
+
 // TestSchedulesAPI_CreateRejectsMalformedJobPayload proves an
 // invalid-JSON job_payload is rejected at create time.
 func TestSchedulesAPI_CreateRejectsMalformedJobPayload(t *testing.T) {

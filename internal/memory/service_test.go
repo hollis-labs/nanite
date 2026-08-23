@@ -133,6 +133,44 @@ func TestMemoryRecall_DefaultValues(t *testing.T) {
 	}
 }
 
+func TestMemoryRecallPage_PreservesActivationRankingAndTotal(t *testing.T) {
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
+	ctx := context.Background()
+	namespace := "user/ranked-page/memory"
+	for _, tc := range []struct {
+		key        string
+		confidence float64
+	}{
+		{key: "low", confidence: 0.2},
+		{key: "high", confidence: 0.9},
+		{key: "middle", confidence: 0.5},
+	} {
+		if err := svc.Store(ctx, Memory{
+			Namespace: namespace, MemoryKey: tc.key, Summary: "Unicode CAFÉ match",
+			Origin: "user", Trigger: "manual", Confidence: tc.confidence,
+			SessionID: "ranked-page", Status: "reviewed",
+		}); err != nil {
+			t.Fatalf("store %s: %v", tc.key, err)
+		}
+	}
+
+	page, err := svc.RecallPage(ctx, RecallOpts{
+		Namespaces: []string{namespace}, Ranking: "activation",
+		Statuses: []string{"reviewed"}, Search: "café", Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("RecallPage: %v", err)
+	}
+	if page.Total != 3 || len(page.Memories) != 2 {
+		t.Fatalf("page total=%d len=%d, want total=3 len=2", page.Total, len(page.Memories))
+	}
+	if page.Memories[0].MemoryKey != "high" || page.Memories[1].MemoryKey != "middle" {
+		t.Fatalf("activation order = [%s %s], want [high middle]", page.Memories[0].MemoryKey, page.Memories[1].MemoryKey)
+	}
+}
+
 // TestMemoryRecall_RankingRelevance verifies the hybrid-relevance ranking
 // (Vanta v0.4.0+) is accepted via its string name and passes through to
 // Conduit without error. Doesn't assert ranking quality — that's covered

@@ -1,7 +1,7 @@
 # permission.Engine's ModeDefault may not prompt before non-destructive writes — ambiguous, needs architect call
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/permission/engine.go` (`Engine.Check`, `defaultDecision`), `internal/permission/engine_test.go`, `internal/service/tool.go` (name-heuristic classification consumed by `Check`)
 **Requires architect decision:** true (matches `findings.json`)
@@ -91,14 +91,18 @@ If Step 2a is chosen (real gap), the observable behavior change is that `dev_wri
 
 ## Done means
 
-- [ ] Architect decision obtained and recorded in Work Log (real gap vs. stale comment)
-- [ ] Corresponding code or doc-comment change landed
-- [ ] `{false,false}`-under-`ModeDefault` test case added to `engine_test.go` and passing
-- [ ] All production `ModeDefault`-construction call sites confirmed unaffected or updated consistently
+- [x] Architect decision obtained and recorded in Work Log (real gap vs. stale comment)
+- [x] Corresponding code or doc-comment change landed
+- [x] `{false,false}`-under-`ModeDefault` test case added to `engine_test.go` and passing
+- [x] All production `ModeDefault`-construction call sites confirmed unaffected or updated consistently
 
 ## Work log
 
-<!-- Worker fills this in. -->
+- 2026-08-22: Read AD-16's decided stale-comment disposition, then verified its falsifiable premise against the production write path before editing. The exact `dev_write` chain is: `chatServiceImpl.HandleMessage` registers explicit path mentions in the container-shared `PathGrants`; `preCheckTools` derives `ToolMeta{false,false}` for `dev_write` and calls `Engine.Check`, whose `ModeDefault` decision is Allow; `executeToolBatch` stamps that same `PathGrants` instance and session ID onto the context with `permission.WithPathGrants`; `executeSingleTool` calls `ToolService.Execute`; `toolServiceImpl.callTransport` routes through `ToolClient.CallTool` (or its direct-manager fallback); `mcp.Manager.ExecuteTool` preserves the context into `DevToolsTransport.CallTool`; and `callWrite` calls `resolveAllowed` before `os.MkdirAll` or `os.WriteFile`. `resolveAllowed` first enforces configured/project `AllowedPaths`, then consults `tryResolveViaSessionGrant`; when neither authorizes the path it returns an error and `callWrite` exits without mutation. Therefore `PathGrants` really is the session-scoped downstream write gate for paths outside the static allow-list, rather than `Engine.sessionGrants` (which is the separate per-tool approval cache AD-16 warned not to confuse with it).
+- Corrected only `ModeDefault`'s stale const comment to say that it prompts for destructive operations and that `dev_write`/`dev_edit` use the downstream `AllowedPaths`/`PathGrants` gate. Added `TestCheck_defaultMode_allowsNonDestructivePathGatedWrite`, using a `dev_write`-shaped `{false,false}` call, to pin `DecisionAllow` as required. No mode behavior, prompt behavior, tool classification, or `PathGrants` scope changed.
+- Confirmed all construction sites: the sole production `permission.NewEngine(permission.ModeDefault, nil)` is `internal/service/container.go`; that instance is shared with chat execution and the API service bundle. Developer mode may explicitly switch it to `ModeYolo`, and the permission-mode API may explicitly change it later, but there is no second production `ModeDefault` construction to reconcile. Other `NewEngine(ModeDefault, ...)` occurrences are permission-package tests.
+- Checked `exhaustive`: it is already enabled repo-wide, with `default-signifies-exhaustive: true`. It can check enum-valued switches, but the missing coverage here was a combination of two booleans inside an already-defaulted mode branch, so it cannot mechanically detect the `{false,false}` policy case. No lint-scope change was warranted.
+- Verification: focused permission/MCP/service path-grant checks, `go test ./internal/permission/...`, `go vet ./internal/permission/...`, `go test ./internal/service/...`, `go build ./cmd/nanite/`, `go vet ./...`, and `go test ./...`.
 
 ## Review notes
 

@@ -22,7 +22,7 @@ const (
 type Mode string
 
 const (
-	ModeDefault     Mode = "default"      // prompt for destructive/write operations
+	ModeDefault     Mode = "default"      // prompt for destructive operations; dev_write/dev_edit use AllowedPaths/PathGrants
 	ModeAcceptEdits Mode = "accept-edits" // auto-accept file edits, prompt for shell
 	ModePlan        Mode = "plan"         // read-only, no modifications
 	ModeYolo        Mode = "yolo"         // skip all permission prompts

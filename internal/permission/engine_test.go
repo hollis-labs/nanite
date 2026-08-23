@@ -42,6 +42,16 @@ func TestCheck_defaultMode_asksForDestructive(t *testing.T) {
 	}
 }
 
+func TestCheck_defaultMode_allowsNonDestructivePathGatedWrite(t *testing.T) {
+	e := NewEngine(ModeDefault, nil)
+
+	result := e.Check(context.Background(), "s1", "dev_write",
+		map[string]any{"path": "/tmp/output.txt", "content": "hello"}, ToolMeta{})
+	if result.Decision != DecisionAllow {
+		t.Errorf("default mode should allow non-destructive path-gated writes, got %s", result.Decision)
+	}
+}
+
 func TestCheck_acceptEditsMode(t *testing.T) {
 	e := NewEngine(ModeAcceptEdits, nil)
 

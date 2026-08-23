@@ -3,8 +3,10 @@
 # user-facing settings or environment variables go here.
 
 http:
-  # Loopback-only by default. Set to 0.0.0.0 (or start nanite with
-  # --bind-address 0.0.0.0) only when access from other hosts is intentional.
+  # Host only: ASCII hostname, raw IPv4, or raw unbracketed IPv6; do not add a
+  # port or brackets. Loopback-only by default. Set to 0.0.0.0 (or start
+  # nanite with --bind-address 0.0.0.0) only when access from other hosts is
+  # intentional.
   bind_address: 127.0.0.1
 
 presence:

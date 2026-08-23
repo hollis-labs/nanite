@@ -71,7 +71,11 @@ type Server struct {
 // httpCfg is consulted for the bind address, timeouts, and body-size caps.
 // Empty/zero fields are replaced with conservative defaults — see
 // resolveHTTPConfig and the default* constants above.
-func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugin.Host, httpCfg config.HTTPConfig) *Server {
+func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugin.Host, httpCfg config.HTTPConfig) (*Server, error) {
+	resolvedHTTPConfig, err := resolveHTTPConfig(httpCfg)
+	if err != nil {
+		return nil, fmt.Errorf("resolve HTTP config: %w", err)
+	}
 	mux := http.NewServeMux()
 	srv := &Server{
 		store:      s,
@@ -80,7 +84,7 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 		mux:        mux,
 		api:        a,
 		pluginHost: pluginHost,
-		httpCfg:    resolveHTTPConfig(httpCfg),
+		httpCfg:    resolvedHTTPConfig,
 	}
 
 	// Set the router on the plugin host if it exists
@@ -89,18 +93,18 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 	}
 
 	srv.routes()
-	return srv
+	return srv, nil
 }
 
 // resolveHTTPConfig returns a copy of cfg with zero-valued fields filled in
 // from the conservative defaults. Callers may pass a zero value to opt into
 // defaults entirely.
-func resolveHTTPConfig(cfg config.HTTPConfig) config.HTTPConfig {
-	if strings.TrimSpace(cfg.BindAddress) == "" {
-		cfg.BindAddress = "127.0.0.1"
-	} else {
-		cfg.BindAddress = strings.TrimSpace(cfg.BindAddress)
+func resolveHTTPConfig(cfg config.HTTPConfig) (config.HTTPConfig, error) {
+	bindAddress, err := config.ResolveHTTPBindAddress(cfg.BindAddress)
+	if err != nil {
+		return config.HTTPConfig{}, err
 	}
+	cfg.BindAddress = bindAddress
 	if cfg.ReadTimeoutSeconds <= 0 {
 		cfg.ReadTimeoutSeconds = int(defaultReadTimeout / time.Second)
 	}
@@ -128,7 +132,7 @@ func resolveHTTPConfig(cfg config.HTTPConfig) config.HTTPConfig {
 			"http://127.0.0.1:5173",
 		}
 	}
-	return cfg
+	return cfg, nil
 }
 
 // SetPluginsDir sets the plugins directory path for the management API routes.
@@ -149,12 +153,13 @@ func (s *Server) SetPluginsDir(dir string) {
 //
 // CORS is outside basicAuth so that preflight (OPTIONS) requests succeed for
 // allowed origins even when the caller has not yet sent credentials — auth
-// UAs cannot attach credentials to a preflight. The body-limit middleware
-// sits inside auth because unauthenticated traffic is already rejected by
-// auth; caps only matter for requests that reach a handler. callerIdentity
-// sits between auth and bodyLimit so that only authenticated requests get
-// a caller-identity stamped on the context; see caller_identity.go for the
-// G-6.3 header contract.
+// UAs cannot attach credentials to a preflight. When Basic Auth is configured,
+// its placement avoids reading bodies from rejected requests; when Basic Auth
+// is disabled, it passes through and bodyLimit still caps requests before the
+// mux. callerIdentity accepts both headers after that optional auth check. With
+// Basic Auth disabled, those header values are trusted without credential
+// verification as part of the loopback-default tradeoff; see
+// caller_identity.go for the G-6.3 header contract.
 func (s *Server) ListenAndServe() error {
 	handler := s.recoverMiddleware(
 		s.loggingMiddleware(

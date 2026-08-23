@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -67,8 +68,11 @@ type OTelConfig struct {
 type HTTPConfig struct {
 	// BindAddress is the host or IP address used by the production HTTP
 	// listener. Empty values resolve to 127.0.0.1 so an unconfigured server is
-	// reachable only from the local machine. Set explicitly to 0.0.0.0 (or ::)
-	// only when remote access is intended and protected by the deployment.
+	// reachable only from the local machine. Values are host-only: ASCII DNS
+	// hostnames and raw IPv4/raw unbracketed IPv6 addresses are accepted; ports,
+	// brackets, and surrounding whitespace are rejected. Set explicitly to
+	// 0.0.0.0 (or ::) only when remote access is intended and protected by the
+	// deployment.
 	BindAddress              string `yaml:"bind_address"`
 	ReadTimeoutSeconds       int    `yaml:"read_timeout_seconds"`
 	ReadHeaderTimeoutSeconds int    `yaml:"read_header_timeout_seconds"`
@@ -96,6 +100,72 @@ type HTTPConfig struct {
 	//     disables Access-Control-Allow-Credentials. Opt in explicitly by
 	//     listing "*" as a sole entry when credentials are not required.
 	CORSAllowedOrigins []string `yaml:"cors_allowed_origins"`
+}
+
+// DefaultHTTPBindAddress keeps an unconfigured server local to the host.
+const DefaultHTTPBindAddress = "127.0.0.1"
+
+// ResolveHTTPBindAddress validates and resolves HTTPConfig.BindAddress.
+// The option is deliberately host-only because the listen port has its own
+// typed setting. Accepted values are ASCII DNS-style hostnames, raw IPv4, and
+// raw unbracketed IPv6. Dotted numeric values are interpreted as IPv4 and must
+// parse as such. An empty value selects DefaultHTTPBindAddress.
+func ResolveHTTPBindAddress(value string) (string, error) {
+	if value == "" {
+		return DefaultHTTPBindAddress, nil
+	}
+	if strings.TrimSpace(value) != value {
+		return "", fmt.Errorf("http.bind_address %q must not contain surrounding whitespace", value)
+	}
+	if strings.ContainsAny(value, "[]") {
+		return "", fmt.Errorf("http.bind_address %q must be an unbracketed host or raw IP address without a port", value)
+	}
+	if net.ParseIP(value) != nil {
+		return value, nil
+	}
+	if strings.Contains(value, ":") {
+		if _, _, err := net.SplitHostPort(value); err == nil {
+			return "", fmt.Errorf("http.bind_address %q must be a host only without a port", value)
+		}
+		return "", fmt.Errorf("http.bind_address %q must be a valid raw unbracketed IPv6 address or hostname without a port", value)
+	}
+	if !validASCIIHostname(value) {
+		return "", fmt.Errorf("http.bind_address %q must be a valid ASCII hostname or raw IPv4/IPv6 address", value)
+	}
+	return value, nil
+}
+
+func validASCIIHostname(value string) bool {
+	if len(value) > 253 || numericDottedValue(value) {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if len(label) == 0 || len(label) > 63 || !asciiLetterOrDigit(label[0]) || !asciiLetterOrDigit(label[len(label)-1]) {
+			return false
+		}
+		for i := 1; i < len(label)-1; i++ {
+			if !asciiLetterOrDigit(label[i]) && label[i] != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func numericDottedValue(value string) bool {
+	if !strings.Contains(value, ".") {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] != '.' && (value[i] < '0' || value[i] > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func asciiLetterOrDigit(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
 }
 
 // PresenceConfig controls presence broadcast behavior.
@@ -136,7 +206,7 @@ func DefaultAppConfig() *AppConfig {
 			VendorStorageDir: "data/skills/vendor",
 		},
 		HTTP: HTTPConfig{
-			BindAddress:              "127.0.0.1",
+			BindAddress:              DefaultHTTPBindAddress,
 			ReadTimeoutSeconds:       30,
 			ReadHeaderTimeoutSeconds: 10,
 			WriteTimeoutSeconds:      60,
@@ -168,6 +238,11 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse app config: %w", err)
 	}
+	bindAddress, err := ResolveHTTPBindAddress(cfg.HTTP.BindAddress)
+	if err != nil {
+		return nil, fmt.Errorf("validate app config: %w", err)
+	}
+	cfg.HTTP.BindAddress = bindAddress
 
 	return cfg, nil
 }

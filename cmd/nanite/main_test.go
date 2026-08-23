@@ -25,10 +25,13 @@ type countingCloser struct {
 	calls atomic.Int32
 }
 
-func TestApplyServeBindAddressOverride(t *testing.T) {
+func TestResolveServeHTTPConfig(t *testing.T) {
 	t.Run("flag overrides config", func(t *testing.T) {
 		cfg := config.HTTPConfig{BindAddress: "127.0.0.1"}
-		got := applyServeBindAddressOverride(cfg, " 0.0.0.0 ")
+		got, err := resolveServeHTTPConfig(cfg, "0.0.0.0")
+		if err != nil {
+			t.Fatalf("resolveServeHTTPConfig: %v", err)
+		}
 		if got.BindAddress != "0.0.0.0" {
 			t.Fatalf("BindAddress = %q, want 0.0.0.0", got.BindAddress)
 		}
@@ -36,11 +39,65 @@ func TestApplyServeBindAddressOverride(t *testing.T) {
 
 	t.Run("empty flag preserves config", func(t *testing.T) {
 		cfg := config.HTTPConfig{BindAddress: "192.0.2.10"}
-		got := applyServeBindAddressOverride(cfg, "")
+		got, err := resolveServeHTTPConfig(cfg, "")
+		if err != nil {
+			t.Fatalf("resolveServeHTTPConfig: %v", err)
+		}
 		if got.BindAddress != cfg.BindAddress {
 			t.Fatalf("BindAddress = %q, want configured %q", got.BindAddress, cfg.BindAddress)
 		}
 	})
+
+	t.Run("invalid flag is rejected before startup", func(t *testing.T) {
+		_, err := resolveServeHTTPConfig(config.HTTPConfig{}, "127.0.0.1:8090")
+		if err == nil || !strings.Contains(err.Error(), "host only") {
+			t.Fatalf("resolveServeHTTPConfig error = %v, want host-only diagnostic", err)
+		}
+	})
+
+	t.Run("flag whitespace is rejected rather than trimmed", func(t *testing.T) {
+		_, err := resolveServeHTTPConfig(config.HTTPConfig{}, " 0.0.0.0 ")
+		if err == nil || !strings.Contains(err.Error(), "surrounding whitespace") {
+			t.Fatalf("resolveServeHTTPConfig error = %v, want whitespace diagnostic", err)
+		}
+	})
+}
+
+func TestCmdServeRejectsInvalidBindBeforeInitializers(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer slog.SetDefault(previousLogger)
+
+	var loggingCalled, otelCalled bool
+	err := cmdServeWithInitializers(
+		[]string{"--bind-address", "localhost:8090"},
+		func(slogx.Config) (*slog.Logger, io.Closer, error) {
+			loggingCalled = true
+			return slog.Default(), &countingCloser{}, nil
+		},
+		func(context.Context, naniteotel.Config) (func(context.Context) error, error) {
+			otelCalled = true
+			return func(context.Context) error { return nil }, nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "host only") {
+		t.Fatalf("cmdServe error = %v, want host-only bind diagnostic", err)
+	}
+	if loggingCalled || otelCalled {
+		t.Fatalf("invalid bind reached startup initializers: logging=%v otel=%v", loggingCalled, otelCalled)
+	}
+	if !strings.Contains(logs.String(), "invalid HTTP server config") || !strings.Contains(logs.String(), "http.bind_address") {
+		t.Fatalf("invalid bind diagnostic missing from startup logs: %s", logs.String())
+	}
+	if strings.Contains(logs.String(), "nanite listening") {
+		t.Fatalf("invalid bind emitted misleading listening log: %s", logs.String())
+	}
 }
 
 func (c *countingCloser) Close() error {

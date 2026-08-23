@@ -22,11 +22,15 @@ import (
 // backing store.
 func newTestServer(t *testing.T, cfg config.HTTPConfig) *Server {
 	t.Helper()
+	resolvedConfig, err := resolveHTTPConfig(cfg)
+	if err != nil {
+		t.Fatalf("resolveHTTPConfig: %v", err)
+	}
 	mux := http.NewServeMux()
 	s := &Server{
 		mux:     mux,
 		port:    0,
-		httpCfg: resolveHTTPConfig(cfg),
+		httpCfg: resolvedConfig,
 	}
 	// Minimal routes so the handler chain has something to hit.
 	mux.HandleFunc("POST /api/echo", func(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +275,10 @@ func TestAuthStillEnforcedOnNonPreflight(t *testing.T) {
 // to the conservative defaults rather than 0-duration timeouts (which would
 // disable the protection entirely).
 func TestResolveHTTPConfigDefaults(t *testing.T) {
-	got := resolveHTTPConfig(config.HTTPConfig{})
+	got, err := resolveHTTPConfig(config.HTTPConfig{})
+	if err != nil {
+		t.Fatalf("resolveHTTPConfig: %v", err)
+	}
 	if got.BindAddress != "127.0.0.1" {
 		t.Errorf("BindAddress default = %q, want 127.0.0.1", got.BindAddress)
 	}
@@ -302,6 +309,27 @@ func TestResolveHTTPConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestNewRejectsInvalidBindAddressBeforeStartupLog(t *testing.T) {
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(previous)
+
+	srv, err := New(nil, nil, 8090, true, nil, config.HTTPConfig{BindAddress: "localhost:8090"})
+	if err == nil {
+		t.Fatal("New accepted bind address carrying a port")
+	}
+	if srv != nil {
+		t.Fatal("New returned a server for invalid bind config")
+	}
+	if !strings.Contains(err.Error(), "host only") {
+		t.Fatalf("New error = %q, want host-only diagnostic", err)
+	}
+	if strings.Contains(buf.String(), "nanite listening") {
+		t.Fatalf("invalid bind address emitted misleading startup log: %s", buf.String())
+	}
+}
+
 func TestListenAddressPosture(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -321,6 +349,12 @@ func TestListenAddressPosture(t *testing.T) {
 			cfg:             config.HTTPConfig{BindAddress: "0.0.0.0"},
 			wantAddress:     "0.0.0.0:0",
 			wantUnspecified: true,
+		},
+		{
+			name:         "raw IPv6 is joined without double brackets",
+			cfg:          config.HTTPConfig{BindAddress: "::1"},
+			wantAddress:  "[::1]:0",
+			wantLoopback: true,
 		},
 	}
 
@@ -422,11 +456,15 @@ func TestStartupLogAlwaysAnnouncesAuthPosture(t *testing.T) {
 func newTestServerWithHost(t *testing.T) *Server {
 	t.Helper()
 	host := naniteplugin.NewHostWithStore(nil)
+	resolvedConfig, err := resolveHTTPConfig(config.HTTPConfig{})
+	if err != nil {
+		t.Fatalf("resolveHTTPConfig: %v", err)
+	}
 	mux := http.NewServeMux()
 	s := &Server{
 		mux:        mux,
 		pluginHost: host,
-		httpCfg:    resolveHTTPConfig(config.HTTPConfig{}),
+		httpCfg:    resolvedConfig,
 	}
 	mux.HandleFunc("POST /api/plugins/events", s.handleEmitEvent)
 	return s

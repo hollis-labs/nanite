@@ -39,13 +39,15 @@ const (
 // carries no CallerIdentity and handlers fall back to the pre-G-6.3
 // behavior of using body/query as both target and caller. This
 // preserves compatibility with existing FE/CLI clients while giving
-// authenticated / automated callers a path to stricter identity
-// enforcement.
+// clients a path to stricter identity enforcement. When Basic Auth is
+// unconfigured, the loopback-default trust model means these caller-supplied
+// headers are accepted without independent credential verification.
 //
-// Placement in the chain: sits inside basicAuth so that unauthenticated
-// traffic is rejected before the header read; outside bodyLimit
-// because header parsing is cheap and body-size caps only matter for
-// requests that reach a handler.
+// Placement in the chain: sits inside optional basicAuth. When Basic Auth is
+// configured, invalid credentials are rejected before the header read; when
+// it is disabled, requests pass through and the header values are trusted as
+// described above. callerIdentity sits outside bodyLimit because header
+// parsing is cheap and body-size caps only matter for request bodies.
 func callerIdentityMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessionID := r.Header.Get(CallerSessionHeader)

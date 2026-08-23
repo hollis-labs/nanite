@@ -142,6 +142,44 @@ A bind-address default change is the highest-risk option — anyone currently re
   closed channel` in `chat_boot_drive.go`, an untouched package); an isolated
   `go test ./internal/service` passed, and the complete `go test ./...` rerun
   then passed.
+- Correction pass preserved the checked-in container deployment without
+  weakening the host/image default: `docker-compose.yaml` now supplies
+  `command: ["--bind-address", "0.0.0.0"]`. Combined with the unchanged
+  Dockerfile entrypoint, Compose runs `./nanite serve -db /data/nanite.db
+  --bind-address 0.0.0.0` and continues publishing `8090:8090`; plain
+  `nanite serve` and image starts without that explicit command remain
+  loopback-only. The existing demo's `docker compose up --build` instruction
+  remains accurate and needed no edit. `CHANGELOG.md` now distinguishes custom
+  Docker deployments and states that the checked-in Compose file already opts
+  in.
+- Corrected the remaining middleware/caller-identity comments: Basic Auth is
+  optional, body limits still apply when it is disabled, and caller-identity
+  headers are trusted without independent credential verification in that
+  mode. No comment now claims all unauthenticated traffic is rejected or that
+  only authenticated requests can stamp caller identity.
+- Added centralized host-only bind validation in `internal/config` and applied
+  it during config load, immediately after the CLI/YAML override resolves in
+  `cmdServe`, and defensively in `server.New`. Accepted values are ASCII
+  DNS-style hostnames, raw IPv4, and raw unbracketed IPv6. Empty config selects
+  `127.0.0.1`; surrounding whitespace, brackets, host:port values, malformed
+  dotted IPv4, malformed IPv6, and malformed hostname labels are rejected with
+  diagnostics naming `http.bind_address`. Invalid CLI input is rejected before
+  logging/OTel initializers and emits an error record, never a misleading
+  `nanite listening` record.
+- Added table coverage for default/empty, `0.0.0.0`, specific IPv4,
+  `localhost`/DNS hostnames, raw IPv6, bracketed IPv6, IPv4/hostname with port,
+  whitespace, and malformed address/hostname shapes; added config-load,
+  composition-root early-rejection, defensive server-construction, no-false-
+  listening-log, and IPv6 `net.JoinHostPort`/listener coverage.
+- Correction verification passed: `go test ./internal/config ./internal/server
+  ./cmd/nanite`; `go test -race ./internal/config ./internal/server
+  ./cmd/nanite`; `go build ./cmd/nanite/`; `go vet ./...`; and `go test ./...`.
+  This machine's Docker CLI has no Compose plugin (`docker compose` is an
+  unknown command), and an isolated legacy `pipx run docker-compose` fallback
+  could not build its pinned PyYAML on this Python toolchain. No tooling was
+  installed; existing Ruby YAML/JSON tooling instead validated the Compose
+  structure, exact `8090:8090` published port, Dockerfile entrypoint, and final
+  combined argv shown above.
 
 ## Review notes
 

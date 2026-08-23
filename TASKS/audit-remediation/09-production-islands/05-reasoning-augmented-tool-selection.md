@@ -1,7 +1,7 @@
 # Decide the fate of reasoning-augmented tool selection (`RankTools`/`SelectWithSignals`/`SelectToolsAugmented`)
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch — see this folder's `README.md` for a
 non-blocking cross-reference note relating this task to
 `04-tool-builder-yaml-architecture.md` and `06-curated-tool-knowledge-matcher.md`.
@@ -373,7 +373,34 @@ Confirmed by grep restricted to non-test files.
 
 ## Work log
 
-<Worker fills this in.>
+- Re-derived the current call graph before editing. Across non-test Go files
+  under `internal/` and `cmd/`, `RankTools`, `SelectWithSignals`, and
+  `SelectToolsAugmented` were still referenced only inside their closed
+  `ranking.go` → `broker.go` chain. The live `SelectToolsAsProvider` body had
+  drifted to `broker.go:416` and still called `selectToolsUncapped`, not the
+  augmented path; `SelectByIntent` remains live through the discovery path.
+- Re-derived the boot wiring at current `container.go:750-770` (rather than
+  the authored `:692-710`). `SetMemoryRecaller` and `SetSkills` were still the
+  only production writers of `ToolClient.memoryRecaller`/`.skills`, and
+  `SelectToolsAugmented` was still their only production reader. No external
+  production use of the fields, setters, or accessors was found.
+- Applied the settled AD-10 **retire** decision. Deleted `ranking.go` and
+  `ranking_test.go`; removed `SelectToolsAugmented`, the broker's two support
+  fields, setters, and accessors; removed the now-dead `ErrTowardMorePad` and
+  `SkillsDir` config fields/default; and removed the narrowly-scoped
+  composition-root block that constructed the memory recaller and read the
+  tool-preference skills directory on every boot. The live
+  `SelectToolsAsProvider`/`selectToolsUncapped`/`SelectByIntent` code was not
+  modified.
+- Removed the two remaining augmented-selection tests from
+  `memory_signal_test.go` because their production API was retired; retained
+  the independent memory-signal helper tests. No schema or operator-data path
+  was touched.
+- Verification passed: `go test ./internal/toolclient/... ./internal/service/...`;
+  `deadcode ./...`; `deadcode -test ./...`; `go build ./...`; `go vet ./...`;
+  and `go test ./...`. Both deadcode runs show no reference to any removed
+  selection symbol; the focused source grep likewise returns zero matches for
+  the retired functions, setters, fields, and config knobs.
 
 ## Review notes
 

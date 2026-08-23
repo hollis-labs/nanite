@@ -747,28 +747,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		}
 	}
 
-	// Phase 5 / D3 (CW-20260419-0011): wire the reasoning-augmented broker
-	// signals onto the toolclient. Both are nil-safe — when memorySvc is
-	// nil or the skills directory is missing, the broker behaves exactly
-	// as before (keyword + token budget). Wiring at this seam keeps the
-	// toolclient package independent of memory + filesystem details.
-	if cfg.ToolClient != nil {
-		if memorySvc != nil {
-			cfg.ToolClient.SetMemoryRecaller(toolclient.NewMemoryRecaller(memorySvc))
-		}
-		skillsDir := cfg.ToolClient.Config.SkillsDir
-		if skillsDir == "" {
-			skillsDir = toolclient.DefaultSkillsPath()
-		}
-		if skillsDir != "" && skillsDir != "off" {
-			if loaded, err := toolclient.LoadSkillsFromDir(skillsDir); err == nil && len(loaded) > 0 {
-				cfg.ToolClient.SetSkills(loaded)
-			} else if err != nil {
-				slog.Warn("service container: failed to load tool-preference skills", "dir", skillsDir, "err", err)
-			}
-		}
-	}
-
 	// --- Orchestration (Wave 2) ---
 
 	streams := NewStreamManager()

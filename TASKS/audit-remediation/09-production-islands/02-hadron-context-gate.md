@@ -1,7 +1,7 @@
 # Decide the fate of `contextbroker`'s Hadron blueprint context gate (fix required before any "wire")
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch.
 **Touches:** `internal/contextbroker/gate_hadron_blueprints.go`,
 `internal/contextbroker/gate_hadron_blueprints_test.go`,
@@ -299,7 +299,34 @@ grep restricted to non-test files.
 
 ## Work log
 
-<Worker fills this in.>
+### 2026-08-23 — AD-07 retire implemented
+
+- Re-verified the current source before editing. There are zero non-test
+  references to `ContextGate`, `HadronBlueprintGate`, or
+  `NewHadronBlueprintGate`; `internal/service/container.go` still constructs
+  exactly the four live Memory, Conduit, PCC, and Session context sources and
+  has no Hadron registration. The only `hadron` match in that file is the
+  unrelated startup-sequencing comment about `apps/hadron/cmd/hadrond`.
+- Re-read `calculateRelevance` in full. Its six additive bonus sites and
+  unclamped return were unchanged, so the latent out-of-range relevance bug
+  described by GO-MEM-002 was still present before retirement.
+- Pre-deletion `deadcode -test ./internal/contextbroker/...` completed
+  successfully but did **not** list the gate: the current `deadcode` test-mode
+  analysis treats the gate's own tests as roots, and those tests call its
+  constructor. This makes the task's expectation that test mode would flag
+  the gate stale. Production unreachability was instead confirmed directly
+  from the zero non-test reference set and the composition-root source list.
+- Applied AD-07 by deleting
+  `internal/contextbroker/gate_hadron_blueprints.go` (302 lines) and
+  `internal/contextbroker/gate_hadron_blueprints_test.go` (337 lines). No
+  change was made to the four live `ContextSource` implementations,
+  `internal/service/container.go`, or broader context-broker behavior.
+- Post-deletion `deadcode -test ./internal/contextbroker/...` reported the
+  same pre-existing unreachable-symbol set as the pre-deletion run and no
+  newly orphaned gate-dependent symbol. A repository-wide non-documentation
+  reference scan found no remaining gate symbols.
+- Verification passed: `go test ./internal/contextbroker/...`,
+  `go build ./...`, `go vet ./...`, and `go test ./...`.
 
 ## Review notes
 

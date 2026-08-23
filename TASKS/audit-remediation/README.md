@@ -359,6 +359,15 @@ before.**
 | `12/01` full-repo scheduled lint gate | W6, `00/02` | AD-21 | Baseline from `00/02`'s frozen-HEAD numbers |
 | `12/03` goroutine lint coverage gap | `04/04` | — | Fix `Makefile:74-81` — fixed package list, non-fatal `-` prefix |
 
+### Wave 9 — Follow-ups
+
+| Task | Depends on | Gated on | Notes |
+|---|---|---|---|
+| `14/01` remove default seeded catalog source | `01/01` | AD-05 ✅ | Leaves no catalog source on a fresh install — needs an empty-state screen, owned by the UI/UX workstream |
+| `14/02` error-handling backlog paydown | `12/01` stage 1 | AD-21 ✅ | 365 findings. **Blocks `12/01` stage 2.** Same hazard profile as `06/03` — see its banner |
+
+Lands after Wave 7 and **before `13/03`**, which stays the batch's final commit.
+
 ### Wave 8 — Mechanical cleanup
 
 | Task | Depends on | Gated on | Notes |

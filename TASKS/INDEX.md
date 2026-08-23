@@ -1139,6 +1139,26 @@ to proceed against the post-sweep signatures.
 | `12/01` | `12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md` | not-started | Wave 6 complete, `00/02` | AD-21 |
 | `12/03` | `12-quality-ratchet-and-standards/03-goroutine-lint-coverage-gap.md` | not-started | `04/04` | — |
 
+### Wave 9 — Follow-ups (`14-followups/`)
+
+Added 2026-08-23, during the Wave 4 decision pass. Holds work that emerged from
+Waves 0-3 as decisions or review findings with no task attached.
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `14/01` | `14-followups/01-remove-default-seeded-catalog-source.md` | not-started | `01/01` (landed) | AD-05 (decided) |
+| `14/02` | `14-followups/02-error-handling-backlog-paydown.md` | not-started | `12/01` stage 1 | AD-21 (decided) |
+
+**Sequencing: after Wave 7, before `13/03`.** The repo-wide `gofmt` sweep stays
+the batch's final commit per AD-22, so this wave must land ahead of it.
+
+`14/02` **blocks `12/01` stage 2** — zero-tolerance on `errcheck`/`errorlint`/
+`nilerr` cannot activate until its 365-finding backlog reaches zero.
+
+The folder README also carries a register of **seven follow-up candidates**
+logged in `TASKS/ESCALATIONS.md` but not promoted to tasks — visible in one
+place rather than only chronologically. Promotion is the operator's call.
+
 ### Wave 8 — Mechanical cleanup
 
 | Task | File | Status | Depends on | Gated on |

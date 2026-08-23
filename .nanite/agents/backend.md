@@ -132,7 +132,7 @@ ui/                          # React SPA (see frontend.md)
 | sandbox | `internal/sandbox/` | Sandbox directory lifecycle. Delegates content writing to CLIAgentAdapter plugins via AdapterRegistry. |
 | server | `internal/server/` | HTTP server with middleware chain: recover -> logging -> basicAuth -> CORS. Serves API routes + embedded SPA. |
 | store | `internal/store/` | SQLite persistence: embedded migrations, CRUD for sessions, messages, agents, skills, modes, templates, usage, bookmarks, artifacts, a2a messages, MCP servers, workflows. |
-| toolclient | `internal/toolclient/` | Tool broker client: intent-based tool selection, permission checking, built-in tool registration, progressive discovery, tool knowledge base. |
+| toolclient | `internal/toolclient/` | Tool broker client: intent-based tool selection, permission checking, built-in tool registration, progressive discovery, live `SelectByIntent` keyword scoring. |
 | truncate | `internal/truncate/` | Truncates large tool outputs for LLM context windows. Periodic cleanup of saved outputs. |
 | workflow | `internal/workflow/` | YAML-driven workflow engine: loads workflow definitions from files and database, executes multi-step workflows with LLM providers. |
 | builders | `internal/builders/` | Fluent builder pattern for creating agents, skills, and prompt templates programmatically. |

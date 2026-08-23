@@ -1,5 +1,12 @@
 # GO-SEC-003 G304 triage checkpoint — Steps 1–3
 
+> **This is an evidence document, not a task file.** It carries no
+> `**Status:**` line deliberately. It shares the `03-` prefix with
+> `03-triage-remaining-gosec-g304-sites.md`, which *is* the task — so a status
+> sweep globbing `08-*/[0-9]*.md` will pick this file up and report an empty
+> status for it. That is expected; do not "fix" it by adding a Status line, and
+> do not count it toward Wave 3's task total. Wave 3 is **10 tasks**.
+
 **Date:** 2026-08-22  
 **Evidence snapshot:** `1d3bfd96`  
 **Implementation state:** operator-approved Step 4 implemented

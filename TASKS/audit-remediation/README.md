@@ -301,7 +301,7 @@ order because AD-03 needs it.
 | `08/06` sandbox proxy header timeout | W2 | — | Independent |
 | `08/07` server auth/bind/TLS posture | `07/02` | AD-15 | High. Same file as `07/02` |
 | `08/08` dependency/toolchain vuln bumps | `00/02` | — | **Runs alone** — see parallelization |
-| `08/09` autocomplete + artifact path hardening | `01/01` | AD-04 | Touches `handleCatalogInstall`, which `01/01` rewrites |
+| `08/09` autocomplete + artifact path hardening | `01/01` | AD-04, AD-27, AD-28 | Now 5 findings (`GO-API-001/002/003/008` + reassigned `GO-SEC4-007`) — the wave's biggest task |
 | `08/10` API validation duplication + pagination bug | W2 | — | |
 
 ### Wave 4 — Production islands

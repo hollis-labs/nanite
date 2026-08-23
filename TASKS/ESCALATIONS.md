@@ -1264,3 +1264,31 @@ authored, not in their work.
 **Resolution:** Not fixed in `08/02`. Its regression fixture was corrected to place the secret after a nonmatching first line, and deterministic post-validation swap tests plus mutation testing independently proved the scoped confinement fix. The task passed fresh re-review on its own acceptance criteria.
 
 **Follow-up:** Add a narrow correctness task for `callGrep` first-line matches: check `ringLen` before modulo/index calculation and add `context=0` plus first-line/default-context regressions. This is not a security-scope reopening of `08/02`.
+
+## 2026-08-23 — Wave 3 `08/08` closes as `implemented`, not `reviewed`: the full race gate was deferred by operator decision
+
+**Raised by:** planner verification of the Wave 3 closeout, cross-checking which loose ends had
+reached this log versus only the wave handoff.
+
+**Question / mismatch:** `08/08` (dependency/toolchain vuln bumps) is the one Wave 3 task not
+`reviewed`. Its verification requires a `-race` run that proved impractical: fixtures repeatedly
+re-applying migrations pushed a focused `internal/selftools` race run to **1,446.675 seconds**,
+passing only under a 30-minute timeout. The operator explicitly deferred the full-race gate rather
+than authorize longer campaigns. `GO-SEC-001` and `GO-SEC-002` therefore remain `implemented`.
+
+This was recorded in `WAVE-3-HANDOFF.md` but **not here** — and the wave handoff is read once, by
+the next wave's kickoff author, then becomes historical. A deferred verification gate on the only
+task in a wave that did not reach `reviewed` is exactly the kind of item that needs to outlive its
+wave's paperwork. Logged here for that reason, not because the decision was wrong.
+
+**Resolution:** No change to the decision. `08/08` stays `implemented`; `GO-SEC-001`/`GO-SEC-002`
+stay `implemented`. **No later document should rewrite this as a race PASS or as a reviewed task** —
+the handoff says so explicitly and it is restated here so the constraint survives independently.
+
+**Follow-up:** Two things, either of which closes it. (1) Run the deferred race gate when someone is
+willing to spend ~25 minutes on `internal/selftools` alone, and mark `08/08` `reviewed` only then.
+(2) Better: fix the underlying cause — the handoff attributes the runtime to test fixtures
+repeatedly applying migrations, which is a test-infrastructure defect that inflates every race run
+in the repo, not just this one. That is the higher-value fix and is unclaimed. Note it is also the
+same surface as the deferred `internal/service` race-suite performance follow-up carried from
+Wave 2.

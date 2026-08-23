@@ -59,7 +59,7 @@ func TestMatchDispatchToAgentReflex_RecurrenceOverride_SuppressesRefire(t *testi
 
 	// First call: the trigger fires, no prior last_fired_at, so nothing
 	// suppresses it.
-	hints1 := st.matchDispatchToAgentReflex(ctx, "sess-cooldown-1", "turn-1", "agent-cooldown-probe", msg, msg)
+	hints1 := st.matchDispatchToAgentReflex(ctx, "sess-cooldown-1", "agent-cooldown-probe", msg)
 	if hints1 == nil {
 		t.Fatal("first call: hints = nil, want a match (reflex should fire on first eligible call)")
 	}
@@ -92,7 +92,7 @@ func TestMatchDispatchToAgentReflex_RecurrenceOverride_SuppressesRefire(t *testi
 
 	// Second call, immediately after: same trigger still fires, but the
 	// 3600-second override should suppress it from winning.
-	hints2 := st.matchDispatchToAgentReflex(ctx, "sess-cooldown-1", "turn-2", "agent-cooldown-probe", msg, msg)
+	hints2 := st.matchDispatchToAgentReflex(ctx, "sess-cooldown-1", "agent-cooldown-probe", msg)
 	if hints2 != nil {
 		t.Fatalf("second call (within cooldown window): hints = %+v, want nil -- recurrence_override_seconds=3600 should suppress an immediate re-fire", hints2)
 	}
@@ -109,7 +109,7 @@ func TestMatchDispatchToAgentReflex_RecurrenceOverride_SuppressesRefire(t *testi
 		t.Fatalf("UpdateAgentReflex (backdate last_fired_at): %v", err)
 	}
 
-	hints3 := st.matchDispatchToAgentReflex(ctx, "sess-cooldown-1", "turn-3", "agent-cooldown-probe", msg, msg)
+	hints3 := st.matchDispatchToAgentReflex(ctx, "sess-cooldown-1", "agent-cooldown-probe", msg)
 	if hints3 == nil {
 		t.Fatal("third call (past cooldown window): hints = nil, want a match again")
 	}

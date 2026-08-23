@@ -11,7 +11,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatch"
-	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
@@ -25,13 +24,6 @@ import (
 // The Chat agent receives the envelope (via the tool result) and
 // relays it to the frontend. Raw worker output never enters the Chat
 // agent's context window — only the structured envelope does.
-//
-// E2 integration (CW-20260419-0028): when GroundingRecaller is set and
-// NANITE_GROUNDING_ENABLED=true, a memory recall step fires FIRST, before
-// the E1 reflex matcher. Memories above the similarity threshold are
-// prepended to the message as a "## Relevant memories" block (≤200 tokens).
-// Consultation rows are logged; outcome rows are written after the
-// follow-up (caller responsibility via grounding.RecordOutcome).
 //
 // E1 integration (CW-20260419-0027; migrated off internal/promptrouter by
 // TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md): before calling
@@ -93,42 +85,6 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 		return mcp.ErrorResult("message is required"), nil
 	}
 
-	// E2: Pre-strategy memory-grounding recall (CW-20260419-0028).
-	// Fires before E1 reflex matching so that memory context can influence
-	// the message seen by the dispatch layer. The grounding block is
-	// prepended to the dispatch message, not the original user-facing
-	// message — the worker/planner sees the enriched prompt.
-	//
-	// When the gate is off, groundingResult.Enabled == false and no rows
-	// are written. When enabled but no hits exceed the threshold, the
-	// message is unchanged.
-	turnID := strArg(args, "turn_id", "")
-	userID := strArg(args, "user_id", "")
-	dispatchMessage := message // may be prepended with memories block below
-	var groundingConsultationIDs []int64
-	if st.GroundingRecaller != nil {
-		groundingResult := st.GroundingRecaller.Recall(ctx, grounding.RecallInput{
-			UserInput: message,
-			SessionID: sessionID,
-			UserID:    userID,
-			TurnID:    turnID,
-		})
-		if groundingResult.Enabled {
-			// Log all hits (consumed/discarded) before dispatch. Errors are swallowed.
-			groundingConsultationIDs = grounding.LogConsultations(st.GroundingLogger, groundingResult, turnID)
-
-			// Prepend the surfaced memories block to the dispatch message.
-			if block := grounding.SystemPromptBlock(groundingResult); block != "" {
-				dispatchMessage = block + "\n" + message
-			}
-		}
-	}
-	// groundingConsultationIDs is available for post-generation outcome
-	// write-back via grounding.RecordOutcome; the MCP dispatch layer does
-	// not observe the follow-up turn directly, so write-back is the
-	// responsibility of the chat generation layer when it records outcomes.
-	_ = groundingConsultationIDs
-
 	// H1 trust resolution (CW-20260421-0014): populate AgentProfileID from
 	// the caller-profile ctx stamped by the service layer in
 	// executeToolBatch. Resolved here (rather than at its original
@@ -143,7 +99,7 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 	// matchDispatchToAgentReflex's doc comment for the full design
 	// (migrated off internal/promptrouter by TASKS/phase-4/
 	// 03-migrate-promptrouter-to-reflexes.md).
-	reflexHints := st.matchDispatchToAgentReflex(ctx, sessionID, strArg(args, "turn_id", ""), apID, message, dispatchMessage)
+	reflexHints := st.matchDispatchToAgentReflex(ctx, sessionID, apID, message)
 
 	// CW-20260502-0005: agent-broker consultation (no-op scaffold).
 	// The broker is upstream of dispatch; the no-op impl reads SessionMode
@@ -166,13 +122,7 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 	// field instead) — SessionMode only ever fed telemetry/audit logging
 	// below, which now just always logs an empty string.
 	if st.Broker != nil {
-		brokerInput := broker.Input{
-			// PR #113 review: broker must see the same effective text
-			// dispatch will see (post-grounding-injection), otherwise the
-			// audit trail and any future non-noop broker logic won't
-			// correspond to the actual dispatched prompt.
-			UserText: dispatchMessage,
-		}
+		brokerInput := broker.Input{UserText: message}
 		if reflexHints != nil {
 			brokerInput.ReflexMatchID = reflexHints.ReflexID
 		}
@@ -220,7 +170,7 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 	envelope, err := dispatch.ExecuteTask(ctx, st.Dispatch, wrapper, st.WorkflowLauncher, dispatch.ExecuteTaskArgs{
 		SessionID:      sessionID,
 		ParentAgentID:  parentAgentID,
-		Message:        dispatchMessage,
+		Message:        message,
 		Provider:       strArg(args, "provider", ""),
 		TimeoutSeconds: mcp.IntArg(args, "timeout_seconds", 0),
 		ReflexHints:    reflexHints,
@@ -326,7 +276,7 @@ func (st *SelfToolsTransport) recursionBlocked(ctx context.Context) (bool, error
 // output is absent). WorkflowName-via-implicit-phrase-match is retired
 // outright — the workflow_run self-tool remains the direct, supported
 // way to invoke a named workflow.
-func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, sessionID, turnID, agentProfileID, message, dispatchMessage string) *dispatch.ReflexHints {
+func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, sessionID, agentProfileID, message string) *dispatch.ReflexHints {
 	if st.Store == nil {
 		return nil
 	}
@@ -525,21 +475,13 @@ func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, se
 	// same unified event_log sink Engine.EvaluateState and
 	// attemptReflexDispatch now go through — see the task's Work Log for
 	// the "no real reader" grep confirming playbook_match_log had no
-	// consumer left to starve. The CW-20260816-0068 raw-vs-sent
-	// audit-trail pair and the matched-input excerpt are preserved via
-	// ExtraMetadata rather than dropped; identical raw/sent text is
-	// collapsed to absent (same bloat-avoidance rule
-	// store.LogReflexMatch used to apply), not persisted as a
-	// pointlessly duplicated pair.
+	// consumer left to starve. The matched-input excerpt is preserved via
+	// ExtraMetadata rather than dropped.
 	excerpt := message
 	if len(excerpt) > 200 {
 		excerpt = excerpt[:200]
 	}
 	extra := map[string]any{"matched_input_excerpt": excerpt}
-	if message != dispatchMessage {
-		extra["raw_input_text"] = message
-		extra["sent_input_text"] = dispatchMessage
-	}
 	reflexes.EmitFirings(ctx, st.Store, st.Plugins, resolved, outcomes, state, reflexes.FiringContext{
 		AgentID:       agentProfileID,
 		AgentClass:    class,

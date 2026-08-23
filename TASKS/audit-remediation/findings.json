@@ -2304,7 +2304,7 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/09-production-islands/01-grounding-memory-recall.md",
       "disposition": "retire-feature",
-      "task_status": "not-started",
+      "task_status": "implemented",
       "revalidation_note": "Confirmed still unwired: zero hits for `GroundingRecaller =` / `GroundingLogger =` anywhere in the tree, and container.go (despite substantial unrelated additive changes since the audit) has zero references to Grounding at all. Wire/defer/retire is AD-06's explicit call. [AD-06 DECIDED 2026-08-22: retire. Delete internal/grounding/ plus the two unassigned SelfToolsTransport fields (self_tools_transport.go:219-231) and the E2 recall block (self_tools_dispatch.go:109-118).]"
     },
     {

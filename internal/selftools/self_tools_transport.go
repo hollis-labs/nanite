@@ -22,7 +22,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/crossapp"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/envelope"
-	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/messaging"
@@ -215,20 +214,6 @@ type SelfToolsTransport struct {
 	// Set post-construction; nil causes sandbox tool calls to error.
 	// CW-20260420-0019 (D6).
 	PythonDispatcher PythonToolDispatcher
-
-	// GroundingRecaller is the pre-strategy memory recall step
-	// (CW-20260419-0028, Phase 5 / E2). When non-nil and
-	// NANITE_GROUNDING_ENABLED=true, callExecuteTask performs a memory
-	// recall before dispatch classification and injects a "## Relevant
-	// memories" block into the message when hits exceed the similarity
-	// threshold. Set post-construction; nil means grounding is skipped
-	// entirely (same effect as the gate being off).
-	GroundingRecaller *grounding.Recaller
-	// GroundingLogger persists consultation and outcome rows.
-	// Set post-construction; nil disables grounding logging (the recall
-	// step still runs when GroundingRecaller is set and the gate is on).
-	// *store.Store satisfies grounding.ConsultationLogger.
-	GroundingLogger grounding.ConsultationLogger
 
 	// Elicitation is the G4 mid-call user-prompt service (CW-20260420-0018).
 	// When set, write tools that need user confirmation (e.g. message_send

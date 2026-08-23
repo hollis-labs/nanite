@@ -127,7 +127,7 @@ func TestMatchDispatchToAgentReflex_RunScopedReflex_IsolatedToItsOwnRun(t *testi
 
 	t.Run("fires for its own run's session", func(t *testing.T) {
 		const msg = "probe-run-scoped-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-a", "turn-1", "agent-run-scope-probe", msg, msg)
+		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-a", "agent-run-scope-probe", msg)
 		if hints == nil {
 			t.Fatal("hints = nil, want a match (run-scoped reflex should fire for a session resolved to its own run)")
 		}
@@ -138,7 +138,7 @@ func TestMatchDispatchToAgentReflex_RunScopedReflex_IsolatedToItsOwnRun(t *testi
 
 	t.Run("invisible to a session in an unrelated run", func(t *testing.T) {
 		const msg = "probe-run-scoped-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-b", "turn-1", "agent-run-scope-probe", msg, msg)
+		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-b", "agent-run-scope-probe", msg)
 		if hints != nil {
 			t.Fatalf("hints = %+v, want nil — a reflex scoped to run-A must not fire for a session resolved to run-B", hints)
 		}
@@ -146,7 +146,7 @@ func TestMatchDispatchToAgentReflex_RunScopedReflex_IsolatedToItsOwnRun(t *testi
 
 	t.Run("invisible to a non-Team session", func(t *testing.T) {
 		const msg = "probe-run-scoped-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-no-run", "turn-1", "agent-run-scope-probe", msg, msg)
+		hints := st.matchDispatchToAgentReflex(ctx, "sess-no-run", "agent-run-scope-probe", msg)
 		if hints != nil {
 			t.Fatalf("hints = %+v, want nil — a reflex scoped to run-A must not fire for a session with no team_run_members row at all", hints)
 		}
@@ -154,7 +154,7 @@ func TestMatchDispatchToAgentReflex_RunScopedReflex_IsolatedToItsOwnRun(t *testi
 
 	t.Run("global reflex still fires in a run-A session", func(t *testing.T) {
 		const msg = "probe-global-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-a", "turn-1", "agent-run-scope-probe", msg, msg)
+		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-a", "agent-run-scope-probe", msg)
 		if hints == nil || hints.AgentSlug != "global-planner" {
 			t.Fatalf("global reflex did not fire inside a Team-run session: hints=%+v", hints)
 		}
@@ -162,7 +162,7 @@ func TestMatchDispatchToAgentReflex_RunScopedReflex_IsolatedToItsOwnRun(t *testi
 
 	t.Run("global reflex still fires in a run-B session", func(t *testing.T) {
 		const msg = "probe-global-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-b", "turn-1", "agent-run-scope-probe", msg, msg)
+		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-b", "agent-run-scope-probe", msg)
 		if hints == nil || hints.AgentSlug != "global-planner" {
 			t.Fatalf("global reflex did not fire inside a different Team-run session: hints=%+v", hints)
 		}
@@ -170,7 +170,7 @@ func TestMatchDispatchToAgentReflex_RunScopedReflex_IsolatedToItsOwnRun(t *testi
 
 	t.Run("global reflex still fires in a non-Team session", func(t *testing.T) {
 		const msg = "probe-global-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-no-run", "turn-1", "agent-run-scope-probe", msg, msg)
+		hints := st.matchDispatchToAgentReflex(ctx, "sess-no-run", "agent-run-scope-probe", msg)
 		if hints == nil || hints.AgentSlug != "global-planner" {
 			t.Fatalf("global reflex did not fire in a plain non-Team session: hints=%+v", hints)
 		}
@@ -216,7 +216,7 @@ func TestMatchDispatchToAgentReflex_NoTeamRunMembersTable_DegradesGracefully(t *
 	st := NewSelfToolsTransport(s)
 
 	const msg = "probe-no-team-table-mcp-token please route this"
-	hints := st.matchDispatchToAgentReflex(ctx, "sess-no-team-table-mcp", "turn-1", "agent-no-team-table-mcp", msg, msg)
+	hints := st.matchDispatchToAgentReflex(ctx, "sess-no-team-table-mcp", "agent-no-team-table-mcp", msg)
 	if hints == nil {
 		t.Fatal("hints = nil, want a match — a missing team_run_members table must not break ordinary global dispatch_to_agent evaluation")
 	}

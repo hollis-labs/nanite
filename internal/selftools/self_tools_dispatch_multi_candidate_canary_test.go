@@ -90,7 +90,7 @@ func TestMatchDispatchToAgentReflex_KindLookupDegraded_LogsMultiCandidateCanary(
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(prevLogger) })
 
-	hints := st.matchDispatchToAgentReflex(ctx, "sess-multi-candidate-1", "turn-1", "agent-multi-candidate-probe", msg, msg)
+	hints := st.matchDispatchToAgentReflex(ctx, "sess-multi-candidate-1", "agent-multi-candidate-probe", msg)
 	if hints == nil {
 		t.Fatal("hints = nil, want a match (both dispatch_to_agent probes should have fired and been selected under the degraded all_applicable fail-open)")
 	}

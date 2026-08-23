@@ -1403,8 +1403,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// removed in CW-20260508-0017 (Decision 3): the local SQLite memory
 	// store is no longer agent-facing — Vanta is the canonical memory
 	// substrate (vanta-primary-since: 2026-04-19). The underlying
-	// memory.Service stays load-bearing for grounding/recall.go,
-	// contextbroker.NewMemorySource, and the per-turn / post-compact
+	// memory.Service stays load-bearing for contextbroker.NewMemorySource
+	// and the per-turn / post-compact
 	// extractor hooks; only the agent-facing tool surface and the
 	// `nanite-memory` MCP server registration are dropped here.
 

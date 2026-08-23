@@ -171,7 +171,7 @@
       "false_positive_considerations": "gosec's G304 rule fires on any variable-driven file open regardless of whether the variable is already constrained; a meaningful fraction of the 68 are plausibly already safe by construction.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/03-triage-remaining-gosec-g304-sites.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "The frozen 00/02 baseline mechanically reproduces 70 production G304 sites at HEAD 1d3bfd96 (68 at the audited commit). Task 08/03 classified all 70, traced the 35 above operator/OS trust, and recorded every disposition in its checkpoint. After explicit operator approval, Step 4 implemented the four selected frozen coordinates in internal/contextbroker/source_pcc.go:99, internal/skill/parser.go:177,218, and internal/api/plugins.go:969 with adversarial regressions and exact-file forbidigo expansion for the PCC and skill parser. Post-fix gosec -include=G304 ./... reports no finding at those four selected sinks; unselected sites retain their checkpoint dispositions. No review or orchestrator approval is claimed."
     },
     {

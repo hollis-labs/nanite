@@ -1,7 +1,7 @@
 # Triage the remaining gosec G304 path-traversal-via-variable sites
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** sequencing only — should be read alongside `TASKS/audit-remediation/03-agent-slug-traversal/01-canonical-slug-path-validation.md` (that folder was empty at the time this task was authored; the cross-reference below is written against the finding it's expected to cover). Not a hard blocking dependency — this task's own list-production step (Step 1) simply must exclude that task's scope rather than re-analyze it.
 **Touches:** `internal/contextbroker/source_pcc.go`, `internal/contextbroker/source_pcc_test.go`, `internal/skill/parser.go`, `internal/skill/parser_test.go`, `internal/api/plugins.go`, `internal/api/plugins_install_test.go`, `.golangci.yml`; plus this task's checkpoint and finding metadata.
 **Requires architect decision:** true (matches `findings.json`) — per the audit's own recommendation: "have the architect (or whoever owns the Phase-1-Wave-1 migration) walk the [filtered] list."
@@ -119,4 +119,4 @@ coordinate was selected, and no review or orchestrator approval is claimed.
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-23: Fresh review at `310a4a58722fd12a751535d5f21b3f08c303ff3e` passed with no findings. The reviewer independently reproduced the frozen `70 - 11 = 59` inventory, verified the exact four operator-approved sinks and seven-file code/config footprint, confirmed optional and separately owned sites remained untouched, and exercised both adversarial escapes and valid nested paths under race. The full G304 scan reports no finding at the four selected sinks; forbidigo-only lint, focused vet, the production build, and diff checks passed.

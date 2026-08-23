@@ -1224,3 +1224,13 @@ corrected `--exclude` form, and any future task copying that idiom should too. (
 baseline table said 371 methods lacked `ctx`; the true figure was 237 (371 total, 134 already with
 `ctx`). The Codex session caught and corrected this independently — the error was in the task file as
 authored, not in their work.
+
+## 2026-08-22 — Wave 3 `08/01`: A2A webhook submit boundary is unauthenticated when optional Basic Auth is disabled — PENDING OPERATOR DECISION
+
+**Raised by:** `TASKS/audit-remediation/08-remaining-security-hardening/01-a2a-webhook-url-validation.md` mandatory auth-boundary pre-step.
+
+**Question / mismatch:** The task conservatively assumed the caller-controlled push-notification URL was at an external-authenticated boundary and explicitly required a stop before implementation if the boundary proved weaker. Production tracing found `POST /api/a2a/jsonrpc` is registered directly; its `SendMessage` path copies `PushNotificationConfig` into `TaskManager.SubmitTask` without a per-route identity check. Global Basic Auth is optional and returns the handler unchanged when credentials are unset. The supported `--bind-address 0.0.0.0` opt-in can therefore expose the URL submission path to unauthenticated remote callers. The sole outbound consumer remains `a2a_push_notifier.go`'s `NewRequestWithContext` plus `client.Do` path.
+
+**Resolution:** Pending operator confirmation. Orchestrator recommendation: keep the already-scoped DNS-rebind-safe SSRF remediation, reuse the reviewed shared `internal/ssrf` policy from `08/09`, and correct the finding's trust classification to external unauthenticated with a severity re-review. No code or task-status changes were made before escalation.
+
+**Follow-up:** Once approved, resume branch `codex/w3-08-01`; record the corrected boundary in the task Work Log/findings metadata, implement pinned dialing and redirect revalidation, then send through fresh security review.

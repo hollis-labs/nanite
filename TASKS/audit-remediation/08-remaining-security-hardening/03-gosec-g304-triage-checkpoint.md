@@ -2,11 +2,13 @@
 
 **Date:** 2026-08-22  
 **Evidence snapshot:** `1d3bfd96`  
-**Implementation state:** prohibited pending architect sign-off
+**Implementation state:** operator-approved Step 4 implemented
 
-This is the mandatory pre-implementation checkpoint for task 08/03. It is a
-mechanical inventory and trust-boundary analysis only. No production code,
-tests, or `.golangci.yml` were changed.
+This was the mandatory pre-implementation checkpoint for task 08/03. Its
+mechanical inventory and trust-boundary analysis remain the frozen basis for
+the implementation. On 2026-08-22, the operator explicitly approved the four
+coordinates and seven-file code/config footprint below; Step 4 then implemented
+that selection without adding another coordinate.
 
 ## Method and count reconciliation
 
@@ -141,9 +143,9 @@ to 16 + 9 + 10 = **35**.
 | Catalog/plugin ID → installer → `DirStaging.Begin` lock path | `internal/plugin/install/staging.go:46` | 1 | `ValidatePluginID` precedes join; no change. |
 | Catalog archive staged root → `ValidateManifest` → fixed manifest path | `internal/plugin/install/validate.go:125` | 1 | Path internally constructed by installer; no change. |
 
-## Proposed Step-4 selection — awaiting sign-off
+## Approved and implemented Step-4 selection
 
-Recommend selecting **4 frozen G304 coordinates across three boundaries and
+The operator approved **4 frozen G304 coordinates across three boundaries and
 three production files**:
 
 1. `internal/contextbroker/source_pcc.go:99`: replace raw scope/entry joins with
@@ -166,7 +168,7 @@ preserve link entries as symlinks, and local installation dereferences a source 
 materializes a regular destination file. Hardening `resolvePluginAssetPath`
 cannot repair that earlier read.
 
-Proposed implementation footprint after approval:
+Implemented code/config footprint:
 
 - `internal/contextbroker/source_pcc.go`
 - `internal/contextbroker/source_pcc_test.go`
@@ -181,7 +183,7 @@ Proposed implementation footprint after approval:
   express `os.Open` symlink-follow policy, and the file contains numerous
   unrelated joins.
 
-Required Step-4 tests would cover dotdot-mid-path, symlink escape, and
+The Step-4 tests cover dotdot-mid-path, symlink escape, and
 symlink-escape-subpath for the PCC and skill-package confinement boundaries,
 plus an install-local regression proving a source-tree file symlink is rejected
 before its external target is read or copied. Expected code touches are limited
@@ -189,10 +191,10 @@ to the seven files above. The unresolved `dev_tools.go:779` walk remains with
 08/02, and the unresolved `workspace/walkup.go:265` root policy remains with
 08/09/AD-27.
 
-## Architect sign-off request
+## Step-4 authorization and result
 
-Approve or correct the evidence-backed four-coordinate / three-boundary Step-4
-selection and seven-file production, regression-test, and forbidigo footprint
-above?
-
-No review or approval is claimed by this checkpoint.
+The operator explicitly approved the evidence-backed four-coordinate,
+three-boundary selection and seven-file code/config footprint. Implementation
+is complete at those coordinates, and post-fix `gosec -include=G304 ./...`
+reports no finding at any selected sink. This records operator authorization
+only; no review or orchestrator approval is claimed by this checkpoint.

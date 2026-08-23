@@ -178,10 +178,11 @@ linters:
         linters: [forbidigo]
         path-except: '(internal/agent/|internal/service/install/|internal/plugin/builtin/adapter-)'
       # Rule 2: ResolveUnder (filepath.Join) — applies to sandbox, mcp,
-      # install. Silence everywhere else.
+      # install, and the PCC/skill files hardened by GO-SEC-003. Silence
+      # everywhere else.
       - text: 'ResolveUnder'
         linters: [forbidigo]
-        path-except: '(internal/sandbox/|internal/mcp/|internal/service/install/)'
+        path-except: '(internal/sandbox/|internal/mcp/|internal/service/install/|internal/contextbroker/source_pcc\.go|internal/skill/parser\.go)'
       # The four new internal/* packages themselves legitimately use the
       # bare primitives (pathsafe calls filepath.Join; fsutil calls
       # os.Rename etc.). Keep them exempt regardless.

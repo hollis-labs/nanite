@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/hollis-labs/nanite/internal/pathsafe"
 )
 
 // PCCSource retrieves context from the Project Context Cache (PCC) files.
@@ -75,7 +77,10 @@ func (s *PCCSource) Fetch(ctx context.Context, intent Intent, budget int) ([]Con
 	}
 
 	// Determine which project directory to read.
-	projectDir := s.resolveProjectDir(intent.Scope)
+	projectDir, err := s.resolveProjectDir(intent.Scope)
+	if err != nil {
+		return nil, fmt.Errorf("resolve pcc project scope %q: %w", intent.Scope, err)
+	}
 	if projectDir == "" {
 		return nil, nil
 	}
@@ -95,7 +100,11 @@ func (s *PCCSource) Fetch(ctx context.Context, intent Intent, budget int) ([]Con
 			continue
 		}
 
-		filePath := filepath.Join(projectDir, entry.Name())
+		filePath, err := pathsafe.ResolveUnder(projectDir, entry.Name())
+		if err != nil {
+			return nil, fmt.Errorf("resolve pcc file %q: %w", entry.Name(), err)
+		}
+		// #nosec G304 -- filePath is confined to projectDir by ResolveUnder above.
 		content, err := os.ReadFile(filePath)
 		if err != nil {
 			slog.Warn("contextbroker/pcc: failed to read", "path", filePath, "err", err)
@@ -141,28 +150,35 @@ func (s *PCCSource) Fetch(ctx context.Context, intent Intent, budget int) ([]Con
 }
 
 // resolveProjectDir finds the PCC directory for the given scope.
-func (s *PCCSource) resolveProjectDir(scope string) string {
+func (s *PCCSource) resolveProjectDir(scope string) (string, error) {
 	if scope == "" {
 		// No scope — try to find any project dir.
 		entries, err := os.ReadDir(s.BasePath)
 		if err != nil {
-			return ""
+			return "", nil
 		}
 		for _, entry := range entries {
 			if entry.IsDir() {
-				return filepath.Join(s.BasePath, entry.Name())
+				dir, err := pathsafe.ResolveUnder(s.BasePath, entry.Name())
+				if err != nil {
+					return "", err
+				}
+				return dir, nil
 			}
 		}
-		return ""
+		return "", nil
 	}
 
 	// Try exact match first.
-	dir := filepath.Join(s.BasePath, scope)
+	dir, err := pathsafe.ResolveUnder(s.BasePath, scope)
+	if err != nil {
+		return "", err
+	}
 	if info, err := os.Stat(dir); err == nil && info.IsDir() {
-		return dir
+		return dir, nil
 	}
 
-	return ""
+	return "", nil
 }
 
 // scoreFile assigns a relevance score based on the PCC filename and intent.

@@ -964,6 +964,11 @@ func copyDir(src, dst string) error {
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 
+		// install-local accepts a caller-selected source root, but that grant
+		// does not extend through links to files elsewhere on the host.
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("copy plugin source: symlink %q is not allowed", srcPath)
+		}
 		if entry.IsDir() {
 			if err := copyDir(srcPath, dstPath); err != nil {
 				return err
@@ -978,6 +983,9 @@ func copyDir(src, dst string) error {
 }
 
 func copyFile(src, dst string) error {
+	// #nosec G304 -- copyDir is the sole caller and rejects source symlinks
+	// before passing this path; the caller-selected local source is the accepted
+	// operation root for install-local.
 	in, err := os.Open(src)
 	if err != nil {
 		return err

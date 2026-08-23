@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/pathsafe"
 	"gopkg.in/yaml.v3"
 )
 
@@ -173,7 +174,11 @@ type PackageFiles map[string][]byte
 // only "here is what's declared, and here is what's actually on disk,"
 // not judging whether the two agree.
 func ParsePackageDir(dir string) (*Definition, PackageFiles, error) {
-	skillPath := filepath.Join(dir, skillFileName)
+	skillPath, err := pathsafe.ResolveUnder(dir, skillFileName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("skill: resolve %s under package %s: %w", skillFileName, dir, err)
+	}
+	// #nosec G304 -- skillPath is confined to the selected package root above.
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("skill: read %s: %w", skillPath, err)
@@ -215,7 +220,7 @@ func readPackageTree(dir string) (PackageFiles, error) {
 		if relErr != nil {
 			return relErr
 		}
-		content, readErr := os.ReadFile(p)
+		content, readErr := readPackageFile(dir, rel)
 		if readErr != nil {
 			return readErr
 		}
@@ -229,6 +234,22 @@ func readPackageTree(dir string) (PackageFiles, error) {
 		return nil, fmt.Errorf("skill: package directory %s contains no files", dir)
 	}
 	return files, nil
+}
+
+// readPackageFile confines each walked path to the caller-selected package
+// root before reading it. The package root itself is an explicit local-install
+// capability; symlinks and traversal beneath that root must not widen it.
+func readPackageFile(root, rel string) ([]byte, error) {
+	resolved, err := pathsafe.ResolveUnder(root, rel)
+	if err != nil {
+		return nil, fmt.Errorf("skill: resolve package file %q: %w", rel, err)
+	}
+	// #nosec G304 -- resolved is confined to root by ResolveUnder above.
+	content, err := os.ReadFile(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("skill: read package file %q: %w", rel, err)
+	}
+	return content, nil
 }
 
 // SlugFromFilename derives a slug from a markdown filename.

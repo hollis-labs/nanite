@@ -1,9 +1,9 @@
 # Triage the remaining gosec G304 path-traversal-via-variable sites
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** in-progress
+**Status:** implemented
 **Depends on:** sequencing only — should be read alongside `TASKS/audit-remediation/03-agent-slug-traversal/01-canonical-slug-path-validation.md` (that folder was empty at the time this task was authored; the cross-reference below is written against the finding it's expected to cover). Not a hard blocking dependency — this task's own list-production step (Step 1) simply must exclude that task's scope rather than re-analyze it.
-**Touches:** repo-wide read-only triage first; downstream code touches are **not yet known** — they depend entirely on Step 1's filtered list. Do not assume a package list before that list exists.
+**Touches:** `internal/contextbroker/source_pcc.go`, `internal/contextbroker/source_pcc_test.go`, `internal/skill/parser.go`, `internal/skill/parser_test.go`, `internal/api/plugins.go`, `internal/api/plugins_install_test.go`, `.golangci.yml`; plus this task's checkpoint and finding metadata.
 **Requires architect decision:** true (matches `findings.json`) — per the audit's own recommendation: "have the architect (or whoever owns the Phase-1-Wave-1 migration) walk the [filtered] list."
 
 > **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
@@ -68,12 +68,12 @@ Risk depends entirely on which sites Step 3 confirms need fixing — likely low-
 
 ## Done means
 
-- [ ] Fresh, complete 70-site list pulled from `raw/golangci-baseline.json` (not just the audit's sample)
-- [ ] List filtered to exclude the `internal/agent/managed_*` subset (cross-referenced, not re-analyzed) and the four already-triaged `cmd/nanite` files (documented verdict, not re-flagged)
-- [ ] Remaining filtered list classified by trust boundary per the guide's taxonomy
-- [ ] Each above-operator-CLI-trust site's call chain traced to origin
-- [ ] Architect sign-off obtained on which sites get `pathsafe.ResolveUnder` applied
-- [ ] Fixes + regression tests landed for confirmed sites; `forbidigo` tracker scope expanded if applicable
+- [x] Fresh, complete 70-site list pulled from `raw/golangci-baseline.json` (not just the audit's sample)
+- [x] List filtered to exclude the `internal/agent/managed_*` subset (cross-referenced, not re-analyzed) and the four already-triaged `cmd/nanite` files (documented verdict, not re-flagged)
+- [x] Remaining filtered list classified by trust boundary per the guide's taxonomy
+- [x] Each above-operator-CLI-trust site's call chain traced to origin
+- [x] Required Step-4 sign-off obtained: the operator explicitly approved the checkpoint's four-coordinate selection and seven-file code/config footprint
+- [x] Fixes + regression tests landed for confirmed sites; `forbidigo` tracker scope expanded to the two exact files using `pathsafe.ResolveUnder`
 
 ## Work log
 
@@ -95,6 +95,27 @@ mandatory coordinates (`source_pcc.go:99`, `skill/parser.go:177,218`, and
 `api/plugins.go:969`) and leaves Step 4 blocked for architect approval or
 correction. This correction changed documentation only; status and GO-SEC-003
 remain `in-progress`.
+
+### 2026-08-22 — operator-approved Step 4 implemented
+
+The operator explicitly approved all four corrected checkpoint coordinates and
+the seven-file code/config footprint. PCC scope and entry reads now use
+symlink-aware confinement beneath the PCC root; skill package root and walked
+file reads are confined beneath the caller-selected package root; and local
+plugin installation rejects source-tree symlinks before opening their targets.
+The forbidigo scope now covers the exact PCC and skill parser files, while
+`plugins.go` remains outside that lexical-join rule as decided.
+
+Adversarial regressions cover dotdot-mid-path, direct symlink escape, symlink
+escape through a subpath, symlinked PCC/package files, and an install-local
+source-file symlink whose external target must remain unread, unmodified, and
+uncopied. Pre-fix execution demonstrated the PCC content leak and accepted
+plugin symlink copy; post-fix focused tests (including `-count=10` and `-race`),
+touched-package tests, `go vet ./...`, `go build ./cmd/nanite/`, and
+`go test ./...` pass. A full current `gosec -include=G304 ./...` inventory
+reports 63 remaining findings and none at the four selected sinks; the frozen
+baseline command still mechanically reproduces 70 sites. No unrelated G304
+coordinate was selected, and no review or orchestrator approval is claimed.
 
 ## Review notes
 

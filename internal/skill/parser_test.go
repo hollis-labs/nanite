@@ -3,6 +3,7 @@ package skill
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -224,6 +225,87 @@ func TestParsePackageDir_MissingSkillFile(t *testing.T) {
 	dir := t.TempDir()
 	if _, _, err := ParsePackageDir(dir); err == nil {
 		t.Fatal("expected an error for a package directory with no SKILL.md")
+	}
+}
+
+func TestParsePackageDir_RejectsSymlinkedSkillFileOutsidePackage(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside-skill.md")
+	writeFile(t, filepath.Dir(outside), filepath.Base(outside), `---
+name: Outside Skill
+slug: outside-skill
+description: must not be imported through a package symlink
+---
+outside secret
+`)
+	if err := os.Symlink(outside, filepath.Join(dir, skillFileName)); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	if def, files, err := ParsePackageDir(dir); err == nil {
+		t.Fatalf("ParsePackageDir followed an escaping SKILL.md symlink: def=%+v files=%v", def, keysOf(files))
+	}
+}
+
+func TestParsePackageDir_RejectsSymlinkedPackageFileOutsidePackage(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, skillFileName, `---
+name: Safe Package
+slug: safe-package
+description: package with a hostile source symlink
+---
+safe body
+`)
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("outside asset secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "asset-link.txt")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	if def, files, err := ParsePackageDir(dir); err == nil {
+		t.Fatalf("ParsePackageDir followed an escaping package-file symlink: def=%+v files=%v", def, keysOf(files))
+	}
+}
+
+func TestReadPackageFile_RejectsEscapingPaths(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(outsideDir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideDir, "secret.txt"), []byte("outside secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideDir, "nested", "secret.txt"), []byte("nested outside secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outsideDir, "secret.txt"), filepath.Join(root, "escape.txt")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := os.Symlink(outsideDir, filepath.Join(root, "escape-dir")); err != nil {
+		t.Skipf("directory symlink unavailable: %v", err)
+	}
+
+	outsideRel, err := filepath.Rel(root, filepath.Join(outsideDir, "secret.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dotdotMid := "sub" + string(filepath.Separator) + ".." + string(filepath.Separator) + ".." + string(filepath.Separator) + outsideRel
+	for _, rel := range []string{
+		dotdotMid,
+		"escape.txt",
+		filepath.Join("escape-dir", "nested", "secret.txt"),
+	} {
+		t.Run(strings.ReplaceAll(rel, string(filepath.Separator), "_"), func(t *testing.T) {
+			if data, err := readPackageFile(root, rel); err == nil {
+				t.Fatalf("readPackageFile(%q) read %q; want confinement error", rel, data)
+			}
+		})
 	}
 }
 

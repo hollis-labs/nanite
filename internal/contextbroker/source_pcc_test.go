@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -98,5 +99,73 @@ func TestPCCSource_BudgetRespected(t *testing.T) {
 	// Only the small file should fit in the budget.
 	if len(items) > 1 {
 		t.Errorf("expected at most 1 item with tight budget, got %d", len(items))
+	}
+}
+
+func TestPCCSource_RejectsEscapingProjectScope(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "pcc")
+	if err := os.MkdirAll(filepath.Join(base, "safe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(filepath.Join(outside, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "00_project.md"), []byte("outside secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "nested", "00_project.md"), []byte("nested outside secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(base, "escape")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	dotdotMid := "safe" + string(filepath.Separator) + ".." + string(filepath.Separator) + ".." + string(filepath.Separator) + "outside"
+	for _, scope := range []string{
+		dotdotMid,       // dotdot in the middle of the caller-controlled scope
+		"escape",        // direct symlink escape
+		"escape/nested", // subpath beneath an escaping symlink
+	} {
+		t.Run(strings.ReplaceAll(scope, "/", "_"), func(t *testing.T) {
+			src := NewPCCSource(base)
+			items, err := src.Fetch(context.Background(), Intent{Type: IntentCustom, Scope: scope}, 10000)
+			if err == nil {
+				t.Fatalf("Fetch scope %q succeeded with items %+v; want confinement error", scope, items)
+			}
+			for _, item := range items {
+				if strings.Contains(item.Content, "outside secret") {
+					t.Fatalf("Fetch scope %q leaked outside content: %+v", scope, items)
+				}
+			}
+		})
+	}
+}
+
+func TestPCCSource_RejectsSymlinkedFileOutsideProject(t *testing.T) {
+	base := t.TempDir()
+	projectDir := filepath.Join(base, "safe")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(out, []byte("outside file secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(out, filepath.Join(projectDir, "00_project.md")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	src := NewPCCSource(base)
+	items, err := src.Fetch(context.Background(), Intent{Type: IntentCustom, Scope: "safe"}, 10000)
+	if err == nil {
+		t.Fatalf("Fetch succeeded with symlinked PCC file: %+v", items)
+	}
+	for _, item := range items {
+		if strings.Contains(item.Content, "outside file secret") {
+			t.Fatalf("Fetch leaked symlink target: %+v", items)
+		}
 	}
 }

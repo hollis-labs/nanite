@@ -129,6 +129,49 @@ func TestHandleInstallLocal_AlreadyInstalled(t *testing.T) {
 	}
 }
 
+func TestHandleInstallLocal_RejectsSourceFileSymlink(t *testing.T) {
+	pms, pluginsDir := setupPluginTestState(t)
+
+	srcRoot := t.TempDir()
+	pluginDir := createTestPlugin(t, srcRoot, "symlink-source-plugin")
+	outside := filepath.Join(t.TempDir(), "outside-secret.txt")
+	wantOutside := []byte("must not be copied through a source symlink")
+	if err := os.WriteFile(outside, wantOutside, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(pluginDir, "external.txt")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/plugins/install-local", pms.handleInstallLocal)
+	body, err := json.Marshal(map[string]string{"path": pluginDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/install-local", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusOK {
+		t.Fatalf("install-local accepted a source-tree file symlink: %s", rec.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "symlink") {
+		t.Fatalf("install-local error does not identify the rejected symlink: %s", rec.Body.String())
+	}
+	if _, err := os.Lstat(filepath.Join(pluginsDir, "symlink-source-plugin")); !os.IsNotExist(err) {
+		t.Fatalf("partial plugin target survived rejected symlink (stat err = %v)", err)
+	}
+	gotOutside, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatalf("outside symlink target was removed: %v", err)
+	}
+	if !bytes.Equal(gotOutside, wantOutside) {
+		t.Fatalf("outside symlink target mutated: got %q, want %q", gotOutside, wantOutside)
+	}
+}
+
 func TestHandleInstallArchive_TarGz(t *testing.T) {
 	pms, pluginsDir := setupPluginTestState(t)
 

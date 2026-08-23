@@ -71,8 +71,8 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-23 | Accept ~8 MB of audit evidence into the repo | `00/02` step 1 | — (process) | 0 | **decided** |
 | AD-24 | Dev-freeze scope and exit criteria | **every batch in the repo** | — (process) | 0 | **decided** |
 | AD-26 | Untracked `safego.Go` spawns: adopt an owner, or accept fire-and-forget | `04/04` (Part B) | GO-SVCCORE-002 | 2a | **decided** |
-| AD-27 | Autocomplete `repo_path` enumeration: constrain, or accept the local-operator trust model | `08/09` | GO-API-001 | 3 | open |
-| AD-28 | Catalog archive fetch: add a host/scheme allowlist, or accept operator-configured sources | `08/09` | GO-API-003 | 3 | open |
+| AD-27 | Autocomplete `repo_path` enumeration: constrain, or accept the local-operator trust model | `08/09` | GO-API-001 | 3 | **decided** |
+| AD-28 | Catalog archive fetch: host/scheme restriction — **and** CIDR-denylist consolidation | `08/09` | GO-API-003, **GO-SEC4-007** | 3 | **decided** |
 | AD-25 | `allow_unsigned_plugins` devmode bypass: wire or retire | `01/02` | GO-PLUGIN-008 | 1 | **decided** |
 
 ### A gap worth naming
@@ -400,7 +400,38 @@ kickoff gates on it.
 
 ### AD-27 — Autocomplete `repo_path` enumeration: constrain, or accept the local-operator trust model
 
-**Status:** open · **Gates:** `08/09` · **Findings:** GO-API-001 (low)
+**Status:** decided · **Gates:** `08/09` · **Findings:** GO-API-001 (low)
+
+> **Decided (2026-08-22): validate `repo_path` at write time, not at read
+> time.**
+>
+> Constrain where a project's `repo_path` may point when it is *set* — in
+> `handleCreateProject`/`handleUpdateProject`, which `08/09` already touches —
+> rather than confining every consumer that later reads it. Fixes the class at
+> its source, leaves the autocomplete walk untouched, and holds regardless of
+> how AD-15's bind option is configured.
+>
+> **Suggested policy, for `08/09` to confirm rather than assume:** reject the
+> filesystem root, the user's home directory *itself* (subdirectories are the
+> normal case and must stay allowed), and system directories (`/etc`, `/usr`,
+> `/var`, `/System`); require the path to exist and be a directory. That
+> directly covers the finding's own stated attack — *"point a project at `/` or
+> `$HOME`"* — without inventing new configuration. A stricter alternative, a
+> configured projects-root that all `repo_path`s must live under, is cleaner in
+> principle but needs new config and a migration for existing rows; take it
+> only if the denylist proves leaky in practice.
+>
+> **Existing rows are not validated retroactively by this change.** Decide in
+> `08/09` whether to validate on next update only (simplest, and consistent
+> with write-time framing) or to sweep existing `projects` rows. Say which in
+> the Work log either way.
+>
+> Rejected: accept-as-is (AD-15's loopback default makes it defensible, but it
+> leaves a remote authenticated caller able to enumerate `$HOME` whenever the
+> bind-wide opt-in is used); confining the walk (leaves `repo_path`
+> unconstrained for every other consumer); and a bind-conditional constraint
+> (mode-dependent security behaviour drifts silently, and the safe path would
+> be the one nobody exercises in development).
 
 Found by the Wave 3 pre-flight cross-check, 2026-08-22 — the third instance of
 the AD-25/AD-26 pattern. `GO-API-001` carries `disposition:
@@ -432,7 +463,45 @@ the trust assumption; or defer with AD-15 named as the trigger.
 
 ### AD-28 — Catalog archive fetch: add a host/scheme allowlist, or accept operator-configured sources
 
-**Status:** open · **Gates:** `08/09` · **Findings:** GO-API-003 (low)
+**Status:** decided · **Gates:** `08/09` · **Findings:** GO-API-003 (low),
+GO-SEC4-007 (low)
+
+> **Decided (2026-08-22): block private, loopback, and link-local destinations
+> — and consolidate the CIDR denylist rather than adding a third copy.**
+>
+> Reject archive URLs resolving into private/RFC1918, loopback, or link-local
+> ranges (including cloud IMDS at `169.254.169.254`). This targets the actual
+> residual — using the server as a probe into its own network — without
+> constraining which *public* hosts a catalog may legitimately vend from.
+> Rejected a same-host allowlist: it breaks the common real pattern of a
+> catalog on one host pointing at releases on another (GitHub releases, a CDN)
+> and would need an escape hatch immediately.
+>
+> ### This decision also closes `GO-SEC4-007`, which had no implementing task
+>
+> The denylist already exists **twice** — `internal/mcp/general_tools.go:61-68`
+> and `internal/sandbox/proxy.go:37+` — identical today, with the sandbox
+> copy's own comment stating the intent is parity *"so both network egress
+> paths enforce the same policy"*, and nothing enforcing it. That is
+> `GO-SEC4-007`.
+>
+> **A naive implementation of this decision would add a third copy**, making
+> the finding worse while closing a different one. So: extract the CIDR set
+> into one shared location that all three consumers import — the sandbox proxy,
+> `callWebFetch`, and the new catalog-download guard. The audit's own
+> recommendation for `GO-SEC4-007` is exactly this (*"extract the shared CIDR
+> set into one place both packages import, or add a test that asserts the two
+> lists are identical"*); prefer extraction over a parity test, since this
+> decision adds a third consumer and parity tests scale worse than a shared
+> constant.
+>
+> **Tracking correction.** `GO-SEC4-007`'s `task_file` pointed at
+> `11-semantic-duplication-migration-drift/07-ssrf-cidr-denylist-duplication.md`,
+> which explicitly disclaims being an implementation task and says the real work
+> lives in `08-remaining-security-hardening/` — where no such task was ever
+> written, because that folder was empty when `11/07` was authored. The finding
+> was therefore an orphan: flagged, dispositioned `needs-architect-decision`,
+> and implemented by nothing. Reassigned to `08/09`.
 
 Same pre-flight cross-check, same missing-entry pattern. **But this finding is
 now half-resolved, and by work that landed after Wave 0 measured it** — worth

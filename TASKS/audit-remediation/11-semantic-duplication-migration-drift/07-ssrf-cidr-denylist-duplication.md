@@ -16,6 +16,25 @@
 > - **Gated on:** AD-19
 > - **requires_security_review:** true · **requires_regression_test:** false
 
+> ## ⚠ RESOLVED ELSEWHERE — `GO-SEC4-007` reassigned to `08/09` (2026-08-22)
+>
+> This file correctly said its finding's real remediation lives in
+> `08-remaining-security-hardening/`, but named no file because that folder was
+> empty when this was written. **No such task was ever created, so
+> `GO-SEC4-007` sat as an orphan** — flagged, dispositioned, and implemented by
+> nothing — until the Wave 3 decision pass found it.
+>
+> It now belongs to
+> `08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md`,
+> because **AD-28** adds a third consumer of the duplicated CIDR denylist (a
+> catalog-download SSRF guard) and therefore has to consolidate the set rather
+> than copy it. Consolidation *is* the remediation.
+>
+> `findings.json`'s `task_file` for `GO-SEC4-007` now points at `08/09`. This
+> file remains as the classification-table entry it was always meant to be, and
+> maps to no finding — like `06/04` and `12/02`, that is by design, not an
+> unmapped-finding error.
+
 ## Purpose of this file
 
 **This is not an implementation task.** `GO-SEC4-007` — the duplicated SSRF CIDR denylist between `internal/sandbox/proxy.go` and `internal/mcp/general_tools.go` — is a real Wave 6 duplication finding thematically, but it is implemented as a security-hardening task in `TASKS/audit-remediation/08-remaining-security-hardening/`, alongside that folder's other trust-boundary findings (see that folder's own README once its task files are written — the exact filename for this specific finding was not available at the time this task-creation pass ran, since `08-remaining-security-hardening/` was empty when this folder was written). Per this batch's own "no finding should disappear merely because it was grouped" rule (remediation guide §4 Output C), this file's only job is to keep `GO-SEC4-007` visible in this folder's classification table (see this folder's `README.md`) even though its actual remediation work is tracked elsewhere.

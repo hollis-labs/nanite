@@ -31,22 +31,37 @@
 > **`GO-API-001` is intact** — `resolveRoot` (`autocomplete.go:136-154`) still
 > returns `p.RepoPath` unvalidated; only the ctx sweep touched that file.
 >
-> **Two new decisions gate the parts of this task they name**, added because
-> both findings carried `disposition: needs-architect-decision` with no queue
-> entry (the third occurrence of the AD-25/AD-26 pattern):
+> **✅ AD-27 and AD-28 are now DECIDED (2026-08-22). This task gained a third
+> finding.**
 >
-> - **AD-27** — `GO-API-001`: constrain the walk, or accept the local-operator
->   trust model. **Downstream of AD-15** — decide the auth/bind/TLS posture
->   first, because "authenticated caller" only means "the operator" under some
->   of AD-15's outcomes.
-> - **AD-28** — `GO-API-003`: add a host/scheme allowlist, or accept
->   operator-configured sources. Weigh it as request-side SSRF (internal
->   network probing from the server's vantage), not payload trust — signature
->   verification already fails closed after AD-04.
+> **AD-27 (`GO-API-001`) — validate `repo_path` at write time.** Constrain it
+> in `handleCreateProject`/`handleUpdateProject` (which this task already
+> touches), **not** by confining the autocomplete walk. Suggested policy, to
+> confirm rather than assume: reject `/`, the home directory *itself*
+> (subdirectories must stay allowed), and system dirs (`/etc`, `/usr`, `/var`,
+> `/System`); require an existing directory. Decide and record whether existing
+> `projects` rows get swept or are validated on next update only.
 >
-> The task's other findings are unaffected and dispatchable once AD-27/AD-28
-> land. Citations in this file predate both `01/01` and the ctx sweep —
-> re-locate before editing.
+> **AD-28 (`GO-API-003`) — block private/loopback/link-local destinations, and
+> DO NOT ADD A THIRD CIDR COPY.** Reject archive URLs resolving into RFC1918,
+> loopback, or link-local ranges (including cloud IMDS `169.254.169.254`). No
+> host allowlist — it would break catalog-on-one-host/releases-on-another,
+> which is the common real pattern.
+>
+> **⚠ `GO-SEC4-007` is now this task's finding too.** The denylist already
+> exists twice — `internal/mcp/general_tools.go:61-68` and
+> `internal/sandbox/proxy.go:37+` — identical, with the sandbox copy's comment
+> promising parity and nothing enforcing it. Adding a third copy here would
+> worsen that finding while closing another. **Extract the CIDR set to one
+> shared location and have all three consumers import it**: the sandbox proxy,
+> `callWebFetch`, and this task's new catalog-download guard.
+>
+> That finding was an orphan until now — its `task_file` pointed at `11/07`,
+> which disclaims being an implementation task and defers to this folder, where
+> no task for it had ever been written. Reassigned here on 2026-08-22.
+>
+> Citations in this file predate both `01/01` and the ctx sweep — re-locate
+> before editing.
 
 ## Findings addressed
 

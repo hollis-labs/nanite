@@ -33,7 +33,7 @@ sign-off block lives here instead:
 | **Design input** | `docs/audits/2026-08-21-go-quality/REPORT.md` (audit, 2026-08-21) + `docs/audits/2026-08-21-go-quality/REMEDIATION-GUIDE.md` (advisor guide, vendored into the repo by this planning pass) |
 | **Task inventory** | Created by a dedicated task-creation pass (61 files), merged in `8258176e` |
 | **Planned** | 2026-08-21 — this pass: sequencing, dependency ordering, parallelization, Wave 0 gate, architect-decision queue, prevention table |
-| **Approved for implementation** | ☐ **Not yet.** Operator sign-off required before any dispatch. |
+| **Approved for implementation** | ☑ **Approved 2026-08-23.** Operator explicitly authorized Wave 4 dispatch. |
 | **Blocking prerequisites** | (1) ~~The dev freeze (AD-24)~~ — **decided and in effect 2026-08-21**, see below. (2) Wave 0 complete, **including AD-01 through AD-04 decided**. (3) ~~AD-23~~ decided *accept* — evidence rescued and committed (`e02f52c9`). |
 
 An Orchestrator reading this file must treat an unchecked approval box as a

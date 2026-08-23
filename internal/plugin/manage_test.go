@@ -215,3 +215,26 @@ func TestManage_PluginStatus_NotInstalled(t *testing.T) {
 		t.Fatal("expected error disabling a nonexistent plugin")
 	}
 }
+
+func TestResolvePluginIdentityRejectsTraversalBeforeLegacyMigration(t *testing.T) {
+	root := t.TempDir()
+	pluginsDir := filepath.Join(root, "plugins")
+	outsideDir := filepath.Join(root, "outside-plugin")
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(outsideDir, "plugin.yaml.disabled")
+	if err := os.WriteFile(legacyPath, []byte("name: outside-plugin\nversion: 1.0.0\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := resolvePluginIdentity(pluginsDir, "../outside-plugin"); err == nil {
+		t.Fatal("resolvePluginIdentity accepted traversal name")
+	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		t.Fatalf("legacy manifest was moved or removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outsideDir, "plugin.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("legacy manifest was migrated outside pluginsDir (stat err = %v)", err)
+	}
+}

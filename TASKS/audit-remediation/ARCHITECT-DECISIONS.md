@@ -464,7 +464,7 @@ the trust assumption; or defer with AD-15 named as the trigger.
 ### AD-28 — Catalog archive fetch: add a host/scheme allowlist, or accept operator-configured sources
 
 **Status:** decided · **Gates:** `08/09` · **Findings:** GO-API-003 (low),
-GO-SEC4-007 (low)
+GO-SEC4-007 (medium)
 
 > **Decided (2026-08-22): block private, loopback, and link-local destinations
 > — and consolidate the CIDR denylist rather than adding a third copy.**

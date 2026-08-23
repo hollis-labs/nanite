@@ -5,7 +5,6 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -110,7 +109,12 @@ func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *st
 
 		// Resolve the requested path through the canonical confinement
 		// primitive so symlinks inside ui/ cannot escape the plugin root.
-		baseDir := filepath.Join(pluginsDir, name, "ui")
+		pluginDir, err := pms.resolvePluginTarget(name)
+		if err != nil {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		baseDir := filepath.Join(pluginDir, "ui")
 		target, err := pathsafe.ResolveUnder(baseDir, file)
 		if err != nil {
 			http.Error(w, "forbidden", http.StatusForbidden)
@@ -314,6 +318,26 @@ type pluginActionReq struct {
 	Name string `json:"name"`
 }
 
+// resolvePluginTarget applies the canonical plugin-ID allowlist and then the
+// repository-wide pathsafe confinement primitive. The allowlist rejects
+// traversal, nested, and absolute caller-controlled names; ResolveUnder is a
+// second boundary at the filesystem sink and also handles symlinked roots.
+func (pms *pluginManagerState) resolvePluginTarget(name string) (string, error) {
+	if err := naniteplugin.ValidatePluginID(name); err != nil {
+		return "", err
+	}
+	return pathsafe.ResolveUnder(pms.pluginsDir, name)
+}
+
+func (pms *pluginManagerState) resolvePluginTargetOrBadRequest(w http.ResponseWriter, name string) (string, bool) {
+	target, err := pms.resolvePluginTarget(name)
+	if err != nil {
+		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", err))
+		return "", false
+	}
+	return target, true
+}
+
 func (pms *pluginManagerState) handleInstall(w http.ResponseWriter, r *http.Request) {
 	var req pluginActionReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
@@ -324,14 +348,8 @@ func (pms *pluginManagerState) handleInstall(w http.ResponseWriter, r *http.Requ
 	// Confine the plugin target path under pluginsDir. A name like
 	// "../../etc/passwd" would otherwise place the cloned repo outside the
 	// plugins directory (audit finding: Critical — path traversal in install).
-	target, err := pathsafe.ResolveUnder(pms.pluginsDir, req.Name)
-	if err != nil {
-		var escErr *pathsafe.EscapeError
-		if errors.As(err, &escErr) {
-			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", escErr))
-			return
-		}
-		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", err))
+	target, ok := pms.resolvePluginTargetOrBadRequest(w, req.Name)
+	if !ok {
 		return
 	}
 
@@ -413,18 +431,13 @@ func (pms *pluginManagerState) handleInstallLocal(w http.ResponseWriter, r *http
 	// includes ".." would otherwise copy the plugin contents outside the
 	// configured plugins directory (audit finding: Critical — path traversal
 	// via local-install manifest name).
-	target, err := pathsafe.ResolveUnder(pms.pluginsDir, manifest.Name)
-	if err != nil {
-		var escErr *pathsafe.EscapeError
-		if errors.As(err, &escErr) {
-			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", escErr))
-			return
-		}
-		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", err))
+	pluginID := manifest.Identifier()
+	target, ok := pms.resolvePluginTargetOrBadRequest(w, pluginID)
+	if !ok {
 		return
 	}
 	if fileExists(filepath.Join(target, "plugin.yaml")) {
-		pms.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", manifest.Name))
+		pms.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", pluginID))
 		return
 	}
 
@@ -442,9 +455,9 @@ func (pms *pluginManagerState) handleInstallLocal(w http.ResponseWriter, r *http
 
 	pms.jsonResp(w, http.StatusOK, map[string]string{
 		"status":  "installed",
-		"plugin":  manifest.Name,
+		"plugin":  pluginID,
 		"source":  "local",
-		"message": fmt.Sprintf("Plugin %q installed from local directory.", manifest.Name),
+		"message": fmt.Sprintf("Plugin %q installed from local directory.", pluginID),
 	})
 }
 
@@ -534,18 +547,13 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 	}
 
 	// Confine archive-derived plugin target under pluginsDir.
-	target, err := pathsafe.ResolveUnder(pms.pluginsDir, manifest.Name)
-	if err != nil {
-		var escErr *pathsafe.EscapeError
-		if errors.As(err, &escErr) {
-			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", escErr))
-			return
-		}
-		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", err))
+	pluginID := manifest.Identifier()
+	target, ok := pms.resolvePluginTargetOrBadRequest(w, pluginID)
+	if !ok {
 		return
 	}
 	if fileExists(filepath.Join(target, "plugin.yaml")) {
-		pms.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", manifest.Name))
+		pms.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", pluginID))
 		return
 	}
 
@@ -562,9 +570,9 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 
 	pms.jsonResp(w, http.StatusOK, map[string]string{
 		"status":  "installed",
-		"plugin":  manifest.Name,
+		"plugin":  pluginID,
 		"source":  "archive",
-		"message": fmt.Sprintf("Plugin %q installed from archive.", manifest.Name),
+		"message": fmt.Sprintf("Plugin %q installed from archive.", pluginID),
 	})
 }
 
@@ -586,7 +594,10 @@ func (pms *pluginManagerState) handleUninstall(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	target := filepath.Join(pms.pluginsDir, req.Name)
+	target, ok := pms.resolvePluginTargetOrBadRequest(w, req.Name)
+	if !ok {
+		return
+	}
 	// Check if installed (active or disabled).
 	activeManifest := filepath.Join(target, "plugin.yaml")
 	disabledManifest := filepath.Join(target, "plugin.yaml.disabled")
@@ -628,7 +639,11 @@ func (pms *pluginManagerState) handleDisable(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Clean up agent profile and unload from running host so changes are immediate.
-	manifestPath := filepath.Join(pms.pluginsDir, req.Name, "plugin.yaml")
+	target, ok := pms.resolvePluginTargetOrBadRequest(w, req.Name)
+	if !ok {
+		return
+	}
+	manifestPath := filepath.Join(target, "plugin.yaml")
 	pms.runPluginUninstallCleanup(manifestPath)
 	unloaded := pms.unloadPluginFromHost(manifestPath)
 
@@ -664,13 +679,17 @@ func (pms *pluginManagerState) handleEnable(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	target, ok := pms.resolvePluginTargetOrBadRequest(w, req.Name)
+	if !ok {
+		return
+	}
+
 	if err := naniteplugin.EnablePlugin(pms.pluginsDir, req.Name); err != nil {
 		pms.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// Hot-load the plugin into the running host so agent profile appears immediately.
-	target := filepath.Join(pms.pluginsDir, req.Name)
 	loaded := pms.runPluginLoadIntoHost(filepath.Join(target, "plugin.yaml"), target)
 
 	// B.8: only emit plugin.enabled when the plugin actually loaded into the
@@ -693,7 +712,6 @@ func (pms *pluginManagerState) handleEnable(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-
 // handleReload unloads and re-loads a plugin in place — the J.3 dev-mode
 // affordance. Useful while iterating on a plugin without restarting the host.
 // Idempotent: if the plugin wasn't loaded (fresh install, or already unloaded)
@@ -708,14 +726,8 @@ func (pms *pluginManagerState) handleReload(w http.ResponseWriter, r *http.Reque
 	// Confine target under pluginsDir — a name like "../../etc" would
 	// otherwise let the reload handler point the loader at arbitrary
 	// files on disk. Mirrors the pattern used by handleInstall.
-	target, err := pathsafe.ResolveUnder(pms.pluginsDir, req.Name)
-	if err != nil {
-		var escErr *pathsafe.EscapeError
-		if errors.As(err, &escErr) {
-			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", escErr))
-			return
-		}
-		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", err))
+	target, ok := pms.resolvePluginTargetOrBadRequest(w, req.Name)
+	if !ok {
 		return
 	}
 	manifestPath := filepath.Join(target, "plugin.yaml")
@@ -749,10 +761,10 @@ func (pms *pluginManagerState) handleReload(w http.ResponseWriter, r *http.Reque
 	}
 
 	pms.jsonResp(w, http.StatusOK, map[string]any{
-		"status":    "reloaded",
-		"plugin":    req.Name,
-		"unloaded":  unloaded,
-		"message":   fmt.Sprintf("Plugin %q reloaded.", req.Name),
+		"status":   "reloaded",
+		"plugin":   req.Name,
+		"unloaded": unloaded,
+		"message":  fmt.Sprintf("Plugin %q reloaded.", req.Name),
 	})
 }
 

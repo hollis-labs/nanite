@@ -287,6 +287,13 @@ func pluginInstall(arg string) {
 	pluginInstallRemote(arg)
 }
 
+func validatePluginIDOrExit(id string) {
+	if err := plugin.ValidatePluginID(id); err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid plugin name %q: %v\n", id, err)
+		os.Exit(1)
+	}
+}
+
 // pluginInstallLocal installs a plugin from a local directory by
 // copying (or symlinking with --link) its contents into the resolved
 // plugins dir under the canonical id from plugin.yaml.
@@ -307,10 +314,7 @@ func pluginInstallLocal(src string) {
 		os.Exit(1)
 	}
 	id := manifest.Identifier()
-	if id == "" {
-		fmt.Fprintln(os.Stderr, "plugin.yaml missing id/name — cannot determine install target")
-		os.Exit(1)
-	}
+	validatePluginIDOrExit(id)
 
 	dir := resolvePluginsDir()
 	target := filepath.Join(dir, id)
@@ -357,6 +361,7 @@ func pluginInstallLocal(src string) {
 // if the plugin is not listed there, falls back to the legacy git-clone
 // flow at github.com/hollis-labs/<name>.git.
 func pluginInstallRemote(name string) {
+	validatePluginIDOrExit(name)
 	dir := resolvePluginsDir()
 	target := filepath.Join(dir, name)
 
@@ -502,6 +507,7 @@ func copyFile(src, dst string) error {
 }
 
 func pluginUninstall(name string) {
+	validatePluginIDOrExit(name)
 	dir := resolvePluginsDir()
 	target := filepath.Join(dir, name)
 
@@ -576,6 +582,7 @@ func pluginUninstall(name string) {
 }
 
 func pluginDisable(name string) {
+	validatePluginIDOrExit(name)
 	dir := resolvePluginsDir()
 
 	// Phase 5 item 03 (TASKS/phase-5/03-wire-registers-agent-profiles.md):
@@ -633,6 +640,7 @@ func pluginDisable(name string) {
 }
 
 func pluginEnable(name string) {
+	validatePluginIDOrExit(name)
 	dir := resolvePluginsDir()
 	if err := plugin.EnablePlugin(dir, name); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

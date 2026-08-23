@@ -3,7 +3,7 @@
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
 **Status:** implemented
 **Depends on:** none
-**Touches:** `internal/api/projects.go` (`handleCreateProject`/`handleUpdateProject`), `internal/api/artifacts.go` (`handlePlaceArtifact`/download defense in depth), `internal/api/catalog.go` (`handleCatalogInstall`), `internal/api/plugins.go` (plugin-UI static-file route), `internal/plugin/install/download.go`, `internal/mcp/general_tools.go`, `internal/sandbox/proxy.go`, new `internal/ssrf`, and focused tests; `internal/pathsafe.ResolveUnder` is reused, not modified
+**Touches:** `internal/api/projects.go` (`handleCreateProject`/`handleUpdateProject`), `internal/api/artifacts.go` (`handlePlaceArtifact`/download defense in depth), `internal/api/catalog.go` (`handleCatalogInstall`), `internal/api/plugins.go` (plugin management and UI static-file routes), `cmd/nanite/plugin_cmd.go`, `internal/plugin/manage.go` plus canonical plugin-ID validation, `internal/plugin/install/download.go`, `internal/mcp/general_tools.go`, `internal/sandbox/proxy.go`, new `internal/ssrf`, and focused tests; `internal/pathsafe.ResolveUnder` is reused, not modified
 **Requires architect decision:** resolved by AD-27 and AD-28
 
 > **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
@@ -161,6 +161,26 @@ The behavior changes reject unsafe project roots, artifact paths outside the con
   with existing canonical absolute rows.
 - The plugin-UI route now uses `pathsafe.ResolveUnder`; its symlink-escape
   regression returns 403 without exposing the target.
+- Review correction: the sibling plugin-name mutation boundary is now closed
+  comprehensively. Caller enumeration found API install, local/archive
+  install, uninstall, disable, enable, reload, and UI routes; CLI local/remote
+  install, uninstall, disable, and enable commands; catalog install (already
+  validated through the install package); and the common
+  `resolvePluginIdentity` sink. That sink serves `DisablePlugin` and
+  `EnablePlugin` from both API and CLI, `PluginStatus` from API/CLI directory
+  listings whose names originate in `os.ReadDir`, and `IsDisabled` (no current
+  non-test caller). Catalog browsing has one catalog-derived read-only status
+  join, not a mutation sink. The existing
+  canonical plugin-ID rule now lives in `internal/plugin`, the install package
+  delegates to it, API and CLI mutation boundaries validate it before path
+  use, and the management sink validates again before joins or legacy-manifest
+  migration. HTTP adversarial regressions cover traversal, nested, and
+  absolute names for uninstall/disable/enable and preserve an outside
+  `plugin.yaml` byte-for-byte with its mode unchanged.
+- Review correction: the shared-policy tables now independently lock CGNAT,
+  IPv6 ULA, IPv4 unspecified, and IPv6 unspecified rejection in both
+  `internal/ssrf` and catalog downloader behavior, in addition to RFC1918,
+  loopback, link-local, and IMDS coverage.
 - Sibling enumeration: the only `internal/api` `Clean`+`HasPrefix` path
   confinement was the named plugin-UI route. Artifact upload already uses
   `ResolveUnder` for both directory and file placement; archive extraction and
@@ -176,6 +196,14 @@ The behavior changes reject unsafe project roots, artifact paths outside the con
   intermittent `internal/service` `driveBootSession` send-on-closed-channel
   panic; `go test ./internal/service` then passed, and a clean full
   `go test ./...` rerun passed. No full-repo race campaign was launched.
+- Review-correction verification: focused full-package tests passed for
+  `internal/ssrf`, `internal/plugin/install`, `internal/plugin`,
+  `internal/mcp`, `internal/sandbox`, and `internal/api`. The targeted gosec
+  rules (`G107`, `G110`, `G304`, `G703`) reported the repository's existing
+  path-taint/noise findings (including `pathsafe`-confined artifact and plugin
+  UI sinks), with no `G107`/`G110` regression and no new unsafe plugin-name
+  mutation sink. `go build ./cmd/nanite/`, `go vet ./...`, and a clean
+  non-race `go test ./... -count=1` all passed.
 
 ## Review notes
 

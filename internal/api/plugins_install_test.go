@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +16,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // setupPluginTestState creates a temp directory and a pluginManagerState for testing.
@@ -217,6 +221,84 @@ func TestHandleInstall_PathTraversal(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &resp)
 	if !strings.Contains(resp["error"], "escapes root") && !strings.Contains(resp["error"], "invalid plugin name") {
 		t.Errorf("expected pathsafe escape error in body, got %q", resp["error"])
+	}
+}
+
+// TestPluginMutationHandlersRejectNonCanonicalNames locks the management
+// boundary at the HTTP layer. Before this regression, ../outside-plugin was
+// joined directly in uninstall and in the enable/disable management sink;
+// uninstall could delete the outside directory, while enable/disable could
+// manage the outside manifest's database identity (and migrate a legacy
+// disabled manifest in place).
+func TestPluginMutationHandlersRejectNonCanonicalNames(t *testing.T) {
+	handlers := map[string]func(*pluginManagerState, http.ResponseWriter, *http.Request){
+		"uninstall": (*pluginManagerState).handleUninstall,
+		"disable":   (*pluginManagerState).handleDisable,
+		"enable":    (*pluginManagerState).handleEnable,
+	}
+	badNames := []string{
+		"../outside-plugin",
+		"nested/plugin",
+		filepath.Join(t.TempDir(), "absolute-plugin"),
+	}
+
+	for action, handler := range handlers {
+		action, handler := action, handler
+		t.Run(action, func(t *testing.T) {
+			root := t.TempDir()
+			pluginsDir := filepath.Join(root, "plugins")
+			if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			outsideDir := filepath.Join(root, "outside-plugin")
+			if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			manifestPath := filepath.Join(outsideDir, "plugin.yaml")
+			manifest := []byte("name: outside-plugin\nversion: 1.0.0\ndescription: outside sentinel\n")
+			if err := os.WriteFile(manifestPath, manifest, 0o640); err != nil {
+				t.Fatal(err)
+			}
+
+			db, err := store.New(context.Background(), filepath.Join(root, "test.db"))
+			if err != nil {
+				t.Fatalf("store.New: %v", err)
+			}
+			naniteplugin.SetPluginStateStore(db)
+			t.Cleanup(func() {
+				naniteplugin.SetPluginStateStore(nil)
+				_ = db.Close(context.Background())
+			})
+			pms := &pluginManagerState{pluginsDir: pluginsDir, reposPath: filepath.Join(pluginsDir, "repos.yaml"), store: db}
+
+			for _, name := range badNames {
+				body, err := json.Marshal(pluginActionReq{Name: name})
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := httptest.NewRequest(http.MethodPost, "/api/plugins/"+action, bytes.NewReader(body))
+				rec := httptest.NewRecorder()
+				handler(pms, rec, req)
+				if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid plugin name") {
+					t.Errorf("name %q: status/body = %d %q, want 400 invalid plugin name", name, rec.Code, rec.Body.String())
+				}
+			}
+
+			got, err := os.ReadFile(manifestPath)
+			if err != nil {
+				t.Fatalf("outside plugin.yaml was removed: %v", err)
+			}
+			if !bytes.Equal(got, manifest) {
+				t.Fatalf("outside plugin.yaml mutated: got %q, want %q", got, manifest)
+			}
+			info, err := os.Stat(manifestPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != 0o640 {
+				t.Fatalf("outside plugin.yaml mode mutated to %o", info.Mode().Perm())
+			}
+		})
 	}
 }
 

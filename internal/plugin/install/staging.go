@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/plugin"
 )
 
 // DirStaging manages a staging root (temp dirs + lockfiles) sitting next to
@@ -144,26 +146,7 @@ func (s *DirStaging) validate() error {
 // different confinement mechanism (AD-04 item 1,
 // TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md).
 func ValidatePluginID(id string) error {
-	if id == "" {
-		return errors.New("staging: empty plugin id")
-	}
-	if len(id) < 2 || len(id) > 63 {
-		return fmt.Errorf("staging: plugin id %q length %d out of range [2,63]", id, len(id))
-	}
-	first := rune(id[0])
-	if first < 'a' || first > 'z' {
-		return fmt.Errorf("staging: plugin id %q must start with lowercase letter", id)
-	}
-	for _, r := range id[1:] {
-		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= '0' && r <= '9':
-		case r == '-':
-		default:
-			return fmt.Errorf("staging: invalid plugin id %q", id)
-		}
-	}
-	return nil
+	return plugin.ValidatePluginID(id)
 }
 
 // isCrossDeviceError reports whether err stems from a rename across

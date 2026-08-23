@@ -136,9 +136,18 @@ func TestDownload_EmitsProgress(t *testing.T) {
 }
 
 func TestDownload_BlocksPrivateAndIMDSDestinations(t *testing.T) {
-	tests := []string{"10.0.0.1", "127.0.0.1", "169.254.169.254", "fe80::1"}
-	for _, blocked := range tests {
-		t.Run(blocked, func(t *testing.T) {
+	tests := map[string]string{
+		"rfc1918":          "10.0.0.1",
+		"ipv4-loopback":    "127.0.0.1",
+		"imds-link-local":  "169.254.169.254",
+		"ipv6-link-local":  "fe80::1",
+		"cgnat":            "100.64.0.1",
+		"ipv6-ula":         "fd00::1",
+		"ipv4-unspecified": "0.0.0.0",
+		"ipv6-unspecified": "::",
+	}
+	for name, blocked := range tests {
+		t.Run(name, func(t *testing.T) {
 			dialed := false
 			d := &HTTPDownloader{
 				Resolver: func(context.Context, string) ([]net.IP, error) {

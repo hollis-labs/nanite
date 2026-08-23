@@ -133,6 +133,13 @@ type pluginIdentity struct {
 // the transition to the DB-backed model instead of silently reverting to
 // enabled.
 func resolvePluginIdentity(pluginsDir, name string) (id pluginIdentity, migratedFromDisabled bool, err error) {
+	// This is the common sink for API and CLI enable/disable/status calls.
+	// Validate before any path construction or legacy-manifest rename so a
+	// caller can never use a traversal, nested path, or absolute path to make
+	// plugin management mutate outside pluginsDir.
+	if err := ValidatePluginID(name); err != nil {
+		return pluginIdentity{}, false, fmt.Errorf("invalid plugin name %q: %w", name, err)
+	}
 	dir := filepath.Join(pluginsDir, name)
 	active := filepath.Join(dir, "plugin.yaml")
 	legacyDisabled := filepath.Join(dir, "plugin.yaml.disabled")

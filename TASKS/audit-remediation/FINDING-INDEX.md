@@ -63,7 +63,7 @@ findings. `12/02` is guide-derived. Neither is an unmapped-finding error.
 | `GO-SEC-003` | medium | `08-remaining-security-hardening/03-triage-remaining-gosec-g304-sites.md` |
 | `GO-SEC4-003` | medium | `08-remaining-security-hardening/04-permission-default-mode-write-gap.md` |
 | `GO-SEC4-004` | medium | `08-remaining-security-hardening/05-secret-key-heuristic-hardening.md` |
-| `GO-SEC4-007` | medium | `11-semantic-duplication-migration-drift/07-ssrf-cidr-denylist-duplication.md` |
+| `GO-SEC4-007` | medium | `08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md` |
 | `GO-STORE-001` | medium | `10-architectural-concentration/03-container-and-store-review-note.md` |
 | `GO-STORE-005` | medium | `06-store-correctness/02-triage-store-context-and-transaction-gaps.md` |
 | `GO-SVCCORE-001` | medium | `04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md` |
@@ -196,7 +196,7 @@ findings. `12/02` is guide-derived. Neither is an unmapped-finding error.
 - **`08-remaining-security-hardening/06-sandbox-proxy-header-timeout.md`** — `GO-SEC4-008`
 - **`08-remaining-security-hardening/07-server-auth-bind-tls-posture.md`** — `GO-RUNTIME-002`
 - **`08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md`** — `GO-SEC-001`, `GO-SEC-002`
-- **`08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md`** — `GO-API-001`, `GO-API-002`, `GO-API-003`, `GO-API-008`
+- **`08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md`** — `GO-API-001`, `GO-API-002`, `GO-API-003`, `GO-API-008`, `GO-SEC4-007`
 - **`08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md`** — `GO-API-004`, `GO-API-005`
 
 ### `09-production-islands/`
@@ -222,7 +222,6 @@ findings. `12/02` is guide-derived. Neither is an unmapped-finding error.
 - **`11-semantic-duplication-migration-drift/04-traffic-light-calculation-duplication.md`** — `GO-INFRA-002`
 - **`11-semantic-duplication-migration-drift/05-mcp-result-processing-tail-duplication.md`** — `GO-MCPTOOL-012`
 - **`11-semantic-duplication-migration-drift/06-provider-streaming-error-handling-divergence.md`** — `GO-INFRA-004`
-- **`11-semantic-duplication-migration-drift/07-ssrf-cidr-denylist-duplication.md`** — `GO-SEC4-007`
 - **`11-semantic-duplication-migration-drift/08-config-package-naming-collision.md`** — `GO-INFRA-001`
 - **`11-semantic-duplication-migration-drift/09-elicitation-client-side-duplication-and-dead-doc.md`** — `GO-CHAT-004`, `GO-MCPTOOL-004`
 - **`11-semantic-duplication-migration-drift/10-envelope-registry-triplication.md`** — `GO-CHAT-001`

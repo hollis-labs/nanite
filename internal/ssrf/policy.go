@@ -74,9 +74,6 @@ func ResolveAndPin(ctx context.Context, resolver Resolver, host string, allowLoc
 				return nil, fmt.Errorf("%w: %s in %s", ErrBlocked, ip, block)
 			}
 		}
-		if ip.IsUnspecified() {
-			return nil, fmt.Errorf("%w: unspecified %s", ErrBlocked, ip)
-		}
 	}
 	return ips[0], nil
 }

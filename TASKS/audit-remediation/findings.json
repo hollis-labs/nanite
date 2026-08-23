@@ -1598,7 +1598,7 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/09-production-islands/06-curated-tool-knowledge-matcher.md",
       "disposition": "retire-feature",
-      "task_status": "not-started",
+      "task_status": "implemented",
       "revalidation_note": "Confirmed still dead: zero production callers of tool_knowledge.go's curated-catalog matcher anywhere outside its own file and tests. Same catalog-gap correction as GO-MEM-002 above (per this task's dispatch instructions and ARCHITECT-DECISIONS.md's \"gap worth naming\"): not flagged `requires_architect_decision: true` in findings.json despite being one of the six AD-06..AD-11 wire/defer/retire islands (AD-11 here). Setting disposition to needs-architect-decision to bring the catalog into line. [AD-11 DECIDED 2026-08-22: retire tool_knowledge.go's curated matcher. Third parallel mechanism for one job; intent.go remains.]"
     },
     {

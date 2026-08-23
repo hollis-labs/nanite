@@ -1,7 +1,7 @@
 # Decide the fate of `contextbroker`'s Hadron blueprint context gate (fix required before any "wire")
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch.
 **Touches:** `internal/contextbroker/gate_hadron_blueprints.go`,
 `internal/contextbroker/gate_hadron_blueprints_test.go`,
@@ -343,4 +343,6 @@ grep restricted to non-test files.
 
 ## Review notes
 
-<Reviewer fills this in.>
+- **Fresh review (2026-08-23): fix required.** Runtime retirement passed; current tracking still described Hadron as live, left applicable completion boxes unchecked, and omitted 337 deleted test lines.
+- **Fix applied (worker pass, 2026-08-23):** corrected the current landing page, completion checklist, and canonical deletion accounting.
+- **Fresh re-review (2026-08-23): PASS.** Both gate files remain absent, the four live context sources remain registered, current tracking is consistent, and focused build/test/diff checks pass. No findings remain.

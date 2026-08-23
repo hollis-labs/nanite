@@ -1,7 +1,7 @@
 # Decide the fate of `internal/tool`'s canonical Tool-interface/builder architecture
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch — see this folder's `README.md` for a
 non-blocking cross-reference note relating this task to `05-reasoning-augmented-tool-selection.md`
 and `06-curated-tool-knowledge-matcher.md`.
@@ -397,3 +397,7 @@ comment for `adapt.go` specifically.
   `internal/tool/stash/categories.go`.
 - Review-fix worker updated all three comments to describe current behavior
   only. Independent re-review remains pending.
+- Fresh re-review (2026-08-23): **PASS**. The reviewer confirmed the retired
+  root-tool files remain absent, `cache.go`/`cache_test.go` are byte-unchanged,
+  live `BuiltinCategorizer` behavior and wiring are preserved, and all stale
+  adapter/registry references are gone. No findings remain.

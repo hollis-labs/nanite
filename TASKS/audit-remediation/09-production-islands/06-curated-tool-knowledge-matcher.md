@@ -1,7 +1,7 @@
 # Decide the fate of the curated tool-knowledge intent matcher (`tool_knowledge.go`)
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch — see this folder's `README.md` for a
 non-blocking cross-reference note relating this task to
 `04-tool-builder-yaml-architecture.md` and `05-reasoning-augmented-tool-selection.md`.
@@ -306,3 +306,7 @@ above.
 - 2026-08-23: Second bounded fix applied: replaced only that stale phrase
   with the live `SelectByIntent` keyword-scoring responsibility. Fresh
   re-review pending; no pass is claimed here.
+- 2026-08-23: Final fresh re-review result: **PASS**. The reviewer confirmed
+  all current guidance now reflects AD-11, the retired files/symbols remain
+  absent, the live `SelectByIntent` path remains reachable, and focused
+  reference/deadcode/build checks pass. No findings remain.

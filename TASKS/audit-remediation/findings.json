@@ -1544,7 +1544,7 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/09-production-islands/04-tool-builder-yaml-architecture.md",
       "disposition": "retire-feature",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still dead: zero production callers of tool.NewBuilder/tool.Register/adapt.Convert-style symbols outside internal/tool/ itself and its own tests. Wire/defer/retire is AD-09's explicit call; AD-09's outcome also changes 13/01's scope per the batch README. [AD-09 DECIDED 2026-08-22: retire except cache.go. Verified NewResultCache/ResultCache/ResultCacheConfig remain live in internal/service/chat.go and container.go. Implementation revalidation also found the live internal/tool/stash categorizer depended on the retiring root Tool interface/category constants; it was detached to stash-local category constants with behavior coverage while the live stash package was preserved. Deleted adapt.go, builder.go, register.go, tool.go, yaml_loader.go and their tests, and did not carry tool.go's false package doc over.]"
     },
     {
@@ -1598,7 +1598,7 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/09-production-islands/06-curated-tool-knowledge-matcher.md",
       "disposition": "retire-feature",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still dead: zero production callers of tool_knowledge.go's curated-catalog matcher anywhere outside its own file and tests. Same catalog-gap correction as GO-MEM-002 above (per this task's dispatch instructions and ARCHITECT-DECISIONS.md's \"gap worth naming\"): not flagged `requires_architect_decision: true` in findings.json despite being one of the six AD-06..AD-11 wire/defer/retire islands (AD-11 here). Setting disposition to needs-architect-decision to bring the catalog into line. [AD-11 DECIDED 2026-08-22: retire tool_knowledge.go's curated matcher. Third parallel mechanism for one job; intent.go remains.]"
     },
     {
@@ -2304,7 +2304,7 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/09-production-islands/01-grounding-memory-recall.md",
       "disposition": "retire-feature",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still unwired: zero hits for `GroundingRecaller =` / `GroundingLogger =` anywhere in the tree, and container.go (despite substantial unrelated additive changes since the audit) has zero references to Grounding at all. Wire/defer/retire is AD-06's explicit call. [AD-06 DECIDED 2026-08-22: retire. Delete internal/grounding/ plus the two unassigned SelfToolsTransport fields (self_tools_transport.go:219-231) and the E2 recall block (self_tools_dispatch.go:109-118).]"
     },
     {
@@ -2332,7 +2332,7 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/09-production-islands/02-hadron-context-gate.md",
       "disposition": "retire-feature",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still unwired: zero hits for HadronBlueprintGate construction/registration anywhere in the composition root. Per this task's dispatch instructions and the batch's own ARCHITECT-DECISIONS.md \"gap worth naming\" / ESCALATIONS.md correction: this finding is not flagged `requires_architect_decision: true` in findings.json even though it is squarely one of the six wire/defer/retire islands the remediation guide's \u00a74 Wave 4 requires a decision for (AD-07). Setting disposition to needs-architect-decision brings the catalog in line with that guide requirement and with task file 09/02's own explicit note about this exact gap. [AD-07 DECIDED 2026-08-22: retire, on an architectural-boundary argument rather than reachability -- core must not contain code specific to another application. Also disposes of the latent unbounded-relevance-score bug rather than deferring it.]"
     },
     {

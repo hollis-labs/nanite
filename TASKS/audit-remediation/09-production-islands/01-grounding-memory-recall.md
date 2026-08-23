@@ -1,7 +1,7 @@
 # Decide the fate of `internal/grounding`'s pre-strategy memory-recall subsystem
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch.
 **Touches:** `internal/grounding/recall.go`, `internal/grounding/outcome.go`,
 `internal/grounding/types.go`, `internal/selftools/self_tools_transport.go`
@@ -287,3 +287,4 @@ do").
 
 - **Fresh-review finding (2026-08-23): fix required.** The production-islands README and global Phase 8 index contradicted AD-06's implemented retirement as described above.
 - **Fix applied (worker pass, 2026-08-23):** corrected both tracking surfaces and recorded the change in the Work Log. Re-review remains pending; this entry does not claim the fix has passed review.
+- **Fresh re-review (2026-08-23): PASS.** The reviewer confirmed both tracking fixes, the complete grounding retirement, preservation of `internal/memory.Service` and historical migrations, and clean focused/full verification. No findings remain.

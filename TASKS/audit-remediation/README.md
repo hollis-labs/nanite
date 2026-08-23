@@ -11,7 +11,7 @@ sibling to `TASKS/reflex-taxonomy/`, `TASKS/harness-reactive-self-tools/`,
 `TASKS/code-mode/` — kept in its own top-level `TASKS/` subfolder for the same
 reason those are.
 
-**63 task files, 113 findings, 9 waves.** This is by a wide margin the largest
+**67 task files, 113 findings, 10 waves.** This is by a wide margin the largest
 batch this process has run (previous maximum: `TASKS/skills/` at 12 tasks), and
 it is the only one whose source of truth is an audit rather than a design doc.
 Both facts change how it is dispatched — see "Dispatch model" below.
@@ -219,7 +219,8 @@ executed successfully.
 | **W6a** | 6 | `11/01,02,05,06,07,08,09,10,11` | 9 | W5 closed. AD-19, AD-20 decided. |
 | **W6b** | 6 | `11/03,04,12,13,14,15,16` | 7 | W6a closed. |
 | **W7** | 7 | `12/01`, `12/03` | 2 | W6 closed. AD-21 decided. |
-| **W8** | 8 | `13/*` | 5 | W7 closed. AD-22 decided. |
+| **W8** | 8 | `13/*` | 5 | W7 closed. AD-22 decided. **`13/03` is the batch's final commit.** |
+| **W9** | 9 | `14/*` | 2 | W7 closed. AD-05, AD-21 decided. Lands **after W7, before `13/03`** — see below. |
 
 **`12/02` (engineering standards docs) is deliberately pulled forward from
 Wave 7 into Wave 1.** The guide files it under the quality-ratchet wave, but
@@ -359,15 +360,6 @@ before.**
 | `12/01` full-repo scheduled lint gate | W6, `00/02` | AD-21 | Baseline from `00/02`'s frozen-HEAD numbers |
 | `12/03` goroutine lint coverage gap | `04/04` | — | Fix `Makefile:74-81` — fixed package list, non-fatal `-` prefix |
 
-### Wave 9 — Follow-ups
-
-| Task | Depends on | Gated on | Notes |
-|---|---|---|---|
-| `14/01` remove default seeded catalog source | `01/01` | AD-05 ✅ | Leaves no catalog source on a fresh install — needs an empty-state screen, owned by the UI/UX workstream |
-| `14/02` error-handling backlog paydown | `12/01` stage 1 | AD-21 ✅ | 365 findings. **Blocks `12/01` stage 2.** Same hazard profile as `06/03` — see its banner |
-
-Lands after Wave 7 and **before `13/03`**, which stays the batch's final commit.
-
 ### Wave 8 — Mechanical cleanup
 
 | Task | Depends on | Gated on | Notes |
@@ -377,6 +369,15 @@ Lands after Wave 7 and **before `13/03`**, which stays the batch's final commit.
 | `13/03` naming and formatting fixes | **everything** | AD-22 | **Absolutely last, alone** — see parallelization |
 | `13/04` low-risk error-handling batch | W7 | — | Independent files |
 | `13/05` low-risk hygiene + lock scope | `11/05`, `11/10`, `09/02` | — | |
+
+### Wave 9 — Follow-ups
+
+| Task | Depends on | Gated on | Notes |
+|---|---|---|---|
+| `14/01` remove default seeded catalog source | `01/01` | AD-05 ✅ | Leaves no catalog source on a fresh install — needs an empty-state screen, owned by the UI/UX workstream |
+| `14/02` error-handling backlog paydown | `12/01` stage 1 | AD-21 ✅ | 365 findings. **Blocks `12/01` stage 2.** Same hazard profile as `06/03` — see its banner |
+
+Lands after Wave 7 and **before `13/03`**, which stays the batch's final commit.
 
 ## Parallelization plan
 

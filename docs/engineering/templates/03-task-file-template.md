@@ -78,6 +78,11 @@ regression test, re-traced the logic by hand, re-grepped for a claimed-absent
 pattern) rather than just restating the worker's own claims.>
 ```
 
+> **See `docs/engineering/failure-modes.md` — required reading.** It covers
+> this section's material plus three classes it doesn't: stale premises,
+> documents being read as ground truth rather than best-effort snapshots, and
+> rule scope inflation. Every example there is real, from this batch.
+
 ## Numeric claims — the most reliable source of drift in this process
 
 Five separate count errors surfaced across Waves 0-2, in task files, kickoffs,

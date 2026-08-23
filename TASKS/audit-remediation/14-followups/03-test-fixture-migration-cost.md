@@ -18,6 +18,83 @@
 
 ---
 
+> ## READ THIS FIRST — this task is dispatched standalone, in isolation
+>
+> This file is written to be handed to a fresh session with no other batch
+> context — the same pattern `06-store-correctness/03-full-context-propagation-sweep.md`
+> used for its own isolated dispatch. **Everything you need is in this file.**
+> Do not go exploring the wider `TASKS/` tree for direction, and do not act on
+> anything you find there — the rest of that tree describes other batch work,
+> most of it frozen or sequenced against this task in ways described below.
+>
+> **You are still working inside the real `nanite` git repository** — file
+> paths cited here (`internal/store/store_test.go`, etc.) are real and
+> readable directly; this isolation instruction is about scope, not about
+> pretending the rest of the repo doesn't exist.
+>
+> **This task must run before Wave 6, not in wave order — this is a hard
+> sequencing constraint, not a preference.** Two Wave 6 tasks want exclusive
+> access to packages this task rewrites test fixtures across: `11/13`
+> (`internal/store` scan-loop duplication) and `11/15` (`internal/api`
+> response boilerplate) each want `internal/store`/`internal/api` to
+> themselves. If this task and Wave 6 run concurrently, Wave 6's own test
+> runs execute against fixtures that are changing out from under them —
+> neither this task gets a clean race verdict, nor does Wave 6 get a clean
+> result to review. Confirm with the operator that Wave 6 has not yet started
+> before beginning; if it has, stop and escalate rather than proceeding.
+>
+> **Why this matters beyond its own line items:** every wave from here
+> forward needs an aggregate `-race` verdict, and per the table below, none
+> has gotten one since Wave 2. Wave 6 would very likely become the fifth
+> occurrence with no verdict — this task exists to convert that into a real
+> pass/fail before it happens again, not just to speed up test runs.
+>
+> **Independent review is still required, even though this is a standalone,
+> single-task dispatch — do not skip it because there's no Orchestrator
+> coordinating multiple tasks around it.** See "For the reviewer" near the
+> end of this file before reviewing; it names a specific hazard this task's
+> own success signal (a faster suite) cannot distinguish from a real
+> regression on its own.
+
+## Operational discipline for this dispatch
+
+This task has no Orchestrator and no wave handoff — the two mechanisms that
+normally carry findings and status forward in this batch. That means you are
+responsible for both directly, not just the fix itself.
+
+**Status and Work Log — update as you go, not just at the end.** Flip the
+`Status:` field in this file's own header forward as you progress
+(`not-started` → `implemented` once the fix lands and the suite is green →
+`reviewed` once a reviewer signs off — matching this batch's convention even
+though you can't see the other task files that establish it). Fill in
+`## Work log` below with what you actually did: the before/after timing
+numbers, which approach you took, the trace results from the reviewer's
+isolation check if you ran it yourself first, and any place the mechanical
+adoption didn't cleanly apply and you had to make a judgment call.
+
+**Discoveries that must outlive this task go to `TASKS/ESCALATIONS.md`
+directly — you are the only one who will otherwise write them down.** Apply
+this test: *if the reviewer is the only one who ever reads my Work Log, does
+this finding still need to survive?* If yes, it belongs in
+`TASKS/ESCALATIONS.md` in full (Shape B —
+`docs/engineering/templates/05-escalation-entry-template.md` — a real
+correction to a stated fact, a bug found and deliberately not fixed because
+it's out of scope, a process incident, anything with an undetermined owner),
+referenced from your Work Log rather than duplicated into it. Concretely for
+this task: a fixture bug that isn't the migration-cost issue, a package
+whose `store.New(` call sites resist the mechanical pattern for a real
+reason, or anything you find while checking candidate 6 (redirected-store
+verification) that looks like a second instance of the `08/10` class of
+incident.
+
+**Work directly against a clean `main`; no worktree isolation needed for
+this task specifically** — nothing else should be running concurrently with
+it (see the isolation banner above), so there's no parallel worktree to
+isolate against. If you discover something else *is* running against
+`internal/store`/`internal/service`/`internal/selftools`/`internal/api`
+concurrently, stop and escalate per the sequencing constraint above rather
+than proceeding.
+
 ## Context
 
 ### What is happening
@@ -155,6 +232,56 @@ fixture setup, that is the natural moment.
   `14-followups/README.md`'s register.
 - If test isolation was touched, say explicitly whether candidate 6 was
   addressed or deliberately left.
+
+## For the reviewer — read this before reviewing, not a generic "review this" ask
+
+**The specific hazard: "faster" and "broken isolation" look identical from
+the inside.** A fixture that's quick because every test now shares one live
+database file passes its own timing check perfectly — the suite genuinely
+does get faster, the worker's before/after numbers will genuinely look
+good, and nothing about a passing `go test -race ./...` run distinguishes
+that outcome from a correct one. A timing win is not evidence of a correct
+fix here; it's exactly as consistent with the bug this instruction exists to
+catch.
+
+**Do this specifically, not "check that tests still pass":**
+
+1. Pick at least 3-4 of the migrated call sites across different packages
+   (`internal/service`, `internal/selftools`, `internal/api` at minimum —
+   the packages named in this task's own Done-means).
+2. For each, trace the actual DB path/file each test instance opens — not
+   the helper function's signature, the real resolved path at runtime (e.g.
+   confirm it's under that specific test's own `t.TempDir()`, not a shared
+   package-level path, a fixed filename, or anything computed once and
+   reused across tests).
+3. Confirm two different tests running concurrently (as `-race` runs them)
+   provably open two different files — read the code path, don't infer this
+   from the suite passing.
+4. If the worker's fix follows `internal/store`'s own template-copy pattern
+   correctly, this should be structurally easy to confirm — the template is
+   read-only, each test gets a fresh copy. Anything that instead has tests
+   open the *same* path, or the *same* already-open handle, is the bug this
+   check exists to catch, no matter how fast or green the suite looks.
+
+**This is not a hypothetical concern for this batch specifically.** Wave 3's
+`08/10` review found regression tests that had been writing synthetic
+memories into the operator's real Tesseract database — a genuine test-
+isolation failure that shipped past a passing suite and was only caught on
+review (`TASKS/ESCALATIONS.md`, 2026-08-23, "Wave 3 `08/10` regression tests
+wrote synthetic memories to the operator Tesseract database — CLOSED AND
+CLEANED"). That incident is why this task's own "hazard to respect" section
+above exists, and it's why this reviewer instruction is specific rather than
+generic — a general "make sure tests pass" review would not have caught it
+the first time either.
+
+Independent of the isolation check: also verify the closing acts in Done-means
+actually landed, not just the timing/isolation fix itself — `08/08`
+re-run and promoted to `reviewed`, `GO-SEC-001`/`GO-SEC-002` updated in
+`findings.json`, the Wave 2 follow-up closed in `TASKS/ESCALATIONS.md`, and
+candidate 4 struck from `14-followups/README.md`'s register. A worker who
+lands the fix but skips these leaves three tracked items open pointing at a
+now-solved problem — check each one exists, don't take the Work Log's word
+for it.
 
 ## Work log
 

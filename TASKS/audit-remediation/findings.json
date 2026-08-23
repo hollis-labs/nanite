@@ -2790,7 +2790,7 @@
       "false_positive_considerations": "Substantial documented-intent caveat: an architect may reasonably judge the current tradeoff acceptable for this product's deployment model.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/07-server-auth-bind-tls-posture.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed unchanged: internal/server/ has zero commits since 8feeee5c. auth.go:15-22 still no-ops (basicAuthMiddleware returns next unmodified) when NANITE_AUTH_USER/PASSWORD are unset; server.go:163-174 still binds to fmt.Sprintf(\":%d\", s.port) (all interfaces, no loopback-only option in config) and serves via plain httpSrv.ListenAndServe() (no TLS anywhere); the one startup log line (server.go:164, slog.Info(\"nanite listening\", \"addr\", addr, \"dev\", s.dev)) reports addr and dev-mode but never auth status. caller_identity.go:14-22 still documents this as the intentional single-user-local-app tradeoff. needs-architect-decision (not remediate): the task file's own 'What to do' names 4 live options including (d) 'explicitly accept the current tradeoff as-is and formally close this finding as accepted-risk' as a legitimate outcome -- the disposition itself, not just the implementation, is AD-15's call. [AD-15 DECIDED 2026-08-22: bind loopback by default, explicit opt-in to bind wide, always log auth status at startup. TLS out of scope. Breaking change for bind-all deployments \u2014 08/07 owns the migration note. Disposition needs-architect-decision -> remediate.]"
     },
     {

@@ -1,7 +1,7 @@
 # Default auth/bind/TLS posture — no enforcement or signal toward the documented local-only tradeoff
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/server/auth.go`, `internal/server/server.go`, `internal/server/caller_identity.go`; likely `internal/config` (any new bind-address/TLS/warning config options); `cmd/nanite/main.go`/`cmdServe` (composition-root wiring, per report §8.13)
 **Requires architect decision:** true — this is explicitly named in the guide's §9 architect-decision-queue as **item 3** ("Default auth/bind/TLS/warning posture")
@@ -183,4 +183,4 @@ A bind-address default change is the highest-risk option — anyone currently re
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-22 — Initial fresh review found three integration gaps: the checked-in Compose deployment did not opt into wide bind, two caller-identity comments still described auth as mandatory, and malformed/port-bearing bind values failed late with misleading listener diagnostics. A focused correction added Compose’s explicit `--bind-address 0.0.0.0`, corrected the auth/header-trust documentation, and centralized host-only validation with IPv4/IPv6/hostname and early-failure coverage. Fresh re-review independently verified the final container argv, loopback default, startup auth logging, invalid-address behavior, CHANGELOG migration note, and absence of TLS additions: **PASS**.

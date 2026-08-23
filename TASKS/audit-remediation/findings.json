@@ -1138,7 +1138,7 @@
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "implemented",
       "revalidation_note": "Confirmed schedules.go:117-137's self-documenting comment (naming schedules/settings validation duplication across 3 producers) is unchanged. Wave-0 finding: the comment's own precondition (\"07/08 both in flight, neither has landed\") is now factually resolved -- all 3 producers (HTTP handler, internal/agent/reflexes/executor.go's ReflexActionAddSchedule case, internal/selftools/self_tools_schedule_create.go's callScheduleCreate) now exist in current source, confirmed by grep. Corrected task file 08/10's Context with this affirmative resolution -- the task is now shovel-ready, not blocked."
     },
     {
@@ -1164,7 +1164,7 @@
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "implemented",
       "revalidation_note": "Confirmed still open, exact citation match: memories.go still sets `opts.Limit = limit + offset` (line 96) before applying status/q filters (:116-137), then reports `\"total\": len(out)` (line 151) -- the post-filter count, not a real match count."
     },
     {

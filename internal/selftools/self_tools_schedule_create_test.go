@@ -304,12 +304,12 @@ func TestCallScheduleCreate_ValidationErrors(t *testing.T) {
 		{
 			name: "cron missing cron_expr",
 			args: map[string]any{"kind": "cron", "message": "m"},
-			want: "cron_expr is required",
+			want: "schedule_spec is required",
 		},
 		{
 			name: "cron invalid cron_expr",
 			args: map[string]any{"kind": "cron", "cron_expr": "not a cron expr", "message": "m"},
-			want: "invalid cron_expr",
+			want: "schedule_spec is not a valid cron expression",
 		},
 		{
 			name: "one_shot with cron_expr",

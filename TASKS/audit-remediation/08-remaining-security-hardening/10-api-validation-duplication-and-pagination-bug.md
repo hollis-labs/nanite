@@ -1,7 +1,7 @@
 # Transport-layer validation duplication (schedules/settings) and a memories-pagination correctness bug
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/api/schedules.go`, `internal/api/settings.go` (GO-API-004); `internal/api/memories.go`, `internal/memory` package (`RecallOpts`/`Recall`) (GO-API-005)
 **Requires architect decision:** **mixed** — GO-API-004: false (task-authoring call, see divergence note); GO-API-005: false (matches `findings.json`)
@@ -65,12 +65,45 @@ GO-API-004's consolidation carries real regression risk **if the three producers
 
 ## Done means
 
-- [ ] GO-API-004: three producers' current validation rules confirmed still equivalent (or divergence resolved) before consolidation; consolidation landed; parity test passing
-- [ ] GO-API-005: filter-then-paginate ordering fixed in `memory.RecallOpts`/`Recall`; true total count implemented; the many-matches-beyond-one-window regression test passing
+- [x] GO-API-004: three producers' current validation rules confirmed still equivalent (or divergence resolved) before consolidation; consolidation landed; parity test passing
+- [x] GO-API-005: filter-then-paginate ordering fixed in `memory.RecallOpts`/`Recall`; true total count implemented; the many-matches-beyond-one-window regression test passing
 
 ## Work log
 
-<!-- Worker fills this in. -->
+- Implemented 2026-08-23. GO-API-004 and GO-API-005 remain independent
+  fixes bundled only because both findings were filed against `internal/api`.
+- GO-API-004 producer trace confirmed the three named production paths:
+  HTTP create/patch in `internal/api/schedules.go`; reflex execution through
+  `internal/agent/reflexes.Executor.Apply` and
+  `service.NewReflexScheduleHook`; and the `schedule_create` self-tool. Their
+  rules had drifted: one-shot spec handling, whitespace handling, expiry and
+  retry checks, and accepted job types differed. `store.ValidateAgentSchedule`
+  now owns the common row invariants, all three producers call it, and
+  `InsertAgentSchedule` enforces it as the final boundary for the additional
+  managed-config and loop-tick producers. The self-tool retains only its
+  narrower tool-schema rule that `cron_expr` is omitted for one-shot requests.
+  The shared job taxonomy includes `loop_run_tick`.
+- Settings scope correction: `handleUpdateSettings` is the only producer of
+  the named enum fields. `internal/api/tools.go` also persists
+  `UserSettings`, but changes only `ToolLoadPreferences`; other direct store
+  callers do not independently parse those enums. With no sibling producer
+  or duplicated rule to consolidate, `settings.go` was intentionally left
+  unchanged.
+- GO-API-005 caller trace found production `Recall` callers in the memories
+  API, context broker, grounding, learnings, and tool-client memory signal.
+  The new `Statuses`, `Search`, and `Offset` options are zero-value compatible,
+  so only the API opts into list filtering/pagination. Status and text filters
+  now run before the page slice, and `RecallPage` returns a separately computed
+  filtered total. The handler no longer performs post-window filtering or
+  reports page length as total.
+- Regression coverage pins the identical malformed-cron rule at the HTTP,
+  reflex, and self-tool paths plus the shared producer-row validator. The
+  memories regression seeds five higher-ranked nonmatches before four matching
+  records; `status=reviewed&q=needle&limit=2&offset=1` returns two records and
+  total four, where the old `limit+offset` fetch returned none.
+- Verification passed: focused schedule/memory tests; full relevant-package
+  tests; `go test ./internal/api/... -count=1`; focused `go vet`; and the
+  non-race baseline `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...`.
 
 ## Review notes
 

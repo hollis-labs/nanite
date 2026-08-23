@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -125,20 +126,8 @@ func scanAgentSchedule(scanner interface{ Scan(...any) error }, s *AgentSchedule
 
 // InsertAgentSchedule upserts an agent_schedules row by ID.
 func (s *Store) InsertAgentSchedule(ctx context.Context, row AgentSchedule) error {
-	if row.ID == "" {
-		return fmt.Errorf("insert agent_schedules: id is required")
-	}
-	if row.AgentID == "" {
-		return fmt.Errorf("insert agent_schedules: agent_id is required")
-	}
-	if row.Name == "" {
-		return fmt.Errorf("insert agent_schedules: name is required")
-	}
-	if row.ScheduleKind == "" {
-		return fmt.Errorf("insert agent_schedules: schedule_kind is required")
-	}
-	if row.Body == "" {
-		return fmt.Errorf("insert agent_schedules: body is required")
+	if err := ValidateAgentSchedule(row); err != nil {
+		return fmt.Errorf("insert agent_schedules: %w", err)
 	}
 	if row.Status == "" {
 		row.Status = ScheduleStatusActive
@@ -189,6 +178,72 @@ func (s *Store) InsertAgentSchedule(ctx context.Context, row AgentSchedule) erro
 	)
 	if err != nil {
 		return fmt.Errorf("insert agent_schedules: %w", err)
+	}
+	return nil
+}
+
+// ValidateAgentSchedule is the shared domain rule for every producer of an
+// agent_schedules row. Empty status/on_fail/job_type/job_payload values are
+// accepted because InsertAgentSchedule applies their documented defaults.
+func ValidateAgentSchedule(row AgentSchedule) error {
+	if row.ID == "" {
+		return fmt.Errorf("id is required")
+	}
+	if row.AgentID == "" {
+		return fmt.Errorf("agent_id is required")
+	}
+	if row.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if row.Body == "" {
+		return fmt.Errorf("body is required")
+	}
+	switch row.ScheduleKind {
+	case ScheduleKindCron:
+		spec := strings.TrimSpace(row.ScheduleSpec)
+		if spec == "" {
+			return fmt.Errorf("schedule_spec is required when schedule_kind=%q", ScheduleKindCron)
+		}
+		if _, err := cron.ParseStandard(spec); err != nil {
+			return fmt.Errorf("schedule_spec is not a valid cron expression: %w", err)
+		}
+	case ScheduleKindOneShot:
+		// A one_shot has no target-time encoding; ScheduleSpec is ignored.
+	default:
+		return fmt.Errorf("schedule_kind must be %q or %q (got %q)", ScheduleKindCron, ScheduleKindOneShot, row.ScheduleKind)
+	}
+	if row.Status != "" {
+		switch row.Status {
+		case ScheduleStatusActive, ScheduleStatusPaused, ScheduleStatusExpired:
+		default:
+			return fmt.Errorf("status must be one of %q, %q, %q (got %q)", ScheduleStatusActive, ScheduleStatusPaused, ScheduleStatusExpired, row.Status)
+		}
+	}
+	if row.ExpiresAt != "" {
+		if _, err := time.Parse(time.RFC3339, row.ExpiresAt); err != nil {
+			return fmt.Errorf("expires_at must be RFC3339 (got %q): %w", row.ExpiresAt, err)
+		}
+	}
+	if row.MaxRetries < 0 {
+		return fmt.Errorf("max_retries must not be negative")
+	}
+	if row.OnFail != "" {
+		switch row.OnFail {
+		case ScheduleOnFailRetry, ScheduleOnFailDisable, ScheduleOnFailNotify:
+		default:
+			return fmt.Errorf("on_fail must be one of %q, %q, %q (got %q)", ScheduleOnFailRetry, ScheduleOnFailDisable, ScheduleOnFailNotify, row.OnFail)
+		}
+	}
+	if row.JobType != "" {
+		switch row.JobType {
+		case ScheduleJobTypeDurableAgentWake, ScheduleJobTypeAgentWorkflowRun,
+			ScheduleJobTypeCommandRun, ScheduleJobTypeReflexDispatch, ScheduleJobTypeLoopRunTick:
+		default:
+			return fmt.Errorf("job_type is not recognized (got %q)", row.JobType)
+		}
+	}
+	if row.JobPayload != "" && !json.Valid([]byte(row.JobPayload)) {
+		return fmt.Errorf("job_payload must be valid JSON")
 	}
 	return nil
 }

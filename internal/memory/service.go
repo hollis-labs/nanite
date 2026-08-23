@@ -13,6 +13,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
 	conduitMemory "github.com/hollis-labs/tesseract/memory"
 )
@@ -44,6 +46,16 @@ type RecallOpts struct {
 	MinConfidence float64  // minimum confidence threshold
 	Origins       []string // filter by origin
 	Tags          []string // filter by tags
+	Statuses      []string // exact lifecycle statuses; empty uses active statuses
+	Search        string   // case-insensitive substring match on summary/body
+	Offset        int      // applied after all filters, before Limit
+}
+
+// RecallPage is a filtered recall page plus the total number of matches before
+// Offset/Limit are applied.
+type RecallPage struct {
+	Memories []Memory
+	Total    int
 }
 
 // Service provides memory storage and recall via an embedded Tesseract memory store.
@@ -134,6 +146,16 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 	if limit <= 0 {
 		limit = 20
 	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	fetchLimit := limit + offset
+	if opts.Search != "" {
+		// Tesseract currently caps recall at 500. Fetch its full supported
+		// candidate window so text filtering happens before this caller's page.
+		fetchLimit = 500
+	}
 
 	// Build filters.
 	var filters conduitMemory.RecallFilters
@@ -148,11 +170,17 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 	if len(opts.Tags) > 0 {
 		filters.Tags = opts.Tags
 	}
-	// Only include statuses that are active.
-	filters.Statuses = []conduitMemory.Status{
-		conduitMemory.StatusDraft,
-		conduitMemory.StatusReviewed,
-		conduitMemory.StatusCanonical,
+	if len(opts.Statuses) > 0 {
+		for _, status := range opts.Statuses {
+			filters.Statuses = append(filters.Statuses, conduitMemory.Status(status))
+		}
+	} else {
+		// Only include statuses that are active.
+		filters.Statuses = []conduitMemory.Status{
+			conduitMemory.StatusDraft,
+			conduitMemory.StatusReviewed,
+			conduitMemory.StatusCanonical,
+		}
 	}
 
 	if (ranking == conduitMemory.RankingSimilarity || ranking == conduitMemory.Ranking("relevance")) && opts.Query == "" {
@@ -165,7 +193,7 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 		Namespaces: opts.Namespaces,
 		Ranking:    ranking,
 		Query:      opts.Query,
-		Limit:      limit,
+		Limit:      fetchLimit,
 		Filters:    filters,
 	}
 
@@ -178,7 +206,102 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 	for _, r := range results {
 		memories = append(memories, revisionToMemory(r.Revision))
 	}
+	if search := strings.ToLower(opts.Search); search != "" {
+		filtered := memories[:0]
+		for _, m := range memories {
+			if strings.Contains(strings.ToLower(m.Summary), search) || strings.Contains(strings.ToLower(m.Body), search) {
+				filtered = append(filtered, m)
+			}
+		}
+		memories = filtered
+	}
+	if offset >= len(memories) {
+		return []Memory{}, nil
+	}
+	if offset > 0 {
+		memories = memories[offset:]
+	}
+	if len(memories) > limit {
+		memories = memories[:limit]
+	}
 	return memories, nil
+}
+
+// RecallPage recalls a page and computes a true filtered total independently
+// of the page length. Existing semantic-recall callers continue using Recall.
+func (s *Service) RecallPage(ctx context.Context, opts RecallOpts) (RecallPage, error) {
+	memories, err := s.Recall(ctx, opts)
+	if err != nil {
+		return RecallPage{}, err
+	}
+	total, err := s.countRecallMatches(ctx, opts)
+	if err != nil {
+		return RecallPage{}, err
+	}
+	return RecallPage{Memories: memories, Total: total}, nil
+}
+
+func (s *Service) countRecallMatches(ctx context.Context, opts RecallOpts) (int, error) {
+	var where []string
+	var args []any
+	where = append(where, "r.namespace IN ("+queryPlaceholders(len(opts.Namespaces))+")")
+	for _, namespace := range opts.Namespaces {
+		args = append(args, namespace)
+	}
+	statuses := opts.Statuses
+	if len(statuses) == 0 {
+		statuses = []string{"draft", "reviewed", "canonical"}
+	}
+	where = append(where, "r.status IN ("+queryPlaceholders(len(statuses))+")")
+	for _, status := range statuses {
+		args = append(args, status)
+	}
+	if len(opts.Origins) > 0 {
+		where = append(where, "r.origin IN ("+queryPlaceholders(len(opts.Origins))+")")
+		for _, origin := range opts.Origins {
+			args = append(args, origin)
+		}
+	}
+	if opts.MinConfidence > 0 {
+		where = append(where, "r.confidence >= ?")
+		args = append(args, opts.MinConfidence)
+	}
+	if opts.Search != "" {
+		pattern := "%" + escapeLike(strings.ToLower(opts.Search)) + "%"
+		where = append(where, "(LOWER(COALESCE(r.payload_summary, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(r.payload_body, '')) LIKE ? ESCAPE '\\')")
+		args = append(args, pattern, pattern)
+	}
+	if len(opts.Tags) > 0 {
+		where = append(where, "EXISTS (SELECT 1 FROM json_each(r.tags) WHERE value IN ("+queryPlaceholders(len(opts.Tags))+"))")
+		for _, tag := range opts.Tags {
+			args = append(args, tag)
+		}
+	}
+	where = append(where, "(r.expires_at IS NULL OR r.expires_at > ?)")
+	args = append(args, time.Now().UTC().Format(time.RFC3339Nano))
+
+	query := `SELECT COUNT(*)
+		FROM memory_revisions r
+		INNER JOIN memory_state s ON s.current_revision = r.revision_id
+		WHERE ` + strings.Join(where, " AND ")
+	var total int
+	if err := s.store.DB().QueryRowContext(ctx, query, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("memory_recall count: %w", err)
+	}
+	return total, nil
+}
+
+func queryPlaceholders(n int) string {
+	if n <= 0 {
+		return "NULL"
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
+func escapeLike(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `%`, `\%`)
+	return strings.ReplaceAll(value, `_`, `\_`)
 }
 
 // Get fetches a single memory by namespace and key.

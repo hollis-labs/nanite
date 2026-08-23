@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	gosched "github.com/hollis-labs/go-scheduler"
@@ -245,8 +246,9 @@ func TestSchedulesAPI_CreateRejectsMalformedCronSpec(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
 		t.Fatalf("decode error response: %v", err)
 	}
-	if errResp["error"] == "" {
-		t.Fatalf("expected a non-empty clear error message, got %+v", errResp)
+	const sharedRule = "schedule_spec is not a valid cron expression"
+	if !strings.Contains(errResp["error"], sharedRule) {
+		t.Fatalf("error = %q, want shared validator rule %q", errResp["error"], sharedRule)
 	}
 }
 

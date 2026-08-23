@@ -30,15 +30,12 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
-	"github.com/robfig/cron/v3"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -114,120 +111,6 @@ type scheduleEngineStatusResponse struct {
 	WorkerErrors int64  `json:"worker_errors"`
 }
 
-// --- Validation ------------------------------------------------------------
-//
-// Shared-validator call (this task's step 3): 07 (the add_schedule reflex
-// hook) and 08 (the agent self-tool) are both in flight in parallel
-// worktrees as this file is written -- neither has landed here, so there
-// is no existing shared validation function to call into, and no way to
-// coordinate a shared one live. The functions below are this endpoint's
-// own independent implementation, deliberately factored into small
-// single-field validators (validateScheduleKind/validateCronSpec/
-// validateJobType/validateJobPayload/validateOnFailPolicy/
-// validateScheduleStatus) rather than one monolithic block, specifically
-// so that consolidating them behind a single cross-producer validator
-// later (once 07/08 land and all three can be diffed side by side) is a
-// mechanical extraction, not a rewrite. Flagged here as a real follow-up
-// candidate, not done in this task: the three producers validate the same
-// conceptual fields (schedule kind/spec, job type/payload, retry policy)
-// but at different call sites (an HTTP handler here, a reflex hook, a
-// self-tool handler) with different error-surfacing conventions (JSON
-// error body vs. a logged hook-failure warning vs. a tool-result error) --
-// picking the right shared shape needs to see all three, not guess ahead
-// of them.
-func validateScheduleKind(kind string) error {
-	switch kind {
-	case store.ScheduleKindCron, store.ScheduleKindOneShot:
-		return nil
-	default:
-		return fmt.Errorf("schedule_kind must be %q or %q (got %q)", store.ScheduleKindCron, store.ScheduleKindOneShot, kind)
-	}
-}
-
-// validateCronSpec is only called for schedule_kind=cron. It calls
-// robfig/cron/v3's own ParseStandard directly -- the exact same parser
-// store.ComputeAgentScheduleNextRun wraps -- rather than hand-rolling a
-// second cron-validity check, matching this batch's standing "don't
-// hand-roll cron-parsing a second time" finding (already flagged once on
-// task 05's own Work Log). ComputeAgentScheduleNextRun itself can't be
-// reused for validation alone: on a malformed spec it deliberately falls
-// back to "due now" rather than surfacing the parse error (see that
-// function's own doc comment on why: a NULL/zero next_run is a worse
-// failure mode for an already-inserted row than one off-schedule fire) --
-// exactly the swallowed signal this handler needs to surface to a caller
-// who hasn't inserted anything yet and should get a clear rejection
-// instead.
-func validateCronSpec(spec string) error {
-	trimmed := strings.TrimSpace(spec)
-	if trimmed == "" {
-		return fmt.Errorf("schedule_spec is required when schedule_kind=%q", store.ScheduleKindCron)
-	}
-	if _, err := cron.ParseStandard(trimmed); err != nil {
-		return fmt.Errorf("schedule_spec is not a valid cron expression: %w", err)
-	}
-	return nil
-}
-
-func validateJobType(jobType string) error {
-	switch jobType {
-	case store.ScheduleJobTypeDurableAgentWake, store.ScheduleJobTypeAgentWorkflowRun,
-		store.ScheduleJobTypeCommandRun, store.ScheduleJobTypeReflexDispatch:
-		return nil
-	default:
-		return fmt.Errorf("job_type must be one of %q, %q, %q, %q (got %q)",
-			store.ScheduleJobTypeDurableAgentWake, store.ScheduleJobTypeAgentWorkflowRun,
-			store.ScheduleJobTypeCommandRun, store.ScheduleJobTypeReflexDispatch, jobType)
-	}
-}
-
-// validateJobPayload only checks that a non-empty payload is well-formed
-// JSON. It deliberately does not validate per-job-type field shape (e.g.
-// that a durable_agent_wake payload carries instance_id) -- that decode
-// happens at dispatch time in internal/scheduler.RunnerAdapter.Enqueue's
-// per-job-type enqueueX functions, which already produce a clear,
-// specific error if the shape is wrong. Duplicating that per-type field
-// validation here would be a second, driftable copy of the same contract
-// runner_adapter.go already owns.
-func validateJobPayload(payload string) error {
-	if payload == "" {
-		return nil
-	}
-	if !json.Valid([]byte(payload)) {
-		return fmt.Errorf("job_payload must be valid JSON")
-	}
-	return nil
-}
-
-func validateOnFailPolicy(onFail string) error {
-	switch onFail {
-	case store.ScheduleOnFailRetry, store.ScheduleOnFailDisable, store.ScheduleOnFailNotify:
-		return nil
-	default:
-		return fmt.Errorf("on_fail must be one of %q, %q, %q (got %q)",
-			store.ScheduleOnFailRetry, store.ScheduleOnFailDisable, store.ScheduleOnFailNotify, onFail)
-	}
-}
-
-func validateScheduleStatus(status string) error {
-	switch status {
-	case store.ScheduleStatusActive, store.ScheduleStatusPaused, store.ScheduleStatusExpired:
-		return nil
-	default:
-		return fmt.Errorf("status must be one of %q, %q, %q (got %q)",
-			store.ScheduleStatusActive, store.ScheduleStatusPaused, store.ScheduleStatusExpired, status)
-	}
-}
-
-func validateExpiresAt(v string) error {
-	if v == "" {
-		return nil
-	}
-	if _, err := time.Parse(time.RFC3339, v); err != nil {
-		return fmt.Errorf("expires_at must be RFC3339 (got %q): %w", v, err)
-	}
-	return nil
-}
-
 // --- Handlers --------------------------------------------------------------
 
 // handleListSchedules lists agent_schedules rows, optionally scoped to one
@@ -290,57 +173,6 @@ func (a *API) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, fmt.Sprintf("agent_id %q does not resolve to a known agent: %v", req.AgentID, err))
 		return
 	}
-	if req.Name == "" {
-		a.errorResp(w, http.StatusBadRequest, "name is required")
-		return
-	}
-	if req.Body == "" {
-		a.errorResp(w, http.StatusBadRequest, "body is required")
-		return
-	}
-	if err := validateScheduleKind(req.ScheduleKind); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if req.ScheduleKind == store.ScheduleKindCron {
-		if err := validateCronSpec(req.ScheduleSpec); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	if req.Status != "" {
-		if err := validateScheduleStatus(req.Status); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	if req.ExpiresAt != "" {
-		if err := validateExpiresAt(req.ExpiresAt); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	if req.MaxRetries != nil && *req.MaxRetries < 0 {
-		a.errorResp(w, http.StatusBadRequest, "max_retries must not be negative")
-		return
-	}
-	if req.OnFail != "" {
-		if err := validateOnFailPolicy(req.OnFail); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	if req.JobType != "" {
-		if err := validateJobType(req.JobType); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	if err := validateJobPayload(req.JobPayload); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
 	row := store.AgentSchedule{
 		ID:           "sched-" + ulid.Make().String(),
 		AgentID:      req.AgentID,
@@ -358,6 +190,10 @@ func (a *API) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.MaxRetries != nil {
 		row.MaxRetries = *req.MaxRetries
+	}
+	if err := store.ValidateAgentSchedule(row); err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// next_run must be computed at insert time, not left NULL -- an
@@ -458,38 +294,24 @@ func (a *API) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 	recomputeNextRun := false
 
 	if req.Name != nil {
-		if *req.Name == "" {
-			a.errorResp(w, http.StatusBadRequest, "name must not be empty")
-			return
-		}
 		updated.Name = *req.Name
 	}
 	if req.SessionID != nil {
 		updated.SessionID = *req.SessionID
 	}
 	if req.ScheduleSpec != nil {
-		if updated.ScheduleKind == store.ScheduleKindCron {
-			if err := validateCronSpec(*req.ScheduleSpec); err != nil {
-				a.errorResp(w, http.StatusBadRequest, err.Error())
-				return
-			}
-		}
 		updated.ScheduleSpec = *req.ScheduleSpec
 		recomputeNextRun = true
 	}
 	if req.Body != nil {
-		if *req.Body == "" {
-			a.errorResp(w, http.StatusBadRequest, "body must not be empty")
-			return
-		}
 		updated.Body = *req.Body
 	}
 	if req.Priority != nil {
 		updated.Priority = *req.Priority
 	}
 	if req.Status != nil {
-		if err := validateScheduleStatus(*req.Status); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
+		if *req.Status == "" {
+			a.errorResp(w, http.StatusBadRequest, "status must not be empty")
 			return
 		}
 		if *req.Status == store.ScheduleStatusActive && current.Status != store.ScheduleStatusActive {
@@ -498,32 +320,24 @@ func (a *API) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 		updated.Status = *req.Status
 	}
 	if req.ExpiresAt != nil {
-		if err := validateExpiresAt(*req.ExpiresAt); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
 		updated.ExpiresAt = *req.ExpiresAt
 	}
 	if req.MaxRetries != nil {
-		if *req.MaxRetries < 0 {
-			a.errorResp(w, http.StatusBadRequest, "max_retries must not be negative")
-			return
-		}
 		updated.MaxRetries = *req.MaxRetries
 	}
 	if req.OnFail != nil {
-		if err := validateOnFailPolicy(*req.OnFail); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
+		if *req.OnFail == "" {
+			a.errorResp(w, http.StatusBadRequest, "on_fail must not be empty")
 			return
 		}
 		updated.OnFail = *req.OnFail
 	}
 	if req.JobPayload != nil {
-		if err := validateJobPayload(*req.JobPayload); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
 		updated.JobPayload = *req.JobPayload
+	}
+	if err := store.ValidateAgentSchedule(updated); err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	if recomputeNextRun {

@@ -82,7 +82,7 @@ func (a *API) handleListMemories(w http.ResponseWriter, r *http.Request) {
 			limit = l
 		}
 	}
-	// offset is noted but Recall doesn't support it directly; we trim client-side.
+	// Recall applies offset only after status/text filters.
 	offset := 0
 	if oStr := q.Get("offset"); oStr != "" {
 		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
@@ -93,48 +93,22 @@ func (a *API) handleListMemories(w http.ResponseWriter, r *http.Request) {
 	opts := memory.RecallOpts{
 		Namespaces: namespaces,
 		Ranking:    "activation",
-		Limit:      limit + offset, // fetch extra to support offset slicing
+		Limit:      limit,
+		Offset:     offset,
 		Tags:       tags,
+		Search:     q.Get("q"),
+	}
+	if status := q.Get("status"); status != "" {
+		opts.Statuses = []string{status}
 	}
 
-	memories, err := a.Services.Memory.Recall(r.Context(), opts)
+	page, err := a.Services.Memory.RecallPage(r.Context(), opts)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "recall failed: "+err.Error())
 		return
 	}
 
-	// Apply offset slice.
-	if offset > 0 {
-		if offset >= len(memories) {
-			memories = []memory.Memory{}
-		} else {
-			memories = memories[offset:]
-		}
-	}
-
-	// Filter by status if requested (Recall excludes deprecated, but draft/reviewed/canonical can be filtered).
-	if statusFilter := q.Get("status"); statusFilter != "" {
-		filtered := memories[:0]
-		for _, m := range memories {
-			if m.Status == statusFilter {
-				filtered = append(filtered, m)
-			}
-		}
-		memories = filtered
-	}
-
-	// Simple text search on summary/body if q param provided.
-	if searchQ := q.Get("q"); searchQ != "" {
-		searchQ = strings.ToLower(searchQ)
-		filtered := memories[:0]
-		for _, m := range memories {
-			if strings.Contains(strings.ToLower(m.Summary), searchQ) ||
-				strings.Contains(strings.ToLower(m.Body), searchQ) {
-				filtered = append(filtered, m)
-			}
-		}
-		memories = filtered
-	}
+	memories := page.Memories
 
 	// Add computed key to each memory for client use.
 	type memoryWithKey struct {
@@ -148,7 +122,7 @@ func (a *API) handleListMemories(w http.ResponseWriter, r *http.Request) {
 
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"memories": out,
-		"total":    len(out),
+		"total":    page.Total,
 	})
 }
 

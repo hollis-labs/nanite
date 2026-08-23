@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -447,13 +448,18 @@ func TestExecutorApply_AddSchedule_MalformedCronSpec_NoRowInserted(t *testing.T)
 	st := newReflexScheduleTestStore(t, agentID)
 
 	hook := NewReflexScheduleHook(st)
-	if err := hook(ctx, agentID, map[string]interface{}{
+	err := hook(ctx, agentID, map[string]interface{}{
 		"name":          "n",
 		"schedule_kind": "cron",
 		"schedule_spec": "not a cron expr",
 		"body":          "body",
-	}); err == nil {
+	})
+	if err == nil {
 		t.Fatal("hook returned nil error for a malformed cron schedule_spec, want an error")
+	}
+	const sharedRule = "schedule_spec is not a valid cron expression"
+	if !strings.Contains(err.Error(), sharedRule) {
+		t.Fatalf("hook error = %q, want shared validator rule %q", err, sharedRule)
 	}
 
 	executor := &reflexes.Executor{

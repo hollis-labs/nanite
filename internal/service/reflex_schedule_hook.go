@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/robfig/cron/v3"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -115,21 +114,14 @@ func NewReflexScheduleHook(st *store.Store) reflexes.ScheduleHook {
 // ListDueAgentSchedules on the very next engine tick, rather than sitting
 // invisible until the next process restart's backfillScheduleNextRun pass.
 //
-// Validation here rejects action_spec shapes that would otherwise either
-// fail the DB's own CHECK constraints (schedule_kind/on_fail/job_type) or
-// produce a semantically broken row (missing name/body, a cron schedule
-// with no schedule_spec at all, invalid job_payload JSON) -- plus, for
-// schedule_kind="cron", a syntactically invalid (but non-empty)
-// schedule_spec (see below). That combination is what "fails cleanly, not
-// a broken row" means for this hook: reject up front with a clear error,
-// or insert a fully valid, dispatchable row -- never something schema-valid
-// but silently wrong.
+// store.ValidateAgentSchedule owns the shared schedule rules for this hook,
+// the HTTP producer, the self-tool producer, and direct store callers. It
+// rejects action_spec shapes that would otherwise fail DB constraints or
+// produce a semantically broken row before next_run is computed. This hook
+// retains only translation of the reflex action_spec into the domain row.
 //
-// A non-empty cron schedule_spec is validated via cron.ParseStandard before
-// next_run is ever computed -- mirroring the front-door validation
-// internal/selftools/self_tools_schedule_create.go's callScheduleCreate and
-// internal/api/schedules.go's validateCronSpec both already do for the
-// identical reason. This function used to rely on
+// The shared validator uses cron.ParseStandard for a non-empty cron spec.
+// This function used to rely on
 // store.ComputeAgentScheduleNextRun's documented "fall back to due now"
 // behavior for a malformed expression instead, but that fallback is only
 // safe for the *next_run computation*, not for the row's ongoing life:
@@ -143,83 +135,40 @@ func NewReflexScheduleHook(st *store.Store) reflexes.ScheduleHook {
 // 2026-08-20 "Scheduling Phase 2 review: task 07's malformed-cron gap"
 // entry for the full finding this fixes.
 func buildReflexAgentSchedule(agentID string, spec map[string]interface{}, now time.Time) (store.AgentSchedule, error) {
-	name := specString(spec, "name")
-	if name == "" {
-		return store.AgentSchedule{}, fmt.Errorf("action_spec.name is required")
-	}
-
-	kind := specString(spec, "schedule_kind")
-	switch kind {
-	case store.ScheduleKindCron, store.ScheduleKindOneShot:
-	default:
-		return store.AgentSchedule{}, fmt.Errorf(
-			"action_spec.schedule_kind must be %q or %q, got %q",
-			store.ScheduleKindCron, store.ScheduleKindOneShot, kind)
-	}
-
-	scheduleSpec := specString(spec, "schedule_spec")
-	if kind == store.ScheduleKindCron {
-		if scheduleSpec == "" {
-			return store.AgentSchedule{}, fmt.Errorf(
-				"action_spec.schedule_spec is required when schedule_kind=%q", store.ScheduleKindCron)
-		}
-		if _, err := cron.ParseStandard(scheduleSpec); err != nil {
-			return store.AgentSchedule{}, fmt.Errorf(
-				"action_spec.schedule_spec %q is not a valid cron expression: %w", scheduleSpec, err)
-		}
-	}
-
-	body := specString(spec, "body")
-	if body == "" {
-		return store.AgentSchedule{}, fmt.Errorf("action_spec.body is required")
-	}
-
-	jobType := specString(spec, "job_type")
-	switch jobType {
-	case "", store.ScheduleJobTypeDurableAgentWake, store.ScheduleJobTypeAgentWorkflowRun,
-		store.ScheduleJobTypeCommandRun, store.ScheduleJobTypeReflexDispatch:
-	default:
-		return store.AgentSchedule{}, fmt.Errorf("action_spec.job_type %q is not a recognized job type", jobType)
-	}
-
-	onFail := specString(spec, "on_fail")
-	switch onFail {
-	case "", store.ScheduleOnFailRetry, store.ScheduleOnFailDisable, store.ScheduleOnFailNotify:
-	default:
-		return store.AgentSchedule{}, fmt.Errorf("action_spec.on_fail %q is not a recognized on_fail policy", onFail)
-	}
-
 	jobPayload, err := specJobPayload(spec)
 	if err != nil {
 		return store.AgentSchedule{}, err
 	}
 
-	nextRun := store.ComputeAgentScheduleNextRun(kind, scheduleSpec, now)
-	if nextRun.IsZero() {
-		// Defensive only -- the schedule_kind switch above already rejects
-		// every kind ComputeAgentScheduleNextRun doesn't recognize, so this
-		// branch should be unreachable in practice.
-		return store.AgentSchedule{}, fmt.Errorf(
-			"action_spec: could not compute next_run for schedule_kind=%q", kind)
-	}
-
-	return store.AgentSchedule{
+	row := store.AgentSchedule{
 		ID:           "reflex-schedule-" + uuid.New().String(),
 		AgentID:      agentID,
 		SessionID:    specString(spec, "session_id"),
-		Name:         name,
-		ScheduleKind: kind,
-		ScheduleSpec: scheduleSpec,
-		Body:         body,
+		Name:         specString(spec, "name"),
+		ScheduleKind: specString(spec, "schedule_kind"),
+		ScheduleSpec: specString(spec, "schedule_spec"),
+		Body:         specString(spec, "body"),
 		Priority:     specInt64(spec, "priority"),
 		ExpiresAt:    specString(spec, "expires_at"),
 		CreatedBy:    reflexScheduleSource,
 		MaxRetries:   specInt64(spec, "max_retries"),
-		OnFail:       onFail,
-		NextRun:      nextRun.Format(time.RFC3339),
-		JobType:      jobType,
+		OnFail:       specString(spec, "on_fail"),
+		JobType:      specString(spec, "job_type"),
 		JobPayload:   jobPayload,
-	}, nil
+	}
+	if err := store.ValidateAgentSchedule(row); err != nil {
+		return store.AgentSchedule{}, fmt.Errorf("action_spec: %w", err)
+	}
+	nextRun := store.ComputeAgentScheduleNextRun(row.ScheduleKind, row.ScheduleSpec, now)
+	if nextRun.IsZero() {
+		// Defensive only -- the shared validator already rejects every kind
+		// ComputeAgentScheduleNextRun doesn't recognize, so this branch should
+		// be unreachable in practice.
+		return store.AgentSchedule{}, fmt.Errorf(
+			"action_spec: could not compute next_run for schedule_kind=%q", row.ScheduleKind)
+	}
+	row.NextRun = nextRun.Format(time.RFC3339)
+	return row, nil
 }
 
 // specString reads a string field out of an unmarshaled action_spec map,
@@ -264,8 +213,9 @@ func specInt64(spec map[string]interface{}, key string) int64 {
 // for AgentSchedule.JobPayload -- see buildReflexAgentSchedule's doc
 // comment for the wire contract this mirrors. Accepts either a nested JSON
 // object (re-marshaled to a string) or an already-encoded JSON string
-// (validated via json.Valid, used as-is). Omitted entirely (or explicit
-// JSON null) returns "", which InsertAgentSchedule defaults to "{}".
+// (validated later by ValidateAgentSchedule, used as-is here). Omitted
+// entirely (or explicit JSON null) returns "", which InsertAgentSchedule
+// defaults to "{}".
 func specJobPayload(spec map[string]interface{}) (string, error) {
 	v, ok := spec["job_payload"]
 	if !ok || v == nil {
@@ -273,10 +223,7 @@ func specJobPayload(spec map[string]interface{}) (string, error) {
 	}
 	switch p := v.(type) {
 	case string:
-		if !json.Valid([]byte(p)) {
-			return "", fmt.Errorf("action_spec.job_payload is not valid JSON")
-		}
-		return p, nil
+		return p, nil // ValidateAgentSchedule owns JSON validity.
 	default:
 		encoded, err := json.Marshal(p)
 		if err != nil {

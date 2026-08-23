@@ -3,9 +3,69 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
+
+// TestValidateAgentSchedule_ProducerParity pins the shared malformed-cron
+// rule against the row shapes built by each of the three production
+// producers. Their transport-specific error wrappers may differ, but the
+// domain rejection they call is identical.
+func TestValidateAgentSchedule_ProducerParity(t *testing.T) {
+	base := AgentSchedule{
+		ID:           "schedule-id",
+		AgentID:      "agent-id",
+		Name:         "name",
+		ScheduleKind: ScheduleKindCron,
+		ScheduleSpec: "not a cron expression",
+		Body:         "body",
+	}
+	producerRows := map[string]AgentSchedule{
+		"http": base,
+		"reflex": func() AgentSchedule {
+			row := base
+			row.ID = "reflex-schedule-id"
+			row.CreatedBy = "reflex:add_schedule"
+			return row
+		}(),
+		"self-tool": func() AgentSchedule {
+			row := base
+			row.ID = "self-schedule-id"
+			row.CreatedBy = "self:agent-id"
+			row.MaxRetries = 3
+			row.OnFail = ScheduleOnFailRetry
+			row.JobType = ScheduleJobTypeDurableAgentWake
+			return row
+		}(),
+	}
+
+	const sharedRule = "schedule_spec is not a valid cron expression"
+	for producer, row := range producerRows {
+		t.Run(producer, func(t *testing.T) {
+			err := ValidateAgentSchedule(row)
+			if err == nil || !strings.Contains(err.Error(), sharedRule) {
+				t.Fatalf("ValidateAgentSchedule() = %v, want %q", err, sharedRule)
+			}
+		})
+	}
+}
+
+func TestValidateAgentSchedule_AcceptsLoopRunTick(t *testing.T) {
+	err := ValidateAgentSchedule(AgentSchedule{
+		ID:           "loop-schedule-id",
+		AgentID:      "agent-id",
+		Name:         "loop tick",
+		ScheduleKind: ScheduleKindCron,
+		ScheduleSpec: "*/5 * * * *",
+		Body:         "tick",
+		JobType:      ScheduleJobTypeLoopRunTick,
+		JobPayload:   `{"loop_id":"loop-id"}`,
+	})
+	if err != nil {
+		t.Fatalf("ValidateAgentSchedule(loop_run_tick) = %v", err)
+	}
+}
 
 // TestAgentSchedule_RoundTrip exercises the basic CRUD path: insert, get,
 // list, status update, fire-count bump, delete.

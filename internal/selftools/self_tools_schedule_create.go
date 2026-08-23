@@ -42,7 +42,6 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
-	"github.com/robfig/cron/v3"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -140,11 +139,6 @@ func scheduleCreateToolDefinition() mcp.Tool {
 // task 05's minor finding), and insert the row scoped to that agent.
 func (st *SelfToolsTransport) callScheduleCreate(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
 	kind := strArg(args, "kind", "")
-	switch kind {
-	case store.ScheduleKindCron, store.ScheduleKindOneShot:
-	default:
-		return mcp.ErrorResult(fmt.Sprintf("schedule_create: kind must be %q or %q, got %q", store.ScheduleKindCron, store.ScheduleKindOneShot, kind)), nil
-	}
 
 	message := strings.TrimSpace(strArg(args, "message", ""))
 	if message == "" {
@@ -152,15 +146,7 @@ func (st *SelfToolsTransport) callScheduleCreate(ctx context.Context, args map[s
 	}
 
 	cronExpr := strings.TrimSpace(strArg(args, "cron_expr", ""))
-	switch kind {
-	case store.ScheduleKindCron:
-		if cronExpr == "" {
-			return mcp.ErrorResult("schedule_create: cron_expr is required when kind=\"cron\""), nil
-		}
-		if _, err := cron.ParseStandard(cronExpr); err != nil {
-			return mcp.ErrorResult(fmt.Sprintf("schedule_create: invalid cron_expr %q: %v", cronExpr, err)), nil
-		}
-	case store.ScheduleKindOneShot:
+	if kind == store.ScheduleKindOneShot {
 		if cronExpr != "" {
 			return mcp.ErrorResult("schedule_create: cron_expr must be omitted when kind=\"one_shot\" (one_shot fires on the scheduler engine's next tick; there is no delayed-target-time field in this schema today)"), nil
 		}
@@ -179,17 +165,6 @@ func (st *SelfToolsTransport) callScheduleCreate(ctx context.Context, args map[s
 		return mcp.ErrorResult("schedule_create: store not configured"), nil
 	}
 
-	now := time.Now().UTC()
-	nextRun := store.ComputeAgentScheduleNextRun(kind, cronExpr, now)
-	if nextRun.IsZero() {
-		// Defensive only -- kind is already validated to cron/one_shot
-		// above, the only two inputs ComputeAgentScheduleNextRun ever
-		// returns a non-zero value for. Guards against silently inserting
-		// an unschedulable (next_run=NULL) row if that invariant ever
-		// drifts.
-		return mcp.ErrorResult("schedule_create: could not compute next_run for the given kind/cron_expr"), nil
-	}
-
 	row := store.AgentSchedule{
 		ID:           "self-sched-" + ulid.Make().String(),
 		AgentID:      agentID,
@@ -201,9 +176,16 @@ func (st *SelfToolsTransport) callScheduleCreate(ctx context.Context, args map[s
 		CreatedBy:    "self:" + agentID,
 		MaxRetries:   scheduleCreateMaxRetries,
 		OnFail:       scheduleCreateOnFail,
-		NextRun:      nextRun.Format(time.RFC3339),
 		JobType:      store.ScheduleJobTypeDurableAgentWake,
 	}
+	if err := store.ValidateAgentSchedule(row); err != nil {
+		return mcp.ErrorResult("schedule_create: " + err.Error()), nil
+	}
+	nextRun := store.ComputeAgentScheduleNextRun(kind, cronExpr, time.Now().UTC())
+	if nextRun.IsZero() {
+		return mcp.ErrorResult("schedule_create: could not compute next_run for the given kind/cron_expr"), nil
+	}
+	row.NextRun = nextRun.Format(time.RFC3339)
 	if err := st.Store.InsertAgentSchedule(ctx, row); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("schedule_create: %v", err)), nil
 	}

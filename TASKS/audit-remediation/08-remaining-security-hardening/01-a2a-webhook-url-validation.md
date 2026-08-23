@@ -1,10 +1,10 @@
 # A2A push-notification webhook URL has no SSRF validation
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; this task-creation batch is sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
-**Touches:** `internal/service/a2a_push_notifier.go`, `internal/service/a2a_task_manager.go` (`TaskSubmitRequest`/`PushNotificationConfig` types); possibly a shared SSRF-CIDR-check helper if one is reused instead of written fresh (see Non-goals)
-**Requires architect decision:** false — but see the divergence note below and the mandatory pre-step; do not treat "false" as "skip verification"
+**Touches:** `internal/service/a2a_push_notifier.go`, `internal/service/a2a_push_notifier_test.go`; task/finding tracking metadata
+**Requires architect decision:** false — the operator approved the traced external-unauthenticated disposition and narrow delivery-seam remediation; A2A authentication redesign remains out of scope
 
 > **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
 > line above wherever they differ — that line predates cross-folder analysis.
@@ -19,19 +19,19 @@
 
 ## Findings addressed
 
-- **GO-SVCCORE-004** (medium severity, medium confidence, security) — report §8.3.
+- **GO-SVCCORE-004** (**high severity, high confidence**, security) — report §8.3. Reclassified after the mandatory auth/caller trace confirmed an external-unauthenticated submission path when optional Basic Auth is unset.
 
-> **Divergence from `findings.json`:** the machine-readable catalog flags this finding's own `requires_architect_decision` as `true`. This task file sets it to `false` per this batch's authoring instruction, on the judgment that the *fix direction itself* (validate scheme + block private/loopback ranges) is unambiguous and doesn't need architect input. What genuinely is unresolved — the A2A endpoint's auth boundary — is called out below as a **mandatory pre-step**, not waved away. If whoever picks this up finds the auth boundary is weaker than assumed, escalate back to architect review before implementing, since that would change the real-world severity above what this task assumes.
+> **Resolved divergence:** the mandatory trace found the weaker boundary: the shared Basic Auth middleware is a no-op when its environment variables are unset, and the A2A submit route has no additional authentication gate. The operator approved proceeding with the same narrow SSRF remediation, recording the boundary as external unauthenticated, and correcting severity. `findings.json` now matches that resolution; no A2A authentication redesign is included here.
 
 ## Context
 
 **Root cause:** the A2A push-notification webhook URL (`TaskSubmitRequest.PushNotificationConfig.URL`, caller-supplied at task-submit time) flows directly into an outbound `http.NewRequestWithContext` + `client.Do` call at `a2a_push_notifier.go:152-166` with **no validation** — no scheme allowlist, no private-IP/localhost block. This is the classic webhook-callback SSRF pattern the remediation guide names explicitly. Gosec's G107 rule doesn't catch it because G107 only targets the `http.Get`/`http.Post` call shape directly, not the `NewRequestWithContext`+`Do` idiom used here — so this is real uncovered surface, not pre-existing lint noise that was suppressed.
 
-**Trust classification (guide's Wave 3 instruction, applied explicitly):** the webhook URL is supplied by whoever calls the A2A task-submit endpoint. The audit explicitly states it did **not** independently verify whether that endpoint's auth boundary restricts submission to trusted peer agents only — this is the single open variable governing real severity. Until confirmed, classify conservatively as **external authenticated** (any caller who can reach and authenticate to the A2A submit endpoint) rather than **agent-controlled** (which would imply only Nanite's own already-trusted agents can set this value — not yet shown). If the pre-step below finds the endpoint is unauthenticated or weakly gated, this becomes **external unauthenticated** and should be escalated back for architect/severity re-review before implementation proceeds.
+**Trust classification (guide's Wave 3 instruction, applied explicitly):** **external unauthenticated**. The webhook URL is supplied by `SendMessage` callers on `POST /api/a2a/jsonrpc`. That route uses the common middleware chain, but Basic Auth is optional and becomes a no-op when its environment variables are unset; no route-local A2A peer authentication exists. The reviewed 08/07 server change makes loopback the default bind, reducing default exposure, but an explicitly non-loopback deployment with auth unset still presents this unauthenticated SSRF surface. Because such a caller could direct authenticated POSTs toward private services, loopback, link-local/IMDS, CGNAT, ULA, or unspecified destinations, the corrected severity is **high**. The completed trace removes the audit's uncertainty, so confidence is **high**.
 
 **Desired invariant:** an A2A push-notification webhook URL must never resolve to a loopback, link-local, or private-range (RFC1918/CGNAT) host unless that host has been explicitly allowlisted by the operator; scheme must be restricted to `https` (or `http` only under an explicit, documented opt-in).
 
-**Mandatory pre-step (blocking — do this before writing any fix):** trace the actual production auth boundary on the A2A task-submit HTTP entry point end to end — which handler registers it, what middleware wraps it, whether Basic Auth or any other check gates it. Record the answer in the Work Log. This determines whether the trust classification above holds or needs to escalate.
+**Mandatory pre-step (completed):** the production auth boundary and complete caller chain are recorded in the Work Log below.
 
 ## What to do
 
@@ -67,15 +67,71 @@ Low risk — validation is additive and only rejects previously-unchecked values
 
 ## Done means
 
-- [ ] Auth-boundary pre-step traced and documented in Work Log
-- [ ] Validation added at submission or delivery time (scheme allowlist + private/loopback range rejection, DNS-rebind-safe)
-- [ ] Tests above pass
-- [ ] `gosec ./internal/service/...` shows no new findings on the touched files
-- [ ] Cross-reference note added if the sandbox/MCP CIDR list is reused, or a justification recorded if a new one was written instead
+- [x] Auth-boundary pre-step traced and documented in Work Log
+- [x] Validation added at delivery time (HTTPS allowlist + private/loopback range rejection, DNS-rebind-safe)
+- [x] Tests above pass, including mixed-answer, pinned-dial, redirect-rebinding, policy-parity, and retry/backoff regressions
+- [x] `gosec ./internal/service/...` shows no new findings on the touched files; focused G107/G704 scan is clean
+- [x] Shared `internal/ssrf` policy from resolved GO-SEC4-007 / task 08/09 reused as the fourth consumer
 
 ## Work log
 
-<!-- Worker fills this in. -->
+### 2026-08-23 — operator-approved remediation implemented
+
+- **Auth/caller trace:** `API.RegisterRoutes` registers
+  `POST /api/a2a/jsonrpc`; `handleA2AJSONRPC` dispatches the public A2A
+  `SendMessage` method to `handleTaskSubmit`; that handler copies the wire
+  `PushNotificationConfig` into `service.TaskSubmitRequest`; and
+  `TaskManager.SubmitTask` persists it. The route is inside the production
+  `recover → logging → CORS → basicAuth → callerIdentity → bodyLimit → mux`
+  chain, but `basicAuthMiddleware` returns the next handler unchanged when
+  `NANITE_AUTH_USER` and `NANITE_AUTH_PASSWORD` are both unset. There is no
+  route-local A2A peer check. The boundary is therefore formally classified
+  **external unauthenticated**, as approved by the operator. Authentication
+  redesign is deliberately out of scope.
+- **Severity correction:** GO-SVCCORE-004 is now **high severity / high
+  confidence**. The unauthenticated network boundary can supply both the
+  callback URL and its Authorization value, giving it a server-side POST
+  primitive toward internal services. The loopback-default bind from reviewed
+  task 08/07 lowers exposure in the default configuration, but does not remove
+  the issue for explicitly exposed, auth-unset deployments. The completed
+  trace also removes the audit's only stated source of confidence uncertainty.
+- **Sole outbound consumer:** repository-wide searches for
+  `PushNotificationConfig.URL` / `config.URL` and outbound delivery construction
+  find exactly one production request: `A2APushNotifier.processDelivery`.
+  `TaskManager` only persists the config and enqueues state-transition
+  deliveries; `cmd/nanite/main.go`'s background ticker only calls
+  `ProcessPendingDeliveries`. No sibling outbound request path exists.
+- **Implementation:** delivery now uses the shared `internal/ssrf` package as
+  its fourth consumer (after sandbox proxy, MCP web fetch, and plugin catalog
+  download). HTTPS is the production default. Every DNS answer is validated;
+  any denied answer rejects the whole resolution; the dialer receives the
+  validated IP literal; keep-alive reuse is disabled; and every redirect is
+  scheme-checked and forced through a fresh resolve/validate/pin cycle. This
+  cross-references the GO-SEC4-007 consolidation resolved and implemented by
+  task 08/09; no CIDR copy or policy fork was introduced.
+- **Behavior preservation:** notification payload/auth headers, the 10-second
+  overall client timeout, response handling, maximum three attempts, quadratic
+  one/four-minute retry schedule before the terminal attempt, and deletion on
+  success/max-attempts remain unchanged. SSRF and redirect rejections enter the
+  same existing retry/backoff branch as other delivery errors.
+- **Regression evidence:** focused tests cover HTTPS-default rejection;
+  RFC1918, IPv4/IPv6 loopback, link-local/IMDS, CGNAT, IPv6 ULA, and IPv4/IPv6
+  unspecified parity; rejection of mixed public/private DNS answers before
+  dial; pinned-literal dialing; redirect-time DNS rebinding; and persistence of
+  the existing one-minute first retry after an SSRF rejection. Existing local
+  HTTP integration tests now opt into both exceptions explicitly rather than
+  weakening production defaults.
+- **Validation:** `go test ./internal/service -run 'TestA2APushNotifier'
+  -count=10`, `go test -race ./internal/service -run
+  'TestA2APushNotifier' -count=1`, `go test ./internal/ssrf
+  ./internal/service -count=1`, `go vet ./...`, `go build ./cmd/nanite/`, and
+  the final `go test ./...` baseline pass. `gosec -quiet
+  -include=G107,G704 ./internal/service/...` is clean. An unrestricted service
+  scan still reports 29 pre-existing findings in unrelated files and none in
+  `a2a_push_notifier.go`. One earlier full-suite run observed the unrelated
+  `TestDurableAgentStopRuntimeErrorMarksFailed` event-ordering flake; its
+  expected event was present at index 1 rather than index 0, the test passed
+  10/10 in isolation, and the final full baseline passed.
 
 ## Review notes
 

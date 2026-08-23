@@ -39,6 +39,7 @@ findings. `12/02` is guide-derived. Neither is an unmapped-finding error.
 | `GO-RUNTIME-002` | high | `08-remaining-security-hardening/07-server-auth-bind-tls-posture.md` |
 | `GO-SEC4-002` | high | `02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md` |
 | `GO-STORE-003` | high | `06-store-correctness/01-fix-deleteagentbyid-error-swallowing.md` |
+| `GO-SVCCORE-004` | high | `08-remaining-security-hardening/01-a2a-webhook-url-validation.md` |
 | `GO-SVCEXEC-001` | high | `10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md` |
 | `GO-SVCEXEC-002` | high | `10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md` |
 | `GO-API-004` | medium | `08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md` |
@@ -68,7 +69,6 @@ findings. `12/02` is guide-derived. Neither is an unmapped-finding error.
 | `GO-STORE-005` | medium | `06-store-correctness/02-triage-store-context-and-transaction-gaps.md` |
 | `GO-SVCCORE-001` | medium | `04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md` |
 | `GO-SVCCORE-003` | medium | `13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md` |
-| `GO-SVCCORE-004` | medium | `08-remaining-security-hardening/01-a2a-webhook-url-validation.md` |
 | `GO-SVCCORE-006` | medium | `04-container-reaper-lifecycle/03-investigate-internal-service-race-timeout.md` |
 | `GO-SVCEXEC-003` | medium | `09-production-islands/03-team-semantic-routing.md` |
 | `GO-SVCEXEC-004` | medium | `11-semantic-duplication-migration-drift/01-subagent-completion-vs-message-wake-policy.md` |

@@ -4,17 +4,235 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
+	"github.com/hollis-labs/nanite/internal/ssrf"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+func allowLocalHTTPWebhookTest(notifier *A2APushNotifier) {
+	notifier.allowHTTP = true
+	notifier.allowLocalhost = true
+}
+
+func TestA2APushNotifierRequiresHTTPSByDefault(t *testing.T) {
+	notifier := NewA2APushNotifier(nil, nil)
+	dialed := false
+	notifier.resolver = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("203.0.113.10")}, nil
+	}
+	notifier.dialer = func(context.Context, string, string) (net.Conn, error) {
+		dialed = true
+		return nil, errors.New("unexpected dial")
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://callback.example/hook", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := notifier.secureHTTPClient().Do(req); err == nil || !strings.Contains(err.Error(), "HTTPS required") {
+		t.Fatalf("HTTP webhook error = %v, want HTTPS-required rejection", err)
+	}
+	if dialed {
+		t.Fatal("HTTP webhook reached the dialer before scheme rejection")
+	}
+}
+
+func TestA2APushNotifierBlocksSharedSSRFPolicyRanges(t *testing.T) {
+	tests := map[string]string{
+		"rfc1918-10":       "10.1.2.3",
+		"rfc1918-172":      "172.16.1.2",
+		"rfc1918-192":      "192.168.1.2",
+		"ipv4-loopback":    "127.0.0.1",
+		"ipv6-loopback":    "::1",
+		"imds-link-local":  "169.254.169.254",
+		"ipv6-link-local":  "fe80::1",
+		"cgnat":            "100.64.0.1",
+		"ipv6-ula":         "fd00::1",
+		"ipv4-unspecified": "0.0.0.0",
+		"ipv6-unspecified": "::",
+	}
+	for name, blocked := range tests {
+		t.Run(name, func(t *testing.T) {
+			notifier := NewA2APushNotifier(nil, nil)
+			dialed := false
+			notifier.resolver = func(context.Context, string) ([]net.IP, error) {
+				return []net.IP{net.ParseIP(blocked)}, nil
+			}
+			notifier.dialer = func(context.Context, string, string) (net.Conn, error) {
+				dialed = true
+				return nil, errors.New("unexpected dial")
+			}
+
+			req, err := http.NewRequest(http.MethodPost, "https://callback.example/hook", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := notifier.secureHTTPClient().Do(req); !errors.Is(err, ssrf.ErrBlocked) {
+				t.Fatalf("blocked IP %s error = %v, want ssrf.ErrBlocked", blocked, err)
+			}
+			if dialed {
+				t.Fatalf("blocked IP %s reached the dialer", blocked)
+			}
+		})
+	}
+}
+
+func TestA2APushNotifierRejectsMixedDNSAnswers(t *testing.T) {
+	notifier := NewA2APushNotifier(nil, nil)
+	dialed := false
+	notifier.resolver = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("203.0.113.10"), net.ParseIP("169.254.169.254")}, nil
+	}
+	notifier.dialer = func(context.Context, string, string) (net.Conn, error) {
+		dialed = true
+		return nil, errors.New("unexpected dial")
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "https://callback.example/hook", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := notifier.secureHTTPClient().Do(req); !errors.Is(err, ssrf.ErrBlocked) {
+		t.Fatalf("mixed DNS answer error = %v, want ssrf.ErrBlocked", err)
+	}
+	if dialed {
+		t.Fatal("mixed DNS answer reached the dialer")
+	}
+}
+
+func TestA2APushNotifierDialsPinnedLiteral(t *testing.T) {
+	notifier := NewA2APushNotifier(nil, nil)
+	var dialAddr string
+	dialErr := errors.New("stop after pinned dial")
+	notifier.resolver = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("203.0.113.25")}, nil
+	}
+	notifier.dialer = func(_ context.Context, _ string, addr string) (net.Conn, error) {
+		dialAddr = addr
+		return nil, dialErr
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "https://callback.example/hook", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := notifier.secureHTTPClient().Do(req); !errors.Is(err, dialErr) {
+		t.Fatalf("pinned dial error = %v, want sentinel", err)
+	}
+	if dialAddr != "203.0.113.25:443" {
+		t.Fatalf("dial address = %q, want pinned literal", dialAddr)
+	}
+}
+
+func TestA2APushNotifierRevalidatesRedirectDNS(t *testing.T) {
+	redirectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/redirected", http.StatusFound)
+	}))
+	defer redirectServer.Close()
+
+	notifier := NewA2APushNotifier(nil, nil)
+	notifier.allowHTTP = true
+	resolveCalls := 0
+	notifier.resolver = func(context.Context, string) ([]net.IP, error) {
+		resolveCalls++
+		if resolveCalls == 1 {
+			return []net.IP{net.ParseIP("203.0.113.10")}, nil
+		}
+		return []net.IP{net.ParseIP("127.0.0.1")}, nil
+	}
+	dialCalls := 0
+	notifier.dialer = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		dialCalls++
+		return (&net.Dialer{}).DialContext(ctx, network, redirectServer.Listener.Addr().String())
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://callback.example/hook", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := notifier.secureHTTPClient().Do(req); !errors.Is(err, ssrf.ErrBlocked) {
+		t.Fatalf("redirect rebind error = %v, want ssrf.ErrBlocked", err)
+	}
+	if resolveCalls != 2 {
+		t.Fatalf("resolver calls = %d, want initial request plus redirect", resolveCalls)
+	}
+	if dialCalls != 1 {
+		t.Fatalf("inner dial calls = %d, want only the validated initial request", dialCalls)
+	}
+}
+
+func TestA2APushNotifierSSRFRejectionUsesRetryBackoff(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.New(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer st.Close(context.Background())
+
+	configJSON, err := json.Marshal(&a2a.PushNotificationConfig{URL: "https://callback.example/hook"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := &store.A2ATask{
+		ID:                     "test-task-ssrf-retry",
+		TargetKind:             "workflow",
+		TargetRef:              "test-workflow",
+		Message:                "test message",
+		State:                  a2a.TaskStateSubmitted,
+		PushNotificationConfig: sql.NullString{String: string(configJSON), Valid: true},
+	}
+	if err := st.CreateA2ATask(ctx, task); err != nil {
+		t.Fatalf("CreateA2ATask: %v", err)
+	}
+
+	notifier := NewA2APushNotifier(st, nil)
+	notifier.resolver = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("127.0.0.1")}, nil
+	}
+	dialed := false
+	notifier.dialer = func(context.Context, string, string) (net.Conn, error) {
+		dialed = true
+		return nil, errors.New("unexpected dial")
+	}
+	if err := notifier.EnqueueDelivery(task.ID, a2a.TaskStateWorking); err != nil {
+		t.Fatalf("EnqueueDelivery: %v", err)
+	}
+
+	before := time.Now()
+	if err := notifier.ProcessPendingDeliveries(ctx); err != nil {
+		t.Fatalf("ProcessPendingDeliveries: %v", err)
+	}
+	if dialed {
+		t.Fatal("blocked callback reached the dialer")
+	}
+	pending, err := st.GetPendingPushDeliveries(ctx, time.Now().Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("GetPendingPushDeliveries: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending deliveries = %d, want 1 scheduled retry", len(pending))
+	}
+	if pending[0].AttemptCount != 1 {
+		t.Fatalf("attempt count = %d, want 1", pending[0].AttemptCount)
+	}
+	if !strings.Contains(pending[0].LastError, ssrf.ErrBlocked.Error()) {
+		t.Fatalf("last error = %q, want SSRF classifier", pending[0].LastError)
+	}
+	if pending[0].NextRetry.Before(before.Add(59 * time.Second)) {
+		t.Fatalf("next retry = %s, want existing one-minute backoff", pending[0].NextRetry)
+	}
+}
 
 // TestA2APushNotifierEnqueueAndDeliver is an integration test that verifies
 // the full push notification lifecycle:
@@ -79,6 +297,7 @@ func TestA2APushNotifierEnqueueAndDeliver(t *testing.T) {
 
 	// Create push notifier
 	notifier := NewA2APushNotifier(s, nil)
+	allowLocalHTTPWebhookTest(notifier)
 
 	// Enqueue a delivery for state transition
 	newState := a2a.TaskStateWorking
@@ -174,6 +393,7 @@ func TestA2APushNotifierRetry(t *testing.T) {
 	}
 
 	notifier := NewA2APushNotifier(s, nil)
+	allowLocalHTTPWebhookTest(notifier)
 
 	// Enqueue delivery
 	if err := notifier.EnqueueDelivery(task.ID, a2a.TaskStateWorking); err != nil {
@@ -284,6 +504,7 @@ func TestA2APushNotifierMaxRetries(t *testing.T) {
 	}
 
 	notifier := NewA2APushNotifier(s, nil)
+	allowLocalHTTPWebhookTest(notifier)
 
 	// Enqueue delivery
 	if err := notifier.EnqueueDelivery(task.ID, a2a.TaskStateWorking); err != nil {
@@ -393,6 +614,7 @@ func TestA2APushNotifier_TickerDrivenPath_EndToEnd(t *testing.T) {
 
 	canceller := &fakeDurableAgentCanceller{}
 	tm := NewTaskManager(st, nil, nil, canceller, agentworkflow.NewRegistry(nil), nil)
+	allowLocalHTTPWebhookTest(tm.PushNotifier())
 
 	// Real production call site: CancelTask's internal
 	// enqueuePushNotification call, not a direct EnqueueDelivery call.

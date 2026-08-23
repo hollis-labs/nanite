@@ -697,8 +697,8 @@
     },
     {
       "id": "GO-SVCCORE-004",
-      "severity": "medium",
-      "confidence": "medium",
+      "severity": "high",
+      "confidence": "high",
       "category": [
         "security"
       ],
@@ -707,19 +707,24 @@
         "internal/service/a2a_push_notifier.go",
         "internal/service/a2a_task_manager.go"
       ],
-      "symbols": [],
+      "symbols": [
+        "A2APushNotifier.processDelivery",
+        "A2APushNotifier.secureHTTPClient",
+        "TaskManager.SubmitTask",
+        "API.handleTaskSubmit"
+      ],
       "summary": "A2A push-notification webhook URL (caller-supplied at task-submit time) has no validation -- no scheme allowlist, no private-IP/localhost block -- before an outbound HTTP request is made. Classic webhook-callback SSRF pattern.",
       "evidence": [
-        "a2a_push_notifier.go:152-166; gosec's G107 rule doesn't catch this idiom (targets http.Get/Post directly, not NewRequestWithContext+client.Do)."
+        "internal/api/api.go:585 registers POST /api/a2a/jsonrpc; a2a_jsonrpc.go:87-88,101-127 accepts SendMessage PushNotificationConfig without a route-local auth gate; server/auth.go:18-20 disables common Basic Auth when credentials are unset; a2a_push_notifier.go:166-179 constructs and sends the callback request."
       ],
       "recommendation": "Validate the URL at submission or delivery time against a scheme allowlist and reject loopback/link-local/private-range hosts unless explicitly trusted.",
-      "requires_architect_decision": true,
+      "requires_architect_decision": false,
       "report_section": "\u00a78.3",
-      "false_positive_considerations": "A2A endpoint's auth boundary (whether only trusted peer agents can submit tasks) was not independently verified.",
+      "false_positive_considerations": "The prior auth-boundary uncertainty is resolved: optional Basic Auth is a no-op when unset and no A2A-specific gate exists. The loopback-default listener reduces default exposure but operators may explicitly bind non-loopback while leaving auth unset, so it does not change the external-unauthenticated classification.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/01-a2a-webhook-url-validation.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed still open: a2a_push_notifier.go's processDelivery builds `http.NewRequestWithContext(ctx, http.MethodPost, config.URL, ...)` (line 153) directly from the caller-supplied PushNotificationConfig with no scheme/host validation anywhere in the function. a2a_task_manager.go changed since the audit but only in an unrelated workflow-status-mapping switch (loops-batch); the push-notifier vulnerability is untouched."
+      "task_status": "implemented",
+      "revalidation_note": "Auth/caller trace confirms external unauthenticated: POST /api/a2a/jsonrpc -> SendMessage -> handleTaskSubmit -> TaskManager.SubmitTask accepts PushNotificationConfig, while common Basic Auth is a no-op when NANITE_AUTH_USER/PASSWORD are unset and there is no A2A-specific gate. Severity/confidence are corrected to high/high because an unauthenticated caller can direct an authenticated server-side POST toward internal destinations; the loopback-default bind lowers default exposure but explicitly exposed auth-unset deployments remain possible. The operator approved the narrow SSRF remediation and left A2A authentication redesign out of scope. A2APushNotifier is the sole outbound URL consumer and now reuses the internal/ssrf policy consolidated by GO-SEC4-007/task 08/09: HTTPS-only default, all-answer validation, pinned-literal dialing, and redirect revalidation. Focused parity/adversarial/race tests pass and existing retry/backoff semantics are preserved. No review or orchestrator approval is claimed."
     },
     {
       "id": "GO-SVCCORE-005",

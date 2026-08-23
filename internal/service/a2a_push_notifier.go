@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 
 	"github.com/hollis-labs/nanite/internal/a2a"
+	"github.com/hollis-labs/nanite/internal/ssrf"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -22,6 +25,16 @@ type A2APushNotifier struct {
 	store  *store.Store
 	client *http.Client
 	logger *slog.Logger
+
+	// resolver and dialer are injectable seams for proving that every DNS
+	// answer is checked and the validated literal is what gets dialed.
+	resolver ssrf.Resolver
+	dialer   func(ctx context.Context, network, addr string) (net.Conn, error)
+
+	// Production defaults are HTTPS-only and deny localhost. Tests that use a
+	// loopback httptest server must opt into both exceptions explicitly.
+	allowHTTP      bool
+	allowLocalhost bool
 }
 
 // NewA2APushNotifier constructs an A2APushNotifier with the given store and logger.
@@ -163,7 +176,7 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 		req.Header.Set("Authorization", config.Auth)
 	}
 
-	resp, err := pn.client.Do(req)
+	resp, err := pn.secureHTTPClient().Do(req)
 	if err != nil {
 		delivery.AttemptCount++
 		delivery.LastError = err.Error()
@@ -233,4 +246,73 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 	)
 
 	return pn.store.DeleteA2APushDelivery(ctx, delivery.ID)
+}
+
+// roundTripperFunc lets the notifier enforce its endpoint-specific HTTPS rule
+// immediately before every request, including redirects, while the shared
+// destination-address policy remains owned by internal/ssrf.
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func (pn *A2APushNotifier) secureHTTPClient() *http.Client {
+	client := &http.Client{Timeout: 10 * time.Second}
+	if pn.client != nil {
+		*client = *pn.client
+	}
+
+	resolver := pn.resolver
+	if resolver == nil {
+		resolver = ssrf.DefaultResolver
+	}
+	innerDial := pn.dialer
+	if innerDial == nil {
+		dialer := &net.Dialer{Timeout: 5 * time.Second}
+		innerDial = dialer.DialContext
+	}
+
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			pinned, err := ssrf.ResolveAndPin(ctx, resolver, host, pn.allowLocalhost)
+			if err != nil {
+				return nil, err
+			}
+			return innerDial(ctx, network, net.JoinHostPort(pinned.String(), port))
+		},
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		DisableKeepAlives:     true,
+	}
+	client.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		if err := pn.validateWebhookURL(req.URL); err != nil {
+			return nil, err
+		}
+		return transport.RoundTrip(req)
+	})
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("a2a push: too many redirects")
+		}
+		return pn.validateWebhookURL(req.URL)
+	}
+	return client
+}
+
+func (pn *A2APushNotifier) validateWebhookURL(target *url.URL) error {
+	if target == nil || target.Hostname() == "" {
+		return fmt.Errorf("a2a push: webhook URL missing host")
+	}
+	if target.Scheme == "https" {
+		return nil
+	}
+	if pn.allowHTTP && target.Scheme == "http" {
+		return nil
+	}
+	return fmt.Errorf("a2a push: unsupported webhook scheme %q (HTTPS required)", target.Scheme)
 }

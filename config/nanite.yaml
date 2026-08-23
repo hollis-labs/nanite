@@ -1,6 +1,11 @@
-# Conduit application configuration.
-# Loaded at startup from config/conduit.yaml. Tunables that don't belong in
+# Nanite application configuration.
+# Loaded at startup from config/nanite.yaml. Tunables that don't belong in
 # user-facing settings or environment variables go here.
+
+http:
+  # Loopback-only by default. Set to 0.0.0.0 (or start nanite with
+  # --bind-address 0.0.0.0) only when access from other hosts is intentional.
+  bind_address: 127.0.0.1
 
 presence:
   # Minimum interval between cli_active presence events per session (seconds).

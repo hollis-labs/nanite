@@ -1,7 +1,7 @@
 # Default auth/bind/TLS posture — no enforcement or signal toward the documented local-only tradeoff
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/server/auth.go`, `internal/server/server.go`, `internal/server/caller_identity.go`; likely `internal/config` (any new bind-address/TLS/warning config options); `cmd/nanite/main.go`/`cmdServe` (composition-root wiring, per report §8.13)
 **Requires architect decision:** true — this is explicitly named in the guide's §9 architect-decision-queue as **item 3** ("Default auth/bind/TLS/warning posture")
@@ -96,14 +96,52 @@ A bind-address default change is the highest-risk option — anyone currently re
 
 ## Done means
 
-- [ ] Architect decision recorded (option a/b/c/d above, or a named alternative)
-- [ ] Corresponding implementation landed (or, if (d), the finding formally dispositioned as accepted-risk with rationale recorded)
-- [ ] `caller_identity.go`'s doc comment updated to match the actual enforced behavior
-- [ ] Tests above pass for whichever direction was implemented
+- [x] Architect decision recorded: AD-15 chose loopback by default, explicit bind-wide opt-in, and an always-visible auth posture; TLS remains out of scope.
+- [x] The new opt-in is named explicitly: `nanite serve --bind-address 0.0.0.0` restores the prior bind-all behavior; `http.bind_address: 0.0.0.0` is the persistent config equivalent.
+- [x] Corresponding implementation landed: zero/unset config resolves to `127.0.0.1`, explicit bind addresses flow from `internal/config` through `cmdServe` into the production server, and startup reports auth enabled/disabled with an unauthenticated warning.
+- [x] `caller_identity.go`'s doc comment matches the enforced loopback-default, explicit-bind-address, optional-auth posture.
+- [x] `CHANGELOG.md` carries an operator-facing Breaking migration note with the change, the symptom (starts normally but is no longer reachable from other hosts), and the one-line opt-in fix.
+- [x] Config, composition-root override, real listener, startup logging, focused race, manual scratch-server, build, vet, and full-suite tests pass.
 
 ## Work log
 
-<!-- Worker fills this in. -->
+- Implemented AD-15 without adding TLS. Added `HTTPConfig.BindAddress`
+  (`http.bind_address`) with the safe `127.0.0.1` default, plus the explicit
+  `nanite serve --bind-address <host-or-IP>` override. `cmdServe` applies the
+  CLI override after loading app config and passes the resulting `HTTPConfig`
+  through the existing `server.New` composition root. `Server.listenAddress`
+  uses `net.JoinHostPort`, preserving IPv4/IPv6 address correctness.
+- Re-checked production construction sites before changing the default:
+  `cmd/nanite/main.go`'s `cmdServe` is the only production caller of
+  `internal/server.New`; the other `NewServer`/`httptest.NewServer` matches are
+  tests or unrelated HTTP/MCP client surfaces. No second Nanite HTTP listener
+  needed migration.
+- Startup now always logs `auth=enabled` or `auth=disabled`. The unconfigured
+  path emits a WARN-level `nanite listening without authentication` record
+  that names both credential environment variables; Basic Auth's existing
+  no-op behavior when both variables are unset is otherwise unchanged.
+- Updated `caller_identity.go` to document the enforced loopback default,
+  explicit bind-address opt-in, optional Basic Auth, and visible startup
+  posture. Added `CHANGELOG.md` `Unreleased / Breaking` migration text for
+  Docker/LAN/remote-dev/reverse-proxy operators. It states the observable
+  symptom and gives the exact one-line fix:
+  `nanite serve --bind-address 0.0.0.0`.
+- Added config default/load-override tests, a `cmdServe` override-wiring test,
+  real ephemeral listener tests for loopback and `0.0.0.0`, and structured-log
+  assertions proving unconfigured auth warns while configured auth logs at
+  INFO without a warning.
+- Scratch-only live verification used an absolute database and XDG roots under
+  `/tmp/nanite-w3-08-07.7EOODj` (no real operator data or relative live write
+  paths). The default process logged `addr=127.0.0.1:0 auth=disabled` at WARN;
+  `--bind-address 0.0.0.0` logged `addr=0.0.0.0:0 auth=disabled` at WARN. A
+  post-run `git status --short` showed only this task's intended files.
+- Verification passed: `go test ./internal/config ./internal/server
+  ./cmd/nanite`; `go test -race ./internal/config ./internal/server`; `go
+  build ./cmd/nanite/`; `go vet ./...`; and `go test ./...`. The first full
+  suite attempt hit an unrelated transient `internal/service` panic (`send on
+  closed channel` in `chat_boot_drive.go`, an untouched package); an isolated
+  `go test ./internal/service` passed, and the complete `go test ./...` rerun
+  then passed.
 
 ## Review notes
 

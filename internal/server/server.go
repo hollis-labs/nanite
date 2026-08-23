@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -67,8 +68,9 @@ type Server struct {
 
 // New creates a new Server wired to the given store and API.
 //
-// httpCfg is consulted for timeouts and body-size caps. Fields that are zero
-// are replaced with conservative defaults — see the default* constants above.
+// httpCfg is consulted for the bind address, timeouts, and body-size caps.
+// Empty/zero fields are replaced with conservative defaults — see
+// resolveHTTPConfig and the default* constants above.
 func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugin.Host, httpCfg config.HTTPConfig) *Server {
 	mux := http.NewServeMux()
 	srv := &Server{
@@ -94,6 +96,11 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 // from the conservative defaults. Callers may pass a zero value to opt into
 // defaults entirely.
 func resolveHTTPConfig(cfg config.HTTPConfig) config.HTTPConfig {
+	if strings.TrimSpace(cfg.BindAddress) == "" {
+		cfg.BindAddress = "127.0.0.1"
+	} else {
+		cfg.BindAddress = strings.TrimSpace(cfg.BindAddress)
+	}
 	if cfg.ReadTimeoutSeconds <= 0 {
 		cfg.ReadTimeoutSeconds = int(defaultReadTimeout / time.Second)
 	}
@@ -160,8 +167,8 @@ func (s *Server) ListenAndServe() error {
 			),
 		),
 	)
-	addr := fmt.Sprintf(":%d", s.port)
-	slog.Info("nanite listening", "addr", addr, "dev", s.dev)
+	addr := s.listenAddress()
+	s.logStartupPosture(addr)
 
 	httpSrv := &http.Server{
 		Addr:              addr,
@@ -172,6 +179,25 @@ func (s *Server) ListenAndServe() error {
 		IdleTimeout:       time.Duration(s.httpCfg.IdleTimeoutSeconds) * time.Second,
 	}
 	return httpSrv.ListenAndServe()
+}
+
+func (s *Server) listenAddress() string {
+	return net.JoinHostPort(s.httpCfg.BindAddress, fmt.Sprintf("%d", s.port))
+}
+
+func (s *Server) logStartupPosture(addr string) {
+	if basicAuthEnabled() {
+		slog.Info("nanite listening", "addr", addr, "dev", s.dev, "auth", "enabled")
+		return
+	}
+
+	slog.Warn(
+		"nanite listening without authentication",
+		"addr", addr,
+		"dev", s.dev,
+		"auth", "disabled",
+		"warning", "configure NANITE_AUTH_USER and NANITE_AUTH_PASSWORD before exposing Nanite beyond a trusted host",
+	)
 }
 
 // newHTTPServer is exposed to tests so they can spin up an httptest server

@@ -11,12 +11,14 @@ import (
 // (rather than trusting body/query-derived caller args) set both
 // headers on every request.
 //
-// G-6.3 design note: nanite is a single-user local app and does not
-// authenticate the caller against a password/token — Basic Auth is
-// optional and coarse. These headers are the *contract* for carrying
-// caller identity end-to-end; the service layer's existing authz
-// checks (Inbox caller-match, Thread participant filter, Ack/Resolve
-// recipient check, UnreadCount caller-match) then enforce that the
+// G-6.3 design note: nanite is a single-user local app. The HTTP server
+// enforces that posture by binding to 127.0.0.1 by default; binding beyond
+// the local machine requires an explicit bind-address opt-in. Basic Auth is
+// still optional and coarse, but startup always announces whether it is
+// enabled and emits a warning when it is not. These headers are the
+// *contract* for carrying caller identity end-to-end; the service layer's
+// existing authz checks (Inbox caller-match, Thread participant filter,
+// Ack/Resolve recipient check, UnreadCount caller-match) then enforce that the
 // caller matches the row's intended recipient. When headers are
 // absent the service falls back to legacy trust-the-body behavior —
 // see messaging.UnreadCount and the HTTP handler comments.

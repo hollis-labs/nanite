@@ -13,11 +13,10 @@ import (
 // (except /api/health) when NANITE_AUTH_USER and NANITE_AUTH_PASSWORD env vars are set.
 // If neither is set, the middleware is a no-op (local dev mode).
 func basicAuthMiddleware(next http.Handler) http.Handler {
-	user := os.Getenv(brand.Env("AUTH_USER"))
-	pass := os.Getenv(brand.Env("AUTH_PASSWORD"))
+	user, pass, enabled := basicAuthCredentials()
 
 	// If no credentials configured, skip auth entirely (local dev mode).
-	if user == "" && pass == "" {
+	if !enabled {
 		return next
 	}
 
@@ -59,7 +58,7 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		// Check Basic Auth credentials.
 		reqUser, reqPass, ok := r.BasicAuth()
 		if !ok {
-			w.Header().Set("WWW-Authenticate", `Basic realm="` + brand.ID + `"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="`+brand.ID+`"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -68,11 +67,27 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		passMatch := subtle.ConstantTimeCompare([]byte(reqPass), []byte(pass)) == 1
 
 		if !userMatch || !passMatch {
-			w.Header().Set("WWW-Authenticate", `Basic realm="` + brand.ID + `"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="`+brand.ID+`"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// basicAuthEnabled reports whether basicAuthMiddleware will enforce
+// credentials. Its condition intentionally mirrors the middleware's no-op
+// branch: either configured value enables the middleware, while both unset
+// leaves the server unauthenticated.
+func basicAuthEnabled() bool {
+	_, _, enabled := basicAuthCredentials()
+	return enabled
+}
+
+func basicAuthCredentials() (user, pass string, enabled bool) {
+	user = os.Getenv(brand.Env("AUTH_USER"))
+	pass = os.Getenv(brand.Env("AUTH_PASSWORD"))
+	enabled = user != "" || pass != ""
+	return user, pass, enabled
 }

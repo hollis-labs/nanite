@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/slogx"
@@ -22,6 +23,24 @@ import (
 
 type countingCloser struct {
 	calls atomic.Int32
+}
+
+func TestApplyServeBindAddressOverride(t *testing.T) {
+	t.Run("flag overrides config", func(t *testing.T) {
+		cfg := config.HTTPConfig{BindAddress: "127.0.0.1"}
+		got := applyServeBindAddressOverride(cfg, " 0.0.0.0 ")
+		if got.BindAddress != "0.0.0.0" {
+			t.Fatalf("BindAddress = %q, want 0.0.0.0", got.BindAddress)
+		}
+	})
+
+	t.Run("empty flag preserves config", func(t *testing.T) {
+		cfg := config.HTTPConfig{BindAddress: "192.0.2.10"}
+		got := applyServeBindAddressOverride(cfg, "")
+		if got.BindAddress != cfg.BindAddress {
+			t.Fatalf("BindAddress = %q, want configured %q", got.BindAddress, cfg.BindAddress)
+		}
+	})
 }
 
 func (c *countingCloser) Close() error {

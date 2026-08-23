@@ -8,6 +8,23 @@ lives in the git log.
 
 ### Breaking
 
+- **The HTTP server now binds to loopback by default** (GO-RUNTIME-002,
+  AD-15). Upgrading a deployment that relied on the previous bind-all default
+  can affect Docker port mappings, LAN or remote-development access, and
+  reverse proxies targeting a non-loopback interface. The symptom is that
+  Nanite starts normally but is no longer reachable from other hosts. Opt in
+  to the former bind-wide behavior explicitly:
+
+  ```sh
+  nanite serve --bind-address 0.0.0.0
+  ```
+
+  For a persistent deployment setting, set `http.bind_address: 0.0.0.0` in
+  `config/nanite.yaml`. Startup logs now always report `auth=enabled` or
+  `auth=disabled`, with a warning when `NANITE_AUTH_USER` and
+  `NANITE_AUTH_PASSWORD` are unconfigured. TLS is not built in; use a reverse
+  proxy when exposing Nanite beyond the local machine.
+
 - **User config moved to XDG-compliant location** (CW-20260430-0010). The
   user-level chat-harness config is now read from
   `$XDG_CONFIG_HOME/nanite/config.yaml` (default

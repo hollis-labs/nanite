@@ -65,10 +65,15 @@ type OTelConfig struct {
 // are optional; zero or unset values fall back to conservative defaults at
 // Server construction time. See server.New for the fallback policy.
 type HTTPConfig struct {
-	ReadTimeoutSeconds       int `yaml:"read_timeout_seconds"`
-	ReadHeaderTimeoutSeconds int `yaml:"read_header_timeout_seconds"`
-	WriteTimeoutSeconds      int `yaml:"write_timeout_seconds"`
-	IdleTimeoutSeconds       int `yaml:"idle_timeout_seconds"`
+	// BindAddress is the host or IP address used by the production HTTP
+	// listener. Empty values resolve to 127.0.0.1 so an unconfigured server is
+	// reachable only from the local machine. Set explicitly to 0.0.0.0 (or ::)
+	// only when remote access is intended and protected by the deployment.
+	BindAddress              string `yaml:"bind_address"`
+	ReadTimeoutSeconds       int    `yaml:"read_timeout_seconds"`
+	ReadHeaderTimeoutSeconds int    `yaml:"read_header_timeout_seconds"`
+	WriteTimeoutSeconds      int    `yaml:"write_timeout_seconds"`
+	IdleTimeoutSeconds       int    `yaml:"idle_timeout_seconds"`
 	// MaxRequestBodyBytes caps the body of any mutating (POST/PUT/PATCH/DELETE)
 	// request that is not explicitly whitelisted for a larger cap (e.g.
 	// multipart artifact upload). A value <=0 falls back to the default.
@@ -131,6 +136,7 @@ func DefaultAppConfig() *AppConfig {
 			VendorStorageDir: "data/skills/vendor",
 		},
 		HTTP: HTTPConfig{
+			BindAddress:              "127.0.0.1",
 			ReadTimeoutSeconds:       30,
 			ReadHeaderTimeoutSeconds: 10,
 			WriteTimeoutSeconds:      60,

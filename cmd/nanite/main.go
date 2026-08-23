@@ -105,6 +105,13 @@ func cmdServe(args []string) error {
 	return cmdServeWithInitializers(args, slogx.Init, naniteotel.Init)
 }
 
+func applyServeBindAddressOverride(httpCfg config.HTTPConfig, bindAddress string) config.HTTPConfig {
+	if strings.TrimSpace(bindAddress) != "" {
+		httpCfg.BindAddress = strings.TrimSpace(bindAddress)
+	}
+	return httpCfg
+}
+
 func cmdServeWithInitializers(
 	args []string,
 	initLogging serveLoggingInitializer,
@@ -112,6 +119,7 @@ func cmdServeWithInitializers(
 ) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 8090, "HTTP listen port")
+	bindAddress := fs.String("bind-address", "", "HTTP bind address override (default: 127.0.0.1; use 0.0.0.0 for all IPv4 interfaces)")
 	// --db default is empty: an unset flag resolves the database path via
 	// go-apppaths (CW-20260517-0061). A non-empty flag becomes an explicit
 	// WithDBOverride. The retired "./nanite.db" CWD-relative default is the
@@ -142,6 +150,7 @@ func cmdServeWithInitializers(
 	if appCfgErr != nil {
 		appCfg = config.DefaultAppConfig()
 	}
+	appCfg.HTTP = applyServeBindAddressOverride(appCfg.HTTP, *bindAddress)
 
 	// Install the structured logging handler before anything else
 	// emits a log record. All slog-based sites flow through the PII

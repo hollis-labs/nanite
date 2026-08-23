@@ -2,8 +2,10 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -270,6 +272,9 @@ func TestAuthStillEnforcedOnNonPreflight(t *testing.T) {
 // disable the protection entirely).
 func TestResolveHTTPConfigDefaults(t *testing.T) {
 	got := resolveHTTPConfig(config.HTTPConfig{})
+	if got.BindAddress != "127.0.0.1" {
+		t.Errorf("BindAddress default = %q, want 127.0.0.1", got.BindAddress)
+	}
 	cases := []struct {
 		name string
 		v    int
@@ -294,6 +299,120 @@ func TestResolveHTTPConfigDefaults(t *testing.T) {
 	// headroom exception).
 	if got.MaxUploadBodyBytes < got.MaxRequestBodyBytes {
 		t.Errorf("upload cap %d must be >= request cap %d", got.MaxUploadBodyBytes, got.MaxRequestBodyBytes)
+	}
+}
+
+func TestListenAddressPosture(t *testing.T) {
+	tests := []struct {
+		name            string
+		cfg             config.HTTPConfig
+		wantAddress     string
+		wantLoopback    bool
+		wantUnspecified bool
+	}{
+		{
+			name:         "default is loopback only",
+			cfg:          config.HTTPConfig{},
+			wantAddress:  "127.0.0.1:0",
+			wantLoopback: true,
+		},
+		{
+			name:            "explicit bind-wide opt-in",
+			cfg:             config.HTTPConfig{BindAddress: "0.0.0.0"},
+			wantAddress:     "0.0.0.0:0",
+			wantUnspecified: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newTestServer(t, tt.cfg)
+			if got := srv.listenAddress(); got != tt.wantAddress {
+				t.Fatalf("listenAddress() = %q, want %q", got, tt.wantAddress)
+			}
+
+			ln, err := net.Listen("tcp", srv.listenAddress())
+			if err != nil {
+				t.Fatalf("listen: %v", err)
+			}
+			defer ln.Close()
+
+			addr, ok := ln.Addr().(*net.TCPAddr)
+			if !ok {
+				t.Fatalf("listener address type = %T, want *net.TCPAddr", ln.Addr())
+			}
+			if addr.IP.IsLoopback() != tt.wantLoopback {
+				t.Errorf("listener IP %s loopback = %v, want %v", addr.IP, addr.IP.IsLoopback(), tt.wantLoopback)
+			}
+			if addr.IP.IsUnspecified() != tt.wantUnspecified {
+				t.Errorf("listener IP %s unspecified = %v, want %v", addr.IP, addr.IP.IsUnspecified(), tt.wantUnspecified)
+			}
+		})
+	}
+}
+
+func TestStartupLogAlwaysAnnouncesAuthPosture(t *testing.T) {
+	tests := []struct {
+		name      string
+		user      string
+		password  string
+		wantLevel string
+		wantAuth  string
+		wantMsg   string
+	}{
+		{
+			name:      "unconfigured warns",
+			wantLevel: "WARN",
+			wantAuth:  "disabled",
+			wantMsg:   "nanite listening without authentication",
+		},
+		{
+			name:      "configured reports enabled without warning",
+			user:      "operator",
+			password:  "secret",
+			wantLevel: "INFO",
+			wantAuth:  "enabled",
+			wantMsg:   "nanite listening",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("NANITE_AUTH_USER", tt.user)
+			t.Setenv("NANITE_AUTH_PASSWORD", tt.password)
+
+			var buf bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+			defer slog.SetDefault(previous)
+
+			srv := newTestServer(t, config.HTTPConfig{})
+			srv.logStartupPosture(srv.listenAddress())
+
+			var record map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &record); err != nil {
+				t.Fatalf("decode startup log %q: %v", buf.String(), err)
+			}
+			if got := record["level"]; got != tt.wantLevel {
+				t.Errorf("level = %v, want %s", got, tt.wantLevel)
+			}
+			if got := record["auth"]; got != tt.wantAuth {
+				t.Errorf("auth = %v, want %s", got, tt.wantAuth)
+			}
+			if got := record["msg"]; got != tt.wantMsg {
+				t.Errorf("msg = %v, want %q", got, tt.wantMsg)
+			}
+			if got := record["addr"]; got != "127.0.0.1:0" {
+				t.Errorf("addr = %v, want 127.0.0.1:0", got)
+			}
+			_, hasWarning := record["warning"]
+			if tt.wantAuth == "disabled" && !hasWarning {
+				t.Error("unauthenticated startup log is missing warning detail")
+			}
+			if tt.wantAuth == "enabled" && hasWarning {
+				t.Error("authenticated startup log unexpectedly contains a warning")
+			}
+		})
 	}
 }
 

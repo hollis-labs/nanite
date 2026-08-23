@@ -1,7 +1,7 @@
 # `generateResponse` — implement the approved six-action pipeline
 
 **Phase:** Audit remediation — Wave 5 reopened implementation beat
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** reviewed evidence/characterization task `10/01`; AD-12 decided
 **Gated on:** none — the operator expressly approved AD-12 on 2026-08-23
 **Findings:** GO-SVCEXEC-001, GO-SVCEXEC-002

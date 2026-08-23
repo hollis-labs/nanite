@@ -1,7 +1,7 @@
 # `SelfToolsTransport` — implement the four approved selective delegations
 
 **Phase:** Audit remediation — Wave 5 reopened implementation beat
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** reviewed evidence task `10/02`; AD-13 decided
 **Gated on:** none — the operator expressly approved AD-13 on 2026-08-23
 **Findings:** GO-MCPTOOL-006

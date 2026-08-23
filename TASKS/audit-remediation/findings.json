@@ -875,7 +875,7 @@
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md",
       "disposition": "remediate",
       "task_status": "reviewed",
-      "revalidation_note": "Confirmed unchanged: internal/service/chat_generate.go has zero commits since 8feeee5c (byte-identical). generateResponse still spans chat_generate.go:122-2028 (~1906 lines), one unbroken function, exactly matching task file 10/01's own citation. 00/02's refreshed tool baseline (docs/audits/2026-08-21-go-quality/raw-1d3bfd96/DELTA.md) shows gocognit/cyclop/maintidx totals all moved worse repo-wide since the audit (gocognit 227->243, cyclop 250->275, maintidx 25->30), consistent with this finding not having improved."
+      "revalidation_note": "Wave 5 first locked the production door and six reviewed boundaries in 10/01, then the operator expressly approved AD-12 and reopened the wave for implementation in 10/04. The incremental six-action extraction is complete and freshly reviewed: generateResponse remains the visible coordinator and moved monotonically from cognitive/cyclop/gocyclo 458/228/225 to 19/18/18; the action complexities are bounded by phase rather than relocating the monolith. Focused normal/race and full non-race repository tests pass. The final full internal/service race attempt timed out after 20 minutes in unrelated SQLite migration setup with no DATA RACE report; this is recorded as a timeout, not a pass. Integrated commits 1d79d7c3 through cbf8554f."
     },
     {
       "id": "GO-SVCEXEC-002",
@@ -905,7 +905,7 @@
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md",
       "disposition": "remediate",
       "task_status": "reviewed",
-      "revalidation_note": "Confirmed unchanged: internal/service/chat.go has zero commits since 8feeee5c (byte-identical). chatServiceImpl struct still spans chat.go:214-392, matching task file 10/01's citation exactly; the 52-field/84-method counts are unaffected since the file is byte-identical to the audited commit."
+      "revalidation_note": "Wave 5 re-counted chatServiceImpl at 52 fields/87 production receiver methods and mapped every owner before AD-12. The approved 10/04 implementation removes generateResponse's accidental orchestration concentration through six explicit actions while keeping the service as coordinator; no wholesale field/type split was authorized. The operator expressly chose this balance: future collaborator extraction requires concrete ownership/testability pressure rather than metric reduction. Fresh final review passed and confirmed no service-field or runtime-session scope drift."
     },
     {
       "id": "GO-SVCEXEC-003",
@@ -1673,7 +1673,7 @@
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/02-selftoolstransport-decomposition.md",
       "disposition": "remediate",
       "task_status": "reviewed",
-      "revalidation_note": "Confirmed still a god-object, slightly worse: self_tools_transport.go grew from 2,431 to 2,493 lines since the audit (unrelated additive changes), and method count grew from 81 to 82 (`grep -c '^func (.*\\*SelfToolsTransport)'` across the package). The god-object finding itself is unambiguous (parallel to GO-SVCEXEC-001/002's treatment) -- AD-13 decides only the decomposition boundaries, per the guide's explicit framing (\"do not split solely to reduce field/method counts\") which presupposes a split is warranted, not whether one is."
+      "revalidation_note": "Wave 5 mapped the current 31-field/82-method/68-name transport in 10/02, then the operator expressly approved selective delegation under AD-13 and reopened the wave for 10/05. Four substantive owners now hold messaging/session handoff, todo/plan tracking, agent profiles/source resolution, and combined card/panel presentation. SelfToolsTransport remains the sole catalog/dispatch adapter at 27 fields and 50 production receiver methods with all 66 clauses/68 names unchanged; one project resolver and one presentation trust gate remain singular. Focused owner races and full non-race repository tests pass. The final full selftools race timed out after 20 minutes during the 145-migration fixture with no race report and is not claimed as a pass. Integrated commits 25689cb5 through 126c2a2a. Further delegation is deliberately pain-driven, not count-driven."
     },
     {
       "id": "GO-MCPTOOL-007",

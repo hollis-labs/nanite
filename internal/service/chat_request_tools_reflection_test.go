@@ -82,6 +82,12 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 	if !strings.Contains(resultBlocks[0].Content, "dev_grep") {
 		t.Errorf("reflection prompt should mention loaded dev_grep; got %q", resultBlocks[0].Content)
 	}
+	if !strings.Contains(resultBlocks[0].Content, "available tool catalog") {
+		t.Errorf("reflection prompt should describe the live catalog query; got %q", resultBlocks[0].Content)
+	}
+	if strings.Contains(resultBlocks[0].Content, "tools, memory, and operator skills") {
+		t.Errorf("reflection prompt should not promise retired ranking signals; got %q", resultBlocks[0].Content)
+	}
 	snap := insp.Snapshot(sessionID, turnID)
 	if snap == nil || len(snap.BrokerDecisions) != 1 || snap.BrokerDecisions[0].Outcome != "reflected" {
 		t.Errorf("expected one 'reflected' broker decision recorded; got %+v", snap)

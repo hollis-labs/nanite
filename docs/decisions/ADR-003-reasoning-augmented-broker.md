@@ -1,11 +1,33 @@
-# ADR-003 — Reasoning-augmented tool broker (D3)
+# ADR-003 — Reasoning-augmented tool broker (D3; partially retired)
 
-- **Status:** Accepted
+- **Status:** Partially superseded — D3-1 and D3-5 remain accepted; D3-2,
+  D3-3, D3-4, and D3-6 were retired by AD-10 on 2026-08-22
 - **Date:** 2026-04-27
+- **Disposition update:** 2026-08-23
 - **Ticket:** CW-20260419-0011 (D3, Phase 5 of architecture-sequence-2026-04-26)
 - **Context links:** CW-20260426-0010 (D2 truncation framing), ADR-002 (MCP wrap layer)
+- **Superseded in part by:** `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`
+  AD-10 and `TASKS/audit-remediation/09-production-islands/05-reasoning-augmented-tool-selection.md`
 
-## Problem
+## Current disposition
+
+AD-10 retired the production-unreachable reasoning-augmented selection chain
+and all machinery dedicated to it: memory-derived tool-pattern signals,
+operator-authored tool-preference files, blended ranking, and the
+err-toward-more padding rule. Their implementation, tests, boot wiring, and
+checked-in operator templates have been removed.
+
+Two decisions from this ADR remain live and independent of that ranking chain:
+
+- **D3-1:** one reflection prompt on the first `request_tools` cap trip, then a
+  hard halt on the second.
+- **D3-5:** context-window-aware token budgeting and final pruning of the
+  selected tool surface.
+
+The sections below retain the original rationale as an architectural record,
+but each heading now states whether the decision is retained or retired.
+
+## Historical problem statement
 
 The pre-Phase-5 tool broker was a reactive keyword matcher. When the LLM asked
 for more tools and the per-turn cap tripped, it died with a flat
@@ -24,9 +46,9 @@ Three concrete shortcomings:
    CW-20260426-0010 #3 the bias should be the other direction: load one extra
    description rather than force a request_tools round-trip.
 
-## Decisions
+## Original decisions and current status
 
-### D3-1. Reflection on cap, then halt
+### D3-1. Reflection on cap, then halt — retained
 
 When `total_calls > maxCalls || consecutive_empty >= 2` the broker now emits a
 **reflection prompt** the first time, asking the LLM to restate the underlying
@@ -38,7 +60,10 @@ halt fire. State machine: `reflectionFired bool` lives on `loopState`.
 turn cap and `consecutive_failures` machinery. Single-shot keeps the loop
 deterministic and bounds reflection cost to one extra round-trip per turn.
 
-### D3-2. Memory recall as parallel ranking signal (not gate)
+### D3-2. Memory recall as parallel ranking signal (not gate) — retired
+
+> Retired by AD-10. `MemoryRecaller`, its `internal/memory.Service` adapter,
+> tool-pattern namespace/recording helpers, and their tests no longer exist.
 
 Vanta memory is queried via the existing `internal/memory.Service` (which
 wraps the embedded Conduit memory store). Hits are added to the rank score
@@ -62,7 +87,12 @@ job, deferred).
 implementation is `memoryRecaller` wrapping `*memory.Service`; tests inject
 `stubMemoryRecaller` so they don't require live Conduit.
 
-### D3-3. Operator skills as first-class input
+### D3-3. Operator skills as first-class input — retired
+
+> Retired by AD-10. The tool-preference loader, `Config.SkillsDir`, dedicated
+> tests/testdata, and checked-in `config/broker-skills/` templates no longer
+> exist. This retired format is unrelated to Nanite's current Skill catalog
+> and vendor-store system.
 
 Authoring format: **YAML frontmatter inside Markdown** at
 `~/.nanite/skills/*.tools.preferences.md` (custom suffix coexists with the
@@ -88,7 +118,11 @@ Container wiring sets the loaded slice on the toolclient via `SetSkills`.
 **Opt-in by default.** Missing directory → no skills loaded → broker behaves
 exactly as before. Operators that don't author skills don't pay any cost.
 
-### D3-4. Ranking-signal blend (precedence)
+### D3-4. Ranking-signal blend (precedence) — retired
+
+> Retired by AD-10 with `RankTools`, `SelectWithSignals`, and
+> `SelectToolsAugmented`. `SelectByIntent` remains as the live, separate
+> intent-matching mechanism.
 
 ```
 score(tool) = skill_weight + memory_weight × confidence + keyword_weight
@@ -114,7 +148,7 @@ hits (≤6).
 **Tie-break:** stable secondary sort by the broker's own rule-priority order,
 so deterministic-with-ties is preserved.
 
-### D3-5. Token budget aware via models.dev
+### D3-5. Token budget aware via models.dev — retained
 
 The broker already received `windowSize` from the chat service, which routes
 through `pkg/models/registry.go` (Nanite's models.dev-style metadata table —
@@ -128,7 +162,11 @@ and Ollama Llama families. No new metadata adapter is needed; the existing
 registry is the source of truth. (`models.dev` is the upstream catalog the
 team mirrors into `pkg/models/registry.go`.)
 
-### D3-6. "Err toward more not less" bias
+### D3-6. "Err toward more not less" bias — retired
+
+> Retired by AD-10. `Config.ErrTowardMorePad` and the zero-score padding pass
+> were removed with the augmented ranker. The retained D3-5 token-budget prune
+> still caps the final, already-filtered tool surface.
 
 After the strict-relevance tier is composed (skills + memory + keyword), the
 broker pads the final selection with up to `Config.ErrTowardMorePad`
@@ -145,12 +183,9 @@ on in production via the Config default.
 
 ## Decisions deliberately deferred
 
-- **Phase 4 (mining job).** A scheduled job that scans `broker_decisions`,
-  derives heuristics ("`clockwork_task_list → clockwork_task_get` happens
-  80% of the time after `audit tasks`"), and emits skills automatically.
-  Outside this ticket's scope. Captured as a follow-up; the
-  `broker_decisions.outcome` index added by migration 031 enables the future
-  scan without a schema change.
+- **Phase 4 (mining job) — closed by retirement.** The proposed job depended
+  on the retired ranking/skill mechanism and the later-removed
+  `broker_decisions` table. It is no longer an active follow-up from this ADR.
 
 - **rtk (response-token-kompactor) integration.** No `rtk` references exist
   in the codebase today; this ticket does not introduce one. The broker
@@ -162,17 +197,19 @@ on in production via the Config default.
   already loaded based on session/agent context. CW-20260426-0010 mentions
   this. Out of scope for D3.
 
-- **Ranking influences tool surface composition.** Today the augmented
-  selection runs alongside `SelectToolsAsProvider` and contributes to the
-  `broker_decisions` row + slog; the actual provider tool slice still uses
-  the legacy keyword-ranked path. Promoting the augmented order into
-  provider conversion is straightforward (the universe is identical) but
-  requires care around permission filtering + chat-surface enforcement
-  invariants. Captured as follow-up.
+- **Ranking influences tool surface composition — closed by retirement.**
+  AD-10 chose retirement instead of promoting the augmented order into the
+  provider path. `SelectToolsAsProvider` and `selectToolsUncapped` remain
+  unchanged.
 
-## Schema impact
+## Historical schema impact
 
-Migration **031_broker_decisions_reflection.sql** extends `broker_decisions`:
+Migration **031_broker_decisions_reflection.sql** originally extended
+`broker_decisions` as described below. The table was later exported and
+dropped by `TASKS/phase-0/23-export-and-drop-decision-tables.md`; this section
+is historical and does not describe current schema.
+
+The migration added:
 
 | Column            | Type    | Default      | Purpose                                          |
 | ----------------- | ------- | ------------ | ------------------------------------------------ |
@@ -182,28 +219,22 @@ Migration **031_broker_decisions_reflection.sql** extends `broker_decisions`:
 | loaded_count      | INTEGER | 0            | Newly-loaded tool count for request_tools rows   |
 | reflection_query  | TEXT    | NULL         | LLM-restated goal (reflected outcome only)       |
 
-Plus index `idx_broker_decisions_outcome` for the deferred mining job.
+Plus index `idx_broker_decisions_outcome` for the then-deferred mining job.
 
 `ALTER TABLE ADD COLUMN` is idempotent in `internal/store/store.go`'s migrate
 runner — duplicate-column errors are caught and swallowed, mirroring the
 pattern from migration 011.
 
-## Test coverage
+## Current test coverage
 
-- `internal/toolclient/skills_test.go` — frontmatter parsing, regex/substring
-  patterns, malformed file warnings, slugifyForVanta, opt-in absent-dir.
-- `internal/toolclient/ranking_test.go` — skills-beat-keyword, memory-adds-hit,
-  unknown-tool drop, tight-budget bound, generous-budget bias.
-- `internal/toolclient/memory_signal_test.go` — augmented selection promotes
-  memory hits, nil recaller is safe, parseToolNames validation.
 - `internal/service/chat_request_tools_reflection_test.go` — first cap-trip
-  emits reflection, second cap-trip hard-halts, broker_decisions row written
-  with the right outcome.
+  emits reflection and the second cap-trip hard-halts.
+- `internal/toolclient/broker_test.go` — context-window fallback, token-budget
+  scaling, and pruning behavior for the retained D3-5 path.
 
-## Limitations preserved
+The former `skills_test.go`, `ranking_test.go`, and `memory_signal_test.go`
+coverage was deleted with the retired implementations.
 
-- **Phase-4 mining job not built** — `broker_decisions.outcome` is now
-  populated, indexed, and ready to scan; nothing scans it yet.
+## Limitations preserved for retained decisions
+
 - **rtk not integrated** — token estimation is still chars/4.
-- **Augmented ranking informs broker_decisions and slog, not provider tool
-  ordering** — see "Decisions deliberately deferred" above.

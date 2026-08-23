@@ -7,8 +7,12 @@ non-blocking cross-reference note relating this task to
 `04-tool-builder-yaml-architecture.md` and `06-curated-tool-knowledge-matcher.md`.
 **Touches:** `internal/toolclient/ranking.go`, `internal/toolclient/broker.go`
 (`SelectToolsAugmented`, `SelectToolsAsProvider`, `SetMemoryRecaller`,
-`SetSkills`), `internal/service/container.go` (lines 692-710, the per-boot
-wiring cost this finding says is still paid regardless of disposition).
+`SetSkills`), `internal/toolclient/memory_signal.go`,
+`internal/toolclient/skills.go`, their dedicated tests/testdata,
+`internal/service/container.go` (lines 692-710, the per-boot wiring cost this
+finding says is still paid regardless of disposition),
+`config/broker-skills/`, `docs/decisions/ADR-003-reasoning-augmented-broker.md`,
+and the D3 reflection copy/regression test in `internal/service/`.
 
 ```yaml
 requires_architect_decision: true
@@ -401,6 +405,40 @@ Confirmed by grep restricted to non-test files.
   and `go test ./...`. Both deadcode runs show no reference to any removed
   selection symbol; the focused source grep likewise returns zero matches for
   the retired functions, setters, fields, and config knobs.
+
+### Attached fresh-review correction — pending re-review
+
+- Fresh review failed the initial implementation because it stopped at the
+  ranking chain and boot wiring. That left `memory_signal.go`, `skills.go`,
+  their dedicated tests/testdata, and `config/broker-skills/` as an orphaned,
+  test-only implementation and operator-facing template surface for a feature
+  AD-10 retired. It also left `broker.go` pointing at deleted `ranking.go` and
+  ADR-003 presenting all D3 decisions as currently accepted.
+- Rechecked every type, constant, constructor, method, parser, loader, and
+  config path before expanding the deletion. Whole-repo non-test Go grep found
+  no consumer outside `memory_signal.go`/`skills.go`; only their dedicated
+  tests referenced them. Pre-fix `deadcode ./...` flagged every executable
+  helper in both files, while `deadcode -test ./...` retained only symbols
+  reached by those same dedicated tests. No independently live surface was
+  found.
+- Removed both orphaned implementation files (461 production lines), both
+  dedicated tests (174 test lines), two testdata fixtures (38 lines), and all
+  three checked-in `config/broker-skills/` template files (91 lines). Updated
+  the stale `broker.go` comment and corrected the live reflection prompt so it
+  no longer promises memory/operator-skill ranking. The reflection behavior
+  itself and the independent context-window token-budget path remain live and
+  unchanged.
+- Updated ADR-003 to record partial supersession accurately: D3-1 reflection
+  and D3-5 token budgeting remain accepted; D3-2 memory signals, D3-3 operator
+  preferences, D3-4 blended ranking, and D3-6 zero-score padding are retired.
+  The removed schema/table material is explicitly historical rather than
+  current.
+- Added a reflection regression assertion that the live prompt describes the
+  available catalog and does not promise the retired signals. Fix verification
+  passed: focused toolclient and reflection tests; `deadcode ./...` and
+  `deadcode -test ./...`; `go build ./...`; `go vet ./...`; and `go test ./...`.
+  Fresh re-review remains pending; the reviewer must write the final result
+  below.
 
 ## Review notes
 

@@ -2878,7 +2878,7 @@ func (s *chatServiceImpl) handleRequestTools(
 				"What is the underlying goal the user asked you to accomplish? "+
 				"State the goal directly — not the keyword you'd search with. "+
 				"Then either (a) call request_tools ONE more time using that goal as the intent — "+
-				"the broker will use your restated goal as a fresh query against tools, memory, and operator skills — "+
+				"the broker will use your restated goal as a fresh query against the available tool catalog — "+
 				"OR (b) use a tool above that gets you closer to the goal, OR "+
 				"(c) describe to the user what specific capability you need so they can guide you. "+
 				"Repeated request_tools calls after this point will be hard-halted.",

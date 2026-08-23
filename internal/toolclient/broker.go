@@ -217,10 +217,9 @@ func (tb *ToolClient) catalogTools() []llmtypes.ToolDefinition {
 // FinalizeToolSelection for the capping step this defers to.
 //
 // intent, hints, workspaceID, and agentID are accepted for API-surface
-// stability (callers throughout the package pass them; SelectByIntent and
-// the reasoning-augmented ranking in ranking.go still use intent/hints for
-// scoring) but no longer drive selection here — Phase 0 item 22 retired
+// stability but no longer drive selection here — Phase 0 item 22 retired
 // the rule-matching layer that used to key off them (decision log §11).
+// Intent-based discovery remains available separately through SelectByIntent.
 func (tb *ToolClient) selectToolsUncapped(_ context.Context, _ string, _ []string, _, _ string) (tools []llmtypes.ToolDefinition, total int, err error) {
 	tools = tb.catalogTools()
 	return tools, len(tools), nil

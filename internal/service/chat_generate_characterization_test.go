@@ -456,6 +456,22 @@ func TestGenerateResponseCharacterization_ProviderErrorMidStream(t *testing.T) {
 	}
 }
 
+func TestGenerateResponseCharacterization_ProviderErrorBeforeStreamKeepsToolsDetailKey(t *testing.T) {
+	f := newCharacterizationFixture(t, []characterizationProviderStep{{err: errors.New("upstream unavailable")}})
+	events := f.run(t, "assistant-provider-error-before-stream")
+
+	errEvent := findEvent(events, "error")
+	if errEvent == nil || errEvent.StructuredError == nil {
+		t.Fatalf("events = %v, want structured provider error", eventTypes(events))
+	}
+	if got, ok := errEvent.StructuredError.Details["tools"]; !ok || got != 0 {
+		t.Fatalf("provider error details = %#v, want tools:0", errEvent.StructuredError.Details)
+	}
+	if _, leaked := errEvent.StructuredError.Details["run.tools"]; leaked {
+		t.Fatalf("provider error details leaked state field name: %#v", errEvent.StructuredError.Details)
+	}
+}
+
 func TestGenerateResponseCharacterization_ContextOverflowCompactionTrigger(t *testing.T) {
 	f := newCharacterizationFixture(t, nil)
 	if err := f.st.UpdateUserSettings(context.Background(), &store.UserSettings{

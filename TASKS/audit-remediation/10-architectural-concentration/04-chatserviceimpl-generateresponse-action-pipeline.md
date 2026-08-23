@@ -277,3 +277,10 @@ read-only and must not edit or claim operator approval.
   diagnostics; coordinator complexity decreased to cognitive 358 / cyclop 164
   / gocyclo 162. `settleToolTurn` is cognitive 21 / cyclop 17 / gocyclo 17,
   a bounded composition action rather than relocated coordinator complexity.
+- Review correction after the Phase 2 midpoint review: the mechanical mutable-
+  state qualification had leaked `run.tools` into observable telemetry keys,
+  JSON detail keys, and continuation reason text. Restored all observable
+  literals to their characterized `tools` spelling while retaining
+  `run.tools` only as the Go state expression. Added a production-door
+  pre-stream provider-error assertion pinning structured detail key `tools`
+  and explicitly rejecting `run.tools`.

@@ -1,7 +1,7 @@
 # Decide the fate of reasoning-augmented tool selection (`RankTools`/`SelectWithSignals`/`SelectToolsAugmented`)
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch — see this folder's `README.md` for a
 non-blocking cross-reference note relating this task to
 `04-tool-builder-yaml-architecture.md` and `06-curated-tool-knowledge-matcher.md`.
@@ -442,4 +442,17 @@ Confirmed by grep restricted to non-test files.
 
 ## Review notes
 
-<Reviewer fills this in.>
+- **Fresh review (2026-08-23): fix required.** The initial retire pass removed
+  the ranking consumer and boot wiring but left its memory-signal and
+  tool-preference-skill producers, tests, fixtures, and operator templates
+  orphaned. Current comments and ADR-003 also still presented the retired
+  mechanism as live.
+- **Fix applied (worker pass, 2026-08-23):** removed the complete orphaned D3
+  support surface, corrected current comments/reflection guidance, and marked
+  ADR-003 partially superseded while retaining live reflection and token
+  budgeting.
+- **Fresh re-review (2026-08-23): PASS.** The reviewer independently confirmed
+  the removed support surface had no production callers, no retired symbols or
+  current claims remain, live reflection/token budgeting and
+  `SelectToolsAsProvider`/`SelectByIntent` remain reachable, and focused
+  deadcode/build/test checks pass. No findings remain.

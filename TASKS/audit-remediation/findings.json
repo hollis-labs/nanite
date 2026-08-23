@@ -1575,7 +1575,7 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/09-production-islands/05-reasoning-augmented-tool-selection.md",
       "disposition": "retire-feature",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still dead: zero production callers of SelectToolsAugmented/RankTools/SelectWithSignals outside internal/toolclient/ and its own tests. Wire/defer/retire is AD-10's explicit call. [AD-10 DECIDED 2026-08-22: retire ranking.go. Keeps intent.go as the single intent-matching mechanism. Closes 2 previously-unjudged complexity outliers.]"
     },
     {

@@ -722,7 +722,9 @@ func cmdServeWithInitializers(
 
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s
-	selfTools.Messaging = container.Messaging
+	// Messaging + its directive-elicitation policy are one collaborator;
+	// replace the constructor's nil-safe instance once runtime services exist.
+	selfTools.MessagingTools = selftools.NewMessagingTools(container.Messaging, container.Elicitation)
 	selfTools.Subagent = container.Subagent
 	selfTools.SkillVendor = container.SkillVendor
 	selfTools.Background = container.Background
@@ -734,11 +736,6 @@ func cmdServeWithInitializers(
 	// (project .nanite / user nanite data dir), so this reuses it rather
 	// than re-deriving a second, possibly-diverging classification.
 	selfTools.AgentClassifier = container.AgentConfig
-	// G4 (CW-20260420-0018): wire elicitation service so write tools
-	// (e.g. message_send kind=directive) can request mid-call
-	// user confirmation via elicitation/create.
-	selfTools.Elicitation = container.Elicitation
-
 	// CW-20260421-0010 (B3): wire the executeTask dispatch primitive.
 	// Adapts subagent.Service.Spawn to dispatch.Spawner so the chat
 	// agent's task_execute tool can drive role-based dispatch.

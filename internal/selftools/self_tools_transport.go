@@ -24,7 +24,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service/install"
@@ -95,8 +94,7 @@ type SelfToolsTransport struct {
 	BuilderRegistry *builders.Registry
 	BuilderSessions *builders.SessionManager
 	TodoStore       TodoStoreInterface // nil-safe; set after construction
-	// Messaging is set post-construction from the container; nil-safe.
-	Messaging *messaging.Service
+	MessagingTools  *MessagingTools
 	// Subagent is set post-construction from the container; nil-safe.
 	Subagent *subagent.Service
 	// SkillVendor is the content-addressed vendored skill store (internal/
@@ -214,12 +212,6 @@ type SelfToolsTransport struct {
 	// Set post-construction; nil causes sandbox tool calls to error.
 	// CW-20260420-0019 (D6).
 	PythonDispatcher PythonToolDispatcher
-
-	// Elicitation is the G4 mid-call user-prompt service (CW-20260420-0018).
-	// When set, write tools that need user confirmation (e.g. message_send
-	// kind=directive) issue an elicitation/create request before proceeding.
-	// Nil-safe: tools auto-approve when Elicitation is not wired.
-	Elicitation mcp.ElicitationService
 
 	// PanelSignalSink fans panel_open/panel_close/mode signals (J8 v1) onto the
 	// originating chat session's stream. Nil-safe — when unwired, panel tools
@@ -378,6 +370,7 @@ func NewSelfToolsTransport(s *store.Store) *SelfToolsTransport {
 		Store:            s,
 		BuilderRegistry:  builders.DefaultRegistry(s),
 		BuilderSessions:  builders.NewSessionManager(),
+		MessagingTools:   NewMessagingTools(nil, nil),
 		RememberCounters: newRememberSessionCounters(),
 	}
 }
@@ -399,12 +392,6 @@ func (st *SelfToolsTransport) RecallToolLearnings(ctx context.Context, userID, t
 func (st *SelfToolsTransport) ListTools(_ context.Context) ([]mcp.Tool, error) {
 	return selfToolDefinitions(), nil
 }
-
-// messageCallTimeout bounds every unary messaging tool call so a wedged store or
-// slow subscriber can't hang the MCP handler forever. Subscription
-// handlers use the parent ctx directly (lifetime-scoped) instead of this
-// timeout — see callMessageSubscribe when it lands.
-const messageCallTimeout = 30 * time.Second
 
 // CallTool dispatches to the appropriate handler based on tool name.
 // The request ctx is threaded to every handler; messaging handlers further
@@ -471,23 +458,23 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	case "install_diff":
 		return st.callInstallDiff(args)
 	case "message_send":
-		return st.callMessageSend(ctx, args)
+		return st.MessagingTools.callMessageSend(ctx, args)
 	case "message_inbox":
-		return st.callMessageInbox(ctx, args)
+		return st.MessagingTools.callMessageInbox(ctx, args)
 	case "message_thread":
-		return st.callMessageThread(ctx, args)
+		return st.MessagingTools.callMessageThread(ctx, args)
 	case "message_ack":
-		return st.callMessageAck(ctx, args)
+		return st.MessagingTools.callMessageAck(ctx, args)
 	case "message_resolve":
-		return st.callMessageResolve(ctx, args)
+		return st.MessagingTools.callMessageResolve(ctx, args)
 	case "message_catch_up":
-		return st.callMessageCatchUp(ctx, args)
+		return st.MessagingTools.callMessageCatchUp(ctx, args)
 	case "handoff_request":
-		return st.callHandoffRequest(ctx, args)
+		return st.MessagingTools.callHandoffRequest(ctx, args)
 	case "handoff_approve":
-		return st.callHandoffApprove(ctx, args)
+		return st.MessagingTools.callHandoffApprove(ctx, args)
 	case "handoff_reject":
-		return st.callHandoffReject(ctx, args)
+		return st.MessagingTools.callHandoffReject(ctx, args)
 	case "subagent_spawn":
 		return st.callSpawnSubagent(ctx, args)
 	case "subagent_status":
@@ -1470,245 +1457,6 @@ func (st *SelfToolsTransport) callInstallDiff(args map[string]any) (*mcp.ToolRes
 	// that returns an action list without mutating state.
 	_ = args
 	return mcp.TextResult("install diff not yet implemented"), nil
-}
-
-// --- Messaging handlers ---
-//
-// The message_subscribe tool is intentionally not registered here: it
-// requires streaming support in mcp-go or a custom server-side handler,
-// which is deferred to a follow-up task. See Task 10 notes.
-
-func (st *SelfToolsTransport) callMessageSend(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.Messaging == nil {
-		return mcp.ErrorResult("messaging service not configured"), nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
-	defer cancel()
-
-	kind := strArg(args, "kind", "")
-	body := strArg(args, "body", "")
-	msgType := strArg(args, "type", "")
-
-	// G4 elicitation pilot (CW-20260420-0018, D5): directive messages broadcast
-	// instructions to all recipients and carry elevated blast radius. Require
-	// explicit user confirmation before sending when elicitation is wired.
-	// Directive is a `type` value (see message_send InputSchema), not kind.
-	if msgType == "directive" && st.Elicitation != nil {
-		fromSessionID := strArg(args, "from_session_id", "")
-		fromAgentID := strArg(args, "from_agent_id", "")
-		elicitResp, err := mcp.ElicitUserInput(ctx, st.Elicitation, fromSessionID, fromAgentID, "",
-			mcp.ElicitationCreateParams{
-				Message: fmt.Sprintf("Send directive to %s? Body: %q", strArg(args, "to_agent_id", ""), body),
-				RequestedSchema: &mcp.ElicitationRequestedSchema{
-					Type:        "boolean",
-					Title:       "Confirm directive send",
-					Description: "Directive messages instruct recipient agents to take action. Confirm to proceed.",
-				},
-			})
-		if err != nil {
-			return mcp.ErrorResult(fmt.Sprintf("elicitation: %v", err)), nil
-		}
-		if elicitResp.Action != "accept" {
-			return mcp.TextResult(fmt.Sprintf("directive send aborted by user (action=%s)", elicitResp.Action)), nil
-		}
-	}
-
-	msg := messaging.SendInput{
-		FromSessionID: strArg(args, "from_session_id", ""),
-		FromAgentID:   strArg(args, "from_agent_id", ""),
-		ToSessionID:   strArg(args, "to_session_id", ""),
-		ToAgentID:     strArg(args, "to_agent_id", ""),
-		Channel:       strArg(args, "channel", ""),
-		Kind:          kind,
-		PayloadJSON:   strArg(args, "payload_json", ""),
-		Subject:       strArg(args, "subject", ""),
-		Body:          body,
-		Type:          msgType,
-		ReplyTo:       strArg(args, "reply_to", ""),
-		RegisterAs:    strArg(args, "register_as", ""),
-	}
-	out, err := st.Messaging.SendMessage(ctx, msg)
-	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("message send: %v", err)), nil
-	}
-	return mcp.TextResult(fmt.Sprintf("sent: %s", out.ID)), nil
-}
-
-func (st *SelfToolsTransport) callMessageInbox(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.Messaging == nil {
-		return mcp.ErrorResult("messaging service not configured"), nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
-	defer cancel()
-	// MVP caller identity: the MCP boundary has no out-of-band caller
-	// channel yet, so the same (session_id, agent_id) args serve as both
-	// target and caller. Real caller-identity-from-ctx is a post-MVP
-	// upgrade; the service still enforces the match, which catches a
-	// misconfigured caller that passes different values.
-	sessionID := strArg(args, "session_id", "")
-	agentID := strArg(args, "agent_id", "")
-	inbox, err := st.Messaging.Inbox(
-		ctx,
-		sessionID,
-		agentID,
-		messaging.InboxFilter{
-			Status:  strArg(args, "status", ""),
-			Channel: strArg(args, "channel", ""),
-			Kind:    strArg(args, "kind", ""),
-		},
-		sessionID,
-		agentID,
-	)
-	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("message inbox: %v", err)), nil
-	}
-	if inbox == nil {
-		inbox = []messaging.Message{}
-	}
-	data, err := json.Marshal(inbox)
-	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("messaging inbox marshal: %v", err)), nil
-	}
-	return mcp.TextResult(string(data)), nil
-}
-
-func (st *SelfToolsTransport) callMessageThread(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.Messaging == nil {
-		return mcp.ErrorResult("messaging service not configured"), nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
-	defer cancel()
-	messages, err := st.Messaging.Thread(
-		ctx,
-		strArg(args, "thread_id", ""),
-		strArg(args, "session_id", ""),
-		strArg(args, "agent_id", ""),
-	)
-	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("message thread: %v", err)), nil
-	}
-	if messages == nil {
-		messages = []messaging.Message{}
-	}
-	data, err := json.Marshal(messages)
-	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("messaging thread marshal: %v", err)), nil
-	}
-	return mcp.TextResult(string(data)), nil
-}
-
-func (st *SelfToolsTransport) callMessageAck(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.Messaging == nil {
-		return mcp.ErrorResult("messaging service not configured"), nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
-	defer cancel()
-	if err := st.Messaging.Ack(
-		ctx,
-		strArg(args, "session_id", ""),
-		strArg(args, "agent_id", ""),
-		strArg(args, "message_id", ""),
-	); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("message ack: %v", err)), nil
-	}
-	return mcp.TextResult("acked"), nil
-}
-
-func (st *SelfToolsTransport) callMessageResolve(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.Messaging == nil {
-		return mcp.ErrorResult("messaging service not configured"), nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
-	defer cancel()
-	if err := st.Messaging.Resolve(
-		ctx,
-		strArg(args, "session_id", ""),
-		strArg(args, "agent_id", ""),
-		strArg(args, "message_id", ""),
-	); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("message resolve: %v", err)), nil
-	}
-	return mcp.TextResult("resolved"), nil
-}
-
-func (st *SelfToolsTransport) callMessageCatchUp(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.Messaging == nil {
-		return mcp.ErrorResult("messaging service not configured"), nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
-	defer cancel()
-	// intArg does not clamp; non-positive values are passed through to
-	// the service/store layers, which apply default-20 + store cap.
-	limit := mcp.IntArg(args, "limit", 20)
-	messages, err := st.Messaging.RecentForSession(
-		ctx,
-		strArg(args, "session_id", ""),
-		limit,
-	)
-	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("message catch_up: %v", err)), nil
-	}
-	if messages == nil {
-		messages = []messaging.Message{}
-	}
-	data, err := json.Marshal(messages)
-	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("messaging catch_up marshal: %v", err)), nil
-	}
-	return mcp.TextResult(string(data)), nil
-}
-
-func (st *SelfToolsTransport) callHandoffRequest(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.Messaging == nil {
-		return mcp.ErrorResult("messaging service not configured"), nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
-	defer cancel()
-	// Session id is harness-assigned: prefer the dispatch context over an
-	// agent-supplied arg, which a CLI-launch agent cannot reliably know.
-	sessionID := mcp.SessionIDFromContext(ctx)
-	if sessionID == "" {
-		sessionID = strArg(args, "session_id", "")
-	}
-	id, err := st.Messaging.RequestHandoff(
-		ctx,
-		sessionID,
-		strArg(args, "from_agent_id", ""),
-		strArg(args, "to_agent_id", ""),
-		strArg(args, "requested_by", ""),
-	)
-	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("handoff request: %v", err)), nil
-	}
-	return mcp.TextResult("handoff requested: " + id), nil
-}
-
-func (st *SelfToolsTransport) callHandoffApprove(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.Messaging == nil {
-		return mcp.ErrorResult("messaging service not configured"), nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
-	defer cancel()
-	if err := st.Messaging.ApproveHandoff(ctx, strArg(args, "handoff_id", "")); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("handoff approve: %v", err)), nil
-	}
-	return mcp.TextResult("approved"), nil
-}
-
-func (st *SelfToolsTransport) callHandoffReject(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.Messaging == nil {
-		return mcp.ErrorResult("messaging service not configured"), nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
-	defer cancel()
-	if err := st.Messaging.RejectHandoff(
-		ctx,
-		strArg(args, "handoff_id", ""),
-		strArg(args, "reason", ""),
-	); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("handoff reject: %v", err)), nil
-	}
-	return mcp.TextResult("rejected"), nil
 }
 
 // --- subagent handlers (T9) ---

@@ -51,11 +51,11 @@ func (s *stubElicitationService) RespondFromEnvelopeData(data map[string]any) er
 // gate → messaging send.
 func TestPilotTool_DirectiveRequiresElicitation(t *testing.T) {
 	st := newSelfTools(t)
-	st.Messaging = newTestMessaging(t)
+	st.MessagingTools.Service = newTestMessaging(t)
 
 	// Wire an elicitation service that auto-accepts and records the call.
 	accepted := false
-	st.Elicitation = &stubElicitationService{
+	st.MessagingTools.Elicitation = &stubElicitationService{
 		elicitFn: func(_ context.Context, req elicitation.ElicitInput) (elicitation.Response, error) {
 			accepted = true
 			if req.Origin != "server" {
@@ -96,9 +96,9 @@ func TestPilotTool_DirectiveRequiresElicitation(t *testing.T) {
 // a non-error result without actually sending the message.
 func TestPilotTool_DirectiveDeclined(t *testing.T) {
 	st := newSelfTools(t)
-	st.Messaging = newTestMessaging(t)
+	st.MessagingTools.Service = newTestMessaging(t)
 
-	st.Elicitation = &stubElicitationService{
+	st.MessagingTools.Elicitation = &stubElicitationService{
 		elicitFn: func(_ context.Context, _ elicitation.ElicitInput) (elicitation.Response, error) {
 			return elicitation.Response{Action: elicitation.ActionDecline}, nil
 		},
@@ -138,10 +138,10 @@ func TestPilotTool_DirectiveDeclined(t *testing.T) {
 // do NOT trigger elicitation.
 func TestPilotTool_NonDirectiveSkipsElicitation(t *testing.T) {
 	st := newSelfTools(t)
-	st.Messaging = newTestMessaging(t)
+	st.MessagingTools.Service = newTestMessaging(t)
 
 	elicitCalled := false
-	st.Elicitation = &stubElicitationService{
+	st.MessagingTools.Elicitation = &stubElicitationService{
 		elicitFn: func(_ context.Context, _ elicitation.ElicitInput) (elicitation.Response, error) {
 			elicitCalled = true
 			return elicitation.Response{Action: elicitation.ActionAccept}, nil

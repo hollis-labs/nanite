@@ -215,7 +215,7 @@ executed successfully.
 | **W2b** | 2 | `06/*`, `07/*` | 7 | W0 closed. AD-14, AD-17, AD-18 decided. |
 | **W3** | 3 | `08/*` | 10 | W1 closed (`08/05`, `08/09` depend on it). AD-15, AD-16 decided. |
 | **W4** | 4 | `09/*` | 6 | W2 closed. AD-06–AD-11 decided **after** `00/01` reports current reachability. |
-| **W5** | 5 | `10/*` | 5 | Reopened after the evidence beat. AD-12 and AD-13 decided; `10/04` and `10/05` implement them. |
+| **W5** | 5 | `10/*` | 5 | Closed after the approved `10/04` and `10/05` implementation beat; all five tasks reviewed. |
 | **W6a** | 6 | `11/01,02,05,06,07,08,09,10,11` | 9 | W5 closed. AD-19, AD-20 decided. |
 | **W6b** | 6 | `11/03,04,12,13,14,15,16` | 7 | W6a closed. |
 | **W7** | 7 | `12/01`, `12/03` | 2 | W6 closed. AD-21 decided. |
@@ -432,12 +432,11 @@ zero real grounding-wiring references and the one string match on "hadron"
 in that file is an unrelated comment about a different app's binary name.
 All six tasks are file-disjoint.
 
-**Wave 5** — the original evidence beat (`10/01`–`10/03`) is reviewed. The
-operator reopened the wave on 2026-08-23 for `10/04` and `10/05`. Those two
-implementation tasks run in parallel because `10/04` exclusively owns
-`internal/service` while `10/05` owns `internal/selftools` plus its explicit
-composition-root/API wiring. Inside each task, extractions are strictly serial
-and behavior/race/complexity verification runs after every boundary.
+**Wave 5** — closed with all five tasks reviewed. The original evidence beat
+(`10/01`–`10/03`) was reopened by express operator direction on 2026-08-23;
+`10/04` then implemented AD-12's six-action pipeline and `10/05` implemented
+AD-13's four selective delegations in parallel, with serial commits and fresh
+review inside each task.
 
 **Wave 6a** — `11/06` ∥ `11/07` ∥ `11/09` are independent. `11/08` **runs
 alone if AD-20 chooses the tree-wide rename** — its own `Touches` warns it may

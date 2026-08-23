@@ -310,3 +310,22 @@ final aggregate attempt reserved for final verification.
   a qualified timeout, not a race PASS; all four boundary-focused race suites,
   the full scoped normal suites, and the final repository-wide non-race suite
   passed as recorded above.
+
+## Review notes
+
+- The messaging/work-tracking midpoint review passed, including direct routing,
+  nil-safe construction, narrow dependencies, mutation broadcast cardinality,
+  and the single shared project resolver.
+- Source reconciliation corrected the task's original scope premise before it
+  could become a behavior change: plans have no `project_id` and retain their
+  legacy non-workspace `scope_id=sessionID` autofill, while todo/reminder/pin
+  share session-to-project resolution. The implementation and tests preserve
+  and document that distinction.
+- The final production review passed all four substantive ownership moves and
+  the single presentation trust gate. Its only initial closeout finding was
+  missing task/map completion documentation; that documentation was added and
+  the re-review passed. No fifth extraction or blanket Store split was added.
+- The expressly approved selective-delegation balance is therefore complete:
+  four cohesive owners now hold the chosen behavior and policy, while
+  `SelfToolsTransport` remains the catalog/dispatch adapter at 27 fields and 50
+  production receiver methods with all 68 tool names unchanged.

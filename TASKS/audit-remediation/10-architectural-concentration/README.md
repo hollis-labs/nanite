@@ -51,3 +51,8 @@ tracked separately in `04-chatserviceimpl-generateresponse-action-pipeline.md`
 and `05-selftoolstransport-selective-delegation.md`; the original `01` and `02`
 files remain the evidence and characterization records those tasks build on.
 `03` remains a deliberate no-refactor disposition.
+
+**Implementation beat closed.** Tasks `10/04` and `10/05` are reviewed. The
+result keeps both adapters/orchestrators recognizable while moving the approved
+behavior into explicit owners; no additional count-driven decomposition was
+added.

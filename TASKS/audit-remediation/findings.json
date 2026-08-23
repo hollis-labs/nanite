@@ -1686,24 +1686,23 @@
       "files": [
         "internal/toolclient/broker.go",
         "internal/toolclient/intent.go",
-        "internal/toolclient/ranking.go",
         "internal/toolclient/meta_tools.go"
       ],
       "symbols": [
         "ToolClient"
       ],
-      "summary": "ToolClient has 26 methods across 4 files backing 3 self-described responsibilities ('selection, permissions, and execution').",
+      "summary": "ToolClient has 20 production receiver methods across 3 files; its remaining selection, policy, and execution surface is cohesive and does not justify decomposition.",
       "evidence": [],
       "recommendation": "No action implied; record for the architect's holistic pass.",
       "requires_architect_decision": false,
       "report_section": "\u00a78.7",
       "metrics": {
-        "method_count": 26
+        "method_count": 20
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/02-selftoolstransport-decomposition.md",
-      "disposition": "defer",
+      "disposition": "false-positive",
       "task_status": "reviewed",
-      "revalidation_note": "Confirmed ToolClient (broker.go/intent.go/ranking.go/meta_tools.go) still spans the described method/file footprint. The finding's own recommendation is \"no action implied; record for the architect's holistic pass\" -- folded into AD-13's SelfToolsTransport-cluster review rather than a standalone fix."
+      "revalidation_note": "Wave 5 current-source recount found 20 production receiver methods across broker.go (18), intent.go (1), and meta_tools.go (1); ranking.go was retired in Wave 4. The remaining surface is cohesive and no ownership or testability pain supports a split. Reviewed 10/02 therefore closes GO-MCPTOOL-007 as no action/false-positive, with no extraction or follow-on task."
     },
     {
       "id": "GO-MCPTOOL-008",

@@ -340,3 +340,19 @@ read-only and must not edit or claim operator approval.
   independently confirming all six actions, coordinator-only routing and
   lifecycle ownership, exactly-once provider cleanup, preserved ordering,
   additive coverage, scope compliance, and the monotonic complexity decrease.
+
+## Review notes
+
+- The Phase 1 review passed. The Phase 2 midpoint review found that a mechanical
+  state rename had escaped into observable telemetry/detail literals as
+  `run.tools`; the worker restored the contractual `tools` spelling and added
+  a production-door regression assertion before proceeding. The correction
+  re-review passed.
+- The Phase 6 review and final whole-pipeline review passed. The final reviewer
+  independently traced all directives and terminal paths, verified that only
+  `generateResponse` performs routing, and confirmed exactly-once provider
+  cancel/span closure plus the preserved persistence and event ordering.
+- The approved action/pipeline boundary is therefore implemented as intended:
+  `generateResponse` remains the visible coordinator at cognitive/cyclop/
+  gocyclo complexity `19/18/18`, down from `458/228/225`, while the six actions
+  own their individual step logic without invoking one another.

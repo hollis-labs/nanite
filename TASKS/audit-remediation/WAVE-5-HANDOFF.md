@@ -1,229 +1,273 @@
 # Wave 5 handoff — for the Wave 6 orchestrator
 
-> **Reopened 2026-08-23.** This handoff describes the completed evidence beat
-> only and is not the current Wave 5 closeout. The operator subsequently
-> approved AD-12 and AD-13 and expressly directed their implementation in this
-> wave through tasks `10/04` and `10/05`. Replace the integration point and
-> status sections after those tasks pass fresh review.
+**Audience: a fresh session with zero memory of Wave 5.** Wave 5 is closed. All
+five tasks are `reviewed`; none is in progress or blocked. The
+pre-implementation baseline is `92315edf`; the reopened implementation and
+central review integration spans `d61751c2..7304e7be`, followed only by the
+final closeout-documentation commit.
 
-**Audience: a fresh session with zero memory of Wave 5.** The immutable Wave 5
-integration point is `fb6527ab`. All three Wave 5 tasks are `reviewed`, but this
-was a decomposition-planning and decision wave, not a production-extraction
-wave: no production refactor shipped.
-
-The statements below that AD-12 and AD-13 remain open are historical. Both are
-now decided in `ARCHITECT-DECISIONS.md`; the repository-wide freeze under
-AD-24 remains in force.
+Wave 5 was not only an evidence/planning wave. It first produced the reviewed
+maps and dispositions in `10/01`–`10/03`; the operator then expressly approved
+AD-12 and AD-13 on 2026-08-23 and directed both production implementations to
+land in the same wave as `10/04` and `10/05`.
 
 ---
 
 ## 1. What actually shipped
 
-| Task | Reviewed outcome | Production impact |
+| Task | Final outcome | Production impact |
 |---|---|---|
-| `10/01` | Added production-door characterization coverage for `generateResponse` and a reviewed responsibility/phase map: 52 fields owned exactly once, 87 production receiver methods reconciled exactly once, and six proposed phases. | One new test file, `internal/service/chat_generate_characterization_test.go`; no production `internal/service` code changed and no extraction task was created. |
-| `10/02` | Added the reviewed `SelfToolsTransport` capability map: 31 fields, 82 production receiver methods, and all 68 `CallTool` names reconciled. It recommends selective delegation based on cohesion and coupling. Rechecked `ToolClient` as 20 methods across three files and closed that informational finding as no action. | Documentation/tracking only; no `internal/selftools` or `internal/toolclient` production or test code changed and no extraction task was created. |
-| `10/03` | Revalidated the concentration findings and recorded the operator-approved balance: no `Container` decomposition; no blanket `Store` split or interface pass absent named consumer pain; selective `Host` work only through evidence from the existing `GO-PLUGIN-004` scope, with an all-category migration sweep rejected. | Documentation/tracking only; no `Container`, Store, or plugin Host code changed. The disposition is also recorded in the AD-14 supplement and Wave 8 task `13/05`. |
+| `10/01` | Added production-door `generateResponse` characterization and a reviewed 52-field/87-method responsibility map with six action boundaries. | Tests and architecture evidence only. The first review found duplicate field ownership and missing real `tool.executing` cancellation coverage; correction `f77076a9` fixed both before PASS. |
+| `10/02` | Reconciled `SelfToolsTransport` at 31 fields, 82 receiver methods, and 68 names/66 clauses; recommended selective delegation. Recounted `ToolClient` at 20 methods across three files and found no useful split. | Documentation only. Fresh review caught a false claim that chat-slot assembly consumed `RecallToolLearnings`; correction `07ca5958` established `callToolDescribe` as its sole production consumer before PASS. |
+| `10/03` | Recounted and dispositioned `Container`, Store, and plugin `Host` against current source. | No application code. The operator approved no `Container` decomposition, no blanket Store split/interface pass, and only pain-driven Host sub-registry work through the existing `GO-PLUGIN-004` boundary. |
+| `10/04` | Implemented AD-12 as six private actions around a visible `generateResponse` coordinator. | Production service refactor plus additive characterization. No action calls another; the coordinator retains loop routing, retry decrements, root lifecycle, and cleanup. |
+| `10/05` | Implemented AD-13 as four substantive self-tool owners while retaining one MCP catalog/dispatch adapter. | Production selftools/main wiring plus focused tests. No fifth domain or blanket Store migration was included. |
 
-The `10/01` characterization cases reach the real production door:
-`Dispatcher.Run` → `chatRunnerAdapter` → `generateResponse`. They cover plain,
-single-tool, multi-tool, mid-stream provider error, context-overflow recovery,
-pre-loop compaction, `message.sending` cancellation, `tool.executing`
-cancellation, and forced rate-budget recovery. The tool-cancellation correction
-proved execution is skipped while blocked tool events/results continue through
-the provider turn and final persistence.
+The five task rows in `TASKS/INDEX.md` are all `reviewed`. The nine findings
+mapped to the first three tasks are also `reviewed`, but their dispositions are
+intentionally different: remediation for the chat concentration and approved
+selftools boundary; accepted risk or false-positive for the metric-only
+Container/Store cases; selective deferral for Host; and no useful ToolClient
+split.
 
-## 2. Coverage and map results
+## 2. Operator decisions and why
 
-`10/01` recorded these like-for-like focused coverage changes:
+### AD-12 — six-action chat pipeline
 
-| Surface | Before | After |
-|---|---:|---:|
-| Package | 62.3% | 65.6% |
-| `generateResponse` | 36.7% | 53.7% |
-| `recoverFromContextOverflow` | 23.4% | 78.7% |
-| `enforceBudgetOrCompact` | 5.9% | 67.6% |
-| Provider-error ranges | 1/111 statements (0.9%) | 28/111 (25.2%) |
-| Compaction-recovery ranges | 15/111 (13.5%) | 59/111 (53.2%) |
-| Plugin-cancel ranges | 1/26 (3.8%) | 26/26 (100.0%) |
+The operator expressly approved the reviewed action/pipeline shape. The outer
+workflow remains readable in `generateResponse`; each action owns one phase's
+logic and returns an explicit directive. This reduces accidental complexity
+without scattering the essential provider/tool loop, cancellation, retry, and
+terminal-cleanup semantics across callbacks or six service objects. A wholesale
+`chatServiceImpl` split and full rewrite were rejected.
 
-The reviewed map is
-`TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-responsibility-map.md`.
-It corrects the authored 84-method premise to 87, separates tool-partition
-state from the runtime-session owner, includes construction-only wiring
-residue, and preserves a recognizable outer state machine. Its six proposed
-phases are architect-review input only. Any approved future extraction must be
-incremental, keep the characterization suite unchanged, and rerun behavior,
-race, and audit complexity checks after every individual extraction.
+The six implemented actions are:
 
-The reviewed `SelfToolsTransport` map is
-`docs/engineering/selftoolstransport-capability-map.md`. It reconciles 31
-fields, 82 methods across 19 files, and 68 names in 66 `CallTool` clauses. Its
-AD-13 recommendation is selective delegation: keep the transport as the MCP
-catalog/dispatch adapter; move only cohesive policy/state owners, and do not
-wrap tiny stateless handlers or handlers already delegated to narrow services.
-The four candidate boundaries are recommendations, not authorized work.
+1. `prepareTurn`
+2. `initializeRun`
+3. `requestProviderIteration`
+4. `consumeProviderIteration`
+5. `settleToolTurn`
+6. `finalizeRun`
 
-`10/03` replaced the audit-era concentration metrics with current-source
-counts: `Container` is 64 fields and four production receiver methods; Store is
-372 production receiver methods across 62 of 66 production Go files, with 32
-exact root-package importers and 61 literal `*store.Store` occurrences across
-25 non-test `internal/service` files; plugin `Host` is 38 fields and 123
-production receiver methods across nine files. These counts support the
-reviewed disposition record; they are not authorization to decompose by
-metric.
+### AD-13 — selective selftools delegation
 
-## 3. Decisions still required
+The operator expressly approved four cohesive boundaries rather than a uniform
+owner per tool domain. `SelfToolsTransport` remains the only static catalog and
+name dispatcher. The approved owners are:
 
-- **AD-12 is open.** The operator must accept, reject, or revise the six
-  `generateResponse` phases and the proposed `chatServiceImpl` capability
-  boundaries. No follow-on extraction task exists or may be drafted first.
-- **AD-13 is open.** The operator must accept, reject, or revise selective
-  delegation and its candidate ordering. A fresh review PASS did not decide
-  this architecture question.
-- **AD-14 is decided and supplemented.** `10/03` is fully dispositioned; it
-  does not create a new refactor task.
+1. `MessagingTools` — messaging and messaging-session handoff;
+2. `WorkTrackingTools` — todo/plan persistence and post-mutation broadcast;
+3. `AgentProfileTools` — agent CRUD, classification/editability, and source
+   resolution; and
+4. `PresentationTools` — card/panel rendering, signals, and the shared trust
+   gate.
 
-This is the required order: map → operator decision → separately scoped
-extraction. Wave 5 completed the first step only for AD-12 and AD-13.
+The reasoning was ownership and policy cohesion, not count reduction. Tiny
+stateless adapters, already-delegated handlers, and domains crossing
+load-bearing seams remain on the transport. Further delegation requires a
+named coupling, ownership, or testability problem.
 
-## 4. Verification before trusting the dependency
+### AD-14 — no blanket `Container`/Store/Host refactor
 
-Run from a clean checkout at `fb6527ab`.
+The approved balance remains binding: `Container` is a composition root, Store
+retains its file-per-domain database-handle shape, and consumer-owned narrow
+interfaces are introduced only for a named consumer with demonstrated pain.
+Plugin `Host` may split a named sub-registry only if `GO-PLUGIN-004`/UnloadPlugin
+work supplies concrete ownership, teardown, locking, or testability evidence.
 
-### Scope and map reconciliation
+## 3. Final production shape
+
+### Chat execution
+
+`generateResponse` remains the visible coordinator in
+`internal/service/chat_generate.go`. Its cognitive/cyclop/gocyclo complexity
+moved monotonically from `458/228/225` to `19/18/18`; maintainability moved
+from `0` to `27`. The six actions live in
+`internal/service/chat_generation_actions.go` and remain bounded by their
+phase rather than recreating the old monolith. `chatServiceImpl`'s broader
+52-field/87-method inventory and runtime-session ownership were not split.
+
+The coordinator still owns all `continue`, `break`, retry decrement, and
+terminal routing; root span and deferred cleanup; stream and presence cleanup;
+and final PTY disposition. `providerAttempt` makes provider cancel/span closure
+idempotent across request and consume paths. The extraction preserves
+stream/tool ordering, delayed-delta recovery behavior, envelope/filter/routed
+broadcast order, persistence before `stream_end`, and terminal scheduling.
+
+### Self-tools
+
+`SelfToolsTransport` now has exactly 27 fields and 50 production receiver
+methods. Its switch still contains all 68 names in 66 clauses, and the static
+catalog and response behavior are unchanged. The four owners contain 31
+receiver methods in total: messaging 9, work tracking 10, agent profiles 5,
+and presentation 7. The thirty-second moved policy is the package-level
+`resolveProjectIDFromSession` function.
+
+There is exactly one project resolver and one `resolvePanelAccess` trust gate.
+Construction remains two-stage: `NewSelfToolsTransport(store)` installs
+nil-safe/store-backed owners for the local MCP path, and `cmd/nanite/main.go`
+replaces them with live runtime dependencies.
+
+One source premise was corrected during `10/05`: todo, reminder, and pin
+project autofill share the session-to-project resolver, but plans do not have a
+`project_id`. Plans retain their legacy rule: a missing non-workspace
+`scope_id` is filled from the current `sessionID`. No behavior was changed to
+force the original, false “identical across all four” premise.
+
+## 4. Integrated commits and fresh review
+
+Branch-local SHAs remain in the task Work Logs. The authoritative equivalents
+on current `main` are:
+
+| Boundary | Integrated commits |
+|---|---|
+| `10/01` characterization/map plus review correction | `4fc5d460`, `f77076a9` |
+| `10/02` capability map plus caller-map correction | `70e20a2b`, `07ca5958` |
+| `10/03` disposition record | `97b048b2` |
+| Original evidence-beat review close | `fb6527ab` |
+| Reopen point / pre-implementation baseline | `92315edf` |
+| Reopened implementation dispatch | `d61751c2` |
+| AD-12 six-action pipeline | `1d79d7c3..cbf8554f` |
+| AD-13 four selective delegations | `25689cb5..126c2a2a` |
+| Final task/finding review sync | `7304e7be` |
+
+AD-12 landed prepare, initialize, settle, finalize, consume, and request as
+separate reviewed moves. Midpoint review caught one observable-schema leak:
+the mutable Go expression `run.tools` had escaped into telemetry/detail/reason
+literals. The correction restored every observable literal to `tools`, kept
+`run.tools` only as a Go expression, and added a production-door assertion.
+Final fresh review passed the complete six-action pipeline.
+
+AD-13's four code boundaries passed focused fresh review. Its first final
+review then failed only the acceptance record because the task and capability
+map still described the pre-extraction state. `126c2a2a` updated status, Work
+Log, ownership/count reconciliation, source correction, and timeout record;
+focused re-review passed that correction. `7304e7be` then marked both
+implementation tasks and their findings reviewed on `main`.
+
+## 5. Verification and exact race qualification
+
+The merged tree passed:
+
+```bash
+go build ./...
+go vet ./...
+go test ./... -count=1
+```
+
+The AD-12 and AD-13 focused normal suites passed. Their focused race suites
+also passed. These focused results do not convert either aggregate race timeout
+into a pass.
+
+The final service aggregate command was:
+
+```bash
+go test -race ./internal/service/... -timeout 20m -count=1
+```
+
+It exited 1 after **1200.838s** with `test timed out after 20m0s` while
+`TestDurableAgentStartCreatesOrReusesSession` was in SQLite-backed test-store
+setup. It emitted no `DATA RACE` report. This result is a **TIMEOUT, not a
+PASS**.
+
+The final selftools aggregate command was:
+
+```bash
+go test -race ./internal/selftools -timeout 20m -count=1
+```
+
+It exited 1 after **1200.458s** while
+`TestSelfToolsTransport_UnknownTool` was in `newTestStore` → `store.New` →
+`Store.migrate` → goose `runMigrations`, applying the fresh 0x91 (145)
+migration fixture. It emitted no race-detector report. This result is also a
+**TIMEOUT, not a PASS**.
+
+## 6. Independent checks before trusting the dependency
+
+Run from a clean checkout of `7304e7be` or a descendant that intentionally
+supersedes it:
 
 ```bash
 git status --short
+git merge-base --is-ancestor 7304e7be HEAD
+sed -n '/### Wave 5/,/### Wave 6a/p' TASKS/INDEX.md
 
-# The only code-tree change in the named concentration surfaces is the new test.
-git diff --name-only 3942f3c4..fb6527ab -- \
-  internal/service internal/selftools internal/toolclient internal/plugin internal/store
+# Six named actions plus the one visible coordinator.
+grep -n -E 'func \(s \*chatServiceImpl\) (generateResponse|prepareTurn|initializeRun|requestProviderIteration|consumeProviderIteration|settleToolTurn|finalizeRun)' \
+  internal/service/chat_generate.go internal/service/chat_generation_actions.go
 
-# Current source inventories used by the reviewed maps: expect 52, 87, 31, 82.
-sed -n '/^type chatServiceImpl struct {/,/^}/p' internal/service/chat.go \
-  | grep -cE '^[[:space:]]+[A-Za-z][A-Za-z0-9]*[[:space:]]'
-grep -RhoE '^func \([^)]*\*chatServiceImpl\) [A-Za-z0-9_]+' internal/service \
-  --include='*.go' --exclude='*_test.go' | sed -E 's/.*\) //' | sort -u | wc -l
+# Expect 27 fields, 50 transport receiver methods, 66 clauses, and 68 names.
 sed -n '/^type SelfToolsTransport struct {/,/^}/p' \
   internal/selftools/self_tools_transport.go \
   | grep -cE '^[[:space:]]+[A-Za-z][A-Za-z0-9]*[[:space:]]'
-grep -RhoE '^func \([^)]*\*SelfToolsTransport\) [A-Za-z0-9_]+' internal/selftools \
-  --include='*.go' --exclude='*_test.go' | sed -E 's/.*\) //' | sort -u | wc -l
-
-# The canonical chat field table must contain 52 unique names and no duplicates.
-sed -n '/^### Canonical exactly-once field ownership$/,/^Arithmetic reconciliation:/p' \
-  TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-responsibility-map.md \
-  | grep -oE '`[A-Za-z][A-Za-z0-9]*`' | tr -d '`' | sort -u | wc -l
-sed -n '/^### Canonical exactly-once field ownership$/,/^Arithmetic reconciliation:/p' \
-  TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-responsibility-map.md \
-  | grep -oE '`[A-Za-z][A-Za-z0-9]*`' | tr -d '`' | sort | uniq -d
-
-# Expect six phase headings. Confirm the method formula ends at 87.
-grep -c '^### Phase [1-6] ' \
-  TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-responsibility-map.md
-grep -A5 '^## Complete 87-method reconciliation$' \
-  TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-responsibility-map.md
-
-# Expect 66 clauses; 65 literal names plus three constant-backed names = 68.
-sed -n '/switch name {/,/default:/p' internal/selftools/self_tools_transport.go \
+git grep -h -E '^func \([^)]*\*SelfToolsTransport\)' -- \
+  'internal/selftools/*.go' ':!internal/selftools/*_test.go' | wc -l
+sed -n '/func (st \*SelfToolsTransport) CallTool/,/^}/p' \
+  internal/selftools/self_tools_transport.go \
   | grep -c '^[[:space:]]*case '
-sed -n '/switch name {/,/default:/p' internal/selftools/self_tools_transport.go \
-  | grep -oE '"[a-z][a-z0-9_]*"' | sort -u | wc -l
-sed -n '/switch name {/,/default:/p' internal/selftools/self_tools_transport.go \
-  | grep '^[[:space:]]*case ' | grep -v 'case "'
-```
-
-The first scope command should print only
-`internal/service/chat_generate_characterization_test.go`. For the dispatch
-count, the final command must show `agentSourceResolveToolName`,
-`taskUpdateReportToolName`, and `scheduleCreateToolName`; adding those three to
-the 65 literal names yields 68.
-
-### Focused behavior and final repository gates
-
-The exact focused command recorded by `10/01` is:
-
-```bash
-go test ./internal/service/... -run 'GenerateResponse|Characterization' -v
-```
-
-For an exact rerun of the nine new focused cases, including the same scope
-under the race detector:
-
-```bash
-go test ./internal/service/... \
-  -run '^(TestGenerateResponseCharacterization_.*|TestRecoverFromContextOverflow_RateBudgetForcedCompactionSucceeds)$' \
-  -count=1 -v
-go test -race ./internal/service/... \
-  -run '^(TestGenerateResponseCharacterization_.*|TestRecoverFromContextOverflow_RateBudgetForcedCompactionSucceeds)$' \
-  -count=1 -v
+sed -n '/func (st \*SelfToolsTransport) CallTool/,/^}/p' \
+  internal/selftools/self_tools_transport.go \
+  | sed -n 's/^[[:space:]]*case //p' \
+  | awk -F',' '{n+=NF} END {print n}'
 
 go build ./...
 go vet ./...
 go test ./... -count=1
 ```
 
-At the final integration point, the root build, vet, and full non-race test
-suite passed; the task-focused race run also passed. A full
-`go test -race ./internal/service/...` did **not** pass: it reached the known
-10-minute SQLite migration timeout while
-`TestResolveProvider_StoredProviderID_UsesRuntimeProviderType` was opening and
-migrating SQLite. It emitted no race report before timing out. Keep that exact
-qualification; do not upgrade it to a race PASS.
+Do not describe the two 20-minute aggregate race results as passes unless a
+future run independently completes with exit 0.
 
-The pre-existing `driveBootSession` send-on-closed-channel flake recurred once
-during a coverage run; an identical retry passed. This is not attributed to
-Wave 5 and is already durably logged from the Skills batch.
+## 7. Durable carried-forward record
 
-### Tracker, findings, and decision state
-
-```bash
-sed -n '/### Wave 5/,/### Wave 6a/p' TASKS/INDEX.md
-jq -r '.findings[] | select(
-  .id=="GO-SVCEXEC-001" or .id=="GO-SVCEXEC-002" or
-  .id=="GO-MCPTOOL-006" or .id=="GO-MCPTOOL-007" or
-  .id=="GO-DEP-001" or .id=="GO-DEP-002" or
-  .id=="GO-STORE-001" or .id=="GO-STORE-002" or
-  .id=="GO-PLUGIN-006") | [.id,.task_status,.disposition] | @tsv' \
-  TASKS/audit-remediation/findings.json
-sed -n '/^### AD-12 /,/^## Wave 6 decisions/p' \
-  TASKS/audit-remediation/ARCHITECT-DECISIONS.md
-```
-
-Expect all three task rows and all nine findings to be `reviewed`; expect
-AD-12 and AD-13 to remain `open`. The accepted dispositions differ by finding
-and should not be flattened into “all remediated.”
-
-## 5. Durable findings already in `TASKS/ESCALATIONS.md`
-
-Reference these entries rather than restating them in later handoffs:
+The following remain relevant; reference the named
+`TASKS/ESCALATIONS.md` entries instead of rediscovering them:
 
 - **“Wave 5 `10/01` corrected the ChatService and StreamManager inventory
-  premises”** — the 52/87 inventory, corrected runtime boundary, and
-  construction-only wiring residue.
+  premises”** — retain the 52/87 inventory and the observation that `commands`,
+  `dbPath`, and `adapterRegistry` are construction-only wiring residue. That
+  observation alone is not deletion authorization.
 - **“Wave 5 `10/02` found stale comments for a retired chat-slot learning
-  consumer”** — the three comments left for a future authorized cleanup.
+  consumer”** — three source-comment blocks still imply a chat-slot consumer
+  that no longer exists. A future stale-comment task must explicitly add those
+  files to scope.
 - **“Wave 5 `10/03` corrected concentration metrics and a retired
-  Store-interface example”** — current counts, retired grounding example, and
-  the approved `Container`/Store/Host balance.
+  Store-interface example”** — preserve the pain-driven Container/Store/Host
+  rule and use `GO-PLUGIN-004` as the Host evidence boundary.
 - **“Wave 8's three mechanical-cleanup tasks carry six
-  `requires_architect_decision` items with no queue entry”** — six missing
-  decision records that must be resolved or explicitly waived before Wave 8's
-  kickoff.
-- The Skills-batch task `10` PASS entry's **pre-existing
-  `driveBootSession` send-on-closed-channel race** — relevant because it
-  recurred once during Wave 5 verification.
+  `requires_architect_decision` items with no queue entry”** — resolve or
+  explicitly waive those six decision records before Wave 8 kickoff.
+- The Skills task `10` review entry records a pre-existing
+  `driveBootSession` send-on-closed-channel race. It recurred once during Wave
+  5 verification and passed on retry; Wave 5 did not fix it.
 
-No Wave 5 durable finding is intentionally held only in this handoff.
+A central decision record is inconsistent and should be reconciled by the
+next tracking-authorized session: `ARCHITECT-DECISIONS.md` contains both a
+decided AD-20 (“rename both types by
+  role”) and a later stale duplicate open AD-20 entry. Do not infer AD-20's
+  state from the duplicate heading; reconcile the decision record before
+  dispatching `11/08`.
 
-## 6. Wave 5 state
+## 8. Wave 6 dependency state
+
+Wave 5's dependency is satisfied. In particular, `11/06`, `11/08`, and
+`11/09` no longer wait on “Wave 5 complete,” and `11/01`/`11/04`/`11/11` have
+their named `10/01`/`10/02` dependencies.
+
+That does **not** make all of Wave 6a immediately dispatchable. AD-19 remains
+open and gates the semantic-divergence tasks; its classification table must be
+produced and the operator must decide shared implementation versus parity
+tests. Reconcile the duplicate AD-20 record before treating `11/08` as ready.
+Wave 6b tasks that depend on Wave 6a remain sequenced behind it.
+
+## 9. Final Wave 5 state
 
 | Status | Count |
 |---|---:|
-| Reviewed | 3 |
+| Reviewed | 5 |
 | In progress | 0 |
 | Blocked | 0 |
 
-The wave's task and finding reviews are closed. Its two architecture decisions
-are not.
+AD-12 and AD-13 are decided and implemented. AD-14's reviewed no-blanket-
+refactor disposition remains in force.

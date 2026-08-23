@@ -1,7 +1,7 @@
 # `generateResponse` — implement the approved six-action pipeline
 
 **Phase:** Audit remediation — Wave 5 reopened implementation beat
-**Status:** not-started
+**Status:** in-progress
 **Depends on:** reviewed evidence/characterization task `10/01`; AD-12 decided
 **Gated on:** none — the operator expressly approved AD-12 on 2026-08-23
 **Findings:** GO-SVCEXEC-001, GO-SVCEXEC-002
@@ -237,4 +237,20 @@ read-only and must not edit or claim operator approval.
 
 ## Work Log
 
-Not started.
+- Phase 1 in progress: established the private directive vocabulary,
+  `generationLifecycle`, and immutable `turnSetup` handoff; added a
+  production-door disabled-agent characterization that pins termination before
+  `stream_start` and provider invocation.
+- Phase 1 complete: extracted `prepareTurn` without moving root-span or deferred
+  cleanup ownership. Focused behavior passed; focused race passed in 102.333s;
+  full non-race service passed in 87.641s; service/all build and vet and
+  `git diff --check` passed. The required aggregate service race reproduced the
+  pre-existing migration-heavy limitation at the doubled ceiling: exit 1 after
+  1200.862s, `test timed out after 20m0s` while
+  `TestDurableAgentWakeEndToEndPersistsPromptAsSessionMessage` was still in
+  SQLite migration, with no `DATA RACE` report. This is recorded as a TIMEOUT,
+  not a pass. Audit lint exited 1 on historical diagnostics; coordinator
+  complexity decreased from cognitive 458 / cyclop 228 / gocyclo 225 to
+  cognitive 397 / cyclop 185 / gocyclo 183. `prepareTurn` is cohesive at
+  cognitive 62 / cyclop 45 / gocyclo 44 / maintainability 8 rather than a move
+  of the original monolith.

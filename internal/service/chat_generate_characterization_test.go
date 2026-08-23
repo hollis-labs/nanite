@@ -366,6 +366,19 @@ func TestGenerateResponseCharacterization_PlainNoToolTurn(t *testing.T) {
 	}
 }
 
+func TestGenerateResponseCharacterization_DisabledAgentTerminatesBeforeStreamStart(t *testing.T) {
+	f := newCharacterizationFixture(t, []characterizationProviderStep{{events: doneEvents("must not run")}})
+	f.svc.agents.(*characterizationAgents).agent.Status = "disabled"
+	events := f.run(t, "assistant-disabled-agent")
+
+	if got := f.provider.callCount(); got != 0 {
+		t.Fatalf("provider calls = %d, want 0", got)
+	}
+	if got := eventTypes(events); !reflect.DeepEqual(got, []string{"error"}) {
+		t.Fatalf("event sequence = %v, want early error only", got)
+	}
+}
+
 func TestGenerateResponseCharacterization_SingleToolTurn(t *testing.T) {
 	tu := llmtypes.ToolUseBlock{ID: "tool-single", Name: "echo", Input: map[string]any{"value": "one"}}
 	f := newCharacterizationFixture(t, []characterizationProviderStep{

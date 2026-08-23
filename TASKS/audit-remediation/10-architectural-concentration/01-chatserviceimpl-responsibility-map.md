@@ -466,3 +466,10 @@ inbox + 3 inspector + 7 enrichment/utility + 1 handoff + 1 loop-termination =
 5. Consider a full rewrite only if incremental extraction later produces a
    concrete, documented safety problem. This mapping found none; incremental
    extraction is the default recommendation.
+
+## AD-12 implementation progress
+
+- Phase 1 (`prepareTurn`) extracted on 2026-08-23. The coordinator retains root
+  tracing and deferred cleanup, and receives an immutable `turnSetup` through a
+  typed directive outcome. Current coordinator complexity after this phase is
+  cognitive 397 / cyclop 185 / gocyclo 183 (baseline 458 / 228 / 225).

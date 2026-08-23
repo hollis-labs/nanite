@@ -12,10 +12,9 @@ correct, validated dependency/toolchain update, but its full-repository race
 gate was explicitly deferred by the operator after repeated migration-time
 suite timeouts; it remains `implemented`, not `reviewed`.
 
-The current Wave 3 rows in `TASKS/INDEX.md` are the status truth used here.
-At this handoff's creation, those row changes are still an **orchestrator-owned,
-uncommitted working-tree update** awaiting final reconciliation. This document
-does not commit or otherwise take ownership of that index change.
+The Wave 3 rows in `TASKS/INDEX.md` are the status truth used here. They were
+reconciled and committed by the orchestrator at wave close, while unrelated
+pre-existing working-tree changes remained untouched.
 
 ---
 

@@ -1076,16 +1076,16 @@ to proceed against the post-sweep signatures.
 
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
-| `08/01` | `08-remaining-security-hardening/01-a2a-webhook-url-validation.md` | not-started | Wave 2 complete | — |
-| `08/02` | `08-remaining-security-hardening/02-mcp-dev-grep-symlink-toctou.md` | not-started | Wave 2 complete | — |
-| `08/03` | `08-remaining-security-hardening/03-triage-remaining-gosec-g304-sites.md` | not-started | `00/02` | — |
-| `08/04` | `08-remaining-security-hardening/04-permission-default-mode-write-gap.md` | not-started | Wave 2 complete | AD-16 |
-| `08/05` | `08-remaining-security-hardening/05-secret-key-heuristic-hardening.md` | not-started | `02/01` | — |
-| `08/06` | `08-remaining-security-hardening/06-sandbox-proxy-header-timeout.md` | not-started | Wave 2 complete | — |
-| `08/07` | `08-remaining-security-hardening/07-server-auth-bind-tls-posture.md` | not-started | `07/02` | AD-15 |
-| `08/08` | `08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md` | not-started | `00/02` | — |
-| `08/09` | `08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md` | not-started | `01/01` | AD-04 |
-| `08/10` | `08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md` | not-started | Wave 2 complete | — |
+| `08/01` | `08-remaining-security-hardening/01-a2a-webhook-url-validation.md` | reviewed | Wave 2 complete | operator-approved external-unauthenticated SSRF disposition |
+| `08/02` | `08-remaining-security-hardening/02-mcp-dev-grep-symlink-toctou.md` | reviewed | Wave 2 complete | — |
+| `08/03` | `08-remaining-security-hardening/03-triage-remaining-gosec-g304-sites.md` | reviewed | `00/02` | operator-approved four-site remediation |
+| `08/04` | `08-remaining-security-hardening/04-permission-default-mode-write-gap.md` | reviewed | Wave 2 complete | AD-16 |
+| `08/05` | `08-remaining-security-hardening/05-secret-key-heuristic-hardening.md` | reviewed | `02/01` | — |
+| `08/06` | `08-remaining-security-hardening/06-sandbox-proxy-header-timeout.md` | reviewed | Wave 2 complete | — |
+| `08/07` | `08-remaining-security-hardening/07-server-auth-bind-tls-posture.md` | reviewed | `07/02` | AD-15 |
+| `08/08` | `08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md` | implemented — dependency fix passes; full race verdict deferred after known migration-time suite timeouts | `00/02` | — |
+| `08/09` | `08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md` | reviewed | `01/01` | AD-04, AD-27, AD-28 (all decided; also now carries `GO-SEC4-007`, reassigned from `11/07`) |
+| `08/10` | `08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md` | reviewed | Wave 2 complete | settings scope corrected after producer trace |
 
 ### Wave 4 — Production islands
 

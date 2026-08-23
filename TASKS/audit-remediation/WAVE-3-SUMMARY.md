@@ -8,10 +8,9 @@ pagination. The dependency/toolchain remediation in `08/08` is implemented and
 clean on its non-race gates, but remains deliberately unreviewed because the
 operator deferred its migration-heavy full-race gate.
 
-The current Wave 3 rows in `TASKS/INDEX.md` are the status truth summarized
-below. Those edits are still an orchestrator-owned, uncommitted working-tree
-update awaiting final reconciliation; these two documents do not take
-ownership of that change.
+The Wave 3 rows in `TASKS/INDEX.md` are the status truth summarized below.
+They were reconciled and committed by the orchestrator at wave close, while
+unrelated pre-existing working-tree changes remained untouched.
 
 ---
 
@@ -196,8 +195,6 @@ it is the explicit `08/08` deferral above.
    retention decision.
 3. Fix the pre-existing `callGrep` empty-ring modulo order and cover first-line
    matches with `context=0` and default context.
-4. Reconcile and commit the orchestrator-owned `TASKS/INDEX.md` status update
-   without changing `08/08` from implemented to reviewed.
 
 ## Wave 3 status
 

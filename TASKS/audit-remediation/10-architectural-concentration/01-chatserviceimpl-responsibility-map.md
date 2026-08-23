@@ -1,8 +1,10 @@
 # `chatServiceImpl` responsibility map and `generateResponse` phase proposal
 
-This document is the architect-review input required by audit-remediation task
-`10/01`. It describes current source as of 2026-08-23. It is not approval to
-perform an extraction and it deliberately contains no execution-task scopes.
+This document was the architect-review input required by audit-remediation task
+`10/01`. It describes current source as of 2026-08-23. **The operator expressly
+approved its six-phase action shape on 2026-08-23 under AD-12**, with
+`generateResponse` retaining orchestration and each action owning its step's
+logic. Implementation is now authorized only through scoped task `10/04`.
 
 ## Verified inventory
 

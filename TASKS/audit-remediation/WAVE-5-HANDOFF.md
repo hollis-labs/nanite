@@ -1,15 +1,19 @@
 # Wave 5 handoff — for the Wave 6 orchestrator
 
+> **Reopened 2026-08-23.** This handoff describes the completed evidence beat
+> only and is not the current Wave 5 closeout. The operator subsequently
+> approved AD-12 and AD-13 and expressly directed their implementation in this
+> wave through tasks `10/04` and `10/05`. Replace the integration point and
+> status sections after those tasks pass fresh review.
+
 **Audience: a fresh session with zero memory of Wave 5.** The immutable Wave 5
 integration point is `fb6527ab`. All three Wave 5 tasks are `reviewed`, but this
 was a decomposition-planning and decision wave, not a production-extraction
 wave: no production refactor shipped.
 
-Do not treat the reviewed task statuses as architect approval. AD-12 and AD-13
-remain `open`; the operator must review the two evidence maps and decide both
-before any `chatServiceImpl`/`generateResponse` or `SelfToolsTransport`
-extraction task is scoped, created, or dispatched. The repository-wide freeze
-under AD-24 also remains in force.
+The statements below that AD-12 and AD-13 remain open are historical. Both are
+now decided in `ARCHITECT-DECISIONS.md`; the repository-wide freeze under
+AD-24 remains in force.
 
 ---
 

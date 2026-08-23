@@ -41,3 +41,13 @@ so those five findings (`GO-DEP-001`, `GO-DEP-002`, `GO-STORE-001`,
 `GO-STORE-002`, `GO-PLUGIN-006`) don't disappear from tracking the way the
 guide's own disposition-tracking requirement (§7 output C: "no finding should
 disappear merely because it was grouped") is written to prevent.
+
+**Wave reopened 2026-08-23.** The operator expressly approved both evidence
+artifacts and directed implementation here rather than adding more deferred
+follow-up work. AD-12 authorizes the reviewed six-phase action pipeline while
+keeping `generateResponse` responsible for orchestration. AD-13 authorizes the
+four recommended selective `SelfToolsTransport` delegations. Implementation is
+tracked separately in `04-chatserviceimpl-generateresponse-action-pipeline.md`
+and `05-selftoolstransport-selective-delegation.md`; the original `01` and `02`
+files remain the evidence and characterization records those tasks build on.
+`03` remains a deliberate no-refactor disposition.

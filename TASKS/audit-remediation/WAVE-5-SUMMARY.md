@@ -1,7 +1,13 @@
 # Wave 5 summary — for the operator
 
-Wave 5 is complete as an evidence wave: **three reviewed, zero in progress,
-zero blocked**. It did not ship a production decomposition or refactor. It
+> **Reopened 2026-08-23.** This summary is the evidence-beat record, not the
+> current Wave 5 closeout. The operator subsequently approved AD-12 and AD-13
+> and directed their implementation here through tasks `10/04` and `10/05`.
+> Refresh this document after both implementations pass fresh review.
+
+Wave 5 completed its evidence beat with **three reviewed, zero blocked**, then
+reopened for the two approved production decompositions. The evidence beat did
+not ship a production decomposition or refactor. It
 delivered two reviewed architecture maps, production-door characterization
 coverage for the highest-complexity chat path, and one approved no-blanket-
 refactor disposition.

@@ -6,8 +6,8 @@ decisions."* This file is that separation. It is the batch's single
 authoritative list of calls that must be made **by the operator/architect**,
 not by a worker mid-task.
 
-**28 decisions**, of which **11 are decided** (AD-01–AD-04, AD-14, AD-17,
-AD-18, AD-23, AD-24, AD-25) and 16 remain open. Most are grounded in the **44
+**28 decisions**, of which **27 are decided** and **one remains open** (AD-19).
+Most are grounded in the **44
 findings** carrying `requires_architect_decision: true` in `findings.json`,
 plus the guide's own §9 list; AD-23 and AD-24 are process decisions surfaced by
 the planning pass.
@@ -57,8 +57,8 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-09 | Island: tool builder / YAML architecture — wire / defer / retire | `09/04` | GO-MCPTOOL-001 | 4 | **decided** |
 | AD-10 | Island: reasoning-augmented tool selection — wire / defer / retire | `09/05` | GO-MCPTOOL-002 | 4 | **decided** |
 | AD-11 | Island: curated tool-knowledge matcher — wire / defer / retire | `09/06` | GO-MCPTOOL-003 | 4 | **decided** |
-| AD-12 | `chatServiceImpl` / `generateResponse` decomposition boundaries | `10/01` | GO-SVCEXEC-001/002 | 5 | open |
-| AD-13 | `SelfToolsTransport` decomposition boundaries | `10/02` | GO-MCPTOOL-006 | 5 | open |
+| AD-12 | `chatServiceImpl` / `generateResponse` decomposition boundaries | `10/01`, `10/04` | GO-SVCEXEC-001/002 | 5 | **decided** |
+| AD-13 | `SelfToolsTransport` decomposition boundaries | `10/02`, `10/05` | GO-MCPTOOL-006 | 5 | **decided** |
 | AD-14 | How far to narrow `internal/store` dependencies | `10/03`, `06/02`, **`06/03`** | GO-DEP-002, GO-STORE-001, GO-STORE-005 | 5 | **decided** |
 | AD-15 | Default auth / bind / TLS / startup-warning posture | `08/07` | GO-RUNTIME-002 | 3 | **decided** |
 | AD-16 | `permission.Engine` `ModeDefault`: does it prompt for writes? | `08/04` | GO-SEC4-003 | 3 | **decided** |
@@ -961,30 +961,69 @@ entries.
 
 ### AD-12 — `chatServiceImpl` / `generateResponse` decomposition boundaries
 
-**Status:** open · **Gates:** `10/01` · **Findings:** GO-SVCEXEC-001 (high),
-GO-SVCEXEC-002 (high)
+**Status:** decided · **Gates:** `10/01`, implementation task `10/04` ·
+**Findings:** GO-SVCEXEC-001 (high), GO-SVCEXEC-002 (high)
 
-The largest refactor in the batch. The guide prescribes the *method* in
-detail (§4 Wave 5) and it should be followed rather than re-derived:
-responsibility map first, characterization tests to lock behavior, improve
-coverage of the provider-error / compaction-recovery / plugin-cancel branches,
-identify 3–6 coherent phases, **extract one at a time**, keep the outer state
-machine recognizable, re-run behavior/race/complexity after each extraction.
-`StreamManager` (`internal/service/stream.go`) is the named in-repo precedent.
-
-What the architect actually decides: **which 3–6 boundaries**, and whether a
-rewrite is on the table at all (the guide permits it only *"if it is clearly
-safer/cleaner than incremental extraction"*). Decide after the responsibility
-map exists, not before — this decision has a prerequisite deliverable.
+> **Decided and expressly approved by the operator (2026-08-23): implement the
+> reviewed six-phase action pipeline incrementally.** `generateResponse`
+> remains the coordinator: it owns control flow and routing, including the
+> provider/tool loop, retry-versus-finish decisions, cancellation, and terminal
+> cleanup. Each extracted action owns one step's local logic and returns an
+> explicit result to the coordinator; actions do not call the next action or
+> hide the state machine behind callbacks.
+>
+> The approved phase boundaries are: (1) resolve and assemble the turn,
+> (2) open the stream and initialize the run, (3) govern an iteration and make
+> the provider request, (4) consume and normalize one provider stream,
+> (5) settle tools and decide continuation, and (6) finalize, persist, and
+> close the run. Begin with named methods and explicit state/outcome structs
+> such as `turnSetup`, `runState`, `providerAttempt`, and `turnResult`; do not
+> create six independent service objects merely to reduce method counts.
+>
+> **Reasoning.** This matches the familiar action/pipeline pattern: the outer
+> workflow remains readable as a sequence of transitions while each step owns
+> its own policy and mechanics. It reduces accidental complexity without
+> dispersing the essential orchestration state or obscuring loop semantics.
+> The characterization suite from `10/01` already protects the production
+> door, error recovery, compaction, and cancellation paths, making incremental
+> extraction safer than a rewrite. Extract one phase at a time and rerun the
+> focused behavior, race, and complexity checks after every phase.
+>
+> **Scope fence.** This decision does not authorize a wholesale
+> `chatServiceImpl` split. The runtime-session lifecycle cluster remains a
+> possible later type extraction only if the action work exposes concrete
+> ownership or testability pressure. A full rewrite is rejected for this
+> phase.
 
 ### AD-13 — `SelfToolsTransport` decomposition boundaries
 
-**Status:** open · **Gates:** `10/02` · **Findings:** GO-MCPTOOL-006 (medium)
+**Status:** decided · **Gates:** `10/02`, implementation task `10/05` ·
+**Findings:** GO-MCPTOOL-006 (medium)
 
-81 methods across several files. The question per the guide: should the
-transport *dispatch into narrower capability owners* rather than implement
-every domain directly? Explicit constraint, worth quoting because it is the
-failure mode: *"Do not split solely to reduce field/method counts."*
+> **Decided and expressly approved by the operator (2026-08-23): implement
+> selective delegation beginning with the four boundaries recommended by the
+> reviewed capability map.** Keep `SelfToolsTransport` as the MCP catalog and
+> dispatch adapter. Move real behavior and its cohesive dependencies into:
+> (1) messaging plus session handoff, (2) todo/plan work tracking, (3) agent
+> profile management plus source resolution, and (4) combined card/panel
+> presentation.
+>
+> **Reasoning.** These four groups have real internal cohesion, shared policy,
+> or exclusive dependencies. The other domains are either already delegated,
+> too small/stateless to justify another layer, or cross load-bearing seams
+> that should stay singular. The combined presentation boundary is especially
+> important: card render-target resolution and panel operations must continue
+> to share one trust/access gate. This is a deliberate balance between one
+> overgrown transport and decomposition for its own sake; further delegation
+> should happen only when growing pains demonstrate ownership, coupling, or
+> testability value.
+>
+> Each move must transfer meaningful logic and use narrow dependencies where
+> practical; hollow wrappers and duplicated policy are out of scope. Preserve
+> static tool definitions, `ListTools`, `CallTool` routing, request context,
+> response behavior, and tool names as the transport contract. Add direct
+> behavioral coverage for the moved handlers, with particular attention to
+> the messaging operations that `10/02` found thinly covered.
 
 ---
 

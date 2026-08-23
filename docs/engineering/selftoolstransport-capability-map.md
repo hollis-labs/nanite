@@ -1,8 +1,10 @@
 # `SelfToolsTransport` capability-domain map
 
 This is the evidence artifact for audit-remediation task `10/02` and the
-input to architect decision AD-13. It describes the current implementation;
-it does not authorize or perform a decomposition.
+input to architect decision AD-13. It describes the pre-extraction
+implementation. **The operator expressly approved its selective-delegation
+recommendation and four first candidates on 2026-08-23 under AD-13.**
+Implementation is now authorized only through scoped task `10/05`.
 
 Inventory was re-derived from commit `3942f3c4`:
 

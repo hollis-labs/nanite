@@ -1,7 +1,7 @@
 # permission.Engine's ModeDefault may not prompt before non-destructive writes — ambiguous, needs architect call
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/permission/engine.go` (`Engine.Check`, `defaultDecision`), `internal/permission/engine_test.go`, `internal/service/tool.go` (name-heuristic classification consumed by `Check`)
 **Requires architect decision:** true (matches `findings.json`)
@@ -106,4 +106,4 @@ If Step 2a is chosen (real gap), the observable behavior change is that `dev_wri
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-22 — **PASS, no blocking findings** (fresh reviewer with no worker context). Independently traced chat `Engine.Check` through the shared grant context into both `dev_write` and `dev_edit`: `ModeDefault` intentionally returns Allow for `{false,false}`, while every filesystem mutation still passes `resolveAllowed`, which permits only static `AllowedPaths` or a session `PathGrant`. Alternate workflow and stdio-MCP callers bypass `Engine.Check` but not `resolveAllowed`, so they remain confined to static allowed paths. The corrected comment accurately names both gates, the new test pins Allow, only one production Engine constructor exists, and the commit changes no production behavior.

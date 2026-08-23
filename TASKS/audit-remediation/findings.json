@@ -2574,7 +2574,7 @@
       "false_positive_considerations": "PathGrants' own documented design philosophy ('explicit-mention auto-grant, no nag-again') may mean this is a stale-comment issue, not a live regression.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/04-permission-default-mode-write-gap.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: permission/engine.go's defaultDecision (ModeDefault branch, :171-179) falls through to Allow when a tool is neither IsReadOnly nor IsDestructive; internal/service/tool.go's GetToolMeta (:716-737) confirms dev_write/dev_edit match neither the read-only suffix set nor the destructive substring set, so both resolve {false,false} -> Allow. Genuinely open whether this is a bug or PathGrants-governs-writability-by-design (the finding's own false_positive_considerations and the task file's \"confirm intended architecture with the architect before changing\" both frame the disposition itself, not just the fix, as unresolved. [AD-16 DECIDED 2026-08-22: PathGrants governs writability; ModeDefault's code is correct and its comment is stale. Remediation is the comment fix, NOT the missing Ask branch. Conditional: 08/04 must first confirm Check() consults PathGrants on the write path \u2014 if it does not, the premise fails and AD-16 re-opens. Disposition -> remediate (doc work remains; the code posture is what was accepted).]"
     },
     {

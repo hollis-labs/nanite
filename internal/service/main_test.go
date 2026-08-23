@@ -1,18 +1,46 @@
 package service
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/envelope"
 )
 
-// TestMain wires the shared go-envelopes Registry so tests that exercise
-// envelope.ValidateData (e.g. tool-repair / tool-recover paths) find
-// compiled schemas. Pre-Cap-5 the validator pulled schemas from a local
-// //go:embed FS that has since been removed; the lib's manifest is now
-// the single source of truth.
+var serviceTestRoot string
+
+// TestMain wires the shared go-envelopes Registry and isolates every
+// package-level path resolver before any service test can construct a
+// Container. The test binary gets one unique root, so parallel tests share
+// stable environment values while concurrent package binaries cannot collide.
 func TestMain(m *testing.M) {
 	envelope.SetupForTesting()
-	os.Exit(m.Run())
+
+	root, err := os.MkdirTemp("", "nanite-service-test-")
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "create service test temp root: %v\n", err)
+		os.Exit(1)
+	}
+	serviceTestRoot = root
+	for env, value := range map[string]string{
+		"HOME":                filepath.Join(root, "home"),
+		"XDG_DATA_HOME":       filepath.Join(root, "xdg", "data"),
+		"XDG_STATE_HOME":      filepath.Join(root, "xdg", "state"),
+		"XDG_CACHE_HOME":      filepath.Join(root, "xdg", "cache"),
+		"XDG_CONFIG_HOME":     filepath.Join(root, "xdg", "config"),
+		"TESSERACT_DB_PATH":   filepath.Join(root, "tesseract", "main.db"),
+		"TESSERACT_WORKSPACE": "service-package-test",
+	} {
+		if err := os.Setenv(env, value); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "set %s for service tests: %v\n", env, err)
+			_ = os.RemoveAll(root)
+			os.Exit(1)
+		}
+	}
+
+	code := m.Run()
+	_ = os.RemoveAll(root)
+	os.Exit(code)
 }

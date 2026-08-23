@@ -143,6 +143,24 @@ GO-API-004's consolidation carries real regression risk **if the three producers
   affected regressions, focused API/memory tests, focused API/memory race
   tests, focused vet, and the full non-race `go build ./cmd/nanite/`,
   `go vet ./...`, `go test ./...` baseline.
+- Final bounded isolation correction 2026-08-23: audited every
+  `NewContainer`/`ContainerConfig` occurrence in `internal/service` tests. The
+  pre-existing post-reaper-failure fixture was the sole call; the new
+  isolation regression is now the only other one. Package `TestMain` creates
+  one unique disposable root before any test runs, pins `HOME`, all four XDG
+  roots, and `TESSERACT_DB_PATH` beneath it, and selects a test-only Tesseract
+  workspace. Those values remain immutable for the test process, so parallel
+  service tests are race-safe; each package test binary has its own environment
+  and temp root, so the isolation cannot leak or collide across packages.
+- The regression first asserts every resolved Tesseract/XDG layout path is
+  under the package temp root, then constructs a real service Container and
+  inspects its opened Conduit SQLite connection with `PRAGMA database_list`.
+  SQLite's actual `main` file must remain under the disposable root and equal
+  the resolved Tesseract DB after symlink canonicalization. Focused normal and
+  race tests for both service Container fixtures passed, followed by the full
+  `internal/service` package and non-race `go build ./cmd/nanite/`,
+  `go vet ./...`, and `go test ./...` baselines. The operator's database was
+  neither opened nor modified.
 
 ## Review notes
 

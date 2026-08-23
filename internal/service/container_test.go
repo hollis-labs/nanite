@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/config"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 	pluginsdk "github.com/hollis-labs/plugin-sdk"
@@ -299,6 +300,94 @@ func TestNewContainer_PostReaperFailureStopsReapers(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func TestNewContainer_TesseractDBIsPackageTempIsolated(t *testing.T) {
+	layout, err := config.ResolveTesseractLayout()
+	if err != nil {
+		t.Fatalf("ResolveTesseractLayout: %v", err)
+	}
+	for label, path := range map[string]string{
+		"data":    layout.DataDir(),
+		"state":   layout.StateDir(),
+		"cache":   layout.CacheDir(),
+		"config":  layout.ConfigDir(),
+		"main DB": layout.MainDB(),
+	} {
+		assertServiceTestPathUnder(t, serviceTestRoot, label, path)
+	}
+
+	root := t.TempDir()
+	st, err := store.New(context.Background(), filepath.Join(root, "nanite.db"))
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
+
+	container, err := NewContainer(ContainerConfig{
+		Store:             st,
+		Providers:         provider.NewRegistry(),
+		WorkingDir:        root,
+		ManagedConfigRoot: filepath.Join(root, ".nanite"),
+	})
+	if err != nil {
+		t.Fatalf("NewContainer: %v", err)
+	}
+	t.Cleanup(container.Shutdown)
+	if container.Conduit == nil {
+		t.Fatal("NewContainer did not open Conduit")
+	}
+
+	var openedDB string
+	rows, err := container.Conduit.MemoryStore().DB().Query("PRAGMA database_list")
+	if err != nil {
+		t.Fatalf("PRAGMA database_list: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var seq int
+		var name, path string
+		if err := rows.Scan(&seq, &name, &path); err != nil {
+			t.Fatalf("scan database_list: %v", err)
+		}
+		if name == "main" {
+			openedDB = path
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("database_list rows: %v", err)
+	}
+	if openedDB == "" {
+		t.Fatal("Tesseract main database path not found")
+	}
+	assertServiceTestPathUnder(t, serviceTestRoot, "opened main DB", openedDB)
+	if canonicalTestPath(t, openedDB) != canonicalTestPath(t, layout.MainDB()) {
+		t.Fatalf("opened Tesseract DB = %q, resolved DB = %q", openedDB, layout.MainDB())
+	}
+}
+
+func assertServiceTestPathUnder(t *testing.T, root, label, path string) {
+	t.Helper()
+	rel, err := filepath.Rel(root, path)
+	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+		return
+	}
+	canonicalRoot := canonicalTestPath(t, root)
+	canonicalPath := canonicalTestPath(t, path)
+	rel, err = filepath.Rel(canonicalRoot, canonicalPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		t.Fatalf("%s path %q escapes service test root %q", label, path, root)
+	}
+}
+
+func canonicalTestPath(t *testing.T, path string) string {
+	t.Helper()
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("canonicalize test path %q: %v", path, err)
+	}
+	return canonical
 }
 
 func reaperGoroutineCounts(t *testing.T) (subagent, runtime int) {

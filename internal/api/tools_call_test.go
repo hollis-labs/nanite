@@ -146,7 +146,7 @@ func TestHandleSelfToolCall_PanelOpenReachesWiredSink(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
 	st := selftools.NewSelfToolsTransport(s)
 	sink := &recordingPanelSink{}
-	st.PanelSignalSink = sink
+	st.PresentationTools.SignalSink = sink
 	a.SetSelfTools(st)
 
 	rec := postToolCall(t, a, map[string]any{

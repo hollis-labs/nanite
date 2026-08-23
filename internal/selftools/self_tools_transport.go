@@ -32,31 +32,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
-// PanelSignalSink is the narrow surface the panel-control tools use to push
-// panel_signal stream events onto the originating chat session. The signature
-// is a (sessionID, type, jsonPayload) triple rather than a chat.StreamEvent —
-// the service layer adapts these arguments into a chat.StreamEvent so the mcp
-// package stays free of the chat import (avoids the chat → toolclient → mcp
-// import cycle). J8 v1 — CW-20260426-0006.
-type PanelSignalSink interface {
-	BroadcastPanelSignal(sessionID, signalType, jsonPayload string) int
-}
-
-// PanelLookup returns the IDs of plugin-shipped panels currently registered
-// with the host. panel_open / panel_close use this to validate
-// a panel_id outside the V1BuiltinPanelIDs set before applying H1 trust
-// gating. Wired from main.go via a closure over plugin.Host.GetPanels — using
-// a closure (rather than an interface) avoids importing the plugin package
-// from internal/mcp (which would create a cycle through plugin → mcp →
-// service → ...). J8 v1 — CW-20260426-0006.
-type PanelLookup func() []string
-
-// PanelTrustResolver mirrors dispatch.TrustResolver narrowly so the panel
-// handlers can resolve H1 trust without importing dispatch directly into the
-// transport. *store.Store already satisfies dispatch.TrustResolver; main.go
-// adapts the same value through this interface.
-type PanelTrustResolver = dispatch.TrustResolver
-
 // SelfToolsTransport provides self-service tools that let the agent
 // create and manage its own skills, agent profiles, and workflows
 // through the same store layer the API uses.
@@ -67,6 +42,7 @@ type SelfToolsTransport struct {
 	MessagingTools    *MessagingTools
 	WorkTrackingTools *WorkTrackingTools
 	AgentProfileTools *AgentProfileTools
+	PresentationTools *PresentationTools
 	// Subagent is set post-construction from the container; nil-safe.
 	Subagent *subagent.Service
 	// SkillVendor is the content-addressed vendored skill store (internal/
@@ -180,28 +156,6 @@ type SelfToolsTransport struct {
 	// CW-20260420-0019 (D6).
 	PythonDispatcher PythonToolDispatcher
 
-	// PanelSignalSink fans panel_open/panel_close/mode signals (J8 v1) onto the
-	// originating chat session's stream. Nil-safe — when unwired, panel tools
-	// still return their {opened: true} confirmation but the FE receives no
-	// out-of-band signal. *service.StreamManager satisfies this.
-	// CW-20260426-0006.
-	PanelSignalSink PanelSignalSink
-
-	// PanelLookup returns the IDs of plugin-shipped panels currently
-	// registered with the plugin host. Used by callPanelOpen/callPanelClose
-	// to validate panel IDs outside the V1 built-in set before applying H1
-	// trust gating. Nil-safe — when unwired, only V1 built-in panel IDs are
-	// addressable and plugin-shipped panel IDs return {reason: "unknown_panel"}.
-	// CW-20260426-0006.
-	PanelLookup PanelLookup
-
-	// TrustResolver is the H1 trust resolver shared with the dispatch
-	// subsystem. Used by callPanelOpen/callPanelClose to gate plugin-shipped
-	// panel access on TrustTrusted. Nil-safe — when unset, plugin-shipped
-	// panel access falls back to "untrusted" (the safe default).
-	// CW-20260426-0006.
-	TrustResolver PanelTrustResolver
-
 	// ReminderEngine is the deterministic trigger engine for agent-set reminders
 	// (J11, CW-20260426-0009). When set, reminder_set calls register the
 	// creation turn with the engine so turn_count triggers compute correctly.
@@ -277,6 +231,7 @@ func NewSelfToolsTransport(s *store.Store) *SelfToolsTransport {
 		MessagingTools:    NewMessagingTools(nil, nil),
 		WorkTrackingTools: NewWorkTrackingTools(nil, s, nil),
 		AgentProfileTools: NewAgentProfileTools(s, nil),
+		PresentationTools: NewPresentationTools(nil, nil, nil),
 		RememberCounters:  newRememberSessionCounters(),
 	}
 }
@@ -332,7 +287,7 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	case "engine_refresh":
 		return st.callRefreshEngine(args)
 	case "card_show":
-		return st.callShowCard(ctx, args)
+		return st.PresentationTools.callShowCard(ctx, args)
 	case "tool_validate":
 		return st.callValidate(ctx, args)
 	case "builder_start":
@@ -409,11 +364,11 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	case "python_run":
 		return st.callRunPython(ctx, args)
 	case "panel_open":
-		return st.callPanelOpen(ctx, args)
+		return st.PresentationTools.callPanelOpen(ctx, args)
 	case "panel_close":
-		return st.callPanelClose(ctx, args)
+		return st.PresentationTools.callPanelClose(ctx, args)
 	case "signal_mode":
-		return st.callSignalMode(ctx, args)
+		return st.PresentationTools.callSignalMode(ctx, args)
 	// --- Reminders + Pin (J11, CW-20260426-0009) ---
 	case "reminder_set":
 		return st.callSetReminder(ctx, args)
@@ -810,7 +765,7 @@ var groundedShowCardTypes = map[string]bool{
 // ctx is used by the trust resolver; passing context.Background() in tests
 // without TrustResolver/PanelLookup wired skips plugin-panel access (the
 // gate falls back to "untrusted" so the deny path is still exercised).
-func (st *SelfToolsTransport) callShowCard(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
+func (pt *PresentationTools) callShowCard(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
 	envType, _ := args["type"].(string)
 	if envType == "" {
 		return mcp.ErrorResult("type is required: pass an envelope type from " + strings.Join(envelope.PassiveRenderableTypes, ", ")), nil
@@ -856,7 +811,7 @@ func (st *SelfToolsTransport) callShowCard(ctx context.Context, args map[string]
 		}
 	}
 
-	renderTarget, renderTargetBlocked := st.resolveShowCardRenderTarget(ctx, envType, args)
+	renderTarget, renderTargetBlocked := pt.resolveShowCardRenderTarget(ctx, envType, args)
 
 	envJSON, _ := json.Marshal(buildShowEnvelope(envType, data, args, renderTarget, renderTargetBlocked))
 
@@ -885,7 +840,7 @@ func (st *SelfToolsTransport) callShowCard(ctx context.Context, args map[string]
 // distinguishable from a missing arg here only because we read the raw
 // args map, but in practice both flow through the same "no override"
 // branch — that's the intended behavior.
-func (st *SelfToolsTransport) resolveShowCardRenderTarget(ctx context.Context, envType string, args map[string]any) (string, string) {
+func (pt *PresentationTools) resolveShowCardRenderTarget(ctx context.Context, envType string, args map[string]any) (string, string) {
 	override, hasOverride := args["render_target"].(string)
 	if !hasOverride || override == "" {
 		return envelope.DefaultRenderTarget(envType), ""
@@ -893,7 +848,7 @@ func (st *SelfToolsTransport) resolveShowCardRenderTarget(ctx context.Context, e
 	if V1BuiltinPanelIDs[override] {
 		return override, ""
 	}
-	allowed, reason := st.resolvePanelAccess(ctx, override)
+	allowed, reason := pt.resolvePanelAccess(ctx, override)
 	if allowed {
 		return override, ""
 	}

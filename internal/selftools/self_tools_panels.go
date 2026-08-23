@@ -56,12 +56,12 @@ type PanelSignal struct {
 // reason?}. The FE applies the dismiss state machine — the backend NEVER
 // silently drops the open; it always emits the panel_signal event so the FE
 // owns the decision (the contract is "agent intent + FE policy").
-func (st *SelfToolsTransport) callPanelOpen(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
+func (pt *PresentationTools) callPanelOpen(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
 	panelID := strArg(args, "panel_id", "")
 	if panelID == "" {
 		return mcp.ErrorResult("panel_id is required"), nil
 	}
-	allowed, reason := st.resolvePanelAccess(ctx, panelID)
+	allowed, reason := pt.resolvePanelAccess(ctx, panelID)
 	if !allowed {
 		return panelResultJSON(map[string]any{
 			"opened":   false,
@@ -69,7 +69,7 @@ func (st *SelfToolsTransport) callPanelOpen(ctx context.Context, args map[string
 			"reason":   reason,
 		}), nil
 	}
-	st.emitPanelSignal(ctx, args, PanelSignal{
+	pt.emitPanelSignal(ctx, args, PanelSignal{
 		Action:  "open",
 		PanelID: panelID,
 		Source:  "agent",
@@ -86,12 +86,12 @@ func (st *SelfToolsTransport) callPanelOpen(ctx context.Context, args map[string
 // panel opens. The backend never resolves the preset — the contract is
 // "agent emits a hint, FE owns the policy". Unknown modes still emit; the
 // FE no-ops on misses by design (graceful forward-compat).
-func (st *SelfToolsTransport) callSignalMode(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
+func (pt *PresentationTools) callSignalMode(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
 	mode := strArg(args, "mode", "")
 	if mode == "" {
 		return mcp.ErrorResult("mode is required"), nil
 	}
-	st.emitPanelSignal(ctx, args, PanelSignal{
+	pt.emitPanelSignal(ctx, args, PanelSignal{
 		Action: "mode",
 		Mode:   mode,
 		Source: "agent",
@@ -104,12 +104,12 @@ func (st *SelfToolsTransport) callSignalMode(ctx context.Context, args map[strin
 
 // callPanelClose handles panel_close. Symmetric to callPanelOpen; the
 // FE state machine refuses to close panels the user has manually opened.
-func (st *SelfToolsTransport) callPanelClose(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
+func (pt *PresentationTools) callPanelClose(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
 	panelID := strArg(args, "panel_id", "")
 	if panelID == "" {
 		return mcp.ErrorResult("panel_id is required"), nil
 	}
-	allowed, reason := st.resolvePanelAccess(ctx, panelID)
+	allowed, reason := pt.resolvePanelAccess(ctx, panelID)
 	if !allowed {
 		return panelResultJSON(map[string]any{
 			"closed":   false,
@@ -117,7 +117,7 @@ func (st *SelfToolsTransport) callPanelClose(ctx context.Context, args map[strin
 			"reason":   reason,
 		}), nil
 	}
-	st.emitPanelSignal(ctx, args, PanelSignal{
+	pt.emitPanelSignal(ctx, args, PanelSignal{
 		Action:  "close",
 		PanelID: panelID,
 		Source:  "agent",
@@ -137,16 +137,16 @@ func (st *SelfToolsTransport) callPanelClose(ctx context.Context, args map[strin
 //
 // Unknown panel IDs return (false, "unknown_panel"). Plugin-known IDs from
 // untrusted callers return (false, "untrusted").
-func (st *SelfToolsTransport) resolvePanelAccess(ctx context.Context, panelID string) (bool, string) {
+func (pt *PresentationTools) resolvePanelAccess(ctx context.Context, panelID string) (bool, string) {
 	if V1BuiltinPanelIDs[panelID] {
 		return true, ""
 	}
-	if st.PanelLookup == nil {
+	if pt == nil || pt.PanelLookup == nil {
 		// No plugin host wired (e.g. tests) — only built-ins are addressable.
 		return false, "unknown_panel"
 	}
 	known := false
-	for _, id := range st.PanelLookup() {
+	for _, id := range pt.PanelLookup() {
 		if id == panelID {
 			known = true
 			break
@@ -156,7 +156,7 @@ func (st *SelfToolsTransport) resolvePanelAccess(ctx context.Context, panelID st
 		return false, "unknown_panel"
 	}
 	// Plugin-shipped panel — gate by H1 trust.
-	if st.TrustResolver == nil {
+	if pt.TrustResolver == nil {
 		// No resolver wired — fall back to "untrusted" so plugin panels are
 		// only addressable in fully-wired production builds. This matches the
 		// safe default elsewhere in the codebase.
@@ -166,7 +166,7 @@ func (st *SelfToolsTransport) resolvePanelAccess(ctx context.Context, panelID st
 	if apID == "" {
 		return false, "untrusted"
 	}
-	tier, err := st.TrustResolver.ResolveTrust(ctx, apID)
+	tier, err := pt.TrustResolver.ResolveTrust(ctx, apID)
 	if err != nil {
 		return false, "untrusted"
 	}
@@ -197,8 +197,8 @@ func (st *SelfToolsTransport) resolvePanelAccess(ctx context.Context, panelID st
 // subscribers. This is a missing cross-harness delivery seam, NOT a defect in
 // the panel tools — fixing it belongs with the CLI-launch GUI-observation
 // infrastructure, not here.
-func (st *SelfToolsTransport) emitPanelSignal(ctx context.Context, args map[string]any, sig PanelSignal) {
-	if st.PanelSignalSink == nil {
+func (pt *PresentationTools) emitPanelSignal(ctx context.Context, args map[string]any, sig PanelSignal) {
+	if pt == nil || pt.SignalSink == nil {
 		return
 	}
 	sessionID := strArg(args, "session_id", "")
@@ -212,7 +212,7 @@ func (st *SelfToolsTransport) emitPanelSignal(ctx context.Context, args map[stri
 	if err != nil {
 		return
 	}
-	st.PanelSignalSink.BroadcastPanelSignal(sessionID, panelSignalEventType, string(payload))
+	pt.SignalSink.BroadcastPanelSignal(sessionID, panelSignalEventType, string(payload))
 }
 
 // panelResultJSON builds a textResult containing the JSON-serialized payload.

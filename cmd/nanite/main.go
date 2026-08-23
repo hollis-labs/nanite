@@ -763,12 +763,9 @@ func cmdServeWithInitializers(
 	// self-tool is the agent-initiated downstream invocation).
 	selfTools.Executor = envelope_render.New()
 
-	// CW-20260426-0006 (J8 v1): wire panel-control surface.
-	//   - PanelSignalSink — push panel_signal SSE events on the originating session.
-	//   - PanelLookup — enumerate plugin-registered panels for the access check.
-	//   - TrustResolver — H1 gate for plugin-shipped panels (built-ins skip the gate).
-	selfTools.PanelSignalSink = container.Streams
-	selfTools.PanelLookup = func() []string {
+	// CW-20260426-0006 (J8 v1): wire the presentation owner with the stream
+	// sink, plugin-panel lookup, and H1 trust gate.
+	panelLookup := func() []string {
 		entries := pluginHost.GetPanels()
 		ids := make([]string, len(entries))
 		for i, e := range entries {
@@ -776,7 +773,7 @@ func cmdServeWithInitializers(
 		}
 		return ids
 	}
-	selfTools.TrustResolver = s
+	selfTools.PresentationTools = selftools.NewPresentationTools(container.Streams, panelLookup, s)
 	// J11 (CW-20260426-0009): wire the reminder engine so RegisterTurnCount
 	// calls from reminder_set hit the correct shared Engine instance.
 	selfTools.ReminderEngine = container.ReminderEngine

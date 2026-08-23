@@ -20,7 +20,7 @@ func TestCallShowCard_Sources_AcceptsTurnToolUseIDs(t *testing.T) {
 		"data":    cloneMap(validShowCardPayloads["report-card"]),
 		"sources": `[{"tool_use_id":"toolu_real","tool_name":"clockwork_task_list"}]`,
 	}
-	res, err := st.callShowCard(ctx, args)
+	res, err := st.PresentationTools.callShowCard(ctx, args)
 	if err != nil {
 		t.Fatalf("callShowCard returned transport error: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestCallShowCard_Sources_RejectsFabricatedToolUseID(t *testing.T) {
 		"data":    cloneMap(validShowCardPayloads["report-card"]),
 		"sources": `[{"tool_use_id":"demo_generation","tool_name":"internal_demo"}]`,
 	}
-	res, err := st.callShowCard(ctx, args)
+	res, err := st.PresentationTools.callShowCard(ctx, args)
 	if err != nil {
 		t.Fatalf("callShowCard returned transport error: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestCallShowCard_Sources_NoCtxStampPreservesExistingBehavior(t *testing.T) 
 		// the existing show_card tests rely on this fallback.
 		"sources": `[{"tool_use_id":"demo_generation","tool_name":"internal_demo"}]`,
 	}
-	res, err := st.callShowCard(context.Background(), args)
+	res, err := st.PresentationTools.callShowCard(context.Background(), args)
 	if err != nil {
 		t.Fatalf("callShowCard returned transport error: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestCallShowCard_Sources_AllowsToolNameOnlyEntries(t *testing.T) {
 		"data":    cloneMap(validShowCardPayloads["report-card"]),
 		"sources": `[{"tool_name":"some_tool","note":"name-only citation"}]`,
 	}
-	res, err := st.callShowCard(ctx, args)
+	res, err := st.PresentationTools.callShowCard(ctx, args)
 	if err != nil {
 		t.Fatalf("callShowCard returned transport error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestCallShowCard_Sources_RejectsMixedRealAndFakeIDs(t *testing.T) {
 			{"tool_use_id":"fake_one","tool_name":"y"}
 		]`,
 	}
-	res, err := st.callShowCard(ctx, args)
+	res, err := st.PresentationTools.callShowCard(ctx, args)
 	if err != nil {
 		t.Fatalf("callShowCard returned transport error: %v", err)
 	}

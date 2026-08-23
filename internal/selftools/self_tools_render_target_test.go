@@ -41,7 +41,7 @@ func TestEnvelope_DefaultRenderTarget_UnknownType(t *testing.T) {
 // path: agent omits render_target → schema default lands on the envelope.
 func TestCallShowCard_StampsSchemaDefaultRenderTarget(t *testing.T) {
 	st := newSelfTools(t)
-	res, err := st.callShowCard(context.Background(), map[string]any{
+	res, err := st.PresentationTools.callShowCard(context.Background(), map[string]any{
 		"type": "info-card",
 		"data": cloneMap(validShowCardPayloads["info-card"]),
 	})
@@ -59,7 +59,7 @@ func TestCallShowCard_StampsSchemaDefaultRenderTarget(t *testing.T) {
 // ignored.
 func TestCallShowCard_AgentOverridesSchemaDefault(t *testing.T) {
 	st := newSelfTools(t)
-	res, err := st.callShowCard(context.Background(), map[string]any{
+	res, err := st.PresentationTools.callShowCard(context.Background(), map[string]any{
 		"type":          "info-card",
 		"data":          cloneMap(validShowCardPayloads["info-card"]),
 		"render_target": "work",
@@ -85,7 +85,7 @@ func TestCallShowCard_AgentOverridesSchemaDefault(t *testing.T) {
 // behavior so the doc note stays honest.
 func TestCallShowCard_ForceInlineWithEmptyRenderTarget(t *testing.T) {
 	st := newSelfTools(t)
-	res, err := st.callShowCard(context.Background(), map[string]any{
+	res, err := st.PresentationTools.callShowCard(context.Background(), map[string]any{
 		"type":          "info-card",
 		"data":          cloneMap(validShowCardPayloads["info-card"]),
 		"render_target": "",
@@ -111,11 +111,11 @@ func TestCallShowCard_ForceInlineWithEmptyRenderTarget(t *testing.T) {
 // through.
 func TestCallShowCard_PluginPanel_TrustedPasses(t *testing.T) {
 	st := newSelfTools(t)
-	st.PanelLookup = func() []string { return []string{"plugin_panel_x"} }
-	st.TrustResolver = &fakeTrustResolver{tier: dispatch.TrustTrusted}
+	st.PresentationTools.PanelLookup = func() []string { return []string{"plugin_panel_x"} }
+	st.PresentationTools.TrustResolver = &fakeTrustResolver{tier: dispatch.TrustTrusted}
 	ctx := mcp.WithCallerProfile(context.Background(), "ap-1")
 
-	res, err := st.callShowCard(ctx, map[string]any{
+	res, err := st.PresentationTools.callShowCard(ctx, map[string]any{
 		"type":          "info-card",
 		"data":          cloneMap(validShowCardPayloads["info-card"]),
 		"render_target": "plugin_panel_x",
@@ -137,11 +137,11 @@ func TestCallShowCard_PluginPanel_TrustedPasses(t *testing.T) {
 // stamped so the FE can surface the blocked intent.
 func TestCallShowCard_PluginPanel_UntrustedFallsBack(t *testing.T) {
 	st := newSelfTools(t)
-	st.PanelLookup = func() []string { return []string{"plugin_panel_x"} }
-	st.TrustResolver = &fakeTrustResolver{tier: dispatch.TrustNormal}
+	st.PresentationTools.PanelLookup = func() []string { return []string{"plugin_panel_x"} }
+	st.PresentationTools.TrustResolver = &fakeTrustResolver{tier: dispatch.TrustNormal}
 	ctx := mcp.WithCallerProfile(context.Background(), "ap-1")
 
-	res, err := st.callShowCard(ctx, map[string]any{
+	res, err := st.PresentationTools.callShowCard(ctx, map[string]any{
 		"type":          "info-card",
 		"data":          cloneMap(validShowCardPayloads["info-card"]),
 		"render_target": "plugin_panel_x",
@@ -162,10 +162,10 @@ func TestCallShowCard_PluginPanel_UntrustedFallsBack(t *testing.T) {
 // path. PanelLookup returns nothing; the trust resolver isn't consulted.
 func TestCallShowCard_UnknownPanel_FallsBack(t *testing.T) {
 	st := newSelfTools(t)
-	st.PanelLookup = func() []string { return nil }
-	st.TrustResolver = &fakeTrustResolver{tier: dispatch.TrustTrusted}
+	st.PresentationTools.PanelLookup = func() []string { return nil }
+	st.PresentationTools.TrustResolver = &fakeTrustResolver{tier: dispatch.TrustTrusted}
 
-	res, err := st.callShowCard(context.Background(), map[string]any{
+	res, err := st.PresentationTools.callShowCard(context.Background(), map[string]any{
 		"type":          "info-card",
 		"data":          cloneMap(validShowCardPayloads["info-card"]),
 		"render_target": "ghost_panel",
@@ -187,11 +187,11 @@ func TestCallShowCard_UnknownPanel_FallsBack(t *testing.T) {
 // design (safe default). Same observable shape as the untrusted-tier case.
 func TestCallShowCard_TrustResolverError_FallsBackUntrusted(t *testing.T) {
 	st := newSelfTools(t)
-	st.PanelLookup = func() []string { return []string{"plugin_panel_x"} }
-	st.TrustResolver = &fakeTrustResolver{err: errors.New("boom")}
+	st.PresentationTools.PanelLookup = func() []string { return []string{"plugin_panel_x"} }
+	st.PresentationTools.TrustResolver = &fakeTrustResolver{err: errors.New("boom")}
 	ctx := mcp.WithCallerProfile(context.Background(), "ap-1")
 
-	res, err := st.callShowCard(ctx, map[string]any{
+	res, err := st.PresentationTools.callShowCard(ctx, map[string]any{
 		"type":          "info-card",
 		"data":          cloneMap(validShowCardPayloads["info-card"]),
 		"render_target": "plugin_panel_x",

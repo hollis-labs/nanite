@@ -40,28 +40,23 @@ func (f *fakeTrustResolver) ResolveTrust(_ context.Context, _ string) (dispatch.
 	return f.tier, nil
 }
 
-// newPanelTransport builds a minimally-wired SelfToolsTransport for panel tests.
-// A nil sink leaves the field unset (interface nil) so callers can verify the
-// nil-safe path; passing a non-nil *fakePanelSink wires it as the sink.
-func newPanelTransport(sink *fakePanelSink, lookup PanelLookup, resolver PanelTrustResolver) *SelfToolsTransport {
-	st := &SelfToolsTransport{
-		PanelLookup:   lookup,
-		TrustResolver: resolver,
+// newPresentationTools builds the owner directly so these tests exercise the
+// extracted presentation policy rather than the transport dispatcher.
+func newPresentationTools(sink *fakePanelSink, lookup PanelLookup, resolver PanelTrustResolver) *PresentationTools {
+	if sink == nil {
+		return NewPresentationTools(nil, lookup, resolver)
 	}
-	if sink != nil {
-		st.PanelSignalSink = sink
-	}
-	return st
+	return NewPresentationTools(sink, lookup, resolver)
 }
 
 func TestPanelOpen_BuiltinPanel_BroadcastsAgentSignal(t *testing.T) {
 	for _, panelID := range []string{"bottom_chat_drawer", "work", "workflows"} {
 		t.Run(panelID, func(t *testing.T) {
 			sink := &fakePanelSink{}
-			st := newPanelTransport(sink, nil, nil)
+			pt := newPresentationTools(sink, nil, nil)
 			ctx := mcp.WithSessionID(context.Background(), "sess-1")
 
-			res, err := st.callPanelOpen(ctx, map[string]any{"panel_id": panelID})
+			res, err := pt.callPanelOpen(ctx, map[string]any{"panel_id": panelID})
 			if err != nil {
 				t.Fatalf("callPanelOpen returned error: %v", err)
 			}
@@ -96,8 +91,8 @@ func TestPanelOpen_BuiltinPanel_BroadcastsAgentSignal(t *testing.T) {
 
 func TestPanelOpen_UnknownPanel_NoBroadcastAndReason(t *testing.T) {
 	sink := &fakePanelSink{}
-	st := newPanelTransport(sink, nil, nil)
-	res, err := st.callPanelOpen(context.Background(), map[string]any{"panel_id": "ghost"})
+	pt := newPresentationTools(sink, nil, nil)
+	res, err := pt.callPanelOpen(context.Background(), map[string]any{"panel_id": "ghost"})
 	if err != nil {
 		t.Fatalf("callPanelOpen returned error: %v", err)
 	}
@@ -153,12 +148,12 @@ func TestPanelOpen_PluginPanel_RequiresTrustedTier(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &fakePanelSink{}
 			lookup := func() []string { return []string{"plugin-doc-pad"} }
-			st := newPanelTransport(sink, lookup, tc.resolver)
+			pt := newPresentationTools(sink, lookup, tc.resolver)
 			ctx := mcp.WithSessionID(context.Background(), "sess-1")
 			if tc.ctxProfile {
 				ctx = mcp.WithCallerProfile(ctx, "ap-1")
 			}
-			res, err := st.callPanelOpen(ctx, map[string]any{"panel_id": "plugin-doc-pad"})
+			res, err := pt.callPanelOpen(ctx, map[string]any{"panel_id": "plugin-doc-pad"})
 			if err != nil {
 				t.Fatalf("callPanelOpen returned error: %v", err)
 			}
@@ -184,10 +179,10 @@ func TestPanelOpen_PluginPanel_RequiresTrustedTier(t *testing.T) {
 
 func TestPanelClose_BuiltinPanel_BroadcastsCloseSignal(t *testing.T) {
 	sink := &fakePanelSink{}
-	st := newPanelTransport(sink, nil, nil)
+	pt := newPresentationTools(sink, nil, nil)
 	ctx := mcp.WithSessionID(context.Background(), "sess-1")
 
-	res, err := st.callPanelClose(ctx, map[string]any{"panel_id": "work"})
+	res, err := pt.callPanelClose(ctx, map[string]any{"panel_id": "work"})
 	if err != nil {
 		t.Fatalf("callPanelClose returned error: %v", err)
 	}
@@ -209,8 +204,8 @@ func TestPanelClose_BuiltinPanel_BroadcastsCloseSignal(t *testing.T) {
 
 func TestPanelOpen_MissingPanelID_ReturnsError(t *testing.T) {
 	sink := &fakePanelSink{}
-	st := newPanelTransport(sink, nil, nil)
-	res, err := st.callPanelOpen(context.Background(), map[string]any{})
+	pt := newPresentationTools(sink, nil, nil)
+	res, err := pt.callPanelOpen(context.Background(), map[string]any{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -221,10 +216,10 @@ func TestPanelOpen_MissingPanelID_ReturnsError(t *testing.T) {
 
 func TestSignalMode_BroadcastsModeSignal(t *testing.T) {
 	sink := &fakePanelSink{}
-	st := newPanelTransport(sink, nil, nil)
+	pt := newPresentationTools(sink, nil, nil)
 	ctx := mcp.WithSessionID(context.Background(), "sess-1")
 
-	res, err := st.callSignalMode(ctx, map[string]any{"mode": "planning"})
+	res, err := pt.callSignalMode(ctx, map[string]any{"mode": "planning"})
 	if err != nil {
 		t.Fatalf("callSignalMode returned error: %v", err)
 	}
@@ -249,9 +244,9 @@ func TestSignalMode_UnknownModeStillBroadcastsByDesign(t *testing.T) {
 	// Unknown modes must still emit so a forward-compatible FE can pick them up
 	// without a backend change.
 	sink := &fakePanelSink{}
-	st := newPanelTransport(sink, nil, nil)
+	pt := newPresentationTools(sink, nil, nil)
 	ctx := mcp.WithSessionID(context.Background(), "sess-1")
-	if _, err := st.callSignalMode(ctx, map[string]any{"mode": "future-mode-not-in-v1"}); err != nil {
+	if _, err := pt.callSignalMode(ctx, map[string]any{"mode": "future-mode-not-in-v1"}); err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if len(sink.calls) != 1 {
@@ -263,14 +258,59 @@ func TestPanelOpen_NoSink_StillReturnsConfirmation(t *testing.T) {
 	// When PanelSignalSink is unwired (e.g. headless test) the tool still
 	// returns {opened:true} so a transcript replay can reconstruct the intent
 	// from the tool call alone.
-	st := newPanelTransport(nil, nil, nil)
+	pt := newPresentationTools(nil, nil, nil)
 	ctx := mcp.WithSessionID(context.Background(), "sess-1")
-	res, err := st.callPanelOpen(ctx, map[string]any{"panel_id": "work"})
+	res, err := pt.callPanelOpen(ctx, map[string]any{"panel_id": "work"})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if !strings.Contains(readToolText(t, res), `"opened":true`) {
 		t.Fatalf("expected opened=true even with nil sink")
+	}
+}
+
+func TestSelfToolsTransport_PresentationRoutesToOwner(t *testing.T) {
+	s := newTestStore(t)
+	tests := []struct {
+		name     string
+		args     map[string]any
+		wantText string
+		wantSink bool
+	}{
+		{
+			name: "card_show",
+			args: map[string]any{
+				"type": "info-card",
+				"data": cloneMap(validShowCardPayloads["info-card"]),
+			},
+			wantText: "<!--ENVELOPE_DATA:",
+		},
+		{name: "panel_open", args: map[string]any{"panel_id": "work"}, wantText: `"opened":true`, wantSink: true},
+		{name: "panel_close", args: map[string]any{"panel_id": "work"}, wantText: `"closed":true`, wantSink: true},
+		{name: "signal_mode", args: map[string]any{"mode": "planning"}, wantText: `"signaled":true`, wantSink: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &fakePanelSink{}
+			st := NewSelfToolsTransport(s)
+			st.PresentationTools = NewPresentationTools(sink, nil, nil)
+			ctx := mcp.WithSessionID(context.Background(), "sess-route")
+
+			res, err := st.CallTool(ctx, tc.name, tc.args)
+			if err != nil {
+				t.Fatalf("CallTool(%q) returned error: %v", tc.name, err)
+			}
+			if res.IsError {
+				t.Fatalf("CallTool(%q) returned error result: %s", tc.name, readToolText(t, res))
+			}
+			if body := readToolText(t, res); !strings.Contains(body, tc.wantText) {
+				t.Fatalf("CallTool(%q) body %q does not contain %q", tc.name, body, tc.wantText)
+			}
+			if got := len(sink.calls); (got == 1) != tc.wantSink {
+				t.Fatalf("CallTool(%q) sink calls = %d, wantSink=%t", tc.name, got, tc.wantSink)
+			}
+		})
 	}
 }
 

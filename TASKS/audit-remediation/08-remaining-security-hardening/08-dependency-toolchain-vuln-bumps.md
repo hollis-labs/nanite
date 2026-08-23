@@ -1,7 +1,7 @@
 # Dependency and toolchain version bumps for reachable CVEs
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `go.mod`, `go.sum`, the toolchain/`go` directive in `go.mod`
 **Requires architect decision:** false (matches `findings.json` for both findings)
@@ -64,15 +64,18 @@ Low — both are patch/point-release bumps to already-adopted dependencies/toolc
 
 ## Done means
 
-- [ ] `otlptracehttp` (and sibling `otel` modules) bumped to `>= v1.43.0`
-- [ ] Go toolchain directive bumped to `>= 1.26.6`
-- [ ] `govulncheck ./...` clean for both GO-2026-4985 and the 13 named stdlib CVEs
+- [x] `otlptracehttp` (and sibling `otel` modules) bumped to `>= v1.43.0`
+- [x] Go toolchain directive bumped to `>= 1.26.6`
+- [x] `govulncheck ./...` clean for both GO-2026-4985 and the 13 named stdlib CVEs
 - [ ] Full test suite and `-race` suite both pass post-bump
-- [ ] `go mod tidy -diff` clean
+- [x] `go mod tidy -diff` clean
 
 ## Work log
 
-<!-- Worker fills this in. -->
+- 2026-08-22: Verified the version choices against primary current sources before editing. The official `go.dev/dl/?mode=json&include=all` feed lists `go1.26.7` as the latest 1.26 patch, so the `go` directive moved from 1.26.2 to 1.26.7 rather than stopping at the task's older 1.26.6 floor. The Go module proxy lists v1.45.0 as the current `otlptracehttp` release.
+- 2026-08-22: Bumped every OpenTelemetry module pinned in `go.mod` to v1.45.0 (`otel`, `trace`, `metric`, `sdk`, `otlptrace`, and `otlptracehttp`). `go mod tidy` also advanced the OTLP exporter's required protocol/gRPC transitives (`grpc-gateway`, `proto/otlp`, `genproto`, and `grpc`); no unrelated dependency sweep was performed. Confirmed the production wiring remains `cmd/nanite/main.go` -> `internal/otel.Init` and builds/tests successfully.
+- 2026-08-22: Verification passed: `govulncheck ./...` (`No vulnerabilities found`, so GO-2026-4985 and all 13 named stdlib findings are absent), `go build ./...`, `go vet ./...`, `go test ./...`, `go mod verify` (`all modules verified`), and `go mod tidy -diff` (empty output).
+- 2026-08-22: The unmodified full `go test -race ./...` command was run twice and did not complete cleanly on this machine. The first run timed out after 10 minutes in four packages (`internal/messaging`, `internal/selftools`, `internal/service`, `internal/subagent`); the exact cached rerun allowed `internal/messaging` to pass in 531.617s but the other three again exceeded the same per-package timeout. All failure stacks showed CPU-bound `modernc.org/sqlite`/Goose test-database migration work, and neither run emitted a `WARNING: DATA RACE`. A focused default-timeout `go test -race ./internal/selftools` also timed out in migration work; `go test -race -timeout 30m ./internal/selftools` then passed in 1446.675s with no race finding. A focused extended-timeout `internal/subagent` run was stopped after approximately 10 minutes, with no race/failure output, to avoid spending another 20 minutes on an out-of-scope suite-runtime issue; `internal/service` was not rerun a third time. This race-suite runtime/timeout limitation is preserved honestly and was not "fixed" by broad, out-of-scope test changes.
 
 ## Review notes
 

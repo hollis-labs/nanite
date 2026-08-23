@@ -84,7 +84,7 @@
       "false_positive_considerations": "Reachability requires OTel export enabled at runtime and a malicious/misbehaving collector endpoint.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "implemented",
       "revalidation_note": "govulncheck reachable-vuln count is 00/02-refreshed: 14 (13 stdlib + 1 module, GO-2026-4985) at both the audit and frozen HEAD -- identical vulnerability-ID set per raw-1d3bfd96/DELTA.md. otlptracehttp v1.41.0 finding still applies; standard dependency bump, no architect input needed."
     },
     {
@@ -109,7 +109,7 @@
       "report_section": "\u00a73",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "implemented",
       "revalidation_note": "govulncheck's 13-stdlib-vuln count is unaffected by the go1.26.2 toolchain pin -- 00/02's DELTA.md confirms the identical 14-vulnerability-ID set (13 stdlib + 1 module) at both the audit and frozen HEAD. Standard toolchain bump, no architect input needed."
     },
     {

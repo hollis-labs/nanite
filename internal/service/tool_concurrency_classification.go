@@ -33,12 +33,7 @@ package service
 //	        is safe, `rm -rf` is not) and known_tools.concurrency_safe is a
 //	        single static bool per tool name with no way to carry that
 //	        per-call nuance. The conservative value (false) is deliberate
-//	        in that case, not a placeholder pending a smarter mechanism --
-//	        internal/tool/adapt.go's WithConcurrencySafeFunc *can* express
-//	        per-input safety, but that mechanism is not wired into the live
-//	        runtime (WrapExistingTools/WrapProviderDef have no production
-//	        caller as of this task; see the Work Log), so it is not treated
-//	        as a competing source of truth here.
+//	        in that case, not a placeholder pending a smarter mechanism.
 //
 // A tool absent from this table is left NULL by the backfill ("not yet
 // classified" -- e.g. a brand-new MCP server tool discovered after this

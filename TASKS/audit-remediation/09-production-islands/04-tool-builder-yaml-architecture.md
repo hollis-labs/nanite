@@ -1,18 +1,20 @@
 # Decide the fate of `internal/tool`'s canonical Tool-interface/builder architecture
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch — see this folder's `README.md` for a
 non-blocking cross-reference note relating this task to `05-reasoning-augmented-tool-selection.md`
 and `06-curated-tool-knowledge-matcher.md`.
 **Touches:** `internal/tool/tool.go`, `internal/tool/builder.go`,
 `internal/tool/register.go`, `internal/tool/adapt.go`,
-`internal/tool/yaml_loader.go` (all dead); `internal/tool/result_cache.go`
+`internal/tool/yaml_loader.go` (all dead); `internal/tool/cache.go`
 (the package's one live export — do not touch, see Non-goals);
+`internal/tool/doc.go` (fresh package documentation);
+`internal/tool/stash/categories.go` (detach live categorizer from retired types);
 `internal/mcp/manager.go` (or wherever `mcp.Manager`'s live dispatch actually
 lives — confirm exact file per "What to do" before assuming) if "wire" is
-chosen; `internal/service/tool_concurrency_classification.go` (comment
-reference only, read not modify).
+chosen; `internal/service/tool_concurrency_classification.go` (stale comment
+reference only).
 
 ```yaml
 requires_architect_decision: true
@@ -137,7 +139,7 @@ one of them is connected to anything.
   independently by the concurrency-classification task's own comment above.
 - `internal/tool/yaml_loader.go` (309 lines) — YAML-defined tool loading.
   Zero production callers.
-- `internal/tool/result_cache.go` — **not** part of this finding; `ResultCache`
+- `internal/tool/cache.go` — **not** part of this finding; `ResultCache`
   is the package's one live, correctly-used export (backing the S4a
   tool-result-cache/pointer mechanism described in this project's own
   `CLAUDE.md`). Do not conflate its health with the rest of the package's
@@ -160,7 +162,7 @@ future engineer more than an empty package would.
 
 - `internal/tool/tool.go`, `builder.go`, `register.go`, `adapt.go`,
   `yaml_loader.go` — the dead architecture in full.
-- `internal/tool/result_cache.go` — explicitly out of scope for
+- `internal/tool/cache.go` — explicitly out of scope for
   removal/rework; read-only reference point establishing what stays.
 - `internal/mcp` (`Manager`, `ExecuteTool`, the per-transport dispatch
   switch) — the live counterpart architecture; needs to be read and
@@ -271,7 +273,7 @@ comment for `adapt.go` specifically.
 
 ## Non-goals
 
-- **`internal/tool/result_cache.go` and `ResultCache` are not part of this
+- **`internal/tool/cache.go` and `ResultCache` are not part of this
   finding and must not be touched, removed, or refactored as a side effect
   of whichever option is chosen** — they're the package's one live,
   correctly-used export, backing the S4a tool-result-cache mechanism
@@ -323,11 +325,11 @@ comment for `adapt.go` specifically.
 
 ## Done means
 
-- [ ] Current-source reachability re-verified (deadcode + grep across all
+- [x] Current-source reachability re-verified (deadcode + grep across all
       five files) and confirmed still open, or disposition corrected if it's
       changed since the audit.
-- [ ] Architect decision recorded: wire, defer, or retire.
-- [ ] `tool.go`'s package doc no longer claims the builder pattern is "the
+- [x] Architect decision recorded: wire, defer, or retire.
+- [x] `tool.go`'s package doc no longer claims the builder pattern is "the
       primary way to construct tools in Go code" unless "wire" has made that
       claim true — corrected regardless of which option is chosen.
 - [ ] If **wire**: real integration with `mcp.Manager`'s live dispatch
@@ -337,16 +339,48 @@ comment for `adapt.go` specifically.
       authoring is retained.
 - [ ] If **defer**: trigger/owner recorded; confirmed no boot/runtime cost
       is paid; package doc corrected as above.
-- [ ] If **retire**: `tool.go`, `builder.go`, `register.go`, `adapt.go`,
-      `yaml_loader.go` removed; `result_cache.go` and its dependents
+- [x] If **retire**: `tool.go`, `builder.go`, `register.go`, `adapt.go`,
+      `yaml_loader.go` removed; `cache.go` and its dependents
       confirmed untouched and passing; `tool_concurrency_classification.go`'s
       comment updated to stop referencing removed files.
-- [ ] `go build ./...` and `go test ./...` pass after whichever direction is
+- [x] `go build ./...` and `go test ./...` pass after whichever direction is
       implemented.
 
 ## Work log
 
-<Worker fills this in.>
+- 2026-08-23 — Re-verified AD-09 against current source before editing.
+  `deadcode -test ./internal/tool/...` did not reproduce the audit's exact
+  root-package symbol list because the island's own tests exercised those
+  exports; it reported only unrelated `intent`/`stash` symbols. Direct caller
+  searches across `internal/` and `cmd/` nevertheless confirmed zero
+  production calls to `NewTool`, `WrapExistingTools`, `WrapProviderDef`,
+  `WithConcurrencySafeFunc`, or the YAML loader, and `tool.go` still carried
+  the false "primary way to construct tools" package claim. The AD-09 retire
+  disposition therefore remained current.
+- The task's outside-package inventory was incomplete: live
+  `internal/tool/stash/categories.go` imported the retiring root `Tool`
+  interface and `Category*` constants, and `stash.BuiltinCategorizer` is
+  constructed at `internal/service/container.go`'s production composition
+  root. Preserved the live stash package and behavior, removed only its dead
+  `registryView`/`RegistryCategorizer` attachment to the retired architecture,
+  and moved the category values it needs to private stash-local constants.
+  Added `categories_test.go` to cover builtin, MCP-prefixed, `nanite_`-heuristic,
+  and unknown-tool categorization. This is the only scope correction from the
+  planned five-file retirement.
+- Implemented AD-09 RETIRE: deleted `adapt.go`, `builder.go`, `register.go`,
+  `tool.go`, `yaml_loader.go` and their three test files. Left `cache.go` and
+  `cache_test.go` unchanged. Added a fresh `doc.go` package comment describing
+  oversized-result caching and pointer retrieval; none of the retired builder
+  architecture's package-doc language was carried forward.
+- Removed the stale `adapt.go`/`WithConcurrencySafeFunc` discussion from
+  `internal/service/tool_concurrency_classification.go` while retaining its
+  conservative static-classification rationale.
+- Verification passed: `go test ./internal/tool/...`; focused stash/service
+  categorizer tests; `go build ./cmd/nanite/`; `go build ./...`; `go vet ./...`;
+  `go test ./...`; and `deadcode -test ./...`. The final deadcode output
+  contains no symbol from the retired root-tool architecture; its remaining
+  findings are pre-existing, out-of-scope items (including
+  `stash.ComposeCategorizers`). No escalation.
 
 ## Review notes
 

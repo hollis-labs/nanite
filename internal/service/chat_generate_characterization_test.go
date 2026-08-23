@@ -511,6 +511,25 @@ func TestGenerateResponseCharacterization_ProviderErrorBeforeStreamKeepsToolsDet
 	}
 }
 
+func TestGenerateResponseCharacterization_RefusedOverflowRecoveryTerminates(t *testing.T) {
+	f := newCharacterizationFixture(t, []characterizationProviderStep{{err: ctxpkg.ErrContextOverflow}})
+	events := f.run(t, "assistant-overflow-refused")
+
+	if f.provider.callCount() != 1 {
+		t.Fatalf("provider calls = %d, want no retry after refused recovery", f.provider.callCount())
+	}
+	errEvent := findEvent(events, "error")
+	if errEvent == nil || errEvent.StructuredError == nil {
+		t.Fatalf("events = %v, want structured recovery error", eventTypes(events))
+	}
+	if got := errEvent.StructuredError.Details["recovery"]; got != "refused" {
+		t.Fatalf("recovery detail = %#v, want refused", got)
+	}
+	if findEvent(events, "stream_end") != nil {
+		t.Fatalf("refused recovery unexpectedly emitted stream_end: %v", eventTypes(events))
+	}
+}
+
 func TestGenerateResponseCharacterization_ContextOverflowCompactionTrigger(t *testing.T) {
 	f := newCharacterizationFixture(t, nil)
 	if err := f.st.UpdateUserSettings(context.Background(), &store.UserSettings{

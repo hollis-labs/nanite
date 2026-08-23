@@ -490,3 +490,9 @@ inbox + 3 inspector + 7 enrichment/utility + 1 handoff + 1 loop-termination =
   terminate, and tool-turn outcomes while the action owns provider events,
   inactivity, phase/usage aggregation, and mid-stream recovery. Current
   coordinator complexity is cognitive 143 / cyclop 61 / gocyclo 60.
+- Phase 3 (`requestProviderIteration`) extracted on 2026-08-23 as the sixth and
+  final dependency-ordered move. Request hard stops, budgets, hooks, telemetry,
+  provider start, and pre-stream recovery now return typed outcomes and an
+  idempotently owned `providerAttempt`; the coordinator alone performs retry
+  decrements and loop/terminal routing. Final coordinator complexity is
+  cognitive 19 / cyclop 18 / gocyclo 18 (baseline 458 / 228 / 225).

@@ -310,6 +310,22 @@ read-only and must not edit or claim operator approval.
   service passed in 90.085s; service/all build and vet and diff check passed.
   Audit lint exited 1 on historical diagnostics; coordinator complexity
   decreased to cognitive 143 / cyclop 61 / gocyclo 60 / maintainability 1.
-  `consumeProviderIteration` is cognitive 108 / cyclop 51 / gocyclo 50 /
+  `consumeProviderIteration` is cognitive 109 / cyclop 52 / gocyclo 51 /
   maintainability 9, a stream-normalization action rather than a relocation of
   the original coordinator.
+- Phase 3 complete (sixth extraction): extracted `requestProviderIteration`
+  with hard stops, cancellation/budget termination, plugin hooks, request
+  telemetry, API/CLI invocation, and all pre-stream recovery outcomes. The
+  coordinator visibly owns request and consume retry decrements plus every
+  continue/break/terminal route. Removed the per-iteration request defer;
+  `providerAttempt` now independently guards cancel and span-end exactly once,
+  closing in Request on plugin cancellation/start errors/retries and in Consume
+  after successful handoff. Added refused-overflow production-door coverage and
+  a direct idempotency test that calls both cleanup paths repeatedly and observes
+  one cancel and one span end. Focused behavior passed in 4.157s; focused race
+  passed in 126.108s; full non-race service passed in 87.695s; service/all build
+  and vet and diff check passed. Audit lint exited 1 on historical diagnostics;
+  final coordinator complexity is cognitive 19 / cyclop 18 / gocyclo 18 /
+  maintainability 27. `requestProviderIteration` is cognitive 87 / cyclop 47 /
+  gocyclo 46 / maintainability 5; the six actions are distinct bounded phase
+  owners and the original 458 / 228 / 225 coordinator monolith is gone.

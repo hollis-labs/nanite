@@ -14,6 +14,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	feotel "github.com/hollis-labs/go-otel"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // CW-20260517-0036 — provider-stream inactivity timeout acceptance.
@@ -195,6 +196,32 @@ func TestConsumeProviderIteration_InactivityTerminatesAndClosesAttempt(t *testin
 	}
 	if !sawError {
 		t.Fatal("inactivity termination emitted no error event")
+	}
+}
+
+type countingAttemptSpan struct {
+	trace.Span
+	endCalls int
+}
+
+func (s *countingAttemptSpan) End(...trace.SpanEndOption) { s.endCalls++ }
+
+func TestProviderAttempt_CloseIsIdempotent(t *testing.T) {
+	cancelCalls := 0
+	_, baseSpan := feotel.StartSpan(context.Background(), "test.provider-attempt-close")
+	span := &countingAttemptSpan{Span: baseSpan}
+	attempt := &providerAttempt{cancel: func() { cancelCalls++ }, span: span}
+
+	attempt.cancelStream()
+	attempt.cancelStream()
+	attempt.close()
+	attempt.close()
+
+	if cancelCalls != 1 {
+		t.Fatalf("cancel calls = %d, want exactly 1", cancelCalls)
+	}
+	if span.endCalls != 1 {
+		t.Fatalf("span end calls = %d, want exactly 1", span.endCalls)
 	}
 }
 

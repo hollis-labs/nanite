@@ -1,12 +1,14 @@
 # Decide the fate of team semantic routing (`TeamRoutingService`) — a self-flagged, unresolved risk
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch.
 **Touches:** `internal/service/team_routing.go`,
-`internal/api/team_runs.go` (`handleLaunchTeam`),
-`TASKS/teams/HANDOFF.md` (read-only reference — this task does not modify
-prior batches' completed task files, see Non-goals).
+`internal/service/container.go`, `cmd/nanite/main.go`,
+`internal/api/team_runs.go` (`handleLaunchTeam`) and its test,
+`TASKS/teams/HANDOFF.md`, this task file, and the mutable audit-remediation
+`findings.json`. The composition-root additions were discovered by the required
+current-source re-verification; see Work log.
 
 ```yaml
 requires_architect_decision: true
@@ -314,30 +316,98 @@ of `InstallTeamRunRouting` is exactly this task's wire/defer/retire question.
 
 ## Done means
 
-- [ ] Current-source reachability re-verified (grep + direct read of
+- [x] Current-source reachability re-verified (grep + direct read of
       `handleLaunchTeam`) and confirmed still open, or disposition corrected
       if it's changed since the audit.
-- [ ] Architect decision recorded: wire, defer, or retire.
-- [ ] `TASKS/teams/HANDOFF.md` updated (or a dated addendum added) to record
+- [x] Architect decision recorded: wire, defer, or retire.
+- [x] `TASKS/teams/HANDOFF.md` updated (or a dated addendum added) to record
       the resolved disposition, closing the open question its own line 30
       raises.
-- [ ] If **wire**: `handleLaunchTeam` calls `InstallTeamRunRouting` after a
+- [x] If **wire**: `handleLaunchTeam` calls `InstallTeamRunRouting` after a
       successful `LaunchTeamRun`; error-handling policy for a routing-install
       failure explicitly decided and implemented; new HTTP-level regression
       test passes; the already-documented lazy-slot-resolution-timing
       limitation confirmed still accurately described once the path is
       actually live.
-- [ ] If **defer**: decision and trigger/owner recorded in
-      `TASKS/teams/HANDOFF.md`; confirmed no boot/runtime cost is paid.
-- [ ] If **retire**: `TeamRoutingService`'s production surface and tests
-      removed; `docs/engineering/architecture/15-teams.md` updated to match;
-      `TASKS/teams/HANDOFF.md` updated to record the retirement and why.
-- [ ] `go build ./...` and `go test ./...` pass after whichever direction is
+- [x] **Defer/retire criteria are not applicable; AD-08 selected wire.**
+- [x] `go build ./...` and `go test ./...` pass after whichever direction is
       implemented.
 
 ## Work log
 
-<Worker fills this in.>
+**2026-08-23 — implementation.** Re-verified the finding against
+current source before editing: `handleLaunchTeam` still called only
+`LaunchTeamRun`; the only non-test `InstallTeamRunRouting(` occurrence under
+`internal/` was its definition; `TASKS/teams/HANDOFF.md` still carried the
+unresolved wiring warning. A second construction-level grep corrected one
+statement in this task's Context: `NewTeamRoutingService` also had zero
+non-test callers, so the type was not "constructed and live elsewhere."
+Completing AD-08's four-step reachability chain therefore requires both the
+handler invocation and production construction alongside `TeamRunLauncher`.
+
+The current code also corrected another Context premise without changing the
+locked action. Installed semantic/coordinator `dispatch_to_agent` reflexes run
+through `chat_reflex_dispatch`/`task_execute`; they do not call `SendToSlot`.
+`SendToSlot` and its `ResolveLazySlot` path belong to the separate explicit
+Team-Slot messaging surface, which still has no production self-tool/UI caller.
+Per the execution process's instruction-vs-rationale rule, this task implements
+AD-08 exactly as decided — make `InstallTeamRunRouting` live from the HTTP
+launch path and prove its `agent_reflexes` rows — without inventing an
+out-of-scope explicit-addressing entry point.
+
+Baseline before implementation: `go build ./cmd/nanite/`, `go vet ./...`, and
+`go test ./...` all passed. A new HTTP-path assertion was then added to the
+existing end-to-end launch test; before the handler call was added it failed
+red with zero run-scoped routing rows, confirming the test detects this exact
+production-island regression rather than merely re-testing the service in
+isolation.
+
+**Implementation.** Added `Container.TeamRouting` and constructed the service
+in `cmd/nanite/main.go` immediately after `TeamRunLauncher`, using the live
+Store, Messaging service, and launcher. `handleLaunchTeam` now preflights both
+dependencies before creating a run, then invokes `InstallTeamRunRouting` only
+after `LaunchTeamRun` returns the real run id and persisted member rows. The
+existing HTTP end-to-end test now authors one semantic rule plus coordinator
+fallback and observes four real run-scoped `dispatch_to_agent`
+`agent_reflexes` rows through `ListAgentReflexesForWorkflowRun` (two rules for
+each of two distinct eagerly-resolved asking agent identities).
+
+**Routing-install failure policy (operator-approved 2026-08-23): fail closed
+without pretending rollback.** `LaunchTeamRun` performs multiple committed
+writes and no `DeleteWorkflowRun`/transactional rollback path exists.
+`InstallTeamRunRouting` likewise inserts rows sequentially and returns the ids
+inserted before an error. Therefore a routing-install failure returns HTTP 500
+as a structured `teamLaunchResponse` containing the already-persisted
+`workflow_run_id`, status, and explicit routing error stating that the run
+remains persisted. The handler attempts to delete every returned partial
+reflex id first, using `context.WithoutCancel` so request cancellation does not
+prevent the cleanup attempt. It reports any cleanup failure rather than
+masking it. The result is neither a best-effort 200 for an incompletely routed
+TeamRun nor a generic error response that hides a live run and encourages a
+duplicate retry.
+
+Regression coverage locks both halves of that policy:
+
+- `TestTeamRunLaunchAPI_ServiceUnavailableWhenRoutingNotWired` proves missing
+  composition-root wiring returns 503 before the workflow-run count changes.
+- `TestTeamRunLaunchAPI_RoutingInstallFailureReturnsRunAndCleansPartialRows`
+  uses a valid-first/invalid-second routing definition: the first rule inserts
+  two rows, the unknown target Team Slot fails the second rule, the response
+  returns the persistent run and member state, and partial cleanup leaves zero
+  run-scoped reflex rows.
+
+`TASKS/teams/HANDOFF.md` now closes its original open wiring question, records
+the failure policy, preserves the lazy-Team-Slot-after-install limitation, and
+states the `SendToSlot`/`ResolveLazySlot` source correction explicitly.
+
+**Verification after implementation.** Focused HTTP regression set passed;
+`go test ./internal/api/... ./internal/service/... ./internal/store/...
+./internal/agentworkflow/... -count=1` passed; the locked routing/lazy-resolution
+tests passed under `go test -race ./internal/service -run
+'Test(SendToSlot_TargetUnavailable|ResolveActiveMembers_ConcurrentLazyResolution_OnlyResolvesOnce|InstallTeamRunRouting)'
+-count=1`; and the full `go build ./...`, `go vet ./...`, `go test ./...`
+baseline passed. `gofmt` and `git diff --check` are clean. No schema migration
+was involved.
 
 ## Review notes
 

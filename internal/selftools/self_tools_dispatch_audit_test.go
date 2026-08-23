@@ -19,11 +19,7 @@ import (
 // match now surfaces as a single event_log row, written by
 // reflexes.EmitFirings, with event_type="dispatch_to_agent",
 // category="reflex". This test proves that row exists and carries the
-// same raw-vs-sent audit-trail fact the retired write used to: with no
-// GroundingRecaller configured, message and dispatchMessage never diverge,
-// so raw_input_text/sent_input_text must be ABSENT from the metadata
-// (collapsed, matching store.LogReflexMatch's old bloat-avoidance rule)
-// rather than present-but-identical.
+// matched-input audit fact the retired write used to.
 //
 // Uses a real *store.Store (newTestStore, self_tools_test.go) seeded via
 // the real reflexes.SeedBaseReflexes — the same seed data
@@ -85,11 +81,5 @@ func TestCallExecuteTask_ReflexMatch_EmitsUnifiedTraceRecord(t *testing.T) {
 	}
 	if got := meta["matched_input_excerpt"]; got != msg {
 		t.Errorf("metadata.matched_input_excerpt = %v, want %q", got, msg)
-	}
-	if _, ok := meta["raw_input_text"]; ok {
-		t.Errorf("metadata.raw_input_text present = %v, want absent (no grounding rewrite happened, raw==sent should collapse)", meta["raw_input_text"])
-	}
-	if _, ok := meta["sent_input_text"]; ok {
-		t.Errorf("metadata.sent_input_text present = %v, want absent (no grounding rewrite happened, raw==sent should collapse)", meta["sent_input_text"])
 	}
 }

@@ -152,12 +152,11 @@ A second, related tension the operator flagged: `agent_procedures` bodies are SQ
 | Post-compaction extraction | `internal/memory/extraction.go:125-158` | Plugin event `context.compacted`; richer LLM extraction pass over the compacted segment (decisions/preferences/corrections/facts) |
 | `lesson_capture` (explicit self-tool) | `internal/selftools/self_tools_remember.go:25,149` → `internal/learnings.Recorder.Capture` | Agent-initiated; **not** `agent_log` — genuinely agent-facing durable memory, own namespacing convention (`tool_use`/`project`/`session` scope, confidence 0.85, status `draft`) layered on `memory.Service` |
 
-**Reads — three independent auto-recall paths, plus the context broker's non-Tesseract sources:**
+**Reads — two independent auto-recall paths, plus the context broker's non-Tesseract sources:**
 
 | Source | File:line | Backend | Trigger |
 |---|---|---|---|
 | `contextbroker.MemorySource` | `internal/contextbroker/source_memory.go` | `memory.Service.Recall`, cascades session→project→user namespaces | Every turn, unless the agent profile disables `auto_recall` (`internal/chat/auto_recall_settings.go`: per-agent enable/limit/min-confidence/timeout) |
-| `grounding.Recaller` | `internal/grounding/recall.go` | `memory.Service.Recall`, own namespace/timeout | **Opt-in, env-gated (`NANITE_GROUNDING_ENABLED`), off by default.** Pre-dispatch. Distinguishing feature: logs *every* candidate hit — surfaced or not — to `grounding_consultations` (`internal/store/grounding_log.go`) for later provenance/citation analysis, not just context injection |
 | `internal/learnings.Recaller` (`RecallByToolName`) | `internal/learnings/learnings.go` | `memory.Service.Recall` | Around tool selection — surfaces up to 2 hints before a tool call |
 | `contextbroker.ConduitSource` | `internal/contextbroker/source_conduit.go` | MCP `context_broker_fetch`/`context_search` against a "conduit" server | Every turn, as one of the broker's fan-out sources |
 | `contextbroker.PCCSource` | `internal/contextbroker/source_pcc.go` | flat files, `.nanite/pcc/global/<project>/*.md` (fixed 6-file set), scored by filename/intent | Every turn |

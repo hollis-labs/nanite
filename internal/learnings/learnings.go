@@ -479,8 +479,8 @@ func DeriveMemoryKey(scope Scope, subject, hint string) string {
 
 // SystemPromptBlock renders the agent-facing block surfaced when prior
 // tool-use learnings exist. Returns "" when hints is empty so callers
-// can concatenate without a guard. Format mirrors
-// grounding.SystemPromptBlock so the chat surface stays uniform.
+// can concatenate without a guard. Its heading-and-list shape keeps the
+// chat surface consistent with other injected context blocks.
 func SystemPromptBlock(toolName string, hints []Hint) string {
 	if len(hints) == 0 {
 		return ""

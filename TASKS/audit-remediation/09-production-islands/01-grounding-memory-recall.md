@@ -1,7 +1,7 @@
 # Decide the fate of `internal/grounding`'s pre-strategy memory-recall subsystem
 
 **Phase:** Wave 4 — Production islands (per remediation guide §4)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch.
 **Touches:** `internal/grounding/recall.go`, `internal/grounding/outcome.go`,
 `internal/grounding/types.go`, `internal/selftools/self_tools_transport.go`
@@ -251,10 +251,10 @@ do").
 
 ## Done means
 
-- [ ] Current-source reachability re-verified (deadcode + grep + composition
+- [x] Current-source reachability re-verified (deadcode + grep + composition
       root read) and confirmed still open, or the task's disposition
       corrected if it's been resolved since the audit.
-- [ ] Architect decision recorded: wire, defer, or retire.
+- [x] Architect decision recorded: wire, defer, or retire.
 - [ ] If **wire**: `*grounding.Recaller`/`grounding.ConsultationLogger`
       constructed and assigned in `internal/service/container.go`;
       `NANITE_GROUNDING_ENABLED`'s target default state explicitly decided
@@ -266,17 +266,21 @@ do").
       plainly that nothing populates them in production today and why;
       trigger/owner recorded; confirmed no boot/runtime cost is currently
       paid (and this stays true).
-- [ ] If **retire**: subsystem, its tests, and the transport fields/dispatch
+- [x] If **retire**: subsystem, its tests, and the transport fields/dispatch
       block removed; `deadcode -test ./internal/grounding/...` (or package
       removal) confirms nothing else in the package remains unreferenced;
       any doc/comment elsewhere describing this as a live or planned feature
       updated or removed.
-- [ ] `go build ./...` and `go test ./...` pass after whichever direction is
+- [x] `go build ./...` and `go test ./...` pass after whichever direction is
       implemented.
 
 ## Work log
 
-<Worker fills this in.>
+- 2026-08-23 — Re-derived reachability and line ranges before editing. `deadcode -test ./internal/grounding/...` reported only unreachable symbols in dependencies (`internal/memory` and `internal/safego`), not a production root for grounding; because the package's own tests make its exports reachable under `-test`, constructor/reference greps supplied the decisive production check. `grounding.NewRecaller(` still had exactly two calls, both in `recall_test.go`; `GroundingRecaller:` had no production assignment; and `internal/service/container.go` had only the stale comment at line 1406, no wiring. The current transport fields were lines 219–231. The full E2 dispatch state was larger than the banner's stale 109–118 range: the function comment at 29–34 and the recall/enriched-message/outcome placeholder block at 96–130.
+- 2026-08-23 — Implemented AD-06 RETIRE. Deleted all five files under `internal/grounding` (534 production and 361 test lines), removed the two `SelfToolsTransport` fields/import, and removed the complete E2 dispatch state rather than only the cited nil-guard. That included the now-single-valued `dispatchMessage`, unused grounding-derived `turnID`/`userID` locals, the raw-vs-sent metadata branch, and the corresponding `matchDispatchToAgentReflex` parameters/test arguments. `task_execute`, broker consultation, reflex matching, and dispatch now consistently receive the original `message`.
+- 2026-08-23 — Fresh reference analysis found one required coupling omitted from the authored Touches list: `internal/store/grounding_log.go` directly imported the retiring package and existed solely as its consultation/outcome persistence adapter. Deleted that 173-line adapter as part of the subsystem retirement. Historical migrations/tables remain untouched so existing database history and migration ordering stay stable. The broader `internal/memory.Service` remains load-bearing; its container comment now names only the live context-broker and extraction consumers.
+- 2026-08-23 — Removed the surviving `grounding.SystemPromptBlock` comparison from `internal/learnings`, updated the canonical steering and memory architecture inventories, and marked the superseded Phase 8 real-session evaluation brief accordingly. Dated audit reports, decision records, and migration comments remain as historical evidence rather than being rewritten.
+- 2026-08-23 — Post-removal package-boundary check confirmed `internal/grounding` no longer exists and no Go source references the removed package, fields, env gate, or consultation state. Verification passed: `go test ./internal/selftools ./internal/store ./internal/learnings ./internal/service`; `git diff --check`; `go build ./cmd/nanite/`; `go vet ./...`; `go test ./...`.
 
 ## Review notes
 

@@ -1,12 +1,13 @@
-# Production islands — architect decision table
+# Production islands — decision and disposition table
 
-This folder is the remediation guide's Wave 4 output: six fully-built,
-extensively-tested Go features that compile, pass their own test suites, and
-are — per the audit's `deadcode` run plus exhaustive grep confirmation for
-each — **unreachable from any production entry point** as of the audited
-commit (`8feeee5c`). None of these are bugs. Each is a completed feature
-sitting one wiring decision away from either mattering or being formally
-retired.
+This folder began as the remediation guide's Wave 4 decision queue: six
+fully-built, extensively-tested Go features that were — per the audit's
+`deadcode` run plus exhaustive grep confirmation for each — **unreachable
+from any production entry point** as of the audited commit (`8feeee5c`). The
+reachability descriptions below are retained as historical pre-remediation
+evidence until each task closes; a row with an implemented disposition records
+the post-remediation state instead. AD-06's grounding retirement is represented
+in that completed form.
 
 ## Read this before touching any file in this folder
 
@@ -48,9 +49,11 @@ process, regardless of how well-built it is.
 
 ## The three-way decision
 
-Per the guide's Wave 4 framing, every island task in this folder queues the
-same three-way choice for the architect — **this task-creation pass does not
-make any of these calls**:
+Per the guide's Wave 4 framing, every island task in this folder originally
+queued the same three-way choice for the architect. Those choices are now
+recorded in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`; rows not yet
+updated after implementation preserve their original decision-queue context
+and are not evidence that a decision remains open:
 
 - **wire** — this was the intended feature; connect it to a real production
   entry point and test the real path end to end.
@@ -66,24 +69,25 @@ make any of these calls**:
   describe it as current or planned, if it no longer reflects real
   architectural intent.
 
-Each task file presents the tradeoffs for its own island in detail and
-deliberately does not recommend one. That is the architect's call.
+Each task file's original option analysis presents the tradeoffs for its own
+island without recommending one; the architect's resulting calls are recorded
+in `ARCHITECT-DECISIONS.md`.
 
 ## Decision table
 
-| Feature | Finding | Current state (built/tested/unreachable) | Decision (wire/defer/retire) | Notes |
+| Feature | Finding | Historical audit state or implemented disposition | Decision (wire/defer/retire) | Notes |
 |---|---|---|---|---|
-| Grounding memory recall | `GO-MEM-001` (medium, high confidence) | Built: `internal/grounding/recall.go`+`outcome.go`, ~530 LOC. Tested: `recall_test.go`+`outcome_test.go`, ~360 LOC. Unreachable: `GroundingRecaller`/`GroundingLogger` fields exist on `SelfToolsTransport` (`internal/selftools/self_tools_transport.go:217,220`) but no production code assigns them; also gated off by default via `NANITE_GROUNDING_ENABLED`. | _(architect to fill in)_ | See `01-grounding-memory-recall.md`. |
+| Grounding memory recall | `GO-MEM-001` (medium, high confidence) | **Retired by `09/01` (2026-08-23):** deleted `internal/grounding` (534 production / 361 test lines), its `internal/store` persistence adapter, the `SelfToolsTransport` fields, and the complete E2 pre-dispatch recall/enriched-message state. The broader `internal/memory.Service` remains live. | **Retire — AD-06, implemented** | See `01-grounding-memory-recall.md` Work Log. |
 | Hadron context gate | `GO-MEM-002` (low as-is / would-be-medium if revived unfixed, high confidence) | Built: `internal/contextbroker/gate_hadron_blueprints.go`, 302 LOC. Tested: `gate_hadron_blueprints_test.go`, 337 LOC. Unreachable: never registered as a `ContextSource` in `internal/service/container.go`'s source list (its 4 live siblings are), confirmed — `NewHadronBlueprintGate` has zero non-test callers. **Contains a latent unclamped-relevance-score bug** (`calculateRelevance`, `gate_hadron_blueprints.go:183-230`) that must be fixed before any "wire" decision — see task file. | _(architect to fill in)_ | See `02-hadron-context-gate.md`. |
 | Team semantic routing | `GO-SVCEXEC-003` (medium, high confidence) | Built: `internal/service/team_routing.go`'s entire production surface (`TeamRoutingService`, `SendToSlot`, `InstallTeamRunRouting`, `resolveAgentSlugForSlot`). Tested: extensively, per the file's own test suite. Unreachable: the intended wiring point, `internal/api/team_runs.go`'s `handleLaunchTeam`, calls only `LaunchTeamRun` (line 152), never `InstallTeamRunRouting`. **Self-flagged**: `TASKS/teams/HANDOFF.md:30` already names this exact risk and asks a future reader to verify it — this audit did. | _(architect to fill in)_ | See `03-team-semantic-routing.md`. |
 | Tool builder/YAML architecture | `GO-MCPTOOL-001` (medium, high confidence) | Built: `internal/tool/tool.go`, `builder.go`, `register.go`, `adapt.go`, `yaml_loader.go`. Unreachable: every exported symbol `deadcode`-flagged; only `ResultCache` (a different, live part of the same package) survives. `tool.go`'s package doc still actively claims this is "the primary way to construct tools in Go code" — false of the current runtime. A prior task's own comment (`internal/service/tool_concurrency_classification.go:36-40`) already reached the same "not wired into the live runtime" conclusion. | _(architect to fill in)_ | See `04-tool-builder-yaml-architecture.md`. "Wire" here is a materially bigger lift than the other five islands — see task file. |
 | Reasoning-augmented tool selection | `GO-MCPTOOL-002` (medium, high confidence) | Built: `RankTools`/`SelectWithSignals` (`internal/toolclient/ranking.go`), `SelectToolsAugmented` (`internal/toolclient/broker.go:170-193`). Unreachable: former consumer (a debug SQL row) removed by `TASKS/phase-0/23-export-and-drop-decision-tables.md`, per `ranking.go:292-297`'s own comment. Production entry point `SelectToolsAsProvider` (`broker.go:416`) never calls this path. Per-boot wiring cost (skills-dir load, memory-recaller construction — `internal/service/container.go:692-710`) is still paid regardless, feeding only this dead path. | _(architect to fill in)_ | See `05-reasoning-augmented-tool-selection.md`. |
 | Curated tool knowledge matcher | `GO-MCPTOOL-003` (low, high confidence) | Built: `internal/toolclient/tool_knowledge.go`, 405 lines. Unreachable: zero callers outside its own file and test file — confirmed by grep. Third parallel "what tools match this intent" mechanism (alongside the live `intent.go` keyword scorer and the dead `RankTools`, finding above). Smallest LOC and thinnest test investment of the six islands. | _(architect to fill in)_ | See `06-curated-tool-knowledge-matcher.md`. |
 
-No disposition in the "Decision" column is filled in by this pass — per the
-guide's own Wave 4 framing and this batch's operator instruction, that is
-explicitly deferred to whoever runs the architect-decision queue next
-(remediation guide §9, item 4).
+The remaining placeholder cells are the task-creation pass's historical
+snapshot. Their authoritative calls live in `ARCHITECT-DECISIONS.md`; update a
+row to its implemented state when that task closes rather than rewriting its
+pre-remediation evidence early.
 
 ## A note on `internal/toolclient`'s three-island cluster
 

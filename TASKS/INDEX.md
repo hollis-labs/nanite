@@ -312,7 +312,7 @@ That same live re-verification surfaced a second, unrelated real bug: reloading 
 |---|---|---|
 | 01-set-default-runtime-kind | not-started | none functionally (Phase 2's `runtime_kind` wiring and boot-profile-catalog retirement, both already landed) |
 | 02-agent-reflex-propose-and-pending-reflexes-testing | not-started | none |
-| 03-test-grounding-in-real-sessions | not-started | none |
+| 03-test-grounding-in-real-sessions | superseded | Wave 4 AD-06 retirement (`09/01`) removed the subsystem and its integration seams |
 | 04-truncation-review | not-started | none; coordinate with `TASKS/phase-4/06-add-filter-tool-selection.md` (both touch tool-catalog rendering) |
 | 05-verify-reaper-behavior | not-started | none |
 | 06-build-test-harness-adversarial-suite | not-started | none — first piece of a broader test-harness effort, scoped to adversarial testing of the failure-footer + sources-gate anti-hallucination mechanisms, see `TASKS/phase-8/06-build-test-harness-adversarial-suite.md` |

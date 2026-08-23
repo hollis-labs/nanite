@@ -43,6 +43,22 @@ var secretKeyPatterns = []string{
 	"AUTH",
 }
 
+// agentSecretEnvKeys supplements secretKeyPatterns for AgentExec only. These
+// are well-known names whose values conventionally carry credentials despite
+// not containing one of the generic secret substrings: authenticated service
+// connection strings, bearer-capability webhook URLs, and a PAT alias.
+var agentSecretEnvKeys = map[string]struct{}{
+	"AMQP_URL":             {},
+	"DATABASE_URL":         {},
+	"DISCORD_WEBHOOK_URL":  {},
+	"ELASTICSEARCH_URL":    {},
+	"GH_PAT":               {},
+	"MONGODB_URI":          {},
+	"REDIS_URL":            {},
+	"SLACK_WEBHOOK_URL":    {},
+	"SUPPORT_DATABASE_URL": {},
+}
+
 // minimalEnvKeys are the only inherited env vars for agent-exec (values only).
 var minimalEnvKeys = []string{
 	"HOME",
@@ -305,7 +321,7 @@ func buildAgentEnv(extra map[string]string) []string {
 
 	// Add caller-provided env vars after filtering secrets.
 	for k, v := range extra {
-		if !isSecretKey(k) {
+		if !isAgentSecretKey(k) {
 			env = append(env, k+"="+v)
 		}
 	}
@@ -329,7 +345,11 @@ func filterSecrets(environ []string) []string {
 	return filtered
 }
 
-// isSecretKey returns true if the env var name matches any secret pattern.
+// isSecretKey implements the legacy, case-insensitive substring rule shared by
+// AgentExec and UserExec. AgentExec additionally calls isAgentSecretKey, which
+// exact-matches well-known credential-bearing connection-string, webhook, and
+// PAT aliases in agentSecretEnvKeys. Add newly established names there rather
+// than broadening this heuristic; UserExec intentionally remains substring-only.
 func isSecretKey(name string) bool {
 	upper := strings.ToUpper(name)
 	for _, pattern := range secretKeyPatterns {
@@ -338,6 +358,15 @@ func isSecretKey(name string) bool {
 		}
 	}
 	return false
+}
+
+func isAgentSecretKey(name string) bool {
+	upper := strings.ToUpper(name)
+	if isSecretKey(upper) {
+		return true
+	}
+	_, denied := agentSecretEnvKeys[upper]
+	return denied
 }
 
 // clampTimeout applies default and maximum bounds to a timeout value.

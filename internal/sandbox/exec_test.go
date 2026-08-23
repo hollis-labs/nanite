@@ -154,9 +154,13 @@ func TestAgentExec_ExtraEnvFiltered(t *testing.T) {
 		Command:   "/usr/bin/env",
 		Timeout:   5 * time.Second,
 		Env: map[string]string{
-			"MY_VAR":         "safe-value",
-			"MY_SECRET_KEY":  "should-be-filtered",
-			"DATABASE_TOKEN": "also-filtered",
+			"MY_VAR":            "safe-value",
+			"MY_SECRET_KEY":     "substring-secret-value",
+			"DATABASE_TOKEN":    "substring-token-value",
+			"DATABASE_URL":      "database-url-secret-value",
+			"REDIS_URL":         "redis-url-secret-value",
+			"SLACK_WEBHOOK_URL": "slack-webhook-secret-value",
+			"GH_PAT":            "github-pat-secret-value",
 		},
 	})
 	if err != nil {
@@ -165,11 +169,21 @@ func TestAgentExec_ExtraEnvFiltered(t *testing.T) {
 	if !strings.Contains(result.Stdout, "MY_VAR=safe-value") {
 		t.Error("expected MY_VAR to be present")
 	}
-	if strings.Contains(result.Stdout, "should-be-filtered") {
+	if strings.Contains(result.Stdout, "substring-secret-value") {
 		t.Error("MY_SECRET_KEY leaked to child process")
 	}
-	if strings.Contains(result.Stdout, "also-filtered") {
+	if strings.Contains(result.Stdout, "substring-token-value") {
 		t.Error("DATABASE_TOKEN leaked to child process")
+	}
+	for _, secretValue := range []string{
+		"database-url-secret-value",
+		"redis-url-secret-value",
+		"slack-webhook-secret-value",
+		"github-pat-secret-value",
+	} {
+		if strings.Contains(result.Stdout, secretValue) {
+			t.Errorf("AgentExec output contains blocked credential value %q", secretValue)
+		}
 	}
 }
 
@@ -286,6 +300,87 @@ func TestIsSecretKey(t *testing.T) {
 			t.Errorf("isSecretKey(%q) = true, want false", k)
 		}
 	}
+}
+
+func TestBuildAgentEnv_FiltersKnownCredentialNames(t *testing.T) {
+	credentialKeys := []string{
+		"DATABASE_URL",
+		"REDIS_URL",
+		"SLACK_WEBHOOK_URL",
+		"GH_PAT",
+		"AMQP_URL",
+		"ELASTICSEARCH_URL",
+		"MONGODB_URI",
+		"DISCORD_WEBHOOK_URL",
+		"SUPPORT_DATABASE_URL",
+	}
+	extra := map[string]string{"SERVICE_URL": "https://service.example.test"}
+	for _, key := range credentialKeys {
+		extra[key] = "must-not-reach-agent"
+	}
+
+	got := envMap(buildAgentEnv(extra))
+	if got["SERVICE_URL"] != "https://service.example.test" {
+		t.Errorf("SERVICE_URL = %q, want safe overlay value", got["SERVICE_URL"])
+	}
+	for _, key := range credentialKeys {
+		if value, ok := got[key]; ok {
+			t.Errorf("buildAgentEnv retained blocked credential %s=%q", key, value)
+		}
+	}
+}
+
+func TestFilterSecrets_UserExecSemanticsUnchanged(t *testing.T) {
+	input := []string{
+		"DATABASE_URL=postgres://user:password@example.test/db",
+		"REDIS_URL=redis://:password@example.test/0",
+		"SLACK_WEBHOOK_URL=https://hooks.slack.example.test/credential",
+		"GH_PAT=github-personal-access-token",
+		"GITHUB_TOKEN=must-still-be-filtered",
+	}
+
+	got := envMap(filterSecrets(input))
+	for _, key := range []string{"DATABASE_URL", "REDIS_URL", "SLACK_WEBHOOK_URL", "GH_PAT"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("filterSecrets removed %s; UserExec must retain its existing substring-only behavior", key)
+		}
+	}
+	if _, ok := got["GITHUB_TOKEN"]; ok {
+		t.Error("filterSecrets retained GITHUB_TOKEN; existing UserExec secret filtering regressed")
+	}
+}
+
+func TestIsAgentSecretKey(t *testing.T) {
+	tests := map[string]bool{
+		"database_url":         true,
+		"REDIS_URL":            true,
+		"Slack_Webhook_Url":    true,
+		"GH_PAT":               true,
+		"AMQP_URL":             true,
+		"ELASTICSEARCH_URL":    true,
+		"MONGODB_URI":          true,
+		"DISCORD_WEBHOOK_URL":  true,
+		"SUPPORT_DATABASE_URL": true,
+		"MY_API_KEY":           true,
+		"SERVICE_URL":          false,
+		"DATABASE_HOST":        false,
+	}
+	for key, want := range tests {
+		if got := isAgentSecretKey(key); got != want {
+			t.Errorf("isAgentSecretKey(%q) = %t, want %t", key, got, want)
+		}
+	}
+}
+
+func envMap(environ []string) map[string]string {
+	result := make(map[string]string, len(environ))
+	for _, entry := range environ {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			result[key] = value
+		}
+	}
+	return result
 }
 
 // TestAgentExec_HonorsWorkingDir (CW-20260504-0003) — when WorkingDir is

@@ -2599,7 +2599,7 @@
       "false_positive_considerations": "Highest-risk surface is AgentExec (agent/LLM-influenced code), not UserExec (user's own shell).",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/05-secret-key-heuristic-hardening.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "implemented",
       "revalidation_note": "Confirmed unchanged: secretKeyPatterns (exec.go:37-44) is still exactly {KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL, AUTH} -- DATABASE_URL, REDIS_URL, SLACK_WEBHOOK_URL, GH_PAT all still slip through isSecretKey's substring check."
     },
     {

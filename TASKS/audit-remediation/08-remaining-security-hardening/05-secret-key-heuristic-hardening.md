@@ -1,7 +1,7 @@
 # Secret-key-name substring heuristic misses common credential-bearing env var names
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/sandbox/exec.go` (`isSecretKey` and its call sites in the AgentExec/UserExec environment-overlay construction path)
 **Requires architect decision:** false
@@ -67,14 +67,17 @@ Option 1 (hard-deny list) is low-risk/additive — rollback is a simple revert. 
 
 ## Done means
 
-- [ ] Chosen direction implemented in `isSecretKey` / AgentExec overlay construction
-- [ ] The four named example variables (`DATABASE_URL`, `REDIS_URL`, `SLACK_WEBHOOK_URL`, `GH_PAT`) confirmed redacted from AgentExec
-- [ ] UserExec behavior unchanged (or explicitly, deliberately changed with rationale recorded)
-- [ ] Regression + new-coverage tests above pass
+- [x] Chosen direction implemented in `isSecretKey` / AgentExec overlay construction
+- [x] The four named example variables (`DATABASE_URL`, `REDIS_URL`, `SLACK_WEBHOOK_URL`, `GH_PAT`) confirmed redacted from AgentExec
+- [x] UserExec behavior unchanged (or explicitly, deliberately changed with rationale recorded)
+- [x] Regression + new-coverage tests above pass
 
 ## Work log
 
-<!-- Worker fills this in. -->
+- 2026-08-22: Chose the least-disruptive exact hard-deny direction for AgentExec overlays. `buildAgentEnv` now layers `isAgentSecretKey` over the existing case-insensitive substring heuristic. The exact set is limited to well-known credential-bearing authenticated connection strings (`DATABASE_URL`, `SUPPORT_DATABASE_URL`, `REDIS_URL`, `AMQP_URL`, `ELASTICSEARCH_URL`, `MONGODB_URI`), bearer-capability webhook URLs (`SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`), and the `GH_PAT` alias. The decision rule and extension point are documented directly on `isSecretKey`; this is not a value scanner or general environment allowlist.
+- 2026-08-22: Traced every production execution caller. Workflow `ShellStep` is the only caller that supplies an AgentExec environment overlay, forwarding the YAML pipeline's `Env`; `code_execute` and `dev_bash` call AgentExec without `Env`. The shell API is the sole UserExec caller and supplies no overlay: UserExec continues filtering the inherited process environment through the original substring-only `filterSecrets` path. No other production AgentExec/UserExec call sites exist under `internal/`.
+- 2026-08-22: Added deterministic unit coverage proving all exact names are absent from `buildAgentEnv`, the substring rule still applies, matching is case-insensitive, and an ordinary `SERVICE_URL` remains available. Extended the OS-sandboxed AgentExec environment test with the four required regression names. Added an explicit regression test pinning unchanged UserExec semantics: those four exact-only names remain on its legacy path while `GITHUB_TOKEN` is still removed.
+- 2026-08-22: Verification passed: `go test ./internal/sandbox/... -count=1`, `go vet ./internal/sandbox/...`, `go build ./...`, `go vet ./...`, `go test ./... -count=1`, and `git diff --check`. Per task direction, no prolonged full-repository race campaign was run.
 
 ## Review notes
 

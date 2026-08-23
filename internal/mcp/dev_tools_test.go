@@ -192,6 +192,59 @@ func TestDevGlob_RespectsAllowedPaths(t *testing.T) {
 	}
 }
 
+func TestDevGlob_SkipsSymlinkOutsideAllowedDirectory(t *testing.T) {
+	dt, dir := tempDevTools(t)
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside-only-secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "leak.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	result, err := dt.CallTool(context.Background(), "dev_glob", map[string]any{
+		"pattern":   "*.txt",
+		"directory": dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].Text)
+	}
+	if strings.Contains(result.Content[0].Text, "leak.txt") {
+		t.Fatalf("outside-target symlink was listed: %s", result.Content[0].Text)
+	}
+}
+
+func TestDevGlob_PreservesSymlinkInsideAllowedDirectory(t *testing.T) {
+	dt, dir := tempDevTools(t)
+	target := filepath.Join(dir, "target.data")
+	if err := os.WriteFile(target, []byte("inside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "alias.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	result, err := dt.CallTool(context.Background(), "dev_glob", map[string]any{
+		"pattern":   "*.txt",
+		"directory": dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "alias.txt") {
+		t.Fatalf("in-root symlink missing from results: %s", result.Content[0].Text)
+	}
+}
+
 // --- dev_edit ---
 
 func TestDevEdit_SingleReplace(t *testing.T) {
@@ -319,6 +372,62 @@ func TestDevGrep_Basic(t *testing.T) {
 	}
 	if !strings.Contains(result.Content[0].Text, "Hello") {
 		t.Errorf("expected match, got: %s", result.Content[0].Text)
+	}
+}
+
+func TestDevGrep_SkipsSymlinkOutsideAllowedDirectory(t *testing.T) {
+	dt, dir := tempDevTools(t)
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside-only-secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "leak.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	result, err := dt.CallTool(context.Background(), "dev_grep", map[string]any{
+		"pattern":   "outside-only-secret",
+		"directory": dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].Text)
+	}
+	if strings.Contains(result.Content[0].Text, "outside-only-secret") ||
+		strings.Contains(result.Content[0].Text, "leak.txt") {
+		t.Fatalf("outside-target symlink content was returned: %s", result.Content[0].Text)
+	}
+}
+
+func TestDevGrep_PreservesSymlinkInsideAllowedDirectory(t *testing.T) {
+	dt, dir := tempDevTools(t)
+	target := filepath.Join(dir, "target.data")
+	if err := os.WriteFile(target, []byte("prefix\ninside-only-needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "alias.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	result, err := dt.CallTool(context.Background(), "dev_grep", map[string]any{
+		"pattern":   "inside-only-needle",
+		"directory": dir,
+		"glob":      "*.txt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "alias.txt") ||
+		!strings.Contains(result.Content[0].Text, "inside-only-needle") {
+		t.Fatalf("in-root symlink was not searched: %s", result.Content[0].Text)
 	}
 }
 

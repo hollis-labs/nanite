@@ -1,7 +1,7 @@
 # MCP dev-tool grep/glob walk callbacks don't re-validate per-entry symlinks
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/mcp/dev_tools.go` (`callGrep`, `callGlob`)
 **Requires architect decision:** false
@@ -67,14 +67,38 @@ Low — the fix only tightens what's readable, never expands it. Rollback is a s
 
 ## Done means
 
-- [ ] Chosen direction implemented in `callGrep` and `callGlob`
-- [ ] Regression tests above pass
-- [ ] `gosec` G122 finding at `dev_tools.go` resolved or justified
-- [ ] Spot-check confirms no other `filepath.Walk`-based MCP tool has the same gap (or, if found, it's flagged back rather than silently fixed here)
+- [x] Chosen direction implemented in `callGrep` and `callGlob`
+- [x] Regression tests above pass
+- [x] `gosec` G122 finding at `dev_tools.go` resolved or justified
+- [x] Spot-check confirms no other `filepath.Walk`-based MCP tool has the same gap (or, if found, it's flagged back rather than silently fixed here)
 
 ## Work log
 
-<!-- Worker fills this in. -->
+- 2026-08-22: Chose proposed direction 2 (per-entry
+  `pathsafe.ResolveUnder`) for both `callGrep` and `callGlob` because it
+  preserves the existing behavior for symlinks whose targets remain inside
+  the granted directory. The callbacks now resolve every matching file before
+  inspecting it and perform the eventual stat/open through an `os.Root` rooted
+  at the already-approved directory, so a filesystem swap between validation
+  and use also cannot redirect the operation outside the grant. Top-level
+  `resolveAllowed` behavior was left unchanged.
+- Added regression coverage proving an outside-target symlink is neither read
+  by `dev_grep` nor listed by `dev_glob`, plus positive coverage proving benign
+  in-grant symlinks remain searchable/listed under the chosen approach.
+- Enumerated `filepath.Walk`/`WalkDir` across the scoped MCP tool packages:
+  `internal/mcp/dev_tools.go` has only the two production tool callbacks fixed
+  here (`callGrep`, `callGlob`); no additional `internal/mcp`,
+  `internal/mcpconfig`, `internal/mcpserver`, `internal/tool`, or
+  `internal/selftools` walk-based tool was found. An expanded sibling search
+  found `internal/toolclient/skills.go`'s operator-configured
+  `LoadSkillsFromDir` loader; it is not an MCP tool entry point and is outside
+  this task's stated package/scope, so it was surfaced but not changed.
+- Verification: focused symlink regressions passed; `go test
+  ./internal/mcp/... -count=1` passed; `go build ./...`, `go vet ./...`, and
+  `go test ./...` passed. `gosec ./internal/mcp/...` no longer reports G122 at
+  `dev_tools.go`; it exits nonzero on 18 pre-existing findings from other rules
+  (including existing G703/G304/G301/G306 reports in `dev_tools.go`) that are
+  outside this task.
 
 ## Review notes
 

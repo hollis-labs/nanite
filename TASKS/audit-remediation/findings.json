@@ -1724,7 +1724,7 @@
       "false_positive_considerations": "Requires either write access to the granted directory or a pre-existing malicious symlink -- a local-filesystem TOCTOU class, not remotely triggerable via MCP input.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/02-mcp-dev-grep-symlink-toctou.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "implemented",
       "revalidation_note": "Confirmed still open: callGrep (dev_tools.go:690, exact match to audit's function-start citation) calls resolveAllowed once before filepath.Walk (:740) but the walk callback's os.Open (:779, exact match) has no per-entry symlink re-validation."
     },
     {

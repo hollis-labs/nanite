@@ -701,6 +701,11 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 		return pathErrorResult(dir, err), nil
 	}
 	dir = resolvedDir
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("open directory: %v", err)), nil
+	}
+	defer root.Close()
 
 	re, err := regexp.Compile(pattern)
 	if err != nil {
@@ -769,14 +774,26 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 			truncatedByFileBudget = true
 			return errStopWalk
 		}
-		if info.Size() > devGrepPerFileCap {
+		// Walk callbacks must re-validate per entry, not just the walk root.
+		// ResolveUnder preserves in-root symlinks while rejecting links that
+		// escape the original grant; Root.Stat/Open keep the later filesystem
+		// operations confined if the entry changes after this check.
+		resolvedEntry, err := resolveWalkEntry(dir, path)
+		if err != nil {
+			return nil
+		}
+		entryInfo, err := root.Stat(resolvedEntry)
+		if err != nil || !entryInfo.Mode().IsRegular() {
+			return nil
+		}
+		if entryInfo.Size() > devGrepPerFileCap {
 			filesSkippedBySize++
 			truncatedBySize = true
 			return nil
 		}
 		filesInspected++
 
-		f, err := os.Open(path)
+		f, err := root.Open(resolvedEntry)
 		if err != nil {
 			return nil
 		}
@@ -1001,6 +1018,11 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 		return pathErrorResult(dir, err), nil
 	}
 	dir = resolvedDir
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("open directory: %v", err)), nil
+	}
+	defer root.Close()
 
 	maxResults := IntArg(args, "max_results", 50)
 	if maxResults < 1 {
@@ -1034,8 +1056,15 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 		}
 
 		if globMatch(pattern, relPath) {
-			info, err := entry.Info()
+			// Walk callbacks must re-validate per entry, not just the walk
+			// root. Root.Stat also prevents a post-validation symlink swap
+			// from exposing metadata outside the original grant.
+			resolvedEntry, err := resolveWalkEntry(dir, path)
 			if err != nil {
+				return nil
+			}
+			info, err := root.Stat(resolvedEntry)
+			if err != nil || !info.Mode().IsRegular() {
 				return nil
 			}
 			matches = append(matches, fileEntry{path: relPath, modTime: info.ModTime()})
@@ -1072,6 +1101,22 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 		fmt.Fprintf(&sb, "%s\n", matches[i].path)
 	}
 	return TextResult(sb.String()), nil
+}
+
+// resolveWalkEntry validates a discovered path against the original walk root
+// and returns the resolved target as a path relative to that root. The relative
+// form is suitable for os.Root operations, which enforce the same confinement
+// at the filesystem operation rather than relying only on a prior path check.
+func resolveWalkEntry(rootDir, path string) (string, error) {
+	discoveredRel, err := filepath.Rel(rootDir, path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := pathsafe.ResolveUnder(rootDir, discoveredRel)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Rel(rootDir, resolved)
 }
 
 // globMatch matches a path against a pattern supporting ** for recursive matching.

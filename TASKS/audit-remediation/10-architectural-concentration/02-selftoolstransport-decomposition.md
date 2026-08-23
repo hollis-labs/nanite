@@ -193,9 +193,8 @@ Zero production risk for both parts — this task produces a written map and two
   No extraction or follow-on task was created.
 - Explicitly mapped the main hard seams: the widely shared `Store`, subagent
   use by both lifecycle and skill composition, `DispatchWrapper` shared by task
-  and workflow launch, panel access shared by cards and panel signals, learning
-  recall's non-dispatch caller, and the shared recursion/project-resolution
-  helpers.
+  and workflow launch, panel access shared by cards and panel signals, and the
+  shared recursion/project-resolution helpers.
 - Coverage observation only (no scope expansion): messaging operations beyond
   directive-send elicitation, background create/cancel, and Engine
   navigate/refresh have notably thin direct handler coverage in this package.
@@ -226,6 +225,22 @@ Zero production risk for both parts — this task produces a written map and two
 - `git diff --check` — pass.
 - Scope check: documentation/task metadata only; no production or test file in
   `internal/selftools/` or `internal/toolclient/` changed.
+
+### 2026-08-23 — Review-fix correction
+
+- A fresh production call-site grep found that `RecallToolLearnings` is called
+  only by `callToolDescribe`; the prior map and Work Log statement that chat
+  slot assembly also consumed it was false. Tests call the helper directly,
+  but no other production code does.
+- Reclassified `LearningRecaller` and `RecallToolLearnings` under tool
+  discovery/description, removed the nonexistent cross-layer learning seam,
+  and re-evaluated learning capture as cleanly extractable through its exclusive
+  `LearningRecorder`/`RememberCounters` state. It remains below the four first
+  candidates because it is a single tool, not because of coupling.
+- The AD-13 recommendation remains selective delegation. No reviewer approval
+  or architect sign-off is claimed by this correction.
+- Review-fix verification: `git diff --check` and
+  `go test ./internal/selftools/... ./internal/toolclient/...` pass.
 
 ## Review notes
 

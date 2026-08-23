@@ -69,7 +69,7 @@ coupling, not on reducing either count.
 | Internal messaging and session handoff | `message_send`, `message_inbox`, `message_thread`, `message_ack`, `message_resolve`, `message_catch_up`, `handoff_request`, `handoff_approve`, `handoff_reject` | `Messaging` R/W, `Elicitation` R/W | `callMessageSend`, `callMessageInbox`, `callMessageThread`, `callMessageAck`, `callMessageResolve`, `callMessageCatchUp`, `callHandoffRequest`, `callHandoffApprove`, `callHandoffReject` (`T`) | `internal/messaging`, MCP elicitation and caller/session context | Strong extraction candidate. All nine operations use one service and one common timeout; elicitation is a policy local to directive sends, not a separate domain. It has no `Store` or helper coupling to the rest of the transport. |
 | Glass-4 context handoff | `handoff_stash`, `handoff_pointers_expand` | `Store` R/W | `callHandoffStash`, `callHandoffPointersExpand` (`H`) | `internal/context` handoff validation/envelopes, `store`, MCP session identity | Cleanly extractable but smaller/less urgent. This is distinct from messaging's session handoff: it persists compaction continuity content rather than changing the session's primary agent. |
 | Reminder and pinned-context controls | `reminder_set`, `context_pin`, `context_unpin` | `Store` R/W, `ReminderEngine` W | `callSetReminder`, `callPin`, `callUnpin`, `currentTurnCount` (`RP`); shares `resolveProjectIDFromSession` (`T`) | `store`, `internal/reminders`, MCP session identity | Partially extractable. Reminder creation and context pins share scope/session/project resolution but are different persisted concepts. A common “attention controls” owner would be artificial; either keep together as adapters or separate only when one side gains more behavior. |
-| Learning capture and recall | `lesson_capture` | `LearningRecorder` W, `RememberCounters` W, `LearningRecaller` R | `callRemember` (`R`), `RecallToolLearnings` (`T`) | `internal/learnings`, MCP caller/session identity, in-memory atomic counters | Not a simple dispatch-only extraction. Recall is also a non-`CallTool` API consumed by chat-layer slot assembly and by `tool_describe`; moving it requires a stable learning facade shared by both callers. Capture itself is cohesive and could move behind that facade later. |
+| Learning capture | `lesson_capture` | `LearningRecorder` W, `RememberCounters` W | `callRemember` (`R`) | `internal/learnings`, MCP caller/session identity, in-memory atomic counters | Cleanly extractable: capture owns both fields exclusively and has no helper coupling to another domain. `LearningRecaller` is not part of this path; its only production consumer is `callToolDescribe` below. Moving one handler is lower priority than the first candidates, but there is no cross-layer seam blocking it. |
 | Per-turn scratchpad gate | `scratchpad_write`, `scratchpad_read`, `scratchpad_clear` | None | Inline branch in `CallTool` (`T`) | Chat-loop `loopState` owns the real implementation | Do not create an owner here. These names are catalogued self-tools but deliberately unavailable through this transport path; this branch only explains that boundary to CLI-launch callers. |
 
 ### Orchestration and execution
@@ -91,7 +91,7 @@ coupling, not on reducing either count.
 | Engine cross-app control | `engine_navigate`, `engine_refresh` | None | `callNavigateEngine`, `callRefreshEngine` (`T`) | `internal/crossapp`, fixed timeouts | Stateless and cohesive but tiny. There is no transport-owned state to isolate, and the handlers already call the cross-app API directly. |
 | Card presentation | `card_show` | `PanelLookup` R and `TrustResolver` R indirectly | `callShowCard`, `resolveShowCardRenderTarget` (`T`); calls shared `resolvePanelAccess` (`P`) | `envelope` schema validation, turn source-ID validation, MCP context, panel trust | Extract only with the panel/signal domain. Its render-target gate intentionally reuses panel access policy, so a card-only owner would either depend back on the transport or duplicate a security-relevant check. Combined presentation ownership is a strong candidate. |
 | Panel and mode signals | `panel_open`, `panel_close`, `signal_mode` | `PanelLookup` R, `TrustResolver` R, `PanelSignalSink` W | `callPanelOpen`, `callPanelClose`, `callSignalMode`, `resolvePanelAccess`, `emitPanelSignal` (`P`) | `dispatch` trust tiers, MCP caller/session identity, frontend stream sink | Strong only as a combined presentation owner with `card_show`. The five methods form one trust-and-signal policy, and absorbing card render-target resolution would remove rather than preserve the sole cross-domain helper call. |
-| Tool discovery, description, and schema validation | `tool_validate`, `tool_describe`, `tool_list` | `SchemaLookup` R, `Inventory` R; `LearningRecaller` R indirectly | `callValidate`, `lookupToolSchema` (`V`); `callToolDescribe` (`D`); `callToolList`, `gatherInventory` (`L`) | MCP definitions/inventory, envelope validation, embedded examples, LLM tool definitions, learning recall | Moderately cohesive, but three different registries and a learning hook meet here. It could become one discovery facade after the learning-recall API is separated; extracting now would merely relocate cross-domain dependencies. |
+| Tool discovery, description, and schema validation | `tool_validate`, `tool_describe`, `tool_list` | `SchemaLookup` R, `Inventory` R, `LearningRecaller` R | `callValidate`, `lookupToolSchema` (`V`); `callToolDescribe` (`D`); `callToolList`, `gatherInventory` (`L`); `RecallToolLearnings` (`T`) | MCP definitions/inventory, envelope validation, embedded examples, LLM tool definitions, `internal/learnings` | Moderately cohesive: three read-side dependencies meet at the discovery surface, and `RecallToolLearnings` only enriches `tool_describe` in production. There is no external chat-slot caller to preserve. A discovery facade is therefore viable, though it remains lower leverage than the first candidates because validation, inventory, and description are distinct operations. |
 | Chat-history search/read | `chat_search`, `chat_get` | `Store` R | `callChatSearch`, `callChatGet` (`CS`) | `store`, SQL, regexp/UTF-8 handling, MCP caller/session context | Clean read-only boundary and already file-isolated. A possible later owner, but lower leverage than the first candidates. |
 | Agent procedure lookup | `procedure_get` | `Store` R | `callProcedureGet` (`PR`) | `store`, MCP caller identity | Too small for a dedicated owner. Keep as a store-backed adapter or group only with a future coherent agent-capabilities read facade. |
 | Caller identity | `whoami` | None | `executeWhoami` (`W`) | MCP caller identity, `internal/a2a` agent-card projection | Stateless single-purpose adapter; a dedicated owner would be ceremony. |
@@ -108,17 +108,17 @@ than hiding behind duplicated helpers:
 | `Subagent` | Subagent lifecycle and fork-composed `skill_get` | A subagent owner cannot simply take exclusive ownership of the service field without preserving skill materialization's legitimate caller. |
 | `DispatchWrapper` | `task_execute` and `workflow_run` | Envelope wrapping is shared output policy across two launch paths; it should remain one collaborator. |
 | `resolvePanelAccess` plus `PanelLookup`/`TrustResolver` | Panel open/close and `card_show` render targets | This is a security-relevant shared gate and the strongest evidence for one combined presentation boundary rather than separate card and panel owners. |
-| `LearningRecaller` / `RecallToolLearnings` | Chat slot assembly (outside `CallTool`) and `tool_describe` | Learning is not exclusively a dispatch domain. Any owner needs a stable recall API for both call sites. |
 | `recursionBlocked` | `subagent_spawn` and `task_execute` | Both create child sessions and intentionally share the same depth-one cap. Do not copy the check into two owners. |
 | `resolveProjectIDFromSession` | Todo creation/listing and reminder/pin scoping | Extract as an injected/narrow project resolver or leave it at the transport seam; do not make either domain own the other. |
 | MCP caller/session context | Skills, work, messaging, subagents, dispatch, panels, reminders, handoff, identity, scheduling | Identity is cross-cutting request context, not transport-owned mutable state. Owners must take `context.Context` unchanged. |
 | Static tool definitions and schemas | `ListTools`, `tool_list`, `tool_describe`, `tool_validate` | Definitions remain the source of truth. A modular dispatcher must not create a second catalog or schema registry. |
 
-Domain-local mutable state is much cleaner: `BuilderSessions` is builder-only,
-`RememberCounters` is learning-only, and the concrete services behind
-`Background`, `Messaging`, `TodoStore`, `ReminderEngine`, and `Reactions` each
-already own their own state. That supports selective delegation, not a uniform
-one-type-per-tool-domain rewrite.
+Domain-local mutable state is much cleaner: `BuilderSessions` is builder-only;
+`LearningRecorder`/`RememberCounters` are capture-only;
+`LearningRecaller`/`RecallToolLearnings` are discovery-only in production; and
+the concrete services behind `Background`, `Messaging`, `TodoStore`,
+`ReminderEngine`, and `Reactions` each already own their own state. That
+supports selective delegation, not a uniform one-type-per-tool-domain rewrite.
 
 ## Inventory reconciliation
 
@@ -136,16 +136,16 @@ The 31 fields reconcile as follows:
 - Python: `PythonPermChecker`, `PythonDispatcher` (2).
 - Presentation: `PanelSignalSink`, `PanelLookup`, `TrustResolver` (3).
 - Reminders: `ReminderEngine` (1).
-- Discovery: `SchemaLookup`, `Inventory` (2).
-- Learning: `LearningRecorder`, `LearningRecaller`, `RememberCounters` (3).
+- Discovery: `SchemaLookup`, `Inventory`, `LearningRecaller` (3).
+- Learning capture: `LearningRecorder`, `RememberCounters` (2).
 - Builder: `BuilderRegistry`, `BuilderSessions` (2).
 - Harness reactions: `Reactions` (1).
 
 The 82 receiver methods reconcile by domain: framework 2; skills 3; agents 5;
-workflow 4; engine control 2; card presentation 2; discovery/validation 5;
+workflow 4; engine control 2; card presentation 2; discovery/validation 6;
 builder 2; work tracking 11; installation 3; messaging 9; subagents 6;
 background 3; task dispatch 2; executor handoff 1; chat history 2; procedures 1;
-Python 1; panels/signals 5; reminders/pins 4; learning 2; Glass-4 handoff 2;
+Python 1; panels/signals 5; reminders/pins 4; learning capture 1; Glass-4 handoff 2;
 identity 1; reactions 1; scheduling 2; and the shared recursion helper 1.
 
 The 68 `CallTool` names reconcile by domain: skills 3; agents 4; workflow 4;
@@ -170,8 +170,8 @@ This conclusion follows from the coupling map:
 - Several are already correctly delegated (`Background`, workflow callbacks,
   executor handoff, builder, reaction engine); another owner would be hollow.
 - Several are load-bearing integration points with deliberate cross-domain
-  seams (subagent/skill composition, task/reflex dispatch, learning recall,
-  card/panel trust). They should not be split until those seams have explicit
+  seams (subagent/skill composition, task/reflex dispatch, card/panel trust).
+  They should not be split until those seams have explicit
   shared interfaces.
 - Single-tool domains such as identity, procedures, and scheduling do not
   justify a dedicated type merely to lower a metric.

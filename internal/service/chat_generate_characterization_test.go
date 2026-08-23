@@ -401,8 +401,11 @@ func TestGenerateResponseCharacterization_DisabledAgentTerminatesBeforeStreamSta
 
 func TestGenerateResponseCharacterization_SingleToolTurn(t *testing.T) {
 	tu := llmtypes.ToolUseBlock{ID: "tool-single", Name: "echo", Input: map[string]any{"value": "one"}}
+	toolEvents := toolTurnEvents(tu)
+	toolEvents[len(toolEvents)-2].Usage.InputTokens = 5
+	toolEvents[len(toolEvents)-2].Usage.OutputTokens = 2
 	f := newCharacterizationFixture(t, []characterizationProviderStep{
-		{events: toolTurnEvents(tu)},
+		{events: toolEvents},
 		{events: doneEvents("single tool complete")},
 	}, "echo")
 	events := f.run(t, "assistant-single")
@@ -415,6 +418,22 @@ func TestGenerateResponseCharacterization_SingleToolTurn(t *testing.T) {
 	}
 	if f.provider.callCount() != 2 || findEvent(events, "stream_end") == nil {
 		t.Fatalf("provider calls/events = %d/%v", f.provider.callCount(), eventTypes(events))
+	}
+	var narration, final bool
+	for _, event := range events {
+		if event.Type == "delta" && event.Content == "I will use the tools. " && event.Phase == chat.PhaseNarration {
+			narration = true
+		}
+		if event.Type == "delta" && event.Content == "single tool complete" && event.Phase == chat.PhaseFinal {
+			final = true
+		}
+	}
+	if !narration || !final {
+		t.Fatalf("delta phases missing: narration=%v final=%v events=%+v", narration, final, events)
+	}
+	end := findEvent(events, "stream_end")
+	if end.Usage == nil || end.Usage.InputTokens != 16 || end.Usage.OutputTokens != 5 || end.Usage.StopReason != "end_turn" {
+		t.Fatalf("aggregated usage = %+v, want input=16 output=5 stop=end_turn", end.Usage)
 	}
 }
 
@@ -528,6 +547,34 @@ func TestGenerateResponseCharacterization_ContextOverflowCompactionTrigger(t *te
 	}
 	if !saved {
 		t.Fatalf("recovered assistant row missing: %+v", msgs)
+	}
+}
+
+func TestGenerateResponseCharacterization_MidStreamOverflowRetriesIteration(t *testing.T) {
+	f := newCharacterizationFixture(t, nil)
+	if err := f.st.UpdateUserSettings(context.Background(), &store.UserSettings{
+		ContextOverflowRecovery: true,
+		SummarizerProvider:      "characterization",
+		SummarizerModel:         "characterization-model",
+	}); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	f.provider.steps = []characterizationProviderStep{
+		{events: []llmtypes.StreamEvent{{Type: "error", Error: "prompt is too long"}}, beforeReturn: func() {
+			f.context.mutateLast(forceCompactableWindow)
+		}},
+		{events: doneEvents("recovered after mid-stream compaction")},
+	}
+	events := f.run(t, "assistant-midstream-overflow")
+
+	if f.provider.callCount() != 2 {
+		t.Fatalf("provider calls = %d, want overflow plus same-iteration retry", f.provider.callCount())
+	}
+	if findEvent(events, "slot_changed") == nil || findEvent(events, "stream_end") == nil {
+		t.Fatalf("mid-stream recovery events = %v, want slot_changed and stream_end", eventTypes(events))
+	}
+	if findEvent(events, "error") != nil {
+		t.Fatalf("mid-stream recovery surfaced error: %v", eventTypes(events))
 	}
 }
 

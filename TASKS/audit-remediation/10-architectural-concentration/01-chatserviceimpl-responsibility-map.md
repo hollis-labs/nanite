@@ -485,3 +485,8 @@ inbox + 3 inspector + 7 enrichment/utility + 1 handoff + 1 loop-termination =
   ordered move. Persistence, outcome bookkeeping, terminal events, and title/
   tag scheduling remain one ordered action. Current coordinator complexity is
   cognitive 284 / cyclop 108 / gocyclo 106.
+- Phase 4 (`consumeProviderIteration`) extracted on 2026-08-23 as the fifth
+  dependency-ordered move. The coordinator now interprets typed retry, finish,
+  terminate, and tool-turn outcomes while the action owns provider events,
+  inactivity, phase/usage aggregation, and mid-stream recovery. Current
+  coordinator complexity is cognitive 143 / cyclop 61 / gocyclo 60.

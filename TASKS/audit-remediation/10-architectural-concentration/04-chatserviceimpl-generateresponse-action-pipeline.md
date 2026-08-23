@@ -296,3 +296,20 @@ read-only and must not edit or claim operator approval.
   / gocyclo 106. `finalizeRun` is cohesive at cognitive 75 / cyclop 58 /
   gocyclo 58 / maintainability 9, well below and distinct from the original
   coordinator monolith.
+- Phase 4 complete (fifth extraction): extracted `consumeProviderIteration`
+  with the provider channel/timer loop, event normalization, phase-delayed
+  delta flushing, usage aggregation, PTY presence, and mid-stream recovery.
+  `providerAttempt` now provides idempotent cancel/span ownership for the
+  consume boundary; the final request extraction will remove the legacy
+  request-side catch-all defer. Updated the inactivity AST acceptance to the
+  new action and added a 15ms behavioral stall test that proves termination
+  and one cancel. Strengthened production-door coverage for narration/final
+  phase routing, cross-iteration usage aggregation, and successful mid-stream
+  overflow retry with the coordinator-owned iteration decrement. Focused
+  behavior passed in 3.718s; focused race passed in 111.450s; full non-race
+  service passed in 90.085s; service/all build and vet and diff check passed.
+  Audit lint exited 1 on historical diagnostics; coordinator complexity
+  decreased to cognitive 143 / cyclop 61 / gocyclo 60 / maintainability 1.
+  `consumeProviderIteration` is cognitive 108 / cyclop 51 / gocyclo 50 /
+  maintainability 9, a stream-normalization action rather than a relocation of
+  the original coordinator.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type generationDirective uint8
@@ -422,8 +425,414 @@ type providerTurn struct {
 	toolUseBlocks []llmtypes.ToolUseBlock
 }
 
+type providerAttempt struct {
+	events     <-chan llmtypes.StreamEvent
+	cancel     context.CancelFunc
+	span       trace.Span
+	cancelOnce sync.Once
+	endOnce    sync.Once
+}
+
+func (a *providerAttempt) cancelStream() {
+	if a == nil {
+		return
+	}
+	a.cancelOnce.Do(func() {
+		if a.cancel != nil {
+			a.cancel()
+		}
+	})
+}
+
+func (a *providerAttempt) close() {
+	if a == nil {
+		return
+	}
+	a.cancelStream()
+	a.endOnce.Do(func() {
+		if a.span != nil {
+			a.span.End()
+		}
+	})
+}
+
+type consumeProviderIterationResult struct {
+	directive generationDirective
+	turn      providerTurn
+}
+
 type settleToolTurnResult struct {
 	directive generationDirective
+}
+
+func (s *chatServiceImpl) consumeProviderIteration(
+	ctx context.Context,
+	sessionID string,
+	assistantMsgID string,
+	setup *turnSetup,
+	run *runState,
+	attempt *providerAttempt,
+	ch chan chat.StreamEvent,
+) consumeProviderIterationResult {
+	agent := setup.agent
+	agentID := agent.ID
+	model := setup.model
+	providerName := setup.providerName
+	slotResult := setup.slotResult
+	defer attempt.close()
+
+	// --- Consume provider stream ---
+	var turnContent strings.Builder
+	var toolUseBlocks []llmtypes.ToolUseBlock
+	var stopReason string
+	var lastPTYToolPending string
+	// T9 — set by the mid-stream overflow handler when the outer loop
+	// should retry with a compacted request instead of terminating.
+	contextOverflowRecovered := false
+
+	// F4 (CW-20260419-0029) — per-iteration delta buffer. Deltas are
+	// buffered during streaming and flushed with the correct phase once
+	// stopReason is known after the stream closes. Narration iterations
+	// (stopReason=tool_use) flush as PhaseNarration; the final iteration
+	// (stopReason=end_turn) flushes as PhaseFinal. The buffer is small —
+	// typically a handful of short prose fragments per iteration.
+	var iterDeltaBuf []string
+
+	// CW-20260418-0043 diagnostic — track provider stream duration + event count.
+	provStreamStart := time.Now()
+	diagProvEventCount := 0
+
+	// CW-20260517-0036 — provider-stream inactivity watchdog.
+	//
+	// `for evt := range attempt.events` blocks indefinitely when the provider
+	// holds the stream open but emits nothing (a silent stall — c242).
+	// CW-20260519-0073's idle terminator (shouldStop Layer 2) only runs
+	// at the *top* of the next chat-loop iteration, which a stalled
+	// streamLoop never reaches; within a single stall the run was
+	// bounded only by the 1800s wall-clock backstop. This select-based
+	// loop bounds the *gap between provider events*: every event resets
+	// streamIdle; if no event arrives for the inactivity window the
+	// watchdog cancels provStreamCtx (closing attempt.events) and the run
+	// surfaces a structured `stalled` error.
+	//
+	// This CANNOT kill a legitimate long-running tool call: a tool call
+	// executes *between* iterations — after streamLoop closes for this
+	// iteration, inside executeToolBatch — so it never blocks this
+	// loop. The watchdog only measures silence on the provider channel
+	// itself, which is exactly the "provider produced nothing" signal.
+	// The window is run.loop.limits.idleTimeout (formerly
+	// ls.limits.idleTimeout), already caller-scoped by
+	// CW-20260519-0073 (300s for a subagent dispatch, 900s interactive),
+	// so we reuse the chat loop's existing liveness budget rather than
+	// inventing a parallel one.
+	streamInactivityWindow := run.loop.limits.idleTimeout
+	streamIdle := time.NewTimer(streamInactivityWindow)
+	streamStalled := false
+
+streamLoop:
+	for {
+		var evt llmtypes.StreamEvent
+		var ok bool
+		select {
+		case evt, ok = <-attempt.events:
+			if !ok {
+				// Channel closed — normal end of stream.
+				break streamLoop
+			}
+			// An event arrived: the provider is alive. Reset the
+			// inactivity window. Stop-then-drain-then-reset is the
+			// race-free Timer reset idiom.
+			if !streamIdle.Stop() {
+				select {
+				case <-streamIdle.C:
+				default:
+				}
+			}
+			streamIdle.Reset(streamInactivityWindow)
+		case <-streamIdle.C:
+			// No provider event for the full inactivity window — a
+			// silent stall. Cancel the stream context so the adapter
+			// tears down the HTTP connection, then fall through to the
+			// post-loop `streamStalled` handler.
+			streamStalled = true
+			break streamLoop
+		}
+		diagProvEventCount++
+		switch evt.Type {
+		case "delta":
+			if lastPTYToolPending != "" && chat.IsCLIProvider(providerName) {
+				s.streams.BroadcastPresence(chat.PresenceEvent{
+					Type: "tool_resolved", SessionID: sessionID, AgentID: agent.ID,
+					ToolName: lastPTYToolPending, Timestamp: time.Now().UTC().Format(time.RFC3339),
+				})
+				lastPTYToolPending = ""
+			}
+			turnContent.WriteString(evt.Content)
+			run.fullContent.WriteString(evt.Content)
+			// Buffer for phase-tagged flush after stopReason is known.
+			// CW-20260418-0043 diagnostic watchdog is deferred to flush site.
+			iterDeltaBuf = append(iterDeltaBuf, evt.Content)
+
+		case "tool_use":
+			if evt.ToolUse != nil {
+				toolUseBlocks = append(toolUseBlocks, *evt.ToolUse)
+				if chat.IsCLIProvider(providerName) {
+					if lastPTYToolPending != "" {
+						s.streams.BroadcastPresence(chat.PresenceEvent{
+							Type: "tool_resolved", SessionID: sessionID, AgentID: agent.ID,
+							ToolName: lastPTYToolPending, Timestamp: time.Now().UTC().Format(time.RFC3339),
+						})
+					}
+					lastPTYToolPending = evt.ToolUse.Name
+					s.streams.BroadcastPresence(chat.PresenceEvent{
+						Type: "tool_pending", SessionID: sessionID, AgentID: agent.ID,
+						ToolName: evt.ToolUse.Name, Timestamp: time.Now().UTC().Format(time.RFC3339),
+					})
+					s.maybeCreateAutoArtifact(sessionID, assistantMsgID, agent.ID, *evt.ToolUse)
+				}
+			}
+
+		case "usage":
+			if evt.Usage != nil {
+				if run.finalUsage == nil {
+					run.finalUsage = &chat.Usage{}
+				}
+				if evt.Usage.InputTokens > 0 {
+					run.finalUsage.InputTokens += evt.Usage.InputTokens
+				}
+				if evt.Usage.OutputTokens > 0 {
+					run.finalUsage.OutputTokens += evt.Usage.OutputTokens
+				}
+				if evt.Usage.CacheCreationTokens > 0 {
+					run.finalUsage.CacheCreationTokens += evt.Usage.CacheCreationTokens
+				}
+				if evt.Usage.CacheReadTokens > 0 {
+					run.finalUsage.CacheReadTokens += evt.Usage.CacheReadTokens
+				}
+				if evt.Usage.StopReason != "" {
+					stopReason = evt.Usage.StopReason
+					run.finalUsage.StopReason = evt.Usage.StopReason
+				}
+			}
+
+		case "error":
+			// T9 — mid-stream overflow recovery: same pattern as the
+			// stream-start case above. Streaming surgery isn't attempted
+			// (plan non-goal) — we abort the in-flight stream, recover,
+			// and the outer loop retries with a rebuilt request.
+			if ctxpkg.IsContextOverflowMessage(evt.Error) && run.loop.compactRecoverableAttempts < maxCompactRecoverableAttempts {
+				run.loop.compactRecoverableAttempts++
+				run.loop.continueWith(ContinueRecovery, "context_overflow mid-stream")
+				if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, run.chatMessages, run.tools, ch, evt.Error, compactTriggerContextOverflow); ok {
+					// Mirror the stream-start recovery path: strip_tool_blocks
+					// drops tool-definition context, so post-compaction the
+					// LLM has to re-request tools. Reset the discovery-call
+					// counters so pre-compaction calls don't eat the
+					// post-compaction budget (CW-20260419-0012).
+					run.loop.totalRequestToolsCalls = 0
+					run.loop.consecutiveEmptyRequests = 0
+					run.chatMessages = newMsgs
+					run.tools = newTools
+					run.systemPrompt = slotResult.SystemPrompt
+					contextOverflowRecovered = true
+					// Labeled break — without the label, `break` would exit
+					// the switch only, and the stream loop would keep
+					// draining events. Copilot review #3095050032.
+					break streamLoop
+				}
+			}
+			errDetails := map[string]interface{}{"raw": evt.Error, "model": model}
+			// CW-20260517-0036 — the loop is about to exit on a
+			// mid-stream provider error; release the per-iteration
+			// stream context before any return path below.
+			streamIdle.Stop()
+			attempt.cancelStream()
+			if ctxpkg.IsContextOverflowMessage(evt.Error) && run.loop.compactRecoverableAttempts >= maxCompactRecoverableAttempts {
+				msg := "Context is still too large after compaction. Use `/clear` or split the request."
+				errDetails["recovery"] = "failed_after_retry"
+				if s.surfaceErrorOrSuppress(ch, sessionID, "midstream_failed_after_retry", msg, errDetails, run.fullContent.String()) {
+					return consumeProviderIterationResult{directive: generationTerminate}
+				}
+				// surfaceErrorOrSuppress already classified above; use the pre-classified
+				// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+				s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+				return consumeProviderIterationResult{directive: generationTerminate}
+			}
+			// Mid-stream provider error (general). Same suppression rule
+			// as the pre-stream provider error above: if a subagent is
+			// active, the FE shouldn't see this surface.
+			if s.suppressSurfaceIfSubagentCaused(sessionID, "midstream_provider_error", run.fullContent.String()) {
+				return consumeProviderIterationResult{directive: generationTerminate}
+			}
+			ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
+			ch <- chat.ErrorEvent(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
+			// Suppression already checked at line above; use the pre-classified
+			// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+			s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+			return consumeProviderIterationResult{directive: generationTerminate}
+
+		case "session_id":
+			// Phase 4c.6 (CW-20260508-0002): persistCLISessionID
+			// deleted. Boot's StartOptions.OnSessionID writes the
+			// provider session id straight to the agent_runtime row
+			// via SetProviderSessionID — no chat-harness side
+			// persistence needed. The case branch is kept so
+			// EventSessionID events remain a known type the loop
+			// observes and discards (vs falling into the default).
+			_ = evt.SessionID
+
+		case "thinking":
+			// F3 (CW-20260420-0023): interleaved thinking block. Persist
+			// signed block for round-trip; emit to FE as PhaseThinking.
+			if evt.ThinkingBlock != nil {
+				run.thinkingBlocks = append(run.thinkingBlocks, *evt.ThinkingBlock)
+				stopDiag := diagWatchChSend(ctx, "streamLoop.thinking", ch, sessionID, assistantMsgID, run.loop.iteration, "delta")
+				ch <- chat.StreamEvent{Type: "delta", Content: evt.ThinkingBlock.Thinking, Phase: chat.PhaseThinking}
+				stopDiag()
+			}
+
+		case "done":
+			// handled below
+		}
+	}
+
+	// CW-20260517-0036 — release the per-iteration stream resources.
+	// Stop the inactivity timer (it may still be armed when the loop
+	// exited on a closed channel or a labeled break), and cancel the
+	// stream context so a still-running provider goroutine is torn down
+	// rather than leaking to the next iteration.
+	streamIdle.Stop()
+	attempt.cancelStream()
+
+	// CW-20260517-0036 — provider-stream inactivity timeout fired.
+	// The provider held the channel open but produced no event for the
+	// full inactivity window: a silent stall. attempt.cancelStream() above
+	// has already torn down the HTTP stream. Surface this as a
+	// structured `stalled` error and end the turn — the same shape the
+	// mid-stream provider-error branch uses, with a distinct cause so
+	// operators (and subagent_runs.error) can tell a genuine stall from
+	// a provider-emitted error.
+	if streamStalled {
+		attempt.span.SetStatus(codes.Error, "provider stream inactivity timeout")
+		attempt.close()
+		stallErr := fmt.Errorf("provider stream stalled: no events for %s", streamInactivityWindow)
+		slog.Warn("chat-service: provider stream inactivity timeout — terminating stalled stream",
+			"session_id", sessionID, "iter", run.loop.iteration,
+			"inactivity_window", streamInactivityWindow.String(),
+			"events_seen", diagProvEventCount,
+			"caller", string(dispatcher.CallerTypeFromContext(ctx)))
+		// Outcome bookkeeping must survive cancellation of the provider stream it records.
+		s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "provider_stream_stalled", "error",
+			fmt.Sprintf("iteration %d: no provider events for %s", run.loop.iteration, streamInactivityWindow),
+			fmt.Sprintf(`{"model":%q,"inactivity_window_s":%d,"events_seen":%d}`,
+				model, int(streamInactivityWindow.Seconds()), diagProvEventCount))
+		if s.events != nil {
+			s.events.EmitError(ctx, sessionID, "provider_stream_stalled", stallErr.Error())
+		}
+		// Subagent suppression: if a subagent is active, the parent FE
+		// shouldn't see the stall surface (mirrors the provider-error
+		// branches). The subagent run still fails — drainCapture sees
+		// the error event below.
+		if s.suppressSurfaceIfSubagentCaused(sessionID, "provider_stream_stalled", run.fullContent.String()) {
+			return consumeProviderIterationResult{directive: generationTerminate}
+		}
+		stallDetails := map[string]interface{}{
+			"raw":               stallErr.Error(),
+			"model":             model,
+			"cause":             "stalled",
+			"inactivity_window": streamInactivityWindow.String(),
+		}
+		ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(stallErr), "Provider stream stalled — no response", stallDetails)
+		ch <- chat.ErrorEvent(chat.ClassifyError(stallErr), "Provider stream stalled — no response", stallDetails)
+		s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, stallErr)
+		return consumeProviderIterationResult{directive: generationTerminate}
+	}
+
+	// CW-20260418-0043 diagnostic — provider stream closed.
+	diagIteration := run.loop.iteration
+	if contextOverflowRecovered {
+		// The coordinator owns the actual decrement when it interprets the
+		// retry directive. Preserve the pre-extraction diagnostic value, which
+		// observed that decrement before logging the recovered attempt.
+		diagIteration--
+	}
+	diagLogProviderStream(sessionID, assistantMsgID, diagIteration,
+		time.Since(provStreamStart), diagProvEventCount, stopReason, len(toolUseBlocks))
+
+	// F4 (CW-20260419-0029) — flush buffered deltas with the correct phase.
+	// stopReason is now known: "tool_use" → narration, anything else → final.
+	// On context-overflow recovery (contextOverflowRecovered) we discard the
+	// buffer — the iteration is being retried so the partial content is stale.
+	if len(iterDeltaBuf) > 0 && !contextOverflowRecovered {
+		phase := chat.PhaseNarration
+		if stopReason != "tool_use" {
+			phase = chat.PhaseFinal
+		}
+		for _, fragment := range iterDeltaBuf {
+			stopDiag := diagWatchChSend(ctx, "streamLoop.delta.flush", ch, sessionID, assistantMsgID, run.loop.iteration, "delta")
+			ch <- chat.StreamEvent{Type: "delta", Content: fragment, Phase: phase}
+			stopDiag()
+		}
+	}
+
+	// F4 — route turnContent to the right accumulator now that phase is known.
+	// This drives the persistence split: run.narrationContent → metadata.thinking,
+	// run.finalContent → message.Content (via cleanContent / WrapResponse).
+	if !contextOverflowRecovered {
+		turnText := turnContent.String()
+		if stopReason == "tool_use" {
+			if turnText != "" {
+				run.narrationContent.WriteString(turnText)
+				run.narrationContent.WriteString("\n")
+			}
+		} else {
+			// The last iteration — and any early-exit text already in
+			// run.fullContent that didn't come from tool_use iterations.
+			run.finalContent.WriteString(turnText)
+		}
+	}
+
+	// T9 — the mid-stream overflow handler broke out of the stream loop so
+	// the outer loop can retry with a compacted request. Skip the
+	// post-stream processing (no content produced this attempt) and
+	// continue.
+	if contextOverflowRecovered {
+		attempt.close()
+		return consumeProviderIterationResult{directive: generationRetryIteration}
+	}
+
+	// Resolve remaining PTY tool presence.
+	if lastPTYToolPending != "" && chat.IsCLIProvider(providerName) {
+		s.streams.BroadcastPresence(chat.PresenceEvent{
+			Type: "tool_resolved", SessionID: sessionID, AgentID: agent.ID,
+			ToolName: lastPTYToolPending, Timestamp: time.Now().UTC().Format(time.RFC3339),
+		})
+	}
+
+	attempt.close()
+
+	// If no tool use, we are done.
+	if stopReason != "tool_use" || len(toolUseBlocks) == 0 {
+		if stopReason == "max_tokens" {
+			run.loop.wasTruncated = true
+			slog.Warn("chat-service: response truncated by max_tokens", "iter", run.loop.iteration)
+			ch <- chat.StreamEvent{Type: "status", Content: "Response was cut short due to length limits. Some content may be missing."}
+			// Outcome bookkeeping must survive cancellation of the provider response it records.
+			s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "max_tokens_truncation", "warning",
+				fmt.Sprintf("iteration %d: response truncated by max_tokens", run.loop.iteration),
+				fmt.Sprintf(`{"model":%q,"iteration":%d}`, model, run.loop.iteration))
+			ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, "Response truncated — hit output token limit", map[string]interface{}{
+				"stop_reason": "max_tokens", "iteration": run.loop.iteration, "model": model,
+			})
+		}
+		diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "done:stop_reason="+stopReason, len(run.loop.toolCallRefs), ch)
+		return consumeProviderIterationResult{directive: generationFinishRun}
+	}
+
+	return consumeProviderIterationResult{
+		directive: generationProceed,
+		turn:      providerTurn{content: turnContent.String(), toolUseBlocks: toolUseBlocks},
+	}
 }
 
 type finalizeRunResult struct {

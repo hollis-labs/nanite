@@ -52,6 +52,9 @@ Host owns process/environment mechanics. It knows **how to run an agent**, not *
 ### Product apps remain independently useful
 Put common infrastructure in libraries/hosts rather than forcing whole-app dependencies. Requiring another app for a product's core function is a boundary smell.
 
+### Own execution, not business truth
+Hollis tools provide engines, runners, validation, and infrastructure. They own the operational state required to perform those responsibilities, not the business definitions or business data they operate on. Keep authority, custody, control, and provenance distinct: originating systems remain authoritative; caches and observed projections are derived and disposable; materialization does not transfer ownership; destructive lifecycle behavior requires explicit policy from the owner.
+
 ### Plugins declare; host validates and grants
 Hooks/filters are extension behavior. Manifests declare surface. Distinguish declared/granted/used capabilities. Prefer narrow host APIs and transactional registration.
 
@@ -90,6 +93,34 @@ Use package boundaries, types, CI/static tests, schemas, and conformance tests t
 
 ### Do not generalize until real pressure exists
 Recognize broader abstractions early, keep current structures compatible with them, but extract only when multiple real use cases create duplication/friction.
+
+## Twelve-factor application principles, adapted for Go
+
+These factors preserve the operational intent of twelve-factor applications while accounting for compiled Go binaries, local-first products, and independently useful portfolio tools.
+
+1. **One codebase, many deployments.** Keep one authoritative codebase in revision control for an application. Development, test, staging, production, desktop, and service installations are deployments of that codebase, not divergent copies of it.
+
+2. **Declare and isolate dependencies.** Declare Go modules in `go.mod` and lock their resolved versions in `go.sum`. Treat required binaries, generators, runtimes, and system packages as explicit toolchain or deployment dependencies; never rely silently on whatever happens to be installed globally.
+
+3. **Externalize deployment configuration.** Keep deployment-varying configuration out of compiled constants and source-controlled business logic. Accept environment variables, flags, config files, secret references, or an external settings store at the process boundary, then parse them into validated typed Go configuration. Environment variables are a transport, not the application configuration model.
+
+4. **Treat backing services as attached resources.** Address databases, caches, queues, model providers, MCP servers, object stores, and other services through replaceable resource references such as URLs, DSNs, or provider-qualified handles. Application logic should not depend on whether a compatible resource is local, managed, or remote.
+
+5. **Separate build, release, and run.** Build produces an immutable binary or artifact. Release binds that artifact to a specific configuration and environment. Run executes that release without compiling source or silently changing its contents.
+
+6. **Make process state disposable.** Do not rely on in-memory process state for durable truth. Persist durable state in explicit backing stores or declared local data roots, including SQLite where appropriate for local-first applications. A self-contained binary may be stateful as a product while each process instance remains restartable from durable state.
+
+7. **Export services through port binding.** Networked Go services embed their server, commonly with `net/http`, and listen on an explicitly configured address. Do not require an external application server to host the process; proxies, tunnels, and service managers remain replaceable infrastructure around it.
+
+8. **Use the process model for deployment concurrency.** Scale independently schedulable workloads with additional process instances or workers where the product requires it. Use goroutines for concurrency within a process, but do not confuse goroutine concurrency with horizontal scale or durable work distribution. Products that are intentionally single-user or local remain free to run as one instance.
+
+9. **Design for disposability.** Start quickly, handle cancellation through `context.Context`, respond to operating-system signals, stop accepting new work during shutdown, and bound graceful cleanup. Recovery must not depend on a process receiving unlimited time before termination.
+
+10. **Maintain development/production parity.** Use the same build path, dependency versions, schemas, and runtime contracts across environments. Differences should be expressed through configuration and attached resources rather than environment-specific code paths or locally installed conveniences.
+
+11. **Treat logs as event streams.** Emit structured operational logs to stdout and stderr and let the execution environment route, retain, and index them. When a product requires persistent diagnostic or audit history, make that sink explicit rather than hiding file rotation and retention inside ordinary application logging.
+
+12. **Run administration as one-off release processes.** Execute migrations, repairs, imports, and other management operations from the same artifact, dependency set, configuration model, and authority boundary as the application release. Prefer explicit Go subcommands or one-shot modes over separately maintained scripts with environmental assumptions.
 
 ## Recurring boundary sketches
 
@@ -136,3 +167,5 @@ Canonical semantics
 10. Is hard enforcement used only where a real invariant requires it?
 11. Is provenance sufficient to explain/security-audit the behavior?
 12. Are recovery axes and lifecycle identities being accidentally conflated?
+13. Does the component own only its execution and operational state, while business definitions and data remain with their authoritative owner?
+14. Are dependencies, configuration, durable state, logs, and administrative operations explicit at the process boundary?

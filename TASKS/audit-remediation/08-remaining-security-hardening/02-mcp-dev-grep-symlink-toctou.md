@@ -1,7 +1,7 @@
 # MCP dev-tool grep/glob walk callbacks don't re-validate per-entry symlinks
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/mcp/dev_tools.go` (`callGrep`, `callGlob`)
 **Requires architect decision:** false
@@ -115,4 +115,4 @@ Low — the fix only tightens what's readable, never expands it. Rollback is a s
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-22 — Initial fresh review found the production confinement sound but rejected the regression coverage: static symlink fixtures did not pin the validate/use race, and the grep fixture could fail via a pre-existing first-line context panic. A focused correction added deterministic post-validation symlink-swap coverage for both grep and glob and moved the grep secret behind a nonmatching first line. Mutation testing confirmed ordinary `os.Stat`/`os.Open` leaked or listed the outside target while the restored rooted operations blocked it. Fresh re-review: **PASS**.

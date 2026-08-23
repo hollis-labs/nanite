@@ -53,6 +53,46 @@ timeout, to not completing. Waves 6–8 will hit the same wall.
 **`go test -race ./...` completes.** Not quickly — completes, and emits a
 verdict, within a timeout a person will actually wait for.
 
+## The cause is confirmed, and the fix already exists in this repo
+
+**Found 2026-08-23, before dispatch.** This task was written as
+measure-then-decide. That work is done, and the answer narrows it
+considerably — read this before the (retained) measurement step.
+
+**`internal/store`'s own tests already solved this.**
+`internal/store/store_test.go:24-70`:
+
+- `testStoreTemplate` uses a `sync.Once` to build **one** migrated database in a
+  temp dir, once per test binary.
+- `newTestStore` then **copies that template file** into the test's own
+  `t.TempDir()` and opens it.
+
+Full migrations run once; every fixture after that is a file copy.
+
+**The packages that time out do not use it.** `internal/service` has its own
+`newTestStore` (`internal/service/a2a_gate_integration_test.go:205`) that calls
+`store.New(...)` directly — a full migration run per fixture. Repo-wide there
+are **96 direct `store.New(` calls in `_test.go` files**, across
+`internal/service`, `internal/selftools`, `internal/api`, `internal/chat`,
+`internal/skill`, `internal/skillinstall` and others.
+
+That is the cost, and it explains the pattern exactly: `internal/store`'s own
+race suite is fine, while the packages that build stores *through* it are the
+ones that cannot finish.
+
+**So this is an adoption task, not an invention task.** Lift `internal/store`'s
+template helper into something the other packages can use — a small exported
+test helper, or `internal/storetest`, or whatever fits this repo's conventions
+— and migrate the 96 call sites onto it. There is a proven in-repo pattern to
+copy; do not design a new one.
+
+**The one hazard to respect:** a shared *template* must not become shared
+*state*. `internal/store` gets this right — the template is read-only and each
+test copies it to its own temp file. Any adoption that has tests share one live
+database is a test-isolation bug, not a speedup, and this batch has already had
+one of those (`08/10` writing synthetic memories into the operator's real
+Tesseract database).
+
 ## What to do
 
 ### 1. Measure before optimising
@@ -71,17 +111,17 @@ worked, and this task's own "done" is a timing claim.
 
 ### 2. Likely approaches, in rough order of value
 
-Not prescriptive — pick against what the measurement shows:
+**Primary approach, per the section above: adopt `internal/store`'s existing
+template-copy helper across the 96 `store.New(` test call sites.** Everything
+below is fallback, for use only if measurement contradicts the diagnosis:
 
-- **Migrate once per package, not per fixture.** A `TestMain` or `sync.Once`
-  that applies migrations to a template database, with each test copying or
-  transacting against it.
-- **Template-database snapshot.** Apply migrations once, snapshot the file,
-  and have each fixture copy the bytes. Usually far cheaper than replaying DDL.
-- **In-memory with a shared cache** where the test does not need file
-  durability.
+- **In-memory with a shared cache** where a test needs no file durability.
 - **Serialise the migration-heavy packages** rather than making them faster —
-  the fallback Wave 3 named. Weakest option: it manages the symptom.
+  Wave 3's named fallback. Weakest option; it manages the symptom.
+
+If the measurement shows the cost is *not* dominated by migration application,
+**stop and report** — the diagnosis above would be wrong and the approach with
+it.
 
 ### 3. Do not change what the tests assert
 
@@ -100,6 +140,10 @@ fixture setup, that is the natural moment.
 
 - `go test -race ./...` **completes and emits a verdict** within a timeout a
   person will wait for. State the before and after numbers.
+- **Zero remaining `store.New(` calls in `_test.go` files** that could use the
+  shared template helper — or each remaining one justified in the Work log.
+- Test isolation preserved: every fixture still gets **its own** database file,
+  not a shared live one. Say how this was verified.
 - `go test ./...` and `go test -race ./...` both pass, with the suite's
   assertions unchanged.
 - `internal/selftools` and `internal/service` aggregate race suites — the two

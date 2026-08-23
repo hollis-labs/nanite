@@ -1,7 +1,7 @@
 # Transport-layer validation duplication (schedules/settings) and a memories-pagination correctness bug
 
 **Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/api/schedules.go`, `internal/api/settings.go` (GO-API-004); `internal/api/memories.go`, `internal/memory` package (`RecallOpts`/`Recall`) (GO-API-005)
 **Requires architect decision:** **mixed** — GO-API-004: false (task-authoring call, see divergence note); GO-API-005: false (matches `findings.json`)
@@ -164,4 +164,4 @@ GO-API-004's consolidation carries real regression risk **if the three producers
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-23: Final fresh review through `eb373144fff495fbe566e937254d10cf19253d4e` passed after two correction rounds. The review verified shared schedule validation across every producer and final store boundary, the settings scope correction, uncapped filter-before-pagination, large offsets, unified Unicode page/total matching, legacy timestamp/order parity with Tesseract, and returned-page-only access reinforcement. It also verified every service/API/memory test database resolves beneath disposable roots using the actually opened SQLite path. Full service tests, focused race suites, build, vet, and series-wide diff checks passed; the operator database was not opened during final review.

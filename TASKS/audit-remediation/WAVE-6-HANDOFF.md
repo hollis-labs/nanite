@@ -37,7 +37,7 @@ wave is committed.
 `TASKS/INDEX.md` marks every Wave 6a and Wave 6b row `reviewed`.
 `TASKS/audit-remediation/findings.json` has 18 findings mapped to
 `11-semantic-duplication-migration-drift`; all 18 now have
-`task_status: "reviewed"`: 14 `remediate`, 4 `defer`.
+`task_status: "reviewed"`: 14 `remediate`, 4 `accepted-risk`.
 
 ## 2. Operator decisions preserved
 

@@ -1,0 +1,189 @@
+name: Full-repo quality gate
+
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-repo-quality-gate
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    strategy:
+      matrix:
+        include:
+          # One source feeds both runs-on and the runtime baseline check.
+          - runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: apps/nanite
+    steps:
+      # Nanite's go.mod has four local replaces at ../../libs/<module>.
+      # Preserve that exact geometry in the Actions workspace.
+      - name: Check out Nanite
+        uses: actions/checkout@v4
+        with:
+          path: apps/nanite
+
+      - name: Check out go-modelsdev
+        uses: actions/checkout@v4
+        with:
+          repository: hollis-labs/go-modelsdev
+          ref: 7d932798b85145ec93f923e392f5d41762894e8c
+          path: libs/go-modelsdev
+
+      - name: Check out go-envelopes
+        uses: actions/checkout@v4
+        with:
+          repository: hollis-labs/go-envelopes
+          ref: 7642d69f64499ea180c0c596a48516e00cd28d46
+          path: libs/go-envelopes
+
+      - name: Check out go-harness-filters
+        uses: actions/checkout@v4
+        with:
+          repository: hollis-labs/go-harness-filters
+          ref: 57a6b0919c0c5f06db90b367184988a72c430d39
+          path: libs/go-harness-filters
+
+      - name: Check out go-runtime-events
+        uses: actions/checkout@v4
+        with:
+          repository: hollis-labs/go-runtime-events
+          ref: 8756744985a6602d6ab1fb0df78d5aabc3920b1b
+          path: libs/go-runtime-events
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/nanite/go.mod
+          cache: true
+          cache-dependency-path: apps/nanite/go.sum
+
+      - name: Verify runner matches committed baseline
+        run: >-
+          python3 scripts/quality-ratchet.py platform
+          --runner "${{ matrix.runner }}"
+
+      - name: Discover tracked Go packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          go_list_file="$RUNNER_TEMP/go-list.txt"
+          package_file="$RUNNER_TEMP/tracked-go-packages.txt"
+          go list -f '{{.ImportPath}}{{"\t"}}{{.Dir}}' ./... > "$go_list_file"
+          : > "$package_file"
+          while IFS=$'\t' read -r _ directory; do
+            relative=${directory#"$PWD"/}
+            if git ls-files --error-unmatch -- "$relative/*.go" >/dev/null 2>&1; then
+              echo "./$relative" >> "$package_file"
+            fi
+          done < "$go_list_file"
+          test -s "$package_file"
+          cat "$package_file"
+
+      - name: Install pinned quality tools
+        shell: bash
+        run: |
+          tool_bin="$RUNNER_TEMP/quality-tools"
+          mkdir -p "$tool_bin"
+          echo "$tool_bin" >> "$GITHUB_PATH"
+          GOBIN="$tool_bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
+          GOBIN="$tool_bin" go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          GOBIN="$tool_bin" go install golang.org/x/vuln/cmd/govulncheck@v1.2.0
+          GOBIN="$tool_bin" go install golang.org/x/tools/cmd/deadcode@v0.45.0
+
+      - name: Run uncapped audit-config lint ratchet (Stage 1)
+        shell: bash
+        run: |
+          packages=()
+          while IFS= read -r package; do
+            packages+=("$package")
+          done < "$RUNNER_TEMP/tracked-go-packages.txt"
+          golangci-lint linters \
+            --config docs/audits/2026-08-21-go-quality/audit-golangci.yml \
+            --json > "$RUNNER_TEMP/audit-linters.json"
+          golangci-lint run \
+            --config docs/audits/2026-08-21-go-quality/audit-golangci.yml \
+            --issues-exit-code=0 \
+            --max-issues-per-linter=0 \
+            --max-same-issues=0 \
+            --output.text.path="$RUNNER_TEMP/audit-lint.txt" \
+            --output.text.colors=false \
+            --output.json.path="$RUNNER_TEMP/audit-lint.json" \
+            "${packages[@]}"
+          python3 scripts/quality-ratchet.py lint \
+            --report "$RUNNER_TEMP/audit-lint.json" \
+            --linters-report "$RUNNER_TEMP/audit-linters.json" \
+            --runner "${{ matrix.runner }}"
+
+      - name: Run vulnerability scan
+        shell: bash
+        run: |
+          packages=()
+          while IFS= read -r package; do
+            packages+=("$package")
+          done < "$RUNNER_TEMP/tracked-go-packages.txt"
+          govulncheck "${packages[@]}"
+
+      - name: Run standalone gosec and apply known-noise policy
+        shell: bash
+        run: |
+          packages=()
+          while IFS= read -r package; do
+            packages+=("$package")
+          done < "$RUNNER_TEMP/tracked-go-packages.txt"
+          gosec -no-fail -exclude-dir=.claude -fmt=json \
+            -out="$RUNNER_TEMP/gosec.json" "${packages[@]}"
+          python3 scripts/quality-ratchet.py gosec \
+            --report "$RUNNER_TEMP/gosec.json" \
+            --runner "${{ matrix.runner }}"
+
+      - name: Verify modules
+        shell: bash
+        run: |
+          go mod verify
+          go mod tidy -diff
+
+      - name: Report dead code
+        shell: bash
+        run: |
+          set -o pipefail
+          packages=()
+          while IFS= read -r package; do
+            packages+=("$package")
+          done < "$RUNNER_TEMP/tracked-go-packages.txt"
+          deadcode -test "${packages[@]}" | tee "$RUNNER_TEMP/deadcode.txt"
+
+      - name: Run aggregate race suite
+        shell: bash
+        run: |
+          packages=()
+          while IFS= read -r package; do
+            packages+=("$package")
+          done < "$RUNNER_TEMP/tracked-go-packages.txt"
+          go test -race -count=1 "${packages[@]}"
+
+      - name: Upload quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-repo-quality-reports
+          path: |
+            ${{ runner.temp }}/audit-lint.json
+            ${{ runner.temp }}/audit-lint.txt
+            ${{ runner.temp }}/audit-linters.json
+            ${{ runner.temp }}/gosec.json
+            ${{ runner.temp }}/deadcode.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # Stage 2 is intentionally absent. Activate zero-tolerance for exactly
+      # errcheck/errorlint/nilerr only after task 14/02 makes all three zero.

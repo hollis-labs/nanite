@@ -1,7 +1,7 @@
 # Wire the existing full-repo uncapped lint gate into an actual enforcement point
 
 **Phase:** Wave 7 — Quality ratchet
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none technically, but see Context — this task is a natural *late*
 item in any eventual sequencing (the guide's own Wave 7 framing: enforcement
 comes "after meaningful backlog reduction," not before). A planner should not
@@ -37,10 +37,11 @@ runbook note; it does not touch any Go source.
 > caught `GO-STORE-003`** (high severity) and was ignored because the fast hook
 > runs `--new` and cannot see pre-existing findings in untouched code.
 >
-> ### ⚠ Stage 2 has a 365-finding prerequisite that no task owns
+> ### ⚠ Stage 2 has a 353-finding prerequisite owned by `14/02`
 >
-> errcheck **294** + errorlint **49** + nilerr **22** = **365**. `13/04` touches
-> five files; it is nowhere near this, and nothing else in the batch covers it.
+> Re-measured at implementation time: errcheck **281** + errorlint **48** +
+> nilerr **24** = **353**. Task `14/02` owns paying all three backlogs down to
+> zero and activating Stage 2 as its closing act.
 >
 > **Do not activate stage 2 until that backlog is zero.** A gate that fails
 > every merge from day one gets disabled within a week, taking stage 1 with it.
@@ -109,18 +110,19 @@ deliberately narrow:
 - `lefthook.yml:65-69` (`pre-push` → `go-test`): `go test ./...` — no lint at
   all.
 
-And there is no `.github/workflows/` directory anywhere in the repo (audit's
-own repo-wide check, confirmed independently during this task-writing pass:
-`ls .github/workflows` against this worktree returns no such directory).
+Before this task was implemented, there was no `.github/workflows/` directory
+anywhere in the repo (the audit's repo-wide check, confirmed independently
+during the task-writing pass). This task adds that directory and the first
+workflow after the operator selected GitHub Actions.
 
-Running `make lint` directly today surfaces **2,338 issues** under the
-project's own already-approved linter set (`raw/golangci-baseline.log`,
-referenced in the audit's evidence): errcheck 284, gosec 590, govet 530,
-misspell 394, forbidigo 222, revive 68, staticcheck 78, unparam 35, unused 43,
-errorlint 47, exhaustive 20, nilerr 22, ineffassign 2, unconvert 3. Whole-repo
-debt accumulates silently: a file can carry an arbitrary number of
-pre-existing issues forever as long as nobody touches those exact lines,
-because `--new`-only linting only ever looks at diffs.
+The clean, tracked-package implementation-time audit-config run surfaces
+**3,615 issues**: cyclop 290, dupl 97, errcheck 281, errorlint 48, exhaustive
+28, forbidigo 236, funlen 69, gocognit 257, gocyclo 287, gosec 637, govet 619,
+ineffassign 2, maintidx 31, misspell 429, nestif 62, nilerr 24, revive 70, staticcheck 75,
+unconvert 3, unparam 26, and unused 44. Whole-repo debt accumulates silently:
+a file can carry an arbitrary number of pre-existing issues forever as long as
+nobody touches those exact lines, because `--new`-only linting only ever looks
+at diffs.
 
 ### The GO-SVCCORE-005 caveat (tool-syntax gap, fold into this gate's design)
 
@@ -168,12 +170,12 @@ Quoting the guide directly (§4, Wave 7, "Full-repo scheduled/merge gate"):
 > Do not require historical low-value debt to hit zero before introducing a
 > ratchet. Baseline and reject regressions/new actionable findings.
 
-Concretely: the 2,338-issue current backlog does **not** need to reach zero
+Concretely: the 3,615-issue current audit-config backlog does **not** need to reach zero
 before this gate exists. The gate's job is to (a) capture the current state
 as a recorded baseline, and (b) fail when a *new* run's actionable finding
 count exceeds that baseline (or, more precisely, when a genuinely new
 actionable finding appears — not a re-count of the same historical debt) —
-not to block on the existing 2,338. The fast developer gate
+not to block on the existing 3,615. The fast developer gate
 (`lefthook.yml`'s `pre-commit`/`pre-push`) stays exactly as it is; nothing in
 this task adds to it.
 
@@ -270,7 +272,7 @@ a separate, additional gate.
   complete in <15 seconds on staged files only."* (`lefthook.yml:3`) Nothing
   in this task adds a new command to that file or changes an existing one's
   behavior.
-- **Do not drive the 2,338-issue backlog to zero.** That is explicitly not
+- **Do not drive the 3,615-issue backlog to zero.** That is explicitly not
   this task's job — see Desired invariant above. A separate mechanical-
   cleanup effort (this batch's `13-mechanical-cleanup/` folder, and likely
   further work beyond it) reduces the backlog over time; this task only adds
@@ -300,7 +302,7 @@ a separate, additional gate.
   revert the throwaway change). This is the functional-correctness check
   for a gate rather than a unit test.
 - Confirm the gate's baseline-comparison logic (however it's implemented)
-  does *not* fail on the pre-existing 2,338-issue backlog on its first run —
+  does *not* fail on the pre-existing 3,615-issue backlog on its first run —
   this is the direct verification of the "baseline and reject regressions"
   invariant.
 
@@ -321,9 +323,10 @@ rediscovering it as a confusing false alarm on a future scheduled run.
 go build ./...
 go vet ./...
 golangci-lint run --max-issues-per-linter=0 --max-same-issues=0
-gosec ./...              # expect exactly one known/accepted G404 at
-                          # internal/service/recovery_envelope_sink.go:223
-                          # per the GO-SVCCORE-005 caveat above
+gosec -no-fail -exclude-dir=.claude -fmt=json -out=/tmp/gosec.json ./...
+                          # the comparison policy accepts exactly the G404 at
+                          # internal/service/recovery_envelope_sink.go:223;
+                          # all other findings remain in the actionable ratchet
 govulncheck ./...
 go mod verify
 go mod tidy -diff
@@ -349,30 +352,108 @@ file this task adds — no code-level revert needed.
 
 ## Done means
 
-- [ ] Architect/operator has confirmed whether an existing CI mechanism
+- [x] Architect/operator has confirmed whether an existing CI mechanism
       already runs (or could run) `make lint` on a schedule, and if not, has
       chosen where the new gate should live.
-- [ ] A full-repo scheduled or merge-to-main gate exists that runs all six
+- [x] A full-repo scheduled or merge-to-main gate exists that runs all six
       checks named in the guide's Wave 7 (uncapped lint, `govulncheck`,
       `gosec`, module verification, dead-code report, race suite where
       runtime permits).
-- [ ] The gate's `gosec`-specific known-noise policy documents
+- [x] The gate's `gosec`-specific known-noise policy documents
       `internal/service/recovery_envelope_sink.go:223` as a pre-triaged,
       accepted non-issue (GO-SVCCORE-005).
-- [ ] The gate does not fail against the current ~2,338-issue baseline on its
+- [x] The gate does not fail against the current 3,615-issue baseline on its
       first run; it does fail when a genuinely new actionable finding is
       introduced.
-- [ ] `lefthook.yml`'s `pre-commit`/`pre-push` are unchanged — still under
+- [x] `lefthook.yml`'s `pre-commit`/`pre-push` are unchanged — still under
       the <15-second target stated in the file's own header.
-- [ ] A short runbook note describing the gate's scope, cadence, and the
+- [x] A short runbook note describing the gate's scope, cadence, and the
       GO-SVCCORE-005 caveat exists somewhere discoverable (exact location
       per this project's own doc conventions, determined at implementation
       time).
 
 ## Work log
 
-<!-- Worker fills in: what was actually done, any deviation and why. -->
+- 2026-08-23: The operator selected GitHub Actions. Added a nightly 07:17 UTC
+  plus manual-dispatch workflow, committed baseline, deterministic comparison
+  runner, and runbook. Stage 1 covers all 21 audit-config linters. Stage 2
+  remains deliberately inactive until `14/02` reduces errcheck 281 + errorlint
+  48 + nilerr 24 (353) to zero.
+- Added a committed JSON baseline and deterministic comparison runner. Stage 1
+  is active across all 21 linters in the audit config and now passes at the
+  clean, tracked-package count of 3,615 findings.
+- Fresh-review fix, 2026-08-23: rebuilt the Actions workspace as
+  `apps/nanite` plus four public `libs/<module>` checkouts, pinned to the
+  supplied remotely available commits. `go list ./...`, build, and vet all
+  load successfully from that isolated geometry. The one-entry `macos-15`
+  matrix feeds both `runs-on` and the comparator, which verifies the intended
+  runner plus actual `go env GOOS/GOARCH` against baseline metadata before
+  either comparison.
+- The local 3,623 versus clean-checkout 3,615 discrepancy was one ignored npm
+  dependency, `ui/node_modules/flatted/golang/pkg/flatted/flatted.go`; it
+  contributed exactly eight complexity findings. The workflow now discovers
+  buildable packages and keeps only directories containing Git-tracked Go
+  files, producing 3,615 identically in fresh-cache local and isolated runs.
+- Standalone gosec v2.28.0 over the explicit tracked-package set reports 317
+  findings. The comparator requires exactly one GO-SVCCORE-005
+  path/rule/symbol match and ratchets all 316 nonmatches by rule. End-to-end
+  regression tests prove zero matches exit 1, one exits 0, and two exit 1;
+  they also prove altered baseline GOARCH exits 1.
+- Functional regression proof: temporarily added
+  `internal/brand/quality_ratchet_regression.go` with one misspelling and one
+  unused declaration. The comparator exited 1 after `misspell` increased
+  429→430 and `unused` increased 44→45. The temporary file was then deleted;
+  it is absent from the final tree. The current clean comparison is
+  3,615/3,615 with exit 0.
+- Final local verification exits: `go build ./cmd/nanite/` 0; `go vet ./...`
+  0; `go test ./... -count=1` 0; tracked-package lint ratchet 0; tracked-package
+  gosec ratchet 0; `go mod verify` and `go mod tidy -diff` 0; comparator tests
+  0; actionlint 0; YAML and JSON parse checks 0. The earlier aggregate race
+  suite completed with exit 0 against the developer sibling checkouts; the
+  orchestrator-owned run recorded `internal/store` at 262.184s.
+- Fresh-review blocker and resolution: the first clean proof found that public
+  go-envelopes stopped at `4456292`, while Nanite's passing local state was
+  unpushed `7978078`; the remote-pin ordinary suite exposed table-card and
+  retired-envelope compatibility failures. The operator authorized publishing
+  go-envelopes v0.2.0. Its annotated tag peels to release commit
+  `7642d69f64499ea180c0c596a48516e00cd28d46` on public `origin/main`; the
+  workflow now pins that exact commit, and the full clean ordinary/race proof
+  passes. No review or approval is claimed.
+- Released-pin clean verification exits: `go list ./...` 0 with 109 packages;
+  `go build ./cmd/nanite/` 0; `go vet ./...` 0; `go test ./... -count=1` 0;
+  tracked-package lint 0 at 3,615/3,615; tracked-package gosec 0 at 316/316
+  actionable findings plus exactly one accepted match; `govulncheck` 0 with no
+  vulnerabilities; `go mod verify` and `go mod tidy -diff` 0; deadcode 0 with
+  a 64-line report; and tracked-package `go test -race -count=1` 0, with
+  `internal/store` completing in 235.123s.
+- Second re-review fix, 2026-08-24: package discovery now writes `go list`
+  output with a direct fail-fast command before filtering begins, instead of
+  consuming it through process substitution. A focused shell proof used a
+  producer that wrote one partial row and returned 23; the wrapper returned 23
+  and the filtering marker remained absent. Clean discovery still finds 109
+  tracked packages, and the lint ratchet remains 3,615/3,615. Corrected the two
+  current-summary `14/02` backlog references from 365 to 353 while preserving
+  historical frozen-HEAD measurements. No review or approval is claimed.
+- Orchestrator validation independently reproduced the partial-producer exit
+  23 with no filtering output, confirmed real discovery still selects 109
+  packages, reran all four comparator tests, the positive platform check,
+  actionlint, JSON validation, whitespace/scope guards, and verified the two
+  current summary rows now say 353. All passed; no application Go source,
+  `lefthook.yml`, or `.golangci.yml` changed.
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail, what was independently re-verified. -->
+**2026-08-24 — final fresh-review verdict: PASS, no findings.** The initial
+review found the missing sibling checkouts, unbounded gosec exception, and
+unenforced/deprecated runner; re-review then found the package-discovery
+fail-open and two stale current-count summaries. Separate worker fixes
+resolved each finding. The reviewer independently verified all four public
+dependency pins and the v0.2.0 tag peel, clean Actions-shaped package loading,
+build/vet/ordinary tests, the complete 109-package scope, 3,615 findings
+across exactly 21 audit-config linters, 317 standalone gosec findings (one
+accepted and 316 actionable), gosec cardinality and platform regressions, all
+six workflow families, actionlint/YAML/JSON/module/deadcode/vulnerability
+checks, the recorded released-pin race exit 0, tracker and protected-file
+scope, and the durable escalation entries. Final narrow review reproduced that
+partial package output followed by exit 23 cannot reach filtering and
+confirmed both current summary tables say 353. No findings remain.

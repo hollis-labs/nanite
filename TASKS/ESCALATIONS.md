@@ -1568,3 +1568,143 @@ and `go test ./...` passing.
 this tool environment, do not rely on prompted worktree isolation for write agents. Either dispatch
 serially, or keep parallel subagents read-only/report-only and have the Orchestrator apply central
 tracking edits.
+
+## 2026-08-23 — Wave 7 preflight found stale quality-ratchet and Wave 6 record facts
+
+**Question / mismatch:** Four committed records had drifted from current source or
+tracker state. AD-21 still presented errcheck 294 + errorlint 49 + nilerr 22
+= 365 as current and said no task owned the paydown, while fresh uncapped runs
+measured 281 + 48 + 24 = 353 and `14/02` now owns reaching zero. A duplicate
+historical AD-21 block still said `Status: open` below the decided block.
+`WAVE-6-HANDOFF.md` described the 18 Wave 6 findings as 14 `remediate` plus
+4 `defer`, but `findings.json` uses the actual disposition `accepted-risk` for
+those four. Finally, task `12/03` cited the audit-time
+`internal/sandbox/proxy.go:414`; current source and functional verification
+place the unchanged watcher at line 342.
+
+**Resolution:** Corrected the current counts and named `14/02` owner in the
+12/01 task, index, baseline/runbook records, and AD-21 implementation-time
+update; marked the duplicate historical AD-21 question superseded; corrected
+the Wave 6 handoff disposition vocabulary; and qualified every 12/03 watcher
+reference with audit-time line 414 versus current line 342. These were record-
+accuracy corrections; the two-stage AD-21 decision, Wave 6 outcomes, and
+watcher behavior did not change.
+
+**Follow-up:** `14/02` must use the re-measured 281/48/24 backlog and must not
+activate Stage 2 until all three counts are zero. Re-measure again when that
+task begins because the values are expected to drift as remediation continues.
+
+## 2026-08-23 — Wave 7 worker tracker patch changed unrelated finding statuses
+
+**Question / mismatch:** The serialized `12/01` worker wrote the shared
+`findings.json` from stale context and included status edits outside its two
+owned findings, including downgrading the already-reviewed `GO-SEC4-009` row.
+An initial orchestrator repair used insufficiently specific patch context and
+briefly moved other unrelated rows. A final whole-file scoped diff exposed all
+unrelated changes before review or closeout.
+
+**Resolution:** Restored every unrelated finding to its pre-wave status and
+then promoted only `GO-HYG-001` and `GO-SVCCORE-005` for task `12/01`, while
+preserving reviewed `GO-SEC4-009` for task `12/03`. `jq empty`, an exact
+`findings.json` diff, and explicit ID/status queries now pass. No application
+code or operator data was affected.
+
+**Follow-up:** None beyond the already-promoted Wave 6 rule: when write agents
+share a checkout, serialize them and reconcile the complete central-tracker
+diff before validation. Tracker patches should also include the finding ID in
+their context rather than match generic `task_status` lines.
+
+## 2026-08-24 — Wave 7 `12/01` fresh review found four gate defects and a contaminated baseline
+
+**Question / mismatch:** The first `12/01` implementation passed in the
+developer checkout but could not execute as committed CI. A clean checkout
+proved the workflow omitted four `go.mod` local-replace siblings, so package
+loading failed before any ratchet ran. The standalone-gosec comparator ignored
+any number of path/rule/symbol matches even though only one GO-SVCCORE-005
+finding was accepted. The committed `darwin/arm64` platform metadata was not
+enforced and the chosen `macos-14` runner had entered deprecation. Finally,
+the stated 3,623 lint total included eight complexity findings from ignored
+`ui/node_modules/flatted/golang/pkg/flatted/flatted.go`; a clean checkout and
+the Git-tracked Nanite package set both contain 3,615. Re-review then proved
+the first discovery repair still ran `go list` inside process substitution,
+whose nonzero exit does not propagate to the `while`; partial output could
+silently run every downstream gate against an incomplete package set. The same
+pass found two current summary rows still saying 365 rather than 353.
+
+**Resolution:** Fresh-review fixes reconstruct the exact Actions workspace as
+`apps/nanite` plus four pinned public `libs/<module>` checkouts, use a
+single-source `macos-15` matrix, and fail fast unless runner identity plus
+actual `go env GOOS/GOARCH` match committed metadata. Package discovery now
+ratchets every buildable package containing Git-tracked Go files, excluding
+ignored local dependencies. The gosec comparator requires exactly one
+accepted match and committed tests cover zero/one/two matches plus platform
+drift. Package discovery now runs `go list` as a direct fail-fast producer and
+filters only its completed output; a partial-output/exit-23 proof stops before
+filtering, while real discovery still selects 109 packages. Both current
+summary rows now say 353. The first remote proof then exposed an unpublished `go-envelopes`
+dependency: public `4456292` could not satisfy Nanite's current envelope tests.
+With explicit operator authorization, `go-envelopes` v0.2.0 was released and
+the workflow pinned its release commit
+`7642d69f64499ea180c0c596a48516e00cd28d46`. A fresh Actions-shaped checkout
+then passed package loading, build, vet, ordinary tests, the 3,615 lint ratchet,
+the 316-actionable-plus-one-accepted gosec ratchet, govulncheck, module checks,
+deadcode, and the aggregate race suite (exit 0; `internal/store` 235.123s).
+
+**Follow-up:** When any pinned sibling changes, update the checkout SHA only
+after repeating the clean Actions-shaped proof. `14/02` still owns Stage 2;
+the correctness-three counts remain errcheck 281, errorlint 48, nilerr 24.
+
+## 2026-08-24 — `go-envelopes` v0.2.0 release checks exposed masked optional-tool failures
+
+**Question / mismatch:** The operator-authorized `go-envelopes` v0.2.0
+release completed its required build, vet, race, module, and diff checks, but
+the sibling repository's Makefile uses `command -v tool && tool || echo ...`
+for both staticcheck and govulncheck. A real tool finding is therefore
+misreported as “not installed” and the target exits 0. Direct checks exposed a
+pre-existing `staticcheck` U1000 for `registry.go:36` (`manifestRel`) and
+`GO-2026-6218` against the module's Go 1.26.1 standard-library floor (fixed in
+Go 1.26.6).
+
+**Resolution:** No Nanite or `12/01` change was required: Nanite's pinned Go
+1.26.7 clean-workspace `govulncheck` passes, and `go-envelopes` v0.2.0 was
+published only after its required `go test -race -count=1 ./...` passed. The
+two optional-tool results and misleading Makefile control flow are recorded
+here rather than being rewritten as release-check passes.
+
+**Follow-up:** In a separately authorized `go-envelopes` maintenance change,
+make installed-tool failures propagate distinctly from “tool unavailable,”
+triage/remove the unused `manifestRel`, and raise the module's supported Go
+patch floor to at least the fixed standard-library version if that compatibility
+tradeoff is accepted.
+
+## 2026-08-24 — Wave 7: `lint-goroutines` has wider coverage but still cannot fail, and the new CI gate does not run it
+
+**Raised by:** planner verification of the Wave 7 closeout.
+
+**Question / mismatch:** `12/03` expanded `lint-goroutines`' package list from 8 to 13, adding the
+trust-boundary packages (`internal/sandbox`, `permission`, `secrets`, `pathsafe`, `fsutil`). That is
+the coverage half of `GO-TEST`-adjacent goroutine tracking and it is correctly done.
+
+The mechanism half is unchanged, and deliberately so — the Work log records the non-fatal `@-grep`
+among things preserved. That is a defensible scope call on its own terms: the finding was about
+coverage, and blocking policy now belongs to `12/01`'s gate rather than to a Makefile target.
+
+**But `12/01`'s gate does not run it.** `grep -i "goroutine\|safego" .github/workflows/full-repo-quality.yml`
+returns nothing. So the `internal/safego` adoption sweep is now: advisory in the Makefile, unable to
+fail because of the leading `@-`, and absent from the only gate that blocks anything. Nothing
+detects a regression in it.
+
+That matters because of what it covers. `GO-SVCCORE-002`/AD-26 concerned untracked `safego.Go`
+spawns with no owner `Container.Shutdown()` can drain — a lifecycle-ownership class the guide names
+as a standard. The sweep is the only mechanism watching it, and `forbidigo` structurally cannot
+help: it matches identifiers and calls, not the `go` keyword, which is why this grep exists at all.
+
+**Resolution:** No change to Wave 7's close. Both tasks are correctly `reviewed`; neither task's own
+scope included wiring the sweep into CI, and inventing that mid-wave would have been scope creep.
+
+**Follow-up:** Add `make lint-goroutines` to `.github/workflows/full-repo-quality.yml` as a
+non-blocking reporting step first — consistent with AD-21's baseline-then-ratchet posture — and
+consider dropping the leading `@-` once the target is known clean in CI. Cheap, and it converts a
+target nobody runs into a signal somebody sees. Filed as a candidate in
+`14-followups/README.md`; not promoted, because Wave 7 closed correctly without it and it is a
+policy addition rather than a defect fix.

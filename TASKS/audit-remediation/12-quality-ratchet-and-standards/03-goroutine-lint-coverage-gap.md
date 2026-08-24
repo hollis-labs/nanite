@@ -1,7 +1,7 @@
 # Add the trust-boundary primitives cluster to `lint-goroutines`'s scanned packages
 
 **Phase:** Wave 7 — Quality ratchet
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none.
 **Touches:** `Makefile` (`lint-goroutines` target only, `Makefile:74-81`).
 
@@ -62,8 +62,9 @@ cluster's review scope, is the wrapper being adopted, not a scan target —
 correctly absent from the list for that reason, not an oversight.)
 
 The audit manually ran the equivalent check against this cluster and found
-exactly one bare `go func()`: `internal/sandbox/proxy.go:414`, inside
-`(*Proxy).runTunnel` (`internal/sandbox/proxy.go:399-405` for the enclosing
+exactly one bare `go func()` at audit-time
+`internal/sandbox/proxy.go:414` (current line 342), inside
+`(*Proxy).runTunnel` (audit-time `internal/sandbox/proxy.go:399-405` for the enclosing
 function, whose own doc comment states it uses "lifecycle-tracked
 goroutines," tracked via `p.lc` so `Proxy.Stop` can cancel the root
 context). The bare `go func()` at line 414 is a small internal watcher
@@ -96,7 +97,8 @@ sweep rather than depending on another manual audit to catch it.
 
 ## Scope
 
-One file, one target, one list. No Go source changes — `internal/sandbox/proxy.go:414`'s
+One file, one target, one list. No Go source changes — the watcher at audit-time
+`internal/sandbox/proxy.go:414` (current line 342)
 existing bare `go func()` is confirmed benign per the audit and is explicitly
 not required to change as part of this task (see Non-goals). This task only
 extends what the tool *looks at* going forward.
@@ -134,7 +136,8 @@ existing `Makefile` conventions, e.g. the backslash-continuation style
 already used for the first eight packages.)
 
 After adding, run `make lint-goroutines` once to confirm it surfaces
-`internal/sandbox/proxy.go:414` (the known, audit-confirmed-benign instance)
+`internal/sandbox/proxy.go:342` (audit-time line 414; the known,
+audit-confirmed-benign instance)
 — this is the expected, correct new output, not a regression. Do not
 "fix" that line as part of adding it to the scan; see Non-goals.
 
@@ -178,7 +181,7 @@ After adding, run `make lint-goroutines` once to confirm it surfaces
 
 - No unit test applicable — this is a `Makefile` target, not Go source.
   The verification step below (running `make lint-goroutines` and confirming
-  it now reports the known `internal/sandbox/proxy.go:414` line) is the
+  it now reports the known `internal/sandbox/proxy.go:342` line, formerly 414) is the
   functional-correctness check for this change.
 
 ## Prevention
@@ -198,7 +201,7 @@ make lint-goroutines
 ```
 
 Observable behavior required for PASS: output includes a line identifying
-`internal/sandbox/proxy.go:414` (the known bare `go func()` inside
+`internal/sandbox/proxy.go:342` (audit-time line 414; the known bare `go func()` inside
 `runTunnel`/`copyOne`) — confirming the newly-added packages are actually
 being scanned, not just listed. If the tool instead reports "(no bare
 goroutines in target packages)" after this change, the addition did not take
@@ -215,21 +218,40 @@ single-line revert to the package list.
 
 ## Done means
 
-- [ ] `lint-goroutines`'s scanned-package list in `Makefile` includes
+- [x] `lint-goroutines`'s scanned-package list in `Makefile` includes
       `internal/sandbox`, `internal/permission`, `internal/secrets`,
       `internal/pathsafe`, and `internal/fsutil`, alongside the existing
       eight.
-- [ ] `make lint-goroutines` run after the change reports
-      `internal/sandbox/proxy.go:414` (confirming the scan actually covers
-      the new packages).
-- [ ] No change made to `internal/sandbox/proxy.go` or any other Go source
+- [x] `make lint-goroutines` run after the change reports the audit-known
+      `internal/sandbox/proxy.go` watcher (now line 342 after source drift;
+      line 414 at audit time), confirming the scan covers the new packages.
+- [x] No change made to `internal/sandbox/proxy.go` or any other Go source
       file.
-- [ ] `internal/safego` itself remains outside the scanned list.
+- [x] `internal/safego` itself remains outside the scanned list.
 
 ## Work log
 
-<!-- Worker fills in: what was actually done, any deviation and why. -->
+- 2026-08-23: Added exactly the five named trust-boundary package paths to
+  `Makefile`'s existing `lint-goroutines` grep input list, preserving the
+  target's pattern, test-file exclusion, `safego.Go`/`safego.Call` filters,
+  and non-fatal leading `-`. No Go source was changed, `internal/safego`
+  remains outside the scan, and the package list was not expanded further.
+- Verification passed: `make lint-goroutines` reported the expected known
+  benign match at `internal/sandbox/proxy.go:342` (moved from audit-time line
+  414 by source drift); worker baseline checks
+  `go build ./cmd/nanite/`, `go vet ./...`, and `go test ./...` all passed.
+- Orchestrator validation independently inspected the complete diff, reran
+  `make lint-goroutines`, `jq empty TASKS/audit-remediation/findings.json`,
+  and `git diff --check`, and confirmed the watcher is reported at the current
+  line 342 with no tracked Go-source changes.
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail, what was independently re-verified. -->
+**2026-08-23 — fresh reviewer verdict: PASS, no findings.** The reviewer
+independently confirmed that only the five authorized packages were added;
+the original eight packages, non-fatal `@-grep`, regex, test exclusion, and
+both `safego` filters are unchanged; `internal/safego` and all tracked Go
+source remain untouched; and `make lint-goroutines` reports the unchanged
+watcher at `internal/sandbox/proxy.go:342`. The reviewer also independently
+reran `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...`, JSON
+validation, and `git diff --check`; all passed.

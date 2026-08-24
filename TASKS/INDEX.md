@@ -1138,8 +1138,8 @@ to proceed against the post-sweep signatures.
 
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
-| `12/01` | `12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md` | not-started | Wave 6 complete, `00/02` | AD-21 |
-| `12/03` | `12-quality-ratchet-and-standards/03-goroutine-lint-coverage-gap.md` | not-started | `04/04` | — |
+| `12/01` | `12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md` | reviewed | Wave 6 complete, `00/02` | AD-21 |
+| `12/03` | `12-quality-ratchet-and-standards/03-goroutine-lint-coverage-gap.md` | reviewed | `04/04` | — |
 
 ### Wave 9 — Follow-ups (`14-followups/`)
 
@@ -1155,7 +1155,7 @@ Waves 0-3 as decisions or review findings with no task attached.
 the batch's final commit per AD-22, so this wave must land ahead of it.
 
 `14/02` **blocks `12/01` stage 2** — zero-tolerance on `errcheck`/`errorlint`/
-`nilerr` cannot activate until its 365-finding backlog reaches zero.
+`nilerr` cannot activate until its current 353-finding backlog reaches zero.
 
 The folder README also carries a register of **seven follow-up candidates**
 logged in `TASKS/ESCALATIONS.md` but not promoted to tasks — visible in one

@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "platform": {
+    "goarch": "arm64",
+    "goos": "darwin",
+    "github_runner": "macos-15"
+  },
+  "audit_config": "docs/audits/2026-08-21-go-quality/audit-golangci.yml",
+  "stage_1": {
+    "active": true,
+    "counts": {
+      "cyclop": 290,
+      "dupl": 97,
+      "errcheck": 281,
+      "errorlint": 48,
+      "exhaustive": 28,
+      "forbidigo": 236,
+      "funlen": 69,
+      "gocognit": 257,
+      "gocyclo": 287,
+      "gosec": 637,
+      "govet": 619,
+      "ineffassign": 2,
+      "maintidx": 31,
+      "misspell": 429,
+      "nestif": 62,
+      "nilerr": 24,
+      "revive": 70,
+      "staticcheck": 75,
+      "unconvert": 3,
+      "unparam": 26,
+      "unused": 44
+    }
+  },
+  "stage_2": {
+    "active": false,
+    "linters": [
+      "errcheck",
+      "errorlint",
+      "nilerr"
+    ],
+    "activation_condition": "Activate zero-tolerance only after TASKS/audit-remediation/14-followups/02-error-handling-backlog-paydown.md reduces all three backlogs to zero. Until then these linters participate only in Stage 1 with their committed current counts."
+  },
+  "standalone_gosec": {
+    "version": "v2.28.0",
+    "actionable_rule_counts": {
+      "G101": 3,
+      "G104": 103,
+      "G115": 4,
+      "G118": 2,
+      "G120": 2,
+      "G122": 4,
+      "G202": 5,
+      "G204": 18,
+      "G301": 60,
+      "G302": 3,
+      "G304": 64,
+      "G306": 16,
+      "G401": 1,
+      "G404": 3,
+      "G501": 1,
+      "G702": 2,
+      "G703": 22,
+      "G704": 3
+    },
+    "known_noise": {
+      "file": "internal/service/recovery_envelope_sink.go",
+      "annotation_line": 223,
+      "rule_id": "G404",
+      "symbol": "pickRecoveryGiphyQuery",
+      "reason": "Cosmetic Giphy-query selection; no security decision depends on it. Bare gosec does not understand //nolint:gosec."
+    }
+  }
+}

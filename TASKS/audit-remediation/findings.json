@@ -137,8 +137,8 @@
       "false_positive_considerations": "Possible the project plans a separate CI system outside GitHub Actions that already runs make lint; no evidence of one found in-repo.",
       "task_file": "TASKS/audit-remediation/12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed still accurate and refreshed by 00/02: lefthook.yml's pre-commit still runs `golangci-lint run --new` (changed-lines only); no .github/workflows exists; `make lint`'s uncapped run total moved from 2,338 (audit-era baseline log) to a larger total at frozen HEAD (raw-1d3bfd96/golangci-baseline.log, per DELTA.md's per-linter table showing across-the-board increases). AD-21 (which lint classes become blocking) is this finding's own explicit gate on task 12/01. [AD-21/AD-22 DECIDED 2026-08-22: regression-gate all linters plus staged zero-tolerance on errcheck/errorlint/nilerr; gofmt ratchets now with one repo-wide sweep as the batch's final commit. Backlog 105 files at HEAD.] [DISPOSITION CORRECTED 2026-08-23: was left at needs-architect-decision when AD-21/AD-22 were recorded on 2026-08-22 -- the note was appended but the field was not flipped. Both decisions are made; the remaining work is remediation.]"
+      "task_status": "reviewed",
+      "revalidation_note": "Implemented, orchestrator-validated, and independently reviewed 2026-08-24 after the operator selected GitHub Actions. The nightly plus manual workflow reconstructs Nanite at apps/nanite with all four public local-replace siblings at libs/<module>, pinned to remotely available commits. Package discovery runs go list as a direct fail-fast command before filtering its completed output; a partial-output/nonzero-producer proof returns 23 without reaching filtering. A one-entry macos-15 matrix feeds both runs-on and runtime comparator validation of runner identity plus actual go env GOOS/GOARCH against the committed darwin/arm64 baseline. Stage 1 passes 3,615 findings across all 21 audit-config linters and rejects increases; package discovery excludes ignored local-only Go sources while retaining all 109 buildable packages with tracked Go files. Stage 2 remains inactive until task 14/02 reduces errcheck 281 + errorlint 48 + nilerr 24 (353) to zero. The first clean validation found public go-envelopes 4456292 lagged the unpushed passing local state 7978078. The operator authorized v0.2.0; its annotated tag peels to public release commit 7642d69f64499ea180c0c596a48516e00cd28d46, which the workflow now pins. Clean go list, build, vet, ordinary tests, lint, gosec, govulncheck, module checks, deadcode, and aggregate race all pass against that released dependency geometry; final fresh review passed with no findings."
     },
     {
       "id": "GO-SEC-003",
@@ -745,8 +745,8 @@
       "report_section": "\u00a78.3",
       "task_file": "TASKS/audit-remediation/12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed still open: recovery_envelope_sink.go's `//nolint:gosec` suppression is unchanged; this syntax is golangci-lint-only and a bare `gosec ./...` run (as the guide's own scheduled-gate design calls for) would still flag it. Concrete doc/comment fix, independent of AD-21's blocking-classes policy question."
+      "task_status": "reviewed",
+      "revalidation_note": "Implemented, orchestrator-validated, and independently reviewed 2026-08-24 in the scheduled-gate runbook, baseline, comparison runner, and regression test without changing Go source. Bare gosec v2.28.0 over the explicit tracked-package set reports 317 findings: exactly one G404 for recovery_envelope_sink.go's pickRecoveryGiphyQuery path/rule/symbol is the accepted GO-SVCCORE-005 match, and all 316 nonmatches remain actionable in the per-rule ratchet. The comparator fails unless the accepted-match cardinality is exactly one; regression cases prove zero exits 1, one exits 0, and two exits 1. The policy documents that the golangci-lint suppression is at source line 223 and bare gosec does not understand `//nolint:gosec`; final fresh review passed with no findings."
     },
     {
       "id": "GO-SVCCORE-006",
@@ -2718,8 +2718,8 @@
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/12-quality-ratchet-and-standards/03-goroutine-lint-coverage-gap.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed still open: Makefile's lint-goroutines target (lines 74-81) still scans only {internal/plugin, internal/worker, internal/mcp, internal/service, internal/server, internal/api, internal/memory, internal/workflow} with the non-fatal `-` grep prefix; the trust-boundary cluster packages this finding names are still absent from that list. Concrete Makefile fix, no architect input needed."
+      "task_status": "reviewed",
+      "revalidation_note": "Implemented 2026-08-23: Makefile's non-fatal lint-goroutines target now scans the five named trust-boundary packages alongside the original eight, while internal/safego remains excluded. Functional verification surfaced the audit-known benign runTunnel watcher at internal/sandbox/proxy.go:342 (moved from audit-time line 414 by source drift); full worker build, vet, and non-race test baselines passed."
     },
     {
       "id": "GO-SEC4-010",

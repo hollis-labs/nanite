@@ -77,6 +77,8 @@ lint-goroutines:
 	@-grep -rn --include='*.go' --exclude='*_test.go' -E '^\s+go [A-Za-z_][A-Za-z0-9_.]*\(' \
 		internal/plugin internal/worker internal/mcp internal/service \
 		internal/server internal/api internal/memory internal/workflow \
+		internal/sandbox internal/permission internal/secrets \
+		internal/pathsafe internal/fsutil \
 		2>/dev/null | grep -v 'safego\.Go' | grep -v 'safego\.Call' || \
 		echo "(no bare goroutines in target packages)"
 

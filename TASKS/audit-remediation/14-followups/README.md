@@ -27,12 +27,12 @@ their wave's predecessors only.
 | Task | Source | Why it had no owner |
 |---|---|---|
 | `01-remove-default-seeded-catalog-source.md` | **AD-05** | Decided 2026-08-22; was filed as a `01/01` follow-up and never became a task |
-| `02-error-handling-backlog-paydown.md` | **AD-21** | Stage 2's 365-finding prerequisite. `13/04` touches five files and nothing else covers it |
+| `02-error-handling-backlog-paydown.md` | **AD-21** | Stage 2's 353-finding prerequisite. `13/04` touches five files and nothing else covers it |
 | `03-test-fixture-migration-cost.md` | promoted candidate 4 | Completed and independently reviewed ahead of Wave 6; full-repo race gate now passes |
 
 ## Candidate register
 
-`TASKS/ESCALATIONS.md` records **eight** follow-up candidates as of 2026-08-23;
+`TASKS/ESCALATIONS.md` records **nine** follow-up candidates as of 2026-08-23;
 five remain open and three are now closed.
 Listed here so they are visible in one place rather than only in a chronological
 log. Open candidates remain operator-controlled because each was deliberately
@@ -79,6 +79,14 @@ Closed candidates 4 and 6 were the two with leverage beyond their own line
 items: one unblocked a deferred verification gate and a standing performance
 complaint, while the other closed the isolation class behind the only incident
 in this batch that touched operator data.
+
+9. **`lint-goroutines` is advisory and absent from CI** (Wave 7). `12/03`
+   widened its coverage to 13 packages, but the target still cannot fail
+   (leading `@-`) and `.github/workflows/full-repo-quality.yml` does not run
+   it. It is the only mechanism watching `internal/safego` adoption —
+   `forbidigo` cannot match the `go` keyword — so nothing detects a regression
+   in the lifecycle-ownership class AD-26 covered. Add it to the workflow as a
+   reporting step first, per AD-21's baseline-then-ratchet posture.
 
 ## Post-remediation backlog — deliberately *after* this batch
 

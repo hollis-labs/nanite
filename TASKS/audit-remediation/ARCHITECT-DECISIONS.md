@@ -1229,6 +1229,12 @@ GO-API-007, GO-CHAT-002, GO-INFRA-004 (+ the rest of `11/`)
 > ignored because the fast gate runs `--new` and cannot see pre-existing
 > findings in untouched code.
 >
+> **Implementation-time update (2026-08-23):** the current correctness-three
+> backlog is errcheck 281 + errorlint 48 + nilerr 24 = **353**, and task
+> `14/02` now owns reducing all three to zero before Stage 2 activates. This
+> supersedes the earlier measurement and unowned-paydown statements below;
+> the two-stage decision itself is unchanged.
+>
 > ### ⚠ The zero-tolerance half has a 365-finding prerequisite that no task owns
 >
 > Current counts: **errcheck 294, errorlint 49, nilerr 22 = 365**. `13/04`
@@ -1246,9 +1252,9 @@ GO-API-007, GO-CHAT-002, GO-INFRA-004 (+ the rest of `11/`)
 > Do **not** let an implementer quietly interpret "zero-tolerance" as
 > "regression-gate these three too" — that is a different and weaker decision.
 
-### AD-21 — Which historical lint classes become blocking
+### AD-21 — Historical question (superseded by the decided block above)
 
-**Status:** open · **Gates:** `12/01` · **Findings:** GO-HYG-001
+**Status:** superseded · **Gates:** none · **Findings:** GO-HYG-001
 
 Guide §9 item 9, with a clear constraint from §4 Wave 7: *"Do not require
 historical low-value debt to hit zero before introducing a ratchet. Baseline

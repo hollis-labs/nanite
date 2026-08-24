@@ -1,7 +1,7 @@
 # Low-risk hygiene grab-bag: 12 findings with no shared root cause, each too small for its own task
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** in-progress
+**Status:** implemented
 **Depends on:** none within this batch.
 **Touches:** `internal/mcp/manager.go`, `internal/plugin/install/validate.go`, `internal/agent/builtin/embed_mux_devmode.go`, `internal/agent/builtin/profiles.go`, `internal/contextbroker/source_pcc.go`, `internal/contextbroker/source_memory.go`, `internal/contextbroker/source_conduit.go`, `internal/context/tokens.go`, `internal/contextbroker/broker.go`, `internal/loopdetect/detector.go`, `internal/recovery/orphansweep/orphan_sweep.go`, `internal/elicitation/service_test_helpers.go`, `internal/chat` (architecture note only, no required edit), `internal/elicitation/service.go`, `internal/plugin/host.go`.
 
@@ -149,14 +149,14 @@ themselves.
   `7a0e37936`), not a new 13/05 finding; the repeat occurrence is a durable
   escalation candidate but was not fixed or re-filed here. Finally,
   `go test -race -count=1 ./...` passed, including the 233.972s store tail.
-- Temporary integration attribution: the full audit ratchet currently reports
-  3256 vs the committed 3255 baseline solely because integrated 13/04 commit
-  `284027e2` added one cyclop/gocyclo finding in
-  `internal/task/service_test.go:255`; no 13/05-modified function is a current
-  cyclop/gocyclo finding, and Stage 2 remains zero. The orchestrator reopened
-  13/04 for correction. This task will validate the combined 3255/3255 state
-  before changing status to `implemented`; it does not alter the baseline or
-  the prior task.
+- Final combined-tree ratchet verification ran after the 13/04 correction and
+  re-review landed on main. The complete pinned comparator discovered 109
+  tracked Go packages and passed at baseline 3255/current 3254: no linter
+  increased, while `gocognit` decreased from 257 to 256. Its Stage 2 check
+  reported `errcheck=0`, `errorlint=0`, and `nilerr=0`; the separate
+  audit-config correctness-only invocation also reported `0 issues`. The
+  temporary 3256 attribution above is therefore resolved, and the committed
+  baseline was not changed by this task.
 
 ## Review notes
 

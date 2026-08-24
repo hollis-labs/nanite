@@ -13,6 +13,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
@@ -28,7 +29,7 @@ import (
 func gatedSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfToolsTransport {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -69,7 +70,7 @@ func (e *gatedApprovalEmitter) Emit(_ context.Context, _, _ string, _ []byte) (s
 func newSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfToolsTransport {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -467,7 +468,7 @@ func (r *gatedNotCalledRunner) Run(_ context.Context, _ *subagent.Run) (*subagen
 // backend fault.
 func TestRecoverSyncSummary_StoreError_ReturnsError(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -507,7 +508,7 @@ func TestRecoverSyncSummary_StoreError_ReturnsError(t *testing.T) {
 // benign no-assistant-text outcome.
 func TestSyncSubagentEnvelope_RecoverSummaryError_EmitsInternalNotEmptyReply(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

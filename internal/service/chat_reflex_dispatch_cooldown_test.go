@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestAttemptReflexDispatch_RecurrenceOverride_SuppressesRefire proves
@@ -27,7 +28,7 @@ import (
 // backdated past the override window.
 func TestAttemptReflexDispatch_RecurrenceOverride_SuppressesRefire(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "reflex-dispatch-cooldown.db")
-	st, err := store.New(context.Background(), dbPath)
+	st, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

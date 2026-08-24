@@ -6,10 +6,11 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func TestContextService_PruneAfterTurn(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -29,7 +30,7 @@ func TestContextService_PruneAfterTurn(t *testing.T) {
 }
 
 func TestContextService_AssembleSlots(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

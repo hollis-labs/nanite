@@ -9,6 +9,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // openTestStore creates an in-memory SQLite store for testing.
@@ -19,7 +20,7 @@ func openTestStore(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	f.Close()
-	s, err := store.New(context.Background(), f.Name())
+	s, err := storetest.New(t, context.Background(), f.Name())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,7 @@ import (
 	gosched "github.com/hollis-labs/go-scheduler"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // --- test helpers ---------------------------------------------------------
@@ -21,13 +22,11 @@ import (
 // means bullet requires the concurrent-claim regression test run against a
 // real store, given the whole CAS-safety argument rests on
 // sqlitekit.OpenSingle's single-writer-connection configuration. Mirrors
-// the store.New(ctx, filepath.Join(t.TempDir(), "test.db")) pattern already
-// used by internal/service's own tests (e.g. a2a_push_notifier_test.go),
-// since internal/store's own newTestStore helper is unexported and package-
-// scoped.
+// the shared storetest template-copy pattern used by internal/service's own
+// tests (e.g. a2a_push_notifier_test.go).
 func newAdapterTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

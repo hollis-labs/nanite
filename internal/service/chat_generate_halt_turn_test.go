@@ -34,6 +34,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
@@ -130,7 +131,7 @@ func (haltTestTools) GetToolSchema(string) map[string]any { return nil }
 func TestGenerateResponse_HaltSessionReflex_AbortsTurnBeforeLLMCall(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "halt-turn-sync.db")
-	st, err := store.New(ctx, dbPath)
+	st, err := storetest.New(t, ctx, dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -262,7 +263,7 @@ func TestGenerateResponse_HaltSessionReflex_AbortsTurnBeforeLLMCall(t *testing.T
 func TestGenerateResponse_NonHaltReflex_DoesNotAbortTurn(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "halt-turn-sync-control.db")
-	st, err := store.New(ctx, dbPath)
+	st, err := storetest.New(t, ctx, dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

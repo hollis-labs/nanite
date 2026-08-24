@@ -11,7 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // newTestServer constructs a Server backed by an on-disk test store.
@@ -19,7 +19,7 @@ func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := tmp + "/test.db"
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

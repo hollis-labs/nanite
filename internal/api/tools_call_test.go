@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // newToolCallTestAPI builds an API plus the store backing it, so the test
@@ -25,8 +26,7 @@ import (
 func newToolCallTestAPI(t *testing.T) (*API, *store.Store) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	prepareAPIStoreDB(t, dbPath)
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

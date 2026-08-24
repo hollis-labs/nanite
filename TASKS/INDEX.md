@@ -1083,7 +1083,7 @@ to proceed against the post-sweep signatures.
 | `08/05` | `08-remaining-security-hardening/05-secret-key-heuristic-hardening.md` | reviewed | `02/01` | — |
 | `08/06` | `08-remaining-security-hardening/06-sandbox-proxy-header-timeout.md` | reviewed | Wave 2 complete | — |
 | `08/07` | `08-remaining-security-hardening/07-server-auth-bind-tls-posture.md` | reviewed | `07/02` | AD-15 |
-| `08/08` | `08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md` | implemented — dependency fix passes; full race verdict deferred after known migration-time suite timeouts | `00/02` | — |
+| `08/08` | `08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md` | reviewed — deferred full race gate passed after `14/03` fixture remediation | `00/02` | — |
 | `08/09` | `08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md` | reviewed | `01/01` | AD-04, AD-27, AD-28 (all decided; also now carries `GO-SEC4-007`, reassigned from `11/07`) |
 | `08/10` | `08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md` | reviewed | Wave 2 complete | settings scope corrected after producer trace |
 

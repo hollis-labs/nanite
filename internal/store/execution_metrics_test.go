@@ -2,16 +2,11 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 )
 
 func TestRecordExecutionMetrics(t *testing.T) {
-	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close(context.Background())
+	s := newTestStore(t)
 
 	m := &ExecutionMetrics{
 		SessionID:       "sess-1",
@@ -43,15 +38,9 @@ func TestRecordExecutionMetrics(t *testing.T) {
 }
 
 func TestGetSessionExecutionMetrics(t *testing.T) {
-	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close(context.
+	s := newTestStore(t)
 
-		// Record two metrics for the same session.
-		Background())
-
+	// Record two metrics for the same session.
 	for i, msgID := range []string{"msg-1", "msg-2"} {
 		m := &ExecutionMetrics{
 			SessionID:  "sess-1",
@@ -91,11 +80,7 @@ func TestGetSessionExecutionMetrics(t *testing.T) {
 }
 
 func TestGetRecentExecutionMetrics(t *testing.T) {
-	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close(context.Background())
+	s := newTestStore(t)
 
 	for i, msgID := range []string{"msg-1", "msg-2", "msg-3"} {
 		if err := s.RecordExecutionMetrics(context.Background(), &ExecutionMetrics{
@@ -118,15 +103,9 @@ func TestGetRecentExecutionMetrics(t *testing.T) {
 }
 
 func TestGetUtilityCallSummary(t *testing.T) {
-	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close(context.
+	s := newTestStore(t)
 
-		// Record utility calls from two providers.
-		Background())
-
+	// Record utility calls from two providers.
 	for i := 0; i < 3; i++ {
 		s.RecordExecutionMetrics(context.Background(), &ExecutionMetrics{
 			SessionID:  "sess-1",
@@ -176,11 +155,7 @@ func TestGetUtilityCallSummary(t *testing.T) {
 }
 
 func TestGetUtilityCallLog(t *testing.T) {
-	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close(context.Background())
+	s := newTestStore(t)
 
 	s.RecordExecutionMetrics(context.Background(), &ExecutionMetrics{
 		SessionID: "sess-1", MessageID: "autoTitle", Provider: "anthropic", IsUtility: true,
@@ -208,11 +183,7 @@ func TestGetUtilityCallLog(t *testing.T) {
 }
 
 func TestExecutionMetrics_PTYAdapter(t *testing.T) {
-	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close(context.Background())
+	s := newTestStore(t)
 
 	m := &ExecutionMetrics{
 		SessionID:      "sess-1",

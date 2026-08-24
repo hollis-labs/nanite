@@ -338,7 +338,7 @@ before.**
 | `11/05` MCP result-processing tail | `09/04` | AD-19 | Shares `mcp/manager.go` |
 | `11/06` provider streaming error divergence | W5 | AD-19 | May be legitimately independent — classify first |
 | `11/07` SSRF CIDR denylist duplication | `08/01` | AD-19 | Classification only, no code |
-| `11/08` `internal/config` naming collision | W5 | AD-20 | **Runs alone if AD-20 picks tree-wide rename** |
+| `11/08` `internal/config` naming collision | W5 | AD-20 (decided) | **No longer runs alone** — AD-20 measured 11 real references (`Config` ×5, `AppConfig` ×6), not a tree-wide rename; parallel-safe with the rest of Wave 6a |
 | `11/09` elicitation duplication + dead doc | W5 | AD-19 | Doc describes a type that doesn't exist |
 | `11/10` envelope registry triplication | `07/02`, `07/05`, `08/07` | AD-19 | Shares `cmd/nanite/main.go` |
 | `11/11` dispatch reflex double-evaluation | `10/01`, `10/02`, `09/01` | AD-19 | |
@@ -350,7 +350,7 @@ before.**
 | `11/03` `StructuredMessage` unwrap duplication | W6a | — | Independent files |
 | `11/04` traffic-light calculation duplication | `10/01` | — | |
 | `11/12` `DevServerName` constant duplication | `09/05` | — | Two-line fix |
-| `11/13` store scan-loop duplication | `06/01`, `06/02` | — | ~20 files in `internal/store` |
+| `11/13` store scan-loop duplication | `06/01`, `06/02` | — | Optional. 46 `dupl` hits / 23 files at current `HEAD` (post-ctx-sweep) — re-derive before dispatch |
 | `11/14` adapter plugin boilerplate | W6a | — | Independent — 4 adapter packages |
 | `11/15` API response boilerplate | `01/01`, `08/09`, `08/10` | — | Broad `internal/api` touch |
 | `11/16` workflow/dispatch naming collisions | W6a | — | No code change |
@@ -438,14 +438,18 @@ All six tasks are file-disjoint.
 AD-13's four selective delegations in parallel, with serial commits and fresh
 review inside each task.
 
-**Wave 6a** — `11/06` ∥ `11/07` ∥ `11/09` are independent. `11/08` **runs
-alone if AD-20 chooses the tree-wide rename** — its own `Touches` warns it may
-reach *"every caller of `config.Config` and `config.AppConfig` across the
-tree."* Decide AD-20 before scheduling the wave, not during it.
+**Wave 6a** — all nine (`11/01`, `02`, `05`, `06`, `07`, `08`, `09`, `10`,
+`11`) are file-disjoint and parallel-safe once AD-19's classification table
+resolves the wave-level gate. `11/08`'s own former "runs alone if AD-20
+picks tree-wide rename" caveat is moot — AD-20 was decided 2026-08-22 and
+measured only 11 real references, not a tree-wide sweep.
 
 **Wave 6b** — `11/03` ∥ `11/12` ∥ `11/14` ∥ `11/16` freely. `11/13`
-(`internal/store`, ~20 files) and `11/15` (`internal/api`, 6 files) each want
-their package to themselves.
+(`internal/store`) and `11/15` (`internal/api`) each want their package to
+themselves — re-measured post-ctx-sweep at **46 `dupl` hits across 23
+files** for `11/13` (was 40/22 at frozen HEAD before `06/03`/`06/04`
+landed); re-derive fresh again before dispatch rather than trusting either
+number.
 
 **Wave 8 — the ordering that actually matters.** `13/03` must be the **last
 thing that lands in the batch, with no other branch open.** If AD-22 chooses

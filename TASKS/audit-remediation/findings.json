@@ -84,8 +84,8 @@
       "false_positive_considerations": "Reachability requires OTel export enabled at runtime and a malicious/misbehaving collector endpoint.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md",
       "disposition": "remediate",
-      "task_status": "implemented",
-      "revalidation_note": "govulncheck reachable-vuln count is 00/02-refreshed: 14 (13 stdlib + 1 module, GO-2026-4985) at both the audit and frozen HEAD -- identical vulnerability-ID set per raw-1d3bfd96/DELTA.md. otlptracehttp v1.41.0 finding still applies; standard dependency bump, no architect input needed."
+      "task_status": "reviewed",
+      "revalidation_note": "Remediated with the aligned OpenTelemetry v1.45.0 module set. govulncheck ./... reports no vulnerabilities; go test ./... and the previously deferred go test -race ./... gate both pass. The final full race suite completed with a verdict in 263.45s wall on 2026-08-23 after isolated migrated test fixtures removed the timeout condition."
     },
     {
       "id": "GO-SEC-002",
@@ -109,8 +109,8 @@
       "report_section": "\u00a73",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md",
       "disposition": "remediate",
-      "task_status": "implemented",
-      "revalidation_note": "govulncheck's 13-stdlib-vuln count is unaffected by the go1.26.2 toolchain pin -- 00/02's DELTA.md confirms the identical 14-vulnerability-ID set (13 stdlib + 1 module) at both the audit and frozen HEAD. Standard toolchain bump, no architect input needed."
+      "task_status": "reviewed",
+      "revalidation_note": "Remediated by moving the go directive to 1.26.7. govulncheck ./... reports no vulnerabilities; go test ./... and the previously deferred go test -race ./... gate both pass. The final full race suite completed with a verdict in 263.45s wall on 2026-08-23 after isolated migrated test fixtures removed the timeout condition."
     },
     {
       "id": "GO-HYG-001",

@@ -11,6 +11,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 const fixturesDir = "testdata/fixtures"
@@ -25,7 +26,7 @@ func newTestInstaller(t *testing.T) (*Installer, *skillvendor.Store, *store.Stor
 	}
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	idx, err := store.New(context.Background(), dbPath)
+	idx, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

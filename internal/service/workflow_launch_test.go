@@ -11,6 +11,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // fakeFailingWorkflowEngine simulates an infra-level engine failure (e.g. a
@@ -56,7 +57,7 @@ func singleToolStepWorkflow(name string) agentworkflow.WorkflowDefinition {
 
 func newWorkflowLaunchTestFixture(t *testing.T) (*store.Store, *store.AgentProfile) {
 	t.Helper()
-	st, err := store.New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

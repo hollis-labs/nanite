@@ -19,6 +19,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // fakeSubagentInbox is a small hand-rolled fake for SubagentResultInbox,
@@ -57,7 +58,7 @@ func (f *fakeSubagentInbox) ackedIDs() []string {
 // uses. Returns the SlotAssemblyResult ready for injection.
 func newTestSlotResult(t *testing.T, sessionID string) *SlotAssemblyResult {
 	t.Helper()
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

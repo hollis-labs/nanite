@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
@@ -78,7 +78,7 @@ func waitForTerminal(t *testing.T, svc *subagent.Service, id string, timeout tim
 func newSyncPollingTestService(t *testing.T, delay time.Duration) (*subagent.Service, *SelfToolsTransport) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestSyncSubagentEnvelope_ExpiredCtx_GenuinelyStillRunning_ReturnsTimeout(t 
 // ErrorKindInternal.
 func TestSyncSubagentEnvelope_StatusError_ReturnsInternal(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

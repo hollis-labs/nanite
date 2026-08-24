@@ -11,6 +11,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // wiringStubSummarizer is a working (non-mock, non-nil-returning) Summarizer
@@ -47,7 +48,7 @@ func (wiringStubSummarizer) Summarize(_ context.Context, _ string, messages []ll
 // production code.
 func TestCompactionEventWriter_WiredAtAllThreeSites_EndToEnd(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.New(ctx, t.TempDir()+"/test.db")
+	s, err := storetest.New(t, ctx, t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

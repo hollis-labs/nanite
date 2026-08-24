@@ -24,6 +24,7 @@ import (
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/install"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // Regression coverage for handleCatalogInstall (internal/api/catalog.go),
@@ -42,8 +43,7 @@ func setupCatalogTestState(t *testing.T) (*catalogState, string) {
 	pluginsDir := t.TempDir()
 	dbDir := t.TempDir()
 	dbPath := filepath.Join(dbDir, "test.db")
-	prepareAPIStoreDB(t, dbPath)
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestAssembleSlots_FillsAllSlotsFromRawSources locks down the T2 contract:
@@ -18,7 +19,7 @@ import (
 // tools, session metadata, message history) rather than packing everything
 // into the System slot the way the legacy AssembleContext path did.
 func TestAssembleSlots_FillsAllSlotsFromRawSources(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -132,7 +133,7 @@ func TestAssembleSlots_FillsAllSlotsFromRawSources(t *testing.T) {
 // any tools selected results in an unpopulated Tools slot (no JSON noise) so
 // the cache-key for Tools stays stable across consecutive no-tool turns.
 func TestAssembleSlots_NoToolsLeavesToolsSlotEmpty(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

@@ -13,7 +13,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/service"
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TASKS/skills/05's "Fix required" section (fresh reviewer, 2026-08-21):
@@ -53,8 +53,7 @@ func newSkillsTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	t.Helper()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "test.db")
-	prepareAPIStoreDB(t, dbPath)
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

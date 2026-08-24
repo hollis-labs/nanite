@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestA2AJSONRPC_MethodRouting verifies that the JSON-RPC handler routes
@@ -118,8 +119,7 @@ func (fakeInstanceCanceller) RequestStop(_ context.Context, id string) (*store.D
 func newTestTaskManager(t *testing.T) (*store.Store, *service.TaskManager) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	prepareAPIStoreDB(t, dbPath)
-	st, err := store.New(context.Background(), dbPath)
+	st, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestSlotStash_E2E_50KLineFile_StashAndDevRead is the ticket's
@@ -41,7 +42,7 @@ import (
 func TestSlotStash_E2E_50KLineFile_StashAndDevRead(t *testing.T) {
 	// --- Test fixtures -------------------------------------------------
 	tmp := t.TempDir()
-	s, err := store.New(context.Background(), tmp+"/e2e.db")
+	s, err := storetest.New(t, context.Background(), tmp+"/e2e.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

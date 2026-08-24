@@ -8,13 +8,14 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := tmp + "/test.db"
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

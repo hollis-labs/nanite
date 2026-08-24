@@ -12,6 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TASKS/phase-2/04-retire-boot-profile-catalog.md: this file used to
@@ -70,8 +71,7 @@ func newTestAPIWithSeededProviders(t *testing.T) (*API, *http.ServeMux) {
 func newSeededStore(t *testing.T) *store.Store {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	prepareAPIStoreDB(t, dbPath)
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

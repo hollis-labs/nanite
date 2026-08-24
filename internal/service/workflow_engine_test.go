@@ -10,6 +10,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // --- fakes ---
@@ -74,7 +75,7 @@ func (f *fakeStepExecutor) toolCallCount(tool string) int {
 
 func newTestWorkflowStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

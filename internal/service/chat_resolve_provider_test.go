@@ -60,6 +60,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func TestResolveProvider_CLISessionProvider_ShortCircuits(t *testing.T) {
@@ -438,7 +439,7 @@ func newRegistryWithAnthropicStub() *provider.Registry {
 
 func mustNewStoreForResolveTest(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.New(context.Background(), t.TempDir()+"/resolve.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/resolve.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

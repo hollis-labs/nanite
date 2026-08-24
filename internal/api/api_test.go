@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
@@ -24,6 +25,7 @@ func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	// Nanite test DB. Pin every XDG root plus the explicit Tesseract DB before
 	// construction so an API test can never open the operator's real store.
 	for env, dir := range map[string]string{
+		"HOME":            filepath.Join(root, "home"),
 		"XDG_DATA_HOME":   filepath.Join(root, "xdg", "data"),
 		"XDG_STATE_HOME":  filepath.Join(root, "xdg", "state"),
 		"XDG_CACHE_HOME":  filepath.Join(root, "xdg", "cache"),
@@ -44,8 +46,7 @@ func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	}
 
 	dbPath := filepath.Join(root, "test.db")
-	prepareAPIStoreDB(t, dbPath)
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

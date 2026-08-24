@@ -38,6 +38,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // dispatchFlavor names one of the four dispatch types the orchestrator
@@ -83,7 +84,7 @@ type invariantsFixture struct {
 
 func newInvariantsFixture(t *testing.T) *invariantsFixture {
 	t.Helper()
-	s, err := store.New(context.Background(), t.TempDir()+"/invariants.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/invariants.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

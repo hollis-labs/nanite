@@ -6,11 +6,7 @@ import (
 )
 
 func TestCatalogSourceCRUD(t *testing.T) {
-	s, err := New(context.Background(), t.TempDir()+"/test.db")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer s.Close(context.Background())
+	s := newTestStore(t)
 
 	if err := s.Seed(context.Background()); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -89,13 +85,9 @@ func TestCatalogSourceCRUD(t *testing.T) {
 }
 
 func TestCatalogSourceDuplicateURL(t *testing.T) {
-	s, err := New(context.Background(), t.TempDir()+"/test.db")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer s.Close(context.Background())
+	s := newTestStore(t)
 
-	_, err = s.CreateCatalogSource(context.Background(), "Dup 1", "https://example.com/dup.yaml", "custom", 10)
+	_, err := s.CreateCatalogSource(context.Background(), "Dup 1", "https://example.com/dup.yaml", "custom", 10)
 	if err != nil {
 		t.Fatalf("create first: %v", err)
 	}

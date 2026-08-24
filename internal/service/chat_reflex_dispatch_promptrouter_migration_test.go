@@ -24,7 +24,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestAttemptReflexDispatch_PromptrouterMigratedPhrases_FireExpectedTarget
@@ -106,7 +106,7 @@ func TestAttemptReflexDispatch_PromptrouterMigratedPhrases_FireExpectedTarget(t 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dbPath := filepath.Join(t.TempDir(), "reflex-dispatch-"+tc.name+".db")
-			st, err := store.New(context.Background(), dbPath)
+			st, err := storetest.New(t, context.Background(), dbPath)
 			if err != nil {
 				t.Fatalf("store.New: %v", err)
 			}

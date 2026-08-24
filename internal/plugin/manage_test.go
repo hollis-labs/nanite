@@ -13,6 +13,7 @@ import (
 	goplugin "github.com/hollis-labs/plugin-sdk"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // newTestPluginStateStore opens a temp-dir-backed store, installs it as the
@@ -23,7 +24,7 @@ import (
 func newTestPluginStateStore(t *testing.T) *store.Store {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "nanite-test.db")
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

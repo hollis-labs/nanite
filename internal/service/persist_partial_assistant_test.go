@@ -16,6 +16,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // capturingStore is a minimal Store stub that records the last CreateMessage call.
@@ -126,7 +127,7 @@ func TestPersistPartialAssistant_EmptyContentPlaceholder(t *testing.T) {
 // final text as content, both fields survive a round-trip through a real store
 // (CW-20260419-0029).
 func TestF4Persistence_NarrationInMetadataThinking(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/f4_persist.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/f4_persist.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestF4Persistence_NarrationInMetadataThinking(t *testing.T) {
 // through the helper (they all call the same helper, so one integration test
 // suffices for the persistence guarantee).
 func TestPersistPartialAssistant_RealStore(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/persist_partial.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/persist_partial.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -495,7 +496,7 @@ func TestPersistPartialAssistantCancelled_NoSubagentLookup(t *testing.T) {
 // end against a real SQLite store. Verifies the row is readable and that
 // neither HasError nor `had_error` is set.
 func TestPersistPartialAssistantCancelled_RealStore(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/persist_cancel.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/persist_cancel.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

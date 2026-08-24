@@ -10,6 +10,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/tool/intent"
 	"github.com/hollis-labs/nanite/internal/tool/stash"
 )
@@ -35,7 +36,7 @@ func (s *scriptedClassifier) Classify(_ context.Context, in intent.Input) (inten
 
 func newStubbedContextService(t *testing.T, classifier intent.Classifier, overrides ToolCacheOverrideStore, cacheEnabled bool) (*contextServiceImpl, *store.Store) {
 	t.Helper()
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

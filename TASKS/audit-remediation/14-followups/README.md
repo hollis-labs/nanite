@@ -28,15 +28,15 @@ their wave's predecessors only.
 |---|---|---|
 | `01-remove-default-seeded-catalog-source.md` | **AD-05** | Decided 2026-08-22; was filed as a `01/01` follow-up and never became a task |
 | `02-error-handling-backlog-paydown.md` | **AD-21** | Stage 2's 365-finding prerequisite. `13/04` touches five files and nothing else covers it |
-| `03-test-fixture-migration-cost.md` | promoted candidate | Fourth occurrence; blocks aggregate `-race` verification. **Consider running before Wave 6** rather than in wave order |
+| `03-test-fixture-migration-cost.md` | promoted candidate 4 | Completed and independently reviewed ahead of Wave 6; full-repo race gate now passes |
 
-## Candidates — logged, not yet tasks
+## Candidate register
 
-`TASKS/ESCALATIONS.md` carries **eight** follow-up candidates (one since promoted) as of 2026-08-23.
+`TASKS/ESCALATIONS.md` records **eight** follow-up candidates as of 2026-08-23;
+five remain open and three are now closed.
 Listed here so they are visible in one place rather than only in a chronological
-log. Promoting any of these into a task is the operator's call; none is
-promoted by default, because each was deliberately judged out of scope by the
-review that found it.
+log. Open candidates remain operator-controlled because each was deliberately
+judged out of scope by the review that found it.
 
 1. **Leftover downloaded archive in every plugin install directory** (Wave 1,
    `01/01` re-review). `HTTPDownloader` writes the archive inside `targetDir`
@@ -47,20 +47,20 @@ review that found it.
    the first input line panics before confinement is exercised — which meant
    the original symlink regression could pass for the wrong reason. Fixture
    corrected; the underlying `ringLen`-before-modulo bug is not.
-3. **`08/08`'s deferred full race gate** (Wave 3). The task is `implemented`,
-   not `reviewed`, by operator decision.
+3. ~~**`08/08`'s deferred full race gate**~~ — **CLOSED BY TASK `14/03`**.
+   The full repository race suite completed in 263.45s wall; `08/08` and
+   GO-SEC-001/GO-SEC-002 are now `reviewed`.
 4. ~~**Test-fixture migration cost inflating every race run**~~ —
-   **PROMOTED TO TASK `14/03` on 2026-08-23**, after a fourth occurrence: both
-   of Wave 5's aggregate race suites timed out in migration setup at 20 minutes
-   with no verdict, on the batch's largest refactor. No longer hygiene — it is
-   what prevents race verification, and it will recur in Waves 6–8. Closing it
-   also closes candidate 3 and the Wave 2 `internal/service` follow-up.
+   **CLOSED BY TASK `14/03` on 2026-08-23**. Shared template-copy fixtures
+   preserve per-test database files while eliminating repeated fresh migration
+   runs; both formerly blocked aggregates and `go test -race ./...` pass.
 5. **246 `TODO(ctx-sweep)` markers** (`06/03`). A greppable map of every call
    site with no context plumbing at all. Newly visible work, never scoped.
-6. **Test isolation: `Container`-constructing tests must redirect *all*
-   independently resolved stores.** From the `08/10` incident that wrote
-   synthetic memories into the operator's real Tesseract database. The incident
-   is closed and cleaned; the *class* is not.
+6. ~~**Test isolation: `Container`-constructing tests must redirect *all*
+   independently resolved stores.**~~ — **CLOSED BY `08/10`, CONFIRMED BY
+   `14/03`**. Service and API package TestMain setup redirects every HOME/XDG/
+   Tesseract root, and dedicated tests inspect SQLite's actually opened `main`
+   path under disposable roots.
 7. **Two test-validity gaps.** `TestNetnsBridge_HostArbitraryPortStillBlocked`
    can pass for the wrong reason in an unprivileged container (`02/01`
    review), and `TestDurableAgentStopRuntimeErrorMarksFailed` is an observed
@@ -75,10 +75,10 @@ review that found it.
    question is whether explicit `@Team Slot` messaging is intended product
    direction, which belongs with whoever owns Teams.
 
-Candidates 4 and 6 are the two with leverage beyond their own line items —
-one unblocks a deferred verification gate and a standing performance
-complaint, the other prevents a repeat of the only incident in this batch that
-touched operator data.
+Closed candidates 4 and 6 were the two with leverage beyond their own line
+items: one unblocked a deferred verification gate and a standing performance
+complaint, while the other closed the isolation class behind the only incident
+in this batch that touched operator data.
 
 ## Out of scope
 
@@ -92,5 +92,6 @@ the UI consequence clearly enough that the review picks it up.
 
 ## Status
 
-**Planned 2026-08-23. Not dispatched.** Created during the Wave 4 decision
-pass, once AD-05 and AD-21 resolved into work with no home.
+**In progress 2026-08-23.** Task `03` was promoted and dispatched ahead of
+Wave 6 under its hard sequencing rule; tasks `01` and `02` retain their own
+task-file status.

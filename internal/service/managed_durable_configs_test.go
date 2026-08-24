@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestSyncManagedDurableAgentSchedule_PreservesNonActiveStatus is a
@@ -20,7 +21,7 @@ import (
 // the baseline active-stays-active case.
 func TestSyncManagedDurableAgentSchedule_PreservesNonActiveStatus(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.New(ctx, filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestWriteManagedDurableAgentConfig_RoundTrips(t *testing.T) {
 // SaveManagedDurableAgentConfig).
 func TestSaveManagedDurableAgentConfig_RejectsSlugTraversalOnCreate(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.New(ctx, filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestSaveManagedDurableAgentConfig_RejectsSlugTraversalOnCreate(t *testing.T
 // without touching the existing file.
 func TestSaveManagedDurableAgentConfig_RejectsSlugTraversalOnRenameShapedUpdate(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.New(ctx, filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

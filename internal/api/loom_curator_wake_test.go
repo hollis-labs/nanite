@@ -16,6 +16,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // newTestAPIWithLoomCurator boots a fresh container against a DB that
@@ -68,8 +69,7 @@ func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 	copyFixture(".nanite/durable-agents/loom-curator.yaml")
 
 	dbPath := filepath.Join(root, "test.db")
-	prepareAPIStoreDB(t, dbPath)
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

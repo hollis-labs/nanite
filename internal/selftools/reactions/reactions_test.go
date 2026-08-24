@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // newTestStore opens a fresh, fully-migrated *store.Store rooted at a
@@ -15,7 +16,7 @@ import (
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	dbPath := t.TempDir() + "/test.db"
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

@@ -19,6 +19,7 @@ import (
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 type countingCloser struct {
@@ -186,7 +187,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}'
 				t.Fatalf("write MCP test server: %v", err)
 			}
 
-			s, err := store.New(context.Background(), filepath.Join(dir, "nanite.db"))
+			s, err := storetest.New(t, context.Background(), filepath.Join(dir, "nanite.db"))
 			if err != nil {
 				t.Fatalf("open store: %v", err)
 			}

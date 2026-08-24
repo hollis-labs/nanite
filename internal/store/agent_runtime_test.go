@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 )
 
@@ -11,15 +10,9 @@ import (
 // re-create (cold-boot reboot) upsert CLEARS it — which is why the resume path
 // reads the id BEFORE re-booting.
 func TestAgentRuntimeProviderSessionID(t *testing.T) {
-	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer s.Close(context.
+	s := newTestStore(t)
 
-		// Missing row → empty, no error.
-		Background())
-
+	// Missing row → empty, no error.
 	if pid, err := s.AgentRuntimeProviderSessionID(context.Background(), "missing"); err != nil || pid != "" {
 		t.Fatalf("missing row: got (%q, %v), want (\"\", nil)", pid, err)
 	}

@@ -577,6 +577,13 @@ Minor, cosmetic: tasks `18`-`22` didn't originally follow the `Status: reviewed`
 **Resolution:** Phase 2 is fully closed — `reviewed` in `TASKS/INDEX.md`. Ready for Phase 3 (`08`, ACP client abstraction).
 **Follow-up:** The `internal/service` combined-package `-race` timeout is a real, pre-existing, non-blocking item for a future, separate ticket — not part of this batch's own scope. The orphaned docs and the security notice were surfaced to the operator directly, not acted on unilaterally.
 
+**Closed 2026-08-23 by audit-remediation task `14/03`:** Shared isolated
+migrated-store fixtures removed the repeated migration cost. The aggregate
+`go test -race ./internal/service/... -count=1` run now passes in 48.527s for
+`internal/service` plus 2.174s for `service/install` (55.25s wall), and the
+full repository race suite passes with a verdict. This is no longer an open
+Wave 2 follow-up.
+
 ---
 
 ## 2026-08-21 — Phase 3 begins: task 08 (ACP client abstraction) and task 09 (native OpenCode ACP adapter) landed, independently verified
@@ -1245,6 +1252,12 @@ authored, not in their work.
 
 **Follow-up:** A future test-infrastructure pass may isolate or pre-migrate SQLite fixtures, serialize the migration-heavy packages, or establish an explicit extended race timeout before re-running the gate. No additional dependency change is required by this deferral.
 
+**Closed 2026-08-23 by audit-remediation task `14/03`:** The preferred option
+landed: every eligible external test fixture now copies a fully migrated
+template into its own destination before opening it normally. The deferred
+`go test -race ./... -count=1` gate passed in 263.45s wall, and `08/08` plus
+GO-SEC-001/GO-SEC-002 are promoted to `reviewed`.
+
 ## 2026-08-23 — Wave 3 `08/10` regression tests wrote synthetic memories to the operator Tesseract database — CLOSED AND CLEANED
 
 **Raised by:** fresh re-review of `TASKS/audit-remediation/08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md`.
@@ -1254,6 +1267,31 @@ authored, not in their work.
 **Resolution:** The operator approved exact cleanup. Before deletion, the orchestrator created and integrity-checked `/Users/chrispian/.local/share/tesseract/workspaces/default/main.db.pre-wave3-test-cleanup-20260823-0042`. One transaction deleted exactly the 515 identified synthetic `memory_state` rows; foreign-key cascades and FTS triggers removed the 4,655 matching revisions/index entries. Post-cleanup verification found zero matching revisions, zero matching state rows, zero foreign-key violations, and `PRAGMA integrity_check = ok`. Corrections `d0ff47e9` and `85931355` isolate API, memory, and service tests under disposable HOME/XDG/Tesseract roots and assert SQLite's actually opened `main` path via `PRAGMA database_list`. Final fresh review passed without opening the operator DB.
 
 **Follow-up:** Keep the backup until the operator decides normal retention can remove it. Future tests that construct a service Container must prove all independently resolved stores—not only Nanite's primary DB—land under disposable roots.
+
+## 2026-08-23 — Task `14/03` review found API Container fixtures still resolved HOME-backed paths against the operator account — CLOSED
+
+**Raised by:** independent review of
+`TASKS/audit-remediation/14-followups/03-test-fixture-migration-cost.md`, while
+performing candidate 6's required actual-path trace.
+
+**Question / mismatch:** The earlier `08/10` correction isolated API XDG and
+Tesseract paths but `internal/api/testmain_test.go` omitted `HOME`. Every API
+`NewContainer` still called `agent.EnsureHomeDirs("")` and resolved the default
+agent workspace root through the operator account. The reviewer captured the
+actual runtime value as `/Users/chrispian/.nanite/workspaces`. No operator data
+mutation was observed, but the fixture remained write-capable under the real
+home directory, so candidate 6 could not truthfully close yet.
+
+**Resolution:** Added a disposable `HOME` to API package `TestMain` for direct
+Container fixtures and to `newTestAPI`'s per-test environment. A focused race
+run then logged the actual workspace root under that test's own temp directory
+(`.../TestNewTestAPI_TesseractDBIsTempIsolated.../home/.nanite/workspaces`) and
+the actual Tesseract database under the same disposable root. Candidate 6 now
+has structural and runtime evidence for HOME, XDG, and independently resolved
+Tesseract paths.
+
+**Follow-up:** None. Keep actual resolved-path tracing in fixture reviews; an
+environment-variable checklist alone missed this gap once.
 
 ## 2026-08-23 — Wave 3 `08/02` review exposed a pre-existing first-line `callGrep` context panic — FOLLOW-UP CANDIDATE
 
@@ -1292,6 +1330,11 @@ repeatedly applying migrations, which is a test-infrastructure defect that infla
 in the repo, not just this one. That is the higher-value fix and is unclaimed. Note it is also the
 same surface as the deferred `internal/service` race-suite performance follow-up carried from
 Wave 2.
+
+**Closed 2026-08-23 by audit-remediation task `14/03`:** Option (2) landed.
+The exact focused selftools race command fell from a 600.480s timeout to a
+20.651s pass, and the full race gate passed in 263.45s wall. `08/08` and its
+two findings are now `reviewed`.
 
 ## 2026-08-23 — Wave 4 identified a seventh production island: `SendToSlot`/`ResolveLazySlot` have no production caller
 
@@ -1479,6 +1522,10 @@ and it will prevent it again in Waves 6–8 unless fixed.
 **Follow-up:** Closing it also closes `08/08`'s deferred gate and the Wave 2 `internal/service`
 follow-up — three items, one fix. Until it lands, treat any wave's aggregate race result as
 **unrun**, not as passing, and do not let a later document quietly upgrade it.
+
+**Closed 2026-08-23 by task `14/03`:** The shared isolated fixture landed and
+all three promised closures are complete. Aggregate selftools and service race
+suites pass, and `go test -race ./... -count=1` completed in 263.45s wall.
 
 ## 2026-08-23 — Fourth item recorded only in a wave handoff; the logging rule needed one more case
 

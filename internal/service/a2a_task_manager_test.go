@@ -12,11 +12,12 @@ import (
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func newA2ATaskManagerTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

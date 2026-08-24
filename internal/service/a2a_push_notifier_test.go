@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/ssrf"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func allowLocalHTTPWebhookTest(notifier *A2APushNotifier) {
@@ -174,7 +175,7 @@ func TestA2APushNotifierRevalidatesRedirectDNS(t *testing.T) {
 
 func TestA2APushNotifierSSRFRejectionUsesRetryBackoff(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.New(ctx, filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -245,7 +246,7 @@ func TestA2APushNotifierEnqueueAndDeliver(t *testing.T) {
 	ctx := context.Background()
 
 	// Set up test store
-	s, err := store.New(ctx, filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -352,7 +353,7 @@ func TestA2APushNotifierRetry(t *testing.T) {
 	ctx := context.Background()
 
 	// Set up test store
-	s, err := store.New(ctx, filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -470,7 +471,7 @@ func TestA2APushNotifierMaxRetries(t *testing.T) {
 	ctx := context.Background()
 
 	// Set up test store
-	s, err := store.New(ctx, filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -555,7 +556,7 @@ func TestA2APushNotifierMaxRetries(t *testing.T) {
 func TestA2APushNotifier_TickerDrivenPath_EndToEnd(t *testing.T) {
 	ctx := context.Background()
 
-	st, err := store.New(ctx, filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

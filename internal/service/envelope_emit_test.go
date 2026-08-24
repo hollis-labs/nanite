@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func TestApprovalEmitter_PersistsAndStreams(t *testing.T) {
 	// In-memory store with migrations applied.
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

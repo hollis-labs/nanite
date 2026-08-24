@@ -28,6 +28,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func requireSkillGetSandboxTool(t *testing.T) {
@@ -48,7 +49,7 @@ func requireSkillGetSandboxTool(t *testing.T) {
 
 func newSkillGetTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "skill-get-test.db"))
+	s, err := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "skill-get-test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

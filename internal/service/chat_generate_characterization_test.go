@@ -24,6 +24,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
@@ -219,7 +220,7 @@ func (c *characterizationContext) mutateLast(fn func(*SlotAssemblyResult)) {
 func newCharacterizationFixture(t *testing.T, steps []characterizationProviderStep, toolNames ...string) *characterizationFixture {
 	t.Helper()
 	ctx := context.Background()
-	st, err := store.New(ctx, filepath.Join(t.TempDir(), "characterization.db"))
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "characterization.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -767,7 +768,7 @@ func TestGenerateResponseCharacterization_PluginToolExecutingCancel(t *testing.T
 // retry orchestration, including slot_changed emission and rebuilt slot views.
 func TestRecoverFromContextOverflow_RateBudgetForcedCompactionSucceeds(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.New(ctx, filepath.Join(t.TempDir(), "forced-compaction.db"))
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "forced-compaction.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

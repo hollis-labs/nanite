@@ -5,9 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // newAllowlistedTestServer mirrors newTestServer (handlers_test.go) but
@@ -17,7 +16,7 @@ func newAllowlistedTestServer(t *testing.T, allowlist []string) *Server {
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := tmp + "/test.db"
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

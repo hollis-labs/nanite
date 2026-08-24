@@ -12,7 +12,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	"github.com/hollis-labs/nanite/internal/service"
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // newTestAPIWithRecovery wires an API + Container that exposes a real
@@ -22,8 +22,7 @@ import (
 func newTestAPIWithRecovery(t *testing.T) (*API, *http.ServeMux, *broker.Broker) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	prepareAPIStoreDB(t, dbPath)
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

@@ -15,7 +15,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/config"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	pluginsdk "github.com/hollis-labs/plugin-sdk"
 )
 
@@ -270,7 +270,7 @@ func TestContainer_ShutdownTimeoutDoesNotUnloadPluginsLater(t *testing.T) {
 
 func TestNewContainer_PostReaperFailureStopsReapers(t *testing.T) {
 	root := t.TempDir()
-	st, err := store.New(context.Background(), filepath.Join(root, "test.db"))
+	st, err := storetest.New(t, context.Background(), filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestNewContainer_TesseractDBIsPackageTempIsolated(t *testing.T) {
 	}
 
 	root := t.TempDir()
-	st, err := store.New(context.Background(), filepath.Join(root, "nanite.db"))
+	st, err := storetest.New(t, context.Background(), filepath.Join(root, "nanite.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

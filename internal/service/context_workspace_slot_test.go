@@ -11,6 +11,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/workspace"
 )
 
@@ -45,7 +46,7 @@ func TestAssembleSlots_WorkspaceSlotShipsWalkUpContent(t *testing.T) {
 	mkgitDir(t, repoRoot)
 	mkfs(t, filepath.Join(repoRoot, "AGENTS.md"), "PROJECT-SPECIFIC-RULES")
 
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -101,7 +102,7 @@ func TestAssembleSlots_WorkspaceSlotShipsWalkUpContent(t *testing.T) {
 // graceful-degrade contract — failing to wire the cache should never
 // break the assembly pipeline.
 func TestAssembleSlots_WorkspaceSlotEmptyWithoutCache(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestAssembleSlots_WorkspaceSlotRefreshedAfterMtimeChange(t *testing.T) {
 	agentsMD := filepath.Join(repoRoot, "AGENTS.md")
 	mkfs(t, agentsMD, "RULES-V1")
 
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

@@ -11,11 +11,12 @@ import (
 
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func newProxyTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.New(context.Background(), t.TempDir()+"/proxy.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/proxy.db")
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

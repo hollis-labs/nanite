@@ -33,6 +33,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/classify"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
@@ -77,7 +78,7 @@ func (f *recordingReflexDispatchToolService) GetToolSchema(string) map[string]an
 // behavior for that tier/pattern combination.
 func TestAttemptReflexDispatch_RealSeededReflex_ScopeTierOpenSubagent_RoutesToPlanner(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "reflex-dispatch.db")
-	st, err := store.New(context.Background(), dbPath)
+	st, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -274,7 +275,7 @@ func (h *recordingReflexPluginHooks) EmitReflexActionStaged(string, map[string]a
 // untouched, same as when the retired broker's rules all missed.
 func TestAttemptReflexDispatch_RealSeededReflex_TierSmall_NoDispatch(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "reflex-dispatch-miss.db")
-	st, err := store.New(context.Background(), dbPath)
+	st, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

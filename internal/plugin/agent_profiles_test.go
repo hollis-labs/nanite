@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestPhase5AgentProfiles_EndToEnd is Phase 5 item 03's Done-means
@@ -40,7 +41,7 @@ func TestPhase5AgentProfiles_EndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	dbPath := filepath.Join(t.TempDir(), "agent-profiles-e2e.db")
-	st, err := store.New(ctx, dbPath)
+	st, err := storetest.New(t, ctx, dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -243,7 +244,7 @@ agent:
 func TestPhase5AgentProfiles_NoLegacyGrandfathering(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "agent-profiles-legacy.db")
-	st, err := store.New(ctx, dbPath)
+	st, err := storetest.New(t, ctx, dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

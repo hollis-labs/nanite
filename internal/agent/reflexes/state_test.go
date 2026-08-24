@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func TestStateCollector_CollectsUserMessagesAndStructuredRefs(t *testing.T) {
@@ -55,7 +56,7 @@ func TestStateCollector_CollectsUserMessagesAndStructuredRefs(t *testing.T) {
 
 func newReflexTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	st, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

@@ -1,7 +1,7 @@
 # Fix the test-fixture SQLite migration cost that blocks every `-race` run
 
 **Phase:** Audit remediation — Wave 9 (follow-ups)
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none. **Promotable ahead of its wave** — see Urgency.
 **Blocks:** `08/08`'s deferred race gate; the Wave 2 `internal/service` race-suite follow-up; and in practice any future wave's aggregate race verification.
 **Parallel-safe with:** most things — it touches test fixtures, not production code. Not with `13/03`.
@@ -285,4 +285,75 @@ for it.
 
 ## Work log
 
+- 2026-08-23: Confirmed with the operator that Wave 6 had not started and no
+  other agent was working; verified a clean `main` matching `origin/main` and
+  no active Go test process before beginning.
+- 2026-08-23: Baseline reproduced the attributed cause. The mandated
+  `go test -race ./internal/selftools/ -count=1 -v` run timed out in
+  `store.New -> Store.migrate -> goose.Provider.Up` after 600.480s
+  (603.46s wall) without a race verdict. The store-only no-match control took
+  1.62s wall (`ok ... 0.215s [no tests to run]`).
+- 2026-08-23: Added `internal/storetest.New`, lifting the existing
+  template-copy pattern into shared test support. One fully migrated template
+  is created per test binary; a missing or empty caller-selected destination is
+  copied from it, then normal `store.New` still runs so connection setup,
+  pragmas, migration-ledger checks, and backfills remain exercised. Existing
+  nonempty databases are never overwritten, preserving explicit migration and
+  reopen fixtures. No production package or production caller changed.
+- 2026-08-23: Current `main` had drifted from the task's 96-call inventory to
+  107 eligible `store.New` call sites across external-package tests. Migrated
+  all 107 across `cmd/nanite` and 18 internal package groups. Removed the
+  now-redundant package-local API template helper. Also moved ten ordinary
+  `internal/store` CRUD/metrics/runtime/settings tests onto its existing
+  `newTestStore`; the remaining direct `New` uses there intentionally test
+  fresh migration, `New` itself, or same-file reopen/idempotency behavior.
+- 2026-08-23: Isolation verification: `internal/selftools.newTestStore` resolves
+  `t.TempDir()/test.db`; `internal/service.newTestStore` resolves
+  `filepath.Join(t.TempDir(), "test.db")`; and `internal/api.newTestAPI`
+  resolves `root := t.TempDir()` then `root/test.db`. Each path flows into
+  `storetest.New`, whose `prepare` copies to that exact destination before
+  `store.New` opens it. `TestNewCreatesIsolatedStoreCopies` additionally opens
+  two stores at two distinct `t.TempDir` paths, asserts their real `DBPath`
+  values differ, and proves a schema mutation in one is absent from the other;
+  it passed under `-race` in 9.679s.
+- 2026-08-23: Focused post-change race results: exact `internal/selftools`
+  aggregate passed in 20.651s (23.39s wall), versus the 600.480s timeout;
+  `internal/service/...` passed in 48.527s plus 2.174s for `service/install`
+  (55.25s wall). After the last ordinary `internal/store` fixture adoptions,
+  its focused race suite passed in 214.378s (216.41s wall). Final
+  `go test ./... -count=1` passed in 39.65s wall. Final
+  `go test -race ./... -count=1` passed with a real verdict in 263.45s wall;
+  `selftools` was 25.649s, `service` 52.746s, API 107.550s, and the intentional
+  migration tests in `internal/store` were 222.784s.
+- 2026-08-23: Promoted `08/08` to `reviewed` in its task file and the live
+  `TASKS/INDEX.md`, updated GO-SEC-001/GO-SEC-002 in `findings.json`, closed the
+  Wave 2 race-timeout escalation, and struck candidates 3, 4, and 6 from the
+  follow-up register. Historical Wave 3 handoff text remains unchanged.
+- 2026-08-23: Candidate 6 was already addressed on `main` by the reviewed
+  Wave 3 `08/10` corrections: service and API `TestMain` redirect every
+  HOME/XDG/Tesseract root, while dedicated service/API tests query
+  `PRAGMA database_list` and assert the actually opened Tesseract `main` file
+  is under the disposable root. This task preserved and reran those assertions;
+  no additional Container fixture change was necessary.
+- 2026-08-23: Independent review correctly disproved the preceding API portion:
+  API TestMain redirected XDG/Tesseract but omitted `HOME`, and its real runtime
+  log showed `workspaces_root=/Users/chrispian/.nanite/workspaces`. Added
+  disposable HOME isolation to API TestMain and per-test `newTestAPI`; the
+  focused race rerun logged both the workspace root and Tesseract database under
+  the test's own temp root. The full correction is recorded in
+  `TASKS/ESCALATIONS.md` ("Task `14/03` review found API Container fixtures...").
+
 ## Review notes
+
+- 2026-08-23: Initial independent review passed the shared fixture design,
+  zero-call audit, remaining `internal/store.New` exceptions, and focused race
+  suites, but returned one medium finding: API HOME isolation was incomplete.
+  It also found stale follow-up-register text and mismatched interim/final
+  timing labels. All three findings were corrected and sent back for re-review;
+  the task remains `implemented` until that re-review passes.
+- 2026-08-23: Independent re-review PASS. The reviewer independently observed
+  actual API Tesseract and workspace paths under the same per-test temp root,
+  confirmed the shared-template/live-store isolation trace across API, service,
+  and selftools, validated all remaining direct `internal/store.New` exceptions,
+  reran the required focused race suites, and verified every closing act and
+  final timing. No findings remain; status promoted to `reviewed`.

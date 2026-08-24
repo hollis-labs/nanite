@@ -7,6 +7,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // newWorkflowContextAssemblerTestDeps stands up a real in-memory store plus
@@ -15,7 +16,7 @@ import (
 // the actual resolution path rather than a mocked stand-in.
 func newWorkflowContextAssemblerTestDeps(t *testing.T) (*store.Store, SessionService, AgentService, ContextService) {
 	t.Helper()
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

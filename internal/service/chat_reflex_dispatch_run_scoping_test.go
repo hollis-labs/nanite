@@ -26,6 +26,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // ensureTestTeamRunMemberFixtureAgent creates the one shared agent_profiles
@@ -91,7 +92,7 @@ func insertTestWorkflowRun(t *testing.T, st *store.Store, runID string) {
 //     replacement of the existing global candidate set.
 func TestAttemptReflexDispatch_RunScopedReflex_IsolatedToItsOwnRun(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "reflex-dispatch-run-scoping.db")
-	st, err := store.New(context.Background(), dbPath)
+	st, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -210,7 +211,7 @@ func TestAttemptReflexDispatch_RunScopedReflex_IsolatedToItsOwnRun(t *testing.T)
 // against a worktree that predated TASKS/teams/02-team-run-members-table.md's
 // own migration (129). Now that both migrations are present on every
 // fresh store, that specific "no such table" branch can no longer be
-// reproduced via store.New() and — orchestrator merge note — is not
+// reproduced via a fresh fully migrated store and — orchestrator merge note — is not
 // otherwise covered by any test as of this merge, a small, known,
 // non-blocking coverage gap rather than a silently-dropped assertion.
 // This test still exercises the sibling "row not found" branch (a real
@@ -219,7 +220,7 @@ func TestAttemptReflexDispatch_RunScopedReflex_IsolatedToItsOwnRun(t *testing.T)
 // scenario the test's own name originally described.
 func TestAttemptReflexDispatch_NoTeamRunMembersTable_DegradesGracefully(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "reflex-dispatch-no-team-run-members-table.db")
-	st, err := store.New(context.Background(), dbPath)
+	st, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

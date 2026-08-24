@@ -10,6 +10,7 @@ import (
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestAssembleSlots_PlanReachesResult locks down the W1A wiring:
@@ -19,7 +20,7 @@ import (
 //
 // SP-20260512-0008 W1A (CW-20260512-0104).
 func TestAssembleSlots_PlanReachesResult(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -60,7 +61,7 @@ func TestAssembleSlots_PlanReachesResult(t *testing.T) {
 // the load-bearing W1A contract — the wire shape of slot positions must
 // not depend on the per-turn content.
 func TestAssembleSlots_StableCachePrefix_AcrossTurns(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -214,7 +215,7 @@ func TestAssembleSlots_UniversalSlotEmptyWhenAbsent(t *testing.T) {
 // the rules ride on SlotUniversal — independent of profile body or
 // template assignment.
 func TestAssembleSlots_UniversalSlotShipsContent(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -292,7 +293,7 @@ func TestAssembleSlots_UniversalSlotShipsContent(t *testing.T) {
 // because the service-layer wiring excludes it from the decider's input
 // map and sets it on the window directly.
 func TestAssembleSlots_ConversationNotInPlanDecider(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

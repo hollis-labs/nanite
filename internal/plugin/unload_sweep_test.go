@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
@@ -158,7 +158,7 @@ func TestUnloadPlugin_FullTeardown(t *testing.T) {
 	// Real store-backed config schema path so we exercise ClearPluginSchema
 	// end-to-end (not just a stub).
 	storePath := filepath.Join(t.TempDir(), "nanite-test.db")
-	db, err := store.New(context.Background(), storePath)
+	db, err := storetest.New(t, context.Background(), storePath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestA2AGateIntegration verifies the full gate ↔ input-required flow:
@@ -204,7 +205,7 @@ func TestGetWaitingGates_ReturnsOnlyWaitingGates(t *testing.T) {
 // Helper to create a test store with the schema applied.
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

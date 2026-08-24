@@ -30,6 +30,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestGenericReflexPass_DoesNotDuplicateDispatchToAgentFiring is the
@@ -42,7 +43,7 @@ import (
 func TestGenericReflexPass_DoesNotDuplicateDispatchToAgentFiring(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "reflex-generic-pass-leak.db")
-	st, err := store.New(ctx, dbPath)
+	st, err := storetest.New(t, ctx, dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

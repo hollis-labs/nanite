@@ -25,11 +25,12 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func TestAttemptReflexDispatch_KindLookupDegraded_LogsMultiCandidateCanary(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "reflex-dispatch-multi-candidate.db")
-	st, err := store.New(context.Background(), dbPath)
+	st, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

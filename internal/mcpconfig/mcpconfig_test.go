@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func TestParse_Valid(t *testing.T) {
@@ -118,7 +118,7 @@ func TestToStoreConfigs(t *testing.T) {
 
 func TestImportAndExport_Roundtrip(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestImportAndExport_Roundtrip(t *testing.T) {
 
 func TestImport_EmptyEnvAndArgs(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

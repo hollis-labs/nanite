@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // setupPluginTestState creates a temp directory and a pluginManagerState for testing.
@@ -303,7 +303,7 @@ func TestPluginMutationHandlersRejectNonCanonicalNames(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			db, err := store.New(context.Background(), filepath.Join(root, "test.db"))
+			db, err := storetest.New(t, context.Background(), filepath.Join(root, "test.db"))
 			if err != nil {
 				t.Fatalf("store.New: %v", err)
 			}

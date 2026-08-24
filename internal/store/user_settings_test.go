@@ -2,21 +2,16 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func newSeededStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := newTestStore(t)
 	if err := s.Seed(context.Background()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	t.Cleanup(func() { s.Close(context.Background()) })
 	return s
 }
 

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
@@ -16,7 +17,7 @@ import (
 func newTestSubagentSvc(t *testing.T) *subagent.Service {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "chat_test.db")
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

@@ -18,6 +18,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	for env, dir := range map[string]string{
+		"HOME":                filepath.Join(root, "home"),
 		"XDG_DATA_HOME":       filepath.Join(root, "xdg", "data"),
 		"XDG_STATE_HOME":      filepath.Join(root, "xdg", "state"),
 		"XDG_CACHE_HOME":      filepath.Join(root, "xdg", "cache"),

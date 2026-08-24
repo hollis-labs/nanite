@@ -8,6 +8,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md
@@ -24,7 +25,7 @@ import (
 
 func newStoreForPermTest(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

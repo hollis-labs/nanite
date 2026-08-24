@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 type fakeSentMessage struct {
@@ -49,7 +50,7 @@ func (f *fakeDurableRuntimeController) SendMessage(_ context.Context, sessionID,
 
 func newDurableAgentServiceTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

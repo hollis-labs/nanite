@@ -11,6 +11,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // newStasherForTest constructs an ArtifactStasher wired against a temp
@@ -20,7 +21,7 @@ func newStasherForTest(t *testing.T) (contextbroker.SlotStasher, *store.Store, s
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := tmp + "/stash.db"
-	s, err := store.New(context.Background(), dbPath)
+	s, err := storetest.New(t, context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -271,7 +272,7 @@ func TestArtifactStasher_DeterministicIDMatchesPackageFn(t *testing.T) {
 // guarantee for the broker's pointer-stash flow.
 func TestArtifactStasher_AtomicityOnFSWriteFailure(t *testing.T) {
 	tmp := t.TempDir()
-	s, err := store.New(context.Background(), tmp+"/stash.db")
+	s, err := storetest.New(t, context.Background(), tmp+"/stash.db")
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}

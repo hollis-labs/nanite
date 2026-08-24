@@ -276,6 +276,13 @@ func TestSQLiteSnapshotListTasksLogsMalformedStoredValuesAndPreservesRow(t *test
 	if err != nil {
 		t.Fatalf("ListTasks: %v", err)
 	}
+	assertMalformedSnapshotRow(t, tasks, taskID)
+	assertMalformedSnapshotWarnings(t, logs.String(), taskID)
+}
+
+func assertMalformedSnapshotRow(t *testing.T, tasks []*Task, taskID string) {
+	t.Helper()
+
 	if len(tasks) != 1 {
 		t.Fatalf("ListTasks returned %d rows, want 1", len(tasks))
 	}
@@ -292,8 +299,11 @@ func TestSQLiteSnapshotListTasksLogsMalformedStoredValuesAndPreservesRow(t *test
 	if got.CompletedAt == nil || !got.CompletedAt.IsZero() {
 		t.Fatalf("CompletedAt = %v, want non-nil zero time", got.CompletedAt)
 	}
+}
 
-	logOutput := logs.String()
+func assertMalformedSnapshotWarnings(t *testing.T, logOutput, taskID string) {
+	t.Helper()
+
 	if count := strings.Count(logOutput, `"task_id":"`+taskID+`"`); count != 4 {
 		t.Errorf("task_id warning count = %d, want 4; logs: %s", count, logOutput)
 	}

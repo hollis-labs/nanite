@@ -1,7 +1,7 @@
 # Low-risk error-handling gaps: silently discarded/unlogged errors across 5 unrelated files
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** reviewed
+**Status:** implemented
 **Depends on:** none within this batch.
 **Touches:** `internal/task/snapshot.go`, `internal/api/bookmarks.go`, `internal/secrets/keyring.go`, `internal/service/durable_wake.go`, `internal/mcpconfig/mcpconfig.go`.
 
@@ -89,6 +89,28 @@ One item in this batch deserves priority over the other four: `GO-SVCEXEC-006`'s
   (`internal/api` 286.281s, `internal/service` 124.701s,
   `internal/store` 276.905s). No review or approval is claimed; status is
   implemented pending fresh review.
+- **2026-08-24 — integration-ratchet correction on current-main base
+  `d5f0518e`.** The earlier implementation and review both ran the audit-config
+  correctness subset (`errcheck`, `errorlint`, `nilerr`) but did not run the
+  full tracked-package Stage-1 comparator. Ordinary and race tests do not
+  exercise complexity linters, so that verification gap missed that the new
+  malformed-snapshot regression itself had cyclomatic complexity 16 and added
+  one `cyclop` plus one `gocyclo` finding after integration.
+- Refactored only that regression's assertions into two small test helpers.
+  The test still inserts malformed `metadata`, `created_at`, `updated_at`, and
+  `completed_at`; verifies the preserved ID/title/status row, initialized-empty
+  metadata, zero required timestamps, and non-nil zero completion timestamp;
+  requires exactly four task-ID diagnostics; and requires a diagnostic for
+  each malformed field. A mutation changing the `updated_at` diagnostic field
+  made the focused regression fail, and restoring it made the test pass.
+- The pinned v2.11.4 full tracked-package ratchet now passes with `cyclop`
+  289/289 and `gocyclo` 286/286; Stage 2 remains `errcheck=0`,
+  `errorlint=0`, `nilerr=0`. Its exact aggregate is baseline 3255/current 3254,
+  because current main already has an unrelated `gocognit` reduction
+  (256 vs baseline 257); no baseline file was changed. Focused ordinary and
+  race tests for `internal/task`, `go build ./...`, `go vet ./...`, and
+  `go test -count=1 ./...` passed. Status is returned to implemented pending a
+  fresh independent re-review; this correction makes no review claim.
 
 ## Review notes
 

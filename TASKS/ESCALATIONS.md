@@ -1547,3 +1547,24 @@ case the previous wording didn't anticipate rather than a case someone ignored, 
 enumerating cases is the weaker half of the fix — the test question ("if the next kickoff author
 never reads my handoff, does this still need to survive?") has caught every one of them and should
 lead.
+
+## 2026-08-24 — Wave 6a dispatch assumptions overstated file disjointness and isolation
+
+**Raised by:** Wave 6 Orchestrator, during W6a execution.
+
+**Question / mismatch:** The W6 kickoff/README sequencing note said all nine W6a tasks were
+file-disjoint and parallel-safe after AD-19 resolved. Current-source execution proved that was
+false: `11/08` and `11/10` both touched `cmd/nanite/main.go`. Separately, the available
+`multi_agent_v1` dispatch mechanism edited the shared checkout in practice rather than giving the
+per-worker isolated worktrees assumed by `EXECUTION-PROCESS.md`, which allowed central tracker
+rows to drift while workers updated `findings.json`/task files concurrently.
+
+**Resolution:** Orchestrator judgment call within the existing process. Serialized `11/10` until
+after `11/08`, reconciled central tracker state by hand, and ran fresh re-review on W6a after the
+fix workers completed. W6a closed reviewed with `jq`, `go build ./cmd/nanite/`, `go vet ./...`,
+and `go test ./...` passing.
+
+**Follow-up:** README sequencing notes now record the W6a correction. For the rest of Wave 6 in
+this tool environment, do not rely on prompted worktree isolation for write agents. Either dispatch
+serially, or keep parallel subagents read-only/report-only and have the Orchestrator apply central
+tracking edits.

@@ -1,7 +1,7 @@
 # Resolve Harness v1 vs. native durable-agent handler duplication — architect decision required first
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/api/harness_v1.go` (durable-agent start/resume/wake handlers), `internal/api/durable_agents.go` (native `/api/durable-agents/*` handlers), `internal/api/durable_agent_wake.go` (native wake handler).
 
@@ -93,16 +93,50 @@ Option A carries real risk if reading 2 turns out to be correct after the fact �
 
 ## Done means
 
-- [ ] Real external-caller enumeration for `/api/harness/v1/*`'s durable-agent endpoints completed and recorded (even if the answer is "no confirmed external caller found").
-- [ ] Architect decision recorded: Option A (consolidate) or Option B (document and add parity test).
-- [ ] Chosen option implemented; existing tests for both endpoint families pass.
-- [ ] If Option B: parity test added and passing; insulation rationale documented in `harness_v1.go`.
-- [ ] `go build`, `go vet`, `go test ./internal/api/...` all pass.
+- [x] Real external-caller enumeration for `/api/harness/v1/*`'s durable-agent endpoints completed and recorded (even if the answer is "no confirmed external caller found").
+- [x] Architect decision recorded: Option A (consolidate) or Option B (document and add parity test).
+- [x] Chosen option implemented; existing tests for both endpoint families pass.
+- [x] If Option B: parity test added and passing; insulation rationale documented in `harness_v1.go`. (N/A: Option A chosen.)
+- [x] `go build`, `go vet`, `go test ./internal/api/...` all pass.
 
 ## Work log
 
-<!-- Worker fills this in: what was actually done, any deviation from plan and why, anything escalated. -->
+2026-08-23 worker:
+
+- Read required context before editing: this task file, `docs/engineering/EXECUTION-PROCESS.md`, `docs/engineering/GLOSSARY.md`, and AD-19 in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`.
+- Re-derived the stale audit citations against the pre-edit current checkout: Harness v1 durable handlers were still independently implemented at `internal/api/harness_v1.go:411-452`; native start/resume were at `internal/api/durable_agents.go:247-270`; native wake was at `internal/api/durable_agent_wake.go:54-69`.
+- Caller enumeration / downstream consumer trace:
+  - Server routes are both registered: native durable-agent start/resume/wake at `internal/api/api.go:173-181`; Harness v1 durable-agent start/resume/wake at `internal/api/api.go:273-275`.
+  - Harness v1 is documented as an external namespace, but not as an independent durable-agent implementation boundary: `docs/external-harness-runtime-api.md:6-9` says it is thin over the same services used by React, `docs/external-harness-runtime-api.md:141-147` says durable start/resume/wake map to the existing durable-agent services, and `docs/backend-agent-runtime-roadmap.md:77-82` describes `/api/harness/v1` as intentionally thin.
+  - Repository-local production callers found for Harness v1 durable-agent start/resume/wake: only exported TypeScript wrappers in `ui/src/lib/api.ts:302-341`. A narrowed `git grep` for `startHarnessDurableAgent` / `resumeHarnessDurableAgent` / `wakeHarnessDurableAgent` excluding `ui/src/lib/api.ts`, tests, docs, TASKS, and data returned no matches. This is "no confirmed repository-local production caller", not proof that no out-of-repo external caller exists.
+  - Repository-local production callers found for native durable-agent endpoints: wrapper functions in `ui/src/lib/api.ts:1369-1407` and `ui/src/lib/api.ts:1453-1462`; UI call sites in `ui/src/components/settings/DurableAgentAdminPanel.tsx:276-303`, `ui/src/components/settings/agents/AgentBuilderWizard.tsx:1656-1661`, and `ui/src/components/sidebar/StartSurfaceDialog.tsx:201-203`.
+  - `cmd/nanite/harness_client.go:87-90` is a Harness v1 client, but its implemented methods in `cmd/nanite/harness_client.go:193-230` cover sessions/turn/cancel, not durable-agent start/resume/wake.
+- AD-19 application: chose Option A. The trace did not prove a deliberate, version-stable, separately-implemented Harness v1 durable-agent contract; the docs instead describe Harness v1 durable operations as a thin mapping onto the existing durable services.
+- Implemented consolidation by changing `handleHarnessV1DurableStart`, `handleHarnessV1DurableResume`, and `handleHarnessV1DurableWake` to delegate directly to `handleDurableAgentStart`, `handleDurableAgentResume`, and `handleDurableAgentWake` respectively (`internal/api/harness_v1.go:411-420` after edit). No parity test was added because Option B was not chosen.
+- Verification:
+  - PASS: `go build ./internal/api/...`
+  - PASS: `go vet ./internal/api/...`
+  - PASS: `go test ./internal/api/... -run 'Harness|DurableAgent' -v` (includes `TestHarnessV1DurableWrappers`)
+  - PASS: `go test ./internal/api/...`
+  - PASS: `go build ./cmd/nanite/`
+  - BLOCKED outside this task: `go vet ./...` fails in `internal/mcp/elicitation_test.go:131` with `undefined: routeClientElicitation`.
+  - BLOCKED outside this task: `go test ./...` fails in `internal/mcp` for undefined `routeClientElicitation` / `parseElicitationCreate`, and also panics in `internal/service` at `internal/service/chat_boot_drive.go:297` with `send on closed channel`. `internal/api` passed during the full test run.
+
+2026-08-23 review-fix worker:
+
+- Read `.claude/agents/worker.md`, this task file, the native durable-agent route registration in `internal/api/api.go`, native start/resume/wake handlers in `internal/api/durable_agents.go` and `internal/api/durable_agent_wake.go`, and the existing native/Harness tests in `internal/api/durable_agents_test.go` and `internal/api/harness_v1_test.go`.
+- Added direct native HTTP coverage for `POST /api/durable-agents/{id}/wake` in `TestDurableAgentsAPI_Wake`, mirroring the Harness v1 wake path with a process-class durable agent, attached wake-scope session, manual wake payload, `200 OK` assertion, and decoded `service.DurableAgentWakeResult` assertions.
+- Verification:
+  - PASS: `go test ./internal/api -run 'Harness|DurableAgent' -count=1 -v`
+  - PASS: `go build ./internal/api/...`
+  - PASS: `go vet ./internal/api/...`
+  - PASS: `go build ./cmd/nanite/`
 
 ## Review notes
 
-<!-- Reviewer fills this in: pass/fail, what was independently re-verified. -->
+- 2026-08-24 fresh re-review PASS. Verified AD-19 Option A consolidation:
+  Harness v1 durable-agent start/resume/wake handlers delegate directly to the
+  native handlers, so one implementation now serves both route families.
+  Confirmed native HTTP coverage for start/resume and the new direct native
+  wake path in `TestDurableAgentsAPI_Wake`, plus Harness v1 start/resume/wake
+  coverage in `TestHarnessV1DurableWrappers`.

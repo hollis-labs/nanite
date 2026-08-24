@@ -43,6 +43,38 @@ func TestResolve_ScalarZeroValueSkipped(t *testing.T) {
 	}
 }
 
+func TestResolve_ReactorPolicyScalarsShareCascadeSemantics(t *testing.T) {
+	base := override.OverrideConfig{
+		MessageWakePolicy:        "message-role",
+		SubagentCompletionPolicy: "subagent-role",
+	}
+	project := &override.OverrideConfig{
+		MessageWakePolicy:        "message-agent",
+		SubagentCompletionPolicy: "subagent-agent",
+	}
+	session := &override.OverrideConfig{
+		MessageWakePolicy:        "message-session",
+		SubagentCompletionPolicy: "subagent-session",
+	}
+
+	result := override.Resolve(base, project, session)
+
+	if result.MessageWakePolicy != "message-session" {
+		t.Errorf("MessageWakePolicy = %q, want session override", result.MessageWakePolicy)
+	}
+	if result.SubagentCompletionPolicy != "subagent-session" {
+		t.Errorf("SubagentCompletionPolicy = %q, want session override", result.SubagentCompletionPolicy)
+	}
+
+	result = override.Resolve(base, project, &override.OverrideConfig{})
+	if result.MessageWakePolicy != "message-agent" {
+		t.Errorf("MessageWakePolicy with empty session = %q, want project override", result.MessageWakePolicy)
+	}
+	if result.SubagentCompletionPolicy != "subagent-agent" {
+		t.Errorf("SubagentCompletionPolicy with empty session = %q, want project override", result.SubagentCompletionPolicy)
+	}
+}
+
 // Test 3: List union with "+" prefix
 func TestResolve_ListUnionWithPlusPrefix(t *testing.T) {
 	base := override.OverrideConfig{

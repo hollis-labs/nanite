@@ -1,7 +1,7 @@
 # Optional: a generic `scanRows[T any]` helper to collapse `internal/store`'s query→scan-loop→append duplication
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/store/*.go` — ~20+ list methods across the package, no single file is canonical.
 
@@ -76,15 +76,33 @@ Low risk if undertaken carefully and incrementally (per the guide's own preferen
 
 ## Done means
 
-- [ ] Explicit decision recorded (undertaken vs. deferred/skipped) — either is an acceptable outcome for this task per its own optional framing.
-- [ ] If undertaken: `scanRows[T any]` helper implemented; at least the audit's 2 sampled pairs migrated as a proof of pattern.
-- [ ] If undertaken further: remaining list methods migrated incrementally, each with passing existing tests.
-- [ ] `go build`, `go vet`, `go test ./internal/store/...` all pass regardless of how far the migration goes.
+- [x] Explicit decision recorded (undertaken vs. deferred/skipped) — either is an acceptable outcome for this task per its own optional framing.
+- [x] If undertaken: N/A — deferred/skipped per the task's optional framing.
+- [x] If undertaken further: N/A — deferred/skipped per the task's optional framing.
+- [x] `go build`, `go vet`, `go test ./internal/store/...` all pass regardless of how far the migration goes.
 
 ## Work log
 
-<!-- Worker fills this in: what was actually done, or the explicit decision to defer and why. -->
+- 2026-08-24: Orchestrator decision: defer/skip this optional cleanup. The
+  task itself quotes the audit's false-positive framing: "per guide §27, do
+  not treat correct, readable, repeated boilerplate as must-fix without
+  identified pain." No bug or semantic divergence was found riding on the
+  duplication, and the current Wave 6 diff is already broad enough that a
+  low-priority generic-store-helper migration would add review surface without
+  closing a correctness gap.
+- Re-ran the required current-source preflight before deferring:
+  `golangci-lint run -c docs/audits/2026-08-21-go-quality/audit-golangci.yml
+  --max-issues-per-linter=0 --max-same-issues=0 --enable-only dupl
+  ./internal/store/...` exits 1 with 46 `dupl` issues, same count as the Wave
+  6 kickoff preflight. This preserves the known count for any future
+  intentional store-helper pass.
+- Store package verification passed with no store code changes:
+  `go build ./internal/store/...`, `go vet ./internal/store/...`, and
+  `go test ./internal/store/... -count=1`.
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-24 fresh review PASS. Verified the explicit optional deferral is
+  justified and recorded with the current 46 `dupl` count plus green
+  `go build`, `go vet`, and `go test ./internal/store/...` checks. No store
+  production code changed.

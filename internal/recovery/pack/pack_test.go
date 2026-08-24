@@ -27,10 +27,14 @@ func TestShouldBuildRecoveryPack(t *testing.T) {
 func TestMessagePlainText(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{`{"v":1,"text":"hello there"}`, "hello there"},
+		{`{"v":1,"text":"  hello there  "}`, "hello there"},
 		{`{"v":1,"text":""}`, ""},
 		{"plain user text", "plain user text"},
+		{"  plain user text  ", "plain user text"},
 		{`{not json`, `{not json`},
 		{`{"text":"no version"}`, `{"text":"no version"}`}, // v missing → treat as plain
+		{`{"v":0,"text":"zero"}`, `{"v":0,"text":"zero"}`},
+		{`{"v":-1,"text":"negative"}`, `{"v":-1,"text":"negative"}`},
 	}
 	for _, c := range cases {
 		if got := MessagePlainText(c.in); got != c.want {

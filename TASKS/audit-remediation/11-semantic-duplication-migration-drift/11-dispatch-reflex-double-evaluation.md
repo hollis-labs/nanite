@@ -1,7 +1,7 @@
 # Consider a sync test for the two intentionally-independent `dispatch_to_agent` reflex evaluators
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/service/chat_reflex_dispatch.go` (upstream evaluator), `internal/selftools/self_tools_dispatch.go` (inside `task_execute`, the second evaluator).
 
@@ -79,15 +79,37 @@ Very low risk — this task adds a test (and, at most, a narrowly-scoped extract
 
 ## Done means
 
-- [ ] Both evaluators' documented intentional-independence rationale re-confirmed by reading the current in-code comment.
-- [ ] A sync test added covering both evaluators' shared reflex-row interpretation logic.
-- [ ] No change to either evaluator's actual dispatch-decision behavior.
-- [ ] `go build`, `go vet`, `go test` pass for both packages.
+- [x] Both evaluators' documented intentional-independence rationale re-confirmed by reading the current in-code comment.
+- [x] A sync test added covering both evaluators' shared reflex-row interpretation logic.
+- [x] No change to either evaluator's actual dispatch-decision behavior.
+- [x] `go build`, `go vet`, `go test` pass for both packages.
 
 ## Work log
 
-<!-- Worker fills this in. -->
+- 2026-08-23: Loaded `.claude/agents/worker.md`, this task file, `docs/engineering/EXECUTION-PROCESS.md`, `docs/engineering/GLOSSARY.md`, and AD-19 in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md` before editing.
+- Re-derived current-HEAD citations before editing:
+  - `internal/selftools/self_tools_dispatch.go:37-45` documents the downstream evaluator's intentional independence.
+  - `internal/service/chat_reflex_dispatch.go:49-65` documents why the upstream call site remains separate while still using `reflexes.Resolve`.
+  - `internal/service/chat_reflex_dispatch.go:203-224` and `internal/selftools/self_tools_dispatch.go:415-424` show the shared `dispatch_to_agent` candidate-filtering interpretation surface that the new test protects.
+- Re-confirmed and recorded the in-code intentional-independence comment: "This is a second, DELIBERATELY INDEPENDENT evaluation of the same dispatch_to_agent reflex rows internal/service/chat_reflex_dispatch.go's attemptReflexDispatch evaluates upstream (before task_execute is ever invoked) — this file's evaluation runs downstream, INSIDE the task_execute call itself, once the LLM has already decided to dispatch. Both layers run; neither is collapsed into the other (the retired internal/service/chat_broker_dispatch.go's own header comment stated this design instruction for the pre-migration broker/promptrouter pair, and it still applies conceptually to this pair post-migration)."
+- Added `internal/service/chat_reflex_dispatch_parity_test.go`, a table-driven sync test that drives both real evaluators without merging them:
+  - upstream via `chatServiceImpl.attemptReflexDispatch`;
+  - downstream via `selftools.NewSelfToolsTransport(...).CallTool("task_execute", ...)` with a fake `dispatch.Spawner`.
+- The test seeds separate but identical stores per evaluator/case so each side's `event_log` and fired-count side effects cannot influence the other. Covered representative interpretation cases: current-turn `user_regex_window`, `scope_tier` + `execution_pattern`, first-applicable priority selection, ignoring non-`dispatch_to_agent` rows, TeamRun-scoped widening, run-scoped invisibility outside the run, and recurrence override suppression.
+- No production dispatch code was changed and no extraction was needed; the two evaluator implementations remain intentionally independent per AD-19.
+- Verification passed:
+  - `go test ./internal/service/... ./internal/selftools/... -run 'TestDispatchToAgentReflexInterpretationParity' -v`
+  - `go build ./internal/service/... ./internal/selftools/...`
+  - `go vet ./internal/service/... ./internal/selftools/...`
+  - `go test ./internal/service/... ./internal/selftools/... -run 'ReflexDispatch|DispatchToAgent' -v`
+  - `go build ./cmd/nanite/`
+  - `go vet ./...`
+  - `go test ./...`
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-24 fresh re-review PASS. Verified the two `dispatch_to_agent` reflex
+  evaluators remain intentionally independent while the new parity test drives
+  both real evaluator paths against shared rule-interpretation cases. Targeted
+  service/selftools reflex tests, `go vet`, `go build ./cmd/nanite/`, and
+  broader build checks passed.

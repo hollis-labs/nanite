@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -107,57 +106,6 @@ func TestElicitUserInput_NilService(t *testing.T) {
 	}
 }
 
-// --- Client-side receiver unit test ---
-
-// TestRouteClientElicitation_Accept simulates an external MCP server issuing
-// elicitation/create mid-tool-call. The user accepts.
-func TestRouteClientElicitation_Accept(t *testing.T) {
-	svc := &stubElicitationService{
-		elicitFn: func(_ context.Context, req elicitation.ElicitInput) (elicitation.Response, error) {
-			if req.Origin != "client" {
-				t.Errorf("origin: got %q, want %q", req.Origin, "client")
-			}
-			return elicitation.Response{Action: elicitation.ActionAccept, Content: "yes"}, nil
-		},
-	}
-
-	params := ElicitationCreateParams{
-		Message: "Allow external tool to read your notes?",
-		RequestedSchema: &ElicitationRequestedSchema{
-			Type: "boolean",
-		},
-	}
-
-	raw, err := routeClientElicitation(context.Background(), svc, "sess-2", "agent-1", "ext-tc-001", params)
-	if err != nil {
-		t.Fatalf("routeClientElicitation error: %v", err)
-	}
-
-	var result elicitationResponse
-	if err := json.Unmarshal(raw, &result); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
-	}
-	if result.Action != "accept" {
-		t.Errorf("action: got %q, want %q", result.Action, "accept")
-	}
-}
-
-// TestRouteClientElicitation_NilService verifies nil service auto-cancels.
-func TestRouteClientElicitation_NilService(t *testing.T) {
-	raw, err := routeClientElicitation(context.Background(), nil, "sess-2", "agent-1", "ext-tc-002",
-		ElicitationCreateParams{Message: "Hello?"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	var result elicitationResponse
-	if err := json.Unmarshal(raw, &result); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if result.Action != "cancel" {
-		t.Errorf("nil service should auto-cancel, got %q", result.Action)
-	}
-}
-
 // --- Timeout test ---
 
 // TestElicitUserInput_Timeout verifies that a timeout returns action=cancel.
@@ -190,39 +138,6 @@ func TestElicitUserInput_Timeout(t *testing.T) {
 }
 
 // --- Schema validation test ---
-
-// TestParseElicitationCreate verifies the JSON-RPC notification parser.
-func TestParseElicitationCreate(t *testing.T) {
-	// Valid elicitation/create notification.
-	valid := json.RawMessage(`{
-		"method": "elicitation/create",
-		"params": {
-			"message": "Do you agree?",
-			"requestedSchema": {"type": "boolean"}
-		}
-	}`)
-	params, ok := parseElicitationCreate(valid)
-	if !ok {
-		t.Fatal("expected parse to succeed for valid elicitation/create")
-	}
-	if params.Message != "Do you agree?" {
-		t.Errorf("message: got %q", params.Message)
-	}
-	if params.RequestedSchema == nil || params.RequestedSchema.Type != "boolean" {
-		t.Errorf("requestedSchema not parsed correctly")
-	}
-
-	// Non-matching method.
-	other := json.RawMessage(`{"method":"tools/call","params":{}}`)
-	if _, ok := parseElicitationCreate(other); ok {
-		t.Error("expected parse to fail for non-elicitation method")
-	}
-
-	// Invalid JSON.
-	if _, ok := parseElicitationCreate(json.RawMessage(`not-json`)); ok {
-		t.Error("expected parse to fail for invalid JSON")
-	}
-}
 
 // TestElicitSchemaValidation_StringRequiresContent mirrors the service-level
 // validation at the MCP layer: a string-schema accept with no content is

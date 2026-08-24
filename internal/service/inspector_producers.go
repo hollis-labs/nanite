@@ -46,21 +46,10 @@ func (s *chatServiceImpl) recordInspectorSlots(sessionID, turnID string, result 
 			CacheKey:     cacheKey,
 			Sensitive:    sensitiveSlots[name],
 			Content:      content,
-			TrafficLight: trafficLightFor(tokens, cached),
+			TrafficLight: inspectsvc.TrafficLight(tokens, cached),
 		})
 	}
 	s.inspector.RecordSlots(sessionID, turnID, snaps)
-}
-
-// trafficLightFor returns the traffic-light colour for a slot.
-func trafficLightFor(tokens int, cached bool) string {
-	if tokens == 0 {
-		return "red"
-	}
-	if cached {
-		return "green"
-	}
-	return "yellow"
 }
 
 // recordInspectorLLMMessages builds a []inspector.LLMMessageRecord from the

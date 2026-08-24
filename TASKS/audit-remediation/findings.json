@@ -456,9 +456,9 @@
       },
       "false_positive_considerations": "Repeated boilerplate that is individually correct and readable is a legitimate design choice; no bug found riding on this duplication.",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/13-store-scan-loop-duplication.md",
-      "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Scan-loop duplication count is 00/02-refreshed: dupl hits inside internal/store went from 41 (audit) to 40 (frozen HEAD), but spread across 22 files instead of ~20 -- per raw-1d3bfd96/DELTA.md, \"the duplication didn't shrink, it spread.\" Did not hand-recompute; task 11/13's own framing (optional generic scanRows helper, every site individually correct) is unaffected."
+      "disposition": "accepted-risk",
+      "task_status": "reviewed",
+      "revalidation_note": "Deferred 2026-08-24 per the task's optional framing and audit false-positive consideration: correct, readable repeated boilerplate is not must-fix without identified pain. Fresh dupl preflight still exits with 46 internal/store issues, and go build/vet/test ./internal/store/... passes with no store code changes. [DISPOSITION CORRECTED 2026-08-24, operator-approved: defer -> accepted-risk. These are reasoned decisions not to act, not staged work. The guide defines defer as 'intentionally staged; record trigger/owner' -- none has a trigger or owner because none is pending. Left as defer they would read as unfinished work indefinitely, in the leaderboard, in any 'what remains' query, and in a future re-audit diff. The reasoning above is unchanged and stands as the justification.]"
     },
     {
       "id": "GO-STORE-008",
@@ -532,8 +532,8 @@
       "report_section": "\u00a78.2",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/08-config-package-naming-collision.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed both Config (config.go:23, reads project-root nanite.yaml) and AppConfig (appconfig.go:12, reads config/nanite.yaml) still exist as described. Task file 11/08's own Gated-on (AD-20) frames the blast radius itself -- two-line rename vs. tree-wide sweep across every caller -- as the undetermined question, not merely the mechanics of an agreed rename. [AD-20 DECIDED 2026-08-22: rename both types by role. Measured 11 references total, not tree-wide as 11/08 claims.]"
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: AD-20 Option A satisfied. config.Config was renamed to config.RuntimeConfig and config.AppConfig was renamed to config.TunablesConfig. Active-tree Go and canonical engineering-doc greps for config\\.(Config|AppConfig)\\b return no matches outside historical/audit/task prose. On-disk config paths/names were not changed."
     },
     {
       "id": "GO-INFRA-002",
@@ -556,8 +556,8 @@
       "report_section": "\u00a78.2",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/04-traffic-light-calculation-duplication.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed both implementations still exist: inspector.trafficLight (service.go:268) and internal/service/inspector_producers.go's trafficLightFor (line 56), the latter a byte-for-byte reimplementation created only because the former is unexported. Concrete, no architect input needed."
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: inspector.trafficLight is now exported as inspector.TrafficLight, internal/service/inspector_producers.go calls inspectsvc.TrafficLight directly, and trafficLightFor was deleted. Fresh review verified inspector.TrafficLight is the only current-source implementation."
     },
     {
       "id": "GO-INFRA-003",
@@ -607,9 +607,9 @@
       "report_section": "\u00a78.2",
       "false_positive_considerations": "A comment at stream.go:104-105 suggests the early return may be a deliberate 'fail loud' choice, not an oversight.",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/06-provider-streaming-error-handling-divergence.md",
-      "disposition": "needs-architect-decision",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed both stream-error paths still exist with the divergent shapes described (openai/stream.go's EventError-then-return vs. anthropic/stream.go's graceful-fallback path); no commits touched either file since the audit. Task file 11/06 is explicitly gated on AD-19 and flags this may be \"legitimately independent\" -- classify before collapsing, per its own text."
+      "disposition": "remediate",
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: AD-19 graceful-degradation decision satisfied. OpenAI and Anthropic malformed streamed tool-call JSON handling now share the graceful _raw fallback via the common parser, and the OpenAI EventError/early-return divergence is gone. Provider stream tests, downstream service checks, build, vet, and full go test passed."
     },
     {
       "id": "GO-SVCCORE-001",
@@ -958,9 +958,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.4",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/01-subagent-completion-vs-message-wake-policy.md",
-      "disposition": "needs-architect-decision",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed still open: messaging_reactor.go's resolveMessageWakePolicy still calls override.Resolve (line 145); subagent_reactor.go's resolveSubagentCompletionPolicy (line 77) still hand-rolls the identical session-override -> agent-constraint -> global-default walk without it. Task file 11/01 is gated on AD-19 (share-implementation vs. parity-test), which is the genuine open question here, not the specific migration mechanics."
+      "disposition": "remediate",
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: AD-19 shared-implementation decision satisfied. resolveSubagentCompletionPolicy now routes through override.Resolve, SubagentCompletionPolicy is a first-class override scalar with the same cascade semantics as MessageWakePolicy, separate global defaults are preserved, and focused service/override tests pass."
     },
     {
       "id": "GO-SVCEXEC-005",
@@ -1190,8 +1190,8 @@
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/15-api-response-boilerplate-duplication.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed a.decode (api.go:607) still exists as the shared helper 3 API-receiver call sites bypass. api.go changed since the audit but only via purely additive Loop-launcher wiring (SetLoopLauncher etc.), unrelated to this finding's decode-boilerplate claim."
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: confirmed a.decode is the shared helper and the 3 API-receiver bypasses now use it: provider_manage.go handleUpdateProvider and handleSetProviderAPIKey, plus plugin_config.go handleUpdatePluginConfig. Malformed JSON still returns 400 with `invalid JSON: ` plus the decoder error, covered by TestProviderManageAndPluginConfigMalformedJSONUsesSharedDecode."
     },
     {
       "id": "GO-API-007",
@@ -1216,9 +1216,9 @@
       "report_section": "\u00a78.5",
       "false_positive_considerations": "Possibly deliberate protocol-stability choice insulating an external control-plane contract from internal refactors -- no comment states this rationale though.",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/02-harness-v1-vs-native-durable-agent-handlers.md",
-      "disposition": "needs-architect-decision",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed both handler families still exist with real independent bodies (harness_v1.go's handleHarnessV1* functions, durable_agents.go's native handlers) -- no commits touched either file since the audit. Task file 11/02 is gated on AD-19 (collapse vs. parity test); its own false_positive_considerations flags a plausible deliberate protocol-stability rationale, reinforcing that the disposition itself is undecided."
+      "disposition": "remediate",
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: AD-19 Option A consolidation satisfied. handleHarnessV1DurableStart/Resume/Wake delegate directly to native durable-agent start/resume/wake handlers, and focused API coverage now exercises native start/resume/wake plus Harness v1 start/resume/wake, including direct native POST /api/durable-agents/{id}/wake coverage."
     },
     {
       "id": "GO-API-008",
@@ -1264,9 +1264,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/15-api-response-boilerplate-duplication.md",
-      "disposition": "defer",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed agent_capabilities.go still has the described 4 parallel CRUD families with dupl-flagged pairs. Finding's own recommendation: \"judgment call... not required.\" No immediate action."
+      "disposition": "accepted-risk",
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: deferred per the finding's optional/informational framing after fresh dupl confirmation. `dupl -plumbing internal/api/agent_capabilities.go` still reports the CRUD-family cycles at 24-44/180-200/362-382/510-530 and 146-165/328-347/476-495/639-658; the broader non-test internal/api package run reports 23 plumbing entries including these pairs. No helper extracted because the families already have behavior-specific exceptions and a generic helper would increase coupling. [DISPOSITION CORRECTED 2026-08-24, operator-approved: defer -> accepted-risk. These are reasoned decisions not to act, not staged work. The guide defines defer as 'intentionally staged; record trigger/owner' -- none has a trigger or owner because none is pending. Left as defer they would read as unfinished work indefinitely, in the leaderboard, in any 'what remains' query, and in a future re-audit diff. The reasoning above is unchanged and stands as the justification.]"
     },
     {
       "id": "GO-API-010",
@@ -1486,8 +1486,8 @@
       "report_section": "\u00a78.6",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/14-adapter-plugin-boilerplate-duplication.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed all 4 adapter directories still exist (adapter-claude, adapter-codex, adapter-gemini, adapter-opencode) alongside the newer adapter-nanite-native. No commits touched these since the audit. Optional shared-helper extraction, no architect input needed."
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: added internal/plugin LoadEmbeddedManifest/BasePlugin helper coverage, migrated adapter-claude, adapter-codex, adapter-gemini, and adapter-opencode to use it for embedded manifest parsing plus plugin-sdk identity/lifecycle behavior, and left only package-scoped init registration plus adapter-specific CLIAgentAdapter/content code duplicated. adapter-nanite-native remains untouched."
     },
     {
       "id": "GO-PLUGIN-008",
@@ -1620,9 +1620,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/09-elicitation-client-side-duplication-and-dead-doc.md",
-      "disposition": "needs-architect-decision",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed: `ClientElicitMiddleware` appears exactly once in the tree, in elicitation.go's own package-doc comment (line 13) -- no type/function definition anywhere. Task file 11/09 is gated on AD-19 (build the missing middleware vs. delete the dead client-side functions and correct the doc) -- genuinely a wire-vs-retire-shaped disposition question, not an implementation detail."
+      "disposition": "remediate",
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: AD-29 delete decision satisfied. ClientElicitMiddleware, routeClientElicitation, and parseElicitationCreate are absent from active Go code, and remaining elicitation comments describe only the live Nanite-owned server-side path. Deadcode and targeted MCP/elicitation tests passed."
     },
     {
       "id": "GO-MCPTOOL-005",
@@ -1775,9 +1775,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/11-dispatch-reflex-double-evaluation.md",
-      "disposition": "defer",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed both evaluators (self_tools_dispatch.go, chat_reflex_dispatch.go) still independently evaluate dispatch_to_agent reflex rows, with the code's own comment still arguing this is intentional. No confirmed defect; deferred pending an optional parity test, per the finding's own \"record for architect awareness\" recommendation."
+      "disposition": "remediate",
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: AD-19 decision satisfied. The two dispatch_to_agent reflex evaluators remain intentionally independent, and a parity test now drives both real evaluator paths against shared rule-interpretation cases so future drift is caught."
     },
     {
       "id": "GO-MCPTOOL-011",
@@ -1800,8 +1800,8 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/12-devservername-constant-duplication.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed both independent declarations still exist: internal/mcp/naming.go's DevServerName = \"dev\" (line 36) and internal/toolclient/broker.go's separate const DevServerName = \"dev\" (line 359), despite the latter already importing the former's package. Two-line fix, no architect input needed."
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: removed the redundant internal/toolclient/broker.go DevServerName declaration and changed toolclient's dev-tool prefix check to reference mcp.DevServerName directly. Fresh review verified exactly one current-source Go declaration remains, in internal/mcp/naming.go."
     },
     {
       "id": "GO-MCPTOOL-012",
@@ -1821,9 +1821,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/05-mcp-result-processing-tail-duplication.md",
-      "disposition": "needs-architect-decision",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed both Manager.ExecuteTool (manager.go:697) and ExecuteToolOnServer (manager.go:781) still exist with the described duplicated result-processing tail. Task file 11/05 is gated on AD-19 (share vs. parity test)."
+      "disposition": "remediate",
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: AD-19 extraction decision satisfied. Manager.ExecuteTool and ExecuteToolOnServer both call processCallToolResult for the shared post-CallTool result assembly, trust-tier size validation, and span attribute tail. Targeted MCP checks, build, vet, and full go test passed."
     },
     {
       "id": "GO-MCPTOOL-013",
@@ -2000,9 +2000,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/10-envelope-registry-triplication.md",
-      "disposition": "needs-architect-decision",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed at least 2 of the 3 independent Registry copies still exist (chat/envelope.go's SetEnvelopeRegistry/EnvelopeRegistry, envelope/validator.go's SetEnvelopeRegistry/getEnvelopeRegistry, both unchanged). Task file 11/10 is gated on AD-19 (collapse to one holder vs. keep three with enforced sync)."
+      "disposition": "remediate",
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: AD-19 shared-wiring decision satisfied. main.go now performs one shared registry wiring call through envelopewiring.InstallSharedRegistry, and pointer-identity coverage verifies chat, envelope, and plugin.Host observe the same registry instance."
     },
     {
       "id": "GO-CHAT-002",
@@ -2024,8 +2024,8 @@
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/03-structuredmessage-unwrap-duplication.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed both implementations still exist unchanged: chat.replayContent (structured.go:132) and recovery/pack.MessagePlainText (pack.go:44). Task file 11/03's own Gated-on field is explicitly \"none\" (unlike its AD-19-gated siblings in this folder) -- this is a self-contained mechanical fix, not an open share-vs-parity-test policy question."
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: import graph independently rechecked before and after the change (`go list -deps ./internal/chat/... | grep internal/recovery/pack` and `go list -deps ./internal/recovery/pack/... | grep internal/chat` both produced no output). Added leaf helper internal/structuredmessage.UnwrapText for the shared StructuredMessage-shaped JSON parse rule, routed chat.replayContent and recovery/pack.MessagePlainText through it without importing internal/chat into recovery/pack, and preserved each caller's fallback/trim behavior."
     },
     {
       "id": "GO-CHAT-003",
@@ -2069,9 +2069,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/09-elicitation-client-side-duplication-and-dead-doc.md",
-      "disposition": "needs-architect-decision",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed both ElicitUserInput (elicitation.go:82) and routeClientElicitation (elicitation.go:165) still exist with the described near-duplicate bodies and inconsistent context.Canceled handling. Same task file (11/09), same AD-19 gate as GO-MCPTOOL-004."
+      "disposition": "remediate",
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24: closed as a side effect of the AD-29 delete path. routeClientElicitation no longer exists, leaving no client-side duplicate cancellation contract to unify; the remaining ElicitUserInput path is the live Nanite-owned server-side path."
     },
     {
       "id": "GO-CHAT-005",
@@ -2256,9 +2256,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.10",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/16-workflow-naming-and-dispatch-naming-collisions.md",
-      "disposition": "defer",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed internal/dispatch, internal/dispatcher, and the workflow-branded packages still exist as three distinct, well-documented execution models (agentworkflow/doc.go still explains the deliberate non-nesting). Finding's own conclusion: \"no action required beyond continued awareness.\""
+      "disposition": "accepted-risk",
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24 as a tracking-only awareness finding. internal/workflow, internal/workflowrunner, and internal/agentworkflow remain three distinct execution models, and agentworkflow/doc.go still documents the deliberate non-nesting. No rename or code change is required. [DISPOSITION CORRECTED 2026-08-24, operator-approved: defer -> accepted-risk. These are reasoned decisions not to act, not staged work. The guide defines defer as 'intentionally staged; record trigger/owner' -- none has a trigger or owner because none is pending. Left as defer they would read as unfinished work indefinitely, in the leaderboard, in any 'what remains' query, and in a future re-audit diff. The reasoning above is unchanged and stands as the justification.]"
     },
     {
       "id": "GO-EXEC-004",
@@ -2276,9 +2276,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.10",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/16-workflow-naming-and-dispatch-naming-collisions.md",
-      "disposition": "defer",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed both internal/dispatch and internal/dispatcher packages still exist as distinct, real packages with their own files. The audit's own recommendation already concludes \"no rename recommended without architect review; flagged for awareness only\" -- there is no live defect to remediate, just a naming-similarity observation the audit itself judged non-actionable. Deferred with the trigger being any future package-rename effort that happens to touch either name."
+      "disposition": "accepted-risk",
+      "task_status": "reviewed",
+      "revalidation_note": "Reviewed 2026-08-24 as a tracking-only awareness finding. internal/dispatch and internal/dispatcher remain distinct real packages with separate documented responsibilities. No rename is recommended without future architect review; no code change is required. [DISPOSITION CORRECTED 2026-08-24, operator-approved: defer -> accepted-risk. These are reasoned decisions not to act, not staged work. The guide defines defer as 'intentionally staged; record trigger/owner' -- none has a trigger or owner because none is pending. Left as defer they would read as unfinished work indefinitely, in the leaderboard, in any 'what remains' query, and in a future re-audit diff. The reasoning above is unchanged and stands as the justification.]"
     },
     {
       "id": "GO-MEM-001",

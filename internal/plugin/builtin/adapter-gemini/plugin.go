@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/fsutil"
@@ -18,29 +16,15 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 
 	plugin "github.com/hollis-labs/plugin-sdk"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed plugin.yaml
 var manifestYAML []byte
 
-var (
-	parsedManifestOnce sync.Once
-	parsedManifest     *hostplugin.PluginManifest
-)
-
-func loadManifest() *hostplugin.PluginManifest {
-	parsedManifestOnce.Do(func() {
-		var m hostplugin.PluginManifest
-		if err := yaml.Unmarshal(manifestYAML, &m); err != nil {
-			panic("adapter-gemini: invalid embedded plugin.yaml: " + err.Error())
-		}
-		parsedManifest = &m
-	})
-	return parsedManifest
-}
+var loadManifest = hostplugin.LoadEmbeddedManifest("adapter-gemini", manifestYAML)
 
 func init() {
+	// init remains per adapter because builtin registration is package-scoped.
 	hostplugin.RegisterPlugin("adapter-gemini", func() plugin.Plugin { return New() })
 }
 
@@ -50,55 +34,27 @@ func init() {
 
 // Plugin is the Gemini CLI adapter plugin.
 type Plugin struct {
-	host    plugin.Host
-	status  plugin.PluginStatus
+	hostplugin.BasePlugin
 	adapter *Adapter
 }
 
 // New creates a new Gemini adapter plugin instance.
 func New() *Plugin {
-	p := &Plugin{}
+	p := &Plugin{
+		BasePlugin: hostplugin.NewBasePlugin(hostplugin.BasePluginConfig{
+			ID:          "adapter-gemini",
+			Name:        "Gemini CLI Adapter",
+			Version:     "0.1.0",
+			Description: "Discovers GEMINI.md and populates Gemini CLI sandboxes",
+			Manifest:    loadManifest,
+		}),
+	}
 	p.adapter = &Adapter{plugin: p}
 	return p
 }
 
 // Adapter returns the CLIAgentAdapter for this plugin.
 func (p *Plugin) Adapter() *Adapter { return p.adapter }
-
-func (p *Plugin) ID() string             { return "adapter-gemini" }
-func (p *Plugin) Name() string           { return "Gemini CLI Adapter" }
-func (p *Plugin) Version() string        { return "0.1.0" }
-func (p *Plugin) Description() string    { return "Discovers GEMINI.md and populates Gemini CLI sandboxes" }
-func (p *Plugin) Dependencies() []string { return nil }
-
-// Manifest exposes the embedded plugin.yaml so the host loader runs the
-// yaml-authoritative path (H.3 / B.4). No declarative registrations — the
-// CLIAgentAdapter is wired via internal/service/install/adapters.go.
-func (p *Plugin) Manifest() *hostplugin.PluginManifest { return loadManifest() }
-
-func (p *Plugin) Load(host plugin.Host) error {
-	p.host = host
-	p.status = plugin.PluginStatus{
-		Loaded:   true,
-		Enabled:  true,
-		LoadedAt: time.Now(),
-	}
-	host.Logger().Info("adapter-gemini: loaded")
-	return nil
-}
-
-func (p *Plugin) Unload() error {
-	p.status.Loaded = false
-	p.status.Enabled = false
-	if p.host != nil {
-		p.host.Logger().Info("adapter-gemini: unloaded")
-	}
-	return nil
-}
-
-func (p *Plugin) Status() plugin.PluginStatus {
-	return p.status
-}
 
 // ---------------------------------------------------------------------------
 // Adapter (implements agent.CLIAgentAdapter)

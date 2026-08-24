@@ -1,14 +1,11 @@
-// Package elicitation implements MCP elicitation/create support (spec 2025-06-18).
+// Package elicitation implements Nanite's server-side MCP elicitation/create
+// support (spec 2025-06-18).
 //
-// Elicitation lets a tool, mid-call, ask the user a question and await their
-// response before continuing. This package manages:
-//
-//  1. Server-side: when one of Nanite's OWN tools needs user input mid-call
-//     (e.g. bulk-delete confirmation), it issues an elicitation request that
-//     bubbles to the chat surface.
-//
-//  2. Client-side: when an external MCP server's tool issues elicitation/create,
-//     we route it through the same UI mechanism.
+// Elicitation lets a Nanite-owned tool, mid-call, ask the user a question and
+// await their response before continuing. This package manages requests from
+// Nanite's own tools: it creates a pending request, emits an
+// elicitation-prompt envelope to the chat surface, and routes the envelope
+// response back to the waiting caller.
 //
 // Design pins (CW-20260420-0018, G4):
 //   - D1: Elicitation is ADDITIVE — it does not replace the strategy-loop
@@ -79,7 +76,7 @@ type Request struct {
 
 	// ToolCallID is the originating tool-call ID (MCP tool_use_id).
 	// Stored so the caller can correlate the response back to its
-	// in-flight tool call when routing across the client-side path.
+	// in-flight tool call.
 	ToolCallID string
 
 	// SessionID and AgentID identify where the response should be
@@ -87,8 +84,8 @@ type Request struct {
 	SessionID string
 	AgentID   string
 
-	// Origin identifies where this elicitation came from.
-	// "server" = our own tool issued it; "client" = external MCP server.
+	// Origin identifies where this elicitation came from. Current production
+	// callers set "server" for Nanite-owned tools.
 	Origin string
 
 	// CreatedAt is when the request was created; used for timeout math.
@@ -122,9 +119,10 @@ type EnvelopeData struct {
 	// SchemaTitle and SchemaDescription are optional widget labels.
 	SchemaTitle       string `json:"schema_title,omitempty"`
 	SchemaDescription string `json:"schema_description,omitempty"`
-	// ToolCallID is carried through for client-side correlation.
+	// ToolCallID is carried through for originating tool-call correlation.
 	ToolCallID string `json:"tool_call_id,omitempty"`
-	// Origin is "server" or "client".
+	// Origin identifies the source label; current production callers set
+	// "server".
 	Origin string `json:"origin"`
 	// TimeoutAt is when the server will auto-cancel if no response arrives.
 	TimeoutAt time.Time `json:"timeout_at"`

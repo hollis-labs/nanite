@@ -12,40 +12,21 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 
 	plugin "github.com/hollis-labs/plugin-sdk"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed plugin.yaml
 var manifestYAML []byte
 
-var (
-	parsedManifestOnce sync.Once
-	parsedManifest     *hostplugin.PluginManifest
-)
-
-// loadManifest parses the embedded plugin.yaml exactly once. A parse failure
-// means the builtin was shipped with invalid source metadata — panic so the
-// bug surfaces at boot rather than producing a half-wired plugin at runtime.
-func loadManifest() *hostplugin.PluginManifest {
-	parsedManifestOnce.Do(func() {
-		var m hostplugin.PluginManifest
-		if err := yaml.Unmarshal(manifestYAML, &m); err != nil {
-			panic("adapter-claude: invalid embedded plugin.yaml: " + err.Error())
-		}
-		parsedManifest = &m
-	})
-	return parsedManifest
-}
+var loadManifest = hostplugin.LoadEmbeddedManifest("adapter-claude", manifestYAML)
 
 func init() {
+	// init remains per adapter because builtin registration is package-scoped.
 	hostplugin.RegisterPlugin("adapter-claude", func() plugin.Plugin { return New() })
 }
 
@@ -55,56 +36,27 @@ func init() {
 
 // Plugin is the Claude Code adapter plugin.
 type Plugin struct {
-	host    plugin.Host
-	status  plugin.PluginStatus
+	hostplugin.BasePlugin
 	adapter *Adapter
 }
 
 // New creates a new Claude Code adapter plugin instance.
 func New() *Plugin {
-	p := &Plugin{}
+	p := &Plugin{
+		BasePlugin: hostplugin.NewBasePlugin(hostplugin.BasePluginConfig{
+			ID:          "adapter-claude",
+			Name:        "Claude Code Adapter",
+			Version:     "0.1.0",
+			Description: "Discovers .claude/agents/*.md and syncs project-root CLAUDE.md",
+			Manifest:    loadManifest,
+		}),
+	}
 	p.adapter = &Adapter{plugin: p}
 	return p
 }
 
 // Adapter returns the CLIAgentAdapter for this plugin.
 func (p *Plugin) Adapter() *Adapter { return p.adapter }
-
-func (p *Plugin) ID() string             { return "adapter-claude" }
-func (p *Plugin) Name() string           { return "Claude Code Adapter" }
-func (p *Plugin) Version() string        { return "0.1.0" }
-func (p *Plugin) Description() string    { return "Discovers .claude/agents/*.md and syncs project-root CLAUDE.md" }
-func (p *Plugin) Dependencies() []string { return nil }
-
-// Manifest exposes the embedded plugin.yaml so the host loader runs the same
-// yaml-authoritative path used for subprocess plugins (H.3 / B.4). This
-// adapter has no declarative host registrations — its CLIAgentAdapter is
-// wired externally via internal/service/install/adapters.go.
-func (p *Plugin) Manifest() *hostplugin.PluginManifest { return loadManifest() }
-
-func (p *Plugin) Load(host plugin.Host) error {
-	p.host = host
-	p.status = plugin.PluginStatus{
-		Loaded:   true,
-		Enabled:  true,
-		LoadedAt: time.Now(),
-	}
-	host.Logger().Info("adapter-claude: loaded")
-	return nil
-}
-
-func (p *Plugin) Unload() error {
-	p.status.Loaded = false
-	p.status.Enabled = false
-	if p.host != nil {
-		p.host.Logger().Info("adapter-claude: unloaded")
-	}
-	return nil
-}
-
-func (p *Plugin) Status() plugin.PluginStatus {
-	return p.status
-}
 
 // ---------------------------------------------------------------------------
 // Adapter (implements agent.CLIAgentAdapter)

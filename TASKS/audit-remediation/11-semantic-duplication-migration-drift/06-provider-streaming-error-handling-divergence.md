@@ -1,7 +1,7 @@
 # Resolve OpenAI vs. Anthropic streaming malformed-tool-call-JSON divergence — highest-priority item in this folder
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/llm/openai/stream.go` (lines 96-123, including the comment at lines 104-105), `internal/llm/anthropic/stream.go` (lines 232-253).
 
@@ -115,16 +115,32 @@ Observable behavior required for PASS: the downstream chat-loop consumer's handl
 
 ## Done means
 
-- [ ] Downstream chat-loop consumer's handling of `EventError`-without-`EventDone` traced and verified (documented in Work log, since the audit explicitly left this untraced).
-- [ ] Architect decision recorded: Option A (unify on graceful degradation) or Option B (document deliberate fail-loud divergence, verify consumer handles it).
-- [ ] Chosen option implemented; `stream.go:104-105`'s comment (OpenAI) is accurate and complete regardless of which option is chosen.
-- [ ] Regression test reproducing the original malformed-JSON behavior added; fails against pre-fix behavior if Option A, passes against documented behavior if Option B.
-- [ ] `go build`, `go vet`, `go test` pass for both provider packages and the downstream consumer.
+- [x] Downstream chat-loop consumer's handling of `EventError`-without-`EventDone` traced and verified (documented in Work log, since the audit explicitly left this untraced).
+- [x] Architect decision recorded: Option A (unify on graceful degradation) or Option B (document deliberate fail-loud divergence, verify consumer handles it).
+- [x] Chosen option implemented; `stream.go:104-105`'s comment (OpenAI) is accurate and complete regardless of which option is chosen.
+- [x] Regression test reproducing the original malformed-JSON behavior added; fails against pre-fix behavior if Option A, passes against documented behavior if Option B.
+- [x] `go build`, `go vet`, `go test` pass for both provider packages and the downstream consumer.
 
 ## Work log
 
-<!-- Worker fills this in: what was actually done, any deviation from plan and why, anything escalated. -->
+- Re-derived the audit citations against current `HEAD` before editing: OpenAI's aborting malformed-tool-argument block was still `internal/llm/openai/stream.go:96-123` with the old comment at `104-105`; Anthropic's graceful fallback block was still `internal/llm/anthropic/stream.go:232-253`.
+- Applied AD-19 Option A. Added `internal/llm/toolargs.ParseObject` as the shared streamed tool-argument parser and moved both OpenAI and Anthropic onto it. Malformed streamed tool-call JSON now becomes `{"_raw": raw}` and stream processing continues through usage and `EventDone`.
+- Recorded the AD-19 invariant in both provider files near the tool-argument parse sites, replacing OpenAI's stale fail-loud comment.
+- Traced production `Provider.StreamChat` callers: the main chat harness calls it from `internal/service/chat_generation_actions.go:794`; envelope retry calls it from `internal/service/chat_generate.go:1365`; early-stop synthesis calls it from `internal/service/chat_generate.go:1723`; workflow LLM steps call it from `internal/service/workflow_step_executor.go:217`. The main chat harness handles `EventError` without requiring `EventDone` at `chat_generation_actions.go:1155-1204` by cancelling the provider stream, surfacing `ErrorEnvelopeDelta`/`ErrorEvent`, persisting partial assistant content, notifying the broker, and terminating. Envelope retry returns on `EventError` (`chat_generate.go:1382-1384`), early-stop synthesis logs and continues draining (`chat_generate.go:1745-1747`), and workflow LLM steps record the stream error and return it after channel close (`workflow_step_executor.go:242-247`).
+- Added regression coverage: OpenAI provider test for malformed streamed tool arguments proving no `EventError` and preserving usage/`EventDone`; Anthropic provider test pinning the same `_raw` fallback shape; shared parser tests; and an explicit downstream assertion in `TestGenerateResponseCharacterization_ProviderErrorMidStream` that an `EventError` without `EventDone` does not emit `stream_end`.
+- Verification passed:
+  - `go build ./internal/llm/openai/... ./internal/llm/anthropic/...`
+  - `go vet ./internal/llm/openai/... ./internal/llm/anthropic/...`
+  - `go test ./internal/llm/openai/... ./internal/llm/anthropic/... -run 'Stream' -v`
+  - `go test ./internal/service/... -run 'Stream|Provider' -v`
+  - `go build ./cmd/nanite/`
+  - `go vet ./...`
+  - `go test ./...`
 
 ## Review notes
 
-<!-- Reviewer fills this in: pass/fail, what was independently re-verified. -->
+- 2026-08-24 fresh re-review PASS. Verified OpenAI and Anthropic malformed
+  streamed tool-call JSON handling now share the graceful `_raw` fallback via
+  the common parser, with no EventError/early-return divergence on the OpenAI
+  path. Provider stream tests, downstream service stream/provider checks,
+  `go build`, `go vet`, and full `go test ./... -count=1` passed.

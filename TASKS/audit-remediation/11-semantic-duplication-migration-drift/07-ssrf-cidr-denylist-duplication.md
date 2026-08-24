@@ -1,7 +1,7 @@
 # SSRF CIDR denylist duplication — cross-reference only, implemented in `08-remaining-security-hardening/`
 
 **Phase:** Wave 6 — Semantic duplication / migration drift (cross-referenced from Wave 3)
-**Status:** not-started (tracking entry only — see below)
+**Status:** reviewed
 **Depends on:** N/A — no implementation task lives in this file.
 **Touches:** nothing directly; this file exists so the finding stays visible in this folder's classification table.
 
@@ -59,13 +59,20 @@ The risk is not that the lists currently disagree (they don't, per the audit's e
 
 ## Done means
 
-- [ ] Confirm `TASKS/audit-remediation/08-remaining-security-hardening/`'s task file covering `GO-SEC4-007` exists and cites this cross-reference (or, if that folder's task-authoring pass has not yet run, flag this to whoever authors it, so the finding isn't silently dropped between folders).
-- [ ] This file itself requires no further action — it is a pointer, not a task.
+- [x] Confirm `TASKS/audit-remediation/08-remaining-security-hardening/`'s task file covering `GO-SEC4-007` exists and cites this cross-reference (or, if that folder's task-authoring pass has not yet run, flag this to whoever authors it, so the finding isn't silently dropped between folders).
+- [x] This file itself requires no further action — it is a pointer, not a task.
 
 ## Work log
 
-N/A — see `08-remaining-security-hardening/` for implementation work log.
+- 2026-08-23: Orchestrator confirmation for Wave 6 preflight. `findings.json`
+  maps `GO-SEC4-007` to
+  `TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md`,
+  disposition `remediate`, task_status `reviewed`. That task is itself
+  `reviewed` and explicitly cites the reassignment from `11/07` plus the AD-28
+  shared CIDR policy consolidation. No implementation remains in this pointer
+  task.
 
 ## Review notes
 
-N/A — see `08-remaining-security-hardening/` for review notes.
+N/A — see `08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md`
+for the implementation review notes.

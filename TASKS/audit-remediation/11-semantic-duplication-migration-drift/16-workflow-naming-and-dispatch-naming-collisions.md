@@ -1,7 +1,7 @@
 # Workflow-branded and dispatch/dispatcher naming collisions — awareness only, no action required
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** nothing — no code change is proposed by this task.
 
@@ -38,13 +38,23 @@ Nothing. No rename, split, or documentation change is proposed by this task. If 
 
 ## Done means
 
-- [ ] Both findings recorded in this folder's `README.md` classification table (see that file) so they remain visible to future planning passes.
-- [ ] No code change made.
+- [x] Both findings recorded in this folder's `README.md` classification table (see that file) so they remain visible to future planning passes.
+- [x] No code change made.
 
 ## Work log
 
-N/A — no implementation work associated with this task.
+- 2026-08-24: Orchestrator verified the tracking-only closeout. Both findings
+  remain recorded in this folder's classification table, and current source
+  still documents the deliberate package split:
+  `internal/agentworkflow/doc.go` explains why the Agent Workflows pillar is
+  not nested under `internal/workflow`, and `internal/dispatch/doc.go`
+  documents the distinct harness dispatch primitive. `internal/dispatcher`
+  remains a separate package with its own run/dispatcher implementation.
+  No production code change is required or made.
 
 ## Review notes
 
-N/A — nothing to review beyond confirming this file accurately reflects the audit's own "no action required" framing for both findings.
+- 2026-08-24 fresh review PASS. Verified the no-action findings are recorded
+  in the task and classification table, with source docs supporting the
+  distinct `workflow`/`workflowrunner`/`agentworkflow` and
+  `dispatch`/`dispatcher` responsibilities. No code change required.

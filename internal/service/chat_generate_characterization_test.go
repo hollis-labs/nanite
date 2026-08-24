@@ -457,6 +457,8 @@ func TestGenerateResponseCharacterization_MultiToolTurn(t *testing.T) {
 }
 
 func TestGenerateResponseCharacterization_ProviderErrorMidStream(t *testing.T) {
+	// This intentionally omits EventDone after EventError. The chat loop must
+	// terminate on the error event rather than waiting for a done sentinel.
 	f := newCharacterizationFixture(t, []characterizationProviderStep{{events: []llmtypes.StreamEvent{
 		{Type: "delta", Content: "partial-but-buffered"},
 		{Type: "error", Error: "upstream disconnected"},
@@ -465,6 +467,9 @@ func TestGenerateResponseCharacterization_ProviderErrorMidStream(t *testing.T) {
 
 	if findEvent(events, "error") == nil {
 		t.Fatalf("events = %v, want structured error", eventTypes(events))
+	}
+	if findEvent(events, "stream_end") != nil {
+		t.Fatalf("events = %v, did not expect stream_end after provider EventError", eventTypes(events))
 	}
 	for _, event := range events {
 		if event.Type == "delta" && event.Content == "partial-but-buffered" {

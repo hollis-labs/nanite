@@ -3,9 +3,14 @@ package anthropic
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	sdk "github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 )
@@ -129,12 +134,12 @@ func TestModelSupportsInterleavedThinking(t *testing.T) {
 		{"claude-opus-4-20250514", true},
 		{"claude-sonnet-4-5-20250930", true},
 		{"claude-haiku-4-5-20251001", true},
-		{"claude-sonnet-4-20250101", false},  // pre-min date
-		{"claude-opus-4-0", false},           // no date
-		{"claude-opus-3-5-20250514", false},  // wrong major
-		{"claude-opus-40-20250514", false},   // false-prefix
-		{"claude-sonnet-4-5", false},         // no date suffix
-		{"gpt-4-turbo-20240414", false},      // wrong family
+		{"claude-sonnet-4-20250101", false}, // pre-min date
+		{"claude-opus-4-0", false},          // no date
+		{"claude-opus-3-5-20250514", false}, // wrong major
+		{"claude-opus-40-20250514", false},  // false-prefix
+		{"claude-sonnet-4-5", false},        // no date suffix
+		{"gpt-4-turbo-20240414", false},     // wrong family
 		{"", false},
 	}
 	for _, tc := range cases {
@@ -235,4 +240,116 @@ func TestStreamChat_PreFlightExceedsBudget(t *testing.T) {
 	if !strings.Contains(err.Error(), "estimated") || !strings.Contains(err.Error(), "tokens vs") || !strings.Contains(err.Error(), "limit") {
 		t.Fatalf("error format does not match parser: %v", err)
 	}
+}
+
+func TestStreamChat_MalformedToolArgumentsGracefulFallback(t *testing.T) {
+	c := newStreamingTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		flusher, _ := w.(http.Flusher)
+		lines := []string{
+			`event: message_start`,
+			`data: {"type":"message_start","message":{"id":"msg_bad","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250514","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":0}}}`,
+			``,
+			`event: content_block_start`,
+			`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_bad","name":"dev_glob","input":{}}}`,
+			``,
+			`event: content_block_delta`,
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"pattern\":"}}`,
+			``,
+			`event: content_block_stop`,
+			`data: {"type":"content_block_stop","index":0}`,
+			``,
+			`event: message_delta`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":5}}`,
+			``,
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
+			``,
+		}
+		for _, line := range lines {
+			_, _ = io.WriteString(w, line+"\n")
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+	})
+
+	ch, err := c.StreamChat(context.Background(), llmtypes.ChatRequest{
+		Model:    "claude-sonnet-4-5-20250514",
+		Messages: []llmtypes.ChatMessage{{Role: "user", Content: "ls"}},
+		Tools: []llmtypes.ToolDefinition{{
+			Name:        "dev_glob",
+			Description: "glob a path",
+			InputSchema: map[string]any{"type": "object"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+
+	var (
+		toolUse      *llmtypes.ToolUseBlock
+		inputTokens  int
+		outputTokens int
+		stopReason   string
+		gotDone      bool
+		gotError     string
+	)
+	for ev := range ch {
+		switch ev.Type {
+		case llmtypes.EventToolUse:
+			tu := *ev.ToolUse
+			toolUse = &tu
+		case llmtypes.EventUsage:
+			if ev.Usage != nil {
+				inputTokens += ev.Usage.InputTokens
+				outputTokens += ev.Usage.OutputTokens
+				if ev.Usage.StopReason != "" {
+					stopReason = ev.Usage.StopReason
+				}
+			}
+		case llmtypes.EventDone:
+			gotDone = true
+		case llmtypes.EventError:
+			gotError = ev.Error
+		}
+	}
+	if gotError != "" {
+		t.Fatalf("unexpected error event: %s", gotError)
+	}
+	if toolUse == nil || toolUse.Name != "dev_glob" || toolUse.ID != "toolu_bad" {
+		t.Fatalf("toolUse = %+v", toolUse)
+	}
+	if got := toolUse.Input["_raw"]; got != `{"pattern":` {
+		t.Fatalf("toolUse.Input = %#v, want _raw malformed JSON", toolUse.Input)
+	}
+	if inputTokens != 4 || outputTokens != 5 {
+		t.Fatalf("usage input/output = %d/%d, want 4/5", inputTokens, outputTokens)
+	}
+	if stopReason != "tool_use" {
+		t.Fatalf("usage stopReason = %q, want tool_use", stopReason)
+	}
+	if !gotDone {
+		t.Fatal("missing done event")
+	}
+}
+
+func newStreamingTestClient(t *testing.T, handler http.HandlerFunc) *Client {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	c := New()
+	c.SetAPIKey("test-key")
+	c.httpClient = srv.Client()
+	c.sdk = sdk.NewClient(
+		option.WithHTTPClient(c.httpClient),
+		option.WithMaxRetries(0),
+		option.WithAPIKey(c.apiKey),
+		option.WithBaseURL(srv.URL),
+		option.WithMiddleware(rateAwareMiddleware(c.RateTracker, c.CircuitBreaker, &c.calibrated)),
+	)
+	return c
 }

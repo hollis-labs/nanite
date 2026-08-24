@@ -15,23 +15,29 @@ import (
 	"golang.org/x/text/message"
 )
 
-// envelopeRegistry is the shared go-envelopes Registry, set once at
-// composition root via SetEnvelopeRegistry. P3b switches loadSchema to
-// look up compiled schemas through this registry; until then it's a
-// reference-keeper for orphan-aware lookups.
+// envelopeRegistry is the shared go-envelopes Registry, installed at composition
+// root via envelopewiring.InstallSharedRegistry. P3b switches loadSchema to look
+// up compiled schemas through this registry; until then it's a reference-keeper
+// for orphan-aware lookups.
 var (
 	envelopeRegistryMu sync.RWMutex
 	envelopeRegistry   *envelopes.Registry
 )
 
-// SetEnvelopeRegistry installs the shared registry used for envelope
-// schema lookup. Called once at startup from cmd/nanite/main.go after
-// envelopes.LoadCore. Passing nil unsets — useful for tests that want
-// to fall back to the legacy embed.FS path.
+// SetEnvelopeRegistry installs the shared registry used for envelope schema
+// lookup. Production startup calls this through
+// envelopewiring.InstallSharedRegistry so all registry consumers are wired
+// together. Passing nil unsets — useful for tests that want to fall back to the
+// legacy embed.FS path.
 func SetEnvelopeRegistry(r *envelopes.Registry) {
 	envelopeRegistryMu.Lock()
 	envelopeRegistry = r
 	envelopeRegistryMu.Unlock()
+}
+
+// EnvelopeRegistry returns the currently-installed registry (may be nil).
+func EnvelopeRegistry() *envelopes.Registry {
+	return getEnvelopeRegistry()
 }
 
 // getEnvelopeRegistry returns the currently-installed registry (may be nil).
@@ -165,7 +171,6 @@ func readEmbeddedSchemaDoc(envelopeType string) (map[string]any, error) {
 	}
 	return doc, nil
 }
-
 
 // DefaultRenderTarget returns the schema-declared default render-target for
 // envelopeType, or "" if the schema does not declare one (or the type is

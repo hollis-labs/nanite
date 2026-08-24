@@ -1,7 +1,7 @@
 # Reference `mcp.DevServerName` from `internal/toolclient` instead of redeclaring it
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/mcp/naming.go` (`DevServerName`, canonical declaration), `internal/toolclient/broker.go` (redundant redeclaration).
 
@@ -63,15 +63,30 @@ Negligible risk — both constants are already the same value (`"dev"`); this is
 
 ## Done means
 
-- [ ] `internal/toolclient/broker.go`'s redundant `DevServerName` declaration removed.
-- [ ] All references within `internal/toolclient` use `mcp.DevServerName`.
-- [ ] Exactly one declaration of `DevServerName` remains in the whole tree.
-- [ ] `go build`, `go vet` pass for both packages.
+- [x] `internal/toolclient/broker.go`'s redundant `DevServerName` declaration removed.
+- [x] All references within `internal/toolclient` use `mcp.DevServerName`.
+- [x] Exactly one declaration of `DevServerName` remains in the whole tree.
+- [x] `go build`, `go vet` pass for both packages.
 
 ## Work log
 
-<!-- Worker fills this in. Note here whether this was executed standalone or folded into `13-mechanical-cleanup/`'s batch. -->
+- 2026-08-24: Implemented standalone, not folded into `13-mechanical-cleanup/`.
+  Removed the package-local `DevServerName = "dev"` declaration from
+  `internal/toolclient/broker.go` and changed `isDevTool` to reference
+  `mcp.DevServerName` directly.
+- Verification passed:
+  `grep -RIn --include='*.go' 'DevServerName' internal/mcp internal/toolclient`;
+  `grep -RIn --include='*.go' --exclude-dir=.git --exclude-dir=worktrees -E 'DevServerName[[:space:]]*=' .`
+  (one declaration: `internal/mcp/naming.go:36`; `worktrees` pruned because
+  `.claude/worktrees/` contains separate parked worktrees outside this checkout);
+  `go build ./internal/mcp/... ./internal/toolclient/...`;
+  `go vet ./internal/mcp/... ./internal/toolclient/...`;
+  `go test ./internal/mcp/... ./internal/toolclient/...`;
+  `go build ./cmd/nanite/`; `go vet ./...`; `go test ./...`.
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-24 fresh review PASS. Verified the sole Go declaration is
+  `mcp.DevServerName` in `internal/mcp/naming.go`, and `internal/toolclient`
+  now references that canonical constant. Focused package checks and full
+  `go build`, `go vet`, and `go test` passed.

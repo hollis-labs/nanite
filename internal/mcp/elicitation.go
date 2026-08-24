@@ -1,20 +1,13 @@
-// Package mcp — G4 elicitation/create support (CW-20260420-0018).
+// Package mcp provides G4 elicitation/create support (CW-20260420-0018).
 //
 // MCP spec 2025-06-18 defines elicitation/create as a method that allows a
 // tool, mid-call, to ask the user a question and await their response before
-// continuing. This file implements BOTH directions:
-//
-//  1. Server-side: when one of Nanite's OWN tools calls ElicitUserInput(), the
-//     helper acquires user input by issuing an elicitation request through the
-//     Service and blocking until the user (or timeout) responds.
-//
-//  2. Client-side: when a REMOTE MCP server's tool issues elicitation/create
-//     during a tool_call, the transport surfaces it as a pending request via
-//     the same Service path. ClientElicitMiddleware wraps an MCPTransport and
-//     intercepts the elicitation/create notification in the tool result.
+// continuing. Nanite's own tools call ElicitUserInput when they need mid-call
+// user confirmation; the helper acquires user input by issuing an elicitation
+// request through the Service and blocking until the user or timeout responds.
 //
 // Design contract (from ticket):
-//   - Elicitation is ADDITIVE — strategy-loop "when to ask" logic is untouched.
+//   - Elicitation is additive; strategy-loop "when to ask" logic is untouched.
 //   - Timeout defaults to 5 min, configurable via NANITE_ELICITATION_TIMEOUT_SEC.
 //   - UI: text input for string schemas, accept/decline buttons for boolean.
 //   - Envelope type: "elicitation-prompt" (registered as a core type in the
@@ -25,7 +18,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -41,7 +33,7 @@ type ElicitationService interface {
 }
 
 // ElicitationCreateParams mirrors the MCP 2025-06-18 spec for elicitation/create.
-// The tool mid-call sends this; the transport decodes it and calls the Service.
+// Nanite tools pass this shape to ElicitUserInput when they need mid-call input.
 type ElicitationCreateParams struct {
 	// Message is the question shown to the user.
 	Message string `json:"message"`
@@ -119,96 +111,6 @@ func ElicitUserInput(
 		Action:  string(resp.Action),
 		Content: resp.Content,
 	}, nil
-}
-
-// ClientElicitationResult captures an elicitation/create request intercepted
-// from a remote MCP server during a tool call.
-type ClientElicitationResult struct {
-	// ID is the elicitation_id assigned by the client-side handler. The
-	// remote server's tool call blocks until Respond(ID, ...) is called.
-	ID string
-	// Params are the elicitation parameters from the remote server.
-	Params ElicitationCreateParams
-}
-
-// parseElicitationCreate extracts an elicitation/create request from a raw
-// JSON-RPC notification body that may arrive as a "side channel" alongside a
-// tools/call response. Returns nil if the message is not an elicitation/create.
-//
-// Per the MCP 2025-06-18 spec, elicitation/create is sent as a JSON-RPC
-// request (with an id) from server to client during a tool execution. In our
-// transport model it arrives as a nested payload in a tool result or as an
-// out-of-band SSE event, depending on the server implementation. Both paths
-// ultimately decode the same shape.
-func parseElicitationCreate(raw json.RawMessage) (*ElicitationCreateParams, bool) {
-	var req struct {
-		Method string                   `json:"method"`
-		Params *ElicitationCreateParams `json:"params"`
-	}
-	if err := json.Unmarshal(raw, &req); err != nil {
-		return nil, false
-	}
-	if req.Method != "elicitation/create" || req.Params == nil {
-		return nil, false
-	}
-	return req.Params, true
-}
-
-// routeClientElicitation processes an elicitation/create received from a
-// remote MCP server's tool call. It:
-//  1. Calls the ElicitationService.Elicit to surface the prompt to the UI.
-//  2. Returns the user's response encoded as a JSON-RPC result so the caller
-//     can relay it back to the remote server.
-//
-// sessionID / agentID identify the session for envelope delivery.
-// toolCallID is the originating MCP tool_use_id from the external server call.
-func routeClientElicitation(
-	ctx context.Context,
-	svc ElicitationService,
-	sessionID, agentID, toolCallID string,
-	params ElicitationCreateParams,
-) (json.RawMessage, error) {
-	if svc == nil {
-		// No elicitation service wired — auto-cancel gracefully.
-		result := elicitationResponse{Action: "cancel"}
-		b, _ := json.Marshal(result)
-		return b, nil
-	}
-
-	var schema *elicitation.RequestedSchema
-	if params.RequestedSchema != nil {
-		schemaType := elicitation.SchemaType(params.RequestedSchema.Type)
-		if schemaType != elicitation.SchemaTypeBoolean && schemaType != elicitation.SchemaTypeString {
-			schemaType = elicitation.SchemaTypeString
-		}
-		schema = &elicitation.RequestedSchema{
-			Type:        schemaType,
-			Title:       params.RequestedSchema.Title,
-			Description: params.RequestedSchema.Description,
-		}
-	}
-
-	resp, err := svc.Elicit(ctx, elicitation.ElicitInput{
-		Message:    params.Message,
-		Schema:     schema,
-		ToolCallID: toolCallID,
-		SessionID:  sessionID,
-		AgentID:    agentID,
-		Origin:     "client",
-	})
-	if err != nil && err != context.Canceled {
-		// Non-cancellation error: return cancel so the remote tool can continue.
-		result := elicitationResponse{Action: "cancel"}
-		b, _ := json.Marshal(result)
-		return b, fmt.Errorf("mcp: client elicitation: %w", err)
-	}
-
-	result := elicitationResponse{
-		Action:  string(resp.Action),
-		Content: resp.Content,
-	}
-	b, err := json.Marshal(result)
-	return b, err
 }
 
 // elicitationTimeoutSeconds returns the configured timeout, falling back to

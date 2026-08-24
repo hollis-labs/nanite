@@ -37,9 +37,9 @@ type EmitInput struct {
 //     request and closes the result channel.
 //  3. Service.Elicit() returns the Response to the caller.
 //
-// Both server-side (our tools mid-call) and client-side (external MCP tools)
-// paths go through the same Service. Origin is recorded for observability
-// but does not change behaviour.
+// The live path is server-side: Nanite-owned tools call Service.Elicit when
+// they need mid-call user input. Origin is recorded for observability but does
+// not change behaviour.
 type Service struct {
 	emitter        Emitter
 	timeoutSeconds int
@@ -244,6 +244,7 @@ type ElicitInput struct {
 	// SessionID and AgentID identify where the envelope should be delivered.
 	SessionID string
 	AgentID   string
-	// Origin is "server" or "client".
+	// Origin is a source label recorded in the emitted envelope. Current
+	// production callers set "server".
 	Origin string
 }

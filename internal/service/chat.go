@@ -102,7 +102,7 @@ type ChatServiceConfig struct {
 
 	// Optional subsystems — nil-safe.
 	Orchestrator   *chat.Orchestrator
-	AppConfig      *config.AppConfig
+	AppConfig      *config.TunablesConfig
 	OutputFilter   *filter.Chain
 	Commands       *chat.CommandRegistry
 	PluginHost     PluginEventSink // for pre-hooks
@@ -227,7 +227,7 @@ type chatServiceImpl struct {
 	store     Store
 
 	orchestrator       *chat.Orchestrator
-	appConfig          *config.AppConfig
+	appConfig          *config.TunablesConfig
 	outputFilter       *filter.Chain
 	commands           *chat.CommandRegistry
 	pluginHost         PluginEventSink

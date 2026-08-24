@@ -50,11 +50,11 @@ func NewServiceWithRingSize(n int) *Service {
 
 // sessionBuffer holds the ring buffer for one session.
 type sessionBuffer struct {
-	mu     sync.Mutex
-	turns  []*TurnSnapshot // ring — oldest at head
-	cap    int
+	mu    sync.Mutex
+	turns []*TurnSnapshot // ring — oldest at head
+	cap   int
 	// index → snapshot for O(1) lookup by turn ID
-	index  map[string]*TurnSnapshot
+	index map[string]*TurnSnapshot
 }
 
 func newSessionBuffer(cap int) *sessionBuffer {
@@ -263,9 +263,9 @@ func (s *Service) RecentSnapshots(sessionID string, limit int) []TurnSnapshot {
 	return sb.recent(limit)
 }
 
-// trafficLight returns "green" (cached), "yellow" (has content, not cached),
+// TrafficLight returns "green" (cached), "yellow" (has content, not cached),
 // or "red" (empty) for a slot.
-func trafficLight(tokens int, cached bool) string {
+func TrafficLight(tokens int, cached bool) string {
 	if tokens == 0 {
 		return "red"
 	}

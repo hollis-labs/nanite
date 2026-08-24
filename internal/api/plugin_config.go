@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -57,7 +56,7 @@ func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 	pluginID := r.PathValue("id")
 
 	var incoming map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+	if err := a.decode(r, &incoming); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}

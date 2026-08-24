@@ -1,7 +1,7 @@
 # Consider a single shared holder for the `*envelopes.Registry` pointer instead of 3 independent copies
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/chat/envelope.go`, `internal/envelope/validator.go`, `internal/plugin/host.go`, and `cmd/nanite/main.go` (the 3 manual setter calls).
 
@@ -86,17 +86,56 @@ Low risk today per the audit's own assessment (one composition-root call site, n
 
 ## Done means
 
-- [ ] All current call sites obtaining the registry pointer in each of the three packages enumerated.
-- [ ] Single shared holder or single shared setter mechanism implemented, replacing the three independent copies.
-- [ ] `main.go` wires the registry through one call/construction instead of three.
-- [ ] Existing tests for all three packages pass unchanged.
-- [ ] New/adapted test confirms all three packages observe the same registry instance.
-- [ ] `go build ./...`, `go vet`, and the targeted `go test` runs above all pass.
+- [x] All current call sites obtaining the registry pointer in each of the three packages enumerated.
+- [x] Single shared holder or single shared setter mechanism implemented, replacing the three independent copies.
+- [x] `main.go` wires the registry through one call/construction instead of three.
+- [x] Existing tests for all three packages pass unchanged.
+- [x] New/adapted test confirms all three packages observe the same registry instance.
+- [x] `go build ./...`, `go vet`, and the targeted `go test` runs above all pass.
 
 ## Work log
 
-<!-- Worker fills this in. -->
+- 2026-08-23: Re-enumerated current HEAD before edits. Production registry
+  wiring was still the three independent calls in `cmd/nanite/main.go`:
+  `chat.SetEnvelopeRegistry(envReg)` at line 239,
+  `envelope.SetEnvelopeRegistry(envReg)` at line 240, and
+  `pluginHost.SetEnvelopeRegistry(envReg)` at line 343. Registry holders were
+  `internal/chat/envelope.go` lines 17-20 plus setter/getter lines 26-39,
+  `internal/envelope/validator.go` lines 22-42, and
+  `internal/plugin/host.go` lines 131-139 plus setter lines 643-647 and getter
+  `internal/plugin/envelope_validator.go` lines 183-187.
+- 2026-08-23: Caller sweep found no second production composition root. Test
+  or minimal-host paths still construct or set individual holders directly:
+  `internal/envelope/legacy.go`, `internal/runtime/agent/sandbox_content_envelope_test.go`,
+  `internal/plugin/envelope_validator_test.go`, plus CLI/API minimal host
+  construction in `cmd/nanite/plugin_cmd.go` and `internal/api/plugins.go`.
+  Those do not change the low-risk production framing; they are test/minimal
+  harness paths, not alternate server startup wiring.
+- 2026-08-23: Implemented the AD-19 shared wiring-call option. Added
+  `internal/envelopewiring.InstallSharedRegistry`, moved `cmd/nanite/main.go`
+  to one composition-root call, constructed `pluginHost` early enough to pass
+  it into that call, and kept the later host service/MCP wiring where its
+  dependencies exist. Added `envelope.EnvelopeRegistry()` so the regression
+  test can assert pointer identity without using unexported validator state.
+  Did not add hot reload or test-isolation behavior.
+- 2026-08-23: Added
+  `internal/envelopewiring.TestInstallSharedRegistryWiresAllConsumersToSameInstance`,
+  covering `chat.EnvelopeRegistry()`, `envelope.EnvelopeRegistry()`, and
+  `plugin.Host.EnvelopeRegistry()` against the exact same registry pointer.
+- 2026-08-23: Verification passed:
+  `go test ./internal/envelopewiring -run TestInstallSharedRegistryWiresAllConsumersToSameInstance -v`;
+  `go build ./...`;
+  `go vet ./internal/chat/... ./internal/envelope/... ./internal/plugin/...`;
+  `go test ./internal/chat/... ./internal/envelope/... ./internal/plugin/... -run 'Envelope|Registry' -v`;
+  `go build ./cmd/nanite/`;
+  `go vet ./...`;
+  `go test ./...`.
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-24 fresh re-review PASS. Verified `main.go` now performs one shared
+  registry wiring call via `envelopewiring.InstallSharedRegistry`, and the new
+  pointer-identity test covers `internal/chat`, `internal/envelope`, and
+  `internal/plugin.Host` observing the same registry instance. Targeted
+  envelope/registry tests, `go vet`, `go build ./cmd/nanite/`, and broader
+  build checks passed.

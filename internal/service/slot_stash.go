@@ -87,7 +87,7 @@ type ArtifactStasherConfig struct {
 	// stasher falls back to config.DefaultAppConfig().Artifacts.StorageDir
 	// — matches the API layer's defaultArtifactsStorageDir constant for
 	// consistency across surfaces.
-	AppConfig *config.AppConfig
+	AppConfig *config.TunablesConfig
 
 	// SourceAgentID is recorded on each stash row's source_agent_id
 	// column. Optional; useful for telemetry and "which agent caused

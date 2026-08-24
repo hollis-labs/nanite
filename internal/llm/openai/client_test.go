@@ -157,6 +157,73 @@ func TestStreamChat_DeltasToolCallUsage(t *testing.T) {
 	}
 }
 
+func TestStreamChat_MalformedToolArgumentsGracefulFallback(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		write := func(s string) {
+			_, _ = io.WriteString(w, "data: "+s+"\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		write(`{"id":"x","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_bad","function":{"name":"dev_glob","arguments":"{\"pattern\":"}}]},"finish_reason":"tool_calls"}]}`)
+		write(`{"id":"x","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":[],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`)
+		write(`[DONE]`)
+	})
+
+	ch, err := c.StreamChat(context.Background(), llmtypes.ChatRequest{
+		Model:    "gpt-test",
+		Messages: []llmtypes.ChatMessage{{Role: "user", Content: "ls"}},
+		Tools: []llmtypes.ToolDefinition{{
+			Name:        "dev_glob",
+			Description: "glob a path",
+			InputSchema: map[string]any{"type": "object"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+
+	var (
+		toolUse  *llmtypes.ToolUseBlock
+		usage    *llmtypes.Usage
+		gotDone  bool
+		gotError string
+	)
+	for ev := range ch {
+		switch ev.Type {
+		case llmtypes.EventToolUse:
+			tu := *ev.ToolUse
+			toolUse = &tu
+		case llmtypes.EventUsage:
+			usage = ev.Usage
+		case llmtypes.EventDone:
+			gotDone = true
+		case llmtypes.EventError:
+			gotError = ev.Error
+		}
+	}
+	if gotError != "" {
+		t.Fatalf("unexpected error event: %s", gotError)
+	}
+	if toolUse == nil || toolUse.Name != "dev_glob" || toolUse.ID != "call_bad" {
+		t.Fatalf("toolUse = %+v", toolUse)
+	}
+	if got := toolUse.Input["_raw"]; got != `{"pattern":` {
+		t.Fatalf("toolUse.Input = %#v, want _raw malformed JSON", toolUse.Input)
+	}
+	if usage == nil || usage.InputTokens != 4 || usage.OutputTokens != 5 {
+		t.Fatalf("usage = %+v, want input=4 output=5", usage)
+	}
+	if usage.StopReason != "tool_use" {
+		t.Fatalf("usage.StopReason = %q, want tool_use", usage.StopReason)
+	}
+	if !gotDone {
+		t.Fatal("missing done event")
+	}
+}
+
 func TestStreamChat_ErrorTranslated(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

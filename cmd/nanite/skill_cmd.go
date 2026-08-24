@@ -60,7 +60,7 @@ func cmdSkill(args []string) {
 
 // resolveSkillVendorRoot resolves the content-addressed vendored skill
 // store's filesystem root the same way cmd/nanite/main.go's initMCP
-// resolves the artifacts root: load nanite.yaml's AppConfig, falling back
+// resolves the artifacts root: load config/nanite.yaml's tunables, falling back
 // to config.DefaultAppConfig() on any load error (missing/malformed config
 // file) or an empty configured value, so a CLI invocation is never blocked
 // by config trouble a running `nanite serve` would itself tolerate.

@@ -338,8 +338,11 @@ func TestReplayContent_FallsBackForNonStructuredContent(t *testing.T) {
 	}{
 		{"plain user text", "what's the status of the migration?"},
 		{"legacy non-structured JSON", `{"foo":"bar"}`},
+		{"invalid structured version", `{"v":0,"text":"ignore me"}`},
+		{"negative structured version", `{"v":-1,"text":"ignore me"}`},
 		{"envelope_response row", FormatEnvelopeResponseContent("approval-card", StatusSubmitted, `{"ok":true}`)},
 		{"empty content", ""},
+		{"invalid json with whitespace", " \n {not json \t"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -348,6 +351,14 @@ func TestReplayContent_FallsBackForNonStructuredContent(t *testing.T) {
 				t.Errorf("replayContent(%q) = %q, want unchanged %q", tc.content, got, tc.content)
 			}
 		})
+	}
+}
+
+func TestReplayContent_PreservesStructuredTextWhitespace(t *testing.T) {
+	stored := `{"v":1,"text":"  keep this spacing  "}`
+	got := replayContent(stored)
+	if got != "  keep this spacing  " {
+		t.Errorf("replayContent(%q) = %q, want untrimmed text", stored, got)
 	}
 }
 

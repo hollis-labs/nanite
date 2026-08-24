@@ -25,7 +25,7 @@ func TestServiceRecordAndSnapshot(t *testing.T) {
 			Tokens:       (i + 1) * 100,
 			Cached:       i%2 == 0,
 			Content:      "content-" + name,
-			TrafficLight: trafficLight((i+1)*100, i%2 == 0),
+			TrafficLight: TrafficLight((i+1)*100, i%2 == 0),
 		}
 	}
 	svc.RecordSlots(sessionID, turnID, slots)
@@ -182,9 +182,9 @@ func TestTrafficLight(t *testing.T) {
 		{100, false, "yellow"},
 	}
 	for _, c := range cases {
-		got := trafficLight(c.tokens, c.cached)
+		got := TrafficLight(c.tokens, c.cached)
 		if got != c.want {
-			t.Errorf("trafficLight(%d, %v) = %q, want %q", c.tokens, c.cached, got, c.want)
+			t.Errorf("TrafficLight(%d, %v) = %q, want %q", c.tokens, c.cached, got, c.want)
 		}
 	}
 }

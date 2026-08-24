@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	"github.com/hollis-labs/nanite/internal/agent/override"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
@@ -59,15 +60,22 @@ func (r *subagentCompletionReactor) ReactToCompletion(ctx context.Context, run *
 	}
 }
 
-// resolveSubagentCompletionPolicy resolves the effective subagent-
-// completion policy for a session: an explicit session override
-// (sessions.metadata["subagent_completion_policy"]) wins, then the
-// session's agent profile default (agent_profiles.constraints via
-// chat.AgentConstraints), then the global default (render_and_wait —
-// the safe default for interactive operator sessions). Resolution
-// failures (session/agent lookup errors) fall back to render_and_wait
-// rather than risk auto-triggering a turn on a session that couldn't be
-// fully resolved.
+// resolveSubagentCompletionPolicy resolves the effective subagent-completion
+// policy for sessionID via the same role->agent->task composition cascade
+// primitive used by resolveMessageWakePolicy. Layers, closest wins:
+//  1. role tier (base) — deliberately the zero value: roles has no
+//     subagent_completion_policy-equivalent column today.
+//  2. agent tier (project) — the session's agent-profile default
+//     (agent_profiles.constraints via chat.AgentConstraints.
+//     SubagentCompletionPolicy).
+//  3. task/invocation tier (session) — an explicit per-session override
+//     (sessions.metadata["subagent_completion_policy"]), the narrowest layer.
+//
+// Falls back to the global default — render_and_wait, the safe default for
+// interactive operator sessions — when no layer resolves to a non-empty value.
+// Resolution failures (session/agent lookup errors) fall back to
+// render_and_wait rather than risk auto-triggering a turn on a session that
+// couldn't be fully resolved.
 //
 // Each tier is validated against chat.IsValidSubagentCompletionPolicy
 // before being trusted — an unrecognized value (typo, stale config) is
@@ -75,28 +83,39 @@ func (r *subagentCompletionReactor) ReactToCompletion(ctx context.Context, run *
 // "auto_summarise" doesn't silently disable the intended behavior with no
 // diagnostic trail (PR #247 review).
 func (s *chatServiceImpl) resolveSubagentCompletionPolicy(ctx context.Context, sessionID string) string {
+	var taskLayer *override.OverrideConfig
 	if session, err := s.sessions.Get(ctx, sessionID); err == nil && session != nil && session.Metadata != "" {
 		var meta map[string]any
 		if json.Unmarshal([]byte(session.Metadata), &meta) == nil {
 			if v, ok := meta["subagent_completion_policy"].(string); ok && v != "" {
 				if chat.IsValidSubagentCompletionPolicy(v) {
-					return v
+					taskLayer = &override.OverrideConfig{SubagentCompletionPolicy: v}
+				} else {
+					slog.Warn("subagent-reactor: unrecognized session policy override, ignoring",
+						"session_id", sessionID, "value", v)
 				}
-				slog.Warn("subagent-reactor: unrecognized session policy override, ignoring",
-					"session_id", sessionID, "value", v)
 			}
 		}
 	}
 
-	if agent, err := s.agents.ResolveForSession(ctx, sessionID); err == nil && agent != nil {
-		constraints := chat.ParseAgentConstraints(agent.Constraints)
-		if constraints.SubagentCompletionPolicy != "" {
-			if chat.IsValidSubagentCompletionPolicy(constraints.SubagentCompletionPolicy) {
-				return constraints.SubagentCompletionPolicy
+	var agentLayer override.OverrideConfig
+	if taskLayer == nil {
+		if agent, err := s.agents.ResolveForSession(ctx, sessionID); err == nil && agent != nil {
+			constraints := chat.ParseAgentConstraints(agent.Constraints)
+			if constraints.SubagentCompletionPolicy != "" {
+				if chat.IsValidSubagentCompletionPolicy(constraints.SubagentCompletionPolicy) {
+					agentLayer.SubagentCompletionPolicy = constraints.SubagentCompletionPolicy
+				} else {
+					slog.Warn("subagent-reactor: unrecognized agent-profile policy default, ignoring",
+						"session_id", sessionID, "agent_id", agent.ID, "value", constraints.SubagentCompletionPolicy)
+				}
 			}
-			slog.Warn("subagent-reactor: unrecognized agent-profile policy default, ignoring",
-				"session_id", sessionID, "agent_id", agent.ID, "value", constraints.SubagentCompletionPolicy)
 		}
+	}
+
+	resolved := override.Resolve(override.OverrideConfig{}, &agentLayer, taskLayer)
+	if resolved.SubagentCompletionPolicy != "" {
+		return resolved.SubagentCompletionPolicy
 	}
 
 	return chat.SubagentPolicyRenderAndWait

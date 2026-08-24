@@ -174,7 +174,7 @@ type Container struct {
 	// AppConfig exposes the parsed nanite.yaml app config to handlers that
 	// need it (artifact storage root, http caps, etc.). May be nil in
 	// lightweight test setups — handlers must nil-check.
-	AppConfig *config.AppConfig
+	AppConfig *config.TunablesConfig
 	// WorkingDir is the project root for project-scoped discovery and
 	// operator-managed config writes.
 	WorkingDir string
@@ -302,7 +302,7 @@ type ContainerConfig struct {
 	MCP        *mcp.Manager
 	ToolClient *toolclient.ToolClient
 	Plugins    *plugin.Host
-	AppConfig  *config.AppConfig
+	AppConfig  *config.TunablesConfig
 	WorkingDir string
 	// ManagedConfigRoot overrides the default project-local config root
 	// used for operator-managed agents and durable manifests.

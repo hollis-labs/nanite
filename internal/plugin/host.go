@@ -133,9 +133,10 @@ type Host struct {
 	// compiled JSON Schemas for both core and plugin envelope types.
 	// Plugin types land here under "<pluginID>.<envType>" via
 	// RegisterPluginEnvelopeSchema; UnloadPlugin drops them via
-	// envelopeRegistry.UnregisterPlugin. Set once at startup via
-	// SetEnvelopeRegistry; nil-tolerant so unit tests that don't
-	// exercise schema validation can run without standing up a registry.
+	// envelopeRegistry.UnregisterPlugin. Production startup installs it
+	// through envelopewiring.InstallSharedRegistry; nil-tolerant so unit tests
+	// that don't exercise schema validation can run without standing up a
+	// registry.
 	envelopeRegistry *envelopes.Registry
 	// manifests holds the parsed plugin.yaml for each loaded plugin, keyed by
 	// plugin ID. Populated by applyManifestRegistrations and cleared by
@@ -633,13 +634,13 @@ func (h *Host) SetStore(s *store.Store) {
 }
 
 // SetEnvelopeRegistry installs the shared go-envelopes Registry used for
-// plugin envelope schema storage and lookup. Called once at startup
-// before any plugin loads. Plugin-owned envelope schemas land in this
-// registry under "<pluginID>.<envType>" via RegisterPluginEnvelopeSchema;
-// UnloadPlugin sweeps them via Registry.UnregisterPlugin. A nil registry
-// is tolerated so unit tests that don't exercise schema validation can
-// run without one — RegisterPluginEnvelopeSchema returns an error in
-// that case.
+// plugin envelope schema storage and lookup. Production startup calls this
+// through envelopewiring.InstallSharedRegistry before any plugin loads.
+// Plugin-owned envelope schemas land in this registry under "<pluginID>.<envType>" via
+// RegisterPluginEnvelopeSchema; UnloadPlugin sweeps them via
+// Registry.UnregisterPlugin. A nil registry is tolerated so unit tests that
+// don't exercise schema validation can run without one —
+// RegisterPluginEnvelopeSchema returns an error in that case.
 func (h *Host) SetEnvelopeRegistry(reg *envelopes.Registry) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

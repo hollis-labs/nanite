@@ -2,10 +2,10 @@ package openai
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/nanite/internal/llm/toolargs"
 	sdk "github.com/openai/openai-go"
 )
 
@@ -98,18 +98,9 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 			if pt == nil || pt.id == "" || pt.name == "" {
 				continue
 			}
-			input := map[string]any{}
-			if args := pt.arguments.String(); args != "" {
-				if err := json.Unmarshal([]byte(args), &input); err != nil {
-					// Surface unparseable tool args as an error event but
-					// keep the assistant's intent visible to the caller.
-					_ = emit(llmtypes.StreamEvent{
-						Type:  llmtypes.EventError,
-						Error: "openai: tool call arguments not valid JSON: " + err.Error(),
-					})
-					return
-				}
-			}
+			// AD-19: provider adapters degrade malformed streamed tool
+			// arguments to {"_raw": raw} instead of aborting the turn.
+			input := toolargs.ParseObject(pt.arguments.String())
 			if !emit(llmtypes.StreamEvent{
 				Type: llmtypes.EventToolUse,
 				ToolUse: &llmtypes.ToolUseBlock{

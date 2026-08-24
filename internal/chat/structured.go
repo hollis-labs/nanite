@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
+
+	"github.com/hollis-labs/nanite/internal/structuredmessage"
 )
 
 // StructuredMessage is the universal wrapper for all assistant messages.
@@ -126,19 +127,14 @@ func (sm StructuredMessage) MarshalContent() string {
 // Content that isn't StructuredMessage-shaped (plain user text, legacy
 // pre-structured rows, envelope_response rows formatted via
 // FormatEnvelopeResponseContent, which are prefixed "[envelope:...]" rather
-// than "{") is returned unchanged — same fallback shape as
-// internal/recovery/pack.MessagePlainText, which unwraps the same JSON
-// envelope for a different purpose (Recovery Pack replay text).
+// than "{") is returned unchanged. The shared JSON-shape unwrap lives in
+// internal/structuredmessage so recovery/pack can use it without importing
+// the full chat harness package.
 func replayContent(content string) string {
-	trimmed := strings.TrimSpace(content)
-	if !strings.HasPrefix(trimmed, "{") {
-		return content
+	if text, ok := structuredmessage.UnwrapText(content); ok {
+		return text
 	}
-	var sm StructuredMessage
-	if err := json.Unmarshal([]byte(trimmed), &sm); err != nil || sm.Version == 0 {
-		return content
-	}
-	return sm.Text
+	return content
 }
 
 // ValidateStructured checks a StructuredMessage for consistency and returns warnings.

@@ -284,19 +284,13 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 	return tools, nil
 }
 
-// DevServerName is the MCP server name for developer tools (dev_bash, dev_read,
-// dev_write, dev_edit, dev_glob, dev_grep). Tools from this server are gated
-// behind developer_mode — see isDevTool and the gate logic in
-// SelectToolsAsProvider / CallTool.
-const DevServerName = "dev"
-
 // isDevTool reports whether a tool name belongs to the dev server. With
 // MCP internalization (CW-20260427-0017, ADR-002) tool names are
 // uniform agent-facing — there is no `mcp__server__` prefix. Dev tools
 // are recognized by their `dev_*` prefix; the legacy `mcp__dev__*` form
 // is no longer emitted on the agent surface.
 func isDevTool(toolName string) bool {
-	return strings.HasPrefix(toolName, DevServerName+"_")
+	return strings.HasPrefix(toolName, mcp.DevServerName+"_")
 }
 
 // developerModeEnabled reports whether developer_mode is active for this

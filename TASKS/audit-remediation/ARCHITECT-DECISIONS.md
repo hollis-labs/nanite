@@ -6,17 +6,18 @@ decisions."* This file is that separation. It is the batch's single
 authoritative list of calls that must be made **by the operator/architect**,
 not by a worker mid-task.
 
-**28 decisions**, of which **27 are decided** and **one remains open** (AD-19).
+**29 decisions currently in this queue**, all decided.
 Most are grounded in the **44
 findings** carrying `requires_architect_decision: true` in `findings.json`,
 plus the guide's own §9 list; AD-23 and AD-24 are process decisions surfaced by
 the planning pass.
 
-**Four were found missing after the fact, by pre-flight verification** —
-AD-25 (Wave 1), AD-26 (Wave 2), and AD-27/AD-28 (Wave 3). In each case a
+**Five were found missing after the fact, by pre-flight verification** —
+AD-25 (Wave 1), AD-26 (Wave 2), AD-27/AD-28 (Wave 3), and AD-29
+(Wave 6). In each case a
 finding carried `requires_architect_decision: true` with no entry in this
 queue. That is the failure mode this file exists to prevent, and it has now
-been caught three waves running by the same mechanism: **a kickoff author cross-checking
+been caught four waves running by the same mechanism: **a kickoff author cross-checking
 `findings.json`'s flag against this queue before dispatch.** Keep doing that
 check when writing each wave's kickoff.
 
@@ -64,7 +65,7 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-16 | `permission.Engine` `ModeDefault`: does it prompt for writes? | `08/04` | GO-SEC4-003 | 3 | **decided** |
 | AD-17 | `cmdServe` fatal-path cleanup: direction | `07/02` | GO-RUNTIME-001 | 2b | **decided** |
 | AD-18 | Background job registry: retention policy | `07/03` | GO-RUNTIME-004 | 2b | **decided** |
-| AD-19 | Duplicated semantics: share implementation vs. parity tests | Wave 6a (all) | GO-SVCEXEC-004, GO-API-007, GO-CHAT-002, GO-INFRA-004 | 6a | open |
+| AD-19 | Duplicated semantics: share implementation vs. parity tests | Wave 6a (all) | GO-SVCEXEC-004, GO-API-007, GO-CHAT-002, GO-INFRA-004 | 6a | **decided** |
 | AD-20 | `internal/config` naming collision: rename direction | `11/08` | GO-INFRA-001 | 6a | **decided** |
 | AD-21 | Which historical lint classes become blocking | `12/01` | GO-HYG-001 | 7 | **decided** |
 | AD-22 | Repo-wide `gofmt` sweep: now, never, or ratchet-only | `13/03` | GO-HYG-001, GO-CHAT-007 | 8 | **decided** |
@@ -74,6 +75,7 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-27 | Autocomplete `repo_path` enumeration: constrain, or accept the local-operator trust model | `08/09` | GO-API-001 | 3 | **decided** |
 | AD-28 | Catalog archive fetch: host/scheme restriction — **and** CIDR-denylist consolidation | `08/09` | GO-API-003, **GO-SEC4-007** | 3 | **decided** |
 | AD-25 | `allow_unsigned_plugins` devmode bypass: wire or retire | `01/02` | GO-PLUGIN-008 | 1 | **decided** |
+| AD-29 | Client-side elicitation dead code: build or delete | `11/09` | GO-MCPTOOL-004 | 6a | **decided** |
 
 ### A gap worth naming
 
@@ -1031,25 +1033,48 @@ entries.
 
 ### AD-19 — Duplicated semantics: share implementation vs. parity tests
 
-**Status:** open · **Gates:** all of Wave 6a · **Findings:** GO-SVCEXEC-004,
+**Status:** decided · **Gates:** all of Wave 6a · **Findings:** GO-SVCEXEC-004,
 GO-API-007, GO-CHAT-002, GO-INFRA-004 (+ the rest of `11/`)
 
-Guide §9 item 10, and the decision that shapes the entire semantic-duplication
-wave. For each duplicated *rule*, two legitimate outcomes: collapse to one
-implementation, or keep both and add a **parity test** that fails when they
-diverge. Sharing is not automatically right — `11/06` (provider streaming
-error handling) covers two providers whose behavior *may* legitimately differ.
+> **Decided (2026-08-23): resolve per instance, favoring shared implementation
+> for migration drift and boilerplate, and parity/sync tests for deliberately
+> independent paths.**
+>
+> - `11/01` — migration drift. Migrate `resolveSubagentCompletionPolicy` onto
+>   the same `override.Resolve` cascade primitive used by message wake policy;
+>   preserve separate default-policy configuration and add a shared cascade
+>   regression test.
+> - `11/02` — ambiguous Harness v1/native handler duplication. Consolidate
+>   the durable-agent start/resume/wake handler implementation unless the
+>   required caller enumeration proves Harness v1 is a deliberate,
+>   version-stable external contract. If it is deliberate, keep separate
+>   implementations but document the boundary and add a parity/contract test.
+> - `11/05` — textual boilerplate. Extract the duplicated post-`CallTool`
+>   result-processing tail into one private helper; preserve both public entry
+>   points.
+> - `11/06` — confirmed semantic divergence. Unify malformed streamed
+>   tool-call JSON behavior on Anthropic-style graceful degradation, with
+>   regression coverage and downstream consumer verification for
+>   `EventError`-without-`EventDone`.
+> - `11/07` — no implementation here. Confirm the cross-reference remains
+>   correct: `GO-SEC4-007` was reassigned to `08/09` under AD-28.
+> - `11/09` / `GO-CHAT-004` — resolve after AD-29. If AD-29 deletes the dead
+>   client-side elicitation path and `routeClientElicitation` disappears, close
+>   the duplication as a side effect. If anything survives, unify the surviving
+>   elicitation paths onto one explicit `context.Canceled` contract.
+> - `11/10` — plumbing duplication. Replace the three independent envelope
+>   registry setter/copy sites with one shared holder or one shared wiring
+>   call; do not build hot reload/test-isolation features in this task.
+> - `11/11` — intentionally independent. Do not merge the two
+>   `dispatch_to_agent` evaluators; add a sync/parity test for their shared
+>   reflex-row interpretation only.
+>
+> `GO-MCPTOOL-004` does not fit AD-19's share-vs-parity shape. It is a
+> wire/delete decision and is recorded separately as AD-29.
 
-The guide's classification is the tool for this, and Wave 6a should produce
-the table before the decision is made:
+### AD-20 — `internal/config` naming collision: rename direction
 
-`textual-only boilerplate | same semantics/stable | same semantics/divergent
-behavior | migration drift | intentionally independent`
-
-Prioritize **semantic divergence** and **migration drift**; LOC reduction is
-explicitly not the goal.
-
-### AD-20 — DECIDED: rename both types by role
+**Status:** decided · **Gates:** `11/08` · **Findings:** GO-INFRA-001 (low)
 
 > **Decided (2026-08-22): give both types names that say what they are.**
 > `Config` inside a package named `config` carries no information; renaming
@@ -1063,15 +1088,25 @@ explicitly not the goal.
 > (`chat.go`, `container.go`, `slot_stash.go`). This is a bounded rename, and
 > `11/08` no longer needs to run alone.
 
-### AD-20 — `internal/config` naming collision: rename direction
+### AD-29 — Client-side elicitation dead code: build or delete
 
-**Status:** open · **Gates:** `11/08` · **Findings:** GO-INFRA-001 (low)
+**Status:** decided · **Gates:** `11/09` · **Findings:** GO-MCPTOOL-004 (low)
 
-`config.Config` vs. `config.AppConfig` in one package. Low severity, but
-`11/08`'s Touches warns the fix may reach *"every caller of `config.Config`
-and `config.AppConfig` across the tree, depending on which direction the
-architect chooses."* That range — a two-line rename or a tree-wide sweep — is
-exactly why it needs deciding before dispatch and not during.
+> **Decided (2026-08-23): delete.**
+>
+> The standing rule on dead code applies: do not push dead code forward into a
+> newly-built feature just because stale docs describe it. Git history is the
+> recovery path if the project later wants this direction. `11/09` should
+> re-confirm that `ClientElicitMiddleware` still does not exist and that the
+> client-side functions are still dead, then remove the dead client-side
+> elicitation functions and correct the package doc to describe only live
+> code.
+>
+> This decision runs before `GO-CHAT-004` inside the same task. If deleting
+> `routeClientElicitation` removes the duplicate half, `GO-CHAT-004` is closed
+> as a side effect and the worker must record that explicitly. If any
+> client-side path survives for a concrete reason, its cancellation contract
+> must be unified or documented per AD-19.
 
 ---
 

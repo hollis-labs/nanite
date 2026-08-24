@@ -13,6 +13,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/nanite/internal/llm/toolargs"
 )
 
 // StreamChat implements llmcontracts.Provider.StreamChat. Mirrors the
@@ -232,15 +233,9 @@ func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.Mes
 		case "content_block_stop":
 			if currentTool != nil {
 				tu := currentTool
-				var input map[string]any
-				raw := tu.input.String()
-				if raw != "" {
-					if jerr := json.Unmarshal([]byte(raw), &input); jerr != nil {
-						input = map[string]any{"_raw": raw}
-					}
-				} else {
-					input = map[string]any{}
-				}
+				// AD-19: keep Anthropic and OpenAI aligned on graceful
+				// degradation for malformed streamed tool arguments.
+				input := toolargs.ParseObject(tu.input.String())
 				ch <- llmtypes.StreamEvent{
 					Type: llmtypes.EventToolUse,
 					ToolUse: &llmtypes.ToolUseBlock{
@@ -287,4 +282,3 @@ func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.Mes
 		}
 	}
 }
-

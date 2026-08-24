@@ -197,7 +197,7 @@ role: xdg-test-role
 
 // TestLoadFrom_StaleKeysSilentlyIgnored is the 18a-cut-dead-storage-and-config
 // acceptance check: nanite.yaml/config.yaml files that still set the fields
-// cut from Config (version, boot_profiles, write_paths, protected_paths,
+// cut from RuntimeConfig (version, boot_profiles, write_paths, protected_paths,
 // executor, defaults, projects, hooks_dir) must not error on load —
 // gopkg.in/yaml.v3's default Unmarshal silently ignores keys with no
 // matching struct field (it only errors on unknown keys via the stricter
@@ -254,7 +254,7 @@ func TestProjectRoot_ExpandsTilde(t *testing.T) {
 		t.Skip("cannot determine home dir")
 	}
 
-	cfg := &Config{
+	cfg := &RuntimeConfig{
 		Project: ProjectConfig{Root: "~/Projects-apps/nanite"},
 	}
 	got := cfg.ProjectRoot()
@@ -265,14 +265,14 @@ func TestProjectRoot_ExpandsTilde(t *testing.T) {
 }
 
 func TestProjectRoot_EmptyRoot(t *testing.T) {
-	cfg := &Config{}
+	cfg := &RuntimeConfig{}
 	if got := cfg.ProjectRoot(); got != "" {
 		t.Errorf("ProjectRoot() = %q, want empty string", got)
 	}
 }
 
 func TestProjectRoot_AbsolutePath(t *testing.T) {
-	cfg := &Config{
+	cfg := &RuntimeConfig{
 		Project: ProjectConfig{Root: "/opt/myproject"},
 	}
 	if got := cfg.ProjectRoot(); got != "/opt/myproject" {
@@ -291,14 +291,14 @@ func TestResolvedDevToolsAllowedPaths(t *testing.T) {
 	}
 
 	t.Run("nil when unset", func(t *testing.T) {
-		cfg := &Config{}
+		cfg := &RuntimeConfig{}
 		if got := cfg.ResolvedDevToolsAllowedPaths(); got != nil {
 			t.Errorf("ResolvedDevToolsAllowedPaths() = %v, want nil", got)
 		}
 	})
 
 	t.Run("tilde-expanded entries", func(t *testing.T) {
-		cfg := &Config{
+		cfg := &RuntimeConfig{
 			DevToolsAllowedPaths: []string{
 				"~/Projects-apps",
 				"~/.nanite",
@@ -322,7 +322,7 @@ func TestResolvedDevToolsAllowedPaths(t *testing.T) {
 	})
 
 	t.Run("empty entries dropped", func(t *testing.T) {
-		cfg := &Config{
+		cfg := &RuntimeConfig{
 			DevToolsAllowedPaths: []string{"", "~/.nanite", ""},
 		}
 		got := cfg.ResolvedDevToolsAllowedPaths()

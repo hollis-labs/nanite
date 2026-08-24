@@ -1,7 +1,7 @@
 # Disambiguate `internal/config`'s three unrelated concerns sharing one generic package name
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/config/config.go` (`Config`), `internal/config/appconfig.go` (`AppConfig`), `internal/config/layout.go` (XDG path resolution). Also, potentially, every caller of `config.Config` and `config.AppConfig` across the tree, depending on which direction the architect chooses.
 
@@ -116,15 +116,56 @@ Option A is low risk (identifier rename only, mechanical, caught immediately by 
 
 ## Done means
 
-- [ ] All callers of `config.Config` and `config.AppConfig` enumerated via grep before implementation.
-- [ ] Architect decision recorded: Option A (rename within one package) or Option B (split into separate packages).
-- [ ] Chosen option implemented; no lingering references to old identifier/package names.
-- [ ] `go build ./...` succeeds; `internal/config` tests pass unchanged.
+- [x] All callers of `config.Config` and `config.AppConfig` enumerated via grep before implementation.
+- [x] Architect decision recorded: Option A (rename within one package) or Option B (split into separate packages).
+- [x] Chosen option implemented; no lingering references to old identifier/package names.
+- [x] `go build ./...` succeeds; `internal/config` tests pass unchanged.
 
 ## Work log
 
-<!-- Worker fills this in: what was actually done, any deviation from plan and why, anything escalated. -->
+- 2026-08-24 worker pre-edit check:
+  - Read `.claude/agents/worker.md`, this task, `docs/engineering/EXECUTION-PROCESS.md`, `docs/engineering/GLOSSARY.md`, and AD-20 in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`.
+  - Architect decision recorded: AD-20 chooses Option A, rename both exported config structs by role within the existing `internal/config` package. No on-disk config file paths/names are in scope.
+  - Re-derived current citations before editing: `internal/config/config.go:23` defines `Config`; `internal/config/config.go:122` reads project-root `nanite.yaml`; `internal/config/appconfig.go:12-13` defines `AppConfig` for checked-in `config/nanite.yaml`; `internal/config/appconfig.go:225-227` loads that checked-in file; `internal/config/layout.go:1` and `internal/config/layout.go:28` are XDG layout resolution only.
+  - Re-enumerated callers with `.git` and `.claude` pruned:
+    - `cmd/nanite/main.go:1009` `config.Config`
+    - `cmd/nanite/main.go:1025` `config.Config`
+    - `cmd/nanite/main.go:1054` `config.Config`
+    - `cmd/nanite/main.go:1071` `config.Config`, `config.AppConfig`
+    - `cmd/nanite/main.go:1403` `config.Config`
+    - `internal/service/slot_stash.go:90` `config.AppConfig`
+    - `internal/service/chat.go:105` `config.AppConfig`
+    - `internal/service/chat.go:230` `config.AppConfig`
+    - `internal/service/container.go:177` `config.AppConfig`
+    - `internal/service/container.go:305` `config.AppConfig`
+- 2026-08-24 implementation:
+  - Renamed `internal/config.Config` to `RuntimeConfig` and `internal/config.AppConfig` to `TunablesConfig`.
+  - Updated the bounded caller set in `cmd/nanite/main.go` and `internal/service/{chat,container,slot_stash}.go`.
+  - Kept the existing `internal/config` package, XDG layout helpers, loader functions, and on-disk YAML paths/names unchanged.
+  - Verification:
+    - `go test ./internal/config/... -v` — PASS.
+    - `go vet ./internal/config/...` — PASS.
+    - `go build ./...` — PASS.
+    - `grep` for `config\.(Config|AppConfig)\b` across active-tree Go files with `.git`/`.claude` pruned — no matches.
+    - `go build ./cmd/nanite/` — PASS.
+    - `go vet ./...` — PASS.
+    - `go test ./...` — PASS on rerun. First full-suite attempt hit a transient `internal/llm/anthropic` usage-count failure; the single failing test, the full package with `-count=1`, and the full suite rerun all passed.
+- 2026-08-24 review-fix round:
+  - Read this task and the `docs/engineering/GLOSSARY.md` **Skill vendor store** entry before editing.
+  - Updated the current canonical glossary reference from `config.AppConfig.Skills.VendorStorageDir` to `config.TunablesConfig.Skills.VendorStorageDir`, matching this task's role-clear rename. Left historical task/audit prose untouched.
+  - Verification:
+    - `find . -path './.git' -prune -o -path './.claude' -prune -o -path './vendor' -prune -o -name '*.go' -exec grep -nE 'config\.(Config|AppConfig)\b' {} +` — no matches in current worktree Go.
+    - `find docs/engineering -name '*.md' ! -path 'docs/engineering/orchestrator-kickoffs/*' ! -path 'docs/engineering/TASKS.md' -exec grep -nE 'config\.(Config|AppConfig)\b' {} +` — no matches in current canonical engineering docs.
+    - `find TASKS docs/engineering -name '*.md' -exec grep -nE 'config\.(Config|AppConfig)\b' {} +` — remaining matches are historical task/audit/kickoff/legacy-task prose only, left as instructed.
+    - `go test ./internal/config/... -v` — PASS.
+    - `go build ./cmd/nanite/` — PASS.
 
 ## Review notes
 
-<!-- Reviewer fills this in: pass/fail, what was independently re-verified. -->
+- 2026-08-24 fresh re-review PASS. Verified the AD-20 rename is complete in
+  active Go (`RuntimeConfig`, `TunablesConfig`) and the stale canonical
+  glossary reference now uses `config.TunablesConfig.Skills.VendorStorageDir`.
+  No active Go or canonical engineering-doc references to `config.Config` or
+  `config.AppConfig` remain outside historical/audit/task prose. Targeted
+  config tests, `go vet`, `go build ./cmd/nanite/`, and broader build checks
+  passed.

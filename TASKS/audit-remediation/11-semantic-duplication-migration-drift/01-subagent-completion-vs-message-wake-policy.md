@@ -1,7 +1,7 @@
 # Migrate `resolveSubagentCompletionPolicy` onto the shared `override.Resolve` cascade
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/service/subagent_reactor.go` (`resolveSubagentCompletionPolicy`), `internal/service/messaging_reactor.go` (`resolveMessageWakePolicy`, reference implementation), the shared `override.Resolve` cascade primitive (package not pinned down in the audit's evidence — locate via the import used by `messaging_reactor.go` before starting).
 
@@ -86,16 +86,43 @@ Low-to-medium risk — the function is internal (unexported), so no external cal
 
 ## Done means
 
-- [ ] Architect decision recorded: confirms `override.Resolve` (or equivalent) is extended, if needed, to support `resolveSubagentCompletionPolicy`'s policy shape without behavior change.
-- [ ] `resolveSubagentCompletionPolicy` routes through the same shared cascade primitive `resolveMessageWakePolicy` uses.
-- [ ] Existing subagent-reactor and messaging-reactor tests pass unchanged.
-- [ ] New/extended test demonstrates the two reactors cannot silently re-diverge on cascade mechanism.
-- [ ] `go build`, `go vet`, `go test ./internal/service/...` all pass.
+- [x] Architect decision recorded: confirms `override.Resolve` (or equivalent) is extended, if needed, to support `resolveSubagentCompletionPolicy`'s policy shape without behavior change.
+- [x] `resolveSubagentCompletionPolicy` routes through the same shared cascade primitive `resolveMessageWakePolicy` uses.
+- [x] Existing subagent-reactor and messaging-reactor tests pass unchanged.
+- [x] New/extended test demonstrates the two reactors cannot silently re-diverge on cascade mechanism.
+- [x] `go build`, `go vet`, `go test ./internal/service/...` all pass.
 
 ## Work log
 
-<!-- Worker fills this in: what was actually done, any deviation from plan and why, anything escalated. -->
+- 2026-08-24: Re-derived current HEAD citations before editing:
+  `resolveMessageWakePolicy` is at `internal/service/messaging_reactor.go:103-150`
+  and calls `override.Resolve` at line 145; `resolveSubagentCompletionPolicy`
+  was at `internal/service/subagent_reactor.go:77-102` and hand-rolled the
+  session override -> agent constraint -> global default walk. Production call
+  sites are `messaging_reactor.go:43` and `subagent_reactor.go:45`; neither
+  required a signature or return-shape change.
+- Added `override.OverrideConfig.SubagentCompletionPolicy` with the same
+  last-non-empty-wins scalar merge behavior as `MessageWakePolicy`, preserving
+  separate policy fields and separate global defaults.
+- Migrated `resolveSubagentCompletionPolicy` to build validated session/task and
+  agent/project layers and resolve them through `override.Resolve`. Preserved
+  the existing behavior that a valid session override avoids the mutating
+  `ResolveForSession` agent lookup.
+- Added primitive-level coverage proving both reactor policy fields share the
+  same cascade semantics, plus a shared table-driven service regression test
+  exercising the same precedence/default cases against both reactors.
+- Verification passed: `go build ./internal/service/...`;
+  `go vet ./internal/service/...`;
+  `go test ./internal/service/... -run 'Reactor|WakePolicy|CompletionPolicy' -v`;
+  `go build ./cmd/nanite/`; `go vet ./...`; `go test ./...`.
 
 ## Review notes
 
-<!-- Reviewer fills this in: pass/fail, what was independently re-verified. -->
+- 2026-08-24 fresh re-review PASS. Verified AD-19's shared-implementation
+  decision is satisfied: `resolveSubagentCompletionPolicy` now resolves through
+  `override.Resolve` while preserving the separate render-and-wait default and
+  the valid-session-override skip of mutating agent resolution. Confirmed
+  primitive and service coverage in
+  `TestResolve_ReactorPolicyScalarsShareCascadeSemantics`,
+  `TestReactorPolicyResolversShareOverrideCascadeCases`, and the existing
+  subagent/message reactor resolver tests.

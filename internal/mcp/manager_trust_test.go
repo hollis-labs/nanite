@@ -256,6 +256,38 @@ func TestManager_ExecuteTool_StripsANSIAndEnforcesTierResultCap(t *testing.T) {
 	}
 }
 
+func TestManager_ExecuteToolOnServer_UsesResultProcessingTail(t *testing.T) {
+	ft := &fakeTieredTransport{
+		tools:      []Tool{{Name: "tool", Description: "x"}},
+		resultText: "\x1b[31mhello\x1b[0m",
+	}
+	mgr := NewManager()
+	if err := mgr.AddServer("srv", ft, TierBuiltin); err != nil {
+		t.Fatalf("AddServer: %v", err)
+	}
+
+	got, err := mgr.ExecuteToolOnServer(context.Background(), "srv", "tool", nil)
+	if err != nil {
+		t.Fatalf("ExecuteToolOnServer: %v", err)
+	}
+	if got != "hello" {
+		t.Errorf("ANSI stripping: got %q want %q", got, "hello")
+	}
+
+	big := strings.Repeat("a", 200*1024)
+	ft2 := &fakeTieredTransport{
+		tools:      []Tool{{Name: "tool", Description: "x"}},
+		resultText: big,
+	}
+	mgr2 := NewManager()
+	if err := mgr2.AddServer("srv", ft2, TierThirdPartyHTTP); err != nil {
+		t.Fatalf("AddServer: %v", err)
+	}
+	if _, err := mgr2.ExecuteToolOnServer(context.Background(), "srv", "tool", nil); err == nil {
+		t.Error("expected tier result-cap error, got nil")
+	}
+}
+
 func TestManager_ExecuteTool_DropsInvalidBlockTypes(t *testing.T) {
 	// A transport that returns one valid text block and one invalid block
 	// type; the result string should only contain the text from the valid

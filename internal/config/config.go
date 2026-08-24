@@ -19,8 +19,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the top-level nanite configuration.
-type Config struct {
+// RuntimeConfig is the user/project runtime configuration loaded from the XDG
+// user config and project-root nanite.yaml.
+type RuntimeConfig struct {
 	Project ProjectConfig `yaml:"project"`
 	// Role is read exactly once, at boot, for a log line only — it does not
 	// currently branch on anything or feed into agent resolution. Kept as-is
@@ -112,8 +113,8 @@ type ProjectConfig struct {
 //   - otherwise:                  ~/.config/nanite/config.yaml
 //
 // A missing user-config file is not an error — Load returns the project
-// config alone (or a zero Config if neither file exists).
-func Load() (*Config, error) {
+// config alone (or a zero RuntimeConfig if neither file exists).
+func Load() (*RuntimeConfig, error) {
 	userPath, err := UserConfigPath()
 	if err != nil {
 		return nil, err
@@ -148,7 +149,7 @@ func UserConfigPath() (string, error) {
 // LoadFrom reads and merges configuration from explicit file paths.
 // userPath is the base config; projectPath overrides it.
 // Either file may be missing — a missing file is silently skipped.
-func LoadFrom(userPath, projectPath string) (*Config, error) {
+func LoadFrom(userPath, projectPath string) (*RuntimeConfig, error) {
 	base, err := readConfig(userPath)
 	if err != nil {
 		return nil, err
@@ -165,7 +166,7 @@ func LoadFrom(userPath, projectPath string) (*Config, error) {
 
 // ProjectRoot resolves the project.root field, expanding ~ to the user's home
 // directory. Returns an empty string if project.root is unset.
-func (c *Config) ProjectRoot() string {
+func (c *RuntimeConfig) ProjectRoot() string {
 	return expandHome(c.Project.Root)
 }
 
@@ -174,7 +175,7 @@ func (c *Config) ProjectRoot() string {
 // home directory. Returns an empty string when the field is unset, which
 // the workflow-definitions registry treats as "no directory configured"
 // (empty registry).
-func (c *Config) ResolvedWorkflowDefinitionsPath() string {
+func (c *RuntimeConfig) ResolvedWorkflowDefinitionsPath() string {
 	return expandHome(c.WorkflowDefinitionsPath)
 }
 
@@ -185,7 +186,7 @@ func (c *Config) ResolvedWorkflowDefinitionsPath() string {
 // from "explicitly empty → no allowed paths". An empty-but-configured
 // list (`dev_tools_allowed_paths: []` in YAML) returns a non-nil empty
 // slice.
-func (c *Config) ResolvedDevToolsAllowedPaths() []string {
+func (c *RuntimeConfig) ResolvedDevToolsAllowedPaths() []string {
 	if c.DevToolsAllowedPaths == nil {
 		return nil
 	}
@@ -200,17 +201,17 @@ func (c *Config) ResolvedDevToolsAllowedPaths() []string {
 	return out
 }
 
-// readConfig reads a single YAML config file. Returns a zero Config if the
+// readConfig reads a single YAML config file. Returns a zero RuntimeConfig if the
 // file does not exist.
-func readConfig(path string) (*Config, error) {
+func readConfig(path string) (*RuntimeConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &Config{}, nil
+			return &RuntimeConfig{}, nil
 		}
 		return nil, err
 	}
-	var cfg Config
+	var cfg RuntimeConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
@@ -220,7 +221,7 @@ func readConfig(path string) (*Config, error) {
 // merge overlays project config on top of user config.
 // For scalar fields, project wins if non-zero. For slices/maps, project
 // replaces user if the project slice/map is non-nil.
-func merge(user, project *Config) *Config {
+func merge(user, project *RuntimeConfig) *RuntimeConfig {
 	out := *user // shallow copy of user as base
 
 	if project.Project.Name != "" {

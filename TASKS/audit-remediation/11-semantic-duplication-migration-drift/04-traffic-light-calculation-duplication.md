@@ -1,7 +1,7 @@
 # Export `inspector.TrafficLight` and remove `internal/service`'s duplicate reimplementation
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/inspector/service.go` (`trafficLight`, lines 266-276), `internal/service/inspector_producers.go` (`trafficLightFor`, lines 56-63).
 
@@ -75,15 +75,34 @@ Very low risk — a pure export-and-delegate change with no behavior change (bot
 
 ## Done means
 
-- [ ] `inspector.trafficLight` renamed to `inspector.TrafficLight` (exported).
-- [ ] `internal/service/inspector_producers.go`'s `trafficLightFor` deleted; call sites use `inspector.TrafficLight` directly.
-- [ ] No remaining reference to `trafficLightFor` anywhere in the tree.
-- [ ] `go build`, `go vet`, `go test` all pass for both packages.
+- [x] `inspector.trafficLight` renamed to `inspector.TrafficLight` (exported).
+- [x] `internal/service/inspector_producers.go`'s `trafficLightFor` deleted; call sites use `inspector.TrafficLight` directly.
+- [x] No remaining reference to `trafficLightFor` anywhere in the tree.
+- [x] `go build`, `go vet`, `go test` all pass for both packages.
 
 ## Work log
 
-<!-- Worker fills this in. -->
+2026-08-24:
+
+- Exported `internal/inspector`'s traffic-light rule as `TrafficLight` and updated existing inspector tests to call the exported function.
+- Removed `internal/service/inspector_producers.go`'s duplicate `trafficLightFor` helper; `recordInspectorSlots` now calls `inspectsvc.TrafficLight(tokens, cached)` directly. The existing `internal/inspector` import was already present, so no new package dependency was introduced.
+- Confirmed `trafficLightFor` had no dedicated test of its own before removal; the existing `TestTrafficLight` coverage now exercises the exported canonical function.
+- Verification passed:
+  - `go build ./internal/inspector/... ./internal/service/...`
+  - `go vet ./internal/inspector/... ./internal/service/...`
+  - `go test ./internal/inspector/... ./internal/service/... -run 'TrafficLight' -v`
+  - `grep -R -n "trafficLightFor" internal/service --include='*.go'` returned no matches.
+  - `git grep -n "trafficLightFor" -- '*.go'` returned no matches in tracked/current Go source.
+  - `grep -R -n "func trafficLight" internal --include='*.go'` returned no matches.
+  - `grep -R -n "func TrafficLight" internal --include='*.go'` returns only `internal/inspector/service.go`.
+  - `go build ./cmd/nanite/`
+  - `go vet ./...`
+  - `go test ./...`
+- Deviations: none.
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-24 fresh review PASS. Verified `inspector.TrafficLight` is the only
+  traffic-light rule implementation in current source and
+  `internal/service/inspector_producers.go` calls it directly. Focused
+  inspector/service checks and full `go build`, `go vet`, and `go test` passed.

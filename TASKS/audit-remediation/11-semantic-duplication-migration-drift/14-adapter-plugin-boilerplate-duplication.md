@@ -1,7 +1,7 @@
 # Optional: shared `plugin.LoadEmbeddedManifest`/`plugin.BasePlugin` helper for the 4 CLI-ecosystem adapter plugins
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/plugin/builtin/adapter-claude`, `internal/plugin/builtin/adapter-codex`, `internal/plugin/builtin/adapter-gemini`, `internal/plugin/builtin/adapter-opencode`. Explicitly **not** `internal/plugin/builtin/adapter-nanite-native` (see Non-goals).
 
@@ -75,16 +75,42 @@ Low risk — a pure boilerplate extraction across 4 files with existing test cov
 
 ## Done means
 
-- [ ] Shared boilerplate identified precisely across all 4 adapters (read all 4 files in full before extracting).
-- [ ] `plugin.LoadEmbeddedManifest`/`plugin.BasePlugin` (or equivalent) helper introduced, confirmed not to already exist unused.
-- [ ] All 4 adapters migrated to use the shared helper for their shareable boilerplate; structurally-unavoidable `init()`-registration boilerplate left in place with a note explaining why.
-- [ ] `adapter-nanite-native` untouched.
-- [ ] `go build`, `go vet`, `go test ./internal/plugin/builtin/...` all pass.
+- [x] Shared boilerplate identified precisely across all 4 adapters (read all 4 files in full before extracting).
+- [x] `plugin.LoadEmbeddedManifest`/`plugin.BasePlugin` (or equivalent) helper introduced, confirmed not to already exist unused.
+- [x] All 4 adapters migrated to use the shared helper for their shareable boilerplate; structurally-unavoidable `init()`-registration boilerplate left in place with a note explaining why.
+- [x] `adapter-nanite-native` untouched.
+- [x] `go build`, `go vet`, `go test ./internal/plugin/builtin/...` all pass.
 
 ## Work log
 
-<!-- Worker fills this in. -->
+2026-08-24 — Implemented.
+
+- Independently verified the orchestrator preflight against current source before editing:
+  - `adapter-claude`, `adapter-codex`, `adapter-gemini`, and `adapter-opencode` each had a `plugin.go` that embedded `plugin.yaml`, parsed it with `yaml.Unmarshal` behind `sync.Once` into `*hostplugin.PluginManifest`, exposed `Manifest()`, and duplicated the same `Load`/`Unload`/`Status` implementation aside from adapter identity/log strings.
+  - `grep -RIn "LoadEmbeddedManifest\|BasePlugin" internal/plugin` returned no existing helper before this task.
+  - `adapter-nanite-native` was read for comparison only. It has similar manifest boilerplate but also real Nanite-specific config/composition logic and tests, so it remained out of scope and was not modified.
+- Added `internal/plugin/base_plugin.go` with:
+  - `LoadEmbeddedManifest`, a lazy `sync.Once`-backed embedded `plugin.yaml` loader that preserves the old panic-on-invalid-source-metadata behavior.
+  - `BasePlugin`, `BasePluginConfig`, and `ManifestLoader` for the common plugin-sdk identity, dependency, embedded manifest, lifecycle status, and load/unload logging behavior.
+- Migrated only the four target adapters to embed `hostplugin.BasePlugin` and pass their adapter-specific ID/name/version/description/manifest loader to `hostplugin.NewBasePlugin`.
+- Left per-package `init()` registration in each adapter. That duplication is structurally unavoidable because Go package self-registration happens from each package's own `init()` function.
+- Left adapter-specific `Adapter` construction, `CLIAgentAdapter` methods, and content generation code unchanged.
+- Added `internal/plugin/base_plugin_test.go` covering embedded manifest caching, invalid YAML panic identity, metadata/dependency behavior, and lifecycle status transitions.
+- Verification run:
+  - `go test ./internal/plugin ./internal/plugin/builtin/...` — pass.
+  - `go build ./internal/plugin/builtin/...` — pass.
+  - `go vet ./internal/plugin/builtin/...` — pass.
+  - `go test ./internal/plugin/builtin/... -v` — pass.
+  - `go build ./cmd/nanite/` — pass.
+  - `go vet ./...` — pass.
+  - `go test ./...` — pass.
+- No deviations from scope; did not run `git stash`.
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-24 fresh review PASS. Verified `LoadEmbeddedManifest` and
+  `BasePlugin` preserve embedded manifest parsing, identity, dependencies,
+  lifecycle status, and load/unload logging for the four target CLI adapters.
+  The four adapters use the helper, `adapter-nanite-native` has no diff, and
+  only package-scoped `init()` plus adapter-specific content remains local.
+  Plugin helper/builtin checks passed.

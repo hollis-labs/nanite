@@ -43,6 +43,14 @@ type OverrideConfig struct {
 	// internal/service/messaging_reactor.go's resolveMessageWakePolicy,
 	// the caller.
 	MessageWakePolicy string `yaml:"message_wake_policy,omitempty" json:"message_wake_policy,omitempty"`
+	// SubagentCompletionPolicy backs chat.AgentConstraints.
+	// SubagentCompletionPolicy (CW-20260520-0001). It intentionally stays a
+	// separate field from MessageWakePolicy: both policies share the same
+	// three-value vocabulary and cascade semantics, but they configure
+	// different reactor events and have different global defaults. Keeping
+	// both fields in this shared primitive prevents the two service-side
+	// resolvers from drifting onto separate merge mechanisms.
+	SubagentCompletionPolicy string `yaml:"subagent_completion_policy,omitempty" json:"subagent_completion_policy,omitempty"`
 
 	// Lists — union with optional +/- prefix support.
 	Tools       []string `yaml:"tools,omitempty"       json:"tools,omitempty"`
@@ -109,6 +117,9 @@ func applyLayer(base, layer OverrideConfig) OverrideConfig {
 	}
 	if layer.MessageWakePolicy != "" {
 		base.MessageWakePolicy = layer.MessageWakePolicy
+	}
+	if layer.SubagentCompletionPolicy != "" {
+		base.SubagentCompletionPolicy = layer.SubagentCompletionPolicy
 	}
 
 	// Lists: union with +/- prefix support.

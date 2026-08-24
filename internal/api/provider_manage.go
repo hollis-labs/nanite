@@ -16,7 +16,7 @@ func (a *API) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	var update store.ProviderUpdate
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+	if err := a.decode(r, &update); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
@@ -39,7 +39,7 @@ func (a *API) handleSetProviderAPIKey(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	var body SetProviderAPIKeyRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := a.decode(r, &body); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}

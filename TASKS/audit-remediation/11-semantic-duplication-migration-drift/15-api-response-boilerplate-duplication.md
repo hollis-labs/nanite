@@ -1,7 +1,7 @@
 # `internal/api` response/decode boilerplate cleanup — bypassed shared helper, plus CRUD-family duplication
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/api/api.go` (`API`, `a.decode`), `internal/api/catalog.go` (`catalogState`), `internal/api/plugins.go` (`pluginManagerState`), `internal/api/provider_manage.go`, `internal/api/plugin_config.go`, `internal/api/agent_capabilities.go`.
 
@@ -82,16 +82,26 @@ Both findings are low risk. GO-API-006's main risk is a subtle behavioral change
 
 ## Done means
 
-- [ ] All 3 `*API`-receiver bypass sites (GO-API-006) identified and switched to `a.decode`.
-- [ ] Decode-failure behavior confirmed identical before/after for all 3 switched sites.
-- [ ] GO-API-009's 7 pairs re-confirmed via a fresh `dupl` run or raw log read.
-- [ ] GO-API-009 judgment call made and recorded: generic helper extracted (with passing tests), or explicitly accepted and closed with reasoning.
-- [ ] `go build`, `go vet`, `go test ./internal/api/...` all pass.
+- [x] All 3 `*API`-receiver bypass sites (GO-API-006) identified and switched to `a.decode`.
+- [x] Decode-failure behavior confirmed identical before/after for all 3 switched sites.
+- [x] GO-API-009's 7 pairs re-confirmed via a fresh `dupl` run or raw log read.
+- [x] GO-API-009 judgment call made and recorded: generic helper extracted (with passing tests), or explicitly accepted and closed with reasoning.
+- [x] `go build`, `go vet`, `go test ./internal/api/...` all pass.
 
 ## Work log
 
-<!-- Worker fills this in: what was actually done for each finding, and the GO-API-009 judgment call's reasoning. -->
+- 2026-08-24 worker: Confirmed `a.decode` in `internal/api/api.go` remains the shared `*API` helper at `api.go:607`, defers `r.Body.Close()`, then calls `json.NewDecoder(r.Body).Decode(v)`.
+- 2026-08-24 worker: Confirmed the 3 bypasses were all ordinary request-body decodes with the same bad-request path: `handleUpdateProvider` and `handleSetProviderAPIKey` in `provider_manage.go`, plus `handleUpdatePluginConfig` in `plugin_config.go`. Switched all three to `a.decode` and preserved the existing `400` response wording: `"invalid JSON: "+err.Error()`.
+- 2026-08-24 worker: Added `TestProviderManageAndPluginConfigMalformedJSONUsesSharedDecode` to cover malformed JSON for the three switched handlers. Wrong-content-type behavior is unchanged by inspection because neither the prior local decoders nor `a.decode` check `Content-Type`; they only decode the body.
+- 2026-08-24 worker: Re-ran `dupl -plumbing internal/api/agent_capabilities.go`; current pairs are `24-44` with `180-200`, `180-200` with `362-382`, `362-382` with `510-530`, `510-530` with `24-44`, plus `146-165` with `328-347`, `328-347` with `476-495`, `476-495` with `639-658`, and `639-658` with `146-165`. Also confirmed the broader non-test package run (`find internal/api -maxdepth 1 -name '*.go' ! -name '*_test.go' | sort | dupl -files -plumbing`) reports 23 plumbing entries including these expected `agent_capabilities.go` CRUD-family entries.
+- 2026-08-24 worker: Closed GO-API-009 as accepted/deferred, not extracted. The four CRUD families are similar at the transport shell but already carry family-specific behavior (known-skill bare-assignment upsert and grant-state preservation; knowledge-seed tag normalization and applied timestamp preservation; different names/request fields/errors). A generic helper would encode exceptions and increase coupling for an informational finding.
+- 2026-08-24 worker: Verification passed: `go build ./internal/api/...`; `go vet ./internal/api/...`; `go test ./internal/api/... -run 'ProviderManage|PluginConfig|AgentCapabilities' -v`; `go build ./cmd/nanite/`; `go vet ./...`; `go test ./...`.
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-24 fresh review PASS. Verified the three `*API` decode bypasses now
+  use `a.decode` while preserving the existing `400` `invalid JSON: ...`
+  response, with malformed JSON coverage for all three handlers. Verified
+  `agent_capabilities.go` CRUD-family pairs were freshly re-confirmed and
+  GO-API-009's accepted/deferred judgment is defensible for an informational
+  finding; no broad helper or unrelated API scope was introduced.

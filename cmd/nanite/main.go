@@ -21,6 +21,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/coordination"
 	"github.com/hollis-labs/nanite/internal/envelope"
+	"github.com/hollis-labs/nanite/internal/envelopewiring"
 	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
@@ -195,7 +196,7 @@ func cmdServeWithInitializers(
 
 	// Initialise OpenTelemetry tracing via the internal/otel wrapper.
 	// The wrapper honours NANITE_OTEL_DISABLED=1 (env takes precedence)
-	// and AppConfig.OTel.Disabled — either installs a no-op tracer
+	// and TunablesConfig.OTel.Disabled — either installs a no-op tracer
 	// provider and returns a no-op shutdown.
 	otelCtx := context.Background()
 	otelShutdown, otelErr := initOTel(otelCtx, naniteotel.Config{
@@ -236,8 +237,19 @@ func cmdServeWithInitializers(
 		slog.Error("envelope registry load failed", "err", err)
 		return fmt.Errorf("envelope registry load failed: %w", err)
 	}
-	chat.SetEnvelopeRegistry(envReg)
-	envelope.SetEnvelopeRegistry(envReg)
+
+	// Create plugin host before envelope registry wiring so the registry has
+	// one composition-root install path across chat, envelope validation, and
+	// plugin-owned schema validation.
+	logger := plugin.NewLogger(brand.ID + "-plugin")
+	pluginHost := plugin.NewHost(nil, logger)
+	pluginHost.SetStore(s)
+	// Phase 5 item 02: share this same store instance with manage.go's
+	// package-level DisablePlugin/EnablePlugin/IsDisabled/PluginStatus so
+	// the running server and those functions read/write the same `plugins`
+	// state table instead of opening a second connection to the DB file.
+	plugin.SetPluginStateStore(s)
+	envelopewiring.InstallSharedRegistry(envReg, pluginHost)
 
 	// Mirror the registry's bare core type names into the chat-side
 	// allowlist used by ParseEnvelopes. The registry is authoritative for
@@ -331,16 +343,7 @@ func cmdServeWithInitializers(
 		}
 	}
 
-	// Create plugin host (before container so it can be wired as a dependency).
-	logger := plugin.NewLogger(brand.ID + "-plugin")
-	pluginHost := plugin.NewHost(nil, logger)
-	pluginHost.SetStore(s)
-	// Phase 5 item 02: share this same store instance with manage.go's
-	// package-level DisablePlugin/EnablePlugin/IsDisabled/PluginStatus so
-	// the running server and those functions read/write the same `plugins`
-	// state table instead of opening a second connection to the DB file.
-	plugin.SetPluginStateStore(s)
-	pluginHost.SetEnvelopeRegistry(envReg)
+	// Finish plugin host wiring now that the MCP and toolclient dependencies exist.
 	pluginHost.SetMCPRegistrar(mcpManager)
 	pluginHost.RegisterService("store", s)
 	pluginHost.RegisterService("mcp", mcpManager)
@@ -1006,7 +1009,7 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 // Hardcoded user-specific defaults (`~/Projects-apps`, etc.) were
 // removed by the SP5 hot-fix (commit 151fc7b) — see audit
 // docs/audits/hardcoded-paths.md for the full disposition table.
-func resolveDevToolsAllowedPaths(cfg *config.Config) []string {
+func resolveDevToolsAllowedPaths(cfg *config.RuntimeConfig) []string {
 	if cfg != nil && cfg.DevToolsAllowedPaths != nil {
 		return cfg.ResolvedDevToolsAllowedPaths()
 	}
@@ -1022,7 +1025,7 @@ func resolveDevToolsAllowedPaths(cfg *config.Config) []string {
 // definitions directory (CW-20260813-0014). Returns an empty string when
 // the field is unset, which agentworkflow.LoadRegistryDir interprets as
 // "no directory" — an empty, inert Registry.
-func resolveWorkflowDefinitionsPath(cfg *config.Config) string {
+func resolveWorkflowDefinitionsPath(cfg *config.RuntimeConfig) string {
 	if cfg == nil {
 		return ""
 	}
@@ -1051,7 +1054,7 @@ func resolveBinaryPath(exe string) string {
 // devAllowedSource returns a short string describing where the dev tools
 // allow-list came from, purely for log observability when sessions hit a
 // path-escape error.
-func devAllowedSource(cfg *config.Config) string {
+func devAllowedSource(cfg *config.RuntimeConfig) string {
 	if cfg != nil && cfg.DevToolsAllowedPaths != nil {
 		return "config:dev_tools_allowed_paths"
 	}
@@ -1068,7 +1071,7 @@ func devAllowedSource(cfg *config.Config) string {
 // devmode build tag via registerMuxTransport (G5 — CW-20260421-0001).
 // In production builds registerMuxTransport is a no-op and no mux_* tools
 // appear in the tool surface.
-func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp.Manager, *toolclient.ToolClient, *selftools.SelfToolsTransport) {
+func initMCP(s *store.Store, cfg *config.RuntimeConfig, appCfg *config.TunablesConfig) (*mcp.Manager, *toolclient.ToolClient, *selftools.SelfToolsTransport) {
 	mcpManager := mcp.NewManager()
 
 	devAllowed := resolveDevToolsAllowedPaths(cfg)
@@ -1400,7 +1403,7 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 //
 // When cfg is nil or cfg.Vanta.URL is empty, the function is a no-op — Vanta
 // integration is opt-in. CW-20260501-0005 sub-ticket 2.
-func registerVantaServer(m *mcp.Manager, cfg *config.Config) {
+func registerVantaServer(m *mcp.Manager, cfg *config.RuntimeConfig) {
 	if cfg == nil || strings.TrimSpace(cfg.Vanta.URL) == "" {
 		return
 	}

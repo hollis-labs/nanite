@@ -9,8 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// AppConfig holds application-level tunables loaded from config/nanite.yaml.
-type AppConfig struct {
+// TunablesConfig holds checked-in application tunables loaded from config/nanite.yaml.
+type TunablesConfig struct {
 	Presence  PresenceConfig  `yaml:"presence"`
 	Artifacts ArtifactsConfig `yaml:"artifacts"`
 	Skills    SkillsConfig    `yaml:"skills"`
@@ -192,8 +192,8 @@ type SkillsConfig struct {
 }
 
 // DefaultAppConfig returns sensible defaults when no config file exists.
-func DefaultAppConfig() *AppConfig {
-	return &AppConfig{
+func DefaultAppConfig() *TunablesConfig {
+	return &TunablesConfig{
 		Presence: PresenceConfig{
 			CLIActiveThrottleSeconds: 5,
 		},
@@ -222,9 +222,9 @@ func DefaultAppConfig() *AppConfig {
 	}
 }
 
-// LoadAppConfig reads config/nanite.yaml and returns the parsed config.
+// LoadAppConfig reads checked-in config/nanite.yaml tunables and returns the parsed config.
 // Returns defaults if the file doesn't exist.
-func LoadAppConfig(path string) (*AppConfig, error) {
+func LoadAppConfig(path string) (*TunablesConfig, error) {
 	cfg := DefaultAppConfig()
 
 	data, err := os.ReadFile(path)

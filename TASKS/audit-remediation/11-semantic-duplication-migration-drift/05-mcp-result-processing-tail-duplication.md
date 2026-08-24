@@ -1,7 +1,7 @@
 # Extract the shared post-CallTool result-processing pipeline out of `Manager.ExecuteTool`/`ExecuteToolOnServer`
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/mcp/manager.go` (`Manager.ExecuteTool`, `Manager.ExecuteToolOnServer`).
 
@@ -67,15 +67,22 @@ Very low risk — pure structural extraction of code the audit confirmed is alre
 
 ## Done means
 
-- [ ] Shared post-`CallTool` tail extracted into one private helper on `*Manager`.
-- [ ] `ExecuteTool` and `ExecuteToolOnServer` both call the extracted helper; no duplicated tail logic remains.
-- [ ] Existing tests for both functions pass unchanged.
-- [ ] `go build`, `go vet`, `go test ./internal/mcp/...` all pass.
+- [x] Shared post-`CallTool` tail extracted into one private helper on `*Manager`.
+- [x] `ExecuteTool` and `ExecuteToolOnServer` both call the extracted helper; no duplicated tail logic remains.
+- [x] Existing tests for both functions pass unchanged.
+- [x] `go build`, `go vet`, `go test ./internal/mcp/...` all pass.
 
 ## Work log
 
-<!-- Worker fills this in. -->
+- 2026-08-23 — Re-derived current citations before editing: `Manager.ExecuteTool` starts at `internal/mcp/manager.go:697`, `ExecuteToolOnServer` starts at `internal/mcp/manager.go:781`, and the duplicated post-`CallTool` tails were `manager.go:746-759` and `manager.go:813-825`. AD-19's decided `11/05` direction is at `TASKS/audit-remediation/ARCHITECT-DECISIONS.md:1039-1054`; the trust-model pipeline is documented at `docs/mcp-trust-model.md:89-112`.
+- Extracted the duplicate assemble → result-size validation → `nanite.mcp.result_len` span attribute tail into private `(*Manager).processCallToolResult`. Both public entry points keep their existing pre-`CallTool` resolution/error behavior and call the helper after successful `CallTool`.
+- Added `TestManager_ExecuteToolOnServer_UsesResultProcessingTail` so the explicit-server path now directly covers ANSI stripping and third-party tier result-cap enforcement through the shared tail.
+- Verification passed: `go build ./internal/mcp/...`, `go vet ./internal/mcp/...`, `go test ./internal/mcp/... -run 'ExecuteTool' -v`, `go build ./cmd/nanite/`, `go vet ./...`, and `go test ./...`.
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- 2026-08-24 fresh re-review PASS. Verified both MCP execution paths now call
+  `processCallToolResult` for the post-`CallTool` tail: result assembly,
+  trust-tier result-size validation, and span attributes live in one helper.
+  Targeted MCP `ExecuteTool` checks, `go build`, `go vet`, and full
+  `go test ./... -count=1` passed.

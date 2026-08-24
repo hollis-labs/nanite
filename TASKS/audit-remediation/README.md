@@ -18,7 +18,8 @@ Both facts change how it is dispatched — see "Dispatch model" below.
 
 ## Status
 
-**Planning complete 2026-08-21. Awaiting operator sign-off. Not dispatched.**
+**Implementation in progress under operator authorization. Waves 0-6 are closed/reviewed;
+Wave 7+ remains undispatched until the operator explicitly resumes the batch.**
 
 This batch has no `docs/engineering/architecture/NN-*.md` design doc, and
 deliberately so: its design input is a completed audit plus an advisor's
@@ -33,7 +34,7 @@ sign-off block lives here instead:
 | **Design input** | `docs/audits/2026-08-21-go-quality/REPORT.md` (audit, 2026-08-21) + `docs/audits/2026-08-21-go-quality/REMEDIATION-GUIDE.md` (advisor guide, vendored into the repo by this planning pass) |
 | **Task inventory** | Created by a dedicated task-creation pass (61 files), merged in `8258176e` |
 | **Planned** | 2026-08-21 — this pass: sequencing, dependency ordering, parallelization, Wave 0 gate, architect-decision queue, prevention table |
-| **Approved for implementation** | ☑ **Approved 2026-08-23.** Operator explicitly authorized Wave 4 dispatch. |
+| **Approved for implementation** | ☑ **Approved 2026-08-23.** Operator has explicitly authorized dispatches through Wave 6. Later waves still require explicit resumption under the development freeze. |
 | **Blocking prerequisites** | (1) ~~The dev freeze (AD-24)~~ — **decided and in effect 2026-08-21**, see below. (2) Wave 0 complete, **including AD-01 through AD-04 decided**. (3) ~~AD-23~~ decided *accept* — evidence rescued and committed (`e02f52c9`). |
 
 An Orchestrator reading this file must treat an unchecked approval box as a
@@ -216,7 +217,7 @@ executed successfully.
 | **W3** | 3 | `08/*` | 10 | W1 closed (`08/05`, `08/09` depend on it). AD-15, AD-16 decided. |
 | **W4** | 4 | `09/*` | 6 | W2 closed. AD-06–AD-11 decided **after** `00/01` reports current reachability. |
 | **W5** | 5 | `10/*` | 5 | Closed after the approved `10/04` and `10/05` implementation beat; all five tasks reviewed. |
-| **W6a** | 6 | `11/01,02,05,06,07,08,09,10,11` | 9 | W5 closed. AD-19, AD-20 decided. |
+| **W6a** | 6 | `11/01,02,05,06,07,08,09,10,11` | 9 | W5 closed. AD-19, AD-20, AD-29 decided. |
 | **W6b** | 6 | `11/03,04,12,13,14,15,16` | 7 | W6a closed. |
 | **W7** | 7 | `12/01`, `12/03` | 2 | W6 closed. AD-21 decided. |
 | **W8** | 8 | `13/*` | 5 | W7 closed. AD-22 decided. **`13/03` is the batch's final commit.** |
@@ -339,7 +340,7 @@ before.**
 | `11/06` provider streaming error divergence | W5 | AD-19 | May be legitimately independent — classify first |
 | `11/07` SSRF CIDR denylist duplication | `08/01` | AD-19 | Classification only, no code |
 | `11/08` `internal/config` naming collision | W5 | AD-20 (decided) | **No longer runs alone** — AD-20 measured 11 real references (`Config` ×5, `AppConfig` ×6), not a tree-wide rename; parallel-safe with the rest of Wave 6a |
-| `11/09` elicitation duplication + dead doc | W5 | AD-19 | Doc describes a type that doesn't exist |
+| `11/09` elicitation duplication + dead doc | W5 | AD-19, AD-29 | Doc describes a type that doesn't exist; AD-29 chose delete |
 | `11/10` envelope registry triplication | `07/02`, `07/05`, `08/07` | AD-19 | Shares `cmd/nanite/main.go` |
 | `11/11` dispatch reflex double-evaluation | `10/01`, `10/02`, `09/01` | AD-19 | |
 
@@ -438,11 +439,12 @@ All six tasks are file-disjoint.
 AD-13's four selective delegations in parallel, with serial commits and fresh
 review inside each task.
 
-**Wave 6a** — all nine (`11/01`, `02`, `05`, `06`, `07`, `08`, `09`, `10`,
-`11`) are file-disjoint and parallel-safe once AD-19's classification table
-resolves the wave-level gate. `11/08`'s own former "runs alone if AD-20
-picks tree-wide rename" caveat is moot — AD-20 was decided 2026-08-22 and
-measured only 11 real references, not a tree-wide sweep.
+**Wave 6a** — completed and reviewed 2026-08-24. The original "all nine are
+file-disjoint" note was wrong: `11/08` and `11/10` both touched
+`cmd/nanite/main.go`, so `11/10` was serialized after `11/08`. AD-20's former
+"runs alone if tree-wide rename" caveat was still moot — AD-20 was decided
+2026-08-22 and measured only 11 real references, not a tree-wide sweep — but
+do not reuse the old all-parallel W6a claim as a precedent.
 
 **Wave 6b** — `11/03` ∥ `11/12` ∥ `11/14` ∥ `11/16` freely. `11/13`
 (`internal/store`) and `11/15` (`internal/api`) each want their package to

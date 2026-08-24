@@ -409,46 +409,15 @@ func (a *API) handleHarnessV1GetDurableAgent(w http.ResponseWriter, r *http.Requ
 }
 
 func (a *API) handleHarnessV1DurableStart(w http.ResponseWriter, r *http.Request) {
-	var req DurableAgentStartRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	result, err := a.Services.DurableAgents.Start(r.Context(), r.PathValue("id"), service.DurableAgentStartRequest{
-		ProjectID:   req.ProjectID,
-		WakePayload: durableAgentWakePayloadFromRequest(req.WakePayload),
-	})
-	a.writeDurableAgentLaunchResult(w, result, err)
+	a.handleDurableAgentStart(w, r)
 }
 
 func (a *API) handleHarnessV1DurableResume(w http.ResponseWriter, r *http.Request) {
-	var req DurableAgentStartRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	result, err := a.Services.DurableAgents.Resume(r.Context(), r.PathValue("id"), service.DurableAgentStartRequest{
-		ProjectID:   req.ProjectID,
-		WakePayload: durableAgentWakePayloadFromRequest(req.WakePayload),
-	})
-	a.writeDurableAgentLaunchResult(w, result, err)
+	a.handleDurableAgentResume(w, r)
 }
 
 func (a *API) handleHarnessV1DurableWake(w http.ResponseWriter, r *http.Request) {
-	var req DurableAgentStartRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	result, err := a.Services.DurableWake.Wake(r.Context(), r.PathValue("id"), service.DurableAgentWakeRequest{
-		ProjectID:   req.ProjectID,
-		WakePayload: durableAgentWakePayloadFromRequest(req.WakePayload),
-	})
-	if err != nil {
-		a.errorResp(w, http.StatusConflict, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusOK, result)
+	a.handleDurableAgentWake(w, r)
 }
 
 func harnessV1App() harnessV1AppInfo {

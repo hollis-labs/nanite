@@ -1,7 +1,7 @@
 # Confirm the import-cycle constraint behind StructuredMessage-unwrap duplication before deciding whether to unify
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/chat/structured.go` (`replayContent`), `internal/recovery/pack/pack.go` (`MessagePlainText`).
 
@@ -85,15 +85,26 @@ Low risk either way — this is an internal implementation-sharing question with
 
 ## Done means
 
-- [ ] Import-cycle constraint independently re-verified against current source (not just re-citing the audit's own conclusion), with the evidence recorded in Work log.
-- [ ] If no cycle: shared unwrap helper extracted; both `replayContent` and `MessagePlainText` use it; existing tests pass.
-- [ ] If cycle confirmed: comment in `structured.go` corrected to state the precise constraint; parity test added.
-- [ ] `go build`, `go vet`, `go test ./internal/chat/... ./internal/recovery/pack/...` all pass.
+- [x] Import-cycle constraint independently re-verified against current source (not just re-citing the audit's own conclusion), with the evidence recorded in Work log.
+- [x] If no cycle: shared unwrap helper extracted; both `replayContent` and `MessagePlainText` use it; existing tests pass.
+- [x] If cycle confirmed: N/A — no cycle was found, so the shared-helper path
+  was taken instead.
+- [x] `go build`, `go vet`, `go test ./internal/chat/... ./internal/recovery/pack/...` all pass.
 
 ## Work log
 
-<!-- Worker fills this in: what was actually done, any deviation from plan and why, anything escalated. -->
+- 2026-08-24 worker: Independently verified the import graph before editing. `go list -deps ./internal/chat/... | grep internal/recovery/pack` produced no output, and `go list -deps ./internal/recovery/pack/... | grep internal/chat` produced no output. Re-ran the same checks after the helper extraction and both still produced no output. This confirms there is no current `chat` <-> `recovery/pack` dependency edge; the implementation still avoids importing the large `internal/chat` package into `internal/recovery/pack`.
+- Located the current source with `grep -RInE "replayContent|MessagePlainText|StructuredMessage|recovery/pack|structured message" internal/chat internal/recovery/pack`. The actual current `structured.go` comment did not state a concrete import-cycle path; its exact cross-package sentence was: "Content that isn't StructuredMessage-shaped (plain user text, legacy pre-structured rows, envelope_response rows formatted via FormatEnvelopeResponseContent, which are prefixed \"[envelope:...]\" rather than \"{\") is returned unchanged — same fallback shape as internal/recovery/pack.MessagePlainText, which unwraps the same JSON envelope for a different purpose (Recovery Pack replay text)." I replaced that cross-reference with a comment pointing at the shared leaf helper.
+- Added `internal/structuredmessage.UnwrapText`, a lower-level helper that parses only the persisted `{"v":...,"text":...}` shape and returns `(text, ok)`. It treats `v > 0` as the valid StructuredMessage-shaped contract. The helper deliberately does not import `internal/chat` or move the full `StructuredMessage` type.
+- Updated `chat.replayContent` and `recovery/pack.MessagePlainText` to call the helper while preserving caller-specific behavior: `replayContent` returns original `content` on fallback and returns raw structured text, while `MessagePlainText` trims fallback content and trims structured text.
+- Added focused coverage in `internal/structuredmessage`, plus caller tests for invalid versions and whitespace behavior in `internal/chat` and `internal/recovery/pack`.
+- Verification passed: `go build ./internal/chat/... ./internal/recovery/pack/... ./internal/structuredmessage/...`; `go vet ./internal/chat/... ./internal/recovery/pack/... ./internal/structuredmessage/...`; `go test ./internal/chat/... ./internal/recovery/pack/... ./internal/structuredmessage/... -run 'Replay|MessagePlainText|Structured|Unwrap' -v`; baseline `go build ./cmd/nanite/`; baseline `go vet ./...`; baseline `go test ./...`.
 
 ## Review notes
 
-<!-- Reviewer fills this in: pass/fail, what was independently re-verified. -->
+- 2026-08-24 fresh review PASS. Verified the shared leaf helper removes the
+  duplicated StructuredMessage-shaped JSON parse rule without importing
+  `internal/chat` into `internal/recovery/pack`. `chat.replayContent` preserves
+  raw fallback/untrimmed text behavior, and `recovery/pack.MessagePlainText`
+  preserves trimmed fallback/text behavior. Focused package checks and full
+  `go build ./cmd/nanite/`, `go vet ./...`, `go test ./... -count=1` passed.

@@ -17,11 +17,11 @@
 package pack
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/structuredmessage"
 )
 
 // recoveryMessageMaxChars bounds each replayed message so a single long
@@ -42,17 +42,10 @@ func ShouldBuildRecoveryPack(coldBooted bool, priorMessageCount int) bool {
 // turns are stored as a StructuredMessage JSON ({"v":1,"text":...});
 // user turns may be plain or wrapped. Returns the human-readable text.
 func MessagePlainText(content string) string {
-	trimmed := strings.TrimSpace(content)
-	if strings.HasPrefix(trimmed, "{") {
-		var sm struct {
-			V    int    `json:"v"`
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal([]byte(trimmed), &sm); err == nil && sm.V > 0 {
-			return strings.TrimSpace(sm.Text)
-		}
+	if text, ok := structuredmessage.UnwrapText(content); ok {
+		return strings.TrimSpace(text)
 	}
-	return trimmed
+	return strings.TrimSpace(content)
 }
 
 // ExcludeCurrentTurn drops the trailing message when it is the current

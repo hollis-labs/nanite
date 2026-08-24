@@ -1112,27 +1112,27 @@ to proceed against the post-sweep signatures.
 
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
-| `11/01` | `11-semantic-duplication-migration-drift/01-subagent-completion-vs-message-wake-policy.md` | not-started | `10/01` | AD-19 |
-| `11/02` | `11-semantic-duplication-migration-drift/02-harness-v1-vs-native-durable-agent-handlers.md` | not-started | `03/01` | AD-19 |
-| `11/05` | `11-semantic-duplication-migration-drift/05-mcp-result-processing-tail-duplication.md` | not-started | `09/04` | AD-19 |
-| `11/06` | `11-semantic-duplication-migration-drift/06-provider-streaming-error-handling-divergence.md` | not-started | Wave 5 complete | AD-19 |
-| `11/07` | `11-semantic-duplication-migration-drift/07-ssrf-cidr-denylist-duplication.md` | not-started | `08/01` | AD-19 |
-| `11/08` | `11-semantic-duplication-migration-drift/08-config-package-naming-collision.md` | not-started | Wave 5 complete | AD-20 |
-| `11/09` | `11-semantic-duplication-migration-drift/09-elicitation-client-side-duplication-and-dead-doc.md` | not-started | Wave 5 complete | AD-19 |
-| `11/10` | `11-semantic-duplication-migration-drift/10-envelope-registry-triplication.md` | not-started | `07/02`, `07/05`, `08/07` | AD-19 |
-| `11/11` | `11-semantic-duplication-migration-drift/11-dispatch-reflex-double-evaluation.md` | not-started | `10/01`, `10/02`, `09/01` | AD-19 |
+| `11/01` | `11-semantic-duplication-migration-drift/01-subagent-completion-vs-message-wake-policy.md` | reviewed | `10/01` | AD-19 |
+| `11/02` | `11-semantic-duplication-migration-drift/02-harness-v1-vs-native-durable-agent-handlers.md` | reviewed | `03/01` | AD-19 |
+| `11/05` | `11-semantic-duplication-migration-drift/05-mcp-result-processing-tail-duplication.md` | reviewed | `09/04` | AD-19 |
+| `11/06` | `11-semantic-duplication-migration-drift/06-provider-streaming-error-handling-divergence.md` | reviewed | Wave 5 complete | AD-19 |
+| `11/07` | `11-semantic-duplication-migration-drift/07-ssrf-cidr-denylist-duplication.md` | reviewed | `08/01` | AD-19 |
+| `11/08` | `11-semantic-duplication-migration-drift/08-config-package-naming-collision.md` | reviewed | Wave 5 complete | AD-20 |
+| `11/09` | `11-semantic-duplication-migration-drift/09-elicitation-client-side-duplication-and-dead-doc.md` | reviewed | Wave 5 complete | AD-19, AD-29 |
+| `11/10` | `11-semantic-duplication-migration-drift/10-envelope-registry-triplication.md` | reviewed | `07/02`, `07/05`, `08/07` | AD-19 |
+| `11/11` | `11-semantic-duplication-migration-drift/11-dispatch-reflex-double-evaluation.md` | reviewed | `10/01`, `10/02`, `09/01` | AD-19 |
 
 ### Wave 6b — Mechanical and boilerplate duplication
 
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
-| `11/03` | `11-semantic-duplication-migration-drift/03-structuredmessage-unwrap-duplication.md` | not-started | Wave 6a complete | — |
-| `11/04` | `11-semantic-duplication-migration-drift/04-traffic-light-calculation-duplication.md` | not-started | `10/01` | — |
-| `11/12` | `11-semantic-duplication-migration-drift/12-devservername-constant-duplication.md` | not-started | `09/05` | — |
-| `11/13` | `11-semantic-duplication-migration-drift/13-store-scan-loop-duplication.md` | not-started | `06/01`, `06/02` | — |
-| `11/14` | `11-semantic-duplication-migration-drift/14-adapter-plugin-boilerplate-duplication.md` | not-started | Wave 6a complete | — |
-| `11/15` | `11-semantic-duplication-migration-drift/15-api-response-boilerplate-duplication.md` | not-started | `01/01`, `08/09`, `08/10` | — |
-| `11/16` | `11-semantic-duplication-migration-drift/16-workflow-naming-and-dispatch-naming-collisions.md` | not-started | Wave 6a complete | — |
+| `11/03` | `11-semantic-duplication-migration-drift/03-structuredmessage-unwrap-duplication.md` | reviewed | Wave 6a complete | — |
+| `11/04` | `11-semantic-duplication-migration-drift/04-traffic-light-calculation-duplication.md` | reviewed | `10/01` | — |
+| `11/12` | `11-semantic-duplication-migration-drift/12-devservername-constant-duplication.md` | reviewed | `09/05` | — |
+| `11/13` | `11-semantic-duplication-migration-drift/13-store-scan-loop-duplication.md` | reviewed | `06/01`, `06/02` | — |
+| `11/14` | `11-semantic-duplication-migration-drift/14-adapter-plugin-boilerplate-duplication.md` | reviewed | Wave 6a complete | — |
+| `11/15` | `11-semantic-duplication-migration-drift/15-api-response-boilerplate-duplication.md` | reviewed | `01/01`, `08/09`, `08/10` | — |
+| `11/16` | `11-semantic-duplication-migration-drift/16-workflow-naming-and-dispatch-naming-collisions.md` | reviewed | Wave 6a complete | — |
 
 ### Wave 7 — Quality ratchet
 

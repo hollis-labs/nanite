@@ -53,6 +53,25 @@ func TestResolveSubagentCompletionPolicy_SessionOverrideWins(t *testing.T) {
 	}
 }
 
+func TestResolveSubagentCompletionPolicy_SessionOverrideSkipsAgentResolution(t *testing.T) {
+	agents := &stubAgentService{agent: &store.AgentProfile{
+		Constraints: `{"subagent_completion_policy":"render_and_wait"}`,
+	}}
+	svc := &chatServiceImpl{
+		sessions: &stubSessionService{sessions: map[string]*store.Session{
+			"sess-1": {ID: "sess-1", Metadata: `{"subagent_completion_policy":"auto_summarize"}`},
+		}},
+		agents: agents,
+	}
+	got := svc.resolveSubagentCompletionPolicy(context.Background(), "sess-1")
+	if got != chat.SubagentPolicyAutoSummarize {
+		t.Errorf("got %q, want session override %q", got, chat.SubagentPolicyAutoSummarize)
+	}
+	if agents.resolveForSessionCalls != 0 {
+		t.Errorf("session override should not require mutating ResolveForSession; got %d calls", agents.resolveForSessionCalls)
+	}
+}
+
 func TestResolveSubagentCompletionPolicy_FallsBackToAgentDefault(t *testing.T) {
 	svc := &chatServiceImpl{
 		sessions: &stubSessionService{sessions: map[string]*store.Session{

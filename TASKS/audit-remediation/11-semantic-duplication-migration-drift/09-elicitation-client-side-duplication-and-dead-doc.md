@@ -1,7 +1,7 @@
 # `internal/mcp/elicitation.go` — unify near-duplicate client elicitation paths, and resolve the dead-code/stale-doc gap
 
 **Phase:** Wave 6 — Semantic duplication / migration drift
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/mcp/elicitation.go` (`ElicitUserInput`, `routeClientElicitation`, `parseElicitationCreate`, package doc comment, `ClientElicitMiddleware` — the described-but-nonexistent type).
 
@@ -17,8 +17,22 @@ requires_architect_decision: true
 > - **Depends on:** Wave 5 complete
 > - **Blocks:** none
 > - **Parallel-safe with:** `11/01`, `11/02`, `11/06`, `11/07`
-> - **Gated on:** AD-19
+> - **Gated on:** AD-19, AD-29
 > - **requires_security_review:** false · **requires_regression_test:** true
+
+> ## ✅ AD-19/AD-29 DECIDED (2026-08-23)
+>
+> Operator direction: the standing rule on dead code is not to push it forward;
+> git history is the recovery path if this direction is wanted later.
+> **GO-MCPTOOL-004 resolves to Option A: delete.** Re-confirm
+> `ClientElicitMiddleware` still does not exist and the client-side functions
+> are still dead, then remove the dead client-side elicitation functions and
+> correct the package doc to describe only live code.
+>
+> Resolve `GO-CHAT-004` after that deletion. If `routeClientElicitation`
+> disappears, close the duplication as a side effect and record that explicitly
+> in the Work log. If any client-side path survives for a concrete reason,
+> unify or document its `context.Canceled` contract per AD-19.
 
 ## Context
 
@@ -99,16 +113,27 @@ Low risk for Option A (deleting confirmed-dead code, re-verified via `deadcode` 
 
 ## Done means
 
-- [ ] `ClientElicitMiddleware`'s existence (or non-existence) independently re-confirmed via `deadcode`/grep before deciding.
-- [ ] Architect decision recorded for GO-MCPTOOL-004: delete or build.
-- [ ] Chosen direction implemented; package doc accurately describes what exists.
-- [ ] GO-CHAT-004 resolved: either closed as a side effect of deletion, or `ElicitUserInput`/`routeClientElicitation` unified onto one explicit `context.Canceled` contract.
-- [ ] `go build`, `go vet`, `go test ./internal/mcp/...` all pass.
+- [x] `ClientElicitMiddleware`'s existence (or non-existence) independently re-confirmed via `deadcode`/grep before deciding.
+- [x] Architect decision recorded for GO-MCPTOOL-004: delete or build.
+- [x] Chosen direction implemented; package doc accurately describes what exists.
+- [x] GO-CHAT-004 resolved: either closed as a side effect of deletion, or `ElicitUserInput`/`routeClientElicitation` unified onto one explicit `context.Canceled` contract.
+- [x] `go build`, `go vet`, `go test ./internal/mcp/...` all pass.
 
 ## Work log
 
-<!-- Worker fills this in: what was actually done, any deviation from plan and why, anything escalated. Record explicitly whether GO-CHAT-004 was closed as a side effect of GO-MCPTOOL-004's resolution. -->
+- 2026-08-23: Read the task file, `docs/engineering/EXECUTION-PROCESS.md`, `docs/engineering/GLOSSARY.md`, and AD-19/AD-29 in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md` before editing. Re-derived current citations: package doc described `ClientElicitMiddleware` at `internal/mcp/elicitation.go:11-14`; `parseElicitationCreate` started at line 143; `routeClientElicitation` started at line 165.
+- Re-confirmed the delete path before editing: `git grep -n 'ClientElicitMiddleware' -- '*.go'` found only the package-doc comment; `git grep -n -E 'ClientElicitationResult|parseElicitationCreate|routeClientElicitation' -- '*.go'` found only definitions plus tests; `deadcode -filter='internal/mcp' ./cmd/nanite` and `deadcode -test -filter='internal/mcp' ./cmd/nanite` both reported `parseElicitationCreate` and `routeClientElicitation` unreachable. `deadcode -test -filter='internal/mcp' ./internal/mcp` kept them live only through the package tests that existed solely for the dead client-side path, so those tests were removed with the path.
+- Implemented AD-29 Option A: removed `ClientElicitationResult`, `parseElicitationCreate`, `routeClientElicitation`, their test-only coverage, and the stale client-side package-doc language. The package doc now describes only the live server-side `ElicitUserInput` path. `GO-CHAT-004` is closed as a side effect because `routeClientElicitation` no longer exists, leaving no duplicate client-side branch to unify.
+- Verification: `deadcode -filter='internal/mcp' ./cmd/nanite` and `deadcode -test -filter='internal/mcp' ./cmd/nanite` no longer report the deleted helpers; tracked-source `git grep` has no `ClientElicitMiddleware`, `ClientElicitationResult`, `parseElicitationCreate`, or `routeClientElicitation` hits. `grep -R -n --include='*.go' --exclude-dir=.claude 'ClientElicitMiddleware' .` also has no current-tree hits; raw `grep` across `.` is polluted by stale `.claude/worktrees` copies and was not used as current HEAD evidence.
+- Verification passed: `go build ./internal/mcp/...`, `go vet ./internal/mcp/...`, `go test ./internal/mcp/... -run 'Elicit' -v`, `go build ./cmd/nanite/`, `go build ./...`, `go vet ./...`, and a rerun of `go test ./...`. The first full `go test ./...` run hit a transient unrelated failure in `internal/llm/anthropic` (`TestStreamChat_MalformedToolArgumentsGracefulFallback` expected input tokens 4, got 0); the test passed in isolation immediately afterward and the full-suite rerun passed.
+- 2026-08-23 review-fix round: Read `.claude/agents/worker.md`, this task file, `internal/mcp/elicitation.go`, `internal/elicitation/types.go`, and `internal/elicitation/service.go`. Corrected only stale comments in `internal/elicitation/types.go` and `internal/elicitation/service.go` that still claimed an external MCP/server-side-plus-client-side elicitation route existed after AD-29 removed `ClientElicitMiddleware`, `parseElicitationCreate`, and `routeClientElicitation`. The comments now describe the live Nanite-owned server-side path and keep `Origin`/`ToolCallID` as metadata without claiming client-side routing.
+- Review-fix verification: `git grep -n -E 'ClientElicitMiddleware|routeClientElicitation|parseElicitationCreate' -- internal/elicitation internal/mcp` and `git grep -n -i -E 'client-side|external MCP server|external MCP servers|same UI mechanism|same Service|client-side path|client-side correlation' -- internal/elicitation internal/mcp` both returned no hits. Passed `go test ./internal/mcp/... -run 'Elicit' -count=1 -v`, `go test ./internal/elicitation/... -count=1 -v`, and `go build ./cmd/nanite/`.
 
 ## Review notes
 
-<!-- Reviewer fills this in: pass/fail, what was independently re-verified. -->
+- 2026-08-24 fresh re-review PASS. Verified the AD-29 delete decision is fully
+  applied: active code no longer contains `ClientElicitMiddleware`,
+  `routeClientElicitation`, or `parseElicitationCreate`, and the remaining
+  elicitation comments describe only the live Nanite-owned server-side path.
+  `deadcode` no longer reports the deleted helpers; targeted MCP/elicitation
+  tests, `go build`, `go vet`, and full `go test ./... -count=1` passed.

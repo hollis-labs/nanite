@@ -11,6 +11,7 @@ import (
 	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
@@ -743,20 +744,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 		return "", err
 	}
 
-	out, err := assembleToolResultText(serverName, toolName, result)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return "", err
-	}
-	if err := ValidateResultSize(tier, len(out)); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return "", fmt.Errorf("call tool %s on %s: %w", toolName, serverName, err)
-	}
-
-	span.SetAttributes(attribute.Int("nanite.mcp.result_len", len(out)))
-	return out, nil
+	return m.processCallToolResult(serverName, toolName, tier, result, span)
 }
 
 // ResolveToolServer finds which server owns a uniform agent-facing tool
@@ -810,6 +798,10 @@ func (m *Manager) ExecuteToolOnServer(ctx context.Context, serverName, toolName 
 		return "", err
 	}
 
+	return m.processCallToolResult(serverName, toolName, tier, result, span)
+}
+
+func (m *Manager) processCallToolResult(serverName, toolName string, tier TrustTier, result *ToolResult, span trace.Span) (string, error) {
 	out, err := assembleToolResultText(serverName, toolName, result)
 	if err != nil {
 		span.RecordError(err)

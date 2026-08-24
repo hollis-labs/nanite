@@ -340,6 +340,56 @@ func TestDurableAgentsAPI_StartAndResume(t *testing.T) {
 	}
 }
 
+func TestDurableAgentsAPI_Wake(t *testing.T) {
+	a, mux := newTestAPI(t)
+	profile := &store.AgentProfile{Name: "Wake Profile", Slug: "wake-profile", SystemPrompt: "x"}
+	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	process := &store.DurableAgentInstance{
+		Name:             "Wake Process",
+		Slug:             "wake-process-api",
+		ProfileID:        profile.ID,
+		LifecycleClass:   store.DurableAgentClassProcess,
+		Provider:         "anthropic",
+		Model:            "model-a",
+		RuntimeKind:      "api",
+		LaunchSourceType: store.DurableAgentLaunchProcessTick,
+	}
+	if err := a.Services.Store.CreateDurableAgentInstance(context.Background(), process); err != nil {
+		t.Fatalf("CreateDurableAgentInstance process: %v", err)
+	}
+	scopeSession := &store.Session{Provider: "anthropic", Model: "model-a"}
+	if err := a.Services.Store.CreateSession(context.Background(), scopeSession); err != nil {
+		t.Fatalf("CreateSession scope: %v", err)
+	}
+	if err := a.Services.Store.AttachDurableAgentInstanceSession(context.Background(), process.ID, scopeSession.ID, store.DurableAgentSessionRelationWake); err != nil {
+		t.Fatalf("AttachDurableAgentInstanceSession process: %v", err)
+	}
+
+	wakeBody, _ := json.Marshal(DurableAgentStartRequest{
+		WakePayload: DurableAgentWakePayloadRequest{Reason: service.DurableAgentWakeManual},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/durable-agents/"+process.ID+"/wake", bytes.NewReader(wakeBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("wake = %d body=%s", w.Code, w.Body.String())
+	}
+	var wakeResult service.DurableAgentWakeResult
+	if err := json.NewDecoder(w.Body).Decode(&wakeResult); err != nil {
+		t.Fatalf("decode wake: %v", err)
+	}
+	if wakeResult.InstanceID != process.ID || wakeResult.WakeReason != service.DurableAgentWakeManual {
+		t.Fatalf("wake result = %+v", wakeResult)
+	}
+	if wakeResult.Skipped || wakeResult.LaunchResult == nil || wakeResult.LaunchResult.Session == nil {
+		t.Fatalf("wake result = %+v", wakeResult)
+	}
+}
+
 func TestDurableAgentsAPI_ListEventsLimitAndCap(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Events Profile", Slug: "events-profile", SystemPrompt: "x"}

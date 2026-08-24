@@ -1,7 +1,7 @@
 # Remove confirmed dead code across 7 packages (deadcode-tool-verified)
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch.
 **Touches:** `internal/store/skill_mode_filter.go`, `internal/store/skills_source.go`, `internal/agent/managed_files.go`, `internal/agentvalidation/validation.go`, `internal/contextbroker/intent.go`, `internal/contextbroker/broker.go`, `internal/recovery/orphansweep/orphan_sweep.go`, `internal/runtime/agent/deps.go` (comment only), `internal/store/agent_runtime.go` (comment only), `internal/service/agent_cycles.go`, `internal/mcp/tool_ctx.go`, `internal/coordination/keys.go`, `internal/recovery/broker/broker.go` (review only, no edit expected).
 
@@ -73,4 +73,8 @@ That disposition shape splits into three buckets, and the split matters more tha
 
 ## Review notes
 
-<!-- Reviewer fills this in: pass/fail per bucket, what was independently re-verified (e.g. re-ran deadcode/grep rather than trusting the worker's claim). -->
+- **2026-08-24 — PASS, independently reviewed at implementation commit `0ea719129e7a741e27e2815b88a501253ed82444` against base `8b1e61bf`.** The full 24-file diff was inspected before verification. Fresh whole-repo symbol searches found no current Go reference to any removed Bucket A/B target. Independent `deadcode ./...` and `deadcode -test ./...` runs reported 123 and 61 unreachable symbols respectively, with none of the removed targets present.
+- **Bucket A:** confirmed the store, agent, validation, and context-budget deletions had no callers or external/plugin surface. `DefaultBudget` removes only the inert `engine: 0.15` entry; the four live-source weights remain unchanged, so no weight was redistributed. The orphan-sweep wrapper's behavior was equivalently redirected through `RuntimeReaper.SweepOnce`, and current Go tests/comments consistently reference the live reaper path; the historical migration comment remains unchanged as intended.
+- **Bucket B:** confirmed AD-36's exact removal boundaries. GO-SVCCORE-007 removes only the context writer/key and its two API stamping sites while retaining both `cycle_kind` request fields and the harness capability. GO-MCPTOOL-005 removes the turn-name scaffold while retaining tool-use-ID context, grounding, and tests. GO-CHAT-005 removes only `PrefixLock`, `PrefixState`, and `LockTTL`.
+- **Scope fences:** `git diff --quiet 8b1e61bf..HEAD` confirmed Bucket C's broker implementation, the four Wave-4 context sources and container registration, and `internal/tool/cache.go`/`cache_test.go` are byte-unchanged. Existing Bucket C late-binding comments remain coherent. The worker's frontend escalation was independently confirmed: the two source-gated fork affordances still call `api.forkSkillToUser`, while the backend route/handler is absent; no frontend change belongs in this task.
+- **Verification:** the touched-package command covering `internal/agent`, `agentvalidation`, `api`, `contextbroker`, `coordination`, `mcp`, `recovery/orphansweep`, `runtime/agent`, `selftools`, `service`, and `store` passed with `-count=1`. `go build ./...`, `go vet ./...`, `go test -count=1 ./...`, and `go test -race -count=1 ./...` all passed. No review findings remain.

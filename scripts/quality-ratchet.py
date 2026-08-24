@@ -12,6 +12,26 @@ import sys
 from typing import Any
 
 
+# The Stage 1 baseline is a *ceiling*: findings must not exceed it.  This is the
+# matching *floor*, and it exists because a scan that covered a fraction of the
+# repository is indistinguishable, at the comparator, from one that genuinely
+# found little: well-formed JSON, a small Issues array, and -- when the package
+# list shrank to a valid-but-partial set -- exit 0.  Without a floor the ratchet
+# celebrates that as a multi-thousand-finding improvement.  (A list that shrank
+# to *nothing* reachable is a different shape: v2.11.4 sets Report.Error and
+# exits non-zero, which golangci_scan_error catches independently.)
+#
+# It is deliberately loose.  A floor only has to separate "the scan did not
+# cover the repository" (0%, or a handful of surviving packages) from "the
+# repository genuinely improved"; it cannot separate a small silent coverage
+# loss from ordinary churn, and pretending otherwise would red-light the gate
+# on honest remediation until someone weakened the check to shut it up.  A real
+# full-repo run measured 3250 findings against the committed 3255 baseline
+# (99.8%) on 2026-08-24, so 50% leaves roughly fifty points of margin.  The
+# floor tightens for free every time the baseline is ratcheted downward.
+LINT_COVERAGE_FLOOR_PERCENT = 50
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         with path.open(encoding="utf-8") as handle:
@@ -128,6 +148,77 @@ def compare_counts(label: str, baseline: dict[str, int], actual: Counter[str]) -
     return 0
 
 
+def golangci_scan_error(report: dict[str, Any]) -> str:
+    """Return golangci-lint's self-reported scan error, or "" if it ran clean.
+
+    golangci-lint sets Report.Error when it could not analyse something it was
+    asked to analyse -- a mistyped path, an import path where a directory was
+    expected, a package that would not load.  It still writes a well-formed
+    report carrying every *other* package's findings, and simply omits that
+    target's.  Measured against the pinned v2.11.4 on 2026-08-24, from the repo
+    root, both with --issues-exit-code=0:
+
+        ./internal/brand ./internal/task
+            exit 0   Report={"Linters": [...]}, no Error key   Issues: 3
+        ./internal/brand ./internal/task ./internal/does-not-exist
+            exit 7   Report.Error="typechecking error: ... directory not found"
+                     Issues: 3   <-- the two real packages still reported
+        <module path>/internal/brand <module path>/internal/task
+            exit 7   Report.Error set                          Issues: 0
+
+    Note the exit code: v2.11.4 does NOT return 0 for these, so the workflow's
+    own `shell: bash` (which GitHub runs as `bash -e`) already aborts the step.
+    This check is not that backstop.  It defends the *comparator*, which is
+    handed a report path and cannot see how the report was produced -- a stale
+    file, a hand-assembled one, or a caller that dropped the exit code, such as
+    the local reproduction procedure in
+    docs/engineering/runbooks/full-repo-quality-gate.md, which does not check
+    it.  A report carrying a scan error proves nothing about the counts inside
+    it, whatever the producer's exit code was.
+    """
+    section = report.get("Report")
+    if not isinstance(section, dict):
+        return ""
+    error = section.get("Error")
+    if error is None:
+        return ""
+    if isinstance(error, str):
+        return error.strip()
+    return json.dumps(error)
+
+
+def verify_lint_coverage(
+    baseline: dict[str, int], actual: Counter[str], report_path: Path
+) -> None:
+    """Fail when the report holds too few findings to be a real full-repo scan."""
+    baseline_total = sum(baseline.values())
+    actual_total = sum(actual.values())
+    if baseline_total <= 0:
+        # An all-zero Stage 1 baseline asserts there is nothing to find, so
+        # there is no floor to enforce.  This is not a way to neuter the gate:
+        # with an all-zero baseline compare_counts flags *every* finding as an
+        # increase, so the only report that passes is an empty one -- which is
+        # the correct verdict for "we expect nothing and found nothing".
+        return
+
+    floor = (baseline_total * LINT_COVERAGE_FLOOR_PERCENT + 99) // 100
+    print(
+        f"audit-config linters coverage floor: current={actual_total} "
+        f"floor={floor} (baseline {baseline_total}, "
+        f"{LINT_COVERAGE_FLOOR_PERCENT}%)"
+    )
+    if actual_total >= floor:
+        return
+    raise SystemExit(
+        f"golangci-lint report {report_path} holds {actual_total} finding(s) "
+        f"against a Stage 1 baseline of {baseline_total}, under the "
+        f"{LINT_COVERAGE_FLOOR_PERCENT}% coverage floor of {floor}. A drop this "
+        "large means the scan did not cover the repository, not that the "
+        "repository improved: check the discovered package list and the "
+        "golangci-lint invocation. Do not lower the baseline to clear this."
+    )
+
+
 def lint_command(
     baseline_path: Path,
     report_path: Path,
@@ -178,6 +269,13 @@ def lint_command(
         )
 
     report = load_json(report_path)
+    scan_error = golangci_scan_error(report)
+    if scan_error:
+        raise SystemExit(
+            f"golangci-lint report {report_path} carries a scan error, so the run "
+            "did not cover every requested package and its counts prove nothing: "
+            + scan_error
+        )
     issues = report.get("Issues")
     if not isinstance(issues, list):
         raise SystemExit(f"golangci-lint report {report_path} has no Issues array")
@@ -187,6 +285,7 @@ def lint_command(
         if not isinstance(issue, dict) or not isinstance(issue.get("FromLinter"), str):
             raise SystemExit(f"golangci-lint report {report_path} has a malformed issue")
         actual[issue["FromLinter"]] += 1
+    verify_lint_coverage(baseline, actual, report_path)
     stage_1_failed = compare_counts("audit-config linters", baseline, actual)
     stage_2_findings = {
         name: actual.get(name, 0)
@@ -275,6 +374,59 @@ def gosec_command(baseline_path: Path, report_path: Path, runner: str) -> int:
     return 1 if cardinality_failed or comparison_failed else 0
 
 
+def packages_command(package_list_path: Path, expected: int) -> int:
+    """Assert the discovered package list is the shape the gate was calibrated on.
+
+    Every scanning step in the workflow -- lint, govulncheck, gosec, deadcode
+    and the race suite -- is handed this one file.  Only lint and gosec have a
+    comparator behind them, so if the list silently shrinks the other three
+    scan less and report success with nothing to catch them.  `test -s` only
+    proved the file held one byte.
+    """
+    if expected <= 0:
+        raise SystemExit("--expected must be a positive package count")
+    try:
+        text = package_list_path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise SystemExit(
+            f"cannot read package list {package_list_path}: {error}"
+        ) from error
+
+    entries = text.splitlines()
+    blank = [number for number, entry in enumerate(entries, 1) if not entry.strip()]
+    if blank:
+        raise SystemExit(
+            f"package list {package_list_path} has blank line(s) at {blank}; "
+            "a padded list would satisfy a bare count check while scanning less"
+        )
+    malformed = sorted({entry for entry in entries if not entry.startswith("./")})
+    if malformed:
+        raise SystemExit(
+            f"package list {package_list_path} must hold ./-relative directories: "
+            f"{malformed}"
+        )
+    repeated = sorted(
+        name for name, count in Counter(entries).items() if count > 1
+    )
+    if repeated:
+        raise SystemExit(
+            f"package list {package_list_path} repeats {repeated}; duplicates "
+            "inflate the count while leaving real packages unscanned"
+        )
+
+    if len(entries) != expected:
+        print(
+            f"tracked Go packages: found {len(entries)}, expected {expected}. "
+            "Re-derive with the 'Discover tracked Go packages' step and update "
+            "--expected in .github/workflows/full-repo-quality.yml only after "
+            "confirming this is a real package addition or removal.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"tracked Go packages: {len(entries)} matches the committed expectation")
+    return 0
+
+
 def platform_command(baseline_path: Path, runner: str) -> int:
     load_verified_baseline(baseline_path, runner)
     return 0
@@ -295,6 +447,9 @@ def parser() -> argparse.ArgumentParser:
             subparser.add_argument("--report", type=Path, required=True)
         if command == "lint":
             subparser.add_argument("--linters-report", type=Path, required=True)
+    packages = subparsers.add_parser("packages")
+    packages.add_argument("--package-list", type=Path, required=True)
+    packages.add_argument("--expected", type=int, required=True)
     return result
 
 
@@ -302,6 +457,8 @@ def main() -> int:
     arguments = parser().parse_args()
     if arguments.command == "platform":
         return platform_command(arguments.baseline, arguments.runner)
+    if arguments.command == "packages":
+        return packages_command(arguments.package_list, arguments.expected)
     if arguments.command == "lint":
         return lint_command(
             arguments.baseline,

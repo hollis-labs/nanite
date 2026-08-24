@@ -86,8 +86,24 @@ jobs:
               echo "./$relative" >> "$package_file"
             fi
           done < "$go_list_file"
-          test -s "$package_file"
           cat "$package_file"
+
+      # Every scanning step below is handed tracked-go-packages.txt, but only
+      # lint and gosec have a comparator behind them. If this list silently
+      # shrinks, govulncheck, deadcode and the race suite scan less and still
+      # report success. `test -s` only proved the file held one byte.
+      #
+      # 109 re-derived 2026-08-24 by running the step above and counting it.
+      # Note `go list ./...` alone answers a different question -- it returns
+      # 110 in a checkout that has run `npm install`, the extra being
+      # ui/node_modules/flatted/golang/pkg/flatted, a stray Go package vendored
+      # inside npm which the git-tracked filter above removes.
+      - name: Assert the discovered package list matches the committed shape
+        shell: bash
+        run: |
+          python3 scripts/quality-ratchet.py packages \
+            --package-list "$RUNNER_TEMP/tracked-go-packages.txt" \
+            --expected 109
 
       - name: Install pinned quality tools
         shell: bash

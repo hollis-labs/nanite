@@ -483,7 +483,7 @@
       "report_section": "\u00a78.1",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "retire-feature",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still dead: skill_mode_filter.go and skills_source.go both still exist, untouched by the intervening skills-index redesign (migrations 136/137, TASKS/skills/02) that reworked the rest of the skills subsystem around them -- circumstantial evidence they're now doubly orphaned, but not certain. Task file itself sets `requires_architect_decision: true` (\"owner to confirm whether still needed\"); genuinely a wire-vs-retire-shaped question, not just cleanup mechanics. [AD-33 DECIDED 2026-08-24: retire, delete all four plus their tests. Zero external non-test callers verified at HEAD; untouched by the skills-index redesign that reworked the subsystem around them. Wiring ClassifySkillSource's described FE gating was rejected -- building a feature to justify existing code. Deleting also removes the false doc comment claiming an ingest.go caller.]"
     },
     {
@@ -581,7 +581,7 @@
       "false_positive_considerations": "Sibling LocalBackend.List/Snapshot already treat similar failures as skip-and-continue without logging, so this may be a deliberate 'best-effort restore' convention.",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: internal/task/snapshot.go's scanTask still discards json.Unmarshal (line 110) and time.Parse (lines 114-115, 117) errors during Restore. Add-a-log-line fix, no architect input needed; the false_positive_considerations note (sibling backends already treat this as best-effort) doesn't change that a log line costs nothing."
     },
     {
@@ -792,7 +792,7 @@
       "report_section": "\u00a78.3",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "retire-feature",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed WithAgentCycleKindForAPI's context value still has 2 real writers (internal/api) and zero readers, self-documented as intentional forward-looking scaffolding. Finding's own recommendation: leave as documented scaffolding or note it explicitly -- no immediate action required. [AD-36 DECIDED 2026-08-24: remove. Context value written by two real API call sites with zero readers; the self-documented forward-looking-scaffolding framing did not survive the test this batch applied to every comparable case.]"
     },
     {
@@ -1011,7 +1011,7 @@
       "report_section": "\u00a78.4",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: durable_wake.go's best-effort UpdateAgentScheduleStatus(...Expired) call is still wrapped in `_ = s.store...` with no logging on failure. Add-a-log-line fix, no architect input needed."
     },
     {
@@ -1287,7 +1287,7 @@
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: bookmarks.go:90 still compares `err != sql.ErrNoRows` directly instead of errors.Is. One-line fix, no architect input needed."
     },
     {
@@ -1644,7 +1644,7 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "retire-feature",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed the per-turn tool-name context write (internal/mcp/tool_ctx.go) still has a real production writer and no reader, with the write side's own comment framing this as deliberate scaffolding. No immediate action; optional removal or doc-tracking per the finding's own recommendation. [AD-36 DECIDED 2026-08-24: remove. Per-turn tool-name context written on every tool dispatch with zero readers -- a per-call cost for a value nothing consumes.]"
     },
     {
@@ -1846,7 +1846,7 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: mcpconfig.Export still has two unchecked json.Unmarshal calls on Args/Env (lines ~145/150). Same class as the already-tracked errcheck cluster; add-warn-log fix, no architect input needed."
     },
     {
@@ -1930,7 +1930,7 @@
       "report_section": "\u00a78.8",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still dead: zero external callers of EnsureManagedDirs/UserManagedAgentPath anywhere in the tree outside managed_files.go itself. Mechanical, no architect input needed per the finding's own requires_architect_decision:false."
     },
     {
@@ -2092,7 +2092,7 @@
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "retire-feature",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still dead: zero references to PrefixLock/PrefixState/LockTTL anywhere outside coordination/keys.go itself. [AD-36 DECIDED 2026-08-24: remove. Planned-but-never-built resource-lock feature, zero consumers.]"
     },
     {
@@ -2355,7 +2355,7 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still true: zero external callers of BudgetForIntent/IntentSourcePriority, and DefaultBudget's SourceWeights (contextbroker/broker.go) still carries the inert \"engine\": 0.15 entry with no backing ContextSource."
     },
     {
@@ -2449,7 +2449,7 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still dead in production: SweepOrphans (orphan_sweep.go:71) has zero callers outside its own definition; RuntimeReaper.SweepOnce calls the inner function directly, bypassing the wrapper, exactly as described."
     },
     {
@@ -2471,7 +2471,7 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "false-positive",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Engages directly with the audit's own conclusion: recovery/broker's With* constructor options (confirmed still present, e.g. WithMaxRetries/WithRemediationTimeout/WithReplacementSessionHook) and the equivalent Set* post-construction setters (SetReplacementSessionHook, SetHTTPRetry) both still exist for the documented late-binding reason. The finding's own recommendation states this explicitly: \"no action needed; example of the guide's own 'reported dead != remove' guardrail working correctly.\""
     },
     {
@@ -2740,7 +2740,7 @@
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: secrets.Get (keyring.go:24) still collapses key-not-found and keychain-access-error into an identical silent empty-string return, unlike Delete's logged failure path. Add-a-log-line fix, no architect input needed."
     },
     {

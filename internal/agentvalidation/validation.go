@@ -24,14 +24,6 @@ func (v ValidationResult) OK() bool {
 	return len(v.Errors) == 0
 }
 
-// Error returns a combined error string, or empty if OK.
-func (v ValidationResult) Error() string {
-	if v.OK() {
-		return ""
-	}
-	return fmt.Sprintf("agent config validation failed: %s", strings.Join(v.Errors, "; "))
-}
-
 // ValidateAgentConfig checks an AgentProfile for configuration problems.
 // Errors are blocking issues that should prevent creation/update.
 // Warnings are non-blocking concerns that should be logged.

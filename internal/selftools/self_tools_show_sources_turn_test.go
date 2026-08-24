@@ -168,16 +168,3 @@ func TestTurnToolUseIDsFromContext_DefensiveCopy(t *testing.T) {
 		t.Errorf("ctx value must be a defensive copy, got %v", got)
 	}
 }
-
-// TestTurnToolNamesFromContext_RoundTrip is the smoke test for the sister
-// helper CW-20260429-0025 will lean on.
-func TestTurnToolNamesFromContext_RoundTrip(t *testing.T) {
-	if got := mcp.TurnToolNamesFromContext(context.Background()); got != nil {
-		t.Errorf("bare ctx must return nil, got %v", got)
-	}
-	ctx := mcp.WithTurnToolNames(context.Background(), []string{"tool_describe", "dev_read"})
-	got := mcp.TurnToolNamesFromContext(ctx)
-	if len(got) != 2 || got[0] != "tool_describe" || got[1] != "dev_read" {
-		t.Errorf("unexpected stamped names: %v", got)
-	}
-}

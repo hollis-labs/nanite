@@ -30,7 +30,7 @@ func (f *fakeLiveSessions) IsLive(id string) bool {
 // fakeRuntimeStore (fakes_test.go) — that one is unexported and can't be
 // reused across the package boundary now that orphan-sweep logic lives
 // here, so this is a deliberate, minimal duplicate covering only what
-// SweepOrphans/RuntimeReaper exercise.
+// RuntimeReaper exercise.
 type fakeRuntimeStore struct {
 	mu        sync.Mutex
 	orphaned  map[string]string
@@ -130,19 +130,20 @@ func TestPidAlive_Dead(t *testing.T) {
 	}
 }
 
-// TestSweepOrphans_RequiresStore returns a clear error when deps.Store
+// TestRuntimeReaper_SweepOnce_RequiresStore returns a clear error when deps.Store
 // is missing.
-func TestSweepOrphans_RequiresStore(t *testing.T) {
-	_, err := SweepOrphans(context.Background(), &agent.Dependencies{})
+func TestRuntimeReaper_SweepOnce_RequiresStore(t *testing.T) {
+	reaper := NewRuntimeReaper(&agent.Dependencies{}, RuntimeReaperOptions{})
+	_, err := reaper.SweepOnce(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "Store") {
 		t.Fatalf("expected Store-required error, got %v", err)
 	}
 }
 
-// TestSweepOrphans_MarksDeadRows verifies the dead-pid path:
+// TestRuntimeReaper_SweepOnce_MarksDeadRows verifies the dead-pid path:
 // rows with PID == 0 and no LiveSessions checker AND no aged updated_at
 // are skipped (UpdatedAt zero), live PIDs stay, dead PIDs flip to orphaned.
-func TestSweepOrphans_MarksDeadRows(t *testing.T) {
+func TestRuntimeReaper_SweepOnce_MarksDeadRows(t *testing.T) {
 	store := newFakeRuntimeStore()
 	store.listRows = []*agent.RuntimeRow{
 		{ID: "no-pid", PID: 0},         // skipped (no checker, UpdatedAt zero)
@@ -150,9 +151,10 @@ func TestSweepOrphans_MarksDeadRows(t *testing.T) {
 		{ID: "dead", PID: 1<<22 + 99},  // dead
 	}
 
-	orphaned, err := SweepOrphans(context.Background(), &agent.Dependencies{Store: store})
+	reaper := NewRuntimeReaper(&agent.Dependencies{Store: store}, RuntimeReaperOptions{})
+	orphaned, err := reaper.SweepOnce(context.Background())
 	if err != nil {
-		t.Fatalf("SweepOrphans: %v", err)
+		t.Fatalf("SweepOnce: %v", err)
 	}
 	if orphaned != 1 {
 		t.Errorf("orphaned count = %d, want 1", orphaned)
@@ -170,19 +172,20 @@ func TestSweepOrphans_MarksDeadRows(t *testing.T) {
 	}
 }
 
-// TestSweepOrphans_LogsEventOnReconciliation verifies every reconciled row
+// TestRuntimeReaper_SweepOnce_LogsEventOnReconciliation verifies every reconciled row
 // writes a real, structured event_log entry (event_type=
 // "orphan_sweep_reconciled", category="recovery") carrying the PID, prior
 // state, and reconciliation reason — not just a bare event-type string.
-func TestSweepOrphans_LogsEventOnReconciliation(t *testing.T) {
+func TestRuntimeReaper_SweepOnce_LogsEventOnReconciliation(t *testing.T) {
 	store := newFakeRuntimeStore()
 	store.listRows = []*agent.RuntimeRow{
 		{ID: "dead-row", Provider: "claude", Mode: "chat", State: "running", PID: 1<<22 + 42},
 	}
 
-	orphaned, err := SweepOrphans(context.Background(), &agent.Dependencies{Store: store})
+	reaper := NewRuntimeReaper(&agent.Dependencies{Store: store}, RuntimeReaperOptions{})
+	orphaned, err := reaper.SweepOnce(context.Background())
 	if err != nil {
-		t.Fatalf("SweepOrphans: %v", err)
+		t.Fatalf("SweepOnce: %v", err)
 	}
 	if orphaned != 1 {
 		t.Fatalf("orphaned count = %d, want 1", orphaned)
@@ -218,11 +221,11 @@ func TestSweepOrphans_LogsEventOnReconciliation(t *testing.T) {
 	}
 }
 
-// TestSweepOrphans_PidZero_NoLiveSession covers the codex case: a row
+// TestRuntimeReaper_SweepOnce_PidZero_NoLiveSession covers the codex case: a row
 // persisted with PID=0 whose session is NOT live in the in-process
 // registry flips to orphaned with reason="no_live_session". A pid=0 row
 // whose session IS live stays.
-func TestSweepOrphans_PidZero_NoLiveSession(t *testing.T) {
+func TestRuntimeReaper_SweepOnce_PidZero_NoLiveSession(t *testing.T) {
 	store := newFakeRuntimeStore()
 	old := time.Now().Add(-10 * time.Minute) // well past the default grace
 	store.listRows = []*agent.RuntimeRow{
@@ -231,12 +234,13 @@ func TestSweepOrphans_PidZero_NoLiveSession(t *testing.T) {
 	}
 	live := &fakeLiveSessions{live: map[string]bool{"codex-live": true}}
 
-	orphaned, err := SweepOrphans(context.Background(), &agent.Dependencies{
+	reaper := NewRuntimeReaper(&agent.Dependencies{
 		Store:        store,
 		LiveSessions: live,
-	})
+	}, RuntimeReaperOptions{})
+	orphaned, err := reaper.SweepOnce(context.Background())
 	if err != nil {
-		t.Fatalf("SweepOrphans: %v", err)
+		t.Fatalf("SweepOnce: %v", err)
 	}
 	if orphaned != 1 {
 		t.Errorf("orphaned count = %d, want 1", orphaned)
@@ -251,42 +255,44 @@ func TestSweepOrphans_PidZero_NoLiveSession(t *testing.T) {
 	}
 }
 
-// TestSweepOrphans_PidZero_GraceWindow verifies that a pid=0 row whose
+// TestRuntimeReaper_SweepOnce_PidZero_GraceWindow verifies that a pid=0 row whose
 // updated_at is *inside* the grace window is NOT orphaned even when the
 // live-sessions checker says it's absent — protects rows mid-launch
 // before the registry has populated.
-func TestSweepOrphans_PidZero_GraceWindow(t *testing.T) {
+func TestRuntimeReaper_SweepOnce_PidZero_GraceWindow(t *testing.T) {
 	store := newFakeRuntimeStore()
 	store.listRows = []*agent.RuntimeRow{
 		{ID: "codex-fresh", PID: 0, UpdatedAt: time.Now().Add(-1 * time.Second)},
 	}
 	live := &fakeLiveSessions{live: map[string]bool{}}
 
-	orphaned, err := sweepOrphansAt(context.Background(), &agent.Dependencies{
+	reaper := NewRuntimeReaper(&agent.Dependencies{
 		Store:        store,
 		LiveSessions: live,
-	}, 1*time.Minute, time.Now)
+	}, RuntimeReaperOptions{PidZeroGrace: time.Minute})
+	orphaned, err := reaper.SweepOnce(context.Background())
 	if err != nil {
-		t.Fatalf("SweepOrphans: %v", err)
+		t.Fatalf("SweepOnce: %v", err)
 	}
 	if orphaned != 0 {
 		t.Errorf("orphaned count = %d, want 0 (grace window)", orphaned)
 	}
 }
 
-// TestSweepOrphans_PidZero_StaleWithoutChecker exercises the no-checker
+// TestRuntimeReaper_SweepOnce_PidZero_StaleWithoutChecker exercises the no-checker
 // fallback: pid=0 row whose updated_at is older than the grace window
 // flips with reason="pid_zero_stale" even without a LiveSessions checker.
-func TestSweepOrphans_PidZero_StaleWithoutChecker(t *testing.T) {
+func TestRuntimeReaper_SweepOnce_PidZero_StaleWithoutChecker(t *testing.T) {
 	store := newFakeRuntimeStore()
 	store.listRows = []*agent.RuntimeRow{
 		{ID: "codex-stale", PID: 0, UpdatedAt: time.Now().Add(-10 * time.Minute)},
 		{ID: "codex-fresh", PID: 0, UpdatedAt: time.Now()}, // within default grace
 	}
 
-	orphaned, err := SweepOrphans(context.Background(), &agent.Dependencies{Store: store})
+	reaper := NewRuntimeReaper(&agent.Dependencies{Store: store}, RuntimeReaperOptions{})
+	orphaned, err := reaper.SweepOnce(context.Background())
 	if err != nil {
-		t.Fatalf("SweepOrphans: %v", err)
+		t.Fatalf("SweepOnce: %v", err)
 	}
 	if orphaned != 1 {
 		t.Errorf("orphaned count = %d, want 1", orphaned)
@@ -411,9 +417,9 @@ func TestRuntimeReaper_NilStore(t *testing.T) {
 	}
 }
 
-// TestRuntimeReaper_SweepOnce exercises the explicit sweep entry point
+// TestRuntimeReaper_SweepOnce_MarksDeadRow exercises the explicit sweep entry point
 // used by the composition root for the startup reconciliation pass.
-func TestRuntimeReaper_SweepOnce(t *testing.T) {
+func TestRuntimeReaper_SweepOnce_MarksDeadRow(t *testing.T) {
 	store := newFakeRuntimeStore()
 	store.listRows = []*agent.RuntimeRow{
 		{ID: "dead", PID: 1<<22 + 5},

@@ -99,12 +99,12 @@ type Dependencies struct {
 	// Telemetry receives PTY restart and lifecycle observability events.
 	Telemetry Telemetry
 
-	// LiveSessions, when non-nil, lets orphansweep.SweepOrphans probe the in-process
+	// LiveSessions, when non-nil, lets orphansweep.RuntimeReaper.SweepOnce probe the in-process
 	// session registry for runtime IDs whose persisted PID is 0 (codex-
 	// style adapters never report a pid). Production wires this against
 	// this same Dependencies value (Dependencies.IsLive, backed by the
 	// unexported liveSessions field below); tests pass a fake. Optional —
-	// nil leaves orphansweep.SweepOrphans falling back to updated_at
+	// nil leaves orphansweep.RuntimeReaper.SweepOnce falling back to updated_at
 	// staleness alone, which still reconciles pre-restart pid=0 rows once
 	// they age past the grace window.
 	LiveSessions LiveSessionChecker
@@ -218,7 +218,7 @@ var _ LiveSessionChecker = (*Dependencies)(nil)
 // itself (Dependencies.IsLive, backed by liveSessions above) now that Boot
 // drives sessions through wrapper.Wrapper.Run directly rather than
 // registering them with *agentsessions.Manager; tests pass a fake.
-// Optional in Dependencies — nil means orphansweep.SweepOrphans falls back
+// Optional in Dependencies — nil means orphansweep.RuntimeReaper.SweepOnce falls back
 // to PID + updated_at staleness only, which still catches the common
 // post-restart case (a fresh process has an empty registry, so every
 // persisted row is "no live session").
@@ -289,7 +289,7 @@ type RuntimeStore interface {
 	// agentsessions.NewFromAdapter and drives it to completion internally,
 	// bypassing the Manager's registry entirely — so Boot and the
 	// session's own completion path now call UpdateState directly at the
-	// same two points the Manager used to. orphansweep.SweepOrphans and
+	// same two points the Manager used to. orphansweep.RuntimeReaper.SweepOnce and
 	// any UI/API surface reading agent_runtime.state depend on this not
 	// regressing to a permanent "launching" row.
 	UpdateState(runtimeID, state string, pid int) error
@@ -303,17 +303,17 @@ type RuntimeStore interface {
 	GetCheckpoint(checkpointID string) (*RuntimeCheckpoint, error)
 
 	// ListRunningRows returns the persisted lifecycle rows currently in
-	// state="launching" or state="running". Used by orphansweep.SweepOrphans at
+	// state="launching" or state="running". Used by orphansweep.RuntimeReaper.SweepOnce at
 	// daemon bootstrap to reconcile rows whose PID is no longer alive.
 	ListRunningRows() ([]*RuntimeRow, error)
 
 	// MarkRuntimeOrphaned transitions a runtime row to state="orphaned"
-	// with the supplied reason. orphansweep.SweepOrphans calls this for rows whose
+	// with the supplied reason. orphansweep.RuntimeReaper.SweepOnce calls this for rows whose
 	// persisted PID is no longer alive.
 	MarkRuntimeOrphaned(runtimeID, reason string) error
 
 	// LogEvent appends a row to the shared event_log postmortem trail.
-	// orphansweep.SweepOrphans calls this alongside MarkRuntimeOrphaned so
+	// orphansweep.RuntimeReaper.SweepOnce calls this alongside MarkRuntimeOrphaned so
 	// every reconciliation leaves a queryable, reasoning-populated record
 	// (docs/engineering/architecture/06-session-lifecycle-and-recovery.md:
 	// "extend event_log logging to all four [recovery mechanisms]").
@@ -329,7 +329,7 @@ type RuntimeStore interface {
 // chat session: ModeBackground tasks, scheduler-dispatched executors, and
 // nested subagents all create runtime rows without owning a chat row.
 //
-// UpdatedAt is the last persistence-side modification timestamp. orphansweep.SweepOrphans
+// UpdatedAt is the last persistence-side modification timestamp. orphansweep.RuntimeReaper.SweepOnce
 // uses it as the staleness signal for rows where PID == 0 — codex-style
 // runtimes never persist a pid, so signal-0 liveness can't speak for them;
 // the in-memory session-liveness probe + an `updated_at` age threshold do

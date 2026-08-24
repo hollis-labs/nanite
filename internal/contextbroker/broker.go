@@ -1,5 +1,5 @@
 // Package contextbroker provides universal context retrieval for Nanite.
-// It aggregates context from multiple sources (Vanta Conduit, PCC, Engine, Session)
+// It aggregates context from multiple sources (Vanta Conduit, Memory, PCC, Session)
 // and returns a budget-bounded context packet for any consumer.
 //
 // This package will move to core/context during library consolidation.
@@ -29,7 +29,7 @@ type BudgetConfig struct {
 
 	// SourceWeights maps source names to relative weight (0.0–1.0).
 	// Sources not listed get equal share of remaining budget.
-	// Example: {"conduit": 0.4, "pcc": 0.3, "engine": 0.15, "session": 0.15}
+	// Example: {"conduit": 0.3, "memory": 0.2, "pcc": 0.3, "session": 0.2}
 	SourceWeights map[string]float64
 }
 
@@ -41,7 +41,6 @@ func DefaultBudget() BudgetConfig {
 			"conduit": 0.25,
 			"memory":  0.15,
 			"pcc":     0.30,
-			"engine":  0.15,
 			"session": 0.15,
 		},
 	}
@@ -49,7 +48,7 @@ func DefaultBudget() BudgetConfig {
 
 // ContextSource is the interface that all context adapters must implement.
 type ContextSource interface {
-	// Name returns the source identifier (e.g. "conduit", "pcc", "engine", "session").
+	// Name returns the source identifier (e.g. "conduit", "memory", "pcc", "session").
 	Name() string
 
 	// Fetch retrieves context items for the given intent within a token budget.

@@ -162,17 +162,6 @@ func TestEstimateTokens(t *testing.T) {
 	}
 }
 
-func TestBudgetForIntent(t *testing.T) {
-	budget := BudgetForIntent(IntentWriteCode, 10000)
-	if budget.MaxTokens != 10000 {
-		t.Errorf("expected MaxTokens=10000, got %d", budget.MaxTokens)
-	}
-	// write_code should prioritize PCC.
-	if budget.SourceWeights["pcc"] < budget.SourceWeights["engine"] {
-		t.Error("write_code intent should prioritize pcc over engine")
-	}
-}
-
 func TestFormatPacket(t *testing.T) {
 	packet := &ContextPacket{
 		Items: []ContextItem{

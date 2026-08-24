@@ -14,13 +14,13 @@ import (
 // path — the real *agentRuntimeStore adapter (the RuntimeStore wired into
 // runtimeagent.Dependencies by BuildAgentDependencies) against a real
 // *store.Store — end to end: seed a dead-PID agent_runtime row, run
-// orphansweep.SweepOrphans (the exact function the daemon's RuntimeReaper
-// calls on a real restart), and confirm the row lands in the real
+// RuntimeReaper.SweepOnce (the exact path the daemon uses on a real
+// restart), and confirm the row lands in the real
 // event_log table with the enriched metadata this task adds.
 //
 // TASKS/phase-3/03-extend-event-log-to-recovery-mechanisms.md's Done means
 // requires triggering a REAL occurrence, not just a fake-store unit test
-// (see the orphansweep package's own TestSweepOrphans_LogsEventOnReconciliation
+// (see the orphansweep package's own TestRuntimeReaper_SweepOnce_LogsEventOnReconciliation
 // for the fake-store coverage of the decision matrix) — this is that real
 // trigger.
 func TestSmoke_OrphanSweep_LogsRealEventLogRow(t *testing.T) {
@@ -44,11 +44,12 @@ func TestSmoke_OrphanSweep_LogsRealEventLogRow(t *testing.T) {
 		t.Fatalf("CreateRuntimeRow: %v", err)
 	}
 
-	orphaned, err := orphansweep.SweepOrphans(context.Background(), &runtimeagent.Dependencies{
+	reaper := orphansweep.NewRuntimeReaper(&runtimeagent.Dependencies{
 		Store: runtimeStore,
-	})
+	}, orphansweep.RuntimeReaperOptions{})
+	orphaned, err := reaper.SweepOnce(context.Background())
 	if err != nil {
-		t.Fatalf("SweepOrphans: %v", err)
+		t.Fatalf("SweepOnce: %v", err)
 	}
 	if orphaned != 1 {
 		t.Fatalf("orphaned = %d, want 1", orphaned)

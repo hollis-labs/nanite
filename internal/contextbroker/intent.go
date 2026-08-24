@@ -4,11 +4,11 @@ package contextbroker
 // These drive which sources are queried and how results are ranked.
 const (
 	// IntentResumeTask fetches context for resuming a previously started task.
-	// Sources: Engine (task state), Vanta Conduit (related records), Session (recent messages).
+	// Sources: Vanta Conduit (related records), Session (recent messages), PCC (project context).
 	IntentResumeTask = "resume_task"
 
 	// IntentBootProject fetches context for starting work on a project.
-	// Sources: PCC (project context), Vanta Conduit (project records), Engine (active tasks).
+	// Sources: PCC (project context), Vanta Conduit (project records), Session (recent messages).
 	IntentBootProject = "boot_project"
 
 	// IntentReviewSession fetches context for reviewing a past session.
@@ -24,7 +24,7 @@ const (
 	IntentDebugIssue = "debug_issue"
 
 	// IntentPlanFeature fetches context for planning a new feature.
-	// Sources: Engine (roadmap, epics), Vanta Conduit (ADRs), PCC (architecture).
+	// Sources: Vanta Conduit (ADRs), PCC (architecture), Session (recent messages).
 	IntentPlanFeature = "plan_feature"
 
 	// IntentRecallDecision fetches context for recalling why a decision was made.
@@ -34,46 +34,3 @@ const (
 	// IntentCustom is a catch-all for intents that don't fit predefined categories.
 	IntentCustom = "custom"
 )
-
-// IntentSourcePriority maps intent types to source priority orderings.
-// Sources listed first get a larger share of the budget.
-var IntentSourcePriority = map[string][]string{
-	IntentResumeTask:     {"engine", "conduit", "session", "pcc"},
-	IntentBootProject:    {"pcc", "conduit", "engine", "session"},
-	IntentReviewSession:  {"session", "conduit", "pcc", "engine"},
-	IntentWriteCode:      {"pcc", "conduit", "session", "engine"},
-	IntentDebugIssue:     {"conduit", "pcc", "session", "engine"},
-	IntentPlanFeature:    {"engine", "conduit", "pcc", "session"},
-	IntentRecallDecision: {"conduit", "pcc", "session", "engine"},
-	IntentCustom:         {"conduit", "pcc", "engine", "session"},
-}
-
-// BudgetForIntent returns a BudgetConfig with source weights tuned
-// for the given intent type. Sources listed earlier in the priority
-// list get proportionally more budget.
-func BudgetForIntent(intentType string, totalTokens int) BudgetConfig {
-	priorities, ok := IntentSourcePriority[intentType]
-	if !ok {
-		priorities = IntentSourcePriority[IntentCustom]
-	}
-
-	if totalTokens <= 0 {
-		totalTokens = DefaultBudget().MaxTokens
-	}
-
-	// Assign decreasing weights: 0.40, 0.30, 0.20, 0.10 for 4 sources.
-	weights := []float64{0.40, 0.30, 0.20, 0.10}
-	sourceWeights := make(map[string]float64)
-	for i, src := range priorities {
-		if i < len(weights) {
-			sourceWeights[src] = weights[i]
-		} else {
-			sourceWeights[src] = 0.05
-		}
-	}
-
-	return BudgetConfig{
-		MaxTokens:     totalTokens,
-		SourceWeights: sourceWeights,
-	}
-}

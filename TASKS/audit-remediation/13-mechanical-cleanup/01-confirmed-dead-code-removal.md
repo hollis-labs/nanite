@@ -1,7 +1,7 @@
 # Remove confirmed dead code across 7 packages (deadcode-tool-verified)
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch.
 **Touches:** `internal/store/skill_mode_filter.go`, `internal/store/skills_source.go`, `internal/agent/managed_files.go`, `internal/agentvalidation/validation.go`, `internal/contextbroker/intent.go`, `internal/contextbroker/broker.go`, `internal/recovery/orphansweep/orphan_sweep.go`, `internal/runtime/agent/deps.go` (comment only), `internal/store/agent_runtime.go` (comment only), `internal/service/agent_cycles.go`, `internal/mcp/tool_ctx.go`, `internal/coordination/keys.go`, `internal/recovery/broker/broker.go` (review only, no edit expected).
 
@@ -55,15 +55,21 @@ That disposition shape splits into three buckets, and the split matters more tha
 
 ## Done means
 
-- [ ] Bucket A: all 4+3+2(+comment cleanup)=9 confirmed-dead symbols removed after a fresh zero-caller re-verification against current `HEAD`; `GO-STORE-008`'s false doc-comment claim is corrected or removed regardless of the code-removal outcome; `GO-MEM-007`'s two stale cross-file comments (`internal/runtime/agent/deps.go`, `internal/store/agent_runtime.go`) are updated to reference `RuntimeReaper.SweepOnce`.
-- [ ] Bucket B: an explicit keep-or-remove decision is recorded for each of `GO-SVCCORE-007`, `GO-MCPTOOL-005`, `GO-CHAT-005` before any code changes; if "remove" is chosen for any, the corresponding writer/caller sites are also cleaned up, not just the dead reader.
-- [ ] Bucket C: `GO-MEM-008` closed with no code change; a short "why `With*` coexists with `Set*`" note added near the declarations if one doesn't already exist.
-- [ ] `go build ./...` and `go vet ./...` pass after all Bucket A/B deletions.
-- [ ] A fresh `deadcode ./...` (and `deadcode -test ./...`) run after changes lands no new surprises in the touched packages.
+- [x] Bucket A: all 4+3+2(+comment cleanup)=9 confirmed-dead symbols removed after a fresh zero-caller re-verification against current `HEAD`; `GO-STORE-008`'s false doc-comment claim is corrected or removed regardless of the code-removal outcome; `GO-MEM-007`'s two stale cross-file comments (`internal/runtime/agent/deps.go`, `internal/store/agent_runtime.go`) are updated to reference `RuntimeReaper.SweepOnce`.
+- [x] Bucket B: an explicit keep-or-remove decision is recorded for each of `GO-SVCCORE-007`, `GO-MCPTOOL-005`, `GO-CHAT-005` before any code changes; if "remove" is chosen for any, the corresponding writer/caller sites are also cleaned up, not just the dead reader.
+- [x] Bucket C: `GO-MEM-008` closed with no code change; a short "why `With*` coexists with `Set*`" note added near the declarations if one doesn't already exist.
+- [x] `go build ./...` and `go vet ./...` pass after all Bucket A/B deletions.
+- [x] A fresh `deadcode ./...` (and `deadcode -test ./...`) run after changes lands no new surprises in the touched packages.
 
 ## Work log
 
-<!-- Worker fills this in as it goes: what was actually done per bucket, any deviation, and — for Bucket B — the decision reached and who made it. -->
+- **2026-08-24 — worker implementation on `audit-remediation/w8-13-01` (base `8b1e61bf`).** Fresh pre-change `deadcode` results were 133 lines for `deadcode ./...` and 64 lines for `deadcode -test ./...`. Whole-repo symbol searches reconfirmed that every Bucket A target had no production or test caller other than the tests deleted or redirected here. The exported Bucket A symbols were all under Go `internal/` packages and had no plugin registration, manifest, wire-schema, or other external API exposure.
+- **Bucket A:** deleted the three mode-filter helpers and `ClassifySkillSource`, their now-orphaned category constants, both helper-only test files, `EnsureManagedDirs`, `UserManagedAgentPath`, `ValidationResult.Error`, `IntentSourcePriority`, `BudgetForIntent`, its unit test, and the redundant `SweepOrphans` wrapper. Removed the inert `engine` default source weight without redistributing its 0.15 share. Updated source examples/comments from the nonexistent Engine source to the four live sources (Conduit, Memory, PCC, Session). Orphan reconciliation tests and the service smoke test now exercise the live `RuntimeReaper.SweepOnce` path, and current Go cross-file references name that path.
+- **Bucket B decisions:** AD-36 decides removal for all three findings. For GO-SVCCORE-007, deleted the context key/writer and exactly its two API write sites while retaining both `cycle_kind` request fields and the harness capability advertisement. For GO-MCPTOOL-005, deleted the context key/writer/reader, per-turn `turnNames` collection, and its round-trip test while preserving tool-use-ID grounding. For GO-CHAT-005, deleted only `PrefixLock`, `PrefixState`, and `LockTTL`.
+- **Bucket C:** no code change, as directed. The existing late-binding setter comments already document the construction-order reason for the live setter path.
+- **Minimal citation/scope corrections:** deleting the skill helpers also required removing a stale `internal/service/ingest_test.go` comment that claimed they survived. Deleting `SweepOrphans` required updating additional live references in `internal/service/agent_deps.go` and `internal/service/orphan_sweep_smoke_test.go` beyond the task's two named cross-file comment locations. Historical task/audit records and the schema migration comment were left unchanged.
+- **Material correction / durable escalation candidate for the orchestrator:** the task premise that FE skill-source gating was never built is false. `SkillDetailView.tsx` and `SkillsBrowser.tsx` implement source-based dev-mode fork gating directly, without calling `ClassifySkillSource`. Their fork action still calls `api.forkSkillToUser`, whose `POST /api/skills/{id}/fork-to-user` backend route was removed. This implementation does not touch the frontend or resurrect the dead Go classifier; a follow-up should decide whether to remove the stranded affordances/API client or restore a supported backend workflow.
+- **Verification:** focused touched-package tests passed; `go build ./...`, `go vet ./...`, `go test ./...`, and the required uncached full `go test -race -count=1 ./...` passed. Post-change `deadcode ./...` reports 123 lines (10 fewer) and `deadcode -test ./...` reports 61 lines (3 fewer), with no remaining report for any removed target and no new surprise in a touched package.
 
 ## Review notes
 

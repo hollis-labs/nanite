@@ -86,16 +86,6 @@ func CallerProfileFromContext(ctx context.Context) (agentProfileID string) {
 // CW-20260429-0024.
 type turnToolUseIDsCtxKey struct{}
 
-// turnToolNamesCtxKey carries the set of tool names called during the current
-// turn. Sibling to turnToolUseIDsCtxKey. Originally introduced for the
-// describe-required gate (CW-20260429-0025); the gate was removed in Phase A
-// of the architectural rebalancing (see docs/architecture/agent-context-architecture.md),
-// but the per-turn name set is preserved as plumbing for any future per-turn
-// observability or trust check that wants to read which tools the turn actually
-// invoked. Independent of tool_use_ids because turn-tool-name checks care
-// about the verb, not the call ID.
-type turnToolNamesCtxKey struct{}
-
 // WithTurnToolUseIDs returns a new context carrying the given tool_use_id
 // set as the "turn so far" for grounding checks. Empty / nil input returns
 // ctx unchanged so callers can pass through unconditionally; downstream
@@ -124,29 +114,5 @@ func TurnToolUseIDsFromContext(ctx context.Context) []string {
 		return nil
 	}
 	v, _ := ctx.Value(turnToolUseIDsCtxKey{}).([]string)
-	return v
-}
-
-// WithTurnToolNames returns a new context carrying the set of tool names
-// called this turn. Sibling to WithTurnToolUseIDs; same nil-input semantics.
-// Originally introduced for the describe-required gate (CW-20260429-0025);
-// retained as observability plumbing after the gate was removed in Phase A
-// of the architectural rebalancing.
-func WithTurnToolNames(ctx context.Context, names []string) context.Context {
-	if len(names) == 0 {
-		return ctx
-	}
-	cp := make([]string, len(names))
-	copy(cp, names)
-	return context.WithValue(ctx, turnToolNamesCtxKey{}, cp)
-}
-
-// TurnToolNamesFromContext returns the tool-name set stamped by
-// WithTurnToolNames, or nil if none was stamped.
-func TurnToolNamesFromContext(ctx context.Context) []string {
-	if ctx == nil {
-		return nil
-	}
-	v, _ := ctx.Value(turnToolNamesCtxKey{}).([]string)
 	return v
 }

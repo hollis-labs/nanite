@@ -48,7 +48,7 @@ const (
 	ReasonReconcileNoLiveSession = "no_live_session" // pid=0 + no in-memory session entry
 )
 
-// SweepOrphans runs at daemon startup and on each periodic reaper tick.
+// sweepOrphansAt runs at daemon startup and on each periodic reaper tick.
 // For every runtime row in state="running" or state="launching" it
 // reconciles the row against three signals:
 //
@@ -68,21 +68,17 @@ const (
 //
 // Returns the number of rows reconciled. Per-row persistence failures are
 // logged via slog and skipped; a single failure does not abort the sweep.
-func SweepOrphans(ctx context.Context, deps *agent.Dependencies) (int, error) {
-	return sweepOrphansAt(ctx, deps, DefaultRuntimeReaperPidZeroGrace, time.Now)
-}
-
-// sweepOrphansAt is the testable core of SweepOrphans. Tests inject a
-// fixed clock + a tighter grace window to drive deterministic sweeps.
+// RuntimeReaper.SweepOnce is the live entry point; tests inject a fixed clock
+// and a tighter grace window through RuntimeReaperOptions.
 func sweepOrphansAt(ctx context.Context, deps *agent.Dependencies, pidZeroGrace time.Duration, now func() time.Time) (int, error) {
 	if deps == nil || deps.Store == nil {
-		return 0, errors.New("orphansweep.SweepOrphans: Dependencies.Store is required")
+		return 0, errors.New("orphansweep.RuntimeReaper.SweepOnce: Dependencies.Store is required")
 	}
 	_ = ctx
 
 	rows, err := deps.Store.ListRunningRows()
 	if err != nil {
-		return 0, fmt.Errorf("orphansweep.SweepOrphans: list running rows: %w", err)
+		return 0, fmt.Errorf("orphansweep.RuntimeReaper.SweepOnce: list running rows: %w", err)
 	}
 
 	var orphaned int
@@ -246,7 +242,7 @@ func pidAlive(pid int) bool {
 //   - Stop is idempotent and blocks until the goroutine exits, so
 //     container shutdown can sequence the reaper before the DB closes.
 //
-// Concurrency: SweepOrphans is safe to invoke from multiple goroutines
+// Concurrency: SweepOnce is safe to invoke from multiple goroutines
 // (each UPDATE is guarded by `WHERE state IN ('launching','running')` at
 // the SQL layer in MarkRuntimeOrphaned via state column). The reaper
 // owns a single goroutine in production; tests may call SweepOnce

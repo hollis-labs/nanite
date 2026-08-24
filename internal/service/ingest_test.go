@@ -771,8 +771,4 @@ func TestAutoIngestAgents_EmptyDefsIsNoOp(t *testing.T) {
 // TestAutoIngestSkills_StoresModeSlugsUnresolved (the E2/CW-20260428-0017
 // mode-slug-storage regression) are deleted along with AutoIngestSkills
 // itself — see docs/engineering/architecture/20-skills.md's "Migration"
-// section. store.ParseSkillModeIDs/MarshalSkillModeIDs/SkillMatchesMode are
-// untouched (out of this task's scope — skill_mode_filter.go's own doc
-// comment already flags them as surviving, independently-useful primitives
-// with no other production caller today); only the AutoIngestSkills-side
-// writer of skills.mode_ids is gone.
+// section. The AutoIngestSkills-side writer of skills.mode_ids is gone too.

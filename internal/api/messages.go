@@ -8,7 +8,6 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/effort"
-	"github.com/hollis-labs/nanite/internal/service"
 )
 
 func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -31,9 +30,6 @@ func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		e = effort.Default
 	}
 	ctx := effort.WithContext(r.Context(), e)
-	if req.CycleKind != "" {
-		ctx = service.WithAgentCycleKindForAPI(ctx, req.CycleKind)
-	}
 
 	msgID, err := a.Services.Chat.HandleMessage(ctx, req.SessionID, req.Content)
 	if err != nil {

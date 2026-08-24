@@ -38,26 +38,6 @@ type managedFileFrontmatter struct {
 	Procedures              []ProcedureDefinition `yaml:"procedures,omitempty"`
 }
 
-func EnsureManagedDirs(homeDir string) error {
-	home := homeDir
-	if home == "" {
-		var err error
-		home, err = os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("agent: resolve home dir: %w", err)
-		}
-	}
-	for _, dir := range []string{
-		filepath.Join(home, ".nanite", "agents"),
-		filepath.Join(home, ".nanite", "durable-agents"),
-	} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("agent: ensure managed dir %s: %w", dir, err)
-		}
-	}
-	return nil
-}
-
 func EnsureManagedConfigDirs(configRoot string) error {
 	if strings.TrimSpace(configRoot) == "" {
 		return fmt.Errorf("agent: managed config root is required")
@@ -71,18 +51,6 @@ func EnsureManagedConfigDirs(configRoot string) error {
 		}
 	}
 	return nil
-}
-
-func UserManagedAgentPath(homeDir, slug string) (string, error) {
-	home := homeDir
-	if home == "" {
-		var err error
-		home, err = os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("agent: resolve home dir: %w", err)
-		}
-	}
-	return filepath.Join(home, ".nanite", "agents", slug+".md"), nil
 }
 
 // ManagedAgentPath resolves an agent slug to its managed-file path under

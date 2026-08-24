@@ -309,9 +309,6 @@ func (a *API) handleHarnessV1SendTurn(w http.ResponseWriter, r *http.Request) {
 		turnEffort = effort.Default
 	}
 	ctx := effort.WithContext(r.Context(), turnEffort)
-	if req.CycleKind != "" {
-		ctx = service.WithAgentCycleKindForAPI(ctx, req.CycleKind)
-	}
 	msgID, err := a.Services.Chat.HandleMessage(ctx, sessionID, req.Content)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())

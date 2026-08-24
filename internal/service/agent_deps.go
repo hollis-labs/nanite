@@ -662,7 +662,7 @@ func marshalMeta(m map[string]any) string {
 
 // agentRuntimeStateSink translates agentsessions.Manager state events into
 // agent_runtime row updates. The lib emits launching → running → done|failed;
-// orphaned is set separately by orphansweep.SweepOrphans.
+// orphaned is set separately by orphansweep.RuntimeReaper.SweepOnce.
 type agentRuntimeStateSink struct {
 	store *store.Store
 }

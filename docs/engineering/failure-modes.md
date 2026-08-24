@@ -18,8 +18,8 @@ post-audit follow-up work (2026-08-24)** — while fixing three test defects the
 batch had flagged, in the tests and tooling that were supposed to be doing the
 checking.
 
-**Companion doc:** `tracking-integrity.md` covers a seventh — the same data
-tracked in several places with no designated authority, so drift becomes
+**Companion doc:** `tracking-integrity.md` covers a further class — the same
+data tracked in several places with no designated authority, so drift becomes
 undetectable rather than merely present. It also specifies the checker that
 catches classes 2 and 3 mechanically.
 
@@ -59,6 +59,13 @@ This was reported as "371 methods lacking a context." It was **371 total
 methods, of which 134 already had one** — the real figure was 237. A fabricated
 "target: 505" followed from it into a task file. An executing agent caught it
 only because the command was printed alongside the number.
+
+That last sentence is the origin of this repo's most-propagated execution rule.
+It is stated directly, as something an agent does rather than something an
+author observed, in `agent-verification-discipline.md` §1.2 — *ship the command
+next to the number*. Worth knowing where it came from: nobody designed it, and
+it survived four hops between sessions by copy-paste before it was written
+down.
 
 ### Recursive commands rooted at `.` descend into nested worktrees
 

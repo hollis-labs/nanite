@@ -11,9 +11,14 @@ Notably, almost none were judgment failures. The decisions held up. What kept
 being wrong were the *measurements and citations underneath them*, in ways that
 looked right.
 
-Four classes, four different defenses. They don't substitute for each other.
+Six classes, six different defenses. They don't substitute for each other.
 
-**Companion doc:** `tracking-integrity.md` covers a fifth — the same data
+Classes 1–5 come from the audit batch itself. **Class 6 was found in the
+post-audit follow-up work (2026-08-24)** — while fixing three test defects the
+batch had flagged, in the tests and tooling that were supposed to be doing the
+checking.
+
+**Companion doc:** `tracking-integrity.md` covers a seventh — the same data
 tracked in several places with no designated authority, so drift becomes
 undetectable rather than merely present. It also specifies the checker that
 catches classes 2 and 3 mechanically.
@@ -185,6 +190,132 @@ obviously-fine thing is wrong. Ask.
 
 ---
 
+## 6. Vacuous verification — the check ran, and confirmed nothing
+
+Found 2026-08-24, in post-audit follow-up work rather than in the batch itself.
+That timing matters: these were found *while fixing defects the audit had
+already flagged*, in the tests and tooling doing the checking.
+
+Distinct from class 1. There, a command answers a different question than you
+asked and you get a wrong number. Here the check runs correctly, reports
+success, and has verified **nothing** — a right answer to a question that was
+never posed. Nothing looks wrong at any point. The suite stays green forever.
+
+This is the class that most rewards a no-code-review workflow's attention: a
+human skimming a diff might notice an assertion that cannot fire. With review
+removed, the test is the only thing asserting correctness, and a test that
+asserts nothing produces silence indistinguishable from success.
+
+### A `range` loop over an empty collection asserts nothing
+
+```go
+// WRONG — passes when List() returns empty, which under load it sometimes did
+workers := mgr.List()
+for _, w := range workers {
+    if w.Status != StatusCancelled { t.Errorf(...) }
+}
+
+// RIGHT
+workers := mgr.List()
+if len(workers) != 1 { t.Fatalf("got %d workers, want 1", len(workers)) }
+if workers[0].Status != StatusCancelled { t.Errorf(...) }
+```
+
+`internal/worker/manager_test.go`, `TestShutdown`. The test had **two** defects,
+not one: the flake it was filed for, and this — a second, quieter mode where it
+passed having checked nothing. Reproduced under scheduler saturation: 1 run in
+25 returned an empty list.
+
+### A "still blocked" assertion with nothing reachable to block
+
+`internal/sandbox/os_linux_test.go`,
+`TestNetnsBridge_HostArbitraryPortStillBlocked`. In an unprivileged container
+the namespace setup may be unavailable, so the assertion succeeds because
+nothing was *ever* reachable — not because the bridge blocked it.
+
+**A security test that passes vacuously is worse than no test**, because it
+reports coverage that does not exist.
+
+Defense: a **positive control**. Prove the harness *can* reach an allowed port
+in this environment before asserting the arbitrary one is blocked. If the
+control fails, `t.Skip` with a reason. A skip is honest; a vacuous pass is not.
+
+### A ratchet that reads an empty scan as a total improvement
+
+`scripts/quality-ratchet.py`, `lint` subcommand:
+
+```
+$ echo '{"Issues": []}' > empty.json
+$ python3 scripts/quality-ratchet.py lint --report empty.json …
+audit-config linters: baseline=3255 current=0
+audit-config linters: reductions detected for cyclop, dupl, … unused
+audit-config linters: ratchet passed
+EXIT=0
+```
+
+A scan that covered nothing is reported as a 3,255-finding improvement across
+18 linters. A report filtered to 12% of the codebase also exits 0.
+
+Reachable, not hypothetical: a `golangci-lint` invocation passing import paths
+where directories were expected emitted `typechecking error: … directory not
+found`, then `0 issues.`, exit 0. One malformed argument between a green
+nightly and a scan of nothing.
+
+The gosec comparator in the *same file* has the defense already —
+`cardinality_failed = ignored != 1` — so an empty gosec report still exits 1.
+The lint side has no equivalent.
+
+**And its own tests encode the hole.** `scripts/quality-ratchet_test.py`
+contains a test asserting the empty report exits 0. The vacuous pass is
+codified as intended behaviour, so anyone fixing the ratchet meets a failing
+test and may "fix" the fix.
+
+### An acceptance command that cannot detect its own bug
+
+A task file specified `go test -race -count=100 ./internal/service/` as the
+gate for an event-ordering flake. `-race` instruments every memory access,
+which inflates the timing gaps that ordering bugs depend on — measured
+inter-event gap p50 **106 µs** without `-race`, **2,187 µs** with it.
+
+| `-race` | count | failures |
+|---|---:|---:|
+| yes | 1,000 | 0 |
+| yes | 20,000 | 1 |
+| **no** | 20,000 | **18** |
+
+Expected failures under the prescribed command, with the bug fully present:
+**0.005**. The gate would have gone green and the defect been reported fixed.
+
+`-race` and high `-count` are not interchangeable intensities of the same dial.
+See `testing-workflow.md` §2.
+
+### Defense
+
+**For any assertion, ask what input would make this pass while proving
+nothing** — an empty collection, a zero count, an unreachable target, a check
+that never ran. If that input is reachable, the check needs a positive control.
+
+**For any fix with a regression test: revert the fix, watch the test fail,
+restore, verify the restore byte-for-byte, and report that you did.** An
+assertion never observed failing is of unknown strength. Both fixes landed
+2026-08-24 did this; both claims held up under independent re-verification.
+
+Guard the restore — see `agent-verification-discipline.md` §3.4. A silently
+failed restore produced one wrong verification result before being caught.
+
+### A note on tooling
+
+Unlike classes 2–5, this class **is** partly mechanizable. Mutation testing
+(`go-mutesting`, `gremlins`) introduces small changes and reports which ones no
+test catches — finding vacuous tests by construction. Worth evaluating against
+`internal/service`, `internal/worker` and `internal/store` first.
+
+Coverage tooling is the weaker cousin: it shows what is never *executed*, not
+what is executed but never *asserted on*. The `range`-over-empty case above
+shows full line coverage.
+
+---
+
 ## Before you publish a task file, kickoff, or handoff
 
 - [ ] Every number derived from a command **at the moment of writing** — not
@@ -196,6 +327,12 @@ obviously-fine thing is wrong. Ask.
       *"count from this list; if another number appears below, this line wins."*
 - [ ] Anything asserted but not verified is labelled as such.
 - [ ] Any rule you restate carries its scope.
+- [ ] Every assertion checked against: what input would make this pass while
+      proving nothing? If that input is reachable, add a positive control.
+- [ ] Every regression test observed failing without its fix, with the restore
+      verified byte-for-byte.
+- [ ] Every prescribed acceptance command verified to actually detect the defect
+      it gates — especially where `-race` or an iteration count is involved.
 
 ## A note on tooling
 

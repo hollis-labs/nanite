@@ -35,6 +35,12 @@ cerberus_resource_logs nanite-api-service --lines 50 --stream stderr
 
 After `reload`, `cerberus_resource_status` should show a new `launchd_pid` and `last exit code = 0` for the prior process. If the pid hasn't changed, the cutover didn't happen — re-run `reload`.
 
+## Verification discipline (read before executing a dispatched task)
+
+`docs/engineering/agent-verification-discipline.md` holds the execution rules every dispatched agent follows in full — derive numbers at the moment of use and ship the command beside each one, re-derive cited line numbers before editing, do the dispatched task and nothing else. Reference it from dispatch prompts rather than copying it inline; append newly found environment hazards to its §3.
+
+Companions: `docs/engineering/failure-modes.md` (why measurements and documents mislead) and `docs/engineering/testing-workflow.md` (test tiers, and `-race` vs. high `-count`).
+
 ## Architecture
 
 - `cmd/nanite/` — Entry point

@@ -13,6 +13,9 @@ This is the canonical, current-state reference for how Nanite's agent system act
 - **`TASKS.md`** — the concrete, sequenced engineering work implementing the architecture docs.
 - **`decisions/`** — Architecture Decision Records (ADRs). One numbering sequence, going forward, from here.
 - **`standards/`** — coding standards, testing philosophy, patterns, code quality. Stubs as of this writing — real content gets added as it's actually established, not invented wholesale up front.
+- **`agent-verification-discipline.md`** — the execution rules every dispatched agent follows. Reference it from dispatch prompts; don't copy it inline.
+- **`failure-modes.md`** — how measurements and documents mislead, from real cases. Required reading before writing a task file, kickoff, or handoff.
+- **`testing-workflow.md`** — test tiers, and which amplification (`-race` vs. high `-count`) finds which defect class.
 - **`deployment.md`** — how Nanite actually gets built and deployed.
 - **`faq.md`** — short-answer reference for recurring questions.
 

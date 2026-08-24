@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/dispatcher"
@@ -230,7 +231,13 @@ func (s *durableWakeService) RunDue(ctx context.Context, req DurableAgentWakeRun
 			continue
 		}
 		if err := s.store.BumpAgentScheduleFireCount(ctx, item.Schedule.ID, now); err == nil && item.Schedule.ScheduleKind == store.ScheduleKindOneShot {
-			_ = s.store.UpdateAgentScheduleStatus(ctx, item.Schedule.ID, store.ScheduleStatusExpired)
+			if err := s.store.UpdateAgentScheduleStatus(ctx, item.Schedule.ID, store.ScheduleStatusExpired); err != nil {
+				slog.Warn("durable wake: failed to expire one-shot schedule",
+					"schedule_id", item.Schedule.ID,
+					"instance_id", item.InstanceID,
+					"err", err,
+				)
+			}
 		}
 	}
 	return out, nil

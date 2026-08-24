@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -109,14 +110,26 @@ func scanTask(rows *sql.Rows) (*Task, error) {
 	}
 
 	t.Status = Status(status)
-	_ = json.Unmarshal([]byte(metaJSON), &t.Metadata)
+	if err := json.Unmarshal([]byte(metaJSON), &t.Metadata); err != nil {
+		slog.Warn("task snapshot: failed to parse stored value", "task_id", t.ID, "field", "metadata", "err", err)
+	}
 	if t.Metadata == nil {
 		t.Metadata = make(map[string]string)
 	}
-	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	var parseErr error
+	t.CreatedAt, parseErr = time.Parse(time.RFC3339, createdAt)
+	if parseErr != nil {
+		slog.Warn("task snapshot: failed to parse stored value", "task_id", t.ID, "field", "created_at", "err", parseErr)
+	}
+	t.UpdatedAt, parseErr = time.Parse(time.RFC3339, updatedAt)
+	if parseErr != nil {
+		slog.Warn("task snapshot: failed to parse stored value", "task_id", t.ID, "field", "updated_at", "err", parseErr)
+	}
 	if completedAt.Valid {
-		ct, _ := time.Parse(time.RFC3339, completedAt.String)
+		ct, err := time.Parse(time.RFC3339, completedAt.String)
+		if err != nil {
+			slog.Warn("task snapshot: failed to parse stored value", "task_id", t.ID, "field", "completed_at", "err", err)
+		}
 		t.CompletedAt = &ct
 	}
 	return &t, nil

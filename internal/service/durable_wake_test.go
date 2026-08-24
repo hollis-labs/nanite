@@ -1,12 +1,25 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+type expiryStatusFailingStore struct {
+	*store.Store
+	err error
+}
+
+func (s *expiryStatusFailingStore) UpdateAgentScheduleStatus(context.Context, string, string) error {
+	return s.err
+}
 
 func TestDurableWakeListDueAndDryRun(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
@@ -141,6 +154,86 @@ func TestDurableWakeRunDueStartsAttachedSessionAndBumpsSchedule(t *testing.T) {
 	}
 	if !durableAgentEventsContain(events, store.DurableAgentEventWakeRequested) || !durableAgentEventsContain(events, store.DurableAgentEventWakeStarted) {
 		t.Fatalf("wake events missing: %+v", events)
+	}
+}
+
+func TestDurableWakeRunDueLogsExpiryFailureAndPreservesSuccess(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	ctx := context.Background()
+	profile := &store.AgentProfile{Name: "Expiry Log Agent", Slug: "expiry-log-agent", SystemPrompt: "x"}
+	if err := st.CreateAgent(ctx, profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	seedSession := &store.Session{Provider: "anthropic", Model: "model-a"}
+	if err := st.CreateSession(ctx, seedSession); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	inst := &store.DurableAgentInstance{
+		Name:             "Expiry Log Instance",
+		Slug:             "expiry-log-instance",
+		ProfileID:        profile.ID,
+		LifecycleClass:   store.DurableAgentClassProcess,
+		Provider:         "anthropic",
+		Model:            "model-a",
+		RuntimeKind:      "api",
+		CurrentSessionID: seedSession.ID,
+	}
+	if err := st.CreateDurableAgentInstance(ctx, inst); err != nil {
+		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	}
+	if err := st.AttachDurableAgentInstanceSession(ctx, inst.ID, seedSession.ID, store.DurableAgentSessionRelationWake); err != nil {
+		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
+	}
+	const scheduleID = "sched-expiry-log"
+	if err := st.InsertAgentSchedule(ctx, store.AgentSchedule{
+		ID:           scheduleID,
+		AgentID:      profile.ID,
+		Name:         "expiry logging",
+		ScheduleKind: store.ScheduleKindOneShot,
+		Body:         "wake",
+		Status:       store.ScheduleStatusActive,
+		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+		NextRun:      time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("InsertAgentSchedule: %v", err)
+	}
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	expiryErr := errors.New("expiry write unavailable")
+	failingStore := &expiryStatusFailingStore{Store: st, err: expiryErr}
+	wakeSvc := NewDurableAgentWakeService(failingStore, NewDurableAgentService(failingStore))
+	run, err := wakeSvc.RunDue(ctx, DurableAgentWakeRunRequest{Now: time.Now().UTC()})
+	if err != nil {
+		t.Fatalf("RunDue returned expiry failure instead of preserving best-effort success: %v", err)
+	}
+	if len(run.Results) != 1 || run.Results[0].LaunchResult == nil || run.Results[0].FailureReason != "" {
+		t.Fatalf("RunDue result = %+v, want one successful launch", run.Results)
+	}
+	schedule, err := st.GetAgentSchedule(ctx, scheduleID)
+	if err != nil {
+		t.Fatalf("GetAgentSchedule: %v", err)
+	}
+	if schedule.FiredCount != 1 {
+		t.Fatalf("FiredCount = %d, want 1", schedule.FiredCount)
+	}
+	if schedule.Status != store.ScheduleStatusActive {
+		t.Fatalf("Status = %q, want active because the injected expiry write failed", schedule.Status)
+	}
+
+	logOutput := logs.String()
+	for _, want := range []string{
+		`"msg":"durable wake: failed to expire one-shot schedule"`,
+		`"schedule_id":"` + scheduleID + `"`,
+		`"instance_id":"` + inst.ID + `"`,
+		`"err":"` + expiryErr.Error() + `"`,
+	} {
+		if !strings.Contains(logOutput, want) {
+			t.Errorf("warning log %q missing from %s", want, logOutput)
+		}
 	}
 }
 

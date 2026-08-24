@@ -3,6 +3,7 @@
 package secrets
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -23,10 +24,15 @@ func Set(key, value string) error {
 // Get retrieves a secret from the OS keychain. Returns empty string if not found.
 func Get(key string) string {
 	val, err := keyring.Get(serviceName, key)
-	if err != nil {
+	if err == nil {
+		return val
+	}
+	if errors.Is(err, keyring.ErrNotFound) {
+		slog.Debug("secrets: key not found", "key", key)
 		return ""
 	}
-	return val
+	slog.Warn("secrets: get failed", "key", key, "err", err)
+	return ""
 }
 
 // Delete removes a secret from the OS keychain. No error if not found.

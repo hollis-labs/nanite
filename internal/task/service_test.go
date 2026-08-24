@@ -1,8 +1,11 @@
 package task
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/coordination"
@@ -246,6 +249,58 @@ func TestSnapshotAndRestore(t *testing.T) {
 	}
 	if len(all) > 0 && all[0].Title != "active" {
 		t.Errorf("restored task = %q, want %q", all[0].Title, "active")
+	}
+}
+
+func TestSQLiteSnapshotListTasksLogsMalformedStoredValuesAndPreservesRow(t *testing.T) {
+	_, db := setupTestService(t)
+	const taskID = "task-malformed-snapshot"
+	_, err := db.Exec(`INSERT INTO tasks (
+		id, parent_id, session_id, worker_session_id, title, description,
+		status, assignee_agent_id, result, error, tokens_used, metadata,
+		created_at, updated_at, completed_at
+	) VALUES (?, '', ?, '', ?, '', ?, '', '', '', 0, ?, ?, ?, ?)`,
+		taskID, "session-1", "malformed row", string(StatusInProgress),
+		"{bad metadata", "bad-created", "bad-updated", "bad-completed",
+	)
+	if err != nil {
+		t.Fatalf("insert malformed task: %v", err)
+	}
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	tasks, err := (&SQLiteSnapshot{DB: db}).ListTasks(TaskFilter{})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("ListTasks returned %d rows, want 1", len(tasks))
+	}
+	got := tasks[0]
+	if got.ID != taskID || got.Title != "malformed row" || got.Status != StatusInProgress {
+		t.Fatalf("row fields changed during best-effort decode: %+v", got)
+	}
+	if got.Metadata == nil || len(got.Metadata) != 0 {
+		t.Fatalf("Metadata = %#v, want initialized empty map", got.Metadata)
+	}
+	if !got.CreatedAt.IsZero() || !got.UpdatedAt.IsZero() {
+		t.Fatalf("timestamps = created %v updated %v, want zero values", got.CreatedAt, got.UpdatedAt)
+	}
+	if got.CompletedAt == nil || !got.CompletedAt.IsZero() {
+		t.Fatalf("CompletedAt = %v, want non-nil zero time", got.CompletedAt)
+	}
+
+	logOutput := logs.String()
+	if count := strings.Count(logOutput, `"task_id":"`+taskID+`"`); count != 4 {
+		t.Errorf("task_id warning count = %d, want 4; logs: %s", count, logOutput)
+	}
+	for _, field := range []string{"metadata", "created_at", "updated_at", "completed_at"} {
+		if !strings.Contains(logOutput, `"field":"`+field+`"`) {
+			t.Errorf("warning for %s missing from %s", field, logOutput)
+		}
 	}
 }
 

@@ -1,7 +1,7 @@
 # Low-risk error-handling gaps: silently discarded/unlogged errors across 5 unrelated files
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch.
 **Touches:** `internal/task/snapshot.go`, `internal/api/bookmarks.go`, `internal/secrets/keyring.go`, `internal/service/durable_wake.go`, `internal/mcpconfig/mcpconfig.go`.
 
@@ -43,7 +43,52 @@ One item in this batch deserves priority over the other four: `GO-SVCEXEC-006`'s
 
 ## Work log
 
-<!-- Worker fills this in as it goes, including the GO-INFRA-003 intent-confirmation finding and the GO-SEC4-010 logging-vs-signature choice. -->
+- 2026-08-24: Implemented the three findings still open on the reviewed
+  `14/02` base. `GO-SVCEXEC-006` now warns when the post-wake one-shot expiry
+  write fails, with `schedule_id`, `instance_id`, and the underlying error.
+  The warning does not alter `RunDue` control flow: the successful wake result
+  and fire-count update remain successful, while expiry stays best-effort. An
+  injected store regression captures the warning and proves those postconditions.
+- Confirmed the `GO-INFRA-003` intent against `LocalBackend.List` and
+  `LocalBackend.Snapshot`: both deliberately skip malformed coordination-store
+  JSON and continue, establishing best-effort recovery behavior. `scanTask`
+  therefore still returns the row with the same initialized-empty metadata and
+  zero-time defaults, but now warns separately for malformed `metadata`,
+  `created_at`, `updated_at`, and `completed_at`, including task ID, field, and
+  parse error. The regression injects all four malformed values and proves both
+  the four warnings and preserved row/default behavior.
+- Kept `secrets.Get`'s `func(string) string` signature because its callers use
+  the documented empty-string absence contract and none needs a new error
+  channel. A keyring not-found error now logs at debug; other keychain-access
+  errors log at warn with the underlying error. Neither path logs the retrieved
+  value. Mock-keyring tests cover not-found, an injected access failure, the
+  unchanged empty-string results, and successful secret retrieval without
+  secret-value logging.
+- `GO-API-010` and `GO-MCPTOOL-013` required no new edits: the reviewed `14/02`
+  work already changed bookmarks to `errors.Is` and added both MCP-config JSON
+  warnings in `9147bf84`; the formal review-fix commit was `2d532314`. Those
+  existing fixes were re-exercised by this task's focused API/MCP-config suites.
+- Inspected the adjacent `BumpAgentScheduleFireCount` call. Its error remains
+  silently discarded by the `err == nil` condition, which also suppresses the
+  one-shot expiry attempt. That is a durable escalation candidate for a later
+  scoped task, but it is outside `GO-SVCEXEC-006`'s exact expiry-status finding
+  and was deliberately not changed or added to the shared escalation tracker.
+- Regression mutation check: with only the three production fixes temporarily
+  reverted, the new durable-wake, malformed-snapshot, and two keyring-error log
+  tests all failed on absent diagnostics; restoring the fixes made the same
+  command pass. Final focused ordinary tests passed for `internal/task`
+  (0.624s), `internal/api` (9.913s), `internal/secrets` (0.154s),
+  `internal/service` (23.336s), `internal/service/install` (1.301s), and
+  `internal/mcpconfig` (0.999s). Focused race tests passed for the same package
+  set (`internal/api` 108.408s, `internal/service` 55.226s).
+- Full verification passed: `go build ./...`; `go vet ./...`;
+  audit-config correctness lint (`errcheck`, `errorlint`, `nilerr`) with
+  `0 issues`;
+  `go test -count=1 ./...` (`internal/service` 29.681s,
+  `internal/store` 16.397s); and `go test -race -count=1 ./...`
+  (`internal/api` 286.281s, `internal/service` 124.701s,
+  `internal/store` 276.905s). No review or approval is claimed; status is
+  implemented pending fresh review.
 
 ## Review notes
 

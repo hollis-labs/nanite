@@ -2,8 +2,8 @@
 
 **Phase:** Audit remediation — Wave 9 (follow-ups taxonomy)
 **Execution:** Wave 8, with explicit operator approval
-**Status:** implemented
-**Review:** pending fresh review
+**Status:** reviewed
+**Review:** passed fresh independent review on 2026-08-24
 **Depends on:** `01/01` (landed) — this only makes sense after the fail-closed convergence, which is what turned an unkeyed source from "works insecurely" into "always rejects."
 **Blocks:** nothing.
 **Parallel-safe with:** worktree-isolated from the rest of Wave 8; its production changes are confined to catalog seed/list behavior and migration `147`.
@@ -161,3 +161,33 @@ catalog until the operator adds and keys a source. The separate UI/UX
 workstream owns the explanatory empty state.
 
 ## Review notes
+
+- **PASS — 2026-08-24, fresh independent review.** Reviewed implementation
+  commit `cf473afbdd19630f8958871f283cd18e195cf571` against base
+  `8b1e61bf` and AD-05. Migration `147` was the next unused number after
+  `146`; the Go seed is removed; `store.New` applies migrations before
+  `cmdServe` calls `Seed`; and no key provisioning, install-pipeline, or UI
+  implementation work was folded into the task.
+- The migration guard includes every legacy seed field, an empty public key,
+  and `created_at = updated_at`. Focused regressions independently passed for
+  exact untouched-row removal, keyed/name/URL/type/enabled/priority/ID/timestamp
+  changes, unrelated-row survival, Down/Up behavior, and `INSERT OR IGNORE`
+  preservation of an operator-owned `official` row. The permanent real-backup
+  test passed against a `t.TempDir()` copy. SHA-256, inode, size, and mtime for
+  the source backup and its WAL were unchanged across the review run.
+- Empty-state behavior is honest and stable: source listing and catalog browse
+  return JSON `[]` with HTTP 200, while refresh remains
+  `{ "status": "cache invalidated" }` with HTTP 200. The frontend punch-list
+  note accurately assigns the explanatory add-and-key empty state to the
+  separate UI/UX workstream.
+- Independent verification passed:
+  `go test -count=1 ./internal/store -run 'Test(Migration147|RealBackupMigration147|CatalogSourceCRUD|ListCatalogSourcesEmpty)' -v`;
+  `go test -count=1 ./internal/api -run 'TestHandle(ListCatalogSourcesEmpty|BrowseCatalogEmpty|RefreshCatalogEmpty)' -v`;
+  `go test -count=1 ./internal/store ./internal/api`;
+  `go build ./...`; `go vet ./...`; `go test -count=1 ./...`; and
+  `go test -race -count=1 ./internal/store ./internal/api` (store 225.958s,
+  API 99.163s). Changed-code golangci reported `0 issues`, and the committed
+  audit-config gate passed at **3,255/3,255**, including Stage 2
+  `errcheck=0`, `errorlint=0`, `nilerr=0`. The unratcheted `make lint` command
+  was also exercised and reached the repository's known historical
+  2,164-issue backlog; no changed-code or ratchet regression was present.

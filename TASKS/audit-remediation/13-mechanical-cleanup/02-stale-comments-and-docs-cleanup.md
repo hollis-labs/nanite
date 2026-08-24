@@ -1,7 +1,7 @@
 # Trim/correct stale comments and package docs across 6 findings — scoped trim, not blanket removal
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch.
 **Touches:** `internal/store/*.go` (25+ files, comment-only), `internal/service/ingest.go`, `internal/service/known_tools_backfill.go`, `internal/service/cli_structured_input_fallback.go`, `internal/service/agent_deps.go`, `internal/service/chat_reflex_dispatch.go`, `internal/service/team_routing.go`, `cmd/nanite/main.go`, `internal/runtime/agent/agent.go`, `internal/chat/hint_catalog.go`, `internal/service/install/adapters.go`, `internal/service/install/adapter_cleanup.go`.
 
@@ -115,4 +115,42 @@ Two findings in this batch are a different shape entirely and don't belong in th
 
 ## Review notes
 
-<!-- Reviewer fills this in: spot-check that no load-bearing rationale was accidentally trimmed; confirm the GO-SVCCORE-003/GO-CHAT-006 decisions were actually implemented, not just recorded. -->
+- **PASS (fresh review, 2026-08-24).** Independently reviewed implementation
+  `cbd23be2527d4badf35dd530bb57d7248f5be23a` against base `bf37312d` and
+  AD-30/AD-34/AD-37. Removing full-line comments from each changed
+  comment-only source produced byte-identical code; the only non-comment
+  changes were deletion of `snapshotAdapterTargets` and its sole test.
+- The AD-30 pass is conservative and preserves semantics. Exact Git blob
+  comparisons proved `internal/store/user_settings.go`, `store.go`, and
+  `agent_runtime.go`; the named service/runtime files; `cmd/nanite/main.go`;
+  and both LearningRecaller files are byte-identical to base. No test file
+  changed outside AD-34's deleted dead-helper test. The retained
+  `known_tools_backfill.go` rationale is accurate against current and
+  historical code: `agent_tools_legacy_backfill` is an independent one-time
+  marker, `role_tools` remains a promoted grant input, the removed historical
+  allowlist path tolerated empty/malformed JSON and used the same glob
+  matcher, and `ToolPermissions` deliberately performs no narrowing now that
+  `agent_tools` is the grant source.
+- AD-34 matches the decided narrow deletion. Base had no production caller of
+  `snapshotAdapterTargets` and only `TestSnapshotAdapterTargets`; neither
+  remains. Live `adapterTargetFiles` and
+  `snapshotAdapterTargetsForRefresh` code is unchanged, the refresh helper
+  retains its one production caller and its tests, and
+  `cleanupRemovedAdapters` retains exactly two production callers
+  (`adopt.go` and `install.go`). Its corrected contract now states explicitly
+  that destructive cleanup has no pre-edit snapshot or rollback and may return
+  only the completed prefix of reports. No rollback feature was introduced.
+- AD-37 changes exactly the three stale comment locations in
+  `internal/chat/hint_catalog.go` to the file selected by
+  `//go:embed hints/*.yaml`, `internal/chat/hints/hints.yaml`. The embedded
+  YAML, config copy, code, and generator/build surfaces are unchanged.
+- The pinned golangci-lint v2.11.4 comparator independently discovered 109
+  tracked packages and passed at baseline 3255/current 3241 with Stage 2
+  `errcheck=0`, `errorlint=0`, `nilerr=0`. The 14-point reduction is fully
+  attributable: one inherited `gocognit` reduction from reviewed 13/04, plus
+  this task's nine `forbidigo` and four `gosec` findings removed with the dead
+  AD-34 helper/test; no other count changed. `gofmt -d` and `git diff --check`
+  were clean; all 13 comparator tests passed; focused store/install/chat/
+  service tests passed; and `go build ./...`, `go vet ./...`, full ordinary,
+  and full race suites passed (race `internal/store`: 256.595s). No review
+  findings remain.

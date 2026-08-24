@@ -1,6 +1,29 @@
 # lefthook.yml — Fragments Engine shared pre-commit/pre-push hooks
 # Reference copy lives in mentat repo; copied to all FE projects.
-# Target: all checks complete in <15 seconds on staged files only.
+#
+# THIS FILE ENFORCES NOTHING UNTIL `lefthook install` HAS RUN IN THE CLONE.
+# A tracked lefthook.yml installs no git hooks by itself. Fresh clones must run
+# `lefthook install` once — see README.md "Quick Start" and AGENTS.md
+# "Common operations".
+#
+# Scope. Only three of the five pre-commit commands are staged-files-only:
+#   go-format, migration-purity, frontend-lint   staged files only
+#   go-vet    whole repo — `go vet ./...`
+#   go-lint   golangci-lint analyzes the whole repo, then reports only findings
+#             on lines the staged diff touches
+#
+# Cost, measured on nanite (2026-08-24) across three real `git commit` attempts
+# with one staged .go file, reading lefthook's own summary each time:
+#   pre-commit total   16.01s / 1.98s / 3.08s
+#     go-lint          15.99s / 1.96s / 3.06s   <- the whole variance
+#     go-vet            2.67s / 1.07s / 2.69s
+#     go-format         0.04s / 0.05s / 0.05s
+# The <15s target this header used to assert holds only while golangci-lint's
+# cache is warm. A staged change that invalidates it costs ~16s, so the first
+# Go commit after a clone, a toolchain bump, or a wide edit blows the budget.
+# Quote the range, not one end of it.
+# `go vet ./...` is deliberately whole-repo rather than staged-scoped: at 1-3s
+# inside the hook it is never the bottleneck, and the extra coverage is free.
 
 pre-commit:
   parallel: true
@@ -16,34 +39,70 @@ pre-commit:
       run: |
         unformatted=$(gofmt -l {staged_files} 2>/dev/null)
         if command -v goimports >/dev/null 2>&1; then
-          unformatted="$unformatted$(goimports -l {staged_files} 2>/dev/null)"
+          # Newline separator matters: $(...) strips trailing newlines, so a
+          # bare "$unformatted$(goimports -l ...)" glues gofmt's last filename
+          # onto goimports' first and prints one unusable run-together path.
+          unformatted=$(printf '%s\n%s' "$unformatted" "$(goimports -l {staged_files} 2>/dev/null)")
         fi
+        unformatted=$(echo "$unformatted" | sed '/^$/d' | sort -u)
         if [ -n "$unformatted" ]; then
           echo "Unformatted files:"
-          echo "$unformatted" | sort -u
+          echo "$unformatted"
           exit 1
         fi
 
     go-lint:
       # Only lints new/modified code so existing warnings don't block commits.
+      #
+      # The diff base must be HEAD, not the bare `--new`. golangci-lint's own
+      # help for `--new`: "if there are unstaged changes or untracked files,
+      # only those changes are analyzed, else only changes in HEAD~ are
+      # analyzed." At commit time the staged change is usually the *only*
+      # change, so `--new` finds no unstaged work and silently falls back to
+      # linting HEAD~ — the previous commit — while reporting "0 issues" about
+      # the commit in progress. `--new-from-rev HEAD` is the staged diff.
       glob: "*.go"
       skip_empty: true
-      run: golangci-lint run --new --timeout 30s
+      run: golangci-lint run --new-from-rev HEAD --timeout 30s
 
     go-vet:
+      # Whole repo, not staged-scoped — see the cost note in the header.
       glob: "*.go"
       skip_empty: true
       run: go vet ./...
 
     migration-purity:
-      # Migrations must be DDL only — seed data belongs in seed.go.
+      # Migrations carry schema and data *shape* changes, not seed rows.
+      #
+      # Rejected: a literal `VALUES` clause — that is seed data, and it belongs
+      # in seed.go.
+      # Allowed: data migrations, which are legitimate and sometimes required —
+      #   * `UPDATE ... SET ...` / `DELETE FROM ...` backfills and cleanups;
+      #   * the `INSERT INTO t_new SELECT ... FROM t` copy that SQLite's
+      #     table-rebuild idiom requires, because SQLite cannot ALTER a CHECK
+      #     constraint. 20 of the 146 migrations in this repo already depend on
+      #     that form.
+      #
+      # The check anchors on the VALUES keyword rather than on INSERT because
+      # 60 of the 67 INSERT statements here start on a line that carries neither
+      # keyword (`INSERT INTO t (\n  cols...\n)\nSELECT`), so an INSERT-anchored
+      # line match cannot tell a seed from a rebuild. `--` comments are stripped
+      # first so prose about "values" does not trip the gate.
       glob: "internal/store/migrations/*.sql"
       skip_empty: true
       run: |
-        if grep -qiE '^\s*(INSERT|UPDATE|DELETE)\b' {staged_files}; then
-          echo "ERROR: Migrations must be DDL only (CREATE/ALTER/DROP)."
-          echo "Move INSERT/UPDATE/DELETE statements to seed.go."
-          grep -nHiE '^\s*(INSERT|UPDATE|DELETE)\b' {staged_files}
+        found=0
+        for f in {staged_files}; do
+          hits=$(sed 's/--.*//' "$f" | grep -niw VALUES) || continue
+          if [ "$found" = 0 ]; then
+            echo "ERROR: Migrations must not contain seed rows (a VALUES clause)."
+            echo "Move literal row data to seed.go. UPDATE/DELETE backfills and"
+            echo "INSERT ... SELECT table rebuilds are allowed."
+            found=1
+          fi
+          echo "$hits" | sed "s|^|$f:|"
+        done
+        if [ "$found" = 1 ]; then
           exit 1
         fi
 
@@ -52,18 +111,42 @@ pre-commit:
     # Safe to leave in Go-only repos — skip conditions prevent errors.
 
     frontend-lint:
+      # DISABLED 2026-08-24 — this command does not work in this repo, and was
+      # only ever inert because no hooks were installed. Now that they are, it
+      # had to be either fixed or switched off honestly; fixing it is tracked
+      # as CW-20260816-0087 and is not this task's scope.
+      #
+      # Measured from the repo root, which is where lefthook runs it:
+      #   npx --no-install biome --version        -> 0.3.3   (an unrelated
+      #                                              package; the project's is
+      #                                              Biome 2.4.7, resolvable
+      #                                              only from ui/)
+      #   ui/node_modules/.bin/biome check <clean tracked file>   -> exit 1
+      #   ...           same, plus --config-path ui               -> exit 1
+      # So the original line silently runs the WRONG binary, and the obvious
+      # repairs still fail on a known-clean file. biome's config lives at
+      # ui/biome.json and it resolves paths against its own cwd, so a working
+      # version has to run from ui/ with ui-relative paths — real work, not a
+      # flag. A hook that greenlights a commit by invoking an unrelated program
+      # is the exact "looks like a gate, is not" state this file was activated
+      # to end, so it stays off until it genuinely works.
+      #
+      # ui/package.json's own scripts remain the real check in the meantime.
+      skip: true
       glob: "*.{ts,tsx,js,jsx}"
       skip_empty: true
       run: npx biome check --no-errors-on-unmatched {staged_files}
-      # Skip entirely if none of the common frontend dirs exist.
-      skip:
-        - run: "test ! -d ui && test ! -d web && test ! -d frontend"
 
 pre-push:
   commands:
 
     go-test:
       # Full test suite gate before code reaches the remote.
+      # Measured on nanite @ 5ec930c8 (2026-08-24), `/usr/bin/time -p go test ./...`:
+      #   real 44.87s with nothing cached (99 packages ran, 0 cached)
+      #   real  4.32s with everything cached (99/99 cached)
+      # Tolerable for a push gate; the common case after a small change is
+      # nearer the low end.
       glob: "*.go"
       skip_empty: true
       run: go test ./...

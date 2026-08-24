@@ -28,8 +28,17 @@ See [TRADEMARK.md](./TRADEMARK.md) for details.
 ## Quick Start
 
 ```bash
+lefthook install                # required once per clone — installs git hooks
 go build ./cmd/nanite/
 ./nanite serve -port 8090 -db ./nanite.db -dev
+```
+
+`lefthook.yml` is tracked, but a tracked config installs no git hooks by itself.
+Skip `lefthook install` and the pre-commit format/lint/vet/migration checks and
+the pre-push test run simply never execute. Confirm it took:
+
+```bash
+find .git/hooks -type f ! -name '*.sample'   # expect pre-commit and pre-push
 ```
 
 See `docs/` for architecture and demo script.

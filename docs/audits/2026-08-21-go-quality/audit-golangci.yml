@@ -1,11 +1,32 @@
-# AUDIT-ONLY golangci-lint config. Not used by CI/hooks/make lint.
+# GATE CONFIG — EDITING THIS FILE MOVES THE QUALITY RATCHET.
+#
+# This is the lint config of the nightly full-repo quality gate.
+# `.github/workflows/full-repo-quality.yml:111,114` passes it to both
+# `golangci-lint linters` and `golangci-lint run`, and that output feeds
+# `scripts/quality-ratchet.py lint`. Changing the enabled-linter list or the
+# per-linter settings below changes what the gate counts and therefore what the
+# baseline in `.github/quality/full-repo-baseline.json` means.
+#
+# It began life audit-only, and said so here until 2026-08-24; it stopped being
+# audit-only when the gate adopted it. Anyone who trusted the old header would
+# have edited this file believing it was inconsequential. (verified-at 2a4cdf0f)
+#
 # Base = project .golangci.yml, plus complexity/duplication reporting linters
-# per docs guide section 15. Reporting only — not wired into any gate.
+# per docs guide section 15. NOT used by lefthook's pre-commit `go-lint` or by
+# `make lint` (Makefile:60) — both of those use the repo-root .golangci.yml.
 
 version: "2"
 
 run:
-  go: "1.25"
+  # Tracks go.mod:3 (`go 1.26.7`). Was pinned to "1.25" until 2026-08-24.
+  # Measured before changing it: this key is inert for the linter set enabled
+  # below. golangci-lint v2.11.4 reported the same 387 issues on
+  # ./internal/store/... at 1.25, 1.26, 1.26.7, with the key absent, and even at
+  # 1.16, with zero per-linter movement — no language-version-gated linter
+  # (copyloopvar, intrange, usestdlibvars, gocritic, modernize) is enabled here.
+  # So this was a stale-documentation defect, not a behavioural one; it is
+  # corrected so it stops reading as a real 1.25 constraint on the gate.
+  go: "1.26"
 
 linters:
   default: none

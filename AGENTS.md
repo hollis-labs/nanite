@@ -61,6 +61,15 @@ executors. Neither is subordinate to the other.
 
 ## Common operations
 
+First time in a fresh clone — install the git hooks. `lefthook.yml` is tracked,
+but a tracked config installs nothing; without this step none of the pre-commit
+or pre-push checks exist.
+
+```bash
+lefthook install
+find .git/hooks -type f ! -name '*.sample'   # verify: expect pre-commit, pre-push
+```
+
 Build (production — no `devmode` tag, signature verification unconditional):
 
 ```bash

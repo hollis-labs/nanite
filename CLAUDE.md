@@ -2,6 +2,21 @@
 
 Agent-agnostic multi-agent chat harness for Fragments Engine.
 
+## First-time setup in a fresh clone
+
+```bash
+lefthook install     # REQUIRED — installs the git hooks in .git/hooks
+```
+
+`lefthook.yml` is tracked, but a tracked config **installs nothing**. Until
+`lefthook install` has run in your clone, `find .git/hooks -type f ! -name '*.sample'`
+returns zero files and every pre-commit/pre-push check silently does not exist.
+Verify with that command; expect `pre-commit` and `pre-push` afterwards.
+
+If it errors with `core.hooksPath is set locally`, either
+`lefthook install --reset-hooks-path` (unsets it) or `lefthook install --force`
+(installs into the configured dir and leaves the setting alone).
+
 ## Build & Test
 
 ```bash
@@ -12,6 +27,14 @@ go test ./...
 # Frontend
 cd ui && npm install && npm run build
 ```
+
+**What the hooks gate.** pre-commit: `go-format` (gofmt + goimports, staged
+files), `go-lint` (`golangci-lint run --new-from-rev HEAD` — the staged diff),
+`go-vet` (`go vet ./...`, whole repo), `migration-purity` (no `VALUES` clause in
+`internal/store/migrations/*.sql` — seed rows belong in `seed.go`; `UPDATE`/
+`DELETE` backfills and `INSERT ... SELECT` table rebuilds are allowed),
+`frontend-lint` (biome). pre-push: `go test ./...` — measured 2026-08-24 at
+44.87s cold / 4.32s fully cached.
 
 **Deploying changes:** Always use Cerberus. Direct `go build` outputs to `./nanite` in the project root, but the running service uses the artifact at `~/.cerberus/apps/nanite/nanite-api-service/bin/nanite-api-service`. These are **separate binaries** — editing one does not affect the other.
 
@@ -85,7 +108,7 @@ Envelopes are structured UI cards injected into chat messages. The system has tw
 4. Verify the `data` shape the backend sends matches what the component expects
 5. Test both the streaming path (SSE deltas) and the persisted path (page reload)
 
-**CI check:** `node scripts/generate-plugin-imports.mjs --check` validates the generated file is up to date.
+**Staleness check — manual, not enforced.** `node scripts/generate-plugin-imports.mjs --check` validates that the generated file is up to date (`scripts/generate-plugin-imports.mjs:25`). **Nothing runs it automatically.** `grep -rn "generate-plugin-imports" .github/` returns no matches — no workflow invokes it, and the pre-commit hooks do not either. The only automatic path is regeneration, not validation: `ui/package.json:17-18` runs the script in write mode from `prebuild`/`predev`, so `npm run build` and `npm run dev` silently rewrite the file rather than failing on drift. Run the `--check` form yourself if you need the assertion. (verified-at 2a4cdf0f)
 
 **Known envelope types** (as of 2026-04-05):
 - Core primitives: `session-task`, `document-viewer`, `report-card`, `error-report`, `approval-card`, `proposal-card`

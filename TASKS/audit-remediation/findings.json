@@ -1406,7 +1406,7 @@
       },
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed UnloadPlugin (host.go:1240, exact match to audit's function-start citation) is unchanged. Complexity classification (essential vs. accidental extraction candidates) and the narrow TOCTOU gap both still apply as described; task file 13/05's Gated-on is none. [AD-35 DECIDED 2026-08-24: fix the load/unload TOCTOU; leave UnloadPlugin's structure alone. Extraction of the ~10 inlined teardown categories filed as post-remediation work -- a 346-line lock-disciplined function is a Wave-5-shaped risk without Wave 5's characterization-test budget.]"
     },
     {
@@ -1432,7 +1432,7 @@
       },
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed validateCrossRefs (validate.go:255) still exists with the described mechanically-repetitive shape. Optional generic-helper extraction; not urgent, no architect input needed for the finding itself."
     },
     {
@@ -1753,7 +1753,7 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: Manager.RemoveServer (manager.go:166-168) still holds `defer m.mu.Unlock()` for the whole function, including the transport `Close()` call at line 177 that can block on subprocess kill+reap."
     },
     {
@@ -1976,7 +1976,7 @@
       "report_section": "\u00a78.8",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: embed_mux_devmode.go:21 still stamps `def.Source = \"builtin\"`, the legacy value the sibling package's own doc says is retired. One-line fix, no architect input needed."
     },
     {
@@ -2047,7 +2047,7 @@
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: internal/elicitation/service_test_helpers.go still lacks the `_test.go` suffix (so it compiles into the production binary) and still defines elicitWithDuration as a near-duplicate of Elicit's body. Rename fix, no architect input needed."
     },
     {
@@ -2158,7 +2158,7 @@
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "accepted-risk",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed internal/chat's wide fan-out (11 internal-package imports) still mixes wire-vocabulary types with subsystem-specific response-handler wiring in one package. Finding's own requires_architect_decision:true and recommendation (\"consider whether subsystem-specific response handlers belong in their own subpackage\") is a genuine open architecture question, not a settled fix. [AD-31 DECIDED 2026-08-24: accept for this batch. Splitting internal/chat's vocabulary from its wiring is a Wave-5-sized architecture refactor and does not belong in mechanical cleanup. Follow-up filed in 14-followups/README.md's post-remediation backlog; not urgent, schedulable anytime.]"
     },
     {
@@ -2180,7 +2180,7 @@
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "defer",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed elicitation/service.go's Elicit still has the described three-way select shape. Finding's own recommendation: \"none recommended; recorded for completeness\" -- theoretical, negligible at production's 5-minute default timeout, no action needed."
     },
     {
@@ -2380,7 +2380,7 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed the three contextbroker sources (source_pcc.go, source_memory.go, source_conduit.go) still compute Relevance independently with no shared normalization contract. Finding's own requires_architect_decision:true and recommendation (\"document/enforce a shared relevance-normalization contract\") is a genuine open design question. [AD-32 DECIDED 2026-08-24: fix now. Document and enforce a shared 0-1 relevance-normalization contract across the three contextbroker sources -- merging differently-scaled values onto one ranking is arbitrary by construction, the same class as the unbounded-score bug AD-07 disposed of. A fuller convergence pass is in the post-remediation backlog.]"
     },
     {
@@ -2403,7 +2403,7 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "accepted-risk",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed the two independent token-estimation formulas (internal/context/tokens.go, internal/contextbroker/broker.go) still exist with the described floor-vs-round-up divergence. Finding's own requires_architect_decision:true and recommendation (converging would need a new shared lower-level package, given contextbroker's deliberate one-way dependency away from internal/context) is a genuine open design question. [AD-32 DECIDED 2026-08-24: accept for this batch. len/4 vs (len+3)/4 diverges by a few tokens; converging needs a new shared lower-level package to respect contextbroker's deliberate one-way dependency. Covered by the same post-remediation follow-up as GO-MEM-004 so the eventual fix is one coherent pass.]"
     },
     {
@@ -2426,7 +2426,7 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: zero production callers of Detector.Reset anywhere in loopdetect or its callers, so Detector.windows still has no production eviction path."
     },
     {
@@ -2494,7 +2494,7 @@
       "false_positive_considerations": "Low risk in practice -- local SQLite call, bounded.",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: RuntimeReaper's SweepOrphans (orphan_sweep.go:81) still has `_ = ctx`, discarding the context parameter so an in-flight DB call cannot be canceled by shutdown."
     },
     {
@@ -2952,7 +2952,7 @@
       },
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "false-positive",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Engages with the audit's own conclusion: agent.Boot (runtime/agent/agent.go:323, confirmed current) is still the second-highest-complexity function in the codebase, but the finding's own recommendation is explicit -- \"no fix required, essential complexity, correctly handled\" (same shape as cmdServe, a correctly-applied cleanup closure at every early-return point). The audit itself judged this not a defect, matching the false-positive disposition rather than a live remediation item."
     }
   ],

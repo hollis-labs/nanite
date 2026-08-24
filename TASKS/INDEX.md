@@ -1157,7 +1157,7 @@ the batch's final commit per AD-22, so this wave must land ahead of it.
 `14/02` activated `12/01` stage 2 after reducing its measured 353-finding
 `errcheck`/`errorlint`/`nilerr` backlog to zero; zero-tolerance is now enforced.
 
-The folder README also carries a register of **eleven follow-up candidates**
+The folder README also carries a register of **thirteen follow-up candidates**
 logged in `TASKS/ESCALATIONS.md` but not promoted to tasks — visible in one
 place rather than only chronologically. Promotion is the operator's call.
 
@@ -1169,7 +1169,7 @@ place rather than only chronologically. Promotion is the operator's call.
 | `13/02` | `13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md` | not-started | Wave 7 complete | — |
 | `13/03` | `13-mechanical-cleanup/03-naming-and-formatting-fixes.md` | not-started | **every other task in the batch** | AD-22 |
 | `13/04` | `13-mechanical-cleanup/04-low-risk-error-handling-batch.md` | reviewed | Wave 7 complete | — |
-| `13/05` | `13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md` | not-started | `11/05`, `11/10`, `09/02` | — |
+| `13/05` | `13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md` | reviewed | `11/05`, `11/10`, `09/02` | — |
 
 ### Load-bearing corrections found by the planning pass — real findings, not assumed
 

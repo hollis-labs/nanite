@@ -1822,3 +1822,47 @@ reviewed again.
 **Follow-up:** Every remaining Wave 8 implementation and review must run the
 complete tracked comparator, not infer Stage-1 health from the Stage-2
 correctness subset.
+
+## 2026-08-24 — Pre-existing `driveBootSession` closed-channel panic recurred
+
+**Raised by:** `13/05` full ordinary verification.
+
+**Question / mismatch:** An asynchronous goroutine panicked with
+`send on closed channel` at
+`internal/service.(*chatServiceImpl).driveBootSession.func2` in
+`internal/service/chat_boot_drive.go:297` (created at line 290). Because the
+panic occurred after asynchronous test activity, the output did not attribute
+an exact `Test...` name. This matches the pre-existing TOCTOU race already
+recorded in the 2026-08-22 Skills task-10 review entry and blamed there to
+commit `7a0e37936`, months before audit remediation.
+
+**Resolution:** No `13/05` code imports or changes the failing path. The two
+likely spawning tests passed at `-count=100`, their pair passed JSON stress at
+`-count=1000`, `internal/service` passed on retry, and a fresh full ordinary
+suite passed. The task did not invent a test attribution or expand scope.
+
+**Follow-up:** The existing owner should synchronize the `closed` check with
+the send/close transition in `driveBootSession` and add a deterministic race
+regression. Recurrence confirms this remains live rather than historical
+noise.
+
+## 2026-08-24 — `internal/worker.TestShutdown` transiently reported `failed`
+
+**Raised by:** fresh `13/05` full-race review.
+
+**Question / mismatch:** One `go test -race -count=1 ./...` run failed in the
+untouched `internal/worker` package because `TestShutdown` observed a worker in
+status `failed` rather than `cancelled`. The test starts `SpawnFull` in a
+goroutine and waits a fixed 50 ms before shutdown rather than waiting on a
+deterministic worker/delegator-start barrier. That timing is a plausible cause,
+but the single failure did not prove the production transition responsible.
+
+**Resolution:** No worker code or test was changed inside `13/05`. The task has
+no diff or import path in `internal/worker`; isolated
+`go test -race -count=50 ./internal/worker -run '^TestShutdown$'` passed, and
+both the worker fix's and re-reviewer's later full race suites passed with
+`TestShutdown` completing in roughly four seconds.
+
+**Follow-up:** Replace the fixed sleep with a start barrier, then stress the
+shutdown/cancellation terminal-state contract and fix production only if that
+deterministic test exposes a real `failed`-overwrites-`cancelled` transition.

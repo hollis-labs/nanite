@@ -32,8 +32,8 @@ their wave's predecessors only.
 
 ## Candidate register
 
-`TASKS/ESCALATIONS.md` records **eleven** follow-up candidates as of 2026-08-24;
-eight remain open and three are now closed.
+`TASKS/ESCALATIONS.md` records **thirteen** follow-up candidates as of 2026-08-24;
+ten remain open and three are now closed.
 Listed here so they are visible in one place rather than only in a chronological
 log. Open candidates remain operator-controlled because each was deliberately
 judged out of scope by the review that found it.
@@ -98,6 +98,16 @@ in this batch that touched operator data.
     `BumpAgentScheduleFireCount` failure remains unlogged and prevents the
     expiry write from running. The audited expiry-write failure itself now
     logs; this adjacent failure is a separate control-flow/observability gap.
+12. **`driveBootSession` can panic sending to a concurrently closed channel**
+    (pre-existing; recurred during `13/05`). An asynchronous SendInput failure
+    path checks `closed` and later sends without synchronizing the close; the
+    resulting `send on closed channel` panic cannot always be attributed to a
+    named test. The original 2026-08-22 escalation remains the owning defect.
+13. **`internal/worker.TestShutdown` has a startup/status timing flake**
+    (`13/05` review). One full race run observed `failed` rather than
+    `cancelled`; the exact-tree retry passed and isolated race `-count=50`
+    passed. Replace its fixed startup sleep with a deterministic barrier and
+    pin the intended terminal-state transition.
 
 ## Post-remediation backlog — deliberately *after* this batch
 

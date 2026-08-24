@@ -32,6 +32,43 @@ their wave's predecessors only.
 
 ## Candidate register
 
+> **Triaged 2026-08-24 — all ten open candidates are now tracked in Torque**
+> under project `PRJ-20260417-0002` (Nanite), tagged `audit-remediation-followup`.
+> Every one was re-verified against source at commit `8cd83423` before being
+> promoted; three register claims did not survive that check and are corrected
+> in place below.
+>
+> **This register is now the historical record. Torque is the live tracker** —
+> if the two disagree, Torque wins. Per `docs/engineering/tracking-integrity.md`,
+> exactly one copy is authoritative; this note designates which.
+>
+> | Candidate | Torque | Note |
+> |---|---|---|
+> | 1 — leftover plugin archive | `CW-20260824-0003` | |
+> | 2 — `callGrep` first-line panic | `CW-20260824-0002` | |
+> | 5 — `TODO(ctx-sweep)` markers | `CW-20260824-0010` | count corrected; scoping task first |
+> | 7 — two test-validity gaps | `CW-20260824-0006` | |
+> | 8 — Team-Slot messaging island | `CW-20260824-0009` | **decided: delete** |
+> | 9 — `lint-goroutines` not in CI | `CW-20260824-0007` | |
+> | 10 — skills fork UI | `CW-20260824-0012` | routed to UI/UX workstream |
+> | 11 — silent one-shot expiry suppression | `CW-20260824-0004` | |
+> | 12 — `driveBootSession` channel race | `CW-20260824-0001` | **two call sites, not one** |
+> | 13 — `worker.TestShutdown` flake | `CW-20260824-0005` | |
+>
+> Post-remediation backlog: P1 `CW-20260824-0013`, P2 `CW-20260824-0014`,
+> P3 `CW-20260824-0015`, P4 `CW-20260824-0011`.
+>
+> **One gap found during triage that this register never carried:** the batch
+> closed with **four findings at `task_status: validated`, not `reviewed`** —
+> `13/03` (`GO-SVCCORE-008`, `GO-AGENT-004`, `GO-CHAT-007`) and `06/03`
+> (`GO-STORE-005`) were both closed at operator direction without a
+> fresh-reviewer pass. Not drift — the task files and `findings.json` agree —
+> but "113/113" reads as fully reviewed and it is 109. Tracked as
+> `CW-20260824-0008`.
+>
+> Creating these items is not dispatching them. The AD-24 freeze stands, and
+> every Torque task above was created `manual=true` and cannot be scheduled.
+
 `TASKS/ESCALATIONS.md` records **thirteen** follow-up candidates as of 2026-08-24;
 ten remain open and three are now closed.
 Listed here so they are visible in one place rather than only in a chronological
@@ -54,8 +91,11 @@ judged out of scope by the review that found it.
    **CLOSED BY TASK `14/03` on 2026-08-23**. Shared template-copy fixtures
    preserve per-test database files while eliminating repeated fresh migration
    runs; both formerly blocked aggregates and `go test -race ./...` pass.
-5. **246 `TODO(ctx-sweep)` markers** (`06/03`). A greppable map of every call
+5. **`TODO(ctx-sweep)` markers** (`06/03`). A greppable map of every call
    site with no context plumbing at all. Newly visible work, never scoped.
+   This register originally stored **246**; derived at `8cd83423` it was
+   **239** across 59 files. Do not store it again — derive it:
+   `grep -rn 'TODO(ctx-sweep)' --include='*.go' ./internal ./cmd ./pkg | wc -l`
 6. ~~**Test isolation: `Container`-constructing tests must redirect *all*
    independently resolved stores.**~~ — **CLOSED BY `08/10`, CONFIRMED BY
    `14/03`**. Service and API package TestMain setup redirects every HOME/XDG/
@@ -71,9 +111,15 @@ judged out of scope by the review that found it.
    of it — installed routing reflexes dispatch through
    `chat_reflex_dispatch`/`task_execute` and never invoke the explicit
    Team-Slot messaging path. Not one of the audit's six, so no finding, AD, or
-   task covers it. Decide it the way the other six were decided; the open
-   question is whether explicit `@Team Slot` messaging is intended product
-   direction, which belongs with whoever owns Teams.
+   task covers it.
+   **DECIDED 2026-08-24 (operator): delete it.** This code was previously
+   directed to be removed; unfinished work is the responsibility of whatever
+   task owns the feature, and git history is the reference copy. No dead code.
+   Scoped in `CW-20260824-0009` — the deletion is surgical, not a whole-file
+   removal: `TeamRoutingService` itself is live (`cmd/nanite/main.go:634`,
+   `InstallTeamRunRouting` via `internal/api/team_runs.go:181`). Deleting the
+   explicit-addressing half also strands `store.TeamAuthorityVerbMayMessage`
+   with no enforcement site, which the task resolves as a named sub-decision.
 
 Closed candidates 4 and 6 were the two with leverage beyond their own line
 items: one unblocked a deferred verification gate and a standing performance
@@ -112,6 +158,12 @@ in this batch that touched operator data.
     flake will now **intermittently red CI** — which was not true when it was
     accepted as a follow-up. It is intermittent, so it will fail confusingly
     and irreproducibly rather than consistently.
+    **Correction, 2026-08-24:** the same check-then-send TOCTOU exists at a
+    *second* site — `agentEventBridge.fanout` in
+    `internal/service/agent_deps.go` reads `!router.closed.Load()` and then
+    sends on `router.ch` with nothing excluding a concurrent `closeOnce()`.
+    A fix confined to `chat_boot_drive.go` leaves that one racing; the fix
+    belongs on `sessionRouter` itself. Scoped in `CW-20260824-0001`.
 13. **`internal/worker.TestShutdown` has a startup/status timing flake**
     (`13/05` review). One full race run observed `failed` rather than
     `cancelled`; the exact-tree retry passed and isolated race `-count=50`

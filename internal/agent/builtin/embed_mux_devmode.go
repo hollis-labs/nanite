@@ -18,7 +18,7 @@ func MuxOrchestratorAgent() (*agent.Definition, error) {
 	if err != nil {
 		return nil, err
 	}
-	def.Source = "builtin"
+	def.Source = SourceInternal
 	def.SourceRef = "embedded:mux-orchestrator.md"
 	return def, nil
 }

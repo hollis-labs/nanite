@@ -1,7 +1,7 @@
 # Low-risk hygiene grab-bag: 12 findings with no shared root cause, each too small for its own task
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** in-progress
 **Depends on:** none within this batch.
 **Touches:** `internal/mcp/manager.go`, `internal/plugin/install/validate.go`, `internal/agent/builtin/embed_mux_devmode.go`, `internal/agent/builtin/profiles.go`, `internal/contextbroker/source_pcc.go`, `internal/contextbroker/source_memory.go`, `internal/contextbroker/source_conduit.go`, `internal/context/tokens.go`, `internal/contextbroker/broker.go`, `internal/loopdetect/detector.go`, `internal/recovery/orphansweep/orphan_sweep.go`, `internal/elicitation/service_test_helpers.go`, `internal/chat` (architecture note only, no required edit), `internal/elicitation/service.go`, `internal/plugin/host.go`.
 
@@ -82,7 +82,81 @@ themselves.
 
 ## Work log
 
-<!-- Worker fills this in as it goes, including the GO-MEM-006 eviction-mechanism choice and the GO-PLUGIN-004 TOCTOU decision. -->
+- 2026-08-24: Implemented the operator's current scope, which supersedes several
+  stale rows and checkboxes above. AD-35 closes `GO-PLUGIN-004` now with a
+  dedicated `Host.lifecycleMu` held across each complete `LoadPlugin` and
+  `UnloadPlugin` transaction. `h.mu` remains released around plugin callbacks.
+  No `UnloadPlugin` teardown helper was extracted; that structural work already
+  lives in `14-followups/README.md` P3. A regression holds A inside a reentrant
+  unload callback, proves dependent B cannot enter `Load`, then proves B fails
+  its dependency check after A is removed.
+- `GO-MCPTOOL-009`: `Manager.RemoveServer` now removes the server, trust/source
+  metadata, tool slice entries, and uniform-name index entries under `m.mu`,
+  releases the lock, and only then calls `Close`. Tests prove removal is visible
+  and an unrelated writer proceeds while a closer blocks. The 14/02 warning on
+  close failure remains intact and is asserted with server name and error.
+- `GO-PLUGIN-005`: live `validateCrossRefs` contains eight uniqueness maps, not
+  the stale count of nine. It remains unchanged: the eight loops also carry
+  section-specific required-field, pattern, composite-key, or matcher rules, so
+  a generic uniqueness helper would add indirection without removing those
+  distinct semantics. No `GO-PLUGIN-006` sub-registry work was inferred; AD-35
+  assigns the postponed teardown extraction to P3.
+- `GO-AGENT-005`: the devmode mux profile now stamps `SourceInternal`; its
+  devmode-only regression proves both the provenance value and the resulting
+  internal/read-only management class.
+- AD-32 / `GO-MEM-004`: upgraded the stale documentation-only task row to the
+  decided enforcement scope. `Broker.Fetch` centrally normalizes relevance from
+  all four live sources (`conduit`, `memory`, `pcc`, `session`) to a finite
+  `[0,1]` contract: NaN/negative values become 0 and positive overflow becomes
+  1. The interface/item documentation and a four-source boundary regression pin
+  the contract. `source_pcc.go` was not changed; its 14/02 not-found-as-absence
+  and real-error propagation tests remain green. `GO-MEM-005` receives no code
+  or duplicate comments; the accepted estimator divergence already has its P2
+  follow-up.
+- `GO-MEM-006`: chose bounded state internal to `Detector`, avoiding session-hook
+  expansion. A FIFO of session IDs caps retained windows at 4096 by default;
+  `WithMaxSessions` makes the cap small and deterministic in tests. Regressions
+  prove oldest-session eviction clears detection state and `Reset` removes its
+  FIFO entry.
+- `GO-MEM-009`: threaded `context.Context` through `RuntimeStore.ListRunningRows`
+  and `MarkRuntimeOrphaned`, the production adapter, fakes, and the live reaper
+  calls. Regressions prove both calls receive the sweep context and canceled
+  list work returns `context.Canceled`. The production store already accepted
+  these contexts.
+- `GO-CHAT-003`: moved only the test helper from
+  `service_test_helpers.go` to `export_test.go`; `go list` confirms neither
+  helper filename is in the production `GoFiles` set. `GO-CHAT-008`/`009`
+  receive no code; the former already has the decided P1 architecture follow-up
+  and the latter remains an accepted theoretical select race.
+- `GO-RUNTIME-008`: no master complexity list exists. Closed administratively
+  here as directed; `agent.Boot` is unchanged. No shared tracker file was
+  edited.
+- Focused verification passed: all changed packages with `-count=1`; devmode
+  builtin tests; and `-race` regressions for plugin lifecycle serialization,
+  MCP blocking-close/warning behavior, four-source relevance normalization,
+  detector FIFO/reset behavior, and RuntimeReaper context propagation.
+  Correctness lint (`errcheck,errorlint,nilerr`) reports `0 issues`.
+- Repository verification: `go build ./...` and `go vet ./...` passed. A first
+  `go test -count=1 ./...` run failed in `internal/service` when an asynchronous
+  `driveBootSession` goroutine panicked with `send on closed channel` at
+  `internal/service/chat_boot_drive.go:297` (`driveBootSession.func2`, created
+  at line 290). Because the panic came from the background goroutine, that run
+  did not attribute it to an exact `Test...` name. Both plausible spawning
+  tests passed independently at `-count=100` and together under JSON output at
+  `-count=1000`; `go test -count=1 ./internal/service` and a fresh full ordinary
+  run also passed. This is the same pre-existing SendInput-failure-handler
+  TOCTOU already recorded in `TASKS/ESCALATIONS.md` (2026-08-22, blame commit
+  `7a0e37936`), not a new 13/05 finding; the repeat occurrence is a durable
+  escalation candidate but was not fixed or re-filed here. Finally,
+  `go test -race -count=1 ./...` passed, including the 233.972s store tail.
+- Temporary integration attribution: the full audit ratchet currently reports
+  3256 vs the committed 3255 baseline solely because integrated 13/04 commit
+  `284027e2` added one cyclop/gocyclo finding in
+  `internal/task/service_test.go:255`; no 13/05-modified function is a current
+  cyclop/gocyclo finding, and Stage 2 remains zero. The orchestrator reopened
+  13/04 for correction. This task will validate the combined 3255/3255 state
+  before changing status to `implemented`; it does not alter the baseline or
+  the prior task.
 
 ## Review notes
 

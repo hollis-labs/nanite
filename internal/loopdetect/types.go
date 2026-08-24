@@ -21,6 +21,11 @@ const DefaultWindowSize = 10
 // triggers a detection.
 const DefaultThreshold = 3
 
+// DefaultMaxSessions bounds per-session detector state for long-running
+// processes. When the cap is reached, the least recently created session
+// window is evicted.
+const DefaultMaxSessions = 4096
+
 // Fingerprint is an opaque string hash derived from (tool_name, normalized_args).
 // Two calls are fingerprint-equal iff they name the same tool and carry
 // semantically identical arguments (JSON key order–independent).

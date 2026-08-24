@@ -166,18 +166,10 @@ func (m *Manager) DiscoverServerTools(ctx context.Context, serverName string) ([
 // RemoveServer unregisters an MCP server, closing its transport if possible.
 func (m *Manager) RemoveServer(name string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	transport, ok := m.servers[name]
 	if !ok {
+		m.mu.Unlock()
 		return
-	}
-
-	// Close the transport if it supports it.
-	if closer, ok := transport.(interface{ Close() error }); ok {
-		if err := closer.Close(); err != nil {
-			slog.Warn("mcp: close transport during removal failed", "server", name, "err", err)
-		}
 	}
 
 	delete(m.servers, name)
@@ -195,6 +187,15 @@ func (m *Manager) RemoveServer(name string) {
 		}
 	}
 	m.tools = filtered
+	m.mu.Unlock()
+
+	// Closing a subprocess transport can block on kill+reap. Registry state is
+	// already consistent, so unrelated manager operations must not wait for it.
+	if closer, ok := transport.(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil {
+			slog.Warn("mcp: close transport during removal failed", "server", name, "err", err)
+		}
+	}
 
 	slog.Info("mcp: removed server", "name", name)
 }

@@ -74,9 +74,7 @@ func sweepOrphansAt(ctx context.Context, deps *agent.Dependencies, pidZeroGrace 
 	if deps == nil || deps.Store == nil {
 		return 0, errors.New("orphansweep.RuntimeReaper.SweepOnce: Dependencies.Store is required")
 	}
-	_ = ctx
-
-	rows, err := deps.Store.ListRunningRows()
+	rows, err := deps.Store.ListRunningRows(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("orphansweep.RuntimeReaper.SweepOnce: list running rows: %w", err)
 	}
@@ -91,7 +89,7 @@ func sweepOrphansAt(ctx context.Context, deps *agent.Dependencies, pidZeroGrace 
 		if !drop {
 			continue
 		}
-		if err := deps.Store.MarkRuntimeOrphaned(row.ID, reason); err != nil {
+		if err := deps.Store.MarkRuntimeOrphaned(ctx, row.ID, reason); err != nil {
 			slog.Warn("agent_runtime: orphan reconciliation persist failed",
 				"runtime_id", row.ID,
 				"provider", row.Provider,

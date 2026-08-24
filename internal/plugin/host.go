@@ -95,6 +95,10 @@ type crudHandlerEntry struct {
 }
 
 type Host struct {
+	// lifecycleMu serializes complete load/unload transactions. h.mu still
+	// protects registry state and is deliberately released around plugin
+	// callbacks, which may re-enter ordinary Host methods.
+	lifecycleMu     sync.Mutex
 	mu              sync.RWMutex
 	plugins         map[string]plugin.Plugin
 	eventHooks      map[string][]eventHookEntry
@@ -1179,6 +1183,9 @@ func (h *Host) PlaceArtifact(sessionID, messageID, name, mimeType, storagePath s
 
 // LoadPlugin loads a plugin into the host.
 func (h *Host) LoadPlugin(p plugin.Plugin) error {
+	h.lifecycleMu.Lock()
+	defer h.lifecycleMu.Unlock()
+
 	id := p.ID()
 
 	// Pre-checks under lock.
@@ -1239,6 +1246,9 @@ func (h *Host) LoadPlugin(p plugin.Plugin) error {
 // the host mutex. We validate under lock, capture the plugin reference,
 // release, then call Unload.
 func (h *Host) UnloadPlugin(id string) error {
+	h.lifecycleMu.Lock()
+	defer h.lifecycleMu.Unlock()
+
 	h.mu.Lock()
 
 	p, exists := h.plugins[id]

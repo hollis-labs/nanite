@@ -27,6 +27,16 @@ func WithThreshold(n int) Option {
 	return func(d *Detector) { d.threshold = n }
 }
 
+// WithMaxSessions overrides the number of session windows retained by a
+// Detector. Non-positive values leave the bounded default in place.
+func WithMaxSessions(n int) Option {
+	return func(d *Detector) {
+		if n > 0 {
+			d.maxSessions = n
+		}
+	}
+}
+
 // WithCallback registers a callback invoked on every detection event.
 func WithCallback(cb DetectCallback) Option {
 	return func(d *Detector) { d.onDetect = cb }
@@ -38,19 +48,22 @@ func WithCallback(cb DetectCallback) Option {
 // Create one Detector per application instance (not per session) and reuse it
 // across sessions — internal state is partitioned by session_id.
 type Detector struct {
-	mu         sync.Mutex
-	windows    map[string]*sessionWindow
-	windowSize int
-	threshold  int
-	onDetect   DetectCallback
+	mu          sync.Mutex
+	windows     map[string]*sessionWindow
+	sessionFIFO []string
+	windowSize  int
+	threshold   int
+	maxSessions int
+	onDetect    DetectCallback
 }
 
 // New creates a Detector with the supplied options.
 func New(opts ...Option) *Detector {
 	d := &Detector{
-		windows:    make(map[string]*sessionWindow),
-		windowSize: DefaultWindowSize,
-		threshold:  DefaultThreshold,
+		windows:     make(map[string]*sessionWindow),
+		windowSize:  DefaultWindowSize,
+		threshold:   DefaultThreshold,
+		maxSessions: DefaultMaxSessions,
 	}
 	for _, o := range opts {
 		o(d)
@@ -129,7 +142,16 @@ func (d *Detector) Record(s Signal) (Detection, bool) {
 func (d *Detector) Reset(sessionID string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if _, ok := d.windows[sessionID]; !ok {
+		return
+	}
 	delete(d.windows, sessionID)
+	for i, id := range d.sessionFIFO {
+		if id == sessionID {
+			d.sessionFIFO = append(d.sessionFIFO[:i], d.sessionFIFO[i+1:]...)
+			break
+		}
+	}
 }
 
 // getOrCreate returns (or creates) the sessionWindow for sessionID.
@@ -137,12 +159,18 @@ func (d *Detector) Reset(sessionID string) {
 func (d *Detector) getOrCreate(sessionID string) *sessionWindow {
 	w, ok := d.windows[sessionID]
 	if !ok {
+		if len(d.windows) >= d.maxSessions {
+			oldest := d.sessionFIFO[0]
+			d.sessionFIFO = d.sessionFIFO[1:]
+			delete(d.windows, oldest)
+		}
 		w = &sessionWindow{
 			fingerprints: make([]Fingerprint, 0, d.windowSize),
 			cap:          d.windowSize,
 			threshold:    d.threshold,
 		}
 		d.windows[sessionID] = w
+		d.sessionFIFO = append(d.sessionFIFO, sessionID)
 	}
 	return w
 }

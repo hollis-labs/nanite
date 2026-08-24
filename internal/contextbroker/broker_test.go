@@ -3,6 +3,7 @@ package contextbroker
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 )
@@ -118,6 +119,51 @@ func TestBrokerFetch_MultipleSources(t *testing.T) {
 	}
 	if len(packet.Manifest.SourcesUsed) != 2 {
 		t.Errorf("expected 2 sources used, got %d", len(packet.Manifest.SourcesUsed))
+	}
+}
+
+func TestBrokerFetch_NormalizesRelevanceAcrossLiveSources(t *testing.T) {
+	sources := []*mockSource{
+		{name: "conduit", items: []ContextItem{{Source: "conduit", Key: "positive-infinity", TokenEstimate: 1, Relevance: math.Inf(1)}}},
+		{name: "memory", items: []ContextItem{{Source: "memory", Key: "nan", TokenEstimate: 1, Relevance: math.NaN()}}},
+		{name: "pcc", items: []ContextItem{{Source: "pcc", Key: "negative", TokenEstimate: 1, Relevance: -0.25}}},
+		{name: "session", items: []ContextItem{
+			{Source: "session", Key: "overflow", TokenEstimate: 1, Relevance: 1.25},
+			{Source: "session", Key: "valid", TokenEstimate: 1, Relevance: 0.6},
+		}},
+	}
+	b := New(BudgetConfig{
+		MaxTokens: 100,
+		SourceWeights: map[string]float64{
+			"conduit": 0.25,
+			"memory":  0.25,
+			"pcc":     0.25,
+			"session": 0.25,
+		},
+	}, sources[0], sources[1], sources[2], sources[3])
+
+	packet, err := b.Fetch(context.Background(), Intent{Type: IntentCustom})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	got := make(map[string]float64, len(packet.Items))
+	for _, item := range packet.Items {
+		got[item.Key] = item.Relevance
+		if math.IsNaN(item.Relevance) || math.IsInf(item.Relevance, 0) || item.Relevance < 0 || item.Relevance > 1 {
+			t.Errorf("item %q retained invalid relevance %v", item.Key, item.Relevance)
+		}
+	}
+	want := map[string]float64{
+		"positive-infinity": 1,
+		"nan":               0,
+		"negative":          0,
+		"overflow":          1,
+		"valid":             0.6,
+	}
+	for key, score := range want {
+		if got[key] != score {
+			t.Errorf("relevance[%q] = %v, want %v", key, got[key], score)
+		}
 	}
 }
 

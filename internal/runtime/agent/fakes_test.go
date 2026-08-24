@@ -86,7 +86,7 @@ func (f *fakeRuntimeStore) UpdateState(id, state string, pid int) error {
 	return nil
 }
 
-func (f *fakeRuntimeStore) MarkRuntimeOrphaned(id, reason string) error {
+func (f *fakeRuntimeStore) MarkRuntimeOrphaned(_ context.Context, id, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.orphaned[id] = reason
@@ -107,7 +107,7 @@ func (f *fakeRuntimeStore) GetCheckpoint(string) (*RuntimeCheckpoint, error) {
 	return f.checkpoint, nil
 }
 
-func (f *fakeRuntimeStore) ListRunningRows() ([]*RuntimeRow, error) {
+func (f *fakeRuntimeStore) ListRunningRows(_ context.Context) ([]*RuntimeRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make([]*RuntimeRow, len(f.listRows))

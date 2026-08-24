@@ -604,8 +604,8 @@ func (s *agentRuntimeStore) GetCheckpoint(id string) (*runtimeagent.RuntimeCheck
 	}, nil
 }
 
-func (s *agentRuntimeStore) ListRunningRows() ([]*runtimeagent.RuntimeRow, error) {
-	rows, err := s.store.ListRunningAgentRuntimeRows(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+func (s *agentRuntimeStore) ListRunningRows(ctx context.Context) ([]*runtimeagent.RuntimeRow, error) {
+	rows, err := s.store.ListRunningAgentRuntimeRows(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -633,8 +633,8 @@ func (s *agentRuntimeStore) ListRunningRows() ([]*runtimeagent.RuntimeRow, error
 	return out, nil
 }
 
-func (s *agentRuntimeStore) MarkRuntimeOrphaned(id, reason string) error {
-	return s.store.MarkAgentRuntimeOrphaned(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, reason)
+func (s *agentRuntimeStore) MarkRuntimeOrphaned(ctx context.Context, id, reason string) error {
+	return s.store.MarkAgentRuntimeOrphaned(ctx, id, reason)
 }
 
 // LogEvent satisfies runtimeagent.RuntimeStore's postmortem-logging method

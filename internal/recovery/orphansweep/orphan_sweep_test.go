@@ -3,6 +3,7 @@ package orphansweep
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -37,6 +38,8 @@ type fakeRuntimeStore struct {
 	listRows  []*agent.RuntimeRow
 	createErr error
 	events    []fakeLoggedEvent
+	listCtx   context.Context
+	markCtx   context.Context
 }
 
 // fakeLoggedEvent captures one LogEvent call for test assertions.
@@ -69,9 +72,13 @@ func (f *fakeRuntimeStore) UpdateState(id, state string, pid int) error {
 	return nil
 }
 
-func (f *fakeRuntimeStore) MarkRuntimeOrphaned(id, reason string) error {
+func (f *fakeRuntimeStore) MarkRuntimeOrphaned(ctx context.Context, id, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.markCtx = ctx
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.orphaned[id] = reason
 	return nil
 }
@@ -84,9 +91,13 @@ func (f *fakeRuntimeStore) GetCheckpoint(string) (*agent.RuntimeCheckpoint, erro
 	return nil, nil
 }
 
-func (f *fakeRuntimeStore) ListRunningRows() ([]*agent.RuntimeRow, error) {
+func (f *fakeRuntimeStore) ListRunningRows(ctx context.Context) ([]*agent.RuntimeRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.listCtx = ctx
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	out := make([]*agent.RuntimeRow, len(f.listRows))
 	copy(out, f.listRows)
 	return out, nil
@@ -137,6 +148,41 @@ func TestRuntimeReaper_SweepOnce_RequiresStore(t *testing.T) {
 	_, err := reaper.SweepOnce(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "Store") {
 		t.Fatalf("expected Store-required error, got %v", err)
+	}
+}
+
+func TestRuntimeReaper_SweepOnce_PropagatesContextToRuntimeStore(t *testing.T) {
+	type contextKey string
+	const key contextKey = "reaper-test"
+	ctx := context.WithValue(context.Background(), key, "same-context")
+	store := newFakeRuntimeStore()
+	store.listRows = []*agent.RuntimeRow{{ID: "dead", PID: 1<<22 + 31}}
+
+	reaper := NewRuntimeReaper(&agent.Dependencies{Store: store}, RuntimeReaperOptions{})
+	orphaned, err := reaper.SweepOnce(ctx)
+	if err != nil {
+		t.Fatalf("SweepOnce: %v", err)
+	}
+	if orphaned != 1 {
+		t.Fatalf("orphaned = %d, want 1", orphaned)
+	}
+	if store.listCtx == nil || store.listCtx.Value(key) != "same-context" {
+		t.Fatal("ListRunningRows did not receive SweepOnce context")
+	}
+	if store.markCtx == nil || store.markCtx.Value(key) != "same-context" {
+		t.Fatal("MarkRuntimeOrphaned did not receive SweepOnce context")
+	}
+}
+
+func TestRuntimeReaper_SweepOnce_CanceledContextStopsList(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	store := newFakeRuntimeStore()
+	reaper := NewRuntimeReaper(&agent.Dependencies{Store: store}, RuntimeReaperOptions{})
+
+	_, err := reaper.SweepOnce(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SweepOnce error = %v, want context.Canceled", err)
 	}
 }
 

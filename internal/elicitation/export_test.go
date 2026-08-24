@@ -9,12 +9,11 @@ import (
 // timeout directly. This lets tests exercise sub-second timeouts without
 // manipulating environment variables.
 //
-// Not part of the production API — _test.go callers reference this via the
-// package-internal alias exposed below.
+// Not part of the production API; this export exists only while testing.
 type ServiceForTest struct {
-	emitter        Emitter
-	timeoutDur     time.Duration
-	inner          *Service // carries the pending map
+	emitter    Emitter
+	timeoutDur time.Duration
+	inner      *Service // carries the pending map
 }
 
 // NewForTest constructs a Service with an explicit duration timeout.

@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"time"
 )
@@ -53,6 +54,9 @@ type ContextSource interface {
 
 	// Fetch retrieves context items for the given intent within a token budget.
 	// Implementations should respect the budget and return items sorted by relevance.
+	// Relevance shares one contract across every source: a finite score in
+	// [0,1]. Broker.Fetch defensively normalizes every returned item before
+	// cross-source comparison.
 	Fetch(ctx context.Context, intent Intent, budget int) ([]ContextItem, error)
 }
 
@@ -116,7 +120,9 @@ type ContextItem struct {
 	// TokenEstimate is the estimated token count for this item.
 	TokenEstimate int
 
-	// Relevance is a 0.0–1.0 score indicating how well this matches the intent.
+	// Relevance is a finite 0.0–1.0 score indicating how well this matches the
+	// intent. The broker clamps values above 1 to 1 and maps NaN or negative
+	// values to 0 before items from different sources are compared.
 	Relevance float64
 
 	// Metadata holds source-specific extra information.
@@ -190,6 +196,9 @@ func (b *Broker) Fetch(ctx context.Context, intent Intent) (*ContextPacket, erro
 			slog.Warn("contextbroker: source error", "source", src.Name(), "err", err)
 			continue
 		}
+		for i := range items {
+			items[i].Relevance = normalizeRelevance(items[i].Relevance)
+		}
 
 		slog.Debug("contextbroker: source returned",
 			"source", src.Name(), "items", len(items), "duration", elapsed, "budget", srcBudget)
@@ -210,6 +219,20 @@ func (b *Broker) Fetch(ctx context.Context, intent Intent) (*ContextPacket, erro
 		"budget", b.budget.MaxTokens, "truncated", packet.Manifest.Truncated)
 
 	return packet, nil
+}
+
+// normalizeRelevance enforces the finite [0,1] scale used for cross-source
+// ranking. Invalid low-side values are least relevant; positive overflow is
+// most relevant.
+func normalizeRelevance(score float64) float64 {
+	switch {
+	case math.IsNaN(score), score < 0:
+		return 0
+	case score > 1:
+		return 1
+	default:
+		return score
+	}
 }
 
 // allocateBudgets distributes the total token budget across sources

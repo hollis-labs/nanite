@@ -304,13 +304,14 @@ type RuntimeStore interface {
 
 	// ListRunningRows returns the persisted lifecycle rows currently in
 	// state="launching" or state="running". Used by orphansweep.RuntimeReaper.SweepOnce at
-	// daemon bootstrap to reconcile rows whose PID is no longer alive.
-	ListRunningRows() ([]*RuntimeRow, error)
+	// daemon bootstrap to reconcile rows whose PID is no longer alive. The
+	// caller's context must reach the database query so shutdown can cancel it.
+	ListRunningRows(ctx context.Context) ([]*RuntimeRow, error)
 
 	// MarkRuntimeOrphaned transitions a runtime row to state="orphaned"
 	// with the supplied reason. orphansweep.RuntimeReaper.SweepOnce calls this for rows whose
-	// persisted PID is no longer alive.
-	MarkRuntimeOrphaned(runtimeID, reason string) error
+	// persisted PID is no longer alive; ctx governs that persistence call.
+	MarkRuntimeOrphaned(ctx context.Context, runtimeID, reason string) error
 
 	// LogEvent appends a row to the shared event_log postmortem trail.
 	// orphansweep.RuntimeReaper.SweepOnce calls this alongside MarkRuntimeOrphaned so

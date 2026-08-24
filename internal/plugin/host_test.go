@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,6 +155,102 @@ func TestLoadPlugin(t *testing.T) {
 
 	if retrieved != testPlugin {
 		t.Error("Retrieved plugin is different from loaded plugin")
+	}
+}
+
+// blockingReentrantUnloadPlugin pauses during Unload after re-entering an
+// ordinary Host method. It exposes the lifecycle window needed to prove a
+// dependent plugin cannot begin loading until removal is complete.
+type blockingReentrantUnloadPlugin struct {
+	TestPlugin
+	host          *Host
+	unloadEntered chan struct{}
+	allowUnload   chan struct{}
+}
+
+func (p *blockingReentrantUnloadPlugin) Unload() error {
+	// lifecycleMu may be held here, but h.mu must not be: plugin callbacks
+	// are allowed to re-enter ordinary Host operations.
+	_ = p.host.ListPlugins()
+	close(p.unloadEntered)
+	<-p.allowUnload
+	p.loaded = false
+	return nil
+}
+
+type observingLoadPlugin struct {
+	TestPlugin
+	loadEntered chan struct{}
+}
+
+func (p *observingLoadPlugin) Load(plugin.Host) error {
+	close(p.loadEntered)
+	p.loaded = true
+	return nil
+}
+
+func TestPluginLifecycle_DependencyCheckSerializedWithUnload(t *testing.T) {
+	host := NewHost(http.NewServeMux(), NewLogger("test"))
+	a := &blockingReentrantUnloadPlugin{
+		TestPlugin:    TestPlugin{id: "a", name: "A", version: "1.0.0"},
+		host:          host,
+		unloadEntered: make(chan struct{}),
+		allowUnload:   make(chan struct{}),
+	}
+	if err := host.LoadPlugin(a); err != nil {
+		t.Fatalf("LoadPlugin(A): %v", err)
+	}
+
+	unloadDone := make(chan error, 1)
+	go func() { unloadDone <- host.UnloadPlugin("a") }()
+	t.Cleanup(func() {
+		select {
+		case <-a.allowUnload:
+		default:
+			close(a.allowUnload)
+		}
+	})
+	select {
+	case <-a.unloadEntered:
+		// Reaching this point also proves A's reentrant ListPlugins callback
+		// did not deadlock while the lifecycle transaction was held.
+	case <-time.After(time.Second):
+		t.Fatal("UnloadPlugin(A) did not enter reentrant callback")
+	}
+
+	b := &observingLoadPlugin{
+		TestPlugin:  TestPlugin{id: "b", name: "B", version: "1.0.0", deps: []string{"a"}},
+		loadEntered: make(chan struct{}),
+	}
+	loadDone := make(chan error, 1)
+	loadAttempted := make(chan struct{})
+	go func() {
+		close(loadAttempted)
+		loadDone <- host.LoadPlugin(b)
+	}()
+	<-loadAttempted
+
+	select {
+	case <-b.loadEntered:
+		t.Fatal("dependent B entered Load while A was unloading")
+	case err := <-loadDone:
+		t.Fatalf("LoadPlugin(B) returned before A completed unload: %v", err)
+	case <-time.After(100 * time.Millisecond):
+		// Expected: B waits on lifecycleMu for A's full unload transaction.
+	}
+
+	close(a.allowUnload)
+	if err := <-unloadDone; err != nil {
+		t.Fatalf("UnloadPlugin(A): %v", err)
+	}
+	err := <-loadDone
+	if err == nil || !strings.Contains(err.Error(), `depends on "a" which is not loaded`) {
+		t.Fatalf("LoadPlugin(B) after A removal = %v, want missing-dependency error", err)
+	}
+	select {
+	case <-b.loadEntered:
+		t.Fatal("dependent B entered Load despite failed dependency check")
+	default:
 	}
 }
 

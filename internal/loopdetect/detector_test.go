@@ -181,6 +181,55 @@ func TestSessionIsolation(t *testing.T) {
 	}
 }
 
+func TestDetector_EvictsOldestSessionAtConfiguredCap(t *testing.T) {
+	d := New(WithMaxSessions(2))
+	repeated := sig("s1", "t1", "dev_bash", raw(`{"command":"ls"}`))
+	d.Record(repeated)
+	d.Record(repeated)
+	d.Record(sig("s2", "t1", "dev_read", raw(`{"path":"/two"}`)))
+	d.Record(sig("s3", "t1", "dev_read", raw(`{"path":"/three"}`)))
+
+	if len(d.windows) != 2 {
+		t.Fatalf("retained windows = %d, want cap 2", len(d.windows))
+	}
+	if _, ok := d.windows["s1"]; ok {
+		t.Fatal("oldest session s1 was not evicted")
+	}
+	if _, ok := d.windows["s2"]; !ok {
+		t.Fatal("newer session s2 was unexpectedly evicted")
+	}
+	if _, ok := d.windows["s3"]; !ok {
+		t.Fatal("newest session s3 was unexpectedly evicted")
+	}
+
+	// Recreating s1 starts with a fresh window; its two pre-eviction records
+	// must not contribute to a detection.
+	if _, detected := d.Record(repeated); detected {
+		t.Fatal("recreated session inherited evicted detection state")
+	}
+	if _, detected := d.Record(repeated); detected {
+		t.Fatal("recreated session detected before three fresh records")
+	}
+	if _, detected := d.Record(repeated); !detected {
+		t.Fatal("recreated session did not detect after three fresh records")
+	}
+}
+
+func TestDetector_ResetRemovesSessionFromFIFO(t *testing.T) {
+	d := New(WithMaxSessions(2))
+	d.Record(sig("s1", "t1", "tool", raw(`{}`)))
+	d.Record(sig("s2", "t1", "tool", raw(`{}`)))
+	d.Reset("s1")
+	d.Record(sig("s3", "t1", "tool", raw(`{}`)))
+
+	if _, ok := d.windows["s2"]; !ok {
+		t.Fatal("reset left a stale FIFO entry that evicted live session s2")
+	}
+	if _, ok := d.windows["s3"]; !ok {
+		t.Fatal("new session s3 missing after reset")
+	}
+}
+
 // ─── Reset ───────────────────────────────────────────────────────────────────
 
 func TestReset_ClearsWindow(t *testing.T) {

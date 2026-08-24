@@ -221,12 +221,19 @@ func TestDetector_ResetRemovesSessionFromFIFO(t *testing.T) {
 	d.Record(sig("s2", "t1", "tool", raw(`{}`)))
 	d.Reset("s1")
 	d.Record(sig("s3", "t1", "tool", raw(`{}`)))
+	d.Record(sig("s4", "t1", "tool", raw(`{}`)))
 
-	if _, ok := d.windows["s2"]; !ok {
-		t.Fatal("reset left a stale FIFO entry that evicted live session s2")
+	if len(d.windows) != 2 {
+		t.Fatalf("retained windows = %d, want cap 2", len(d.windows))
+	}
+	if _, ok := d.windows["s2"]; ok {
+		t.Fatal("oldest live session s2 was not evicted")
 	}
 	if _, ok := d.windows["s3"]; !ok {
-		t.Fatal("new session s3 missing after reset")
+		t.Fatal("newer session s3 was unexpectedly evicted")
+	}
+	if _, ok := d.windows["s4"]; !ok {
+		t.Fatal("newest session s4 is missing")
 	}
 }
 

@@ -157,6 +157,21 @@ themselves.
   audit-config correctness-only invocation also reported `0 issues`. The
   temporary 3256 attribution above is therefore resolved, and the committed
   baseline was not changed by this task.
+- 2026-08-24 follow-up fix for the fresh review's P2 test-validity finding:
+  `TestDetector_ResetRemovesSessionFromFIFO` previously stopped after adding
+  `s3`, which merely refilled the map after `Reset(s1)` and never exercised an
+  eviction. The repaired sequence adds `s4`, asserts the retained map remains
+  exactly at cap two, and proves the correct oldest live session (`s2`) is
+  evicted while `s3` and `s4` remain. Mutation-removing `Reset`'s FIFO cleanup
+  now fails the test with `retained windows = 3, want cap 2`; restoring the
+  production code makes it pass. No production change was required.
+- Post-fix verification passed: ordinary and race `internal/loopdetect` suites;
+  the complete pinned 109-package comparator at baseline 3255/current 3254
+  with Stage 2 `errcheck=0`, `errorlint=0`, `nilerr=0`; `go build ./...`;
+  `go vet ./...`; `go test -count=1 ./...`; and a fresh
+  `go test -race -count=1 ./...` (store tail 233.916s). The unrelated
+  `internal/worker.TestShutdown` failure seen during the prior review did not
+  recur; `internal/worker` passed the full race run in 4.132s.
 
 ## Review notes
 

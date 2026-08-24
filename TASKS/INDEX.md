@@ -1166,7 +1166,7 @@ place rather than only chronologically. Promotion is the operator's call.
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
 | `13/01` | `13-mechanical-cleanup/01-confirmed-dead-code-removal.md` | reviewed | `09/02`, `09/04`, `03/01`, `00/02` | AD-09, AD-07 — **scope-changing, not merely gating** |
-| `13/02` | `13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md` | not-started | Wave 7 complete | — |
+| `13/02` | `13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md` | reviewed | Wave 7 complete | — |
 | `13/03` | `13-mechanical-cleanup/03-naming-and-formatting-fixes.md` | not-started | **every other task in the batch** | AD-22 |
 | `13/04` | `13-mechanical-cleanup/04-low-risk-error-handling-batch.md` | reviewed | Wave 7 complete | — |
 | `13/05` | `13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md` | reviewed | `11/05`, `11/10`, `09/02` | — |

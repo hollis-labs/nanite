@@ -505,7 +505,7 @@
       "report_section": "\u00a78.1",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still pervasive across internal/store/*.go (CW-YYYYMMDD-NNNN and TASKS/*.md references embedded in comments) -- not hand-recounted per the guide's own instruction not to chase LOC/count metrics for their own sake. Genuinely an architect-scoped trim-pass question (which comments are pure task-ID citation vs. load-bearing invariant documentation), per the finding's own requires_architect_decision:true. [AD-30 DECIDED 2026-08-24: trim comments that are purely a task-ID or TASKS/*.md pointer; keep any that explain an invariant or a why, even if they also cite a task. Per-comment judgment, not a bulk pattern delete.]"
     },
     {
@@ -692,7 +692,7 @@
       "false_positive_considerations": "Blast radius is bounded -- only strips Nanite's own previously-written managed markers, not arbitrary user content.",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: cleanupRemovedAdapters's doc comment (adapter_cleanup.go:32) still claims \"rollback is handled by the existing snapshotAdapterTargets() pass\" but grep confirms snapshotAdapterTargets is never called anywhere in the codebase (only defined, in adapters.go:116), and no `Rollback` function exists outside an unrelated `tx.Rollback()` DB-transaction call in internal/messaging/handoff.go. [AD-34 DECIDED 2026-08-24: delete snapshotAdapterTargets and correct cleanupRemovedAdapters' comment to describe the destructive strip with no rollback. The false comment is the live harm; building real rollback is a separate future task and must not be blocked behind a comment already claiming it.]"
     },
     {
@@ -842,7 +842,7 @@
       "report_section": "\u00a78.3",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
       "disposition": "defer",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed the 4 cited files (ingest.go, known_tools_backfill.go, cli_structured_input_fallback.go, agent_deps.go) still carry long task-ID/PR-review-history comments. Finding's own recommendation: \"no immediate action; candidate for a future documentation-consolidation pass.\""
     },
     {
@@ -1034,7 +1034,7 @@
       "report_section": "\u00a78.4",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
       "disposition": "defer",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed the long package-header/justification comments still exist at roughly the described scale (chat_reflex_dispatch.go 467 lines, team_routing.go 771 lines, both unchanged since the audit). The finding's own recommendation is \"no specific edit proposed... worth an architect pass\" -- no immediate action, deferred pending any future house-style decision from 12/02's engineering-standards work."
     },
     {
@@ -2115,7 +2115,7 @@
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: hint_catalog.go's package doc still claims the loader reads config/think-hints/hints.yaml, but the actual `//go:embed hints/*.yaml` directive (line 62) embeds a different path. Currently byte-identical files per the finding, but no build step keeps them in sync -- concrete comment-or-generate-step fix, no architect input needed. [AD-37 DECIDED 2026-08-24: correct the package doc to name the file go:embed actually reads. The two files are byte-identical with no build step keeping them so, which is the trap -- the wrong doc looks right until they diverge.]"
     },
     {
@@ -2896,7 +2896,7 @@
       "report_section": "\u00a78.13",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
       "disposition": "defer",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed cmdServe (cmd/nanite/main.go) and agent.Boot (runtime/agent/agent.go) both still carry the described comment-density pattern. Finding's own recommendation: an architect-level pass could migrate history to docs/decisions/, but this is explicitly not a mechanical-stripping task and requires_architect_decision is false (no blocking decision needed) -- deferred, no immediate action."
     },
     {

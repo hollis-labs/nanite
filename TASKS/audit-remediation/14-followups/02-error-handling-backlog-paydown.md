@@ -2,7 +2,7 @@
 
 **Phase:** Audit remediation — Wave 9 (follow-ups taxonomy)
 **Execution:** Wave 8, with explicit operator approval
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `12/01` stage 1 (the regression gate) should land first, so this paydown is measured against a gate that already exists.
 **Blocks:** Cleared — `12/01` stage 2 was activated after errcheck, errorlint, and nilerr reached zero.
 **Parallel-safe with:** **nothing meaningful.** It touches error handling across the tree; treat it like the ctx sweep — its own window, landing in as few merges as practical.
@@ -231,3 +231,16 @@ Run it yourself on the final state and read the output.
   or approval is claimed.
 
 ## Review notes
+
+- Fresh review was split across behavior/error propagation, errcheck cleanup
+  semantics, and Stage 2/tracker integrity. The first pass found missing
+  behavioral regressions, incorrect `NextShortCode` error ordering, incomplete
+  artifact failure cleanup, three under-specified diagnostics, a post-close log
+  sent through the closed sink, inaccurate ignore comments, and stale tracking.
+  Separate worker commits `2d532314` and `0adb654e` fixed those findings.
+- All three reviewers passed the finished integrated diff. They independently
+  confirmed the focused regressions, atomic artifact promotion and cleanup,
+  all explicit-ignore rationales, diagnostic context, fail-closed Stage 2
+  configuration coverage, exact tracker scope, and current `0/0/0` correctness
+  counts. Focused ordinary/race checks, the 13 comparator tests, build, vet,
+  full ordinary tests, full race tests, and diff checks passed.

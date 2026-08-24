@@ -1149,7 +1149,7 @@ Waves 0-3 as decisions or review findings with no task attached.
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
 | `14/01` | `14-followups/01-remove-default-seeded-catalog-source.md` | not-started | `01/01` (landed) | AD-05 (decided) |
-| `14/02` | `14-followups/02-error-handling-backlog-paydown.md` | implemented | `12/01` stage 1 | AD-21 (decided) |
+| `14/02` | `14-followups/02-error-handling-backlog-paydown.md` | reviewed | `12/01` stage 1 | AD-21 (decided) |
 
 **Sequencing: after Wave 7, before `13/03`.** The repo-wide `gofmt` sweep stays
 the batch's final commit per AD-22, so this wave must land ahead of it.

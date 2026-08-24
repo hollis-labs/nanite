@@ -33,44 +33,32 @@ remains the only work authorized to proceed.
 ## Correction to the planning note before anything else — read this first
 
 The planning note behind this kickoff says Wave 8 is "fully ungated, all
-decisions made." **That's true at the task-dispatch level — no `Gated on:
-AD-NN, open` line blocks any of the five tasks from starting — but it is not
-true at the finding level, and the distinction matters for two of them.**
-Independently re-verified against current `ARCHITECT-DECISIONS.md` and the
-task files themselves while writing this kickoff: **six individual findings
-inside `13/01`, `13/02`, and `13/05` are each explicitly marked "decision
-needed, do not resolve unilaterally" in their own task file text, and none
-of the six has a corresponding `AD-NN` entry anywhere in the decision
-queue.** This is not a new discovery — it was logged to `TASKS/ESCALATIONS.md`
-on 2026-08-23 (*"Wave 8's three mechanical-cleanup tasks carry six
-`requires_architect_decision` items with no queue entry"*) specifically so
-whoever wrote this wave's kickoff wouldn't have to rediscover it. Three
-close cousins from that same entry *have* since been resolved with real
-`AD-NN` records — AD-29 (`GO-MCPTOOL-004`, closed via `11/09` in Wave 6),
-AD-33 (`GO-STORE-008`, `13/01` Bucket A), AD-30 (`GO-STORE-009`, `13/02`'s
-trim pass) — which is very likely why the planning note now reads as
-"decisions made": three of nine did get made. **The other six did not:**
+decisions made." **That was wrong when this kickoff was drafted, and the
+kickoff author was right to check rather than trust it.** Six individual
+findings inside `13/01`, `13/02` and `13/05` were each marked "decision needed,
+do not resolve unilaterally" in their own task text with no `AD-NN` entry.
 
-| Finding | Task | What's undecided |
+**All six have since been decided — 2026-08-24, AD-34 through AD-37.** The
+table below is now instructions, not open questions. **Implement exactly what
+each row says; do not treat the alternatives as still available**, because for
+several of them the rejected option is the more tempting one.
+
+| Finding | Task | Decision — implement this |
 |---|---|---|
-| `GO-SVCCORE-003` | `13/02` | Wire the promised rollback into `freshScaffold`, or correct the doc comment that falsely claims one exists — a real destructive-operation safety-net question, medium severity, heavier than the rest of this batch |
-| `GO-CHAT-006` | `13/02` | Fix the doc comment to point at the real `//go:embed` path, or add a generate step that makes the documented path real |
-| `GO-SVCCORE-007` | `13/01` Bucket B | Keep `WithAgentCycleKindForAPI` as documented scaffolding, or remove the writer + its two `internal/api` call sites |
-| `GO-MCPTOOL-005` | `13/01` Bucket B | Same shape — keep `TurnToolNamesFromContext`'s dead-reader scaffolding, or remove both writer and reader |
-| `GO-CHAT-005` | `13/01` Bucket B | Wire an actual resource-lock feature using `PrefixLock`/`PrefixState`/`LockTTL`, or remove all three — no live writer half to preserve either way |
-| `GO-PLUGIN-004` | `13/05` | Close the traced TOCTOU window in concurrent plugin load/unload, or accept it as a documented limitation — a real, narrow concurrency bug, not a style observation |
+| `GO-SVCCORE-003` | `13/02` | **AD-34:** delete `snapshotAdapterTargets`; correct the doc comment to describe a destructive strip with **no** rollback. **Do not build the rollback** — explicitly rejected for this wave. The false comment is the harm: it tells a reader a safety net exists so auditing stops there. |
+| `GO-CHAT-006` | `13/02` | **AD-37:** fix the doc comment to name the file `//go:embed` actually reads. **No generate step, no consolidation** — both rejected as disproportionate. |
+| `GO-SVCCORE-007` | `13/01` B | **AD-36:** remove. Writer plus context key. The "documented scaffolding" framing was considered and rejected. |
+| `GO-MCPTOOL-005` | `13/01` B | **AD-36:** remove. Same shape, and it costs work on **every** tool dispatch for a value nothing reads. |
+| `GO-CHAT-005` | `13/01` B | **AD-36:** remove `PrefixLock`/`PrefixState`/`LockTTL`. **Do not wire a resource-lock feature** — building one to justify existing code was rejected. |
+| `GO-PLUGIN-004` | `13/05` | **AD-35:** close the TOCTOU. **Leave `UnloadPlugin`'s structure alone** — extracting its ~10 inlined teardown categories is filed as post-remediation P3, not this wave. |
 
-**Do not dispatch `13/01`, `13/02`, or `13/05` past the point where a worker
-would reach these rows without resolving this first.** Each of the six needs
-either its own `AD-NN` entry (mirroring how AD-06 through AD-33 have been
-recorded for every other wire/retire- or comment-vs-code-shaped call in this
-batch) or an explicit operator confirmation that the task's own in-body
-"present both options, don't decide unilaterally" framing is sufficient
-without a queue entry. Given every other batch decision of this exact shape
-got a real `AD-NN` record, the second path would be the outlier — raise this
-with the operator before dispatch, don't default to the second path
-yourself. The three of these tasks' *other* content (everything not in this
-table) has no such gap and can proceed normally.
+Read each AD's full entry in `ARCHITECT-DECISIONS.md` before implementing; the
+rationale matters, particularly for AD-34 and AD-36 where the rejected option
+is the one a well-meaning worker would reach for.
+
+The pre-flight gate that previously blocked these rows is **satisfied**. Do not
+re-litigate the six; if you believe one is wrong, escalate rather than deciding
+differently.
 
 ## Things about this specific wave that won't be obvious from the batch README alone
 
@@ -154,10 +142,12 @@ of how idle the rest of the batch looks.
 
 1. **Waves 0 through 7 are all closed.** Confirm directly against
    `TASKS/INDEX.md`.
-2. **Resolve (or get explicit operator sign-off to proceed without
-   resolving) the six-item gap above before any worker reaches those
-   specific rows in `13/01`, `13/02`, or `13/05`.** This is the single most
-   important gate in this wave.
+2. ~~Resolve the six-item gap~~ — **satisfied 2026-08-24 (AD-34 through
+   AD-37).** Instead: confirm each of the six task rows is implemented as its
+   decision states, and that no worker chose a rejected alternative. AD-34 and
+   AD-36 are the ones to check most closely — in both, the rejected option
+   (build the rollback; wire the resource-lock feature) is the one a
+   well-meaning worker reaches for.
 3. **Confirm with the operator whether `14/01`/`14/02` are being dispatched
    alongside this wave** (gotcha A) — don't assume either way.
 4. **Re-run gotcha (B)'s `gofmt -l` command yourself** and confirm the
@@ -198,9 +188,11 @@ re-verifies every task, not just re-reads the Work Log.
 - **`13/04`** — confirm `GO-SVCEXEC-006` was treated as the priority item
   it's flagged as, not downgraded to "same as the other four" during
   implementation.
-- **`13/05`** — confirm the `GO-PLUGIN-004` TOCTOU decision was actually
-  recorded (not just the mechanical helper-extraction half, which has no
-  decision gate), and confirm the Wave 5 constraint on `Host` decomposition
+- **`13/05`** — `GO-PLUGIN-004` is AD-35: TOCTOU closed, `UnloadPlugin`'s
+  structure untouched. Confirm the worker did **not** also extract the ~10
+  inlined teardown categories — that is post-remediation P3, and doing it here
+  would restructure a 346-line lock-disciplined function with no
+  characterization-test budget. Also confirm the Wave 5 constraint on `Host` decomposition
   (no all-category migration sweep) was respected.
 
 ## Scope fences
@@ -260,7 +252,8 @@ When all five tasks are `reviewed` (and `14/01`/`14/02` too, if bundled in
 per gotcha A), dispatch `doc-writer` for `WAVE-8-HANDOFF.md` and
 `WAVE-8-SUMMARY.md`. This is very likely the batch's last numbered wave —
 have the handoff state plainly: whether all six gap findings from the
-correction above got real `AD-NN` records or explicit operator sign-off,
+correction above was implemented as its `AD-NN` states (AD-34 through AD-37,
+all decided 2026-08-24) rather than via a rejected alternative,
 `13/03`'s final gofmt count and confirmation it landed alone with a clean
 `gofmt -l` afterward, and whether anything remains open in
 `14-followups/README.md`'s candidate register that should block calling the

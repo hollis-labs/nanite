@@ -1,7 +1,7 @@
 # Low-risk hygiene grab-bag: 12 findings with no shared root cause, each too small for its own task
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch.
 **Touches:** `internal/mcp/manager.go`, `internal/plugin/install/validate.go`, `internal/agent/builtin/embed_mux_devmode.go`, `internal/agent/builtin/profiles.go`, `internal/contextbroker/source_pcc.go`, `internal/contextbroker/source_memory.go`, `internal/contextbroker/source_conduit.go`, `internal/context/tokens.go`, `internal/contextbroker/broker.go`, `internal/loopdetect/detector.go`, `internal/recovery/orphansweep/orphan_sweep.go`, `internal/elicitation/service_test_helpers.go`, `internal/chat` (architecture note only, no required edit), `internal/elicitation/service.go`, `internal/plugin/host.go`.
 
@@ -175,4 +175,34 @@ themselves.
 
 ## Review notes
 
-<!-- Reviewer fills this in: pass/fail per row, what was independently re-verified (e.g. confirmed GO-CHAT-003's helper is genuinely excluded from a production build after rename). -->
+- **PASS (fresh review and re-review, 2026-08-24).** The original review of
+  implementation `76eabc61` plus task finalization `2c2c06ed` independently
+  confirmed every production boundary: full Host lifecycle serialization
+  without holding `h.mu` across reentrant callbacks; MCP registry removal under
+  lock followed by `Close` after unlock with the 14/02 warning preserved; the
+  unchanged eight-map `validateCrossRefs` structure; devmode
+  `SourceInternal`; central finite `[0,1]` relevance normalization across all
+  four live sources without changing PCC absence-versus-error behavior;
+  bounded detector state; RuntimeStore context propagation and cancellation;
+  the test-only elicitation helper rename; and the stated no-code dispositions.
+  The pre-existing `driveBootSession` panic remained correctly attributed to
+  its existing escalation. That review found one issue: the original detector
+  reset test was a false positive because adding only `s3` refilled the cap and
+  never forced FIFO eviction.
+- Re-review of fix `356f1b97` confirmed its diff changes only the detector test
+  and this task record, with no production change. Independently removing only
+  `Reset`'s FIFO cleanup made the strengthened `s1,s2,Reset(s1),s3,s4`
+  sequence fail with `retained windows = 3, want cap 2`; restoring the cleanup
+  made the exact test and full `internal/loopdetect` package pass. A
+  `-race -count=100` run of the eviction and reset regressions also passed,
+  proving the repaired test observes both the configured cap and correct live
+  FIFO eviction rather than map refill alone.
+- Independent final gates passed on the exact fixed tree: the pinned
+  golangci-lint v2.11.4 comparator discovered 109 tracked packages and reported
+  baseline 3255/current 3254 with no increase (`gocognit` 257 to 256), while
+  Stage 2 remained `errcheck=0`, `errorlint=0`, `nilerr=0`; `go build ./...`;
+  `go vet ./...`; `go test -count=1 ./...`; and
+  `go test -race -count=1 ./...`. The full race run included
+  `internal/store` at 242.594s and `internal/worker` at 4.214s; the prior
+  transient `internal/worker.TestShutdown` failure did not recur. No review
+  findings remain.

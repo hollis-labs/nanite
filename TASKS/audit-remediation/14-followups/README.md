@@ -102,19 +102,21 @@ in this batch that touched operator data.
     (pre-existing; recurred during `13/05`). An asynchronous SendInput failure
     path checks `closed` and later sends without synchronizing the close; the
     resulting `send on closed channel` panic cannot always be attributed to a
-    named test. The original 2026-08-22 escalation remains the owning defect.
+    named test. The original 2026-08-22 escalation remains the owning defect;
+    `git blame` dates it to `7a0e37936` (2026-05-19), long before this batch.
+    **Its consequence changed on 2026-08-24 and this is now the highest-value
+    candidate here.** `13/03`'s race gate reproduced it as a real
+    `WARNING: DATA RACE` (`chansend1` at `chat_boot_drive.go:297` racing
+    `sessionRouter.closeOnce`). With `12/01`'s gate live, `14/03` making the
+    aggregate race suite runnable in 260s, and `14/02` activating stage 2, this
+    flake will now **intermittently red CI** — which was not true when it was
+    accepted as a follow-up. It is intermittent, so it will fail confusingly
+    and irreproducibly rather than consistently.
 13. **`internal/worker.TestShutdown` has a startup/status timing flake**
     (`13/05` review). One full race run observed `failed` rather than
     `cancelled`; the exact-tree retry passed and isolated race `-count=50`
     passed. Replace its fixed startup sleep with a deterministic barrier and
     pin the intended terminal-state transition.
-
-10. **`chat_boot_drive.go` send-on-closing-channel race** (pre-existing,
-    `7a0e37936`, 2026-05-19). Surfaced by `13/03`'s race gate; intermittent.
-    **Its consequence changed**: with `12/01`'s gate live, `14/03` making the
-    race suite runnable, and stage 2 active, this flake will now intermittently
-    red CI. It was tracked only in `ESCALATIONS.md` under the Skills batch and
-    absent from this register until 2026-08-24.
 
 ## Post-remediation backlog — deliberately *after* this batch
 

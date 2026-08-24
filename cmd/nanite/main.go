@@ -110,6 +110,12 @@ func closeStoreBestEffort(ctx context.Context, s *store.Store) {
 	}
 }
 
+func closeLoggingOutput(closer io.Closer, stderr io.Writer) {
+	if err := closer.Close(); err != nil {
+		_, _ = fmt.Fprintf(stderr, "close logging output failed: %v\n", err) // stderr is the last independent diagnostic sink; no fallback remains if it fails.
+	}
+}
+
 func cmdServe(args []string) error {
 	return cmdServeWithInitializers(args, slogx.Init, naniteotel.Init)
 }
@@ -183,11 +189,7 @@ func cmdServeWithInitializers(
 	if logErr != nil {
 		slog.Warn("slog handler init failed, continuing with stdlib log", "err", logErr)
 	} else {
-		defer func() {
-			if err := logCloser.Close(); err != nil {
-				slog.Warn("close logging output failed", "err", err)
-			}
-		}()
+		defer closeLoggingOutput(logCloser, os.Stderr)
 	}
 
 	// Load agentrc config (user-level + project-level, merged).

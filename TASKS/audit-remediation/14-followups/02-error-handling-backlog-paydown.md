@@ -7,7 +7,7 @@
 **Parallel-safe with:** **nothing meaningful.** It touches error handling across the tree; treat it like the ctx sweep — its own window, landing in as few merges as practical.
 **Gated on:** AD-21 — decided; this task *is* the decided work.
 **requires_security_review:** false
-**requires_regression_test:** false — this must not change behaviour, so there is no new behaviour to test. The existing suite passing unchanged is the safety net.
+**requires_regression_test:** true — semantic review found behavior-changing fixes; dedicated regressions cover each confirmed defect in addition to the unchanged full suite.
 
 ---
 
@@ -182,17 +182,51 @@ Run it yourself on the final state and read the output.
 - Activated `12/01` Stage 2 only after all three correctness linters reached
   zero. The comparator now requires Stage 2 active, requires exactly
   `errcheck`/`errorlint`/`nilerr`, refuses nonzero committed baselines for
-  them, and independently rejects any future finding. Eight comparator tests
-  cover the positive and negative cases. The full audit-config ratchet passes
-  at **3,259/3,259**; incidental reductions in `govet` (619 to 617) and
+  them, and independently rejects any future finding. The initial comparator
+  suite covered eight positive and negative cases. The full audit-config
+  ratchet passed at **3,259/3,259**; incidental reductions in `govet` (619 to 617) and
   `staticcheck` (75 to 74) were preserved in the committed Stage 1 baseline.
-- Final verification on the finished tree: correctness lint reports
+- Initial implementation verification: correctness lint reported
   `errcheck=0`, `errorlint=0`, `nilerr=0` (`0 issues`, exit 0); full
   audit-config ratchet exit 0; `python3 -m py_compile` exit 0;
   `python3 -m unittest scripts/quality-ratchet_test.py` runs 8 tests and exits
   0; `git diff --check` exit 0; `go build ./...` exit 0; `go vet ./...` exit 0;
   `go test -count=1 ./...` exit 0; and
   `go test -race -count=1 ./...` exit 0 (`internal/store` 226.687s). No review
+  or approval is claimed.
+- Formal review-fix pass, 2026-08-24: added regressions for every confirmed
+  behavior change: a non-directory PCC base proves non-ENOENT `ReadDir`
+  failures propagate; malformed persisted subagent `created_at` prevents
+  approval and preserves requested status; corrupt session metadata returns an
+  error and remains byte-for-byte unchanged; a closed database proves
+  `NextShortCode` does not turn query failures into `c1`; and injected artifact
+  copy/close failures prove primary-error precedence, staging cleanup, no DB
+  record, and preservation of any existing final-path file.
+- Artifact uploads now write to a same-directory temporary file and atomically
+  rename it only after copy and close succeed. Added a per-API test seam rather
+  than global mutable state, so close failure is reliable under both ordinary
+  and race tests. The original final path is never created or truncated on
+  copy/close failure.
+- Corrected reviewer-confirmed observability gaps: autocomplete walk warnings
+  include root and error; MCP update discovery and malformed args/env/
+  env-allowlist warnings include server identity and underlying error; logging
+  sink close failure goes directly to an independent stderr writer after the
+  sink is closed; and three web-fetch cleanup comments now describe their
+  actual redirect, retryable-5xx, and non-retryable-4xx branches.
+- Expanded the Stage 2 comparator suite from 8 to 13 cases. It now proves
+  absent or structurally malformed `stage_2`, a missing active flag, missing
+  linters, and the wrong linter set all fail closed, in addition to the prior
+  zero/nonzero correctness-count checks.
+- Formal review-fix verification on the finished tree: `jq empty` and
+  `git diff --check` exit 0; `python3 -m py_compile` exit 0; all 13 comparator
+  tests pass; every new focused regression passes; correctness lint reports
+  `errcheck=0`, `errorlint=0`, and `nilerr=0` (`0 issues`); the full tracked
+  109-package audit ratchet passes at **3,255/3,255** with no new-from-HEAD
+  finding. Artifact factoring reduced `cyclop` 290 to 289, `gocyclo` 287 to
+  286, and `gosec` 637 to 635; those reductions are preserved in the committed
+  baseline. `go build ./...`, `go vet ./...`, and
+  `go test -count=1 ./...` all exit 0; `go test -race -count=1 ./...` exits 0
+  with `internal/api` at 108.973s and `internal/store` at 224.709s. No review
   or approval is claimed.
 
 ## Review notes

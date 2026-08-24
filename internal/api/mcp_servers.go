@@ -113,7 +113,8 @@ func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		a.Services.MCP.RemoveServer(name)
 		a.registerMCPTransport(&cfg)
 		if _, err := a.Services.MCP.AutoDiscover(context.Background(), a.Services.Store); err != nil {
-			slog.Warn("api: MCP tool discovery after update failed")
+			// #nosec G706 -- server and err are structured operational diagnostics, not a formatted log message.
+			slog.Warn("api: MCP tool discovery after update failed", "server", cfg.Name, "err", err)
 		}
 	}
 
@@ -200,9 +201,9 @@ func (a *API) registerMCPTransport(cfg *store.MCPServerConfig) {
 
 	switch cfg.TransportType {
 	case "stdio":
-		args := decodeMCPStringSlice(cfg.Args, "args")
-		env := decodeMCPStringSlice(cfg.Env, "env")
-		envAllowlist := decodeMCPStringSlice(cfg.EnvAllowlist, "env_allowlist")
+		args := decodeMCPStringSlice(cfg.Args, cfg.Name, "args")
+		env := decodeMCPStringSlice(cfg.Env, cfg.Name, "env")
+		envAllowlist := decodeMCPStringSlice(cfg.EnvAllowlist, cfg.Name, "env_allowlist")
 		if err := a.Services.MCP.AddStdioServer(cfg.Name, cfg.Command, args, env, envAllowlist, mcp.TrustTier(cfg.TrustTier)); err != nil {
 			slog.Warn("api: failed to register stdio MCP server", "name", cfg.Name, "err", err)
 		}
@@ -213,13 +214,14 @@ func (a *API) registerMCPTransport(cfg *store.MCPServerConfig) {
 	}
 }
 
-func decodeMCPStringSlice(raw, field string) []string {
+func decodeMCPStringSlice(raw, server, field string) []string {
 	if raw == "" || raw == "[]" {
 		return nil
 	}
 	var values []string
 	if err := json.Unmarshal([]byte(raw), &values); err != nil {
-		slog.Warn("api: malformed MCP string-list json — ignoring", "field", field)
+		// #nosec G706 -- server, field, and err are structured operational diagnostics, not a formatted log message.
+		slog.Warn("api: malformed MCP string-list json — ignoring", "server", server, "field", field, "err", err)
 		return nil
 	}
 	return values

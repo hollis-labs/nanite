@@ -107,7 +107,8 @@ func (a *API) handleAutocompleteFiles(w http.ResponseWriter, r *http.Request) {
 
 		return nil
 	}); err != nil {
-		slog.Warn("api: autocomplete walk ended early")
+		// #nosec G706 -- root and err are structured operational diagnostics, not a formatted log message.
+		slog.Warn("api: autocomplete walk ended early", "root", root, "err", err)
 	}
 
 	// Sort: exact basename matches first, then by path length (shorter = more relevant).

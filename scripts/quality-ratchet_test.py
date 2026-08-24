@@ -59,29 +59,36 @@ class QualityRatchetTest(unittest.TestCase):
         *,
         stage_2_active: bool = True,
         errcheck_baseline: int = 0,
+        include_stage_2: bool = True,
+        stage_2_value: object | None = None,
+        stage_2_linters: object | None = None,
     ) -> Path:
-        return self.write_json(
-            "lint-baseline.json",
-            {
-                "platform": {
-                    "goos": self.goos,
-                    "goarch": self.goarch,
-                    "github_runner": RUNNER,
-                },
-                "stage_1": {
-                    "active": True,
-                    "counts": {
-                        "errcheck": errcheck_baseline,
-                        "errorlint": 0,
-                        "nilerr": 0,
-                    },
-                },
-                "stage_2": {
-                    "active": stage_2_active,
-                    "linters": ["errcheck", "errorlint", "nilerr"],
+        baseline: dict[str, object] = {
+            "platform": {
+                "goos": self.goos,
+                "goarch": self.goarch,
+                "github_runner": RUNNER,
+            },
+            "stage_1": {
+                "active": True,
+                "counts": {
+                    "errcheck": errcheck_baseline,
+                    "errorlint": 0,
+                    "nilerr": 0,
                 },
             },
-        )
+        }
+        if include_stage_2:
+            if stage_2_value is None:
+                baseline["stage_2"] = {
+                    "active": stage_2_active,
+                    "linters": stage_2_linters
+                    if stage_2_linters is not None
+                    else ["errcheck", "errorlint", "nilerr"],
+                }
+            else:
+                baseline["stage_2"] = stage_2_value
+        return self.write_json("lint-baseline.json", baseline)
 
     def run_lint(
         self,
@@ -89,6 +96,9 @@ class QualityRatchetTest(unittest.TestCase):
         *,
         stage_2_active: bool = True,
         errcheck_baseline: int = 0,
+        include_stage_2: bool = True,
+        stage_2_value: object | None = None,
+        stage_2_linters: object | None = None,
     ) -> subprocess.CompletedProcess[str]:
         report = self.write_json("lint.json", {"Issues": issues})
         linters_report = self.write_json(
@@ -111,6 +121,9 @@ class QualityRatchetTest(unittest.TestCase):
                     self.lint_baseline(
                         stage_2_active=stage_2_active,
                         errcheck_baseline=errcheck_baseline,
+                        include_stage_2=include_stage_2,
+                        stage_2_value=stage_2_value,
+                        stage_2_linters=stage_2_linters,
                     )
                 ),
                 "--report",
@@ -225,6 +238,37 @@ class QualityRatchetTest(unittest.TestCase):
         result = self.run_lint([], stage_2_active=False)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("must be active", result.stderr)
+
+    def test_lint_stage_2_cannot_be_absent(self) -> None:
+        result = self.run_lint([], include_stage_2=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("must be active", result.stderr)
+
+    def test_lint_stage_2_rejects_malformed_structure(self) -> None:
+        result = self.run_lint([], stage_2_value=[])
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("must be active", result.stderr)
+
+    def test_lint_stage_2_rejects_missing_active_flag(self) -> None:
+        result = self.run_lint(
+            [],
+            stage_2_value={"linters": ["errcheck", "errorlint", "nilerr"]},
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("must be active", result.stderr)
+
+    def test_lint_stage_2_rejects_missing_linters(self) -> None:
+        result = self.run_lint([], stage_2_value={"active": True})
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("must name exactly", result.stderr)
+
+    def test_lint_stage_2_rejects_wrong_linters(self) -> None:
+        result = self.run_lint(
+            [],
+            stage_2_linters=["errcheck", "nilerr"],
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("must name exactly", result.stderr)
 
 
 if __name__ == "__main__":

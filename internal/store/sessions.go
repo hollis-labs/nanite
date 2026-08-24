@@ -437,11 +437,14 @@ func (s *Store) NextShortCode(ctx context.Context) (string, error) {
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT short_code FROM sessions ORDER BY CAST(SUBSTR(short_code, 2) AS INTEGER) DESC LIMIT 1`,
 	).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) || !raw.Valid {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "c1", nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("query short_code: %w", err)
+	}
+	if !raw.Valid {
+		return "c1", nil
 	}
 
 	numStr := strings.TrimPrefix(raw.String, "c")

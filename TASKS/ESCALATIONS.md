@@ -1725,11 +1725,13 @@ The same review found analogous final-close gaps in plugin archive/copy and
 Darwin seatbelt-profile creation paths, before those outputs were consumed.
 
 **Resolution:** Fixed within `14/02`. Session metadata parse errors now
-propagate. Artifact records are created only after the destination closes
-successfully, and generated plugin/seatbelt outputs likewise reject final
-close failures before use. Cleanup failures preserve the authoritative primary
-error. The full ordinary and race suites pass, and errcheck/errorlint/nilerr
-are all zero under the audit config.
+propagate. Artifact uploads stage into the destination directory and atomically
+promote only after copy and close succeed, so failures neither truncate nor
+leave a partial final-path file and records are created only after promotion.
+Generated plugin/seatbelt outputs likewise reject final close failures before
+use. Cleanup failures preserve the authoritative primary error. The full
+ordinary and race suites pass, and errcheck/errorlint/nilerr are all zero under
+the audit config.
 
 **Follow-up:** None. This entry exists because the task explicitly requires
 new security/data-integrity-relevant findings to survive outside the frozen

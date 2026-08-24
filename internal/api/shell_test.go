@@ -131,3 +131,28 @@ func TestHandleShellExec_SessionMode_SandboxIsolatedTrue(t *testing.T) {
 		t.Errorf("output = %q, want it to contain the echoed text", output)
 	}
 }
+
+func TestSetSessionMetadataFieldRejectsCorruptMetadataWithoutOverwrite(t *testing.T) {
+	a, _ := newTestAPI(t)
+	const corruptMetadata = `{"preserve":`
+	sess := &store.Session{
+		ID:       "shell-corrupt-metadata",
+		Title:    "Corrupt metadata",
+		Metadata: corruptMetadata,
+	}
+	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	err := a.setSessionMetadataField(sess.ID, "shell_mode", "session")
+	if err == nil || !strings.Contains(err.Error(), "parse session metadata") {
+		t.Fatalf("setSessionMetadataField error = %v, want metadata parse error", err)
+	}
+	got, err := a.Services.Store.GetSession(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.Metadata != corruptMetadata {
+		t.Fatalf("metadata = %q, want corrupt value preserved as %q", got.Metadata, corruptMetadata)
+	}
+}

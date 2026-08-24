@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -118,6 +119,24 @@ func TestNextShortCode(t *testing.T) {
 		if sess.ShortCode != want {
 			t.Errorf("expected short code %q, got %q", want, sess.ShortCode)
 		}
+	}
+}
+
+func TestNextShortCodePropagatesDatabaseError(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	code, err := s.NextShortCode(context.Background())
+	if err == nil {
+		t.Fatalf("NextShortCode = %q, nil; want closed-database error", code)
+	}
+	if code != "" {
+		t.Fatalf("NextShortCode code = %q on error, want empty", code)
+	}
+	if !strings.Contains(err.Error(), "query short_code") {
+		t.Fatalf("NextShortCode error = %q, want query context", err)
 	}
 }
 

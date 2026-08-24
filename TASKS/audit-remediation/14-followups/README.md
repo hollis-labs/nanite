@@ -14,10 +14,10 @@ landing place for them has not really closed.
 
 ## Sequencing
 
-**Runs last, after Wave 8** — with one hard exception: `13/03` (the repo-wide
-`gofmt` sweep) is the final commit of the entire batch and must stay that way
-per AD-22. So this wave lands **after Wave 7, before `13/03`**, or the sweep
-gets rerun.
+The original plan placed this folder after Wave 8, with `13/03` (the repo-wide
+`gofmt` sweep) still the final commit of the entire batch per AD-22. The
+operator subsequently approved tasks `01` and `02` for inclusion in Wave 8;
+task `02` is implemented there and `13/03` must still land after it.
 
 Neither task here is gated on an open architect decision. Both are gated on
 their wave's predecessors only.
@@ -27,7 +27,7 @@ their wave's predecessors only.
 | Task | Source | Why it had no owner |
 |---|---|---|
 | `01-remove-default-seeded-catalog-source.md` | **AD-05** | Decided 2026-08-22; was filed as a `01/01` follow-up and never became a task |
-| `02-error-handling-backlog-paydown.md` | **AD-21** | Stage 2's 353-finding prerequisite. `13/04` touches five files and nothing else covers it |
+| `02-error-handling-backlog-paydown.md` | **AD-21** | Implemented in Wave 8: paid the measured 281/48/24 correctness backlog to zero and activated Stage 2 |
 | `03-test-fixture-migration-cost.md` | promoted candidate 4 | Completed and independently reviewed ahead of Wave 6; full-repo race gate now passes |
 
 ## Candidate register
@@ -162,6 +162,6 @@ the UI consequence clearly enough that the review picks it up.
 
 ## Status
 
-**In progress 2026-08-23.** Task `03` was promoted and dispatched ahead of
-Wave 6 under its hard sequencing rule; tasks `01` and `02` retain their own
-task-file status.
+**In progress.** Task `03` was completed and independently reviewed ahead of
+Wave 6 under its hard sequencing rule. Task `02` is implemented in Wave 8 and
+Stage 2 is active; task `01` retains its own task-file status.

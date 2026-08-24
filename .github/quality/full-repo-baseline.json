@@ -9,7 +9,7 @@
   "stage_1": {
     "active": true,
     "counts": {
-      "cyclop": 290,
+      "cyclop": 289,
       "dupl": 97,
       "errcheck": 0,
       "errorlint": 0,
@@ -17,8 +17,8 @@
       "forbidigo": 236,
       "funlen": 69,
       "gocognit": 257,
-      "gocyclo": 287,
-      "gosec": 637,
+      "gocyclo": 286,
+      "gosec": 635,
       "govet": 617,
       "ineffassign": 2,
       "maintidx": 31,

@@ -68,6 +68,22 @@ func TestPCCSource_NoScope(t *testing.T) {
 	}
 }
 
+func TestPCCSource_NoScopePropagatesReadDirError(t *testing.T) {
+	baseFile := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(baseFile, []byte("pcc"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	src := NewPCCSource(baseFile)
+	items, err := src.Fetch(context.Background(), Intent{Type: IntentCustom}, 10000)
+	if err == nil {
+		t.Fatalf("Fetch returned items %+v and nil error for a non-directory PCC base", items)
+	}
+	if !strings.Contains(err.Error(), "read pcc base dir") {
+		t.Fatalf("Fetch error = %q, want PCC base-directory context", err)
+	}
+}
+
 func TestPCCSource_BudgetRespected(t *testing.T) {
 	tmpDir := t.TempDir()
 	projectDir := filepath.Join(tmpDir, "mentat")

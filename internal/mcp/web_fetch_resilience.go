@@ -332,7 +332,7 @@ func fetchWithRetry(ctx context.Context, client *http.Client, rawURL string) (*h
 
 		// Redirect loop (CheckRedirect already fired but just in case).
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-			_ = resp.Body.Close() // The rejected redirect response is discarded before the next attempt.
+			_ = resp.Body.Close() // The rejected redirect response is discarded before returning its redirect error.
 			return nil, &FetchError{
 				Kind:     FetchErrRedirectLoop,
 				URL:      rawURL,
@@ -366,7 +366,7 @@ func fetchWithRetry(ctx context.Context, client *http.Client, rawURL string) (*h
 
 		// Other retryable 5xx.
 		if retryableStatusCode(resp.StatusCode) {
-			_ = resp.Body.Close() // The oversized response is discarded before returning the bounded error.
+			_ = resp.Body.Close() // The retryable 5xx response is discarded before retry or terminal error.
 			lastFetchErr = &FetchError{
 				Kind:     FetchErr5xxAfterRetries,
 				URL:      rawURL,
@@ -386,7 +386,7 @@ func fetchWithRetry(ctx context.Context, client *http.Client, rawURL string) (*h
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
 			kind = FetchErrBlocked
 		}
-		_ = resp.Body.Close() // The response body has been consumed; close is best-effort connection cleanup.
+		_ = resp.Body.Close() // The non-retryable response body is discarded before returning its status error.
 		return nil, &FetchError{
 			Kind:     kind,
 			URL:      rawURL,

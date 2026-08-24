@@ -928,6 +928,38 @@ func TestApprove_StaleReturnsExpiredError(t *testing.T) {
 	}
 }
 
+func TestApprove_RejectsMalformedCreatedAt(t *testing.T) {
+	db, _ := newTestDB(t)
+	settings := stubSettings{us: store.UserSettings{
+		SubagentApprovalRequired:       true,
+		SubagentApprovalTimeoutSeconds: 3600,
+	}}
+	svc := NewService(db, EchoRunner{}, nil, &stubEmitter{}, settings)
+
+	runID, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "s", ParentAgentID: "p",
+		Role: "r", Prompt: "hi", Mode: ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, updateErr := db.Exec(`UPDATE subagent_runs SET created_at=? WHERE id=?`, "not-a-timestamp", runID); updateErr != nil {
+		t.Fatalf("corrupt created_at: %v", updateErr)
+	}
+
+	err = svc.Approve(context.Background(), runID)
+	if err == nil || !strings.Contains(err.Error(), "parse subagent run") {
+		t.Fatalf("Approve error = %v, want malformed created_at rejection", err)
+	}
+	run, err := svc.Status(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if run.Status != StatusRequested {
+		t.Fatalf("status = %q, want requested after rejected malformed timestamp", run.Status)
+	}
+}
+
 func TestReject_TransitionsAndPostsReply(t *testing.T) {
 	db, _ := newTestDB(t)
 	emitter := &stubEmitter{}

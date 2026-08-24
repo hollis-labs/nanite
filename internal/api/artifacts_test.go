@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +23,54 @@ import (
 
 	"github.com/hollis-labs/go-providers/provider"
 )
+
+type closeErrorArtifactFile struct {
+	artifactTempFile
+	err error
+}
+
+func (f *closeErrorArtifactFile) Close() error {
+	if err := f.artifactTempFile.Close(); err != nil {
+		return err
+	}
+	return f.err
+}
+
+type dataThenErrorReader struct {
+	data []byte
+	err  error
+	done bool
+}
+
+func (r *dataThenErrorReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, r.err
+	}
+	r.done = true
+	return copy(p, r.data), r.err
+}
+
+func artifactUploadRequest(t *testing.T, sessionID, filename, content string) *http.Request {
+	t.Helper()
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	if err := mw.WriteField("session_id", sessionID); err != nil {
+		t.Fatalf("WriteField: %v", err)
+	}
+	fw, err := mw.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := io.WriteString(fw, content); err != nil {
+		t.Fatalf("write multipart file: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/artifacts/upload", body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	return req
+}
 
 // TestSanitizeUploadFilename_Rejections verifies that every category of
 // disallowed filename is rejected rather than silently rewritten. This is
@@ -326,6 +376,104 @@ func TestUploadHappyPath(t *testing.T) {
 		if len(matches) == 0 {
 			t.Fatalf("uploaded file not present under artifacts root: %v", err)
 		}
+	}
+}
+
+func TestUploadCloseFailurePreservesFinalPathAndDoesNotPersist(t *testing.T) {
+	a, artifactsRoot := newArtifactTestAPI(t)
+	storageDir := filepath.Join(artifactsRoot, "sess1")
+	if err := os.MkdirAll(storageDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	finalPath := filepath.Join(storageDir, "note.txt")
+	if err := os.WriteFile(finalPath, []byte("ORIGINAL"), 0o600); err != nil {
+		t.Fatalf("seed final artifact: %v", err)
+	}
+
+	closeErr := errors.New("injected artifact close failure")
+	var tempPath, factoryDir string
+	a.createArtifactTemp = func(dir, pattern string) (artifactTempFile, error) {
+		factoryDir = dir
+		file, err := os.CreateTemp(dir, pattern)
+		if err != nil {
+			return nil, err
+		}
+		tempPath = file.Name()
+		return &closeErrorArtifactFile{artifactTempFile: file, err: closeErr}, nil
+	}
+
+	req := artifactUploadRequest(t, "sess1", "note.txt", "replacement")
+	rec := httptest.NewRecorder()
+	a.handleUploadArtifact(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("upload status = %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), closeErr.Error()) {
+		t.Fatalf("response = %q, want close failure", rec.Body.String())
+	}
+	resolvedStorageDir, err := filepath.EvalSymlinks(storageDir)
+	if err != nil {
+		t.Fatalf("resolve storage dir: %v", err)
+	}
+	if factoryDir != resolvedStorageDir {
+		t.Fatalf("temp factory dir = %q, want destination dir %q", factoryDir, resolvedStorageDir)
+	}
+	// #nosec G304 -- finalPath is constructed beneath this test's temporary artifact root.
+	got, err := os.ReadFile(finalPath)
+	if err != nil {
+		t.Fatalf("read preserved final artifact: %v", err)
+	}
+	if string(got) != "ORIGINAL" {
+		t.Fatalf("final artifact = %q, want original content", got)
+	}
+	if _, statErr := os.Stat(tempPath); !os.IsNotExist(statErr) {
+		t.Fatalf("staging file still exists after close failure: err=%v", statErr)
+	}
+	artifacts, err := a.Services.Store.ListArtifacts(context.Background(), "sess1")
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if len(artifacts) != 0 {
+		t.Fatalf("close-failed artifact was persisted: %+v", artifacts)
+	}
+}
+
+func TestWriteArtifactAtomicallyPreservesCopyErrorOverCloseError(t *testing.T) {
+	dir := t.TempDir()
+	finalPath := filepath.Join(dir, "artifact.txt")
+	if err := os.WriteFile(finalPath, []byte("ORIGINAL"), 0o600); err != nil {
+		t.Fatalf("seed final artifact: %v", err)
+	}
+	copyErr := errors.New("injected copy failure")
+	closeErr := errors.New("injected cleanup close failure")
+	var tempPath string
+	a := &API{createArtifactTemp: func(dir, pattern string) (artifactTempFile, error) {
+		file, err := os.CreateTemp(dir, pattern)
+		if err != nil {
+			return nil, err
+		}
+		tempPath = file.Name()
+		return &closeErrorArtifactFile{artifactTempFile: file, err: closeErr}, nil
+	}}
+
+	_, err := a.writeArtifactAtomically(dir, finalPath, &dataThenErrorReader{data: []byte("partial"), err: copyErr})
+	if !errors.Is(err, copyErr) {
+		t.Fatalf("write error = %v, want primary copy error", err)
+	}
+	if errors.Is(err, closeErr) {
+		t.Fatalf("write error = %v, cleanup close error replaced/joined primary error", err)
+	}
+	// #nosec G304 -- finalPath is constructed beneath t.TempDir above.
+	got, err := os.ReadFile(finalPath)
+	if err != nil {
+		t.Fatalf("read preserved final artifact: %v", err)
+	}
+	if string(got) != "ORIGINAL" {
+		t.Fatalf("final artifact = %q, want original content", got)
+	}
+	if _, statErr := os.Stat(tempPath); !os.IsNotExist(statErr) {
+		t.Fatalf("staging file still exists after copy failure: err=%v", statErr)
 	}
 }
 

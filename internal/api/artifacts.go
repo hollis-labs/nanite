@@ -19,6 +19,18 @@ import (
 // Used as a fallback when AppConfig is nil (bare API construction in tests).
 const defaultArtifactsStorageDir = "data/artifacts"
 
+type artifactTempFile interface {
+	io.Writer
+	io.Closer
+	Name() string
+}
+
+type artifactTempFileFactory func(dir, pattern string) (artifactTempFile, error)
+
+func defaultArtifactTempFile(dir, pattern string) (artifactTempFile, error) {
+	return os.CreateTemp(dir, pattern)
+}
+
 // artifactsStorageDir returns the configured artifacts storage root, falling
 // back to the default when AppConfig is unset.
 func (a *API) artifactsStorageDir() string {
@@ -204,19 +216,9 @@ func (a *API) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "resolve storage path: "+err.Error())
 		return
 	}
-	dst, err := os.Create(storagePath)
+	written, err := a.writeArtifactAtomically(storageDir, storagePath, file)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "failed to create file")
-		return
-	}
-	written, err := io.Copy(dst, file)
-	if err != nil {
-		_ = dst.Close() // Preserve the copy failure; close is cleanup for the incomplete artifact.
-		a.errorResp(w, http.StatusInternalServerError, "failed to write file")
-		return
-	}
-	if err := dst.Close(); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "failed to finalize file: "+err.Error())
+		a.errorResp(w, http.StatusInternalServerError, "failed to store file: "+err.Error())
 		return
 	}
 
@@ -251,6 +253,38 @@ func (a *API) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusCreated, artifact)
+}
+
+// writeArtifactAtomically stages an upload beside its final path, closes it,
+// then atomically promotes it. Copy, close, and rename failures leave any
+// existing final-path artifact untouched.
+func (a *API) writeArtifactAtomically(storageDir, storagePath string, src io.Reader) (int64, error) {
+	tmp, err := a.createArtifactTemp(storageDir, ".nanite-artifact-*")
+	if err != nil {
+		return 0, fmt.Errorf("create upload temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	promoted := false
+	defer func() {
+		if !promoted {
+			_ = os.Remove(tmpPath) // Staging cleanup must not replace the authoritative copy, close, or rename error.
+		}
+	}()
+
+	written, err := io.Copy(tmp, src)
+	if err != nil {
+		_ = tmp.Close() // Preserve the copy failure; close is cleanup for the incomplete staging file.
+		return written, fmt.Errorf("copy upload: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return written, fmt.Errorf("close upload temp file: %w", err)
+	}
+	// #nosec G703 -- both paths are created/resolved inside the same confined storage directory above.
+	if err := os.Rename(tmpPath, storagePath); err != nil {
+		return written, fmt.Errorf("promote upload: %w", err)
+	}
+	promoted = true
+	return written, nil
 }
 
 // handlePlaceArtifact creates an artifact with origin="placed" for tools/plugins

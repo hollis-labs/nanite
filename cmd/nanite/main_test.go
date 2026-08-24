@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -24,6 +25,7 @@ import (
 
 type countingCloser struct {
 	calls atomic.Int32
+	err   error
 }
 
 func TestResolveServeHTTPConfig(t *testing.T) {
@@ -103,7 +105,22 @@ func TestCmdServeRejectsInvalidBindBeforeInitializers(t *testing.T) {
 
 func (c *countingCloser) Close() error {
 	c.calls.Add(1)
-	return nil
+	return c.err
+}
+
+func TestCloseLoggingOutputUsesIndependentWriter(t *testing.T) {
+	closeErr := errors.New("injected log sink close failure")
+	closer := &countingCloser{err: closeErr}
+	var stderr bytes.Buffer
+
+	closeLoggingOutput(closer, &stderr)
+
+	if got := closer.calls.Load(); got != 1 {
+		t.Fatalf("Close calls = %d, want 1", got)
+	}
+	if !strings.Contains(stderr.String(), closeErr.Error()) {
+		t.Fatalf("independent stderr = %q, want close failure", stderr.String())
+	}
 }
 
 func TestCmdServeStartupFailureReturns(t *testing.T) {

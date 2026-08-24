@@ -47,10 +47,12 @@ type BookmarksWidgetPlugin struct {
 
 func New() *BookmarksWidgetPlugin { return &BookmarksWidgetPlugin{} }
 
-func (p *BookmarksWidgetPlugin) ID() string             { return "bookmarks-widget" }
-func (p *BookmarksWidgetPlugin) Name() string           { return "Bookmarks" }
-func (p *BookmarksWidgetPlugin) Version() string        { return "1.0.0" }
-func (p *BookmarksWidgetPlugin) Description() string    { return "Quick access to bookmarked messages with scroll-to navigation" }
+func (p *BookmarksWidgetPlugin) ID() string      { return "bookmarks-widget" }
+func (p *BookmarksWidgetPlugin) Name() string    { return "Bookmarks" }
+func (p *BookmarksWidgetPlugin) Version() string { return "1.0.0" }
+func (p *BookmarksWidgetPlugin) Description() string {
+	return "Quick access to bookmarked messages with scroll-to navigation"
+}
 func (p *BookmarksWidgetPlugin) Dependencies() []string { return nil }
 
 // Manifest exposes the embedded plugin.yaml so the host loader can apply

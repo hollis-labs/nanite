@@ -5,7 +5,6 @@
 //
 // Precedence: the NANITE_OTEL_DISABLED=1 environment variable takes
 // precedence over Config.Disabled. Either set disables exporter init.
-//
 package otel
 
 import (

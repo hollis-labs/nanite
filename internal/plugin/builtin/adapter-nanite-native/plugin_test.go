@@ -51,7 +51,7 @@ func TestComposeSystemPrompt_MissingRole(t *testing.T) {
 func TestReadProjectConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
-os.WriteFile(cfgPath, []byte(`
+	os.WriteFile(cfgPath, []byte(`
 nanite_version: "2.3.0"
 agents:
   test-agent:

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	conduit "github.com/hollis-labs/tesseract"
 	"github.com/hollis-labs/nanite/internal/memory"
+	conduit "github.com/hollis-labs/tesseract"
 )
 
 // newConduitMemory spins up a real embedded Conduit instance backed by

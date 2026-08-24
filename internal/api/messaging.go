@@ -27,12 +27,12 @@ func messagingStatus(err error) int {
 
 // resolveCaller picks the authoritative caller (session_id, agent_id)
 // for a messaging handler. G-6.3 precedence:
-//   1. ctx-carried CallerIdentity (stamped by the HTTP caller-identity
-//      middleware from X-Nanite-Caller-Session + X-Nanite-Caller-Agent
-//      headers) wins when present.
-//   2. The body/query-supplied fallback is used when no headers were
-//      set — preserves pre-G-6.3 MVP trust-the-body behavior for
-//      clients that have not adopted the header contract.
+//  1. ctx-carried CallerIdentity (stamped by the HTTP caller-identity
+//     middleware from X-Nanite-Caller-Session + X-Nanite-Caller-Agent
+//     headers) wins when present.
+//  2. The body/query-supplied fallback is used when no headers were
+//     set — preserves pre-G-6.3 MVP trust-the-body behavior for
+//     clients that have not adopted the header contract.
 //
 // Returning the header-stamped identity as caller and the body/query
 // values as target lets the service's existing caller-match checks

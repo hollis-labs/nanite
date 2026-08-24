@@ -13,11 +13,11 @@ import (
 // TestDevTools_PathGrants_EndToEnd is the trust-agent integration smoke
 // test (CW-20260430-0009). Exercises the full path:
 //
-//   user message contains "/some/explicit/path.go"
-//   → grant registered into PathGrants
-//   → ctx stamped via permission.WithPathGrants
-//   → DevToolsTransport.resolveAllowed accepts the path even though it
-//     lies outside the static AllowedPaths list
+//	user message contains "/some/explicit/path.go"
+//	→ grant registered into PathGrants
+//	→ ctx stamped via permission.WithPathGrants
+//	→ DevToolsTransport.resolveAllowed accepts the path even though it
+//	  lies outside the static AllowedPaths list
 //
 // The static list is set to a *different* tmp dir to confirm the static
 // gate alone rejects, and the grant is the only thing letting the call

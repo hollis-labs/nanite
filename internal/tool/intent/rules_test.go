@@ -11,10 +11,10 @@ var allCats = []string{"search", "code-exec", "core-io", "http", "agent", "sessi
 
 func TestRulesClassifier_MatchesAndClears(t *testing.T) {
 	cases := []struct {
-		name      string
-		input     string
-		wantHit   bool
-		wantCats  []string
+		name     string
+		input    string
+		wantHit  bool
+		wantCats []string
 	}{
 		{"search intent", "please search for the foo function", true, []string{"search"}},
 		{"look up", "can you look up the ticket", true, []string{"search"}},

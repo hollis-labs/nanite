@@ -7,11 +7,11 @@ import "testing"
 // the rubric is auditable in one place.
 func TestClassifyRoute(t *testing.T) {
 	cases := []struct {
-		name              string
-		message           string
-		wantRoute         Route
-		wantTargetType    string
-		wantSynthetic     bool
+		name           string
+		message        string
+		wantRoute      Route
+		wantTargetType string
+		wantSynthetic  bool
 	}{
 		// --- Default / chat-direct ---
 		{

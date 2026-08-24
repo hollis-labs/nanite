@@ -45,8 +45,8 @@ type yamlStep struct {
 }
 
 type yamlRetry struct {
-	MaxAttempts int    `yaml:"max_attempts"`
-	Delay       string `yaml:"delay"`
+	MaxAttempts int     `yaml:"max_attempts"`
+	Delay       string  `yaml:"delay"`
 	Backoff     float64 `yaml:"backoff"`
 }
 

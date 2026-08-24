@@ -14,10 +14,10 @@ const (
 	// chat.AssembleSlotSources, which sources the block from
 	// chat.UniversalRulesBlock(). Non-compactable identity-class slot —
 	// keeps the Anthropic cacheable prefix stable across agents.
-	SlotUniversal   = "universal"
-	SlotSystem      = "system"
-	SlotMemory      = "memory"
-	SlotAgent       = "agent"
+	SlotUniversal = "universal"
+	SlotSystem    = "system"
+	SlotMemory    = "memory"
+	SlotAgent     = "agent"
 	// SlotMode carries the session-level Mode addendum (B1, CW-20260428-0009).
 	// Sits between SlotAgent (identity) and SlotRules (policy) — modes
 	// modulate the agent's identity but don't override policy. Non-compactable
@@ -25,8 +25,8 @@ const (
 	// Distinct from the legacy AgentMode addendum that still lands inside
 	// SlotAgent — that handles the agent-scoped *store.AgentMode and stays
 	// for back-compat. SlotMode is for the session-scoped *store.Mode only.
-	SlotMode        = "mode"
-	SlotRules       = "rules"
+	SlotMode  = "mode"
+	SlotRules = "rules"
 	// SlotPermissions carries the per-session path-access summary
 	// (CW-20260512-0118, SP-20260512-0010 W2). Sourced via
 	// permission.RenderPermissionSummary from the agent's resolved
@@ -73,10 +73,10 @@ const (
 	// this dedicated slot (the ticket asks for a `workspace slot`,
 	// distinct from the think-tool + workspace-identity payload that
 	// lives in SlotSystem).
-	SlotWorkspace = "workspace"
-	SlotTools     = "tools"
+	SlotWorkspace   = "workspace"
+	SlotTools       = "tools"
 	SlotSession     = "session"
-	SlotContext     = "context"     // dynamic enrichment (plugins, context broker)
+	SlotContext     = "context"      // dynamic enrichment (plugins, context broker)
 	SlotUserContext = "user_context" // J10 (CW-20260426-0008): user-authored session context prompt.
 	// Not compactable — survives compaction like SlotAgent/SlotRules.
 	// Populated from sessions.context_prompt. Composes with HandoffStash
@@ -215,9 +215,9 @@ func DefaultBudgets() map[string]int {
 		SlotWorkspace:    4000, // CW-20260512-0116 — generous; concatenated AGENTS.md/CLAUDE.md/NANITE.md across the walk path. Oversized payloads stash via the assembly decider's per-slot budget check.
 		SlotTools:        0,    // proportional to selected tool count
 		SlotSession:      1000,
-		SlotContext:      0,    // dynamic
-		SlotUserContext:  2000, // J10: user context prompt; thin by design.
+		SlotContext:      0,                    // dynamic
+		SlotUserContext:  2000,                 // J10: user context prompt; thin by design.
 		SlotHandoff:      SlotHandoffMaxTokens, // Glass-3 (CW-20260502-0011): feature-sized handoff, ~1500 tokens.
-		SlotConversation: 0,    // gets remainder
+		SlotConversation: 0,                    // gets remainder
 	}
 }

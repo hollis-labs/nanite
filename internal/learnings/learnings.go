@@ -17,9 +17,9 @@
 //     memory/namespaces.go). We map the requested scopes onto those
 //     forms and carry tool/scope identity in tags + memory_key:
 //
-//	tool_use → user/<user>/memory                (tag: tool:<tool>)
-//	project  → user/<user>/project/<id>/memory
-//	session  → user/<user>/session/<id>/memory
+//     tool_use → user/<user>/memory                (tag: tool:<tool>)
+//     project  → user/<user>/project/<id>/memory
+//     session  → user/<user>/session/<id>/memory
 //
 //     Recall by tool name combines the user namespace with a
 //     tag-filter on `tool:<tool>`, so per-tool isolation still works

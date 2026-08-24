@@ -129,7 +129,7 @@ type FailPolicy string
 const (
 	FailPolicyAll  FailPolicy = "all_must_pass" // any failure = step failure
 	FailPolicyAny  FailPolicy = "any_pass"      // at least one must pass
-	FailPolicyNone FailPolicy = "ignore"         // failures don't fail the parent
+	FailPolicyNone FailPolicy = "ignore"        // failures don't fail the parent
 )
 
 // ParallelStep runs N sub-steps concurrently and collects results.

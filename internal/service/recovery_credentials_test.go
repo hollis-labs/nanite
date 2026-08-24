@@ -398,8 +398,8 @@ func (c *countingResolver) GetOrDefault(name string) (*store.AgentProfile, error
 // a deliberate test update.
 func TestClassifyProvider(t *testing.T) {
 	cases := []struct {
-		name      string
-		wantKind  providerKind
+		name       string
+		wantKind   providerKind
 		wantProvID string
 	}{
 		{"anthropic", providerKindAPIAnthropic, "anthropic-001"},

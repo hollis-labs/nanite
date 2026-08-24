@@ -113,9 +113,9 @@ func TestAssemble_cacheHits(t *testing.T) {
 func TestConversationBudget(t *testing.T) {
 	cw := NewContextWindow(100_000, nil)
 	// Set static slots.
-	cw.SetContent(SlotSystem, strings.Repeat("x", 4000))  // ~1000 tokens
-	cw.SetContent(SlotAgent, strings.Repeat("x", 2000))   // ~500 tokens
-	cw.SetContent(SlotRules, strings.Repeat("x", 1000))   // ~250 tokens
+	cw.SetContent(SlotSystem, strings.Repeat("x", 4000)) // ~1000 tokens
+	cw.SetContent(SlotAgent, strings.Repeat("x", 2000))  // ~500 tokens
+	cw.SetContent(SlotRules, strings.Repeat("x", 1000))  // ~250 tokens
 
 	budget := cw.ConversationBudget()
 	staticUsed := cw.Slot(SlotSystem).TokenCount +
@@ -129,7 +129,7 @@ func TestConversationBudget(t *testing.T) {
 
 func TestNeedsCompaction(t *testing.T) {
 	// Tiny window to force compaction.
-	cw := NewContextWindow(1000, nil) // budget = 800 tokens
+	cw := NewContextWindow(1000, nil)                          // budget = 800 tokens
 	cw.SetContent(SlotSystem, strings.Repeat("x", 400))        // ~100 tokens
 	cw.SetContent(SlotConversation, strings.Repeat("x", 4000)) // ~1000 tokens
 

@@ -17,14 +17,14 @@
 //
 // # Dispatch flow
 //
-//   user message
-//     → Chat agent (with fixed surface)
-//     → executeTask(ctx, args)
-//     → classify.Classify → ScopeTier + ExecutionPattern
-//     → AssignRole(...) → (Worker | Planner, surface)
-//     → spawn role agent (via subagent.Service)
-//     → middleware envelope wraps result
-//     → Chat receives envelope only (not raw output)
+//	user message
+//	  → Chat agent (with fixed surface)
+//	  → executeTask(ctx, args)
+//	  → classify.Classify → ScopeTier + ExecutionPattern
+//	  → AssignRole(...) → (Worker | Planner, surface)
+//	  → spawn role agent (via subagent.Service)
+//	  → middleware envelope wraps result
+//	  → Chat receives envelope only (not raw output)
 //
 // Worker/Planner output never enters Chat's context window directly — it
 // is wrapped by the envelope pipeline before Chat sees it. This is the

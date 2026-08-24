@@ -111,12 +111,12 @@ func (s *Service) Elicit(ctx context.Context, req ElicitInput) (Response, error)
 
 	// Emit envelope so the UI renders the input widget.
 	data := EnvelopeData{
-		ElicitationID:     id,
-		Message:           req.Message,
-		SchemaType:        string(schemaType),
-		ToolCallID:        req.ToolCallID,
-		Origin:            req.Origin,
-		TimeoutAt:         time.Now().Add(timeoutDur),
+		ElicitationID: id,
+		Message:       req.Message,
+		SchemaType:    string(schemaType),
+		ToolCallID:    req.ToolCallID,
+		Origin:        req.Origin,
+		TimeoutAt:     time.Now().Add(timeoutDur),
 	}
 	if req.Schema != nil {
 		data.SchemaTitle = req.Schema.Title

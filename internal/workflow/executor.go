@@ -81,8 +81,8 @@ func (e *Executor) Run(ctx context.Context, pipeline *Pipeline, input map[string
 	}
 
 	// Validate dependencies and build adjacency.
-	dependents := make(map[string][]string)   // step -> steps that depend on it
-	inDegree := make(map[string]int)          // step -> number of unmet dependencies
+	dependents := make(map[string][]string) // step -> steps that depend on it
+	inDegree := make(map[string]int)        // step -> number of unmet dependencies
 	for _, s := range pipeline.Steps {
 		inDegree[s.ID] = len(s.DependsOn)
 		for _, dep := range s.DependsOn {

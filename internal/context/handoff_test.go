@@ -119,9 +119,9 @@ func TestValidateHandoff_OversizeTotal(t *testing.T) {
 
 func TestValidateHandoff_OversizePerField(t *testing.T) {
 	cases := []struct {
-		name        string
-		mutate      func(*HandoffPayload)
-		fieldHint   string
+		name      string
+		mutate    func(*HandoffPayload)
+		fieldHint string
 	}{
 		{
 			name: "session_intent over cap",
@@ -221,10 +221,10 @@ func TestValidateHandoff_MissingRequired(t *testing.T) {
 
 func TestValidateHandoff_Malformed(t *testing.T) {
 	cases := [][]byte{
-		nil,                       // empty input
-		[]byte(""),                // empty input
-		[]byte("{not json"),       // unterminated JSON, not valid YAML mapping
-		[]byte("\x00\x01\x02"),    // binary garbage
+		nil,                    // empty input
+		[]byte(""),             // empty input
+		[]byte("{not json"),    // unterminated JSON, not valid YAML mapping
+		[]byte("\x00\x01\x02"), // binary garbage
 	}
 	for i, payload := range cases {
 		_, err := ValidateHandoff(payload)

@@ -17,10 +17,10 @@ func TestTimeoutInRange(t *testing.T) {
 		{0, false},
 		{-1, false},
 		{59, false},
-		{minTimeoutSeconds, true},   // 60 — lower bound inclusive
-		{300, true},                 // the legacy fixed default
-		{1800, true},                // DefaultTimeoutSeconds
-		{maxTimeoutSeconds, true},    // 7200 — upper bound inclusive
+		{minTimeoutSeconds, true}, // 60 — lower bound inclusive
+		{300, true},               // the legacy fixed default
+		{1800, true},              // DefaultTimeoutSeconds
+		{maxTimeoutSeconds, true}, // 7200 — upper bound inclusive
 		{maxTimeoutSeconds + 1, false},
 		{999999, false},
 	}

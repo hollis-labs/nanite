@@ -8,8 +8,8 @@
 //     delimited tokens whose first character indicates a literal path:
 //     "~/", "/", or "./". Each strict-prefix token grants access to:
 //
-//       (a) the literal path
-//       (b) its single parent directory
+//     (a) the literal path
+//     (b) its single parent directory
 //
 //     The grant is recorded against the session ID and persists for the
 //     remainder of the session (process-local; cleared on session close).
@@ -596,7 +596,7 @@ func isPathToken(tok string) bool {
 
 // trimMarkdownAndPunct strips common surrounding punctuation and
 // markdown emphasis markers from a token. Symmetric: strips matched
-// pairs (e.g. `\`foo\`` → `foo`) but also peels unmatched trailing
+// pairs (e.g. `\`foo\“ → `foo`) but also peels unmatched trailing
 // punctuation (e.g. `~/foo.` → `~/foo`).
 func trimMarkdownAndPunct(tok string) string {
 	// Trim outer whitespace defensively (Fields already split on it).

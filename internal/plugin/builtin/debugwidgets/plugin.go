@@ -47,10 +47,12 @@ type DebugWidgetsPlugin struct {
 
 func New() *DebugWidgetsPlugin { return &DebugWidgetsPlugin{} }
 
-func (p *DebugWidgetsPlugin) ID() string             { return "debug-widgets" }
-func (p *DebugWidgetsPlugin) Name() string           { return "Debug Widgets" }
-func (p *DebugWidgetsPlugin) Version() string        { return "1.0.0" }
-func (p *DebugWidgetsPlugin) Description() string    { return "Slot inspector and turn snapshot widgets (developer_mode only)" }
+func (p *DebugWidgetsPlugin) ID() string      { return "debug-widgets" }
+func (p *DebugWidgetsPlugin) Name() string    { return "Debug Widgets" }
+func (p *DebugWidgetsPlugin) Version() string { return "1.0.0" }
+func (p *DebugWidgetsPlugin) Description() string {
+	return "Slot inspector and turn snapshot widgets (developer_mode only)"
+}
 func (p *DebugWidgetsPlugin) Dependencies() []string { return nil }
 
 // Manifest exposes the embedded plugin.yaml so widget UIComponents register

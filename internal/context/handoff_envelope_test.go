@@ -70,7 +70,7 @@ func TestParseHandoffEnvelope_RejectsUnknownSchema(t *testing.T) {
 func TestParseHandoffEnvelope_RejectsMalformedJSON(t *testing.T) {
 	cases := [][]byte{
 		[]byte(`not json at all`),
-		[]byte(`{"schema":`),                   // truncated
+		[]byte(`{"schema":`),                    // truncated
 		[]byte(`{"schema":"glass-4","payload"`), // truncated mid-key
 		[]byte(`{schema:"glass-4"}`),            // unquoted key
 	}

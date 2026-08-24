@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	goplugin "github.com/hollis-labs/plugin-sdk"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // TestPluginsEvents_LoadUnloadCycle drives a plugin through LoadPlugin and
@@ -227,13 +227,13 @@ type lifecycleTestPlugin struct {
 	id string
 }
 
-func (p *lifecycleTestPlugin) ID() string                       { return p.id }
-func (p *lifecycleTestPlugin) Name() string                     { return p.id }
-func (p *lifecycleTestPlugin) Version() string                  { return "0.0.1" }
-func (p *lifecycleTestPlugin) Description() string              { return "b8 lifecycle test plugin" }
-func (p *lifecycleTestPlugin) Dependencies() []string           { return nil }
-func (p *lifecycleTestPlugin) Load(h goplugin.Host) error       { return nil }
-func (p *lifecycleTestPlugin) Unload() error                    { return nil }
+func (p *lifecycleTestPlugin) ID() string                 { return p.id }
+func (p *lifecycleTestPlugin) Name() string               { return p.id }
+func (p *lifecycleTestPlugin) Version() string            { return "0.0.1" }
+func (p *lifecycleTestPlugin) Description() string        { return "b8 lifecycle test plugin" }
+func (p *lifecycleTestPlugin) Dependencies() []string     { return nil }
+func (p *lifecycleTestPlugin) Load(h goplugin.Host) error { return nil }
+func (p *lifecycleTestPlugin) Unload() error              { return nil }
 func (p *lifecycleTestPlugin) Status() goplugin.PluginStatus {
 	return goplugin.PluginStatus{Loaded: true, Enabled: true}
 }

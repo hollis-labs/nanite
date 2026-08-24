@@ -238,7 +238,6 @@ func DecideAssembly(ctx context.Context, input AssemblyInput) AssemblyPlan {
 		stasher = NopStasher()
 	}
 
-
 	decisions := make([]SlotDecision, 0, len(input.SlotOrder))
 	var stash map[string]string
 

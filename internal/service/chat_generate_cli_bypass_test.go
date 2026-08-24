@@ -27,9 +27,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/chat"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/chat"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 )
 

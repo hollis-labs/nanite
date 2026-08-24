@@ -88,7 +88,7 @@ func TestFilterPluginEnvelopes_ProdDropsInvalid(t *testing.T) {
 	envs := []sdkplugin.EnvelopeOut{
 		{Type: "card", Data: map[string]interface{}{"title": "ok"}},
 		{Type: "card", Data: map[string]interface{}{"nope": true}}, // missing "title" → invalid
-		{Type: "ghost", Data: map[string]interface{}{"a": 1}},       // undeclared type
+		{Type: "ghost", Data: map[string]interface{}{"a": 1}},      // undeclared type
 	}
 	out := h.FilterPluginEnvelopes("p1", envs)
 	if len(out) != 1 {

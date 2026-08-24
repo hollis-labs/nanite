@@ -182,52 +182,62 @@ func TestInstaller_HappyPath_Directory_SkipsVerify(t *testing.T) {
 }
 
 // Each table entry forces failure at one state and asserts:
-// 1. Install returns the wrapped error.
-// 2. State transitions into StateFailed.
-// 3. Staging cleanup runs if failure occurred before Commit; does NOT run
-//    after Commit (Loading failure).
-// 4. Later steps are not invoked.
+//  1. Install returns the wrapped error.
+//  2. State transitions into StateFailed.
+//  3. Staging cleanup runs if failure occurred before Commit; does NOT run
+//     after Commit (Loading failure).
+//  4. Later steps are not invoked.
 func TestInstaller_FailurePaths(t *testing.T) {
 	cases := []struct {
-		name            string
-		mutate          func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging)
-		failedIn        State
-		wantCleanups    int
-		wantVerCalled   bool
-		wantExtCalled   bool
-		wantValCalled   bool
+		name             string
+		mutate           func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging)
+		failedIn         State
+		wantCleanups     int
+		wantVerCalled    bool
+		wantExtCalled    bool
+		wantValCalled    bool
 		wantLoaderCalled bool
 	}{
 		{
-			name:     "begin staging fails",
-			mutate:   func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) { stg.beginErr = errors.New("boom") },
-			failedIn: StateNotInstalled,
+			name: "begin staging fails",
+			mutate: func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) {
+				stg.beginErr = errors.New("boom")
+			},
+			failedIn:     StateNotInstalled,
 			wantCleanups: 0,
 		},
 		{
-			name:     "download fails",
-			mutate:   func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) { src.err = errors.New("net") },
-			failedIn: StateDownloading,
+			name: "download fails",
+			mutate: func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) {
+				src.err = errors.New("net")
+			},
+			failedIn:     StateDownloading,
 			wantCleanups: 1,
 		},
 		{
-			name:          "verify fails",
-			mutate:        func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) { ver.err = errors.New("bad sig") },
+			name: "verify fails",
+			mutate: func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) {
+				ver.err = errors.New("bad sig")
+			},
 			failedIn:      StateVerifying,
 			wantCleanups:  1,
 			wantVerCalled: true,
 		},
 		{
-			name:          "extract fails",
-			mutate:        func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) { ext.err = errors.New("tarslip") },
+			name: "extract fails",
+			mutate: func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) {
+				ext.err = errors.New("tarslip")
+			},
 			failedIn:      StateExtracting,
 			wantCleanups:  1,
 			wantVerCalled: true,
 			wantExtCalled: true,
 		},
 		{
-			name:          "validate fails",
-			mutate:        func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) { val.err = errors.New("bad manifest") },
+			name: "validate fails",
+			mutate: func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) {
+				val.err = errors.New("bad manifest")
+			},
 			failedIn:      StateValidating,
 			wantCleanups:  1,
 			wantVerCalled: true,
@@ -235,8 +245,10 @@ func TestInstaller_FailurePaths(t *testing.T) {
 			wantValCalled: true,
 		},
 		{
-			name:          "commit fails",
-			mutate:        func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) { stg.commitErr = errors.New("cross-fs") },
+			name: "commit fails",
+			mutate: func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) {
+				stg.commitErr = errors.New("cross-fs")
+			},
 			failedIn:      StateValidating,
 			wantCleanups:  1,
 			wantVerCalled: true,
@@ -244,13 +256,15 @@ func TestInstaller_FailurePaths(t *testing.T) {
 			wantValCalled: true,
 		},
 		{
-			name:            "load fails after commit — no staging cleanup",
-			mutate:          func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) { ldr.err = errors.New("host refused") },
-			failedIn:        StateLoading,
-			wantCleanups:    0,
-			wantVerCalled:   true,
-			wantExtCalled:   true,
-			wantValCalled:   true,
+			name: "load fails after commit — no staging cleanup",
+			mutate: func(src *fakeSource, ver *fakeVerifier, ext *fakeExtractor, val *fakeValidator, ldr *fakeLoader, stg *fakeStaging) {
+				ldr.err = errors.New("host refused")
+			},
+			failedIn:         StateLoading,
+			wantCleanups:     0,
+			wantVerCalled:    true,
+			wantExtCalled:    true,
+			wantValCalled:    true,
 			wantLoaderCalled: true,
 		},
 	}

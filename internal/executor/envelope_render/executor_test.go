@@ -330,11 +330,11 @@ func TestPromptIsEmbeddedAndUnderBudget(t *testing.T) {
 	// doesn't silently drop one. Match on distinctive phrases that are
 	// unlikely to appear unless the rule is verbatim.
 	musts := []string{
-		"synthesize",                  // judgment 1
-		"empty for THIS user",         // judgment 2
-		"semantically aligned",        // judgment 3
-		"signal to pivot",             // judgment 4
-		"`tool_describe`'s id",        // the right-vs-wrong example
+		"synthesize",           // judgment 1
+		"empty for THIS user",  // judgment 2
+		"semantically aligned", // judgment 3
+		"signal to pivot",      // judgment 4
+		"`tool_describe`'s id", // the right-vs-wrong example
 	}
 	for _, m := range musts {
 		if !strings.Contains(body, m) {

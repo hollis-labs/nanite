@@ -32,11 +32,11 @@ type idMismatchPlugin struct {
 	id string
 }
 
-func (p *idMismatchPlugin) ID() string             { return p.id }
-func (p *idMismatchPlugin) Name() string           { return "Mismatch Display Name" }
-func (p *idMismatchPlugin) Version() string        { return "0.1.0" }
-func (p *idMismatchPlugin) Description() string    { return "id != name regression fixture" }
-func (p *idMismatchPlugin) Dependencies() []string { return nil }
+func (p *idMismatchPlugin) ID() string                 { return p.id }
+func (p *idMismatchPlugin) Name() string               { return "Mismatch Display Name" }
+func (p *idMismatchPlugin) Version() string            { return "0.1.0" }
+func (p *idMismatchPlugin) Description() string        { return "id != name regression fixture" }
+func (p *idMismatchPlugin) Dependencies() []string     { return nil }
 func (p *idMismatchPlugin) Load(h goplugin.Host) error { return nil }
 func (p *idMismatchPlugin) Unload() error              { return nil }
 func (p *idMismatchPlugin) Status() goplugin.PluginStatus {

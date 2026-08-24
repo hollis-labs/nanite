@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	sdkplugin "github.com/hollis-labs/plugin-sdk"
 	nplugin "github.com/hollis-labs/nanite/internal/plugin"
+	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // TestRegisterPluginCommand_AppendsEnvelopeBlocks exercises the B.12 path:

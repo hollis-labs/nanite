@@ -40,10 +40,12 @@ type ContextWidgetsPlugin struct {
 
 func New() *ContextWidgetsPlugin { return &ContextWidgetsPlugin{} }
 
-func (p *ContextWidgetsPlugin) ID() string             { return "context-widgets" }
-func (p *ContextWidgetsPlugin) Name() string           { return "Context & Usage" }
-func (p *ContextWidgetsPlugin) Version() string        { return "1.0.0" }
-func (p *ContextWidgetsPlugin) Description() string    { return "Session info, context budget, and token usage widgets" }
+func (p *ContextWidgetsPlugin) ID() string      { return "context-widgets" }
+func (p *ContextWidgetsPlugin) Name() string    { return "Context & Usage" }
+func (p *ContextWidgetsPlugin) Version() string { return "1.0.0" }
+func (p *ContextWidgetsPlugin) Description() string {
+	return "Session info, context budget, and token usage widgets"
+}
 func (p *ContextWidgetsPlugin) Dependencies() []string { return nil }
 
 // Manifest exposes the embedded plugin.yaml so widget UIComponents register

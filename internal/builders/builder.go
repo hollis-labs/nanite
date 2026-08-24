@@ -7,18 +7,18 @@ import (
 
 // BuilderStep defines a single step in a builder flow.
 type BuilderStep struct {
-	Name      string                // unique step identifier
-	Prompt    string                // what to ask the user
-	Field     string                // which field this fills in the inputs map
-	Required  bool                  // whether the value must be non-empty
-	Default   string                // default value if none provided
-	Validator func(string) error    // optional validation function
+	Name      string             // unique step identifier
+	Prompt    string             // what to ask the user
+	Field     string             // which field this fills in the inputs map
+	Required  bool               // whether the value must be non-empty
+	Default   string             // default value if none provided
+	Validator func(string) error // optional validation function
 }
 
 // BuildResult holds the output of a completed builder flow.
 type BuildResult struct {
-	Resource    any               `json:"resource"`
-	Summary     string            `json:"summary"`
+	Resource any    `json:"resource"`
+	Summary  string `json:"summary"`
 }
 
 // Builder defines a multi-step creation flow for a resource type.

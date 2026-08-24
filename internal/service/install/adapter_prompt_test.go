@@ -11,11 +11,11 @@ func TestPromptAdapterSelection_DetectedAccept(t *testing.T) {
 	in := strings.NewReader("y\n")
 	var out bytes.Buffer
 	got, err := promptAdapterSelection(promptInput{
-		Detected: []string{"claude", "codex"},
-		Current:  []string{"claude", "codex"},
+		Detected:      []string{"claude", "codex"},
+		Current:       []string{"claude", "codex"},
 		IsReconfigure: false,
-		Stdin:    in,
-		Stdout:   &out,
+		Stdin:         in,
+		Stdout:        &out,
 	})
 	if err != nil {
 		t.Fatal(err)

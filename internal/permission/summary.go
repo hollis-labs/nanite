@@ -85,12 +85,12 @@ import (
 // listed above is outside session scope" sentence's qualifier (e.g.
 // "this researcher subagent's scope"). Empty produces the generic phrasing.
 type SummaryInput struct {
-	WorkingDir       string
-	Rules            *RuleSet
-	AllowedPaths     []string
-	OwnGrants        []string
-	InheritedGrants  []string
-	SessionScope     string
+	WorkingDir      string
+	Rules           *RuleSet
+	AllowedPaths    []string
+	OwnGrants       []string
+	InheritedGrants []string
+	SessionScope    string
 }
 
 // RenderPermissionSummary returns a human-readable Markdown block describing

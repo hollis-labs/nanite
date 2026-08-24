@@ -24,10 +24,10 @@ const HostShadcnVersion = "1.0.0"
 //
 // Supported range grammar (a deliberate npm-compatible subset):
 //
-//   ""              → skip (no declaration).
-//   "X.Y.Z"         → exact match.
-//   "^X.Y.Z"        → same-major, >= X.Y.Z (the common case).
-//   "~X.Y.Z"        → same-major+minor, >= X.Y.Z.
+//	""              → skip (no declaration).
+//	"X.Y.Z"         → exact match.
+//	"^X.Y.Z"        → same-major, >= X.Y.Z (the common case).
+//	"~X.Y.Z"        → same-major+minor, >= X.Y.Z.
 //
 // Anything else is reported as an unsupported range so the plugin author can
 // either narrow the constraint or file a BLG for richer syntax.

@@ -17,8 +17,8 @@
 // Downstream tickets consume this pair and map it to their own concern:
 //
 //   - CW-20260419-0020 (budgets)         — ScopeTier → Anthropic task_budget.tokens.
-//                                          TierOpen ⇒ advisory only; workspace-policy
-//                                          hard_ceiling wins.
+//     TierOpen ⇒ advisory only; workspace-policy
+//     hard_ceiling wins.
 //   - CW-20260419-0026 (strategy loop)   — both axes gate strategy-loop entry.
 //   - CW-20260419-0027 (playbook)        — both axes inform playbook selection.
 //   - CW-20260420-0016 (BackgroundJob)   — PatternBackground gates detached dispatch.

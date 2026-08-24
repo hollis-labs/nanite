@@ -336,9 +336,9 @@ func TestHasWorkspaceRelative(t *testing.T) {
 // containment check for `./` patterns.
 func TestSplitGlob(t *testing.T) {
 	cases := []struct {
-		in              string
-		wantLiteral     string
-		wantGlobSuffix  string
+		in             string
+		wantLiteral    string
+		wantGlobSuffix string
 	}{
 		{"", "", ""},
 		{"**", "", "**"},

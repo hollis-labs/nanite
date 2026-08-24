@@ -542,6 +542,8 @@ func (p *manifestProviderPlugin) Load(h goplugin.Host) error {
 	p.loaded = true
 	return nil
 }
-func (p *manifestProviderPlugin) Unload() error                { p.loaded = false; return nil }
-func (p *manifestProviderPlugin) Status() goplugin.PluginStatus { return goplugin.PluginStatus{Loaded: p.loaded, Enabled: true} }
-func (p *manifestProviderPlugin) Manifest() *PluginManifest    { return p.manifest }
+func (p *manifestProviderPlugin) Unload() error { p.loaded = false; return nil }
+func (p *manifestProviderPlugin) Status() goplugin.PluginStatus {
+	return goplugin.PluginStatus{Loaded: p.loaded, Enabled: true}
+}
+func (p *manifestProviderPlugin) Manifest() *PluginManifest { return p.manifest }

@@ -279,7 +279,7 @@ func writeEnvWrapperScript(bootDir, providerName, realBinary string, env map[str
 
 // shellQuote wraps s in single quotes for safe embedding in the generated
 // POSIX sh script, escaping embedded single quotes via the standard
-// close-escape-reopen technique ('\'').
+// close-escape-reopen technique ('\”).
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

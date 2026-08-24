@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	goplugin "github.com/hollis-labs/plugin-sdk"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // TestPluginsRegistry_EmptyHost asserts the response shape carries all four
@@ -204,11 +204,11 @@ type synthPlugin struct {
 	id string
 }
 
-func (s *synthPlugin) ID() string             { return s.id }
-func (s *synthPlugin) Name() string           { return s.id }
-func (s *synthPlugin) Version() string        { return "0.0.1" }
-func (s *synthPlugin) Description() string    { return "synth" }
-func (s *synthPlugin) Dependencies() []string { return nil }
+func (s *synthPlugin) ID() string                 { return s.id }
+func (s *synthPlugin) Name() string               { return s.id }
+func (s *synthPlugin) Version() string            { return "0.0.1" }
+func (s *synthPlugin) Description() string        { return "synth" }
+func (s *synthPlugin) Dependencies() []string     { return nil }
 func (s *synthPlugin) Load(h goplugin.Host) error { return nil }
 func (s *synthPlugin) Unload() error              { return nil }
 func (s *synthPlugin) Status() goplugin.PluginStatus {

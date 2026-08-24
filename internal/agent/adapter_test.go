@@ -15,7 +15,7 @@ type stubAdapter struct {
 	discErr  error
 }
 
-func (s *stubAdapter) Name() string { return s.name }
+func (s *stubAdapter) Name() string  { return s.name }
 func (s *stubAdapter) Priority() int { return s.priority }
 func (s *stubAdapter) Discover(projectDir string) ([]Definition, error) {
 	if s.discErr != nil {

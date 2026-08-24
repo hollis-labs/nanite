@@ -43,10 +43,10 @@ func TestFindCatalogEntry_BadYAML(t *testing.T) {
 
 func TestStripSha256Prefix(t *testing.T) {
 	cases := map[string]string{
-		"sha256:abc": "abc",
-		"abc":        "abc",
+		"sha256:abc":     "abc",
+		"abc":            "abc",
 		"  sha256:abc  ": "abc",
-		"": "",
+		"":               "",
 	}
 	for in, want := range cases {
 		if got := stripSha256Prefix(in); got != want {

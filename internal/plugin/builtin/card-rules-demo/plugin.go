@@ -52,10 +52,12 @@ type CardRulesDemoPlugin struct {
 // New returns a new CardRulesDemoPlugin.
 func New() *CardRulesDemoPlugin { return &CardRulesDemoPlugin{} }
 
-func (p *CardRulesDemoPlugin) ID() string             { return "card-rules-demo" }
-func (p *CardRulesDemoPlugin) Name() string           { return "Card Rules Demo" }
-func (p *CardRulesDemoPlugin) Version() string        { return "1.0.0" }
-func (p *CardRulesDemoPlugin) Description() string    { return "Reference plugin demonstrating card_rules manifest extension (J5)" }
+func (p *CardRulesDemoPlugin) ID() string      { return "card-rules-demo" }
+func (p *CardRulesDemoPlugin) Name() string    { return "Card Rules Demo" }
+func (p *CardRulesDemoPlugin) Version() string { return "1.0.0" }
+func (p *CardRulesDemoPlugin) Description() string {
+	return "Reference plugin demonstrating card_rules manifest extension (J5)"
+}
 func (p *CardRulesDemoPlugin) Dependencies() []string { return nil }
 
 // Manifest exposes the embedded plugin.yaml so card_rules register through

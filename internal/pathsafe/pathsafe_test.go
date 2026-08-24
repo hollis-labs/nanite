@@ -47,11 +47,11 @@ func TestResolveUnder_Table(t *testing.T) {
 	}
 
 	cases := []struct {
-		name        string
-		input       string
-		wantErr     bool
-		wantEscape  bool
-		wantSuffix  string // resolved path must end with this (posix-joined)
+		name       string
+		input      string
+		wantErr    bool
+		wantEscape bool
+		wantSuffix string // resolved path must end with this (posix-joined)
 	}{
 		{name: "simple relative", input: "sub/file.txt", wantSuffix: "sub/file.txt"},
 		{name: "dot-slash prefix", input: "./sub/file.txt", wantSuffix: "sub/file.txt"},

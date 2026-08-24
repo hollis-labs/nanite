@@ -125,27 +125,27 @@ type ManifestRequires struct {
 // ManifestRegisters declares all of the plugin's registrations. The loader
 // translates each list into the corresponding host Register* call.
 type ManifestRegisters struct {
-	Envelopes     []EnvelopeRegistration      `yaml:"envelopes"`
-	Commands      []CommandRegistration       `yaml:"commands"`
-	Slots         []SlotRegistration          `yaml:"slots"`
-	Components    []ComponentRegistration     `yaml:"components"`
-	Keybindings   []KeybindingRegistration    `yaml:"keybindings"`
-	Events        []EventRegistration         `yaml:"events"`
-	Crud          []CRUDRegistration          `yaml:"crud"`
-	HttpRoutes    []HTTPRouteRegistration     `yaml:"http_routes"`
-	McpServers    []MCPServerRegistration     `yaml:"mcp_servers"`
-	AgentProfiles []AgentProfileRegistration  `yaml:"agent_profiles"`
+	Envelopes     []EnvelopeRegistration     `yaml:"envelopes"`
+	Commands      []CommandRegistration      `yaml:"commands"`
+	Slots         []SlotRegistration         `yaml:"slots"`
+	Components    []ComponentRegistration    `yaml:"components"`
+	Keybindings   []KeybindingRegistration   `yaml:"keybindings"`
+	Events        []EventRegistration        `yaml:"events"`
+	Crud          []CRUDRegistration         `yaml:"crud"`
+	HttpRoutes    []HTTPRouteRegistration    `yaml:"http_routes"`
+	McpServers    []MCPServerRegistration    `yaml:"mcp_servers"`
+	AgentProfiles []AgentProfileRegistration `yaml:"agent_profiles"`
 	// CardRules declares Stage 1 card detection rules the plugin contributes.
 	// Each rule is evaluated against agent output text; the first matching rule
 	// (by regex pattern or output schema) emits its card_type. Plugin rules run
 	// AFTER built-in rules and can only add new card types, not override builtins.
-	CardRules     []CardRuleRegistration      `yaml:"card_rules"`
+	CardRules []CardRuleRegistration `yaml:"card_rules"`
 	// Panels declares right-rail v2 panels this plugin contributes (J9).
 	// Each entry adds a panel to the host's panel registry and makes it
 	// available in the right-rail tab strip. Panel rendering in v1 is a
 	// placeholder — the render function for plugin panels is a follow-up.
 	// Trust gate: install-time only (H1); runtime registration is not supported.
-	Panels        []PanelRegistration         `yaml:"panels"`
+	Panels []PanelRegistration `yaml:"panels"`
 }
 
 // PanelRegistration declares a right-rail panel the plugin contributes.

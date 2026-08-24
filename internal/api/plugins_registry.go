@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	goplugin "github.com/hollis-labs/plugin-sdk"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // RegistryEnvelopeEntry is one envelope entry in the /api/plugins/registry
@@ -52,8 +52,8 @@ type RegistrySlotEntry struct {
 type RegistryPluginEntry struct {
 	BundleURL     string `json:"bundle_url,omitempty"`
 	StylesheetURL string `json:"stylesheet_url,omitempty"`
-	BundleHash    string `json:"bundle_hash"`    // always present; empty until manifest schema grows a field (see backlog)
-	ReactVersion  string `json:"react_version"`  // always present; empty when manifest omits ui.react_version
+	BundleHash    string `json:"bundle_hash"`   // always present; empty until manifest schema grows a field (see backlog)
+	ReactVersion  string `json:"react_version"` // always present; empty when manifest omits ui.react_version
 }
 
 // RegistryResponse is the top-level shape for GET /api/plugins/registry.

@@ -109,6 +109,13 @@ in this batch that touched operator data.
     passed. Replace its fixed startup sleep with a deterministic barrier and
     pin the intended terminal-state transition.
 
+10. **`chat_boot_drive.go` send-on-closing-channel race** (pre-existing,
+    `7a0e37936`, 2026-05-19). Surfaced by `13/03`'s race gate; intermittent.
+    **Its consequence changed**: with `12/01`'s gate live, `14/03` making the
+    race suite runnable, and stage 2 active, this flake will now intermittently
+    red CI. It was tracked only in `ESCALATIONS.md` under the Skills batch and
+    absent from this register until 2026-08-24.
+
 ## Post-remediation backlog — deliberately *after* this batch
 
 Distinct from the candidate register above. Those are items that could still be
@@ -170,6 +177,24 @@ so this is consistency work rather than a defect fix.
 
 Natural to pair with P1 (the `internal/chat` split) in whatever architecture
 pass comes next.
+
+### P4 — Badger vlog rotation for the coordination store
+
+`internal/coordination/badger.go`'s `NewBadgerStore` uses Badger's 1 GB default
+value-log size. Heartbeat and lock churn can balloon a single vlog past 2 GB
+before it rotates, and **the active vlog is never GC-eligible** — so `gcLoop`
+runs with nothing to reclaim.
+
+A written fix exists and is preserved at
+`~/dev/hollis-labs/nanite-worktree-archive-20260824/patches/repo.patch`:
+`WithValueLogFileSize(64 << 20)` plus `WithValueThreshold(1 << 10)`, the latter
+inlining small coordination payloads into the LSM so they skip the vlog
+entirely.
+
+Found during the worktree-archive audit; it originates outside audit
+remediation and was never reviewed. **Review whether 64 MB / 1 KB suit this
+workload before landing it** — the rationale is sound but the constants are
+someone's judgment, not a measurement.
 
 ## Out of scope
 

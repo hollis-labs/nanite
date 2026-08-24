@@ -40,10 +40,12 @@ type ObservabilityWidgetsPlugin struct {
 
 func New() *ObservabilityWidgetsPlugin { return &ObservabilityWidgetsPlugin{} }
 
-func (p *ObservabilityWidgetsPlugin) ID() string             { return "observability-widgets" }
-func (p *ObservabilityWidgetsPlugin) Name() string           { return "Observability" }
-func (p *ObservabilityWidgetsPlugin) Version() string        { return "1.0.0" }
-func (p *ObservabilityWidgetsPlugin) Description() string    { return "LLM execution metrics, duration, cost, and error tracking widget" }
+func (p *ObservabilityWidgetsPlugin) ID() string      { return "observability-widgets" }
+func (p *ObservabilityWidgetsPlugin) Name() string    { return "Observability" }
+func (p *ObservabilityWidgetsPlugin) Version() string { return "1.0.0" }
+func (p *ObservabilityWidgetsPlugin) Description() string {
+	return "LLM execution metrics, duration, cost, and error tracking widget"
+}
 func (p *ObservabilityWidgetsPlugin) Dependencies() []string { return nil }
 
 // Manifest exposes the embedded plugin.yaml so widget UIComponents register

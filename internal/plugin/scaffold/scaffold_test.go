@@ -271,13 +271,13 @@ func TestRun_RequiresKind(t *testing.T) {
 
 func TestRun_RejectsInvalidName(t *testing.T) {
 	for _, name := range []string{
-		"Foo",          // uppercase
-		"1foo",         // leading digit
-		"foo_bar",      // underscore
-		"foo.bar",      // dot
-		"foo/bar",      // slash — path-traversal vector
-		"../foo",       // path-traversal
-		"f",            // too short (min 2)
+		"Foo",                   // uppercase
+		"1foo",                  // leading digit
+		"foo_bar",               // underscore
+		"foo.bar",               // dot
+		"foo/bar",               // slash — path-traversal vector
+		"../foo",                // path-traversal
+		"f",                     // too short (min 2)
 		strings.Repeat("a", 64), // too long (max 63)
 	} {
 		t.Run(name, func(t *testing.T) {

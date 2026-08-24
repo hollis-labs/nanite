@@ -27,8 +27,8 @@ type TurnSnapshot struct {
 	ToolCalls []ToolCallRecord `json:"tool_calls"`
 
 	// Playbook / Memory — nil until producers wire up.
-	Playbook *PlaybookRecord `json:"playbook,omitempty"`
-	MemoryHits []MemoryRecord `json:"memory_hits,omitempty"`
+	Playbook   *PlaybookRecord `json:"playbook,omitempty"`
+	MemoryHits []MemoryRecord  `json:"memory_hits,omitempty"`
 
 	// ScopeTier classification (B2) — empty until producer wires up.
 	ScopeTier string `json:"scope_tier,omitempty"`
@@ -70,11 +70,11 @@ type SlotSnapshot struct {
 // LLMMessageRecord is one internal-classified message visible to the LLM.
 type LLMMessageRecord struct {
 	// Role is "system", "user", "assistant", or "tool".
-	Role      string `json:"role"`
+	Role string `json:"role"`
 	// Content is the message text.
-	Content   string `json:"content"`
+	Content string `json:"content"`
 	// Tokens is the estimated token count.
-	Tokens    int    `json:"tokens"`
+	Tokens int `json:"tokens"`
 	// Classification tags this message with its internal origin
 	// (e.g. "user_turn", "tool_result", "envelope_response").
 	Classification string `json:"classification,omitempty"`
@@ -83,39 +83,39 @@ type LLMMessageRecord struct {
 // BrokerDecision is one request_tools call captured from the broker pipeline.
 type BrokerDecision struct {
 	// Intent is the LLM-supplied intent string from the request_tools call.
-	Intent           string   `json:"intent"`
+	Intent string `json:"intent"`
 	// Outcome is one of: selected, loaded, empty, halted, reflected.
-	Outcome          string   `json:"outcome"`
+	Outcome string `json:"outcome"`
 	// SelectedTools is the list of tool names returned to the LLM.
-	SelectedTools    []string `json:"selected_tools"`
+	SelectedTools []string `json:"selected_tools"`
 	// LayerReached is the farthest layer the broker queried.
-	LayerReached     string   `json:"layer_reached"`
+	LayerReached string `json:"layer_reached"`
 	// ConsecutiveEmpty is the run length of empty broker responses.
-	ConsecutiveEmpty int      `json:"consecutive_empty"`
+	ConsecutiveEmpty int `json:"consecutive_empty"`
 	// TotalCalls is the count of request_tools calls this turn.
-	TotalCalls       int      `json:"total_calls"`
+	TotalCalls int `json:"total_calls"`
 	// LoadedCount is the total number of tools currently loaded for the turn.
-	LoadedCount      int      `json:"loaded_count"`
+	LoadedCount int `json:"loaded_count"`
 	// ReflectionQuery is the restated goal when outcome == "reflected".
-	ReflectionQuery  string   `json:"reflection_query,omitempty"`
+	ReflectionQuery string `json:"reflection_query,omitempty"`
 	// Signals is the diagnostic JSON blob from the broker ranking layer.
-	Signals          string   `json:"signals,omitempty"`
+	Signals string `json:"signals,omitempty"`
 }
 
 // ToolCallRecord describes one MCP / self-tool invocation.
 type ToolCallRecord struct {
 	// ToolID is the provider-assigned tool-use block ID.
-	ToolID    string `json:"tool_id"`
+	ToolID string `json:"tool_id"`
 	// Name is the tool name.
-	Name      string `json:"name"`
+	Name string `json:"name"`
 	// Arguments is the raw JSON of the input map.
 	Arguments string `json:"arguments"`
 	// Result is the full tool output text.
-	Result    string `json:"result"`
+	Result string `json:"result"`
 	// IsError is true when the tool returned an error result.
-	IsError   bool   `json:"is_error"`
+	IsError bool `json:"is_error"`
 	// LatencyMs is the wall-clock time for the tool call in milliseconds.
-	LatencyMs int64  `json:"latency_ms"`
+	LatencyMs int64 `json:"latency_ms"`
 	// CacheState is "hit", "miss", or "n/a".
 	CacheState string `json:"cache_state"`
 }
@@ -124,7 +124,7 @@ type ToolCallRecord struct {
 // Nil until the playbook producer wires up.
 type PlaybookRecord struct {
 	// Name is the matched playbook name.
-	Name  string `json:"name"`
+	Name string `json:"name"`
 	// Steps is the list of step descriptions.
 	Steps []string `json:"steps,omitempty"`
 }
@@ -133,20 +133,20 @@ type PlaybookRecord struct {
 // Empty until the memory-hit producer wires up.
 type MemoryRecord struct {
 	// Source is "memory" or the broker source tag.
-	Source  string `json:"source"`
+	Source string `json:"source"`
 	// Content is the recalled memory text.
 	Content string `json:"content"`
 	// Score is the relevance score from the broker.
-	Score   float64 `json:"score,omitempty"`
+	Score float64 `json:"score,omitempty"`
 }
 
 // LoopRecord holds loop-detection status (I2).
 // Nil until I2 wires up.
 type LoopRecord struct {
 	// Detected is true when a loop was detected.
-	Detected bool   `json:"detected"`
+	Detected bool `json:"detected"`
 	// Reason describes the detection signal.
-	Reason   string `json:"reason,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // RemindersRecord holds reminder activity for one turn (J11, CW-20260426-0009).

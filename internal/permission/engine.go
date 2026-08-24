@@ -30,10 +30,10 @@ const (
 
 // CheckResult holds the decision and metadata from a permission check.
 type CheckResult struct {
-	Decision   Decision
-	RequestID  string // set when Decision == DecisionAsk
+	Decision    Decision
+	RequestID   string // set when Decision == DecisionAsk
 	MatchedRule *Rule  // the rule that matched, if any
-	Reason     string // human-readable reason
+	Reason      string // human-readable reason
 }
 
 // ApprovalRequest represents a pending permission prompt waiting for user input.
@@ -63,11 +63,11 @@ type ToolMeta struct {
 
 // Engine evaluates permission rules and manages the approval flow.
 type Engine struct {
-	mu             sync.RWMutex
-	mode           Mode
-	rules          *RuleSet
-	sessionGrants  map[string]map[string]Decision // sessionID -> toolName -> decision
-	pendingApprovals sync.Map                      // requestID -> *ApprovalRequest
+	mu               sync.RWMutex
+	mode             Mode
+	rules            *RuleSet
+	sessionGrants    map[string]map[string]Decision // sessionID -> toolName -> decision
+	pendingApprovals sync.Map                       // requestID -> *ApprovalRequest
 	approvalTimeout  time.Duration
 }
 

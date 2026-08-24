@@ -78,7 +78,7 @@ type Client struct {
 	// for callers that have not migrated; effectiveCacheHints reads
 	// req.CacheHints first and only falls back to this shared field when
 	// the per-call slot is empty. See FU-13 / CW-20260520-0054.
-	cacheHints     []llmcontracts.CacheHint
+	cacheHints []llmcontracts.CacheHint
 	// calibrated reports whether at least one provider response has supplied
 	// an x-ratelimit-limit-input-tokens header. RateLimitTPM consults this
 	// to honor the RateLimited contract: return 0 when the limit is unknown
@@ -321,4 +321,3 @@ func resolveMaxTokens(req llmtypes.ChatRequest) int64 {
 	}
 	return DefaultMaxTokens
 }
-

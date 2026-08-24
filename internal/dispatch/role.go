@@ -65,7 +65,7 @@ const PlannerRoleSlug = "planner"
 // The tool surface for Worker/Planner is owned by the spawned profile,
 // not this package.
 type RoleAssignment struct {
-	Role     Role
+	Role Role
 	// AgentSlug is the slug of the agent profile to spawn. The subagent
 	// runner resolves it against the agent registry.
 	AgentSlug string

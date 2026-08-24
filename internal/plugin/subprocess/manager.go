@@ -16,7 +16,7 @@ import (
 type ProcessState int
 
 const (
-	StateStopped  ProcessState = iota
+	StateStopped ProcessState = iota
 	StateStarting
 	StateRunning
 	StateStopping
@@ -42,10 +42,10 @@ func (s ProcessState) String() string {
 
 // ManagerConfig configures the subprocess manager.
 type ManagerConfig struct {
-	Command    string   // executable path
-	Args       []string // command-line arguments
-	Env        []string // "KEY=VALUE" pairs
-	WorkDir    string   // working directory (plugin directory)
+	Command string   // executable path
+	Args    []string // command-line arguments
+	Env     []string // "KEY=VALUE" pairs
+	WorkDir string   // working directory (plugin directory)
 
 	// Health check interval. Zero disables periodic health checks.
 	HealthInterval time.Duration
@@ -382,8 +382,8 @@ func (m *Manager) healthCheck() {
 
 // ringBuffer is a simple circular buffer for capturing stderr.
 type ringBuffer struct {
-	buf []byte
-	pos int
+	buf  []byte
+	pos  int
 	full bool
 }
 

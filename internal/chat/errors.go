@@ -78,16 +78,16 @@ type errorEnvelopeData struct {
 	Code       string                 `json:"code"`
 	Message    string                 `json:"message"`
 	Details    map[string]interface{} `json:"details,omitempty"`
-	GiphyQuery string                `json:"giphy_query"`
-	Timestamp  string                `json:"timestamp"`
+	GiphyQuery string                 `json:"giphy_query"`
+	Timestamp  string                 `json:"timestamp"`
 }
 
 // buildErrorEnvelope creates a JSON string for an error-report nanite-envelope block.
 func buildErrorEnvelope(code ErrorCode, message string, details map[string]interface{}) string {
 	data := errorEnvelopeData{
-		Code:       string(code),
-		Message:    message,
-		Details:    details,
+		Code:    string(code),
+		Message: message,
+		Details: details,
 		// math/rand is appropriate here: the Giphy query is cosmetic UI garnish
 		// embedded in the error envelope. No security decision, identity, or
 		// secret depends on this selection.

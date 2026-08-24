@@ -70,7 +70,7 @@ func readRunStatusError(t *testing.T, db *sql.DB, id string) (status, errMsg str
 // TestReaper_InactivitySweep_FallsBackToStartedAt verifies that a row
 // with no last_activity_at yet (the pre-heartbeat / never-heartbeated
 // case) is reaped using started_at as the activity baseline — i.e. the
-// COALESCE(NULLIF(last_activity_at, ''), started_at) fallback behaves
+// COALESCE(NULLIF(last_activity_at, ”), started_at) fallback behaves
 // exactly like the old started_at-only comparison when no heartbeat has
 // landed. Lands on status=stalled (CW-20260816-0004), not failed — see
 // TestReaper_InactivityBranch_LandsOnStalledNotFailed for the dedicated

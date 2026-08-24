@@ -12,7 +12,7 @@ type PluginConstructor func() fplugin.Plugin
 
 // registry is the global plugin registry.
 var (
-	registryMu   sync.RWMutex
+	registryMu     sync.RWMutex
 	pluginRegistry = map[string]PluginConstructor{}
 )
 

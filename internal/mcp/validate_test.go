@@ -10,11 +10,11 @@ func TestLimitsFor_AllTiers(t *testing.T) {
 	// in the limits table is caught immediately, and the strict-default
 	// fallback (unknown tier) lands on TierThirdPartyHTTP per D4.
 	cases := []struct {
-		tier             TrustTier
-		wantNameLen      int
-		wantSchemaBytes  int
-		wantResultBytes  int
-		wantToolsPerSrv  int
+		tier            TrustTier
+		wantNameLen     int
+		wantSchemaBytes int
+		wantResultBytes int
+		wantToolsPerSrv int
 	}{
 		{TierBuiltin, 256, 256 * 1024, 2 * 1024 * 1024, 1000},
 		{TierPluginStdio, 128, 64 * 1024, 512 * 1024, 200},

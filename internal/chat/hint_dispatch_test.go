@@ -22,7 +22,7 @@ import (
 
 // okDispatcher simulates a successful peer that returns the given ids.
 type okDispatcher struct {
-	ids            []string
+	ids             []string
 	capturedPayload string
 }
 

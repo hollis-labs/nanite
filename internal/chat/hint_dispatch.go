@@ -152,10 +152,10 @@ func ThinkToolBlockDynamic(ctx context.Context, dispatcher HintDispatcher, userI
 // buildDispatchPayload marshals the peer request to JSON.
 func buildDispatchPayload(userInput, scopeTier, reflexMatchID string, catalog []HintCatalogSummary) (string, error) {
 	req := struct {
-		UserInput    string               `json:"user_input"`
-		ScopeTier    string               `json:"scope_tier"`
-		ReflexMatch  string               `json:"reflex_match"`
-		HintCatalog  []HintCatalogSummary `json:"hint_catalog"`
+		UserInput   string               `json:"user_input"`
+		ScopeTier   string               `json:"scope_tier"`
+		ReflexMatch string               `json:"reflex_match"`
+		HintCatalog []HintCatalogSummary `json:"hint_catalog"`
 	}{
 		UserInput:   userInput,
 		ScopeTier:   scopeTier,

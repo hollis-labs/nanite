@@ -211,4 +211,3 @@ func TestCalibrateRateTracker_NoHeaderNoOp(t *testing.T) {
 		t.Fatal("calibrated should NOT be set when header is absent")
 	}
 }
-

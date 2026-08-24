@@ -55,7 +55,7 @@ func setupPlugin(t *testing.T, manifest string, files map[string]string) string 
 
 func TestValidateManifest_Valid(t *testing.T) {
 	dir := setupPlugin(t, validManifest(), map[string]string{
-		"bin/giphy":                           "#!/bin/sh\n",
+		"bin/giphy":                         "#!/bin/sh\n",
 		"envelopes/giphy-modal.schema.json": `{"type":"object"}`,
 	})
 	err := ValidateManifest(filepath.Join(dir, "plugin.yaml"), dir, ValidationOptions{})

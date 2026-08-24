@@ -102,13 +102,13 @@ func (v ValidationError) Error() string {
 // values. These are the canonical string set so the UI can render them with
 // stable formatting.
 const (
-	WarnInvalidToolName     = "invalid_tool_name"
-	WarnDescriptionTooLong  = "description_too_long"
-	WarnSchemaSizeExceeded  = "schema_size_exceeded"
-	WarnToolCountHigh       = "tool_count_high"
-	WarnDuplicateToolName   = "duplicate_tool_name"
-	WarnInvalidBlockType    = "invalid_block_type"
-	WarnResultSizeExceeded  = "result_size_exceeded"
+	WarnInvalidToolName    = "invalid_tool_name"
+	WarnDescriptionTooLong = "description_too_long"
+	WarnSchemaSizeExceeded = "schema_size_exceeded"
+	WarnToolCountHigh      = "tool_count_high"
+	WarnDuplicateToolName  = "duplicate_tool_name"
+	WarnInvalidBlockType   = "invalid_block_type"
+	WarnResultSizeExceeded = "result_size_exceeded"
 )
 
 // reValidToolNameStrict is the canonical tool-name charset enforced across

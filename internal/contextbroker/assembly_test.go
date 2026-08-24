@@ -481,9 +481,9 @@ func TestDecisionSummary_Format(t *testing.T) {
 
 func TestSlotAction_String(t *testing.T) {
 	cases := map[SlotAction]string{
-		ActionShip:    "ship",
-		ActionSkip:    "skip",
-		ActionPointer: "pointer",
+		ActionShip:     "ship",
+		ActionSkip:     "skip",
+		ActionPointer:  "pointer",
 		SlotAction(99): "unknown",
 	}
 	for action, want := range cases {

@@ -1866,3 +1866,63 @@ both the worker fix's and re-reviewer's later full race suites passed with
 **Follow-up:** Replace the fixed sleep with a start barrier, then stress the
 shutdown/cancellation terminal-state contract and fix production only if that
 deterministic test exposes a real `failed`-overwrites-`cancelled` transition.
+
+## 2026-08-24 — Worktree-archive audit found genuinely unlanded work: a Badger vlog-rotation fix
+
+**Raised by:** auditing the 32 patches archived before deleting 122 worktrees (9.1 GB reclaimed).
+
+**Question / mismatch:** 31 of the 32 patches contain nothing that is not already in `main`. Sampled
+added lines resolve into current source at a rate of roughly 58/60; the residue is almost entirely
+**Work-log prose** — draft narrative describing changes that did land, rewritten before commit — plus
+one stale auto-generated file (`ui/src/generated/plugin-envelopes.ts`, which carries a
+"do not edit manually" header).
+
+**The exception is `repo.patch`**, from a tether workspace rather than an agent worktree. It contains
+a real, unlanded change to `internal/coordination/badger.go`:
+
+```go
+WithValueLogFileSize(64 << 20).
+WithValueThreshold(1 << 10)
+```
+
+with the rationale that Badger's 1 GB default let heartbeat/lock churn balloon a single vlog past
+2 GB before rotation, and **the active vlog is never GC-eligible** — so `gcLoop` had nothing to
+reclaim. Verified absent from `main`: `NewBadgerStore` still sets only `WithLogger`,
+`WithNumVersionsToKeep(1)` and `WithCompactL0OnClose(true)`.
+
+**Resolution:** Not applied. It originates outside audit remediation, has not been reviewed, and
+applying an unreviewed patch from an abandoned workspace at batch close is exactly the scope creep
+this process guards against. The patch is preserved at
+`~/dev/hollis-labs/nanite-worktree-archive-20260824/patches/repo.patch`.
+
+**Follow-up:** Worth landing on its own merits — it is a disk-growth defect with a written fix and a
+clear rationale, found on the same day 9.1 GB of worktrees were reclaimed. Needs a real review of
+whether 64 MB / 1 KB are the right values for this workload before it lands. Filed in
+`14-followups/README.md`'s post-remediation backlog.
+
+## 2026-08-24 — The known `chat_boot_drive.go` race now has a consequence it did not have when filed
+
+**Raised by:** `13/03`'s race gate, which surfaced it on a full `-race ./...` run.
+
+**Question / mismatch:** A `WARNING: DATA RACE` appeared during Wave 8's closing verification —
+`chansend1` at `chat_boot_drive.go:297` racing `sessionRouter.closeOnce` at `agent_deps.go:771` via
+`SetPerSessionRouter`. This is **not new and not caused by the gofmt sweep**. It is the
+send-on-closing-channel race already logged here during the Skills batch, `git blame`d to commit
+`7a0e37936` (2026-05-19), months before this batch. It is intermittent: Wave 6's aggregate race run
+and a post-`14/03` run were both clean, and three targeted re-runs pass.
+
+**What changed is the consequence.** When it was filed, the race suite was not in CI and could not
+complete anyway. Now `12/01`'s `full-repo-quality.yml` exists, `14/03` made the aggregate race suite
+runnable in 260s, and `14/02` activated stage 2. **So this flake will intermittently red the build**
+on a gate that is now real. That was not true when it was accepted as a follow-up candidate.
+
+It was also absent from `14-followups/README.md`'s candidate register — tracked only in this log
+under the Skills batch, which is precisely the "recorded once, findable by nobody" pattern this
+batch documented.
+
+**Resolution:** No change to Wave 8's or `13/03`'s status; the race is pre-existing and unrelated to
+either. Added to the Wave 9 register as candidate 10 with the CI consequence stated.
+
+**Follow-up:** Fix the TOCTOU between the `!closed.Load()` check and the concurrent channel close.
+Given the gate is live, this has graduated from "nice to fix" to "will cost someone a confusing red
+build." Whoever next owns `chat_boot_drive.go` should take it.

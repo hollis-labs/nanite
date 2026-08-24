@@ -278,8 +278,8 @@ func TestACPSession_AbnormalProcessExitReachesSessionWait(t *testing.T) {
 			"concrete type to route a crash to the broker at all (verified against classifier.go); err = %v", err)
 	}
 	if xe.Code == 0 {
-		t.Errorf("ExitError.Code = 0, want non-zero -- Classify's default branch keys on xe.Code != 0 "+
-			"to treat this as a real crash rather than falling through to the 'exit code 0, not a recovery "+
+		t.Errorf("ExitError.Code = 0, want non-zero -- Classify's default branch keys on xe.Code != 0 " +
+			"to treat this as a real crash rather than falling through to the 'exit code 0, not a recovery " +
 			"candidate' bottom branch")
 	}
 }

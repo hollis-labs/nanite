@@ -18,8 +18,8 @@ type tableCardAction struct {
 // tableCardColumn mirrors a table-card column definition, including its
 // optional column-scoped actions.
 type tableCardColumn struct {
-	Key     string             `json:"key"`
-	Actions []tableCardAction  `json:"actions,omitempty"`
+	Key     string            `json:"key"`
+	Actions []tableCardAction `json:"actions,omitempty"`
 }
 
 // tableCardPayload mirrors the subset of table-card's data shape this

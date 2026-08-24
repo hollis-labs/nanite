@@ -153,7 +153,7 @@ func TestFindInlineMarkers_MultipleRealMarkers(t *testing.T) {
 // required" section): the real Agent-Skills-spec
 // (https://code.claude.com/docs/en/skills) states the inline form is only
 // recognized when `!` starts a line or immediately follows whitespace — a
-// `!` preceded by any other character (its own spec example: `` KEY=!`cmd` ``)
+// `!` preceded by any other character (its own spec example: “ KEY=!`cmd` “)
 // must be left as literal text and never reported as a marker. Three cases,
 // exactly as the fix instructions specify: the spec's own "does not run"
 // example (no preceding whitespace), the spec's own "still runs" case

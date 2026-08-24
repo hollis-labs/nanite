@@ -40,10 +40,12 @@ type AgentWidgetsPlugin struct {
 
 func New() *AgentWidgetsPlugin { return &AgentWidgetsPlugin{} }
 
-func (p *AgentWidgetsPlugin) ID() string             { return "agent-widgets" }
-func (p *AgentWidgetsPlugin) Name() string           { return "Agent & Tools" }
-func (p *AgentWidgetsPlugin) Version() string        { return "1.0.0" }
-func (p *AgentWidgetsPlugin) Description() string    { return "Agent mode switching and MCP tool discovery widgets" }
+func (p *AgentWidgetsPlugin) ID() string      { return "agent-widgets" }
+func (p *AgentWidgetsPlugin) Name() string    { return "Agent & Tools" }
+func (p *AgentWidgetsPlugin) Version() string { return "1.0.0" }
+func (p *AgentWidgetsPlugin) Description() string {
+	return "Agent mode switching and MCP tool discovery widgets"
+}
 func (p *AgentWidgetsPlugin) Dependencies() []string { return nil }
 
 // Manifest exposes the embedded plugin.yaml so widget UIComponents register

@@ -227,7 +227,7 @@ type InstallProjectReport struct {
 	FreshScaffold bool
 	Adopted       bool
 	ArchivePath   string
-	Warnings []string
+	Warnings      []string
 
 	// Adapter selection results (new in 2026-04-09 design).
 	Adapters        []string        // resolved adapter list (may be empty)

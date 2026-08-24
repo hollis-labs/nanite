@@ -43,7 +43,7 @@ func TestWorkflowLauncher_Launch_EmptyEngine_DefaultsToBuiltin(t *testing.T) {
 	other := &recordingWorkflowEngine{name: agentworkflow.EngineLangGraph}
 	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	launcher := NewWorkflowLauncher(registry, map[string]agentworkflow.WorkflowEngine{
-		agentworkflow.EngineBuiltin:    builtin,
+		agentworkflow.EngineBuiltin:   builtin,
 		agentworkflow.EngineLangGraph: other,
 	}, exec, NewDurableAgentService(st))
 
@@ -73,7 +73,7 @@ func TestWorkflowLauncher_Launch_ExplicitEngine_RoutesToIt(t *testing.T) {
 	langgraph := &recordingWorkflowEngine{name: agentworkflow.EngineLangGraph}
 	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	launcher := NewWorkflowLauncher(registry, map[string]agentworkflow.WorkflowEngine{
-		agentworkflow.EngineBuiltin:    builtin,
+		agentworkflow.EngineBuiltin:   builtin,
 		agentworkflow.EngineLangGraph: langgraph,
 	}, exec, NewDurableAgentService(st))
 

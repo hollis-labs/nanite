@@ -119,7 +119,7 @@ func TestFetchWithRetry_404NoRetry(t *testing.T) {
 		&mockResponse{status: 404},
 	)
 	_ = client.Transport.(*mockTransport) // type assert for clarity
-	attempts++ // first and only call
+	attempts++                            // first and only call
 
 	_, fe := fetchWithRetry(context.Background(), client, "http://example.com/notfound")
 	if fe == nil {

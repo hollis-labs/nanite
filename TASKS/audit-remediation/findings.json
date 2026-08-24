@@ -817,8 +817,8 @@
       "report_section": "\u00a78.3",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/03-naming-and-formatting-fixes.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed still open, exact line match: adapters.go:159's `any := false` still shadows the builtin. Trivial rename, no architect input needed."
+      "task_status": "validated",
+      "revalidation_note": "Confirmed still open, exact line match: adapters.go:159's `any := false` still shadows the builtin. Trivial rename, no architect input needed. [13/03 SWEPT 2026-08-24: 82 files re-derived immediately before sweeping per AD-22; gofmt -l now 0; build/vet/test clean. Executed in-session at operator direction, so status is validated rather than reviewed -- no fresh-reviewer pass, defensible only because gofmt is deterministic and machine-checkable.]"
     },
     {
       "id": "GO-SVCCORE-009",
@@ -1952,8 +1952,8 @@
       "report_section": "\u00a78.8",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/03-naming-and-formatting-fixes.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "Confirmed still stale: permissions_test.go's only tests are TestParseMD_ParentDispatchAllowlist and two ParentDispatchAllowlist-marshaling tests -- nothing tests permissions. Trivial rename, no architect input needed."
+      "task_status": "validated",
+      "revalidation_note": "Confirmed still stale: permissions_test.go's only tests are TestParseMD_ParentDispatchAllowlist and two ParentDispatchAllowlist-marshaling tests -- nothing tests permissions. Trivial rename, no architect input needed. [13/03 SWEPT 2026-08-24: 82 files re-derived immediately before sweeping per AD-22; gofmt -l now 0; build/vet/test clean. Executed in-session at operator direction, so status is validated rather than reviewed -- no fresh-reviewer pass, defensible only because gofmt is deterministic and machine-checkable.]"
     },
     {
       "id": "GO-AGENT-005",
@@ -2135,8 +2135,8 @@
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/03-naming-and-formatting-fixes.md",
       "disposition": "remediate",
-      "task_status": "not-started",
-      "revalidation_note": "gofmt count is 00/02-refreshed: 130 files fail gofmt -l at frozen HEAD (was 122 at the audit, +8), per raw-1d3bfd96/DELTA.md and gofmt-l.txt -- did not hand-recompute. This finding's own task file (13/03) frames the 12-vs-130-file scope choice as recorded in the Work Log once decided, and the batch's AD-22 (repo-wide gofmt sweep: now/never/ratchet-only, sequencing hazard against every other open worktree) is the gate for that scope decision. [AD-21/AD-22 DECIDED 2026-08-22: regression-gate all linters plus staged zero-tolerance on errcheck/errorlint/nilerr; gofmt ratchets now with one repo-wide sweep as the batch's final commit. Backlog 105 files at HEAD.] [DISPOSITION CORRECTED 2026-08-23: was left at needs-architect-decision when AD-21/AD-22 were recorded on 2026-08-22 -- the note was appended but the field was not flipped. Both decisions are made; the remaining work is remediation.]"
+      "task_status": "validated",
+      "revalidation_note": "gofmt count is 00/02-refreshed: 130 files fail gofmt -l at frozen HEAD (was 122 at the audit, +8), per raw-1d3bfd96/DELTA.md and gofmt-l.txt -- did not hand-recompute. This finding's own task file (13/03) frames the 12-vs-130-file scope choice as recorded in the Work Log once decided, and the batch's AD-22 (repo-wide gofmt sweep: now/never/ratchet-only, sequencing hazard against every other open worktree) is the gate for that scope decision. [AD-21/AD-22 DECIDED 2026-08-22: regression-gate all linters plus staged zero-tolerance on errcheck/errorlint/nilerr; gofmt ratchets now with one repo-wide sweep as the batch's final commit. Backlog 105 files at HEAD.] [DISPOSITION CORRECTED 2026-08-23: was left at needs-architect-decision when AD-21/AD-22 were recorded on 2026-08-22 -- the note was appended but the field was not flipped. Both decisions are made; the remaining work is remediation.] [13/03 SWEPT 2026-08-24: 82 files re-derived immediately before sweeping per AD-22; gofmt -l now 0; build/vet/test clean. Executed in-session at operator direction, so status is validated rather than reviewed -- no fresh-reviewer pass, defensible only because gofmt is deterministic and machine-checkable.]"
     },
     {
       "id": "GO-CHAT-008",

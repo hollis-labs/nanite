@@ -15,8 +15,8 @@ func TestParseCommand(t *testing.T) {
 		{"/help", "help", ""},
 		{"/agent claude-sonnet", "agent", "claude-sonnet"},
 		{"/search hello world", "search", "hello world"},
-		{"help", "help", ""},              // without leading slash
-		{"/model", "model", ""},           // no args
+		{"help", "help", ""},    // without leading slash
+		{"/model", "model", ""}, // no args
 		{"/export  extra spaces ", "export", "extra spaces"},
 	}
 

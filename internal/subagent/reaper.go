@@ -317,8 +317,8 @@ func (s SweepCounts) Total() int { return s.HardCeiling + s.Inactivity + s.Orpha
 //     ReaperOptions), not a per-row column — unlike timeout_seconds,
 //     no per-run override exists yet.
 //   - Inactivity branch matches rows whose started_at is non-empty AND
-//     COALESCE(NULLIF(last_activity_at, ''), started_at) +
-//     timeout_seconds < now. last_activity_at defaults to '' (migration
+//     COALESCE(NULLIF(last_activity_at, ”), started_at) +
+//     timeout_seconds < now. last_activity_at defaults to ” (migration
 //     092) until the first heartbeat stamps it (service.go
 //     stampActivity); NULLIF converts that empty default to NULL so
 //     COALESCE falls back to started_at — a run with no heartbeat

@@ -16,9 +16,9 @@ package service
 // Exempted tools:
 //   - tool_describe — discovery contract; agent must read inline.
 //   - tool_validate     — pre-flight validator; structured findings the
-//                           agent acts on directly.
+//     agent acts on directly.
 //   - fetch_tool_result   — already returns a slice from the cache;
-//                           re-caching it produces a pointer of a pointer.
+//     re-caching it produces a pointer of a pointer.
 //   - search_tool_result  — same.
 func isCacheExemptTool(name string) bool {
 	switch name {

@@ -16,13 +16,13 @@ package eval
 // Scenario is a single eval test case loaded from a YAML file.
 type Scenario struct {
 	ID          string `yaml:"id"`
-	Benchmark   string `yaml:"benchmark"`   // "noisytoolbench" | "carbench" | "clarifymt"
+	Benchmark   string `yaml:"benchmark"` // "noisytoolbench" | "carbench" | "clarifymt"
 	Description string `yaml:"description"`
 
 	// Input
-	UserMessage  string       `yaml:"user_message"`
+	UserMessage  string        `yaml:"user_message"`
 	ToolsOffered []ToolDefStub `yaml:"tools_offered,omitempty"`
-	PrevTurns    []TurnStub   `yaml:"prev_turns,omitempty"` // ClarifyMT multi-turn
+	PrevTurns    []TurnStub    `yaml:"prev_turns,omitempty"` // ClarifyMT multi-turn
 
 	// Expected
 	ExpectedBehavior string `yaml:"expected_behavior"` // human-readable goal
@@ -39,7 +39,7 @@ type ToolDefStub struct {
 
 // TurnStub is a single previous conversation turn for multi-turn scenarios.
 type TurnStub struct {
-	Role    string `yaml:"role"`    // "user" | "assistant"
+	Role    string `yaml:"role"` // "user" | "assistant"
 	Content string `yaml:"content"`
 }
 

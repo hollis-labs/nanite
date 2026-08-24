@@ -111,7 +111,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/safego"
 )
 
-// DefaultMarkerTimeout bounds a single inline `` !`cmd` `` marker
+// DefaultMarkerTimeout bounds a single inline “ !`cmd` “ marker
 // execution, matching the old marker's own 10-second precedent
 // (context.go's dynamicContextTimeout) — still the right default for a
 // short, deterministic "compute this value" command.
@@ -250,8 +250,8 @@ func (e *ExecutionError) Error() string {
 
 func (e *ExecutionError) Unwrap() error { return e.Err }
 
-// markerPattern matches `` !`command` `` markers — the same shape the old,
-// now-deleted context.go used (`` !`([^`]+)` ``). Applied per fence-eligible
+// markerPattern matches “ !`command` “ markers — the same shape the old,
+// now-deleted context.go used (“ !`([^`]+)` “). Applied per fence-eligible
 // line only (see FindInlineMarkers), never against the whole body at once.
 var markerPattern = regexp.MustCompile("!`([^`]+)`")
 
@@ -259,7 +259,7 @@ var markerPattern = regexp.MustCompile("!`([^`]+)`")
 // spaces of indentation, then 3+ backticks or 3+ tildes.
 var fenceRunPattern = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
 
-// InlineMarker is one real (non-fenced) `` !`cmd` `` marker found in a
+// InlineMarker is one real (non-fenced) “ !`cmd` “ marker found in a
 // SKILL.md body. Start/End are byte offsets into the original body string
 // (End exclusive) — the exact span ResolveInlineMarkers replaces with the
 // command's output.
@@ -360,13 +360,13 @@ func classifyFenceLines(spans []lineSpan) []bool {
 	return eligible
 }
 
-// FindInlineMarkers returns every real `` !`cmd` `` marker in body — every
+// FindInlineMarkers returns every real “ !`cmd` “ marker in body — every
 // occurrence outside a fenced (```/~~~) code block, and (per the real
 // Agent-Skills-spec's own precedence rule, https://code.claude.com/docs/en/skills)
 // at the start of a line or immediately preceded by whitespace. A marker
 // whose literal text appears inside a fenced code block (a documentation
 // example, most commonly), or whose `!` is preceded by a non-whitespace
-// character (e.g. `` KEY=!`cmd` `` — plausible prose about an env-var
+// character (e.g. “ KEY=!`cmd` “ — plausible prose about an env-var
 // convention, not a real marker), is never returned — see exec_test.go's
 // TestFindInlineMarkers_CodeFenceAwareness and
 // TestFindInlineMarkers_RequiresLineStartOrPrecedingWhitespace.
@@ -400,7 +400,7 @@ func FindInlineMarkers(body string) []InlineMarker {
 // a whitespace character. This is the real Agent-Skills-spec's own
 // precedence rule (https://code.claude.com/docs/en/skills): "The inline form
 // is only recognized when `!` appears at the start of a line or immediately
-// after whitespace. If `!` follows another character, as in `` KEY=!`cmd` ``,
+// after whitespace. If `!` follows another character, as in “ KEY=!`cmd` “,
 // the placeholder is left as literal text and the command does not run."
 //
 // Checks the single byte immediately before matchStart rather than decoding
@@ -429,7 +429,7 @@ func precededByLineStartOrWhitespace(line string, matchStart int) bool {
 	}
 }
 
-// ResolveInlineMarkers replaces every real (non-fenced) `` !`cmd` `` marker
+// ResolveInlineMarkers replaces every real (non-fenced) “ !`cmd` “ marker
 // in body with the trimmed output of executing that command through gate —
 // matching the old ResolveDynamicContext's own ReplaceAllStringFunc-style
 // substitution behavior, but gated and fence-aware. body is not necessarily

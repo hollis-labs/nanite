@@ -264,9 +264,9 @@ var allModels = []Model{
 }
 
 var (
-	once           sync.Once
-	byModelID      map[string]*Model
-	byInternalID   map[string]*Model
+	once         sync.Once
+	byModelID    map[string]*Model
+	byInternalID map[string]*Model
 )
 
 // catalogMu guards catalogOverlay. Separate from the registry maps (which are

@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	fplugin "github.com/hollis-labs/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
+	fplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // DiscoveredPlugin holds metadata parsed from a plugin.yaml plus the

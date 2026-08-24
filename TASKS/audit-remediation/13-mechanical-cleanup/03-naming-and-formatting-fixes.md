@@ -1,7 +1,7 @@
 # Trivial naming fixes and repo-wide gofmt backlog
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** validated — swept and mechanically verified in-session 2026-08-24 at operator direction; no fresh-reviewer pass
 **Depends on:** none within this batch.
 **Touches:** `internal/service/install/adapters.go`, `internal/agent/permissions_test.go`, and (if the repo-wide gofmt option below is taken) all **130** files currently failing `gofmt -l` per `GO-HYG-001`'s baseline (was **122** at the audited commit `8feeee5c`, per `raw/golangci-baseline.log`'s citation; refreshed at frozen HEAD `1d3bfd96` by `00/02` — a direct `gofmt -l . | grep -v '^ui/'` re-run, see `docs/audits/2026-08-21-go-quality/raw-1d3bfd96/DELTA.md` and `raw-1d3bfd96/gofmt-l.txt`), not just the 12 named by `GO-CHAT-007`.
 
@@ -58,6 +58,44 @@ All three findings in this task are trivial, mechanical, zero-design-ambiguity f
 - [ ] `go build ./...` and `go vet ./...` pass; `gofmt -l .` returns empty for whatever scope was chosen.
 
 ## Work log
+
+- **2026-08-24, executed in-session at operator direction** rather than by a
+  dispatched worker. The gate — `main` as the only open worktree — was
+  satisfied the same day by removing 122 worktrees (9.1 GB reclaimed); that
+  gate is why this task sat `not-started` while the rest of Wave 8 closed.
+- **Re-derived the count immediately before sweeping, per AD-22: 82 files.**
+  Not 89, 105, 122 or 130 — every earlier figure in this file's history was
+  stale by the time it was read. Measured with
+  `gofmt -l ./internal ./cmd ./pkg`, **not** `gofmt -l .`, which descends into
+  `.claude/worktrees/` and returned a five-figure number when that directory
+  still held 88 repo copies.
+- `gofmt -w ./internal ./cmd ./pkg` → `gofmt -l` returns **0**.
+- 82 files changed, 367 insertions, 344 deletions. Whitespace and alignment
+  only; no semantic change.
+- Gates: `go build ./...` clean, `go vet ./...` 0 findings, `go test ./...`
+  0 FAIL / 98 ok.
+- **`go test -race ./...` surfaced one `WARNING: DATA RACE`** — `chansend1` at
+  `chat_boot_drive.go:297` racing `sessionRouter.closeOnce`
+  (`agent_deps.go:771`). **Pre-existing and unrelated to this sweep**: it is the
+  known send-on-closing-channel race `git blame`d to `7a0e37936` (2026-05-19),
+  already in `ESCALATIONS.md` from the Skills batch, and intermittent — Wave 6's
+  aggregate run and a post-`14/03` run were both clean, and three targeted
+  re-runs pass. gofmt cannot introduce a race. Logged with its newly-changed
+  consequence (CI will now intermittently red on it) and registered as Wave 9
+  candidate 10.
+
+## Review notes
+
+**2026-08-24 — mechanical verification, not a fresh-reviewer pass.** Status is
+`validated`, not `reviewed`, and deliberately: the operator directed this be
+executed in-session, so no reviewer without the executor's context examined it.
+
+That is defensible here specifically because `gofmt -w` is deterministic and its
+acceptance criterion is machine-checkable — `gofmt -l` returning 0 — with no
+judgment for a reviewer to exercise. The same claim would **not** hold for any
+task involving a design call. Verified: `gofmt -l` 0, build clean, vet 0,
+`go test ./...` 0 FAIL / 98 ok, and the diff confirmed formatting-only.
+
 
 <!-- Worker fills this in as it goes: rename choices made, and whether the gofmt pass was scoped to 12 files or the full 122. -->
 

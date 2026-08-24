@@ -24,10 +24,7 @@ import (
 // seedUserSettingsRow inserts the user_settings singleton row (id=1) so
 // cs.store.GetUserSettings()/UpdateUserSettings() have a row to operate on.
 // setupCatalogTestState's store.New (unlike cmdServe's boot path) does not
-// run Store.Seed — deliberately not called here either, since Seed also
-// inserts a real external "official" catalog_sources row that
-// handleCatalogInstall would then try to fetch over the network as part of
-// ListCatalogSources/cs.fetcher.Fetch.
+// run Store.Seed, and these tests register their catalog source explicitly.
 func seedUserSettingsRow(t *testing.T, cs *catalogState) {
 	t.Helper()
 	if _, err := cs.store.DB.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {

@@ -36,6 +36,7 @@
 
 # Plugins
 [ ] Card should click and go to plugin details. Plugin details should be all the meta with links to the author page/repo, descriptions, etc. Plugins optionally should be able to provide an about/readme/how-to for their plugins. 
+[ ] Match the product's existing Shadcn empty-state pattern when no catalog source is configured, with guidance that helps the operator add a source and configure its public key before browsing or installing plugins.
 
 # General
 [ ] I like Shadcn's "empty" component, we should use that and follow that pattern so nothing looks broken/unfinished. 
@@ -57,4 +58,3 @@
 
 # Main chat display
 [ ] Let's use infinite scroll here too. When a user loads and old chat (say, using a bookmark or search) it should navigate to that chat message and load the previous 10 and next 10. Then, whatever direction the user scrolls it should add more in that direction. 
-

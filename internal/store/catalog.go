@@ -33,7 +33,7 @@ func (s *Store) ListCatalogSources(ctx context.Context) ([]CatalogSource, error)
 	}
 	defer closeRows(rows)
 
-	var sources []CatalogSource
+	sources := make([]CatalogSource, 0)
 	for rows.Next() {
 		var cs CatalogSource
 		var enabled int
@@ -110,8 +110,7 @@ func (s *Store) SetCatalogSourcePublicKey(ctx context.Context, id, publicKey str
 	return nil
 }
 
-// DeleteCatalogSource removes a catalog source. The official source can be
-// deleted but will be re-seeded on next migration run.
+// DeleteCatalogSource removes a catalog source.
 func (s *Store) DeleteCatalogSource(ctx context.Context, id string) error {
 	res, err := s.DB.ExecContext(ctx, `DELETE FROM catalog_sources WHERE id=?`, id)
 	if err != nil {

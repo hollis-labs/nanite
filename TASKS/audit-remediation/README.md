@@ -189,7 +189,9 @@ among them.
 - **It does not require the historical lint backlog to reach zero.** `12/01`
   baselines history and blocks regressions. Demanding zero would stall the
   ratchet indefinitely — the guide calls this out directly.
-- **It claims no migration numbers.** See "Migration numbering" below.
+- **It planned no migration numbers for the original 113 findings.** The
+  operator-approved `14/01` follow-up is the sole exception and claims
+  migration `147`; see "Migration numbering" below.
 - **It does not touch the frontend.** All 113 findings are Go. `ui/` is
   untouched except where `12/01`'s gate configuration incidentally names it.
 
@@ -377,7 +379,7 @@ before.**
 
 | Task | Depends on | Gated on | Notes |
 |---|---|---|---|
-| `14/01` remove default seeded catalog source | `01/01` | AD-05 ✅ | Leaves no catalog source on a fresh install — needs an empty-state screen, owned by the UI/UX workstream |
+| `14/01` remove default seeded catalog source | `01/01` | AD-05 ✅ | Implemented in the operator-approved Wave 8 window via guarded migration `147`; fresh installs have no source and the UI consequence remains with the UI/UX workstream. Pending fresh review. |
 | `14/02` error-handling backlog paydown | `12/01` stage 1 | AD-21 ✅ | Measured 281/48/24 findings; reduced all three to zero in the operator-approved Wave 8 execution and activated `12/01` stage 2. Same hazard profile as `06/03` — see its banner |
 
 Lands after Wave 7 and **before `13/03`**, which stays the batch's final commit.
@@ -464,10 +466,13 @@ run in parallel with each other beforehand.
 
 ## Migration numbering
 
-**This batch claims no migration numbers and needs none.** All 113 findings
-are Go-level: security boundaries, lifecycle, duplication, dead code, lint
-posture. No task introduces, alters, or drops a schema object. The highest
-migration on disk at planning time is `137`
+The original 113-finding plan claimed no migration numbers because its tasks
+were Go-level work. The operator-approved `14/01` follow-up now claims
+**`147_remove_untouched_official_catalog_source.sql`**, re-derived immediately
+before creation after confirming `146_agent_schedules_loop_run_tick_job_type.sql`
+was the highest migration on disk. Migration `147` removes only the exact,
+untouched legacy catalog seed and supplies a tested `INSERT OR IGNORE` Down.
+The highest migration on disk at planning time was `137`
 (`internal/store/migrations/137_*_drop_agent_skills.sql`), landed by
 `TASKS/skills/`.
 

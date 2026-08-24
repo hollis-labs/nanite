@@ -172,17 +172,6 @@ func (s *Store) Seed(ctx context.Context) error {
 		return fmt.Errorf("insert user_settings: %w", err)
 	}
 
-	// --- Catalog sources ---
-	if _, err := tx.ExecContext(ctx,
-		`INSERT OR IGNORE INTO catalog_sources (id, name, url, type, priority)
-		 VALUES (?, ?, ?, ?, ?)`,
-		"official", "Hollis Labs",
-		"https://raw.githubusercontent.com/hollis-labs/plugin-catalog/main/catalog.yaml",
-		"official", 100,
-	); err != nil {
-		return fmt.Errorf("insert catalog source: %w", err)
-	}
-
 	return tx.Commit()
 }
 

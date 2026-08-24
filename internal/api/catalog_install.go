@@ -27,12 +27,11 @@ import (
 // way the CLI's single hardcoded catalog does; a source's own trusted
 // public key IS its signer identity here).
 //
-// A source with no configured public key — the out-of-the-box state for
-// the default seeded "official" source — makes findSourcePublicKey return
+// A source with no configured public key makes findSourcePublicKey return
 // "", so this returns (nil, false). SignatureVerifier.Verify treats that as
 // "unknown signer key id" and rejects the install. This is the fix for
-// GO-PLUGIN-001: previously a missing source key silently skipped
-// signature verification entirely instead of failing closed.
+// GO-PLUGIN-001: previously a missing source key silently skipped signature
+// verification entirely instead of failing closed.
 func catalogKeyLookup(sources []store.CatalogSource) install.KeyLookup {
 	return func(keyID string) (ed25519.PublicKey, bool) {
 		hexKey := findSourcePublicKey(sources, keyID)

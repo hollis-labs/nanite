@@ -193,13 +193,11 @@ func buildZipArchive(t *testing.T, files map[string]string) []byte {
 }
 
 // TestHandleCatalogInstall_RejectsUnsignedEntry is the GO-PLUGIN-001
-// regression test: a catalog entry with no signature, from a source with no
-// configured public key (today's default-seeded "official" source state —
-// store.Store.Seed's INSERT never sets catalog_sources.public_key), must be
-// rejected outright in a production (non-devmode) build/test run — not
-// silently installed. This test file has no `devmode` build tag, so `go
-// test ./internal/api/...` (this task's own baseline check) exercises
-// exactly the production posture.
+// regression test: a catalog entry with no signature, from an
+// operator-created source with no configured public key, must be rejected
+// outright in a production (non-devmode) build/test run — not silently
+// installed. This test file has no `devmode` build tag, so `go test
+// ./internal/api/...` exercises exactly the production posture.
 func TestHandleCatalogInstall_RejectsUnsignedEntry(t *testing.T) {
 	cs, pluginsDir := setupCatalogTestState(t)
 

@@ -12,19 +12,16 @@ func TestCatalogSourceCRUD(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Seed() inserts the official source.
+	// A fresh seed deliberately leaves catalog source configuration empty.
 	sources, err := s.ListCatalogSources(context.Background())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(sources) != 1 {
-		t.Fatalf("expected 1 seeded source, got %d", len(sources))
+	if sources == nil {
+		t.Fatal("fresh catalog source list is nil, want a non-nil empty slice")
 	}
-	if sources[0].Name != "Hollis Labs" {
-		t.Errorf("expected seeded source 'Hollis Labs', got %q", sources[0].Name)
-	}
-	if sources[0].Type != "official" {
-		t.Errorf("expected type 'official', got %q", sources[0].Type)
+	if len(sources) != 0 {
+		t.Fatalf("expected no seeded sources, got %d", len(sources))
 	}
 
 	// Create a custom source.
@@ -39,13 +36,13 @@ func TestCatalogSourceCRUD(t *testing.T) {
 		t.Errorf("priority: expected 50, got %d", custom.Priority)
 	}
 
-	// List should now have 2 (official at priority 100 first, custom at 50).
+	// List should now contain only the operator-created source.
 	sources, _ = s.ListCatalogSources(context.Background())
-	if len(sources) != 2 {
-		t.Fatalf("expected 2 sources, got %d", len(sources))
+	if len(sources) != 1 {
+		t.Fatalf("expected 1 source, got %d", len(sources))
 	}
-	if sources[0].Name != "Hollis Labs" {
-		t.Errorf("first source should be official (higher priority), got %q", sources[0].Name)
+	if sources[0].Name != "My Fork" {
+		t.Errorf("listed source: expected 'My Fork', got %q", sources[0].Name)
 	}
 
 	// Update custom source.
@@ -54,7 +51,7 @@ func TestCatalogSourceCRUD(t *testing.T) {
 		t.Fatalf("update: %v", err)
 	}
 
-	// After update, custom should be first (priority 150 > 100).
+	// Updated fields should be reflected in the list.
 	sources, _ = s.ListCatalogSources(context.Background())
 	if sources[0].Name != "My Forked Catalog" {
 		t.Errorf("expected updated custom first, got %q", sources[0].Name)
@@ -74,13 +71,31 @@ func TestCatalogSourceCRUD(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 	sources, _ = s.ListCatalogSources(context.Background())
-	if len(sources) != 1 {
-		t.Fatalf("expected 1 source after delete, got %d", len(sources))
+	if sources == nil {
+		t.Fatal("catalog source list after deleting the final row is nil, want a non-nil empty slice")
+	}
+	if len(sources) != 0 {
+		t.Fatalf("expected no sources after delete, got %d", len(sources))
 	}
 
 	// Delete nonexistent.
 	if err := s.DeleteCatalogSource(context.Background(), "nonexistent"); err == nil {
 		t.Error("expected error deleting nonexistent source")
+	}
+}
+
+func TestListCatalogSourcesEmptyReturnsNonNilSlice(t *testing.T) {
+	s := newTestStore(t)
+
+	sources, err := s.ListCatalogSources(context.Background())
+	if err != nil {
+		t.Fatalf("ListCatalogSources: %v", err)
+	}
+	if sources == nil {
+		t.Fatal("ListCatalogSources returned nil for an empty table")
+	}
+	if len(sources) != 0 {
+		t.Fatalf("ListCatalogSources returned %d rows for an empty table", len(sources))
 	}
 }
 

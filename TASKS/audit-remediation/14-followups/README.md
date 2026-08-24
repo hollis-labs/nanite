@@ -26,7 +26,7 @@ their wave's predecessors only.
 
 | Task | Source | Why it had no owner |
 |---|---|---|
-| `01-remove-default-seeded-catalog-source.md` | **AD-05** | Decided 2026-08-22; was filed as a `01/01` follow-up and never became a task |
+| `01-remove-default-seeded-catalog-source.md` | **AD-05** | Implemented in the operator-approved Wave 8 window with guarded migration `147`; pending fresh review |
 | `02-error-handling-backlog-paydown.md` | **AD-21** | Implemented in Wave 8: paid the measured 281/48/24 correctness backlog to zero and activated Stage 2 |
 | `03-test-fixture-migration-cost.md` | promoted candidate 4 | Completed and independently reviewed ahead of Wave 6; full-repo race gate now passes |
 
@@ -153,7 +153,7 @@ pass comes next.
 ## Out of scope
 
 **The UI/UX review is not this wave's work** and must not be folded in.
-Task `01` will leave the plugin catalog with no configured source out of the
+Task `01` leaves the plugin catalog with no configured source out of the
 box, which is a deliberate consequence of AD-05 and needs an empty-state screen
 explaining *why* rather than a blank list or an error. That belongs to the
 separate UI/UX review workstream the operator has queued for after the freeze
@@ -164,4 +164,4 @@ the UI consequence clearly enough that the review picks it up.
 
 **In progress.** Task `03` was completed and independently reviewed ahead of
 Wave 6 under its hard sequencing rule. Task `02` is implemented in Wave 8 and
-Stage 2 is active; task `01` retains its own task-file status.
+Stage 2 is active. Task `01` is implemented in Wave 8 and pending fresh review.

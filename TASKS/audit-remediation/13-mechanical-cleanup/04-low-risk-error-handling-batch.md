@@ -1,7 +1,7 @@
 # Low-risk error-handling gaps: silently discarded/unlogged errors across 5 unrelated files
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch.
 **Touches:** `internal/task/snapshot.go`, `internal/api/bookmarks.go`, `internal/secrets/keyring.go`, `internal/service/durable_wake.go`, `internal/mcpconfig/mcpconfig.go`.
 
@@ -121,3 +121,35 @@ One item in this batch deserves priority over the other four: `GO-SVCEXEC-006`'s
 - `GO-API-010` and `GO-MCPTOOL-013`: commits `9147bf84` and review-fix `2d532314` are ancestors of the reviewed base, and this branch has no diff in `internal/api/bookmarks.go` or `internal/mcpconfig/mcpconfig.go`. Live source still uses `errors.Is` for bookmark not-found and logs both malformed MCP args/env decodes with server identity and underlying error. Focused API and MCP-config suites passed.
 - The adjacent unchecked `BumpAgentScheduleFireCount` error is accurately recorded in the Work Log: it can suppress the expiry attempt, but is outside this finding's exact expiry-write scope. The implementation did not silently broaden into that follow-up.
 - Independent verification passed: `git diff --check 8b1e61bf..f14db17d`; the three new focused ordinary regressions; focused API/MCP-config suites; focused race runs for the new service/task/secrets regressions; audit-config `errcheck,errorlint,nilerr` (`0 issues`); `go build ./...`; `go vet ./...`; and uncached `go test -count=1 ./...` (`internal/api` 10.888s, `internal/service` 24.394s, `internal/store` 11.181s).
+- **PASS — fresh independent re-review of corrective commit `fb81a0aa`
+  against `d5f0518e` (2026-08-24).** The earlier review was insufficient
+  because it ran only the Stage-2 correctness subset and omitted the full
+  tracked-package Stage-1 comparator; ordinary and race tests cannot detect
+  complexity-linter regressions. Re-running the pinned golangci-lint v2.11.4
+  comparator on the pre-fix commit reproduced the miss exactly: baseline
+  3,255/current 3,256, `cyclop` 290/289 and `gocyclo` 287/286, with both new
+  findings naming
+  `TestSQLiteSnapshotListTasksLogsMalformedStoredValuesAndPreservesRow` at
+  complexity 16.
+- The corrective diff extracts only two test helpers and candidly reopens the
+  task record. No production file, committed baseline, `TASKS/INDEX.md`,
+  `findings.json`, or `TASKS/ESCALATIONS.md` changed. The insertion of all four
+  malformed values and every assertion remain intact: preserved ID/title/status,
+  initialized-empty metadata, zero required timestamps, non-nil zero completion
+  timestamp, exactly four task-ID warnings, and one warning for each of
+  `metadata`, `created_at`, `updated_at`, and `completed_at`.
+- Independent mutation confirmed the diagnostic assertions remain sensitive:
+  changing only the production `updated_at` field label to
+  `updated_at_mutated` made the focused regression fail specifically for the
+  missing `updated_at` warning while the output still contained all four
+  task-ID warnings; restoring the label made it pass.
+- Corrected HEAD passes the pinned full comparator at baseline 3,255/current
+  3,254: `cyclop` 289/289, `gocyclo` 286/286, and the unrelated existing
+  `gocognit` reduction at 256/257. Stage 2 remains `errcheck=0`,
+  `errorlint=0`, `nilerr=0`; the baseline was not edited. Also passed:
+  `git diff --check d5f0518e..fb81a0aa`; `go test -count=1 ./internal/task`
+  (0.533s); `go test -race -count=1 ./internal/task` (1.848s);
+  `go build ./...`; `go vet ./...`; and `go test -count=1 ./...`
+  (`internal/service` 24.498s, `internal/store` 12.670s). Both disposable
+  reproduction/mutation worktrees were removed after use, and the review
+  branch remained clean before this review-only record change.

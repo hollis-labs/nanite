@@ -379,7 +379,7 @@ before.**
 
 | Task | Depends on | Gated on | Notes |
 |---|---|---|---|
-| `14/01` remove default seeded catalog source | `01/01` | AD-05 ✅ | Implemented in the operator-approved Wave 8 window via guarded migration `147`; fresh installs have no source and the UI consequence remains with the UI/UX workstream. Pending fresh review. |
+| `14/01` remove default seeded catalog source | `01/01` | AD-05 ✅ | Reviewed in the operator-approved Wave 8 window via guarded migration `147`; fresh installs have no source and the UI consequence remains with the UI/UX workstream. |
 | `14/02` error-handling backlog paydown | `12/01` stage 1 | AD-21 ✅ | Measured 281/48/24 findings; reduced all three to zero in the operator-approved Wave 8 execution and activated `12/01` stage 2. Same hazard profile as `06/03` — see its banner |
 
 Lands after Wave 7 and **before `13/03`**, which stays the batch's final commit.
@@ -455,14 +455,19 @@ files** for `11/13` (was 40/22 at frozen HEAD before `06/03`/`06/04`
 landed); re-derive fresh again before dispatch rather than trusting either
 number.
 
-**Wave 8 — the ordering that actually matters.** `13/03` must be the **last
-thing that lands in the batch, with no other branch open.** If AD-22 chooses
-the full repo-wide `gofmt` sweep, it rewrites 122 files (count as of the
-audited commit; `00/02` refreshes it) and will conflict with every
-outstanding worktree in the repository. `13/02` has the same property in
-milder form — it touches 25+ files in `internal/store` plus `cmd/nanite/main.go`
-— and should follow everything except `13/03`. `13/01`, `13/04`, `13/05` can
-run in parallel with each other beforehand.
+**Wave 8 — the ordering that actually matters.** Current-source preflight
+disproved the original all-disjoint claim: `13/01` and `13/05` both touch
+`internal/contextbroker/broker.go` and
+`internal/recovery/orphansweep/orphan_sweep.go`; broad `13/02` overlaps
+`13/01`'s store files; and `14/02` changed error semantics that `13/05` must
+preserve in `internal/mcp/manager.go` and `source_pcc.go`. The execution order
+is therefore `14/02`; then `13/01` ∥ `13/04` ∥ `14/01`; then `13/05`;
+then broad `13/02`; then `13/03` alone. `13/03` must be the **last thing that
+lands in the batch, with no other branch open.** If AD-22 chooses the full
+repo-wide `gofmt` sweep, it conflicts with every outstanding worktree in the
+repository. Re-derive the live `gofmt -l` count immediately before dispatch;
+the audited 122-file count and subsequent counts are historical measurements,
+not a target.
 
 ## Migration numbering
 

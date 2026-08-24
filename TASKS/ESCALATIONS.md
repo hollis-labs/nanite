@@ -1736,3 +1736,62 @@ the audit config.
 **Follow-up:** None. This entry exists because the task explicitly requires
 new security/data-integrity-relevant findings to survive outside the frozen
 original-audit `findings.json`; that catalog was not changed.
+
+## 2026-08-24 — Wave 8 kickoff overstated file disjointness
+
+**Raised by:** Wave 8 Orchestrator during current-source preflight.
+
+**Question / mismatch:** The kickoff and batch README described the mechanical
+cleanup tasks as file-disjoint and allowed `13/01`, `13/04`, and `13/05` to run
+in parallel. Current source disproved that assumption: `13/01` and `13/05`
+both touch `internal/contextbroker/broker.go` and
+`internal/recovery/orphansweep/orphan_sweep.go`; broad `13/02` overlaps
+`13/01`'s store files; and `14/02` changed `internal/mcp/manager.go` plus
+`source_pcc.go` semantics that `13/05` must preserve.
+
+**Resolution:** Execution was resequenced to `14/02`; then isolated
+`13/01` ∥ `13/04` ∥ `14/01`; then `13/05`; then broad `13/02`; then
+`13/03` alone. The authoritative batch README now records that order. Every
+parallel writer received an explicit Git worktree rather than relying on
+implicit agent isolation.
+
+**Follow-up:** Re-derive file overlap from current source at every wave
+preflight. Treat planning-time `Touches` tables as hypotheses, not proof of
+parallel safety.
+
+## 2026-08-24 — Skills UI fork affordances call a removed backend route
+
+**Raised by:** `13/01` implementation and confirmed by fresh review.
+
+**Question / mismatch:** The dead-code task assumed skill-source frontend
+gating had never been built. It exists directly in `SkillDetailView.tsx` and
+`SkillsBrowser.tsx`, but both fork affordances invoke `api.forkSkillToUser`,
+whose `POST /api/skills/{id}/fork-to-user` backend route was removed. The Go
+`ClassifySkillSource` helper was still independently dead and was correctly
+retired; the UI now exposes an action with no supported server endpoint.
+
+**Resolution:** No frontend or route change was folded into mechanical cleanup
+during the freeze. `13/01` removed only the decided dead Go surface and
+recorded the product mismatch durably.
+
+**Follow-up:** In the queued post-freeze UI/UX workstream, decide whether to
+remove the stranded fork affordances/API client or restore a supported backend
+workflow. Do not resurrect the dead Go classifier merely to justify it.
+
+## 2026-08-24 — Durable fire-count failure can silently suppress one-shot expiry
+
+**Raised by:** `13/04` implementation and confirmed by fresh review.
+
+**Question / mismatch:** `13/04` fixed the audited silent
+`UpdateAgentScheduleStatus(...Expired)` failure. The immediately preceding
+`BumpAgentScheduleFireCount` call still has no error log, and its failure skips
+the expiry write entirely because the write is guarded by `err == nil`. This
+is adjacent to, but distinct from, `GO-SVCEXEC-006`.
+
+**Resolution:** The task stayed within its exact finding and did not change
+control flow or silently broaden scope. The adjacent failure was inspected,
+left unchanged, and registered as a follow-up candidate.
+
+**Follow-up:** Add structured logging for the fire-count failure and a
+regression proving operators receive a schedule/instance-scoped diagnostic
+while existing best-effort control flow remains unchanged.

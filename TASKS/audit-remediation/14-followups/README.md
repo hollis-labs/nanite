@@ -26,14 +26,14 @@ their wave's predecessors only.
 
 | Task | Source | Why it had no owner |
 |---|---|---|
-| `01-remove-default-seeded-catalog-source.md` | **AD-05** | Implemented in the operator-approved Wave 8 window with guarded migration `147`; pending fresh review |
+| `01-remove-default-seeded-catalog-source.md` | **AD-05** | Reviewed in the operator-approved Wave 8 window with guarded migration `147` |
 | `02-error-handling-backlog-paydown.md` | **AD-21** | Implemented in Wave 8: paid the measured 281/48/24 correctness backlog to zero and activated Stage 2 |
 | `03-test-fixture-migration-cost.md` | promoted candidate 4 | Completed and independently reviewed ahead of Wave 6; full-repo race gate now passes |
 
 ## Candidate register
 
-`TASKS/ESCALATIONS.md` records **nine** follow-up candidates as of 2026-08-23;
-five remain open and three are now closed.
+`TASKS/ESCALATIONS.md` records **eleven** follow-up candidates as of 2026-08-24;
+eight remain open and three are now closed.
 Listed here so they are visible in one place rather than only in a chronological
 log. Open candidates remain operator-controlled because each was deliberately
 judged out of scope by the review that found it.
@@ -87,6 +87,17 @@ in this batch that touched operator data.
    `forbidigo` cannot match the `go` keyword — so nothing detects a regression
    in the lifecycle-ownership class AD-26 covered. Add it to the workflow as a
    reporting step first, per AD-21's baseline-then-ratchet posture.
+
+10. **Skills UI fork affordances call a removed backend route** (`13/01`).
+    `SkillDetailView.tsx` and `SkillsBrowser.tsx` still gate and show the
+    source-based fork action, but `api.forkSkillToUser` posts to the removed
+    `/api/skills/{id}/fork-to-user` route. Decide in the post-freeze UI/UX
+    workstream whether to remove the stranded action/client or restore a
+    supported backend workflow.
+11. **Durable one-shot expiry can still be suppressed silently** (`13/04`).
+    `BumpAgentScheduleFireCount` failure remains unlogged and prevents the
+    expiry write from running. The audited expiry-write failure itself now
+    logs; this adjacent failure is a separate control-flow/observability gap.
 
 ## Post-remediation backlog — deliberately *after* this batch
 
@@ -163,5 +174,5 @@ the UI consequence clearly enough that the review picks it up.
 ## Status
 
 **In progress.** Task `03` was completed and independently reviewed ahead of
-Wave 6 under its hard sequencing rule. Task `02` is implemented in Wave 8 and
-Stage 2 is active. Task `01` is implemented in Wave 8 and pending fresh review.
+Wave 6 under its hard sequencing rule. Tasks `01` and `02` are reviewed in the
+operator-approved Wave 8 execution, and Stage 2 is active.

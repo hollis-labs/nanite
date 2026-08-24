@@ -37,7 +37,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/hollis-labs/go-harness-filters v0.1.0 // indirect
-	github.com/hollis-labs/go-queue v0.1.2 // indirect
+	github.com/hollis-labs/go-queue v0.1.0 // indirect
 	github.com/hollis-labs/go-runner v0.5.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect

@@ -80,6 +80,54 @@ items: one unblocked a deferred verification gate and a standing performance
 complaint, while the other closed the isolation class behind the only incident
 in this batch that touched operator data.
 
+## Post-remediation backlog — deliberately *after* this batch
+
+Distinct from the candidate register above. Those are items that could still be
+promoted into this batch; these are decisions that explicitly scheduled work for
+**after audit remediation completes**. Neither is urgent; both are schedulable
+whenever resources allow.
+
+They live here rather than in a new file so follow-ups have one home — creating
+a fourth tracking location for work-to-be-done would repeat the duplicated-data
+failure this batch documented in `docs/engineering/tracking-integrity.md`.
+
+### P1 — Split `internal/chat`'s vocabulary from its wiring (AD-31, `GO-CHAT-008`)
+
+`internal/chat` mixes broadly-consumed wire-vocabulary types
+(`Envelope`, `ResponseV1`) with subsystem-specific response-handler wiring, so
+any caller wanting only the vocabulary transitively depends on an 11-package
+graph spanning subagent, elicitation, mcp and plugin.
+
+Move the subsystem-specific handlers into their own thin wiring files or a
+subpackage, leaving a pure-vocabulary core. **Not attempted in Wave 8** because
+it is a Wave-5-sized architecture refactor and belongs in a wave scoped for
+that, with characterization tests — not inside mechanical cleanup.
+
+Worth pairing with whatever architecture pass comes next rather than doing
+alone.
+
+### P2 — Converge the context pipeline's measurement contracts (AD-32, `GO-MEM-005` + the rest of `GO-MEM-004`)
+
+Wave 8 fixes the *relevance* half: a shared 0–1 normalization contract across
+`contextbroker`'s three sources, because merging differently-scaled values onto
+one ranking is arbitrary by construction.
+
+This follow-up finishes the job:
+
+- **Converge the two token estimators.** `internal/context/tokens.go` uses
+  `len/4` (floors); `internal/contextbroker/broker.go` uses `(len+3)/4`
+  (rounds up). Both measure the same content at different stages of one budget
+  pipeline. Converging needs a **new shared lower-level package**, because
+  `contextbroker` deliberately depends one-way away from `internal/context` —
+  that structure was disproportionate to a rounding difference inside the
+  batch, but is the right end state.
+- **Revisit the relevance contract** once that package exists, so normalization
+  and estimation live together rather than as two disconnected edits.
+
+The reason to do these as one pass: they are the same underlying problem — one
+measurement, several uncoordinated implementations, no shared contract — and
+fixing them separately means touching the same call sites twice.
+
 ## Out of scope
 
 **The UI/UX review is not this wave's work** and must not be folded in.

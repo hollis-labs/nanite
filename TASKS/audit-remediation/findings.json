@@ -504,9 +504,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.1",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
-      "disposition": "needs-architect-decision",
+      "disposition": "remediate",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed still pervasive across internal/store/*.go (CW-YYYYMMDD-NNNN and TASKS/*.md references embedded in comments) -- not hand-recounted per the guide's own instruction not to chase LOC/count metrics for their own sake. Genuinely an architect-scoped trim-pass question (which comments are pure task-ID citation vs. load-bearing invariant documentation), per the finding's own requires_architect_decision:true."
+      "revalidation_note": "Confirmed still pervasive across internal/store/*.go (CW-YYYYMMDD-NNNN and TASKS/*.md references embedded in comments) -- not hand-recounted per the guide's own instruction not to chase LOC/count metrics for their own sake. Genuinely an architect-scoped trim-pass question (which comments are pure task-ID citation vs. load-bearing invariant documentation), per the finding's own requires_architect_decision:true. [AD-30 DECIDED 2026-08-24: trim comments that are purely a task-ID or TASKS/*.md pointer; keep any that explain an invariant or a why, even if they also cite a task. Per-comment judgment, not a bulk pattern delete.]"
     },
     {
       "id": "GO-INFRA-001",
@@ -2157,9 +2157,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
-      "disposition": "needs-architect-decision",
+      "disposition": "accepted-risk",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed internal/chat's wide fan-out (11 internal-package imports) still mixes wire-vocabulary types with subsystem-specific response-handler wiring in one package. Finding's own requires_architect_decision:true and recommendation (\"consider whether subsystem-specific response handlers belong in their own subpackage\") is a genuine open architecture question, not a settled fix."
+      "revalidation_note": "Confirmed internal/chat's wide fan-out (11 internal-package imports) still mixes wire-vocabulary types with subsystem-specific response-handler wiring in one package. Finding's own requires_architect_decision:true and recommendation (\"consider whether subsystem-specific response handlers belong in their own subpackage\") is a genuine open architecture question, not a settled fix. [AD-31 DECIDED 2026-08-24: accept for this batch. Splitting internal/chat's vocabulary from its wiring is a Wave-5-sized architecture refactor and does not belong in mechanical cleanup. Follow-up filed in 14-followups/README.md's post-remediation backlog; not urgent, schedulable anytime.]"
     },
     {
       "id": "GO-CHAT-009",
@@ -2379,9 +2379,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
-      "disposition": "needs-architect-decision",
+      "disposition": "remediate",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed the three contextbroker sources (source_pcc.go, source_memory.go, source_conduit.go) still compute Relevance independently with no shared normalization contract. Finding's own requires_architect_decision:true and recommendation (\"document/enforce a shared relevance-normalization contract\") is a genuine open design question."
+      "revalidation_note": "Confirmed the three contextbroker sources (source_pcc.go, source_memory.go, source_conduit.go) still compute Relevance independently with no shared normalization contract. Finding's own requires_architect_decision:true and recommendation (\"document/enforce a shared relevance-normalization contract\") is a genuine open design question. [AD-32 DECIDED 2026-08-24: fix now. Document and enforce a shared 0-1 relevance-normalization contract across the three contextbroker sources -- merging differently-scaled values onto one ranking is arbitrary by construction, the same class as the unbounded-score bug AD-07 disposed of. A fuller convergence pass is in the post-remediation backlog.]"
     },
     {
       "id": "GO-MEM-005",
@@ -2402,9 +2402,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
-      "disposition": "needs-architect-decision",
+      "disposition": "accepted-risk",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed the two independent token-estimation formulas (internal/context/tokens.go, internal/contextbroker/broker.go) still exist with the described floor-vs-round-up divergence. Finding's own requires_architect_decision:true and recommendation (converging would need a new shared lower-level package, given contextbroker's deliberate one-way dependency away from internal/context) is a genuine open design question."
+      "revalidation_note": "Confirmed the two independent token-estimation formulas (internal/context/tokens.go, internal/contextbroker/broker.go) still exist with the described floor-vs-round-up divergence. Finding's own requires_architect_decision:true and recommendation (converging would need a new shared lower-level package, given contextbroker's deliberate one-way dependency away from internal/context) is a genuine open design question. [AD-32 DECIDED 2026-08-24: accept for this batch. len/4 vs (len+3)/4 diverges by a few tokens; converging needs a new shared lower-level package to respect contextbroker's deliberate one-way dependency. Covered by the same post-remediation follow-up as GO-MEM-004 so the eventual fix is one coherent pass.]"
     },
     {
       "id": "GO-MEM-006",

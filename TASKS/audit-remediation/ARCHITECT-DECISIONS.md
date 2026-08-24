@@ -74,6 +74,9 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-26 | Untracked `safego.Go` spawns: adopt an owner, or accept fire-and-forget | `04/04` (Part B) | GO-SVCCORE-002 | 2a | **decided** |
 | AD-27 | Autocomplete `repo_path` enumeration: constrain, or accept the local-operator trust model | `08/09` | GO-API-001 | 3 | **decided** |
 | AD-28 | Catalog archive fetch: host/scheme restriction — **and** CIDR-denylist consolidation | `08/09` | GO-API-003, **GO-SEC4-007** | 3 | **decided** |
+| AD-30 | Task-ID citations in permanent production comments: trim or keep | `13/02` | GO-STORE-009 | 8 | **decided** |
+| AD-31 | `internal/chat` vocabulary-vs-wiring split | `13/05` | GO-CHAT-008 | 8 | **decided** |
+| AD-32 | Context pipeline: relevance contract and token-estimator convergence | `13/05` | GO-MEM-004, GO-MEM-005 | 8 | **decided** |
 | AD-25 | `allow_unsigned_plugins` devmode bypass: wire or retire | `01/02` | GO-PLUGIN-008 | 1 | **decided** |
 | AD-29 | Client-side elicitation dead code: build or delete | `11/09` | GO-MCPTOOL-004 | 6a | **decided** |
 
@@ -562,6 +565,74 @@ AD-28 addresses where the fetch may *go*. Signature verification failing closed
 protection against the *request itself* as a probe — internal network
 enumeration from the server's vantage point. Weigh it on that, not on payload
 trust, which is already handled.
+
+### AD-30 — Task-ID citations in permanent production comments
+
+**Status:** decided · **Gates:** `13/02` · **Findings:** GO-STORE-009 (informational)
+
+> **Decided (2026-08-24): trim pure citations, keep rationale.**
+>
+> Remove comments whose entire content is a task-ID (`CW-YYYYMMDD-NNNN`) or a
+> `TASKS/*.md` pointer. **Keep** any comment that explains an invariant or a
+> *why*, even where it also cites a task.
+>
+> This is the `failure-modes.md` "documents assert false things" class: a
+> comment pointing at a task file that may no longer exist sends a reader
+> hunting for context that is gone, and the pointer looks authoritative while
+> it does so. Roughly 40 task IDs and 23 `TASKS/*.md` paths across 25+ files.
+>
+> **This needs judgment per comment, which is why it was a decision and not a
+> `sed`.** A worker who bulk-deletes every line matching the pattern will
+> destroy load-bearing rationale. If a comment would still be useful with the
+> citation stripped, strip the citation and keep the comment.
+
+### AD-31 — `internal/chat` vocabulary-vs-wiring split
+
+**Status:** decided · **Gates:** `13/05` · **Findings:** GO-CHAT-008 (informational)
+
+> **Decided (2026-08-24): accept for this batch, and file a follow-up for
+> after audit remediation completes.**
+>
+> The observation is real — `internal/chat` mixes broadly-consumed
+> wire-vocabulary types with subsystem-specific response-handler wiring, so a
+> caller wanting only `Envelope`/`ResponseV1` transitively pulls an
+> 11-package graph. But splitting it is a Wave-5-sized architecture refactor,
+> and this batch already ran its architecture wave with deliberately bounded
+> scope. Doing it inside mechanical cleanup would be exactly the
+> "mix large mechanical cleanup into semantic remediation" the guide warns
+> against.
+>
+> **Not urgent, schedulable whenever resources allow.** Recorded in
+> `14-followups/README.md`'s post-remediation backlog, not the in-batch
+> candidate register — this is deliberately *after* the batch, not pending
+> within it.
+
+### AD-32 — Context pipeline: relevance contract and token estimators
+
+**Status:** decided · **Gates:** `13/05` · **Findings:** GO-MEM-004,
+GO-MEM-005 (both informational)
+
+> **Decided (2026-08-24): fix the relevance contract now; accept the estimator
+> divergence, with a post-remediation follow-up to converge both properly.**
+>
+> **`GO-MEM-004` is correctness-adjacent despite its severity label.** Three
+> `contextbroker` sources (`source_pcc.go`, `source_memory.go`,
+> `source_conduit.go`) each compute `ContextItem.Relevance` by an unrelated
+> method, and the results are merged and cross-compared on one global scale.
+> Ranking across differently-scaled inputs is arbitrary by construction — the
+> same defect class as the unbounded-score bug AD-07 disposed of by deleting
+> the Hadron gate. Document and enforce a shared 0–1 normalization contract.
+>
+> **`GO-MEM-005` is accepted for now.** `internal/context/tokens.go` uses
+> `len/4` (floors); `internal/contextbroker/broker.go` uses `(len+3)/4`
+> (rounds up). Confirmed at HEAD. The divergence is a few tokens, and
+> converging properly needs a new shared lower-level package to respect
+> `contextbroker`'s deliberate one-way dependency away from `internal/context`
+> — structure disproportionate to a rounding difference *inside this batch*.
+>
+> **The follow-up covers both**, so the eventual fix is one coherent pass over
+> the context pipeline's measurement contracts rather than two disconnected
+> edits. Filed in `14-followups/README.md`'s post-remediation backlog.
 
 ### AD-25 — `allow_unsigned_plugins` devmode bypass: wire or retire
 

@@ -74,6 +74,7 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-26 | Untracked `safego.Go` spawns: adopt an owner, or accept fire-and-forget | `04/04` (Part B) | GO-SVCCORE-002 | 2a | **decided** |
 | AD-27 | Autocomplete `repo_path` enumeration: constrain, or accept the local-operator trust model | `08/09` | GO-API-001 | 3 | **decided** |
 | AD-28 | Catalog archive fetch: host/scheme restriction — **and** CIDR-denylist consolidation | `08/09` | GO-API-003, **GO-SEC4-007** | 3 | **decided** |
+| AD-33 | Dead skill-mode/source functions: retire or wire | `13/01` | GO-STORE-008 | 8 | **decided** |
 | AD-30 | Task-ID citations in permanent production comments: trim or keep | `13/02` | GO-STORE-009 | 8 | **decided** |
 | AD-31 | `internal/chat` vocabulary-vs-wiring split | `13/05` | GO-CHAT-008 | 8 | **decided** |
 | AD-32 | Context pipeline: relevance contract and token-estimator convergence | `13/05` | GO-MEM-004, GO-MEM-005 | 8 | **decided** |
@@ -565,6 +566,35 @@ AD-28 addresses where the fetch may *go*. Signature verification failing closed
 protection against the *request itself* as a probe — internal network
 enumeration from the server's vantage point. Weigh it on that, not on payload
 trust, which is already handled.
+
+### AD-33 — Dead skill-mode/source functions: retire or wire
+
+**Status:** decided · **Gates:** `13/01` · **Findings:** GO-STORE-008 (low)
+
+> **Decided (2026-08-24): retire. Delete all four.**
+>
+> `ParseSkillModeIDs`, `MarshalSkillModeIDs`, `SkillMatchesMode`
+> (`internal/store/skill_mode_filter.go`) and `ClassifySkillSource`
+> (`internal/store/skills_source.go`) — verified at HEAD with **zero external
+> non-test callers**, still dead after six waves.
+>
+> The decisive evidence is circumstantial but strong: they sat **untouched
+> while the skills-index redesign** (migrations `136`/`137`, `TASKS/skills/02`)
+> reworked the entire skills subsystem around them. A subsystem rewrite that
+> steps over four functions is telling you they are not part of it.
+>
+> Same wire-vs-retire shape as AD-06 through AD-11, decided the same way five
+> of those six were. `ClassifySkillSource`'s described FE gating was considered
+> for wiring and rejected: building a feature to justify existing code is
+> backwards, and nobody has asked for that gating.
+>
+> Deleting also disposes of a doc comment asserting a live caller in
+> `internal/service/ingest.go` that does not exist — the `failure-modes.md`
+> "documents assert false things" class, and the specific false claim the audit
+> called out.
+>
+> **Delete the tests with the functions.** Tests for retired code are not
+> coverage; they are maintenance on something nothing calls.
 
 ### AD-30 — Task-ID citations in permanent production comments
 

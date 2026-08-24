@@ -482,9 +482,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.1",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
-      "disposition": "needs-architect-decision",
+      "disposition": "retire-feature",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed still dead: skill_mode_filter.go and skills_source.go both still exist, untouched by the intervening skills-index redesign (migrations 136/137, TASKS/skills/02) that reworked the rest of the skills subsystem around them -- circumstantial evidence they're now doubly orphaned, but not certain. Task file itself sets `requires_architect_decision: true` (\"owner to confirm whether still needed\"); genuinely a wire-vs-retire-shaped question, not just cleanup mechanics."
+      "revalidation_note": "Confirmed still dead: skill_mode_filter.go and skills_source.go both still exist, untouched by the intervening skills-index redesign (migrations 136/137, TASKS/skills/02) that reworked the rest of the skills subsystem around them -- circumstantial evidence they're now doubly orphaned, but not certain. Task file itself sets `requires_architect_decision: true` (\"owner to confirm whether still needed\"); genuinely a wire-vs-retire-shaped question, not just cleanup mechanics. [AD-33 DECIDED 2026-08-24: retire, delete all four plus their tests. Zero external non-test callers verified at HEAD; untouched by the skills-index redesign that reworked the subsystem around them. Wiring ClassifySkillSource's described FE gating was rejected -- building a feature to justify existing code. Deleting also removes the false doc comment claiming an ingest.go caller.]"
     },
     {
       "id": "GO-STORE-009",

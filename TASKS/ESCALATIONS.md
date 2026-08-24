@@ -1795,3 +1795,30 @@ left unchanged, and registered as a follow-up candidate.
 **Follow-up:** Add structured logging for the fire-count failure and a
 regression proving operators receive a schedule/instance-scoped diagnostic
 while existing best-effort control flow remains unchanged.
+
+## 2026-08-24 — `13/04` first review missed a full-ratchet regression — FIXED
+
+**Raised by:** `13/05`'s required full comparator on the integrated Wave 8
+base.
+
+**Question / mismatch:** `13/04`'s worker and first reviewer ran the
+correctness-only `errcheck`/`errorlint`/`nilerr` gate, focused race tests,
+build, vet, and full ordinary tests, but not the complete Stage-1 comparator.
+Its new malformed-snapshot regression had cyclomatic complexity 16, adding one
+`cyclop` and one `gocyclo` finding and raising the integrated total from the
+3,255 baseline to 3,256. The task was therefore recorded `reviewed` while a
+required tracked gate failed.
+
+**Resolution:** The orchestrator immediately reopened `13/04` and downgraded
+its central status to `implemented`; the baseline was not raised. The original
+worker extracted test-only assertion helpers without changing production
+behavior or weakening the four-field diagnostic/default-row regression. A
+fresh reviewer mutation-tested the changed `updated_at` diagnostic and
+re-ran the full comparator. The corrected tree reports 3,254/3,255,
+`cyclop` 289/289, `gocyclo` 286/286, and Stage 2 at 0/0/0; the lower aggregate
+also includes an independent `gocognit` reduction from `14/01`. `13/04` is
+reviewed again.
+
+**Follow-up:** Every remaining Wave 8 implementation and review must run the
+complete tracked comparator, not infer Stage-1 health from the Stage-2
+correctness subset.

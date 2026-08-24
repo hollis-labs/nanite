@@ -581,7 +581,7 @@
       "false_positive_considerations": "Sibling LocalBackend.List/Snapshot already treat similar failures as skip-and-continue without logging, so this may be a deliberate 'best-effort restore' convention.",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: internal/task/snapshot.go's scanTask still discards json.Unmarshal (line 110) and time.Parse (lines 114-115, 117) errors during Restore. Add-a-log-line fix, no architect input needed; the false_positive_considerations note (sibling backends already treat this as best-effort) doesn't change that a log line costs nothing."
     },
     {
@@ -1011,7 +1011,7 @@
       "report_section": "\u00a78.4",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: durable_wake.go's best-effort UpdateAgentScheduleStatus(...Expired) call is still wrapped in `_ = s.store...` with no logging on failure. Add-a-log-line fix, no architect input needed."
     },
     {
@@ -1287,7 +1287,7 @@
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: bookmarks.go:90 still compares `err != sql.ErrNoRows` directly instead of errors.Is. One-line fix, no architect input needed."
     },
     {
@@ -1846,7 +1846,7 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: mcpconfig.Export still has two unchecked json.Unmarshal calls on Args/Env (lines ~145/150). Same class as the already-tracked errcheck cluster; add-warn-log fix, no architect input needed."
     },
     {
@@ -2740,7 +2740,7 @@
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "implemented",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: secrets.Get (keyring.go:24) still collapses key-not-found and keychain-access-error into an identical silent empty-string return, unlike Delete's logged failure path. Add-a-log-line fix, no architect input needed."
     },
     {

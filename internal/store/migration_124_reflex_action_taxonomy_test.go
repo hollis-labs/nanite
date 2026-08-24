@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"testing"
@@ -102,7 +103,7 @@ func TestMigrate124SeedsTaxonomyLookupTables(t *testing.T) {
 		}
 	}
 
-	if _, err := s.GetReflexActionKind(ctx, "does_not_exist"); err != ErrReflexActionKindNotFound {
+	if _, err := s.GetReflexActionKind(ctx, "does_not_exist"); !errors.Is(err, ErrReflexActionKindNotFound) {
 		t.Errorf("GetReflexActionKind(unknown) err = %v, want ErrReflexActionKindNotFound", err)
 	}
 

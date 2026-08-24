@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,15 +62,15 @@ func (a *API) handleAutocompleteFiles(w http.ResponseWriter, r *http.Request) {
 
 	var results []fileResult
 
-	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // skip errors
+			return nil //nolint:nilerr // Autocomplete is best-effort; unreadable paths are omitted from suggestions.
 		}
 
 		// Get relative path.
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil || rel == "." {
-			return nil
+			return nil //nolint:nilerr // An unrelativizable path cannot produce a safe workspace suggestion.
 		}
 
 		// Enforce depth limit.
@@ -105,7 +106,9 @@ func (a *API) handleAutocompleteFiles(w http.ResponseWriter, r *http.Request) {
 		}
 
 		return nil
-	})
+	}); err != nil {
+		slog.Warn("api: autocomplete walk ended early")
+	}
 
 	// Sort: exact basename matches first, then by path length (shorter = more relevant).
 	sort.Slice(results, func(i, j int) bool {

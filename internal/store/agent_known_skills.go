@@ -135,7 +135,7 @@ func (s *Store) ListAgentKnownSkills(ctx context.Context, agentID string) ([]Age
 	if err != nil {
 		return nil, fmt.Errorf("list agent_known_skills: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]AgentKnownSkill, 0)
 	for rows.Next() {

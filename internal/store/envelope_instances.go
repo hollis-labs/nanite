@@ -102,7 +102,7 @@ func (s *Store) ListEnvelopeInstancesBySession(ctx context.Context, sessionID st
 	if err != nil {
 		return nil, fmt.Errorf("list envelope instances by session: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var out []EnvelopeInstance
 	for rows.Next() {

@@ -483,7 +483,9 @@ func (g *Gate) run(ctx context.Context, req ExecRequest, caps Capabilities) (Exe
 	if err != nil {
 		return ExecResult{}, fmt.Errorf("skill gate: create exec scratch workspace: %w", err)
 	}
-	defer os.RemoveAll(scratchDir)
+	defer func() {
+		_ = os.RemoveAll(scratchDir) // The isolated skill scratch directory is disposable cleanup.
+	}()
 	if resolved, rerr := filepath.EvalSymlinks(scratchDir); rerr == nil {
 		scratchDir = resolved
 	}

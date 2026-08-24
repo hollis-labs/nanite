@@ -38,11 +38,11 @@ type HandoffPointer struct {
 // Per-field caps for HandoffPayload validation. Total payload is also gated
 // by SlotHandoffMaxTokens (defined in slot.go).
 const (
-	HandoffSessionIntentMaxTokens       = 200
-	HandoffRecentDecisionsMax           = 3
-	HandoffRecentDecisionItemMaxTokens  = 100
-	HandoffActivePointersMax            = 5
-	HandoffNextStepAnchorMaxTokens      = 100
+	HandoffSessionIntentMaxTokens      = 200
+	HandoffRecentDecisionsMax          = 3
+	HandoffRecentDecisionItemMaxTokens = 100
+	HandoffActivePointersMax           = 5
+	HandoffNextStepAnchorMaxTokens     = 100
 )
 
 // ErrHandoffMalformed is returned when the input bytes do not parse as JSON
@@ -50,9 +50,9 @@ const (
 // ErrHandoffOversize is returned when a per-field or total cap is exceeded.
 // Wrapped errors carry the offending field name in their message.
 var (
-	ErrHandoffMalformed     = errors.New("handoff: malformed payload")
-	ErrHandoffMissingField  = errors.New("handoff: required field missing")
-	ErrHandoffOversize      = errors.New("handoff: payload exceeds cap")
+	ErrHandoffMalformed    = errors.New("handoff: malformed payload")
+	ErrHandoffMissingField = errors.New("handoff: required field missing")
+	ErrHandoffOversize     = errors.New("handoff: payload exceeds cap")
 )
 
 // ValidateHandoff parses + validates a handoff payload. JSON is tried first
@@ -87,7 +87,7 @@ func parseHandoff(payload []byte) (*HandoffPayload, error) {
 	// YAML fallback — covers human-authored block-scalar handoffs.
 	hp = HandoffPayload{}
 	if yamlErr := yaml.Unmarshal(payload, &hp); yamlErr != nil {
-		return nil, fmt.Errorf("%w: not valid JSON or YAML: %v", ErrHandoffMalformed, yamlErr)
+		return nil, fmt.Errorf("%w: not valid JSON or YAML: %w", ErrHandoffMalformed, yamlErr)
 	}
 	return &hp, nil
 }

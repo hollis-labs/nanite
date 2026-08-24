@@ -45,7 +45,7 @@ func (s *Store) ListBottomDrawerPinnedCards(ctx context.Context, sessionID strin
 	if err != nil {
 		return nil, fmt.Errorf("list bottom drawer pinned cards: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]BottomDrawerPinnedCard, 0)
 	for rows.Next() {

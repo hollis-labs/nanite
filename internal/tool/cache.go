@@ -3,6 +3,7 @@ package tool
 import (
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -153,7 +154,7 @@ func (c *ResultCache) Fetch(sessionID, id string, offset, length int) (slice str
 	err = c.db.QueryRow(
 		`SELECT body, byte_size, expires_at FROM tool_result_cache WHERE id = ? AND session_id = ?`, id, sessionID,
 	).Scan(&body, &byteSize, &expiresAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", 0, fmt.Errorf("cached result %q not found or expired", id)
 	}
 	if err != nil {
@@ -207,7 +208,7 @@ func (c *ResultCache) Search(sessionID, id, pattern string, maxMatches int) ([]M
 	err := c.db.QueryRow(
 		`SELECT body, expires_at FROM tool_result_cache WHERE id = ? AND session_id = ?`, id, sessionID,
 	).Scan(&body, &expiresAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("cached result %q not found", id)
 	}
 	if err != nil {

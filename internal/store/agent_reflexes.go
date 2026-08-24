@@ -341,7 +341,7 @@ func (s *Store) ListAgentReflexesForAgent(ctx context.Context, agentID, classTag
 	if err != nil {
 		return nil, fmt.Errorf("list agent_reflexes: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]AgentReflex, 0)
 	for rows.Next() {
 		var r AgentReflex
@@ -408,7 +408,7 @@ func (s *Store) ListAgentReflexesForWorkflowRun(ctx context.Context, runID, agen
 	if err != nil {
 		return nil, fmt.Errorf("list agent_reflexes for workflow run: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]AgentReflex, 0)
 	for rows.Next() {
 		var r AgentReflex
@@ -453,7 +453,7 @@ func (s *Store) ListAgentReflexesForLoopRun(ctx context.Context, loopRunID strin
 	if err != nil {
 		return nil, fmt.Errorf("list agent_reflexes for loop run: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]AgentReflex, 0)
 	for rows.Next() {
 		var r AgentReflex
@@ -478,7 +478,7 @@ func (s *Store) ListAllAgentReflexes(ctx context.Context, agentID string) ([]Age
 	if err != nil {
 		return nil, fmt.Errorf("list all agent_reflexes: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]AgentReflex, 0)
 	for rows.Next() {
 		var r AgentReflex
@@ -629,7 +629,7 @@ func (s *Store) ListAgentReflexOptOuts(ctx context.Context, agentID string) ([]s
 	if err != nil {
 		return nil, fmt.Errorf("list agent_reflex_opt_outs: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]string, 0)
 	for rows.Next() {
 		var id string
@@ -759,7 +759,7 @@ func (s *Store) ListPendingReflexes(ctx context.Context, status string) ([]Pendi
 	if err != nil {
 		return nil, fmt.Errorf("list pending_reflexes: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]PendingReflex, 0)
 	for rows.Next() {
 		var r PendingReflex
@@ -790,7 +790,7 @@ func (s *Store) ApprovePendingReflex(ctx context.Context, id, reviewedBy string)
 	if err != nil {
 		return nil, fmt.Errorf("approve pending_reflexes: begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackUnlessCommitted(tx)
 
 	newID := "rfx-" + ulid.Make().String()
 	createdBy := pending.ProposedBy

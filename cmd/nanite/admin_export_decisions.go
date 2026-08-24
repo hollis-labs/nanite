@@ -104,7 +104,9 @@ func adminExportDecisionTables(dbPath string, args []string) {
 		fmt.Fprintf(os.Stderr, "admin export-decision-tables: open db %s: %v\n", absPath, err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer func() {
+		_ = db.Close() // The CLI export result owns the outcome; database close is process-exit cleanup.
+	}()
 
 	s := &store.Store{DB: db}
 
@@ -216,7 +218,9 @@ func readTableRowsForExport(db *sql.DB, table string) ([]map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Query and iteration errors are surfaced separately; deferred close is cleanup only.
+	}()
 
 	cols, err := rows.Columns()
 	if err != nil {

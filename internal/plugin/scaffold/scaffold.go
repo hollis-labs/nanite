@@ -209,7 +209,7 @@ func renderTree(root, dst string, data templateData) error {
 				return fmt.Errorf("create %s: %w", outPath, err)
 			}
 			if err := tmpl.Execute(f, data); err != nil {
-				f.Close()
+				_ = f.Close() // Preserve the template execution failure; close is cleanup for the incomplete file.
 				return fmt.Errorf("execute %s: %w", path, err)
 			}
 			if err := f.Close(); err != nil {

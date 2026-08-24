@@ -202,7 +202,9 @@ func Launch(ctx context.Context, cfg Config, input agentworkflow.WorkflowInput) 
 		}
 		workDir = dir
 		if !cfg.KeepWorkDir {
-			defer os.RemoveAll(workDir)
+			defer func() {
+				_ = os.RemoveAll(workDir) // Auto-created workflow workspaces are disposable cleanup unless KeepWorkDir is set.
+			}()
 		}
 	} else if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return Result{}, fmt.Errorf("workflowrunner: prepare work dir: %w", err)

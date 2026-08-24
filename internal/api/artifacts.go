@@ -117,14 +117,16 @@ func (a *API) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, "open artifact: "+err.Error())
 		return
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close() // Read-only file close is best-effort cleanup; read errors are handled separately.
+	}()
 
 	// Sanitize the downloaded filename in Content-Disposition so a filename
 	// stored earlier (e.g. with quotes or CRLF) cannot inject headers.
 	safeName := sanitizeContentDispositionName(artifact.Name)
 	w.Header().Set("Content-Type", artifact.MimeType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeName))
-	io.Copy(w, f)
+	_, _ = io.Copy(w, f) // The response is already streaming; a client disconnect has no recovery response path.
 }
 
 // sanitizeContentDispositionName strips characters that could break out of a
@@ -158,7 +160,9 @@ func (a *API) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "file is required: "+err.Error())
 		return
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close() // Multipart input close is best-effort cleanup; read errors are handled separately.
+	}()
 
 	// Sanitize the uploader-supplied filename. Reject — don't silently
 	// rename — so the caller is never surprised by a different filename on
@@ -205,11 +209,14 @@ func (a *API) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, "failed to create file")
 		return
 	}
-	defer dst.Close()
-
 	written, err := io.Copy(dst, file)
 	if err != nil {
+		_ = dst.Close() // Preserve the copy failure; close is cleanup for the incomplete artifact.
 		a.errorResp(w, http.StatusInternalServerError, "failed to write file")
+		return
+	}
+	if err := dst.Close(); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, "failed to finalize file: "+err.Error())
 		return
 	}
 

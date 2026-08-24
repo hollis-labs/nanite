@@ -24,6 +24,7 @@ package loop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -319,7 +320,7 @@ func TestEvaluateDecideAndAct_DecisionEscalate_DoesNotScheduleLoopRunTick(t *tes
 
 	if _, err := st.GetAgentSchedule(ctx, loopRunTickScheduleID(lr.ID)); err == nil {
 		t.Fatalf("GetAgentSchedule: expected no loop_run_tick schedule row after an ESCALATE decision, but one exists")
-	} else if err != store.ErrAgentScheduleNotFound {
+	} else if !errors.Is(err, store.ErrAgentScheduleNotFound) {
 		t.Fatalf("GetAgentSchedule: unexpected error %v, want %v", err, store.ErrAgentScheduleNotFound)
 	}
 }

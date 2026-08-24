@@ -26,7 +26,7 @@ func (s *Store) ListAgentProjects(ctx context.Context, agentID string) ([]Projec
 	if err != nil {
 		return nil, fmt.Errorf("list agent projects: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Project, 0)
 	for rows.Next() {
@@ -52,7 +52,7 @@ func (s *Store) ListProjectAgents(ctx context.Context, projectID string) ([]Agen
 	if err != nil {
 		return nil, fmt.Errorf("list project agents: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]AgentProfile, 0)
 	for rows.Next() {

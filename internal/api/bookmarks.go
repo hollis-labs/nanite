@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -87,7 +88,7 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 
 	// Check if bookmark exists for this message.
 	existing, err := a.Services.Store.GetBookmarkByMessage(r.Context(), messageID)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

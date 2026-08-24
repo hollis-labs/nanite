@@ -36,11 +36,11 @@ func (svc *Service) RequestHandoff(ctx context.Context, sessionID, fromAgentID, 
 		return "", fmt.Errorf("%w: to_agent_id required", ErrValidation)
 	}
 	if err := ValidateAgentID(ctx, svc.resolver, toAgentID); err != nil {
-		return "", fmt.Errorf("%w: to_agent_id: %v", ErrValidation, err)
+		return "", fmt.Errorf("%w: to_agent_id: %w", ErrValidation, err)
 	}
 	if fromAgentID != "" {
 		if err := ValidateAgentID(ctx, svc.resolver, fromAgentID); err != nil {
-			return "", fmt.Errorf("%w: from_agent_id: %v", ErrValidation, err)
+			return "", fmt.Errorf("%w: from_agent_id: %w", ErrValidation, err)
 		}
 	}
 	if requestedBy == "" {

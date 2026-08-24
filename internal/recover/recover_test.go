@@ -235,7 +235,7 @@ func TestWrap_RecoverableEnrichesContext(t *testing.T) {
 	}
 	if !errors.Is(wrapped, err) {
 		// errors.Is walks Unwrap; rec.OriginalError must be reachable
-		if !errors.Is(rec.OriginalError, err) && rec.OriginalError != err {
+		if !errors.Is(rec.OriginalError, err) {
 			t.Errorf("Unwrap chain broken — original error not reachable")
 		}
 	}
@@ -247,7 +247,7 @@ func TestWrap_RecoverableEnrichesContext(t *testing.T) {
 func TestWrap_UnrecoverablePassesThrough(t *testing.T) {
 	original := errors.New("permission denied: tool \"x\" not permitted")
 	got := Wrap(original, "x", nil)
-	if got != original {
+	if got != original { //nolint:errorlint // This test deliberately requires exact pass-through identity, not only errors.Is equivalence.
 		t.Errorf("expected unrecoverable error to pass through unchanged, got %T (%v)", got, got)
 	}
 }

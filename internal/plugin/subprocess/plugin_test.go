@@ -3,6 +3,7 @@ package subprocess
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -29,7 +30,7 @@ func newFakeHost() *fakeHost {
 	}
 }
 
-func (h *fakeHost) GetPlugin(id string) (plugin.Plugin, bool)             { return nil, false }
+func (h *fakeHost) GetPlugin(id string) (plugin.Plugin, bool) { return nil, false }
 func (h *fakeHost) RegisterCRUDHandler(rt string, hh plugin.CRUDHandler) error {
 	h.crud[rt] = hh
 	return nil
@@ -52,15 +53,15 @@ func (h *fakeHost) RegisterConfigSchema(fields []plugin.ConfigFieldDef) error {
 func (h *fakeHost) RegisterConnector(name string, c plugin.Connector) error { return nil }
 func (h *fakeHost) RegisterProvider(name string, p interface{}) error       { return nil }
 func (h *fakeHost) RegisterCLIAdapter(name string, a interface{}) error     { return nil }
-func (h *fakeHost) Logger() plugin.Logger        { return h.logger }
-func (h *fakeHost) Context() context.Context      { return context.Background() }
+func (h *fakeHost) Logger() plugin.Logger                                   { return h.logger }
+func (h *fakeHost) Context() context.Context                                { return context.Background() }
 
 type nopLogger struct{}
 
-func (l *nopLogger) Debug(msg string, kv ...interface{}) {}
-func (l *nopLogger) Info(msg string, kv ...interface{})  {}
-func (l *nopLogger) Warn(msg string, kv ...interface{})  {}
-func (l *nopLogger) Error(msg string, kv ...interface{}) {}
+func (l *nopLogger) Debug(msg string, kv ...interface{})  {}
+func (l *nopLogger) Info(msg string, kv ...interface{})   {}
+func (l *nopLogger) Warn(msg string, kv ...interface{})   {}
+func (l *nopLogger) Error(msg string, kv ...interface{})  {}
 func (l *nopLogger) With(kv ...interface{}) plugin.Logger { return l }
 
 // TestSubprocessPlugin_LoadLifecycle tests the full init → load → register → unload
@@ -253,7 +254,7 @@ func TestSubprocessPlugin_InitRejectsWrongProtocol(t *testing.T) {
 	}
 }
 
-// TestMapRPCError verifies JSON-RPC error codes map to plugin.PluginError types.
+// TestMapRPCError verifies JSON-RPC error codes map to plugin.Error types.
 func TestMapRPCError(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -276,9 +277,9 @@ func TestMapRPCError(t *testing.T) {
 				}
 				return
 			}
-			pe, ok := result.(*plugin.PluginError)
-			if !ok {
-				t.Fatalf("expected *plugin.PluginError, got %T", result)
+			var pe *plugin.Error
+			if !errors.As(result, &pe) {
+				t.Fatalf("expected *plugin.Error, got %T", result)
 			}
 			if pe.Code != tt.wantCode {
 				t.Errorf("expected code %d, got %d", tt.wantCode, pe.Code)

@@ -121,7 +121,7 @@ func (s *Store) ListAgentToolNames(ctx context.Context, agentID string) ([]strin
 	if err != nil {
 		return nil, fmt.Errorf("list agent_tools names: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]string, 0)
 	for rows.Next() {
@@ -195,7 +195,7 @@ func (s *Store) ListAgentDispatchToolNames(ctx context.Context, agentID string) 
 	if err != nil {
 		return nil, fmt.Errorf("list agent_dispatch_tool_allowlist names: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]string, 0)
 	for rows.Next() {

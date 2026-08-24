@@ -3,7 +3,9 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -152,7 +154,11 @@ func AgentExec(opts AgentExecOpts) (*ExecResult, error) {
 		if err := proxy.Start(); err != nil {
 			return nil, fmt.Errorf("sandbox: start proxy: %w", err)
 		}
-		defer proxy.Stop()
+		defer func() {
+			if stopErr := proxy.Stop(); stopErr != nil {
+				slog.Warn("sandbox: stop network proxy failed", "err", stopErr)
+			}
+		}()
 		proxyAddr = proxy.Addr
 
 		// Inject proxy env vars so sandboxed tools (curl, wget, pip, npm, go)
@@ -295,7 +301,8 @@ func runCmd(ctx context.Context, cmd *exec.Cmd, timeout time.Duration) (*ExecRes
 			result.ExitCode = 124
 			return result, nil
 		}
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			result.ExitCode = exitErr.ExitCode()
 			return result, nil
 		}

@@ -175,7 +175,9 @@ func (m *Manager) RemoveServer(name string) {
 
 	// Close the transport if it supports it.
 	if closer, ok := transport.(interface{ Close() error }); ok {
-		closer.Close()
+		if err := closer.Close(); err != nil {
+			slog.Warn("mcp: close transport during removal failed", "server", name, "err", err)
+		}
 	}
 
 	delete(m.servers, name)
@@ -1024,8 +1026,11 @@ func (m *Manager) Close() {
 
 	for _, nt := range snapshot {
 		if closer, ok := nt.transport.(interface{ Close() error }); ok {
-			closer.Close()
-			slog.Info("mcp: closed transport", "server", nt.name)
+			if err := closer.Close(); err != nil {
+				slog.Warn("mcp: close transport failed", "server", nt.name, "err", err)
+			} else {
+				slog.Info("mcp: closed transport", "server", nt.name)
+			}
 		}
 	}
 }

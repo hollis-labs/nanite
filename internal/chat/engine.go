@@ -123,7 +123,7 @@ func ParseAgentConstraints(raw string) AgentConstraints {
 	if raw == "" || raw == "{}" {
 		return c
 	}
-	json.Unmarshal([]byte(raw), &c)
+	_ = json.Unmarshal([]byte(raw), &c) // Invalid stored constraints deliberately resolve to the documented zero-value policy.
 	return c
 }
 

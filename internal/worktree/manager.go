@@ -126,7 +126,9 @@ func (m *gitManager) Cleanup(sessionID string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		slog.Warn("worktree: remove failed", "path", wt.Path, "output", strings.TrimSpace(string(out)), "err", err)
 		// Try manual cleanup as fallback.
-		os.RemoveAll(wt.Path)
+		if removeErr := os.RemoveAll(wt.Path); removeErr != nil {
+			slog.Warn("worktree: manual cleanup failed", "path", wt.Path, "err", removeErr)
+		}
 	}
 
 	// Delete the branch.
@@ -137,7 +139,11 @@ func (m *gitManager) Cleanup(sessionID string) error {
 	}
 
 	// Prune stale worktree references.
-	exec.Command("git", "worktree", "prune").Run()
+	prune := exec.Command("git", "worktree", "prune")
+	prune.Dir = m.repoRoot
+	if out, err := prune.CombinedOutput(); err != nil {
+		slog.Warn("worktree: prune failed", "output", strings.TrimSpace(string(out)), "err", err)
+	}
 
 	slog.Info("worktree: cleaned up", "session_id", sessionID)
 	return nil
@@ -172,22 +178,33 @@ func (m *gitManager) CleanupOrphaned(activeSessionIDs map[string]bool) (int, err
 		// Remove worktree.
 		cmd := exec.Command("git", "worktree", "remove", wtPath, "--force")
 		cmd.Dir = m.repoRoot
-		cmd.Run() // best-effort
+		if out, err := cmd.CombinedOutput(); err != nil {
+			slog.Warn("worktree: orphan git removal failed", "path", wtPath, "output", strings.TrimSpace(string(out)), "err", err)
+		}
 
 		// Remove directory if git didn't.
-		os.RemoveAll(wtPath)
+		if err := os.RemoveAll(wtPath); err != nil {
+			slog.Warn("worktree: orphan directory removal failed", "path", wtPath, "err", err)
+			continue
+		}
 
 		// Delete branch.
 		cmd = exec.Command("git", "branch", "-D", branch)
 		cmd.Dir = m.repoRoot
-		cmd.Run() // best-effort
+		if out, err := cmd.CombinedOutput(); err != nil {
+			slog.Warn("worktree: orphan branch deletion failed", "branch", branch, "output", strings.TrimSpace(string(out)), "err", err)
+		}
 
 		delete(m.active, sessionID)
 		cleaned++
 	}
 
 	if cleaned > 0 {
-		exec.Command("git", "worktree", "prune").Run()
+		prune := exec.Command("git", "worktree", "prune")
+		prune.Dir = m.repoRoot
+		if out, err := prune.CombinedOutput(); err != nil {
+			slog.Warn("worktree: orphan prune failed", "output", strings.TrimSpace(string(out)), "err", err)
+		}
 	}
 
 	return cleaned, nil

@@ -31,7 +31,7 @@ func (s *Store) ListCatalogSources(ctx context.Context) ([]CatalogSource, error)
 	if err != nil {
 		return nil, fmt.Errorf("list catalog sources: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var sources []CatalogSource
 	for rows.Next() {

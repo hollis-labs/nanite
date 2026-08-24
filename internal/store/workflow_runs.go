@@ -307,7 +307,7 @@ func (s *Store) ListWorkflowRunSteps(ctx context.Context, runID string) ([]*Work
 	if err != nil {
 		return nil, fmt.Errorf("list workflow_run_steps %s: %w", runID, err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var out []*WorkflowRunStepRow
 	for rows.Next() {
@@ -449,7 +449,7 @@ func (s *Store) GetWaitingGates(ctx context.Context, runID string) ([]*WorkflowR
 	if err != nil {
 		return nil, fmt.Errorf("get waiting gates %s: %w", runID, err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var out []*WorkflowRunStepRow
 	for rows.Next() {

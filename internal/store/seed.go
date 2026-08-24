@@ -30,7 +30,7 @@ func (s *Store) Seed(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackUnlessCommitted(tx)
 
 	// Agents are now file-based (internal/agent/). No agent seeding needed.
 	// See internal/agent/builtin/default.md for the built-in default agent.
@@ -226,7 +226,7 @@ func (s *Store) SeedProviders(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackUnlessCommitted(tx)
 
 	for _, p := range providers {
 		if _, err := tx.ExecContext(ctx,

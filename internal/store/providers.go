@@ -44,7 +44,7 @@ func (s *Store) ListProviders(ctx context.Context) ([]ProviderConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list providers: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]ProviderConfig, 0)
 	for rows.Next() {
@@ -74,7 +74,7 @@ func (s *Store) ListModels(ctx context.Context) ([]Model, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list models: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Model, 0)
 	for rows.Next() {

@@ -46,7 +46,7 @@ func (s *Store) ListArtifacts(ctx context.Context, sessionID string) ([]Artifact
 	if err != nil {
 		return nil, fmt.Errorf("list artifacts: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Artifact, 0)
 	for rows.Next() {
@@ -76,7 +76,7 @@ func (s *Store) ListArtifactsByOrigin(ctx context.Context, sessionID, origin str
 	if err != nil {
 		return nil, fmt.Errorf("list artifacts by origin: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Artifact, 0)
 	for rows.Next() {
@@ -123,7 +123,7 @@ func (s *Store) ListArtifactsByProject(ctx context.Context, projectID, excludeSe
 	if err != nil {
 		return nil, fmt.Errorf("list artifacts by project: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Artifact, 0)
 	for rows.Next() {

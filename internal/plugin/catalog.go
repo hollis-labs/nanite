@@ -19,16 +19,16 @@ import (
 
 // CatalogEntry represents a single plugin in a remote catalog.
 type CatalogEntry struct {
-	Name        string `yaml:"name"        json:"name"`
-	Version     string `yaml:"version"     json:"version"`
-	Description string `yaml:"description" json:"description"`
-	Author      string `yaml:"author"      json:"author,omitempty"`
-	Repo        string `yaml:"repo"        json:"repo,omitempty"`        // e.g. "hollis-labs/nanite-plugin-git"
-	ArchiveURL  string `yaml:"archive_url" json:"archive_url"`           // download URL for .tar.gz
-	Checksum    string `yaml:"checksum"    json:"checksum,omitempty"`    // "sha256:hex..."
-	Signature   string `yaml:"signature"   json:"signature,omitempty"`  // hex-encoded Ed25519 signature over the archive
-	Compat      string `yaml:"compat"      json:"compat,omitempty"`     // semver range, e.g. ">=0.2.0"
-	Runtime     string `yaml:"runtime"     json:"runtime,omitempty"`    // "builtin" or "subprocess"
+	Name        string   `yaml:"name"        json:"name"`
+	Version     string   `yaml:"version"     json:"version"`
+	Description string   `yaml:"description" json:"description"`
+	Author      string   `yaml:"author"      json:"author,omitempty"`
+	Repo        string   `yaml:"repo"        json:"repo,omitempty"`      // e.g. "hollis-labs/nanite-plugin-git"
+	ArchiveURL  string   `yaml:"archive_url" json:"archive_url"`         // download URL for .tar.gz
+	Checksum    string   `yaml:"checksum"    json:"checksum,omitempty"`  // "sha256:hex..."
+	Signature   string   `yaml:"signature"   json:"signature,omitempty"` // hex-encoded Ed25519 signature over the archive
+	Compat      string   `yaml:"compat"      json:"compat,omitempty"`    // semver range, e.g. ">=0.2.0"
+	Runtime     string   `yaml:"runtime"     json:"runtime,omitempty"`   // "builtin" or "subprocess"
 	Tags        []string `yaml:"tags"      json:"tags,omitempty"`
 }
 
@@ -151,7 +151,9 @@ func (cf *CatalogFetcher) fetchSource(ctx context.Context, src CatalogSource) (*
 		slog.Warn("catalog: fetch failed (using cache)", "name", src.Name, "err", err)
 		return cf.loadDiskCache(src.ID)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		slog.Warn("catalog: fetch returned error (using cache)", "name", src.Name, "status", resp.StatusCode)
@@ -221,8 +223,8 @@ func (cf *CatalogFetcher) saveDiskCache(sourceID string, data []byte) {
 	if path == "" {
 		return
 	}
-	os.MkdirAll(cf.cacheDir, 0755)
-	_ = os.WriteFile(path, data, 0644)
+	_ = os.MkdirAll(cf.cacheDir, 0o755) // The disk cache is optional; network fetch remains authoritative.
+	_ = os.WriteFile(path, data, 0o644) // The disk cache is optional; network fetch remains authoritative.
 }
 
 func (cf *CatalogFetcher) loadDiskCache(sourceID string) (*CatalogFile, error) {

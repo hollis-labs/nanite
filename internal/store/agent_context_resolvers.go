@@ -173,7 +173,7 @@ func (s *Store) ListAgentContextResolvers(ctx context.Context, agentID string) (
 	if err != nil {
 		return nil, fmt.Errorf("list agent_context_resolvers: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]AgentContextResolver, 0)
 	for rows.Next() {
 		var r AgentContextResolver
@@ -200,7 +200,7 @@ func (s *Store) ListEnabledAgentContextResolvers(ctx context.Context, agentID st
 	if err != nil {
 		return nil, fmt.Errorf("list enabled agent_context_resolvers: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]AgentContextResolver, 0)
 	for rows.Next() {
 		var r AgentContextResolver

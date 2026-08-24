@@ -321,7 +321,9 @@ func (m *Manager) ReapStale(threshold time.Duration) []Snapshot {
 
 	for _, s := range stale {
 		slog.Warn("worker: reaped as stale (heartbeat expired)", "worker_id", s.ID[:8])
-		m.Cancel(s.ID)
+		if err := m.Cancel(s.ID); err != nil {
+			slog.Warn("worker: stale reap cancellation failed", "worker_id", s.ID, "err", err)
+		}
 	}
 
 	return stale

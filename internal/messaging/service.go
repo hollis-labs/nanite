@@ -132,7 +132,7 @@ func (svc *Service) SetLifecycleManager(m *lifecycle.Manager) {
 func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message, error) {
 	registered, err := svc.maybeAutoRegister(ctx, input.FromAgentID, input.RegisterAs)
 	if err != nil {
-		return nil, fmt.Errorf("%w: from_agent_id: %v", ErrValidation, err)
+		return nil, fmt.Errorf("%w: from_agent_id: %w", ErrValidation, err)
 	}
 	// Skip the from-side ValidateAgentID call when we just auto-
 	// registered the id: the resolver may cache negative lookups or
@@ -140,11 +140,11 @@ func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message,
 	// We know the row exists because we just wrote it.
 	if !registered {
 		if err := ValidateAgentID(ctx, svc.resolver, input.FromAgentID); err != nil {
-			return nil, fmt.Errorf("%w: from_agent_id: %v", ErrValidation, err)
+			return nil, fmt.Errorf("%w: from_agent_id: %w", ErrValidation, err)
 		}
 	}
 	if err := ValidateAgentID(ctx, svc.resolver, input.ToAgentID); err != nil {
-		return nil, fmt.Errorf("%w: to_agent_id: %v", ErrValidation, err)
+		return nil, fmt.Errorf("%w: to_agent_id: %w", ErrValidation, err)
 	}
 	if input.FromSessionID == "" {
 		return nil, fmt.Errorf("%w: from_session_id required", ErrValidation)
@@ -258,7 +258,7 @@ func (svc *Service) Thread(ctx context.Context, threadID, callerSessionID, calle
 // wrapping ErrForbidden.
 func (svc *Service) Ack(ctx context.Context, sessionID, agentID, msgID string) error {
 	if err := ValidateAgentID(ctx, svc.resolver, agentID); err != nil {
-		return fmt.Errorf("%w: agent_id: %v", ErrValidation, err)
+		return fmt.Errorf("%w: agent_id: %w", ErrValidation, err)
 	}
 	msg, err := svc.store.Get(ctx, msgID)
 	if err != nil {
@@ -278,7 +278,7 @@ func (svc *Service) Ack(ctx context.Context, sessionID, agentID, msgID string) e
 // as Ack — mismatches return an error wrapping ErrForbidden.
 func (svc *Service) Resolve(ctx context.Context, sessionID, agentID, msgID string) error {
 	if err := ValidateAgentID(ctx, svc.resolver, agentID); err != nil {
-		return fmt.Errorf("%w: agent_id: %v", ErrValidation, err)
+		return fmt.Errorf("%w: agent_id: %w", ErrValidation, err)
 	}
 	msg, err := svc.store.Get(ctx, msgID)
 	if err != nil {

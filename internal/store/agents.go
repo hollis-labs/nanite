@@ -623,7 +623,7 @@ func (s *Store) DeleteAgent(ctx context.Context, slug string) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackUnlessCommitted(tx)
 
 	cleanups := []string{
 		"DELETE FROM session_agents WHERE agent_id = ?",
@@ -950,7 +950,7 @@ func (s *Store) ListSessionAgents(ctx context.Context, sessionID string) ([]Sess
 	if err != nil {
 		return nil, fmt.Errorf("list session agents: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]SessionAgent, 0)
 	for rows.Next() {
@@ -989,7 +989,7 @@ func (s *Store) ListAgents(ctx context.Context) ([]AgentProfile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list agents: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]AgentProfile, 0)
 	for rows.Next() {
@@ -1008,7 +1008,7 @@ func (s *Store) ListAgentsBySource(ctx context.Context, source string) ([]AgentP
 	if err != nil {
 		return nil, fmt.Errorf("list agents by source: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]AgentProfile, 0)
 	for rows.Next() {
@@ -1037,7 +1037,7 @@ func (s *Store) ListAgentsByRoleID(ctx context.Context, roleID string) ([]AgentP
 	if err != nil {
 		return nil, fmt.Errorf("list agents by role_id: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]AgentProfile, 0)
 	for rows.Next() {
@@ -1063,7 +1063,7 @@ func (s *Store) ListAgentsByPluginID(ctx context.Context, pluginID string) ([]Ag
 	if err != nil {
 		return nil, fmt.Errorf("list agents by plugin_id: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]AgentProfile, 0)
 	for rows.Next() {
@@ -1133,7 +1133,7 @@ func (s *Store) GetAgentByURN(ctx context.Context, urn string) (*AgentProfile, b
 	if err != nil {
 		return nil, false, fmt.Errorf("get agent by urn alias %s: %w", urn, err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	for rows.Next() {
 		var cand AgentProfile
 		if err := scanAgent(rows, &cand); err != nil {
@@ -1201,7 +1201,7 @@ func (s *Store) ListAgentsFilter(ctx context.Context, class, activationMode, sta
 	if err != nil {
 		return nil, fmt.Errorf("list agents filter: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]AgentProfile, 0)
 	for rows.Next() {
 		var a AgentProfile
@@ -1275,7 +1275,7 @@ func (s *Store) ListSessionsByAgentID(ctx context.Context, agentID string) ([]Se
 	if err != nil {
 		return nil, fmt.Errorf("list sessions by agent: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]SessionAgent, 0)
 	for rows.Next() {
 		var sa SessionAgent

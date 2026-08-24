@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -141,7 +142,7 @@ func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *st
 func (pms *pluginManagerState) jsonResp(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data) // A client write failure cannot be repaired after headers are sent.
 	// Flush to ensure the client receives the response before any restart.
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
@@ -259,7 +260,7 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	_ = json.NewEncoder(w).Encode(result) // A client write failure cannot be repaired after headers are sent.
 }
 
 // collectSkippedRegistrations pulls runtime opt-outs off a loaded subprocess
@@ -359,7 +360,10 @@ func (pms *pluginManagerState) handleInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	os.MkdirAll(pms.pluginsDir, 0755)
+	if err := os.MkdirAll(pms.pluginsDir, 0o755); err != nil {
+		pms.errorResp(w, http.StatusInternalServerError, "failed to create plugins directory: "+err.Error())
+		return
+	}
 
 	// Determine repo URL — check repos.yaml first, fall back to default org.
 	repoURL := fmt.Sprintf("git@github.com:hollis-labs/%s.git", req.Name)
@@ -382,7 +386,7 @@ func (pms *pluginManagerState) handleInstall(w http.ResponseWriter, r *http.Requ
 
 	// Verify plugin.yaml exists in the cloned repo.
 	if _, err := os.Stat(filepath.Join(target, "plugin.yaml")); err != nil {
-		os.RemoveAll(target)
+		_ = os.RemoveAll(target) // The invalid checkout is already rejected; removal only cleans partial state.
 		pms.errorResp(w, http.StatusBadRequest, "cloned repo does not contain plugin.yaml")
 		return
 	}
@@ -441,11 +445,14 @@ func (pms *pluginManagerState) handleInstallLocal(w http.ResponseWriter, r *http
 		return
 	}
 
-	os.MkdirAll(pms.pluginsDir, 0755)
+	if err := os.MkdirAll(pms.pluginsDir, 0o755); err != nil {
+		pms.errorResp(w, http.StatusInternalServerError, "failed to create plugins directory: "+err.Error())
+		return
+	}
 
 	// Copy the directory tree.
 	if err := copyDir(srcDir, target); err != nil {
-		os.RemoveAll(target)
+		_ = os.RemoveAll(target) // Preserve the copy failure; removal only cleans a partial install.
 		pms.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("copy failed: %v", err))
 		return
 	}
@@ -478,23 +485,17 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 		pms.errorResp(w, http.StatusBadRequest, "archive file is required")
 		return
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close() // Multipart input close is best-effort cleanup; read errors are handled separately.
+	}()
 
 	// Write to a temp file so we can seek (needed for zip).
-	tmpFile, err := os.CreateTemp("", "nanite-plugin-*")
+	tmpPath, cleanupUpload, err := saveUploadToTemp(file)
 	if err != nil {
-		pms.errorResp(w, http.StatusInternalServerError, "failed to create temp file")
+		pms.errorResp(w, http.StatusInternalServerError, "failed to save upload: "+err.Error())
 		return
 	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err := io.Copy(tmpFile, file); err != nil {
-		tmpFile.Close()
-		pms.errorResp(w, http.StatusInternalServerError, "failed to save upload")
-		return
-	}
-	tmpFile.Close()
+	defer cleanupUpload()
 
 	// Extract to a temp directory first, then validate.
 	extractDir, err := os.MkdirTemp("", "nanite-plugin-extract-*")
@@ -502,7 +503,9 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 		pms.errorResp(w, http.StatusInternalServerError, "failed to create temp dir")
 		return
 	}
-	defer os.RemoveAll(extractDir)
+	defer func() {
+		_ = os.RemoveAll(extractDir) // The archive extraction directory is disposable installation scratch space.
+	}()
 
 	filename := header.Filename
 	switch {
@@ -557,10 +560,13 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 		return
 	}
 
-	os.MkdirAll(pms.pluginsDir, 0755)
+	if err := os.MkdirAll(pms.pluginsDir, 0o755); err != nil {
+		pms.errorResp(w, http.StatusInternalServerError, "failed to create plugins directory: "+err.Error())
+		return
+	}
 
 	if err := copyDir(pluginRoot, target); err != nil {
-		os.RemoveAll(target)
+		_ = os.RemoveAll(target) // Preserve the copy failure; removal only cleans a partial install.
 		pms.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("copy failed: %v", err))
 		return
 	}
@@ -574,6 +580,27 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 		"source":  "archive",
 		"message": fmt.Sprintf("Plugin %q installed from archive.", pluginID),
 	})
+}
+
+func saveUploadToTemp(src io.Reader) (string, func(), error) {
+	tmpFile, err := os.CreateTemp("", "nanite-plugin-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	cleanup := func() {
+		_ = os.Remove(tmpPath) // The uploaded archive copy is disposable after installation.
+	}
+	if _, err := io.Copy(tmpFile, src); err != nil {
+		_ = tmpFile.Close() // Preserve the upload copy failure; close is cleanup for the abandoned temp file.
+		cleanup()
+		return "", nil, fmt.Errorf("copy upload: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("close uploaded archive: %w", err)
+	}
+	return tmpPath, cleanup, nil
 }
 
 func (pms *pluginManagerState) handleUninstall(w http.ResponseWriter, r *http.Request) {
@@ -990,7 +1017,9 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() {
+		_ = in.Close() // Input-file close is best-effort cleanup; read errors are handled separately.
+	}()
 
 	info, err := in.Stat()
 	if err != nil {
@@ -1001,10 +1030,11 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-
-	_, err = io.Copy(out, in)
-	return err
+	if _, err = io.Copy(out, in); err != nil {
+		_ = out.Close() // Preserve the copy failure; close is cleanup for the incomplete destination.
+		return err
+	}
+	return out.Close()
 }
 
 // extractedFileClose is the hook used by extractTarGz / extractZip to close
@@ -1019,13 +1049,17 @@ func extractTarGz(archivePath, destDir string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close() // Read-only file close is best-effort cleanup; read errors are handled separately.
+	}()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return fmt.Errorf("gzip: %w", err)
 	}
-	defer gz.Close()
+	defer func() {
+		_ = gz.Close() // The gzip reader close is best-effort cleanup after read errors are handled.
+	}()
 
 	tr := tar.NewReader(gz)
 	var (
@@ -1034,7 +1068,7 @@ func extractTarGz(archivePath, destDir string) error {
 	)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -1105,7 +1139,9 @@ func extractZip(archivePath, destDir string) error {
 	if err != nil {
 		return fmt.Errorf("zip: %w", err)
 	}
-	defer zr.Close()
+	defer func() {
+		_ = zr.Close() // The zip reader close is best-effort cleanup after extraction errors are handled.
+	}()
 
 	if len(zr.File) > maxArchiveFileCount {
 		return fmt.Errorf("archive too many entries: %d > %d", len(zr.File), maxArchiveFileCount)
@@ -1149,7 +1185,7 @@ func extractZip(archivePath, destDir string) error {
 		}
 		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode())
 		if err != nil {
-			rc.Close()
+			_ = rc.Close() // Preserve the destination-open failure; archive-entry close is cleanup.
 			return err
 		}
 		// Bounded copy: reject at maxArchiveFileSize+1 bytes. Defends
@@ -1158,12 +1194,15 @@ func extractZip(archivePath, destDir string) error {
 		//nolint:gosec // G110: copy is explicitly bounded by io.LimitReader; bomb is rejected before disk/memory exhaustion.
 		written, err := io.Copy(out, io.LimitReader(rc, maxArchiveFileSize+1))
 		closeErr := extractedFileClose(out)
-		rc.Close()
+		rcCloseErr := rc.Close()
 		if err != nil {
 			return err
 		}
 		if closeErr != nil {
 			return fmt.Errorf("close extracted file: %w", closeErr)
+		}
+		if rcCloseErr != nil {
+			return fmt.Errorf("close archive entry %s: %w", f.Name, rcCloseErr)
 		}
 		if written > maxArchiveFileSize {
 			return fmt.Errorf("archive file too large: %s exceeded %d during decompress", f.Name, maxArchiveFileSize)

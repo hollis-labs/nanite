@@ -287,7 +287,7 @@ func (a *Adapter) ListRoles() ([]agent.RoleInfo, error) {
 
 	err = filepath.WalkDir(rolesDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip unreadable entries
+			return nil //nolint:nilerr // Role discovery is best-effort; unreadable entries are omitted.
 		}
 		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
 			return nil
@@ -334,7 +334,7 @@ func (a *Adapter) ListSkills() ([]agent.SkillInfo, error) {
 
 	err = filepath.WalkDir(skillsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // Skill discovery is best-effort; unreadable entries are omitted.
 		}
 		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
 			return nil

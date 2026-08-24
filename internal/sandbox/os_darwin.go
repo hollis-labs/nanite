@@ -13,8 +13,8 @@ import (
 // seatbeltUnsafeRuneError is returned when a string destined for a seatbelt
 // profile literal contains a byte the profile syntax cannot quote safely.
 type seatbeltUnsafeRuneError struct {
-	field string
-	value string
+	field  string
+	value  string
 	reason string
 }
 
@@ -166,11 +166,14 @@ func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, extraWritePath string, net
 	profilePath := f.Name()
 
 	if _, err := f.WriteString(profile); err != nil {
-		f.Close()
-		os.Remove(profilePath)
+		_ = f.Close()              // Preserve the write failure; close is cleanup for the incomplete profile.
+		_ = os.Remove(profilePath) // Preserve the write failure; removal is cleanup for the incomplete profile.
 		return nil, false, fmt.Errorf("write seatbelt profile: %w", err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(profilePath) // Preserve the close failure; removal is cleanup for the unusable profile.
+		return nil, false, fmt.Errorf("close seatbelt profile: %w", err)
+	}
 
 	// Wrap: sandbox-exec -f <profile> <original-command> <original-args...>
 	origPath := cmd.Path
@@ -183,5 +186,7 @@ func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, extraWritePath string, net
 	newArgs = append(newArgs, origArgs...)
 	cmd.Args = newArgs
 
-	return func() { os.Remove(profilePath) }, true, nil
+	return func() {
+		_ = os.Remove(profilePath) // The generated seatbelt profile is disposable after command execution.
+	}, true, nil
 }

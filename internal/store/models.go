@@ -69,7 +69,7 @@ func (s *Store) SyncModelsFromRegistry(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackUnlessCommitted(tx)
 
 	applied := 0
 	for _, m := range seeded {

@@ -152,21 +152,7 @@ func (s *PCCSource) Fetch(ctx context.Context, intent Intent, budget int) ([]Con
 // resolveProjectDir finds the PCC directory for the given scope.
 func (s *PCCSource) resolveProjectDir(scope string) (string, error) {
 	if scope == "" {
-		// No scope — try to find any project dir.
-		entries, err := os.ReadDir(s.BasePath)
-		if err != nil {
-			return "", nil
-		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				dir, err := pathsafe.ResolveUnder(s.BasePath, entry.Name())
-				if err != nil {
-					return "", err
-				}
-				return dir, nil
-			}
-		}
-		return "", nil
+		return s.resolveAnyProjectDir()
 	}
 
 	// Try exact match first.
@@ -178,6 +164,22 @@ func (s *PCCSource) resolveProjectDir(scope string) (string, error) {
 		return dir, nil
 	}
 
+	return "", nil
+}
+
+func (s *PCCSource) resolveAnyProjectDir() (string, error) {
+	entries, err := os.ReadDir(s.BasePath)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read pcc base dir %s: %w", s.BasePath, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return pathsafe.ResolveUnder(s.BasePath, entry.Name())
+		}
+	}
 	return "", nil
 }
 

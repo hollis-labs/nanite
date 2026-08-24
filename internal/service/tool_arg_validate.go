@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -315,8 +316,8 @@ func (v *argValidator) getOrCompile(toolName string, schema map[string]any) (*js
 // formatValidationError converts a jsonschema validation error into a concise,
 // LLM-friendly error message. Does not expose raw library internals.
 func formatValidationError(toolName string, err error) string {
-	ve, ok := err.(*jsonschema.ValidationError)
-	if !ok {
+	var ve *jsonschema.ValidationError
+	if !errors.As(err, &ve) {
 		return fmt.Sprintf("ARG_VALIDATION_FAILED: %s — %s", toolName, err.Error())
 	}
 

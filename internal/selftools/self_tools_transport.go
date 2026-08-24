@@ -1965,7 +1965,7 @@ func parseSourcesArg(args map[string]any) ([]map[string]any, error) {
 	}
 	var sources []map[string]any
 	if err := json.Unmarshal([]byte(raw), &sources); err != nil {
-		return nil, fmt.Errorf("invalid sources JSON: %v", err)
+		return nil, fmt.Errorf("invalid sources JSON: %w", err)
 	}
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("sources must contain at least one entry — cite the tool calls whose results ground this card")

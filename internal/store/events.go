@@ -47,7 +47,7 @@ func (s *Store) ListEvents(ctx context.Context, category string, limit int) ([]E
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]EventLog, 0)
 	for rows.Next() {

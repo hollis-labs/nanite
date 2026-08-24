@@ -559,7 +559,7 @@ func (s *Store) ListTeams(ctx context.Context) ([]Team, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list teams: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]Team, 0)
 	for rows.Next() {
 		var t Team

@@ -64,7 +64,9 @@ func readFileBytes(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close() // Read-only file close is best-effort cleanup; read errors are handled separately.
+	}()
 	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)

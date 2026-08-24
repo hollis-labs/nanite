@@ -62,7 +62,7 @@ func (b *BrokerClassifier) Classify(ctx context.Context, in Input) (Result, erro
 	llmResult, err := b.llm.Classify(ctx, in)
 	if err != nil {
 		// LLMClassifier's own fail-open applies — err is informational.
-		return llmResult, nil
+		return llmResult, nil //nolint:nilerr // Classification deliberately fails open to the LLM-provided fallback result.
 	}
 	return llmResult, nil
 }

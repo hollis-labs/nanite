@@ -31,7 +31,7 @@ func (st *SelfToolsTransport) callSetReminder(ctx context.Context, args map[stri
 	case map[string]any:
 		b, err := json.Marshal(v)
 		if err != nil {
-			return mcp.ErrorResult("trigger: failed to marshal: " + err.Error()), nil
+			return mcp.ErrorResult("trigger: failed to marshal: " + err.Error()), nil //nolint:nilerr // Tool errors travel in the MCP result payload.
 		}
 		triggerJSON = string(b)
 	default:
@@ -40,7 +40,7 @@ func (st *SelfToolsTransport) callSetReminder(ctx context.Context, args map[stri
 
 	// Validate trigger shape before persisting.
 	if _, err := reminders.ParseTrigger(triggerJSON); err != nil {
-		return mcp.ErrorResult("trigger: " + err.Error()), nil
+		return mcp.ErrorResult("trigger: " + err.Error()), nil //nolint:nilerr // Validation failures travel in the MCP result payload.
 	}
 
 	sessionID := mcp.SessionIDFromContext(ctx)

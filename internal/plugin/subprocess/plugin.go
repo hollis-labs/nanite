@@ -3,6 +3,7 @@ package subprocess
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -38,7 +39,6 @@ func validatePluginID(id string) error {
 	}
 	return nil
 }
-
 
 // SubprocessPlugin implements plugin.Plugin by proxying all operations over
 // JSON-RPC to a plugin running as a separate process. It is backward-compatible
@@ -105,9 +105,9 @@ func NewSubprocessPlugin(pluginDir string, manifestID string, config map[string]
 		// to collide on an empty map key and the second to fail with
 		// "plugin \"\" already loaded". Load() will overwrite this with
 		// initResult.ID once the handshake completes (they should match).
-		id:         manifestID,
-		config:     config,
-		mgr:        mgr,
+		id:     manifestID,
+		config: config,
+		mgr:    mgr,
 		status: plugin.PluginStatus{
 			Enabled: true,
 		},
@@ -195,12 +195,12 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 	// 2. Init handshake — send config, receive identity.
 	initParams, err := buildInitParams(sp.pluginDir, sp.manifestID, sp.config)
 	if err != nil {
-		sp.mgr.Stop()
+		_ = sp.mgr.Stop() // Preserve the init-parameter error; stopping the just-started process is cleanup.
 		return fmt.Errorf("build init params: %w", err)
 	}
 	initResult, err := CallResult[InitResult](transport, ctx, MethodInit, initParams)
 	if err != nil {
-		sp.mgr.Stop()
+		_ = sp.mgr.Stop() // Preserve the handshake error; stopping the failed plugin process is cleanup.
 		return fmt.Errorf("init handshake: %w", err)
 	}
 
@@ -208,7 +208,7 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 	// version different from the host's, fail fast rather than speak a
 	// mismatched dialect and corrupt later RPC calls.
 	if err := checkProtocolVersion(initResult.Protocol); err != nil {
-		sp.mgr.Stop()
+		_ = sp.mgr.Stop() // Preserve the protocol mismatch; stopping the incompatible process is cleanup.
 		return err
 	}
 
@@ -222,7 +222,7 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 	// 3. Load — receive registration manifest.
 	loadResult, err := CallResult[LoadResult](transport, ctx, MethodLoad, &LoadParams{})
 	if err != nil {
-		sp.mgr.Stop()
+		_ = sp.mgr.Stop() // Preserve the load-handshake error; stopping the failed plugin process is cleanup.
 		return fmt.Errorf("load handshake: %w", err)
 	}
 
@@ -748,8 +748,8 @@ func mapRPCError(err error) error {
 	if err == nil {
 		return nil
 	}
-	rpcErr, ok := err.(*RPCError)
-	if !ok {
+	var rpcErr *RPCError
+	if !errors.As(err, &rpcErr) {
 		return err
 	}
 	switch rpcErr.Code {

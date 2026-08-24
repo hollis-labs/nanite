@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -62,7 +63,7 @@ func TestMigrate126SeedsSelftoolReactionKinds(t *testing.T) {
 		}
 	}
 
-	if _, err := s.GetSelftoolReactionKind(ctx, "does_not_exist"); err != ErrSelftoolReactionKindNotFound {
+	if _, err := s.GetSelftoolReactionKind(ctx, "does_not_exist"); !errors.Is(err, ErrSelftoolReactionKindNotFound) {
 		t.Errorf("GetSelftoolReactionKind(unknown) err = %v, want ErrSelftoolReactionKindNotFound", err)
 	}
 

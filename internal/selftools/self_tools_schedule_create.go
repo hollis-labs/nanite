@@ -159,7 +159,7 @@ func (st *SelfToolsTransport) callScheduleCreate(ctx context.Context, args map[s
 
 	agentID, err := st.resolveSelfScheduleAgentID(ctx)
 	if err != nil {
-		return mcp.ErrorResult("schedule_create: " + err.Error()), nil
+		return mcp.ErrorResult("schedule_create: " + err.Error()), nil //nolint:nilerr // Tool errors travel in the MCP result payload.
 	}
 	if st.Store == nil {
 		return mcp.ErrorResult("schedule_create: store not configured"), nil
@@ -179,7 +179,7 @@ func (st *SelfToolsTransport) callScheduleCreate(ctx context.Context, args map[s
 		JobType:      store.ScheduleJobTypeDurableAgentWake,
 	}
 	if err := store.ValidateAgentSchedule(row); err != nil {
-		return mcp.ErrorResult("schedule_create: " + err.Error()), nil
+		return mcp.ErrorResult("schedule_create: " + err.Error()), nil //nolint:nilerr // Validation failures travel in the MCP result payload.
 	}
 	nextRun := store.ComputeAgentScheduleNextRun(kind, cronExpr, time.Now().UTC())
 	if nextRun.IsZero() {
@@ -187,7 +187,7 @@ func (st *SelfToolsTransport) callScheduleCreate(ctx context.Context, args map[s
 	}
 	row.NextRun = nextRun.Format(time.RFC3339)
 	if err := st.Store.InsertAgentSchedule(ctx, row); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("schedule_create: %v", err)), nil
+		return mcp.ErrorResult(fmt.Sprintf("schedule_create: %v", err)), nil //nolint:nilerr // Persistence failures travel in the MCP result payload.
 	}
 
 	return mcp.TextResult(fmt.Sprintf(

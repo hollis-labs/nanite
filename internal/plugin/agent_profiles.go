@@ -165,7 +165,9 @@ func ParsePluginAgentProfileFile(path string) (*PluginAgentProfileDocument, erro
 	if err != nil {
 		return nil, fmt.Errorf("open agent profile file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close() // Read-only file close is best-effort cleanup; read errors are handled separately.
+	}()
 
 	dec := yaml.NewDecoder(f)
 	dec.KnownFields(true)

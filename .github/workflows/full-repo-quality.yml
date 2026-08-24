@@ -100,7 +100,7 @@ jobs:
           GOBIN="$tool_bin" go install golang.org/x/vuln/cmd/govulncheck@v1.2.0
           GOBIN="$tool_bin" go install golang.org/x/tools/cmd/deadcode@v0.45.0
 
-      - name: Run uncapped audit-config lint ratchet (Stage 1)
+      - name: Run uncapped audit-config lint ratchet (Stages 1 and 2)
         shell: bash
         run: |
           packages=()
@@ -185,5 +185,5 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      # Stage 2 is intentionally absent. Activate zero-tolerance for exactly
-      # errcheck/errorlint/nilerr only after task 14/02 makes all three zero.
+      # The comparator applies the Stage 1 per-linter regression baseline and
+      # Stage 2 zero-tolerance for errcheck, errorlint, and nilerr.

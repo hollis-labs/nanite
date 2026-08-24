@@ -38,7 +38,7 @@ func cmdChat(args []string) {
 	sessionID := fs.String("session", "", "resume an existing session id instead of creating a new one")
 	title := fs.String("title", "", "title for a new session")
 	noAutostart := fs.Bool("no-autostart", false, "fail fast instead of auto-starting `nanite serve` if it isn't already running")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
 
 	ctx := context.Background()
 

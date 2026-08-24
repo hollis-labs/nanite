@@ -125,7 +125,7 @@ func (s *Store) ListSessionObjects(ctx context.Context, sessionID string) ([]Ses
 	if err != nil {
 		return nil, fmt.Errorf("list session objects: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]SessionObject, 0)
 	for rows.Next() {

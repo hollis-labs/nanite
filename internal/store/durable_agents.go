@@ -250,7 +250,7 @@ func (s *Store) ListDurableAgentInstances(ctx context.Context, includeArchived b
 	if err != nil {
 		return nil, fmt.Errorf("list durable_agent_instances: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	var out []DurableAgentInstance
 	for rows.Next() {
 		var inst DurableAgentInstance
@@ -468,7 +468,7 @@ func (s *Store) ListDurableAgentInstanceSessions(ctx context.Context, instanceID
 	if err != nil {
 		return nil, fmt.Errorf("list durable agent instance sessions: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	var out []DurableAgentInstanceSession
 	for rows.Next() {
 		rel, err := scanDurableAgentInstanceSession(rows)
@@ -508,7 +508,7 @@ func (s *Store) ListDurableAgentInstanceSessionStates(ctx context.Context, insta
 	if err != nil {
 		return nil, fmt.Errorf("list durable agent instance session states: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	var out []DurableAgentInstanceSessionState
 	for rows.Next() {
 		var row DurableAgentInstanceSessionState
@@ -570,7 +570,7 @@ func (s *Store) ListDurableAgentEvents(ctx context.Context, instanceID string, l
 	if err != nil {
 		return nil, fmt.Errorf("list durable_agent_events: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	var out []DurableAgentEvent
 	for rows.Next() {
 		var event DurableAgentEvent
@@ -610,7 +610,7 @@ func (s *Store) ListDurableAgentSessionStatesForSession(ctx context.Context, ses
 	if err != nil {
 		return nil, fmt.Errorf("list durable agent session states for session: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	var out []DurableAgentInstanceSessionState
 	for rows.Next() {
 		var row DurableAgentInstanceSessionState

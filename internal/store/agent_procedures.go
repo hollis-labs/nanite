@@ -79,7 +79,7 @@ func (s *Store) ListAgentProcedures(ctx context.Context, agentID string) ([]Agen
 	if err != nil {
 		return nil, fmt.Errorf("list agent_procedures: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]AgentProcedure, 0)
 	for rows.Next() {

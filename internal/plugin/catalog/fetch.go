@@ -95,7 +95,7 @@ func (f *SignedFetcher) Fetch(ctx context.Context, catalogURL string) (*SignedCa
 	// Fall back to cache.
 	cy, cs, cerr := f.readCache(catalogURL)
 	if cerr != nil {
-		return nil, fmt.Errorf("catalog: fetch failed (%v) and no usable cache: %w", netErr, cerr)
+		return nil, fmt.Errorf("catalog: fetch failed (%w) and no usable cache: %w", netErr, cerr)
 	}
 	if err := verify(pub, cy, cs); err != nil {
 		f.removeCache(catalogURL)
@@ -169,7 +169,9 @@ func fetchBytes(ctx context.Context, client *http.Client, url string, max int64)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 	if resp.StatusCode/100 != 2 {
 		return nil, fmt.Errorf("http %s", resp.Status)
 	}

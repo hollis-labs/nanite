@@ -165,7 +165,7 @@ func (s *Store) ListTeamAuthorityGrants(ctx context.Context, teamID string) ([]T
 	if err != nil {
 		return nil, fmt.Errorf("list team authority grants: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]TeamAuthorityGrant, 0)
 	for rows.Next() {
@@ -272,7 +272,7 @@ func (s *Store) AuthorizedForVerb(ctx context.Context, teamID, fromSlot, verb, t
 	if err != nil {
 		return false, fmt.Errorf("authorized for verb: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	for rows.Next() {
 		var grantToSlot string

@@ -119,7 +119,7 @@ func (s *Store) ListPluginSettings(ctx context.Context) ([]*PluginSettings, erro
 	if err != nil {
 		return nil, fmt.Errorf("list plugin settings: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var results []*PluginSettings
 	for rows.Next() {

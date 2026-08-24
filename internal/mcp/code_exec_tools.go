@@ -129,7 +129,9 @@ func (c *CodeExecTransport) callCodeExecute(args map[string]any) (*ToolResult, e
 	if err := os.WriteFile(scriptPath, []byte(code), 0644); err != nil {
 		return ErrorResult(fmt.Sprintf("write script: %v", err)), nil
 	}
-	defer os.Remove(scriptPath)
+	defer func() {
+		_ = os.Remove(scriptPath) // The generated sandbox script is disposable after execution.
+	}()
 
 	// Execute via sandbox.AgentExec.
 	result, err := sandbox.AgentExec(sandbox.AgentExecOpts{

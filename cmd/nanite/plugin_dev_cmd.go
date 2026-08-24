@@ -60,7 +60,9 @@ func pluginReload(name string) {
 			brand.BinaryName, apiBaseURL(), err)
 		os.Exit(1)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
 		fmt.Fprintf(os.Stderr, "%s plugin reload: server returned %d: %s\n",
@@ -114,7 +116,7 @@ func snapshotTree(root string) map[string]time.Time {
 	out := map[string]time.Time{}
 	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // The dev watcher snapshot is best-effort; unreadable entries are skipped.
 		}
 		if d.IsDir() {
 			switch d.Name() {
@@ -125,7 +127,7 @@ func snapshotTree(root string) map[string]time.Time {
 		}
 		info, err := d.Info()
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // The dev watcher snapshot is best-effort; entries with unreadable metadata are skipped.
 		}
 		out[p] = info.ModTime()
 		return nil

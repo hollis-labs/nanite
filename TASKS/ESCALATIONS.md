@@ -1708,3 +1708,29 @@ consider dropping the leading `@-` once the target is known clean in CI. Cheap, 
 target nobody runs into a signal somebody sees. Filed as a candidate in
 `14-followups/README.md`; not promoted, because Wave 7 closed correctly without it and it is a
 policy addition rather than a defect fix.
+
+## 2026-08-24 — `14/02` exposed silent persistence/finalization failures — FIXED
+
+**Raised by:** `14-followups/02-error-handling-backlog-paydown.md` during the
+nilerr/errcheck semantic review.
+
+**Question / mismatch:** Two backlog items were data-integrity defects rather
+than cleanup noise. `internal/api/shell.go` ignored malformed persisted session
+metadata and then wrote a replacement map, so a subsequent shell-mode update
+could silently erase corrupt-but-recoverable metadata. Separately,
+`internal/api/artifacts.go` persisted the artifact database record without
+checking the destination file's final close; a late filesystem error could
+therefore leave metadata claiming an upload that was not durably finalized.
+The same review found analogous final-close gaps in plugin archive/copy and
+Darwin seatbelt-profile creation paths, before those outputs were consumed.
+
+**Resolution:** Fixed within `14/02`. Session metadata parse errors now
+propagate. Artifact records are created only after the destination closes
+successfully, and generated plugin/seatbelt outputs likewise reject final
+close failures before use. Cleanup failures preserve the authoritative primary
+error. The full ordinary and race suites pass, and errcheck/errorlint/nilerr
+are all zero under the audit config.
+
+**Follow-up:** None. This entry exists because the task explicitly requires
+new security/data-integrity-relevant findings to survive outside the frozen
+original-audit `findings.json`; that catalog was not changed.

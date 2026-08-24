@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -78,8 +79,8 @@ func TestMigrate144WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 	if got.LoopRunID == nil || *got.LoopRunID != loopRunID {
 		t.Errorf("GetWorkflowRunStepByLoopRunID row LoopRunID = %v, want %q", got.LoopRunID, loopRunID)
 	}
-	if _, err := s.GetWorkflowRunStepByLoopRunID(context.Background(), "no-such-loop-run"); err != ErrWorkflowRunStepNotFound {
-		t.Errorf("GetWorkflowRunStepByLoopRunID(unknown) error = %v, want ErrWorkflowRunStepNotFound", err)
+	if _, gotErr := s.GetWorkflowRunStepByLoopRunID(context.Background(), "no-such-loop-run"); !errors.Is(gotErr, ErrWorkflowRunStepNotFound) {
+		t.Errorf("GetWorkflowRunStepByLoopRunID(unknown) error = %v, want ErrWorkflowRunStepNotFound", gotErr)
 	}
 
 	assertGooseHasNothingPending(t, s)

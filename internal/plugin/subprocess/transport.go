@@ -132,10 +132,10 @@ func (t *Transport) read(ctx context.Context) (*RPCResponse, error) {
 	case <-time.After(timeout):
 		// Close the underlying reader so the goroutine blocked on
 		// ReadBytes unblocks and does not leak or corrupt future reads.
-		t.Close()
+		_ = t.Close() // The timeout is authoritative; close only unblocks the abandoned read.
 		return nil, fmt.Errorf("timeout after %s", timeout)
 	case <-ctx.Done():
-		t.Close()
+		_ = t.Close() // Context cancellation is authoritative; close only unblocks the abandoned read.
 		return nil, fmt.Errorf("context: %w", ctx.Err())
 	}
 }

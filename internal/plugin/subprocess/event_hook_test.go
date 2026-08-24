@@ -3,6 +3,7 @@ package subprocess
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -178,7 +179,7 @@ func TestEventHook_PreHookUnchanged(t *testing.T) {
 	err := hook.Handle(context.Background(), plugin.Event{
 		Type: "message.sending", SessionID: "s", Source: "t",
 	})
-	if err == nil || err != plugin.ErrCancelled {
+	if err == nil || !errors.Is(err, plugin.ErrCancelled) {
 		t.Fatalf("pre-hook cancel: want ErrCancelled, got %v", err)
 	}
 	consumer.mu.Lock()

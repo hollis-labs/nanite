@@ -82,7 +82,7 @@ func (s *Store) ListDocuments(ctx context.Context, sessionID string) ([]Document
 	if err != nil {
 		return nil, fmt.Errorf("list documents: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var out []Document
 	for rows.Next() {
@@ -139,7 +139,7 @@ func (s *Store) GetIncludedDocuments(ctx context.Context, sessionID string) ([]D
 	if err != nil {
 		return nil, fmt.Errorf("get included documents: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var out []Document
 	for rows.Next() {

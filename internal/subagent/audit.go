@@ -105,14 +105,14 @@ func (svc *Service) AuditUnknownRoles(ctx context.Context) ([]RoleAuditEntry, er
 	for rows.Next() {
 		var e RoleAuditEntry
 		if err := rows.Scan(&e.Role, &e.TotalRuns, &e.OrphanFailures, &e.ConfigFailures, &e.OtherFailures); err != nil {
-			rows.Close()
+			_ = rows.Close() // Preserve the scan failure; closing the abandoned result set is cleanup.
 			return nil, fmt.Errorf("subagent audit scan: %w", err)
 		}
 		e.InTextOnlyList = isTextOnlyRole(e.Role)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close() // Preserve the iteration failure; closing the exhausted result set is cleanup.
 		return nil, fmt.Errorf("subagent audit rows: %w", err)
 	}
 	if err := rows.Close(); err != nil {

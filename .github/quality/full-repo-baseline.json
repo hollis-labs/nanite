@@ -11,35 +11,35 @@
     "counts": {
       "cyclop": 290,
       "dupl": 97,
-      "errcheck": 281,
-      "errorlint": 48,
+      "errcheck": 0,
+      "errorlint": 0,
       "exhaustive": 28,
       "forbidigo": 236,
       "funlen": 69,
       "gocognit": 257,
       "gocyclo": 287,
       "gosec": 637,
-      "govet": 619,
+      "govet": 617,
       "ineffassign": 2,
       "maintidx": 31,
       "misspell": 429,
       "nestif": 62,
-      "nilerr": 24,
+      "nilerr": 0,
       "revive": 70,
-      "staticcheck": 75,
+      "staticcheck": 74,
       "unconvert": 3,
       "unparam": 26,
       "unused": 44
     }
   },
   "stage_2": {
-    "active": false,
+    "active": true,
     "linters": [
       "errcheck",
       "errorlint",
       "nilerr"
     ],
-    "activation_condition": "Activate zero-tolerance only after TASKS/audit-remediation/14-followups/02-error-handling-backlog-paydown.md reduces all three backlogs to zero. Until then these linters participate only in Stage 1 with their committed current counts."
+    "activation_condition": "Satisfied by TASKS/audit-remediation/14-followups/02-error-handling-backlog-paydown.md: errcheck, errorlint, and nilerr must remain at zero."
   },
   "standalone_gosec": {
     "version": "v2.28.0",

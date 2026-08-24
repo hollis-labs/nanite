@@ -3,6 +3,7 @@ package subprocess
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -119,8 +120,8 @@ func TestTransport_CallError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	rpcErr, ok := err.(*RPCError)
-	if !ok {
+	var rpcErr *RPCError
+	if !errors.As(err, &rpcErr) {
 		t.Fatalf("expected *RPCError, got %T: %v", err, err)
 	}
 	if rpcErr.Code != ErrCodeNotFound {

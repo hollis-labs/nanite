@@ -101,7 +101,7 @@ func (s *Store) ListRecoveryBreadcrumbsForSession(ctx context.Context, sessionID
 	if err != nil {
 		return nil, fmt.Errorf("list recovery breadcrumbs: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var out []*RecoveryBreadcrumb
 	for rows.Next() {

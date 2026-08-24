@@ -112,7 +112,7 @@ func resolveAllowUnsignedPlugins(dbPath string) bool {
 	if err != nil {
 		return false
 	}
-	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 	us, err := s.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return false

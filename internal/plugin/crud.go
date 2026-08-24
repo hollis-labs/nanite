@@ -48,7 +48,9 @@ func (h *Host) handleCRUDCreate(w http.ResponseWriter, r *http.Request, handler 
 		h.errorResp(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close() // The server owns request-body cleanup; decode/read errors are handled separately.
+	}()
 
 	created, err := handler.Create(r.Context(), resource)
 	if err != nil {
@@ -89,7 +91,9 @@ func (h *Host) handleCRUDUpdate(w http.ResponseWriter, r *http.Request, handler 
 		h.errorResp(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close() // The server owns request-body cleanup; decode/read errors are handled separately.
+	}()
 
 	updated, err := handler.Update(r.Context(), id, resource)
 	if err != nil {

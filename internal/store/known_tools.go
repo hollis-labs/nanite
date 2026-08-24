@@ -58,7 +58,7 @@ func (s *Store) ListKnownTools(ctx context.Context) ([]KnownTool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list known_tools: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]KnownTool, 0)
 	for rows.Next() {
@@ -78,7 +78,7 @@ func (s *Store) ListAvailableKnownTools(ctx context.Context) ([]KnownTool, error
 	if err != nil {
 		return nil, fmt.Errorf("list available known_tools: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]KnownTool, 0)
 	for rows.Next() {
@@ -99,7 +99,7 @@ func (s *Store) ListAlwaysIncludedKnownTools(ctx context.Context) ([]KnownTool, 
 	if err != nil {
 		return nil, fmt.Errorf("list always-included known_tools: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]KnownTool, 0)
 	for rows.Next() {
@@ -217,7 +217,7 @@ func (s *Store) MarkKnownToolsUnavailableExcept(ctx context.Context, currentName
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			rows.Close()
+			_ = rows.Close() // Preserve the scan failure; closing the abandoned result set is cleanup.
 			return 0, fmt.Errorf("mark known_tools unavailable: scan: %w", err)
 		}
 		if !present[name] {
@@ -227,7 +227,9 @@ func (s *Store) MarkKnownToolsUnavailableExcept(ctx context.Context, currentName
 	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("mark known_tools unavailable: %w", err)
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		return 0, fmt.Errorf("mark known_tools unavailable: close rows: %w", err)
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, name := range stale {

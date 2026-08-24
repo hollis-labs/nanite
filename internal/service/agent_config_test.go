@@ -426,7 +426,7 @@ func TestAgentConfig_RevisionConflict(t *testing.T) {
 	updated := *created.Profile
 	updated.Description = "gui edit"
 	_, err = svc.Update(created.Profile, &updated, nil, created.Revision)
-	if err != ErrAgentRevisionConflict {
+	if !errors.Is(err, ErrAgentRevisionConflict) {
 		t.Fatalf("expected ErrAgentRevisionConflict, got %v", err)
 	}
 }

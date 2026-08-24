@@ -79,7 +79,9 @@ func (p *selfToolProxy) CallTool(ctx context.Context, name string, args map[stri
 	if err != nil {
 		return nil, fmt.Errorf("self-tool %q: forward to harness: %w", name, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {

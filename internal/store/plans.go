@@ -140,7 +140,7 @@ func (s *Store) ListPlans(ctx context.Context, f PlanFilter) ([]Plan, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list plans: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Plan, 0)
 	for rows.Next() {

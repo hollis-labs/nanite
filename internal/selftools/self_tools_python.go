@@ -3,6 +3,7 @@ package selftools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -260,14 +261,16 @@ func RunPythonSandbox(
 	}
 	pyRespR, pyRespW, err := os.Pipe() // Go writes here (FD4); Python reads
 	if err != nil {
-		pyReqR.Close()
-		pyReqW.Close()
+		_ = pyReqR.Close() // Preserve the response-pipe creation failure; request-pipe close is cleanup.
+		_ = pyReqW.Close() // Preserve the response-pipe creation failure; request-pipe close is cleanup.
 		return nil, fmt.Errorf("python_run: create resp pipe: %w", err)
 	}
-	defer pyReqR.Close()
-	defer pyReqW.Close()
-	defer pyRespR.Close()
-	defer pyRespW.Close()
+	defer func() {
+		_ = pyReqR.Close()  // Pipe endpoints are best-effort cleanup after process and pump errors are collected.
+		_ = pyReqW.Close()  // Pipe endpoints are best-effort cleanup after process and pump errors are collected.
+		_ = pyRespR.Close() // Pipe endpoints are best-effort cleanup after process and pump errors are collected.
+		_ = pyRespW.Close() // Pipe endpoints are best-effort cleanup after process and pump errors are collected.
+	}()
 
 	// Wall-clock deadline for the entire sandbox execution.
 	deadline := time.Duration(timeLimitSec) * time.Second
@@ -313,8 +316,12 @@ func RunPythonSandbox(
 
 	// Close the child-side ends in the parent after Start() so EOF propagates
 	// correctly when Python closes its FDs.
-	pyReqW.Close()
-	pyRespR.Close()
+	if err := pyReqW.Close(); err != nil {
+		slog.Warn("python_run: close parent request-pipe writer failed", "err", err)
+	}
+	if err := pyRespR.Close(); err != nil {
+		slog.Warn("python_run: close parent response-pipe reader failed", "err", err)
+	}
 
 	// Pump goroutine: reads tool-call requests from pyReqR, dispatches them
 	// through the permission engine, writes responses to pyRespW.
@@ -322,7 +329,9 @@ func RunPythonSandbox(
 	var pumpErr error
 	go func() {
 		defer close(pumpDone)
-		defer pyRespW.Close() // close resp write-end when pump exits → Python readline returns ""
+		defer func() {
+			_ = pyRespW.Close() // Closing the pump writer signals EOF; pumpErr owns the goroutine result.
+		}()
 		pumpErr = pumpToolCalls(runCtx, sessionID, pyReqR, pyRespW, perm, dispatcher, &toolCallsLog, &toolCallsMu)
 	}()
 
@@ -464,7 +473,8 @@ func exitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode()
 	}
 	return -1

@@ -345,7 +345,7 @@ func classifyExit(waitErr, ctxErr error, cancelled bool) (JobStatus, error) {
 	if cancelled || ctxErr != nil {
 		// Cancellation request — even if the child had already exited
 		// non-zero, the user-visible reason is "cancelled".
-		return StatusCancelled, nil
+		return StatusCancelled, nil //nolint:nilerr // Cancellation is the terminal status, not a process failure.
 	}
 	if waitErr == nil {
 		return StatusSucceeded, nil

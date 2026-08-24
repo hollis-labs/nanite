@@ -18,6 +18,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -104,7 +105,7 @@ func ElicitUserInput(
 		AgentID:    agentID,
 		Origin:     "server",
 	})
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		return elicitationResponse{Action: "cancel"}, fmt.Errorf("mcp: elicitation: %w", err)
 	}
 	return elicitationResponse{

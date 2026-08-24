@@ -62,7 +62,9 @@ func fetch(rawURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("%s: HTTP %d", rawURL, resp.StatusCode)
 	}

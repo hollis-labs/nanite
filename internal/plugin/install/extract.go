@@ -94,13 +94,17 @@ func (e *TarGzExtractor) extractArchive(ctx context.Context, h Handle, targetDir
 	if err != nil {
 		return fmt.Errorf("extract: open archive: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close() // Read-only file close is best-effort cleanup; read errors are handled separately.
+	}()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return fmt.Errorf("extract: gzip: %w", err)
 	}
-	defer gz.Close()
+	defer func() {
+		_ = gz.Close() // The gzip reader close is best-effort cleanup after read errors are handled.
+	}()
 
 	tr := tar.NewReader(gz)
 
@@ -280,7 +284,9 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() {
+		_ = in.Close() // Input-file close is best-effort cleanup; read errors are handled separately.
+	}()
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		return err

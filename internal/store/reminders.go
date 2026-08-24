@@ -141,7 +141,7 @@ func (s *Store) ListUnfiredReminders(ctx context.Context, sessionID string) ([]R
 	if err != nil {
 		return nil, fmt.Errorf("list unfired reminders: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	var out []Reminder
 	for rows.Next() {
 		var r Reminder

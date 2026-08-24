@@ -355,7 +355,7 @@ func (s *Store) ListLoopRuns(ctx context.Context, filter LoopRunFilter) ([]LoopR
 	if err != nil {
 		return nil, fmt.Errorf("list loop_runs: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]LoopRun, 0)
 	for rows.Next() {
 		var lr LoopRun

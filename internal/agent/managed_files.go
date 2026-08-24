@@ -228,13 +228,15 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("create temp: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() {
+		_ = os.Remove(tmpName) // The rename removes this path on success; otherwise it is best-effort temp cleanup.
+	}()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // Preserve the write failure; close is cleanup for the abandoned temp file.
 		return fmt.Errorf("write temp: %w", err)
 	}
 	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // Preserve the chmod failure; close is cleanup for the abandoned temp file.
 		return fmt.Errorf("chmod temp: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

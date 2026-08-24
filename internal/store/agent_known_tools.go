@@ -85,7 +85,7 @@ func (s *Store) ListAgentKnownTools(ctx context.Context, agentID string) ([]Agen
 	if err != nil {
 		return nil, fmt.Errorf("list agent_known_tools: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]AgentKnownTool, 0)
 	for rows.Next() {

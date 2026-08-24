@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -296,14 +297,14 @@ func readLineBounded(r *bufio.Reader, max int) ([]byte, error) {
 	var buf []byte
 	for {
 		chunk, err := r.ReadSlice('\n')
-		switch err {
-		case nil:
+		switch {
+		case err == nil:
 			chunk = chunk[:len(chunk)-1]
 			if len(buf)+len(chunk) > max {
 				return nil, fmt.Errorf("mcp response exceeded %d bytes", max)
 			}
 			return append(buf, chunk...), nil
-		case bufio.ErrBufferFull:
+		case errors.Is(err, bufio.ErrBufferFull):
 			if len(buf)+len(chunk) > max {
 				return nil, fmt.Errorf("mcp response exceeded %d bytes", max)
 			}

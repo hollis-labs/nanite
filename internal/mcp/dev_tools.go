@@ -661,7 +661,9 @@ func (d *DevToolsTransport) callRead(ctx context.Context, args map[string]any) (
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("open: %v", err)), nil
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close() // Read-only file close is best-effort cleanup; read errors are handled separately.
+	}()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -711,7 +713,9 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("open directory: %v", err)), nil
 	}
-	defer root.Close()
+	defer func() {
+		_ = root.Close() // The read-only directory handle is closed as best-effort cleanup.
+	}()
 
 	re, err := regexp.Compile(pattern)
 	if err != nil {
@@ -806,7 +810,9 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 		if err != nil {
 			return nil
 		}
-		defer f.Close()
+		defer func() {
+			_ = f.Close() // Read-only file close is best-effort cleanup; read errors are handled separately.
+		}()
 
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -1031,7 +1037,9 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("open directory: %v", err)), nil
 	}
-	defer root.Close()
+	defer func() {
+		_ = root.Close() // The read-only directory handle is closed as best-effort cleanup.
+	}()
 
 	maxResults := IntArg(args, "max_results", 50)
 	if maxResults < 1 {
@@ -1049,7 +1057,7 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 			return err
 		}
 		if walkErr != nil {
-			return nil
+			return nil //nolint:nilerr // Glob is best-effort; unreadable descendants are omitted from matches.
 		}
 		if entry.IsDir() {
 			base := filepath.Base(path)
@@ -1061,7 +1069,7 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 
 		relPath, err := filepath.Rel(dir, path)
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // Paths outside the walk's relative namespace cannot be returned safely.
 		}
 
 		if globMatch(pattern, relPath) {
@@ -1070,14 +1078,14 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 			// from exposing metadata outside the original grant.
 			resolvedEntry, err := resolveWalkEntry(dir, path)
 			if err != nil {
-				return nil
+				return nil //nolint:nilerr // Entries that fail confinement validation are deliberately excluded.
 			}
 			if d.walkEntryValidated != nil {
 				d.walkEntryValidated(path)
 			}
 			info, err := root.Stat(resolvedEntry)
 			if err != nil || !info.Mode().IsRegular() {
-				return nil
+				return nil //nolint:nilerr // Raced-away or non-regular entries are not valid glob results.
 			}
 			matches = append(matches, fileEntry{path: relPath, modTime: info.ModTime()})
 		}

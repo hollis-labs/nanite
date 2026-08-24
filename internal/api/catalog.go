@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -56,7 +57,9 @@ func RegisterCatalogRoutes(mux *http.ServeMux, s *store.Store, pluginsDir string
 func (cs *catalogState) jsonResp(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Debug("api: write catalog JSON response failed", "err", err)
+	}
 }
 
 func (cs *catalogState) errorResp(w http.ResponseWriter, status int, msg string) {
@@ -396,7 +399,9 @@ func checksumFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close() // Read-only file close is best-effort cleanup; read errors are handled separately.
+	}()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err

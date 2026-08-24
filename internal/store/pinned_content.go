@@ -107,7 +107,7 @@ func (s *Store) ListPinnedContent(ctx context.Context, sessionID string) ([]Pinn
 	if err != nil {
 		return nil, fmt.Errorf("list pinned content: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	var out []PinnedContent
 	for rows.Next() {
 		var p PinnedContent

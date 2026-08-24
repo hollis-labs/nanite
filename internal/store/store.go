@@ -54,7 +54,7 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 
 	s := &Store{DB: db, dbPath: absPath}
 	if err := s.migrate(ctx); err != nil {
-		db.Close()
+		_ = db.Close() // Preserve the migration error; closing a failed-to-initialize store is best-effort cleanup.
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	// TASKS/scheduling/01-schema-schedule-kind-collapse-and-retry-columns.md:
@@ -66,7 +66,7 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 	// backfillScheduleNextRun's doc comment (agent_schedules.go) for the
 	// full reasoning.
 	if err := s.backfillScheduleNextRun(ctx, time.Now()); err != nil {
-		db.Close()
+		_ = db.Close() // Preserve the backfill error; closing a failed-to-initialize store is best-effort cleanup.
 		return nil, fmt.Errorf("backfill schedule next_run: %w", err)
 	}
 	return s, nil
@@ -75,6 +75,20 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 // Close closes the underlying database connection.
 func (s *Store) Close(ctx context.Context) error {
 	return s.DB.Close()
+}
+
+// closeRows preserves the established query semantics for deferred cleanup.
+// Scan and iteration failures are returned at their call sites; a late close
+// failure cannot replace those results once the surrounding function returns.
+func closeRows(rows *sql.Rows) {
+	_ = rows.Close() // Query and iteration errors are surfaced separately; deferred close is cleanup only.
+}
+
+// rollbackUnlessCommitted makes the standard transaction cleanup explicit.
+// Rollback is a no-op after Commit and must not replace the operation or
+// commit error that the caller already returns.
+func rollbackUnlessCommitted(tx *sql.Tx) {
+	_ = tx.Rollback() // The operation or Commit owns the returned error; rollback is best-effort cleanup.
 }
 
 // legacyMigrationCutoverVersion is the highest goose migration version that

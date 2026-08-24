@@ -266,7 +266,7 @@ func (s *Store) ListGoalEvidence(ctx context.Context, goalID string, filter Goal
 	if err != nil {
 		return nil, fmt.Errorf("list goal evidence: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]GoalEvidence, 0)
 	for rows.Next() {
 		var e GoalEvidence

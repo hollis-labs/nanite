@@ -138,7 +138,9 @@ func checkHealth(ctx context.Context, baseURL string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 	return resp.StatusCode == http.StatusOK, nil
 }
 
@@ -211,7 +213,7 @@ func spawnServe(port int, logPath string) (chan error, error) {
 
 	if err := cmd.Start(); err != nil {
 		if closeErr := logFile.Close(); closeErr != nil {
-			return nil, fmt.Errorf("start nanite serve (%s): %w (also failed to close log file: %v)", exe, err, closeErr)
+			return nil, fmt.Errorf("start nanite serve (%s): %w (also failed to close log file: %w)", exe, err, closeErr)
 		}
 		return nil, fmt.Errorf("start nanite serve (%s): %w", exe, err)
 	}

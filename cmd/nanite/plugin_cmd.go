@@ -220,7 +220,9 @@ func triggerHotReload(name string) {
 		fmt.Printf("  Reload manually: %s plugin reload %s\n", brand.BinaryName, name)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
 		fmt.Printf("  Hot-reload failed (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -342,7 +344,7 @@ func pluginInstallLocal(src string) {
 		fmt.Printf("Copying %s → %s...\n", absSrc, target)
 		if err := copyPluginDir(absSrc, target); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to copy: %v\n", err)
-			os.RemoveAll(target)
+			_ = os.RemoveAll(target) // Preserve the copy failure; removal only cleans a partial install.
 			os.Exit(1)
 		}
 	}
@@ -392,7 +394,10 @@ func pluginInstallRemote(name string) {
 	}
 
 	// Ensure plugins dir exists
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create plugins directory: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Clone from GitHub
 	repoURL := fmt.Sprintf("git@github.com:%s/%s.git", pluginGitOrg, name)
@@ -409,7 +414,7 @@ func pluginInstallRemote(name string) {
 	// Verify plugin.yaml exists
 	if _, err := os.Stat(filepath.Join(target, "plugin.yaml")); err != nil {
 		fmt.Fprintf(os.Stderr, "Cloned repo does not contain plugin.yaml — not a valid plugin\n")
-		os.RemoveAll(target)
+		_ = os.RemoveAll(target) // The invalid checkout is already rejected; removal only cleans partial state.
 		os.Exit(1)
 	}
 
@@ -417,7 +422,7 @@ func pluginInstallRemote(name string) {
 	manifest, err := plugin.ParseManifest(filepath.Join(target, "plugin.yaml"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to parse plugin.yaml: %v\n", err)
-		os.RemoveAll(target)
+		_ = os.RemoveAll(target) // Preserve the manifest error; removal only cleans the invalid checkout.
 		os.Exit(1)
 	}
 
@@ -488,7 +493,9 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() {
+		_ = in.Close() // Input-file close is best-effort cleanup; read errors are handled separately.
+	}()
 	info, err := in.Stat()
 	if err != nil {
 		return err
@@ -499,7 +506,7 @@ func copyFile(src, dst string) error {
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		if cerr := out.Close(); cerr != nil {
-			return fmt.Errorf("copy %s: %w (close: %v)", src, err, cerr)
+			return fmt.Errorf("copy %s: %w (close: %w)", src, err, cerr)
 		}
 		return err
 	}

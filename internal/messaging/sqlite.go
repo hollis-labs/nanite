@@ -141,7 +141,9 @@ func (s *SQLiteStore) Inbox(ctx context.Context, sessionID, agentID string, filt
 	if err != nil {
 		return nil, fmt.Errorf("inbox: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Query and iteration errors are surfaced separately; deferred close is cleanup only.
+	}()
 
 	return scanRows(rows)
 }
@@ -157,7 +159,9 @@ func (s *SQLiteStore) Thread(ctx context.Context, threadID string) ([]Message, e
 	if err != nil {
 		return nil, fmt.Errorf("thread: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Query and iteration errors are surfaced separately; deferred close is cleanup only.
+	}()
 
 	return scanRows(rows)
 }
@@ -185,7 +189,9 @@ func (s *SQLiteStore) Recent(ctx context.Context, sessionID string, limit int) (
 	if err != nil {
 		return nil, fmt.Errorf("recent: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Query and iteration errors are surfaced separately; deferred close is cleanup only.
+	}()
 
 	msgs, err := scanRows(rows)
 	if err != nil {

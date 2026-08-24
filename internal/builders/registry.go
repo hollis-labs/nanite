@@ -64,7 +64,7 @@ func (r *Registry) ListBuilders() []string {
 // DefaultRegistry returns a registry pre-loaded with the standard builders.
 func DefaultRegistry(s *store.Store) *Registry {
 	r := NewRegistry(s)
-	r.Register(NewAgentBuilder(s))
-	r.Register(NewSkillBuilder(s))
+	_ = r.Register(NewAgentBuilder(s)) // Built-in builder names are fixed and distinct; tests cover the registry invariant.
+	_ = r.Register(NewSkillBuilder(s)) // Built-in builder names are fixed and distinct; tests cover the registry invariant.
 	return r
 }

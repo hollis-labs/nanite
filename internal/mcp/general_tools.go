@@ -377,7 +377,9 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 		}
 		return ErrorResult(msg), nil
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 
 	// Read up to webFetchBodyCap bytes from the upstream. This caps the
 	// envelope allocation regardless of what Content-Length the peer sent or

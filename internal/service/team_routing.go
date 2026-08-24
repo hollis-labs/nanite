@@ -406,7 +406,7 @@ func (svc *TeamRoutingService) resolveActiveMembers(ctx context.Context, runID, 
 		// "fresh member fails to instantiate" — the lazy-resolution
 		// attempt itself errored (e.g. no agent bound to the slot's role,
 		// a durable wake failure, an unauthorized elastic resolution).
-		return nil, fmt.Errorf("%w: lazy resolution of team slot %q failed: %v", ErrTeamRoutingTargetUnavailable, slotName, err)
+		return nil, fmt.Errorf("%w: lazy resolution of team slot %q failed: %w", ErrTeamRoutingTargetUnavailable, slotName, err)
 	}
 	active := filterActiveMembers(newly)
 	if len(active) == 0 {

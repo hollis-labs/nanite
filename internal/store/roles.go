@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -100,7 +101,7 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list roles: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Role, 0)
 	for rows.Next() {
@@ -117,7 +118,7 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 func (s *Store) GetRole(ctx context.Context, id string) (*Role, error) {
 	var r Role
 	row := s.DB.QueryRowContext(ctx, `SELECT `+roleColumns+` FROM roles WHERE id = ?`, id)
-	if err := scanRole(row, &r); err == sql.ErrNoRows {
+	if err := scanRole(row, &r); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("get role %s: %w", id, err)
@@ -129,7 +130,7 @@ func (s *Store) GetRole(ctx context.Context, id string) (*Role, error) {
 func (s *Store) GetRoleBySlug(ctx context.Context, slug string) (*Role, error) {
 	var r Role
 	row := s.DB.QueryRowContext(ctx, `SELECT `+roleColumns+` FROM roles WHERE slug = ?`, slug)
-	if err := scanRole(row, &r); err == sql.ErrNoRows {
+	if err := scanRole(row, &r); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("get role by slug %s: %w", slug, err)
@@ -217,7 +218,7 @@ func (s *Store) ListRolesByPluginID(ctx context.Context, pluginID string) ([]Rol
 	if err != nil {
 		return nil, fmt.Errorf("list roles by plugin_id: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Role, 0)
 	for rows.Next() {

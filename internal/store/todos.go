@@ -177,7 +177,7 @@ func (s *Store) ListTodos(ctx context.Context, f TodoFilter) ([]Todo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list todos: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Todo, 0)
 	for rows.Next() {

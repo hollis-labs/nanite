@@ -41,7 +41,7 @@ func loadGoldenExamples(toolName string) ([]goldenExample, error) {
 		// fs.ErrNotExist or any other read error — treat as "no examples
 		// available" so the describe call still succeeds. The caller
 		// distinguishes "tool not found" from "tool exists, no examples".
-		return nil, nil
+		return nil, nil //nolint:nilerr // Embedded examples are optional enrichment; read failure means no examples.
 	}
 	var out []goldenExample
 	if err := json.Unmarshal(raw, &out); err != nil {

@@ -102,6 +102,14 @@ func main() {
 	}
 }
 
+// closeStoreBestEffort reports CLI shutdown failures where no caller remains
+// to receive them. Command-operation errors remain authoritative.
+func closeStoreBestEffort(ctx context.Context, s *store.Store) {
+	if err := s.Close(ctx); err != nil {
+		slog.Warn("close store failed", "err", err)
+	}
+}
+
 func cmdServe(args []string) error {
 	return cmdServeWithInitializers(args, slogx.Init, naniteotel.Init)
 }
@@ -132,7 +140,7 @@ func cmdServeWithInitializers(
 	// data-loss failure mode this migration removes.
 	dbFlag := fs.String("db", "", "SQLite database path (default: go-apppaths XDG layout — run `nanite path`)")
 	dev := fs.Bool("dev", false, "Development mode (skip embedded SPA)")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
 
 	resolvedDB := resolveDBPathWith(*dbFlag)
 	dbPath := &resolvedDB
@@ -175,7 +183,11 @@ func cmdServeWithInitializers(
 	if logErr != nil {
 		slog.Warn("slog handler init failed, continuing with stdlib log", "err", logErr)
 	} else {
-		defer logCloser.Close()
+		defer func() {
+			if err := logCloser.Close(); err != nil {
+				slog.Warn("close logging output failed", "err", err)
+			}
+		}()
 	}
 
 	// Load agentrc config (user-level + project-level, merged).
@@ -206,7 +218,11 @@ func cmdServeWithInitializers(
 	if otelErr != nil {
 		slog.Warn("OTel init failed", "err", otelErr)
 	} else {
-		defer otelShutdown(otelCtx)
+		defer func() {
+			if err := otelShutdown(otelCtx); err != nil {
+				slog.Warn("OTel shutdown failed", "err", err)
+			}
+		}()
 	}
 
 	// Open store and run migrations.
@@ -215,7 +231,7 @@ func cmdServeWithInitializers(
 		slog.Error("failed to open store", "err", err)
 		return fmt.Errorf("failed to open store: %w", err)
 	}
-	defer s.Close(otelCtx)
+	defer closeStoreBestEffort(otelCtx, s)
 
 	// Seed default data.
 	if err := s.Seed(otelCtx); err != nil {
@@ -369,7 +385,11 @@ func cmdServeWithInitializers(
 		slog.Warn("coordination store failed to open, multi-agent features disabled", "err", coordErr)
 		coordStore = nil
 	} else {
-		defer coordStore.Close()
+		defer func() {
+			if closeErr := coordStore.Close(); closeErr != nil {
+				slog.Warn("coordination store close failed", "err", closeErr)
+			}
+		}()
 		slog.Info("coordination store: badger initialized", "dir", coordDir)
 	}
 	var coord coordination.CoordStore
@@ -1475,7 +1495,7 @@ func cmdMCPServe(args []string) {
 	// (CW-20260517-0061). A non-empty flag becomes an explicit WithDBOverride.
 	dbFlag := fs.String("db", "", "SQLite database path (default: go-apppaths XDG layout — run `nanite path`)")
 	sessionID := fs.String("session", "", "Session ID")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
 
 	dbPathStr := resolveDBPathWith(*dbFlag)
 	dbPath := &dbPathStr
@@ -1485,7 +1505,7 @@ func cmdMCPServe(args []string) {
 		fmt.Fprintf(os.Stderr, "%s mcp: open db: %v\n", brand.BinaryName, err)
 		os.Exit(1)
 	}
-	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()

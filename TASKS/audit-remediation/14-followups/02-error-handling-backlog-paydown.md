@@ -1,7 +1,7 @@
 # Pay down the errcheck / errorlint / nilerr backlog to zero
 
 **Phase:** Audit remediation — Wave 9 (follow-ups)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** `12/01` stage 1 (the regression gate) should land first, so this paydown is measured against a gate that already exists.
 **Blocks:** **`12/01` stage 2.** Zero-tolerance on these three linters cannot be activated until this reaches zero.
 **Parallel-safe with:** **nothing meaningful.** It touches error handling across the tree; treat it like the ctx sweep — its own window, landing in as few merges as practical.
@@ -140,5 +140,59 @@ Run it yourself on the final state and read the output.
   back.
 
 ## Work log
+
+- 2026-08-24: Executed in Wave 8 with explicit operator approval. Re-derived
+  the backlog at the isolated starting commit
+  `e8ca7c5c529ea82b514c3dc28b1600680f317d7c` using the audit config:
+  `errcheck` **281**, `errorlint` **48**, and `nilerr` **24**. Worked in the
+  required value order: nilerr, errorlint, then errcheck.
+- The nilerr review found two genuine defects among the 24 reports. An
+  unscoped PCC lookup treated every `os.ReadDir` failure as an absent cache;
+  it now preserves not-found as the empty result but propagates permission,
+  I/O, and other failures. Stale subagent expiry treated a malformed persisted
+  `created_at` as "not stale"; it now returns a wrapped parse error. The other
+  nilerr reports were deliberate in-band MCP/builder results, best-effort
+  discovery, cancellation status, or fail-open classification paths and now
+  carry narrow per-line explanations.
+- The errorlint sweep converted sentinel comparisons and type assertions to
+  `errors.Is`/`errors.As` and changed contextual `fmt.Errorf` calls to `%w`, so
+  callers can now match wrapped causes. Existing call sites were checked. The
+  sole exact-identity assertion (`recover.TestWrap_UnrecoverablePassesThrough`)
+  remains exact and has a narrow, reasoned `errorlint` suppression; no blanket
+  suppression was added and test assertions were not discarded.
+- Errcheck review produced several correct behavior changes rather than merely
+  silencing returns: corrupt session metadata is no longer overwritten as an
+  empty map; artifact, plugin-archive, copied-file, and Darwin seatbelt output
+  close failures abort before the result is persisted or used; plugin and CLI
+  directory/output failures now reach the caller; rows are explicitly closed
+  before schedule/tool backfill writes; and orphan worktree cleanup no longer
+  reports/counts a directory as cleaned when removal failed. MCP transport,
+  coordination-store, worker-cancellation, JSON-response, discovery, prune,
+  and other best-effort failures are now logged. Deferred query/transaction
+  cleanup remains best-effort through documented helpers. Every introduced
+  explicit ignore is accompanied by its reason.
+- The data-integrity-relevant session/artifact finalization defects were
+  recorded durably in `TASKS/ESCALATIONS.md`; both are fixed here and require
+  no separate follow-up. Two later-task overlaps are intentional:
+  `internal/mcp/manager.go` now logs transport close failures while `13/05`
+  will move that close outside the registry lock, and
+  `internal/contextbroker/source_pcc.go` now distinguishes absence from real
+  directory errors while `13/05` will revisit the PCC relevance contract.
+  Those later changes must preserve these error semantics.
+- Activated `12/01` Stage 2 only after all three correctness linters reached
+  zero. The comparator now requires Stage 2 active, requires exactly
+  `errcheck`/`errorlint`/`nilerr`, refuses nonzero committed baselines for
+  them, and independently rejects any future finding. Eight comparator tests
+  cover the positive and negative cases. The full audit-config ratchet passes
+  at **3,259/3,259**; incidental reductions in `govet` (619 to 617) and
+  `staticcheck` (75 to 74) were preserved in the committed Stage 1 baseline.
+- Final verification on the finished tree: correctness lint reports
+  `errcheck=0`, `errorlint=0`, `nilerr=0` (`0 issues`, exit 0); full
+  audit-config ratchet exit 0; `python3 -m py_compile` exit 0;
+  `python3 -m unittest scripts/quality-ratchet_test.py` runs 8 tests and exits
+  0; `git diff --check` exit 0; `go build ./...` exit 0; `go vet ./...` exit 0;
+  `go test -count=1 ./...` exit 0; and
+  `go test -race -count=1 ./...` exit 0 (`internal/store` 226.687s). No review
+  or approval is claimed.
 
 ## Review notes

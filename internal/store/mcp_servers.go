@@ -53,7 +53,7 @@ func (s *Store) ListMCPServers(ctx context.Context) ([]MCPServerConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list mcp servers: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]MCPServerConfig, 0)
 	for rows.Next() {

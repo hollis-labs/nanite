@@ -299,7 +299,7 @@ func (s *Store) ListLoopRunIterations(ctx context.Context, loopRunID string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("list loop_run_iterations: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]LoopRunIteration, 0)
 	for rows.Next() {
 		var li LoopRunIteration

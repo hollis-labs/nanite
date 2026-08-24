@@ -119,7 +119,7 @@ func (s *Store) LastNTokenUsage(ctx context.Context, sessionID string, n int) ([
 	if err != nil {
 		return nil, fmt.Errorf("last %d token_usage for %s: %w", n, sessionID, err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]TokenUsage, 0, n)
 	for rows.Next() {
 		var u TokenUsage
@@ -157,7 +157,7 @@ func (s *Store) LastNAssistantMessages(ctx context.Context, sessionID string, n 
 	if err != nil {
 		return nil, fmt.Errorf("last %d assistant messages for %s: %w", n, sessionID, err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]Message, 0, n)
 	for rows.Next() {
 		var m Message

@@ -94,7 +94,7 @@ func openSkillInstaller() (*skillinstall.Installer, *store.Store) {
 	vendor, err := skillvendor.New(vendorRoot)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: init skill vendor store at %q: %v\n", vendorRoot, err)
-		s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+		closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 		os.Exit(1)
 	}
 
@@ -126,7 +126,7 @@ func printSkillInstallEvents() skillinstall.EventFunc {
 // non-zero exit — never a panic or a bare stack trace.
 func skillInstallCmd(path string) {
 	installer, s := openSkillInstaller()
-	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
 	result, err := installer.Install(context.Background(), skillinstall.Source{Path: path})
 	if err != nil {
@@ -146,7 +146,7 @@ func skillInstallCmd(path string) {
 // mistake before anything is vendored or indexed under it.
 func skillSyncCmd(slug, path string) {
 	installer, s := openSkillInstaller()
-	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
 	existing, err := s.GetSkillBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug)
 	if err != nil {

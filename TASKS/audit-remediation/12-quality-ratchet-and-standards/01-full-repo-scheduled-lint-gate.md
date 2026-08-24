@@ -37,11 +37,11 @@ runbook note; it does not touch any Go source.
 > caught `GO-STORE-003`** (high severity) and was ignored because the fast hook
 > runs `--new` and cannot see pre-existing findings in untouched code.
 >
-> ### ⚠ Stage 2 has a 353-finding prerequisite owned by `14/02`
+> ### ✅ Stage 2 prerequisite satisfied by `14/02` (2026-08-24)
 >
 > Re-measured at implementation time: errcheck **281** + errorlint **48** +
-> nilerr **24** = **353**. Task `14/02` owns paying all three backlogs down to
-> zero and activating Stage 2 as its closing act.
+> nilerr **24** = **353**. Task `14/02` reduced all three to zero and activated
+> Stage 2 as its closing act.
 >
 > **Do not activate stage 2 until that backlog is zero.** A gate that fails
 > every merge from day one gets disabled within a week, taking stage 1 with it.
@@ -382,6 +382,10 @@ file this task adds — no code-level revert needed.
 - Added a committed JSON baseline and deterministic comparison runner. Stage 1
   is active across all 21 linters in the audit config and now passes at the
   clean, tracked-package count of 3,615 findings.
+- 2026-08-24 (`14/02`): activated Stage 2 after the correctness-three backlog
+  reached zero. The comparator now independently rejects any `errcheck`,
+  `errorlint`, or `nilerr` finding and refuses a nonzero committed baseline for
+  those linters.
 - Fresh-review fix, 2026-08-23: rebuilt the Actions workspace as
   `apps/nanite` plus four public `libs/<module>` checkouts, pinned to the
   supplied remotely available commits. `go list ./...`, build, and vet all

@@ -149,7 +149,9 @@ func (c *harnessClient) doJSON(ctx context.Context, method, path string, body, o
 	if err != nil {
 		return &connectError{fmt.Errorf("could not reach %s: %w (is `nanite serve` running?)", c.baseURL, err)}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
@@ -265,7 +267,7 @@ func (c *harnessClient) StreamEvents(ctx context.Context, path string) (<-chan c
 	}
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close() // The response has been drained; close is best-effort connection cleanup.
 		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 

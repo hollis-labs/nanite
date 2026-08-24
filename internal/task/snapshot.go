@@ -78,7 +78,9 @@ func (s *SQLiteSnapshot) ListTasks(filter TaskFilter) ([]*Task, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Query and iteration errors are surfaced separately; deferred close is cleanup only.
+	}()
 
 	var tasks []*Task
 	for rows.Next() {

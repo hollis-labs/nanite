@@ -147,7 +147,7 @@ func (p *pubsub) publish(msg *Message) {
 // cancel it when the subscription ends.
 func (svc *Service) SubscribeSessionAgent(ctx context.Context, sessionID, agentID string) (<-chan *Message, error) {
 	if err := ValidateAgentID(ctx, svc.resolver, agentID); err != nil {
-		return nil, fmt.Errorf("%w: agent_id: %v", ErrValidation, err)
+		return nil, fmt.Errorf("%w: agent_id: %w", ErrValidation, err)
 	}
 	return svc.pub.subscribe(ctx, sessionID, agentID), nil
 }

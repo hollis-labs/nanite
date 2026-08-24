@@ -29,7 +29,7 @@ func (s *Store) ListBookmarks(ctx context.Context, sessionID string) ([]Bookmark
 	if err != nil {
 		return nil, fmt.Errorf("list bookmarks: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Bookmark, 0)
 	for rows.Next() {

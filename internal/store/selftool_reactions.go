@@ -102,7 +102,7 @@ func (s *Store) ListEnabledSelftoolReactions(ctx context.Context, toolName strin
 	if err != nil {
 		return nil, fmt.Errorf("list selftool_reactions: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]SelftoolReaction, 0)
 	for rows.Next() {

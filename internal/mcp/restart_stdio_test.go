@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"testing"
 	"time"
@@ -108,7 +109,7 @@ func TestRestartStdioTransports_RespectsContextCancel(t *testing.T) {
 	if err == nil {
 		t.Fatal("RestartStdioTransports: expected ctx.Err(), got nil")
 	}
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("RestartStdioTransports: err = %v, want context.Canceled", err)
 	}
 }

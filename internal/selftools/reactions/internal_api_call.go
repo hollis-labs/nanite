@@ -78,7 +78,9 @@ func (e *Engine) executeInternalAPICall(ctx context.Context, configJSON string, 
 	if err != nil {
 		return fmt.Errorf("internal_api_call: request to %s failed: %w", cfg.Endpoint, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Bounded read: internal_api_call targets a trusted, same-process

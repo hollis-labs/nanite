@@ -61,14 +61,14 @@ type StartBuilderResult struct {
 
 // StepResult is returned by HandleBuilderStep.
 type StepResult struct {
-	Builder   string       `json:"builder"`
-	Step      string       `json:"step"`
-	Status    string       `json:"status"` // "next", "complete", "error"
-	NextStep  string       `json:"next_step,omitempty"`
-	Prompt    string       `json:"prompt,omitempty"`
-	Required  bool         `json:"required,omitempty"`
-	Result    *BuildResult `json:"result,omitempty"`
-	Error     string       `json:"error,omitempty"`
+	Builder  string       `json:"builder"`
+	Step     string       `json:"step"`
+	Status   string       `json:"status"` // "next", "complete", "error"
+	NextStep string       `json:"next_step,omitempty"`
+	Prompt   string       `json:"prompt,omitempty"`
+	Required bool         `json:"required,omitempty"`
+	Result   *BuildResult `json:"result,omitempty"`
+	Error    string       `json:"error,omitempty"`
 }
 
 // HandleStartBuilder starts a new builder flow. It returns the first step prompt
@@ -154,7 +154,7 @@ func HandleBuilderStep(reg *Registry, sm *SessionManager, sessionKey string, inp
 			Prompt:  step.Prompt,
 		}
 		data, _ := json.Marshal(result)
-		return string(data), nil
+		return string(data), nil //nolint:nilerr // Validation failures are returned in the builder protocol payload.
 	}
 
 	// Store the value.
@@ -176,7 +176,7 @@ func HandleBuilderStep(reg *Registry, sm *SessionManager, sessionKey string, inp
 			data, _ := json.Marshal(result)
 			// Clean up session on build failure.
 			sm.Delete(sessionKey)
-			return string(data), nil
+			return string(data), nil //nolint:nilerr // Build failures are returned in the builder protocol payload.
 		}
 
 		result := StepResult{

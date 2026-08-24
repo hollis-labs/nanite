@@ -3,6 +3,7 @@ package shell
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -73,7 +74,7 @@ func Exec(ctx context.Context, command string, opts ExecOpts) *ExecResult {
 			// Timeout — use standard exit code 124 regardless of the signal code.
 			exitCode = 124
 			fmt.Fprintf(&buf, "\n[command timed out after %s]", timeout)
-		} else if exitErr, ok := err.(*exec.ExitError); ok {
+		} else if exitErr := new(exec.ExitError); errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = 1

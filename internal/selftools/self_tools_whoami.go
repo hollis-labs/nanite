@@ -49,7 +49,7 @@ func (st *SelfToolsTransport) executeWhoami(ctx context.Context, args map[string
 		"address": addr.URN(),
 	})
 	if err != nil {
-		return mcp.ErrorResult("whoami: " + err.Error()), nil
+		return mcp.ErrorResult("whoami: " + err.Error()), nil //nolint:nilerr // Tool errors travel in the MCP result payload.
 	}
 	return mcp.TextResult(string(out)), nil
 }

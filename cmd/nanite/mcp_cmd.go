@@ -40,7 +40,7 @@ func mcpImport(args []string) {
 		fmt.Fprintf(os.Stderr, "error: open db: %v\n", err)
 		os.Exit(1)
 	}
-	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
 	result, err := mcpconfig.Import(s, data)
 	if err != nil {
@@ -77,7 +77,7 @@ func mcpExport(args []string) {
 		fmt.Fprintf(os.Stderr, "error: open db: %v\n", err)
 		os.Exit(1)
 	}
-	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
 	cfg, err := mcpconfig.Export(s)
 	if err != nil {
@@ -93,13 +93,19 @@ func mcpExport(args []string) {
 	data = append(data, '\n')
 
 	if outPath == "" {
-		os.Stdout.Write(data)
+		if _, err := os.Stdout.Write(data); err != nil {
+			fmt.Fprintf(os.Stderr, "error: write stdout: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
 	// Ensure parent directory exists.
 	if dir := filepath.Dir(outPath); dir != "." {
-		os.MkdirAll(dir, 0755)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "error: create output directory %s: %v\n", dir, err)
+			os.Exit(1)
+		}
 	}
 
 	if err := os.WriteFile(outPath, data, 0644); err != nil {

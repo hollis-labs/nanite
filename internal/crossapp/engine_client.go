@@ -50,7 +50,9 @@ func SendUICommand(ctx context.Context, cmd UICommand) error {
 		slog.Warn("crossapp: Engine UI command failed (Engine may be offline)", "err", err)
 		return fmt.Errorf("post UI command: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 
 	if resp.StatusCode >= 300 {
 		slog.Warn("crossapp: Engine returned error for UI command", "status", resp.StatusCode, "type", cmd.Type)

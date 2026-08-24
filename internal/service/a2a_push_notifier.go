@@ -206,7 +206,9 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 
 		return pn.store.UpdateA2APushDelivery(ctx, delivery)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		delivery.AttemptCount++

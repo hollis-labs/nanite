@@ -85,7 +85,7 @@ func (s *Store) GetPendingPushDeliveries(ctx context.Context, now time.Time) ([]
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var deliveries []*A2APushDelivery
 	for rows.Next() {

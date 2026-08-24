@@ -37,14 +37,14 @@ func resolveRoleWithFallback(agents agentSlugResolver, slug, caller string) (*st
 		return agent, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("%w %q: %v", errRoleResolveFailed, slug, err)
+		return nil, fmt.Errorf("%w %q: %w", errRoleResolveFailed, slug, err)
 	}
 	// Unknown slug. Try the fallback before surfacing failure.
 	fallback, fbErr := agents.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, fallbackRoleSlug)
 	if fbErr != nil {
 		// Fallback itself missing — the deployment is misconfigured;
 		// surface the ORIGINAL slug so logs point at the user's request.
-		return nil, fmt.Errorf("%w %q: %v (fallback %q also missing: %v)",
+		return nil, fmt.Errorf("%w %q: %w (fallback %q also missing: %w)",
 			errRoleResolveFailed, slug, err, fallbackRoleSlug, fbErr)
 	}
 	slog.Warn("subagent: role slug not found, falling back",

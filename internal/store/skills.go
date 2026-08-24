@@ -88,7 +88,7 @@ func (s *Store) ListSkills(ctx context.Context) ([]Skill, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list skills: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Skill, 0)
 	for rows.Next() {
@@ -105,7 +105,7 @@ func (s *Store) ListSkills(ctx context.Context) ([]Skill, error) {
 func (s *Store) GetSkill(ctx context.Context, id string) (*Skill, error) {
 	var sk Skill
 	row := s.DB.QueryRowContext(ctx, `SELECT `+skillColumns+` FROM skills WHERE id = ?`, id)
-	if err := scanSkill(row, &sk); err == sql.ErrNoRows {
+	if err := scanSkill(row, &sk); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("get skill %s: %w", id, err)
@@ -117,7 +117,7 @@ func (s *Store) GetSkill(ctx context.Context, id string) (*Skill, error) {
 func (s *Store) GetSkillBySlug(ctx context.Context, slug string) (*Skill, error) {
 	var sk Skill
 	row := s.DB.QueryRowContext(ctx, `SELECT `+skillColumns+` FROM skills WHERE slug = ?`, slug)
-	if err := scanSkill(row, &sk); err == sql.ErrNoRows {
+	if err := scanSkill(row, &sk); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("get skill by slug %s: %w", slug, err)
@@ -236,7 +236,7 @@ func (s *Store) ListAgentSkills(ctx context.Context, agentID string) ([]Skill, e
 	if err != nil {
 		return nil, fmt.Errorf("list agent skills: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Skill, 0)
 	for rows.Next() {

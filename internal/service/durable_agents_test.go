@@ -350,7 +350,7 @@ func TestDurableAgentResumeNoResumableSession(t *testing.T) {
 	if err := svc.Create(context.Background(), inst); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if _, err := svc.Resume(context.Background(), inst.ID, DurableAgentStartRequest{}); err != ErrDurableAgentNoResumableSession {
+	if _, err := svc.Resume(context.Background(), inst.ID, DurableAgentStartRequest{}); !errors.Is(err, ErrDurableAgentNoResumableSession) {
 		t.Fatalf("Resume error = %v, want ErrDurableAgentNoResumableSession", err)
 	}
 	got, err := st.GetDurableAgentInstance(context.Background(), inst.ID)

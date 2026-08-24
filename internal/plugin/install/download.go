@@ -78,7 +78,9 @@ func (d *HTTPDownloader) Download(ctx context.Context, url, destDir, pluginID st
 	if err != nil {
 		return "", fmt.Errorf("download: get: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
+	}()
 
 	if resp.StatusCode/100 != 2 {
 		return "", fmt.Errorf("download: http status %s", resp.Status)

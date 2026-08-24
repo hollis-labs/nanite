@@ -90,7 +90,7 @@ func cmdMessage(args []string) {
 	if err != nil {
 		slogx.Fatal("message: open db", "path", dbPath, "err", err)
 	}
-	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
 	svc, err := newMessagingServiceForCLI(s)
 	if err != nil {
@@ -127,7 +127,7 @@ func messageSend(svc *messaging.Service, args []string) {
 	subject := fs.String("subject", "", "subject line")
 	body := fs.String("body", "", "message body")
 	msgType := fs.String("type", "message", "message type")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
 
 	var missing []string
 	if *session == "" {
@@ -182,7 +182,7 @@ func messageInbox(svc *messaging.Service, args []string) {
 	session := fs.String("session", "", "session id")
 	agentID := fs.String("agent", "", "agent id")
 	status := fs.String("status", "", "filter: unread|read|acknowledged|resolved")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
 
 	if *session == "" || *agentID == "" {
 		fmt.Fprintln(os.Stderr, "message inbox: --session and --agent are required")
@@ -220,7 +220,7 @@ func messageThread(svc *messaging.Service, args []string) {
 	fs := flag.NewFlagSet("message thread", flag.ExitOnError)
 	session := fs.String("session", "", "caller session id")
 	agentID := fs.String("agent", "", "caller agent id")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
 	if fs.NArg() < 1 {
 		fmt.Fprintf(os.Stderr, "usage: %s message thread --session X --agent Y <threadID>\n", brand.BinaryName)
 		os.Exit(1)
@@ -246,7 +246,7 @@ func messageAck(svc *messaging.Service, args []string) {
 	fs := flag.NewFlagSet("message ack", flag.ExitOnError)
 	session := fs.String("session", "", "session id")
 	agentID := fs.String("agent", "", "agent id")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
 	if *session == "" || *agentID == "" {
 		fmt.Fprintln(os.Stderr, "message ack: --session and --agent are required")
 		os.Exit(1)
@@ -265,7 +265,7 @@ func messageResolve(svc *messaging.Service, args []string) {
 	fs := flag.NewFlagSet("message resolve", flag.ExitOnError)
 	session := fs.String("session", "", "session id")
 	agentID := fs.String("agent", "", "agent id")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
 	if *session == "" || *agentID == "" {
 		fmt.Fprintln(os.Stderr, "message resolve: --session and --agent are required")
 		os.Exit(1)
@@ -284,7 +284,7 @@ func messageCatchUp(svc *messaging.Service, args []string) {
 	fs := flag.NewFlagSet("message catch-up", flag.ExitOnError)
 	session := fs.String("session", "", "session id")
 	last := fs.Int("last", 20, "number of recent messages")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
 
 	if *session == "" {
 		fmt.Fprintln(os.Stderr, "message catch-up: --session is required")
@@ -320,7 +320,7 @@ func messageHandoff(svc *messaging.Service, args []string) {
 		to := fs.String("to", "", "to agent id")
 		from := fs.String("from", "", "from agent id (optional)")
 		reqBy := fs.String("requested-by", "user", "departing|incoming|user")
-		fs.Parse(rest)
+		_ = fs.Parse(rest) // ExitOnError terminates on parse failure; the returned error is unreachable.
 
 		if *session == "" || *to == "" {
 			fmt.Fprintln(os.Stderr, "message handoff request: --session and --to are required")
@@ -350,7 +350,7 @@ func messageHandoff(svc *messaging.Service, args []string) {
 	case "reject":
 		fs := flag.NewFlagSet("handoff reject", flag.ExitOnError)
 		reason := fs.String("reason", "", "rejection reason")
-		fs.Parse(rest)
+		_ = fs.Parse(rest) // ExitOnError terminates on parse failure; the returned error is unreachable.
 		if fs.NArg() < 1 {
 			fmt.Fprintf(os.Stderr, "usage: %s message handoff reject --reason X <handoffID>\n", brand.BinaryName)
 			os.Exit(1)

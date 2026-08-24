@@ -1170,7 +1170,7 @@ func (svc *Service) expireIfStale(ctx context.Context, runID string) (bool, erro
 
 	t, perr := time.Parse(time.RFC3339Nano, createdAt)
 	if perr != nil {
-		return false, nil
+		return false, fmt.Errorf("parse subagent run %q created_at: %w", runID, perr)
 	}
 	if time.Since(t) <= time.Duration(timeout)*time.Second {
 		return false, nil

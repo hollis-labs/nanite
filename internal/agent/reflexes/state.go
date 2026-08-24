@@ -119,7 +119,9 @@ func (sc *StateCollector) recentMessagesByRole(ctx context.Context, sessionID, r
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Query and iteration errors are surfaced separately; deferred close is cleanup only.
+	}()
 	out := make([]MessageSignal, 0, limit)
 	for rows.Next() {
 		var m MessageSignal
@@ -150,7 +152,9 @@ func (sc *StateCollector) recentEvents(ctx context.Context, sessionID string, li
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Query and iteration errors are surfaced separately; deferred close is cleanup only.
+	}()
 	out := make([]EventSignal, 0, limit)
 	for rows.Next() {
 		var e EventSignal

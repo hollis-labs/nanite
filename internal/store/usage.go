@@ -121,7 +121,7 @@ func (s *Store) GetUsageSummary(ctx context.Context) (*UsageSummary, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get usage summary by model: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	summary.ByModel = make([]ModelUsage, 0)
 	for rows.Next() {

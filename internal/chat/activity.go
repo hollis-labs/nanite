@@ -98,7 +98,7 @@ func (e *ActivityEmitter) Emit(ctx context.Context, ev activityEvent) {
 		slog.Warn("activity: send error (engine unreachable)", "err", err)
 		return
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close() // The activity probe has consumed the response; close is best-effort cleanup.
 	if resp.StatusCode >= 300 {
 		slog.Warn("activity: engine non-2xx", "status", resp.StatusCode)
 	}

@@ -79,7 +79,7 @@ func (s *Store) ListAgentKnowledgeSeeds(ctx context.Context, agentID string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("list agent_knowledge_seed: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]AgentKnowledgeSeed, 0)
 	for rows.Next() {

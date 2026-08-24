@@ -92,7 +92,9 @@ func (e *catalogExtractor) Extract(ctx context.Context, h install.Handle, target
 	if err != nil {
 		return fmt.Errorf("catalog extract: scratch dir: %w", err)
 	}
-	defer os.RemoveAll(scratchDir)
+	defer func() {
+		_ = os.RemoveAll(scratchDir) // The same-filesystem extraction directory is disposable staging cleanup.
+	}()
 
 	if strings.HasSuffix(e.archiveURL, ".zip") {
 		if err := extractZip(h.Path, scratchDir); err != nil {

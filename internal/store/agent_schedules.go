@@ -278,7 +278,7 @@ func (s *Store) ListAgentSchedules(ctx context.Context, agentID string) ([]Agent
 	if err != nil {
 		return nil, fmt.Errorf("list agent_schedules: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]AgentSchedule, 0)
 	for rows.Next() {
 		var sch AgentSchedule
@@ -312,7 +312,7 @@ func (s *Store) ListAllAgentSchedules(ctx context.Context) ([]AgentSchedule, err
 	if err != nil {
 		return nil, fmt.Errorf("list all agent_schedules: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]AgentSchedule, 0)
 	for rows.Next() {
 		var sch AgentSchedule
@@ -418,7 +418,7 @@ func (s *Store) ListDueAgentSchedules(ctx context.Context, now time.Time, limit 
 	if err != nil {
 		return nil, fmt.Errorf("list due agent_schedules: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	out := make([]AgentSchedule, 0)
 	for rows.Next() {
 		var sch AgentSchedule
@@ -540,7 +540,7 @@ func (s *Store) backfillScheduleNextRun(ctx context.Context, now time.Time) erro
 	for rows.Next() {
 		var c candidate
 		if err := rows.Scan(&c.id, &c.kind, &c.spec); err != nil {
-			rows.Close()
+			_ = rows.Close() // Preserve the scan failure; closing the abandoned result set is cleanup.
 			return fmt.Errorf("backfill agent_schedules next_run: scan: %w", err)
 		}
 		candidates = append(candidates, c)
@@ -548,7 +548,9 @@ func (s *Store) backfillScheduleNextRun(ctx context.Context, now time.Time) erro
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("backfill agent_schedules next_run: rows: %w", err)
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("backfill agent_schedules next_run: close rows: %w", err)
+	}
 
 	for _, c := range candidates {
 		next := ComputeAgentScheduleNextRun(c.kind, c.spec, now)

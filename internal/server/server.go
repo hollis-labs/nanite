@@ -252,10 +252,12 @@ func (s *Server) routes() {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
 		"version": version.Version,
-	})
+	}); err != nil {
+		slog.Debug("server: write health response failed", "err", err)
+	}
 }
 
 // --- Middleware ---
@@ -465,10 +467,12 @@ func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"plugins": pluginInfos,
 		"count":   len(pluginInfos),
-	})
+	}); err != nil {
+		slog.Debug("server: write plugin response failed", "err", err)
+	}
 }
 
 func (s *Server) handleGetUIComponents(w http.ResponseWriter, r *http.Request) {
@@ -488,10 +492,12 @@ func (s *Server) handleGetUIComponents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"components": components,
 		"count":      len(components),
-	})
+	}); err != nil {
+		slog.Debug("server: write UI components response failed", "err", err)
+	}
 }
 
 func (s *Server) handleGetUISlots(w http.ResponseWriter, r *http.Request) {
@@ -502,7 +508,9 @@ func (s *Server) handleGetUISlots(w http.ResponseWriter, r *http.Request) {
 
 	slots := s.pluginHost.GetAllSlots()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(slots)
+	if err := json.NewEncoder(w).Encode(slots); err != nil {
+		slog.Debug("server: write UI slots response failed", "err", err)
+	}
 }
 
 // knownEmitEventTypes lists the event names the HTTP /api/plugins/events
@@ -581,7 +589,9 @@ func (s *Server) handleEmitEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close() // The server owns request-body cleanup; decode/read errors are handled separately.
+	}()
 
 	if req.EventType == "" {
 		http.Error(w, "event_type is required", http.StatusBadRequest)
@@ -624,5 +634,7 @@ func (s *Server) handleEmitEvent(w http.ResponseWriter, r *http.Request) {
 	s.pluginHost.EmitEvent(event)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		slog.Debug("server: write plugin event response failed", "err", err)
+	}
 }

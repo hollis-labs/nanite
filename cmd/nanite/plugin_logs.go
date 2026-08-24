@@ -28,7 +28,9 @@ func pluginLogs(id string) {
 		fmt.Fprintf(os.Stderr, "open log: %v\n", err)
 		os.Exit(1)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close() // Read-only file close is best-effort cleanup; read errors are handled separately.
+	}()
 	if _, err := io.Copy(os.Stdout, f); err != nil {
 		fmt.Fprintf(os.Stderr, "read log: %v\n", err)
 		os.Exit(1)

@@ -242,7 +242,9 @@ func (a *API) setSessionMetadataField(sessionID, key string, value interface{}) 
 
 	meta := make(map[string]interface{})
 	if sess.Metadata != "" {
-		json.Unmarshal([]byte(sess.Metadata), &meta)
+		if decodeErr := json.Unmarshal([]byte(sess.Metadata), &meta); decodeErr != nil {
+			return fmt.Errorf("parse session metadata: %w", decodeErr)
+		}
 	}
 	meta[key] = value
 

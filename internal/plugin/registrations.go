@@ -3,6 +3,7 @@ package plugin
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -688,7 +689,8 @@ func newSubprocessHTTPHandler(transport *subprocess.Transport, handlerName strin
 			limited := http.MaxBytesReader(w, r.Body, maxPluginHTTPBodyBytes)
 			b, err := io.ReadAll(limited)
 			if err != nil {
-				if _, ok := err.(*http.MaxBytesError); ok {
+				var maxBytesErr *http.MaxBytesError
+				if errors.As(err, &maxBytesErr) {
 					http.Error(w, "request body exceeds plugin route limit", http.StatusRequestEntityTooLarge)
 					return
 				}

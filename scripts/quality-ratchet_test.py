@@ -54,6 +54,77 @@ class QualityRatchetTest(unittest.TestCase):
             },
         )
 
+    def lint_baseline(
+        self,
+        *,
+        stage_2_active: bool = True,
+        errcheck_baseline: int = 0,
+    ) -> Path:
+        return self.write_json(
+            "lint-baseline.json",
+            {
+                "platform": {
+                    "goos": self.goos,
+                    "goarch": self.goarch,
+                    "github_runner": RUNNER,
+                },
+                "stage_1": {
+                    "active": True,
+                    "counts": {
+                        "errcheck": errcheck_baseline,
+                        "errorlint": 0,
+                        "nilerr": 0,
+                    },
+                },
+                "stage_2": {
+                    "active": stage_2_active,
+                    "linters": ["errcheck", "errorlint", "nilerr"],
+                },
+            },
+        )
+
+    def run_lint(
+        self,
+        issues: list[dict[str, str]],
+        *,
+        stage_2_active: bool = True,
+        errcheck_baseline: int = 0,
+    ) -> subprocess.CompletedProcess[str]:
+        report = self.write_json("lint.json", {"Issues": issues})
+        linters_report = self.write_json(
+            "linters.json",
+            {
+                "Enabled": [
+                    {"name": "errcheck"},
+                    {"name": "errorlint"},
+                    {"name": "nilerr"},
+                ]
+            },
+        )
+        return subprocess.run(
+            [
+                "python3",
+                str(SCRIPT),
+                "lint",
+                "--baseline",
+                str(
+                    self.lint_baseline(
+                        stage_2_active=stage_2_active,
+                        errcheck_baseline=errcheck_baseline,
+                    )
+                ),
+                "--report",
+                str(report),
+                "--linters-report",
+                str(linters_report),
+                "--runner",
+                RUNNER,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
     @staticmethod
     def accepted_issue() -> dict[str, str]:
         return {
@@ -132,6 +203,28 @@ class QualityRatchetTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("go env GOOS/GOARCH", result.stderr)
+
+    def test_lint_stage_2_accepts_zero_correctness_findings(self) -> None:
+        result = self.run_lint([])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("errcheck=0, errorlint=0, nilerr=0", result.stdout)
+        self.assertIn("zero-tolerance passed", result.stdout)
+
+    def test_lint_stage_2_rejects_any_correctness_finding(self) -> None:
+        result = self.run_lint([{"FromLinter": "errcheck"}])
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("requires zero findings", result.stderr)
+        self.assertIn("'errcheck': 1", result.stderr)
+
+    def test_lint_stage_2_rejects_nonzero_committed_baseline(self) -> None:
+        result = self.run_lint([], errcheck_baseline=1)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("must have zero Stage 1 baselines", result.stderr)
+
+    def test_lint_stage_2_cannot_be_disabled(self) -> None:
+        result = self.run_lint([], stage_2_active=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("must be active", result.stderr)
 
 
 if __name__ == "__main__":

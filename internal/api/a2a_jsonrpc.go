@@ -302,7 +302,9 @@ func respondJSONRPCSuccess(w http.ResponseWriter, result any, id any) {
 	resp := a2a.NewJSONRPCResponse(result, id)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Debug("a2a: write JSON-RPC success response failed", "err", err)
+	}
 }
 
 // respondJSONRPCError writes a JSON-RPC 2.0 error response.
@@ -311,5 +313,7 @@ func respondJSONRPCError(w http.ResponseWriter, code int, message string, data a
 	w.Header().Set("Content-Type", "application/json")
 	// Always return 200 for JSON-RPC — errors are in the response envelope
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Debug("a2a: write JSON-RPC error response failed", "err", err)
+	}
 }

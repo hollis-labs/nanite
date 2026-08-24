@@ -175,7 +175,9 @@ func (svc *Service) SessionEvents(ctx context.Context, sessionID string, limit i
 	if err != nil {
 		return nil, fmt.Errorf("session events: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Query and iteration errors are surfaced separately; deferred close is cleanup only.
+	}()
 
 	out := make([]SessionEvent, 0)
 	for rows.Next() {

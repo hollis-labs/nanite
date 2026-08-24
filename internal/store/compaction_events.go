@@ -89,7 +89,7 @@ func (s *Store) ListCompactionEventsBySession(ctx context.Context, sessionID str
 	if err != nil {
 		return nil, fmt.Errorf("list compaction events: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var events []CompactionEvent
 	for rows.Next() {

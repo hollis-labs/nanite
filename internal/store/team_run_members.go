@@ -140,7 +140,7 @@ func (s *Store) ListTeamRunMembersByRun(ctx context.Context, runID string) ([]Te
 	if err != nil {
 		return nil, fmt.Errorf("list team_run_members by run: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]TeamRunMember, 0)
 	for rows.Next() {
@@ -174,7 +174,7 @@ func (s *Store) ListTeamRunMembersBySlot(ctx context.Context, runID, slotName st
 	if err != nil {
 		return nil, fmt.Errorf("list team_run_members by slot: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]TeamRunMember, 0)
 	for rows.Next() {

@@ -227,7 +227,7 @@ func (st *SelfToolsTransport) recursionBlocked(ctx context.Context) (bool, error
 	if err != nil {
 		// Fail closed: an unverifiable parentage means we refuse rather
 		// than risk an unbounded recursive spawn chain.
-		return false, fmt.Errorf("subagent recursion check failed: %v", err)
+		return false, fmt.Errorf("subagent recursion check failed: %w", err)
 	}
 	return isChild, nil
 }

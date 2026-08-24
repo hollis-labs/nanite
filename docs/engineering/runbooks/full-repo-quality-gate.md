@@ -33,7 +33,8 @@ The workflow installs pinned tool versions and runs all six Wave 7 check
 families:
 
 1. `golangci-lint` with the uncapped audit config, followed by the committed
-   per-linter Stage 1 ratchet;
+   per-linter Stage 1 ratchet and Stage 2 zero-tolerance check for `errcheck`,
+   `errorlint`, and `nilerr`;
 2. `govulncheck` over the discovered tracked package set;
 3. standalone `gosec`, with `.claude` excluded so nested agent worktrees are
    not scanned and with the known-noise policy below;
@@ -103,12 +104,11 @@ Stage 1 is active now: every linter enabled in the audit config has a committed
 count, and any per-linter increase fails. Lower counts pass and should be
 written back promptly so later increases cannot consume the improvement.
 
-Stage 2 is deliberately inactive. It is future zero-tolerance for exactly
-`errcheck`, `errorlint`, and `nilerr`, and may be activated only after
-`TASKS/audit-remediation/14-followups/02-error-handling-backlog-paydown.md`
-reduces all three backlogs to zero. Until that trigger, those three linters are
-ordinary Stage 1 participants at 281, 48, and 24 findings respectively; do not
-approximate Stage 2 with smaller nonzero thresholds.
+Stage 2 is active: `errcheck`, `errorlint`, and `nilerr` must each remain at
+zero. Task `14/02` satisfied the activation trigger by reducing the measured
+backlogs from 281, 48, and 24 findings respectively to zero. The comparator
+also requires their Stage 1 baseline counts to remain zero, so raising a
+baseline cannot silently weaken Stage 2.
 
 ## Standalone gosec known noise
 

@@ -1568,7 +1568,11 @@ func (c *Container) shutdownWithMaxWait(maxWait time.Duration) {
 		})
 	}
 	if c.Coord != nil {
-		run("coord", func() { c.Coord.Close() })
+		run("coord", func() {
+			if err := c.Coord.Close(); err != nil {
+				slog.Warn("shutdown: coordination store close", "err", err)
+			}
+		})
 	}
 	if c.Conduit != nil {
 		run("conduit", func() {

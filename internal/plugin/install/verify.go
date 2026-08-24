@@ -122,7 +122,9 @@ func (v *SignatureVerifier) Verify(ctx context.Context, h Handle) error {
 	if err != nil {
 		return fmt.Errorf("verify: open: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close() // Read-only file close is best-effort cleanup; read errors are handled separately.
+	}()
 
 	hasher := sha256.New()
 	body, err := io.ReadAll(io.TeeReader(io.LimitReader(f, max+1), hasher))

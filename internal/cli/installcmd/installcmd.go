@@ -27,7 +27,7 @@ func Run(label string, args []string) {
 	adapters := fs.String("adapters", "", "comma-separated list of CLI adapters to manage (claude, codex, gemini, opencode)")
 	noAdapters := fs.Bool("no-adapters", false, "disable all CLI adapter management for this project")
 	reconfigure := fs.Bool("reconfigure", false, "re-prompt for adapter selection even if config has adapters: set")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
 
 	if *adapters != "" && *noAdapters {
 		die(label, "flag conflict", fmt.Errorf("--adapters and --no-adapters are mutually exclusive"))

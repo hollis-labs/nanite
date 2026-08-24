@@ -33,7 +33,7 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 	if s.dev {
 		setSPACacheHeaders(w, "index.html")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(placeholderHTML))
+		_, _ = w.Write([]byte(placeholderHTML)) // The response is committed; a client disconnect has no recovery path.
 		return
 	}
 
@@ -42,7 +42,7 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		setSPACacheHeaders(w, "index.html")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(placeholderHTML))
+		_, _ = w.Write([]byte(placeholderHTML)) // The response is committed; a client disconnect has no recovery path.
 		return
 	}
 
@@ -60,15 +60,15 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 		if err2 != nil {
 			setSPACacheHeaders(w, "index.html")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write([]byte(placeholderHTML))
+			_, _ = w.Write([]byte(placeholderHTML)) // The response is committed; a client disconnect has no recovery path.
 			return
 		}
 		setSPACacheHeaders(w, "index.html")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(data)
+		_, _ = w.Write(data) // The response is committed; a client disconnect has no recovery path.
 		return
 	}
-	f.Close()
+	_ = f.Close() // The probe only confirms the embedded file exists; FileServer reopens it for serving.
 
 	// Serve the file.
 	setSPACacheHeaders(w, pathpkg.Clean(path))

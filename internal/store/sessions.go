@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -135,7 +136,7 @@ func (s *Store) ListSessions(ctx context.Context, includeArchived ...bool) ([]Se
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Session, 0)
 	for rows.Next() {
@@ -376,7 +377,7 @@ func (s *Store) ArchiveSession(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("archive session %s: begin tx: %w", id, err)
 	}
-	defer tx.Rollback()
+	defer rollbackUnlessCommitted(tx)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := tx.ExecContext(ctx,
@@ -436,7 +437,7 @@ func (s *Store) NextShortCode(ctx context.Context) (string, error) {
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT short_code FROM sessions ORDER BY CAST(SUBSTR(short_code, 2) AS INTEGER) DESC LIMIT 1`,
 	).Scan(&raw)
-	if err == sql.ErrNoRows || !raw.Valid {
+	if errors.Is(err, sql.ErrNoRows) || !raw.Valid {
 		return "c1", nil
 	}
 	if err != nil {
@@ -464,7 +465,7 @@ func (s *Store) ListMessages(ctx context.Context, sessionID string, limit int) (
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Message, 0)
 	for rows.Next() {
@@ -517,7 +518,7 @@ func (s *Store) ListMessagesPaginated(ctx context.Context, sessionID string, lim
 	if err != nil {
 		return nil, fmt.Errorf("list messages paginated: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Message, 0)
 	for rows.Next() {
@@ -588,7 +589,7 @@ func (s *Store) ListMessagesAroundID(ctx context.Context, sessionID, messageID s
 	if err != nil {
 		return nil, fmt.Errorf("list messages around: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]Message, 0)
 	for rows.Next() {
@@ -645,7 +646,7 @@ func (s *Store) CreateMessage(ctx context.Context, msg *Message) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackUnlessCommitted(tx)
 
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO messages (id, session_id, agent_id, role, content, envelope, metadata, parent_id, is_compacted, created_at)
@@ -761,7 +762,7 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 	if err != nil {
 		return nil, fmt.Errorf("begin fork tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackUnlessCommitted(tx)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -868,7 +869,7 @@ func (s *Store) CopyMessages(ctx context.Context, sourceSessionID, targetSession
 	if err != nil {
 		return fmt.Errorf("begin copy tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackUnlessCommitted(tx)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, m := range msgs {
@@ -949,7 +950,7 @@ func (s *Store) SearchMessages(ctx context.Context, query, projectID string, lim
 	if err != nil {
 		return nil, fmt.Errorf("search messages: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]SearchResult, 0)
 	for rows.Next() {

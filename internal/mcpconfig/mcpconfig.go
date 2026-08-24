@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -143,12 +144,18 @@ func Export(s *store.Store) (*ClaudeCodeConfig, error) {
 		}
 
 		if sc.Args != "" && sc.Args != "[]" {
-			json.Unmarshal([]byte(sc.Args), &entry.Args)
+			if err := json.Unmarshal([]byte(sc.Args), &entry.Args); err != nil {
+				slog.Warn("mcpconfig: malformed stored args json — exporting empty args", "server", sc.Name, "err", err)
+				entry.Args = nil
+			}
 		}
 
 		if sc.Env != "" && sc.Env != "[]" {
 			var envSlice []string
-			json.Unmarshal([]byte(sc.Env), &envSlice)
+			if err := json.Unmarshal([]byte(sc.Env), &envSlice); err != nil {
+				slog.Warn("mcpconfig: malformed stored env json — exporting empty env", "server", sc.Name, "err", err)
+				envSlice = nil
+			}
 			if len(envSlice) > 0 {
 				entry.Env = make(map[string]string, len(envSlice))
 				for _, pair := range envSlice {

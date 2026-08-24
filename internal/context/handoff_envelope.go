@@ -56,7 +56,7 @@ func ParseHandoffEnvelope(raw []byte) (*HandoffPayload, error) {
 		Schema string `json:"schema"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrHandoffMalformed, err)
+		return nil, fmt.Errorf("%w: %w", ErrHandoffMalformed, err)
 	}
 	if probe.Schema == "" {
 		return nil, ErrHandoffEnvelopeWrongSchema
@@ -66,14 +66,14 @@ func ParseHandoffEnvelope(raw []byte) (*HandoffPayload, error) {
 	}
 	var env HandoffEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrHandoffMalformed, err)
+		return nil, fmt.Errorf("%w: %w", ErrHandoffMalformed, err)
 	}
 	// Round-trip through ValidateHandoff so caps/required-fields are enforced
 	// at read time too — protects against payloads written by a future binary
 	// with relaxed rules.
 	body, err := json.Marshal(env.Payload)
 	if err != nil {
-		return nil, fmt.Errorf("%w: re-marshal: %v", ErrHandoffMalformed, err)
+		return nil, fmt.Errorf("%w: re-marshal: %w", ErrHandoffMalformed, err)
 	}
 	return ValidateHandoff(body)
 }

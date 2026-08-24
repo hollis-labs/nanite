@@ -62,7 +62,9 @@ func (a *API) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 
 	// Run discovery to pick up new tools.
 	if a.Services.MCP != nil {
-		a.Services.MCP.AutoDiscover(context.Background(), a.Services.Store)
+		if _, err := a.Services.MCP.AutoDiscover(context.Background(), a.Services.Store); err != nil {
+			slog.Warn("api: MCP tool discovery after create failed", "server", cfg.Name, "err", err)
+		}
 	}
 
 	a.jsonResp(w, http.StatusCreated, cfg)
@@ -110,7 +112,9 @@ func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 	if a.Services.MCP != nil {
 		a.Services.MCP.RemoveServer(name)
 		a.registerMCPTransport(&cfg)
-		a.Services.MCP.AutoDiscover(context.Background(), a.Services.Store)
+		if _, err := a.Services.MCP.AutoDiscover(context.Background(), a.Services.Store); err != nil {
+			slog.Warn("api: MCP tool discovery after update failed")
+		}
 	}
 
 	a.jsonResp(w, http.StatusOK, cfg)
@@ -159,7 +163,9 @@ func (a *API) handleImportMCPServers(w http.ResponseWriter, r *http.Request) {
 
 	// Run discovery for new tools.
 	if a.Services.MCP != nil && len(result.Created) > 0 {
-		a.Services.MCP.AutoDiscover(context.Background(), a.Services.Store)
+		if _, err := a.Services.MCP.AutoDiscover(context.Background(), a.Services.Store); err != nil {
+			slog.Warn("api: MCP tool discovery after import failed", "created", result.Created, "err", err)
+		}
 	}
 
 	a.jsonResp(w, http.StatusOK, result)
@@ -183,7 +189,7 @@ func (a *API) handleExportMCPServers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename=".mcp.json"`)
 	w.WriteHeader(http.StatusOK)
-	w.Write(data)
+	_, _ = w.Write(data) // The response is already committed; a client disconnect has no recovery response path.
 }
 
 // registerMCPTransport registers the transport for a server config with the MCP manager.
@@ -194,22 +200,9 @@ func (a *API) registerMCPTransport(cfg *store.MCPServerConfig) {
 
 	switch cfg.TransportType {
 	case "stdio":
-		var args []string
-		if cfg.Args != "" && cfg.Args != "[]" {
-			json.Unmarshal([]byte(cfg.Args), &args)
-		}
-		var env []string
-		if cfg.Env != "" && cfg.Env != "[]" {
-			json.Unmarshal([]byte(cfg.Env), &env)
-		}
-		var envAllowlist []string
-		if cfg.EnvAllowlist != "" && cfg.EnvAllowlist != "[]" {
-			if err := json.Unmarshal([]byte(cfg.EnvAllowlist), &envAllowlist); err != nil {
-				slog.Warn("api: malformed env_allowlist json — ignoring",
-					"name", cfg.Name, "err", err)
-				envAllowlist = nil
-			}
-		}
+		args := decodeMCPStringSlice(cfg.Args, "args")
+		env := decodeMCPStringSlice(cfg.Env, "env")
+		envAllowlist := decodeMCPStringSlice(cfg.EnvAllowlist, "env_allowlist")
 		if err := a.Services.MCP.AddStdioServer(cfg.Name, cfg.Command, args, env, envAllowlist, mcp.TrustTier(cfg.TrustTier)); err != nil {
 			slog.Warn("api: failed to register stdio MCP server", "name", cfg.Name, "err", err)
 		}
@@ -218,4 +211,16 @@ func (a *API) registerMCPTransport(cfg *store.MCPServerConfig) {
 			slog.Warn("api: failed to register http MCP server", "name", cfg.Name, "err", err)
 		}
 	}
+}
+
+func decodeMCPStringSlice(raw, field string) []string {
+	if raw == "" || raw == "[]" {
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		slog.Warn("api: malformed MCP string-list json — ignoring", "field", field)
+		return nil
+	}
+	return values
 }

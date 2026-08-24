@@ -610,7 +610,9 @@ func (a *API) handleResolveLoopEscalation(w http.ResponseWriter, r *http.Request
 // endpoint's body is documented as optional (this task's own "What to do"
 // #2: "body: optional EscalationOverride").
 func decodeOptionalEscalationOverride(r *http.Request) (*loop.EscalationOverride, error) {
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close() // The server owns request-body cleanup; decode/read errors are handled separately.
+	}()
 	var body loop.EscalationOverride
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		if errors.Is(err, io.EOF) {

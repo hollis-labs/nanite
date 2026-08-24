@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/hollis-labs/nanite/internal/loop"
@@ -595,7 +596,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 func (a *API) jsonResp(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Debug("api: write JSON response failed", "err", err)
+	}
 }
 
 // errorResp writes a JSON error response.
@@ -605,6 +608,8 @@ func (a *API) errorResp(w http.ResponseWriter, status int, msg string) {
 
 // decode decodes a JSON request body into v.
 func (a *API) decode(r *http.Request, v any) error {
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close() // The server owns request-body cleanup; decode/read errors are handled separately.
+	}()
 	return json.NewDecoder(r.Body).Decode(v)
 }

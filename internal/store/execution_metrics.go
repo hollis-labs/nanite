@@ -100,7 +100,7 @@ func (s *Store) GetSessionExecutionMetrics(ctx context.Context, sessionID string
 	if err != nil {
 		return nil, fmt.Errorf("get session execution metrics: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]ExecutionMetrics, 0)
 	for rows.Next() {
@@ -125,7 +125,7 @@ func (s *Store) GetRecentExecutionMetrics(ctx context.Context, limit int) ([]Exe
 	if err != nil {
 		return nil, fmt.Errorf("get recent execution metrics: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]ExecutionMetrics, 0)
 	for rows.Next() {
@@ -156,7 +156,7 @@ func (s *Store) GetUtilityCallSummary(ctx context.Context) ([]UtilityCallSummary
 	if err != nil {
 		return nil, fmt.Errorf("get utility call summary: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]UtilityCallSummary, 0)
 	for rows.Next() {
@@ -208,7 +208,7 @@ func (s *Store) GetUtilityCallLog(ctx context.Context, limit int) ([]ExecutionMe
 	if err != nil {
 		return nil, fmt.Errorf("get utility call log: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]ExecutionMetrics, 0)
 	for rows.Next() {

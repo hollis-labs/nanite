@@ -70,7 +70,7 @@ func (h *ElicitationResponseHandler) HandleResponse(_ context.Context, env store
 
 	if err := h.svc.Respond(payload.ElicitationID, elicitResp); err != nil {
 		// Already resolved (timeout race) — not a fatal error; log and continue.
-		return HandlerResult{
+		return HandlerResult{ //nolint:nilerr // A late response is represented as a silent handler result, not a pipeline failure.
 			Silent:   true,
 			FollowUp: fmt.Sprintf("elicitation %s already resolved (timeout race)", payload.ElicitationID),
 		}, nil

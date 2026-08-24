@@ -139,15 +139,23 @@ def lint_command(
     stage_2 = baseline_document.get("stage_2")
     if not isinstance(stage_1, dict) or stage_1.get("active") is not True:
         raise SystemExit("baseline must keep Stage 1 active")
-    if not isinstance(stage_2, dict) or stage_2.get("active") is not False:
-        raise SystemExit(
-            "Stage 2 must remain inactive until 14/02 reduces errcheck, "
-            "errorlint, and nilerr to zero"
-        )
+    if not isinstance(stage_2, dict) or stage_2.get("active") is not True:
+        raise SystemExit("Stage 2 must be active after 14/02")
     if stage_2.get("linters") != ["errcheck", "errorlint", "nilerr"]:
         raise SystemExit("Stage 2 must name exactly errcheck, errorlint, and nilerr")
 
     baseline = integer_counts(stage_1.get("counts"), "stage_1.counts")
+    stage_2_linters = stage_2["linters"]
+    nonzero_stage_2_baselines = {
+        name: baseline.get(name)
+        for name in stage_2_linters
+        if baseline.get(name) != 0
+    }
+    if nonzero_stage_2_baselines:
+        raise SystemExit(
+            "Stage 2 linters must have zero Stage 1 baselines: "
+            f"{nonzero_stage_2_baselines}"
+        )
     linters_report = load_json(linters_report_path)
     enabled_entries = linters_report.get("Enabled")
     if not isinstance(enabled_entries, list):
@@ -179,7 +187,24 @@ def lint_command(
         if not isinstance(issue, dict) or not isinstance(issue.get("FromLinter"), str):
             raise SystemExit(f"golangci-lint report {report_path} has a malformed issue")
         actual[issue["FromLinter"]] += 1
-    return compare_counts("audit-config linters", baseline, actual)
+    stage_1_failed = compare_counts("audit-config linters", baseline, actual)
+    stage_2_findings = {
+        name: actual.get(name, 0)
+        for name in stage_2_linters
+        if actual.get(name, 0) != 0
+    }
+    print(
+        "correctness Stage 2: "
+        + ", ".join(f"{name}={actual.get(name, 0)}" for name in stage_2_linters)
+    )
+    if stage_2_findings:
+        print(
+            f"correctness Stage 2 requires zero findings: {stage_2_findings}",
+            file=sys.stderr,
+        )
+        return 1
+    print("correctness Stage 2: zero-tolerance passed")
+    return stage_1_failed
 
 
 def relative_report_path(raw_path: Any) -> str:

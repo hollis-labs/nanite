@@ -76,7 +76,7 @@ func (s *Store) ListLog(ctx context.Context, agentID string, limit int) ([]Agent
 	if err != nil {
 		return nil, fmt.Errorf("list agent_log: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]AgentLogEntry, 0)
 	for rows.Next() {

@@ -109,7 +109,7 @@ type Result struct {
 func outputDir() string {
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, ".nanite", "tool-output")
-	os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0o755) // The following WriteFile detects failure and falls back to inline truncation.
 	return dir
 }
 
@@ -272,8 +272,11 @@ func Cleanup() {
 			continue
 		}
 		if info.ModTime().Before(cutoff) {
-			os.Remove(filepath.Join(dir, entry.Name()))
-			removed++
+			if err := os.Remove(filepath.Join(dir, entry.Name())); err == nil {
+				removed++
+			} else {
+				slog.Warn("truncate: failed to remove expired tool output", "path", filepath.Join(dir, entry.Name()), "err", err)
+			}
 		}
 	}
 	if removed > 0 {

@@ -191,7 +191,7 @@ func (s *Store) ListRunningAgentRuntimeRows(ctx context.Context) ([]*AgentRuntim
 	if err != nil {
 		return nil, fmt.Errorf("list running agent_runtime: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var out []*AgentRuntimeRow
 	for rows.Next() {
@@ -212,7 +212,7 @@ func (s *Store) ListAgentRuntimeRowsForSession(ctx context.Context, sessionID st
 	if err != nil {
 		return nil, fmt.Errorf("list agent_runtime for session %s: %w", sessionID, err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var out []*AgentRuntimeRow
 	for rows.Next() {

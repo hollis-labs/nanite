@@ -30,7 +30,7 @@ type MessageFlags struct {
 // ToolCallRef records a tool call made during the response.
 //
 // ErrorReason carries the verbatim tool error string (or block/deny/cancel
-// message) when Status is one of "error", "denied", "blocked", or "cancelled".
+// message) when Status is one of "error", "denied", "blocked", or "canceled".
 // It is the same string as the matching tool_result block's Content. This is
 // what the failure-footer enrichment (CW-20260501-0013) inlines so the model
 // sees the actual reason next to the failed tool name in the harness footer,

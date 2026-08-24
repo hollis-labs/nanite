@@ -274,7 +274,7 @@ func TestStreamEventPhaseConstants(t *testing.T) {
 }
 
 // TestStreamEventPhaseFieldOmitEmpty verifies that the Phase field is omitted
-// from non-delta events (omitempty behaviour — old clients must not see it).
+// from non-delta events (omitempty behavior — old clients must not see it).
 func TestStreamEventPhaseFieldOmitEmpty(t *testing.T) {
 	marshal := func(v any) string {
 		b, _ := json.Marshal(v)
@@ -295,7 +295,7 @@ func TestStreamEventPhaseFieldOmitEmpty(t *testing.T) {
 		t.Errorf("delta event with PhaseNarration should contain phase field; got: %s", out2)
 	}
 
-	// Delta with no phase: must be absent (old stream behaviour).
+	// Delta with no phase: must be absent (old stream behavior).
 	noPhase := chat.StreamEvent{Type: "delta", Content: "hi"}
 	out3 := marshal(noPhase)
 	if strings.Contains(out3, "phase") {

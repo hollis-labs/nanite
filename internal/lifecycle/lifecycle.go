@@ -1,7 +1,7 @@
 // Package lifecycle provides a tracked-goroutine Manager with deterministic
 // shutdown semantics.
 //
-// A Manager owns a root context that is cancelled on Shutdown, a WaitGroup
+// A Manager owns a root context that is canceled on Shutdown, a WaitGroup
 // tracking every goroutine it has spawned, and an OTel tracer emitting span
 // events at shutdown milestones (Start / WaitingOn / ForceExit).
 //
@@ -60,7 +60,7 @@ func NewManager(label string) *Manager {
 }
 
 // NewManagerWithContext returns a Manager whose root context is derived from
-// parent. Cancelling parent also cancels the manager.
+// parent. Canceling parent also cancels the manager.
 //
 // Ownership contract: the returned Manager owns the CancelFunc. It is stored
 // on the struct and invoked unconditionally by Shutdown (including the
@@ -74,14 +74,14 @@ func NewManagerWithContext(parent context.Context, label string) *Manager {
 	return m
 }
 
-// Context returns the manager's root context. It is cancelled on Shutdown.
+// Context returns the manager's root context. It is canceled on Shutdown.
 func (m *Manager) Context() context.Context { return m.ctx }
 
 // Active returns the current count of tracked goroutines still running.
 func (m *Manager) Active() int64 { return m.active.Load() }
 
 // Go spawns fn as a tracked, panic-safe goroutine. fn receives the manager's
-// context, which is cancelled on Shutdown. The returned goroutine is counted
+// context, which is canceled on Shutdown. The returned goroutine is counted
 // in the Manager's WaitGroup; Shutdown will wait on it.
 //
 // If the manager is already closed, Go returns without spawning.

@@ -13,7 +13,7 @@ import (
 )
 
 // execWaitDelay bounds the time exec.Cmd.Wait will block after the
-// process's context is cancelled. Go 1.22+ uses this to force-close
+// process's context is canceled. Go 1.22+ uses this to force-close
 // stdio pipes that an orphaned grandchild may still hold, so Wait
 // cannot hang forever. Small enough that a timed-out exec surfaces
 // promptly; large enough that a well-behaved interpreter can flush
@@ -30,7 +30,7 @@ const execGroupKillGrace = 250 * time.Millisecond
 // groupKillBackstop sleeps for execWaitDelay+execGroupKillGrace then sends a
 // group-wide SIGKILL if the process group still exists. It is a named function
 // (not an anonymous closure) so that goleak tests can filter it by name via
-// IgnoreAnyFunction — the goroutine outlives the cancelled command by design
+// IgnoreAnyFunction — the goroutine outlives the canceled command by design
 // and is not a real leak.
 func groupKillBackstop(pid int) {
 	time.Sleep(execWaitDelay + execGroupKillGrace)
@@ -43,7 +43,7 @@ func groupKillBackstop(pid int) {
 }
 
 // setProcessGroupKill configures cmd so the child starts in a fresh
-// process group and the whole group is signalled on context cancel.
+// process group and the whole group is signaled on context cancel.
 //
 // Rationale (2026-04-10 sandbox-hardening audit, finding 07):
 //
@@ -51,7 +51,7 @@ func groupKillBackstop(pid int) {
 //     node) is its child; user scripts may fork further. Go's default
 //     exec.CommandContext sends SIGKILL only to the direct child, so
 //     interpreter descendants orphan to launchd. Setpgid + negative-PID
-//     signalling gets the whole tree.
+//     signaling gets the whole tree.
 //   - Linux: bwrap's --die-with-parent already handles this at the namespace
 //     level, but the process-group approach is defensive if bwrap is
 //     skipped (install missing) or someone calls UserExec without a

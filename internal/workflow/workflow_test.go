@@ -392,9 +392,9 @@ func TestPipeline_Cancel(t *testing.T) {
 	}
 	if state.Status != RunFailed {
 		// The blocker step fails with context.Canceled, which is a required step failure.
-		// OR it could be RunCancelled depending on timing.
-		if state.Status != RunCancelled {
-			t.Fatalf("expected failed or cancelled, got %s", state.Status)
+		// OR it could be RunCanceled depending on timing.
+		if state.Status != RunCanceled {
+			t.Fatalf("expected failed or canceled, got %s", state.Status)
 		}
 	}
 }

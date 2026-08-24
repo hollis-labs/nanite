@@ -35,7 +35,7 @@ func TestEnumStringers(t *testing.T) {
 		{"outcome remediated", OutcomeRemediated.String(), "remediated"},
 		{"outcome transient_succ", OutcomeTransientRetrySucceeded.String(), "transient_retry_succeeded"},
 		{"outcome permanent", OutcomePermanent.String(), "permanent"},
-		{"outcome cancelled", OutcomeCancelled.String(), "cancelled"},
+		{"outcome canceled", OutcomeCanceled.String(), "canceled"},
 		{"outcome unknown zero", OutcomeUnknown.String(), "unknown"},
 	}
 	for _, tc := range cases {

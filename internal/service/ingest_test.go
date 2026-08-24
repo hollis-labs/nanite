@@ -689,7 +689,7 @@ func TestAutoIngestAgents_SourceFlipFromBuiltinToInternal(t *testing.T) {
 
 	// Use a synthetic slug so we don't collide with migration 060's
 	// INSERT OR IGNORE seed of the four canonical internal profile slugs
-	// (default / worker / planner / hint-selector). The behaviour under
+	// (default / worker / planner / hint-selector). The behavior under
 	// test is the source-column flip itself, not its application to a
 	// specific slug.
 	const slug = "test-internal-profile-flip"

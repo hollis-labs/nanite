@@ -20,7 +20,7 @@ var ErrGoalNotFound = errors.New("goal not found")
 // they ever reach the DB. Full lifecycle per docs/engineering/architecture/
 // 21-loops.md's Decision 2 and GLOSSARY.md's Goal entry: draft/defined are
 // pre-launch authoring states, active is the one running state, and
-// blocked/satisfied/failed/cancelled/superseded are the terminal-or-paused
+// blocked/satisfied/failed/canceled/superseded are the terminal-or-paused
 // outcomes. Real transition-legality enforcement (e.g. rejecting draft ->
 // satisfied directly) is a later task's job (21-loops.md's continuation
 // policy engine) -- this package only enforces enum membership.
@@ -31,7 +31,7 @@ const (
 	GoalStatusBlocked    = "blocked"
 	GoalStatusSatisfied  = "satisfied"
 	GoalStatusFailed     = "failed"
-	GoalStatusCancelled  = "cancelled"
+	GoalStatusCanceled   = "canceled"
 	GoalStatusSuperseded = "superseded"
 )
 
@@ -42,7 +42,7 @@ const (
 var goalTerminalStatuses = map[string]bool{
 	GoalStatusSatisfied:  true,
 	GoalStatusFailed:     true,
-	GoalStatusCancelled:  true,
+	GoalStatusCanceled:   true,
 	GoalStatusSuperseded: true,
 }
 
@@ -56,7 +56,7 @@ var validGoalStatuses = map[string]bool{
 	GoalStatusBlocked:    true,
 	GoalStatusSatisfied:  true,
 	GoalStatusFailed:     true,
-	GoalStatusCancelled:  true,
+	GoalStatusCanceled:   true,
 	GoalStatusSuperseded: true,
 }
 
@@ -68,7 +68,7 @@ var validGoalStatuses = map[string]bool{
 // (TASKS/loops/01-goals-schema.md's "What to do" §2, last bullet).
 func validateGoalStatus(status string) error {
 	if !validGoalStatuses[status] {
-		return fmt.Errorf("status %q invalid: must be one of draft, defined, active, blocked, satisfied, failed, cancelled, superseded", status)
+		return fmt.Errorf("status %q invalid: must be one of draft, defined, active, blocked, satisfied, failed, canceled, superseded", status)
 	}
 	return nil
 }
@@ -138,7 +138,7 @@ type Goal struct {
 	ActivatedAt string `json:"activated_at,omitempty"`
 
 	// CompletedAt is set (once) when Status first transitions into any
-	// terminal status (satisfied/failed/cancelled/superseded -- NOT
+	// terminal status (satisfied/failed/canceled/superseded -- NOT
 	// blocked, which is a paused, not terminal, state) via
 	// UpdateGoalStatus. Empty until then.
 	CompletedAt string `json:"completed_at,omitempty"`
@@ -423,7 +423,7 @@ func (s *Store) UpdateGoal(ctx context.Context, g *Goal) error {
 // Narrow updater, mirrors agent_schedules.go's UpdateAgentScheduleStatus.
 // Sets activated_at (once -- COALESCE, never overwritten by a later call)
 // when transitioning into GoalStatusActive, and completed_at (once) when
-// transitioning into any terminal status (satisfied/failed/cancelled/
+// transitioning into any terminal status (satisfied/failed/canceled/
 // superseded -- see goalTerminalStatuses; blocked is a paused, not
 // terminal, state and does not set completed_at). Returns ErrGoalNotFound
 // if no row matched.

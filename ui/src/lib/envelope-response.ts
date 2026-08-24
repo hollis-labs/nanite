@@ -4,7 +4,7 @@ export const RESPONSE_V1_VERSION = 1;
 
 export const ResponseStatus = {
   Submitted: "submitted",
-  Cancelled: "cancelled",
+  Canceled: "canceled",
   Partial: "partial",
 } as const;
 
@@ -26,7 +26,7 @@ export const ResponseV1Schema = z.object({
   v: z.literal(RESPONSE_V1_VERSION),
   kind: z.string().min(1),
   id: z.string().min(1),
-  status: z.enum([ResponseStatus.Submitted, ResponseStatus.Cancelled, ResponseStatus.Partial]),
+  status: z.enum([ResponseStatus.Submitted, ResponseStatus.Canceled, ResponseStatus.Partial]),
   data: z.record(z.string(), z.unknown()).optional(),
   answers: z.array(AnswerSchema).optional(),
   decisions: z.array(DecisionSchema).optional(),
@@ -109,7 +109,7 @@ export async function submitEnvelopeResponse(
 if (import.meta.env?.DEV) {
   const fixtures: ResponseV1[] = [
     { v: 1, kind: "approval", id: "env-01", status: "submitted", data: { approved: true } },
-    { v: 1, kind: "approval", id: "env-02", status: "cancelled" },
+    { v: 1, kind: "approval", id: "env-02", status: "canceled" },
     {
       v: 1,
       kind: "collect_feedback",

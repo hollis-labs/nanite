@@ -46,7 +46,7 @@ const (
 	// FetchErrRedirectLoop — too many redirects (> maxFetchRedirects).
 	FetchErrRedirectLoop FetchErrorKind = "redirect_loop"
 
-	// FetchErr4xx — non-retryable 4xx other than 403/blocked-flavour. E.g.
+	// FetchErr4xx — non-retryable 4xx other than 403/blocked-flavor. E.g.
 	// 404 Not Found or 410 Gone.
 	FetchErr4xx FetchErrorKind = "4xx"
 )
@@ -140,7 +140,7 @@ func retryableNetError(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	// Classify by net.Error behaviour.
+	// Classify by net.Error behavior.
 	var netErr net.Error
 	if errors.As(err, &netErr) {
 		return netErr.Timeout() || netErr.Temporary() //nolint:staticcheck // Temporary still useful here
@@ -174,7 +174,7 @@ func classifyNetError(err error) FetchErrorKind {
 
 	s := err.Error()
 
-	// TLS errors surface with recognisable keywords before the net layer.
+	// TLS errors surface with recognizable keywords before the net layer.
 	if strings.Contains(s, "tls:") ||
 		strings.Contains(s, "certificate") ||
 		strings.Contains(s, "x509:") {
@@ -288,13 +288,13 @@ func fetchWithRetry(ctx context.Context, client *http.Client, rawURL string) (*h
 
 		resp, doErr := client.Do(req)
 		if doErr != nil {
-			// Context cancelled → never retry, propagate immediately.
+			// Context canceled → never retry, propagate immediately.
 			if errors.Is(doErr, context.Canceled) {
 				return nil, &FetchError{
 					Kind:     FetchErrTimeout,
 					URL:      rawURL,
 					Attempts: attempt + 1,
-					Detail:   "context cancelled",
+					Detail:   "context canceled",
 				}
 			}
 			// SSRF block → never retry.
@@ -408,7 +408,7 @@ func fetchWithRetry(ctx context.Context, client *http.Client, rawURL string) (*h
 	}
 }
 
-// sleep waits for d, honouring context cancellation.
+// sleep waits for d, honoring context cancellation.
 func sleep(ctx context.Context, d time.Duration) {
 	if d <= 0 {
 		return

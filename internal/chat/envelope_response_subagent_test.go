@@ -92,7 +92,7 @@ func TestSubagentApprovalHandler_Reject(t *testing.T) {
 		EnvelopeJSON: string(envelopeJSON),
 	}
 	res, err := h.HandleResponse(context.Background(), env, ResponseV1{
-		V: 1, Kind: "subagent-spawn-approval", Status: StatusCancelled,
+		V: 1, Kind: "subagent-spawn-approval", Status: StatusCanceled,
 		Data: map[string]any{"reason": "nope"},
 	})
 	if err != nil {

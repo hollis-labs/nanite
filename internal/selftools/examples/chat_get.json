@@ -15,6 +15,6 @@
       "session_id": "01926a0e-c248-7000-8000-abcdefabcdef",
       "include_compacted": false
     },
-    "notes": "include_compacted=false returns only active (non-summarised) messages."
+    "notes": "include_compacted=false returns only active (non-summarized) messages."
   }
 ]

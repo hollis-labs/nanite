@@ -134,7 +134,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 </ToggleGroup>
 ```
 
-Combine with `Field` for labelled toggle groups:
+Combine with `Field` for labeled toggle groups:
 
 ```tsx
 <Field orientation="horizontal">

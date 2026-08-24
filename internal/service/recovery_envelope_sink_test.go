@@ -120,7 +120,7 @@ func TestProjectRecoveryEnvelope_KindMapping(t *testing.T) {
 	}
 }
 
-// TestProjectRecoveryEnvelope_UnknownKindError ensures unrecognised
+// TestProjectRecoveryEnvelope_UnknownKindError ensures unrecognized
 // kinds surface as an error rather than silently producing an empty
 // envelope (defends against typos drifting into the wire).
 func TestProjectRecoveryEnvelope_UnknownKindError(t *testing.T) {

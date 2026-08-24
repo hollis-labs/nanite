@@ -233,7 +233,7 @@ func (t *StdioTransport) call(ctx context.Context, method string, params any) (*
 		return nil, fmt.Errorf("timeout waiting for response from %s after %s", t.command, timeout)
 	case <-ctx.Done():
 		t.killAndReapLocked()
-		return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
+		return nil, fmt.Errorf("context canceled: %w", ctx.Err())
 	}
 
 	var rpcResp JSONRPCResponse

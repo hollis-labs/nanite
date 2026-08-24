@@ -186,7 +186,7 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if v, ok := raw["allow_unsigned_plugins"]; ok {
-		// J.2: raw field pass-through. The setting is honoured only in
+		// J.2: raw field pass-through. The setting is honored only in
 		// devmode builds of the host (compile-time gate in
 		// internal/plugin/devmode). In production the field is stored
 		// but never consulted by the signature verifier.

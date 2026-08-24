@@ -77,7 +77,7 @@ type Verifier interface {
 	Verify(ctx context.Context, h Handle) error
 }
 
-// Extractor materialises a Handle into targetDir. For archive handles it
+// Extractor materializes a Handle into targetDir. For archive handles it
 // extracts the tar.gz; for directory handles it copies (or symlinks) the
 // source directory. Implementation in G.2.
 type Extractor interface {

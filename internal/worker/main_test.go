@@ -10,7 +10,7 @@ import (
 
 // TestMain drains any test-created Managers before running goleak so the
 // lifecycle-tracked retention/heartbeat goroutines (which would otherwise
-// sleep for 30s) are deterministically cancelled.
+// sleep for 30s) are deterministically canceled.
 func TestMain(m *testing.M) {
 	code := m.Run()
 	testManagersMu.Lock()

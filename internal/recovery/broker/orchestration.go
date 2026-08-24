@@ -134,7 +134,7 @@ func (b *Broker) runConfigFixedRetry(ev *FailureEvent, c Classification, started
 
 	if ctx.Err() != nil {
 		// User clicked [Cancel retry] during remediation.
-		b.recordOutcome(ev, c, ActionRetryConfigFixed, OutcomeCancelled, started)
+		b.recordOutcome(ev, c, ActionRetryConfigFixed, OutcomeCanceled, started)
 		return
 	}
 
@@ -169,7 +169,7 @@ func (b *Broker) runTransientRetry(ev *FailureEvent, c Classification, started t
 	}
 
 	if ctx.Err() != nil {
-		b.recordOutcome(ev, c, ActionRetryTransient, OutcomeCancelled, started)
+		b.recordOutcome(ev, c, ActionRetryTransient, OutcomeCanceled, started)
 		return
 	}
 

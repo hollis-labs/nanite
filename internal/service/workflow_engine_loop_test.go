@@ -202,7 +202,7 @@ func TestParseLoopStepConfig(t *testing.T) {
 // --- isTerminalLoopStatus ---
 
 func TestIsTerminalLoopStatus(t *testing.T) {
-	terminal := []string{"completed", "failed", "cancelled"}
+	terminal := []string{"completed", "failed", "canceled"}
 	for _, s := range terminal {
 		if !isTerminalLoopStatus(s) {
 			t.Errorf("isTerminalLoopStatus(%q) = false, want true", s)

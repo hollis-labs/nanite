@@ -96,7 +96,7 @@ func TestRestartStdioTransports_Idempotent(t *testing.T) {
 
 // TestRestartStdioTransports_RespectsContextCancel verifies the call
 // returns ctx.Err() promptly when the caller's context is already
-// cancelled. The broker's Remediate runs under a 10s ctx; an already-
+// canceled. The broker's Remediate runs under a 10s ctx; an already-
 // expired ctx must not block on a real subprocess Close.
 func TestRestartStdioTransports_RespectsContextCancel(t *testing.T) {
 	mgr := NewManager()

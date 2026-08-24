@@ -80,7 +80,7 @@ func (r *subagentCompletionReactor) ReactToCompletion(ctx context.Context, run *
 // Each tier is validated against chat.IsValidSubagentCompletionPolicy
 // before being trusted — an unrecognized value (typo, stale config) is
 // logged and treated as absent rather than returned verbatim, so a typo'd
-// "auto_summarise" doesn't silently disable the intended behavior with no
+// "auto_summarize" doesn't silently disable the intended behavior with no
 // diagnostic trail (PR #247 review).
 func (s *chatServiceImpl) resolveSubagentCompletionPolicy(ctx context.Context, sessionID string) string {
 	var taskLayer *override.OverrideConfig

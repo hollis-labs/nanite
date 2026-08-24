@@ -92,7 +92,7 @@ type HTTPConfig struct {
 	// Semantics:
 	//   - Empty / unset: the server falls back to a development-oriented default
 	//     of ["http://localhost:5173", "http://127.0.0.1:5173"]. This replaces
-	//     the prior reflect-any behaviour (audit finding: Critical) so an
+	//     the prior reflect-any behavior (audit finding: Critical) so an
 	//     unconfigured deployment is no longer open to arbitrary web origins.
 	//   - Comparison is an exact string match against the Origin header. No
 	//     substring, suffix, or regex matching is performed.

@@ -39,7 +39,7 @@ type EmitInput struct {
 //
 // The live path is server-side: Nanite-owned tools call Service.Elicit when
 // they need mid-call user input. Origin is recorded for observability but does
-// not change behaviour.
+// not change behavior.
 type Service struct {
 	emitter        Emitter
 	timeoutSeconds int
@@ -76,8 +76,8 @@ func New(emitter Emitter, timeoutSeconds int) *Service {
 //  3. Blocks until the user responds or the timeout fires.
 //  4. Returns the Response (action + optional content/reason).
 //
-// ctx cancellation (e.g. parent request cancelled) causes Elicit to return
-// immediately with action=cancel + reason="context_cancelled".
+// ctx cancellation (e.g. parent request canceled) causes Elicit to return
+// immediately with action=cancel + reason="context_canceled".
 func (s *Service) Elicit(ctx context.Context, req ElicitInput) (Response, error) {
 	timeoutDur := time.Duration(s.timeoutSeconds) * time.Second
 
@@ -137,7 +137,7 @@ func (s *Service) Elicit(ctx context.Context, req ElicitInput) (Response, error)
 	case <-time.After(timeoutDur):
 		return Response{Action: ActionCancel, Reason: "timeout"}, nil
 	case <-ctx.Done():
-		return Response{Action: ActionCancel, Reason: "context_cancelled"}, ctx.Err()
+		return Response{Action: ActionCancel, Reason: "context_canceled"}, ctx.Err()
 	}
 }
 

@@ -29,7 +29,7 @@ type ResponseV1 struct {
     V         int            // always 1
     Kind      string         // envelope type
     ID        string         // envelope instance id
-    Status    ResponseStatus // submitted | cancelled | partial
+    Status    ResponseStatus // submitted | canceled | partial
     Data      map[string]any
     Answers   []Answer       // convenience for collect_feedback
     Decisions []Decision     // convenience for triage_items
@@ -40,7 +40,7 @@ type ResponseV1 struct {
 
 Status semantics:
 - **submitted** — user completed the card.
-- **cancelled** — user dismissed the card; `Data` may be empty.
+- **canceled** — user dismissed the card; `Data` may be empty.
 - **partial** — user saved progress on an explicit action; no auto-partial on session-close.
 
 ## Response handlers

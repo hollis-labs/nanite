@@ -77,7 +77,7 @@ func NewCommandRegistry() *CommandRegistry {
 		// All three names are registered so the user can type any of them.
 		// Bare invocation (no args) → opens scratchpad drawer (client-side).
 		// With args → appends text to scratchpad without sending to agent.
-		// Handler returns "client" action so the frontend decides behaviour.
+		// Handler returns "client" action so the frontend decides behavior.
 		{SlashCommand{
 			Name:        "scratch",
 			Description: "Open scratchpad (bare) or append text without sending to agent",

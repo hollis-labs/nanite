@@ -55,9 +55,9 @@ interface ConfirmationCardProps {
  */
 function hydrateDecision(
   prior: EnvelopeType['prior_response'],
-): 'pending' | 'confirmed' | 'cancelled' {
+): 'pending' | 'confirmed' | 'canceled' {
   if (!prior) return 'pending'
-  return prior.status === ResponseStatus.Cancelled ? 'cancelled' : 'confirmed'
+  return prior.status === ResponseStatus.Canceled ? 'canceled' : 'confirmed'
 }
 
 export function ConfirmationCard({ envelope, onRespond, onSendMessage }: ConfirmationCardProps) {
@@ -93,7 +93,7 @@ function GenericConfirmationCard({
   onRespond?: EnvelopeResponder
   onSendMessage?: (content: string) => void
 }) {
-  const [decision, setDecision] = useState<'pending' | 'confirmed' | 'cancelled'>(() =>
+  const [decision, setDecision] = useState<'pending' | 'confirmed' | 'canceled'>(() =>
     hydrateDecision(envelope.prior_response),
   )
 
@@ -114,9 +114,9 @@ function GenericConfirmationCard({
   }
 
   const handleCancel = () => {
-    setDecision('cancelled')
+    setDecision('canceled')
     if (onRespond) {
-      void onRespond({ status: ResponseStatus.Cancelled, data: { confirmed: false } }).catch(() => {
+      void onRespond({ status: ResponseStatus.Canceled, data: { confirmed: false } }).catch(() => {
         setDecision('pending')
       })
     } else {
@@ -136,12 +136,12 @@ function GenericConfirmationCard({
     )
   }
 
-  if (decision === 'cancelled') {
+  if (decision === 'canceled') {
     return (
       <Envelope muted>
         <div className="flex items-center gap-2 px-4 py-2.5 text-fg-muted">
           <XCircle className="h-4 w-4" />
-          <span className="text-[13px]">Cancelled: {data.title}</span>
+          <span className="text-[13px]">Canceled: {data.title}</span>
         </div>
       </Envelope>
     )

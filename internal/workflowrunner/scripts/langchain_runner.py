@@ -18,7 +18,7 @@ composition primitive is LCEL (LangChain Expression Language) — Runnables
 piped together with `|` into a RunnableSequence — not a second graph
 wrapper. Unlike CrewAI/ADK/AutoGen's Agent abstractions, an LCEL Runnable
 never needs "some LLM" of its own to drive a tool-calling loop: a
-RunnableLambda is just an async function, so there is no analogue to those
+RunnableLambda is just an async function, so there is no analog to those
 frameworks' deterministic-stub-model problem here. The one real model
 call in this run — the llm_step — happens entirely inside the
 workflow_execute_llm_step callback tool; no LangChain-native chat model is

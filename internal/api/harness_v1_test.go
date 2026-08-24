@@ -209,7 +209,7 @@ func TestHarnessV1TurnCancelAndEvents(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&cancelResp); err != nil {
 		t.Fatalf("decode cancel: %v", err)
 	}
-	if cancelResp.Status != "cancelled" {
+	if cancelResp.Status != "canceled" {
 		t.Fatalf("cancel response = %+v", cancelResp)
 	}
 

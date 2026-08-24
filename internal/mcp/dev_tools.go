@@ -673,7 +673,7 @@ func (d *DevToolsTransport) callRead(ctx context.Context, args map[string]any) (
 	collected := 0
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
-			return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
+			return ErrorResult(fmt.Sprintf("canceled: %v", err)), nil
 		}
 		lineNum++
 		if lineNum < offset {
@@ -903,7 +903,7 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 	})
 	if err != nil && !errors.Is(err, errStopWalk) {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
+			return ErrorResult(fmt.Sprintf("canceled: %v", err)), nil
 		}
 		return ErrorResult(fmt.Sprintf("walk error: %v", err)), nil
 	}
@@ -934,7 +934,7 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 
 func (d *DevToolsTransport) callWrite(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if err := ctx.Err(); err != nil {
-		return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("canceled: %v", err)), nil
 	}
 	path, _ := args["path"].(string)
 	content, _ := args["content"].(string)
@@ -961,7 +961,7 @@ func (d *DevToolsTransport) callWrite(ctx context.Context, args map[string]any) 
 
 func (d *DevToolsTransport) callEdit(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if err := ctx.Err(); err != nil {
-		return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("canceled: %v", err)), nil
 	}
 	path, _ := args["path"].(string)
 	oldStr, _ := args["old_string"].(string)
@@ -1093,7 +1093,7 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
+			return ErrorResult(fmt.Sprintf("canceled: %v", err)), nil
 		}
 		return ErrorResult(fmt.Sprintf("walk error: %v", err)), nil
 	}
@@ -1207,7 +1207,7 @@ const devBashSessionID = "dev-bash"
 
 func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if err := ctx.Err(); err != nil {
-		return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("canceled: %v", err)), nil
 	}
 	command, _ := args["command"].(string)
 	if command == "" {
@@ -1282,7 +1282,7 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 		// own timeout; we return promptly so the caller's goroutine does not
 		// stay wedged waiting for the shell. The in-flight goroutine drains
 		// into the buffered `done` channel and is garbage-collected.
-		return ErrorResult(fmt.Sprintf("cancelled: %v", ctx.Err())), nil
+		return ErrorResult(fmt.Sprintf("canceled: %v", ctx.Err())), nil
 	case out := <-done:
 		result, err = out.res, out.err
 	}

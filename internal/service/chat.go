@@ -558,7 +558,7 @@ func (s *chatServiceImpl) registerGenerationIfIdle(sessionID, msgID string, canc
 // iteration and exit cleanly), false when no generation was active.
 // CW-20260512-0006: this is the user-stop endpoint backstop now that the
 // 5-minute wall-clock deadline has been removed. The registry slot is
-// NOT cleared here — deregisterGeneration handles that when the cancelled
+// NOT cleared here — deregisterGeneration handles that when the canceled
 // goroutine returns, preserving the takeover semantics in
 // registerGeneration.
 func (s *chatServiceImpl) CancelActiveGeneration(sessionID string) bool {
@@ -574,7 +574,7 @@ func (s *chatServiceImpl) CancelActiveGeneration(sessionID string) bool {
 
 // launchGeneration starts a cancellable generateResponse goroutine for the
 // given target session. If another generateResponse is already running for
-// this session, it is cancelled first — prevents concurrent duplicate loops
+// this session, it is canceled first — prevents concurrent duplicate loops
 // when the user retries mid-stream (CW-20260418-0043).
 //
 // The cancel is wired into both our per-session registry (for takeover) and
@@ -598,7 +598,7 @@ func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, user
 
 	prev := s.registerGeneration(sessionID, assistantMsgID, cancel)
 	if prev != nil {
-		slog.Info("chat-service: cancelling prior in-flight generation for session",
+		slog.Info("chat-service: canceling prior in-flight generation for session",
 			"session_id", sessionID, "new_msg_id", assistantMsgID)
 		prev()
 	}
@@ -739,7 +739,7 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 
 	// Start async generation on a per-session cancellable ctx. If a prior
 	// generateResponse is still running for this session it will be
-	// cancelled — concurrent loops on the same session fight over the
+	// canceled — concurrent loops on the same session fight over the
 	// provider rate-limit budget and look like stalls from the UI
 	// (CW-20260418-0043). The lifecycle manager's shutdown ctx is bridged
 	// inside launchGeneration so process Shutdown still drains cleanly.

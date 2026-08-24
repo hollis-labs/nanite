@@ -308,7 +308,7 @@ func TestMessageStream_TakeoverClosesPriorSubscriber(t *testing.T) {
 // fires events while several reconnector goroutines repeatedly Subscribe
 // and abandon, each Subscribe triggering close(prev) on the previous
 // subscriber the pump might be writing to. Under -race, the pre-fix code
-// reliably reproduces a write/close data race; the fix serialises both
+// reliably reproduces a write/close data race; the fix serializes both
 // paths under ms.mu.
 func TestMessageStream_NoRaceOnTakeoverDuringFanout(t *testing.T) {
 	sm := NewStreamManager()

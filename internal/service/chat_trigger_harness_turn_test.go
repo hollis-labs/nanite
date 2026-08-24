@@ -30,15 +30,15 @@ func newTriggerHarnessTurnTestService(t *testing.T) (*chatServiceImpl, *capturin
 func TestTriggerHarnessTurn_BusySession_RejectsWithoutInterrupting(t *testing.T) {
 	svc, cs := newTriggerHarnessTurnTestService(t)
 
-	cancelled := false
-	svc.activeGen["sess-1"] = &inFlightGen{msgID: "user-turn-in-flight", cancel: func() { cancelled = true }}
+	canceled := false
+	svc.activeGen["sess-1"] = &inFlightGen{msgID: "user-turn-in-flight", cancel: func() { canceled = true }}
 
 	_, err := svc.TriggerHarnessTurn(context.Background(), "sess-1", "subagent_completion", "run-1")
 
 	if !errors.Is(err, ErrSessionBusy) {
 		t.Fatalf("expected ErrSessionBusy, got %v", err)
 	}
-	if cancelled {
+	if canceled {
 		t.Error("TriggerHarnessTurn must not cancel the existing in-flight user generation (takeover semantics would do this — reject-if-busy must not)")
 	}
 	if cs.callCount != 0 {

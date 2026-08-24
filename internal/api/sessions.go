@@ -520,7 +520,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 			TokensBefore: tokensBefore,
 			TokensAfter:  tokensAfter,
 		}
-		// Reuse the chat helper's marshalling+defaulting via a side channel:
+		// Reuse the chat helper's marshaling+defaulting via a side channel:
 		// we wrap the same emit logic by sending through a single-buffered
 		// chan and forwarding to active streams.
 		envCh := make(chan chat.StreamEvent, 1)

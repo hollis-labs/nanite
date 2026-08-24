@@ -219,13 +219,13 @@ asserts nothing produces silence indistinguishable from success.
 // WRONG — passes when List() returns empty, which under load it sometimes did
 workers := mgr.List()
 for _, w := range workers {
-    if w.Status != StatusCancelled { t.Errorf(...) }
+    if w.Status != StatusCanceled { t.Errorf(...) }
 }
 
 // RIGHT
 workers := mgr.List()
 if len(workers) != 1 { t.Fatalf("got %d workers, want 1", len(workers)) }
-if workers[0].Status != StatusCancelled { t.Errorf(...) }
+if workers[0].Status != StatusCanceled { t.Errorf(...) }
 ```
 
 `internal/worker/manager_test.go`, `TestShutdown`. The test had **two** defects,
@@ -274,7 +274,7 @@ The lint side has no equivalent.
 
 **And its own tests encode the hole.** `scripts/quality-ratchet_test.py`
 contains a test asserting the empty report exits 0. The vacuous pass is
-codified as intended behaviour, so anyone fixing the ratchet meets a failing
+codified as intended behavior, so anyone fixing the ratchet meets a failing
 test and may "fix" the fix.
 
 ### An acceptance command that cannot detect its own bug
@@ -332,7 +332,7 @@ shows full line coverage.
       with the commit it was verified against.
 - [ ] Any count that must appear twice has one copy marked authoritative:
       *"count from this list; if another number appears below, this line wins."*
-- [ ] Anything asserted but not verified is labelled as such.
+- [ ] Anything asserted but not verified is labeled as such.
 - [ ] Any rule you restate carries its scope.
 - [ ] Every assertion checked against: what input would make this pass while
       proving nothing? If that input is reachable, add a positive control.

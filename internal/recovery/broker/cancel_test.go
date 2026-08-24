@@ -31,12 +31,12 @@ func TestCancel_ValidTokenAndSession(t *testing.T) {
 
 	// Idempotent: a second Cancel for the same token is a no-op.
 	if b.Cancel("s1", "tok-1") {
-		t.Error("second Cancel returned true; expected false for already-cancelled token")
+		t.Error("second Cancel returned true; expected false for already-canceled token")
 	}
 }
 
 // TestCancel_TokenScopedToOtherSession is the cross-session replay
-// guard: a token issued for session A cannot be cancelled by a request
+// guard: a token issued for session A cannot be canceled by a request
 // claiming session B. The entry stays intact so the legitimate session
 // can still cancel it.
 func TestCancel_TokenScopedToOtherSession(t *testing.T) {
@@ -61,7 +61,7 @@ func TestCancel_TokenScopedToOtherSession(t *testing.T) {
 }
 
 // TestCancel_UnknownToken covers the FE-bug / stale-token path: the
-// token isn't in the active map (already cancelled or never issued).
+// token isn't in the active map (already canceled or never issued).
 // Cancel returns false; no panic.
 func TestCancel_UnknownToken(t *testing.T) {
 	b := NewBroker(Dependencies{})

@@ -98,4 +98,4 @@ Defined at `chat_loop_state.go:375-400`:
 - `loopState.shouldStop` table-test all 4 terminators + 2 soft caps.
 - `provider.Provider` channel mock; assert recovery path on `IsCompactRecoverable` errors.
 - Synthesis-on-runaway: trigger 10 permission denials, assert `earlyStopSynthesis` runs once and `chat-loop-terminated` envelope fires.
-- Cancellation: send `HandleMessage` to a session with an in-flight gen, assert prior gen ctx is cancelled.
+- Cancellation: send `HandleMessage` to a session with an in-flight gen, assert prior gen ctx is canceled.

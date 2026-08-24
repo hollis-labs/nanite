@@ -28,7 +28,7 @@ type CancelRecoveryRetryRequest struct {
 //     session A cannot cancel session B's retry even if the FE made the
 //     request through the wrong path-bound URL.
 //
-// Returns 200 with {status:"cancelled"} on success, 404 when the token
+// Returns 200 with {status:"canceled"} on success, 404 when the token
 // is unknown / expired / scoped to another session, 400 on missing
 // token, and 503 when the broker is not wired (degraded boot, test
 // fakes that supply mock RecoveryHooks).
@@ -59,5 +59,5 @@ func (a *API) handleCancelRecoveryRetry(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	a.jsonResp(w, http.StatusOK, map[string]string{"status": "cancelled"})
+	a.jsonResp(w, http.StatusOK, map[string]string{"status": "canceled"})
 }

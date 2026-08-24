@@ -26,7 +26,7 @@ const (
 	StatusRunning   Status = "running"
 	StatusCompleted Status = "completed"
 	StatusFailed    Status = "failed"
-	StatusCancelled Status = "cancelled"
+	StatusCanceled  Status = "canceled"
 )
 
 // Worker represents an active worker in the orchestration system.

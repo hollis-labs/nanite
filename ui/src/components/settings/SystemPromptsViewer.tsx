@@ -4,14 +4,14 @@
  * Read-only viewer for all LLM-facing system prompts in the Nanite harness.
  * Gated behind developer_mode — standard users never see this panel.
  *
- * V1: static catalogue of code-owned prompts with file:line references.
+ * V1: static catalog of code-owned prompts with file:line references.
  * No editing. Variable interpolation / composition pipeline preserved as-is.
  */
 
 import { ChevronDown, ChevronRight, FileCode } from "lucide-react";
 import { useState } from "react";
 
-// ─── Static prompt catalogue ────────────────────────────────────────────────
+// ─── Static prompt catalog ────────────────────────────────────────────────
 // Cross-referenced against inbox/nanite-prompts-snapshot-2026-04-19.md and
 // docs/agent-role-prompt-catalog.md (M1 audit).
 
@@ -37,7 +37,7 @@ export interface SystemPromptEntry {
 }
 
 /** Default/original text for prompts that have variables — shown verbatim. */
-const CATALOGUE: SystemPromptEntry[] = [
+const CATALOG: SystemPromptEntry[] = [
   // ── 1. Base Chat Agent (Go embed) ──────────────────────────────────────
   {
     name: "Base Chat Agent",
@@ -244,13 +244,13 @@ export function SystemPromptsViewer() {
           </span>
         ))}
         <span className="text-[11px] text-fg-faint self-center ml-1">
-          {CATALOGUE.length} prompts total
+          {CATALOG.length} prompts total
         </span>
       </div>
 
       {/* Prompt cards */}
       <div className="space-y-2">
-        {CATALOGUE.map((entry) => (
+        {CATALOG.map((entry) => (
           <PromptCard key={entry.slug} entry={entry} />
         ))}
       </div>

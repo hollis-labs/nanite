@@ -28,7 +28,7 @@ Whenever this skill finds something it needs the user to decide on, it uses exac
 
 **Rules:**
 - State the discovery as a fact. 1–3 lines of context. No opinion, no preferred disposition, no recommended pick.
-- Exactly three options, in this order, labelled A / B / C.
+- Exactly three options, in this order, labeled A / B / C.
 - Never substitute a binary yes/no ("want me to fix it?") — that's Pattern B2, the anti-pattern this skill trains against.
 - Never bury the surface inside a status block — stop, pose the menu, wait.
 - If more than one thing needs surfacing, pose them one at a time unless they're tightly related. A menu per discovery is clearer than a bulk list.
@@ -224,7 +224,7 @@ Behavior forks by workspace mode (determined in step 2):
 - A one-line category tag if obvious (e.g., `"2 agent-config, 4 prior-session docs, 3 tool-runtime artifacts"`).
 - No diffs, no questions, no decisions unless the user asks. This is the default state of a multi-session workspace — surfacing it on every wrap creates noise that trains the user to ignore the skill.
 
-**Do not commit USER or AMBIGUOUS files in either mode.** Ever. Even if the user says "yeah include everything", route that through explicit confirmation — prefer to stage them and have the user review the diff before committing. The one exception: if the user explicitly invokes a "housekeeping commit" flow (e.g., "commit accumulated KB state wholesale"), follow their directive, but still stage by explicit file list (never `-A`/`.`/`-u`), exclude paths that should be gitignored (tool runtime state, lockfiles, temp databases), and make it a separate commit with a clearly labelled scope (`housekeeping:` or similar).
+**Do not commit USER or AMBIGUOUS files in either mode.** Ever. Even if the user says "yeah include everything", route that through explicit confirmation — prefer to stage them and have the user review the diff before committing. The one exception: if the user explicitly invokes a "housekeeping commit" flow (e.g., "commit accumulated KB state wholesale"), follow their directive, but still stage by explicit file list (never `-A`/`.`/`-u`), exclude paths that should be gitignored (tool runtime state, lockfiles, temp databases), and make it a separate commit with a clearly labeled scope (`housekeeping:` or similar).
 
 ### 9. Produce the wrap-up report
 
@@ -506,5 +506,5 @@ If the user asks for any of the above during an end-of-session run, complete the
 
 - **The checklist is the point.** The value of this skill is that it runs in a fixed order every time. Don't "optimize" by skipping steps that feel unnecessary for this session — the user's complaint is that agents silently skip steps.
 - **Surfacing is a pause, not a narration.** When you pose the three-option template, actually stop and wait for the user's pick. Don't immediately follow it with "I'll probably do A" or "while you decide, let me also check Y". One surface, wait, next step.
-- **The wrap-up report is a receipt, not a recap.** The user already knows what happened in the session — they were there. The report exists to confirm what was committed, what was surfaced, and what's still open so the next session can pick up without archaeology.
+- **The wrap-up report is a receipt, not a recap.** The user already knows what happened in the session — they were there. The report exists to confirm what was committed, what was surfaced, and what's still open so the next session can pick up without archeology.
 - **If the hook fires on a false positive** (user said "wrap this function up" meaning something totally different), the checklist still runs but will find a clean tree and produce a one-line "all clean" report. That's a cheap false-positive cost and worth keeping the hook permissive.

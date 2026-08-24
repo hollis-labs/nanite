@@ -400,7 +400,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 // panic value + a capped stack, records an OTel span event on the request
 // span (if one is present in r.Context()), and returns HTTP 500.
 //
-// Shape is modelled on internal/safego.recoverAndReport but kept inline
+// Shape is modeled on internal/safego.recoverAndReport but kept inline
 // because the middleware must write an HTTP response in addition to the
 // log + span event. The parallel slog-migration session will convert the
 // slog.Error emission below carries panic + stack + method + path as

@@ -214,7 +214,7 @@ func TestVantaMemoryRecallRoundTrip(t *testing.T) {
 
 // TestVantaMemoryRecallRoundTrip_NoAuthRequired covers the optional-token path
 // — when no Authorization header is configured, AddHTTPServer is used and the
-// upstream sees no auth header. Mirrors registerVantaServer's behaviour when
+// upstream sees no auth header. Mirrors registerVantaServer's behavior when
 // cfg.Vanta.Token is empty.
 func TestVantaMemoryRecallRoundTrip_NoAuthRequired(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

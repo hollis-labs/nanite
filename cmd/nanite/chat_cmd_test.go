@@ -50,7 +50,7 @@ func TestRunChatTurn_CtxCancelInvokesCancelOnce(t *testing.T) {
 	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&cancelCalls, 1)
 		lastCancelSessionID = r.PathValue("id")
-		json.NewEncoder(w).Encode(harnessCancelResponse{SessionID: r.PathValue("id"), Status: "cancelled"})
+		json.NewEncoder(w).Encode(harnessCancelResponse{SessionID: r.PathValue("id"), Status: "canceled"})
 	})
 
 	srv := httptest.NewServer(mux)

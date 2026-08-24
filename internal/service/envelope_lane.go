@@ -12,7 +12,7 @@ const (
 	EnvelopeDisplayClassActionRequired EnvelopeDisplayClass = "action-required"
 )
 
-// stampEnvelopeDisplayClass injects display_class into an already-marshalled
+// stampEnvelopeDisplayClass injects display_class into an already-marshaled
 // envelope object when absent. Legacy emit paths stream whole envelopes rather
 // than the plugin-envelope wrapper, so they need a post-marshal seam.
 func stampEnvelopeDisplayClass(raw string, class EnvelopeDisplayClass) string {

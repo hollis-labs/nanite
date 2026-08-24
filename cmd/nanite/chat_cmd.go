@@ -126,14 +126,14 @@ func runChatTurn(ctx context.Context, client *harnessClient, sessionID, content 
 	for {
 		select {
 		case <-ctx.Done():
-			// The turn-scoped ctx (see cmdChat) was cancelled — a Ctrl-C
+			// The turn-scoped ctx (see cmdChat) was canceled — a Ctrl-C
 			// during this turn. Tell the server to stop generating, then
 			// return; StreamEvents' own goroutine notices the same ctx and
 			// exits on its own, so no explicit drain is needed here.
 			if _, cancelErr := client.Cancel(context.Background(), sessionID); cancelErr != nil {
 				fmt.Fprintf(os.Stderr, "chat: cancel failed: %v\n", cancelErr)
 			}
-			fmt.Print("\nturn cancelled\n")
+			fmt.Print("\nturn canceled\n")
 			return nil
 		case evt, ok := <-events:
 			if !ok {

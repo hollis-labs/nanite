@@ -306,7 +306,7 @@ func (l *TeamRunLauncher) LaunchTeamRun(ctx context.Context, teamID string, over
 	// Registry-growth mitigation (TASKS/teams/11-team-run-launch-api.md's
 	// required prerequisite; see agentworkflow.Registry.Unregister's own
 	// doc comment for the full reasoning). A run that came back terminal
-	// (completed/failed/cancelled) will never be Resume()d — nothing will
+	// (completed/failed/canceled) will never be Resume()d — nothing will
 	// ever call l.registry.Get(wfName) again — so its one-off compiled
 	// definition can be evicted immediately. A run still waiting on a gate
 	// or a flex step's exit trigger is deliberately left registered: Resume
@@ -346,14 +346,14 @@ func (l *TeamRunLauncher) LaunchTeamRun(ctx context.Context, teamID string, over
 
 // isTerminalRunStatus reports whether status is one of the built-in
 // engine's real terminal states (agentworkflow.RunStatusCompleted/Failed/
-// Cancelled) — as opposed to RunStatusWaiting/RunStatusWaitingOnFlex/
+// Canceled) — as opposed to RunStatusWaiting/RunStatusWaitingOnFlex/
 // RunStatusWaitingOnLoop, which mean the run made all the progress it
 // currently can but is not done: a later external Resume call will still
 // need to look its compiled definition up by name. See this file's own
 // Unregister call site, above.
 func isTerminalRunStatus(status agentworkflow.RunStatus) bool {
 	switch status {
-	case agentworkflow.RunStatusCompleted, agentworkflow.RunStatusFailed, agentworkflow.RunStatusCancelled:
+	case agentworkflow.RunStatusCompleted, agentworkflow.RunStatusFailed, agentworkflow.RunStatusCanceled:
 		return true
 	default:
 		return false

@@ -1489,7 +1489,7 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 // answer sitting right there in the DB, and the caller incorrectly
 // narrates total failure for a run that actually succeeded.
 //
-// Fix: on a ctx-cancelled Status failure, retry once with a short,
+// Fix: on a ctx-canceled Status failure, retry once with a short,
 // fresh background context before giving up — cheap, and recovers the
 // common case where the real terminal result was simply blocked by an
 // unrelated expired ctx rather than genuinely still in progress. The
@@ -1510,7 +1510,7 @@ func (st *SelfToolsTransport) syncSubagentEnvelope(ctx context.Context, runID st
 					"subagent run not found after spawn", nil)
 			}
 			if ctx.Err() != nil {
-				// The caller's ctx is cancelled/expired — not necessarily
+				// The caller's ctx is canceled/expired — not necessarily
 				// because the run is still running. Re-check with a fresh
 				// context before concluding that; Spawn's own block means
 				// the row is very likely already terminal.
@@ -1541,7 +1541,7 @@ func (st *SelfToolsTransport) syncSubagentEnvelope(ctx context.Context, runID st
 		// Ready for EnvelopeFromRun once the run is out of StatusRunning.
 		// This is deliberately broader than IsTerminalStatus: besides the
 		// terminal set (completed, failed, over_budget, stalled,
-		// cancelled, rejected), EnvelopeFromRun also has an explicit,
+		// canceled, rejected), EnvelopeFromRun also has an explicit,
 		// load-bearing case for StatusRequested/StatusApproved — an
 		// approval-gated spawn acks success immediately rather than
 		// waiting for a human, and must not be treated as "still
@@ -1573,12 +1573,12 @@ func (st *SelfToolsTransport) syncSubagentEnvelope(ctx context.Context, runID st
 		// cancellation.
 		select {
 		case <-ctx.Done():
-			// Context cancelled during wait. The run is still in progress
+			// Context canceled during wait. The run is still in progress
 			// (status = run.Status). Return ErrorKindTimeout with current
 			// status so the parent knows the run did not fail — it's just
 			// not done within the sync wait budget.
 			return subagent.NewFailureEnvelope(runID, subagent.ErrorKindTimeout,
-				fmt.Sprintf("sync wait cancelled (run status: %s, may still be executing): %v", run.Status, ctx.Err()),
+				fmt.Sprintf("sync wait canceled (run status: %s, may still be executing): %v", run.Status, ctx.Err()),
 				map[string]any{
 					"run_id": runID,
 					"status": run.Status,
@@ -1834,7 +1834,7 @@ func (st *SelfToolsTransport) callSubagentCancel(ctx context.Context, args map[s
 	if err := st.Subagent.Cancel(ctx, strArg(args, "run_id", "")); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("subagent cancel: %v", err)), nil
 	}
-	return mcp.TextResult("cancelled"), nil
+	return mcp.TextResult("canceled"), nil
 }
 
 // callSubagentRoleAudit returns a structured report of role slugs that
@@ -1938,7 +1938,7 @@ func (st *SelfToolsTransport) callBackgroundCancel(_ context.Context, args map[s
 	if err := st.Background.Cancel(jobID); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("background cancel: %v", err)), nil
 	}
-	return mcp.TextResult("cancelled"), nil
+	return mcp.TextResult("canceled"), nil
 }
 
 // --- helpers ---

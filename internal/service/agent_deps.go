@@ -461,7 +461,7 @@ type mcpTransportRestarter interface {
 // without panicking.
 //
 // Bounded by ctx — RestartStdioTransports returns ctx.Err() between
-// transports so the broker's 10s remediation timeout is honoured.
+// transports so the broker's 10s remediation timeout is honored.
 type recoveryMCPAdapter struct {
 	manager mcpTransportRestarter
 }

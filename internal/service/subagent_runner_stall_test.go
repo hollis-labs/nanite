@@ -60,7 +60,7 @@ func TestDrainCapture_FastFailsOnErrorEvent(t *testing.T) {
 // and is deliberately left that way. The provider-stream inactivity
 // timeout lives one layer up, in generateResponse's `streamLoop` (a
 // select with a resettable timer over the provider event channel): a
-// silently stalled provider stream is now cancelled there, which closes
+// silently stalled provider stream is now canceled there, which closes
 // the capture channel, which is what unblocks drainCapture. So this
 // characterization still holds for the isolated-channel scenario it
 // constructs — drainCapture in isolation, with no upstream stream loop

@@ -407,7 +407,7 @@ func TestRecallByToolName_NilSafe(t *testing.T) {
 }
 
 // TestRecallByToolName_EmptyToolName guards against accidental recall
-// against the default "_" sanitised namespace, which would surface
+// against the default "_" sanitized namespace, which would surface
 // unrelated entries.
 func TestRecallByToolName_EmptyToolName(t *testing.T) {
 	store := &stubStore{recallReply: []memory.Memory{{Summary: "x"}}}

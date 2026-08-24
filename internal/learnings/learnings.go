@@ -93,7 +93,7 @@ const (
 	ScopeSession Scope = "session"
 )
 
-// IsValid reports whether s is a recognised scope.
+// IsValid reports whether s is a recognized scope.
 func (s Scope) IsValid() bool {
 	switch s {
 	case ScopeToolUse, ScopeProject, ScopeSession:
@@ -440,7 +440,7 @@ const MaxMemoryKeyLen = 64
 // into one row.
 //
 // The result is truncated to MaxMemoryKeyLen so writes never trip
-// Vanta's per-segment length cap. Truncation favours the prefix
+// Vanta's per-segment length cap. Truncation favors the prefix
 // (scope+subject) so different hints under the same (scope, subject)
 // still land in distinct keys when at all possible — within budget.
 func DeriveMemoryKey(scope Scope, subject, hint string) string {
@@ -500,7 +500,7 @@ func SystemPromptBlock(toolName string, hints []Hint) string {
 // (Conduit treats tags as an unordered set, but human review tools
 // often render them in insertion order).
 //
-// toolForTag is the sanitised tool name to encode as `tool:<name>`.
+// toolForTag is the sanitized tool name to encode as `tool:<name>`.
 // Empty for non-tool_use scopes (where the tool identity is either
 // absent or implied by a different field).
 func buildTags(scope Scope, toolForTag, sourceEventID string, extra []string) []string {

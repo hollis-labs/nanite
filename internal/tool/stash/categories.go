@@ -78,7 +78,7 @@ var BuiltinCategories = map[string]string{
 //   - `nanite_<verb>_<noun>` — Categorize by verb where possible ("search",
 //     "recall") else CategoryOther
 //
-// Unrecognised names return "" (stash buckets them under CategoryOther).
+// Unrecognized names return "" (stash buckets them under CategoryOther).
 func BuiltinCategorizer() Categorizer {
 	return CategorizerFunc(func(name string) string {
 		if cat, ok := BuiltinCategories[name]; ok {

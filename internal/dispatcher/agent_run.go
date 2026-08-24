@@ -69,7 +69,7 @@ const (
 	RunStatusCompleted            RunStatus = "completed"
 	RunStatusFailed               RunStatus = "failed"
 	RunStatusTimedOut             RunStatus = "timed_out"
-	RunStatusCancelled            RunStatus = "cancelled"
+	RunStatusCanceled             RunStatus = "canceled"
 	RunStatusStalled              RunStatus = "stalled"
 	RunStatusOverBudget           RunStatus = "over_budget"
 	RunStatusFabricationSuspected RunStatus = "fabrication_suspected"

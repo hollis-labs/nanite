@@ -61,7 +61,7 @@ plugins/my-plugin/
 ├── envelopes/               # envelope JSON Schemas
 ├── ui/
 │   ├── src/index.tsx        # ESM entry
-│   ├── vite.config.ts       # externalises react + @nanite/ui/*
+│   ├── vite.config.ts       # externalizes react + @nanite/ui/*
 │   ├── package.json
 │   └── tsconfig.json
 ├── Makefile                 # cross-platform build + sign + archive

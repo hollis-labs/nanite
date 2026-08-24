@@ -189,7 +189,7 @@ func TestParentCancelPropagates(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("child ctx not cancelled by parent")
+		t.Fatal("child ctx not canceled by parent")
 	}
 	if !seen.Load() {
 		t.Fatal("goroutine did not observe cancellation")
@@ -210,7 +210,7 @@ func TestContextAccessor(t *testing.T) {
 	select {
 	case <-m.Context().Done():
 	default:
-		t.Fatal("context not cancelled after shutdown")
+		t.Fatal("context not canceled after shutdown")
 	}
 }
 
@@ -226,7 +226,7 @@ func TestShutdown_InvokesCancel(t *testing.T) {
 	// Before shutdown, context is live.
 	select {
 	case <-m.Context().Done():
-		t.Fatal("manager context cancelled before Shutdown")
+		t.Fatal("manager context canceled before Shutdown")
 	default:
 	}
 
@@ -239,7 +239,7 @@ func TestShutdown_InvokesCancel(t *testing.T) {
 	select {
 	case <-m.Context().Done():
 	default:
-		t.Fatal("manager context not cancelled after Shutdown")
+		t.Fatal("manager context not canceled after Shutdown")
 	}
 	if err := m.Context().Err(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("ctx err after Shutdown = %v, want context.Canceled", err)

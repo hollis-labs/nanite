@@ -185,7 +185,7 @@ func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message,
 	// (mirrors internal/subagent/service.go's "subagent.completion-
 	// reactor" goroutine) with a background context so a slow/misbehaving
 	// reactor never blocks the SendMessage caller (self-tool call, HTTP
-	// handler, or background-job poster) and outlives a cancelled request
+	// handler, or background-job poster) and outlives a canceled request
 	// ctx.
 	//
 	// msgCopy takes a shallow copy of *out before handing it to the

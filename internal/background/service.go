@@ -238,7 +238,7 @@ func (svc *Service) Result(jobID string) (JobResult, error) {
 
 // Cancel asks the Backend to terminate jobID. Idempotent — Cancel on
 // an already-terminal or unknown job returns nil. The Backend must
-// invoke the completion callback (with StatusCancelled) so the
+// invoke the completion callback (with StatusCanceled) so the
 // in-memory record + messaging envelope reflect the cancellation.
 func (svc *Service) Cancel(jobID string) error {
 	if svc.backend == nil {

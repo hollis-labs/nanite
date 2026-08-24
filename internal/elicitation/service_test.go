@@ -139,10 +139,10 @@ func TestElicit_Timeout(t *testing.T) {
 	// minimum because New clamps ≤0 to default. Instead, we build with 1 and
 	// verify the action=cancel path with a context timeout that's shorter
 	// than the service timeout but longer than the test wait — but the easiest
-	// approach is to test the context-cancelled path instead.
+	// approach is to test the context-canceled path instead.
 	//
 	// Actually: create service with 1s timeout and use a context that cancels
-	// immediately so we get action=cancel with reason=context_cancelled.
+	// immediately so we get action=cancel with reason=context_canceled.
 	// That exercises the same code path the timeout goroutine uses.
 	svcFast := newFastSvc(emitter, 100*time.Millisecond)
 
@@ -167,8 +167,8 @@ func TestElicit_Timeout(t *testing.T) {
 	_ = svc
 }
 
-// TestElicit_ContextCancelled verifies ctx cancellation returns action=cancel.
-func TestElicit_ContextCancelled(t *testing.T) {
+// TestElicit_ContextCanceled verifies ctx cancellation returns action=cancel.
+func TestElicit_ContextCanceled(t *testing.T) {
 	emitter := &stubEmitter{}
 	svc := elicitation.New(emitter, 60)
 
@@ -191,8 +191,8 @@ func TestElicit_ContextCancelled(t *testing.T) {
 	if resp.Action != elicitation.ActionCancel {
 		t.Errorf("action: got %q, want %q", resp.Action, elicitation.ActionCancel)
 	}
-	if resp.Reason != "context_cancelled" {
-		t.Errorf("reason: got %q, want %q", resp.Reason, "context_cancelled")
+	if resp.Reason != "context_canceled" {
+		t.Errorf("reason: got %q, want %q", resp.Reason, "context_canceled")
 	}
 }
 

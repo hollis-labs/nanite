@@ -402,7 +402,7 @@ func TestCancel_TerminalIsNoop(t *testing.T) {
 	}
 }
 
-// slowRunner blocks on its ctx until cancelled, then returns ctx.Err().
+// slowRunner blocks on its ctx until canceled, then returns ctx.Err().
 // Lets us verify per-run Cancel actually cancels the in-flight runner:
 // done closes after <-ctx.Done() returns, so the test can assert the
 // runner goroutine actually exits (not just that the DB row flipped).
@@ -437,7 +437,7 @@ func TestCancel_PerRunContextCancellation(t *testing.T) {
 		t.Fatalf("Spawn: %v", err)
 	}
 
-	// Wait for runner to actually be running before cancelling.
+	// Wait for runner to actually be running before canceling.
 	select {
 	case <-runner.started:
 	case <-time.After(time.Second):
@@ -460,8 +460,8 @@ func TestCancel_PerRunContextCancellation(t *testing.T) {
 
 	// Secondary: the DB row reflects the cancellation.
 	run, _ := svc.Status(context.Background(), id)
-	if run == nil || run.Status != StatusCancelled {
-		t.Fatalf("Status = %+v, want StatusCancelled", run)
+	if run == nil || run.Status != StatusCanceled {
+		t.Fatalf("Status = %+v, want StatusCanceled", run)
 	}
 }
 
@@ -619,10 +619,10 @@ func TestSpawn_EmitsTerminalEventOnFailure(t *testing.T) {
 	}
 }
 
-// TestSpawn_EmitsTerminalEventOnCancelled verifies Cancel owns exactly one
-// terminal event with the DB-authoritative "cancelled" status. The runner's
+// TestSpawn_EmitsTerminalEventOnCanceled verifies Cancel owns exactly one
+// terminal event with the DB-authoritative "canceled" status. The runner's
 // later finalizeRun reconciliation must not emit a duplicate terminal event.
-func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
+func TestSpawn_EmitsTerminalEventOnCanceled(t *testing.T) {
 	db, _ := newTestDB(t)
 	sink := &recordingSink{}
 	runner := &slowRunner{
@@ -674,8 +674,8 @@ func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
 		t.Fatalf("events = %v; want exactly running + one terminal cancellation", events)
 	}
 	terminal := events[len(events)-1]
-	if got := terminal.Payload["status"]; got != "cancelled" {
-		t.Errorf("terminal status = %v, want cancelled", got)
+	if got := terminal.Payload["status"]; got != "canceled" {
+		t.Errorf("terminal status = %v, want canceled", got)
 	}
 	if errStr, _ := terminal.Payload["error"].(string); errStr != "" {
 		t.Errorf("error = %q, want empty on cancel path", errStr)
@@ -1005,7 +1005,7 @@ func TestReject_NotPending(t *testing.T) {
 		ParentSessionID: "s", ParentAgentID: "p",
 		Role: "r", Prompt: "hi", Mode: ModeSync,
 	})
-	_, _ = db.Exec(`UPDATE subagent_runs SET status='cancelled' WHERE id=?`, runID)
+	_, _ = db.Exec(`UPDATE subagent_runs SET status='canceled' WHERE id=?`, runID)
 
 	if err := svc.Reject(context.Background(), runID, ""); !errors.Is(err, ErrNotPending) {
 		t.Errorf("err = %v, want ErrNotPending", err)

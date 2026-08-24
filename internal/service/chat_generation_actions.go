@@ -552,10 +552,10 @@ func (s *chatServiceImpl) requestProviderIteration(
 	// by the in-loop runaway-fail-cap + idle-timeout + hard-ceiling
 	// (resolveIterationLimits in chat_loop_state.go).
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "ctx_cancelled:"+ctxErr.Error(), len(run.loop.toolCallRefs), ch)
-		slog.Info("generateResponse cancelled", "err", ctxErr, "session_id", sessionID)
-		ch <- chat.StreamEvent{Type: "status", Content: "Stopped: cancelled"}
-		s.persistPartialAssistantCancelled(sessionID, assistantMsgID, agentID, run.fullContent.String())
+		diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "ctx_canceled:"+ctxErr.Error(), len(run.loop.toolCallRefs), ch)
+		slog.Info("generateResponse canceled", "err", ctxErr, "session_id", sessionID)
+		ch <- chat.StreamEvent{Type: "status", Content: "Stopped: canceled"}
+		s.persistPartialAssistantCanceled(sessionID, assistantMsgID, agentID, run.fullContent.String())
 		return requestProviderIterationResult{directive: generationTerminate}
 	}
 
@@ -606,7 +606,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 	provCtx, provSpan := feotel.StartSpan(ctx, "nanite.provider.call")
 	// CW-20260517-0036: a cancelable child of provCtx so the
 	// provider-stream inactivity watchdog (streamLoop below) can tear
-	// down a silently stalled HTTP stream from the inside. Cancelling
+	// down a silently stalled HTTP stream from the inside. Canceling
 	// it propagates context.Canceled into the provider adapter, which
 	// closes provCh — unblocking the consume loop. providerAttempt owns
 	// both cancellation and span completion with independent sync.Once
@@ -645,16 +645,16 @@ func (s *chatServiceImpl) requestProviderIteration(
 	// Plugins observing "message.sending" may cancel the LLM call.
 	// Data shape: {session_id, agent_id, model, messages, system_prompt_length, iteration}.
 	if s.pluginHost != nil {
-		cancelled := s.pluginHost.EmitPreHook("message.sending", sessionID, map[string]any{
+		canceled := s.pluginHost.EmitPreHook("message.sending", sessionID, map[string]any{
 			"agent_id":             agent.ID,
 			"model":                model,
 			"messages":             len(run.chatMessages),
 			"system_prompt_length": len(run.systemPrompt),
 			"iteration":            run.loop.iteration,
 		})
-		if cancelled {
+		if canceled {
 			attempt.close()
-			slog.Info("chat-service: message.sending cancelled by plugin hook", "session_id", sessionID, "iter", run.loop.iteration)
+			slog.Info("chat-service: message.sending canceled by plugin hook", "session_id", sessionID, "iter", run.loop.iteration)
 			blockMsg := "Message blocked by plugin policy."
 			ch <- chat.StreamEvent{Type: "delta", Content: blockMsg, Phase: chat.PhaseFinal}
 			run.fullContent.WriteString(blockMsg)
@@ -1395,7 +1395,7 @@ func (s *chatServiceImpl) finalizeRun(
 	//
 	// If run.finalContent is empty (e.g. the loop exited on circuit_open with no
 	// final iteration, or directReturn was set), fall back to run.fullContent so
-	// the stored message is not empty. Old behaviour preserved for those paths.
+	// the stored message is not empty. Old behavior preserved for those paths.
 	finalText := run.finalContent.String()
 	if finalText == "" {
 		finalText = run.fullContent.String()

@@ -146,7 +146,7 @@ func TestRunMadeProgress(t *testing.T) {
 func TestIsTerminalStatus(t *testing.T) {
 	terminal := []string{
 		StatusCompleted, StatusFailed, StatusOverBudget,
-		StatusStalled, StatusCancelled, StatusRejected,
+		StatusStalled, StatusCanceled, StatusRejected,
 	}
 	for _, s := range terminal {
 		if !IsTerminalStatus(s) {

@@ -102,7 +102,7 @@ func TestDelegateSubTasks_NilOwnerPreCanceledStartsNoWork(t *testing.T) {
 		t.Fatalf("results = %#v, want nil on cancellation", results)
 	}
 	if got := calls.Load(); got != 0 {
-		t.Fatalf("worker calls = %d, want 0 for pre-cancelled context", got)
+		t.Fatalf("worker calls = %d, want 0 for pre-canceled context", got)
 	}
 }
 

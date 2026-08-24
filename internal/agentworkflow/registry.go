@@ -176,7 +176,7 @@ func (r *Registry) Register(wf WorkflowDefinition) error {
 // task wired LaunchTeamRun into real, callable traffic. Unregister is the
 // primitive that closes it: TeamRunLauncher.LaunchTeamRun calls this once a
 // launched TeamRun's WorkflowResult comes back in a terminal status
-// (completed/failed/cancelled) — at that point nothing will ever call
+// (completed/failed/canceled) — at that point nothing will ever call
 // registry.Get(wfName) again (a2a_task_manager.go's resumeWorkflowRun only
 // re-fetches by name for a run that's still RunStatusWaiting/
 // RunStatusWaitingOnFlex). A still-waiting TeamRun (the common case per

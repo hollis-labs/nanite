@@ -24,7 +24,7 @@ type UserSettings struct {
 	ToolLoadPreferences   map[string]string `json:"tool_load_preferences,omitempty"`
 	TaskBackend           string            `json:"task_backend"`
 	// AllowUnsignedPlugins permits installing plugin archives that lack a
-	// verified Ed25519 signature. The setting is ONLY honoured in builds
+	// verified Ed25519 signature. The setting is ONLY honored in builds
 	// compiled with the `devmode` build tag (see internal/plugin/devmode).
 	// In production binaries this field is intentionally inert: a
 	// compromised row cannot disable signature verification.

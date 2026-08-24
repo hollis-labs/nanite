@@ -231,7 +231,7 @@ func TestRemediateRespectsTimeout(t *testing.T) {
 	}
 }
 
-// blockingBootDir blocks Repopulate until ctx is cancelled, then
+// blockingBootDir blocks Repopulate until ctx is canceled, then
 // returns ctx.Err(). Lets the timeout test exercise the bounded
 // context.WithTimeout path inside Remediate.
 type blockingBootDir struct{}

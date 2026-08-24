@@ -163,7 +163,7 @@ const claudeDefaultPermissionMode = "acceptEdits"
 // additionalDirectories, when non-empty, sets
 // ClaudeAdapter.AdditionalDirectories so the planted settings.json
 // carries permissions.additionalDirectories — the directories claude
-// may access beyond its boot dir cwd. This is claude's analogue of the
+// may access beyond its boot dir cwd. This is claude's analog of the
 // codex WritableRoots widening; both are sourced from the same nanite
 // config setting (dev_tools_allowed_paths) so a CLI-launch agent's
 // file-write scope is consistent across providers (CW-20260518-0075).

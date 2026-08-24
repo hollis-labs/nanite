@@ -16,7 +16,7 @@ Run a Hadron blueprint via MCP tools, with CLI fallback.
 
 3. **Execute blueprint.** Use `mcp__hadron__hadron_run_enqueue` with blueprint name and inputs. If MCP unavailable, fall back to CLI: `hadron run <blueprint> --input key=value`. Capture the run ID.
 
-4. **Monitor execution.** Poll `mcp__hadron__hadron_run_get` every 5 seconds, up to the blueprint's timeout (default: 120s). Check for terminal status (completed, failed, cancelled).
+4. **Monitor execution.** Poll `mcp__hadron__hadron_run_get` every 5 seconds, up to the blueprint's timeout (default: 120s). Check for terminal status (completed, failed, canceled).
 
 5. **Handle failure.** If the run fails:
    - Read run events via `mcp__hadron__hadron_run_events` for error details

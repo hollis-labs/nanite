@@ -192,7 +192,7 @@ func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 			if a.Services.Store == nil {
 				cleanupErr = errors.New("store not available for partial routing cleanup")
 			} else {
-				// Installation can itself fail because the request was cancelled;
+				// Installation can itself fail because the request was canceled;
 				// cleanup protects persistent rows and must still get one attempt.
 				cleanupCtx := context.WithoutCancel(r.Context())
 				for _, reflexID := range installedRoutingIDs {

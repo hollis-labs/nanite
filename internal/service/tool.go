@@ -51,7 +51,7 @@ type ToolService interface {
 	//
 	// windowSize is the per-session context window in tokens (from models.dev /
 	// user settings). Pass 0 when the model is unknown — the broker falls back
-	// to DefaultContextWindowTokens so behaviour is preserved.
+	// to DefaultContextWindowTokens so behavior is preserved.
 	SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string, windowSize int) (*ToolSelection, error)
 
 	// Execute runs a tool call, routing through ToolClient (with permission
@@ -512,7 +512,7 @@ func (s *toolServiceImpl) attemptRepair(ctx context.Context, agentID, toolName s
 // autoRepairEnvEnabled returns true unless NANITE_AUTO_REPAIR is set
 // to a falsy value ("0", "false", "no", "off", case-insensitive). The
 // default — when the env var is unset or set to anything else — is
-// "enabled". This matches the ticket's "default always" behaviour.
+// "enabled". This matches the ticket's "default always" behavior.
 func autoRepairEnvEnabled() bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv("NANITE_AUTO_REPAIR")))
 	switch v {
@@ -567,7 +567,7 @@ func classifyAndFormatToolError(err error, toolName string, input map[string]any
 // auto-repair pass and the future Vanta learning hint both key off this
 // payload.
 //
-// On marshalling failure (which would be a programmer bug since all
+// On marshaling failure (which would be a programmer bug since all
 // fields are JSON-friendly) the function falls back to the rec.Error()
 // string — the agent still gets the kind tag and reason.
 func buildAgentErrorEnvelope(rec *recoverpkg.RecoverableError) string {
@@ -776,7 +776,7 @@ func (s *toolServiceImpl) discoverAgentMCPTools(
 	seen map[string]bool,
 ) ([]llmtypes.ToolDefinition, map[string]bool) {
 	var servers []string
-	// Silently ignore bad JSON — matches existing engine behaviour.
+	// Silently ignore bad JSON — matches existing engine behavior.
 	_ = parseJSONStrings(mcpServersJSON, &servers)
 
 	beforeCount := countMCPOriginTools(s.toolClient, allTools)
@@ -813,7 +813,7 @@ func (s *toolServiceImpl) discoverAgentMCPTools(
 func countMCPOriginTools(tc *toolclient.ToolClient, tools []llmtypes.ToolDefinition) int {
 	if tc == nil {
 		// Without a toolclient we cannot distinguish; treat all as MCP-origin
-		// to preserve the historical behaviour of triggering progressive
+		// to preserve the historical behavior of triggering progressive
 		// discovery when the manager exposes a large tool surface.
 		return len(tools)
 	}

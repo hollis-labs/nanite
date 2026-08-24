@@ -241,7 +241,7 @@ func (e *ValidationError) Unwrap() error { return e.Inner }
 // just add noise.
 //
 // Suggestion is best-effort; an empty string means the validator did not
-// recognise a pattern worth hinting at.
+// recognize a pattern worth hinting at.
 type StructuredError struct {
 	Path       string `json:"path"`
 	Reason     string `json:"reason"`
@@ -296,7 +296,7 @@ func collectLeaves(ve *jsonschema.ValidationError, schemaDoc map[string]any, out
 }
 
 // structuredErrorFromLeaf converts a leaf *jsonschema.ValidationError into
-// a StructuredError, picking suggestions off recognised ErrorKinds.
+// a StructuredError, picking suggestions off recognized ErrorKinds.
 func structuredErrorFromLeaf(ve *jsonschema.ValidationError, schemaDoc map[string]any) StructuredError {
 	se := StructuredError{
 		Path:   jsonPointer(ve.InstanceLocation),

@@ -685,10 +685,10 @@ func selfToolDefinitions() []mcp.Tool {
 		},
 		{
 			Name: "handoff_reject",
-			Description: "Reject a pending handoff, cancelling the transfer request.\n\n" +
+			Description: "Reject a pending handoff, canceling the transfer request.\n\n" +
 				"**When to use:** When the user or logic determines the handoff should not proceed. Provide a reason so the requesting agent can understand the outcome.\n\n" +
 				"**Required context:** handoff_id from a prior handoff_request call.\n\n" +
-				"**Output shape:** Confirmation that the handoff is cancelled; the session remains with the current agent.",
+				"**Output shape:** Confirmation that the handoff is canceled; the session remains with the current agent.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -709,7 +709,7 @@ func selfToolDefinitions() []mcp.Tool {
 				"- api: returns immediately; reply lands in the parent session chat (channel=chat).\n\n" +
 				"**Required context:** parent_session_id, parent_agent_id, role, and prompt are required.\n\n" +
 				"**Output shape:** A JSON envelope `{success: bool, result?: {run_id, summary}, error?: {kind, message, context}}` (CW-20260512-0122). " +
-				"Check `success` first — when `success: false`, the subagent failed and you MUST acknowledge the failure using error.message and error.kind (timeout | denied | cancelled | internal | empty_reply | at_capacity). Do not narrate success on a failed envelope, and do not fabricate a reply: even a non-empty result body on a success=false envelope is still a failure. " +
+				"Check `success` first — when `success: false`, the subagent failed and you MUST acknowledge the failure using error.message and error.kind (timeout | denied | canceled | internal | empty_reply | at_capacity). Do not narrate success on a failed envelope, and do not fabricate a reply: even a non-empty result body on a success=false envelope is still a failure. " +
 				"For sync mode, `result.summary` carries the subagent's prose. For async/api, `result.run_id` is the handle for subagent_status polling and the eventual reply lands out-of-band.\n\n" +
 				"**Fan-out cap:** A maximum of 3 subagent spawns may execute concurrently. When all slots are occupied, spawn calls block until a slot is freed. If the caller's context deadline expires while waiting, error.kind will be `at_capacity`; retry when slots free up or sequence spawns to respect the cap.\n\n" +
 				"**Chaining:** Follow async/api spawns with message_inbox to receive the reply, or subagent_status to check completion.\n\n" +
@@ -734,7 +734,7 @@ func selfToolDefinitions() []mcp.Tool {
 			Description: "Return the current lifecycle state of a spawned subagent run.\n\n" +
 				"**When to use:** After subagent_spawn in async or api mode, to check whether the subagent has completed.\n\n" +
 				"**Required context:** run_id from the subagent_spawn response.\n\n" +
-				"**Output shape:** {run_id, status: pending|running|done|failed|cancelled, ...}.",
+				"**Output shape:** {run_id, status: pending|running|done|failed|canceled, ...}.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -746,7 +746,7 @@ func selfToolDefinitions() []mcp.Tool {
 		{
 			Name: "subagent_cancel",
 			Description: "Cancel an in-flight subagent run. Idempotent — calling on an already-terminal run is a no-op.\n\n" +
-				"**When to use:** When the parent agent no longer needs the subagent's result (e.g. user cancelled the request), or the subagent is taking too long.\n\n" +
+				"**When to use:** When the parent agent no longer needs the subagent's result (e.g. user canceled the request), or the subagent is taking too long.\n\n" +
 				"**Required context:** run_id from the subagent_spawn response.\n\n" +
 				"**Output shape:** Confirmation of cancellation or no-op if already terminal.",
 			InputSchema: map[string]any{
@@ -778,7 +778,7 @@ func selfToolDefinitions() []mcp.Tool {
 				"- **background_job** (async, NON-session-bound): a heavy or long-running shell command that should not block this session. Reply arrives via the messaging inbox when done — possibly after this turn ends.\n\n" +
 				"**When to use:** Long-running build/test/crawl scripts, batch data processing, or any shell command you'd otherwise abandon partway through because the calling turn ends.\n\n" +
 				"**Required context:** task (the shell command to run), originating_session_id, originating_agent_id. budget is optional (defaults: 30 min wall-clock, 1 MiB output cap); agent is optional and currently unused (no backend reads it).\n\n" +
-				"**Output shape:** {job_id}. The completion envelope (channel=inbox, kind=notification, from_agent_id=background-job) carries a structured JobResult JSON in payload_json with status (succeeded/failed/cancelled), output (captured stdout+stderr), error, started_at, completed_at. Poll message_inbox after the turn or chain via background_status.",
+				"**Output shape:** {job_id}. The completion envelope (channel=inbox, kind=notification, from_agent_id=background-job) carries a structured JobResult JSON in payload_json with status (succeeded/failed/canceled), output (captured stdout+stderr), error, started_at, completed_at. Poll message_inbox after the turn or chain via background_status.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -797,7 +797,7 @@ func selfToolDefinitions() []mcp.Tool {
 			Description: "Return the current lifecycle state and (when terminal) result of a background job.\n\n" +
 				"**When to use:** After background_job, to poll progress. Prefer waiting for the inbox notification; this is for active polling cases.\n\n" +
 				"**Required context:** job_id from the background_job response.\n\n" +
-				"**Output shape:** {job_id, status: pending|running|succeeded|failed|cancelled|expired, output, error, started_at, completed_at, output_truncated}. An expired result is a normal structured terminal response with status=expired and an explanatory error field; an id that was never issued returns a tool error.",
+				"**Output shape:** {job_id, status: pending|running|succeeded|failed|canceled|expired, output, error, started_at, completed_at, output_truncated}. An expired result is a normal structured terminal response with status=expired and an explanatory error field; an id that was never issued returns a tool error.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -809,7 +809,7 @@ func selfToolDefinitions() []mcp.Tool {
 		{
 			Name: "background_cancel",
 			Description: "Cancel an in-flight background job. Idempotent — calling on an already-terminal job is a no-op.\n\n" +
-				"**When to use:** When the background work is no longer needed (e.g. the user cancelled the request, or a faster path materialized). The backend kills the process group; descendants are reaped.\n\n" +
+				"**When to use:** When the background work is no longer needed (e.g. the user canceled the request, or a faster path materialized). The backend kills the process group; descendants are reaped.\n\n" +
 				"**Required context:** job_id from the background_job response.\n\n" +
 				"**Output shape:** Confirmation of cancellation or no-op if already terminal.",
 			InputSchema: map[string]any{

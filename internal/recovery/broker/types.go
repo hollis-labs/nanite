@@ -280,10 +280,10 @@ const (
 	// OutcomePermanent: failure escalated to the user; no further retry.
 	OutcomePermanent
 
-	// OutcomeCancelled: user clicked the [Cancel retry] info-card button
+	// OutcomeCanceled: user clicked the [Cancel retry] info-card button
 	// before the retry completed; original failure escalated as
 	// permanent.
-	OutcomeCancelled
+	OutcomeCanceled
 )
 
 // String renders Outcome for telemetry/log output.
@@ -295,8 +295,8 @@ func (o Outcome) String() string {
 		return "transient_retry_succeeded"
 	case OutcomePermanent:
 		return "permanent"
-	case OutcomeCancelled:
-		return "cancelled"
+	case OutcomeCanceled:
+		return "canceled"
 	default:
 		return "unknown"
 	}

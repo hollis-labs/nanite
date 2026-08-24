@@ -6,7 +6,7 @@ import "strings"
 
 // OverrideConfig holds per-field overrides that can be layered on top of a
 // base agent config. All fields use omitempty so zero values are omitted from
-// serialised output and do not shadow lower-priority layers.
+// serialized output and do not shadow lower-priority layers.
 type OverrideConfig struct {
 	// Scalars — last non-empty writer wins.
 	Model       string `yaml:"model,omitempty"       json:"model,omitempty"`

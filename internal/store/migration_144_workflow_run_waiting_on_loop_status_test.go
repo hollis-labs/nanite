@@ -25,7 +25,7 @@ import (
 func TestMigrate144WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 	s := newTestStore(t)
 
-	for _, status := range []string{"running", "completed", "failed", "cancelled", "waiting_on_gate", "waiting_on_flex", "waiting_on_loop"} {
+	for _, status := range []string{"running", "completed", "failed", "canceled", "waiting_on_gate", "waiting_on_flex", "waiting_on_loop"} {
 		runID := "run-144-" + status
 		if err := s.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: runID, DefinitionName: "loop-status-check", Status: status}); err != nil {
 			t.Fatalf("CreateWorkflowRun(status=%q): %v", status, err)

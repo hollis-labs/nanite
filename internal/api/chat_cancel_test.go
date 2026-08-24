@@ -51,7 +51,7 @@ func (s *chatCancelStub) Shutdown() error { return nil }
 
 // TestChatCancelEndpoint_HappyPath verifies that POST
 // /api/sessions/{id}/chat/cancel dispatches the cancel through the
-// chat service and returns 200 + {"status":"cancelled"}. CW-20260512-0006.
+// chat service and returns 200 + {"status":"canceled"}. CW-20260512-0006.
 func TestChatCancelEndpoint_HappyPath(t *testing.T) {
 	a, mux := newTestAPI(t)
 
@@ -74,8 +74,8 @@ func TestChatCancelEndpoint_HappyPath(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got["status"] != "cancelled" {
-		t.Errorf("status = %q, want cancelled", got["status"])
+	if got["status"] != "canceled" {
+		t.Errorf("status = %q, want canceled", got["status"])
 	}
 
 	select {

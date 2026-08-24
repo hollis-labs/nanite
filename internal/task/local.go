@@ -88,7 +88,7 @@ func (b *LocalBackend) Transition(ctx context.Context, id string, to Status) err
 	}
 	t.Status = to
 	t.UpdatedAt = time.Now().UTC()
-	if to == StatusCompleted || to == StatusFailed || to == StatusCancelled {
+	if to == StatusCompleted || to == StatusFailed || to == StatusCanceled {
 		now := time.Now().UTC()
 		t.CompletedAt = &now
 	}

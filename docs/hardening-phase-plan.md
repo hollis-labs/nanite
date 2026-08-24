@@ -303,7 +303,7 @@ Use Hadron's DAG model and retry strategies as reference architecture.
 - Kahn's algorithm for topological sort
 - Concurrent execution of independent steps at same DAG level
 - Gate functions for pre-execution validation
-- Clean exit: cancel → remaining steps Cancelled; required fail → dependents Skipped
+- Clean exit: cancel → remaining steps Canceled; required fail → dependents Skipped
 - Event emission via callback (wired to plugin events at integration layer)
 
 **YAML loader:**

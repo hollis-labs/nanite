@@ -39,7 +39,7 @@ const (
 
 // Run status constants. Lifecycle:
 //
-//	requested → approved → running → completed | failed | over_budget | stalled | cancelled
+//	requested → approved → running → completed | failed | over_budget | stalled | canceled
 //	requested → rejected
 //
 // `requested` is the initial state only when interactive approval
@@ -73,7 +73,7 @@ const (
 	StatusFailed     = "failed"
 	StatusOverBudget = "over_budget"
 	StatusStalled    = "stalled"
-	StatusCancelled  = "cancelled"
+	StatusCanceled   = "canceled"
 	StatusRejected   = "rejected"
 )
 
@@ -84,7 +84,7 @@ const (
 func IsTerminalStatus(s string) bool {
 	switch s {
 	case StatusCompleted, StatusFailed, StatusOverBudget,
-		StatusStalled, StatusCancelled, StatusRejected:
+		StatusStalled, StatusCanceled, StatusRejected:
 		return true
 	default:
 		return false
@@ -159,7 +159,7 @@ func IsValidOnFail(s string) bool {
 //     detector trip and approval-rejection are pre-filtered by the
 //     classifier in execute (see retryableFailureError).
 //
-// completed, cancelled, rejected are never retried: completed is a
+// completed, canceled, rejected are never retried: completed is a
 // success, the other two are operator decisions that must not be
 // overridden by the retry loop.
 func IsRetriableStatus(s string) bool {

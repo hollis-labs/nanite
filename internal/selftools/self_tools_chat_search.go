@@ -116,7 +116,7 @@ func isShortCode(s string) bool {
 }
 
 // callChatSearch implements chat_search — search a chat's conversation
-// history including compacted (summarised) spans. By default the search is
+// history including compacted (summarized) spans. By default the search is
 // scoped to the current session (back-compat with the pre-CW-20260519-0063
 // shape). Passing a `target` arg (short code or session_id) redirects the
 // search to that chat instead — workspace-scoped, read-only.
@@ -430,7 +430,7 @@ func intArgFull(args map[string]any, key string, def int) int {
 	}
 }
 
-// buildExcerpt returns a snippet of text centred on [matchStart, matchEnd)
+// buildExcerpt returns a snippet of text centered on [matchStart, matchEnd)
 // with up to radius bytes of context on each side. The match is wrapped in
 // «…» markers so the caller can see where the hit is.
 func buildExcerpt(text string, matchStart, matchEnd, radius int) string {

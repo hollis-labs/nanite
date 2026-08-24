@@ -22,7 +22,7 @@ const (
 	DefaultMaxCompressionRatio = int64(200)
 )
 
-// TarGzExtractor materialises a Handle into targetDir. Archive handles are
+// TarGzExtractor materializes a Handle into targetDir. Archive handles are
 // extracted from tar.gz with adversarial guards. Directory handles are
 // copied in (no symlinks — that path is reserved for the explicit --link
 // flag plumbed through the CLI, not this extractor).
@@ -35,7 +35,7 @@ type TarGzExtractor struct {
 	MaxCompressionRatio       int64
 }
 
-// Extract materialises h into targetDir. targetDir must already exist.
+// Extract materializes h into targetDir. targetDir must already exist.
 func (e *TarGzExtractor) Extract(ctx context.Context, h Handle, targetDir string, emit EventFunc) error {
 	if targetDir == "" {
 		return errors.New("extract: empty targetDir")

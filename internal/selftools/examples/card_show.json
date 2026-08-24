@@ -189,7 +189,7 @@
         "description": "Cross-check Datadog headroom against forecast in planning/q3-capacity.md."
       }
     },
-    "notes": "REFERENCE ONLY: session-task is registered for validation but NOT in the card_show allow-list. Emitted by the chat engine through a different path. Field shape shown so callers/components emitting it match the schema. status enum: pending|in_progress|completed|failed|cancelled."
+    "notes": "REFERENCE ONLY: session-task is registered for validation but NOT in the card_show allow-list. Emitted by the chat engine through a different path. Field shape shown so callers/components emitting it match the schema. status enum: pending|in_progress|completed|failed|canceled."
   },
   {
     "title": "REFERENCE — error-report (NOT emitted via card_show)",

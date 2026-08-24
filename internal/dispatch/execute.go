@@ -17,7 +17,7 @@ import (
 // to chat.Envelope at the seam where they meet — see
 // internal/service/dispatch_wiring.go.
 //
-// Field names match chat.Envelope so JSON marshalling round-trips
+// Field names match chat.Envelope so JSON marshaling round-trips
 // cleanly between the two types.
 type Envelope struct {
 	Kind     string `json:"kind"`

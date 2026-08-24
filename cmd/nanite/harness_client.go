@@ -286,7 +286,7 @@ func (c *harnessClient) StreamEvents(ctx context.Context, path string) (<-chan c
 
 		// emitError surfaces a synthetic "error" StreamEvent so a decode or
 		// read failure is diagnosable instead of looking like a silently
-		// truncated stream. Returns false if ctx was cancelled before the
+		// truncated stream. Returns false if ctx was canceled before the
 		// send could go through, signaling the caller should stop.
 		emitError := func(msg string) bool {
 			select {

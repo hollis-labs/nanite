@@ -295,7 +295,7 @@ func NewRuntimeReaper(deps *agent.Dependencies, opts RuntimeReaperOptions) *Runt
 }
 
 // Start spawns the reaper goroutine. ctx is the parent context; the
-// reaper exits when ctx is cancelled OR Stop is called. Calling Start
+// reaper exits when ctx is canceled OR Stop is called. Calling Start
 // more than once is a no-op.
 //
 // deps.Store nil is tolerated — the goroutine logs and exits, so wiring
@@ -355,7 +355,7 @@ func (r *RuntimeReaper) loop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("agent_runtime reaper: stopping (ctx cancelled)")
+			slog.Info("agent_runtime reaper: stopping (ctx canceled)")
 			return
 		case <-r.stopCh:
 			slog.Info("agent_runtime reaper: stopping (Stop called)")

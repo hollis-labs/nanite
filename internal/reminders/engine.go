@@ -57,7 +57,7 @@ type Trigger struct {
 }
 
 // ParseTrigger decodes a reminder's TriggerJSON into a Trigger.
-// Returns an error when the JSON is malformed or the type is unrecognised.
+// Returns an error when the JSON is malformed or the type is unrecognized.
 func ParseTrigger(raw string) (Trigger, error) {
 	var t Trigger
 	if raw == "" || raw == "{}" {

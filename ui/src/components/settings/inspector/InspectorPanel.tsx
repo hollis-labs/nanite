@@ -46,9 +46,9 @@ function PanelCard({
   );
 }
 
-function TrafficDot({ colour }: { colour: "green" | "yellow" | "red" | string }) {
+function TrafficDot({ color }: { color: "green" | "yellow" | "red" | string }) {
   const bg =
-    colour === "green" ? "bg-green-500" : colour === "yellow" ? "bg-yellow-400" : "bg-red-500";
+    color === "green" ? "bg-green-500" : color === "yellow" ? "bg-yellow-400" : "bg-red-500";
   return <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${bg}`} />;
 }
 
@@ -79,7 +79,7 @@ function SlotGrid({ slots, reveal }: { slots: InspectorSlotSnapshot[]; reveal: b
           <div className="flex items-center justify-between mb-1">
             <span className="font-semibold text-fg capitalize">{slot.name}</span>
             <span className="flex items-center">
-              <TrafficDot colour={slot.traffic_light} />
+              <TrafficDot color={slot.traffic_light} />
               <TokenBadge count={slot.tokens} />
               {slot.cached && (
                 <span className="ml-1 text-[9px] text-green-600 font-medium">cached</span>
@@ -229,7 +229,7 @@ function ToolCallList({ calls }: { calls: InspectorToolCallRecord[] }) {
               })
             }
           >
-            {call.is_error ? <TrafficDot colour="red" /> : <TrafficDot colour="green" />}
+            {call.is_error ? <TrafficDot color="red" /> : <TrafficDot color="green" />}
             <span className="font-mono font-semibold text-fg">{call.name}</span>
             <span className="text-fg-muted text-[10px]">{call.latency_ms}ms</span>
             <span className="ml-auto text-[10px] text-fg-muted">{expanded.has(i) ? "▲" : "▼"}</span>

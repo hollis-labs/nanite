@@ -151,8 +151,8 @@ def compare_counts(label: str, baseline: dict[str, int], actual: Counter[str]) -
 def golangci_scan_error(report: dict[str, Any]) -> str:
     """Return golangci-lint's self-reported scan error, or "" if it ran clean.
 
-    golangci-lint sets Report.Error when it could not analyse something it was
-    asked to analyse -- a mistyped path, an import path where a directory was
+    golangci-lint sets Report.Error when it could not analyze something it was
+    asked to analyze -- a mistyped path, an import path where a directory was
     expected, a package that would not load.  It still writes a well-formed
     report carrying every *other* package's findings, and simply omits that
     target's.  Measured against the pinned v2.11.4 on 2026-08-24, from the repo

@@ -16,7 +16,7 @@
  *   - clearAllPanelDismissed → closed (per-panel) for all dismissed panels.
  *
  * Migrated 2026-05-01 chat-surface redesign — the bottom_chat_drawer surface
- * was retired in favour of ChatWorkingDrawer. The J8 source-attribution
+ * was retired in favor of ChatWorkingDrawer. The J8 source-attribution
  * machine no longer applies to that surface; only right-rail panels use it.
  * Routing through `bottom_chat_drawer` (the legacy key) still opens the
  * working drawer for back-compat, but without the dismiss-attribution gate.

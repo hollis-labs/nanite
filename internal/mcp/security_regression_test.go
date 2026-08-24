@@ -53,7 +53,7 @@ func TestDevBash_OutputBoundsTruncate(t *testing.T) {
 	}
 }
 
-// TestDevBash_ContextCancelPropagates verifies a cancelled parent context
+// TestDevBash_ContextCancelPropagates verifies a canceled parent context
 // returns from callBash promptly even when the sandbox goroutine is still
 // working. The stub blocks until the test releases it so we can observe the
 // cancellation path without racing the real sandbox.
@@ -79,7 +79,7 @@ func TestDevBash_ContextCancelPropagates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.IsError || !strings.Contains(result.Content[0].Text, "cancelled") {
+	if !result.IsError || !strings.Contains(result.Content[0].Text, "canceled") {
 		t.Fatalf("expected cancellation, got: %+v", result)
 	}
 	if elapsed > 200*time.Millisecond {
@@ -208,7 +208,7 @@ func TestDevGrep_ContextCancel(t *testing.T) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // pre-cancelled
+	cancel() // pre-canceled
 	result, err := dt.CallTool(ctx, "dev_grep", map[string]any{
 		"pattern":   "needle",
 		"directory": dir,
@@ -216,7 +216,7 @@ func TestDevGrep_ContextCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.IsError || !strings.Contains(result.Content[0].Text, "cancelled") {
+	if !result.IsError || !strings.Contains(result.Content[0].Text, "canceled") {
 		t.Fatalf("expected cancellation, got: %+v", result)
 	}
 }
@@ -302,7 +302,7 @@ func TestWebFetch_StripsControlChars(t *testing.T) {
 	}
 }
 
-// TestWebFetch_ContextCancelPropagates verifies a cancelled caller ctx aborts
+// TestWebFetch_ContextCancelPropagates verifies a canceled caller ctx aborts
 // the in-flight HTTP request promptly rather than waiting for the 10s client
 // timeout.
 func TestWebFetch_ContextCancelPropagates(t *testing.T) {

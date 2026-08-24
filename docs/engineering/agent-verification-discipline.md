@@ -158,7 +158,7 @@ Full guidance: `testing-workflow.md`.
 ## 6. Scope and escalation
 
 - **Do the dispatched task. Nothing else.** If you find other work — and you will — **write it down and report it; do not do it.**
-- **Escalate rather than deciding alone** when a fix requires changing production behaviour rather than test/sync code, when it would touch a file outside your stated fence, or when a question your dispatch flagged has no clear answer in the code.
+- **Escalate rather than deciding alone** when a fix requires changing production behavior rather than test/sync code, when it would touch a file outside your stated fence, or when a question your dispatch flagged has no clear answer in the code.
 - **Do not expand scope to route around a blocker.** Stop and ask.
 
 An honest negative result is a real deliverable. *"Not reproduced in N iterations; here is the hazard I found by reading, here is what I ruled out"* is worth more than a manufactured fix.

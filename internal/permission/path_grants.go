@@ -29,7 +29,7 @@
 //
 //   - This is intentionally an in-process store. Persistence to YAML or
 //     SQLite is out of scope for the trust-agent redesign — the user
-//     explicitly opted for "session-scoped, no nag-again" behaviour.
+//     explicitly opted for "session-scoped, no nag-again" behavior.
 //
 //   - The store is goroutine-safe: a single sync.RWMutex guards both
 //     registration and lookup. Read pressure dominates (one lookup per
@@ -374,7 +374,7 @@ func (g *PathGrants) BucketSize(sessionID string) int {
 // so a mention like ~/foo/bar.go yields the file's parent directory
 // (the bucket also contains the parent registration). Returning the
 // longest existing-directory match is the most-specific dir the user
-// has signalled intent toward.
+// has signaled intent toward.
 //
 // Order rationale: registration always co-stamps the literal AND its
 // parent (path_grants.go RegisterFromUserMessage). Sorting by length

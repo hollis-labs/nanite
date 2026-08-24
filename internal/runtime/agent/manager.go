@@ -53,7 +53,7 @@ func (s *Session) SendInput(payload []byte) error {
 // SIGTERM/SIGKILL escalation — see go-agent-wrapper's
 // adapters.InterruptCapability for the honest per-adapter ceiling on this
 // today, carried forward unchanged by this migration). Deliberately does
-// NOT touch Session.runCancel — see agent.go's Boot for why cancelling
+// NOT touch Session.runCancel — see agent.go's Boot for why canceling
 // wr.Run's own ctx from here would race an otherwise-clean stop into an
 // avoidable context.Canceled error; wr.Stop's own ctx parameter (bounded
 // by the caller) is the correct, sufficient interrupt mechanism on its

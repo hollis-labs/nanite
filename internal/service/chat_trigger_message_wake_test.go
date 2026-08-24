@@ -31,8 +31,8 @@ func newTriggerMessageWakeTestService(t *testing.T) (*chatServiceImpl, *capturin
 func TestTriggerMessageWake_BusySession_RejectsWithoutInterrupting(t *testing.T) {
 	svc, cs := newTriggerMessageWakeTestService(t)
 
-	cancelled := false
-	svc.activeGen["sess-1"] = &inFlightGen{msgID: "user-turn-in-flight", cancel: func() { cancelled = true }}
+	canceled := false
+	svc.activeGen["sess-1"] = &inFlightGen{msgID: "user-turn-in-flight", cancel: func() { canceled = true }}
 
 	msg := &messaging.Message{ID: "msg-1", ToSessionID: "sess-1", FromAgentID: "peer", Body: "hi"}
 	_, err := svc.TriggerMessageWake(context.Background(), "sess-1", msg)
@@ -40,7 +40,7 @@ func TestTriggerMessageWake_BusySession_RejectsWithoutInterrupting(t *testing.T)
 	if !errors.Is(err, ErrSessionBusy) {
 		t.Fatalf("expected ErrSessionBusy, got %v", err)
 	}
-	if cancelled {
+	if canceled {
 		t.Error("TriggerMessageWake must not cancel the existing in-flight user generation (takeover semantics would do this — reject-if-busy must not)")
 	}
 	if cs.callCount != 0 {

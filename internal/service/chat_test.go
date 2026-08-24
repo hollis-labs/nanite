@@ -574,7 +574,7 @@ func TestDetectStuckLoop(t *testing.T) {
 	// Note: lastResults now contains the modified (note-appended) text,
 	// so passing "result1" again won't match. The stuck loop detector
 	// correctly resets since the stored result differs. This matches the
-	// original engine behaviour: a real stuck loop sends the *same* raw
+	// original engine behavior: a real stuck loop sends the *same* raw
 	// tool output each time, which would be the unmodified result.
 	//
 	// To test the block path, we need consecutive matching results stored
@@ -670,8 +670,8 @@ func containsStr(s, sub string) bool {
 func TestChatService_RegisterGeneration_Takeover(t *testing.T) {
 	svc := &chatServiceImpl{activeGen: make(map[string]*inFlightGen)}
 
-	cancelledA := make(chan struct{})
-	cancelA := context.CancelFunc(func() { close(cancelledA) })
+	canceledA := make(chan struct{})
+	cancelA := context.CancelFunc(func() { close(canceledA) })
 
 	// First registration: no prior cancel.
 	if prev := svc.registerGeneration("sess", "msg-A", cancelA); prev != nil {
@@ -686,7 +686,7 @@ func TestChatService_RegisterGeneration_Takeover(t *testing.T) {
 	}
 	prev()
 	select {
-	case <-cancelledA:
+	case <-canceledA:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("prior cancel was not invoked")
 	}
@@ -731,8 +731,8 @@ func TestChatService_RegisterGeneration_ScopedPerSession(t *testing.T) {
 func TestChatService_CancelActiveGeneration_DispatchesCancel(t *testing.T) {
 	svc := &chatServiceImpl{activeGen: make(map[string]*inFlightGen)}
 
-	cancelled := make(chan struct{})
-	cancel := context.CancelFunc(func() { close(cancelled) })
+	canceled := make(chan struct{})
+	cancel := context.CancelFunc(func() { close(canceled) })
 
 	svc.registerGeneration("sess-active", "msg-1", cancel)
 
@@ -740,20 +740,20 @@ func TestChatService_CancelActiveGeneration_DispatchesCancel(t *testing.T) {
 		t.Fatal("CancelActiveGeneration returned false for an active generation")
 	}
 	select {
-	case <-cancelled:
+	case <-canceled:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("registered cancel was not invoked by CancelActiveGeneration")
 	}
 
 	// The slot is NOT cleared here; deregisterGeneration handles that when
-	// the cancelled goroutine returns. This preserves the takeover
+	// the canceled goroutine returns. This preserves the takeover
 	// semantics — a stale slot for a draining goroutine is fine because
 	// registerGeneration only consults the slot to compute `prev`.
 	svc.activeGenMu.Lock()
 	cur, ok := svc.activeGen["sess-active"]
 	svc.activeGenMu.Unlock()
 	if !ok || cur == nil || cur.msgID != "msg-1" {
-		t.Fatalf("expected slot retained for the cancelled gen, got %+v ok=%v", cur, ok)
+		t.Fatalf("expected slot retained for the canceled gen, got %+v ok=%v", cur, ok)
 	}
 }
 

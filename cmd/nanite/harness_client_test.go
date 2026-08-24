@@ -77,7 +77,7 @@ func newTestHarnessServer(t *testing.T) (*httptest.Server, *string) {
 	})
 
 	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(harnessCancelResponse{SessionID: r.PathValue("id"), Status: "cancelled"})
+		json.NewEncoder(w).Encode(harnessCancelResponse{SessionID: r.PathValue("id"), Status: "canceled"})
 	})
 
 	mux.HandleFunc("GET /api/harness/v1/sessions/{id}/events", func(w http.ResponseWriter, r *http.Request) {
@@ -309,7 +309,7 @@ func TestHarnessClient_Cancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
-	if resp.Status != "cancelled" {
+	if resp.Status != "canceled" {
 		t.Fatalf("unexpected status: %q", resp.Status)
 	}
 }

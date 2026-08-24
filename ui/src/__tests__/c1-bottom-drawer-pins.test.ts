@@ -144,7 +144,7 @@ describe("Terminal-1 session state", () => {
 
 // ── Tab overflow smoke test ──────────────────────────────────────────────────
 //
-// The horizontal-scroll behaviour is a CSS contract (`overflow-x-auto
+// The horizontal-scroll behavior is a CSS contract (`overflow-x-auto
 // scrollbar-hide` on the tabstrip wrapper). We can't render the full drawer
 // in a non-DOM Vitest run without significant React-Query setup, so this
 // "smoke test" verifies the constant + helper invariants the JSX relies on:

@@ -260,7 +260,7 @@ func TestDevBash_NoWorkingDir_UsesSessionGrant(t *testing.T) {
 	}
 	ctx := permission.WithPathGrants(context.Background(), "sess-bash", grants)
 
-	// AllowedPaths empty → only the session grant can authorise the call.
+	// AllowedPaths empty → only the session grant can authorize the call.
 	dt := NewDevToolsTransport(nil)
 	res, err := dt.CallTool(ctx, "dev_bash", map[string]any{
 		"command": "echo unified-gate",

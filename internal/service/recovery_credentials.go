@@ -130,9 +130,9 @@ func (a *recoveryCredentialsAdapter) Refresh(ctx context.Context, agentProfile s
 		return errors.New("recovery: credentials adapter: agents resolver not wired")
 	}
 
-	// Honour the caller-imposed deadline before any work — nanite's
+	// Honor the caller-imposed deadline before any work — nanite's
 	// keychain wrapper is synchronous (no ctx-aware variant), and the
-	// SetAPIKey rebuild is in-memory + fast, but a cancelled ctx should
+	// SetAPIKey rebuild is in-memory + fast, but a canceled ctx should
 	// short-circuit the whole flow.
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("recovery: credentials refresh aborted: %w", err)

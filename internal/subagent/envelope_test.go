@@ -80,16 +80,16 @@ func TestEnvelopeFromRun_FailureInternal(t *testing.T) {
 	}
 }
 
-// TestEnvelopeFromRun_Cancelled pins the cancel shape.
-func TestEnvelopeFromRun_Cancelled(t *testing.T) {
+// TestEnvelopeFromRun_Canceled pins the cancel shape.
+func TestEnvelopeFromRun_Canceled(t *testing.T) {
 	run := &Run{
 		ID:     "run-4",
 		Role:   "worker",
-		Status: StatusCancelled,
+		Status: StatusCanceled,
 	}
 	env := EnvelopeFromRun(run, "")
-	if env.Error.Kind != ErrorKindCancelled {
-		t.Errorf("Kind = %q, want %q", env.Error.Kind, ErrorKindCancelled)
+	if env.Error.Kind != ErrorKindCanceled {
+		t.Errorf("Kind = %q, want %q", env.Error.Kind, ErrorKindCanceled)
 	}
 }
 

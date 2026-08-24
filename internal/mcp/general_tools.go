@@ -266,7 +266,7 @@ func (g *GeneralToolsTransport) CallTool(ctx context.Context, name string, args 
 
 func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if err := ctx.Err(); err != nil {
-		return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("canceled: %v", err)), nil
 	}
 	rawURL, _ := args["url"].(string)
 	if rawURL == "" {

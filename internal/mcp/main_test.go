@@ -16,7 +16,7 @@ func TestMain(m *testing.M) {
 	envelope.SetupForTesting()
 	goleak.VerifyTestMain(m,
 		// groupKillBackstop is spawned by sandbox.setProcessGroupKill on every
-		// context cancellation. It intentionally outlives the cancelled command
+		// context cancellation. It intentionally outlives the canceled command
 		// by execWaitDelay+execGroupKillGrace (≈2.25s) to SIGKILL any grandchild
 		// processes that survive Go's WaitDelay escalation. Not a real leak.
 		goleak.IgnoreAnyFunction("github.com/hollis-labs/nanite/internal/sandbox.groupKillBackstop"),

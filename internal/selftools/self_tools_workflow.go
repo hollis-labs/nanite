@@ -177,7 +177,7 @@ func decodeStepArgs(args map[string]any, out any) error {
 }
 
 // jsonToolResult marshals v (one of the agentworkflow result types) and
-// wraps it as a text ToolResult. Marshalling cannot realistically fail —
+// wraps it as a text ToolResult. Marshaling cannot realistically fail —
 // no channels/funcs/cycles in these fields — but a failure falls back to
 // a structured error so the caller still gets a uniform shape.
 func jsonToolResult(v any) (*mcp.ToolResult, error) {

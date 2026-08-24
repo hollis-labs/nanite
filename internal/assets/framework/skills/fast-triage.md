@@ -34,7 +34,7 @@ Collect structured feedback or triage items through a browser UI via MCP, instea
 
 5. **Read the response.** Check `status`:
    - `"submitted"` — process `answers` (feedback) or `decisions` (triage).
-   - `"cancelled"` — user bailed. Acknowledge and ask how to proceed.
+   - `"canceled"` — user bailed. Acknowledge and ask how to proceed.
 
 6. **Follow up if needed.** To send a follow-up envelope, set `meta.parentEnvelopeId` to the previous envelope's ID. The UI shows continuity context.
 
@@ -167,7 +167,7 @@ Navigation: `j`/`k` or arrow keys.
 - ALWAYS verify MCP availability before sending an envelope
 - ALWAYS use unique IDs — collisions cause silent failures
 - NEVER send empty envelopes (zero questions or zero items)
-- NEVER retry a cancelled envelope — the user cancelled deliberately
+- NEVER retry a canceled envelope — the user canceled deliberately
 - Prefer triage for batch same-decision workflows; prefer feedback for varied questions
 - Use `suggestion` liberally — the response tells you whether the user accepted
 - Batch related questions into one envelope; don't send many single-question envelopes

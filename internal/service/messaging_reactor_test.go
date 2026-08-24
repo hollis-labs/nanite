@@ -71,7 +71,7 @@ func TestResolveMessageWakePolicy_GlobalDefaultWhenUnset(t *testing.T) {
 func TestResolveMessageWakePolicy_UnrecognizedSessionOverride_FallsThrough(t *testing.T) {
 	svc := &chatServiceImpl{
 		sessions: &stubSessionService{sessions: map[string]*store.Session{
-			"sess-1": {ID: "sess-1", Metadata: `{"message_wake_policy":"auto-summarise"}`}, // typo/variant
+			"sess-1": {ID: "sess-1", Metadata: `{"message_wake_policy":"auto-summarize"}`}, // typo/variant
 		}},
 		agents: &stubAgentService{agent: &store.AgentProfile{
 			Constraints: `{"message_wake_policy":"render_and_wait"}`,

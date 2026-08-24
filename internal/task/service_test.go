@@ -198,8 +198,8 @@ func TestCancel(t *testing.T) {
 	}
 
 	got, _ := svc.Get(ctx, task.ID)
-	if got.Status != StatusCancelled {
-		t.Errorf("status = %q, want cancelled", got.Status)
+	if got.Status != StatusCanceled {
+		t.Errorf("status = %q, want canceled", got.Status)
 	}
 }
 
@@ -320,18 +320,18 @@ func TestValidateTransition(t *testing.T) {
 		wantErr  bool
 	}{
 		{StatusPending, StatusInProgress, false},
-		{StatusPending, StatusCancelled, false},
+		{StatusPending, StatusCanceled, false},
 		{StatusPending, StatusCompleted, true},
 		{StatusPending, StatusFailed, true},
 		{StatusInProgress, StatusCompleted, false},
 		{StatusInProgress, StatusFailed, false},
-		{StatusInProgress, StatusCancelled, false},
+		{StatusInProgress, StatusCanceled, false},
 		{StatusInProgress, StatusPending, true},
 		{StatusCompleted, StatusPending, true},
 		{StatusCompleted, StatusInProgress, true},
 		{StatusFailed, StatusPending, false}, // retry
 		{StatusFailed, StatusCompleted, true},
-		{StatusCancelled, StatusPending, true},
+		{StatusCanceled, StatusPending, true},
 	}
 
 	for _, tt := range tests {

@@ -333,7 +333,7 @@ func (a *API) handleHarnessV1CancelTurn(w http.ResponseWriter, r *http.Request) 
 	}
 	status := "idle"
 	if a.Services.Chat.CancelActiveGeneration(sessionID) {
-		status = "cancelled"
+		status = "canceled"
 	}
 	a.jsonResp(w, http.StatusOK, harnessV1CancelResponse{
 		SessionID: sessionID,

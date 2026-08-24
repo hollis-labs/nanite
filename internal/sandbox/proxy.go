@@ -94,7 +94,7 @@ type Proxy struct {
 const defaultCONNECTDeadline = 5 * time.Minute
 
 // proxyStopDrainWindow is the time Stop waits for in-flight CONNECT
-// tunnels to drain after cancelling their context and closing their conns
+// tunnels to drain after canceling their context and closing their conns
 // before returning to the caller.
 const proxyStopDrainWindow = 5 * time.Second
 
@@ -336,7 +336,7 @@ func (p *Proxy) runTunnel(clientConn, targetConn net.Conn) {
 	copyOne := func(label string, dst, src net.Conn) {
 		p.lc.Go(label, func(ctx context.Context) {
 			// Fire a watcher that closes conns when the lifecycle ctx is
-			// cancelled (e.g. via Stop). Cheap — exits when the copy does.
+			// canceled (e.g. via Stop). Cheap — exits when the copy does.
 			done := make(chan struct{})
 			defer close(done)
 			go func() {

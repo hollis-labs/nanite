@@ -78,7 +78,7 @@ func emitNotifyPause(
 	ch chan chat.StreamEvent,
 	mu *sync.Mutex,
 	delay time.Duration,
-) (cancelled bool) {
+) (canceled bool) {
 	if !shouldNotifyPause(tu.Name) {
 		return false
 	}
@@ -119,13 +119,13 @@ func emitNotifyPause(
 	}
 
 	// Pause briefly. Two ways out:
-	//  - ctx.Done() fired → user cancelled (or session ended).
+	//  - ctx.Done() fired → user canceled (or session ended).
 	//  - timer expired → proceed.
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		slog.Info("chat-service: notify-pause cancelled by ctx",
+		slog.Info("chat-service: notify-pause canceled by ctx",
 			"tool", tu.Name, "tool_id", tu.ID, "err", ctx.Err())
 		return true
 	case <-timer.C:
@@ -155,7 +155,7 @@ func shouldNotifyPause(name string) bool {
 // firstNonEmptyPath extracts the first path-like input field from a
 // dev_* tool call (path / file_path / directory / working_dir) so the
 // notify-pause UI can show "Reading <path>..." rather than just the tool
-// name. Returns "" when no recognised field is present.
+// name. Returns "" when no recognized field is present.
 func firstNonEmptyPath(input map[string]any) string {
 	for _, key := range []string{"path", "file_path", "directory", "working_dir"} {
 		if v, ok := input[key]; ok {

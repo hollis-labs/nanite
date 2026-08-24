@@ -95,6 +95,6 @@ func elicitWithDuration(ctx context.Context, s *Service, req ElicitInput, timeou
 	case <-time.After(timeout):
 		return Response{Action: ActionCancel, Reason: "timeout"}, nil
 	case <-ctx.Done():
-		return Response{Action: ActionCancel, Reason: "context_cancelled"}, ctx.Err()
+		return Response{Action: ActionCancel, Reason: "context_canceled"}, ctx.Err()
 	}
 }

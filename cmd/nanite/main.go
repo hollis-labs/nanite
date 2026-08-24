@@ -208,8 +208,8 @@ func cmdServeWithInitializers(
 		slog.Warn("failed to load app config, using defaults", "err", appCfgErr)
 	}
 
-	// Initialise OpenTelemetry tracing via the internal/otel wrapper.
-	// The wrapper honours NANITE_OTEL_DISABLED=1 (env takes precedence)
+	// Initialize OpenTelemetry tracing via the internal/otel wrapper.
+	// The wrapper honors NANITE_OTEL_DISABLED=1 (env takes precedence)
 	// and TunablesConfig.OTel.Disabled — either installs a no-op tracer
 	// provider and returns a no-op shutdown.
 	otelCtx := context.Background()
@@ -806,7 +806,7 @@ func cmdServeWithInitializers(
 	// D1 (CW-20260429-0009): wire the Vanta-backed learning recorder
 	// + recaller used by lesson_capture and the lesson-recall slot
 	// extension. memory.Service satisfies the learnings.LearningStore
-	// interface; when it is nil (Conduit not initialised) both wires
+	// interface; when it is nil (Conduit not initialized) both wires
 	// stay nil and the self-tool returns a clear errorResult.
 	if container.Memory != nil {
 		selfTools.LearningRecorder = learnings.NewRecorder(container.Memory)
@@ -1513,7 +1513,7 @@ func cmdMCPServe(args []string) {
 	defer cancel()
 
 	// Reuse the same allow-list resolution path as the main server so the
-	// stdio MCP entry point honours config.dev_tools_allowed_paths and
+	// stdio MCP entry point honors config.dev_tools_allowed_paths and
 	// falls back to project root + cwd when the field is unset (per
 	// CW-20260430-0009 — no hardcoded user-specific defaults). Failures to
 	// load the agentrc config fall back to the same default ladder — the

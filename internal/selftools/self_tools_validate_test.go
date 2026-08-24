@@ -8,7 +8,7 @@ import (
 )
 
 // validateResp mirrors the shape callValidate emits so tests can assert
-// against it without re-marshalling the raw text payload by hand.
+// against it without re-marshaling the raw text payload by hand.
 type validateResp struct {
 	Valid  bool                  `json:"valid"`
 	Errors []validateRespErrItem `json:"errors"`

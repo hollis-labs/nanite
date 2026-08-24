@@ -70,7 +70,7 @@ cd ui && npm install --no-audit --no-fund --silent && npm run build
 ```
 
 The output is `ui/dist/index.js` and (optionally) `ui/dist/style.css`. The
-scaffold's Vite config externalises React and the eleven `@nanite/ui/*`
+scaffold's Vite config externalizes React and the eleven `@nanite/ui/*`
 primitives — your bundle must not include them. If `npm run build`
 produces a bundle containing React or any `@nanite/ui/*` symbol, check
 the Vite `rollupOptions.external` list.

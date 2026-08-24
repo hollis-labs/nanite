@@ -84,11 +84,11 @@ func TestEnvelopeRespond_SubmittedDefaultHandler(t *testing.T) {
 	}
 }
 
-func TestEnvelopeRespond_CancelledAndPartial(t *testing.T) {
+func TestEnvelopeRespond_CanceledAndPartial(t *testing.T) {
 	a, mux := newTestAPI(t)
 	sessID := seedSessionForEnvelope(t, a)
 
-	for _, status := range []chat.ResponseStatus{chat.StatusCancelled, chat.StatusPartial} {
+	for _, status := range []chat.ResponseStatus{chat.StatusCanceled, chat.StatusPartial} {
 		inst := seedEnvelopeInstance(t, a, sessID, "q")
 		body, _ := json.Marshal(chat.ResponseV1{V: 1, Kind: "q", ID: inst.ID, Status: status})
 		w := doPost(mux, "/api/envelopes/"+inst.ID+"/respond", body)

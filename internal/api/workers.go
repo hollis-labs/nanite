@@ -29,5 +29,5 @@ func (a *API) handleCancelWorker(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, map[string]string{"status": "cancelled"})
+	a.jsonResp(w, http.StatusOK, map[string]string{"status": "canceled"})
 }

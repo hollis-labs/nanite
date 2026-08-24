@@ -571,7 +571,7 @@ func (svc *Service) drainStatusEmissions(owner *spawnSlotWait, wait bool) {
 //
 // Uses a short context derived from context.Background, not the
 // caller's runCtx: the write must still land even if runCtx is on the
-// verge of its own deadline, and it must not be cancelled by the same
+// verge of its own deadline, and it must not be canceled by the same
 // timeout it exists to make survivable. Mirrors persistRetryCheckpoint's
 // context discipline.
 func (svc *Service) stampActivity(runID string) {
@@ -987,7 +987,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		//
 		// Acquire the fan-out semaphore before launching the
 		// goroutine. The caller's ctx governs the wait so a
-		// queued async spawn can be cancelled before it starts.
+		// queued async spawn can be canceled before it starts.
 		if err := svc.acquireSpawnSlotForRun(run.ID, slotWait); err != nil {
 			return "", err
 		}
@@ -1002,7 +1002,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 // markGatedSpawnFailed transitions a just-inserted 'requested' run to
 // 'failed' with an error reason when a post-insert step in gated Spawn
 // (envelope Emit, envelope_instance_id persist) fails. Compensating
-// update — uses Background ctx so it survives a cancelled caller, and
+// update — uses Background ctx so it survives a canceled caller, and
 // matches on status=requested to avoid clobbering a concurrent
 // Approve/Reject. Errors are swallowed: the caller is already returning
 // an error to its own caller; double-reporting helps no one.
@@ -1022,12 +1022,12 @@ func (svc *Service) Status(ctx context.Context, runID string) (*Run, error) {
 	return scanRun(row)
 }
 
-// Cancel marks a run as cancelled and unblocks its runner. Ordering
+// Cancel marks a run as canceled and unblocks its runner. Ordering
 // is load-bearing: on the success path we UPDATE the DB row to a complete
-// cancelled terminal state FIRST, reserve its terminal event, then invoke the
+// canceled terminal state FIRST, reserve its terminal event, then invoke the
 // registered CancelFunc. This makes
 // cancellation deterministic — a concurrent finalizeRun from the
-// unblocked runner sees status = cancelled (not in the (running,
+// unblocked runner sees status = canceled (not in the (running,
 // requested, approved) guard set) and no-ops. finalizeRun's re-read
 // branch patches the in-memory Run but suppresses its own emit because Cancel
 // owns the authoritative terminal event.
@@ -1058,13 +1058,13 @@ func (svc *Service) Cancel(ctx context.Context, runID string) error {
 			`UPDATE subagent_runs
 			    SET status = ?, completed_at = ?
 			  WHERE id = ? AND status IN (?,?,?)`,
-			StatusCancelled, now, runID, StatusRequested, StatusApproved, StatusRunning,
+			StatusCanceled, now, runID, StatusRequested, StatusApproved, StatusRunning,
 		)
 		if err == nil {
 			var affected int64
 			affected, err = res.RowsAffected()
 			if err == nil && affected > 0 {
-				run.Status = StatusCancelled
+				run.Status = StatusCanceled
 				run.CompletedAt = now
 				run.Error = ""
 				if cancelOwner != nil {
@@ -1301,7 +1301,7 @@ func (svc *Service) registerSpawnSlotWaitLocked(waitCtx context.Context, runID s
 
 // acquireSpawnSlotForRun acquires capacity for a registered run. The runCtx
 // check closes the race where Cancel wakes the semaphore wait at the same
-// instant a slot becomes available: a cancelled run releases that slot without
+// instant a slot becomes available: a canceled run releases that slot without
 // ever invoking the runner.
 func (svc *Service) acquireSpawnSlotForRun(runID string, wait *spawnSlotWait) error {
 	if err := svc.acquireSpawnSlot(wait.queueCtx); err != nil {
@@ -1353,7 +1353,7 @@ func (svc *Service) abandonQueuedRun(runID string) {
 	defer cancel()
 	res, err := svc.db.ExecContext(ctx,
 		`UPDATE subagent_runs SET status=?, completed_at=? WHERE id=? AND status=?`,
-		StatusCancelled, now, runID, StatusRunning)
+		StatusCanceled, now, runID, StatusRunning)
 	if err != nil {
 		slog.Error("subagent: persist abandoned queued run", "err", err, "run_id", runID)
 		return
@@ -1370,7 +1370,7 @@ func (svc *Service) abandonQueuedRun(runID string) {
 }
 
 // acquireSpawnSlot blocks until a slot in the fan-out semaphore is
-// available or ctx is cancelled. Returns ErrSpawnFanoutCapReached if
+// available or ctx is canceled. Returns ErrSpawnFanoutCapReached if
 // ctx.Done() fires while genuinely waiting for capacity (all 3 slots
 // occupied), ctx.Err() for other cancellation reasons, or nil on
 // successful acquisition.
@@ -1379,8 +1379,8 @@ func (svc *Service) acquireSpawnSlot(ctx context.Context) error {
 	case svc.spawnSem <- struct{}{}:
 		return nil
 	case <-ctx.Done():
-		// Context cancelled while waiting. Distinguish between "timed
-		// out waiting for a slot" (at-capacity) vs "cancelled for
+		// Context canceled while waiting. Distinguish between "timed
+		// out waiting for a slot" (at-capacity) vs "canceled for
 		// another reason" by attempting a non-blocking acquisition.
 		// If the semaphore is full, we were genuinely at capacity.
 		select {
@@ -1438,7 +1438,7 @@ func (svc *Service) executeWithSlot(ctx context.Context, run *Run, parentAgentID
 // across attempts so the chat path's message history carries forward
 // (the runner skips createChildSession when ChildSessionID is set);
 // an over_budget resume picks up the conversation rather than discards
-// it. fabrication-suspected, cancelled, rejected, and any state that
+// it. fabrication-suspected, canceled, rejected, and any state that
 // IsRetriableStatus rejects are never retried regardless of OnFail.
 // max_retries (default 3) caps the chain length. Each attempt gets a
 // fresh wall-clock budget — execute does not amortize the backstop
@@ -1465,7 +1465,7 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 			// classifyRunOutcome MUST see runCtx with its real
 			// post-runner Err() — that's how it tells "wall-clock
 			// backstop fired" from "runner returned an error of its
-			// own". Cancelling runCtx before this call would falsely
+			// own". Canceling runCtx before this call would falsely
 			// always report ctx.Err()==Canceled and the classifier
 			// would misroute a genuine runner error to stalled /
 			// over_budget.
@@ -1680,7 +1680,7 @@ func classifyRunOutcome(runErr error, result *Result, runCtx context.Context) st
 		return StatusStalled
 	}
 
-	// The wall-clock backstop fired (or the run was cancelled): the run
+	// The wall-clock backstop fired (or the run was canceled): the run
 	// context is done. A run that made real progress before the deadline
 	// is over_budget, not failed — it should not burn retry budget. A
 	// deadline that fired with zero progress is a silent/stuck run with
@@ -1906,8 +1906,8 @@ func (svc *Service) insertRun(ctx context.Context, r *Run) error {
 
 // finalizeRun updates the terminal fields of a run (status, result,
 // error, completed_at). Guarded so a concurrent Cancel that flipped
-// the row to 'cancelled' wins the race — without this, a runner
-// that was cancelled mid-flight would have its cancellation
+// the row to 'canceled' wins the race — without this, a runner
+// that was canceled mid-flight would have its cancellation
 // overwritten by the completed/failed terminal state this function
 // wants to write.
 //
@@ -1945,7 +1945,7 @@ func (svc *Service) finalizeRun(ctx context.Context, r *Run) (bool, error) {
 			`SELECT status FROM subagent_runs WHERE id = ?`, r.ID,
 		).Scan(&actual); err == nil {
 			r.Status = actual
-			if actual == StatusCancelled {
+			if actual == StatusCanceled {
 				// The runner returned ctx.Err() after Cancel fired;
 				// the "context canceled" Error is an artifact of the
 				// cancellation, not a real failure.
@@ -1965,12 +1965,12 @@ func (svc *Service) finalizeRun(ctx context.Context, r *Run) (bool, error) {
 //   - remaining budget (retry_count < max_retries)
 //   - a concurrent Cancel observed via either ctx or the persisted
 //     row status (a Cancel issued between attempts must NOT trigger
-//     another retry — that would resurrect a cancelled run).
+//     another retry — that would resurrect a canceled run).
 //
 // Unretriable outcomes never retry regardless of budget:
 //   - fabrication-suspected (the LLM produced unreliable text;
 //     re-running won't reliably fix that)
-//   - cancelled, rejected (operator decisions)
+//   - canceled, rejected (operator decisions)
 //
 // over_budget always retries within budget regardless of on_fail —
 // it is not a routing-on-fail case, it is a "productive run hit the
@@ -1978,8 +1978,8 @@ func (svc *Service) finalizeRun(ctx context.Context, r *Run) (bool, error) {
 // than discarded. on_fail=block / escalate only suppresses retry for
 // the failed / stalled buckets.
 func (svc *Service) shouldRetry(ctx context.Context, run *Run, runErr error) bool {
-	// Cancellation observed via ctx (parent cancelled the run): bail
-	// without retrying. The runner's own ctx already cancelled; the
+	// Cancellation observed via ctx (parent canceled the run): bail
+	// without retrying. The runner's own ctx already canceled; the
 	// row should land in its final state.
 	if ctx != nil && ctx.Err() != nil {
 		return false
@@ -2016,16 +2016,16 @@ func (svc *Service) shouldRetry(ctx context.Context, run *Run, runErr error) boo
 
 	// Concurrent Cancel: re-read the row's status before committing to
 	// another attempt. A Cancel that landed between attempts updates the
-	// row to cancelled; we must observe that and abort the chain rather
+	// row to canceled; we must observe that and abort the chain rather
 	// than the next runner.Run resurrecting it. Use a short-bounded
-	// background ctx so a cancelled parent ctx doesn't prevent the read.
+	// background ctx so a canceled parent ctx doesn't prevent the read.
 	checkCtx, checkCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer checkCancel()
 	var persistedStatus string
 	if err := svc.db.QueryRowContext(checkCtx,
 		`SELECT status FROM subagent_runs WHERE id = ?`, run.ID,
 	).Scan(&persistedStatus); err == nil {
-		if persistedStatus == StatusCancelled || persistedStatus == StatusRejected {
+		if persistedStatus == StatusCanceled || persistedStatus == StatusRejected {
 			return false
 		}
 	}
@@ -2050,7 +2050,7 @@ type attemptRecord struct {
 }
 
 // appendAttempt parses the existing AttemptsJSON array, appends the new
-// entry, and returns the marshalled result. A malformed prior value is
+// entry, and returns the marshaled result. A malformed prior value is
 // recovered to an empty array (a single corrupt attempts column must not
 // poison the rest of the chain — the loss is one entry of audit, not
 // run correctness). Returns "[]" on a marshal failure (effectively
@@ -2095,7 +2095,7 @@ func lastAttemptStatus(attemptsJSON string) string {
 // retry_count + attempts_json carry the prior history, and the result/
 // error/completed_at columns are reset so the next attempt's UPDATE
 // (via finalizeRun) writes fresh state. Uses a 5s timeout on a fresh
-// background ctx so a cancelled parent doesn't prevent the write.
+// background ctx so a canceled parent doesn't prevent the write.
 //
 // This persistence is best-effort: a failure here is logged but does not
 // abort the retry chain. The in-memory Run state is the source of truth
@@ -2114,7 +2114,7 @@ func (svc *Service) persistRetryCheckpoint(parentCtx context.Context, run *Run) 
 		       error = '', result_json = '{}', completed_at = ''
 		 WHERE id = ? AND status NOT IN (?, ?)`,
 		StatusRunning, run.RetryCount, attempts,
-		run.ID, StatusCancelled, StatusRejected,
+		run.ID, StatusCanceled, StatusRejected,
 	)
 	return err
 }

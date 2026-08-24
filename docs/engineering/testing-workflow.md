@@ -210,7 +210,7 @@ go test -shuffle=<seed> ./internal/<pkg>/      # reproduce
 | package | why it's a target |
 |---|---|
 | `internal/pathsafe` | path traversal — **security** |
-| `internal/ssrf` | URL parsing / SSRF defence — **security** |
+| `internal/ssrf` | URL parsing / SSRF defense — **security** |
 | `internal/truncate` | boundary handling, UTF-8 splitting |
 | `internal/filter` | input filtering |
 | `internal/llm/toolargs` | parses model-generated JSON — adversarial by nature |

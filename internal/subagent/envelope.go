@@ -19,7 +19,7 @@ import (
 //
 // This is the structural fix for the c160 turn-18 reproduction
 // (CW-20260512-0096): a sync subagent whose run.Status terminated as
-// failed/cancelled/rejected previously returned its last assistant text
+// failed/canceled/rejected previously returned its last assistant text
 // to the parent indistinguishable from a successful run. The universal
 // slot rule ("if subagent.success=false, acknowledge the failure; do
 // not narrate it as success") closes the LLM-side trust contract; this
@@ -93,10 +93,10 @@ const (
 	// ErrorKindConfig, so the reference was stale.)
 	ErrorKindDenied = "denied"
 
-	// ErrorKindCancelled indicates the run was cancelled
+	// ErrorKindCanceled indicates the run was canceled
 	// mid-flight (Cancel API or parent-side abort). Distinct from
 	// timeout — cancellation is operator-driven, timeout is policy.
-	ErrorKindCancelled = "cancelled"
+	ErrorKindCanceled = "canceled"
 
 	// ErrorKindInternal is the catch-all for runner failures that
 	// don't fit a more specific bucket (panic, child-session
@@ -127,7 +127,7 @@ const (
 	// is full (all 3 slots occupied) and the caller's context deadline
 	// expires while waiting for a slot (CW-20260816-0001). Distinct
 	// from ErrorKindTimeout (runner exceeded its execution limit) and
-	// ErrorKindCancelled (operator-driven). This signals resource
+	// ErrorKindCanceled (operator-driven). This signals resource
 	// exhaustion: the parent can retry later or sequence spawns to
 	// respect the cap.
 	ErrorKindAtCapacity = "at_capacity"
@@ -271,8 +271,8 @@ func equalFold(a, b string) bool {
 //     ErrorKindTimeout if run.Error matches a timeout/deadline string,
 //     otherwise ErrorKindInternal. The runner error string is
 //     propagated as the message.
-//   - StatusCancelled                     → Success=false,
-//     ErrorKindCancelled. Distinct from timeout — operator-driven.
+//   - StatusCanceled                     → Success=false,
+//     ErrorKindCanceled. Distinct from timeout — operator-driven.
 //   - StatusRejected                      → Success=false,
 //     ErrorKindDenied. Includes run.RejectionReason in the message
 //     when present.
@@ -328,9 +328,9 @@ func EnvelopeFromRun(run *Run, summary string) ResultEnvelope {
 			"role":   run.Role,
 			"status": run.Status,
 		})
-	case StatusCancelled:
-		return NewFailureEnvelope(run.ID, ErrorKindCancelled,
-			"subagent run was cancelled before completion",
+	case StatusCanceled:
+		return NewFailureEnvelope(run.ID, ErrorKindCanceled,
+			"subagent run was canceled before completion",
 			map[string]any{
 				"role":   run.Role,
 				"status": run.Status,

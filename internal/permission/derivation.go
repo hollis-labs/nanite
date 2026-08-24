@@ -24,7 +24,7 @@
 //
 // # Why allows don't propagate
 //
-// A parent whose profile grants "/Users/u/project_a/**" is signalling its
+// A parent whose profile grants "/Users/u/project_a/**" is signaling its
 // own scope, not the subagent's. The subagent's profile decides what the
 // subagent can reach (typically narrower — e.g. researcher allowed only
 // under "/docs/**"). Propagating parent allows would widen the subagent

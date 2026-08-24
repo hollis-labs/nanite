@@ -10,7 +10,7 @@ import (
 
 // fakeTransportRestarter satisfies mcpTransportRestarter for adapter
 // unit tests. Counts invocations and lets each test inject a per-call
-// behaviour (success / error / sleep-then-respect-ctx).
+// behavior (success / error / sleep-then-respect-ctx).
 type fakeTransportRestarter struct {
 	count   atomic.Int32
 	err     error
@@ -70,7 +70,7 @@ func TestRecoveryMCPAdapter_RestartTransport_Idempotent(t *testing.T) {
 }
 
 // TestRecoveryMCPAdapter_RestartTransport_TimeoutRespect verifies the
-// adapter honours a context deadline. The fake delays 200ms; the caller
+// adapter honors a context deadline. The fake delays 200ms; the caller
 // passes a 20ms ctx — the adapter must surface ctx.Err() within bounded
 // time, not block on the underlying close.
 func TestRecoveryMCPAdapter_RestartTransport_TimeoutRespect(t *testing.T) {
@@ -95,7 +95,7 @@ func TestRecoveryMCPAdapter_RestartTransport_TimeoutRespect(t *testing.T) {
 // TestRecoveryMCPAdapter_RestartTransport_NoNilPanic verifies a nil
 // adapter / nil-manager guard returns a clean error rather than
 // panicking. Defensive — the construction path leaves brokerDeps.MCP
-// unset when cfg.MCP is nil, but a partially-initialised adapter could
+// unset when cfg.MCP is nil, but a partially-initialized adapter could
 // reach the dispatch path through a refactor regression.
 func TestRecoveryMCPAdapter_RestartTransport_NoNilPanic(t *testing.T) {
 	var a *recoveryMCPAdapter

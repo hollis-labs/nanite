@@ -26,7 +26,7 @@ type HandoffPayload struct {
 	NextStepAnchor  string           `yaml:"next_step_anchor" json:"next_step_anchor"`
 }
 
-// HandoffPointer is one entry in HandoffPayload.ActivePointers — a labelled
+// HandoffPointer is one entry in HandoffPayload.ActivePointers — a labeled
 // pointer to a harness-cached resource the agent wants to remember the
 // existence of without paying the full token cost in the handoff itself.
 type HandoffPointer struct {

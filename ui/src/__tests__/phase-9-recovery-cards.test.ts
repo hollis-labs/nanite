@@ -11,7 +11,7 @@
  *   - The FE reads the token verbatim and POSTs it to
  *     `POST /api/sessions/{sessionID}/recovery/cancel` with body
  *     `{"token": "<token>"}`.
- *   - 200 → "cancelled" (broker cancelled the retry).
+ *   - 200 → "canceled" (broker canceled the retry).
  *   - 404 → "stale" (token unknown/expired/cross-session).
  *   - any other → "error".
  *   - Severity → variant mapping: info → info, warning → warning,
@@ -54,7 +54,7 @@ afterEach(() => {
 
 describe("api.cancelRecoveryRetry", () => {
   it("POSTs the token verbatim to the path-bound session endpoint", async () => {
-    const fn = mockFetchOnce({ status: 200, body: { status: "cancelled" } });
+    const fn = mockFetchOnce({ status: 200, body: { status: "canceled" } });
     await api.cancelRecoveryRetry("sess-123", "tok-abc");
     expect(fn).toHaveBeenCalledTimes(1);
     const [url, init] = fn.mock.calls[0];
@@ -66,10 +66,10 @@ describe("api.cancelRecoveryRetry", () => {
     });
   });
 
-  it("returns 'cancelled' on 200", async () => {
-    mockFetchOnce({ status: 200, body: { status: "cancelled" } });
+  it("returns 'canceled' on 200", async () => {
+    mockFetchOnce({ status: 200, body: { status: "canceled" } });
     const result = await api.cancelRecoveryRetry("sess", "tok");
-    expect(result).toBe("cancelled");
+    expect(result).toBe("canceled");
   });
 
   it("returns 'stale' on 404 (unknown / expired / cross-session token)", async () => {

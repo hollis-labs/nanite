@@ -94,7 +94,7 @@ func newMessageStream(messageID, sessionID string) *messageStream {
 // buf/nextID/subscriber; Subscribe and the producer just push through it.
 //
 // The non-blocking send to the current subscriber happens while ms.mu is
-// held. This serialises the write against subscribe()'s close(prev) (and
+// held. This serializes the write against subscribe()'s close(prev) (and
 // the producer-end close below), eliminating the data race between pump
 // fanout and subscriber replacement (CW-20260510-0002). The send is a
 // `select default`, so holding the lock cannot block — at worst we take

@@ -7,7 +7,7 @@
 //   - Each runtime dir has a corresponding README embedded in the framework
 //     asset tree under runtime-dir-readmes/<name>.md.
 //   - README creation is idempotent: if a README.md already exists (user may
-//     have customised it) we leave it alone.
+//     have customized it) we leave it alone.
 //   - EnsureRuntimeDirs is called from InstallHome after the main framework
 //     extract so it runs on every `nanite-agent init` and `--refresh`.
 package install
@@ -45,7 +45,7 @@ var runtimeDirs = []runtimeDir{
 	{name: "playbooks", readmeAsset: "runtime-dir-readmes/playbooks.md"},
 }
 
-// RuntimeDirReport summarises what EnsureRuntimeDirs did.
+// RuntimeDirReport summarizes what EnsureRuntimeDirs did.
 type RuntimeDirReport struct {
 	DirsCreated    int // directories newly created
 	DirsExisted    int // directories that were already present

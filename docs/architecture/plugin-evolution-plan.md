@@ -58,8 +58,8 @@ The plugin system has a solid foundation: clean SDK interfaces, a working host r
 **Completed:** 2026-03-29
 
 ### 1a. Fix pre-hook cancellation ✅
-- Added `plugin.ErrCancelled` sentinel error to plugin SDK
-- `EmitPreHook` now checks for `errors.Is(err, plugin.ErrCancelled)` — hooks return the error to signal cancellation
+- Added `plugin.ErrCanceled` sentinel error to plugin SDK
+- `EmitPreHook` now checks for `errors.Is(err, plugin.ErrCanceled)` — hooks return the error to signal cancellation
 - Legacy map-based `cancel` flag still supported for backward compatibility
 
 ### 1b. Fix nil router window ✅

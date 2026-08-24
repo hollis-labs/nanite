@@ -35,7 +35,7 @@ import (
 )
 
 // killGracePeriod is how long PTYBackend waits between SIGTERM and
-// SIGKILL when cancelling a job. Long enough for a well-behaved
+// SIGKILL when canceling a job. Long enough for a well-behaved
 // child to flush output and exit cleanly; short enough that a
 // Cancel call returns within the test budget (1s upper bound for
 // the cancellation tests).
@@ -84,12 +84,12 @@ type ptyJob struct {
 	// child — Cancel uses this to know when it's safe to mark the
 	// status terminal without a deadline race.
 	done chan struct{}
-	// cancelled is set by Cancel before signalling the process so
-	// the reaper's classifyExit reports StatusCancelled rather than
+	// canceled is set by Cancel before signaling the process so
+	// the reaper's classifyExit reports StatusCanceled rather than
 	// StatusFailed (the kernel-delivered signal looks like an exit
-	// error to cmd.Wait, but the user-visible reason is "cancelled").
+	// error to cmd.Wait, but the user-visible reason is "canceled").
 	// Same flag is set by the wall-clock-budget timer.
-	cancelled bool
+	canceled bool
 }
 
 // NewPTYBackend returns a PTYBackend wired with the production
@@ -185,14 +185,14 @@ func (b *PTYBackend) Start(ctx context.Context, jobID string, req JobRequest, on
 		completedAt := time.Now().UTC()
 
 		// Read the cancellation flag under the mutex — Cancel sets
-		// it before signalling, so by the time Wait returns, the
+		// it before signaling, so by the time Wait returns, the
 		// flag accurately reflects whether the exit was caller-
 		// requested or a real failure.
 		b.mu.Lock()
-		cancelled := job.cancelled
+		canceled := job.canceled
 		b.mu.Unlock()
 
-		status, errReport := classifyExit(waitErr, runCtx.Err(), cancelled)
+		status, errReport := classifyExit(waitErr, runCtx.Err(), canceled)
 
 		// Belt-and-suspenders: ensure no descendants survived the
 		// child's exit. killProcessGroup with SIGKILL is idempotent
@@ -238,7 +238,7 @@ func (b *PTYBackend) Status(jobID string) (JobStatus, error) {
 // an unknown or already-terminal job returns nil. Sends SIGTERM
 // first, then SIGKILL after killGracePeriod if the process is still
 // alive. Either way, the reaper observes the death and fires
-// onComplete with StatusCancelled.
+// onComplete with StatusCanceled.
 func (b *PTYBackend) Cancel(jobID string) error {
 	b.mu.Lock()
 	job, ok := b.jobs[jobID]
@@ -250,10 +250,10 @@ func (b *PTYBackend) Cancel(jobID string) error {
 		b.mu.Unlock()
 		return nil // already done; reaper handled
 	}
-	// Stamp the cancellation flag BEFORE signalling so the reaper
-	// classifies the resulting Wait error as StatusCancelled, not
+	// Stamp the cancellation flag BEFORE signaling so the reaper
+	// classifies the resulting Wait error as StatusCanceled, not
 	// StatusFailed.
-	job.cancelled = true
+	job.canceled = true
 	pgid := job.pgid
 	cancel := job.cancel
 	done := job.done
@@ -330,22 +330,22 @@ func drainPipes(stdout, stderr io.Reader, maxBytes int) (string, bool) {
 }
 
 // classifyExit maps a cmd.Wait() error + runCtx.Err() + caller-set
-// cancelled flag to a terminal JobStatus. Cancellation (cancelled
-// flag set OR runCtx done) reports StatusCancelled with no error;
+// canceled flag to a terminal JobStatus. Cancellation (canceled
+// flag set OR runCtx done) reports StatusCanceled with no error;
 // non-zero exit reports StatusFailed with the wait error; clean
 // exit reports StatusSucceeded.
 //
-// The cancelled flag is the load-bearing signal: ctxErr is only set
-// when the runCtx is cancelled, but Cancel signals the process group
+// The canceled flag is the load-bearing signal: ctxErr is only set
+// when the runCtx is canceled, but Cancel signals the process group
 // directly (faster than relying on exec.CommandContext's cancel
 // semantics) and then closes the runCtx after a grace period — by
 // the time Wait returns, ctxErr may not yet be set, so the explicit
 // flag is what the reaper checks.
-func classifyExit(waitErr, ctxErr error, cancelled bool) (JobStatus, error) {
-	if cancelled || ctxErr != nil {
+func classifyExit(waitErr, ctxErr error, canceled bool) (JobStatus, error) {
+	if canceled || ctxErr != nil {
 		// Cancellation request — even if the child had already exited
-		// non-zero, the user-visible reason is "cancelled".
-		return StatusCancelled, nil //nolint:nilerr // Cancellation is the terminal status, not a process failure.
+		// non-zero, the user-visible reason is "canceled".
+		return StatusCanceled, nil //nolint:nilerr // Cancellation is the terminal status, not a process failure.
 	}
 	if waitErr == nil {
 		return StatusSucceeded, nil

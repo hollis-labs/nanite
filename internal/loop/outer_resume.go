@@ -66,7 +66,7 @@ func (e *LoopEngine) WithOuterResumeNotifier(n OuterResumeNotifier) *LoopEngine 
 }
 
 // notifyOuterOnTerminal calls the configured OuterResumeNotifier once lr
-// reaches a genuine terminal status (completed/failed/cancelled). A no-op
+// reaches a genuine terminal status (completed/failed/canceled). A no-op
 // when no notifier is configured (the ordinary case for a Manual/API-
 // launched Loop with no outer WorkflowRun waiting on it at all) or when
 // status is not one of the three terminal values — waiting_on_gate/
@@ -88,7 +88,7 @@ func (e *LoopEngine) notifyOuterOnTerminal(ctx context.Context, loopRunID, statu
 		return
 	}
 	switch status {
-	case store.LoopRunStatusCompleted, store.LoopRunStatusFailed, store.LoopRunStatusCancelled:
+	case store.LoopRunStatusCompleted, store.LoopRunStatusFailed, store.LoopRunStatusCanceled:
 	default:
 		return
 	}

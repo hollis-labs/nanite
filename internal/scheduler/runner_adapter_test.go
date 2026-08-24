@@ -391,7 +391,7 @@ func TestEnqueue_LoopRunTick_WaitingOnGate_ResumesLoop(t *testing.T) {
 
 // TestEnqueue_LoopRunTick_NotResumableStatusIsNotAnError proves this task's
 // own no-op guard: a tick against a LoopRun no longer in a resumable status
-// (running, completed, failed, cancelled) is a cheap no-op, not an error --
+// (running, completed, failed, canceled) is a cheap no-op, not an error --
 // and, critically, Resume is never called (calling it would itself return a
 // hard error, per *loop.LoopEngine.Resume's own switch).
 func TestEnqueue_LoopRunTick_NotResumableStatusIsNotAnError(t *testing.T) {
@@ -399,7 +399,7 @@ func TestEnqueue_LoopRunTick_NotResumableStatusIsNotAnError(t *testing.T) {
 		store.LoopRunStatusRunning,
 		store.LoopRunStatusCompleted,
 		store.LoopRunStatusFailed,
-		store.LoopRunStatusCancelled,
+		store.LoopRunStatusCanceled,
 	} {
 		t.Run(status, func(t *testing.T) {
 			resumer := &fakeLoopResumer{}

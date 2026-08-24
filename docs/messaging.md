@@ -70,7 +70,7 @@ When an unknown `from_agent_id` sends a message:
 
 `internal/subagent/` implements the inline subagent spawn flow — a primary agent can spawn a short-lived subagent to handle a subtask.
 
-**Lifecycle:** `requested → approved → running → completed | failed | cancelled` (persisted in `subagent_runs`).
+**Lifecycle:** `requested → approved → running → completed | failed | canceled` (persisted in `subagent_runs`).
 
 **Modes:**
 - `sync` — blocking spawn; caller holds until the runner returns. Reply lands in `chat` channel.

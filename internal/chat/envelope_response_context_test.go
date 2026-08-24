@@ -12,8 +12,8 @@ import (
 // internal/api/envelopes_e2e_test.go.
 
 func TestFormatEnvelopeResponseContent(t *testing.T) {
-	got := FormatEnvelopeResponseContent("q", StatusCancelled, "")
-	want := "[envelope:q status:cancelled] {}"
+	got := FormatEnvelopeResponseContent("q", StatusCanceled, "")
+	want := "[envelope:q status:canceled] {}"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}

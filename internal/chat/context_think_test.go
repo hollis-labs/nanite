@@ -46,7 +46,7 @@ func TestThinkBlockV1TokenBudget(t *testing.T) {
 }
 
 // TestThinkBlockV1F5TODO verifies that thinkToolBlockV1 carries a source-level
-// reference to F5 (CW-20260420-0022), signalling the seam for dynamic
+// reference to F5 (CW-20260420-0022), signaling the seam for dynamic
 // hint selection.
 func TestThinkBlockV1F5TODO(t *testing.T) {
 	// The TODO lives in the Go source comment above the const, not in the

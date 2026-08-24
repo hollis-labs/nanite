@@ -48,8 +48,8 @@ func completionBody(result JobResult) string {
 			return "Background job " + result.JobID + " failed: " + result.Error
 		}
 		return "Background job " + result.JobID + " failed."
-	case StatusCancelled:
-		return "Background job " + result.JobID + " was cancelled."
+	case StatusCanceled:
+		return "Background job " + result.JobID + " was canceled."
 	default:
 		return "Background job " + result.JobID + " reached status " + string(result.Status) + "."
 	}

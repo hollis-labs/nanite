@@ -122,14 +122,14 @@ func TestDispatchRetryHTTPPropagatesRetryErr(t *testing.T) {
 	}
 }
 
-// TestDispatchRetryHTTPBackoffRespectsCancel verifies a cancelled ctx
+// TestDispatchRetryHTTPBackoffRespectsCancel verifies a canceled ctx
 // aborts the backoff wait promptly (bounded time) instead of blocking
 // for the full computed backoff duration, and never calls Retry once
-// cancelled. Mirrors the FE [Cancel retry] flow, which cancels the ctx
+// canceled. Mirrors the FE [Cancel retry] flow, which cancels the ctx
 // registered via registerActiveRetry before DispatchRetry runs.
 func TestDispatchRetryHTTPBackoffRespectsCancel(t *testing.T) {
 	httpRetry := &fakeHTTPRetry{}
-	// Generous ceiling so the uncancelled wait would be seconds long —
+	// Generous ceiling so the uncanceled wait would be seconds long —
 	// proves the early return is due to ctx cancellation, not the
 	// backoff naturally elapsing.
 	b := NewBroker(Dependencies{HTTPRetry: httpRetry}, WithRemediationTimeout(10*time.Second))
@@ -151,7 +151,7 @@ func TestDispatchRetryHTTPBackoffRespectsCancel(t *testing.T) {
 		t.Fatalf("DispatchRetry blocked %v past cancellation (want well under the 4s backoff step)", elapsed)
 	}
 	if httpRetry.calls() != 0 {
-		t.Errorf("HTTPRetry.Retry should not be called once ctx is cancelled during backoff, got %d calls", httpRetry.calls())
+		t.Errorf("HTTPRetry.Retry should not be called once ctx is canceled during backoff, got %d calls", httpRetry.calls())
 	}
 }
 

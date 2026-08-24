@@ -162,9 +162,9 @@ func TestDispatchSpawner_TerminalStateMapping(t *testing.T) {
 			wantErr: "subagent failed: tool exploded",
 		},
 		{
-			name:    "cancelled",
-			run:     &subagent.Run{Status: subagent.StatusCancelled},
-			wantErr: "subagent cancelled",
+			name:    "canceled",
+			run:     &subagent.Run{Status: subagent.StatusCanceled},
+			wantErr: "subagent canceled",
 		},
 		{
 			name:    "rejected",

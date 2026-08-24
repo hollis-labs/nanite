@@ -46,9 +46,9 @@ func (s *toolCacheOverrideStore) Set(sessionID string, o intent.Override) {
 // LLM layer reuses the classifier provider/model (falling back to the
 // summarizer + chat defaults) resolved from UserSettings.
 //
-// On construction we honour the user's current setting; if they change the
+// On construction we honor the user's current setting; if they change the
 // classifier mode or timeout at runtime, a restart picks up the change. This
-// mirrors BuildSummarizer's behaviour (context.go S3a pattern).
+// mirrors BuildSummarizer's behavior (context.go S3a pattern).
 func buildToolIntentClassifier(reg *provider.Registry, s *store.Store) intent.Classifier {
 	rules := intent.NewRulesClassifier()
 	if s == nil {

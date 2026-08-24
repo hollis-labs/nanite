@@ -68,7 +68,7 @@ type ContextClient struct {
 	WorkspaceCache *wsutil.Cache
 
 	// WorkingDirForSession resolves the on-disk working_dir for a
-	// session. Today the closest analogue is the session's project
+	// session. Today the closest analog is the session's project
 	// repo_path (store.Project.RepoPath). The resolver is injected
 	// rather than hard-wired so test paths can supply a t.TempDir() and
 	// future evolution (e.g. session-scoped working_dir column) only
@@ -460,7 +460,7 @@ func (cb *ContextClient) buildPermissionsSlotContent(session *store.Session, age
 //     walk-up entirely. Construct via workspace.NewCache(); the cache is
 //     concurrency-safe and process-lifetime.
 //   - cb.WorkingDirForSession: session → working_dir resolver. Today the
-//     closest analogue is the session's project repo_path. Injected rather
+//     closest analog is the session's project repo_path. Injected rather
 //     than hard-wired so test paths can supply a t.TempDir() and future
 //     evolution (session.working_dir column, etc.) only touches the wiring
 //     layer.

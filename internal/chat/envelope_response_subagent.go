@@ -41,7 +41,7 @@ func (h *SubagentApprovalHandler) HandleResponse(ctx context.Context, env store.
 			FollowUp:       fmt.Sprintf("Subagent run %s approved — running.", p.RunID),
 			TranscriptData: map[string]any{"run_id": p.RunID, "decision": "approved"},
 		}, nil
-	case StatusCancelled:
+	case StatusCanceled:
 		reason, _ := resp.Data["reason"].(string)
 		if err := h.svc.Reject(ctx, p.RunID, reason); err != nil {
 			return HandlerResult{}, fmt.Errorf("reject run %s: %w", p.RunID, err)

@@ -275,7 +275,7 @@ func waitForRunTerminal(t *testing.T, st *SelfToolsTransport, runID string) {
 		run, err := st.Subagent.Status(context.Background(), runID)
 		if err == nil && run != nil {
 			switch run.Status {
-			case subagent.StatusCompleted, subagent.StatusFailed, subagent.StatusCancelled, subagent.StatusRejected:
+			case subagent.StatusCompleted, subagent.StatusFailed, subagent.StatusCanceled, subagent.StatusRejected:
 				return
 			}
 		}

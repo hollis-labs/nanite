@@ -88,7 +88,7 @@ Additional:
 #### Task Tracking
 - `internal/task/` package: Task struct (id, title, status, assignee, parent, metadata, timestamps)
 - TaskService in service layer: Create, Update, List, Get, Assign, Transition
-- Status flow: pending → in_progress → completed/failed/cancelled
+- Status flow: pending → in_progress → completed/failed/canceled
 - Parent-child relationships for subtask decomposition
 - Badger-backed for real-time state, with periodic SQLite snapshots for persistence across restarts
 - API endpoints: CRUD + assign + transition + list-by-session + list-by-agent

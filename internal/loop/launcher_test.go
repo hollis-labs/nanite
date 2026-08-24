@@ -218,8 +218,8 @@ func TestLoopLauncher_Cancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLoopRun: %v", err)
 	}
-	if lr.Status != store.LoopRunStatusCancelled {
-		t.Fatalf("Status = %q, want cancelled", lr.Status)
+	if lr.Status != store.LoopRunStatusCanceled {
+		t.Fatalf("Status = %q, want canceled", lr.Status)
 	}
 	if lr.CompletedAt == "" {
 		t.Fatalf("CompletedAt not set after Cancel")
@@ -348,15 +348,15 @@ func TestLoopLauncher_ResolveEscalation_ForceCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveEscalation: %v", err)
 	}
-	if result.Status != store.LoopRunStatusCancelled {
-		t.Fatalf("Status = %q, want cancelled", result.Status)
+	if result.Status != store.LoopRunStatusCanceled {
+		t.Fatalf("Status = %q, want canceled", result.Status)
 	}
 	lr, err := st.GetLoopRun(ctx, loopRunID)
 	if err != nil {
 		t.Fatalf("GetLoopRun: %v", err)
 	}
-	if lr.Status != store.LoopRunStatusCancelled {
-		t.Fatalf("persisted Status = %q, want cancelled", lr.Status)
+	if lr.Status != store.LoopRunStatusCanceled {
+		t.Fatalf("persisted Status = %q, want canceled", lr.Status)
 	}
 }
 

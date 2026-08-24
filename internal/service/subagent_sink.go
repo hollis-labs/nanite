@@ -6,7 +6,7 @@ import (
 
 // subagentStreamSink bridges subagent.Service's status emission to the
 // parent session's SSE stream. Each transition (running, completed,
-// failed, cancelled) becomes a chat.StreamEvent of type
+// failed, canceled) becomes a chat.StreamEvent of type
 // "subagent_run_status_changed" on the parent session.
 //
 // Mirrors the T7 messagingStreamSink pattern (messaging_sink.go).

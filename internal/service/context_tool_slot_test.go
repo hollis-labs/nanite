@@ -338,7 +338,7 @@ func TestAssembleSlots_S3b_TokensBeforeReflectsPriorSlot(t *testing.T) {
 
 func TestAssembleSlots_S3b_ClassifierErrorStillRenders(t *testing.T) {
 	// When the classifier returns an error, contextServiceImpl currently still
-	// honours the returned Result (BrokerClassifier's fail-open pattern applies
+	// honors the returned Result (BrokerClassifier's fail-open pattern applies
 	// upstream). Here we exercise the scripted case where the classifier
 	// returns a fail-open Result with err=non-nil.
 	cls := &scriptedClassifier{

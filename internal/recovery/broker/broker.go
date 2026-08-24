@@ -215,7 +215,7 @@ func (b *Broker) CancelRetry(token string) {
 // Cancel aborts the in-flight retry identified by token IFF the token
 // was issued for sessionID. Returns true when a cancel actually ran;
 // false for unknown tokens, mismatched sessionIDs, empty inputs, or
-// already-cancelled tokens. Used by the BE recovery-cancel HTTP
+// already-canceled tokens. Used by the BE recovery-cancel HTTP
 // endpoint to enforce per-session token ownership: a token leaked or
 // replayed from another session is silently rejected.
 //

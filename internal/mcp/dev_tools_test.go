@@ -599,7 +599,7 @@ func TestResolveAllowed_TildeUserPath(t *testing.T) {
 	// On macOS UserHomeDir reads from $HOME first, so the override is
 	// enough. Re-resolve to be sure nothing cached.
 	if h, _ := os.UserHomeDir(); h != real {
-		t.Skipf("HOME override not honoured (got %q, want %q)", h, real)
+		t.Skipf("HOME override not honored (got %q, want %q)", h, real)
 	}
 
 	// Allowed path includes a literal ~/sub entry; NewDevToolsTransport

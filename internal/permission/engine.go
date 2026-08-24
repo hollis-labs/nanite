@@ -216,7 +216,7 @@ func (e *Engine) WaitForApproval(ctx context.Context, req *ApprovalRequest) Appr
 		slog.Warn("permission: approval timed out — defaulting to deny", "id", req.ID, "timeout", timeout)
 		return ApprovalResponse{Decision: DecisionDeny, Scope: ScopeOnce, TimedOut: true}
 	case <-ctx.Done():
-		slog.Warn("permission: approval cancelled — defaulting to deny", "id", req.ID)
+		slog.Warn("permission: approval canceled — defaulting to deny", "id", req.ID)
 		return ApprovalResponse{Decision: DecisionDeny, Scope: ScopeOnce, TimedOut: false}
 	}
 }

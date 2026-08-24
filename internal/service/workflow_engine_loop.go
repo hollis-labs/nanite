@@ -285,12 +285,12 @@ func parseLoopStepConfig(cfg map[string]any, outerParams map[string]any) (LoopSt
 }
 
 // isTerminalLoopStatus reports whether status is one of the three genuine
-// terminal loop_runs.status values (completed/failed/cancelled) — distinct
+// terminal loop_runs.status values (completed/failed/canceled) — distinct
 // from the two paused values (waiting_on_gate/waiting_on_escalation),
 // which keep a StepKindLoop step in waiting_on_loop.
 func isTerminalLoopStatus(status string) bool {
 	switch status {
-	case store.LoopRunStatusCompleted, store.LoopRunStatusFailed, store.LoopRunStatusCancelled:
+	case store.LoopRunStatusCompleted, store.LoopRunStatusFailed, store.LoopRunStatusCanceled:
 		return true
 	default:
 		return false

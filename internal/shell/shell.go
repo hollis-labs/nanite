@@ -18,7 +18,7 @@ const (
 	ModeYOLO Mode = "yolo"
 )
 
-// ValidMode returns true if m is one of the three recognised modes.
+// ValidMode returns true if m is one of the three recognized modes.
 func ValidMode(m string) bool {
 	switch Mode(m) {
 	case ModeAsk, ModeSession, ModeYOLO:

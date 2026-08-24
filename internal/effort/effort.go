@@ -152,7 +152,7 @@ type ReasoningConfig struct {
 	// BudgetMode is an advisory token-budget strategy hint for the
 	// Anthropic thinking_config. Supported values:
 	//   "enabled" — use BudgetTokens as the max_tokens ceiling (default).
-	// Providers that don't recognise the value ignore this field.
+	// Providers that don't recognize the value ignore this field.
 	BudgetMode string
 }
 

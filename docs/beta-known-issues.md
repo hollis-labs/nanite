@@ -21,9 +21,9 @@ Last updated: 2026-04-10 (afternoon — all P0 items resolved; P0-4 closed by do
 
 ### 1. `TestShutdown` data race in `internal/worker` — ✅ Done (merged)
 
-Race between `Manager.Shutdown()` writing `w.Status = StatusCancelled` and the in-flight `SpawnFull` goroutine writing terminal status values (`StatusFailed` / `StatusCompleted`). Both wrote `Worker.Status` without synchronization. Reproducible via `go test -race -run TestShutdown ./internal/worker/...`.
+Race between `Manager.Shutdown()` writing `w.Status = StatusCanceled` and the in-flight `SpawnFull` goroutine writing terminal status values (`StatusFailed` / `StatusCompleted`). Both wrote `Worker.Status` without synchronization. Reproducible via `go test -race -run TestShutdown ./internal/worker/...`.
 
-**Fix:** Added `sync.RWMutex` to `Worker` with `GetStatus()`/`SetStatus()` accessors; routed all in-package reads/writes through them; added a "don't clobber `StatusCancelled`" guard in `SpawnFull`'s terminal transitions.
+**Fix:** Added `sync.RWMutex` to `Worker` with `GetStatus()`/`SetStatus()` accessors; routed all in-package reads/writes through them; added a "don't clobber `StatusCanceled`" guard in `SpawnFull`'s terminal transitions.
 
 **Merged:** `1343446` on `main` (2026-04-10). Landed together with #3 below via the combined branch `fix/worker-field-sync` (now deleted).
 

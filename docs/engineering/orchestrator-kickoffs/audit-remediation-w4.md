@@ -110,7 +110,7 @@ never the already-built, already-tested `InstallTeamRunRouting`. AD-08's own
 text is blunt about the acceptance bar: *"the guide's four-step reachability
 proof is the acceptance bar: production entry point →
 construction/registration/wiring → feature invocation → observable
-behaviour. Being unwired-but-well-tested is precisely how this island came to
+behavior. Being unwired-but-well-tested is precisely how this island came to
 exist."* `team_routing.go` already carries 927 lines of tests against 771 of
 implementation — more test investment than any other island in this folder —
 and it was still unreachable in production until this task. Brief the `09/03`

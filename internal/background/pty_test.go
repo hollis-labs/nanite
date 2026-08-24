@@ -160,8 +160,8 @@ func TestPTYBackend_CancelKillsProcessGroup(t *testing.T) {
 	}
 
 	got := cap.wait(t, 2*time.Second)
-	if got.Status != StatusCancelled {
-		t.Fatalf("status = %s; want cancelled", got.Status)
+	if got.Status != StatusCanceled {
+		t.Fatalf("status = %s; want canceled", got.Status)
 	}
 	if elapsed := time.Since(cancelStart); elapsed > 2*time.Second {
 		t.Fatalf("Cancel took %s; expected <2s", elapsed)
@@ -262,7 +262,7 @@ func TestPTYBackend_LongRunningJobLifecycle(t *testing.T) {
 
 // TestPTYBackend_WallClockBudgetCancels verifies the wall-clock
 // guard fires when the job exceeds Budget.WallClockSeconds, and the
-// completion envelope reports cancelled.
+// completion envelope reports canceled.
 func TestPTYBackend_WallClockBudgetCancels(t *testing.T) {
 	skipIfWindows(t)
 	t.Parallel()
@@ -282,8 +282,8 @@ func TestPTYBackend_WallClockBudgetCancels(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	got := cap.wait(t, 5*time.Second)
-	if got.Status != StatusCancelled {
-		t.Fatalf("status = %s; want cancelled (wall-clock budget)", got.Status)
+	if got.Status != StatusCanceled {
+		t.Fatalf("status = %s; want canceled (wall-clock budget)", got.Status)
 	}
 }
 

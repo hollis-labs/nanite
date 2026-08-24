@@ -56,7 +56,7 @@ func (h *ElicitationResponseHandler) HandleResponse(_ context.Context, env store
 			// (backward-compat with basic submitted responses).
 			action = elicitation.ActionAccept
 		}
-	case StatusCancelled:
+	case StatusCanceled:
 		action = elicitation.ActionCancel
 	default:
 		action = elicitation.ActionCancel

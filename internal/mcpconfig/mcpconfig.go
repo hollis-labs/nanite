@@ -31,7 +31,7 @@ type ServerEntry struct {
 	Env map[string]string `json:"env,omitempty"`
 }
 
-// ImportResult summarises what happened during an import.
+// ImportResult summarizes what happened during an import.
 type ImportResult struct {
 	Created []string `json:"created"`
 	Skipped []string `json:"skipped"` // already existed
@@ -175,7 +175,7 @@ func Export(s *store.Store) (*ClaudeCodeConfig, error) {
 	return cfg, nil
 }
 
-// Marshal serialises a ClaudeCodeConfig as indented JSON.
+// Marshal serializes a ClaudeCodeConfig as indented JSON.
 func Marshal(cfg *ClaudeCodeConfig) ([]byte, error) {
 	return json.MarshalIndent(cfg, "", "  ")
 }

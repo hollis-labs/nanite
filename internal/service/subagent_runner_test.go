@@ -593,7 +593,7 @@ func TestChatRunner_DrainsSummaryAndEnvelope(t *testing.T) {
 // TestChatRunner_CapturesPartialResultOnStreamError is the acceptance
 // test for CW-20260519-0071 (audit §P2). A productive subagent that did
 // real tool-iteration work and then had its in-flight provider stream
-// cancelled by the run-budget deadline must not have its accumulated
+// canceled by the run-budget deadline must not have its accumulated
 // work discarded. The runner now returns the partial *subagent.Result
 // (summary + envelope + tool counts) ALONGSIDE the stream error, so
 // subagent.execute can persist result_json on the StatusFailed branch

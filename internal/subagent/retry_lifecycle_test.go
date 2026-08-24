@@ -19,7 +19,7 @@ import (
 //
 //   - Retriable outcomes (over_budget, stalled, failed-with-OnFail=retry)
 //     trigger another iteration up to max_retries
-//   - Unretriable outcomes (fabrication-suspected, cancelled, rejected)
+//   - Unretriable outcomes (fabrication-suspected, canceled, rejected)
 //     never auto-retry regardless of budget
 //   - Each attempt's outcome is folded into AttemptsJSON
 //   - The runner sees a stable Run struct across attempts (the
@@ -306,7 +306,7 @@ func TestShouldRetry_OverBudgetIgnoresOnFailBlock(t *testing.T) {
 	svc := NewService(db, EchoRunner{}, &stubPoster{}, nil, stubSettings{})
 
 	// Insert a row so shouldRetry's row-status re-read finds something
-	// other than cancelled / rejected. The values here mimic mid-chain
+	// other than canceled / rejected. The values here mimic mid-chain
 	// state: status is the JUST-classified terminal outcome of an
 	// attempt; the persisted row is still 'running' at the point
 	// shouldRetry is consulted (persistRetryCheckpoint not yet called
@@ -379,11 +379,11 @@ func TestShouldRetry_FailedHonoursOnFailBlock(t *testing.T) {
 	}
 }
 
-// TestShouldRetry_CancelledRowAbortsChain pins the cancel-mid-chain
+// TestShouldRetry_CanceledRowAbortsChain pins the cancel-mid-chain
 // invariant at the shouldRetry layer: a row whose status was flipped to
-// cancelled between attempts must abort the chain rather than triggering
+// canceled between attempts must abort the chain rather than triggering
 // another runner invocation.
-func TestShouldRetry_CancelledRowAbortsChain(t *testing.T) {
+func TestShouldRetry_CanceledRowAbortsChain(t *testing.T) {
 	db, _ := newTestDB(t)
 	svc := NewService(db, EchoRunner{}, &stubPoster{}, nil, stubSettings{})
 	run := &Run{
@@ -400,19 +400,19 @@ func TestShouldRetry_CancelledRowAbortsChain(t *testing.T) {
 	if err := svc.insertRun(context.Background(), run); err != nil {
 		t.Fatalf("insertRun: %v", err)
 	}
-	// Concurrent Cancel landed: persisted status is cancelled.
-	if _, err := db.Exec(`UPDATE subagent_runs SET status='cancelled' WHERE id=?`, run.ID); err != nil {
+	// Concurrent Cancel landed: persisted status is canceled.
+	if _, err := db.Exec(`UPDATE subagent_runs SET status='canceled' WHERE id=?`, run.ID); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
 	if svc.shouldRetry(context.Background(), run, errors.New("boom")) {
-		t.Error("shouldRetry(persisted-cancelled) = true; want false")
+		t.Error("shouldRetry(persisted-canceled) = true; want false")
 	}
 }
 
 // TestExecute_CancelDuringAttemptBailsOut pins the end-to-end
 // cancellation discipline: a Cancel call that lands while a runner is
 // in-flight cancels the runner's ctx, the runner returns ctx.Err(), and
-// the loop sees the cancelled ctx and bails without retrying.
+// the loop sees the canceled ctx and bails without retrying.
 //
 // The runner blocks on its ctx so the test has a deterministic window
 // to issue Cancel — no race with the next-iteration entry into Run.
@@ -455,7 +455,7 @@ func TestExecute_CancelDuringAttemptBailsOut(t *testing.T) {
 		t.Fatalf("Cancel: %v", err)
 	}
 
-	// Poll for terminal state. The loop's ctx-cancelled branch in
+	// Poll for terminal state. The loop's ctx-canceled branch in
 	// shouldRetry should bail without a second runner invocation.
 	deadline := time.Now().Add(2 * time.Second)
 	var run *Run
@@ -473,8 +473,8 @@ func TestExecute_CancelDuringAttemptBailsOut(t *testing.T) {
 	if run == nil {
 		t.Fatal("run did not reach a terminal state within 2s")
 	}
-	if run.Status != StatusCancelled {
-		t.Errorf("final Status = %q, want %q", run.Status, StatusCancelled)
+	if run.Status != StatusCanceled {
+		t.Errorf("final Status = %q, want %q", run.Status, StatusCanceled)
 	}
 	if got := runner.calls.Load(); got != 1 {
 		t.Errorf("runner call count = %d, want 1 (cancel must suppress retry)", got)
@@ -680,7 +680,7 @@ func TestIsRetriableStatus_TaxonomyCoverage(t *testing.T) {
 		StatusStalled:    true,
 		StatusFailed:     true,
 		StatusCompleted:  false,
-		StatusCancelled:  false,
+		StatusCanceled:   false,
 		StatusRejected:   false,
 		StatusRequested:  false,
 		StatusApproved:   false,

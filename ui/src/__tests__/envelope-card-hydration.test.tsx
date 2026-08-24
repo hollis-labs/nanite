@@ -70,11 +70,11 @@ describe("interactive cards hydrate from prior_response", () => {
     expect(container.textContent).toContain("Applied");
   });
 
-  it("ProposalCard renders the dismissed state when prior_response is cancelled", () => {
+  it("ProposalCard renders the dismissed state when prior_response is canceled", () => {
     const env = envelope(
       "proposal-card",
       { type: "rename", payload: { name: "x" } },
-      response({ status: "cancelled" }),
+      response({ status: "canceled" }),
     );
     const { container } = render(<ProposalCard envelope={env} />);
     expect(container.textContent).toContain("Dismissed");
@@ -91,14 +91,14 @@ describe("interactive cards hydrate from prior_response", () => {
     expect(container.textContent).not.toContain("Confirm action");
   });
 
-  it("ConfirmationCard renders the cancelled state when prior_response is cancelled", () => {
+  it("ConfirmationCard renders the canceled state when prior_response is canceled", () => {
     const env = envelope(
       "confirmation-card",
       { title: "Drop table", message: "Sure?" },
-      response({ status: "cancelled", data: { confirmed: false } }),
+      response({ status: "canceled", data: { confirmed: false } }),
     );
     const { container } = render(<ConfirmationCard envelope={env} />);
-    expect(container.textContent).toContain("Cancelled");
+    expect(container.textContent).toContain("Canceled");
   });
 
   it("ApprovalCard (subagent-spawn-approval flavor) renders the approved state when prior_response is submitted", () => {
@@ -111,11 +111,11 @@ describe("interactive cards hydrate from prior_response", () => {
     expect(container.textContent).toContain("approved");
   });
 
-  it("ApprovalCard (subagent-spawn-approval flavor) renders the rejected state when prior_response is cancelled", () => {
+  it("ApprovalCard (subagent-spawn-approval flavor) renders the rejected state when prior_response is canceled", () => {
     const env = envelope(
       "subagent-spawn-approval",
       { run_id: "run-1", role: "backend", prompt: "do x", mode: "async" },
-      response({ status: "cancelled" }),
+      response({ status: "canceled" }),
     );
     const { container } = render(<ApprovalCard envelope={env} />);
     expect(container.textContent).toContain("rejected");

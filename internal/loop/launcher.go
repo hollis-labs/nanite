@@ -282,7 +282,7 @@ func isZeroContinuationPolicy(p ContinuationPolicy) bool {
 	return p.Provider == "" && p.Model == "" && p.AgentID == "" && p.SessionID == "" && len(p.Tools) == 0
 }
 
-// Cancel sets loop_runs.status = 'cancelled' directly -- an operator-
+// Cancel sets loop_runs.status = 'canceled' directly -- an operator-
 // initiated hard stop, per this task's own "What to do" #1 ("no Decide call
 // needed"). Notifies any outer WorkflowRun waiting on this LoopRun via a
 // StepKindLoop step (task 09) exactly as LoopEngine's own terminal
@@ -296,10 +296,10 @@ func (l *LoopLauncher) Cancel(ctx context.Context, loopRunID string) error {
 		return fmt.Errorf("loop: cancel: loop_run_id is required")
 	}
 	now := time.Now().UTC()
-	if err := l.store.UpdateLoopRunStatus(ctx, loopRunID, store.LoopRunStatusCancelled, &now); err != nil {
+	if err := l.store.UpdateLoopRunStatus(ctx, loopRunID, store.LoopRunStatusCanceled, &now); err != nil {
 		return fmt.Errorf("loop: cancel %s: %w", loopRunID, err)
 	}
-	l.engine.notifyOuterOnTerminal(ctx, loopRunID, store.LoopRunStatusCancelled)
+	l.engine.notifyOuterOnTerminal(ctx, loopRunID, store.LoopRunStatusCanceled)
 	return nil
 }
 
@@ -339,7 +339,7 @@ func (l *LoopLauncher) ResolveEscalation(ctx context.Context, loopRunID string, 
 		if err := l.Cancel(ctx, loopRunID); err != nil {
 			return LoopResult{}, err
 		}
-		return LoopResult{LoopRunID: loopRunID, Status: store.LoopRunStatusCancelled, CurrentIteration: lr.CurrentIteration}, nil
+		return LoopResult{LoopRunID: loopRunID, Status: store.LoopRunStatusCanceled, CurrentIteration: lr.CurrentIteration}, nil
 
 	case override != nil && override.Replan != nil:
 		if err := l.applyReplan(ctx, lr, override.Replan); err != nil {

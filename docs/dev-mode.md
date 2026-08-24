@@ -51,7 +51,7 @@ comment at line 4 documents this invariant.
 **Invariant:** the production binary (`make build` / `go build ./cmd/nanite`) contains
 zero occurrences of `mux_list_launches`, `mux_launch`, `mux_send`, or `mux_stop`.
 
-Every file in `internal/muxproxy/` that defines real behaviour carries `//go:build devmode`
+Every file in `internal/muxproxy/` that defines real behavior carries `//go:build devmode`
 at the top. Non-devmode stub files (`*_notdev.go`) expose only no-op shims and empty
 type aliases so the rest of the binary compiles. The builtin mux-orchestrator agent
 profile is likewise absent from the production binary (see

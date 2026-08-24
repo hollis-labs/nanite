@@ -50,7 +50,7 @@ func (a *API) handleGetWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, record)
 }
 
-// handleCancelWorkflowRun marks a workflow run as cancelled.
+// handleCancelWorkflowRun marks a workflow run as canceled.
 //
 // POST /api/workflows/runs/{runId}/cancel
 func (a *API) handleCancelWorkflowRun(w http.ResponseWriter, r *http.Request) {
@@ -67,8 +67,8 @@ func (a *API) handleCancelWorkflowRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	record.Run.Status = workflow.RunCancelled
-	a.jsonResp(w, http.StatusOK, map[string]string{"status": "cancelled"})
+	record.Run.Status = workflow.RunCanceled
+	a.jsonResp(w, http.StatusOK, map[string]string{"status": "canceled"})
 }
 
 // handleRunWorkflow accepts a YAML workflow definition and executes it.

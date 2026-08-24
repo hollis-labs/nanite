@@ -308,7 +308,7 @@ func partialResult(summary, envelope string, counts toolUsageCounts) *subagent.R
 		},
 	})
 	if err != nil {
-		// Marshalling a fixed-shape struct of strings/ints/RawMessage
+		// Marshaling a fixed-shape struct of strings/ints/RawMessage
 		// effectively cannot fail; fall back to summary-only capture.
 		return &subagent.Result{Summary: summary}
 	}
@@ -908,7 +908,7 @@ func (r *ChatRunner) registerSubagentDerivedRules(childID, parentSessionID strin
 	// future profile rules. Read from PathGrants.BestSessionDir which
 	// walks the lineage chain when the child's own bucket is empty
 	// (CW-20260504-0003) — gives us the most-specific dir the user has
-	// signalled intent toward. May be empty when no path mentions have
+	// signaled intent toward. May be empty when no path mentions have
 	// been registered; that's fine because subagentRules is nil today
 	// (Resolve fast-paths an empty subagent ruleset).
 	childWorkingDir := r.pathGrants.BestSessionDir(childID)

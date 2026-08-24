@@ -135,11 +135,11 @@ func (s *runningRunSink) SubagentStatusChanged(_ string, payload []byte) {
 	}
 }
 
-type cancellingRunningSink struct {
+type cancelingRunningSink struct {
 	cancel context.CancelFunc
 }
 
-func (s *cancellingRunningSink) SubagentStatusChanged(_ string, payload []byte) {
+func (s *cancelingRunningSink) SubagentStatusChanged(_ string, payload []byte) {
 	var event struct {
 		Status string `json:"status"`
 	}
@@ -404,7 +404,7 @@ func TestFanout_AtCap_QueuesExtra(t *testing.T) {
 // one extra spawn with a cancel-able context. Cancels that context before
 // any slot becomes free and verifies:
 //  1. The queued spawn returns promptly with a non-nil error.
-//  2. The cap remains fully utilised by the original 3 (none leaked).
+//  2. The cap remains fully utilized by the original 3 (none leaked).
 //  3. The 3 originals complete normally after release.
 func TestFanout_CancelWhileQueued(t *testing.T) {
 	db, _ := newTestDB(t)
@@ -460,23 +460,23 @@ func TestFanout_CancelWhileQueued(t *testing.T) {
 	select {
 	case err := <-extraDone:
 		if err == nil {
-			t.Error("expected non-nil error from cancelled queued spawn, got nil")
+			t.Error("expected non-nil error from canceled queued spawn, got nil")
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("cancelled queued spawn did not return within 500ms")
+		t.Fatal("canceled queued spawn did not return within 500ms")
 	}
 
 	// The extra spawn must NOT have started the runner — slot was never acquired.
 	if runner.started.Load() != int64(cap3) {
-		t.Errorf("runner.started = %d, want %d — cancelled spawn consumed a slot",
+		t.Errorf("runner.started = %d, want %d — canceled spawn consumed a slot",
 			runner.started.Load(), cap3)
 	}
 	run, err := svc.Status(context.Background(), queuedRunID)
 	if err != nil {
-		t.Fatalf("status cancelled queued run: %v", err)
+		t.Fatalf("status canceled queued run: %v", err)
 	}
-	if run.Status != StatusCancelled || run.CompletedAt == "" {
-		t.Fatalf("cancelled queued run = status %q completed_at %q; want cancelled terminal row",
+	if run.Status != StatusCanceled || run.CompletedAt == "" {
+		t.Fatalf("canceled queued run = status %q completed_at %q; want canceled terminal row",
 			run.Status, run.CompletedAt)
 	}
 
@@ -555,8 +555,8 @@ func TestFanout_CapacityErrorDistinguishable(t *testing.T) {
 	if statusErr != nil {
 		t.Fatalf("status capacity-blocked run: %v", statusErr)
 	}
-	if run.Status != StatusCancelled || run.CompletedAt == "" {
-		t.Fatalf("capacity-blocked run = status %q completed_at %q; want cancelled terminal row",
+	if run.Status != StatusCanceled || run.CompletedAt == "" {
+		t.Fatalf("capacity-blocked run = status %q completed_at %q; want canceled terminal row",
 			run.Status, run.CompletedAt)
 	}
 
@@ -670,7 +670,7 @@ func TestFanout_OperatorCancelWhileQueuedPreventsRunner(t *testing.T) {
 			ParentSessionID: "sess-fanout",
 			ParentAgentID:   "parent-agent",
 			Role:            "worker-role",
-			Prompt:          "operator-cancelled-while-queued",
+			Prompt:          "operator-canceled-while-queued",
 			Mode:            ModeAsync,
 		})
 		extraDone <- err
@@ -689,10 +689,10 @@ func TestFanout_OperatorCancelWhileQueuedPreventsRunner(t *testing.T) {
 	select {
 	case <-extraDone:
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("operator-cancelled queued spawn did not unblock promptly")
+		t.Fatal("operator-canceled queued spawn did not unblock promptly")
 	}
 	if got := runner.started.Load(); got != spawnFanoutCap {
-		t.Fatalf("runner.started = %d, want %d; cancelled queued runner executed", got, spawnFanoutCap)
+		t.Fatalf("runner.started = %d, want %d; canceled queued runner executed", got, spawnFanoutCap)
 	}
 
 	runner.release()
@@ -714,21 +714,21 @@ func TestFanout_OperatorCancelWhileQueuedPreventsRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status queued run: %v", err)
 	}
-	if run.Status != StatusCancelled || run.CompletedAt == "" {
+	if run.Status != StatusCanceled || run.CompletedAt == "" {
 		t.Fatalf("queued run = status %q completed_at %q; want completed cancellation",
 			run.Status, run.CompletedAt)
 	}
 	statuses := sink.statuses(queuedRunID)
 	terminalCount := 0
 	for _, status := range statuses {
-		if status == StatusCancelled {
+		if status == StatusCanceled {
 			terminalCount++
 		}
 	}
 	if terminalCount != 1 {
-		t.Fatalf("queued run events = %v; want exactly one cancelled terminal event", statuses)
+		t.Fatalf("queued run events = %v; want exactly one canceled terminal event", statuses)
 	}
-	if statuses[len(statuses)-1] != StatusCancelled {
+	if statuses[len(statuses)-1] != StatusCanceled {
 		t.Fatalf("queued run events = %v; terminal cancellation must be last", statuses)
 	}
 }
@@ -789,14 +789,14 @@ func TestApprove_CancelEmissionOrdering(t *testing.T) {
 	statuses := sink.statuses(runID)
 	terminalCount := 0
 	for _, status := range statuses {
-		if status == StatusCancelled {
+		if status == StatusCanceled {
 			terminalCount++
 		}
 	}
 	if terminalCount != 1 {
-		t.Fatalf("approval/cancel events = %v; want exactly one cancelled terminal event", statuses)
+		t.Fatalf("approval/cancel events = %v; want exactly one canceled terminal event", statuses)
 	}
-	if statuses[len(statuses)-1] != StatusCancelled {
+	if statuses[len(statuses)-1] != StatusCanceled {
 		t.Fatalf("approval/cancel events = %v; stale running event followed cancellation", statuses)
 	}
 	if got := runner.started.Load(); got != 0 {
@@ -804,14 +804,14 @@ func TestApprove_CancelEmissionOrdering(t *testing.T) {
 	}
 	run, err := svc.Status(context.Background(), runID)
 	if err != nil {
-		t.Fatalf("status cancelled approval: %v", err)
+		t.Fatalf("status canceled approval: %v", err)
 	}
-	if run.Status != StatusCancelled || run.CompletedAt == "" {
+	if run.Status != StatusCanceled || run.CompletedAt == "" {
 		t.Fatalf("approved run = status %q completed_at %q; want completed cancellation",
 			run.Status, run.CompletedAt)
 	}
-	// Approve launches the cancelled queue wait after its ordered running emit
-	// drains. Give that cleanup goroutine time to observe the cancelled owner
+	// Approve launches the canceled queue wait after its ordered running emit
+	// drains. Give that cleanup goroutine time to observe the canceled owner
 	// before newTestDB closes the database at test cleanup.
 	time.Sleep(25 * time.Millisecond)
 }
@@ -1021,7 +1021,7 @@ func TestApprove_RequestCancellationAfterTransitionRetainsOwner(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	svc.SetStreamSink(&cancellingRunningSink{cancel: cancel})
+	svc.SetStreamSink(&cancelingRunningSink{cancel: cancel})
 	if err := svc.Approve(ctx, runID); err != nil {
 		t.Fatalf("approve after synchronous request cancellation: %v", err)
 	}
@@ -1042,7 +1042,7 @@ func TestApprove_RequestCancellationAfterTransitionRetainsOwner(t *testing.T) {
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		run, statusErr := svc.Status(context.Background(), runID)
-		if statusErr == nil && run.Status == StatusCancelled && len(svc.spawnSem) == 0 {
+		if statusErr == nil && run.Status == StatusCanceled && len(svc.spawnSem) == 0 {
 			return
 		}
 		time.Sleep(time.Millisecond)
@@ -1120,8 +1120,8 @@ func TestApprove_ConcurrentDuplicateApproveCancelSingleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("final status: %v", err)
 	}
-	if run.Status != StatusCancelled {
-		t.Fatalf("final status = %q, want %q", run.Status, StatusCancelled)
+	if run.Status != StatusCanceled {
+		t.Fatalf("final status = %q, want %q", run.Status, StatusCanceled)
 	}
 	if got := runner.started.Load(); got > 1 {
 		t.Fatalf("runner.started = %d, want at most 1", got)

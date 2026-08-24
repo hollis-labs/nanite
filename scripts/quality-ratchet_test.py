@@ -13,7 +13,7 @@ import unittest
 SCRIPT = Path(__file__).with_name("quality-ratchet.py")
 RUNNER = "test-macos-runner"
 
-# Stage 1 needs a non-zero baseline for any of the ratchet's real behaviour to
+# Stage 1 needs a non-zero baseline for any of the ratchet's real behavior to
 # be reachable. The three Stage 2 linters are pinned at zero by the comparator
 # itself, so the fixture baseline also carries gosec -- a real audit-config
 # linter that is not under Stage 2 zero-tolerance.
@@ -252,7 +252,7 @@ class QualityRatchetTest(unittest.TestCase):
 
     def test_lint_stage_2_accepts_zero_correctness_findings(self) -> None:
         # This test used to pass an empty report and assert exit 0, which
-        # codified the vacuous pass as intended behaviour (CW-20260824-0023).
+        # codified the vacuous pass as intended behavior (CW-20260824-0023).
         # Stage 2 clearing means "the scan ran and found no correctness
         # findings", so the report must contain real Stage 1 findings.
         result = self.run_lint(self.covering_issues())
@@ -410,7 +410,7 @@ class QualityRatchetTest(unittest.TestCase):
     # --- Stage 1 regression against a non-zero baseline ------------------
     #
     # Previously untested end to end: every fixture baseline was all zeros, so
-    # the ratchet's actual behaviour (a count rising above a real baseline)
+    # the ratchet's actual behavior (a count rising above a real baseline)
     # never ran.
 
     def test_lint_rejects_a_stage_1_regression(self) -> None:

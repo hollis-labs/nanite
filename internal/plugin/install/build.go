@@ -27,7 +27,7 @@ type BuildOptions struct {
 	// dead-code-eliminate this field's read path entirely.
 	AllowUnsigned bool
 
-	// Extractor materialises a downloaded/local Handle into the staging
+	// Extractor materializes a downloaded/local Handle into the staging
 	// dir. Required — callers differ (CLI: tar.gz only via
 	// TarGzExtractor; API: a format-dispatching zip/tar.gz extractor, see
 	// internal/api/catalog.go).

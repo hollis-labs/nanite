@@ -55,10 +55,10 @@ function StatusBadge({ status }: { status: WorkerStatus }) {
           failed
         </span>
       );
-    case "cancelled":
+    case "canceled":
       return (
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-fg-muted/20 text-fg-muted font-medium">
-          cancelled
+          canceled
         </span>
       );
   }
@@ -67,11 +67,11 @@ function StatusBadge({ status }: { status: WorkerStatus }) {
 function WorkerRow({
   worker,
   onCancel,
-  isCancelling,
+  isCanceling,
 }: {
   worker: Worker;
   onCancel: (id: string) => void;
-  isCancelling: boolean;
+  isCanceling: boolean;
 }) {
   const isActive = worker.status === "spawning" || worker.status === "running";
 
@@ -101,7 +101,7 @@ function WorkerRow({
             <button
               type="button"
               onClick={() => onCancel(worker.id)}
-              disabled={isCancelling}
+              disabled={isCanceling}
               className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-danger/10 text-danger hover:bg-danger/20 transition-colors disabled:opacity-50"
             >
               <XCircle className="w-3 h-3" />
@@ -115,16 +115,16 @@ function WorkerRow({
 }
 
 export function WorkerStatusPanel() {
-  const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set());
+  const [cancelingIds, setCancelingIds] = useState<Set<string>>(new Set());
 
   const { data: workers = [], isLoading } = useWorkers();
   const cancel = useCancelWorker();
 
   function handleCancel(id: string) {
-    setCancellingIds((prev) => new Set(prev).add(id));
+    setCancelingIds((prev) => new Set(prev).add(id));
     cancel.mutate(id, {
       onSettled: () => {
-        setCancellingIds((prev) => {
+        setCancelingIds((prev) => {
           const next = new Set(prev);
           next.delete(id);
           return next;
@@ -173,7 +173,7 @@ export function WorkerStatusPanel() {
                   key={worker.id}
                   worker={worker}
                   onCancel={handleCancel}
-                  isCancelling={cancellingIds.has(worker.id)}
+                  isCanceling={cancelingIds.has(worker.id)}
                 />
               ))}
             </tbody>

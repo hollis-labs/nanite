@@ -12,11 +12,11 @@ import "net/http"
 // the user no longer wants).
 //
 // Behavior:
-//   - 200 with {status:"cancelled"} when an active generation was
-//     cancelled. The cancel propagates through the registered
+//   - 200 with {status:"canceled"} when an active generation was
+//     canceled. The cancel propagates through the registered
 //     context.CancelFunc; the generateResponse goroutine observes
 //     ctx.Err() on its next loop iteration, persists any partial
-//     content, emits a "Stopped: cancelled" status event, and returns.
+//     content, emits a "Stopped: canceled" status event, and returns.
 //   - 404 with {error:"no active generation"} when no generation is
 //     registered for the session — idempotent: hitting stop twice is
 //     not an error condition the user should see surfaced as failure.
@@ -43,5 +43,5 @@ func (a *API) handleCancelChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.jsonResp(w, http.StatusOK, map[string]string{"status": "cancelled"})
+	a.jsonResp(w, http.StatusOK, map[string]string{"status": "canceled"})
 }

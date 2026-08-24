@@ -99,11 +99,11 @@ func (b *stubBackend) Cancel(jobID string) error {
 	b.mu.Lock()
 	b.cancelCalls = append(b.cancelCalls, jobID)
 	cb := b.completers[jobID]
-	b.statuses[jobID] = StatusCancelled
+	b.statuses[jobID] = StatusCanceled
 	b.mu.Unlock()
 	if cb != nil {
 		cb(jobID, BackendCompletion{
-			Status:      StatusCancelled,
+			Status:      StatusCanceled,
 			StartedAt:   time.Now().UTC().Add(-100 * time.Millisecond),
 			CompletedAt: time.Now().UTC(),
 		})
@@ -269,7 +269,7 @@ func TestLifecycle_FailureSurfacesError(t *testing.T) {
 	}
 }
 
-func TestCancel_TransitionsToCancelled(t *testing.T) {
+func TestCancel_TransitionsToCanceled(t *testing.T) {
 	t.Parallel()
 	be := newStubBackend()
 	msgs := &stubMessenger{}
@@ -287,8 +287,8 @@ func TestCancel_TransitionsToCancelled(t *testing.T) {
 	}
 	be.mu.Unlock()
 
-	if got, _ := svc.Status(id); got != StatusCancelled {
-		t.Fatalf("status after cancel = %s; want cancelled", got)
+	if got, _ := svc.Status(id); got != StatusCanceled {
+		t.Fatalf("status after cancel = %s; want canceled", got)
 	}
 }
 

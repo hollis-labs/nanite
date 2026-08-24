@@ -29,7 +29,7 @@ Per C1: `schema_validation`, `type_coercion`, `wrong_card_type`, `missing_option
 ## When NOT to apply
 
 - **Security boundaries (auth, permission, capability checks).** Never repair — recovery would be privilege escalation. *Mitigation:* taxonomy excludes auth-class errors; validator emits `hard_error`.
-- **Value fabrication.** Don't invent missing user-supplied content (names, IDs, message bodies) — that's hallucination dressed as resilience. *Mitigation:* repair may coerce types and remap field names, never synthesise opaque values; missing-required fields fail hard.
+- **Value fabrication.** Don't invent missing user-supplied content (names, IDs, message bodies) — that's hallucination dressed as resilience. *Mitigation:* repair may coerce types and remap field names, never synthesize opaque values; missing-required fields fail hard.
 - **Infinite-loop risk.** Repair must be bounded and observable. *Mitigation:* per-call repair budget at the harness; learning store prevents re-hitting the same shape.
 
 ## Anti-patterns

@@ -391,13 +391,13 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 		case <-ctx.Done():
 			result.Content = content.String()
 			result.Success = false
-			result.Error = "delegation cancelled"
+			result.Error = "delegation canceled"
 			dispatcher.LogOutcome(dispatcher.AgentRunResult{
 				CallerType:      runReq.CallerType,
 				Completion:      runReq.Completion,
 				TargetSessionID: workerSession.ID,
 				Content:         result.Content,
-				Status:          dispatcher.RunStatusCancelled,
+				Status:          dispatcher.RunStatusCanceled,
 				Err:             errors.New(result.Error),
 			})
 			if trackedTask != nil && s.tasks != nil {

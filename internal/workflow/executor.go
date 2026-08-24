@@ -141,15 +141,15 @@ func (e *Executor) Run(ctx context.Context, pipeline *Pipeline, input map[string
 				for _, stepID := range lvl {
 					ss := state.StepStates[stepID]
 					if ss.Status == StepPending {
-						ss.Status = StepCancelled
+						ss.Status = StepCanceled
 						ss.CompletedAt = time.Now()
 					}
 				}
 			}
-			state.Status = RunCancelled
+			state.Status = RunCanceled
 			state.CompletedAt = time.Now()
 			e.emit(Event{
-				Type:       "pipeline.cancelled",
+				Type:       "pipeline.canceled",
 				PipelineID: pipeline.ID,
 				RunID:      runID,
 				Timestamp:  time.Now(),
@@ -311,9 +311,9 @@ func (e *Executor) Run(ctx context.Context, pipeline *Pipeline, input map[string
 	// Determine final status.
 	state.CompletedAt = time.Now()
 	if ctx.Err() != nil {
-		state.Status = RunCancelled
+		state.Status = RunCanceled
 		e.emit(Event{
-			Type:       "pipeline.cancelled",
+			Type:       "pipeline.canceled",
 			PipelineID: pipeline.ID,
 			RunID:      runID,
 			Timestamp:  time.Now(),
@@ -370,7 +370,7 @@ func (e *Executor) executeWithRetry(ctx context.Context, step *Step, input StepI
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return lastOut, fmt.Errorf("retry cancelled: %w", ctx.Err())
+				return lastOut, fmt.Errorf("retry canceled: %w", ctx.Err())
 			case <-time.After(delay):
 			}
 			delay = time.Duration(float64(delay) * backoff)

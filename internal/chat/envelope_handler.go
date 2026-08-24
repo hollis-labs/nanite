@@ -74,7 +74,7 @@ type defaultResponseHandler struct{}
 
 func (defaultResponseHandler) HandleResponse(_ context.Context, _ store.EnvelopeInstance, resp ResponseV1) (HandlerResult, error) {
 	// Copy resp.Data into a fresh map rather than mutating the caller's map
-	// in place. The endpoint reuses resp for response_json marshalling, and
+	// in place. The endpoint reuses resp for response_json marshaling, and
 	// mutation would leak "answers"/"decisions" into the persisted payload.
 	data := make(map[string]any, len(resp.Data)+2)
 	for k, v := range resp.Data {

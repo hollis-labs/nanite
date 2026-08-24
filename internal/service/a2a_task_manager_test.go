@@ -158,13 +158,13 @@ func TestTaskManager_deriveFromWorkflowRun(t *testing.T) {
 			wantState: a2a.TaskStateWorking,
 		},
 		{
-			// "cancelled" is a real, schema-valid workflow_runs.status (see
+			// "canceled" is a real, schema-valid workflow_runs.status (see
 			// the CHECK constraint) that deriveFromWorkflowRun's switch
 			// doesn't explicitly map -- exercises the same default-fallback
 			// branch a literal invalid string would, without violating the
 			// CHECK constraint the way "unknown" does.
 			name:      "unmapped-but-valid status defaults to working",
-			runStatus: "cancelled",
+			runStatus: "canceled",
 			wantState: a2a.TaskStateWorking,
 		},
 	}

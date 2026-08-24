@@ -101,7 +101,7 @@ func buildToolAllowlist(names []string) map[string]struct{} {
 }
 
 // Run starts the MCP server on stdio (stdin/stdout). Blocks until the
-// client disconnects or ctx is cancelled.
+// client disconnects or ctx is canceled.
 func (s *Server) Run(ctx context.Context) error {
 	srv := s.buildMCPServer()
 	slog.Info("mcpserver: starting stdio server", "session_id", s.sessionID)

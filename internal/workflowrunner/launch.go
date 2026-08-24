@@ -178,7 +178,7 @@ func (cfg Config) validate() error {
 // subprocess: plant .mcp.json plus the input file into a work dir, run
 // the process to completion in that dir, capture what it reported, and
 // clean up. Blocks until the process exits, the configured timeout
-// elapses, or ctx is cancelled.
+// elapses, or ctx is canceled.
 func Launch(ctx context.Context, cfg Config, input agentworkflow.WorkflowInput) (Result, error) {
 	if err := cfg.validate(); err != nil {
 		return Result{}, err
@@ -271,7 +271,7 @@ func Launch(ctx context.Context, cfg Config, input agentworkflow.WorkflowInput) 
 //
 // runErr == nil is checked FIRST and short-circuits to success
 // regardless of runCtx/parentCtx state at that exact moment: ctx is
-// caller-owned and may be cancelled for reasons entirely unrelated to
+// caller-owned and may be canceled for reasons entirely unrelated to
 // this subprocess's lifecycle (e.g. the caller's own overall deadline
 // firing at the same instant this process happens to finish). Treating
 // that as a launch failure would report a spurious error over a Result

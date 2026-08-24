@@ -622,7 +622,7 @@ func (h *Host) EmitPreHook(eventType, sessionID string, data map[string]interfac
 		cancel()
 		if err != nil {
 			if errors.Is(err, plugin.ErrCancelled) {
-				h.logger.Info("pre-hook cancelled action", "eventType", eventType)
+				h.logger.Info("pre-hook canceled action", "eventType", eventType)
 				return true
 			}
 			h.logger.Error("pre-hook failed", "eventType", eventType, "error", err)
@@ -630,7 +630,7 @@ func (h *Host) EmitPreHook(eventType, sessionID string, data map[string]interfac
 	}
 
 	// Legacy: check map-based cancel flag for backward compatibility.
-	if cancelled, ok := event.Data["cancel"].(bool); ok && cancelled {
+	if canceled, ok := event.Data["cancel"].(bool); ok && canceled {
 		return true
 	}
 	return false

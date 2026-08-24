@@ -606,7 +606,7 @@ export interface HarnessTurnResponse {
 
 export interface HarnessCancelResponse {
   session_id: string;
-  status: "cancelled" | "idle" | string;
+  status: "canceled" | "idle" | string;
 }
 
 export interface StartSurfacePrefill {
@@ -1650,7 +1650,7 @@ export interface Envelope {
    * When set, the FE renders a [Cancel retry] button that POSTs the
    * token verbatim to `POST /api/sessions/{sessionID}/recovery/cancel`
    * with body `{"token": "<token>"}`. On success, the card transitions
-   * to a cancelled visual state.
+   * to a canceled visual state.
    *
    * Recovery-broker-only today; if a third caller appears the field
    * may consolidate with `EnvelopeRouting` per W1D's follow-up note.
@@ -2107,7 +2107,7 @@ export type WorkerStatus =
   | "running"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "canceled";
 
 export interface Worker {
   id: string;
@@ -2333,14 +2333,14 @@ export type RunStatus =
   | "running"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "canceled";
 export type StepStatus =
   | "pending"
   | "running"
   | "completed"
   | "failed"
   | "skipped"
-  | "cancelled";
+  | "canceled";
 
 export interface StepState {
   step_id: string;

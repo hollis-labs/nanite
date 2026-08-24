@@ -162,7 +162,7 @@ func (s *serviceImpl) ListAll(ctx context.Context) ([]*Task, error) {
 }
 
 func (s *serviceImpl) Cancel(ctx context.Context, id string) error {
-	return s.Transition(ctx, id, StatusCancelled)
+	return s.Transition(ctx, id, StatusCanceled)
 }
 
 // Snapshot delegates to the local backend only (other backends manage their own persistence).

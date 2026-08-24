@@ -169,7 +169,7 @@ func TestServiceCopyIsolation(t *testing.T) {
 	}
 }
 
-// TestTrafficLight verifies the colour logic.
+// TestTrafficLight verifies the color logic.
 func TestTrafficLight(t *testing.T) {
 	cases := []struct {
 		tokens int

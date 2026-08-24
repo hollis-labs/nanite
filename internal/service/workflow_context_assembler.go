@@ -38,7 +38,7 @@ type WorkflowContextAssembler interface {
 // tools, extraSystemPrefix, and toolsLazyHint are turn-specific concerns
 // AssembleSlots also accepts (selected tool defs for the Tools slot, a
 // dynamic per-turn prefix, and the lazy-tool-partition pointer) that have no
-// analogue at this call's (sessionID, agentID) granularity — a workflow
+// analog at this call's (sessionID, agentID) granularity — a workflow
 // step's tool surface is already capability-restricted and passed straight
 // to the provider by workflow_step_executor.go, not selected here. They are
 // passed as zero values; every other slot (Universal, Rules, Permissions,

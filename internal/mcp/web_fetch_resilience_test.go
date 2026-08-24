@@ -186,7 +186,7 @@ func TestFetchWithRetry_ContextCanceled(t *testing.T) {
 	}
 	_, fe := fetchWithRetry(ctx, client, "http://example.com/")
 	if fe == nil {
-		t.Fatal("expected FetchError for cancelled context")
+		t.Fatal("expected FetchError for canceled context")
 	}
 	if fe.Kind != FetchErrTimeout {
 		t.Errorf("expected FetchErrTimeout kind for cancellation, got %s", fe.Kind)

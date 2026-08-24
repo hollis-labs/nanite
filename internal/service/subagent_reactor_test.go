@@ -108,7 +108,7 @@ func TestResolveSubagentCompletionPolicy_GlobalDefaultWhenUnset(t *testing.T) {
 func TestResolveSubagentCompletionPolicy_UnrecognizedSessionOverride_FallsThrough(t *testing.T) {
 	svc := &chatServiceImpl{
 		sessions: &stubSessionService{sessions: map[string]*store.Session{
-			"sess-1": {ID: "sess-1", Metadata: `{"subagent_completion_policy":"auto-summarise"}`}, // typo/variant, not a real value
+			"sess-1": {ID: "sess-1", Metadata: `{"subagent_completion_policy":"auto-summarize"}`}, // typo/variant, not a real value
 		}},
 		agents: &stubAgentService{agent: &store.AgentProfile{
 			Constraints: `{"subagent_completion_policy":"auto_summarize"}`,

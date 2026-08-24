@@ -22,7 +22,7 @@ func getHomeDir() string {
 }
 
 // secretEnvSuffixes are environment variable name suffixes whose values should
-// be redacted from tool error output. Best-effort defence-in-depth, not a
+// be redacted from tool error output. Best-effort defense-in-depth, not a
 // security boundary.
 var secretEnvSuffixes = []string{
 	"_KEY", "_TOKEN", "_SECRET", "_PASS", "_PASSWORD",

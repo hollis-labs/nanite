@@ -34,7 +34,7 @@ const (
 	ResponseV1Version = 1
 
 	StatusSubmitted ResponseStatus = "submitted"
-	StatusCancelled ResponseStatus = "cancelled"
+	StatusCanceled  ResponseStatus = "canceled"
 	StatusPartial   ResponseStatus = "partial"
 
 	// RoleEnvelopeResponse is the message role used for transcript entries
@@ -85,9 +85,9 @@ func (r ResponseV1) Validate() error {
 		return fmt.Errorf("response_v1: id is required")
 	}
 	switch r.Status {
-	case StatusSubmitted, StatusCancelled, StatusPartial:
+	case StatusSubmitted, StatusCanceled, StatusPartial:
 	default:
-		return fmt.Errorf("response_v1: invalid status %q (want submitted|cancelled|partial)", r.Status)
+		return fmt.Errorf("response_v1: invalid status %q (want submitted|canceled|partial)", r.Status)
 	}
 	return nil
 }

@@ -58,7 +58,7 @@ func TestResponseV1_StatusEnum(t *testing.T) {
 		ok     bool
 	}{
 		{"submitted", "submitted", true},
-		{"cancelled", "cancelled", true},
+		{"canceled", "canceled", true},
 		{"partial", "partial", true},
 		{"unknown", "accepted", false},
 		{"empty", "", false},

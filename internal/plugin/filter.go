@@ -21,7 +21,7 @@ const (
 )
 
 // reasoningBlindStripKeys are the top-level map keys removed when applying
-// the reasoning-blind view. This is a best-effort defence-in-depth measure;
+// the reasoning-blind view. This is a best-effort defense-in-depth measure;
 // the specific keys will be tuned as safety classifiers are built.
 var reasoningBlindStripKeys = []string{
 	"assistant_content",

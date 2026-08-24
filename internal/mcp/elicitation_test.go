@@ -118,7 +118,7 @@ func TestElicitUserInput_Timeout(t *testing.T) {
 
 	svc := &stubElicitationService{
 		elicitFn: func(ctx context.Context, _ elicitation.ElicitInput) (elicitation.Response, error) {
-			// Block until ctx is cancelled (simulating no user response).
+			// Block until ctx is canceled (simulating no user response).
 			<-ctx.Done()
 			return elicitation.Response{Action: elicitation.ActionCancel, Reason: "timeout"}, ctx.Err()
 		},
@@ -127,7 +127,7 @@ func TestElicitUserInput_Timeout(t *testing.T) {
 	resp, err := ElicitUserInput(ctx, svc, "sess-3", "agent-1", "tc-timeout",
 		ElicitationCreateParams{Message: "Will you respond?"})
 	if !errors.Is(err, context.DeadlineExceeded) {
-		// context_cancelled or deadline — both are acceptable "no response" paths.
+		// context_canceled or deadline — both are acceptable "no response" paths.
 		if err != nil && !errors.Is(err, context.Canceled) {
 			t.Errorf("unexpected error type: %v", err)
 		}

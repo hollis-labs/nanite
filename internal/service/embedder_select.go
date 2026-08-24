@@ -80,7 +80,7 @@ func DefaultEmbedderSelectDeps() EmbedderSelectDeps {
 // non-"active" status when no embedder should be wired; returns a configured
 // Embedder and EmbeddingStatusActive when it should.
 //
-// Behaviour:
+// Behavior:
 //   - Mode "" or "disabled" → (nil, "", "disabled").
 //   - Provider "" → (nil, "", "disabled").
 //   - Provider unsupported → (nil, "", "disabled") — silently treated as off so

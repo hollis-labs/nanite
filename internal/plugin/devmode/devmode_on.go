@@ -9,7 +9,7 @@ package devmode
 // to accept an unsigned / unverifiable catalog.
 //
 // Per-plugin signatures are bypassed ONLY when the operator also opts in
-// via user_settings.allow_unsigned_plugins = true. The setting is honoured
+// via user_settings.allow_unsigned_plugins = true. The setting is honored
 // only in devmode builds; in production builds (HostDevSigningBypass ==
 // false) the setting is ignored entirely.
 const HostDevSigningBypass = true

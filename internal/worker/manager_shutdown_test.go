@@ -10,8 +10,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 )
 
-// blockingDelegator blocks until its context is cancelled, then returns the
-// context error. It models a long-running provider call that must honour
+// blockingDelegator blocks until its context is canceled, then returns the
+// context error. It models a long-running provider call that must honor
 // cancellation for Shutdown to complete in bounded time.
 type blockingDelegator struct {
 	started chan struct{}
@@ -80,7 +80,7 @@ func TestShutdown_CancelsInFlightWorkAndDrains(t *testing.T) {
 	}
 
 	// SpawnFull should also return quickly now that the delegator context
-	// is cancelled.
+	// is canceled.
 	select {
 	case <-spawnDone:
 	case <-time.After(2 * time.Second):

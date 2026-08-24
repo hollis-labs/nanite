@@ -19,7 +19,7 @@ function statusBadgeClass(status: string): string {
       return "bg-success/20 text-success";
     case "failed":
       return "bg-danger/20 text-danger";
-    case "cancelled":
+    case "canceled":
       return "bg-fg-muted/10 text-fg-muted";
     case "pending":
       return "bg-warning/20 text-warning";

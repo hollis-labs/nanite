@@ -31,7 +31,7 @@ Ralph falls out of this for free: it's `max_iterations` runs of a trivial one-`l
 
 ## Decision 2 — Goal is a first-class entity with its own lifecycle, not embedded state
 
-Operator call: Goal gets a real `goals` row and the full lifecycle the proposal describes (§15) — `DRAFT | DEFINED | ACTIVE | BLOCKED | SATISFIED | FAILED | CANCELLED | SUPERSEDED` — from day one, not deferred to a later phase. This is a deliberate divergence from this repo's usual "start narrow, add a table later" bias (the one applied to Verify's check registry, and the one this design would otherwise have defaulted to) — the operator's reasoning: a Goal outliving any single LoopRun (survives an abandon-and-restart, survives a REPLAN, potentially spans a Team's flex phases and a Loop's iterations under one shared target state) is load-bearing for how this is meant to be used, not a nice-to-have.
+Operator call: Goal gets a real `goals` row and the full lifecycle the proposal describes (§15) — `DRAFT | DEFINED | ACTIVE | BLOCKED | SATISFIED | FAILED | CANCELED | SUPERSEDED` — from day one, not deferred to a later phase. This is a deliberate divergence from this repo's usual "start narrow, add a table later" bias (the one applied to Verify's check registry, and the one this design would otherwise have defaulted to) — the operator's reasoning: a Goal outliving any single LoopRun (survives an abandon-and-restart, survives a REPLAN, potentially spans a Team's flex phases and a Loop's iterations under one shared target state) is load-bearing for how this is meant to be used, not a nice-to-have.
 
 **A `loop_runs` row always has exactly one `goal_id` — a `goals` row does not require a `loop_runs` row.** A goal can exist `DRAFT`/`DEFINED` before any loop launches against it (authored by a planning session, an architect agent, or an operator), and `parent_goal_id` supports the decomposition the proposal describes in §16 (one goal recomputing its own subgoals as barriers are discovered) independent of execution. `LoopLaunchRequest` accepts either an existing `goal_id` or an inline goal spec, which the launcher upserts into `goals` first — so Ralph-shaped ergonomics (`Loop::ralph()->goal($goal)->run()`) don't require a separate authoring step for the common case, even though storage is always first-class underneath.
 
@@ -133,7 +133,7 @@ goals(
   id, parent_goal_id NULL,
   intent, desired_state_json, constraints_json, acceptance_criteria_json, invariants_json,
   priority, scope,
-  status CHECK(draft|defined|active|blocked|satisfied|failed|cancelled|superseded),
+  status CHECK(draft|defined|active|blocked|satisfied|failed|canceled|superseded),
   owner, source,
   created_at, activated_at, completed_at
 )
@@ -148,7 +148,7 @@ goal_evidence(
 loop_runs(
   id, goal_id NOT NULL,
   definition_name,        -- initial iteration WorkflowDefinition (or preset name)
-  status CHECK(running|completed|failed|cancelled|waiting_on_gate|waiting_on_escalation),
+  status CHECK(running|completed|failed|canceled|waiting_on_gate|waiting_on_escalation),
   current_iteration,
   budget_json,             -- max_iterations, max_failures, max_runtime, max_no_progress_iterations
   continuation_policy_json,
@@ -204,7 +204,7 @@ Protect that framing during implementation. If building this starts to require a
 - Whether two `LoopRun`s can run concurrently against the same `goal_id` (competing strategies racing toward one target state) — not addressed.
 - The exact `budget`/`on_exhausted` field set and vocabulary — Scheduling's `retry`/`disable`/`notify` is proposed as a starting point, not locked.
 - `loop_run_tick`'s payload shape — depends on Scheduling's own implementation landing first.
-- Auth/permission model for launching, cancelling, or force-resolving a `LoopRun` escalation.
+- Auth/permission model for launching, canceling, or force-resolving a `LoopRun` escalation.
 - Whether presets (`ralph`, `test-fix`, `review-fix`, `goal`, `plan-execute`, `queue-drain`, `durable`, `self-improve`) are DB rows (like reflex seeds) or Go-coded constants for v1.
 - Any implementation sequencing/task breakdown — none of this is scheduled or filed yet.
 

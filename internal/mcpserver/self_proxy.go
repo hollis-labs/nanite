@@ -46,7 +46,7 @@ func newSelfToolProxy(s *store.Store, apiURL, sessionID string) *selfToolProxy {
 		// A forwarded self-tool can be a synchronous dispatch (task_execute)
 		// that legitimately runs up to the subagent default of 300s. Keep
 		// the client timeout well clear of that so a valid long dispatch
-		// isn't cancelled, while still bounding a genuinely wedged harness.
+		// isn't canceled, while still bounding a genuinely wedged harness.
 		// The per-call ctx threaded into the request remains the primary
 		// cancellation path.
 		client: &http.Client{Timeout: 10 * time.Minute},

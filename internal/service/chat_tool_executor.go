@@ -228,7 +228,7 @@ func (s *chatServiceImpl) preCheckTools(
 				ls.continueWith(ContinuePermission, fmt.Sprintf("tool %s approved (scope: %s)", tu.Name, resp.Scope))
 
 			default:
-				// Fail closed on any unknown Decision value (defence against future
+				// Fail closed on any unknown Decision value (defense against future
 				// enum additions that might otherwise silently fall through to tool
 				// execution).
 				ls.recordToolCall(tu.Name, false)
@@ -253,12 +253,12 @@ func (s *chatServiceImpl) preCheckTools(
 		// Plugins observing "tool.executing" may cancel tool execution.
 		// Data shape: {session_id, tool_name, tool_input, tool_id}.
 		if s.pluginHost != nil {
-			cancelled := s.pluginHost.EmitPreHook("tool.executing", sessionID, map[string]any{
+			canceled := s.pluginHost.EmitPreHook("tool.executing", sessionID, map[string]any{
 				"tool_name":  tu.Name,
 				"tool_input": tu.Input,
 				"tool_id":    tu.ID,
 			})
-			if cancelled {
+			if canceled {
 				ls.recordToolCall(tu.Name, false)
 				blockMsg := fmt.Sprintf("Tool %q was refused by a policy plugin for this input. Retrying with the same arguments will be refused again — adjust the arguments, pick a different tool, or explain to the user that this action is gated.", tu.Name)
 				slog.Info("chat-service: tool blocked by plugin pre-hook", "tool", tu.Name)
@@ -480,15 +480,15 @@ func (s *chatServiceImpl) executeSingleTool(
 	// tool. Read-only discovery tools (dev_grep, dev_glob) are exempted
 	// inside shouldNotifyPause to avoid the rule-following-defendant
 	// pattern from docs/architecture/agent-context-architecture.md.
-	if cancelled := emitNotifyPause(ctx, tu, ch, mu, 0); cancelled {
-		cancelMsg := fmt.Sprintf("Tool %q cancelled by user during notify-pause window.", tu.Name)
+	if canceled := emitNotifyPause(ctx, tu, ch, mu, 0); canceled {
+		cancelMsg := fmt.Sprintf("Tool %q canceled by user during notify-pause window.", tu.Name)
 		ls.recordToolCall(tu.Name, false)
 		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: cancelMsg, IsError: true}
 		return toolExecResult{
 			resultBlock: llmtypes.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: cancelMsg, IsError: true,
 			},
-			ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "cancelled", ErrorReason: cancelMsg},
+			ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "canceled", ErrorReason: cancelMsg},
 			isError:   true,
 			rawOutput: cancelMsg,
 			duration:  time.Since(start),

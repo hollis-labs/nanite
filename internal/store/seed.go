@@ -193,7 +193,7 @@ var seededProviders = []providerRow{
 }
 
 // providerIDForType resolves a registry provider_type to the DB row id. Used
-// when materialising pkg/models rows into the models table.
+// when materializing pkg/models rows into the models table.
 func providerIDForType(t string) string {
 	for _, p := range seededProviders {
 		if p.provType == t {

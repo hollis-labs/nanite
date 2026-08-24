@@ -934,7 +934,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// After each successful fetch the OnRefresh hook pushes the data into the
 	// pkg/models overlay so all callers of Pricing/MaxOutputFor/ContextWindowFor
 	// automatically see live values without threading the catalog through the
-	// stack, then materialises the same overlay values into the `models` DB
+	// stack, then materializes the same overlay values into the `models` DB
 	// table (store.SyncModelsFromRegistry) so agents.model_id has a real,
 	// current row to FK against — see Phase 1 #06.
 	catalogCtx, stopCatalog := context.WithCancel(context.Background())

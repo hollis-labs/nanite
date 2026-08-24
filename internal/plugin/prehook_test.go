@@ -8,19 +8,19 @@ import (
 	"github.com/hollis-labs/plugin-sdk"
 )
 
-// cancellingHook returns plugin.ErrCancelled to signal cancellation.
-type cancellingHook struct {
+// cancelingHook returns plugin.ErrCancelled to signal cancellation.
+type cancelingHook struct {
 	eventTypes []string
 	called     bool
 }
 
-func (h *cancellingHook) Handle(ctx context.Context, event plugin.Event) error {
+func (h *cancelingHook) Handle(ctx context.Context, event plugin.Event) error {
 	h.called = true
 	return plugin.ErrCancelled
 }
 
-func (h *cancellingHook) EventTypes() []string { return h.eventTypes }
-func (h *cancellingHook) PluginID() string     { return "test-plugin" }
+func (h *cancelingHook) EventTypes() []string { return h.eventTypes }
+func (h *cancelingHook) PluginID() string     { return "test-plugin" }
 
 // passingHook records the call but does not cancel.
 type passingHook struct {
@@ -44,9 +44,9 @@ func TestEmitPreHook_NoCancel(t *testing.T) {
 		t.Fatalf("RegisterEventHook: %v", err)
 	}
 
-	cancelled := host.EmitPreHook(EventMessageSending, "s1", map[string]any{"agent_id": "a1"})
-	if cancelled {
-		t.Error("expected EmitPreHook to return false when no hook cancelled")
+	canceled := host.EmitPreHook(EventMessageSending, "s1", map[string]any{"agent_id": "a1"})
+	if canceled {
+		t.Error("expected EmitPreHook to return false when no hook canceled")
 	}
 	if !hook.called {
 		t.Error("expected hook to have been called")
@@ -56,13 +56,13 @@ func TestEmitPreHook_NoCancel(t *testing.T) {
 func TestEmitPreHook_CancelViaError(t *testing.T) {
 	host := NewHost(http.NewServeMux(), NewLogger("test"))
 
-	hook := &cancellingHook{eventTypes: []string{EventToolExecuting}}
+	hook := &cancelingHook{eventTypes: []string{EventToolExecuting}}
 	if err := host.RegisterEventHook([]string{EventToolExecuting}, hook); err != nil {
 		t.Fatalf("RegisterEventHook: %v", err)
 	}
 
-	cancelled := host.EmitPreHook(EventToolExecuting, "s1", map[string]any{"tool_name": "dev_bash"})
-	if !cancelled {
+	canceled := host.EmitPreHook(EventToolExecuting, "s1", map[string]any{"tool_name": "dev_bash"})
+	if !canceled {
 		t.Error("expected EmitPreHook to return true when hook returned plugin.ErrCancelled")
 	}
 	if !hook.called {
@@ -73,8 +73,8 @@ func TestEmitPreHook_CancelViaError(t *testing.T) {
 func TestEmitPreHook_NoHooksRegistered(t *testing.T) {
 	host := NewHost(http.NewServeMux(), NewLogger("test"))
 
-	cancelled := host.EmitPreHook(EventMessageSending, "s1", nil)
-	if cancelled {
+	canceled := host.EmitPreHook(EventMessageSending, "s1", nil)
+	if canceled {
 		t.Error("expected EmitPreHook to return false with no hooks registered")
 	}
 }
@@ -90,8 +90,8 @@ func TestEmitPreHook_CancelViaMapFlag(t *testing.T) {
 	}
 
 	data := map[string]any{"agent_id": "a1"}
-	cancelled := host.EmitPreHook(EventMessageSending, "s1", data)
-	if !cancelled {
+	canceled := host.EmitPreHook(EventMessageSending, "s1", data)
+	if !canceled {
 		t.Error("expected EmitPreHook to return true when hook set cancel flag")
 	}
 }

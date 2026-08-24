@@ -58,7 +58,7 @@ func TestReactorPolicyResolversShareOverrideCascadeCases(t *testing.T) {
 		},
 		{
 			name:          "invalid session override falls through to agent default",
-			sessionPolicy: "auto-summarise",
+			sessionPolicy: "auto-summarize",
 			agentPolicy:   chat.SubagentPolicyRenderAndWait,
 			want:          chat.SubagentPolicyRenderAndWait,
 		},

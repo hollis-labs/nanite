@@ -191,7 +191,7 @@ func TestSelectTools_GeminiWindowBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SelectTools(unknown model): %v", err)
 	}
-	// Unknown-model behaviour must match the 200K fallback (same budget).
+	// Unknown-model behavior must match the 200K fallback (same budget).
 	if len(toolsUnknown) != len(tools200k) {
 		t.Errorf("unknown-model fallback count (%d) differs from explicit 200K count (%d); "+
 			"DefaultContextWindowTokens must equal 200000",

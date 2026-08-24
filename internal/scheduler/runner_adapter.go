@@ -470,7 +470,7 @@ func (r *RunnerAdapter) enqueueLoopRunTick(ctx context.Context, job gosched.Job)
 // isResumableLoopRunStatus reports whether status is one of the two
 // loop_runs.status values *loop.LoopEngine.Resume actually knows how to
 // resume (engine.go's own switch) -- everything else (running, completed,
-// failed, cancelled) is "already terminal or not actually WAITing" per this
+// failed, canceled) is "already terminal or not actually WAITing" per this
 // task's own no-op guard wording, including LoopRunStatusRunning: a tick
 // landing while another Resume/Run call is already mid-iteration for this
 // same LoopRun has nothing useful to do either.

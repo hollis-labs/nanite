@@ -81,7 +81,7 @@ func buildProvider() eval.ChatProvider {
 	return &deterministicMock{}
 }
 
-// deterministicMock is a stub provider that returns a recognisable placeholder
+// deterministicMock is a stub provider that returns a recognizable placeholder
 // response. Real scoring only fires in runner_test.go where per-scenario mocks
 // inject targeted responses; this mock is for smoke-testing the CLI pipeline.
 type deterministicMock struct{}

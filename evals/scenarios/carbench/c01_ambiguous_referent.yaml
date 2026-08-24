@@ -11,7 +11,7 @@ tools_offered: []
 prev_turns: []
 
 expected_behavior: >
-  Model recognises that "it" is undefined and asks the user what they want moved
+  Model recognizes that "it" is undefined and asks the user what they want moved
   before taking any action.
 
 rubric:

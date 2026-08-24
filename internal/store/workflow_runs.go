@@ -171,7 +171,7 @@ func (s *Store) UpdateWorkflowRunLoopScope(ctx context.Context, id, loopRunID st
 }
 
 // SetWorkflowRunStatus transitions a run to a new status (typically
-// terminal-for-this-call: completed/failed/cancelled/waiting_on_gate).
+// terminal-for-this-call: completed/failed/canceled/waiting_on_gate).
 // completedAt may be the zero time when the run isn't yet finished. Returns
 // ErrWorkflowRunNotFound when id doesn't match any row — matching this
 // codebase's dominant store convention of surfacing a no-op update as an

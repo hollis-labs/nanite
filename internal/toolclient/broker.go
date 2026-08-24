@@ -228,7 +228,7 @@ func (tb *ToolClient) selectToolsUncapped(_ context.Context, _ string, _ []strin
 // toolTokenBudget computes the token budget for tool definitions from the
 // client's Config and the caller's per-session context window. windowSize
 // <= 0 means the model is unknown — falls back to DefaultContextWindowTokens
-// so behaviour on unknown models is preserved (never a hard failure).
+// so behavior on unknown models is preserved (never a hard failure).
 func (tb *ToolClient) toolTokenBudget(windowSize int) (budget, ctxWindow int) {
 	budgetPct := tb.Config.ToolTokenBudgetPct
 	if budgetPct <= 0 {
@@ -256,7 +256,7 @@ func (tb *ToolClient) toolTokenBudget(windowSize int) (budget, ctxWindow int) {
 //
 // windowSize is the per-session context window in tokens (from models.dev /
 // user settings). When windowSize <= 0 this falls back to
-// DefaultContextWindowTokens so behaviour on unknown models is preserved.
+// DefaultContextWindowTokens so behavior on unknown models is preserved.
 func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string, windowSize int) ([]llmtypes.ToolDefinition, error) {
 	tools, total, err := tb.selectToolsUncapped(ctx, intent, hints, workspaceID, agentID)
 	if err != nil {
@@ -459,7 +459,7 @@ func (tb *ToolClient) CallToolWithPolicyCheck(ctx context.Context, agentID, tool
 // requested inner tool names (and their arguments, when provided) were
 // previously returned to the LLM without enforcement.
 //
-// Behaviour:
+// Behavior:
 //   - If args contain a known escalation pattern (e.g., a path with ".."),
 //     return an empty result and a deny summary.
 //   - Inner tool names not granted to agentID via agent_tools (+ the
@@ -703,7 +703,7 @@ func PruneToolDefsToTokenBudget(tools []llmtypes.ToolDefinition, budgetTokens in
 // past index 15 in the broker's unranked candidate order.
 //
 // windowSize is the per-session context window in tokens; <= 0 falls back
-// to DefaultContextWindowTokens, matching SelectTools' behaviour on unknown
+// to DefaultContextWindowTokens, matching SelectTools' behavior on unknown
 // models.
 func (tb *ToolClient) FinalizeToolSelection(tools []llmtypes.ToolDefinition, windowSize int) []llmtypes.ToolDefinition {
 	if len(tools) > MaxSelectedTools {

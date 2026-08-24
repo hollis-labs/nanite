@@ -72,8 +72,8 @@ func TestRecoveryCancelEndpoint_HappyPath(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got["status"] != "cancelled" {
-		t.Errorf("status = %q, want cancelled", got["status"])
+	if got["status"] != "canceled" {
+		t.Errorf("status = %q, want canceled", got["status"])
 	}
 	if !called {
 		t.Error("bound CancelFunc not invoked")
@@ -82,7 +82,7 @@ func TestRecoveryCancelEndpoint_HappyPath(t *testing.T) {
 
 // TestRecoveryCancelEndpoint_TokenForOtherSession exercises the cross-
 // session replay guard: a token issued for sessionID="real" cannot be
-// cancelled via the endpoint path-bound to sessionID="other". 404 + the
+// canceled via the endpoint path-bound to sessionID="other". 404 + the
 // token stays active so the legitimate session can still cancel it.
 func TestRecoveryCancelEndpoint_TokenForOtherSession(t *testing.T) {
 	_, mux, broker := newTestAPIWithRecovery(t)
@@ -119,7 +119,7 @@ func TestRecoveryCancelEndpoint_TokenForOtherSession(t *testing.T) {
 
 // TestRecoveryCancelEndpoint_UnknownToken covers the stale-FE / typo
 // path: a token that was never registered (or has already been
-// cancelled) returns 404. No state mutation.
+// canceled) returns 404. No state mutation.
 func TestRecoveryCancelEndpoint_UnknownToken(t *testing.T) {
 	_, mux, _ := newTestAPIWithRecovery(t)
 

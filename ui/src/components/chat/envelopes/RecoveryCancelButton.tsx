@@ -12,7 +12,7 @@ import { useChatStore } from "@/stores/useChatStore";
  * `cancel_token` is set. POSTs the token verbatim to
  * `POST /api/sessions/{sessionID}/recovery/cancel`. The BE broker
  * validates session-binding and returns:
- *   - 200 → retry cancelled; render a terminal "cancelled" state.
+ *   - 200 → retry canceled; render a terminal "canceled" state.
  *   - 404 → token unknown / expired / cross-session → terminal "no
  *     longer cancellable" state (transitive failure, not actionable).
  *   - 400 / network → transient toast; button stays interactive so the
@@ -30,7 +30,7 @@ export interface RecoveryCancelButtonProps {
   token: string;
 }
 
-type CancelState = "idle" | "pending" | "cancelled" | "stale";
+type CancelState = "idle" | "pending" | "canceled" | "stale";
 
 export function RecoveryCancelButton({ token }: RecoveryCancelButtonProps) {
   const [state, setState] = useState<CancelState>("idle");
@@ -46,8 +46,8 @@ export function RecoveryCancelButton({ token }: RecoveryCancelButtonProps) {
     setState("pending");
     try {
       const result = await api.cancelRecoveryRetry(sessionId, token);
-      if (result === "cancelled") {
-        setState("cancelled");
+      if (result === "canceled") {
+        setState("canceled");
       } else if (result === "stale") {
         setState("stale");
       } else {
@@ -57,18 +57,18 @@ export function RecoveryCancelButton({ token }: RecoveryCancelButtonProps) {
       }
     } catch {
       setState("idle");
-      showChatToast("Network error cancelling retry.", "info");
+      showChatToast("Network error canceling retry.", "info");
     }
   };
 
-  if (state === "cancelled") {
+  if (state === "canceled") {
     return (
       <span
-        data-recovery-cancel="cancelled"
+        data-recovery-cancel="canceled"
         className="inline-flex items-center gap-1.5 font-mono text-[11px] text-fg-muted"
       >
         <CheckCircle2 className="h-3.5 w-3.5 text-success" />
-        Retry cancelled
+        Retry canceled
       </span>
     );
   }

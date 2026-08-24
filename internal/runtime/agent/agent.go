@@ -603,7 +603,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	// sess.wr becomes usable for SendInput/Stop the moment Wrapper.Run
 	// emits runtimeevents.KindSessionReady — sink.onReady (closing
 	// readyCh) mirrors that exact point, so Boot blocks below until it
-	// fires (or Run exits first, or the caller's ctx is cancelled) before
+	// fires (or Run exits first, or the caller's ctx is canceled) before
 	// returning sess to its own caller.
 	//
 	// runCancel is deliberately NOT called from Session.Stop (manager.go)
@@ -611,7 +611,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	// and computed sess.runErr. Wrapper.Run's own tail end falls back to
 	// ctx.Err() whenever the underlying session.Wait() reports a nil
 	// error (true for every clean stop, e.g. agentkit's adapterSession.
-	// Wait always returns a nil error) — cancelling runCtx from Stop
+	// Wait always returns a nil error) — canceling runCtx from Stop
 	// while Run's own session.Wait()/ctx.Err() check is still in flight
 	// races into an *avoidable* context.Canceled on an otherwise-clean
 	// cooperative stop. wr.Stop's own ctx parameter (caller-bounded) is
@@ -655,7 +655,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		// goroutine above already wrote (state alone, no reason) — mirrors
 		// the <-sess.runDone branch's own MarkRuntimeFailed call above so
 		// every Boot abort path leaves a forensic reason, not just a state.
-		_ = deps.Store.MarkRuntimeFailed(sessID, "agent.Boot: caller ctx cancelled: "+ctx.Err().Error())
+		_ = deps.Store.MarkRuntimeFailed(sessID, "agent.Boot: caller ctx canceled: "+ctx.Err().Error())
 		return cleanup(ctx.Err())
 	}
 

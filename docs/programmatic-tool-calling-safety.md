@@ -157,7 +157,7 @@ no v1 benefit.
 
 ## Failure modes
 
-| Failure | Behaviour |
+| Failure | Behavior |
 |---|---|
 | `python3` not on PATH | Tool returns `errorResult` immediately; no subprocess spawned |
 | Timeout (wall-clock) | Go sends SIGTERM to process group, then SIGKILL backstop; `error` field set to `"execution timed out after Ns"` |

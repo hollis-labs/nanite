@@ -479,12 +479,12 @@ export const api = {
    */
   cancelChatStream: async (
     sessionId: string,
-  ): Promise<"cancelled" | "idle" | "error"> => {
+  ): Promise<"canceled" | "idle" | "error"> => {
     try {
       const res = await fetch(`${API_BASE}/sessions/${sessionId}/chat/cancel`, {
         method: "POST",
       });
-      if (res.ok) return "cancelled";
+      if (res.ok) return "canceled";
       if (res.status === 404) return "idle";
       return "error";
     } catch {
@@ -558,7 +558,7 @@ export const api = {
    *
    * BE: POST /api/sessions/{id}/recovery/cancel with {"token": ...}.
    * Per W1D's contract:
-   *   - 200 → "cancelled" (broker cancelled; breadcrumb is OutcomeCancelled)
+   *   - 200 → "canceled" (broker canceled; breadcrumb is OutcomeCanceled)
    *   - 404 → "stale" (token unknown / expired / cross-session)
    *   - 400 → "error" (malformed body / missing token — should not happen)
    *   - any other / network failure → "error"
@@ -570,7 +570,7 @@ export const api = {
   cancelRecoveryRetry: async (
     sessionId: string,
     token: string,
-  ): Promise<"cancelled" | "stale" | "error"> => {
+  ): Promise<"canceled" | "stale" | "error"> => {
     const res = await fetch(
       `${API_BASE}/sessions/${sessionId}/recovery/cancel`,
       {
@@ -579,7 +579,7 @@ export const api = {
         body: JSON.stringify({ token }),
       },
     );
-    if (res.ok) return "cancelled";
+    if (res.ok) return "canceled";
     if (res.status === 404) return "stale";
     return "error";
   },

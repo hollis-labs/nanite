@@ -172,7 +172,7 @@ func TestWorkflowLauncher_Launch_RequiresAgentProfileID(t *testing.T) {
 
 // TestWorkflowLauncher_Launch_RespectsTimeout proves TimeoutSeconds is
 // actually enforced against the engine run, not silently dropped — a step
-// that ignores its own deadline and only exits when ctx is cancelled must
+// that ignores its own deadline and only exits when ctx is canceled must
 // still cause Launch to return promptly instead of blocking on the step
 // forever, and the durable-agent instance must still be finalized to
 // stopped rather than left dangling in "active".
@@ -230,11 +230,11 @@ func TestWorkflowLauncher_Launch_RespectsTimeout(t *testing.T) {
 	}
 }
 
-func TestBuiltinWorkflowEngine_PersistWorkflowRunStepOutcome_SurvivesCancelledContext(t *testing.T) {
+func TestBuiltinWorkflowEngine_PersistWorkflowRunStepOutcome_SurvivesCanceledContext(t *testing.T) {
 	st, _ := newWorkflowLaunchTestFixture(t)
-	runID := "cancelled-outcome-run"
+	runID := "canceled-outcome-run"
 	if err := st.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{
-		ID: runID, DefinitionName: "cancelled-outcome", Status: "running", InputJSON: "{}",
+		ID: runID, DefinitionName: "canceled-outcome", Status: "running", InputJSON: "{}",
 	}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestBuiltinWorkflowEngine_PersistWorkflowRunStepOutcome_SurvivesCancelledCo
 		},
 	}
 	engine := NewBuiltinWorkflowEngine(st)
-	outcome := engine.runStep(ctx, runID, singleToolStepWorkflow("cancelled-outcome").Steps[0], nil, agentworkflow.WorkflowInput{}, exec)
+	outcome := engine.runStep(ctx, runID, singleToolStepWorkflow("canceled-outcome").Steps[0], nil, agentworkflow.WorkflowInput{}, exec)
 	if outcome.Err != nil {
 		t.Fatalf("runStep: %v", outcome.Err)
 	}

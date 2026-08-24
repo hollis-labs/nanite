@@ -53,9 +53,9 @@ func TestEmitNotifyPause_EmitsPlaceholderEnvelope(t *testing.T) {
 
 	// Short delay so the test runs fast. 60ms is comfortably above the
 	// scheduler's poll resolution and well under the floor.
-	cancelled := emitNotifyPause(context.Background(), tu, ch, nil, 60*time.Millisecond)
-	if cancelled {
-		t.Fatal("expected proceed (not cancelled) on a non-cancelled ctx")
+	canceled := emitNotifyPause(context.Background(), tu, ch, nil, 60*time.Millisecond)
+	if canceled {
+		t.Fatal("expected proceed (not canceled) on a non-canceled ctx")
 	}
 	close(ch)
 
@@ -100,11 +100,11 @@ func TestEmitNotifyPause_SkipsNonDevTools(t *testing.T) {
 		Name: "card_show",
 	}
 	ch := make(chan chat.StreamEvent, 4)
-	cancelled := emitNotifyPause(context.Background(), tu, ch, nil, 60*time.Millisecond)
+	canceled := emitNotifyPause(context.Background(), tu, ch, nil, 60*time.Millisecond)
 	close(ch)
 
-	if cancelled {
-		t.Fatal("non-dev tool should never report cancelled")
+	if canceled {
+		t.Fatal("non-dev tool should never report canceled")
 	}
 	for ev := range ch {
 		if ev.Type == "notify_pause" {
@@ -114,7 +114,7 @@ func TestEmitNotifyPause_SkipsNonDevTools(t *testing.T) {
 }
 
 // TestEmitNotifyPause_CancelsOnCtx confirms a ctx.Done() during the
-// pause window returns cancelled=true. This is the wiring path the
+// pause window returns canceled=true. This is the wiring path the
 // CW-20260501-0003 toast cancel button will hit (it cancels the
 // per-message ctx).
 func TestEmitNotifyPause_CancelsOnCtx(t *testing.T) {
@@ -133,10 +133,10 @@ func TestEmitNotifyPause_CancelsOnCtx(t *testing.T) {
 		cancel()
 	}()
 
-	cancelled := emitNotifyPause(ctx, tu, ch, nil, 1500*time.Millisecond)
+	canceled := emitNotifyPause(ctx, tu, ch, nil, 1500*time.Millisecond)
 	close(ch)
-	if !cancelled {
-		t.Fatal("expected cancelled=true when ctx is cancelled during the pause window")
+	if !canceled {
+		t.Fatal("expected canceled=true when ctx is canceled during the pause window")
 	}
 }
 

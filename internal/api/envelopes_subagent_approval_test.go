@@ -82,7 +82,7 @@ func TestEnvelopeResponse_SubagentApproval_Approve(t *testing.T) {
 }
 
 // TestEnvelopeResponse_SubagentApproval_Reject drives: spawn-with-interactive
-// → POST respond with Status=cancelled + reason → row transitions to rejected
+// → POST respond with Status=canceled + reason → row transitions to rejected
 // with rejection_reason persisted.
 func TestEnvelopeResponse_SubagentApproval_Reject(t *testing.T) {
 	a, mux := newTestAPI(t)
@@ -124,7 +124,7 @@ func TestEnvelopeResponse_SubagentApproval_Reject(t *testing.T) {
 
 	body, _ := json.Marshal(chat.ResponseV1{
 		V: 1, Kind: "subagent-spawn-approval", ID: envelopeID,
-		Status: chat.StatusCancelled,
+		Status: chat.StatusCanceled,
 		Data:   map[string]any{"reason": "too risky"},
 	})
 	w := doPost(mux, "/api/envelopes/"+envelopeID+"/respond", body)

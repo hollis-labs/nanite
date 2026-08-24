@@ -26,7 +26,7 @@ const (
 	LoopRunStatusRunning             = "running"
 	LoopRunStatusCompleted           = "completed"
 	LoopRunStatusFailed              = "failed"
-	LoopRunStatusCancelled           = "cancelled"
+	LoopRunStatusCanceled            = "canceled"
 	LoopRunStatusWaitingOnGate       = "waiting_on_gate"
 	LoopRunStatusWaitingOnEscalation = "waiting_on_escalation"
 )
@@ -56,7 +56,7 @@ var validLoopRunStatuses = map[string]bool{
 	LoopRunStatusRunning:             true,
 	LoopRunStatusCompleted:           true,
 	LoopRunStatusFailed:              true,
-	LoopRunStatusCancelled:           true,
+	LoopRunStatusCanceled:            true,
 	LoopRunStatusWaitingOnGate:       true,
 	LoopRunStatusWaitingOnEscalation: true,
 }
@@ -69,7 +69,7 @@ var validLoopRunStatuses = map[string]bool{
 // storage layer.
 func validateLoopRunStatus(status string) error {
 	if !validLoopRunStatuses[status] {
-		return fmt.Errorf("status %q invalid: must be one of running, completed, failed, cancelled, waiting_on_gate, waiting_on_escalation", status)
+		return fmt.Errorf("status %q invalid: must be one of running, completed, failed, canceled, waiting_on_gate, waiting_on_escalation", status)
 	}
 	return nil
 }
@@ -185,7 +185,7 @@ type LoopRun struct {
 	UpdatedAt string `json:"updated_at"`
 
 	// CompletedAt is set when this LoopRun reaches a terminal status
-	// (completed/failed/cancelled -- NOT waiting_on_gate/
+	// (completed/failed/canceled -- NOT waiting_on_gate/
 	// waiting_on_escalation, which are paused, not terminal, states) via
 	// UpdateLoopRunStatus's completedAt parameter. Empty until then.
 	CompletedAt string `json:"completed_at,omitempty"`

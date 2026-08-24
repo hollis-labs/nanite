@@ -92,7 +92,7 @@ func diagWatchChSend(ctx context.Context, site string, ch chan chat.StreamEvent,
 			case <-done:
 				return
 			case <-ctx.Done():
-				slog.Warn("chat-loop-diag: ctx cancelled while send pending",
+				slog.Warn("chat-loop-diag: ctx canceled while send pending",
 					"site", site, "waited_ms", time.Since(start).Milliseconds(),
 					"ch_len", len(ch), "ch_cap", cap(ch),
 					"session_id", sessionID, "msg_id", msgID, "iter", iter, "event_type", evtType)

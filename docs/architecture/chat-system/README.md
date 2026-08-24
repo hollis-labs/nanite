@@ -16,7 +16,7 @@ User message → assistant response, 14 steps. Numbered components are clickable
 
 1. **UI** `ChatComposer.sendMessage(content)` (`ui/src/hooks/useChat.ts:300`). Optimistic user-message added; `useChatStore.isStreaming = true` (global — see [09](09-session-and-slot-management.md) on cross-session bleed).
 2. **REST** `POST /api/messages` → `chatServiceImpl.HandleMessage` (`internal/service/chat.go:394`). Path-grant scan: `pathGrants.RegisterFromUserMessage(sessionID, content)` registers `~/`, `/`, `./` literals + parents into the session bucket ([06](06-permission-and-authority.md)).
-3. **Persist + launch** `HandleMessage` writes the user `*store.Message`, allocates `assistantMsgID`, calls `launchGeneration`. Prior in-flight generation for the same session is cancelled (CW-20260418-0043) ([04](04-chat-harness-and-loop-orchestration.md)).
+3. **Persist + launch** `HandleMessage` writes the user `*store.Message`, allocates `assistantMsgID`, calls `launchGeneration`. Prior in-flight generation for the same session is canceled (CW-20260418-0043) ([04](04-chat-harness-and-loop-orchestration.md)).
 4. **Resolve** `generateResponse` (`internal/service/chat_generate.go:121`) loads session, resolves agent via `agents.ResolveForSession`, parses `AgentConstraints`, resolves model + provider via `resolveProvider` → `chat.InferProvider` ([07](07-provider-routing.md)).
 5. **Tool selection** `s.tools.SelectForAgent` returns `ToolSelection{Tools, Progressive, Catalog, OverrideBlock}`. Mode `tool_overrides` applied. `composeExtraSystemPrefix` builds the per-turn dynamic prefix ([02](02-tool-invocation-and-authority.md)).
 6. **Plugin filters** `FilterSystemPrompt`, `FilterUserMessage` mutate the per-turn prefix and user content.

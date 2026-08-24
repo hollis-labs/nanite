@@ -85,7 +85,7 @@ func TestEnsureRuntimeDirs_Idempotent(t *testing.T) {
 }
 
 // TestEnsureRuntimeDirs_SkipsUserModifiedREADME verifies that a README.md
-// the user has customised is preserved verbatim — EnsureRuntimeDirs must not
+// the user has customized is preserved verbatim — EnsureRuntimeDirs must not
 // overwrite it.
 func TestEnsureRuntimeDirs_SkipsUserModifiedREADME(t *testing.T) {
 	home := t.TempDir()

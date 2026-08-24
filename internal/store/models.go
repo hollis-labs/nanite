@@ -18,7 +18,7 @@ import (
 // as long as the caller invokes this after SyncFromCatalog has run for the
 // current refresh cycle, the DB row and the in-memory overlay are always
 // reading the exact same merged value — there is exactly one merge
-// (registry.go's SyncFromCatalog), and this just materialises its result
+// (registry.go's SyncFromCatalog), and this just materializes its result
 // into the DB. That is the mechanism that keeps the two from diverging;
 // this function must not re-derive context window / max output / pricing
 // by any other path.

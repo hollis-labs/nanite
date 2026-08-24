@@ -197,7 +197,7 @@ func TestCancelWorker(t *testing.T) {
 	// Wait for result.
 	result := <-done
 	if result.Success {
-		t.Error("expected cancelled worker to not succeed")
+		t.Error("expected canceled worker to not succeed")
 	}
 }
 
@@ -264,38 +264,38 @@ func TestListAndActiveCount(t *testing.T) {
 //   - entered   — closed once DelegateTask is actually executing, i.e. once
 //     SpawnFull is past its whole spawn phase (worker published, heartbeat
 //     registered, SetStatus(StatusRunning) done).
-//   - cancelled — closed once the delegation has observed its context being
-//     cancelled, proving Shutdown really cancelled it.
+//   - canceled — closed once the delegation has observed its context being
+//     canceled, proving Shutdown really canceled it.
 //   - release   — supplied by the test; the delegation parks here until the
 //     test lets it unwind, so SpawnFull's error path runs at a point the
 //     test controls rather than at a point the scheduler picks.
 //
 // It is deliberately separate from manager_shutdown_test.go's
 // blockingDelegator, which owns the drain-within-budget property and must
-// keep returning as soon as its context is cancelled.
+// keep returning as soon as its context is canceled.
 type shutdownBarrierDelegator struct {
-	entered   chan struct{}
-	cancelled chan struct{}
-	release   chan struct{}
+	entered  chan struct{}
+	canceled chan struct{}
+	release  chan struct{}
 
-	enteredOnce   sync.Once
-	cancelledOnce sync.Once
+	enteredOnce  sync.Once
+	canceledOnce sync.Once
 }
 
 func (d *shutdownBarrierDelegator) DelegateTask(ctx context.Context, _ chat.DelegationRequest) (*chat.DelegationResult, error) {
 	d.enteredOnce.Do(func() { close(d.entered) })
 	<-ctx.Done()
-	d.cancelledOnce.Do(func() { close(d.cancelled) })
+	d.canceledOnce.Do(func() { close(d.canceled) })
 	<-d.release
 	return nil, ctx.Err()
 }
 
 // TestShutdown pins the terminal state of a worker that Shutdown interrupts
-// mid-delegation: it is "cancelled", and nothing downstream may downgrade it
+// mid-delegation: it is "canceled", and nothing downstream may downgrade it
 // to "failed".
 //
 // That is the manager's stated intent — SpawnFull guards every one of its
-// own status writes with `if w.GetStatus() != StatusCancelled` precisely so a
+// own status writes with `if w.GetStatus() != StatusCanceled` precisely so a
 // concurrent Shutdown/Cancel wins (see manager.go, "Respect that terminal
 // state rather than overwriting it"). "failed" is not a second legal outcome
 // here, so the assertion below is exact and must not be widened to accept
@@ -305,9 +305,9 @@ func (d *shutdownBarrierDelegator) DelegateTask(ctx context.Context, _ chat.Dele
 // is not a barrier: it bounds elapsed wall-clock time, not SpawnFull's
 // progress. On a saturated machine — a full-repo `-race` run on one CI
 // runner — the spawned goroutine can still be inside its spawn phase when
-// the sleep expires. Shutdown then marks a worker "cancelled" that SpawnFull
-// immediately overwrites with StatusRunning; the already-cancelled context
-// makes DelegateTask fail, the != StatusCancelled guard sees "running", and
+// the sleep expires. Shutdown then marks a worker "canceled" that SpawnFull
+// immediately overwrites with StatusRunning; the already-canceled context
+// makes DelegateTask fail, the != StatusCanceled guard sees "running", and
 // the worker settles on "failed".
 //
 // The entered-barrier is therefore load-bearing, not decoration. To confirm
@@ -318,9 +318,9 @@ func (d *shutdownBarrierDelegator) DelegateTask(ctx context.Context, _ chat.Dele
 // with the barrier; re-derive rather than trusting those figures.
 func TestShutdown(t *testing.T) {
 	deleg := &shutdownBarrierDelegator{
-		entered:   make(chan struct{}),
-		cancelled: make(chan struct{}),
-		release:   make(chan struct{}),
+		entered:  make(chan struct{}),
+		canceled: make(chan struct{}),
+		release:  make(chan struct{}),
 	}
 	mgr := newTestManager(deleg)
 
@@ -354,7 +354,7 @@ func TestShutdown(t *testing.T) {
 	_ = mgr.Shutdown(2 * time.Second)
 
 	select {
-	case <-deleg.cancelled:
+	case <-deleg.canceled:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Shutdown did not cancel the in-flight delegation's context")
 	}
@@ -370,27 +370,27 @@ func TestShutdown(t *testing.T) {
 	if len(workers) != 1 {
 		t.Fatalf("after Shutdown: List() = %d workers, want 1", len(workers))
 	}
-	if got := workers[0].Status; got != StatusCancelled {
+	if got := workers[0].Status; got != StatusCanceled {
 		t.Errorf("after Shutdown: worker %s status = %q, want %q",
-			workers[0].ID[:8], got, StatusCancelled)
+			workers[0].ID[:8], got, StatusCanceled)
 	}
 
 	// Now let the delegation unwind. SpawnFull's error path must respect the
-	// cancelled terminal state rather than downgrading it to "failed".
+	// canceled terminal state rather than downgrading it to "failed".
 	releaseDelegation()
 	select {
 	case <-spawnDone:
 	case <-time.After(5 * time.Second):
-		t.Fatal("SpawnFull did not return after its context was cancelled")
+		t.Fatal("SpawnFull did not return after its context was canceled")
 	}
 
 	workers = mgr.List()
 	if len(workers) != 1 {
 		t.Fatalf("after SpawnFull returned: List() = %d workers, want 1", len(workers))
 	}
-	if got := workers[0].Status; got != StatusCancelled {
-		t.Errorf("after SpawnFull returned: worker %s status = %q, want %q (SpawnFull's error path must not overwrite a cancelled worker)",
-			workers[0].ID[:8], got, StatusCancelled)
+	if got := workers[0].Status; got != StatusCanceled {
+		t.Errorf("after SpawnFull returned: worker %s status = %q, want %q (SpawnFull's error path must not overwrite a canceled worker)",
+			workers[0].ID[:8], got, StatusCanceled)
 	}
 }
 

@@ -45,7 +45,7 @@ interface ElicitationPromptCardProps {
   onRespond?: EnvelopeResponder
 }
 
-type ElicitationState = 'pending' | 'accepted' | 'declined' | 'cancelled'
+type ElicitationState = 'pending' | 'accepted' | 'declined' | 'canceled'
 
 /**
  * Hydrate the card state from a persisted response so it keeps its resolved
@@ -56,7 +56,7 @@ function hydrateState(prior: EnvelopeType['prior_response']): ElicitationState {
   if (!prior) return 'pending'
   const action = prior.data?.action
   if (action === 'decline') return 'declined'
-  if (action === 'cancel') return 'cancelled'
+  if (action === 'cancel') return 'canceled'
   return 'accepted'
 }
 
@@ -78,7 +78,7 @@ export function ElicitationPromptCard({ envelope, onRespond }: ElicitationPrompt
 
   const respond = async (action: 'accept' | 'decline' | 'cancel', content?: string) => {
     setSubmitError(null)
-    setState(action === 'accept' ? 'accepted' : action === 'decline' ? 'declined' : 'cancelled')
+    setState(action === 'accept' ? 'accepted' : action === 'decline' ? 'declined' : 'canceled')
     if (!onRespond) return
     try {
       await onRespond({
@@ -129,14 +129,14 @@ export function ElicitationPromptCard({ envelope, onRespond }: ElicitationPrompt
     )
   }
 
-  if (state === 'declined' || state === 'cancelled') {
+  if (state === 'declined' || state === 'canceled') {
     return (
       <Envelope accent="neutral" muted>
         <EnvelopeBody>
           <div className="flex items-center gap-2">
             <XCircle className="h-4 w-4 text-fg-muted shrink-0" />
             <span className="text-[13px] text-fg-secondary">
-              {state === 'declined' ? 'Declined' : 'Cancelled'} — {data.message}
+              {state === 'declined' ? 'Declined' : 'Canceled'} — {data.message}
             </span>
           </div>
         </EnvelopeBody>

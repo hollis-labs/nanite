@@ -13,7 +13,7 @@ const (
 	StatusInProgress Status = "in_progress"
 	StatusCompleted  Status = "completed"
 	StatusFailed     Status = "failed"
-	StatusCancelled  Status = "cancelled"
+	StatusCanceled   Status = "canceled"
 )
 
 // Task represents a unit of work in multi-agent orchestration.
@@ -37,16 +37,16 @@ type Task struct {
 
 // IsTerminal returns true if the task is in a final state.
 func (t *Task) IsTerminal() bool {
-	return t.Status == StatusCompleted || t.Status == StatusFailed || t.Status == StatusCancelled
+	return t.Status == StatusCompleted || t.Status == StatusFailed || t.Status == StatusCanceled
 }
 
 // validTransitions defines which status transitions are allowed.
 var validTransitions = map[Status][]Status{
-	StatusPending:    {StatusInProgress, StatusCancelled},
-	StatusInProgress: {StatusCompleted, StatusFailed, StatusCancelled},
+	StatusPending:    {StatusInProgress, StatusCanceled},
+	StatusInProgress: {StatusCompleted, StatusFailed, StatusCanceled},
 	StatusCompleted:  {},
 	StatusFailed:     {StatusPending}, // allow retry
-	StatusCancelled:  {},
+	StatusCanceled:   {},
 }
 
 // ValidateTransition checks whether a status transition is allowed.

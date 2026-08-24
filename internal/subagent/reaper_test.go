@@ -357,8 +357,8 @@ func TestReaper_OrphanGraceFloorPreservesFreshRows(t *testing.T) {
 }
 
 // TestReaper_StartStopNoGoroutineLeak — the reaper goroutine must exit
-// when ctx is cancelled (subtodo (b): "Reaper must stop on context
-// cancel — no goroutine leak"). Test by cancelling and asserting Stop
+// when ctx is canceled (subtodo (b): "Reaper must stop on context
+// cancel — no goroutine leak"). Test by canceling and asserting Stop
 // returns within a tight bound.
 func TestReaper_StartStopNoGoroutineLeak(t *testing.T) {
 	db, _ := newTestDB(t)

@@ -473,8 +473,8 @@ func TestLoopsAPI_CancelLoop(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &lr); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if lr.Status != store.LoopRunStatusCancelled {
-		t.Fatalf("Status = %q, want cancelled", lr.Status)
+	if lr.Status != store.LoopRunStatusCanceled {
+		t.Fatalf("Status = %q, want canceled", lr.Status)
 	}
 }
 
@@ -551,8 +551,8 @@ func TestLoopsAPI_ResolveEscalation_ForceCancel(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if resp.Status != store.LoopRunStatusCancelled {
-		t.Fatalf("Status = %q, want cancelled", resp.Status)
+	if resp.Status != store.LoopRunStatusCanceled {
+		t.Fatalf("Status = %q, want canceled", resp.Status)
 	}
 }
 

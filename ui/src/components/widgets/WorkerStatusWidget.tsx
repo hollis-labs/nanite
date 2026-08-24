@@ -10,7 +10,7 @@ const STATUS_DOT: Record<string, string> = {
   running: 'bg-info',
   completed: 'bg-success',
   failed: 'bg-danger',
-  cancelled: 'bg-fg-muted',
+  canceled: 'bg-fg-muted',
 }
 
 export function WorkerStatusWidget() {

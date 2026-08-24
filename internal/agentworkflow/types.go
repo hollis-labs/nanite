@@ -68,7 +68,7 @@ type RunStatus string
 const (
 	RunStatusCompleted RunStatus = "completed"
 	RunStatusFailed    RunStatus = "failed"
-	RunStatusCancelled RunStatus = "cancelled"
+	RunStatusCanceled  RunStatus = "canceled"
 	// RunStatusWaiting means the run made all the progress it currently
 	// can — every remaining step is blocked behind an unresolved gate.
 	RunStatusWaiting RunStatus = "waiting_on_gate"

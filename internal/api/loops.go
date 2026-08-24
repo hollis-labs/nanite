@@ -30,7 +30,7 @@
 // already in use by any comparable endpoint (schedules/teams/durable-agents
 // all rely on the same uniform chain), and 21-loops.md's own "What this
 // session did not decide" list explicitly leaves "auth/permission model for
-// launching, cancelling, or force-resolving a LoopRun escalation" open --
+// launching, canceling, or force-resolving a LoopRun escalation" open --
 // so nothing narrower is added here, matching both precedents' own
 // "acceptable to leave open and let real usage inform the answer" call.
 package api

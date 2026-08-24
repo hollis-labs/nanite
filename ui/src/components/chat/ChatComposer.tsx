@@ -46,7 +46,7 @@ import { ShellInfoDrawer } from "./ShellInfoDrawer";
  *    strip with success accent + StatusPill-sized dismiss button.
  *  - Shell approval strip: was the worst offender — three ad-hoc buttons
  *    (one primary-fill "Allow", one surface-hover "Deny", and an inline
- *    code chip). Now mono-labelled with proper primary + ghost buttons.
+ *    code chip). Now mono-labeled with proper primary + ghost buttons.
  *    No more "Deny" button rendered in white text on hover-gray.
  *  - Shell mode 3-state toggle: bg-warning/10 + text-warning combinations
  *    still make sense (security-flavored), but the button radius matches

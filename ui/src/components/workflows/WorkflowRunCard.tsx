@@ -24,7 +24,7 @@ function statusDotClass(status: RunStatus): string {
       return "bg-success";
     case "failed":
       return "bg-danger";
-    case "cancelled":
+    case "canceled":
       return "bg-fg-muted/40";
     case "pending":
       return "bg-warning animate-pulse";
@@ -39,7 +39,7 @@ function statusBadgeClass(status: RunStatus): string {
       return "bg-success/20 text-success";
     case "failed":
       return "bg-danger/20 text-danger";
-    case "cancelled":
+    case "canceled":
       return "bg-fg-muted/10 text-fg-muted";
     case "pending":
       return "bg-warning/20 text-warning";
@@ -59,7 +59,7 @@ function stepPillPrefix(status: StepStatus): string {
     case "failed":
       return "✗";
     case "skipped":
-    case "cancelled":
+    case "canceled":
       return "⊘";
     default:
       return "·";
@@ -75,7 +75,7 @@ function stepPillClass(status: StepStatus): string {
     case "failed":
       return "bg-danger/20 text-danger";
     case "skipped":
-    case "cancelled":
+    case "canceled":
       return "bg-fg-muted/10 text-fg-muted";
     default:
       return "bg-surface/40 text-fg-faint";
@@ -102,7 +102,7 @@ function timeLabel(run: WorkflowRun): string {
 export function WorkflowRunCard({ run, onClick }: WorkflowRunCardProps) {
   const { pipeline, run: runState } = run;
   const status = runState.status;
-  const isTerminal = status === "completed" || status === "failed" || status === "cancelled";
+  const isTerminal = status === "completed" || status === "failed" || status === "canceled";
 
   const stepStates = Object.entries(runState.step_states ?? {});
   const totalSteps = Math.max(pipeline.step_count, stepStates.length);

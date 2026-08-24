@@ -215,7 +215,7 @@ func mustExitError(t *testing.T, code int) error {
 // isolation — in particular the caller-cancellation race Copilot flagged
 // in review: a subprocess that already exited cleanly (runErr == nil)
 // must report success even if the caller's ambient parentCtx happens to
-// be cancelled (for reasons unrelated to this subprocess) at the same
+// be canceled (for reasons unrelated to this subprocess) at the same
 // moment, rather than surfacing a spurious launch-level error over an
 // otherwise-valid Result.
 func TestClassifyRunResult(t *testing.T) {
@@ -235,9 +235,9 @@ func TestClassifyRunResult(t *testing.T) {
 		{
 			// The exact race from review: the subprocess already
 			// finished successfully, but the caller's own ambient
-			// context happens to be cancelled at the same instant for
+			// context happens to be canceled at the same instant for
 			// unrelated reasons. Must NOT be reported as a failure.
-			name:         "clean exit despite a concurrently-cancelled parent ctx",
+			name:         "clean exit despite a concurrently-canceled parent ctx",
 			runErr:       nil,
 			parentCtxErr: context.Canceled,
 			wantErr:      false,
@@ -256,7 +256,7 @@ func TestClassifyRunResult(t *testing.T) {
 			wantErr:      true,
 		},
 		{
-			name:         "parent ctx cancelled with a real run error",
+			name:         "parent ctx canceled with a real run error",
 			runErr:       mustExitError(t, 1),
 			parentCtxErr: context.Canceled,
 			wantErr:      true,

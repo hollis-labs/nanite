@@ -271,7 +271,7 @@ Recovery from provider errors flows through `ctxpkg.IsCompactRecoverable`. This 
 ## G-TILDE-NOTE-LOCATION
 
 **Severity:** P3
-**Status:** Open (resolution = code archaeology)
+**Status:** Open (resolution = code archeology)
 
 `tildeAcceptanceNote()` is referenced in decisions / spec / boot prompts as the convention for "tool descriptions accept `~/` verbatim and let the permission layer expand." The exact code symbol wasn't located in the recent investigation — could be a comment in description templates rather than a function. Worth resolving before tool-description docs are revised.
 

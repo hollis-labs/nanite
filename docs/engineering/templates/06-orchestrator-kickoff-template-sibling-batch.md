@@ -66,8 +66,8 @@ Work through {{the real dispatch order — waves, phases, whatever this batch's 
 
 Five separate count errors surfaced across Waves 0-2, in task files, kickoffs,
 handoffs, and summaries alike. The lists were correct every time; only the
-prose summarising them drifted. They split into two kinds, and the two need
-different defences.
+prose summarizing them drifted. They split into two kinds, and the two need
+different defenses.
 
 ### Kind 1 — wrong at the source
 
@@ -86,11 +86,11 @@ this, because the prose is accurate about a measurement that was wrong.
 - A planning doc reported the audit's rescued evidence as "~16 MB, 30 files"
   from `du -sh` on the source directory; the real figure was **8.0 MB, 29
   files**. `du` reports allocated disk blocks, not summed file sizes, and the
-  directory listing included `.`/`..`. A different flavour of the same fault:
+  directory listing included `.`/`..`. A different flavor of the same fault:
   the command ran fine and answered a slightly different question than the one
   being asked.
 
-**Defence: ship the command next to the number**, so verifying is a paste
+**Defense: ship the command next to the number**, so verifying is a paste
 rather than an investigation — and sanity-check the command itself against a
 case whose answer you already know. In the first example above, the number that
 caught the error was found by an executing agent *because the command was
@@ -111,7 +111,7 @@ reframed and the rest inherit it.
 Restating a number reads as emphasis, not as an independent unverified claim —
 which is exactly why it does not feel like duplication while writing it.
 
-**Defence: state a count once and reference it thereafter.** Put it in the
+**Defense: state a count once and reference it thereafter.** Put it in the
 table that is derived from the list, and elsewhere say "the task list above"
 rather than repeating the figure. Where a number must appear twice, mark one
 authoritative in the text — *"count from this list; if any other number
@@ -124,12 +124,12 @@ from earlier in the same document, and never carry one across documents.
 
 *(This section's first draft said "five separate count errors" while listing
 four — written by the same author who had just spent a session finding the
-other five. The pull toward a round summarising number is strong enough to
+other five. The pull toward a round summarizing number is strong enough to
 survive knowing about it, which is the argument for deriving rather than
 resolving to be careful.)*
 
 **Kickoffs are the highest-risk document for this**, because their author is
-summarising work they did not do, from task files written before the code
+summarizing work they did not do, from task files written before the code
 moved. Every count in a kickoff — task totals, file counts, findings closed,
 statuses — should be re-derived against current `HEAD` while writing it, not
 copied from the batch README or a prior wave's handoff.

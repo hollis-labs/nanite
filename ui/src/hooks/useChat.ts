@@ -389,11 +389,11 @@ export function useChat(sessionId: string | null) {
   const pendingJump = useChatStore((s) => s.pendingJump);
   useEffect(() => {
     if (!pendingJump || !sessionId || pendingJump.sessionId !== sessionId) return;
-    let cancelled = false;
+    let canceled = false;
     (async () => {
       try {
         const page = await api.getMessagesAround(sessionId, pendingJump.messageId);
-        if (cancelled) return;
+        if (canceled) return;
         setMessages(page.messages ?? []);
         // Explicitly set paginationState to null — the messages-around endpoint
         // returns a window from the middle of the session, and we don't know
@@ -407,10 +407,10 @@ export function useChat(sessionId: string | null) {
       } catch (err) {
         console.error("Failed to load messages around jump target:", err);
       }
-      // Clear the pending jump (success or failure) unless this run was cancelled
+      // Clear the pending jump (success or failure) unless this run was canceled
       // or the store now holds a different jump. Done outside the catch to
       // avoid a return-in-finally pattern.
-      if (cancelled) return;
+      if (canceled) return;
       const current = useChatStore.getState().pendingJump;
       if (
         current &&
@@ -421,7 +421,7 @@ export function useChat(sessionId: string | null) {
       }
     })();
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [pendingJump, sessionId]);
 
@@ -490,7 +490,7 @@ export function useChat(sessionId: string | null) {
             // "narration" → thinking strip (not accumulated as the answer).
             // "thinking"  → thinking strip (F3 interleaved thinking block).
             // "final"     → answer bubble (accumulated for persistence).
-            // No phase (pre-F4 or legacy streams) → treat as final (old behaviour).
+            // No phase (pre-F4 or legacy streams) → treat as final (old behavior).
             if (data.phase === "narration") {
               store().appendStreamNarration(sessionId, data.content);
             } else if (data.phase === "thinking") {

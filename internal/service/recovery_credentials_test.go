@@ -176,7 +176,7 @@ func TestRefresh_EmptyDefaultProvider(t *testing.T) {
 }
 
 // TestRefresh_UnknownProvider: profile maps to a provider name the
-// adapter doesn't recognise. Returns clean error so the broker
+// adapter doesn't recognize. Returns clean error so the broker
 // escalates.
 func TestRefresh_UnknownProvider(t *testing.T) {
 	profiles := map[string]*store.AgentProfile{
@@ -281,9 +281,9 @@ func TestRefresh_RegistryNotWired(t *testing.T) {
 	}
 }
 
-// TestRefresh_RespectsCancelledContext: pre-cancelled ctx short-circuits
+// TestRefresh_RespectsCanceledContext: pre-canceled ctx short-circuits
 // the flow without a panic and without touching the resolver/keychain.
-func TestRefresh_RespectsCancelledContext(t *testing.T) {
+func TestRefresh_RespectsCanceledContext(t *testing.T) {
 	resolverCalls := 0
 	keyringCalls := 0
 	a := &recoveryCredentialsAdapter{
@@ -312,21 +312,21 @@ func TestRefresh_RespectsCancelledContext(t *testing.T) {
 
 	err := a.Refresh(ctx, "chat")
 	if err == nil {
-		t.Fatal("Refresh: expected error for cancelled ctx, got nil")
+		t.Fatal("Refresh: expected error for canceled ctx, got nil")
 	}
 	if !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "context canceled") {
 		t.Errorf("Refresh: expected ctx.Canceled wrap, got: %v", err)
 	}
 	if resolverCalls != 0 {
-		t.Errorf("Refresh: resolver called %d times after cancelled ctx, want 0", resolverCalls)
+		t.Errorf("Refresh: resolver called %d times after canceled ctx, want 0", resolverCalls)
 	}
 	if keyringCalls != 0 {
-		t.Errorf("Refresh: keychain consulted %d times after cancelled ctx, want 0", keyringCalls)
+		t.Errorf("Refresh: keychain consulted %d times after canceled ctx, want 0", keyringCalls)
 	}
 }
 
 // TestRefresh_RespectsTimeoutContext: deadline-exceeded ctx behaves the
-// same as cancelled — short-circuit before any work.
+// same as canceled — short-circuit before any work.
 func TestRefresh_RespectsTimeoutContext(t *testing.T) {
 	a := &recoveryCredentialsAdapter{
 		agents: &fakeProfileResolver{
@@ -382,7 +382,7 @@ func TestRefresh_NilAgentsResolver(t *testing.T) {
 }
 
 // countingResolver wraps fakeProfileResolver to expose a call counter
-// (used to assert we don't reach the resolver after a cancelled ctx).
+// (used to assert we don't reach the resolver after a canceled ctx).
 type countingResolver struct {
 	inner    *fakeProfileResolver
 	callsPtr *int

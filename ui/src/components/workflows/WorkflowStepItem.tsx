@@ -26,7 +26,7 @@ function StatusIcon({ status }: { status: StepStatus }) {
       return <XCircle className="w-4 h-4 text-danger shrink-0" />;
     case "skipped":
       return <Slash className="w-4 h-4 text-fg-muted shrink-0" />;
-    case "cancelled":
+    case "canceled":
       return <XCircle className="w-4 h-4 text-fg-muted shrink-0" />;
   }
 }
@@ -40,7 +40,7 @@ function lineColor(status: StepStatus): string {
     case "failed":
       return "bg-danger/40";
     case "skipped":
-    case "cancelled":
+    case "canceled":
       return "bg-fg-muted/20";
     default:
       return "bg-border";
@@ -65,7 +65,7 @@ export function WorkflowStepItem({ step, isLast }: WorkflowStepItemProps) {
             className={`text-xs font-medium truncate ${
               step.status === "pending"
                 ? "text-fg-muted/60"
-                : step.status === "skipped" || step.status === "cancelled"
+                : step.status === "skipped" || step.status === "canceled"
                   ? "text-fg-muted line-through"
                   : "text-fg"
             }`}

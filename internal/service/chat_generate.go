@@ -312,7 +312,7 @@ func (s *chatServiceImpl) persistPartialAssistantPreClassified(sessionID, assist
 	}
 }
 
-// persistPartialAssistantCancelled saves a partial assistant message for a
+// persistPartialAssistantCanceled saves a partial assistant message for a
 // CLEAN cancellation path (intentional stop: takeover / shutdown /
 // user-initiated cancel). The persisted row has StructuredMessage.Flags.HasError=false
 // and the metadata column does NOT carry `had_error:true`, so FE rehydration
@@ -327,7 +327,7 @@ func (s *chatServiceImpl) persistPartialAssistantPreClassified(sessionID, assist
 //
 // Like the other persist-partial helpers, the call is best-effort — errors
 // are logged but not propagated.
-func (s *chatServiceImpl) persistPartialAssistantCancelled(sessionID, assistantMsgID, agentID, content string) {
+func (s *chatServiceImpl) persistPartialAssistantCanceled(sessionID, assistantMsgID, agentID, content string) {
 	if content == "" {
 		content = "[generation interrupted]"
 	}
@@ -344,7 +344,7 @@ func (s *chatServiceImpl) persistPartialAssistantCancelled(sessionID, assistantM
 		// an intentional cancel.
 	}
 	if err := s.store.CreateMessage(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, msg); err != nil {
-		slog.Warn("chat-service: persistPartialAssistantCancelled: failed to save partial message",
+		slog.Warn("chat-service: persistPartialAssistantCanceled: failed to save partial message",
 			"session_id", sessionID, "msg_id", assistantMsgID, "err", err)
 	}
 }
@@ -947,7 +947,7 @@ func BuildSummarizer(registry *provider.Registry, resolver DefaultResolver, sett
 }
 
 // ClassifyCompactionMode maps an agent profile to a CompactionPipeline mode by
-// inspecting the agent's tags. Default is "general" when no recognised tag is
+// inspecting the agent's tags. Default is "general" when no recognized tag is
 // present. Exported so out-of-package callers (e.g. /compact handler) reuse the
 // same classification heuristic as the chat hot path.
 func ClassifyCompactionMode(agent *store.AgentProfile) string {
@@ -1006,7 +1006,7 @@ func buildIntentSignals(userContent string, tools []string, hasAttachments bool)
 }
 
 // classifyModeFromAgentTags maps agent tags to a CompactionPipeline mode.
-// Default is "general" when no recognised tag is present.
+// Default is "general" when no recognized tag is present.
 func classifyModeFromAgentTags(agent *store.AgentProfile) string {
 	if agent == nil || agent.Tags == "" || agent.Tags == "[]" {
 		return ctxpkg.CompactionModeGeneral

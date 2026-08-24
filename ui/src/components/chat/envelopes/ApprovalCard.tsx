@@ -48,13 +48,13 @@ const PROMPT_TRUNCATE_LEN = 200
  * `prior_response` into the envelope when the card was already answered.
  * The generic flavor's `respond()` always posts status=Submitted and
  * encodes the decision in `data.approved`; the subagent flavor posts
- * status=Submitted on approve and status=Cancelled (with a `reason`) on
+ * status=Submitted on approve and status=Canceled (with a `reason`) on
  * reject — both read correctly through the same status-first check.
  * CW-20260517-0006.
  */
 function hydrateDecision(prior: EnvelopeType['prior_response']): 'pending' | 'approved' | 'rejected' {
   if (!prior) return 'pending'
-  if (prior.status === ResponseStatus.Cancelled) return 'rejected'
+  if (prior.status === ResponseStatus.Canceled) return 'rejected'
   return prior.data?.approved === false ? 'rejected' : 'approved'
 }
 
@@ -93,7 +93,7 @@ export function ApprovalCard({ envelope, onRespond }: ApprovalCardProps) {
 
     if (isSubagentSpawn) {
       // internal/chat/envelope_response_subagent.go's registered handler
-      // switches on resp.Status: Submitted -> Approve, Cancelled -> Reject
+      // switches on resp.Status: Submitted -> Approve, Canceled -> Reject
       // (reading the reject reason off resp.Data["reason"]). Preserve that
       // exact wire contract — do not collapse to the generic flavor's
       // always-Submitted-with-data.approved shape.
@@ -106,7 +106,7 @@ export function ApprovalCard({ envelope, onRespond }: ApprovalCardProps) {
         if (approved) {
           await onRespond({ status: ResponseStatus.Submitted })
         } else {
-          await onRespond({ status: ResponseStatus.Cancelled, data: { reason } })
+          await onRespond({ status: ResponseStatus.Canceled, data: { reason } })
         }
         setDecision(approved ? 'approved' : 'rejected')
       } catch (err) {

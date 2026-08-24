@@ -53,7 +53,7 @@ Steps, in order:
 4. The `envelope_data` plugin filter runs on each envelope's `Data` map
    (chat_generate.go:1046–1055), giving plugins a chance to enrich or
    transform card data before persistence.
-5. Validated envelopes are serialised to `envelopeJSON` and stored alongside
+5. Validated envelopes are serialized to `envelopeJSON` and stored alongside
    the assistant message; the frontend deserialises them on load.
 
 **Envelope struct (runtime shape):** `internal/chat/envelope.go:72`

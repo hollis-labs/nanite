@@ -107,7 +107,7 @@ Supported stream event types mirror the existing message stream:
 
 Response statuses:
 
-- `cancelled` — an active generation was cancelled
+- `canceled` — an active generation was canceled
 - `idle` — there was no active generation to cancel
 
 ## Recover

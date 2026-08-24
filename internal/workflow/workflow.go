@@ -14,7 +14,7 @@ const (
 	StepCompleted StepStatus = "completed"
 	StepFailed    StepStatus = "failed"
 	StepSkipped   StepStatus = "skipped"
-	StepCancelled StepStatus = "cancelled"
+	StepCanceled  StepStatus = "canceled"
 )
 
 // StepInput is passed to each step handler.
@@ -80,7 +80,7 @@ const (
 	RunRunning   RunStatus = "running"
 	RunCompleted RunStatus = "completed"
 	RunFailed    RunStatus = "failed"
-	RunCancelled RunStatus = "cancelled"
+	RunCanceled  RunStatus = "canceled"
 )
 
 // RunState tracks the state of a pipeline execution.

@@ -288,7 +288,7 @@ func (st *SelfToolsTransport) callToolList(ctx context.Context, args map[string]
 
 	body, err := json.Marshal(out)
 	if err != nil {
-		// Marshalling a slice of two-string structs cannot realistically
+		// Marshaling a slice of two-string structs cannot realistically
 		// fail — fall back to a structured error so the caller still
 		// gets a uniform shape.
 		return mcp.ErrorResult("tool_list: marshal result"), nil //nolint:nilerr // Tool errors travel in the MCP result payload.

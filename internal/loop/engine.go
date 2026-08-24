@@ -876,8 +876,8 @@ func classifyIterationProgress(res *service.WorkflowLaunchResult) (store.Evaluat
 		// for three-way symmetry with that filter, not because this
 		// branch is exercised.
 		return store.Evaluation{RemainingDelta: fmt.Sprintf("iteration workflow run is itself waiting (%s)", res.Status)}, store.LoopRunIterationProgressBlocked
-	case agentworkflow.RunStatusCancelled:
-		return store.Evaluation{RemainingDelta: "iteration workflow run was cancelled"}, store.LoopRunIterationProgressBlocked
+	case agentworkflow.RunStatusCanceled:
+		return store.Evaluation{RemainingDelta: "iteration workflow run was canceled"}, store.LoopRunIterationProgressBlocked
 	}
 
 	var passed, failed int

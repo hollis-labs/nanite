@@ -111,8 +111,8 @@ func (d *dispatchSpawner) Spawn(ctx context.Context, req dispatch.SpawnRequest) 
 		// error text so the caller / operator can tell a stall from a
 		// crash without inspecting run.Error.
 		return nil, fmt.Errorf("dispatch: subagent stalled (no provider activity): %s", run.Error)
-	case subagent.StatusCancelled:
-		return nil, fmt.Errorf("dispatch: subagent cancelled")
+	case subagent.StatusCanceled:
+		return nil, fmt.Errorf("dispatch: subagent canceled")
 	case subagent.StatusRejected:
 		return nil, fmt.Errorf("dispatch: subagent rejected: %s", run.RejectionReason)
 	default:

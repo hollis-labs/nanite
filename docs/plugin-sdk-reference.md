@@ -106,7 +106,7 @@ type Event struct {
 }
 ```
 
-Returning `ErrCancelled` from a pre-hook (e.g. `message.sending`) cancels
+Returning `ErrCanceled` from a pre-hook (e.g. `message.sending`) cancels
 the pending action.
 
 ### `CRUDHandler`
@@ -372,7 +372,7 @@ Standard JSON-RPC: `-32700` parse, `-32600` invalid request,
 `-32601` method not found, `-32602` invalid params, `-32603` internal.
 
 Application: `-32000` not found, `-32001` conflict, `-32002` validation,
-`-32003` cancelled (pre-hook cancellation).
+`-32003` canceled (pre-hook cancellation).
 
 ### Protocol version
 

@@ -46,7 +46,7 @@ import (
 //
 // Lifecycle:
 //
-//	pending → running → (succeeded | failed | cancelled) → expired
+//	pending → running → (succeeded | failed | canceled) → expired
 //
 // `pending` is a brief window between Submit and the Backend's Start
 // returning a job_id. Once Start returns, the service flips to running
@@ -60,13 +60,13 @@ const (
 	StatusRunning   JobStatus = "running"
 	StatusSucceeded JobStatus = "succeeded"
 	StatusFailed    JobStatus = "failed"
-	StatusCancelled JobStatus = "cancelled"
+	StatusCanceled  JobStatus = "canceled"
 	StatusExpired   JobStatus = "expired"
 )
 
 // IsTerminal reports whether s is a terminal lifecycle state.
 func (s JobStatus) IsTerminal() bool {
-	return s == StatusSucceeded || s == StatusFailed || s == StatusCancelled || s == StatusExpired
+	return s == StatusSucceeded || s == StatusFailed || s == StatusCanceled || s == StatusExpired
 }
 
 // JobBudget bounds a job's runtime + output. Zero values mean "use
@@ -101,7 +101,7 @@ type JobRequest struct {
 	// agent-dispatch hook: the PTYBackend (the only backend today)
 	// runs Task as a shell command and ignores Agent entirely. The
 	// field is retained for API/wire compatibility and as an optional
-	// labelling hint for callers; wiring an agent-dispatch backend
+	// labeling hint for callers; wiring an agent-dispatch backend
 	// (D3, agent-mux) is a separate, currently-unimplemented ticket.
 	// Setting this field does not change how a job runs.
 	Agent string
@@ -190,7 +190,7 @@ type CompletionFunc func(jobID string, completion BackendCompletion)
 // CompletionFunc callback. The Service translates this into a
 // JobResult before posting the messaging envelope.
 type BackendCompletion struct {
-	// Status is one of StatusSucceeded, StatusFailed, StatusCancelled.
+	// Status is one of StatusSucceeded, StatusFailed, StatusCanceled.
 	Status JobStatus
 	// Output is captured stdout+stderr (interleaved or merged is
 	// implementation-defined).
@@ -199,7 +199,7 @@ type BackendCompletion struct {
 	// MaxOutputBytes.
 	OutputTruncated bool
 	// Err carries the failure reason for StatusFailed; nil for
-	// StatusSucceeded and StatusCancelled (cancellation is a request,
+	// StatusSucceeded and StatusCanceled (cancellation is a request,
 	// not an error).
 	Err error
 	// StartedAt and CompletedAt bound the job's wall-clock runtime.

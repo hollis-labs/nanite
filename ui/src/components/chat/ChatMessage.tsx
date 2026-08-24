@@ -337,7 +337,7 @@ export function ChatMessage({
             </button>
             {narrationExpanded && (
               <div className="mt-1.5 rounded-[6px] border border-border-subtle bg-surface px-3 py-2.5 text-[12px] leading-relaxed text-fg-muted whitespace-pre-wrap">
-                {/* F3: thinking blocks rendered with a "thinking" badge, italicised */}
+                {/* F3: thinking blocks rendered with a "thinking" badge, italicized */}
                 {thinkingBlocks &&
                   thinkingBlocks.map((tb, idx) => (
                     <div key={idx} className="mb-2">

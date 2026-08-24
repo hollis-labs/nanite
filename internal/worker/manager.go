@@ -77,7 +77,7 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 	case m.sem <- struct{}{}:
 		// acquired
 	case <-ctx.Done():
-		return nil, fmt.Errorf("worker spawn cancelled while waiting for capacity")
+		return nil, fmt.Errorf("worker spawn canceled while waiting for capacity")
 	}
 
 	workerID := uuid.NewString()
@@ -155,9 +155,9 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 	}
 
 	// A concurrent Shutdown/Cancel may have already marked this worker as
-	// cancelled. Respect that terminal state rather than overwriting it.
+	// canceled. Respect that terminal state rather than overwriting it.
 	if delegErr != nil {
-		if w.GetStatus() != StatusCancelled {
+		if w.GetStatus() != StatusCanceled {
 			w.SetStatus(StatusFailed)
 		}
 		result.Success = false
@@ -170,12 +170,12 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 		result.TokensUsed = delegResult.TokensUsed
 		result.Success = delegResult.Success
 		if !delegResult.Success {
-			if w.GetStatus() != StatusCancelled {
+			if w.GetStatus() != StatusCanceled {
 				w.SetStatus(StatusFailed)
 			}
 			result.Error = delegResult.Error
 		} else {
-			if w.GetStatus() != StatusCancelled {
+			if w.GetStatus() != StatusCanceled {
 				w.SetStatus(StatusCompleted)
 			}
 		}
@@ -209,7 +209,7 @@ func (m *Manager) SpawnLight(ctx context.Context, executor ToolExecutor, req Lig
 	case m.sem <- struct{}{}:
 		defer func() { <-m.sem }()
 	case <-ctx.Done():
-		return nil, fmt.Errorf("light worker cancelled while waiting for capacity")
+		return nil, fmt.Errorf("light worker canceled while waiting for capacity")
 	}
 
 	workerID := uuid.NewString()
@@ -259,7 +259,7 @@ func (m *Manager) Cancel(workerID string) error {
 	if w.cancel != nil {
 		w.cancel()
 	}
-	w.SetStatus(StatusCancelled)
+	w.SetStatus(StatusCanceled)
 	m.writeWorkerStatus(w)
 
 	// Cancel linked task if tracked.
@@ -333,7 +333,7 @@ func (m *Manager) ReapStale(threshold time.Duration) []Snapshot {
 // goroutines (heartbeats, retention timers) to exit. Returns
 // context.DeadlineExceeded if any goroutine is still running after maxWait.
 //
-// Before this refactor, Shutdown cancelled per-worker contexts but did not
+// Before this refactor, Shutdown canceled per-worker contexts but did not
 // wait, and the 30-second retention goroutine in SpawnFull leaked past
 // process exit (BLG-001). Both are now tracked by the manager's lifecycle.
 func (m *Manager) Shutdown(maxWait time.Duration) error {
@@ -342,7 +342,7 @@ func (m *Manager) Shutdown(maxWait time.Duration) error {
 			if w.cancel != nil {
 				w.cancel()
 			}
-			w.SetStatus(StatusCancelled)
+			w.SetStatus(StatusCanceled)
 		}
 		return true
 	})
@@ -373,7 +373,7 @@ func (m *Manager) writeWorkerStatus(w *Worker) {
 
 // heartbeatLoop writes periodic heartbeats to the coordination store.
 // Exits when either the per-worker stop channel is closed (normal worker
-// completion) or when ctx is cancelled (manager shutdown).
+// completion) or when ctx is canceled (manager shutdown).
 func (m *Manager) heartbeatLoop(ctx context.Context, workerID string, stop chan struct{}) {
 	if m.coord == nil || !m.coord.Available() {
 		return

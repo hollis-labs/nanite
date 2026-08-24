@@ -33,7 +33,7 @@ const (
 	SeverityWarn   Severity = "warn"
 )
 
-// Kind categorises an install-time failure for reporting / filtering.
+// Kind categorizes an install-time failure for reporting / filtering.
 type Kind string
 
 const (

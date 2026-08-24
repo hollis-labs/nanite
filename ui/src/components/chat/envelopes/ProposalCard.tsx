@@ -21,7 +21,7 @@ function hydrateState(
   prior: EnvelopeType['prior_response'],
 ): 'pending' | 'applied' | 'dismissed' {
   if (!prior) return 'pending'
-  return prior.status === ResponseStatus.Cancelled ? 'dismissed' : 'applied'
+  return prior.status === ResponseStatus.Canceled ? 'dismissed' : 'applied'
 }
 
 export function ProposalCard({ envelope }: ProposalCardProps) {

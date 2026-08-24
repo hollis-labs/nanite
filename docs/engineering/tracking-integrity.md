@@ -60,24 +60,26 @@ Every `task_status` ∈ `allowed_task_statuses`; every `disposition` ∈
 ### 3. Flagged findings have a decision, or don't need one
 A finding with `requires_architect_decision: true` must **either** appear in
 `ARCHITECT-DECISIONS.md` **or** have `disposition != needs-architect-decision`.
+> *Caught:* four separate missing decisions (AD-25 through AD-28), one per wave,
+> each found by hand at kickoff time. Running it across *all* remaining waves
+> rather than just the next one found a fifth gap — seven flagged findings in the
+> cleanup wave — **before** its kickoff, the first time that happened.
 
-> **⚠ This assertion has a blind spot, found the hard way.** It trusts
-> `findings.json`'s flag as the authority on whether a decision is needed. **Task
-> files can flag decisions the catalog does not.** In Wave 8, six findings had
-> task text explicitly saying "decision needed, do not resolve unilaterally" —
-> and **four of the six carried `requires_architect_decision: false`**, so this
-> check reported them clean. A kickoff author reading the task text caught all
-> six; the automated check caught two.
->
-> **Scan the task files too**, not just the catalog: grep task bodies for
-> decision-needed language and cross-reference against the queue. The two
-> sources disagree, and the *union* is the real set. Treat a disagreement as a
-> finding in itself — it means one of them is wrong.
-> *Caught:* four separate missing decisions (AD-25 through AD-28), one per
-> wave, each found by hand at kickoff time. Running it across *all* remaining
-> waves rather than just the next one found a fifth gap — seven flagged
-> findings in the cleanup wave — **before** its kickoff, the first time that
-> happened.
+### 3b. …but the catalog's flag is not the only source. Scan task text too.
+**This is a blind spot in check 3, found the hard way.** Check 3 trusts
+`findings.json`'s `requires_architect_decision` as the authority on whether a
+decision is needed. **Task files can flag decisions the catalog does not.**
+
+In Wave 8, six findings carried task text explicitly saying "decision needed, do
+not resolve unilaterally" — and **four of the six had
+`requires_architect_decision: false`**, so check 3 reported them clean. A
+kickoff author reading the task bodies found all six; the automated check found
+two. The planner had already declared the wave "fully ungated" on the strength
+of check 3 alone.
+
+So: grep task bodies for decision-needed language and cross-reference against
+the queue. **The union of the two sources is the real set**, and a disagreement
+between them is itself a finding — it means one of them is wrong.
 
 ### 4. Decided decisions don't leave stale dispositions
 A decision marked decided ⇒ no finding it covers is still at

@@ -1,11 +1,11 @@
 package store
 
-// Phase 5 item 02 (TASKS/phase-5/02-build-plugin-installed-enabled-state-model.md)
-// -- store accessors for the `plugins` table, the DB-backed installed/enabled
-// state model that replaces the old plugin.yaml <-> plugin.yaml.disabled
-// file-rename mechanism. See migrations/121_plugins_installed_enabled_state.sql
-// for the full design rationale and internal/plugin/manage.go +
-// internal/plugin/loader.go for the read paths that consume PluginState rows.
+// Store accessors for the `plugins` table implement the DB-backed
+// installed/enabled state model that replaces the old plugin.yaml <->
+// plugin.yaml.disabled file-rename mechanism. See
+// migrations/121_plugins_installed_enabled_state.sql for the full design
+// rationale and internal/plugin/manage.go + internal/plugin/loader.go for the
+// read paths that consume PluginState rows.
 
 import (
 	"context"

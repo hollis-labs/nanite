@@ -28,9 +28,9 @@ type CleanupReport struct {
 // Adapters whose target file was already missing are skipped without a
 // report.
 //
-// All errors are I/O errors and propagate immediately. Snapshot for
-// rollback is handled by the existing snapshotAdapterTargets() pass that
-// runs before cleanup.
+// All errors are I/O errors and propagate immediately. Cleanup runs without
+// a pre-edit snapshot or rollback path; callers receive only the reports for
+// work completed before an error.
 func cleanupRemovedAdapters(projectDir string, removed []string) ([]CleanupReport, error) {
 	var reports []CleanupReport
 	for _, slug := range removed {

@@ -1,7 +1,7 @@
 # Trim/correct stale comments and package docs across 6 findings — scoped trim, not blanket removal
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch.
 **Touches:** `internal/store/*.go` (25+ files, comment-only), `internal/service/ingest.go`, `internal/service/known_tools_backfill.go`, `internal/service/cli_structured_input_fallback.go`, `internal/service/agent_deps.go`, `internal/service/chat_reflex_dispatch.go`, `internal/service/team_routing.go`, `cmd/nanite/main.go`, `internal/runtime/agent/agent.go`, `internal/chat/hint_catalog.go`, `internal/service/install/adapters.go`, `internal/service/install/adapter_cleanup.go`.
 
@@ -54,7 +54,64 @@ Two findings in this batch are a different shape entirely and don't belong in th
 
 ## Work log
 
-<!-- Worker fills this in as it goes: what was trimmed vs. kept and why, and the two architect decisions once made. -->
+- Implemented from the isolated Wave 8 baseline
+  `bf37312de3ee728ecdf9698ff64641cafaf958fa`. Re-derived every named location
+  against current source before editing. The conservative kickoff fence
+  superseded the older task file's broad `Touches` list: this pass did not
+  expand into a repository-wide comment rewrite.
+- `GO-STORE-009`: removed only the bare ticket lines in `documents.go` and
+  `sessions.go`; removed the Phase 5/task-file provenance prefix from
+  `plugins.go` while retaining the installed/enabled-state rationale; and
+  stripped IDs from the named scope/gate comments in `todos.go`,
+  `reminders.go`, and `workflow_runs.go` while preserving their semantics.
+  The explicitly protected rationale in `user_settings.go`, `store.go`, and
+  `agent_runtime.go`, the loop-scoping rationale in `workflow_runs.go`, all
+  `_test.go` provenance outside the dead AD-34 test, and equivalent
+  operational comments remain unchanged.
+- `GO-SVCCORE-009`: rewrote only `known_tools_backfill.go`'s stale chronology
+  as historical cutover/parity documentation. The comment still records that
+  the independent marker makes the backfill one-time, protects later operator
+  changes from reassertion, includes the deliberately promoted `role_tools`
+  input, tolerates malformed legacy JSON as the historical selector did, and
+  intentionally does not replay retired `tool_permissions` narrowing now that
+  `agent_tools` is the sole grant source. No backfill behavior changed. The
+  other named service/runtime comment clusters were kept because current
+  source revalidation found their operational rationale load-bearing and the
+  kickoff did not authorize a broader consolidation.
+- `GO-SVCCORE-003` / AD-34: took the decided comment-correction path, not a new
+  rollback implementation. Deleted dead `snapshotAdapterTargets` and its sole
+  unit test. Preserved live `adapterTargetFiles`,
+  `snapshotAdapterTargetsForRefresh`, and the refresh atomicity coverage;
+  updated their nearby wording so it no longer implies a migration rollback.
+  `cleanupRemovedAdapters` now states plainly that cleanup has no pre-edit
+  snapshot or rollback and may return reports for work completed before an
+  I/O error. Reconfirmed exactly two production callers:
+  `internal/service/install/adopt.go:64` and
+  `internal/service/install/install.go:309`.
+- `GO-CHAT-006` / AD-37: corrected exactly the three stale path comments in
+  the current file `internal/chat/hint_catalog.go` to the package-relative
+  embedded source `internal/chat/hints/hints.yaml`. No generator, catalog
+  consolidation, or runtime change was added.
+- Scope fence: the stale `LearningRecaller` comments in
+  `internal/selftools/self_tools_transport.go`,
+  `internal/selftools/self_tools_describe.go`, and `cmd/nanite/main.go` are an
+  existing escalation but were outside the kickoff's named fence; they remain
+  untouched. `ingest.go`, `cli_structured_input_fallback.go`, `agent_deps.go`,
+  `chat_reflex_dispatch.go`, `team_routing.go`, and
+  `internal/runtime/agent/agent.go` likewise have zero diff. No shared tracker,
+  UI, or install-pipeline behavior was changed.
+- Verification: `gofmt -d` over all changed Go files produced no output and
+  `git diff --check` passed. Focused
+  `go test -count=1 ./internal/store ./internal/service/install ./internal/chat ./internal/service`
+  passed. Pinned `golangci-lint` v2.11.4 over the full tracked-package set
+  passed the committed comparator at **3,241 / 3,255**; active Stage 2 stayed
+  at `errcheck=0`, `errorlint=0`, `nilerr=0`. The comparator's own
+  `python3 -m unittest scripts/quality-ratchet_test.py` suite passed all 13
+  cases. `go build ./...`, `go vet ./...`, `go test -count=1 ./...`, and
+  `go test -race -count=1 ./...` all passed (race `internal/store`: 250.133s).
+  Grep verification found no remaining `snapshotAdapterTargets` symbol or
+  stale `config/think-hints` path in the corrected catalog file. No review or
+  approval is claimed.
 
 ## Review notes
 

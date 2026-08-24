@@ -22,9 +22,8 @@ import (
 )
 
 // adapterTargetFiles is the set of project-root markdown files that the
-// built-in adapters write managed sections into. Used by the install
-// service to snapshot pre-edit state for rollback and to drive cleanup
-// during rollback.
+// built-in adapters write managed sections into. The refresh path walks this
+// set to preserve managed pre-refresh state before re-rendering.
 var adapterTargetFiles = []string{
 	"CLAUDE.md",
 	"AGENTS.md",
@@ -105,39 +104,13 @@ func extractAgentsFromConfig(path string) ([]store.AgentProfile, error) {
 	return out, nil
 }
 
-// snapshotAdapterTargets copies any existing project-root CLI files
-// (CLAUDE.md, AGENTS.md, GEMINI.md, OPENCODE.md) into the archive
-// directory as `.pre-edit` snapshots so Rollback can restore them.
-//
-// Files that don't exist in the project are skipped — Rollback knows
-// "no snapshot" means "the file was created by the installer" and will
-// remove the file (after stripping the managed section) instead of
-// restoring it.
-func snapshotAdapterTargets(projectDir, archiveDir string) error {
-	for _, name := range adapterTargetFiles {
-		src := filepath.Join(projectDir, name)
-		data, err := os.ReadFile(src)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("read %s for snapshot: %w", src, err)
-		}
-		dst := filepath.Join(archiveDir, name+".pre-edit")
-		if err := fsutil.AtomicWriteFile(dst, data, 0o644); err != nil {
-			return fmt.Errorf("write snapshot %s: %w", dst, err)
-		}
-	}
-	return nil
-}
-
 // snapshotAdapterTargetsForRefresh is the BLG-20260412-002 customization-
 // overwrite backup path: when nanite-agent init re-runs against a project
 // that already has a managed section in one of the adapter target files,
 // we snapshot the current rendered file into a refresh archive directory
 // before the sync re-renders over it.
 //
-// Unlike snapshotAdapterTargets (migration path), this helper:
+// This refresh-only helper:
 //   - resolves its own archive dir under the shared archive base
 //     (~/Projects-apps/.archived) using a "<basename>-refresh-YYYY-MM-DD..."
 //     prefix so it doesn't collide with or shadow migration archives

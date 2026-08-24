@@ -1,17 +1,10 @@
 package service
 
-// Phase 1 item 04 (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md):
-// BackfillAgentToolsFromLegacyColumns carries the CURRENT value of every
-// agent_profiles row's tools/role_tools columns into real agent_tools grant
-// rows, once per agent -- so the follow-up that actually wires
-// SelectForAgent to read agent_tools
-// (TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md, which
-// landed the SelectForAgent read path this file's comments below describe
-// as "the follow-up" -- filterToolsByAllowlist referenced below no longer
-// exists as of that task; it's retained here as the historical parity
-// target this one-time backfill algorithm was built to replicate) starts
-// from data that already matches today's live selection behavior instead
-// of an empty table.
+// BackfillAgentToolsFromLegacyColumns copied each agent profile's legacy
+// tools/role_tools selection into agent_tools when agent_tools became the live
+// grant source. Candidate matching preserves the historical selection
+// semantics so profiles first encountered after that cutover receive the same
+// initial grants as profiles migrated at the time.
 //
 // Deliberately a ONE-TIME operation per agent, not a per-boot resync: once
 // an agent has a row in agent_tools_legacy_backfill (an independent marker,
@@ -19,21 +12,12 @@ package service
 // migration doc comment for why), this function skips it on every later
 // boot. Without that guard, a later boot would silently re-derive (and
 // re-assert) grants from the legacy JSON columns over any explicit change
-// an operator later makes through agent_tools directly (e.g. task 09's
-// picker UI) -- exactly the "file reingest silently reverts a GUI
-// customization" anti-pattern architecture/01-agent-construction.md's
-// "What's cut" section names as a real, already-fixed bug for agent
-// profile files generally.
+// an operator later makes through agent_tools directly -- the same class of
+// problem as file reingest silently reverting an operator customization.
 //
-// role_tools is included in the candidate set alongside tools -- upgrading
-// it from its current "best-effort agent_known_tools enrichment, not a
-// contract the runtime enforces" status (migration 070's own doc comment)
-// to a real agent_tools grant. This mirrors ingest.go's
-// seedRoleToolsFromIngest, which this same task updates to grant agent_tools
-// going forward for newly-ingested/re-ingested definitions -- see that
-// function's doc comment for why this is a deliberate behavior upgrade, not
-// a parity bug: SelectForAgent does not consult agent_tools yet (11 is
-// still open), so nothing observable changes until that follow-up lands.
+// role_tools is included alongside tools because the agent_tools migration
+// deliberately promoted that prior best-effort enrichment input into real
+// grants. This mirrors seedRoleToolsFromIngest for newly ingested definitions.
 
 import (
 	"context"
@@ -93,8 +77,8 @@ func BackfillAgentToolsFromLegacyColumns(ctx context.Context, st *store.Store) (
 		}
 
 		// Mark the agent as considered regardless of how many grants
-		// resulted (including zero, for a genuinely empty legacy
-		// configuration or a deny-everything policy) -- see
+		// resulted (including zero, when the catalog is empty or no legacy
+		// pattern matches an available tool) -- see
 		// HasLegacyToolsBackfillRun's doc comment for why this must be an
 		// independent marker, not derived from the grants themselves.
 		if err := st.MarkLegacyToolsBackfillRun(ctx, agent.ID); err != nil {
@@ -104,31 +88,21 @@ func BackfillAgentToolsFromLegacyColumns(ctx context.Context, st *store.Store) (
 	return total, nil
 }
 
-// legacyGrantCandidates computes, for one agent, the set of currently-
-// available tool names that today's live selection path
-// (filterToolsByAllowlist, internal/service/tool.go) would consider
-// selectable for it, given its current tools/role_tools column values.
+// legacyGrantCandidates computes, for one agent, the set of currently
+// available tool names that the historical tools/role_tools selection path
+// would have considered selectable.
 //
 //   - agent.Tools ("[]"/empty means no restriction, matching
-//     filterToolsByAllowlist's own documented behavior) and agent.RoleTools
-//     (upgraded to real selection input by this task, see the file doc
-//     comment) are unioned into a pattern set. An empty pattern set means
-//     "every currently-available tool" (mirrors the no-restriction case).
+//     the historical behavior) and agent.RoleTools are unioned into a pattern
+//     set. An empty pattern set means "every currently-available tool."
 //   - The pattern set is expanded against allNames via
-//     toolclient.MatchPattern (the same glob matcher filterToolsByAllowlist
-//     already uses).
+//     toolclient.MatchPattern, preserving the historical glob behavior.
 //
-// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md removed
-// the second stage this used to run — narrowing the pattern-matched
-// candidate set through agent.ToolPermissions' CheckPermission (allow_list
-// / deny_list) — since tool_permissions no longer gates tool selection
-// anywhere else in the system; replaying a narrowing step here that every
-// other surface has stopped honoring would make this one-time backfill the
-// LAST live consumer of a deny_list, silently under-granting relative to
-// what agent_tools is now the sole, unconditional source of truth for. Any
-// pre-existing agent's tool_permissions content (real, in the live DB for
-// 14 of 35 seeded agents as of this task) is inert historical data now —
-// see agent_profiles.ToolPermissions' doc comment (internal/store/agents.go).
+// ToolPermissions is deliberately absent. Its retired allow/deny policy no
+// longer gates tool selection; replaying it here would make this one-time
+// backfill the last live deny-list consumer and silently under-grant relative
+// to agent_tools, the sole grant source. Existing tool_permissions values are
+// retained only as inert historical data.
 func legacyGrantCandidates(agent store.AgentProfile, allNames []string) []string {
 	patterns := dedupStrings(append(parseLegacyToolList(agent.Tools), parseLegacyToolList(agent.RoleTools)...))
 
@@ -150,8 +124,8 @@ func legacyGrantCandidates(agent store.AgentProfile, allNames []string) []string
 // parseLegacyToolList parses a JSON-array-of-strings column
 // (agent_profiles.tools or .role_tools). Empty/"[]"/malformed all yield nil
 // — the empty case is meaningful (see legacyGrantCandidates) and malformed
-// input degrades to "no explicit patterns" rather than erroring, matching
-// filterToolsByAllowlist's own tolerance of bad JSON.
+// input degrades to "no explicit patterns" rather than erroring, matching the
+// historical selection path's tolerance of bad JSON.
 func parseLegacyToolList(raw string) []string {
 	if raw == "" || raw == "[]" {
 		return nil

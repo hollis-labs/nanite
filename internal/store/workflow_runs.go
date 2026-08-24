@@ -9,7 +9,7 @@ import (
 )
 
 // WorkflowRunRow is the persisted identity/status row for one built-in
-// WorkflowEngine Run()/Resume() invocation (CW-20260813-0010).
+// WorkflowEngine Run()/Resume() invocation.
 type WorkflowRunRow struct {
 	ID             string
 	DefinitionName string
@@ -54,7 +54,7 @@ type WorkflowRunStepRow struct {
 	ToolCallsJSON string
 	VerifyJSON    string
 	Error         string
-	GateInput     string // CW-20260814-0017: external input that resolves a gate step
+	GateInput     string // external input that resolves a gate step
 	StartedAt     time.Time
 	CompletedAt   time.Time
 	UpdatedAt     time.Time
@@ -399,7 +399,6 @@ func parseTimeRFC3339Nano(s string) time.Time {
 // ResolveGate updates a waiting gate step with the provided input and marks it
 // completed. This is called when external input (e.g., from A2A task input)
 // resolves a paused gate, allowing the workflow to resume.
-// CW-20260814-0017: A2A gate ↔ input-required mapping.
 func (s *Store) ResolveGate(ctx context.Context, runID, stepID, input string) error {
 	if runID == "" || stepID == "" {
 		return errors.New("ResolveGate: runID and stepID are required")
@@ -438,7 +437,7 @@ func (s *Store) ResolveGate(ctx context.Context, runID, stepID, input string) er
 }
 
 // GetWaitingGates returns all gate steps in waiting_on_gate status for a run.
-// CW-20260814-0017: used to surface gate context in A2A Task state.
+// It is used to surface gate context in A2A Task state.
 func (s *Store) GetWaitingGates(ctx context.Context, runID string) ([]*WorkflowRunStepRow, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+workflowRunStepColumns+` FROM workflow_run_steps

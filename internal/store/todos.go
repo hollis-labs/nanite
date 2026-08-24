@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Todo scope constants (D1, CW-20260428-0014).
+// Todo scope constants.
 //
 // Workspace-scoped todos were dropped in migration 043 — workspace is
 // out of scope for the project/session/turn dimension exposed to users.
@@ -22,7 +22,7 @@ const (
 
 // Todo represents an internal todo item scoped to project, session, or turn.
 //
-// Scope semantics (D1, CW-20260428-0014):
+// Scope semantics:
 //   - turn    — ScopeID = session_id (turn lives inside a session).
 //   - session — ScopeID = session_id.
 //   - project — ScopeID = project_id and ProjectID is also populated.
@@ -215,8 +215,8 @@ func (s *Store) UpdateTodo(ctx context.Context, t *Todo) error {
 	return nil
 }
 
-// UpdateTodoScope promotes/demotes a todo between session and project scope
-// (D2, CW-20260428-0015). Validates that project scope carries a project_id.
+// UpdateTodoScope promotes/demotes a todo between session and project scope.
+// It validates that project scope carries a project_id.
 func (s *Store) UpdateTodoScope(ctx context.Context, id, scope, scopeID, projectID string) error {
 	switch scope {
 	case TodoScopeTurn, TodoScopeSession, TodoScopeProject:

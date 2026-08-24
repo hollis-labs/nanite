@@ -85,45 +85,6 @@ agents:
 	}
 }
 
-func TestSnapshotAdapterTargets(t *testing.T) {
-	project := t.TempDir()
-	archive := t.TempDir()
-
-	mkFile := func(p, c string) {
-		t.Helper()
-		if err := os.WriteFile(p, []byte(c), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Two files exist, two don't.
-	mkFile(filepath.Join(project, "CLAUDE.md"), "claude content\n")
-	mkFile(filepath.Join(project, "AGENTS.md"), "agents content\n")
-	// GEMINI.md and OPENCODE.md don't exist.
-
-	if err := snapshotAdapterTargets(project, archive); err != nil {
-		t.Fatalf("snapshotAdapterTargets: %v", err)
-	}
-
-	// Existing files should be snapshotted.
-	if data, err := os.ReadFile(filepath.Join(archive, "CLAUDE.md.pre-edit")); err != nil {
-		t.Errorf("CLAUDE.md snapshot missing: %v", err)
-	} else if string(data) != "claude content\n" {
-		t.Errorf("CLAUDE.md snapshot content mismatch: %q", data)
-	}
-	if data, err := os.ReadFile(filepath.Join(archive, "AGENTS.md.pre-edit")); err != nil {
-		t.Errorf("AGENTS.md snapshot missing: %v", err)
-	} else if string(data) != "agents content\n" {
-		t.Errorf("AGENTS.md snapshot content mismatch: %q", data)
-	}
-	// Missing files should NOT have snapshots.
-	if _, err := os.Stat(filepath.Join(archive, "GEMINI.md.pre-edit")); !os.IsNotExist(err) {
-		t.Errorf("GEMINI.md.pre-edit should not exist (source was missing)")
-	}
-	if _, err := os.Stat(filepath.Join(archive, "OPENCODE.md.pre-edit")); !os.IsNotExist(err) {
-		t.Errorf("OPENCODE.md.pre-edit should not exist (source was missing)")
-	}
-}
-
 func TestSyncAdaptersForProject_WritesAllFourCLIFiles(t *testing.T) {
 	project := t.TempDir()
 

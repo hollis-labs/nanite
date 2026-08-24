@@ -404,8 +404,6 @@ func (s *Store) ArchiveSession(ctx context.Context, id string) error {
 // upstream (e.g. strip a leading `#`, lowercase) before invoking this helper.
 // Returns sql.ErrNoRows when no row matches; the caller is expected to wrap
 // the error for the surface they're presenting.
-//
-// CW-20260519-0063 (cross-session chat read self-tool).
 func (s *Store) GetSessionByShortCode(ctx context.Context, code string) (*Session, error) {
 	var sess Session
 	err := s.DB.QueryRowContext(ctx,

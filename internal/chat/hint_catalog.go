@@ -2,12 +2,11 @@ package chat
 
 // hint_catalog.go — Think-hint catalog loader (F5 / CW-20260420-0022).
 //
-// Loads the YAML hint catalog from config/think-hints/hints.yaml (or any
-// file in that directory). Exposes BuiltinHints() as the runtime catalog;
-// the hint-selector peer agent consumes a summary of this catalog at
-// dispatch time.
+// Loads the YAML hint catalog embedded from internal/chat/hints/hints.yaml.
+// Exposes BuiltinHints() as the runtime catalog; the hint-selector peer agent
+// consumes a summary of this catalog at dispatch time.
 //
-// Schema: see config/think-hints/hints.yaml for field documentation.
+// Schema: see internal/chat/hints/hints.yaml for field documentation.
 
 import (
 	"embed"
@@ -107,8 +106,8 @@ func LoadHintsFromYAML(data []byte) ([]Hint, error) {
 	return f.Hints, nil
 }
 
-// loadHintsFromFS reads all *.yaml files in the config/think-hints/ directory
-// inside fsys, merges their hint lists, and returns the combined catalog.
+// loadHintsFromFS reads the catalogs embedded from internal/chat/hints/
+// (currently internal/chat/hints/hints.yaml), merges them, and returns the hints.
 func loadHintsFromFS(fsys embed.FS) ([]Hint, error) {
 	var all []Hint
 

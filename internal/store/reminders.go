@@ -10,7 +10,7 @@ import (
 // ErrReminderNotFound is returned when a reminder row cannot be located.
 var ErrReminderNotFound = errors.New("reminder not found")
 
-// Reminder scope constants (D1, CW-20260428-0014).
+// Reminder scope constants.
 //
 // Every reminder retains its originating SessionID for provenance even
 // when its scope is project-wide; firing semantics are governed by
@@ -27,7 +27,7 @@ const (
 //	{"type":"time","at":"<RFC3339>"}
 //	{"type":"turn_count","n":5}
 //
-// Scope (D1, CW-20260428-0014):
+// Scope:
 //   - "turn"    — fires within the originating turn only.
 //   - "session" — fires only in the originating session (default).
 //   - "project" — fires in any session of the same project; ProjectID is required.

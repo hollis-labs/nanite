@@ -9,7 +9,6 @@ import (
 )
 
 // Document is a user-uploaded or paste-content document persisted per session.
-// J10 (CW-20260426-0008).
 type Document struct {
 	ID          string `json:"id"`
 	SessionID   string `json:"session_id"`

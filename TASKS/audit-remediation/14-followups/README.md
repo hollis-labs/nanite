@@ -136,6 +136,20 @@ The reason to do these as one pass: they are the same underlying problem — one
 measurement, several uncoordinated implementations, no shared contract — and
 fixing them separately means touching the same call sites twice.
 
+### P3 — Finish `UnloadPlugin`'s teardown extraction (AD-35, `GO-PLUGIN-004`)
+
+Wave 8 fixes the TOCTOU. This finishes the structural half: ~10 of
+`UnloadPlugin`'s 18 lock-disciplined teardown categories are still hand-inlined
+map-iterate-delete logic while ~8 are already extracted.
+
+**Not attempted in Wave 8** because it is a 346-line lock-disciplined function
+and restructuring it needs characterization tests — the Wave 5 method, not
+cleanup-wave effort. The audit itself judged its complexity essential-dominated,
+so this is consistency work rather than a defect fix.
+
+Natural to pair with P1 (the `internal/chat` split) in whatever architecture
+pass comes next.
+
 ## Out of scope
 
 **The UI/UX review is not this wave's work** and must not be folded in.

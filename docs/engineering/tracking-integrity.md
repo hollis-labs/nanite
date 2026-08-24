@@ -60,6 +60,19 @@ Every `task_status` ∈ `allowed_task_statuses`; every `disposition` ∈
 ### 3. Flagged findings have a decision, or don't need one
 A finding with `requires_architect_decision: true` must **either** appear in
 `ARCHITECT-DECISIONS.md` **or** have `disposition != needs-architect-decision`.
+
+> **⚠ This assertion has a blind spot, found the hard way.** It trusts
+> `findings.json`'s flag as the authority on whether a decision is needed. **Task
+> files can flag decisions the catalog does not.** In Wave 8, six findings had
+> task text explicitly saying "decision needed, do not resolve unilaterally" —
+> and **four of the six carried `requires_architect_decision: false`**, so this
+> check reported them clean. A kickoff author reading the task text caught all
+> six; the automated check caught two.
+>
+> **Scan the task files too**, not just the catalog: grep task bodies for
+> decision-needed language and cross-reference against the queue. The two
+> sources disagree, and the *union* is the real set. Treat a disagreement as a
+> finding in itself — it means one of them is wrong.
 > *Caught:* four separate missing decisions (AD-25 through AD-28), one per
 > wave, each found by hand at kickoff time. Running it across *all* remaining
 > waves rather than just the next one found a fifth gap — seven flagged

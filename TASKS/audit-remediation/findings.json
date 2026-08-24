@@ -693,7 +693,7 @@
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
       "disposition": "remediate",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed still open: cleanupRemovedAdapters's doc comment (adapter_cleanup.go:32) still claims \"rollback is handled by the existing snapshotAdapterTargets() pass\" but grep confirms snapshotAdapterTargets is never called anywhere in the codebase (only defined, in adapters.go:116), and no `Rollback` function exists outside an unrelated `tx.Rollback()` DB-transaction call in internal/messaging/handoff.go."
+      "revalidation_note": "Confirmed still open: cleanupRemovedAdapters's doc comment (adapter_cleanup.go:32) still claims \"rollback is handled by the existing snapshotAdapterTargets() pass\" but grep confirms snapshotAdapterTargets is never called anywhere in the codebase (only defined, in adapters.go:116), and no `Rollback` function exists outside an unrelated `tx.Rollback()` DB-transaction call in internal/messaging/handoff.go. [AD-34 DECIDED 2026-08-24: delete snapshotAdapterTargets and correct cleanupRemovedAdapters' comment to describe the destructive strip with no rollback. The false comment is the live harm; building real rollback is a separate future task and must not be blocked behind a comment already claiming it.]"
     },
     {
       "id": "GO-SVCCORE-004",
@@ -791,9 +791,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.3",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
-      "disposition": "defer",
+      "disposition": "retire-feature",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed WithAgentCycleKindForAPI's context value still has 2 real writers (internal/api) and zero readers, self-documented as intentional forward-looking scaffolding. Finding's own recommendation: leave as documented scaffolding or note it explicitly -- no immediate action required."
+      "revalidation_note": "Confirmed WithAgentCycleKindForAPI's context value still has 2 real writers (internal/api) and zero readers, self-documented as intentional forward-looking scaffolding. Finding's own recommendation: leave as documented scaffolding or note it explicitly -- no immediate action required. [AD-36 DECIDED 2026-08-24: remove. Context value written by two real API call sites with zero readers; the self-documented forward-looking-scaffolding framing did not survive the test this batch applied to every comparable case.]"
     },
     {
       "id": "GO-SVCCORE-008",
@@ -1407,7 +1407,7 @@
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed UnloadPlugin (host.go:1240, exact match to audit's function-start citation) is unchanged. Complexity classification (essential vs. accidental extraction candidates) and the narrow TOCTOU gap both still apply as described; task file 13/05's Gated-on is none."
+      "revalidation_note": "Confirmed UnloadPlugin (host.go:1240, exact match to audit's function-start citation) is unchanged. Complexity classification (essential vs. accidental extraction candidates) and the narrow TOCTOU gap both still apply as described; task file 13/05's Gated-on is none. [AD-35 DECIDED 2026-08-24: fix the load/unload TOCTOU; leave UnloadPlugin's structure alone. Extraction of the ~10 inlined teardown categories filed as post-remediation work -- a 346-line lock-disciplined function is a Wave-5-shaped risk without Wave 5's characterization-test budget.]"
     },
     {
       "id": "GO-PLUGIN-005",
@@ -1643,9 +1643,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
-      "disposition": "defer",
+      "disposition": "retire-feature",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed the per-turn tool-name context write (internal/mcp/tool_ctx.go) still has a real production writer and no reader, with the write side's own comment framing this as deliberate scaffolding. No immediate action; optional removal or doc-tracking per the finding's own recommendation."
+      "revalidation_note": "Confirmed the per-turn tool-name context write (internal/mcp/tool_ctx.go) still has a real production writer and no reader, with the write side's own comment framing this as deliberate scaffolding. No immediate action; optional removal or doc-tracking per the finding's own recommendation. [AD-36 DECIDED 2026-08-24: remove. Per-turn tool-name context written on every tool dispatch with zero readers -- a per-call cost for a value nothing consumes.]"
     },
     {
       "id": "GO-MCPTOOL-006",
@@ -2091,9 +2091,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
-      "disposition": "remediate",
+      "disposition": "retire-feature",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed still dead: zero references to PrefixLock/PrefixState/LockTTL anywhere outside coordination/keys.go itself."
+      "revalidation_note": "Confirmed still dead: zero references to PrefixLock/PrefixState/LockTTL anywhere outside coordination/keys.go itself. [AD-36 DECIDED 2026-08-24: remove. Planned-but-never-built resource-lock feature, zero consumers.]"
     },
     {
       "id": "GO-CHAT-006",
@@ -2116,7 +2116,7 @@
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
       "disposition": "remediate",
       "task_status": "not-started",
-      "revalidation_note": "Confirmed still open: hint_catalog.go's package doc still claims the loader reads config/think-hints/hints.yaml, but the actual `//go:embed hints/*.yaml` directive (line 62) embeds a different path. Currently byte-identical files per the finding, but no build step keeps them in sync -- concrete comment-or-generate-step fix, no architect input needed."
+      "revalidation_note": "Confirmed still open: hint_catalog.go's package doc still claims the loader reads config/think-hints/hints.yaml, but the actual `//go:embed hints/*.yaml` directive (line 62) embeds a different path. Currently byte-identical files per the finding, but no build step keeps them in sync -- concrete comment-or-generate-step fix, no architect input needed. [AD-37 DECIDED 2026-08-24: correct the package doc to name the file go:embed actually reads. The two files are byte-identical with no build step keeping them so, which is the trap -- the wrong doc looks right until they diverge.]"
     },
     {
       "id": "GO-CHAT-007",

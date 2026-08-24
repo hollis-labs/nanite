@@ -74,6 +74,10 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-26 | Untracked `safego.Go` spawns: adopt an owner, or accept fire-and-forget | `04/04` (Part B) | GO-SVCCORE-002 | 2a | **decided** |
 | AD-27 | Autocomplete `repo_path` enumeration: constrain, or accept the local-operator trust model | `08/09` | GO-API-001 | 3 | **decided** |
 | AD-28 | Catalog archive fetch: host/scheme restriction — **and** CIDR-denylist consolidation | `08/09` | GO-API-003, **GO-SEC4-007** | 3 | **decided** |
+| AD-34 | Adapter-cleanup rollback: build it, or stop claiming it | `13/02` | GO-SVCCORE-003 | 8 | **decided** |
+| AD-35 | `UnloadPlugin` TOCTOU and teardown extraction | `13/05` | GO-PLUGIN-004 | 8 | **decided** |
+| AD-36 | Three write-only scaffolding surfaces: keep or remove | `13/01` | GO-CHAT-005, GO-SVCCORE-007, GO-MCPTOOL-005 | 8 | **decided** |
+| AD-37 | `hint_catalog.go` doc-vs-embed mismatch | `13/02` | GO-CHAT-006 | 8 | **decided** |
 | AD-33 | Dead skill-mode/source functions: retire or wire | `13/01` | GO-STORE-008 | 8 | **decided** |
 | AD-30 | Task-ID citations in permanent production comments: trim or keep | `13/02` | GO-STORE-009 | 8 | **decided** |
 | AD-31 | `internal/chat` vocabulary-vs-wiring split | `13/05` | GO-CHAT-008 | 8 | **decided** |
@@ -566,6 +570,91 @@ AD-28 addresses where the fetch may *go*. Signature verification failing closed
 protection against the *request itself* as a probe — internal network
 enumeration from the server's vantage point. Weigh it on that, not on payload
 trust, which is already handled.
+
+### AD-34 — Adapter-cleanup rollback: build it, or stop claiming it
+
+**Status:** decided · **Gates:** `13/02` · **Findings:** GO-SVCCORE-003 (medium)
+
+> **Decided (2026-08-24): delete `snapshotAdapterTargets`; correct the comment
+> to describe what actually happens.**
+>
+> `cleanupRemovedAdapters` strips content from `CLAUDE.md`/`AGENTS.md` — files
+> users author — and its doc comment claims a rollback snapshot pass runs
+> first. It does not. `snapshotAdapterTargets` is dead.
+>
+> **The comment is the live harm, not the missing feature.** It tells a reader
+> a safety net exists, so anyone auditing this path stops looking. Same class
+> as the sandbox reporting successful isolation while running unconfined, and
+> as `tool.go` calling itself the primary tool-construction path.
+>
+> Building real rollback was rejected *for this wave*: it is a feature decision
+> inside mechanical cleanup. If someone later wants snapshot-before-destroy
+> protection, that is a new task with its own scope — but it must not be
+> blocked behind a comment that already claims the protection exists.
+
+### AD-35 — `UnloadPlugin` TOCTOU and teardown extraction
+
+**Status:** decided · **Gates:** `13/05` · **Findings:** GO-PLUGIN-004 (medium)
+
+> **Decided (2026-08-24): fix the TOCTOU now; file the extraction as
+> post-remediation work.**
+>
+> Close the race where a concurrent `LoadPlugin(B)` — with B depending on the
+> plugin being unloaded — passes its own dependency check in the window before
+> `UnloadPlugin` completes. That is a real correctness defect with a traced
+> mechanism.
+>
+> Leave `UnloadPlugin`'s structure alone. ~10 of its 18 teardown categories are
+> hand-inlined while ~8 are extracted, which is a genuine inconsistency — but
+> it is a 346-line lock-disciplined function, and restructuring it in a wave
+> with no characterization-test budget is a Wave-5-shaped risk without Wave 5's
+> safeguards. AD-13 already scoped decomposition deliberately and this was not
+> in it.
+>
+> Extraction filed in the post-remediation backlog alongside the
+> `internal/chat` split.
+
+### AD-36 — Three write-only scaffolding surfaces
+
+**Status:** decided · **Gates:** `13/01` · **Findings:** GO-CHAT-005,
+GO-SVCCORE-007, GO-MCPTOOL-005
+
+> **Decided (2026-08-24): remove all three.**
+>
+> - `GO-CHAT-005` — `PrefixLock`/`PrefixState`/`LockTTL`, a planned-but-never-
+>   built resource-lock feature on `CoordStore`, zero consumers.
+> - `GO-SVCCORE-007` — `WithAgentCycleKindForAPI`'s context value, written by
+>   two real API call sites, zero readers.
+> - `GO-MCPTOOL-005` — per-turn tool-name context, written on **every** tool
+>   dispatch, zero readers. This one costs work per call for a value nothing
+>   consumes.
+>
+> Consistent with how this batch treated every comparable case: five of six
+> production islands retired (AD-06–AD-11), `GO-STORE-008`'s four dead
+> functions retired (AD-33). Two of these are self-documented as deliberate
+> forward-looking scaffolding; that framing was considered and did not survive
+> the same test applied elsewhere — code kept for a future that has not arrived
+> is indistinguishable from code nobody removed, and git makes removal
+> recoverable if the intent returns.
+
+### AD-37 — `hint_catalog.go` doc-vs-embed mismatch
+
+**Status:** decided · **Gates:** `13/02` · **Findings:** GO-CHAT-006 (low)
+
+> **Decided (2026-08-24): fix the doc to name the file `go:embed` actually
+> reads.**
+>
+> The package doc claims the loader reads `config/think-hints/hints.yaml`; the
+> `go:embed` directive embeds a different file. They are byte-identical today
+> and **no build step keeps them so** — which is precisely the trap: the wrong
+> doc currently looks right, and will keep looking right until they silently
+> diverge.
+>
+> A sync build step and consolidation to one file were both rejected as
+> disproportionate to a low-severity doc error, and consolidation may not even
+> be possible if `go:embed` cannot reach the config path — likely why two files
+> exist. Correcting the doc removes the false assertion at the cost of one
+> line.
 
 ### AD-33 — Dead skill-mode/source functions: retire or wire
 

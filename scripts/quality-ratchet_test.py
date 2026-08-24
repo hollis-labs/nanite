@@ -45,7 +45,39 @@ class QualityRatchetTest(unittest.TestCase):
         path.write_text(json.dumps(value), encoding="utf-8")
         return path
 
-    def baseline(self, *, goarch: str | None = None) -> Path:
+    # known_noise is a *list* as of CW-20260824-0025: one entry per suppressed
+    # site, each required to match exactly once.  A bare count would be
+    # satisfied by any N sites, so deleting a justified one while adding an
+    # unjustified one nets to zero and passes -- the hole these tests close.
+    @staticmethod
+    def recovery_noise_entry() -> dict[str, object]:
+        return {
+            "file": "internal/service/recovery_envelope_sink.go",
+            "annotation_line": 223,
+            "rule_id": "G404",
+            "symbol": "pickRecoveryGiphyQuery",
+            "finding_id": "GO-SVCCORE-005",
+            "reason": "Cosmetic Giphy-query selection; no security decision.",
+        }
+
+    @staticmethod
+    def jitter_noise_entry() -> dict[str, object]:
+        return {
+            "file": "internal/mcp/web_fetch_resilience.go",
+            "annotation_line": 233,
+            "rule_id": "G404",
+            "symbol": "jitterFactor",
+            "reason": "Retry-backoff jitter; unpredictability is not a security property.",
+        }
+
+    def baseline(
+        self,
+        *,
+        goarch: str | None = None,
+        known_noise: object | None = None,
+    ) -> Path:
+        if known_noise is None:
+            known_noise = [self.recovery_noise_entry(), self.jitter_noise_entry()]
         return self.write_json(
             "baseline.json",
             {
@@ -55,13 +87,8 @@ class QualityRatchetTest(unittest.TestCase):
                     "github_runner": RUNNER,
                 },
                 "standalone_gosec": {
-                    "actionable_rule_counts": {"G101": 1},
-                    "known_noise": {
-                        "file": "internal/service/recovery_envelope_sink.go",
-                        "annotation_line": 223,
-                        "rule_id": "G404",
-                        "symbol": "pickRecoveryGiphyQuery",
-                    },
+                    "actionable_rule_counts": {"G101": 1, "G404": 0},
+                    "known_noise": known_noise,
                 },
             },
         )
@@ -176,7 +203,27 @@ class QualityRatchetTest(unittest.TestCase):
         return {
             "file": "/actions/apps/nanite/internal/service/recovery_envelope_sink.go",
             "rule_id": "G404",
+            "line": "225",
             "code": "func pickRecoveryGiphyQuery() string {",
+        }
+
+    @staticmethod
+    def jitter_issue() -> dict[str, str]:
+        return {
+            "file": "/actions/apps/nanite/internal/mcp/web_fetch_resilience.go",
+            "rule_id": "G404",
+            "line": "234",
+            "code": "jitterFactor := 0.75 + rand.Float64()*0.5",
+        }
+
+    @staticmethod
+    def unjustified_weak_random_issue() -> dict[str, str]:
+        """A new math/rand site with no annotation and no known_noise entry."""
+        return {
+            "file": "/actions/apps/nanite/internal/brand/probe.go",
+            "rule_id": "G404",
+            "line": "9",
+            "code": "return rand.Intn(10)",
         }
 
     @staticmethod
@@ -187,21 +234,20 @@ class QualityRatchetTest(unittest.TestCase):
             "code": 'const credential = "example"',
         }
 
-    def run_gosec(self, accepted_count: int) -> subprocess.CompletedProcess[str]:
-        report = self.write_json(
-            "gosec.json",
-            {
-                "Issues": [self.actionable_issue()]
-                + [self.accepted_issue() for _ in range(accepted_count)]
-            },
-        )
+    def run_gosec_report(
+        self,
+        issues: list[dict[str, str]],
+        *,
+        known_noise: object | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        report = self.write_json("gosec.json", {"Issues": issues})
         return subprocess.run(
             [
                 "python3",
                 str(SCRIPT),
                 "gosec",
                 "--baseline",
-                str(self.baseline()),
+                str(self.baseline(known_noise=known_noise)),
                 "--report",
                 str(report),
                 "--runner",
@@ -212,16 +258,29 @@ class QualityRatchetTest(unittest.TestCase):
             text=True,
         )
 
+    def run_gosec(self, accepted_count: int) -> subprocess.CompletedProcess[str]:
+        """Vary only the recovery entry's match count; keep jitter at exactly 1."""
+        return self.run_gosec_report(
+            [self.actionable_issue(), self.jitter_issue()]
+            + [self.accepted_issue() for _ in range(accepted_count)]
+        )
+
     def test_gosec_rejects_zero_accepted_matches(self) -> None:
         result = self.run_gosec(0)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("expected exactly 1", result.stderr)
+        self.assertIn("GO-SVCCORE-005", result.stderr)
         self.assertIn("G101: 1", result.stdout)
 
     def test_gosec_accepts_exactly_one_match(self) -> None:
         result = self.run_gosec(1)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("found 1 accepted-policy", result.stdout)
+        self.assertIn("2 finding(s) matched 2 enumerated entries", result.stdout)
+        self.assertIn("GO-SVCCORE-005: 1 G404 match(es)", result.stdout)
+        self.assertIn(
+            "internal/mcp/web_fetch_resilience.go:jitterFactor: 1 G404 match(es)",
+            result.stdout,
+        )
         self.assertIn("G101: 1", result.stdout)
 
     def test_gosec_rejects_two_accepted_matches(self) -> None:
@@ -230,6 +289,105 @@ class QualityRatchetTest(unittest.TestCase):
         self.assertIn("expected exactly 1", result.stderr)
         self.assertIn("found 2", result.stderr)
         self.assertIn("G101: 1", result.stdout)
+
+    # --- enumerated known noise (CW-20260824-0025) -----------------------
+    #
+    # The regression a bare `G404: 4` count could not catch: swap a justified
+    # site for an unjustified one and the total is unchanged.
+
+    def test_gosec_rejects_an_unjustified_new_weak_random_site(self) -> None:
+        result = self.run_gosec_report(
+            [
+                self.actionable_issue(),
+                self.accepted_issue(),
+                self.jitter_issue(),
+                self.unjustified_weak_random_issue(),
+            ]
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("G404 increased from 0 to 1", result.stderr)
+        self.assertIn("G404: 1 (baseline 0) INCREASE", result.stdout)
+
+    def test_gosec_rejects_a_justified_site_swapped_for_an_unjustified_one(
+        self,
+    ) -> None:
+        # jitterFactor deleted, an unannotated math/rand site added: the raw
+        # G404 count is unchanged, so only per-entry cardinality catches it.
+        result = self.run_gosec_report(
+            [
+                self.actionable_issue(),
+                self.accepted_issue(),
+                self.unjustified_weak_random_issue(),
+            ]
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("jitterFactor, found 0", result.stderr)
+        self.assertIn("G404 increased from 0 to 1", result.stderr)
+
+    def test_gosec_rejects_the_legacy_single_object_known_noise(self) -> None:
+        result = self.run_gosec_report(
+            [self.actionable_issue(), self.accepted_issue()],
+            known_noise=self.recovery_noise_entry(),
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("must be a non-empty list", result.stderr)
+
+    def test_gosec_rejects_an_empty_known_noise_list(self) -> None:
+        result = self.run_gosec_report([self.actionable_issue()], known_noise=[])
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("must be a non-empty list", result.stderr)
+
+    def test_gosec_rejects_a_known_noise_entry_without_a_reason(self) -> None:
+        # A suppression with no written justification is the thing the list
+        # shape exists to make expensive.
+        entry = self.recovery_noise_entry()
+        del entry["reason"]
+        result = self.run_gosec_report(
+            [self.actionable_issue(), self.accepted_issue()],
+            known_noise=[entry],
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("non-empty string 'reason'", result.stderr)
+
+    def test_gosec_rejects_a_known_noise_entry_without_an_annotation_line(
+        self,
+    ) -> None:
+        entry = self.recovery_noise_entry()
+        entry["annotation_line"] = 0
+        result = self.run_gosec_report(
+            [self.actionable_issue(), self.accepted_issue()],
+            known_noise=[entry],
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("positive integer 'annotation_line'", result.stderr)
+
+    def test_gosec_rejects_duplicate_known_noise_entries(self) -> None:
+        # Two identical entries would each claim the same single finding and
+        # both report a cardinality of 1, hiding a second real site.
+        result = self.run_gosec_report(
+            [self.actionable_issue(), self.accepted_issue()],
+            known_noise=[self.recovery_noise_entry(), self.recovery_noise_entry()],
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("repeats the path/rule/symbol triple", result.stderr)
+
+    def test_gosec_rejects_overlapping_known_noise_entries(self) -> None:
+        # Distinct entries whose symbols both appear in one finding's code:
+        # each would report a cardinality of 1 off a single finding.
+        broad = self.recovery_noise_entry()
+        broad["symbol"] = "recoveryGiphyQueries"
+        del broad["finding_id"]
+        issue = self.accepted_issue()
+        issue["code"] = (
+            "func pickRecoveryGiphyQuery() string {\n"
+            "\treturn recoveryGiphyQueries[rand.Intn(len(recoveryGiphyQueries))]"
+        )
+        result = self.run_gosec_report(
+            [self.actionable_issue(), issue],
+            known_noise=[self.recovery_noise_entry(), broad],
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("known-noise entries overlap", result.stderr)
 
     def test_platform_rejects_baseline_goarch_drift(self) -> None:
         other_goarch = "amd64" if self.goarch != "amd64" else "arm64"

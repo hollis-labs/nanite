@@ -112,19 +112,84 @@ baseline cannot silently weaken Stage 2.
 
 ## Standalone gosec known noise
 
-Bare `gosec` does not understand golangci-lint's `//nolint:gosec` syntax. It
-therefore reports G404 for `pickRecoveryGiphyQuery` even though the source has
-the accepted suppression at
-`internal/service/recovery_envelope_sink.go:223`. The function selects cosmetic
-Giphy text and makes no security decision. The comparison runner recognizes
-only that path/rule/symbol combination as GO-SVCCORE-005 known noise, and the
-comparison fails unless exactly one such match exists. Zero matches means the
-exception is stale; two matches means it has broadened or duplicated. Every
+Bare `gosec` does not understand golangci-lint's `//nolint:gosec` syntax, so
+every annotated-and-justified suppression in the tree reappears as a finding.
+`standalone_gosec.known_noise` is a **list**, one entry per suppressed site, and
+`G404` sits at `0` in `actionable_rule_counts`. Measured at `4f3d38c4` with
+`gosec` v2.28.0 over the 109 tracked packages, all four raw G404 findings are
+enumerated:
+
+| Source site | `//nolint` at | `symbol` | Why it is accepted |
+|---|---|---|---|
+| `internal/service/recovery_envelope_sink.go:225` | `:223` | `pickRecoveryGiphyQuery` | Cosmetic Giphy-query selection (`GO-SVCCORE-005`) |
+| `internal/chat/errors.go:95` | `:94` | `errorGiphyQueries` | Cosmetic Giphy-query selection in the error envelope |
+| `internal/mcp/web_fetch_resilience.go:108` | `:107` | `fetchUserAgents` | UA rotation — load distribution, not a security decision |
+| `internal/mcp/web_fetch_resilience.go:234` | `:233` | `jitterFactor` | Retry-backoff jitter — unpredictability is not a security property |
+
+Matching is on path/rule/symbol, never on line number, so ordinary edits above a
+site do not red the gate. **Each entry must match exactly once.** Zero matches
+means the exception went stale; two or more means it broadened or duplicated;
+one finding matching two entries is an overlap and also fails. Every
 nonmatching issue remains actionable and participates in the per-rule baseline.
-The command must keep `-exclude-dir=.claude` while leaving the tracked package
-set in scope.
+Every entry requires a written `reason` — the comparator rejects the baseline
+without one, which is what keeps "add a suppression" from being cheaper than
+"argue for the suppression". The command must keep `-exclude-dir=.claude` while
+leaving the tracked package set in scope.
+
+**Why a list rather than `G404: 4`.** A bare count is satisfied by any four
+sites. Deleting a justified one while adding an unjustified one nets to zero and
+passes. Reproduced at `4f3d38c4` against a real report with `jitterFactor`
+removed and an unannotated `rand.Intn` added: the pre-`CW-20260824-0025`
+comparator and baseline printed `G404: 3 (baseline 3)` and `ratchet passed`,
+exit 0. The enumerated form fails the same report twice over — a stale
+`jitterFactor` entry and `G404 increased from 0 to 1`.
+
+To add an entry, confirm the site really carries a `//nolint:gosec` with a
+written justification in situ, pick a `symbol` that appears in the finding's
+`code` snippet and cannot plausibly appear at an unrelated site, and drop the
+matching `actionable_rule_counts` entry by one in the same commit.
 
 To refresh a reduced baseline, generate both JSON reports with the same pinned
 versions and on `darwin/arm64`, inspect the removed findings, lower only the
 corresponding counts, and rerun both comparison modes. Never raise a baseline
 to make a new regression pass.
+
+**Run `gosec` at least three times and require identical finding sets before
+writing any number into the baseline.** A degraded run has been observed on this
+tree that returned a strict subset of the findings while being otherwise
+indistinguishable from a good one: exit 0, empty `Golang errors`, well-formed
+JSON, and identical `files`/`lines` stats. Averaging or taking the lowest would
+bake a permanently-red baseline into the gate.
+
+## Blocker: the gate cannot resolve a private module dependency
+
+*Observed 2026-08-24 at `4f3d38c4`, the first two times the workflow ever ran:*
+[32788460848](https://github.com/hollis-labs/nanite/actions/runs/32788460848)
+and [32788631043](https://github.com/hollis-labs/nanite/actions/runs/32788631043).
+Both failed identically at **Discover tracked Go packages**, 42s and 50s in:
+
+```
+internal/memory/service.go:22:2: github.com/hollis-labs/tesseract@v0.7.1-0.20260518032333-bbce958849ac:
+  invalid version: git ls-remote -q --end-of-options https://github.com/hollis-labs/tesseract ...
+  fatal: could not read Username for 'https://github.com': terminal prompts disabled
+```
+
+`github.com/hollis-labs/tesseract` is a **private** repository (`gh api
+repos/hollis-labs/tesseract --jq .visibility`), and it is the only private
+external module in `go.mod` — the other twenty `hollis-labs` requires are all
+public. It is required by version, not by a local `replace`, so the four
+`libs/` checkouts above do not cover it, and a pseudo-version cannot come from
+the public proxy. `go list ./...` therefore fails before the package filter runs
+and every later step is skipped.
+
+Nothing downstream of that step has ever executed in CI. Every claim about this
+gate's behavior — in this runbook and elsewhere — still rests on local
+reproduction only.
+
+Resolving it needs a credential decision (a repository secret with read access
+to `hollis-labs/tesseract`, plus `GOPRIVATE`, or vendoring, or making the module
+public). That is an operator call, deliberately not made here.
+
+The failure mode is at least the correct one: the step is fail-closed by design,
+so a partial `go list` never reaches the filtering loop and never produces a
+short package list that would have scanned less while reporting success.

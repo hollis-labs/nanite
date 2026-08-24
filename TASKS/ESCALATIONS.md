@@ -1926,3 +1926,46 @@ either. Added to the Wave 9 register as candidate 10 with the CI consequence sta
 **Follow-up:** Fix the TOCTOU between the `!closed.Load()` check and the concurrent channel close.
 Given the gate is live, this has graduated from "nice to fix" to "will cost someone a confusing red
 build." Whoever next owns `chat_boot_drive.go` should take it.
+
+---
+
+## 2026-08-24 — The full-repo quality gate cannot run in CI: a private module dependency
+
+**Raised by:** Torque `CW-20260824-0025` (run the gate once for real, then refresh the baseline).
+
+**Question / mismatch:** The gate was dispatched for the first time ever, at `4f3d38c4`, with
+`origin/main` at the same commit. Both dispatches —
+[32788460848](https://github.com/hollis-labs/nanite/actions/runs/32788460848) and
+[32788631043](https://github.com/hollis-labs/nanite/actions/runs/32788631043), the second run
+purely as a determinism control — failed identically at step 9, **Discover tracked Go packages**,
+42s and 50s in:
+
+```
+internal/memory/service.go:22:2: github.com/hollis-labs/tesseract@v0.7.1-0.20260518032333-bbce958849ac:
+  invalid version: git ls-remote -q --end-of-options https://github.com/hollis-labs/tesseract ...
+  fatal: could not read Username for 'https://github.com': terminal prompts disabled
+```
+
+`github.com/hollis-labs/tesseract` is **private**, and it is the only private external module in
+`go.mod` — checked with `gh api repos/hollis-labs/<name> --jq .visibility` across all 20 other
+`hollis-labs` requires, every one of which is public. It is required by version rather than by a
+local `replace`, so the four `libs/` checkouts the workflow already performs do not cover it, and a
+pseudo-version of a private repo cannot be served by the public proxy either. `go list ./...` fails,
+the step exits 1, and all eight scanning steps are skipped.
+
+The consequence is larger than one red run: **no step downstream of package discovery has ever
+executed in CI.** Every statement about this gate's behavior, in the runbook and in every task file
+that cites it, rests on local reproduction only. The gate's own fail-closed design did work exactly
+as documented — a partial `go list` never reached the filtering loop, so the run failed loudly
+rather than silently scanning a short package list.
+
+**Resolution:** Not fixed here, deliberately. Every available remedy is a credential or publication
+decision — a repository secret with read access to `hollis-labs/tesseract` plus `GOPRIVATE`, a
+vendored copy, or making the module public — and that is operator territory, not a worker's call.
+The baseline refresh and the `known_noise` schema change in the same task were completed and
+verified against locally-derived reports produced with the workflow's own package-discovery loop,
+the pinned `gosec` v2.28.0 and `golangci-lint` v2.11.4, on `darwin/arm64`.
+
+**Follow-up:** Until the credential question is answered, the gate is a detector that has never
+detected anything. The nightly 07:17 UTC cron will keep failing at the same step. Worth resolving
+before anyone treats a green (or absent) gate result as evidence.

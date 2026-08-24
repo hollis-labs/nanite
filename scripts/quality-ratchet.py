@@ -25,10 +25,11 @@ from typing import Any
 # cover the repository" (0%, or a handful of surviving packages) from "the
 # repository genuinely improved"; it cannot separate a small silent coverage
 # loss from ordinary churn, and pretending otherwise would red-light the gate
-# on honest remediation until someone weakened the check to shut it up.  A real
-# full-repo run measured 3250 findings against the committed 3255 baseline
-# (99.8%) on 2026-08-24, so 50% leaves roughly fifty points of margin.  The
-# floor tightens for free every time the baseline is ratcheted downward.
+# on honest remediation until someone weakened the check to shut it up.  The
+# floor tightens for free every time the baseline is ratcheted downward: it was
+# 1628 against the 3255 baseline this note was first written for, and is 1407
+# against the 2813 baseline refreshed at 4f3d38c4 (CW-20260824-0025), where a
+# real full-repo run measures 2813 -- exactly 1406 points of margin.
 LINT_COVERAGE_FLOOR_PERCENT = 50
 
 
@@ -326,6 +327,73 @@ def is_known_gosec_noise(issue: dict[str, Any], policy: dict[str, Any]) -> bool:
     )
 
 
+def known_noise_label(policy: dict[str, Any]) -> str:
+    finding_id = policy.get("finding_id")
+    if isinstance(finding_id, str) and finding_id:
+        return finding_id
+    return f"{policy['file']}:{policy['symbol']}"
+
+
+def load_known_noise(gosec_baseline: dict[str, Any]) -> list[dict[str, Any]]:
+    """Validate and return the enumerated known-noise entries.
+
+    Bare gosec does not understand golangci-lint's //nolint:gosec syntax, so
+    every annotated-and-justified suppression in the tree reappears here as a
+    finding.  The baseline enumerates them one entry per site rather than
+    absorbing them into actionable_rule_counts: a count of 4 would be satisfied
+    by any four sites, so deleting a justified one and adding an unjustified one
+    would net to zero and pass.  Each entry must match exactly once -- zero
+    means the exception went stale, two or more means it broadened -- and the
+    corresponding actionable count then sits at 0, so a genuinely new site is an
+    increase against zero.
+
+    `reason` is required, not decorative.  It is the only thing standing between
+    "this suppression was argued for" and "someone silenced a finding".
+    """
+    policies = gosec_baseline.get("known_noise")
+    if not isinstance(policies, list) or not policies:
+        raise SystemExit(
+            "baseline standalone_gosec.known_noise must be a non-empty list of "
+            "entries; the single-object form predates CW-20260824-0025 and is "
+            "no longer accepted"
+        )
+    seen: set[tuple[str, str, str]] = set()
+    for policy in policies:
+        if not isinstance(policy, dict):
+            raise SystemExit(
+                "standalone_gosec.known_noise entries must be JSON objects"
+            )
+        for field in ("file", "rule_id", "symbol", "reason"):
+            value = policy.get(field)
+            if not isinstance(value, str) or not value:
+                raise SystemExit(
+                    "standalone_gosec.known_noise entry needs a non-empty "
+                    f"string {field!r}: {policy}"
+                )
+        line = policy.get("annotation_line")
+        if not isinstance(line, int) or isinstance(line, bool) or line <= 0:
+            raise SystemExit(
+                "standalone_gosec.known_noise entry needs a positive integer "
+                f"'annotation_line': {policy}"
+            )
+        finding_id = policy.get("finding_id")
+        if finding_id is not None and (
+            not isinstance(finding_id, str) or not finding_id
+        ):
+            raise SystemExit(
+                "standalone_gosec.known_noise 'finding_id' must be a non-empty "
+                f"string when present: {policy}"
+            )
+        key = (policy["file"], policy["rule_id"], policy["symbol"])
+        if key in seen:
+            raise SystemExit(
+                "standalone_gosec.known_noise repeats the path/rule/symbol "
+                f"triple {key}; a duplicate entry absorbs a second real finding"
+            )
+        seen.add(key)
+    return policies
+
+
 def gosec_command(baseline_path: Path, report_path: Path, runner: str) -> int:
     baseline_document = load_verified_baseline(baseline_path, runner)
     gosec_baseline = baseline_document.get("standalone_gosec")
@@ -335,9 +403,7 @@ def gosec_command(baseline_path: Path, report_path: Path, runner: str) -> int:
         gosec_baseline.get("actionable_rule_counts"),
         "standalone_gosec.actionable_rule_counts",
     )
-    policy = gosec_baseline.get("known_noise")
-    if not isinstance(policy, dict):
-        raise SystemExit("baseline has no standalone_gosec.known_noise policy")
+    policies = load_known_noise(gosec_baseline)
 
     report = load_json(report_path)
     issues = report.get("Issues")
@@ -347,25 +413,51 @@ def gosec_command(baseline_path: Path, report_path: Path, runner: str) -> int:
         raise SystemExit(f"gosec report {report_path} has no Issues array")
 
     actual: Counter[str] = Counter()
+    match_counts = [0] * len(policies)
+    overlapping: list[str] = []
     ignored = 0
     for issue in issues:
         if not isinstance(issue, dict) or not isinstance(issue.get("rule_id"), str):
             raise SystemExit(f"gosec report {report_path} has a malformed issue")
-        if is_known_gosec_noise(issue, policy):
+        matched = [
+            index
+            for index, policy in enumerate(policies)
+            if is_known_gosec_noise(issue, policy)
+        ]
+        if len(matched) > 1:
+            overlapping.append(
+                f"{issue.get('file')}:{issue.get('line')} matches "
+                + ", ".join(known_noise_label(policies[index]) for index in matched)
+            )
+        if matched:
+            for index in matched:
+                match_counts[index] += 1
             ignored += 1
             continue
         actual[issue["rule_id"]] += 1
 
     print(
-        "standalone gosec: found "
-        f"{ignored} accepted-policy {policy.get('rule_id')} finding(s) at "
-        f"{policy.get('file')} (annotation line {policy.get('annotation_line')})"
+        f"standalone gosec known noise: {ignored} finding(s) matched "
+        f"{len(policies)} enumerated entr{'y' if len(policies) == 1 else 'ies'}"
     )
-    cardinality_failed = ignored != 1
-    if cardinality_failed:
+    cardinality_failed = False
+    for policy, count in zip(policies, match_counts):
         print(
-            "standalone gosec: expected exactly 1 GO-SVCCORE-005 "
-            f"path/rule/symbol match, found {ignored}",
+            f"  {known_noise_label(policy)}: {count} {policy['rule_id']} "
+            f"match(es) at {policy['file']} "
+            f"(annotation line {policy['annotation_line']})"
+        )
+        if count != 1:
+            cardinality_failed = True
+            print(
+                "standalone gosec: expected exactly 1 path/rule/symbol match "
+                f"for {known_noise_label(policy)}, found {count}",
+                file=sys.stderr,
+            )
+    for description in overlapping:
+        cardinality_failed = True
+        print(
+            f"standalone gosec: known-noise entries overlap -- {description}",
             file=sys.stderr,
         )
     comparison_failed = compare_counts(

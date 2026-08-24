@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "platform": {
     "goarch": "arm64",
     "goos": "darwin",
@@ -14,15 +14,15 @@
       "errcheck": 0,
       "errorlint": 0,
       "exhaustive": 28,
-      "forbidigo": 236,
+      "forbidigo": 227,
       "funlen": 69,
-      "gocognit": 257,
+      "gocognit": 255,
       "gocyclo": 286,
-      "gosec": 635,
+      "gosec": 631,
       "govet": 617,
       "ineffassign": 2,
       "maintidx": 31,
-      "misspell": 429,
+      "misspell": 2,
       "nestif": 62,
       "nilerr": 0,
       "revive": 70,
@@ -45,30 +45,54 @@
     "version": "v2.28.0",
     "actionable_rule_counts": {
       "G101": 3,
-      "G104": 103,
+      "G104": 0,
       "G115": 4,
       "G118": 2,
       "G120": 2,
       "G122": 4,
       "G202": 5,
       "G204": 18,
-      "G301": 60,
+      "G301": 59,
       "G302": 3,
-      "G304": 64,
+      "G304": 62,
       "G306": 16,
       "G401": 1,
-      "G404": 3,
+      "G404": 0,
       "G501": 1,
       "G702": 2,
-      "G703": 22,
+      "G703": 21,
       "G704": 3
     },
-    "known_noise": {
-      "file": "internal/service/recovery_envelope_sink.go",
-      "annotation_line": 223,
-      "rule_id": "G404",
-      "symbol": "pickRecoveryGiphyQuery",
-      "reason": "Cosmetic Giphy-query selection; no security decision depends on it. Bare gosec does not understand //nolint:gosec."
-    }
+    "known_noise": [
+      {
+        "file": "internal/service/recovery_envelope_sink.go",
+        "annotation_line": 223,
+        "rule_id": "G404",
+        "symbol": "pickRecoveryGiphyQuery",
+        "finding_id": "GO-SVCCORE-005",
+        "reason": "Cosmetic Giphy-query selection; no security decision depends on it. Bare gosec does not understand //nolint:gosec."
+      },
+      {
+        "file": "internal/chat/errors.go",
+        "annotation_line": 94,
+        "rule_id": "G404",
+        "symbol": "errorGiphyQueries",
+        "reason": "Cosmetic Giphy-query selection inside the error envelope; no identity, secret, or security decision depends on it. Bare gosec does not understand //nolint:gosec."
+      },
+      {
+        "file": "internal/mcp/web_fetch_resilience.go",
+        "annotation_line": 107,
+        "rule_id": "G404",
+        "symbol": "fetchUserAgents",
+        "reason": "User-agent rotation for web_fetch; load distribution across UA strings, not a security decision. Bare gosec does not understand //nolint:gosec."
+      },
+      {
+        "file": "internal/mcp/web_fetch_resilience.go",
+        "annotation_line": 233,
+        "rule_id": "G404",
+        "symbol": "jitterFactor",
+        "reason": "Retry-backoff jitter to avoid a thundering herd; unpredictability is not a security property here. Bare gosec does not understand //nolint:gosec."
+      }
+    ]
   }
 }

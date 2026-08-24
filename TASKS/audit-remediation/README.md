@@ -378,7 +378,7 @@ before.**
 | Task | Depends on | Gated on | Notes |
 |---|---|---|---|
 | `14/01` remove default seeded catalog source | `01/01` | AD-05 ✅ | Leaves no catalog source on a fresh install — needs an empty-state screen, owned by the UI/UX workstream |
-| `14/02` error-handling backlog paydown | `12/01` stage 1 | AD-21 ✅ | 353 findings. **Blocks `12/01` stage 2.** Same hazard profile as `06/03` — see its banner |
+| `14/02` error-handling backlog paydown | `12/01` stage 1 | AD-21 ✅ | Measured 281/48/24 findings; reduced all three to zero in the operator-approved Wave 8 execution and activated `12/01` stage 2. Same hazard profile as `06/03` — see its banner |
 
 Lands after Wave 7 and **before `13/03`**, which stays the batch's final commit.
 

@@ -1,9 +1,10 @@
 # Pay down the errcheck / errorlint / nilerr backlog to zero
 
-**Phase:** Audit remediation — Wave 9 (follow-ups)
+**Phase:** Audit remediation — Wave 9 (follow-ups taxonomy)
+**Execution:** Wave 8, with explicit operator approval
 **Status:** implemented
 **Depends on:** `12/01` stage 1 (the regression gate) should land first, so this paydown is measured against a gate that already exists.
-**Blocks:** **`12/01` stage 2.** Zero-tolerance on these three linters cannot be activated until this reaches zero.
+**Blocks:** Cleared — `12/01` stage 2 was activated after errcheck, errorlint, and nilerr reached zero.
 **Parallel-safe with:** **nothing meaningful.** It touches error handling across the tree; treat it like the ctx sweep — its own window, landing in as few merges as practical.
 **Gated on:** AD-21 — decided; this task *is* the decided work.
 **requires_security_review:** false

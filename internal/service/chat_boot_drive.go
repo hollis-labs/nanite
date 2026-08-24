@@ -292,14 +292,14 @@ func (s *chatServiceImpl) driveBootSession(
 			slog.Warn("driveBootSession: send input failed",
 				"session_id", sessionID, "err", err)
 			if v, ok := s.agentEventBridge.routers.Load(sessionID); ok {
-				if r, rOK := v.(*sessionRouter); rOK && !r.closed.Load() {
-					select {
-					case r.ch <- llmtypes.StreamEvent{
+				if r, rOK := v.(*sessionRouter); rOK {
+					// Non-blocking; drops if the router already closed or
+					// its buffer is full. Either way the harness still
+					// terminates via the unbind below.
+					r.send(llmtypes.StreamEvent{
 						Type:  llmtypes.EventError,
 						Error: fmt.Sprintf("driveBootSession: send input: %v", err),
-					}:
-					default:
-					}
+					})
 				}
 			}
 			s.agentEventBridge.SetPerSessionRouter(sessionID, nil)

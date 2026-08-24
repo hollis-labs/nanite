@@ -761,13 +761,54 @@ type agentEventBridge struct {
 // fanout goroutine, the chat-harness ctx-cancel watcher, and explicit
 // SetPerSessionRouter(nil) calls can all race to release the chan without
 // double-close panics.
+//
+// CW-20260824-0001: releasing the chan is not the only thing those goroutines
+// race over — they also race the *senders*. `closed` is therefore guarded by
+// mu, not by being atomic: every send takes mu for read and re-checks `closed`
+// inside the lock, and closeOnce takes it for write. A `closed` field a caller
+// can read without the lock is exactly the shape that produced the original
+// check-then-act bug, so do not reintroduce one. Send only through send();
+// never touch r.ch directly.
 type sessionRouter struct {
+	// mu orders sends against the close. Read-held for the (non-blocking)
+	// send, write-held for the close.
+	mu     sync.RWMutex
 	ch     chan llmtypes.StreamEvent
-	closed atomic.Bool
+	closed bool
 }
 
+// send delivers ev to the per-turn chan without ever blocking. It is a no-op
+// once the router is closed, and it silently drops ev when the chan buffer is
+// full — matching the pre-existing drop semantics at both call sites.
+//
+// Dropping on a full buffer is deliberate and load-bearing: the runtime's
+// fanout goroutine must not stall behind a slow chat-harness consumer. Any
+// change that lets this method block is a worse bug than the race it exists
+// to close.
+//
+// Holding mu for read across the select is safe precisely because the select
+// has a default arm: it completes in bounded time regardless of how the
+// consumer behaves, so it cannot hold off closeOnce's write lock.
+func (r *sessionRouter) send(ev llmtypes.StreamEvent) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed {
+		return
+	}
+	select {
+	case r.ch <- ev:
+	default:
+	}
+}
+
+// closeOnce releases the per-turn chan. Idempotent, and mutually exclusive
+// with in-flight send() calls — a send can no longer observe an open router
+// and then hand its event to an already-closed chan.
 func (r *sessionRouter) closeOnce() {
-	if r.closed.CompareAndSwap(false, true) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.closed {
+		r.closed = true
 		close(r.ch)
 	}
 }
@@ -830,14 +871,11 @@ func (b *agentEventBridge) fanout(sessionID string) chan<- llmtypes.StreamEvent 
 		for ev := range out {
 			if v, ok := b.routers.Load(sessionID); ok {
 				router := v.(*sessionRouter)
-				if !router.closed.Load() {
-					select {
-					case router.ch <- ev:
-					default:
-						// Drop on full to avoid stalling the runtime; the
-						// chat-harness consumer is expected to keep up.
-					}
-				}
+				// send drops on a full buffer to avoid stalling the runtime
+				// (the chat-harness consumer is expected to keep up) and is
+				// a no-op once the router is closed. Neither case is
+				// actionable here, which is why send reports nothing.
+				router.send(ev)
 				if ev.Type == llmtypes.EventDone || ev.Type == llmtypes.EventError {
 					b.routers.CompareAndDelete(sessionID, router)
 					router.closeOnce()

@@ -257,26 +257,140 @@ func TestListAndActiveCount(t *testing.T) {
 	}
 }
 
+// shutdownBarrierDelegator models a provider call that is genuinely in
+// flight when Shutdown arrives, and gives the test three barriers to
+// synchronize on instead of a fixed sleep:
+//
+//   - entered   — closed once DelegateTask is actually executing, i.e. once
+//     SpawnFull is past its whole spawn phase (worker published, heartbeat
+//     registered, SetStatus(StatusRunning) done).
+//   - cancelled — closed once the delegation has observed its context being
+//     cancelled, proving Shutdown really cancelled it.
+//   - release   — supplied by the test; the delegation parks here until the
+//     test lets it unwind, so SpawnFull's error path runs at a point the
+//     test controls rather than at a point the scheduler picks.
+//
+// It is deliberately separate from manager_shutdown_test.go's
+// blockingDelegator, which owns the drain-within-budget property and must
+// keep returning as soon as its context is cancelled.
+type shutdownBarrierDelegator struct {
+	entered   chan struct{}
+	cancelled chan struct{}
+	release   chan struct{}
+
+	enteredOnce   sync.Once
+	cancelledOnce sync.Once
+}
+
+func (d *shutdownBarrierDelegator) DelegateTask(ctx context.Context, _ chat.DelegationRequest) (*chat.DelegationResult, error) {
+	d.enteredOnce.Do(func() { close(d.entered) })
+	<-ctx.Done()
+	d.cancelledOnce.Do(func() { close(d.cancelled) })
+	<-d.release
+	return nil, ctx.Err()
+}
+
+// TestShutdown pins the terminal state of a worker that Shutdown interrupts
+// mid-delegation: it is "cancelled", and nothing downstream may downgrade it
+// to "failed".
+//
+// That is the manager's stated intent — SpawnFull guards every one of its
+// own status writes with `if w.GetStatus() != StatusCancelled` precisely so a
+// concurrent Shutdown/Cancel wins (see manager.go, "Respect that terminal
+// state rather than overwriting it"). "failed" is not a second legal outcome
+// here, so the assertion below is exact and must not be widened to accept
+// both.
+//
+// This test previously waited with time.Sleep(50 * time.Millisecond), which
+// is not a barrier: it bounds elapsed wall-clock time, not SpawnFull's
+// progress. On a saturated machine — a full-repo `-race` run on one CI
+// runner — the spawned goroutine can still be inside its spawn phase when
+// the sleep expires. Shutdown then marks a worker "cancelled" that SpawnFull
+// immediately overwrites with StatusRunning; the already-cancelled context
+// makes DelegateTask fail, the != StatusCancelled guard sees "running", and
+// the worker settles on "failed".
+//
+// The entered-barrier is therefore load-bearing, not decoration. To confirm
+// that after changing this test, replace `<-deleg.entered` below with a spin
+// on `len(mgr.List()) == 0` — the strictly weaker guarantee an expired sleep
+// gives you — and loop the body: the status assertion starts failing. Doing
+// exactly that at d5de0ba1 failed 43 times in 200 iterations, versus 0 in 200
+// with the barrier; re-derive rather than trusting those figures.
 func TestShutdown(t *testing.T) {
-	deleg := &stubDelegator{delay: 5 * time.Second}
+	deleg := &shutdownBarrierDelegator{
+		entered:   make(chan struct{}),
+		cancelled: make(chan struct{}),
+		release:   make(chan struct{}),
+	}
 	mgr := newTestManager(deleg)
 
-	go mgr.SpawnFull(context.Background(), SpawnRequest{
-		ParentSessionID: "p-1",
-		Title:           "long task",
-		AgentID:         "agent-1",
-	})
+	var releaseOnce sync.Once
+	releaseDelegation := func() { releaseOnce.Do(func() { close(deleg.release) }) }
+	// Guarantees the spawned goroutine unwinds even on an early t.Fatal.
+	t.Cleanup(releaseDelegation)
 
-	time.Sleep(50 * time.Millisecond)
+	spawnDone := make(chan struct{})
+	go func() {
+		defer close(spawnDone)
+		_, _ = mgr.SpawnFull(context.Background(), SpawnRequest{
+			ParentSessionID: "p-1",
+			Title:           "long task",
+			AgentID:         "agent-1",
+		})
+	}()
+
+	// Barrier, not a sleep. The timeout is a liveness backstop only; the
+	// happy path never waits on it.
+	select {
+	case <-deleg.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("delegation never started; Shutdown would not have exercised cancellation")
+	}
+
+	// Shutdown's own status write happens synchronously before it waits on
+	// its lifecycle, so by the time this returns the transition has landed.
+	// The drain-within-budget property belongs to
+	// TestShutdown_CancelsInFlightWorkAndDrains, not here.
 	_ = mgr.Shutdown(2 * time.Second)
 
-	// All workers should be cancelled. List returns value snapshots, so
-	// field reads here are safe without further synchronization.
+	select {
+	case <-deleg.cancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown did not cancel the in-flight delegation's context")
+	}
+
+	// The delegation is parked on release, so SpawnFull cannot have written
+	// any status yet. List returns value snapshots, so field reads here are
+	// safe without further synchronization.
+	//
+	// Assert the worker is actually present: the old loop iterated over
+	// whatever List returned and passed vacuously when that was empty, which
+	// under load it sometimes was.
 	workers := mgr.List()
-	for _, w := range workers {
-		if w.Status != StatusCancelled {
-			t.Errorf("worker %s status = %q, want cancelled", w.ID[:8], w.Status)
-		}
+	if len(workers) != 1 {
+		t.Fatalf("after Shutdown: List() = %d workers, want 1", len(workers))
+	}
+	if got := workers[0].Status; got != StatusCancelled {
+		t.Errorf("after Shutdown: worker %s status = %q, want %q",
+			workers[0].ID[:8], got, StatusCancelled)
+	}
+
+	// Now let the delegation unwind. SpawnFull's error path must respect the
+	// cancelled terminal state rather than downgrading it to "failed".
+	releaseDelegation()
+	select {
+	case <-spawnDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("SpawnFull did not return after its context was cancelled")
+	}
+
+	workers = mgr.List()
+	if len(workers) != 1 {
+		t.Fatalf("after SpawnFull returned: List() = %d workers, want 1", len(workers))
+	}
+	if got := workers[0].Status; got != StatusCancelled {
+		t.Errorf("after SpawnFull returned: worker %s status = %q, want %q (SpawnFull's error path must not overwrite a cancelled worker)",
+			workers[0].ID[:8], got, StatusCancelled)
 	}
 }
 

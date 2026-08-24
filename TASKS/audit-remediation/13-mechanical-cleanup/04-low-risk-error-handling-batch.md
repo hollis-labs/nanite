@@ -1,7 +1,7 @@
 # Low-risk error-handling gaps: silently discarded/unlogged errors across 5 unrelated files
 
 **Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch.
 **Touches:** `internal/task/snapshot.go`, `internal/api/bookmarks.go`, `internal/secrets/keyring.go`, `internal/service/durable_wake.go`, `internal/mcpconfig/mcpconfig.go`.
 
@@ -92,4 +92,10 @@ One item in this batch deserves priority over the other four: `GO-SVCEXEC-006`'s
 
 ## Review notes
 
-<!-- Reviewer fills this in: pass/fail per row, what was independently re-verified. -->
+- **PASS — fresh review of `f14db17d` against base `8b1e61bf` (2026-08-24).** The implementation diff is limited to the task record, three production error paths, and their regressions; no shared tracker or unrelated application file changed.
+- `GO-SVCEXEC-006`: traced `RunDue` through successful `Wake`, fire-count persistence, and one-shot expiry. The only production control-flow change is inspecting the existing best-effort expiry write's error and emitting a warning with `schedule_id`, `instance_id`, and `err`; the error is not returned and does not alter the successful result. The injected-store regression independently proves the wake result remains successful, fire count reaches 1, status remains active after the injected expiry failure, and every required diagnostic attribute is present.
+- `GO-INFRA-003`: confirmed `LocalBackend.List` and `LocalBackend.Snapshot` both implement skip-and-continue handling for malformed coordination-store JSON. `scanTask` retains its prior best-effort row/default semantics while warning independently for malformed `metadata`, `created_at`, `updated_at`, and `completed_at`, always with task ID, field, and parse error. The regression proves the row survives, metadata remains an initialized empty map, the required timestamps remain zero, and all four field diagnostics fire.
+- `GO-SEC4-010`: confirmed `Get` retains its `func(string) string` signature and all production callers retain the empty-string absence contract. `errors.Is(err, keyring.ErrNotFound)` logs at debug; every other access failure logs at warn; success returns the value without logging it. Mock-keyring regressions cover both error classes and verify the stored secret value is absent from captured logs.
+- `GO-API-010` and `GO-MCPTOOL-013`: commits `9147bf84` and review-fix `2d532314` are ancestors of the reviewed base, and this branch has no diff in `internal/api/bookmarks.go` or `internal/mcpconfig/mcpconfig.go`. Live source still uses `errors.Is` for bookmark not-found and logs both malformed MCP args/env decodes with server identity and underlying error. Focused API and MCP-config suites passed.
+- The adjacent unchecked `BumpAgentScheduleFireCount` error is accurately recorded in the Work Log: it can suppress the expiry attempt, but is outside this finding's exact expiry-write scope. The implementation did not silently broaden into that follow-up.
+- Independent verification passed: `git diff --check 8b1e61bf..f14db17d`; the three new focused ordinary regressions; focused API/MCP-config suites; focused race runs for the new service/task/secrets regressions; audit-config `errcheck,errorlint,nilerr` (`0 issues`); `go build ./...`; `go vet ./...`; and uncached `go test -count=1 ./...` (`internal/api` 10.888s, `internal/service` 24.394s, `internal/store` 11.181s).

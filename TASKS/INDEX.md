@@ -29,6 +29,54 @@
 > Orchestrator booting against any section of this file, this banner overrides
 > that section's own "not yet dispatched, ready to go" language.
 
+---
+
+## 🔢 Migration numbering — the claiming rule (read before dispatching any schema task)
+
+> **A migration number is claimed by creating the file on `main`, not by
+> writing the number in a task file. Re-derive the next free number
+> immediately before writing a migration. A number written in a task file is a
+> hint that expires.**
+
+Derive it, every time, at the moment of use:
+
+```
+ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1
+```
+
+At `5ec930c8` that returns `147_remove_untouched_official_catalog_source.sql`
+— **next free is 148.** That number is stale the moment a sibling batch
+merges; the command is not. From a worktree branched before a sibling merged,
+ask `main` instead:
+`git ls-tree --name-only main -- internal/store/migrations/ | sort -t_ -k1 -n | tail -1`.
+
+**"Next free" is one past the highest — never the lowest unused integer.**
+`135` is an empty slot (`63d79028` shifted Loops' `135`–`143` to `138`–`146`
+to clear a collision with Skills) and it looks available. It is not. Nanite
+builds its goose provider without `WithAllowOutofOrder`
+(`internal/store/store.go:153`), so a migration numbered below a database's
+highest applied version is a hard error at boot, not a back-fill — reproduced
+at goose v3.27.3 with Nanite's exact options as
+`detected 1 missing (out-of-order) migration lower than database version (137): version 135`.
+The live database's ledger max is `137` with no `135` row, so this is a
+service that fails to start, not a document that reads wrong. **Holes are
+permanently burned.**
+
+Full rationale, and the mechanical form as check 9, in
+`docs/engineering/tracking-integrity.md` ("Migration numbers: the claiming
+rule"). The general principle it specializes is `docs/engineering/failure-modes.md`
+§2, "Derive; don't store."
+
+Stale claims still sitting in frozen batches were annotated in place on
+2026-08-24 rather than silently renumbered — see the `⚠️ STALE CLAIM` markers
+in this file's batch sections and in `TASKS/plugin-system/` and
+`TASKS/code-mode/`. `lefthook.yml`'s `migration-purity` hook does **not** catch
+duplicate prefixes; it only greps staged migration *contents* for a `VALUES`
+clause and never looks at a filename. It structurally cannot catch this
+either — two worktrees each see only their own staged file, so a collision is
+invisible until both reach `main`.
+
+---
 
 Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/EXECUTION-PROCESS.md`. Phase 0 is planned in full below (34 task files, tracked by the Phase 0 Orchestrator session). Phase 1 (Agent Construction) is tracked separately, pending a merge from the `phase-1-execution` worktree into `main` — see `PHASE-0-1-AUDIT-FOLLOWUPS.md`. Phases 2-9 (36 task files across 8 phases) are planned in full below, tracked by this Planner session — see `docs/engineering/PLANNER-KICKOFF-PROMPT.md`. **Resequenced 2026-08-19**: the original Phases 1-6 grouping was reviewed and reorganized into this Phase 2-9 layout, with two real Phase 0/Phase 1 gaps folded in as new tasks (`TASKS/phase-2/05`, `TASKS/phase-2/06`) — see `PHASE-0-1-AUDIT-FOLLOWUPS.md`'s reconciliation note for the full record. **Section ownership**: the Phase 0 Orchestrator session owns the "Phase 0 — task table" and its "Parallelization plan"; this Planner session owns everything from "Phase 1 — Agent Construction" onward. Cross-section edits are coordinated by message between the two sessions, not blind overwrites.
 
@@ -737,6 +785,15 @@ authoring time (2026-08-21) is `134_agent_profiles_protocol_transport.sql`.
 either lands; `TASKS/agent-host-acp`, `TASKS/plugin-system`, and `TASKS/filesystem-snapshots`
 are all concurrently in flight and any may have claimed `135`-`137` first by dispatch time.
 
+> **⚠️ Resolved / stale — annotated 2026-08-24, `5ec930c8`.** This batch's own `136`/`137`
+> claims **landed** (`136_skills_index_redesign.sql`,
+> `137_agent_known_skills_grant_state_and_drop_agent_skills.sql`); this paragraph is now a
+> historical record, not an open claim. The `TASKS/plugin-system/04` claim it restates is
+> **stale and unusable** — `135` is a permanently burned hole. Next free is **148**
+> (`ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1` →
+> `147_remove_untouched_official_catalog_source.sql`). Re-derive before writing; see the
+> claiming rule at the top of this file.
+
 **Sequencing.** Phase 1 (`01`) is a clean-slate cut, landing first so later phases build on a
 decluttered base — matches `20-skills.md`'s own explicit "no carried-forward content" operator
 call (none of the 8 embedded builtin skills or DB-originated auto-discovered rows has ever been
@@ -832,6 +889,16 @@ This batch provisionally claims `138`-`144` (one per Phase 1 schema task, `01` t
 in order, plus `09`'s separate `RunStatusWaitingOnLoop` status-CHECK migration at `144`) —
 all seven provisional, re-check the migrations directory immediately before any lands;
 `TASKS/agent-host-acp` and `TASKS/filesystem-snapshots` may also be concurrently in flight.
+
+> **⚠️ Resolved / stale — annotated 2026-08-24, `5ec930c8`.** This batch **landed**, and its
+> provisional `138`-`144` range is not what it used its numbers for: a uniform +3 shift
+> (`63d79028`) moved it to `138`-`146` after Skills landed `136`/`137` first, leaving `135` as
+> a permanently burned hole. Read this paragraph as a historical record. The
+> `TASKS/plugin-system/04` claim it restates is **stale and unusable** for that hole reason;
+> `TASKS/skills/02`'s `136`-`137` landed. Next free is **148**
+> (`ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1` →
+> `147_remove_untouched_official_catalog_source.sql`). See the claiming rule at the top of
+> this file.
 
 **Sequencing.** Phase 1 (`01`-`06`) is schema/storage only, no runtime behavior — three
 parallel waves (`01`+`06`, then `02`+`03`, then `04`+`05`), per the README's own
@@ -975,6 +1042,19 @@ the kind writable via the CRUD API.
 the next free slot after `TASKS/plugin-system`'s `135`, `TASKS/skills`'s `136`-`137`, and
 `TASKS/loops`'s `138`-`143` claims. Re-list `internal/store/migrations/` immediately before
 landing it and renumber if any sibling batch lands first.
+
+> **⚠️ STALE CLAIM — annotated 2026-08-24, `5ec930c8`. Do not use `144`.** Every premise
+> above has moved. `144` is **taken** — `144_workflow_run_waiting_on_loop_status.sql`, landed
+> by Loops, which used `138`-`146` rather than the `138`-`143` cited here. Skills' `136`-`137`
+> landed. `135` was never claimed and is now a permanently burned hole (see the claiming rule
+> at the top of this file — filling it fails the boot, it does not back-fill).
+>
+> **Next free is 148**, derived at `5ec930c8`:
+> `ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1` →
+> `147_remove_untouched_official_catalog_source.sql`. **Re-derive again at dispatch** — this
+> number is itself a hint that expires, and other frozen batches resume at the same time.
+> Task `03` and `TASKS/code-mode/README.md`'s "Migration numbering" section carry the same
+> annotation.
 
 **What this batch explicitly does not do** (see README for full reasoning): wire Code Mode
 into `internal/scheduler`'s periodic-job surface directly (composable from what this batch

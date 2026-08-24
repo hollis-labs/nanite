@@ -7,7 +7,9 @@
 **Touches:** `internal/store/agent_reflexes.go` (new `ReflexAction*` constant), `internal/agent/
 reflexes/executor.go` (new `HookFunc` type, `Executor` field, `case` branch), new migration
 `internal/store/migrations/144_reflex_action_run_python_sandbox.sql` (re-verify the number is
-still free before landing — see the batch README's "Migration numbering" section),
+still free before landing — see the batch README's "Migration numbering" section)
+**[⚠️ `144` is taken — next free is 148 at `5ec930c8`; re-derive. See the annotation on
+"What to do" item 1 below]**,
 `internal/api/reflexes.go` (`validateReflexDefinition`'s action-kind switch),
 `internal/service/container.go` (`reflexEngine.Executor` wiring, ~lines 950-973), new file
 `internal/service/reflex_python_sandbox_hook.go`, `docs/engineering/GLOSSARY.md` (Reflexes entry
@@ -110,6 +112,33 @@ stale-by-omission once a seventh kind lands — update the sentence to include
 `run_python_sandbox`.
 
 ## What to do
+
+> **⚠️ STALE MIGRATION CLAIM — annotated 2026-08-24 at `5ec930c8`.** The `144` in item 1 is
+> **taken**: `144_workflow_run_waiting_on_loop_status.sql`, landed by the Loops batch after
+> this task file was written. The number below is left in place rather than silently rewritten
+> so this correction is visible to whoever picks the task up.
+>
+> **Next free is 148**, derived at `5ec930c8`:
+>
+> ```
+> $ ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1
+> 147_remove_untouched_official_catalog_source.sql
+> ```
+>
+> **Re-derive it again at the moment you write the file — do not carry `148` forward from
+> here.** A migration number is claimed by the file existing on `main`, not by a task file
+> naming it, and several frozen batches resume in parallel. From a worktree branched before a
+> sibling merged, ask `main`:
+> `git ls-tree --name-only main -- internal/store/migrations/ | sort -t_ -k1 -n | tail -1`.
+>
+> **Do not "helpfully" use `135`.** It is an empty slot, and it is unusable: Nanite builds its
+> goose provider without `WithAllowOutofOrder` (`internal/store/store.go:153`), so a migration
+> numbered below a database's highest applied version aborts `Up` with
+> `detected 1 missing (out-of-order) migration lower than database version (…)` and the service
+> fails to start. Holes are permanently burned.
+>
+> Rule: `TASKS/INDEX.md`'s "Migration numbering — the claiming rule" banner;
+> `docs/engineering/tracking-integrity.md` check 9.
 
 1. **New migration** `internal/store/migrations/144_reflex_action_run_python_sandbox.sql`
    (re-verify `144` is still free immediately before landing — see the batch README). Illustrative

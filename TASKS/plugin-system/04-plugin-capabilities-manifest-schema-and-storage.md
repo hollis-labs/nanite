@@ -6,7 +6,9 @@
 **Touches:** `internal/plugin/config.go` (`PluginManifest`, new `Capabilities` field),
 `internal/plugin/schemas/plugin.schema.v1.json` (optional — see Context, not strictly required
 to avoid breaking, but required to actually *validate* the new field), new migration
-`135_plugin_capability_grants.sql` (or equivalent — see Migration numbering note below),
+`135_plugin_capability_grants.sql` (or equivalent — see Migration numbering note below)
+**[⚠️ `135` MUST NOT BE USED — it is a hole and filling it fails the boot. Next free is 148 at
+`5ec930c8`; re-derive. See the annotation on "Migration numbering" below]**,
 `internal/store/plugins.go` (or a new `internal/store/plugin_capabilities.go`).
 
 ## Context
@@ -88,6 +90,46 @@ This planning session's own research independently re-verified the starting stat
    and worth making explicit and discoverable, not just implicit in code comments.
 
 ## Migration numbering
+
+> **⚠️ STALE CLAIM — annotated 2026-08-24 at `5ec930c8`. `135` is unoccupied and must still
+> never be used.** The note below is kept as written so the correction is visible rather than
+> silently applied; every `135` in this file (touches line, "What to do" item 3, "Done means")
+> is superseded by this block.
+>
+> AD-24's freeze note recorded that "migration `135` remains unclaimed by Plugin System," which
+> reads as *still available*. It is not. `135` is a **hole** — `63d79028` shifted the Loops
+> batch's `135`-`143` up to `138`-`146` to clear a collision with Skills, and nothing filled the
+> gap.
+>
+> Nanite builds its goose provider **without** `WithAllowOutofOrder`
+> (`internal/store/store.go:153`), so `allowMissing` is false. A migration numbered below a
+> database's highest applied version is a hard error, not a back-fill. Reproduced against goose
+> v3.27.3 with Nanite's exact provider options:
+>
+> ```
+> detected 1 missing (out-of-order) migration lower than database version (137): version 135
+> ```
+>
+> `Store.migrate` surfaces that as `goose up: …` and **the service does not boot**. The live
+> database is already past it — ledger max `137`, no `135` row. This task's own "Done means"
+> requirement to land the migration against a real copy of the backed-up database would fail
+> for that reason, not for anything to do with the DDL.
+>
+> **Next free is 148**, derived at `5ec930c8`:
+>
+> ```
+> $ ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1
+> 147_remove_untouched_official_catalog_source.sql
+> ```
+>
+> **Re-derive at the moment you write the file — do not carry `148` forward from here.** A
+> number is claimed by the file existing on `main`, not by this file naming it, and several
+> frozen batches resume in parallel. From a worktree branched before a sibling merged, ask
+> `main`:
+> `git ls-tree --name-only main -- internal/store/migrations/ | sort -t_ -k1 -n | tail -1`.
+>
+> Rule: `TASKS/INDEX.md`'s "Migration numbering — the claiming rule" banner;
+> `docs/engineering/tracking-integrity.md` check 9.
 
 Claims `135`. Re-check the migrations directory immediately before landing — `TASKS/agent-host-acp`
 and `TASKS/filesystem-snapshots` are both concurrently in flight per `TASKS/INDEX.md` and may

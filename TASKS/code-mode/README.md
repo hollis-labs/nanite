@@ -223,6 +223,32 @@ reflex_python_sandbox_hook.go`, and `docs/engineering/GLOSSARY.md`. Zero overlap
 
 ## Migration numbering
 
+> **⚠️ STALE CLAIM — annotated 2026-08-24 at `5ec930c8`. The `144` below is taken. Do not use
+> it.** Every premise in the paragraph that follows has moved since 2026-08-21; it is kept as
+> written so the correction is visible rather than silently applied.
+>
+> - `144` is **occupied** by `144_workflow_run_waiting_on_loop_status.sql`, landed by Loops.
+> - Loops did not use `138`-`143`. A uniform +3 shift (`63d79028`) moved its range to
+>   `138`-`146` once Skills landed `136`/`137` first.
+> - Skills' `136`-`137` landed as `136_skills_index_redesign.sql` and
+>   `137_agent_known_skills_grant_state_and_drop_agent_skills.sql`.
+> - `TASKS/plugin-system`'s `135` was never taken, and **`135` must never be used now** — that
+>   renumber left it as a hole below the highest applied version, and Nanite's goose provider
+>   runs without `WithAllowOutofOrder` (`internal/store/store.go:153`), so filling a hole is a
+>   hard boot failure, not a back-fill.
+>
+> **Next free is 148**, derived at `5ec930c8`:
+>
+> ```
+> $ ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1
+> 147_remove_untouched_official_catalog_source.sql
+> ```
+>
+> **Re-derive it again immediately before task `03` writes its migration.** 148 is itself a
+> hint that expires — several frozen batches resume at once, and the number is only claimed
+> once the file exists on `main`. See `TASKS/INDEX.md`'s "Migration numbering — the claiming
+> rule" banner and `docs/engineering/tracking-integrity.md` check 9.
+
 Highest existing goose migration on disk at this planning session's authoring time (2026-08-21)
 is `134_agent_profiles_protocol_transport.sql`. Three sibling batches currently sitting as
 uncommitted/unstarted plans have already provisionally claimed numbers past that: `TASKS/

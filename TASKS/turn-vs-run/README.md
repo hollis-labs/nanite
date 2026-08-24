@@ -200,6 +200,19 @@ sequence. If a future task in this folder is ever added that *does* need a migra
 re-list the migrations directory immediately before claiming a number, per every sibling
 batch's own standing caution.
 
+> **⚠️ Sibling-claim restatement is stale — annotated 2026-08-24 at `5ec930c8`.** This batch's
+> own "no migration needed" verdict is unaffected and still correct. The sibling numbers it
+> quotes have all moved: Skills' `136`-`137` **landed**; Loops landed `138`-`146` (not
+> "`138` onward" as planned — `63d79028` shifted its range by +3); and Plugin System's `135`
+> is **unusable**, a permanently burned hole rather than a pending claim — filling it fails
+> the boot (`internal/store/store.go:153` builds goose without `WithAllowOutofOrder`).
+>
+> If a task is ever added here that does need a migration: **next free is 148** at `5ec930c8`
+> (`ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1` →
+> `147_remove_untouched_official_catalog_source.sql`) — and re-derive it then, don't carry it
+> from here. See `TASKS/INDEX.md`'s "Migration numbering — the claiming rule" banner and
+> `docs/engineering/tracking-integrity.md` check 9.
+
 ## Escalations logged during this planning pass
 
 See `TASKS/ESCALATIONS.md`'s corresponding 2026-08-21 "Turn vs. Run planning" entry for: the

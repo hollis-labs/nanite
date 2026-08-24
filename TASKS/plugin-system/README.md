@@ -139,6 +139,44 @@ other).
 
 ## Migration numbering
 
+> **⚠️ STALE CLAIM, AND `135` IS NOT MERELY STALE — IT IS UNUSABLE. Annotated 2026-08-24 at
+> `5ec930c8`.** The paragraph below is kept as written so the correction is visible rather than
+> silently applied.
+>
+> `135` is still unoccupied, which is exactly the trap. AD-24's own freeze note recorded that
+> "migration `135` remains unclaimed by Plugin System," which reads as *still available*. It is
+> not. `135` is a **hole**: `63d79028` renumbered the Loops batch's `135`-`143` up to
+> `138`-`146` to clear a collision with Skills, and nothing has filled the gap since.
+>
+> Nanite builds its goose provider **without** `WithAllowOutofOrder`
+> (`internal/store/store.go:153` —
+> `goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))`), so
+> `allowMissing` is false. Under that default a migration numbered *below* a database's highest
+> applied version is a hard error, not a back-fill. Reproduced against goose v3.27.3 with those
+> exact options:
+>
+> ```
+> detected 1 missing (out-of-order) migration lower than database version (137): version 135
+> ```
+>
+> `Store.migrate` surfaces that as `goose up: …`, so **the service does not boot.** The live
+> database is already past it — its ledger max is `137` with no `135` row
+> (`sqlite3 ~/.local/share/nanite/workspaces/default/main.db 'select max(version_id) from goose_db_version'`
+> → `137`). Landing task `04` on `135` would break startup for every existing deployment,
+> including the operator's.
+>
+> **Next free is 148**, derived at `5ec930c8`:
+>
+> ```
+> $ ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1
+> 147_remove_untouched_official_catalog_source.sql
+> ```
+>
+> **Re-derive at the moment task `04` writes its file — do not carry `148` forward from here.**
+> A number is claimed by the file existing on `main`, not by a task file naming it, and several
+> frozen batches resume in parallel. See `TASKS/INDEX.md`'s "Migration numbering — the claiming
+> rule" banner and `docs/engineering/tracking-integrity.md` check 9.
+
 Highest existing goose migration on disk at this planning session's authoring time
 (2026-08-21) is `134_agent_profiles_protocol_transport.sql` (landed by the concurrently-running
 `TASKS/agent-host-acp` batch, task `11`). This batch provisionally claims `135` for `04`'s

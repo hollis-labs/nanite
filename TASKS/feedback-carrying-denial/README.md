@@ -134,6 +134,16 @@ the one sibling folder in `TASKS/` that claims **zero** migration numbers; nothi
 collides with `TASKS/plugin-system`'s `135`, `TASKS/skills`'s `136`-`137`, or
 `TASKS/loops`'s `138`-onward claims.
 
+> **⚠️ Sibling-claim restatement is stale — annotated 2026-08-24 at `5ec930c8`.** The "zero
+> migration numbers" verdict above is unaffected and still correct; only the sibling numbers
+> it quotes have moved. Skills' `136`-`137` **landed**. Loops landed `138`-`146`, not
+> "`138`-onward" as planned — `63d79028` shifted its whole range by +3. Plugin System's `135`
+> is **unusable**, not pending: that shift left it a permanently burned hole, and Nanite's
+> goose provider runs without `WithAllowOutofOrder` (`internal/store/store.go:153`), so
+> filling a hole aborts `Up` and the service fails to start. Highest on disk is now `147`;
+> next free is **148**, re-derived at use. See `TASKS/INDEX.md`'s "Migration numbering — the
+> claiming rule" banner and `docs/engineering/tracking-integrity.md` check 9.
+
 ## A drift note, logged not chased
 
 `internal/agent/reflexes/telemetry.go:106`'s comment cites `05-provenance-tier-enforcement.md`

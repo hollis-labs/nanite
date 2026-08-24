@@ -85,9 +85,13 @@ This planning session's own research independently re-verified every premise:
    `NNN_description.sql` file-naming convention within its own embedded directory) and register
    it via a new typed `Host` method called from `Load()`; run each plugin's embedded migrations
    through a **second, separate goose provider instance** pointed at a distinct tracking table
-   (not the core `goose_db_version` table `internal/store/store.go:141` already owns) — this
+   (not the core `goose_db_version` table `(*Store).migrate` already owns —
+   `internal/store/store.go:137`, provider built at `:153`; the previously cited `:141` had
+   drifted, re-derived at `5ec930c8`) — this
    keeps plugin schema versioning fully independent of the core numbered sequence, so this
-   batch's own `04`'s migration claim (`135`) and any future core migration never collide with
+   batch's own `04`'s migration claim (`135` — ⚠️ stale and unusable as of `5ec930c8`, see
+   `04`'s own "Migration numbering" annotation; whatever `04` actually lands on, the point of
+   the separate provider is unchanged) and any future core migration never collide with
    plugin-contributed schema. Whatever mechanism you land on, every table it creates must carry
    the `plugin_<id>_` prefix — enforce this as a real check (parse/lint the plugin's own
    migration SQL for table names, reject any that don't match the prefix), not just a

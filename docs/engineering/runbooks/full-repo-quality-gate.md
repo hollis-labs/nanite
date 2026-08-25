@@ -138,6 +138,67 @@ python3 scripts/quality-ratchet.py lint \
   --report "$report" --linters-report "$linters" --runner macos-15
 ```
 
+**A `Report.Error` in that report makes its issue count meaningless — it does
+not mean "zero issues."** `golangci-lint` sets `Report.Error` when it could not
+analyze something it was asked to analyze: a mistyped path, an import path where
+a directory was expected, a package that would not load. The report it writes is
+still well-formed, so nothing downstream looks wrong. Never compare a count from
+such a report against the baseline, and never write one into it.
+
+The block above is fail-closed on this twice over — but **neither guard is the
+line you read.** Measured 2026-08-25 at `d60c8264` against the pinned
+`golangci-lint` v2.11.4, by adding exactly one line to the block
+(`packages+=("./internal/does-not-exsit")`) and changing nothing else:
+
+| golangci-lint cache | block | exit | last count on stdout | reached the comparator |
+|---|---|---|---|---|
+| cold | unmodified | 0 | `2813 issues:` | yes — `ratchet passed` |
+| cold | one mistyped package | 7 | **`0 issues.`** | no |
+| warm | one mistyped package | 7 | `2813 issues:` | no |
+
+v2.11.4 exits **7** on a scan error *even with* `--issues-exit-code=0`, so
+`set -euo pipefail` aborts the block before `quality-ratchet.py` runs — that
+holds for a paste into an interactive `zsh` or `bash` too, where `set -e` fires
+and takes the shell with it. Were the exit code ever dropped,
+`golangci_scan_error` in `scripts/quality-ratchet.py` reads `Report.Error` and
+raises instead of comparing counts. Grep that function by name; it moves, so do
+not cite a line number for it.
+
+What is left is a reading hazard rather than a control-flow one. On a cold cache
+the broken run's entire stdout is `0 issues.`, with the diagnosis on stderr
+(`level=error msg="[linters_context] typechecking error: … directory not
+found"`). **`0 issues.` beside a nonzero exit is not a clean run — it is a scan
+that did not happen.** Check `$?` before believing any count the block prints.
+
+A report you did not watch being produced carries no exit status at all,
+including `audit-lint.json` from the `full-repo-quality-reports` artifact. Check
+that one directly:
+
+```bash
+report=/path/to/audit-lint.json
+python3 - "$report" <<'PY'
+import json, sys
+
+report = json.load(open(sys.argv[1]))
+error = (report.get("Report") or {}).get("Error")
+count = len(report.get("Issues") or [])
+if error:
+    sys.exit(
+        f"INVALID: golangci-lint set Report.Error, so this run did not analyze "
+        f"what it was asked to and its {count} issue(s) mean nothing: {error}"
+    )
+print(f"scan covered its targets: {count} issue(s)")
+PY
+```
+
+Verified both directions at `d60c8264`: against a report from a mistyped
+invocation it prints `INVALID: … typechecking error: stat
+…/internal/does-not-exist: directory not found` and exits 1; against a good
+`./internal/brand ./internal/mcp` report it prints
+`scan covered its targets: 166 issue(s)` and exits 0. Exit 0 says the scan
+reached everything it was handed — not that the count is acceptable, only that
+it is real.
+
 The package discovery deliberately keeps only buildable packages with tracked
 Go files. A developer checkout may contain ignored Go sources inside
 `ui/node_modules`; a raw local `./...` sees those files even though a clean

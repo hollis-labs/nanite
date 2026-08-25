@@ -69,11 +69,11 @@ non-reproducible run that dropped 17 findings as a strict subset, with `files`
 and `lines` identical, exit 0 and well-formed JSON — indistinguishable from a
 real improvement. Observed once in 12 runs.
 
-A reduction passes, and the comparator prints guidance to lower the committed
-baseline. **Do not act on that message for a gosec reduction without confirming
-it reproduces.** Lowering the baseline on a spurious decrease permanently
-deletes real findings — the same error as raising a baseline to make a
-regression pass, in the opposite direction.
+A reduction passes, and the comparator prints guidance to confirm the reduction
+reproduces before the baseline is lowered. **Follow that instruction for a gosec
+reduction — it is one extra run.** Lowering the baseline on a spurious decrease
+permanently deletes real findings — the same error as raising a baseline to make
+a regression pass, in the opposite direction.
 
 Because comparison is per-`rule_id`, a same-run regression *in the same rule*
 could in principle be masked by this. Narrow and unlikely, but not zero.

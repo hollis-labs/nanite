@@ -81,9 +81,11 @@ diff: `go-format` (gofmt + goimports), `migration-purity` (no `VALUES` clause in
 change in front of you, which is what keeps `--no-verify` — all-or-nothing —
 from being the natural escape.
 
-**pre-push** runs `go test ./...` scoped to `main` (`only: - ref: main`), so a
-WIP-branch push reports `go-test (skip) by condition`. It is the no-`-race`
-suite, not Tier 3.
+**pre-push** runs `go test ./...` on every push to `main` (`only: - ref: main`).
+The branch is the only thing that scopes it — there is no file filter, so the
+suite runs whatever the push contains, `go.mod`- and migration-`.sql`-only
+pushes included. A WIP-branch push reports `go-test (skip) by condition`, the
+only skip there is. It is the no-`-race` suite, not Tier 3.
 
 **Whole-repo analysis lives in `./scripts/check.sh`** — see "Test and lint"
 below.

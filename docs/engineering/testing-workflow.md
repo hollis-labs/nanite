@@ -80,10 +80,11 @@ repo has are the same one.
 | 4 | by hand, deliberately, when hunting a named flake |
 
 **No git hook runs any of these tiers.** `pre-commit` is formatting only.
-`pre-push` runs `go test ./...` scoped to `main` — the whole suite *without*
-`-race`, which is neither Tier 1's scope nor Tier 3's amplification. Read it as
-a backstop before code reaches the remote, not as one of these tiers.
-`lefthook.yml` carries the measured cost of both hooks.
+`pre-push` runs `go test ./...` on every push to `main`, scoped by branch and by
+nothing else — the whole suite *without* `-race`, which is neither Tier 1's scope
+nor Tier 3's amplification. Read it as a backstop before code reaches the remote,
+not as one of these tiers. `lefthook.yml` carries the measured cost of both hooks
+and the reason the push hook has no file filter.
 
 ### Tier 0 — inner loop · seconds
 

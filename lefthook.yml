@@ -35,14 +35,18 @@
 # The 0.17s run also re-synced the installed hooks. Re-derive rather than
 # trusting this block: stage one .go file, commit, read lefthook's summary.
 #
-# `skip_empty: true` on the commands below is inert at the installed lefthook
-# (2.1.4): `lefthook dump` omits the key and `lefthook validate` reports
-# "No values are allowed because the schema is set to 'false'" for each of the
-# four commands carrying it. The behavior it names is 2.1.4's default and was
+# Push time is branch-scoped, not file-scoped. `pre-push`'s `go-test` runs
+# `go test ./...` on every push to `main` and nothing else decides — see its
+# own note for why it carries no `glob`.
+#
+# `skip_empty: true` on the three pre-commit commands is inert at the installed
+# lefthook (2.1.4): `lefthook dump` omits the key and `lefthook validate`
+# reports "No values are allowed because the schema is set to 'false'" for each
+# command carrying it. The behavior it names is 2.1.4's default and was
 # confirmed directly — a `git commit` with no staged .sql prints
-# `migration-purity (skip) no files for inspection`, and a docs-only push on
-# `main` prints `go-test (skip) no matching push files`. Dropping the key is a
-# separate cleanup; check `lefthook validate` before assuming it is done.
+# `migration-purity (skip) no files for inspection`. Dropping the key from the
+# remaining three is a separate cleanup; check `lefthook validate` before
+# assuming it is done.
 
 pre-commit:
   parallel: true
@@ -169,18 +173,42 @@ pre-push:
 
     go-test:
       # Full test suite gate before code reaches the remote, scoped to `main`.
-      # Pushes to a WIP branch do not pay for it; a push to `main` does, and
-      # that is where it matters, because this repo has no branch protection
-      # and no merge gate — see TASKS/INDEX.md point 4.
+      # Pushes to a WIP branch do not pay for it; every push to `main` does,
+      # and that is where it matters, because this repo has no branch
+      # protection and no merge gate — see TASKS/INDEX.md point 4.
       #
       # This is the **no-`-race`** suite. It is not Tier 3: Tier 3 is the same
       # packages under `-race`, ~9 min, and it belongs to the nightly full-repo
       # quality gate, not to a hook.
       #
-      # `only: - ref: main` and `glob`/`skip_empty` print different skip
-      # reasons, which is what makes the scoping testable:
-      #   on a non-`main` branch  -> `go-test (skip) by condition`
-      #   on `main`, no .go files -> `go-test (skip) no matching push files`
+      # The branch is the only trigger. `only: - ref: main` carries the whole
+      # scoping, so there is exactly one skip reason and it is testable:
+      #   on a non-`main` branch -> `go-test (skip) by condition`
+      #   on `main`              -> the suite runs, whatever is in the push
+      #
+      # NO `glob` HERE, DELIBERATELY. A file filter on this command is a
+      # silent fail-open. `glob: "*.go"` matches neither `go.mod` nor `go.sum`
+      # nor any of the non-Go inputs compiled into the binary: 22 `//go:embed`
+      # directives pull in the 147 `internal/store/migrations/*.sql` files,
+      # `all:framework`, `all:templates`, `all:ui_dist`, `examples/*.json`, the
+      # plugin JSON schema, 11 `plugin.yaml` files, scaffold templates, agent
+      # profiles and the Python workflow-runner scripts. Derive rather than
+      # trust these two counts:
+      #   grep -rn '^//go:embed' --include='*.go' . | grep -v node_modules | wc -l
+      #   ls internal/store/migrations/*.sql | wc -l
+      # So a filtered push hook drops a migration-only push entirely while
+      # printing `go-test (skip) no matching push files`, which reads as a
+      # benign, correct skip. Migration number collisions are this repo's one
+      # unrecoverable failure class, so that is the worst thing to skip
+      # quietly. Enumerating the extra paths instead was considered and
+      # rejected: it covers only the cases someone thought of and goes stale
+      # against the next `go:embed` addition. The accepted cost is that a
+      # docs-only push to `main` also runs the suite — seconds, cached.
+      #
+      # No `skip_empty` here either. With no `glob` there is no file list for
+      # it to act on, and at 2.1.4 the key is not in the schema at all —
+      # `lefthook validate` rejects every command that carries one, and
+      # `lefthook dump` renders `glob` but omits `skip_empty`.
       #
       # Measured on nanite @ 9591c1a6 (2026-08-24),
       # `go clean -testcache && /usr/bin/time -p go test ./...`:
@@ -192,6 +220,4 @@ pre-push:
       # of them have test files. Re-derive before quoting.
       only:
         - ref: main
-      glob: "*.go"
-      skip_empty: true
       run: go test ./...

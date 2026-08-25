@@ -38,9 +38,16 @@ staged files), `migration-purity` (no `VALUES` clause in
 `9591c1a6` across three real one-`.go`-file commits: **0.17s / 0.06s / 0.06s**
 total, read off lefthook's own summary.
 
-**pre-push:** `go test ./...`, scoped to `main` via `only: - ref: main`. A push
-from a WIP branch reports `go-test (skip) by condition`; a docs-only push on
-`main` reports `(skip) no matching push files`. Measured at `9591c1a6`:
+**pre-push:** `go test ./...` on **every push to `main`**. The branch is the
+only thing that scopes it (`only: - ref: main`, and deliberately no `glob`), so
+the suite runs whatever the push contains — a `go.mod`-only, `go.sum`-only or
+migration-`.sql`-only push included. A push from a WIP branch reports
+`go-test (skip) by condition`, and that is the only skip there is. A file filter
+here is a silent fail-open: `*.go` matches none of `go.mod`, `go.sum`, or the
+non-Go inputs the binary embeds, so it drops a migration-only push while printing
+`(skip) no matching push files`, which reads as a benign, correct skip. Migration
+number collisions are this repo's one unrecoverable failure class, so that is the
+worst thing to skip quietly. Measured at `9591c1a6`:
 **41.34s** with the test cache cleared (`go clean -testcache && /usr/bin/time -p
 go test ./...`), **5.06s / 4.59s** on two back-to-back cached runs (99/99
 cached). This is the **no-`-race`** suite — not Tier 3.

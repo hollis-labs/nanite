@@ -66,9 +66,10 @@ Two distinct failure shapes, and a correct check must cover both:
    on `main`.
 2. **Back-fill into a burned hole** — `135` is empty (`63d79028` shifted Loops'
    `135`–`143` to `138`–`146` to clear a collision with Skills) and *looks*
-   available. It is not. The live database's ledger max is `137` with no `135`
-   row. **"Next free" is one past the highest, never the lowest unused
-   integer.** `[[nanite_migration_holes_permanently_burned]]`
+   available. It is not — see the two outcomes above; whichever one a given
+   database takes, neither is a back-fill. **"Next free" is one past the
+   highest, never the lowest unused integer.**
+   `[[nanite_migration_holes_permanently_burned]]`
 
 The claiming rule is already published — `TASKS/INDEX.md`'s "Migration
 numbering" section and `docs/engineering/tracking-integrity.md` check 9. **This

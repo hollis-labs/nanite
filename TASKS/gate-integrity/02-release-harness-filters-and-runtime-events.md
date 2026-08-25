@@ -319,7 +319,10 @@ git -C <nanite> status --porcelain
 `go build -o /dev/null ./cmd/nanite/` exits 0 and `git status --porcelain`
 stays empty after it — the `-o /dev/null` form is deliberate, since a plain
 `go build ./cmd/nanite/` deposits an untracked `./nanite` and would itself
-break the property being claimed. Nanite's `go.mod` and workflow were not
+break the property being claimed. *[Corrected — `./nanite` is gitignored
+(`.gitignore:75`, and again at `:2`), so a plain build would not have appeared
+in `git status --porcelain`. `-o /dev/null` is still the better command, for a
+different reason. See Review notes.]* Nanite's `go.mod` and workflow were not
 touched; that is `03`.
 
 

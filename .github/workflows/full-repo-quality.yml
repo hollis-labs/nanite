@@ -179,6 +179,8 @@ jobs:
             ${{ runner.temp }}/audit-linters.json
             ${{ runner.temp }}/gosec.json
             ${{ runner.temp }}/gosec-repeat.json
+            ${{ runner.temp }}/gosec-stderr.txt
+            ${{ runner.temp }}/gosec-repeat-stderr.txt
             ${{ runner.temp }}/deadcode.txt
           if-no-files-found: ignore
           retention-days: 14

@@ -769,11 +769,28 @@ def gosec_command(
        ParseErrors returns early when len(pkg.Errors) == 0, so "Golang errors"
        stays empty. Net: a subset of findings missing, full files/lines, empty
        "Golang errors", exit 0 under -no-fail. That is this task's own phantom
-       drop, and its ONLY trace is two strings on gosec's stderr
+       drop, and its only trace is two strings on gosec's stderr
        ("Panic when running SSA analyzer", "Error building the SSA
        representation") -- gosec.logger writes to os.Stderr. Point 1 catches
-       this whenever it is nondeterministic, which is the real defense. Nothing
-       here catches it when it reproduces.
+       this whenever it is nondeterministic, which is the broader defense.
+       When it REPRODUCES, the catch is one layer out and not in this file:
+       scripts/gosec-repeat-run.sh captures each run's stderr to its own file
+       and fails hard on either string before calling this script, so a report
+       carrying one never reaches the comparator. The ground for failing is not
+       that a panic is serious -- it may have cost zero findings, and that
+       nobody can tell is the defect -- but that a report gosec built from less
+       than it was asked to analyze is not comparable to a baseline at all.
+
+       SCOPE of that stderr trace, narrower than it reads: it is specific to
+       SSA *construction*. analyzers/slice_bounds.go:142 declares named returns
+       and its deferred recover() sets both to nil -- "Return nil error to allow
+       other analyzers to continue" -- so analyzer.go sees no error and a nil
+       result, logs nothing, and G602's findings for that package vanish with no
+       trace on any channel. No stderr assertion can cover that one; only point 1
+       can. Do not read the wrapper's check as covering every way gosec can
+       quietly return less than it found.
+       Nothing in THIS file reads stderr, so a report handed to --report by any
+       other route arrives with that assertion unmade.
 
     What the checks below do close is narrower and real: a disagreement fails,
     a "Golang errors" entry fails, a missing Issues array fails, and a scan

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -11,6 +12,7 @@ import unittest
 
 
 SCRIPT = Path(__file__).with_name("quality-ratchet.py")
+WRAPPER = Path(__file__).with_name("gosec-repeat-run.sh")
 RUNNER = "test-macos-runner"
 
 # Stage 1 needs a non-zero baseline for any of the ratchet's real behavior to
@@ -1143,6 +1145,177 @@ class QualityRatchetTest(unittest.TestCase):
         result = self.run_packages(["./cmd/nanite"], expected=0)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("must be a positive package count", result.stderr)
+
+    # ------------------------------------------------------------------
+    # scripts/gosec-repeat-run.sh -- the stderr capture and its assertion.
+    #
+    # gosec v2.28.0 recovers from an SSA panic per package and only logs it, so
+    # that package's SSA-rule findings vanish while Stats.files/Stats.lines stay
+    # full, "Golang errors" stays empty and the exit status stays 0 under
+    # -no-fail. Nothing in the report or the status distinguishes it from a
+    # complete run; the only trace is one of two strings gosec.logger writes to
+    # os.Stderr. These tests drive the wrapper with a gosec stub on PATH, which
+    # exercises the capture, the assertion and the comparator handoff, and does
+    # NOT exercise gosec itself -- the marker strings are asserted against the
+    # module cache, not against a real panic.
+    # ------------------------------------------------------------------
+
+    STDOUT_CANARY = "STDOUTCANARY"
+    STDERR_CANARY = "STDERRCANARY"
+
+    def gosec_stub(self, *, fail_on: str = "none", marker: str = "panic") -> Path:
+        """A stub gosec that writes to fd 1 and fd 2 with distinguishable text.
+
+        The two canaries are what makes the redirect testable: `2>"$file"` sends
+        stderr to the capture, while the transposed `2>&1 >"$file"` sends stdout
+        there instead, which would leave the assertion unable to fire. A stub
+        that wrote one stream only could not tell those apart.
+
+        `fail_on` names which run(s) emit an SSA-failure line -- first, second,
+        both or none -- selected from the -out= path, because a hit on one run
+        only is the nondeterministic case and has to be distinguishable from a
+        reproducible one.
+        """
+        report = self.write_json(
+            "stub-gosec-report.json",
+            self.gosec_report(
+                [self.actionable_issue(), self.jitter_issue(), self.accepted_issue()]
+            ),
+        )
+        panic_line = (
+            "[gosec]2026/01/01 00:00:00 Panic when running SSA analyzer on "
+            "package: stubpkg. Panic: runtime error"
+        )
+        build_line = (
+            "[gosec]2026/01/01 00:00:00 Error building the SSA representation "
+            "of the package stubpkg: no ssa result"
+        )
+        failure_line = build_line if marker == "build" else panic_line
+        directory = self.directory / "stub-bin"
+        directory.mkdir(exist_ok=True)
+        stub = directory / "gosec"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            "out=''\n"
+            'for arg in "$@"; do\n'
+            '  case "$arg" in -out=*) out=${arg#-out=} ;; esac\n'
+            "done\n"
+            'case "$out" in *gosec-repeat.json) run=second ;; *) run=first ;; esac\n'
+            f"printf '{self.STDOUT_CANARY} %s\\n' \"$out\"\n"
+            f"printf '[gosec] {self.STDERR_CANARY} %s run\\n' \"$run\" >&2\n"
+            f'if [ "$run" = "{fail_on}" ] || [ "{fail_on}" = both ]; then\n'
+            f"  printf '%s\\n' \"{failure_line}\" >&2\n"
+            "fi\n"
+            f'cp "{report}" "$out"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        return directory
+
+    def run_wrapper(
+        self, *, fail_on: str = "none", marker: str = "panic"
+    ) -> subprocess.CompletedProcess[str]:
+        stub_directory = self.gosec_stub(fail_on=fail_on, marker=marker)
+        self.wrapper_output = self.directory / "wrapper-out"
+        self.wrapper_output.mkdir(exist_ok=True)
+        package_list = self.directory / "wrapper-packages.txt"
+        package_list.write_text("./internal/example\n", encoding="utf-8")
+        environment = os.environ.copy()
+        environment["PATH"] = f"{stub_directory}:{environment['PATH']}"
+        return subprocess.run(
+            [
+                "/bin/bash",
+                str(WRAPPER),
+                "--package-list",
+                str(package_list),
+                "--output-dir",
+                str(self.wrapper_output),
+                "--runner",
+                RUNNER,
+                "--baseline",
+                str(self.baseline()),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+
+    def test_wrapper_accepts_a_run_with_clean_stderr(self) -> None:
+        result = self.run_wrapper(fail_on="none")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("ratchet passed", result.stdout)
+        # The negative control for the three rejection tests below: the wrapper
+        # must not print the verdict on a run that did not earn it.
+        self.assertNotIn("SSA analysis failure", result.stderr)
+        self.assertNotIn("this run is VOID", result.stderr)
+        for name in ("gosec-stderr.txt", "gosec-repeat-stderr.txt"):
+            self.assertTrue((self.wrapper_output / name).is_file(), name)
+        # The matcher's own control fixtures are cleaned up, so the artifact
+        # upload's fixed name list stays exactly the four files it names.
+        self.assertEqual(
+            sorted(path.name for path in self.wrapper_output.iterdir()),
+            [
+                "gosec-repeat-stderr.txt",
+                "gosec-repeat.json",
+                "gosec-stderr.txt",
+                "gosec.json",
+            ],
+        )
+
+    def test_wrapper_captures_the_stderr_stream_and_not_stdout(self) -> None:
+        """The redirect operand order, proven rather than read.
+
+        `2>&1 >"$file"` writes stdout to the capture and leaves stderr on the
+        old stdout -- an assertion that can never fire, under a positive control
+        that would pass on the wrong stream. Both canaries are asserted in both
+        directions so a transposition fails here.
+        """
+        result = self.run_wrapper(fail_on="none")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ("gosec-stderr.txt", "gosec-repeat-stderr.txt"):
+            captured = (self.wrapper_output / name).read_text(encoding="utf-8")
+            self.assertIn(self.STDERR_CANARY, captured)
+            self.assertNotIn(self.STDOUT_CANARY, captured)
+        self.assertIn(self.STDOUT_CANARY, result.stdout)
+        self.assertNotIn(self.STDERR_CANARY, result.stdout)
+
+    def test_wrapper_rejects_an_ssa_panic_on_the_first_run_only(self) -> None:
+        result = self.run_wrapper(fail_on="first", marker="panic")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(
+            "the first run reported an SSA analysis failure", result.stderr
+        )
+        self.assertNotIn(
+            "the second run reported an SSA analysis failure", result.stderr
+        )
+        self.assertIn("failing package(s): stubpkg", result.stderr)
+        self.assertIn("this run is VOID", result.stderr)
+        # No gosec number may reach the baseline comparison from a void run.
+        self.assertNotIn("ratchet passed", result.stdout)
+
+    def test_wrapper_rejects_an_ssa_build_failure_on_the_second_run_only(self) -> None:
+        result = self.run_wrapper(fail_on="second", marker="build")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(
+            "the second run reported an SSA analysis failure", result.stderr
+        )
+        self.assertNotIn(
+            "the first run reported an SSA analysis failure", result.stderr
+        )
+        self.assertIn("Error building the SSA representation", result.stderr)
+        self.assertNotIn("ratchet passed", result.stdout)
+
+    def test_wrapper_rejects_a_reproducible_ssa_failure_naming_both_runs(self) -> None:
+        result = self.run_wrapper(fail_on="both", marker="panic")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(
+            "the first run reported an SSA analysis failure", result.stderr
+        )
+        self.assertIn(
+            "the second run reported an SSA analysis failure", result.stderr
+        )
+        self.assertNotIn("ratchet passed", result.stdout)
 
 
 if __name__ == "__main__":

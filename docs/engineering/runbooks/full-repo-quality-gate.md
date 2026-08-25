@@ -309,6 +309,31 @@ finding sets no longer adds information for gosec — it remains the only option
 for lint. Averaging runs or taking the lowest would still bake a permanently-red
 baseline into the gate: agreement, not aggregation, is the test.
 
+**An SSA-failure line on gosec's stderr fails the gate — for comparability, not
+for severity.** The wrapper captures each run's stderr to `gosec-stderr.txt` and
+`gosec-repeat-stderr.txt`, uploaded alongside the reports, and refuses to hand
+either report to the comparator if either capture carries `Panic when running
+SSA analyzer` or `Error building the SSA representation`. gosec recovers from an
+SSA panic per package and only logs it, so the scan continues: that package's
+SSA-rule findings vanish while `files`/`lines` stay full, `Golang errors` stays
+empty and the status stays 0 under `-no-fail` — a report shaped exactly like a
+complete one, which the coverage floor cannot see through. A recovered panic may
+have cost zero findings; nobody can tell, and that nobody can tell is why the
+run is void rather than merely noisy. Re-run the gate. A hit on one run only is
+the nondeterministic case; a hit on both, on the same package, means that
+package's SSA analysis is failing and no gosec number from this tree can be
+compared until it is fixed. Never lower the baseline off a run that hit this.
+
+**This check is narrower than it reads, and the gap has no trace at all.** It
+covers SSA *construction* failure — the case gosec logs. It does not cover an
+analyzer that recovers its own panic internally: `analyzers/slice_bounds.go:142`
+sets both of its named returns to nil so that other analyzers can continue, and
+gosec's driver then sees no error and a nil result and writes nothing to any
+channel. G602's findings for that package vanish silently, with the same intact
+`files`/`lines` and empty `Golang errors`. No stderr assertion can ever see it —
+only two runs disagreeing can. Read this check as covering one named mechanism,
+not as covering every way gosec can quietly return less than it found.
+
 ## Module resolution — every external dependency resolves without a credential
 
 The gate carries **no repository secret, no `GOPRIVATE`, and no vendoring**.

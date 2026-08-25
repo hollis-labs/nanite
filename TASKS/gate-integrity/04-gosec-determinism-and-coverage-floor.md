@@ -1443,6 +1443,325 @@ residue (`git status --short` shows only modified tracked files: this one, my
 `3.18` addition, and the other session's two `05` files).
 
 
+### Follow-up — gosec's stderr is captured, asserted on, and uploaded (2026-08-25)
+
+**Scope: the one item `04b` step 1 parked.** That entry's *Scope-parked* item 3
+reads *"`scripts/gosec-repeat-run.sh` discards gosec's stderr ... Deliberately
+not implemented: that file is committed and reviewed, and a change to it needs
+its own scoping."* This is that scoping, dispatched as its own change. Nothing
+here touches the agreement check, the coverage floor, the `Issues` check, the
+`Golang errors` check, `04a`'s advisory string, the baseline JSON, or any Go
+source. No quality-gate run was dispatched.
+
+**One correction to the parked item's wording, made before starting.** It says
+the wrapper *"discards"* stderr. It did not: at `af513279` the invocation
+(`gosec -no-fail ... "${packages[@]}"`, then line `101`) carried **no
+redirection at all**, so gosec's stderr was *inherited* and reached the CI job
+log — unasserted and un-uploaded, but not discarded. The distinction matters,
+because "discarded" would mean the SSA lines had never been visible anywhere,
+and "inherited" means they were visible and nothing looked at them. The task is
+the same either way.
+
+**Starting commit:** `af513279b3104af0d994752b188400df18740c5f`, branch `main`,
+`git status --short` empty, `origin/main` in sync
+(`git log --oneline -1 origin/main` -> `52d6bd2d`). Every citation below was
+derived **after** the final edit.
+
+#### Files changed
+
+| File | What |
+|---|---|
+| `scripts/gosec-repeat-run.sh` | per-run stderr capture, the matcher self-check, the two assertions and the VOID verdict; 117 -> **314** lines (`wc -l`) |
+| `.github/workflows/full-repo-quality.yml` | two paths added to the artifact upload (`:182-183`); nothing else — the step count is unchanged at **13** (`grep -c '^      - name:'`) |
+| `scripts/quality-ratchet.py` | the fourth clause of `gosec_command`'s docstring boundary statement only (`:777` sits inside it); no behaviour change |
+| `docs/engineering/runbooks/full-repo-quality-gate.md` | one passage at `:312`, in the gosec section directly under the automated-repeat paragraph |
+| `scripts/quality-ratchet_test.py` | five new tests plus two helpers, appended (see *Deviation* below) |
+
+`git diff --stat` -> `5 files changed, 407 insertions(+), 12 deletions(-)`.
+
+#### The mechanism, re-derived at source rather than trusted
+
+Every line the dispatch cited was re-derived in
+`"$(go env GOMODCACHE)/github.com/securego/gosec/v2@v2.28.0/analyzer.go"`, and
+**two of the five numbers differ from the brief** — both by two, both because
+the brief cited the enclosing statement rather than the string:
+
+```
+grep -n 'func (gosec \*Analyzer) buildSSA'          analyzer.go   # 697  (brief: 697 — agrees)
+grep -n 'Panic when running SSA analyzer'           analyzer.go   # 701  (brief cites the recover() at 698)
+grep -n 'func (gosec \*Analyzer) checkAnalyzers'    analyzer.go   # 572  (brief: 572 — agrees)
+grep -n 'Error building the SSA representation'     analyzer.go   # 580  (brief cites the guard at 578)
+grep -n 'logger = log.New(os.Stderr'                analyzer.go   # 235  (brief: 235 — agrees)
+```
+
+The substance holds exactly as briefed: `buildSSA` has unnamed returns with a
+deferred `recover()` that only logs; `checkAnalyzers` has **no error return**
+and returns `nil, &Metrics{}`; it is called per package (`:373`, appended
+`:374`); `Metrics.Merge` (`:185`) is four `+=` (`:189-192`); and `ParseErrors`
+(`:760`) returns early on `len(pkg.Errors) == 0` (`:761`). Net shape: a strict
+subset of findings missing, full `files`/`lines`, empty `Golang errors`, exit 0
+under `-no-fail`.
+
+**Both strings carry the package name**, which is why the failure message can
+name it: `"Panic when running SSA analyzer on package: %s. Panic: %v..."` and
+`"Error building the SSA representation of the package " + pkg.Name + ": "`.
+The constants in the wrapper (`:77-78`) are deliberately the parts that do
+*not* contain the name.
+
+#### What was built
+
+- **Capture.** `run_gosec` (`:241`) takes a third argument and redirects with
+  `2>"$captured_stderr"` (`:254`) — stderr to the file, stdout untouched. Fixed
+  names under `--output-dir`: `gosec-stderr.txt` and `gosec-repeat-stderr.txt`
+  (`:271-272`), matching `gosec.json` / `gosec-repeat.json`.
+- **Two assertions, named by run.** `assert_no_ssa_failure` (`:224`) is called
+  once per capture (`:285-286`) **after both runs**, so a hit on run 2 only
+  (nondeterministic) is distinguishable from a hit on both (reproducible).
+  Failing straight after run 1 would have destroyed exactly that distinction.
+- **`grep -F` for both needles** in one call (`scan_stderr_for_ssa_failure`,
+  `:154`). It also treats `grep` exit > 1 as a failed assertion rather than a
+  clean run, and an unreadable capture as a hard failure.
+- **The verdict** (`:288` onward) states that the run is VOID because the report
+  is **not comparable**, explicitly *not* because a panic is serious — a
+  recovered panic may have cost zero findings, and that nobody can tell is the
+  defect. It then says what to do: re-run; a hit on both runs on the same
+  package means that package's SSA analysis is failing and no gosec number from
+  this tree can be compared until it is fixed; never lower the baseline off a
+  run that hit this.
+- **Upload.** Both captures added to the `if: always()` artifact step.
+
+#### The redirect, proven rather than read
+
+The trap is `2>&1 >"$FILE"`, which sends stderr to the *old* stdout and stdout
+to the file. Proven both ways with a stub that writes a distinct canary to each
+descriptor:
+
+```
+capture file:  STDERRCANARY=1  STDOUTCANARY=0   (both captures, clean run)
+job stdout:    STDOUTCANARY=2  STDERRCANARY=0
+```
+
+and against a mutant of the final script with the operands transposed:
+
+```
+swapped-redirect mutant, gosec stub panicking on run 1
+  capture file: STDERRCANARY=0 STDOUTCANARY=1  panic-line matches=0
+  wrapper exit=0, stdout ends "standalone gosec actionable rules: ratchet passed"
+```
+
+That is the defect the dispatch predicted, reproduced: the assertion cannot
+fire, and a positive control written to the wrong stream would have passed with
+it. The real script exits 1 on the same input.
+
+#### Both directions, by running it
+
+Real script, `/bin/bash` **3.2.57** (`/bin/bash --version`), gosec stub on
+`PATH`, exit codes read with no pipe (`cmd >out 2>err; echo $?`):
+
+| stub emits | on | wrapper exit | comparator reached? |
+|---|---|---|---|
+| nothing | — | **0** | yes, `ratchet passed` |
+| `Panic when running SSA analyzer` | first run | **1** | no |
+| `Panic when running SSA analyzer` | second run | **1** | no |
+| `Panic when running SSA analyzer` | both runs | **1** | no |
+| `Error building the SSA representation` | first run | **1** | no |
+| `Error building the SSA representation` | second run | **1** | no |
+
+Real output, `fail_on=first`:
+
+```
+gosec-repeat-run: the first run reported an SSA analysis failure on stderr (.../gosec-stderr.txt):
+    [gosec]0000/00/00 00:00:00 Panic when running SSA analyzer on package: stubpkg. Panic: runtime error
+gosec-repeat-run: the first run's failing package(s): stubpkg
+gosec-repeat-run: this run is VOID — no report from it may be compared to the
+  baseline. ...
+```
+
+`fail_on=second` names **only** the second run; `fail_on=both` names both, which
+is the reproducible-vs-nondeterministic distinction working. Pre-existing exit
+codes are unchanged: `--help` -> 0, unknown argument -> 2, missing argument -> 2,
+absent package list -> 1, empty package list -> 1.
+
+#### The positive control — and the version of it that was wrong
+
+`verify_ssa_matcher` (`:184`) runs on **every** invocation, before gosec, over
+two fixtures written to `--output-dir` and removed afterwards: one carrying both
+markers plus a `Stack trace:` line (expects exactly **2** matching lines), one
+carrying neither (expects **0**).
+
+**The first version was self-confirming and I caught it with a mutant, not by
+inspection.** It built the hit fixture by interpolating `$ssa_panic_marker` and
+`$ssa_build_marker`, so a *misspelled* marker matched its own fixture, passed the
+control, and then never matched gosec — the control agreed with the typo. A
+`Panic while running SSA analyzer` mutant exited **0** on a panicking stub with
+that version. The fixture is now a **literal** copy of what `analyzer.go:701`
+and `:580` produce, so the markers are checked against an independent statement
+and the same mutant now exits 1 at the self-check. This is §3.17: the passing
+control would have been equally consistent with a broken matcher, so it was
+evidence about the instrument.
+
+**What the control still cannot detect:** gosec renaming either message
+upstream. The literal fixture and the marker would go stale together. The
+comment says so and says to re-derive both from the module cache when the pin
+moves — nothing in this repository can check it.
+
+#### The stub: construction, and what it does and does not establish
+
+A `gosec` shell script placed first on `PATH` (never installed, never in the
+repo). It parses `-out=` from its own argv, copies a fixed report there, writes
+`STDOUTCANARY <path>` to **fd 1** and `[gosec] STDERRCANARY <run>` to **fd 2**,
+and — selected by `STUB_SSA_FAIL_ON` and by whether `-out=` names
+`gosec-repeat.json` — writes one of the two real gosec lines to **fd 2**.
+
+**Establishes:** the redirect lands stderr in the capture and stdout elsewhere;
+the assertion fires on either string, in either run, and names which; the
+package name is extracted; a void run never reaches the comparator; a clean run
+does and passes; the wrapper still runs end to end under `bash` 3.2.
+
+**Does not establish:** that gosec emits those exact strings (that rests on the
+module cache read above, not on any run), that a real SSA panic is recoverable
+in the way `analyzer.go` says, that a real panic's output interleaves the way
+the stub's does, or anything at all about frequency. **No real gosec run was
+made in this task** — the local `gosec` on `PATH` is not the gate's pinned
+binary, and running it would have proved nothing extra about a code path that
+did not fire in 24 runs during step 1.
+
+#### Tests — 64 -> 69, all green
+
+`python3 scripts/quality-ratchet_test.py` -> `Ran 69 tests ... OK`. Five added
+(`scripts/quality-ratchet_test.py:1244`, `:1266`, `:1283`, `:1297`, `:1309`) with
+two helpers (`gosec_stub` `:1166`, `run_wrapper` `:1215`) and one module constant
+(`WRAPPER`, `:15`). They drive the real wrapper under `/bin/bash` with the stub on
+`PATH`. No existing test was modified; the diff to that file is purely additive
+apart from one `import os` and the `WRAPPER` constant.
+
+The clean-run test doubles as the **negative control**: it asserts
+`SSA analysis failure` and `this run is VOID` are **absent**, so the three
+rejection assertions cannot be satisfied by an unconditionally printed line. It
+also pins the output directory's contents to exactly the four uploaded files, so
+the self-check's fixtures cannot start leaking into the artifact.
+
+**Evidence the new tests can fail (§4.1).** Five mutants of the final wrapper,
+each against a byte-identical copy of the final test file (`shasum` -> **1**
+distinct hash across all six copies) and an unchanged control (`shasum` of the
+control wrapper vs. the repo's -> **1** distinct hash):
+
+| Mutant of `scripts/gosec-repeat-run.sh` | Failures | Which |
+|---|---|---|
+| `2>"$file"` -> `2>&1 >"$file"` | 4 | the redirect test + all three rejection tests |
+| assertion body -> `return 0` | 3 | the three rejection tests |
+| `ssa_panic_marker=''` | 5 | all five (self-check fires on the clean fixture) |
+| `ssa_panic_marker='Panic while ...'` | 5 | all five (self-check fires on the hit fixture) |
+| `verify_ssa_matcher` call removed | **0** | — |
+| unchanged control | 0 | — |
+
+In every failing case the other **64** tests still pass, which is the control
+that the harness itself is sound.
+
+**The zero is honest and worth reading.** Removing the self-check changes no
+behaviour whenever the matcher works, and the tests can only create that
+condition — they catch a wrong marker *directly*, through the rejection tests,
+which is why the typo mutant fails 5 rather than 1. A combined mutant (typo'd
+marker **and** self-check removed) fails **2** — the two panic-marker tests —
+confirming the tests are an independent guard rather than a proxy for the
+self-check. What the self-check adds is a guard at **gate** time, where no test
+runs and a matcher broken by the environment rather than by an edit would
+otherwise read as a clean run.
+
+#### Two deliberate choices a reviewer will want the reasoning for
+
+1. **The capture is mirrored back to the job log** (`cat "$captured_stderr" >&2`,
+   inside `run_gosec`). Without it, redirecting the stream would *remove* the
+   whole of gosec's informational stderr from the CI log, where it is visible
+   today, and a gosec failure for an unrelated reason would leave its
+   explanation in a file the reader has to download. Mirroring keeps the log's
+   content equivalent to `af513279`'s while adding the file. `tee` and process
+   substitution were rejected: under `bash` 3.2 there is no reliable way to wait
+   for the substituted process, so the assertion could run before the file was
+   flushed.
+2. **gosec's own exit status is now read** rather than left to `set -e`. The
+   capture means a non-zero gosec no longer prints anything by itself, so the
+   status is captured with `|| status=$?` and the mirrored capture is printed
+   before exiting. `-no-fail` makes a **0** uninformative, but a non-zero is
+   still worth reporting precisely.
+
+#### Deviations from the dispatch, and one ambiguity
+
+1. **`scripts/quality-ratchet_test.py` is not in the dispatch's "only these"
+   file list, but the same dispatch says "do not touch ... `quality-ratchet_test.py`'s
+   existing tests (add to it, don't rewrite)".** I read the parenthetical as
+   permission to add, and added five tests without touching an existing one. The
+   alternative reading — add nothing — would have left a new hard-failure path
+   in the gate with no committed regression test, in a repository whose review
+   culture asks for exactly that. Flagged here rather than resolved silently.
+2. **One check beyond the literal ask:** the wrapper now requires
+   `--output-dir` to exist (`:130`), exit 1. It writes four files there plus two
+   fixtures, and a bare redirection into a missing directory fails with a
+   message naming a path nobody chose. Exit codes for every pre-existing failure
+   branch are unchanged.
+3. **`**Status:**` is untouched**, by instruction; so are `## Review notes`,
+   `TASKS/INDEX.md` and `docs/engineering/agent-verification-discipline.md`. This
+   entry is the only edit to this file.
+
+#### Baseline checks
+
+| Command | Result |
+|---|---|
+| `/bin/bash -n scripts/gosec-repeat-run.sh` | exit 0 |
+| `shellcheck scripts/gosec-repeat-run.sh` | exit 0, no output, **no disables added** (it was clean before, and is clean after) |
+| `python3 -m py_compile` both python scripts | exit 0 |
+| `python3 scripts/quality-ratchet_test.py` | `Ran 69 tests ... OK` |
+| workflow YAML parses (`yaml.safe_load`) | 13 steps in job `quality`, 8 upload paths |
+| `grep -c '^      - name:' .github/workflows/full-repo-quality.yml` | **13** |
+| `./scripts/check.sh` | **exit 0** (`no stage failed`; `lint` examined nothing — no Go file changed) |
+| `go build ./cmd/nanite/` | exit 0 |
+| `go vet ./...` | exit 0 |
+| `go test ./...` | exit 0, **99** `ok` lines, **0** `FAIL` |
+
+Environment facts re-derived rather than assumed: a shebanged script here gets
+`/usr/bin/grep`, `grep (BSD grep, GNU compatible) 2.6.0-FreeBSD` (§3.13 — so the
+assertion was written and tested against BSD grep, and `-F` sidesteps the
+BRE/ERE difference entirely); `docs/engineering/agent-verification-discipline.md`
+§3 has **18** entries, last `3.18`
+(`grep -cE '^### 3\.[0-9]+'`); `/bin/bash --version` -> **3.2.57**.
+
+#### What I could not establish
+
+- **That the assertion ever fires on real gosec output.** Everything is stubbed.
+  The strings come from the module cache; no run in this repository has ever
+  been observed emitting them (step 1's two captured probe runs are clean).
+- **That a hit implies a findings loss.** It does not, and the message says so —
+  the claim is only that the run is not comparable.
+- **That these are the only stderr-only failure signals gosec has.** I searched
+  for the two the mechanism analysis names; `analyzer.go` logs plenty else, and
+  no attempt was made to enumerate which other lines might matter.
+- **Anything about CI behaviour.** No quality-gate run was dispatched; run
+  `32902785030` at `52d6bd2d` remains the last green one. The first CI exercise
+  of this code will be the Orchestrator's run.
+
+#### Scope-parked — found, deliberately not fixed
+
+1. **`scripts/__pycache__/` is still absent from `.gitignore`**, as `04b` and
+   step 1 both noted. `py_compile` created it here; removed by hand
+   (`git status --short` clean of it below).
+2. **The lint side captures no stderr either.** `golangci-lint` exits non-zero
+   on `Report.Error` so the shell catches its analysis failures, which is why
+   this is an asymmetry rather than a hole — but if a stderr-only failure mode is
+   ever found there, this wrapper is the pattern.
+3. **The self-check's fixtures survive a self-check failure** (the `rm -f` is on
+   the success path). They are not in the upload list, so they cannot reach the
+   artifact; left in place deliberately, since a reader diagnosing a self-check
+   failure wants them.
+
+#### Repo state on finishing
+
+Nothing staged, nothing committed, nothing pushed, **no `git stash` at any
+point**. The gosec stub, every scratch report, all seven mutant trees and the
+mutant test suites live under the session scratch directory.
+`git status --short` in the repository lists exactly the five modified tracked
+files above and no untracked residue.
+
+
 ## Review notes
 
 **`04a` reviewed 2026-08-25 at `d17c8b62`/`f553b0a7` by a fresh reviewer

@@ -68,6 +68,23 @@ A deterministic reproduction beats every amplification strategy. Both fixes land
 
 ## 3. The tiers
 
+**Where each tier actually runs.** The vocabulary below and the mechanisms this
+repo has are the same one.
+
+| Tier | Runs where |
+|---|---|
+| 0 | by hand, constantly, while you work |
+| 1 | `./scripts/check.sh` — by hand, when a feature lands (see below) |
+| 2 | by hand, when its trigger applies |
+| 3 | the nightly full-repo quality gate — `.github/workflows/full-repo-quality.yml`, `schedule` (`17 7 * * *`) + `workflow_dispatch` only, `go test -race -count=1` at line 188 |
+| 4 | by hand, deliberately, when hunting a named flake |
+
+**No git hook runs any of these tiers.** `pre-commit` is formatting only.
+`pre-push` runs `go test ./...` scoped to `main` — the whole suite *without*
+`-race`, which is neither Tier 1's scope nor Tier 3's amplification. Read it as
+a backstop before code reaches the remote, not as one of these tiers.
+`lefthook.yml` carries the measured cost of both hooks.
+
 ### Tier 0 — inner loop · seconds
 
 ```bash
@@ -91,6 +108,22 @@ go list -f '{{.ImportPath}} {{join .Deps " "}}' ./... \
 ```
 
 **This is the default for feature work.** Most packages run in 1–2 s.
+
+**`./scripts/check.sh` is the runnable form of this tier.** No arguments, four
+stages, and it names every stage that failed: `format` (gofmt + goimports over
+every Go file), `vet` (`go vet ./...`), `lint` (`golangci-lint` scoped to what
+your work added, measured from the merge base with `origin/main`), and `test`.
+
+Its test stage is whole-repo `go test ./...` **without** `-race` — not the
+changed-packages-plus-dependents form above — because a script that takes no
+arguments cannot know which packages you changed. Wider in scope, no
+amplification, same wall-time budget: measured at `9591c1a6`, **67.36s** with
+the golangci-lint and test caches both cleared and **8.75s** fully warm
+(`/usr/bin/time -p ./scripts/check.sh`).
+
+So the script covers this tier's *scope* intent and not its *amplification*. If
+your change trips the Tier 2 trigger below, run Tier 2 yourself — the script
+will not do it for you.
 
 ### Tier 2 — touched concurrency, lifecycle, or shutdown · minutes
 
@@ -150,6 +183,10 @@ Record the iteration count in whatever you write up. "It passed" is not a result
 | touches `internal/store` schema, migrations, or timestamps | 2 + Tier 3 (store is the slowest and most depended-on) |
 | is a docs/comment change | 0 |
 | is "I don't know what this touches" | 3 |
+
+Every row above is something **you** run. §3's "Where each tier actually runs"
+says what the automatic mechanisms cover, which is less than this table asks
+for — that gap is deliberate.
 
 ### Non-negotiable for any flake fix
 
@@ -286,7 +323,8 @@ GOMAXPROCS=1 go test -count=25 -run '^TestName$' ./internal/<pkg>/
 Current settings are deliberately loose because the app is pre-release with no consumers. At go-live:
 
 - Enable commit/push protection (already planned).
-- Promote Tier 1 to a pre-push hook — but keep it **fast**, or it becomes something people `--no-verify` past, which is the same as not having it.
+- Decide whether the landing check (`./scripts/check.sh`) should run from a hook rather than on request — it is a deliberate manual step today. Whatever runs it must stay **fast**, or it becomes something people `--no-verify` past, which is the same as not having it.
+- Decide whether the push path should carry `-race`. `pre-push` runs the suite without it, so Tier 3's nightly run is the only thing that amplifies for memory-model violations.
 - Consider making the full gate run on push to `main`, not only nightly, once merge gating is available.
 - Raise flake tolerance to zero: any test that needs `-count > 1` to be trustworthy should be made deterministic instead.
 

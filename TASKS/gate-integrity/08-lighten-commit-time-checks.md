@@ -432,4 +432,141 @@ throwaway local commit, both cleaned up.
 
 This task touched no migration. `internal/store/migrations/` is unmodified.
 
+---
+
+## Second pass — Orchestrator review corrections (same day, after `ea42a879`)
+
+Two defects raised on review. Both fixed; both proven by demonstration, not by
+reading the change.
+
+### A. The lint stage passed vacuously for work already committed on `main`
+
+**Reproduced before touching anything.** A probe package with two real findings
+(`unused` + `errcheck`), `gofmt`-clean:
+
+```
+# uncommitted, base = merge-base(HEAD, main) = ea42a879
+internal/lintprobe/probe.go:10:11: Error return value of `os.Remove` is not checked (errcheck)
+internal/lintprobe/probe.go:6:6:   func unusedHelper is unused (unused)
+2 issues:  * errcheck: 1  * unused: 1        ->  check.sh: FAILED stages: lint   (exit 1)
+
+# byte-identical file, committed on main, same script, base = 1ca86fdf = HEAD
+0 issues.                                     ->  check.sh: all stages passed    (exit 0)
+```
+
+That is a §1.3 zero. On `main`, `git merge-base HEAD main` **is** `HEAD`, so
+everything already committed is outside the diff. It matters because the
+operator works directly in `main` and commits as they go, then runs the landing
+check — precisely the path where the stage checked nothing and printed `OK`. On
+a feature branch the old base was already correct.
+
+**Fix 1 — the base.** `git merge-base HEAD origin/main`, with a two-step
+fallback and `CHECK_LINT_BASE` still overriding. On a feature branch it is the
+last pushed ancestor; on `main` it is the last pushed commit — which is exactly
+the "run this before you push" scope the script's own header documents, and it
+covers committed and uncommitted work alike. Fallback chain verified in a
+scratch git repo across all three states:
+
+| state | resolved base |
+|---|---|
+| no `origin/main`, `main` exists | `merge-base HEAD main` |
+| `CHECK_LINT_BASE=deadbeef` | `deadbeef` |
+| neither ref exists | `HEAD` |
+
+**Fix 2 — the positive control, reported rather than failed.** Zero changed Go
+files is a legitimate state here (unlike zero Go files in the `format` stage,
+which is always broken), so it must not fail — but it must not read as
+"examined and clean" either. The stage now resolves and prints its base, counts
+the Go files in scope (`git diff --name-only --diff-filter=d <base> -- '*.go'`
+unioned with untracked `*.go`), and distinguishes the two outcomes with a third
+stage result that is neither OK nor FAIL:
+
+```
+==> lint — golangci-lint run --new-from-rev 77137106
+    0 changed Go files vs 77137106 — nothing to lint
+    ---  (0s)  examined nothing
+…
+check.sh: no stage failed — but these examined nothing: lint      (exit 0)
+```
+
+versus, with something in scope:
+
+```
+    1 changed Go file(s) vs 77137106; only findings on
+    lines they touched — whole-repo lint is the nightly gate's job
+```
+
+**Proof, both directions.** Same committed-on-`main` probe that produced the
+vacuous pass above, under the fixed script: base resolves to `77137106`,
+`1 changed Go file(s)`, both findings reported, `check.sh: FAILED stages: lint`,
+exit 1. On a throwaway feature branch carrying the same committed probe: same
+two findings, `FAILED stages: lint`, exit 1. With no changed Go files at all:
+the `examined nothing` output above, exit 0.
+
+One honest note on the feature-branch case: because local `main` is currently
+ahead of `origin/main`, the resolved base on a branch is `origin/main`
+(`77137106`), not the local branch point. That is a superset of the branch's own
+diff and it costs nothing here, since none of the intervening commits touch a
+`.go` file.
+
+### B. `testing-workflow.md` — the doc → script direction
+
+Scope-parking item 7 from the first pass was in scope after all; the kickoff
+that dispatched this task made closing the disconnect part of `08`. Before:
+`grep -c 'check\.sh' docs/engineering/testing-workflow.md` → **0**. After →
+**4**. Three additions, no tier renamed, renumbered or added
+(`grep -o 'Tier [0-9]' … | sort -u` → exactly `Tier 0..4`, and the five
+`### Tier N` headings are intact):
+
+- **§3, immediately under "The tiers"** — a "Where each tier actually runs"
+  table mapping every tier to its real mechanism, and a plain statement that
+  **no git hook runs any tier**: `pre-commit` is formatting only, and
+  `pre-push`'s `go test ./...` on `main` is the whole suite *without* `-race`,
+  so it is neither Tier 1's scope nor Tier 3's amplification and should be read
+  as a backstop, not a tier. Tier 3's row cites
+  `.github/workflows/full-repo-quality.yml`, its `schedule` (`17 7 * * *`) +
+  `workflow_dispatch` triggers, and `go test -race -count=1` at line 188 — all
+  re-derived from the workflow, not carried.
+- **§3 Tier 1** — `./scripts/check.sh` named as the runnable form of the tier,
+  with its four stages, its measured cost, and the difference already recorded
+  in the script header now stated in the doc too: whole-repo `go test ./...`
+  without `-race` rather than changed-packages-plus-dependents, because a
+  no-argument script cannot know what you changed. Wider scope, no
+  amplification; run Tier 2 yourself if its trigger applies.
+- **§4** — one line under the table: every row is something you run by hand, and
+  §3's mapping covers less than the table asks for, deliberately.
+- **§6** — the go-live bullet *"Promote Tier 1 to a pre-push hook"* replaced by
+  what is true and what genuinely remains: decide whether the landing check runs
+  from a hook rather than on request (keeping the "or people `--no-verify` past
+  it" warning, which still holds), and decide whether the push path should carry
+  `-race`, since today only the nightly run amplifies for memory-model
+  violations.
+
+### A throwaway commit landed on `main` and was removed forward, not rebased
+
+Reproducing defect A required being on `main` — the bug is that
+`merge-base HEAD main` equals `HEAD` there, which cannot be reproduced from a
+branch. The probe was therefore committed to `main` as `1ca86fdf`. Before it
+could be cleaned up, the Orchestrator's `11c417c4` landed on top of it.
+
+`1ca86fdf` was removed **forward**, in `0d91e73a`, rather than by
+`git rebase --onto`. Nothing here is pushed (`origin/main` is `77137106`), so a
+rewrite would have been safe from the remote's point of view — but it would have
+rewritten a peer agent's commit under them in a shared checkout while they were
+actively committing, which is the same shared-mutable-ref hazard class as the
+repo-global `git stash` incidents `EXECUTION-PROCESS.md` records. Not worth the
+tidier history. `main` therefore carries `1ca86fdf` and `0d91e73a`, both labelled
+as throwaway with the reason in the message. **If the Orchestrator wants them
+squashed out, that is theirs to decide — they own `main`'s history.**
+
+No `git stash` was run. No push to `origin`. No out-of-tree worktree. The one
+throwaway branch (`throwaway/lint-base-proof`) was deleted
+(`Deleted branch throwaway/lint-base-proof (was d555e6a0)`).
+
+### Baseline after the second pass
+
+`go build ./cmd/nanite/` OK · `./scripts/check.sh` exit 0 with `format`, `vet`
+and `test` OK and `lint` correctly reporting `examined nothing` (there is no
+changed `.go` file in this task's final diff).
+
 ## Review notes

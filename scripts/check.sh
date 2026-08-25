@@ -33,7 +33,9 @@
 # runs with `--issues-exit-code=0` against a committed baseline that ratchets
 # (`scripts/quality-ratchet.py`). This stage uses the adoption-mode form that
 # `.golangci.yml`'s own header prescribes: lint only what your work added,
-# measured from the merge base with `main`.
+# measured from the merge base with `origin/main` — on a feature branch that is
+# the branch point, and on `main` it is the last pushed commit, so work you have
+# already committed locally is in scope either way.
 #
 # Override the diff base with CHECK_LINT_BASE=<rev>.
 
@@ -42,11 +44,12 @@ set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-  sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 fi
 
 failed=()
+examined_nothing=()
 stage_start=0
 
 begin() {
@@ -63,6 +66,16 @@ finish() {
     printf '    FAIL (%ss)\n' "$elapsed"
     failed+=("$1")
   fi
+}
+
+# A stage that had nothing to look at is not the same result as a stage that
+# looked and found nothing. Say which one happened; never print a bare OK for
+# the former.
+finish_examined_nothing() {
+  # finish_examined_nothing <stage-name>
+  local elapsed=$(( $(date +%s) - stage_start ))
+  printf '    ---  (%ss)  examined nothing\n' "$elapsed"
+  examined_nothing+=("$1")
 }
 
 # Tracked and untracked Go files, NUL-separated. Excludes ui/node_modules,
@@ -106,14 +119,41 @@ go vet ./...
 finish "vet" $?
 
 # ── 3. lint ───────────────────────────────────────────────────────────────
+# The base is the merge base with **origin/main**, not with local `main`.
+# On a feature branch the two agree — both give the branch point, and the whole
+# branch gets linted. On `main` they do not: local `main` is HEAD, so
+# `merge-base HEAD main` is HEAD and everything you have already committed is
+# invisible. `origin/main` is the last pushed commit, which is exactly the
+# "run this when a feature lands, before you push" scope this script documents,
+# and it covers committed and uncommitted work alike.
 lint_base="${CHECK_LINT_BASE:-}"
 if [ -z "$lint_base" ]; then
-  lint_base=$(git merge-base HEAD main 2>/dev/null) || lint_base=HEAD
+  lint_base=$(git merge-base HEAD origin/main 2>/dev/null) ||
+    lint_base=$(git merge-base HEAD main 2>/dev/null) ||
+    lint_base=HEAD
 fi
-begin "lint — golangci-lint run --new-from-rev $(git rev-parse --short "$lint_base" 2>/dev/null || echo "$lint_base")"
-echo "    (only findings on lines your work touched; whole-repo lint is the nightly gate)"
-golangci-lint run --new-from-rev "$lint_base"
-finish "lint" $?
+lint_base_short=$(git rev-parse --short "$lint_base" 2>/dev/null || echo "$lint_base")
+
+# Positive control. `--new-from-rev` reports "0 issues." both when your changes
+# are clean and when it was handed no changes at all, and those are different
+# results. Count the Go files in scope first and say which case this is.
+changed_go=$(
+  {
+    git diff --name-only --diff-filter=d "$lint_base" -- '*.go' 2>/dev/null
+    git ls-files --others --exclude-standard -- '*.go'
+  } | sort -u | sed '/^$/d' | wc -l | tr -d ' '
+)
+
+begin "lint — golangci-lint run --new-from-rev $lint_base_short"
+if [ "$changed_go" -eq 0 ]; then
+  echo "    0 changed Go files vs $lint_base_short — nothing to lint"
+  finish_examined_nothing "lint"
+else
+  echo "    $changed_go changed Go file(s) vs $lint_base_short; only findings on"
+  echo "    lines they touched — whole-repo lint is the nightly gate's job"
+  golangci-lint run --new-from-rev "$lint_base"
+  finish "lint" $?
+fi
 
 # ── 4. test ───────────────────────────────────────────────────────────────
 begin "test — go test ./...  (Tier 1, testing-workflow.md §3)"
@@ -123,7 +163,11 @@ finish "test" $?
 # ── summary ───────────────────────────────────────────────────────────────
 echo
 if [ ${#failed[@]} -eq 0 ]; then
-  echo "check.sh: all stages passed (format, vet, lint, test)"
+  if [ ${#examined_nothing[@]} -eq 0 ]; then
+    echo "check.sh: all stages passed (format, vet, lint, test)"
+  else
+    echo "check.sh: no stage failed — but these examined nothing: ${examined_nothing[*]}"
+  fi
   exit 0
 fi
 echo "check.sh: FAILED stages: ${failed[*]}"

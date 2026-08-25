@@ -13,8 +13,10 @@ other hook-invoked scripts use), and `docs/engineering/tracking-integrity.md`
 **This is the task that makes parallel batch work safe.** Everything else the
 gate catches is directional and recoverable — a lint regression, a gosec
 increase, a race flake, all get found on the next manual gate run and fixed in
-a follow-up. A bad migration number is different in kind: it is **a service
-that fails to start**, discovered at boot, on every existing deployment.
+a follow-up. A bad migration number is different in kind, and *which* kind
+depends on the database it lands on: **a service that fails to start**,
+discovered at boot, or a migration that **silently never runs** on a database
+that already has that number in its ledger.
 
 Verified at `77137106`:
 
@@ -23,10 +25,27 @@ grep -n 'goose.NewProvider' internal/store/store.go
 #   153:  provider, err := goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))
 ```
 
-No `WithAllowOutofOrder`. So a migration numbered below a database's highest
-applied version is a hard error, not a back-fill — reproduced at goose v3.27.3
-with Nanite's exact options as
-`detected 1 missing (out-of-order) migration lower than database version (137): version 135`.
+No `WithAllowOutofOrder`, so `allowMissing` is false — and what that produces
+is **two outcomes, not one**. `UpVersions` in goose's `internal/gooseutil`
+package keys its applied set on the version integer alone — no filename, no
+checksum — and both of its selection loops skip any version already in that
+set. So for a file numbered at or below a database's highest applied version,
+which of two things happens depends on whether **that** database has already
+applied that number:
+
+- **Not previously applied** — it is collected as missing and the run fails
+  with goose's missing-migration error. A hard boot error. Reproduced at goose
+  v3.27.3 with Nanite's exact options as
+  `detected 1 missing (out-of-order) migration lower than database version (137): version 135`.
+- **Already applied** — both loops skip it. It never runs, nothing is
+  reported, and goose considers the database up to date. **Silent.**
+
+There is no third case: a version equal to the highest applied version is by
+construction already applied. **The silent branch is the dangerous one** —
+schema divergence between databases of different vintages, with no startup
+failure to announce it. The fourth Work log pass below, "The 'hard boot error,
+not a back-fill' framing was half the story", has the full reading of
+`UpVersions` this rests on.
 
 Nothing guards this today. `migration-purity` is the only migration-aware hook
 and it greps staged *file contents* for a `VALUES` clause — it never reads a
@@ -54,7 +73,8 @@ Two distinct failure shapes, and a correct check must cover both:
 The claiming rule is already published — `TASKS/INDEX.md`'s "Migration
 numbering" section and `docs/engineering/tracking-integrity.md` check 9. **This
 task turns that documented rule into a mechanism.** A rule with no mechanism
-behind it decays, and this one decays into a boot failure.
+behind it decays, and this one decays into a boot failure on some databases
+and a silent divergence on the others.
 
 ## What to do
 

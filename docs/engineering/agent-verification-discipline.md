@@ -327,6 +327,102 @@ remote that had already advanced.
 The habit generalizes past this repo, and it is cheap: one question, asked before the result leaves
 your hands.
 
+### 3.18 `$rev:path` in zsh silently applies a history modifier — it corrupts `git show`
+
+*Found 2026-08-25, measured at `3954f9be` with `R=3954f9be`.* **Whether this bites depends on the
+path**, so testing the idiom once and concluding it is safe is exactly the wrong move. In zsh, a `:`
+that immediately follows a *bare* parameter expansion and is followed by a valid **modifier letter**
+is parsed as a history modifier and rewrites the value. Any other letter passes through literally:
+
+```
+printf '%q' "$R:scripts/check.sh"   # -> 3954f9bek.sh                            :s substitute
+printf '%q' "$R:lefthook.yml"       # -> 3954f9beefthook.yml                     :l lowercase
+printf '%q' "$R:cmd/x"              # -> 3954f9bemd/x                            :c
+printf '%q' "$R:ui/src"             # -> 3954F9BEi/src                           :u UPCASED the sha
+printf '%q' "$R:examples/x"         # -> xamples/x                               :e ate the sha
+printf '%q' "$R:api/x"              # -> /Users/…/apps/nanite/3954f9bepi/x       :a prepended $PWD
+printf '%q' "$R:scripts/x"          # -> zsh: bad substitution
+
+printf '%q' "$R:go.mod"             # -> 3954f9be:go.mod           intact  (control)
+printf '%q' "$R:docs/x"             # -> 3954f9be:docs/x           intact  (control)
+printf '%q' "$R:internal/store"     # -> 3954f9be:internal/store   intact  (control)
+printf '%q' "$R:TASKS/x"            # -> 3954f9be:TASKS/x          intact  (control)
+```
+
+In this repo `scripts/`, `cmd/`, `config/`, `ui/`, `examples/`, `api/` and `lefthook.yml` break,
+while `go.mod`, `docs/`, `internal/`, `pkg/`, `plugins/`, `TASKS/` and `.github/` are fine. **Someone
+checks `git show "$R:go.mod"`, sees it work, and generalizes — that is §4 again.** It is also
+data-dependent past the first letter: after `:s` the *next* character becomes the delimiter, so
+`scripts/check.sh` corrupts while `scripts/x` raises `bad substitution` instead.
+
+**Four outcomes, ordered by nastiness.** Most corruption is loud, and that is the good case:
+
+1. **Intact** — `:` followed by a non-modifier letter. `go.mod`, `docs/`, `internal/`, `TASKS/`.
+2. **Loud, exit 128** — the common corruption. `git show "$R:lefthook.yml"` and
+   `git show "$R:scripts/check.sh"` both fail immediately; a mangled ref is not a ref.
+3. **Path-shaped and plausible, still exit 128** — `:a` prepends `$PWD`, so `"$R:api/x"` becomes
+   `/Users/…/apps/nanite/3954f9bepi/x` and git answers *"unknown revision or path not in the working
+   tree"*. It reads like a missing file rather than a mangled command.
+4. **Silent, exit 0** — the modifier consumed the path *entirely*, leaving a bare valid rev. `git
+   show` then has a perfectly good commit to show, prints its message plus diff, and returns 0.
+
+**Branch 4 is the one to fear, and it is the one that happened here:**
+
+```
+printf '%q' "$R:scripts/gosec-repeat-run.sh"                       # -> 3954f9be   (path gone)
+git show "$R:scripts/gosec-repeat-run.sh"   | wc -l                # -> 301, exit 0
+git show "${R}:scripts/gosec-repeat-run.sh" | wc -l                # -> 117   <- the actual file
+git show "$R:scripts/gosec-repeat-run.sh"   | grep -cF 'gosec -no-fail'   # -> 0
+git show "${R}:scripts/gosec-repeat-run.sh" | grep -cF 'gosec -no-fail'   # -> 1   (control)
+```
+
+A downstream `grep -n` returns **no match**, and a no-match reads as a clean negative result.
+
+`:u` and `:e` reach branch 4 only under the same condition — the path fully consumed. Upcasing is not
+itself a danger; it is what keeps the leftover *resolvable*, since git accepts an upper-case hex sha
+(`git rev-parse --verify 26899CD0` -> `26899cd0b58f…`, `git show 26899CD0` exit 0). Leave any path
+behind and it is loud again: `git show "26899CD0i/src"` exits 128.
+
+**The lesson is not the mechanism, it is what the wrong answer looked like.** The conclusion drawn
+from that `0` — that the wrapper passes no `-concurrency` — *is true*. It would have shipped as a
+verified claim, obtained by a command that never read the file. §1.3's "a zero is a signal" was the
+only thing that caught it.
+
+**Two safe forms. Quoting is not one of them** — `"$R:…"` mangles identically, because the parse
+happens inside the expansion. Terminate the parameter name, or keep the path out of the literal:
+
+```
+git show "${R}:scripts/check.sh" | wc -l   # -> 248   brace the rev          <- prefer this
+P=scripts/check.sh; git show "$R:$P" | wc -l   # -> 248   path in a variable
+git show 3954f9be:scripts/check.sh | wc -l     # -> 248   fully literal (control)
+```
+
+`:` followed by `$` is not a modifier letter, which is why the variable form is safe.
+
+**That has a nasty consequence: the hazard hides from anyone who tests it in a loop.** The natural
+way to check a list of paths is to iterate with the path in a variable — and that is one of the two
+*safe* forms, so the check comes back clean and reads as disproof. Two separate reproductions
+disagreed for exactly this reason during the investigation that found this, one having substituted
+the path in before `eval` and the other having kept it a variable at expansion time. **The two
+constructs look identical in the source.** Test it with a literal path, and compare `printf '%q'`
+output rather than end results.
+
+**This is a zsh language property, not an environment effect.** `zsh -f` loads no rc files and still
+corrupts, so there is no alias, option or profile to configure away:
+
+```
+zsh -f -c 'R=3954f9be; printf "%s\n" "$R:scripts/check.sh"'   # -> 3954f9bek.sh   (zsh 5.9)
+bash  -c 'R=3954f9be; printf "%s\n" "$R:scripts/check.sh"'    # -> 3954f9be:scripts/check.sh
+```
+
+`bash` has no such feature, so a bash spot-check reports it clean. **Brace the rev in every
+`rev:path` you hand to git** — §2.3 asks you to pin citations to a commit, and `${var}` is what makes
+that idiom usable with a variable at all.
+
+`bad substitution` is a **parse** error, so it aborts the whole compound command at that point —
+every later line in a multi-command block silently does not run, and the truncated transcript reads
+as a complete one.
+
 ---
 
 ## 4. Verifying that your verification verifies

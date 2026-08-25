@@ -216,6 +216,117 @@ it reports success in exactly the check meant to rule that out.
 `~/dev/hollis-labs/` remains (`find /private/tmp /tmp "$TMPDIR" -maxdepth 1 -type l`). If one
 reappears, that is a signal, not a coincidence — see Torque `CW-20260825-0019`.
 
+### 3.13 The shell you verify in is not the shell your code runs in
+
+`grep` at an agent prompt is a **shell function** from Claude Code's shell snapshot, resolving to
+ugrep. Shell functions do not cross into child processes, so anything with a shebang gets
+`/usr/bin/grep` (BSD grep). The identical line returns different answers on either side of that
+boundary:
+
+```
+type grep                       # grep is a shell function from ~/.claude/shell-snapshots/…
+grep --version | head -1        # ugrep 7.8.4
+/usr/bin/grep --version | head -1   # grep (BSD grep, GNU compatible) 2.6.0-FreeBSD
+
+printf 'costs $5 today\n' | grep -c 'costs $5'              # 0   ugrep
+printf 'costs $5 today\n' | /usr/bin/grep -c 'costs $5'     # 1   BSD grep, POSIX BRE
+```
+
+Under POSIX BRE a `$` is an anchor only at the end of the pattern and literal elsewhere; ugrep
+treats it as a metacharacter. **Any literal `$` mid-pattern is affected** — `$(`, `$5`, `${`.
+
+This corrupts the cheapest signal we have. §1.3 says a zero is a signal that the command is wrong;
+here it can instead mean the *matcher* differs from the one the pattern was written for, and it
+fails silently in the direction that reads as "clean."
+
+Use `-F` for literal patterns, `-P` where a real regex is wanted, or `/usr/bin/grep` explicitly.
+**Prove a claim about a script by running the script, not by grepping it from a different matcher.**
+
+The general rule outlives the instance: an interactive profile's functions and aliases are invisible
+to every child process, so any verification typed at a prompt may not describe what a shebanged
+script does.
+
+### 3.14 A scratch clone of the real repo has the real repo as `origin`
+
+`git clone <path-to-real-repo> <scratch>` sets `origin` to that path, so **every push test in the
+scratch clone targets the real repository.** Depth of nesting and a `/private/tmp` location do not
+change this.
+
+```
+git init --bare "$SCRATCH/origin.git"          # do this
+git clone "$SCRATCH/origin.git" "$SCRATCH/w"
+case "$(git -C "$SCRATCH/w" remote get-url origin)" in *"/apps/nanite") exit 1;; esac
+```
+
+*Concrete instance, 2026-08-25:* a `git push -f origin seed:main` from such a clone was refused only
+because `main` happened to be the checked-out branch (`receive.denyCurrentBranch`). On any other
+branch it would have rewritten local `main` on top of hours of uncommitted work. **It was saved by
+the state of the tree, not by design.** The safe pattern was already in use by two other agents in
+the same session.
+
+### 3.15 `bash` drops NUL from a command substitution; `zsh` preserves it
+
+```
+bash -c 'v=$(printf "a\0b\0"); printf "%s" "$v"'   # ab   + "warning: ignored null byte in input"
+zsh  -c 'v=$(printf "a\0b\0"); printf "%s" "$v"'   # a \0 b \0
+```
+
+The interactive shell here is zsh, so a check typed at a prompt reports the opposite of what a
+bash-shebang script does. Consequence for `-z`-style NUL-delimited git output: it **cannot** be
+captured with `$(...)` in bash. Write it to a file and read with `read -r -d ''`.
+
+Same family as §3.13 — verify in the shell the code runs in.
+
+### 3.16 Two scratch paths differing only in case are one file
+
+This machine's filesystem is case-insensitive, and there is nowhere to relocate to: `/private/tmp`,
+`$HOME` and the repo all report the same device and mount.
+
+```
+printf 'one\n' > "$D/zz"; printf 'two\n' > "$D/ZZ"; cat "$D/zz"   # two — one file
+```
+
+The single-letter `a`/`A`, `b`/`B` convention that shell one-liners invite is exactly what triggers
+it. Writing the second **silently truncates** the first — no error, just an empty input where data
+was. Use distinct multi-character names (`set_phrase`, `set_symbol`), never case as the only
+distinguisher.
+
+Git agrees: `git config --get core.ignorecase` → `true`, so a case-only rename is not a change git
+will show you either. No tracked paths collide today
+(`git ls-files | tr 'A-Z' 'a-z' | sort | uniq -d` → empty).
+
+*Concrete instance, 2026-08-25:* an intermediate set written to `$D/a` and then `$D/A` destroyed its
+own input mid-derivation, and the run reported "B \ A = all 12" — a sensible-shaped result that
+would have sent someone re-auditing two greps as disjoint. **A silent truncation that yields a
+plausible number is worse than one that yields an obvious error.**
+
+### 3.17 Ask whether the result would be correct if your hypothesis held
+
+Before reporting a surprising result, ask what it would mean if the thing you are testing were
+working correctly. **If the result is what correct behavior looks like, it is evidence about your
+instrument, not your subject.** Discard it and fix the harness.
+
+This is the counterpart to §4's "prove the check can fail": that one asks whether a passing check
+could ever fail, this one asks whether a failing check is measuring anything.
+
+Four instances on 2026-08-25, all caught this way and none reported:
+
+- A matrix returning `127` on all eight rows — uniform implausibility; a reset had deleted the
+  script under test, and every row would have read as a fail-closed pass.
+- A guard "wrongly" accepting `149_a\nb.sql` — `149` was a legitimate number, so accepting it was
+  correct; the test, not the guard, was wrong.
+- A file reported as exclusively in set A *and* exclusively in set B — impossible under any
+  hypothesis.
+- A `git push -f` "succeeding harmlessly" — it had been refused, so the follow-on measurement
+  proved nothing.
+
+Two more found the same way by other agents in the same session: a `127` from a `git clean` that
+removed a modified script, and a "regression" that was a correct duplicate rejection against a lab
+remote that had already advanced.
+
+The habit generalizes past this repo, and it is cheap: one question, asked before the result leaves
+your hands.
+
 ---
 
 ## 4. Verifying that your verification verifies

@@ -324,3 +324,77 @@ touched; that is `03`.
 
 
 ## Review notes
+
+**Reviewed 2026-08-25 at nanite `9969e873` by a fresh reviewer dispatch** — no
+shared context with the implementing worker. Transcribed by the Orchestrator;
+the reviewer agent type is read-only by design.
+
+**Verdict: PASS**, with one low-severity Work-log accuracy defect.
+
+**The irreversible part is correct.** Both `v0.1.1` tags resolve on the *remote*
+to exactly the SHAs nanite's workflow pins — verified five independent ways
+(`ls-remote` peeled with `^{}` per §3.10, `rev-list -n1`, `describe`, the
+proxy's own `Origin.Hash`, and a full `ls-remote origin` showing exactly four
+refs per repo with no strays). Nothing here needs superseding.
+
+**The reviewer produced stronger evidence than the Work log claimed.** Rather
+than rely on a local `go.sum` — which §3.11 says is not evidence about published
+bytes, since `GOPRIVATE` defaults `GONOSUMDB` — it downloaded both published
+`.zip`s from proxy.golang.org and diffed them against the `git archive`'d tagged
+trees. **Identical for both modules.** That is direct proof about what the proxy
+serves, and it closes the gap that made `01`'s byte-identity comparison
+near-tautological.
+
+Also verified independently: tag shape and message convention match each repo's
+own `v0.1.0`; each `CHANGELOG.md` entry matches its own repo's dialect and
+correctly does *not* adopt `go-envelopes`'; tests re-run from the tagged trees in
+scratch at `-count=1` with and without `-race`, all exit 0, plus `go vet` and
+`govulncheck` clean; neither repo has a Makefile, confirmed two ways, so the
+`command -v tool && tool || echo` misreporting hazard genuinely did not apply.
+
+**The worker's `EventKind` self-correction is right.** An independent `go/ast`
+walk gives 29 at `8756744` and **28 at `71a0cf2`** — the second figure being a
+positive control proving the counting mechanism differentiates. The regex failure
+reproduces exactly: `const KindSandboxApplied EventKind = "sandbox.applied"` at
+`kinds.go:72` is a single-line `const` with no leading whitespace, which the
+`^\s+`-anchored pattern missed.
+
+### Finding — low severity, high confidence
+
+**The Work log's stated reason for `go build -o /dev/null` is factually wrong.**
+It says a plain `go build ./cmd/nanite/` "deposits an untracked `./nanite` and
+would itself break the property being claimed." `./nanite` is gitignored
+(`.gitignore:75`, and again at `:2`), and a 71,804,466-byte `./nanite` sits on
+disk right now while `git status --porcelain` returns zero lines — its mtime
+predates the tagging, so it is not something this task left behind.
+
+`-o /dev/null` remains the better command, for a different reason: it avoids
+clobbering a large artifact someone may be running. Only the rationale is wrong.
+Marked inline above rather than rewritten.
+
+**Who hits it:** no build or runtime impact. It hits the next agent that mines
+this Work log for a nanite-fence recipe and concludes `git status --porcelain`
+catches stray build output. It does not — not for `./nanite`, nor for
+`/cmd/nanite/nanite` (`.gitignore:3`).
+
+### Observations, not findings
+
+- **The tagged trees' `CHANGELOG.md` tops out at v0.1.0.** Unavoidable given
+  "the tag must equal the pin," and disclosed by the worker in three places.
+- **Neither repo's `check` workflow fires on tags** (`on: push: branches:
+  [main]` + `pull_request`), so the tag pushes generated no CI signal in either
+  direction.
+- **Once the changelog commits are pushed, `main` will again sit one commit past
+  the newest tag in both repos** — the same *shape* this batch's original
+  detection command flags. Harmless: `03` deletes the SHA pins entirely and
+  `go.mod` resolves `v0.1.1` through the proxy. Noted so a re-run of
+  `rev-list --count v0.1.0..<pin>` is not misread as a regression.
+
+### Parallel-session check
+
+The reviewer was warned mid-pass that a separate session might be operating in
+both sibling repos. It re-verified all state three times across an eight-minute
+window: both `HEAD`s, `[ahead 1]`, empty `--porcelain`, and the full live
+`ls-remote origin` ref lists were byte-for-byte identical at every observation,
+and both `v0.1.1` tags resolved to the workflow pins each time. **No activity
+from another session was observed in either repo during that window.**

@@ -47,14 +47,34 @@ backfills six columns — plus a `go-envelopes` v0.3.0 release. A parked branch
 or task file that still writes the British spelling is stale, and doubly so
 wherever it is a status literal handed to the store rather than prose.
 
-**3. Git hooks are live, for the first time ever.** `lefthook install` was run
-in `2b3b0216`. **pre-commit:** `go-format`, `go-lint`
-(`golangci-lint run --new-from-rev HEAD`), `go-vet` (`go vet ./...`, whole-repo,
-not staged-scoped), `migration-purity`. **pre-push:** `go test ./...` — 44.87s
-cold, 4.32s fully cached, per `lefthook.yml`'s own measured header.
-`frontend-lint` is **deliberately disabled** (`skip: true`): it invoked an
-unrelated binary and greenlit everything, so it was switched off honestly
-rather than left looking like a gate.
+**3. Git hooks are live, and commit time is formatting only.** `lefthook
+install` was run in `2b3b0216`. **pre-commit:** `go-format` (gofmt + goimports)
+and `migration-purity`, both scoped to the staged diff — nothing at commit time
+can fail for a reason outside the change in front of you, which is what keeps
+`--no-verify` (all-or-nothing) from being the natural escape. Measured at
+`9591c1a6` across three real one-`.go`-file commits, read off lefthook's own
+summary: **0.17s / 0.06s / 0.06s** total. **pre-push:** `go test ./...`, scoped
+to `main` via `only: - ref: main` — a WIP-branch push reports `go-test (skip) by
+condition`, a docs-only push on `main` reports `(skip) no matching push files`.
+Measured at `9591c1a6`: **41.34s** with the test cache cleared
+(`go clean -testcache && /usr/bin/time -p go test ./...`), **5.06s / 4.59s** on
+two back-to-back cached runs, per `lefthook.yml`'s own measured header. That is
+the **no-`-race`** suite; Tier 3 is the same packages under `-race` and belongs
+to the nightly gate, not to a hook. `frontend-lint` is **deliberately disabled**
+(`skip: true`): it invoked an unrelated binary and greenlit everything, so it
+was switched off honestly rather than left looking like a gate.
+
+**Whole-repo analysis lives in `./scripts/check.sh`, the landing check.** Four
+stages, each named when it fails: `format` (gofmt + goimports over every Go
+file), `vet` (`go vet ./...`), `lint` (`golangci-lint` scoped to what your work
+added, measured from the merge base) and `test` (`go test ./...` — Tier 1 of
+`docs/engineering/testing-workflow.md` §3). Run it **when a feature lands**,
+before pushing a branch you care about, and before dispatching the quality gate
+— not on every commit. Measured at `9591c1a6`: **67.36s** with the
+golangci-lint and test caches both cleared, **8.75s** fully warm. Its lint stage
+is scoped on purpose: whole-repo `golangci-lint run` exits non-zero on a large
+body of pre-existing findings, and that body is the nightly gate's business,
+where it runs with `--issues-exit-code=0` against a ratcheting baseline.
 
 **Worktrees inherit the hooks; fresh clones do not.** A tracked `lefthook.yml`
 installs nothing by itself, so a fresh clone has no checks until someone runs
@@ -66,17 +86,17 @@ installs nothing by itself, so a fresh clone has no checks until someone runs
 git config --get core.hooksPath      # absolute path into the parent clone
 ```
 
-Tested 2026-08-25 by committing into a throwaway worktree: `go-format`,
-`go-vet` and `go-lint` all fired and the commit was correctly rejected.
-
-**But a worktree outside `~/dev/hollis-labs/apps/` cannot pass `go-lint`.**
+**But a worktree outside `~/dev/hollis-labs/apps/` still cannot build or test.**
 `go.mod`'s four `replace` directives use relative `../../libs/<module>` paths,
-which do not resolve from an arbitrary worktree location, so `go-lint` reports
-16 unrelated `undefined: envelopes` typecheck errors and blocks every commit.
-An agent hitting this will be tempted into `--no-verify`, which disables *all*
-the hooks including the ones that matter. Either place worktrees as siblings
-under `~/dev/hollis-labs/apps/`, or land `TASKS/gate-integrity/01`-`03`, which
-remove the relative replaces entirely and make worktree location irrelevant.
+which do not resolve from an arbitrary worktree location, producing ~16
+unrelated `undefined: envelopes` typecheck errors. `go build`, `go test`,
+`./scripts/check.sh` and the `main`-scoped `pre-push` all fail there. Commit
+time should be unaffected, since neither remaining pre-commit command
+type-checks anything — that follows from the mechanism (`gofmt` is syntactic,
+`migration-purity` is `sed`+`grep`) and has not been tested in a real
+out-of-tree worktree. Either place worktrees as siblings under
+`~/dev/hollis-labs/apps/`, or land `TASKS/gate-integrity/01`-`03`, which remove
+the relative replaces entirely and make worktree location irrelevant.
 
 **4. The quality gate works now — and it is a detector, not a merge gate.** Run
 [`32791971817`](https://github.com/hollis-labs/nanite/actions/runs/32791971817)
@@ -1175,7 +1195,7 @@ the crucial things that prevent us from working in standard ways."*
 
 | Task | Wave | Status | Depends on |
 |---|---|---|---|
-| `08-lighten-commit-time-checks` | **A — first** | not-started | none |
+| `08-lighten-commit-time-checks` | **A — first** | implemented | none |
 | `01-drop-published-sibling-replaces` | **A** | not-started | none |
 | `02-release-harness-filters-and-runtime-events` | **A** | not-started | none (**sibling repos, not nanite**) |
 | `03-drop-remaining-replaces-and-sibling-checkouts` | **A** | not-started | `01`, `02` (both real, not sequencing) |
@@ -1247,8 +1267,8 @@ number below a database's highest applied version is a hard boot error, not a ba
 **Also load-bearing for parallel work: worktree isolation is currently broken.** Worktrees *do*
 inherit the hooks (`core.hooksPath` is absolute — tested 2026-08-25, correcting the claim in
 point 3 above), but `go.mod`'s relative `../../libs/<module>` replaces do not resolve from a
-worktree outside `~/dev/hollis-labs/apps/`, so `go-lint` fails with ~16 unrelated typecheck
-errors and the natural escape is `--no-verify`, which disables every hook at once. `01`-`03`
+worktree outside `~/dev/hollis-labs/apps/`, so `go build`, `go test`, `./scripts/check.sh` and
+the `main`-scoped `pre-push` all fail there with ~16 unrelated typecheck errors. `01`-`03`
 fix this as a side effect, which is a better argument for them than the CI-pin drift they were
 written around.
 

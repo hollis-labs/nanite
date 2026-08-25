@@ -1970,6 +1970,15 @@ the pinned `gosec` v2.28.0 and `golangci-lint` v2.11.4, on `darwin/arm64`.
 detected anything. The nightly 07:17 UTC cron will keep failing at the same step. Worth resolving
 before anyone treats a green (or absent) gate result as evidence.
 
+**Closed 2026-08-25 by the pre-unfreeze batch:** the gate ran green for the first time in its
+existence — run [`32791971817`](https://github.com/hollis-labs/nanite/actions/runs/32791971817)
+at `61698b4e`, all 18 steps including the aggregate race suite. The Follow-up above is superseded:
+the gate has detected, and the nightly cron no longer fails at package discovery. The private-module
+blocker was one of three that had to clear in sequence, listed in the AD-24 entry below. **The remedy
+chosen for the `tesseract` blocker specifically is not recorded anywhere in this log** — if it
+recurs, there is no prior resolution to consult, and it remains a credential-or-publication decision
+for the operator rather than a worker's call.
+
 ---
 
 ## 2026-08-25 — AD-24 lifted: the repo-wide development freeze is over, by operator decision

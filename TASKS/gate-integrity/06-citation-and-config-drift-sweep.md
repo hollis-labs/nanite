@@ -60,9 +60,10 @@ both attributing *"complete in <15 seconds on staged files only"* to
 `lefthook.yml:3`.
 
 **Both the pointer and the substance are wrong now.** Line 3 of `lefthook.yml`
-is a blank comment line, and per `sed -n '9,12p' lefthook.yml` only three of
-the five pre-commit commands are staged-only — `go-vet` runs `go vet ./...`
-whole-repo and `go-lint` analyzes the whole repo before filtering its report.
+is a blank comment line. The claim about scope needs re-deriving rather than
+correcting from this paragraph: since `TASKS/gate-integrity/08` landed, every
+pre-commit command is staged-only and whole-repo analysis lives in
+`./scripts/check.sh`. Derive the current set from `lefthook.yml` itself.
 `lefthook.yml`'s own measured header now carries real numbers — use what the
 file says, re-derived, not this paragraph's copy of it.
 

@@ -1975,9 +1975,10 @@ existence — run [`32791971817`](https://github.com/hollis-labs/nanite/actions/
 at `61698b4e`, all 18 steps including the aggregate race suite. The Follow-up above is superseded:
 the gate has detected, and the nightly cron no longer fails at package discovery. The private-module
 blocker was one of three that had to clear in sequence, listed in the AD-24 entry below. **The remedy
-chosen for the `tesseract` blocker specifically is not recorded anywhere in this log** — if it
-recurs, there is no prior resolution to consult, and it remains a credential-or-publication decision
-for the operator rather than a worker's call.
+was publication:** `gh api repos/hollis-labs/tesseract --jq .visibility` returns `public`, so the
+module resolves from the proxy with no credential and `GOPRIVATE` is not needed. Re-derive that
+before relying on it. The Follow-up's premise — that this was still an open credential decision —
+is therefore closed too.
 
 ---
 

@@ -120,6 +120,17 @@ Check with `type mkdir` before trusting interleaved output; use `command mkdir -
 
 `gofmt -l` and `goimports -l` write their file list to stdout and their errors to stderr, and a binary that is missing (127), a file they cannot parse (2), or a path they cannot read all produce **empty stdout**. Empty stdout is what "everything is formatted" also looks like. Any check built on `gofmt -l` must inspect the exit status; discarding stderr with `2>/dev/null` and ignoring the status makes a tool failure indistinguishable from a clean tree. This shipped twice in this repo — in `scripts/check.sh`'s format stage and in `lefthook.yml`'s `go-format` hook.
 
+### 3.10 `ls-remote refs/tags/<t>` returns the tag object, not the commit
+
+*Found 2026-08-25.* For an **annotated** tag, `git ls-remote origin refs/tags/v0.3.0` returns the
+tag object's SHA, which never equals the commit. Comparing it against a pinned commit reports a
+spurious mismatch. Peel it: `refs/tags/v0.3.0^{}`.
+
+`git rev-list -n1 <tag>` and `git describe` peel on their own, so a check built on those is already
+correct — the hazard is specific to `ls-remote` and to `cat-file`-style lookups. All four
+`hollis-labs/libs` siblings use annotated tags, so this bites every pin-versus-tag comparison in
+this repo.
+
 ---
 
 ## 4. Verifying that your verification verifies

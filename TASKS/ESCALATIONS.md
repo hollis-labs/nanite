@@ -2022,8 +2022,9 @@ Orchestrator most needs and which a bare deletion would have destroyed. `TASKS/I
 `schedule` (07:17 UTC) and `workflow_dispatch` only, and no branch protection is available on this
 repo. The lefthook hooks installed during the pre-unfreeze batch are therefore the **only**
 automatic check between writing code and landing on `main` — and a tracked `lefthook.yml` installs
-nothing by itself, so a fresh clone or a new worktree has no checks at all until someone runs
-`lefthook install`. Dispatch the gate by hand after landing anything significant:
+nothing by itself, so a fresh clone has no checks at all until someone runs `lefthook install`;
+a worktree of an already-installed clone is covered, because `core.hooksPath` is an absolute path
+into the parent clone's `.git/hooks`, which every worktree shares. Dispatch the gate by hand after landing anything significant:
 `gh workflow run "Full-repo quality gate" --ref main`. One failure signature is known and should not
 be chased: `internal/memory` `SQLITE_BUSY` (Torque `CW-20260825-0001`), root-caused in `tesseract`
 and fixed there, not yet picked up by Nanite's pin.

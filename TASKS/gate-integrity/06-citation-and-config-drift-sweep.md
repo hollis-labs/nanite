@@ -63,9 +63,8 @@ both attributing *"complete in <15 seconds on staged files only"* to
 is a blank comment line, and per `sed -n '9,12p' lefthook.yml` only three of
 the five pre-commit commands are staged-only — `go-vet` runs `go vet ./...`
 whole-repo and `go-lint` analyzes the whole repo before filtering its report.
-`lefthook.yml`'s own measured header now carries real numbers (44.87s cold /
-4.32s fully cached for pre-push) — use what the file says, re-derived, not
-this paragraph's copy of it.
+`lefthook.yml`'s own measured header now carries real numbers — use what the
+file says, re-derived, not this paragraph's copy of it.
 
 Judgment call for the worker, stated as adjustable rather than decided:
 `PREVENTION.md` is a live prevention document and should be corrected.

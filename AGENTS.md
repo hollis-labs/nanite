@@ -70,6 +70,24 @@ lefthook install
 find .git/hooks -type f ! -name '*.sample'   # verify: expect pre-commit, pre-push
 ```
 
+A worktree of an already-installed clone is covered — `core.hooksPath` is an
+absolute path into the parent clone's `.git/hooks`, which every worktree shares
+(`git config --get core.hooksPath`).
+
+**pre-commit is formatting only**, and every command is scoped to the staged
+diff: `go-format` (gofmt + goimports), `migration-purity` (no `VALUES` clause in
+`internal/store/migrations/*.sql`), and `frontend-lint` (biome, `skip: true` —
+`CW-20260816-0087`). Nothing at commit time can fail for a reason outside the
+change in front of you, which is what keeps `--no-verify` — all-or-nothing —
+from being the natural escape.
+
+**pre-push** runs `go test ./...` scoped to `main` (`only: - ref: main`), so a
+WIP-branch push reports `go-test (skip) by condition`. It is the no-`-race`
+suite, not Tier 3.
+
+**Whole-repo analysis lives in `./scripts/check.sh`** — see "Test and lint"
+below.
+
 Build (production — no `devmode` tag, signature verification unconditional):
 
 ```bash
@@ -92,11 +110,32 @@ frontend.
 Test and lint:
 
 ```bash
+./scripts/check.sh  # the landing check — run this when a feature lands
 make test           # go test -race ./...
 make lint           # go vet + golangci-lint + staticcheck + errcheck + govulncheck
 make vuln           # govulncheck only
 make eval           # interaction-quality eval suite (eval build tag)
 ```
+
+`./scripts/check.sh` takes no arguments and runs four stages, naming every one
+that failed: `format` (gofmt + goimports over every Go file), `vet`
+(`go vet ./...`), `lint` (`golangci-lint` scoped to what your work added,
+measured from the merge base with `main`), and `test` (`go test ./...` — Tier 1
+of `docs/engineering/testing-workflow.md` §3). Run it when a feature lands,
+before pushing a branch you care about, and before dispatching the full-repo
+quality gate — not on every commit.
+
+The lint stage is scoped on purpose: whole-repo `golangci-lint run` exits
+non-zero on a large body of pre-existing findings, and that body is the nightly
+gate's business, where it runs with `--issues-exit-code=0` against a ratcheting
+baseline (`scripts/quality-ratchet.py`). Override the diff base with
+`CHECK_LINT_BASE=<rev>`.
+
+If your change touched goroutines, channels, `context` cancellation, mutexes,
+atomics, or shutdown ordering, also run Tier 2 (`-race -count=20` on the package
+you touched). Tier 3 (full suite under `-race`) is the nightly gate's; Tier 4
+flake hunting is deliberate and manual. Neither belongs on a hook or in the
+landing check.
 
 Deploy via Cerberus (the running service uses a separate artifact from a local
 `go build` — resource id is `nanite-api-service`, not `nanite-api`):

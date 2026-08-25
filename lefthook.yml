@@ -4,33 +4,52 @@
 # THIS FILE ENFORCES NOTHING UNTIL `lefthook install` HAS RUN IN THE CLONE.
 # A tracked lefthook.yml installs no git hooks by itself. Fresh clones must run
 # `lefthook install` once — see README.md "Quick Start" and AGENTS.md
-# "Common operations".
+# "Common operations". A worktree of an already-installed clone is covered:
+# `core.hooksPath` is an absolute path into the parent clone's `.git/hooks`,
+# which every worktree shares. Confirm with `git config --get core.hooksPath`.
 #
-# Scope. Only three of the five pre-commit commands are staged-files-only:
-#   go-format, migration-purity, frontend-lint   staged files only
-#   go-vet    whole repo — `go vet ./...`
-#   go-lint   golangci-lint analyzes the whole repo, then reports only findings
-#             on lines the staged diff touches
+# Scope. Commit time is formatting only, and every pre-commit command is
+# staged-files-only:
+#   go-format         staged files only
+#   migration-purity  staged files only
+#   frontend-lint     staged files only — `skip: true`, see its own note
 #
-# Cost, measured on nanite (2026-08-24) across three real `git commit` attempts
-# with one staged .go file, reading lefthook's own summary each time:
-#   pre-commit total   16.01s / 1.98s / 3.08s
-#     go-lint          15.99s / 1.96s / 3.06s   <- the whole variance
-#     go-vet            2.67s / 1.07s / 2.69s
-#     go-format         0.04s / 0.05s / 0.05s
-# The <15s target this header used to assert holds only while golangci-lint's
-# cache is warm. A staged change that invalidates it costs ~16s, so the first
-# Go commit after a clone, a toolchain bump, or a wide edit blows the budget.
-# Quote the range, not one end of it.
-# `go vet ./...` is deliberately whole-repo rather than staged-scoped: at 1-3s
-# inside the hook it is never the bottleneck, and the extra coverage is free.
+# No pre-commit command can fail for a reason outside the diff being committed.
+# That is deliberate and it is the whole design: `--no-verify` is all-or-
+# nothing, so a single finding unrelated to the change in front of you must
+# never be able to disable every check at once.
+#
+# Whole-repo analysis lives in `scripts/check.sh`, the landing check —
+# `go vet ./...`, scoped `golangci-lint`, and `go test ./...` (Tier 1 of
+# `docs/engineering/testing-workflow.md` §3). Run it when a feature lands,
+# before pushing a branch you care about, and before dispatching the full-repo
+# quality gate. Not on every commit.
+#
+# Cost, measured on nanite @ 9591c1a6 (2026-08-24) across three real
+# `git commit` attempts with one staged .go file, reading lefthook's own
+# summary each time:
+#   pre-commit total   0.17s / 0.06s / 0.06s
+#     go-format        0.16s / 0.04s / 0.03s
+#     migration-purity  (skip) no files for inspection — no staged .sql
+#     frontend-lint     (skip) by condition — `skip: true`
+# The 0.17s run also re-synced the installed hooks. Re-derive rather than
+# trusting this block: stage one .go file, commit, read lefthook's summary.
+#
+# `skip_empty: true` on the commands below is inert at the installed lefthook
+# (2.1.4): `lefthook dump` omits the key and `lefthook validate` reports
+# "No values are allowed because the schema is set to 'false'" for each of the
+# four commands carrying it. The behavior it names is 2.1.4's default and was
+# confirmed directly — a `git commit` with no staged .sql prints
+# `migration-purity (skip) no files for inspection`, and a docs-only push on
+# `main` prints `go-test (skip) no matching push files`. Dropping the key is a
+# separate cleanup; check `lefthook validate` before assuming it is done.
 
 pre-commit:
   parallel: true
   commands:
 
     # ── Go parallel group ─────────────────────────────────────────────
-    # These three run simultaneously on staged .go files.
+    # Runs on staged .go files only.
 
     go-format:
       # Fail if any staged Go file is not gofmt + goimports clean.
@@ -50,26 +69,6 @@ pre-commit:
           echo "$unformatted"
           exit 1
         fi
-
-    go-lint:
-      # Only lints new/modified code so existing warnings don't block commits.
-      #
-      # The diff base must be HEAD, not the bare `--new`. golangci-lint's own
-      # help for `--new`: "if there are unstaged changes or untracked files,
-      # only those changes are analyzed, else only changes in HEAD~ are
-      # analyzed." At commit time the staged change is usually the *only*
-      # change, so `--new` finds no unstaged work and silently falls back to
-      # linting HEAD~ — the previous commit — while reporting "0 issues" about
-      # the commit in progress. `--new-from-rev HEAD` is the staged diff.
-      glob: "*.go"
-      skip_empty: true
-      run: golangci-lint run --new-from-rev HEAD --timeout 30s
-
-    go-vet:
-      # Whole repo, not staged-scoped — see the cost note in the header.
-      glob: "*.go"
-      skip_empty: true
-      run: go vet ./...
 
     migration-purity:
       # Migrations carry schema and data *shape* changes, not seed rows.
@@ -141,12 +140,30 @@ pre-push:
   commands:
 
     go-test:
-      # Full test suite gate before code reaches the remote.
-      # Measured on nanite @ 5ec930c8 (2026-08-24), `/usr/bin/time -p go test ./...`:
-      #   real 44.87s with nothing cached (99 packages ran, 0 cached)
-      #   real  4.32s with everything cached (99/99 cached)
-      # Tolerable for a push gate; the common case after a small change is
-      # nearer the low end.
+      # Full test suite gate before code reaches the remote, scoped to `main`.
+      # Pushes to a WIP branch do not pay for it; a push to `main` does, and
+      # that is where it matters, because this repo has no branch protection
+      # and no merge gate — see TASKS/INDEX.md point 4.
+      #
+      # This is the **no-`-race`** suite. It is not Tier 3: Tier 3 is the same
+      # packages under `-race`, ~9 min, and it belongs to the nightly full-repo
+      # quality gate, not to a hook.
+      #
+      # `only: - ref: main` and `glob`/`skip_empty` print different skip
+      # reasons, which is what makes the scoping testable:
+      #   on a non-`main` branch  -> `go-test (skip) by condition`
+      #   on `main`, no .go files -> `go-test (skip) no matching push files`
+      #
+      # Measured on nanite @ 9591c1a6 (2026-08-24),
+      # `go clean -testcache && /usr/bin/time -p go test ./...`:
+      #   real 41.34s with nothing cached (0 of 99 test packages cached)
+      # then two back-to-back cached runs, `/usr/bin/time -p go test ./...`:
+      #   real  5.06s / 4.59s with everything cached (99/99 cached)
+      # `go test ./...` covers all 110 packages `go list ./...` reports, which
+      # includes the stray vendored `ui/node_modules/.../flatted` package; 99
+      # of them have test files. Re-derive before quoting.
+      only:
+        - ref: main
       glob: "*.go"
       skip_empty: true
       run: go test ./...

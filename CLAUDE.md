@@ -28,13 +28,37 @@ go test ./...
 cd ui && npm install && npm run build
 ```
 
-**What the hooks gate.** pre-commit: `go-format` (gofmt + goimports, staged
-files), `go-lint` (`golangci-lint run --new-from-rev HEAD` — the staged diff),
-`go-vet` (`go vet ./...`, whole repo), `migration-purity` (no `VALUES` clause in
+**What the hooks gate.** Commit time is formatting only, and every pre-commit
+command is scoped to the staged diff — nothing there can fail for a reason
+outside the change in front of you. pre-commit: `go-format` (gofmt + goimports,
+staged files), `migration-purity` (no `VALUES` clause in
 `internal/store/migrations/*.sql` — seed rows belong in `seed.go`; `UPDATE`/
 `DELETE` backfills and `INSERT ... SELECT` table rebuilds are allowed),
-`frontend-lint` (biome). pre-push: `go test ./...` — measured 2026-08-24 at
-44.87s cold / 4.32s fully cached.
+`frontend-lint` (biome, `skip: true` — `CW-20260816-0087`). Measured at
+`9591c1a6` across three real one-`.go`-file commits: **0.17s / 0.06s / 0.06s**
+total, read off lefthook's own summary.
+
+**pre-push:** `go test ./...`, scoped to `main` via `only: - ref: main`. A push
+from a WIP branch reports `go-test (skip) by condition`; a docs-only push on
+`main` reports `(skip) no matching push files`. Measured at `9591c1a6`:
+**41.34s** with the test cache cleared (`go clean -testcache && /usr/bin/time -p
+go test ./...`), **5.06s / 4.59s** on two back-to-back cached runs (99/99
+cached). This is the **no-`-race`** suite — not Tier 3.
+
+**The landing check: `./scripts/check.sh`.** Whole-repo analysis lives here, not
+on a hook: gofmt/goimports over every Go file, `go vet ./...`, `golangci-lint`
+scoped to what your work added, and `go test ./...` (Tier 1 of
+`docs/engineering/testing-workflow.md` §3). No arguments; it names every stage
+that failed. Measured at `9591c1a6`: **67.36s** with the golangci-lint and test
+caches both cleared, **8.75s** fully warm.
+
+Run it **when a feature lands**, before pushing a branch you care about, and
+before dispatching the full-repo quality gate — *not* on every commit. If your
+change touched goroutines, channels, `context` cancellation, mutexes, atomics,
+or shutdown ordering, it is not enough on its own: run Tier 2 (`-race -count=20`
+on the package you touched) as well. Tier 3 (full suite under `-race`, ~9 min)
+belongs to the nightly quality gate, and Tier 4 flake hunting is deliberate and
+manual; neither runs from a hook or from this script.
 
 **Deploying changes:** Always use Cerberus. Direct `go build` outputs to `./nanite` in the project root, but the running service uses the artifact at `~/.cerberus/apps/nanite/nanite-api-service/bin/nanite-api-service`. These are **separate binaries** — editing one does not affect the other.
 

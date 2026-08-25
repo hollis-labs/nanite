@@ -334,8 +334,10 @@ step 1 remains open. This entry describes the tree it was measured on, not the
 current one.
 
 The trigger above has since fired and is discharged outside this task: the
-`:65`/`:74`/`:285` correction is a scheduled pass against nanite-36's revised
-text, not a logged intention. **One dependency does remain outstanding — `04`
+three gosec passages were corrected against nanite-36's revised text in a
+separate pass, landed as its own commit. Find them by name, not by line —
+`/usr/bin/grep -n -F 'What it does not guarantee' <runbook>` and
+`/usr/bin/grep -n -F 'now automated' <runbook>`. **One dependency does remain outstanding — `04`
 step 1 is still open**, so the runbook's gosec side will not be fully current
 until it lands. If step 1 changes anything the runbook asserts, folding that in
 belongs to `04b`, not to a reopening of `05`.

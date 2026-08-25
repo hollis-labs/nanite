@@ -64,16 +64,26 @@ workflow's YAML `- name:` count, which is not the same number as the step count
 
 ### What it does not guarantee — one item, one direction
 
-**The gosec step can record a false improvement.** `gosec` has produced a
-non-reproducible run that dropped 17 findings as a strict subset, with `files`
-and `lines` identical, exit 0 and well-formed JSON — indistinguishable from a
-real improvement. Observed once in 12 runs.
+**The gosec step can record a false improvement, but no longer a
+non-reproducible one.** `gosec` has produced a run that dropped 17 findings as a
+strict subset, with `files` and `lines` identical, exit 0 and well-formed JSON —
+indistinguishable from a real improvement. Observed once in 12 runs. Since
+`TASKS/gate-integrity/04b`, the gosec step runs the scanner **twice** and fails
+the gate unless both runs agree on the full report, so a drop that does not
+reproduce is now caught rather than banked.
 
-A reduction passes, and the comparator prints guidance to confirm the reduction
-reproduces before the baseline is lowered. **Follow that instruction for a gosec
-reduction — it is one extra run.** Lowering the baseline on a spurious decrease
-permanently deletes real findings — the same error as raising a baseline to make
-a regression pass, in the opposite direction.
+**What agreement does not establish is that a reduction was *earned*.** Two runs
+of one tree reproduce an unearned drop exactly as well as an earned one, and the
+coverage floor cannot see a drop at constant `files`/`lines` — which is this
+failure's exact shape. So the comparator's advice to confirm a reduction
+reproduces is a **necessary condition, not a sufficient one**: bank a gosec
+reduction only when it maps to a real code change since the committed
+measurement. Lowering the baseline on an unearned decrease permanently deletes
+real findings — the same error as raising a baseline to make a regression pass,
+in the opposite direction.
+
+**The advisory is shared with the lint caller, which has no automated repeat.**
+For a lint reduction, the extra run is still yours to do by hand.
 
 Because comparison is per-`rule_id`, a same-run regression *in the same rule*
 could in principle be masked by this. Narrow and unlikely, but not zero.
@@ -291,12 +301,13 @@ versions and on `darwin/arm64`, inspect the removed findings, lower only the
 corresponding counts, and rerun both comparison modes. Never raise a baseline
 to make a new regression pass.
 
-**Run `gosec` at least three times and require identical finding sets before
-writing any number into the baseline.** A degraded run has been observed on this
-tree that returned a strict subset of the findings while being otherwise
-indistinguishable from a good one: exit 0, empty `Golang errors`, well-formed
-JSON, and identical `files`/`lines` stats. Averaging or taking the lowest would
-bake a permanently-red baseline into the gate.
+**The manual three-run protocol this section used to prescribe is now automated
+for gosec and should not be run by hand.** `scripts/gosec-repeat-run.sh`
+performs the repeat unconditionally and `--repeat-report` is required, so the
+comparator cannot be invoked without it. Running gosec by hand and comparing
+finding sets no longer adds information for gosec — it remains the only option
+for lint. Averaging runs or taking the lowest would still bake a permanently-red
+baseline into the gate: agreement, not aggregation, is the test.
 
 ## Module resolution — every external dependency resolves without a credential
 

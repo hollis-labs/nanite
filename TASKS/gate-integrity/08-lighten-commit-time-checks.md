@@ -714,9 +714,15 @@ help branch, so a relative-path invocation from a subdirectory re-resolves `$0`
 against the repo root and prints nothing.
 
 **Checked and cleared:** no automatic coverage was lost by removing `go-vet`
-from `pre-commit` — the nightly gate enables `govet` with `enable-all: true`
-minus `fieldalignment`, strictly broader, including the `lostcancel` analyzer
-behind the incident `PREVENTION.md` cites. No Tier 3 or Tier 4 on any hook or in
+from `pre-commit` — the nightly gate's ratchet config
+(`docs/audits/2026-08-21-go-quality/audit-golangci.yml:35`, `:82-85`) enables
+`govet` with `enable-all: true` minus `fieldalignment`, strictly broader,
+including the `lostcancel` analyzer behind the incident `PREVENTION.md` cites.
+*(Orchestrator's note: my first transcription of this bullet dropped the file
+and line numbers. A later worker read the uncited claim, correctly added a
+citation, and my relay of that reached me as "the reviewer cited the wrong
+file" — which was never true and was never written down anywhere. The reviewer's
+citation was right from the start. Restored here; the drift was mine.)* No Tier 3 or Tier 4 on any hook or in
 the script, and nothing conflates the `pre-push` suite with Tier 3. No naming
 collision for `scripts/check.sh`. The script is bash-3.2-safe. `lefthook
 validate`'s non-zero exit is pre-existing and this task reduced it from six

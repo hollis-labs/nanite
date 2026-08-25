@@ -1196,7 +1196,7 @@ the crucial things that prevent us from working in standard ways."*
 
 | Task | Wave | Status | Depends on |
 |---|---|---|---|
-| `08-lighten-commit-time-checks` | **A — first** | implemented | none |
+| `08-lighten-commit-time-checks` | **A — first** | reviewed | none |
 | `01-drop-published-sibling-replaces` | **A** | not-started | none |
 | `02-release-harness-filters-and-runtime-events` | **A** | not-started | none (**sibling repos, not nanite**) |
 | `03-drop-remaining-replaces-and-sibling-checkouts` | **A** | not-started | `01`, `02` (both real, not sequencing) |
@@ -1217,10 +1217,10 @@ and CI validates released source. All four have the same root cause — `go.mod`
 
 **`08` is first because the hooks are days old and already being bypassed.** They were activated
 2026-08-24 in `2b3b0216`; within the 6 commits since, `4f3d38c4` required `--no-verify` because
-`go-lint` flagged two intentional constants. `--no-verify` is all-or-nothing — it disables
-`go-format`, `go-vet`, `go-lint` and `migration-purity` together. Commit-time checks become
-formatting only; whole-repo analysis moves to a landing script run when a feature lands. Operator
-decision, 2026-08-25. Re-derive both numbers before repeating them.
+`go-lint` flagged two intentional constants. `--no-verify` was all-or-nothing — it disabled
+`go-format`, `go-vet`, `go-lint` and `migration-purity` together. Commit-time checks are now
+formatting only, and whole-repo analysis lives in `./scripts/check.sh`, run when a feature lands.
+Operator decision, 2026-08-25. Re-derive both numbers before repeating them.
 
 **Everything in this batch was verified at `77137106`** and ships the command that produced
 each number. Re-derive before acting — these are citations about citations, the class of error

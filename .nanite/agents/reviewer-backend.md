@@ -220,7 +220,7 @@ When `nanite-reviewer-backend` is booted with a scope:
    - `go vet ./...` — always
    - `make test` (== `go test -race ./...`) — for concurrency-heavy scopes
    - `make lint` — full pipeline: `go vet` + `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0` + `staticcheck ./...` + `errcheck ./...` + `govulncheck ./...`. Default caps in golangci-lint suppressed ~70% of findings in a prior audit (283 vs 956 issues); uncapped is the canonical reviewer setting.
-   - `golangci-lint run --new --timeout 30s` — legacy pre-commit invocation (changed lines only); use only when reproducing the pre-commit hook, not for audits.
+   - `golangci-lint run --new-from-rev "$(git merge-base HEAD origin/main)"` — changed lines only; this is the landing check's (`./scripts/check.sh`) lint stage. Use it only when reproducing that stage, not for audits. **No pre-commit hook runs lint or vet** — commit time is formatting only, so there is no commit-time lint invocation to reproduce.
    - `staticcheck ./...` and `errcheck ./...` — targeted; both are run by `make lint`.
    - `govulncheck ./...` — targeted; also available as `make vuln`. Required for the security category.
    - `go mod tidy` diff check for the tooling category.

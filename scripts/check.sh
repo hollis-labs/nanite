@@ -51,12 +51,33 @@
 
 set -uo pipefail
 
-cd "$(git rev-parse --show-toplevel)" || exit 1
+# Resolve this script's own path BEFORE the cd below. `$0` is relative to the
+# caller's directory, so `cd internal && ../scripts/check.sh --help` would
+# re-resolve it against the repo root and read nothing at all.
+self=$0
+case "$self" in
+  /*)  ;;
+  */*) self="$PWD/$self" ;;
+  *)   self=$(command -v -- "$self" 2>/dev/null || printf '%s' "$self") ;;
+esac
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-  sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'
+  # Self-delimiting: print the leading comment block and stop where it actually
+  # ends, rather than at a hardcoded line span. That span silently went stale
+  # twice as the header grew, truncating the help text with no signal.
+  help_text=$(awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$self")
+  # `--help` used to exit 0 even when it printed nothing, so a broken read was
+  # indistinguishable from a short header. Assert the read produced something.
+  if [ -z "$help_text" ]; then
+    echo "ERROR: --help read no header lines from '$self'." >&2
+    echo "       The help text is broken, not empty." >&2
+    exit 1
+  fi
+  printf '%s\n' "$help_text"
   exit 0
 fi
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
 
 failed=()
 examined_nothing=()
@@ -97,29 +118,68 @@ go_files() {
 
 # ── 1. format ─────────────────────────────────────────────────────────────
 begin "format — gofmt + goimports"
-# Positive control: an empty file list would make this stage pass while
-# checking nothing. Assert presence before properties.
+# Two different inputs would let this stage report OK while checking nothing,
+# and it has to defend against both.
+#
+# 1. An empty file list. Assert presence before properties — the count below.
+# 2. A tool that never ran. `gofmt -l` and `goimports -l` print NOTHING on
+#    stdout when they cannot do their job — binary not on PATH, a file they
+#    cannot parse, a path they cannot read (a tracked file deleted from the
+#    worktree but still in the index does this) — and an empty stdout is
+#    indistinguishable from "everything is clean" unless the exit status is
+#    inspected. So capture it, fold stderr in so the reason is printable, and
+#    fail the stage loudly on a tool failure.
+#
+# The count printed below comes from `git ls-files`: it names paths git knows
+# about, not files a tool managed to open. Those two diverge exactly when a
+# tool fails, which is what makes the status checks below load-bearing rather
+# than defensive decoration.
 go_file_count=$(go_files | tr -cd '\0' | wc -c | tr -d ' ')
 if [ "$go_file_count" -eq 0 ]; then
   echo "ERROR: found 0 Go files to check — the file list is broken, not clean."
   finish "format" 1
 else
-  echo "    $go_file_count Go files"
-  unformatted=$(go_files | xargs -0 gofmt -l 2>/dev/null)
+  echo "    $go_file_count Go files (tracked + untracked, per git ls-files)"
+  format_tool_failed=""
+
+  gofmt_out=$(go_files | xargs -0 gofmt -l 2>&1)
+  gofmt_status=$?
+  if [ "$gofmt_status" -ne 0 ]; then
+    echo "ERROR: gofmt did not run cleanly (exit $gofmt_status) — this stage"
+    echo "       cannot report OK for files it never examined:"
+    printf '%s\n' "$gofmt_out" | sed 's/^/       /'
+    format_tool_failed=1
+    gofmt_out=""
+  fi
+
+  goimports_out=""
   if command -v goimports >/dev/null 2>&1; then
-    # Newline separator matters: $(...) strips trailing newlines, so a bare
-    # concatenation glues gofmt's last filename onto goimports' first.
-    unformatted=$(printf '%s\n%s' "$unformatted" "$(go_files | xargs -0 goimports -l 2>/dev/null)")
+    goimports_out=$(go_files | xargs -0 goimports -l 2>&1)
+    goimports_status=$?
+    if [ "$goimports_status" -ne 0 ]; then
+      echo "ERROR: goimports did not run cleanly (exit $goimports_status) —"
+      echo "       this stage cannot report OK for files it never examined:"
+      printf '%s\n' "$goimports_out" | sed 's/^/       /'
+      format_tool_failed=1
+      goimports_out=""
+    fi
   else
     echo "    note: goimports not on PATH — import grouping not checked"
   fi
-  unformatted=$(printf '%s\n' "$unformatted" | sed '/^$/d' | sort -u)
-  if [ -n "$unformatted" ]; then
-    echo "Unformatted files:"
-    printf '%s\n' "$unformatted"
+
+  if [ -n "$format_tool_failed" ]; then
     finish "format" 1
   else
-    finish "format" 0
+    # Newline separator matters: $(...) strips trailing newlines, so a bare
+    # concatenation glues gofmt's last filename onto goimports' first.
+    unformatted=$(printf '%s\n%s' "$gofmt_out" "$goimports_out" | sed '/^$/d' | sort -u)
+    if [ -n "$unformatted" ]; then
+      echo "Unformatted files:"
+      printf '%s\n' "$unformatted"
+      finish "format" 1
+    else
+      finish "format" 0
+    fi
   fi
 fi
 

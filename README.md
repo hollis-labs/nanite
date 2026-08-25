@@ -34,11 +34,15 @@ go build ./cmd/nanite/
 ```
 
 `lefthook.yml` is tracked, but a tracked config installs no git hooks by itself.
-Skip `lefthook install` and the pre-commit format/lint/vet/migration checks and
-the pre-push test run simply never execute. Confirm it took:
+Skip `lefthook install` and the pre-commit format/migration checks and the
+`main`-scoped pre-push test run simply never execute. Confirm it took:
 
 ```bash
 find .git/hooks -type f ! -name '*.sample'   # expect pre-commit and pre-push
 ```
+
+Commit time is formatting only, by design. Whole-repo analysis — `go vet`,
+scoped `golangci-lint`, and the test suite — lives in `./scripts/check.sh`,
+the landing check; run it when a feature lands, not on every commit.
 
 See `docs/` for architecture and demo script.

@@ -166,8 +166,24 @@ script run when a feature lands.**
   Tier 4.
 - `lefthook.yml`'s cached-timing header is re-derived, not copied.
 - `CLAUDE.md`, `AGENTS.md` and `TASKS/INDEX.md` point 3 all describe the same
-  hook set, and it is the one that now exists. Grep for stragglers:
-  `grep -rn 'go-lint\|go-vet' --include='*.md' . | grep -v node_modules | grep -v TASKS/gate-integrity`
+  hook set, and it is the one that now exists. Grep for stragglers with a
+  pattern that can find **prose**, not only the hyphenated command names. The
+  original form here was `grep -rn 'go-lint\|go-vet' --include='*.md' .` and it
+  structurally cannot match `format/lint/vet`, `via lefthook pre-commit`, or
+  `reproducing the pre-commit hook` — four live documents stayed wrong behind
+  it while this criterion read as passing. Use instead:
+
+  ```
+  grep -rniE 'pre-?commit|lefthook|commit[ -]time' \
+      --include='*.md' --include='*.yml' --include='*.yaml' --include='*.sh' . |
+    grep -v node_modules |
+    grep -Ei 'go-lint|go-vet|[^a-z-]vet|lint|golangci|staticcheck|errcheck'
+  ```
+
+  It over-matches on purpose — every hit gets triaged as either a **live claim**
+  (fix it) or a **historical record** quoting the old hook set as the thing
+  being corrected (leave it). A grep narrow enough to need no triage is a grep
+  narrow enough to miss the prose forms.
 - The `pre-push` decision is stated explicitly in the Work log.
 
 ## Work log
@@ -715,3 +731,320 @@ scratch repo with this `lefthook.yml` copied verbatim where a `.go` commit on
 `main` made the command execute and branches named `feat/wip` and `mainline`
 both skipped by condition. The reviewer flagged the "actually runs" half as
 out-of-repo evidence rather than smoothing it over.
+
+---
+
+## Fourth pass — review-finding fixes (after `6c139038`)
+
+Executed 2026-08-25. Started from `6c139038` (`git rev-parse HEAD`), **clean
+tree** (`git status --porcelain` → empty), on `main`, in the main checkout.
+`git worktree list` → one entry, this checkout. Fixes the three findings in
+**Review notes** above, plus the glossary entry the dispatch added. The Review
+notes section itself was not touched.
+
+**No commit was made on `main`, and none was needed.** Every hook proof below
+used `git add` / `git rm --cached` plus `lefthook run pre-commit` — which is
+exactly what a real `git commit` invokes, verified rather than assumed:
+`.git/hooks/pre-commit:71` is `call_lefthook run "pre-commit" "$@"`. No
+`git stash` at any point, no push to `origin`, no worktree, no throwaway branch.
+
+### Finding 1 — a format check could report OK for files it never examined
+
+Reproduced first, at `6c139038`, three ways in `scripts/check.sh` and two in
+`lefthook.yml`. All five printed a pass while the tool had failed:
+
+| what was broken | before the fix |
+|---|---|
+| `rm internal/brand/brand.go` (tracked, still in the index) | `1354 Go files` / `OK` — while `git ls-files -z '*.go' \| xargs -0 gofmt -l` exited **1** with `stat internal/brand/brand.go: no such file or directory` |
+| `env -i PATH=/usr/bin:/bin` (no `gofmt`) | `1354 Go files` / `OK` — and, tellingly, an honest `note: goimports not on PATH` on the very next line |
+| an unparseable `internal/checkproof/broken.go` | `1355 Go files` / `OK` — while `gofmt -l` on that file alone exited **2** with `broken.go:3:14: expected ')', found '{'` |
+| the same unparseable file, **staged**, via `lefthook run pre-commit` | `✔️ go-format (0.01 seconds)` |
+| a **clean** staged `.go` file with `gofmt` off `PATH` | `✔️ go-format (0.02 seconds)` |
+
+The root cause is one shape in two places: `gofmt -l` and `goimports -l` write
+their file list to stdout and their errors to stderr, and **empty stdout is
+what both "clean" and "never ran" look like**. Both call sites discarded the
+exit status and sent stderr to `/dev/null`.
+
+**Fixed in both.** `scripts/check.sh:143-176` (`grep -n 'gofmt_status=\|goimports_status=\|format_tool_failed' scripts/check.sh`) and `lefthook.yml`'s
+`go-format` block at `lefthook.yml:54-99` (`grep -n '^    go-format:' lefthook.yml`).
+Each tool's status is captured, stderr is folded into the captured output so the
+reason is printable, and a non-zero status fails the stage/hook with the tool's
+own message indented under an `ERROR:` line. `goimports`' `command -v` guard —
+the asymmetry the reviewer named — is unchanged; a *missing* `goimports` is
+still an announced note, a *failing* one is now a failure. The stage's file
+count is now labelled `(tracked + untracked, per git ls-files)`, because that is
+what it counts; the status checks are what make it mean anything.
+
+`lefthook.yml`'s `go-format` was **deliberately out of scope in the first pass**
+and the reviewer correctly called it pre-existing rather than introduced. The
+Orchestrator put it in scope with a reason worth recording, because it is the
+stronger version of the argument: this task's premise is that commit time is
+formatting only, so a formatting check that can pass vacuously means commit time
+gates **nothing at all**. That makes it load-bearing for `08`'s own design, not
+adjacent cleanup. Agreed and done.
+
+**Proof after the fix** — same five inputs, plus the two controls that matter:
+
+```
+scripts/check.sh   clean tree                          format OK
+scripts/check.sh   tracked file deleted from worktree  FAIL — "gofmt did not run cleanly (exit 1)"
+                                                              stat internal/brand/brand.go: no such file or directory
+scripts/check.sh   gofmt absent from PATH              FAIL — "gofmt did not run cleanly (exit 127)"
+                                                              xargs: gofmt: No such file or directory
+scripts/check.sh   unparseable .go file                FAIL — "gofmt did not run cleanly (exit 1)"
+                                                              broken.go:3:14: expected ')', found '{'
+lefthook go-format clean staged .go file               exit=0
+lefthook go-format gofmt absent from PATH              exit=1 — "sh: gofmt: command not found"
+lefthook go-format unparseable staged .go file         exit=1 — exit 2, parse error printed
+lefthook go-format misformatted staged .go file        exit=1 — "Unformatted files:" (08's own criterion, unregressed)
+```
+
+`internal/brand/brand.go` was restored with `git checkout --` and verified
+byte-for-byte (`shasum` → `9414b1ef091e7ee291281d94f77e890e805c271f`, matching
+the pre-deletion reading).
+
+### Finding 2 — live documents describing a commit-time vet/lint gate
+
+Every line number below was re-derived at `6c139038` before editing; all four the
+review cited were still accurate.
+
+| file:line (derived) | was | now |
+|---|---|---|
+| `README.md:37` | *"the pre-commit format/lint/vet/migration checks"* | *"the pre-commit format/migration checks and the `main`-scoped pre-push test run"* |
+| `.nanite/agents/backend.md:386` | *"**Vet:** `go vet ./...` (via lefthook pre-commit)"* | states plainly that **nothing runs it for you at commit time**, and names the two places that do |
+| `.nanite/agents/reviewer-backend.md:223` | *"use only when reproducing the pre-commit hook"* | the landing check's lint stage, with its real `--new-from-rev` form, plus *"there is no commit-time lint invocation to reproduce"* |
+| `TASKS/audit-remediation/PREVENTION.md:123` | `go vet` *"is already in `lefthook.yml` pre-commit"* | corrected, and points at where the enforcement actually lives |
+| `TASKS/audit-remediation/PREVENTION.md:124` | enforcement point *"`lefthook.yml` go-vet"* | the nightly gate's ratcheted `govet`, plus the landing check's `vet` stage |
+
+`backend.md:387` (`gofmt`/`goimports` *"via lefthook pre-commit"*) is still true
+and was **not** touched, as instructed. `PREVENTION.md` changed exactly two
+lines — `git diff --stat` → `4 ++--`, i.e. 2 insertions / 2 deletions.
+
+**Two more live claims, in a file already in scope, fixed beyond the four.** The
+broadened grep (below) surfaced `.nanite/agents/backend.md:385` (*"Legacy
+pre-commit lint: `golangci-lint run --new --timeout 30s` (lefthook pre-commit…)"*)
+and `:419` (*"Pre-commit hooks via lefthook: `gofmt`, `goimports`,
+`golangci-lint --new`, `go vet` (parallel)"*). Both are the same defect as
+`:386`, in the same per-agent boot-context file, and `:419` is the most explicit
+false hook-set list in the repo. Fixing `:386` while leaving them would have left
+the file self-contradicting itself two paragraphs later and still teaching an
+agent to skip `go vet`. `:385` now describes the landing check, a new `:387`
+carries the real scoped-lint invocation, and `:420` (was `:419`) states the hook
+set that exists. Recorded here because it is beyond the dispatch's enumerated
+four, not because it was ambiguous.
+
+**`README.md` also gained a pointer** (`README.md:44-46`) to
+`./scripts/check.sh`. Removing the false claim alone would have left a new
+contributor's Quick Start implying vet and lint simply stopped happening. Three
+lines; judgment call, logged.
+
+**Verified before writing it, not carried from the dispatch.** The claim that the
+nightly gate's `govet` is strictly broader than `go vet ./...`:
+
+```
+go tool vet help | awk '/^Registered analyzers:/{f=1;next} f && /^    [a-z]/{print $1}' | sort -u   -> 35
+golangci-lint config verify --config <govet enable-all probe>   # enum in the rejection message -> 45
+comm -23 vet-default.txt govet-all.txt        -> 0 analyzers in go vet but not in govet
+comm -13 vet-default.txt govet-all.txt        -> 10 extra: fieldalignment (disabled) + atomicalign
+                                                 deepequalerrors findcall httpmux nilness
+                                                 reflectvaluecompare shadow sortslice unusedwrite
+grep -H '^lostcancel$' vet-default.txt govet-all.txt   -> present in both
+```
+
+So: superset by 9 live analyzers, `lostcancel` included. `lostcancel` is the
+analyzer behind this row's own cited diagnostic — its message is *"the cancel
+function is not used on all paths"*, which is verbatim what `PREVENTION.md:122`
+quotes for `GO-LIFE-001`. The enforcement is a **ceiling ratchet**, not a report:
+`scripts/quality-ratchet.py:116-140`'s `compare_counts` returns 1 on any
+increase, so one new `lostcancel` finding lifts `govet` past its committed
+baseline in `.github/quality/full-repo-baseline.json` and fails the run.
+
+**Correction to the review's own citation.** The Review notes say *"the nightly
+gate enables `govet` with `enable-all: true` minus `fieldalignment`"* without
+naming the config. The gate does **not** read the repo-root `.golangci.yml`; it
+reads `docs/audits/2026-08-21-go-quality/audit-golangci.yml`
+(`.github/workflows/full-repo-quality.yml:130`). The two files happen to carry
+identical `govet` settings (`.golangci.yml:111-116` and
+`audit-golangci.yml:82-85`), so the reviewer's conclusion holds — but a reader
+following the sentence would open the wrong file. `PREVENTION.md:123` names the
+one the gate actually uses.
+
+### Finding 2, second half — the criterion's own instrument
+
+*Done means* now carries a broadened straggler grep in place of
+`grep -rn 'go-lint\|go-vet' --include='*.md' .`, which matched only the
+hyphenated command names and structurally could not find `format/lint/vet` or
+`via lefthook pre-commit`. That is why the criterion read as passing while four
+documents stayed wrong.
+
+**The new instrument was itself given a positive control** (§4.1 — an assertion
+never observed firing is of unknown strength). Run against the pre-fix tree with
+`git grep … 6c139038`, so no checkout was needed:
+
+```
+git grep -niE 'pre-?commit|lefthook|commit[ -]time' 6c139038 -- '*.md' '*.yml' '*.yaml' '*.sh' |
+  grep -v node_modules | grep -Ei 'go-lint|go-vet|[^a-z-]vet|lint|golangci|staticcheck|errcheck'
+```
+
+finds **all four** review-named documents plus `backend.md:385` and `:419`. The
+old narrow form, on the same tree, finds exactly one of them —
+`PREVENTION.md:124` — and only incidentally, because that line happens to contain
+the literal string `go-vet`. It misses `README.md:37`, `backend.md:385/386/419`,
+`reviewer-backend.md:223` and `PREVENTION.md:123` entirely.
+
+**What was searched, and every hit triaged.** The broadened grep on the fixed
+tree returns **46** lines (`… | wc -l`). By bucket:
+
+- **5 hits are this pass's own corrected text** — `README.md:44`,
+  `PREVENTION.md:123`, `backend.md:386`, `backend.md:420`,
+  `reviewer-backend.md:223`. (`PREVENTION.md:124` no longer matches at all: it no
+  longer names a hook.)
+- **6 hits are this task file** quoting the old hook set as the thing being
+  fixed. Left, by the same rule the first pass applied to the stale-`4.32s` list.
+- **~28 hits are historical records** — dated audit reports
+  (`docs/audits/2026-08-21-go-quality/**`, `docs/audits/2026-04-11-**`, the
+  latter still citing an `.agentrc/` path that no longer exists), completed task
+  files (`TASKS/audit-remediation/12-…/01-full-repo-scheduled-lint-gate.md`, 11
+  hits, whose `lefthook.yml:27-31` citations were already stale before this
+  batch), dated reviewer verdicts (`TASKS/ESCALATIONS.md:872`,
+  `TASKS/skills/01:319`), and `adr/ADR-021`, which describes the state *before*
+  hooks existed. A record of what was true when it was written is not a straggler.
+- **7 hits are live-reading claims I did not fix** — see the parking list below.
+
+### Finding 3 — `--help`
+
+Both halves reproduced at `6c139038` before touching anything:
+
+```
+cd internal && ../scripts/check.sh --help
+  -> sed: ../scripts/check.sh: No such file or directory
+  -> exit=0, 0 lines of help
+```
+
+`cd "$(git rev-parse --show-toplevel)"` ran before the help branch, so `$0` was
+re-resolved against the repo root; and `--help` exited 0 unconditionally, so
+reading nothing succeeded.
+
+**Fixed.** `scripts/check.sh:54-78` (`grep -n '^self=\$0' scripts/check.sh` → 57):
+`$0` is resolved to an absolute path **before** the `cd` (absolute / contains a
+slash / bare-name-on-`PATH`, all three handled), the help branch now runs before
+the `cd` — so `--help` also works outside a git repo — and the hardcoded
+`sed -n '2,50p'` is replaced by an `awk` pass that prints from line 2 and stops
+at the first line that is not a `#` comment. It derives the end from the header's
+actual end. Then it asserts the read produced something and exits **1** if not.
+
+**Proof, both properties:**
+
+```
+./scripts/check.sh --help | wc -l                              -> 49
+awk 'NR>1 && !/^#/{print NR-1; exit}' scripts/check.sh         -> 50   (49 = lines 2..50)
+cd internal          && ../scripts/check.sh --help | wc -l     -> 49, exit 0
+cd internal/store/migrations && ../../../scripts/check.sh --help | wc -l  -> 49
+cd ui/src            && bash ../../scripts/check.sh --help | wc -l       -> 49
+```
+
+Header grown by six lines in place, last of them `# LAST HEADER LINE OF THE
+PROOF BLOCK.`: header end moved to file line **56**, `--help` printed **55**
+lines, and its last line was `LAST HEADER LINE OF THE PROOF BLOCK.` — from the
+repo root and from `internal/` alike. Restored with `command cp -f` and verified
+byte-for-byte (`shasum` before `1d7b1d0c0b30bc66f55215fd2360f8b65cff06c6`, after
+identical), then `--help` re-confirmed at 49 lines.
+
+**The new assertion was observed failing.** A copy of the script with its entire
+leading comment block stripped:
+
+```
+ERROR: --help read no header lines from '<path>'.
+       The help text is broken, not empty.
+exit=1
+```
+
+### Glossary
+
+`docs/engineering/GLOSSARY.md:104` — a **Landing check** entry, matching the
+file's `**Term** (`path`) — prose` format. Checked for collision first: before
+this pass `grep -ni 'quality gate\|landing check' docs/engineering/GLOSSARY.md`
+returned nothing, so neither term had an entry. The entry defines the landing
+check and disambiguates it from the quality gate **by trigger**, as instructed —
+manual/local/on-request versus scheduled (`cron: "17 7 * * *"`) +
+`workflow_dispatch`/in-CI — and notes that their contents diverge *because* of
+that trigger difference, not independently of it. Triggers re-derived from
+`.github/workflows/full-repo-quality.yml:3-6`. It also records that neither is a
+*merge* gate, since this repo has no branch protection.
+
+### Two hazards appended to the discipline doc
+
+`docs/engineering/agent-verification-discipline.md` §3 says to append newly found
+hazards there rather than to one's own prompt, so:
+
+- **§3.8** — `mkdir` is aliased to `mkdir -pv` in this environment
+  (`type mkdir` → `mkdir is an alias for mkdir -pv`). It writes the directory
+  name to stdout. This cost one wrong reading mid-pass (below). Note §3.4's
+  claim about `cp` did not reproduce in the same shell: `type cp` → `/bin/cp`,
+  and `alias | grep '^cp='` is empty. §3.4's *advice* (`command cp -f`, always
+  verify a restore) was followed anyway and the restore was verified.
+- **§3.9** — the `gofmt -l` silent-failure shape from Finding 1, so the next
+  person writing a formatting check does not re-derive it from a third incident.
+
+### Corrections to my own numbers, mid-flight
+
+- **A zero that was my command, not the world.** My first attempt to enumerate
+  `go vet`'s analyzers —
+  `go tool vet help | sed -n '/^Registered analyzers:/,/^$/p'` — returned **0**
+  names, and I reported `comm` output against that empty set before noticing.
+  The range terminated on the blank line that immediately *follows* the
+  `Registered analyzers:` header. Rewritten as an `awk` state machine, sanity-
+  checked against a name whose presence I already knew (`grep -c '^printf$'` → 1),
+  and only then used. Every govet/vet count above comes from the corrected form.
+- **A stray `internal/checkproof` line** in an early proof block looked like
+  `gofmt` output and briefly read as a `gofmt -l` result. It was `mkdir -pv`.
+  Re-derived with stdout and stderr separated; that is §3.8 above.
+- **Hazard §3.2 does not apply in this checkout, and I assumed it did.**
+  `.claude/worktrees/` exists, but `ls -la` shows it holds only symlinks to other
+  repos, `grep -r` does not follow symlinks, and `git worktree list` reports one
+  entry. No recursive command in this pass walked a nested copy.
+
+### Scope-parked — found, deliberately not fixed
+
+1. **`TASKS/INDEX.md:1503-1504`** — *"`nilerr` is enabled today; it never gated
+   because the pre-commit hook runs `golangci-lint run --new`"*, present tense.
+   That hook no longer exists. **Fenced — the Orchestrator's file.**
+2. **`TASKS/ESCALATIONS.md:1001-1002`** and
+   **`TASKS/audit-remediation/README.md:155`** — the *same sentence*, two more
+   copies. Not fixed **on purpose**: the third copy is the fenced one, and
+   repairing two of three would leave the trio inconsistent. All three want one
+   edit by whoever owns `INDEX.md`.
+3. **`docs/audits/2026-08-21-go-quality/audit-golangci.yml:15`** — a comment
+   reading *"NOT used by lefthook's pre-commit `go-lint`"*. Vacuously still true,
+   but it names a retired hook, and unlike the rest of that directory this file
+   is **live**: the nightly gate reads it (`full-repo-quality.yml:130`).
+4. **`.nanite/agents/reviewer-backend.md:22`** — lists `lefthook` pre-commit in a
+   tooling inventory. Not false (the hook exists; it runs formatting), so left.
+5. **`skip_empty`** — untouched, as fenced. `lefthook validate` exits **1** both
+   at `6c139038` and after this pass, with the identical four complaints; my edit
+   added no new validation error.
+6. **`frontend-lint`** — left `skip: true` (`CW-20260816-0087`), as fenced.
+
+### Baseline, at the end of this pass
+
+```
+go build ./cmd/nanite/                       exit 0
+go vet ./...                                 exit 0
+/usr/bin/time -p ./scripts/check.sh          exit 0
+    format  OK   1354 Go files (tracked + untracked, per git ls-files)
+    vet     OK
+    lint    ---  examined nothing  (0 changed .go files vs 77137106 — this
+                                    pass's diff contains no Go file)
+    test    OK   go test ./...  (Tier 1)
+lefthook validate                            exit 1 — pre-existing, unchanged
+```
+
+Two runs of the landing check, both warm, both exit 0: `real 20.88` and
+`real 21.84` (`/usr/bin/time -p ./scripts/check.sh`). Quoted as a pair rather
+than as one figure precisely because a single number here would be re-quoted as
+if it were stable; per-stage seconds vary by a second or two between runs. Well
+inside the operator's 30s-to-two-minutes budget either way.
+
+`go test ./...` ran as the landing check's `test` stage and passed. No migration
+was touched: `git status --porcelain internal/store/migrations/` is empty.

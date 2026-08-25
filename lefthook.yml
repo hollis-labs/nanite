@@ -53,15 +53,43 @@ pre-commit:
 
     go-format:
       # Fail if any staged Go file is not gofmt + goimports clean.
+      #
+      # A tool failure fails this hook loudly. `gofmt -l` prints NOTHING on
+      # stdout when it cannot do its job — binary not on PATH, a file it cannot
+      # parse, a path it cannot read — and an empty stdout is indistinguishable
+      # from "everything is clean" unless the exit status is inspected. That
+      # matters more here than anywhere: commit time is formatting only, so
+      # this is the whole commit-time gate. A hook that can pass vacuously
+      # means commit time gates nothing at all.
+      #
+      # stderr is folded into the captured output so the reason is printable;
+      # the status check is what keeps a tool's error text from being mistaken
+      # for a filename. `scripts/check.sh`'s format stage carries the same
+      # guard over the whole repo.
       glob: "*.go"
       skip_empty: true
       run: |
-        unformatted=$(gofmt -l {staged_files} 2>/dev/null)
+        unformatted=$(gofmt -l {staged_files} 2>&1)
+        status=$?
+        if [ "$status" -ne 0 ]; then
+          echo "ERROR: gofmt did not run cleanly (exit $status). This hook"
+          echo "       cannot pass files it never examined:"
+          printf '%s\n' "$unformatted" | sed 's/^/       /'
+          exit 1
+        fi
         if command -v goimports >/dev/null 2>&1; then
+          imports=$(goimports -l {staged_files} 2>&1)
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "ERROR: goimports did not run cleanly (exit $status). This hook"
+            echo "       cannot pass files it never examined:"
+            printf '%s\n' "$imports" | sed 's/^/       /'
+            exit 1
+          fi
           # Newline separator matters: $(...) strips trailing newlines, so a
-          # bare "$unformatted$(goimports -l ...)" glues gofmt's last filename
-          # onto goimports' first and prints one unusable run-together path.
-          unformatted=$(printf '%s\n%s' "$unformatted" "$(goimports -l {staged_files} 2>/dev/null)")
+          # bare "$unformatted$imports" glues gofmt's last filename onto
+          # goimports' first and prints one unusable run-together path.
+          unformatted=$(printf '%s\n%s' "$unformatted" "$imports")
         fi
         unformatted=$(echo "$unformatted" | sed '/^$/d' | sort -u)
         if [ -n "$unformatted" ]; then

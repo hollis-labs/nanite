@@ -110,6 +110,16 @@ Use `gtimeout` (coreutils) or rely on the tool's own timeout flag.
 
 Go's default is **10 minutes per test binary**. Exceeding it prints `FAIL … 600.7s`, which reads exactly like a test failure. Pass an explicit `-timeout` on any high-count run. This misread has already cost time once.
 
+### 3.8 `mkdir` is aliased to `mkdir -pv` — it writes to stdout
+
+*Found 2026-08-25.* `mkdir -p some/dir` prints `some/dir`. In an interactive transcript that line appears immediately above whatever you ran next, and reads as that command's output — it cost one wrong reading of a `gofmt` result before being caught. Inside `$(...)` it silently contaminates the captured value.
+
+Check with `type mkdir` before trusting interleaved output; use `command mkdir -p` in anything whose stdout you read. **Check the shell you are actually in rather than assuming §3.4's list is complete or current** — in the same shell where this was found, `type cp` reported `/bin/cp` with no alias.
+
+### 3.9 `gofmt -l` prints nothing when it cannot run at all
+
+`gofmt -l` and `goimports -l` write their file list to stdout and their errors to stderr, and a binary that is missing (127), a file they cannot parse (2), or a path they cannot read all produce **empty stdout**. Empty stdout is what "everything is formatted" also looks like. Any check built on `gofmt -l` must inspect the exit status; discarding stderr with `2>/dev/null` and ignoring the status makes a tool failure indistinguishable from a clean tree. This shipped twice in this repo — in `scripts/check.sh`'s format stage and in `lefthook.yml`'s `go-format` hook.
+
 ---
 
 ## 4. Verifying that your verification verifies

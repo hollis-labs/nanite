@@ -382,8 +382,9 @@ Universal agent harness with plugin-per-adapter model. Spec: `docs/superpowers/s
   - `go install golang.org/x/vuln/cmd/govulncheck@latest`
   - `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` (or Homebrew)
 - **Vulnerability scan only:** `make vuln` (runs `govulncheck ./...`)
-- **Legacy pre-commit lint:** `golangci-lint run --new --timeout 30s` (lefthook pre-commit — changed lines only; use `make lint` for whole-repo)
-- **Vet:** `go vet ./...` (via lefthook pre-commit)
+- **Landing check:** `./scripts/check.sh` — `gofmt`/`goimports`, `go vet ./...`, `golangci-lint` scoped to the merge base with `origin/main`, and `go test ./...`. Run it when a feature lands, not on every commit.
+- **Vet:** `go vet ./...` — **nothing runs this for you at commit time.** It is a landing-check stage and a nightly-gate linter (`govet`, `enable-all` minus `fieldalignment`, ratcheted); run it yourself before you land work.
+- **Scoped lint:** `golangci-lint run --new-from-rev "$(git merge-base HEAD origin/main)"` — what the landing check's lint stage runs. Use `make lint` for whole-repo.
 - **Format:** `gofmt` + `goimports` (via lefthook pre-commit)
 - **Run:** `./nanite serve --port 8090 --db ./nanite.db` or `make run`
 - **Run (dev):** `./nanite serve --port 8090 --dev` (skips embedded SPA, use Vite dev server separately)
@@ -416,7 +417,7 @@ The `-dev` flag is **unrelated** to this. It only changes how the SPA is served 
 ## Notes
 
 - **Deploying changes:** Use Cerberus (`cerberus_rebuild nanite-api --reason "..."`). See §Build & Run "Two binaries, only one is live" above for the full footgun explanation.
-- **Pre-commit hooks via lefthook:** `gofmt`, `goimports`, `golangci-lint --new`, `go vet` (parallel). Frontend: `biome check`. Pre-push: `go test ./...`.
+- **Hooks via lefthook:** pre-commit is formatting only — `go-format` (`gofmt` + `goimports` on staged files) and `migration-purity`; `frontend-lint` is `skip: true` (`CW-20260816-0087`). Pre-push runs `go test ./...`, scoped to `main`. Whole-repo `go vet` and `golangci-lint` are **not** on any hook — they are stages of `./scripts/check.sh`.
 - **SPA embedding:** Go binary embeds the built UI from `internal/server/ui_dist/` via `//go:embed`. The `-dev` flag skips this for local development with Vite HMR.
 - **Auth:** Optional basic auth via `NANITE_AUTH_USER` / `NANITE_AUTH_PASSWORD` env vars. Disabled when unset (local dev). `/api/health` is always exempt.
 - **A2A messaging:** SQLite-native via `internal/store/a2a.go`. Nexus/PostgreSQL dependency removed (PR #11).

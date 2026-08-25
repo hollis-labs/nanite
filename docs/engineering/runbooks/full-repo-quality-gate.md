@@ -15,7 +15,8 @@ the `../../libs/<module>` geometry in `go.mod` without a cross-repository
 secret:
 
 - `go-modelsdev` — `7d932798b85145ec93f923e392f5d41762894e8c`
-- `go-envelopes` — `7642d69f64499ea180c0c596a48516e00cd28d46`
+- `go-envelopes` — see the workflow; **re-derive, this pin has moved**:
+  `grep -A2 'repository: hollis-labs/go-envelopes' .github/workflows/full-repo-quality.yml`
 - `go-harness-filters` — `57a6b0919c0c5f06db90b367184988a72c430d39`
 - `go-runtime-events` — `8756744985a6602d6ab1fb0df78d5aabc3920b1b`
 
@@ -26,6 +27,68 @@ was unpushed `7978078`. The operator authorized a release; v0.2.0 now peels to
 workflow pins that exact release commit. The clean Actions-shaped ordinary and
 race suites were rerun against this published state before the pin was recorded
 as resolved.
+
+## What this gate guarantees — read before reporting a result
+
+This gate was stood up during Nanite's **first** audit cycle. Its purpose is to
+show **direction** — are we improving or regressing — against a baseline
+refreshed on 2026-08-25. It is not a release gate, and Nanite is pre-release
+with no consumers. Judge it against that goal, not against a mature CI system.
+
+**Derive the shape yourself rather than trusting this paragraph's numbers:**
+
+```
+grep -c '^      - name:' .github/workflows/full-repo-quality.yml
+```
+
+Most steps set up the environment. Only some assert. As of 2026-08-25, of 17
+steps, 8 assert and 7 of those 8 are sound.
+
+### What it does guarantee
+
+- **Regressions fail.** `compare_counts` in `scripts/quality-ratchet.py` exits
+  non-zero on any per-rule increase and on findings from rule names absent from
+  the baseline. There is no known way for a straightforward regression to pass
+  silently.
+- **Coverage is canaried.** `Assert the discovered package list matches the
+  committed shape` pins the package count handed to every scanner. This is the
+  most load-bearing assertion in the workflow: without it, lint, govulncheck,
+  gosec, deadcode and the race suite can all scan less and still report success.
+- **The lint ratchet cannot pass vacuously.** `Report.Error` is checked, so a
+  `golangci-lint` run that failed to analyze what it was asked to analyze fails
+  instead of reporting zero issues.
+
+### What it does not guarantee — one item, one direction
+
+**The gosec step can record a false improvement.** `gosec` has produced a
+non-reproducible run that dropped 17 findings as a strict subset, with `files`
+and `lines` identical, exit 0 and well-formed JSON — indistinguishable from a
+real improvement. Observed once in 12 runs.
+
+A reduction passes, and the comparator prints guidance to lower the committed
+baseline. **Do not act on that message for a gosec reduction without confirming
+it reproduces.** Lowering the baseline on a spurious decrease permanently
+deletes real findings — the same error as raising a baseline to make a
+regression pass, in the opposite direction.
+
+Because comparison is per-`rule_id`, a same-run regression *in the same rule*
+could in principle be masked by this. Narrow and unlikely, but not zero.
+
+### How to report a gate result honestly
+
+- A green run means: no regressions in any asserting step, at the package count
+  the baseline was calibrated on.
+- A green run does **not** by itself mean a gosec reduction shown in the log is
+  real. Confirm before banking it.
+- Report the run URL and the step that failed. "The gate is red" without a step
+  name is not a finding.
+- **Do not describe this gate as untrustworthy.** It has one known soft spot,
+  named above, in one direction. Anything broader is not supported by evidence.
+
+### Known intermittents — report and move on, do not chase
+
+- `internal/memory` failing with `SQLITE_BUSY` — Torque `CW-20260825-0001`.
+  Root-caused in tesseract and fixed there; Nanite's pin has not picked it up.
 
 ## Checks
 
@@ -161,35 +224,29 @@ indistinguishable from a good one: exit 0, empty `Golang errors`, well-formed
 JSON, and identical `files`/`lines` stats. Averaging or taking the lowest would
 bake a permanently-red baseline into the gate.
 
-## Blocker: the gate cannot resolve a private module dependency
+## Module resolution — every external dependency resolves without a credential
 
-*Observed 2026-08-24 at `4f3d38c4`, the first two times the workflow ever ran:*
-[32788460848](https://github.com/hollis-labs/nanite/actions/runs/32788460848)
-and [32788631043](https://github.com/hollis-labs/nanite/actions/runs/32788631043).
-Both failed identically at **Discover tracked Go packages**, 42s and 50s in:
+The gate carries **no repository secret, no `GOPRIVATE`, and no vendoring**.
+Confirm before assuming otherwise:
 
 ```
-internal/memory/service.go:22:2: github.com/hollis-labs/tesseract@v0.7.1-0.20260518032333-bbce958849ac:
-  invalid version: git ls-remote -q --end-of-options https://github.com/hollis-labs/tesseract ...
-  fatal: could not read Username for 'https://github.com': terminal prompts disabled
+grep -in 'secret\|GOPRIVATE\|token' .github/workflows/full-repo-quality.yml
 ```
 
-`github.com/hollis-labs/tesseract` is a **private** repository (`gh api
-repos/hollis-labs/tesseract --jq .visibility`), and it is the only private
-external module in `go.mod` — the other twenty `hollis-labs` requires are all
-public. It is required by version, not by a local `replace`, so the four
-`libs/` checkouts above do not cover it, and a pseudo-version cannot come from
-the public proxy. `go list ./...` therefore fails before the package filter runs
-and every later step is skipped.
+That returns nothing. Every `hollis-labs` module in `go.mod`, including
+`github.com/hollis-labs/tesseract`, resolves from the public proxy. Check any
+one of them with:
 
-Nothing downstream of that step has ever executed in CI. Every claim about this
-gate's behavior — in this runbook and elsewhere — still rests on local
-reproduction only.
+```
+gh api repos/hollis-labs/tesseract --jq .visibility        # public
+```
 
-Resolving it needs a credential decision (a repository secret with read access
-to `hollis-labs/tesseract`, plus `GOPRIVATE`, or vendoring, or making the module
-public). That is an operator call, deliberately not made here.
+**If `Discover tracked Go packages` ever fails with `could not read Username
+for 'https://github.com'`, that is this property breaking** — a module in
+`go.mod` has become unreachable without a credential. Identify which one from
+the error, check its visibility, and treat it as a dependency decision
+(publish, vendor, or add a secret plus `GOPRIVATE`) rather than a workflow bug.
 
-The failure mode is at least the correct one: the step is fail-closed by design,
-so a partial `go list` never reaches the filtering loop and never produces a
-short package list that would have scanned less while reporting success.
+The step is fail-closed by design: a partial `go list` never reaches the
+filtering loop, so it cannot produce a short package list that scans less while
+reporting success. A failure here stops the run rather than shrinking it.

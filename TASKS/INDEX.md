@@ -54,9 +54,29 @@ not staged-scoped), `migration-purity`. **pre-push:** `go test ./...` — 44.87s
 cold, 4.32s fully cached, per `lefthook.yml`'s own measured header.
 `frontend-lint` is **deliberately disabled** (`skip: true`): it invoked an
 unrelated binary and greenlit everything, so it was switched off honestly
-rather than left looking like a gate. A tracked `lefthook.yml` installs nothing
-by itself — **a fresh clone or a new worktree has no checks at all until
-someone runs `lefthook install`.**
+rather than left looking like a gate.
+
+**Worktrees inherit the hooks; fresh clones do not.** A tracked `lefthook.yml`
+installs nothing by itself, so a fresh clone has no checks until someone runs
+`lefthook install`. A **worktree of an already-installed clone is covered** —
+`core.hooksPath` is set to an absolute path into the parent clone's
+`.git/hooks`, which every worktree shares. Verify in any worktree with:
+
+```
+git config --get core.hooksPath      # absolute path into the parent clone
+```
+
+Tested 2026-08-25 by committing into a throwaway worktree: `go-format`,
+`go-vet` and `go-lint` all fired and the commit was correctly rejected.
+
+**But a worktree outside `~/dev/hollis-labs/apps/` cannot pass `go-lint`.**
+`go.mod`'s four `replace` directives use relative `../../libs/<module>` paths,
+which do not resolve from an arbitrary worktree location, so `go-lint` reports
+16 unrelated `undefined: envelopes` typecheck errors and blocks every commit.
+An agent hitting this will be tempted into `--no-verify`, which disables *all*
+the hooks including the ones that matter. Either place worktrees as siblings
+under `~/dev/hollis-labs/apps/`, or land `TASKS/gate-integrity/01`-`03`, which
+remove the relative replaces entirely and make worktree location irrelevant.
 
 **4. The quality gate works now — and it is a detector, not a merge gate.** Run
 [`32791971817`](https://github.com/hollis-labs/nanite/actions/runs/32791971817)
@@ -64,8 +84,11 @@ was the **first green run in the gate's existence**: all 18 steps, including
 the aggregate race suite, at `61698b4e` on 2026-08-25. It fires on `schedule`
 (07:17 UTC) and `workflow_dispatch` **only**, and no branch protection is
 available on this repo — so the local hooks in (3) are the only automatic check
-standing between writing code and landing it on `main`. Dispatch the gate by
-hand after landing anything significant:
+standing between writing code and landing it on `main`. **Before reporting a gate result, read
+`docs/engineering/runbooks/full-repo-quality-gate.md`'s "What this gate
+guarantees" section** — it states precisely what a green run does and does not
+prove, and it is the answer to anyone characterizing the gate broadly rather
+than by step. Dispatch the gate by hand after landing anything significant:
 
 ```
 gh workflow run "Full-repo quality gate" --ref main
@@ -1120,6 +1143,135 @@ CRUD/admin UI for authoring these reflexes.
 **Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
 this is the planning checkpoint — present to the operator for review before any worker is
 dispatched.
+
+## Gate Integrity (`TASKS/gate-integrity/`, outside the Phase 0-9 sequence)
+
+**The first batch planned after the AD-24 freeze was lifted.** Unlike its sibling batches it
+implements no `docs/engineering/architecture/NN-*.md` design — it is drawn from the hand-off
+register the pre-unfreeze batch left behind (`pre-unfreeze-batch-summary.md` §8, plus §7's
+process findings), triaged and re-verified against live code by the post-unfreeze planning
+session on 2026-08-25. A sibling to `TASKS/teams/`, `TASKS/scheduling/`,
+`TASKS/agent-host-acp/`, `TASKS/plugin-system/`, `TASKS/skills/`, `TASKS/loops/`,
+`TASKS/turn-vs-run/`, `TASKS/feedback-carrying-denial/`, and `TASKS/code-mode/`. See
+`TASKS/gate-integrity/README.md` for the full read-first list, the nine load-bearing
+corrections, and the scope fence.
+
+**This is the tail end of standing up a first quality gate, not a rescue.** Of the workflow's 17
+steps, 8 assert and **7 of those 8 are sound** — regressions fail correctly, the 109-package
+canary guards every scanner's coverage, and the lint ratchet's vacuous pass was closed by
+`audit-remediation`'s `0023`. Four soft spots remain: the gosec step can bank a *fake
+improvement* (a spurious decrease is indistinguishable from a real one, and the comparator
+advises lowering the baseline — the one action that makes a transient flake permanent); CI
+validates against sibling source that is in no published release; the runbook still reproduces
+the vacuous pass on the human-facing side; and some load-bearing citations point at moved lines
+and one file that does not exist. None of this is a blanket trust problem and no task here
+should be written or reviewed as though it were.
+
+**Ordered by wave, not by task number.** Task numbers are stable ids; priority is the wave.
+The roadmap this serves, set by the operator 2026-08-25: **serial now → parallel git worktrees
+when they work → Docker soon.** All of these tasks get done — ordering is the point, volume is
+not. Operator: *"We can do all the tasks, that was never the issue. It was always about fixing
+the crucial things that prevent us from working in standard ways."*
+
+| Task | Wave | Status | Depends on |
+|---|---|---|---|
+| `08-lighten-commit-time-checks` | **A — first** | not-started | none |
+| `01-drop-published-sibling-replaces` | **A** | not-started | none |
+| `02-release-harness-filters-and-runtime-events` | **A** | not-started | none (**sibling repos, not nanite**) |
+| `03-drop-remaining-replaces-and-sibling-checkouts` | **A** | not-started | `01`, `02` (both real, not sequencing) |
+| `04a` — gosec advisory reword only (step 6 of `04`) | **A** | not-started | none |
+| `07-migration-number-collision-guard` | **B — before parallel worktrees** | not-started | none |
+| *(container image + how checks run inside it)* | **C — with Docker** | not scoped | `01`-`03` |
+| `04b` — gosec wrapper + coverage floor (steps 1-5 of `04`) | **D** | not-started | none |
+| `05-runbook-report-error-gap` | **D** | not-started | none |
+| `06-citation-and-config-drift-sweep` | **D** | not-started | none |
+
+**`01`-`03` is the keystone, and was undersold when this batch was first written.** Filed as
+CI-pin hygiene, it is actually the change that makes the repo self-contained — and four things
+depend on that: a second person can `git clone && go build` (today that fails unless they
+reproduce the exact `hollis-labs/{apps,libs}` layout); git worktrees work outside
+`~/dev/hollis-labs/apps/`; Docker containers work without mounting siblings at a relative path;
+and CI validates released source. All four have the same root cause — `go.mod`'s four relative
+`../../libs/<module>` replaces.
+
+**`08` is first because the hooks are days old and already being bypassed.** They were activated
+2026-08-24 in `2b3b0216`; within the 6 commits since, `4f3d38c4` required `--no-verify` because
+`go-lint` flagged two intentional constants. `--no-verify` is all-or-nothing — it disables
+`go-format`, `go-vet`, `go-lint` and `migration-purity` together. Commit-time checks become
+formatting only; whole-repo analysis moves to a landing script run when a feature lands. Operator
+decision, 2026-08-25. Re-derive both numbers before repeating them.
+
+**Everything in this batch was verified at `77137106`** and ships the command that produced
+each number. Re-derive before acting — these are citations about citations, the class of error
+most likely to recur while being fixed.
+
+**The pinned-sibling coupling is removable, not merely checkable — the register's recommendation
+is under-scoped.** All four sibling working trees are clean, and two pins (`go-envelopes`
+v0.3.0, `go-modelsdev` v0.2.0) are byte-identical to tags already published on the proxy, so
+those replaces resolve to the same source either way and come out today at zero behavioral risk
+(`01`). The other two — `go-harness-filters`, `go-runtime-events` — are each pinned **one commit
+past their newest tag**, so CI currently validates against source in no release; one tag each
+(`02`) makes them removable too (`03`). End state deletes four `replace` directives and four
+checkout steps, making the drift impossible rather than detectable. `01` also closes Torque
+`CW-20260816-0090` (tagged `blocking-merge`, open since 2026-08-16) and corrects `go.mod:20`,
+which still requires `go-envelopes v0.1.1` while building v0.3.0's source.
+
+**The gosec finding `04` exists for is not in the register.** `compare_counts`
+(`scripts/quality-ratchet.py`) fails on increases but treats a **reduction** as a pass, printing
+*"lower the committed baseline to preserve them."* So the known 193-vs-210 nondeterminism — a
+strict subset of 17 findings vanishing with `files`/`lines` identical and exit 0 — passes the
+gate and invites an operator to permanently delete those findings. That is `INDEX.md` point 6's
+warning inverted, with the tooling pointing the wrong way. Note the coverage floor cannot catch this
+(files/lines matched); only repeat-run comparison can. They are two defects sharing one workflow
+step and `04` must not conflate them — and the floor is defense-in-depth behind the 109-package
+assertion, not the gap the register implies. The cheapest high-value piece is rewording the
+advisory itself. The register also calls the nondeterminism
+lead-free; it is not — the gate never sets `-concurrency` (gosec defaults to 10) and the
+eliminated hypothesis was the *build cache*, an unrelated mechanism.
+
+**Two register items are already resolved — do not schedule them.** `CW-20260824-0001` and
+`CW-20260824-0005` are `done` in Torque (verified 2026-08-25T00:47), not `todo` as the register
+states. And `pre-unfreeze-batch-summary.md` §8 bills "the quality gate cannot run at all" as the
+single highest-value post-unfreeze item, which §0 of that same document contradicts — the gate
+ran green at `61698b4e`. §8 was written before §0 was appended and never reconciled.
+
+**`07` is the task that makes parallel batch work safe, and it is the only one of these that
+guards an *unrecoverable* failure.** Everything else the gate catches is directional — found on
+the next manual run, fixed in a follow-up. A bad migration number is a service that fails to
+start on every existing deployment. Nothing guards it today: `migration-purity` greps staged
+file *contents* for a `VALUES` clause and never reads a filename, and it structurally cannot be
+fixed in place because two worktrees each see only their own staged file.
+`internal/store/store.go:153` builds the goose provider without `WithAllowOutofOrder`, so a
+number below a database's highest applied version is a hard boot error, not a back-fill.
+
+**Also load-bearing for parallel work: worktree isolation is currently broken.** Worktrees *do*
+inherit the hooks (`core.hooksPath` is absolute — tested 2026-08-25, correcting the claim in
+point 3 above), but `go.mod`'s relative `../../libs/<module>` replaces do not resolve from a
+worktree outside `~/dev/hollis-labs/apps/`, so `go-lint` fails with ~16 unrelated typecheck
+errors and the natural escape is `--no-verify`, which disables every hook at once. `01`-`03`
+fix this as a side effect, which is a better argument for them than the CI-pin drift they were
+written around.
+
+**Deliberately not in this batch, with reasons in the README's scope fence:** branch protection
+and real merge gating (an operator cost/plan decision, surfaced not planned — see point 4 above);
+gosec root-cause archaeology; the go-envelopes half-migrated enum; the tesseract bump; the
+`frontend-lint` repair (`CW-20260816-0087`); the fresh-clone `lefthook install` gap; and the
+~25 drifted migration-filename citations in landed Work Logs, which are historical records
+rather than live claims.
+
+**Parallelization.** Wave A runs largely concurrently: `08` touches `lefthook.yml` plus docs,
+`02` is in sibling repos entirely, `04a` touches `scripts/quality-ratchet.py`. Two real overlaps —
+`01` and `03` share `go.mod`, `go.sum` and the workflow (sequence `01` → `02` completes → `03`),
+and `08` and `04a` both touch docs describing hook/gate behavior. **Do not use out-of-tree
+worktrees to parallelize this batch until `01`-`03` lands** — that breakage is what is being
+fixed. Work serially, or place worktrees under `~/dev/hollis-labs/apps/`. `01` and `03` are the
+only tasks whose acceptance genuinely needs a CI run, because what they change *is* what CI
+resolves.
+
+**Wave A kickoff is written and approved for dispatch:**
+`docs/engineering/orchestrator-kickoffs/gate-integrity-wave-a.md` (operator-approved 2026-08-25,
+serial execution, subagent dispatch). Waves B, C and D are planned but **not** authorized by that
+kickoff — the operator reviews Wave A's handoff before Wave B starts.
 
 ## Audit Remediation (`TASKS/audit-remediation/`, outside the Phase 0-9 sequence)
 

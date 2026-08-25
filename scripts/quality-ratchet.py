@@ -143,12 +143,16 @@ def compare_counts(label: str, baseline: dict[str, int], actual: Counter[str]) -
     if reductions:
         # A reduction is the improvement direction, and for most linters it is
         # exactly what remediation looks like: fix the misspellings, the count
-        # falls, the baseline follows.  The one step that can also produce a
+        # falls, the baseline follows.  The one step *known* to also produce a
         # decrease nobody earned is standalone gosec, which has emitted a run
-        # dropping a subset of its findings with identical Stats and a clean
-        # exit.  See `docs/engineering/runbooks/full-repo-quality-gate.md`,
-        # "What this gate guarantees", for the size of that drop and how often
-        # it was seen -- deliberately not restated here.
+        # dropping a subset of its findings with identical Stats.files and
+        # Stats.lines and a clean exit.  (Not the whole Stats block: it also
+        # carries `found`, which equals len(Issues) and therefore moved with
+        # the drop.  That is exactly why 04b step 3 keys its floor on
+        # files/lines and not on counts.)  See
+        # `docs/engineering/runbooks/full-repo-quality-gate.md`, "What this
+        # gate guarantees", for the size of that drop and how often it was
+        # seen -- deliberately not restated here.
         #
         # A repeat run is what tells the two cases apart, so the advisory asks
         # for one instead of singling out a linter: it costs a real improvement

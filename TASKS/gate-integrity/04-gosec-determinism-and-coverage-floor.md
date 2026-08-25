@@ -111,7 +111,11 @@ correct whether or not step 1 converges, and they are the deliverable.
    with no mechanism behind it decays, and that decay is the problem being
    fixed here.
 3. **Add the coverage floor to `gosec_command`**, keyed on `Stats.files` and
-   `Stats.lines` against committed baseline values. Re-derive those values from
+   `Stats.lines` against committed baseline values. Note a floor already exists
+   on the **lint** side (`verify_lint_coverage`, total findings against 50% of
+   the Stage 1 baseline) — different side, different key. Do not mistake one for
+   the other; `grep -n 'Stats\|Golang errors\|NumFiles' scripts/quality-ratchet.py`
+   still returns nothing, so the gosec floor genuinely does not exist. Re-derive those values from
    a fresh run rather than copying `files=661` / `lines=165247` out of this
    file — those were measured before this batch and are a hint that expires.
    Make a missing or non-numeric `Stats` block a hard failure, not a default of

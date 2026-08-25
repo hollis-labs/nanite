@@ -34,32 +34,34 @@ sign-off block lives here instead:
 | **Design input** | `docs/audits/2026-08-21-go-quality/REPORT.md` (audit, 2026-08-21) + `docs/audits/2026-08-21-go-quality/REMEDIATION-GUIDE.md` (advisor guide, vendored into the repo by this planning pass) |
 | **Task inventory** | Created by a dedicated task-creation pass (61 files), merged in `8258176e` |
 | **Planned** | 2026-08-21 — this pass: sequencing, dependency ordering, parallelization, Wave 0 gate, architect-decision queue, prevention table |
-| **Approved for implementation** | ☑ **Approved 2026-08-23.** Operator has explicitly authorized dispatches through Wave 6. Later waves still require explicit resumption under the development freeze. |
-| **Blocking prerequisites** | (1) ~~The dev freeze (AD-24)~~ — **decided and in effect 2026-08-21**, see below. (2) Wave 0 complete, **including AD-01 through AD-04 decided**. (3) ~~AD-23~~ decided *accept* — evidence rescued and committed (`e02f52c9`). |
+| **Approved for implementation** | ☑ **Approved 2026-08-23.** Operator explicitly authorized dispatches through Wave 6; the later waves were resumed by explicit operator go-ahead under the development freeze, which was **lifted 2026-08-25**. The batch has since closed — see `docs/audits/2026-08-24-audit-remediation-close/`. |
+| **Blocking prerequisites** | All three cleared. (1) ~~The dev freeze (AD-24)~~ — decided and in effect 2026-08-21, **lifted by the operator 2026-08-25**, see below. (2) ~~Wave 0 complete, including AD-01 through AD-04 decided~~. (3) ~~AD-23~~ decided *accept* — evidence rescued and committed (`e02f52c9`). |
 
 An Orchestrator reading this file must treat an unchecked approval box as a
 hard stop, and confirm with the operator directly rather than inferring
 approval from the batch's thoroughness.
 
-### The development freeze (AD-24, decided 2026-08-21)
+### The development freeze (AD-24, decided 2026-08-21 — lifted 2026-08-25)
 
-**ALL tasks in the repository are frozen** — every batch, every phase, every
-`TASKS/` folder. Not scoped to audited packages, not scoped to this batch's
-dependencies. **`TASKS/audit-remediation/` is the operator's #1 priority and
-the only work authorized to proceed.**
+**Lifted.** The repo-wide freeze ran 2026-08-21 → 2026-08-25 and no longer
+constrains anything. Nothing in this file blocks a dispatch on it.
 
-- **Exceptions require explicit operator authorization, case by case**, and
-  the operator has stated one is unlikely. An agent must never grant itself
-  one. Size, low risk, "it's only docs," and "this batch was already planned"
-  are not exceptions — if work seems to need one, stop and ask.
-- **The operator is the gate for resuming.** Resumption is not automatic on
-  any condition: not a wave boundary, not "all critical/high closed," not a
-  green test run, not `TASKS/INDEX.md` showing a batch complete. There is no
-  derived trigger.
-- **In-flight work at the time of the freeze finishes**; nothing new starts.
+While it was in force: ALL tasks in the repository were frozen — every batch,
+every phase, every `TASKS/` folder, not scoped to audited packages or to this
+batch's dependencies. `TASKS/audit-remediation/` was the operator's #1 priority
+and the only work authorized to proceed. Exceptions required explicit
+operator authorization case by case; the operator was the gate for resuming,
+with no derived trigger; in-flight work finished and nothing new started.
 
-Mirrored as a banner at the top of `TASKS/INDEX.md`, because the freeze
-governs every batch tracked there — not just this one.
+**The exit rule held as written.** The freeze was lifted by an operator
+decision — "green to proceed" — not by any condition being met. The
+pre-unfreeze batch and the first green full-repo quality-gate run informed that
+call without triggering it.
+
+The lift is recorded in AD-24's resolution note in `ARCHITECT-DECISIONS.md`, in
+the 2026-08-25 entry in `TASKS/ESCALATIONS.md`, and as the banner at the top of
+`TASKS/INDEX.md` — which also carries a **"What changed during the freeze"**
+section every resuming batch must read.
 
 ## Read before starting any task here
 
@@ -212,7 +214,7 @@ executed successfully.
 
 | Unit | Wave | Tasks | Count | Dispatch precondition |
 |---|---|---|---:|---|
-| **W0** | 0 | `00/01`–`00/02` | 2 | Dev freeze in effect (AD-24 ✅). AD-23 decided (✅). **AD-01–AD-04 are resolved during this window** as an operator-owned third track — see below. |
+| **W0** | 0 | `00/01`–`00/02` | 2 | Dev freeze was in effect (AD-24 ✅; lifted 2026-08-25). AD-23 decided (✅). **AD-01–AD-04 were resolved during this window** as an operator-owned third track — see below. |
 | **W1** | 1 | `01/*`, `02/*`, `03/01`, `12/02` | 6 | W0 closed **and** AD-01–AD-04 all `decided`. |
 | **W2a** | 2 | `04/*`, `05/01` | 6 | W0 closed. |
 | **W2b** | 2 | `06/*`, `07/*` | 7 | W0 closed. AD-14, AD-17, AD-18 decided. |

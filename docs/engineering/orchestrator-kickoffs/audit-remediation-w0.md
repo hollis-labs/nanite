@@ -1,3 +1,21 @@
+> # ⚠️ Dated document — the freeze it describes was lifted 2026-08-25
+>
+> This kickoff was written 2026-08-21, while the AD-24 repo-wide development
+> freeze was in force. **That freeze has been lifted, and the Audit Remediation
+> batch it belongs to has closed.** The text below is preserved unedited as a
+> record of what this wave was dispatched against.
+>
+> One instruction in it must not be followed. Below, this file says that if the
+> operator asks you to touch another batch you should "point them at the freeze
+> rather than complying." **That is void.** It was correct while the freeze
+> stood; today it would have you refuse a legitimate request by citing a rule
+> that no longer exists. Every other batch is cleared to proceed — see
+> `TASKS/INDEX.md`'s "What changed during the freeze" section.
+>
+> Unlike the Wave 1-8 kickoffs, this one asserts the freeze's status directly
+> rather than deferring to `TASKS/INDEX.md`, which is why it needs this notice
+> and they do not.
+
 You are the Orchestrator for **Wave 0 (`W0`) of the Audit Remediation batch**
 (`TASKS/audit-remediation/00-revalidate-baseline/`) — the first of eleven
 dispatch units implementing the remediation program derived from

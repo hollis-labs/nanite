@@ -1,3 +1,18 @@
+> # ⚠️ SUPERSEDED — this is a 2026-08-22 snapshot, not current state
+>
+> **For current state, read `TASKS/INDEX.md`** — its banner and its "What
+> changed during the freeze" section.
+>
+> Everything below this line is preserved exactly as it stood on 2026-08-22 and
+> has not been updated since. Two things it says are no longer true: the
+> **AD-24 development freeze was lifted by the operator on 2026-08-25**, and the
+> audit-remediation batch it describes as paused on `06/03` has since **closed**
+> (closing snapshot: `docs/audits/2026-08-24-audit-remediation-close/`). Read it
+> as a dated record of that day, not as instructions. Do not act on its
+> pointers, counts, or commit references without re-deriving them.
+
+---
+
 # Where we are (2026-08-22, mid audit-remediation — PAUSED on `06/03`)
 
 Picking this up after compaction: read this whole file first, then the

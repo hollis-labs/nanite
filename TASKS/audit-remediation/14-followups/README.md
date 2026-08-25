@@ -66,8 +66,11 @@ their wave's predecessors only.
 > but "113/113" reads as fully reviewed and it is 109. Tracked as
 > `CW-20260824-0008`.
 >
-> Creating these items is not dispatching them. The AD-24 freeze stands, and
-> every Torque task above was created `manual=true` and cannot be scheduled.
+> Creating these items is not dispatching them. Every Torque task above was
+> created `manual=true` and cannot be scheduled — that is still true, and is
+> what keeps them operator-controlled. It was originally also backed by the
+> AD-24 freeze; that freeze was lifted 2026-08-25, so `manual=true` is now the
+> only thing holding them.
 
 `TASKS/ESCALATIONS.md` records **thirteen** follow-up candidates as of 2026-08-24;
 ten remain open and three are now closed.

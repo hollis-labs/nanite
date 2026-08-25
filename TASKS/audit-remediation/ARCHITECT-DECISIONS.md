@@ -70,7 +70,7 @@ a named trigger) | `moot` (Wave 0 revalidation removed the question).
 | AD-21 | Which historical lint classes become blocking | `12/01` | GO-HYG-001 | 7 | **decided** |
 | AD-22 | Repo-wide `gofmt` sweep: now, never, or ratchet-only | `13/03` | GO-HYG-001, GO-CHAT-007 | 8 | **decided** |
 | AD-23 | Accept ~8 MB of audit evidence into the repo | `00/02` step 1 | — (process) | 0 | **decided** |
-| AD-24 | Dev-freeze scope and exit criteria | **every batch in the repo** | — (process) | 0 | **decided** |
+| AD-24 | Dev-freeze scope and exit criteria | **every batch in the repo** | — (process) | 0 | **decided** · freeze **lifted 2026-08-25**, see the resolution note |
 | AD-26 | Untracked `safego.Go` spawns: adopt an owner, or accept fire-and-forget | `04/04` (Part B) | GO-SVCCORE-002 | 2a | **decided** |
 | AD-27 | Autocomplete `repo_path` enumeration: constrain, or accept the local-operator trust model | `08/09` | GO-API-001 | 3 | **decided** |
 | AD-28 | Catalog archive fetch: host/scheme restriction — **and** CIDR-denylist consolidation | `08/09` | GO-API-003, **GO-SEC4-007** | 3 | **decided** |
@@ -1454,3 +1454,49 @@ tracking: migration `135` remains unclaimed by Plugin System (per the root
 `HANDOFF.md`). If frozen batches resume later, their provisional claims need
 re-checking against whatever this batch lands. This batch claims **no**
 migration numbers (see the batch README).
+
+**Resolution note, 2026-08-25 — the freeze was lifted.** Appended; the decision
+text above is untouched and stays correct as the record of what was decided on
+2026-08-21.
+
+The operator lifted the repo-wide freeze on **2026-08-25**: "green to proceed."
+Every batch and phase is unfrozen. The banner at the top of `TASKS/INDEX.md` and
+the do-not-boot banners on all 18 files in
+`docs/engineering/orchestrator-kickoffs/` were replaced accordingly, as AD-24's
+own text said they should be once the operator lifted it.
+
+**What the exit actually was.** Two things preceded the call, and it is worth
+being precise that neither *caused* it:
+
+- A **six-task pre-unfreeze batch** landed on `main`: the verification-discipline
+  and testing-workflow docs, the quality-ratchet fix that fails a lint report
+  which did not scan the repo, the published migration claiming rule with stale
+  claims annotated in place, `lefthook install` run for the first time with the
+  hooks made to actually enforce, the repo-wide US-English migration
+  (`cancelled` → `canceled`, persisted enum included, migration `148`), and the
+  baseline refresh.
+- The **full-repo quality gate ran green for the first time in its existence** —
+  run `32791971817`, at `61698b4e`, all 18 steps including the aggregate race
+  suite.
+
+**AD-24's "no derived trigger" rule held.** The freeze was lifted by an operator
+decision, not by a condition being met. The pre-unfreeze batch closing and the
+gate turning green are exactly the sort of facts AD-24 named as *non*-triggers
+("not a green test run, not `TASKS/INDEX.md` showing a batch complete"). They
+informed the operator's judgment; they did not fire it. Nothing in this repo
+lifted the freeze automatically, and nothing was built that could have.
+
+**Standing caveat carried forward.** The gate runs on `schedule` and
+`workflow_dispatch` only and there is no branch protection, so it detects
+regressions rather than gating merges. The newly installed local lefthook hooks
+are the only automatic check between writing code and landing on `main`. See
+`TASKS/INDEX.md`'s "What changed during the freeze" section, and the 2026-08-25
+entry in `TASKS/ESCALATIONS.md`.
+
+**Migration numbering after the freeze.** The note above says migration `135`
+"remains unclaimed by Plugin System." Still true as a fact about who claimed it,
+but no longer the useful framing: `135` is a **permanently burned hole** — Nanite
+builds goose without `WithAllowOutofOrder`, so a migration numbered below a
+database's highest applied version is a hard boot failure. The claiming rule is
+now published at the top of `TASKS/INDEX.md`; frozen batches resuming with
+provisional claims must re-derive against it, not reuse the gap.

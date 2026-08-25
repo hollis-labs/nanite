@@ -1969,3 +1969,61 @@ the pinned `gosec` v2.28.0 and `golangci-lint` v2.11.4, on `darwin/arm64`.
 **Follow-up:** Until the credential question is answered, the gate is a detector that has never
 detected anything. The nightly 07:17 UTC cron will keep failing at the same step. Worth resolving
 before anyone treats a green (or absent) gate result as evidence.
+
+---
+
+## 2026-08-25 — AD-24 lifted: the repo-wide development freeze is over, by operator decision
+
+**Raised by:** the operator, directly. Not raised as a question — recorded here because AD-24's own
+entry (2026-08-21, above, unchanged) said the freeze ends by an operator decision and by nothing
+else, and that ending needs the same record the start got.
+
+**Question / mismatch:** None. This is the resolution half of the 2026-08-21 entry.
+
+**Resolution:** **Operator decision, stated directly on 2026-08-25: "green to proceed."** The
+repo-wide freeze is lifted. Every batch and phase is unfrozen; `TASKS/audit-remediation/`, the only
+batch authorized to run during the freeze, has closed.
+
+**AD-24's exit rule held exactly as written.** Resumption was not automatic on any condition, and
+nothing in the repo fired it. Two things preceded the call and neither triggered it:
+
+- **A six-task pre-unfreeze batch closed.** It landed the verification-discipline and
+  testing-workflow docs; the quality-ratchet fix that fails a lint report which did not scan the
+  repo; the published migration claiming rule, with stale claims in frozen batches annotated in
+  place rather than silently renumbered; `lefthook install` run for the first time, with
+  `frontend-lint` switched off honestly rather than left inert; the repo-wide US-English migration
+  (`cancelled` → `canceled`, persisted enum included, migration `148`); and the baseline refresh.
+  That sweep also **corrected its own headroom figure to 122, not the ~129 previously claimed** — a
+  stored number that had been carried rather than re-derived, which is the exact failure class
+  `docs/engineering/failure-modes.md` was written from.
+- **The full-repo quality gate ran green for the first time in its existence** — run
+  [`32791971817`](https://github.com/hollis-labs/nanite/actions/runs/32791971817) at `61698b4e`, all
+  18 steps including the aggregate race suite. Three blockers had to clear in sequence to get there,
+  each one hidden behind the last, and each one only visible once the previous was fixed:
+  1. **`github.com/hollis-labs/tesseract` is private** — the sole private external module in
+     `go.mod`, required by pseudo-version rather than by a local `replace`, so package discovery
+     died at step 9 and no downstream step had ever executed. Logged as its own entry above
+     (2026-08-24).
+  2. **A phantom `go-queue v0.1.2`** that existed only in one machine's module cache and was never
+     published. It resolved locally and could not resolve anywhere else; pinned to `v0.1.0`, the
+     only published version.
+  3. **A workflow-pinned `go-envelopes` SHA that predated the enum change**, so CI compiled the
+     repo's new `canceled` spelling against a module that still only knew `cancelled`. Bumped to
+     the v0.3.0 ref.
+
+**Follow-up:** The banners AD-24 planted were replaced, not deleted — all 18 kickoffs in
+`docs/engineering/orchestrator-kickoffs/` and the `TASKS/INDEX.md` banner now say the freeze was
+lifted **and** that the repository moved while the batch was parked, which is the fact a resuming
+Orchestrator most needs and which a bare deletion would have destroyed. `TASKS/INDEX.md` gained a
+**"What changed during the freeze"** section as the single anchor those banners point at. AD-24 in
+`ARCHITECT-DECISIONS.md` gained a resolution note; its decision text is unaltered.
+
+**Standing caveat — the gate detects, it does not gate.** The full-repo quality gate runs on
+`schedule` (07:17 UTC) and `workflow_dispatch` only, and no branch protection is available on this
+repo. The lefthook hooks installed during the pre-unfreeze batch are therefore the **only**
+automatic check between writing code and landing on `main` — and a tracked `lefthook.yml` installs
+nothing by itself, so a fresh clone or a new worktree has no checks at all until someone runs
+`lefthook install`. Dispatch the gate by hand after landing anything significant:
+`gh workflow run "Full-repo quality gate" --ref main`. One failure signature is known and should not
+be chased: `internal/memory` `SQLITE_BUSY` (Torque `CW-20260825-0001`), root-caused in `tesseract`
+and fixed there, not yet picked up by Nanite's pin.

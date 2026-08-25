@@ -4,21 +4,24 @@
 dispatched to a worker until both tasks here are `reviewed` **and** AD-01
 through AD-04 are `decided` (see "The third track" below).
 
-**The repo-wide development freeze is in effect** (AD-24, decided 2026-08-21).
-All tasks in all batches are frozen; `TASKS/audit-remediation/` is the
-operator's #1 priority and the only authorized work. Exceptions require
-explicit operator authorization. The operator — not a wave boundary or any
-other derived condition — is the gate for resuming. See the banner at the top
-of `TASKS/INDEX.md`.
+**The repo-wide development freeze has been lifted** (AD-24, decided
+2026-08-21, lifted by the operator 2026-08-25). While it was in force, all
+tasks in all batches were frozen and `TASKS/audit-remediation/` was the
+operator's #1 priority and the only authorized work. It blocks nothing now —
+see the banner at the top of `TASKS/INDEX.md`, and its **"What changed during
+the freeze"** section.
 
 The Go quality audit was run against commit `8feeee5c`. Development did not
 stop. As of this batch's planning pass (2026-08-21), `git diff --stat
 8feeee5c..HEAD` reports **40 commits, 156 files changed, +24,891/-539 lines** —
 and two more batches were still landing code when this folder was first
-written. **Those have since finished and the freeze is now in effect**
-(AD-24) — specifically so this revalidation runs against a baseline that stays
-put. Confirm that directly (`git log`, `git status`, `git worktree list`)
-before starting; a moving baseline invalidates the whole task.
+written. **Those finished and the freeze took effect** (AD-24) —
+specifically so this revalidation ran against a baseline that stayed put. That
+window has closed: the freeze was lifted 2026-08-25 and `main` moves again, so
+anyone re-running this work now must re-establish a stable baseline by some
+other means and confirm it directly (`git log`, `git status`,
+`git worktree list`) before starting. A moving baseline invalidates the whole
+task.
 
 That drift is not incidental. It lands squarely on packages the audit found
 defects in: `internal/store/` (+275 lines in `skills.go` alone, two new

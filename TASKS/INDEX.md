@@ -1,33 +1,86 @@
 # Execution Index
 
-> # 🛑 DEVELOPMENT FREEZE IN EFFECT — 2026-08-21
+> # ✅ DEVELOPMENT FREEZE LIFTED — 2026-08-25
 >
-> **ALL tasks are frozen, in every batch and every phase.** Not scoped to
-> audited packages, not scoped to `TASKS/audit-remediation/`. Every `TASKS/`
-> folder tracked in this file is frozen: Phase 0-9, and every sibling batch
-> (`filesystem-snapshots`, `plugin-system`, `loops`, `turn-vs-run`,
-> `feedback-carrying-denial`, `code-mode`, `skills`, and the rest).
+> The repo-wide freeze recorded as **AD-24** on 2026-08-21 was lifted by the
+> operator on **2026-08-25** — "green to proceed." Every batch and phase tracked
+> in this file is unfrozen. `TASKS/audit-remediation/`, the one batch that was
+> authorized to run during the freeze, has closed.
 >
-> **`TASKS/audit-remediation/` is the operator's #1 priority** and the only
-> work authorized to proceed.
+> **AD-24's exit rule held exactly as written: the operator is the gate.** The
+> freeze ended because the operator said so, not because a condition was met.
+> The pre-unfreeze batch and the first green quality-gate run informed that
+> call; neither triggered it. There was, as AD-24 insisted, no derived trigger.
 >
-> **Exceptions require explicit operator authorization, case by case.** The
-> operator has stated an exception is unlikely. Do not infer one. "This task
-> is tiny," "this is only a doc change," "this unblocks something else," and
-> "this batch was already planned" are **not** exceptions.
+> **Do not read this as "resume where you left off."** Every batch parked here
+> sat for four days while `main` moved underneath it. Read **"What changed
+> during the freeze"** immediately below before dispatching anything, and
+> re-derive every number and line citation in whatever batch section you are
+> booting against.
 >
-> **The operator is the gate for resuming.** Resumption is *not* automatic on
-> any condition — not a wave boundary, not "all critical/high findings
-> closed," not a green test run, not this file showing a batch complete. Work
-> resumes when the operator says it resumes, and by no other trigger.
->
-> **In-flight work at the time of the freeze** (two batches, in their home
-> stretch as of 2026-08-21) finishes. Nothing new starts.
->
-> Recorded as **AD-24** in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`
-> and in `TASKS/ESCALATIONS.md`'s 2026-08-21 freeze entry. If you are an
-> Orchestrator booting against any section of this file, this banner overrides
-> that section's own "not yet dispatched, ready to go" language.
+> Full record: **AD-24** and its resolution note in
+> `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`, and the **2026-08-21** and
+> **2026-08-25** entries in `TASKS/ESCALATIONS.md`.
+
+---
+
+## What changed during the freeze
+
+The freeze ran **2026-08-21 → 2026-08-25**. `TASKS/audit-remediation/` closed
+(closing snapshot: `docs/audits/2026-08-24-audit-remediation-close/`), and a
+six-task pre-unfreeze batch landed on `main` underneath every parked batch.
+Six things are true now that were not true when the parked kickoffs and task
+files were written.
+
+**1. Migration numbers — the claiming rule is now published.** It is the
+section directly below this one; read it before writing any migration. The
+one-line version: **next free is one past the highest, never the lowest unused
+integer**, and `135` is a permanently burned hole — a migration numbered there
+is a hard boot failure on every existing deployment, not a back-fill. Any
+migration number sitting in a parked task file is an expired hint. Re-derive it
+at the moment you create the file.
+
+**2. US English is the project standard.** `cancelled` → `canceled` landed
+repo-wide in `4f3d38c4`, including the **persisted enum** — migration
+`148_us_english_canceled_status.sql` rebuilds four CHECK constraints and
+backfills six columns — plus a `go-envelopes` v0.3.0 release. A parked branch
+or task file that still writes the British spelling is stale, and doubly so
+wherever it is a status literal handed to the store rather than prose.
+
+**3. Git hooks are live, for the first time ever.** `lefthook install` was run
+in `2b3b0216`. **pre-commit:** `go-format`, `go-lint`
+(`golangci-lint run --new-from-rev HEAD`), `go-vet` (`go vet ./...`, whole-repo,
+not staged-scoped), `migration-purity`. **pre-push:** `go test ./...` — 44.87s
+cold, 4.32s fully cached, per `lefthook.yml`'s own measured header.
+`frontend-lint` is **deliberately disabled** (`skip: true`): it invoked an
+unrelated binary and greenlit everything, so it was switched off honestly
+rather than left looking like a gate. A tracked `lefthook.yml` installs nothing
+by itself — **a fresh clone or a new worktree has no checks at all until
+someone runs `lefthook install`.**
+
+**4. The quality gate works now — and it is a detector, not a merge gate.** Run
+[`32791971817`](https://github.com/hollis-labs/nanite/actions/runs/32791971817)
+was the **first green run in the gate's existence**: all 18 steps, including
+the aggregate race suite, at `61698b4e` on 2026-08-25. It fires on `schedule`
+(07:17 UTC) and `workflow_dispatch` **only**, and no branch protection is
+available on this repo — so the local hooks in (3) are the only automatic check
+standing between writing code and landing it on `main`. Dispatch the gate by
+hand after landing anything significant:
+
+```
+gh workflow run "Full-repo quality gate" --ref main
+```
+
+**5. One known intermittent gate failure — do not chase it.** `internal/memory`
+failing with `SQLITE_BUSY` (Torque `CW-20260825-0001`). Root-caused in
+`tesseract` and fixed there, but Nanite's pin has not picked the fix up yet. If
+you see that signature, it is known: report it and move on.
+
+**6. The baseline was refreshed and now reflects reality.**
+`.github/quality/full-repo-baseline.json` was rewritten in `7d20556d` — gosec
+`G104` 103 → **0**, `misspell` 429 → **2**. **Never raise a baseline to make a
+regression pass.** The baseline is the thing a regression is measured against;
+moving it does not fix the regression, it deletes the measurement.
 
 ---
 
@@ -1312,8 +1365,11 @@ migration on disk at planning time is `137` (`TASKS/skills/`). `135` remains unc
 architect decision turns a task schema-touching (`07/03`'s retention policy is the one plausible
 candidate), re-list `internal/store/migrations/` at that moment and claim the next free number then.
 
-**Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline, this is
-the planning checkpoint. Three blocking prerequisites before any dispatch: (1) the dev freeze is in
-effect (AD-24); (2) Wave 0 is closed; (3) the operator has checked the approval box in the batch
-README's `## Status` block. AD-23 (rescue the audit evidence) is urgent and **independent of all
-three** — it should be decided and acted on immediately.
+**Planned 2026-08-21; dispatched, and closed since.** Per `EXECUTION-PROCESS.md`'s Phase A
+discipline, this was the planning checkpoint. Three blocking prerequisites stood before any
+dispatch: (1) the dev freeze was in effect (**AD-24** — decided 2026-08-21, **lifted 2026-08-25**;
+see the banner at the top of this file); (2) Wave 0 closed; (3) the operator checked the approval
+box in the batch README's `## Status` block (☑ approved 2026-08-23). All three cleared, the batch
+ran, and it has closed — closing snapshot at `docs/audits/2026-08-24-audit-remediation-close/`.
+AD-23 (rescue the audit evidence) was urgent and **independent of all three**; it was decided
+*accept* and the evidence committed (`e02f52c9`).

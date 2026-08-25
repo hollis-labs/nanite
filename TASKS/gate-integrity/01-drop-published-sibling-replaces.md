@@ -131,7 +131,8 @@ Proxy column from
 `GOPROXY=https://proxy.golang.org go list -m -versions github.com/hollis-labs/<n>`
 (exit 0 for both).
 
-**One thing the task file's block would have gotten wrong.** Both tags are
+**One thing the task file's block would have gotten wrong.**
+*[Corrected — this claim is false. See Review notes, W1.]* Both tags are
 *annotated*, so `git ls-remote origin refs/tags/<t>` returns the tag object,
 not the commit — `65939f99...` for `v0.3.0` and `222c848f...` for `v0.2.0`,
 neither of which equals the pin. Peeled, they do:
@@ -369,6 +370,8 @@ is precisely what the pinned checkouts prevented.
    fact.
 2. **Annotated-tag peeling**, above — the task file's and the batch README's
    `ls-remote`-shaped checks would have reported a spurious mismatch.
+   *[Corrected — neither file contains an `ls-remote` check; both use
+   `git rev-list -n1`, which peels. See Review notes, W1.]*
 
 ### Deliberately not done
 
@@ -471,8 +474,10 @@ The Work log's "Corrections to the record" asserted the task file's and the batc
 README's checks would misread annotated tags. Neither uses `ls-remote`; both use
 `git rev-list -n1`, which peels. The hazard is real and belongs to the worker's
 own `ls-remote` command. Recorded correctly as `agent-verification-discipline.md`
-§3.10. **The Work-log passages at the former `:134-142` and `:370-371` overstate
-this; read them as scoped to `ls-remote` only.**
+§3.10. **The Work-log passages at the former `:134-142` and `:370-371` assert a
+defect in the task file and the batch README. Neither contains an `ls-remote`
+check, so there is no defect there to scope down — those two passages are simply
+wrong, and are marked in place rather than rewritten.**
 
 ### W2 — corrected everywhere, and it was a live hazard to `03`.
 

@@ -131,7 +131,7 @@ correct — the hazard is specific to `ls-remote` and to `cat-file`-style lookup
 `hollis-labs/libs` siblings use annotated tags, so this bites every pin-versus-tag comparison in
 this repo.
 
-### 3.11 `GOPRIVATE` silently defeats a `GOPROXY=` prefix (Nanite-specific)
+### 3.11 `GOPRIVATE` silently defeats a `GOPROXY=` prefix
 
 *Found 2026-08-25.* `go env GOPRIVATE` is `github.com/hollis-labs/*`, and `GOPRIVATE` **defaults
 `GONOPROXY` to the same value**. `GONOPROXY` beats a `GOPROXY=` prefix, so
@@ -161,6 +161,19 @@ curl -sS https://proxy.golang.org/github.com/hollis-labs/<m>/@v/list
 
 Or clear both overrides: `GOPRIVATE= GONOPROXY=none GOPROXY=https://proxy.golang.org go list …`.
 Note CI sets none of these, so CI resolves through the proxy regardless of what your shell does.
+
+`curl -sS` without `-f` exits 0 on a 404, so **check for the version string, not for command
+success.** An unreachable host is loud (`curl: (6) Could not resolve host`, exit 6); a missing
+module is a 404 with a `not found:` body and exit 0.
+
+**`GOPRIVATE` also defaults `GONOSUMDB`** — `go env GONOPROXY GONOSUMDB` returns the same value for
+both. So hashes for these modules are computed from whatever your local fetch returned and are never
+verified against sum.golang.org, and the module cache is populated by direct VCS fetch
+(`Origin.VCS=git` in the `.info` file) rather than from the proxy. **A local `go.sum`, and a local
+`GOMODCACHE`, are not evidence about published bytes** — comparing a sibling checkout against the
+cache compares git to git. Clear `GOPRIVATE` to make the checksum DB apply. This is the sibling half
+of the same hazard and it has already produced one near-tautological "byte-identity" proof in this
+repo.
 
 ---
 

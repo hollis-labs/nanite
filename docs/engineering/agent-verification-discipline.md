@@ -74,6 +74,37 @@ When you correct a citation, say so in your report. That is a finding, not house
 
 Any number or code citation you write into a durable artifact carries either its command or `verified-at: <commit>`.
 
+### 2.4 A line number describes your tree, not the commit
+
+`grep -n` reports where something sits **in the working tree you ran it in**. If that tree has
+uncommitted changes to the file, the number is correct for you and wrong for the next reader — and
+nothing in the number says which.
+
+**Any line number leaving your session** — a brief, a task file, a doc, a commit message — is derived
+against a revision:
+
+```
+git show "${rev}:path/to/file" | /usr/bin/grep -n 'thing'      # braced — see 3.18
+```
+
+**Scope.** This applies whenever the tree you derived from has uncommitted changes to that file,
+**whether they are yours or another session's**. It does **not** apply to your own scratch
+verification against a clean tree; there `grep -n` is the honest form and `git show` is ceremony.
+The precondition is mechanically checkable — `git status --short -- <file>` — which is why it is the
+right one; *"am I alone in this tree"* often cannot be answered at all.
+
+**The case people don't anticipate is their own.** A session wrote `:285` into a task file and its
+own edits in the same turn moved the passage to `:294`. The citation was stale before it finished
+being written. That passage has now been at `:224`, `:285` and `:294` across three commits, all by
+one session. *"Another session moved it"* is intuitive; *"I moved it myself"* is not, and this entry
+exists for the second.
+
+**Where a number is unavoidable, cite by name instead** — a `grep -n -F '<distinctive phrase>'`
+form rather than a line. It survives every edit above the passage, it re-derives itself when run,
+and when the passage is genuinely gone it reports **absence** rather than silently pointing at
+whatever now occupies that line. A wrong line number and a correct one are indistinguishable on the
+page; a grep that returns nothing is not.
+
 ---
 
 ## 3. Environment hazards
@@ -216,7 +247,11 @@ it reports success in exactly the check meant to rule that out.
 `~/dev/hollis-labs/` remains (`find /private/tmp /tmp "$TMPDIR" -maxdepth 1 -type l`). If one
 reappears, that is a signal, not a coincidence — see Torque `CW-20260825-0019`.
 
-### 3.13 The shell you verify in is not the shell your code runs in
+### 3.13 The matcher is not the one you assumed
+
+Three ways this bites, and the remedy differs for each. The common shape is that you get a different matcher — or a different corpus — than the one you wrote the pattern for, and the mismatch reports as **no match**, which reads as a clean negative.
+
+**(a) A different binary.** The shell you verify in is not the shell your code runs in.
 
 `grep` at an agent prompt is a **shell function** from Claude Code's shell snapshot, resolving to
 ugrep. Shell functions do not cross into child processes, so anything with a shebang gets
@@ -245,6 +280,24 @@ Use `-F` for literal patterns, `-P` where a real regex is wanted, or `/usr/bin/g
 The general rule outlives the instance: an interactive profile's functions and aliases are invisible
 to every child process, so any verification typed at a prompt may not describe what a shebanged
 script does.
+
+**(b) A different dialect, same binary.** BSD `grep` is **BRE**: a bare `|` is a literal pipe, not
+alternation. `grep -c 'cannot catch|does not catch' <file>` searches for that whole string and
+returns `0`, which reads as "absent."
+
+```
+printf 'cannot catch\n' | /usr/bin/grep -c  'cannot catch|does not catch'   # 0   BRE: | is literal
+printf 'cannot catch\n' | /usr/bin/grep -cE 'cannot catch|does not catch'   # 1
+```
+
+**(c) A corpus with line breaks your phrase doesn't have.** A `grep -F` for a phrase that wraps
+across two source lines returns `0` while the phrase is plainly present. Match a short fragment that
+cannot wrap.
+
+**The reflex, not the awareness.** `-E` by default for anything with alternation, `-F` for anything
+literal, `/usr/bin/grep` when you want POSIX BRE specifically — and a positive control on every
+`→ 0`. Naming a danger without giving a reflex produces an entry you read *after* the mistake: this
+one was in the file, and cost two more wrong answers in the two days after it was written.
 
 ### 3.14 A scratch clone of the real repo has the real repo as `origin`
 
@@ -449,6 +502,61 @@ if workers[0].Status != want { … }
 A bare `for … range` over an empty slice asserts nothing and passes. That is a real defect found in this repo, not a hypothetical.
 
 ---
+
+### 4.4 When success and total failure print the same bytes
+
+A tool whose clean output is empty or minimal often produces **the same output when it did not run at
+all**, with the discriminator on a stream nobody reads — an exit status, or stderr. Three instances
+in this repo:
+
+- `gofmt -l` prints nothing whether the tree is clean, a file is unparseable, a path is missing, or
+  the binary is absent. Only the exit status separates them: `0 / 2 / 2 / 127`.
+- A broken `golangci-lint` run prints `0 issues.` on a cold cache — byte-identical to success — with
+  the diagnosis only on stderr.
+- `gosec` under `-no-fail` returns a **well-formed report missing a strict subset of findings**, with
+  `files`/`lines` intact and `Golang errors` empty, when an SSA panic is recovered. Its only trace is
+  two lines on stderr.
+
+**The dangerous form: the coinciding condition is one you did not choose, cannot see, and meet
+first — and the natural act of checking destroys it.** Warm the cache and the broken lint run becomes
+obviously broken; cold is the *first* run, which is when someone debugging arrives. A hazard that
+appears only on a first run and vanishes on every retry **gets filed as unreproducible**, because the
+obvious way to check is to run it again. `gofmt` does not have this property; the lint case does, and
+that is what makes it worse rather than merely equal.
+
+**Two mitigations, and the second is the one to copy.**
+
+*Reader-side* — say how to interpret the ambiguous output where the reader actually is. Necessary
+when the tool is not yours to change.
+
+*Tool-side* — **don't emit an ambiguous result at all.** `scripts/check.sh` makes *examined nothing* a
+first-class third outcome (`grep -n 'examined nothing' scripts/check.sh`) rather than relying on
+anyone to read `$?`, which is exactly what this entry says nobody does. That countermeasure was built
+in this repo, for this class, and then the class was hit twice more without anyone recognising it —
+which is the argument for a pattern rather than a third log entry.
+
+**Scope.** This is about tools whose *clean* output is empty or minimal. Where success output is
+substantive, an empty result is already visibly wrong and a third outcome is noise that trains people
+to ignore the real ones.
+
+**The diagnostic, which transfers past these tools:** when something is unreproducible, ask **what the
+first run had that the retry didn't** — cold cache, empty state, unwarmed index, first connection.
+*"Could not reproduce"* is evidence about the retry's conditions, not only about the original.
+
+### 4.5 A control built from the assertion's own inputs proves nothing
+
+The sharpest instance of 4.2 found in this repo, because the artifact at fault is **the check written
+to prevent exactly this class**.
+
+A stderr assertion greps for two fixed marker strings. Its positive control built the "should match"
+fixture by **interpolating the same marker variables** the assertion greps with. So a *misspelled*
+marker matched its own fixture, the control passed, and the assertion could never have matched the
+real tool. Demonstrated with a mutant — `Panic while running SSA analyzer` for `when` — which exited
+`0` against a stub that was emitting a genuine panic line.
+
+**A positive control must be built from the artifact, not from the assertion's own inputs.** The
+fixture is now a literal copy of what the tool emits. Note what that still does not cover: the tool
+renaming its message upstream. Say so rather than implying the control is total.
 
 ## 5. Amplification has directions
 

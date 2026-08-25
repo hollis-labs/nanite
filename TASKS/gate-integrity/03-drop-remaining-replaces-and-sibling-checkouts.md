@@ -289,3 +289,103 @@ from the module proxy** rather than from pinned sibling checkouts.
   required by this task and not done.
 
 ## Review notes
+
+**Reviewed 2026-08-25 at `e820e5c7` by a fresh reviewer dispatch** — no shared
+context with the implementing worker. Transcribed by the Orchestrator; the
+reviewer agent type is read-only by design. *Transcribed late: `INDEX.md` was
+marked `reviewed` and `c169830f` recorded the PASS before this section was
+written, which left the keystone task carrying an approval with no record
+behind it. Caught by the doc-writer, not by me.*
+
+**Verdict: PASS.** The keystone landed and it is real.
+
+**Re-derived independently, each against a positive control at `51a10cc6`:**
+`grep -c '=>' go.mod` → 0 (control: 2); `grep -c ' => \.\./\.\./libs/' go.mod`
+→ 0 (control: 2); `grep -c 'actions/checkout' <workflow>` → 1 (control: 3);
+`grep -n 'libs/' <workflow>` → no match (control: 3); the four module names →
+0 (control: 2). Both requires at `v0.1.1`. No `libs/` reference survives
+anywhere in `.github/`.
+
+**The decoupling proof was re-run, stricter than the worker's.** A clone whose
+`../../libs` resolves to a confirmed-absent path, a fresh empty `GOMODCACHE`,
+and `GOPROXY=https://proxy.golang.org` **with no `,direct`** — so a VCS
+fallback was impossible, not merely unlikely. `go build`, `go vet`,
+`go mod verify`, `go mod tidy -diff` and `go test ./...` (99 ok, 0 FAIL) all
+exit 0.
+
+**The negative control discriminates.** Re-adding the two replaces produces
+`replacement directory ../../libs/go-runtime-events does not exist` and exit 1
+— which is what the proof would have produced had decoupling not worked.
+Restored and verified byte-for-byte by `shasum`.
+
+**The gate run.** `32864133579`: conclusion `success`, `event`
+`workflow_dispatch`, `headSha` `834c9506…` byte-identical to the landing
+commit — not an earlier tree. 17 step objects all `success`; `Check out Nanite`
+the only checkout.
+
+**"First proxy-only run" established from the log, not the summary.**
+`Set up Go` prints `GOPRIVATE=''`, `GONOPROXY=''`, `GONOSUMDB=''`,
+`GOPROXY='https://proxy.golang.org,direct'`; the log carries
+`go: downloading …go-runtime-events v0.1.1` and `…go-harness-filters v0.1.1`,
+349 `go: downloading` lines, and no cache *restore* — a cold module cache. The
+preceding run `32856005953` was at `f08ac62a`, whose tree still had 2 replaces
+and 2 sibling checkouts.
+
+**Confirming evidence the worker did not report:** the proxy's `.info` for each
+new tag pins the exact commit the deleted `ref:` used — `57a6b091…` and
+`8756744…`. The switch from pinned checkout to proxy version is
+**source-preserving**, not merely green. And the committed `go.sum` is the
+sumdb-verified one: all four new lines match `sum.golang.org`'s log byte for
+byte.
+
+**All three of the worker's durable self-corrections confirmed.** `GOPRIVATE=`
+(empty) is inert — `go env GOENV` is `~/Library/Application Support/go/env`,
+whose entire content is `GOPRIVATE=github.com/hollis-labs/*`; `=none` works,
+and is the documented idiom per `go help private`. `Origin.VCS` does not
+discriminate: the reviewer went beyond curling the proxy and `cmp`'d a real
+direct-fetch cache against a real proxy-only cache — **identical**. And the
+"churn for all four modules" correction is right; a locally-replaced module has
+no `go.sum` entry at all, so each pair lands in the task that removes its own
+replace. **Nothing in the corrected §3.11 is still wrong.**
+
+### F1 — the `pre-push` glob was a silent fail-open, broader than first reported
+
+`glob: "*.go"` excluded every non-Go input compiled into the binary: 147
+migration `.sql` files loaded through an `embed.FS`, plus `all:framework`,
+`all:templates`, `all:ui_dist`, `examples/*.json`, plugin schemas, 11
+`plugin.yaml` files, scaffold templates, agent profiles and runner scripts. A
+migration-only push to `main` ran no tests at all — the batch README's "one
+*unrecoverable* failure class". Reproduced deterministically with a
+discriminating control. `code-quality.md`: *"A silent fail-open is worse than a
+loud failure."* **Fixed by reopening `08`; see its fifth-pass Work log.**
+
+The reviewer also discarded two of its own earlier attempts at that proof as
+vacuous — `--files-from-stdin` does not feed the pre-push glob, and with
+`origin` removed lefthook cannot compute the push set and runs regardless.
+
+### F2, F3 — stale documents this change created. Both fixed by the Orchestrator.
+
+`INDEX.md` still told readers the four replaces existed and an out-of-tree
+worktree could not build — the exact audience, at the exact decision, reading
+the opposite of what `01`-`03` bought. And the runbook printed a derivation
+command beside a number that command no longer produced (said 17, returns 13;
+`01` took it to 15, `03` to 13, all four removed steps being checkouts, so the
+8-assert/7-sound split is unchanged).
+
+### F5 — an over-generalized sentence in the Work log
+
+It says the clone sat "at a path with no `libs/` anywhere above it." Literally
+false on this machine at the time: `/private/tmp/libs` was a symlink to the
+real sibling tree. **The proof is unaffected** — the resolved path the worker
+actually enumerated and checked was absent — but the generalized phrasing could
+be reused somewhere it does not hold. Recorded as hazard §3.12, and the symlink
+has since been removed (Torque `CW-20260825-0019`).
+
+### Correction to this review
+
+Its "outside this review" note called `docs/engineering/standards/patterns.md`
+and `code-quality.md` stubs with no usable content. They self-label "Stub." and
+carry a `## Not yet documented` section, but both hold substantive bullet lists
+— `code-quality.md` is where the *"silent fail-open"* line F1 cites as
+authority actually lives. The reviewer's own text said as much; the summary of
+it here originally did not.

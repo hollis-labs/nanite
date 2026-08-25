@@ -1276,6 +1276,13 @@ pass. Reported to the operator instead; squashing or re-messaging is theirs.
 
 The practical consequence for the reader: `517721fa` is the commit where the
 `pre-push` glob was removed, despite its subject line.
+*[Corrected — `517721fa` is not in `main`
+(`git merge-base --is-ancestor 517721fa HEAD` exits non-zero). The Orchestrator
+resolved the incident after this log was written, by soft-resetting and
+splitting it into `60cfb1be` (the discipline doc alone) and **`aedbc296`** (the
+`pre-push` widening plus the three docs describing it). That was safe to do
+where the worker's own rewrite would not have been: nothing was pushed and no
+other writer was live in the checkout. **`aedbc296` is the commit.**]*
 
 ### Corrections to my own numbers and to the dispatch's
 

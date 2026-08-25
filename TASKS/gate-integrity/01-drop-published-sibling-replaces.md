@@ -534,8 +534,17 @@ same. `Makefile:24,27,31` is a **third** hardcoded `../../libs/go-envelopes`
 call site alongside the two `scripts/*.mjs` ones, and `make install` depends on
 `generate-envelopes`, so it breaks in the same fresh-clone case.
 
-**Process gap the reviewer hit:** `docs/engineering/standards/patterns.md` and
-`standards/code-quality.md` are both stubs whose only heading is *"Not yet
-documented"*, yet `EXECUTION-PROCESS.md`'s review criteria point every reviewer
-at them as the checklist for the regression category. Two reviews in this batch
-have now had to substitute the criteria named inline instead.
+**~~Process gap the reviewer hit:~~ Retracted by the Orchestrator, 2026-08-25.**
+This said `docs/engineering/standards/patterns.md` and `standards/code-quality.md`
+are "stubs whose only heading is *Not yet documented*", leaving
+`EXECUTION-PROCESS.md`'s review criteria pointing at an empty checklist. **That
+is wrong.** Both files open with the word "Stub." and close with a
+`## Not yet documented` section naming what is still missing, but each carries a
+substantive bullet list in between — `wc -l` returns 14 and 12. `code-quality.md`
+is in fact where *"A silent fail-open is worse than a loud failure"* lives, the
+line task `08`'s own review later cited as authority. The checklist works; it is
+partial, which is what those files say about themselves.
+
+I propagated this without checking it, and nearly carried it into the Wave B
+handoff as a process finding. Caught by the doc-writer. The two files are
+unchanged this wave.

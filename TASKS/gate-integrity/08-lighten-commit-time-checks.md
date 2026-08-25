@@ -1054,3 +1054,289 @@ inside the operator's 30s-to-two-minutes budget either way.
 
 `go test ./...` ran as the landing check's `test` stage and passed. No migration
 was touched: `git status --porcelain internal/store/migrations/` is empty.
+
+---
+
+## Fifth pass — 2026-08-25, REOPENED: the `pre-push` `glob` was a silent fail-open
+
+This task was closed and is being reopened to fix a defect found downstream of
+it, in a fresh review of `03`. **Status stays `implemented`** (it already read
+that at the start of this pass, `sed -n '4p'` → `**Status:** implemented`).
+
+Started from `c169830f` (`git rev-parse HEAD`), **clean tree**
+(`git status --porcelain` → empty), on `main`, in the main checkout, no
+worktree. Installed lefthook is **2.1.4** (`lefthook version`). Nothing was
+pushed to `origin`, no `git stash` was run at any point, and
+`~/dev/hollis-labs/libs/` was not touched.
+
+### The defect
+
+`pre-push`'s `go-test` carried `glob: "*.go"`. That glob matches no `go.mod`, no
+`go.sum`, and none of the non-Go inputs compiled into the binary. Derived at
+`c169830f`:
+
+```
+grep -rn '^//go:embed' --include='*.go' . | grep -v node_modules | wc -l   ->  22
+grep -rln '^//go:embed plugin.yaml' --include='*.go' . | grep -v node_modules | wc -l -> 11
+ls internal/store/migrations/*.sql | wc -l                                 -> 147
+```
+
+Those 22 directives pull in the 147 migrations (behind `internal/store/store.go`'s
+`//go:embed migrations/*.sql`), plus `all:framework`, `all:templates`,
+`all:ui_dist`, `examples/*.json`, the plugin JSON schema, 11 `plugin.yaml`
+files, scaffold templates, agent profiles and the Python workflow-runner
+scripts. So a **migration-only push to `main` ran no tests at all**, and printed
+`go-test (skip) no matching push files` — which reads as a benign, correct skip.
+`docs/engineering/standards/code-quality.md` names that shape: a silent
+fail-open is worse than a loud failure.
+
+### The decision, and the alternative that was rejected
+
+Operator decision, 2026-08-25: **drop the `glob` entirely** and let
+`only: - ref: main` carry the scoping. Every push to `main` runs
+`go test ./...`, whatever is in it.
+
+Adding `go.mod`/`go.sum` to the glob was considered and rejected before this
+pass began: it fixes only the case that happened to be noticed, leaves the 147
+migrations and every embedded asset uncovered, and creates a hand-maintained
+enumeration that goes stale against the next `go:embed` addition. The accepted
+cost is that a docs-only push to `main` also runs the suite. Measured in the
+main checkout at this pass:
+
+```
+go clean -testcache && /usr/bin/time -p go test ./...   ->  real 41.72   exit 0
+/usr/bin/time -p go test ./...                          ->  real  4.40   exit 0
+```
+
+### `skip_empty` — removed from `go-test`, kept on the three pre-commit commands
+
+**Removed here, and the removal was established empirically rather than
+assumed.** Three reasons, in order of weight:
+
+1. **With no `glob` there is no file list for it to act on.** Verified rather
+   than reasoned: a *variant* config carrying no `glob` but keeping
+   `skip_empty: true` was built and run against a docs-only push set on `main` —
+   `✔️ go-test (8.36 seconds)`, the suite ran. The key changes nothing in this
+   configuration.
+2. **It is not in lefthook 2.1.4's schema at all.** `lefthook validate` exits 1
+   with `skip_empty: No values are allowed because the schema is set to 'false'`
+   for every command carrying it, and `lefthook dump` omits it. The dump is
+   discriminating, not silent about everything: it renders `glob:` for
+   `go-format` while omitting `skip_empty` there too.
+3. **Even if it were honored it would be wrong here.** Its documented meaning is
+   "skip when the filtered file list is empty," which is the exact fail-open
+   this pass exists to remove.
+
+Effect on `lefthook validate`: **4 complaints before, 3 after** — `go-test`'s is
+gone, `go-format`/`migration-purity`/`frontend-lint` still carry theirs. That
+non-zero exit is pre-existing and unchanged in kind; dropping the remaining
+three stays parked (see below), as it was in the fourth pass.
+
+### What changed
+
+Line numbers below were re-derived at `c169830f` immediately before editing with
+`grep -n 'skip_empty\|^pre-push:\|    go-test:\|glob:\|only:\|- ref: main\|run: go test' lefthook.yml`.
+
+- **`lefthook.yml`** — `go-test` (block at `170`-`197` before the edit) loses
+  `glob: "*.go"` (`195`) and `skip_empty: true` (`196`). It now carries exactly
+  `only: - ref: main` and `run: go test ./...`; confirmed by `lefthook dump`,
+  which renders nothing else under `pre-push.commands.go-test`. Its comment
+  block is rewritten to state the one trigger, to say plainly that there is **no
+  `glob` deliberately** and why, to carry the two counts *with their commands*
+  rather than as bare figures, and to record the rejected alternative and the
+  accepted cost. The header's `skip_empty` paragraph (`38`-`45` before the edit)
+  drops the now-false example *"a docs-only push on `main` prints `go-test
+  (skip) no matching push files`"*, says **three** commands rather than four, and
+  gains a "Push time is branch-scoped, not file-scoped" statement so a reader of
+  the header alone gets the rule.
+- **`CLAUDE.md:41`** (`grep -n 'pre-push' CLAUDE.md`) — the `**pre-push:**`
+  paragraph. Was: *"scoped to `main` via `only: - ref: main`. A push from a WIP
+  branch reports `go-test (skip) by condition`; a docs-only push on `main`
+  reports `(skip) no matching push files`."* Now: every push to `main`, branch is
+  the only scoping, `(skip) by condition` is the only skip, and why a file filter
+  here is a fail-open. The stamped `9591c1a6` timing block below it was left
+  alone — re-deriving it was not this pass's scope and it carries its own command.
+- **`AGENTS.md:84`** (`grep -n 'pre-push' AGENTS.md`) — same correction, shorter.
+- **`docs/engineering/testing-workflow.md:83`** (`grep -n 'pre-push' docs/engineering/testing-workflow.md`)
+  — §3's "Where each tier actually runs" prose. It was not false, but it said
+  only *"scoped to `main`"*; now *"on every push to `main`, scoped by branch and
+  by nothing else"*, and it points at `lefthook.yml` for the reason there is no
+  file filter. In scope as a document describing the hook set.
+
+`TASKS/INDEX.md` was **not** touched — fenced. Replacement text for point 3 is
+in the completion report.
+
+### Proofs — a real clone, a real upstream, both directions
+
+Two earlier attempts at proving this defect were vacuous and are not repeated:
+`lefthook run pre-push --files-from-stdin` does **not** feed the pre-push glob,
+and with `origin` removed lefthook cannot compute a push set and runs the
+command regardless. Both produce meaningless results.
+
+Setup instead: a `--no-hardlinks` **bare** clone of this repo used as `origin`,
+and a working clone made from it, both under the session scratchpad. Per §3.12
+the resolved sibling path was checked rather than inferred —
+`ls -la <scratchpad>/libs` → `No such file or directory`, and
+`ls -la <scratchpad>/gate08/libs` → same. (`/private/tmp/libs` **does** exist and
+is a symlink to `~/dev/hollis-labs/libs`; the clone is nowhere near it.) The
+clone's `origin/main` and `HEAD` both start at `c169830f`; the module has no
+`replace` directives (`grep -n 'replace' go.mod` → no output), and
+`go build ./cmd/nanite/` succeeds there. Each case is one commit on top of
+`origin/main` touching exactly one file, and the push set is printed with
+`git diff --name-only origin/main..HEAD` before every run. Nothing was pushed.
+
+The `lefthook.yml` under test for the "after" runs is the **shipped bytes**, not
+a paraphrase: `git show 517721fa:lefthook.yml` extracted to the scratch dir,
+`git hash-object` → `d1640fbc635d9b5d780fef28016e0167fbb0871e`, equal to
+`git rev-parse 517721fa:lefthook.yml`, and `shasum` equal to the worktree file
+(`1a980b6e…`).
+
+**Before, at `c169830f` — the reproduction.**
+
+| push set | branch | `lefthook run pre-push --no-auto-install` |
+|---|---|---|
+| `go.mod` | main | `go-test (skip) no matching push files` — 0.04s |
+| `internal/store/migrations/147_…sql` | main | `go-test (skip) no matching push files` — 0.04s |
+| `README.md` | main | `go-test (skip) no matching push files` — 0.04s |
+| `internal/version/scratchproof.go` | wip | `go-test (skip) by condition` — 0.03s |
+| `internal/version/scratchproof.go` | **main** | **`✔️ go-test (46.68 seconds)`** |
+
+The last row is the §4.2 positive control: without it, five skips would be
+indistinguishable from a harness that cannot make the command run at all. The
+`wip` row deliberately carries a `.go` file, so its skip is attributable to the
+branch condition and not to an empty file set.
+
+**After, on the shipped bytes.**
+
+| push set | branch | result |
+|---|---|---|
+| `go.mod` | main | `✔️ go-test (43.00 seconds)` — **the case that started this** |
+| `internal/store/migrations/147_…sql` | main | `✔️ go-test (32.21 seconds)` — **the case that matters most** |
+| `README.md` | main | `✔️ go-test (23.92 seconds)` — the accepted cost, on the record |
+| `internal/version/scratchproof.go` | wip | `go-test (skip) by condition` — 0.04s |
+
+The `wip` row is the one that matters in the other direction: `only: - ref: main`
+still carries the scoping, so a narrow fail-open has not been traded for a wide
+one.
+
+**The discriminating control — one push set, two configs, back to back.** Same
+clone, same commit `0749e637` on `main`, push set exactly
+`internal/store/migrations/147_remove_untouched_official_catalog_source.sql`;
+only `lefthook.yml` differs between the two runs:
+
+```
+########## PARENT COMMIT'S lefthook.yml (c169830f — glob: "*.go") ##########
+      only:
+        - ref: main
+      glob: "*.go"
+      skip_empty: true
+      run: go test ./...
+│  go-test (skip) no matching push files
+summary: (done in 0.04 seconds)
+
+########## THIS TASK'S lefthook.yml (no glob, no skip_empty) ##########
+      only:
+        - ref: main
+      run: go test ./...
+┃  go-test ❯
+ok  	github.com/hollis-labs/nanite/internal/store	10.020s
+summary: (done in 42.55 seconds)
+✔️ go-test (42.55 seconds)
+```
+
+`go clean -testcache` was run between them, so `internal/store` — the package
+that loads those 147 `.sql` files through its `embed.FS` — genuinely executed
+rather than replaying a cache entry.
+
+### A shared-checkout incident: this pass's uncommitted work was swept into someone else's commit
+
+Mid-pass, `git status --porcelain` went empty and `HEAD` moved from `c169830f`
+to `517721fa` — *"discipline: make 3.12 about the rule, not the symlink"*. Its
+diffstat is:
+
+```
+git diff --stat c169830f..HEAD
+ AGENTS.md                                         |  8 ++--
+ CLAUDE.md                                         | 13 +++--
+ docs/engineering/agent-verification-discipline.md | 35 +++++++-------
+ docs/engineering/testing-workflow.md              |  9 ++--
+ lefthook.yml                                      | 58 ++++++++++++++++-------
+```
+
+Only the `agent-verification-discipline.md` hunk belongs to that commit's stated
+purpose. The other four files are this pass's in-flight working-tree edits,
+picked up by a concurrent `git add -A`/`git commit -a` in the shared checkout.
+Nothing was lost or altered — `git diff HEAD -- lefthook.yml CLAUDE.md AGENTS.md
+docs/engineering/testing-workflow.md` is empty and `git show HEAD:lefthook.yml`
+is byte-identical to what was intended — but the change is now attributed to a
+commit that does not describe it. **Not rewritten**: `main` has a concurrent
+writer, and rewriting a peer's commit under them in a shared checkout is the
+same shared-mutable-ref hazard class this file already recorded in its second
+pass. Reported to the operator instead; squashing or re-messaging is theirs.
+
+The practical consequence for the reader: `517721fa` is the commit where the
+`pre-push` glob was removed, despite its subject line.
+
+### Corrections to my own numbers and to the dispatch's
+
+- **The dispatch said "ten `plugin.yaml` files".** Derived at `c169830f`:
+  `grep -rln '^//go:embed plugin.yaml' --include='*.go' . | grep -v node_modules | wc -l`
+  → **11**. `lefthook.yml`'s comment carries 11 and ships the command.
+- **A first `//go:embed` count of 29 was wrong** and was caught before it was
+  written anywhere durable. `grep -rn '//go:embed'` (unanchored) matches seven
+  *prose* mentions inside comments and test files — e.g.
+  `internal/plugin/loader.go:262` *"expose their plugin.yaml to the host via
+  //go:embed"*. Anchored, `grep -rn '^//go:embed'` → **22** real directives. This
+  is §3.3 in a different costume: the unanchored pattern counted a superset.
+- **`lefthook validate`'s complaint count was re-derived on both sides** of the
+  edit rather than carried: 4 before, 3 after.
+- **The parked `skip_empty` line numbers were off by one when first written** —
+  `73`/`122`/`167` are the `glob:` lines that sit immediately above them. Caught
+  by re-running `grep -n 'skip_empty' lefthook.yml` against the finished file
+  instead of reusing a reading taken mid-edit; corrected to `74`/`123`/`168`.
+  Exactly §2.2, committed inside a pass about not trusting stored numbers.
+
+### Scope-parked — found, deliberately not fixed
+
+1. **`TASKS/INDEX.md:56-58`** — point 3 still says *"a docs-only push on `main`
+   reports `(skip) no matching push files`"*. Fenced; replacement text handed to
+   the Orchestrator in the completion report.
+2. **`skip_empty` on the three remaining pre-commit commands** —
+   `lefthook.yml:74`, `:123`, `:168` after this edit
+   (`grep -n 'skip_empty' lefthook.yml`). Still inert, still the sole reason
+   `lefthook validate` exits 1. Removing them is a real cleanup with a real
+   (small) risk of changing pre-commit behavior if any future lefthook honors
+   the key, and it is outside this pass's fence.
+3. **`.nanite/agents/backend.md:420`** — *"Pre-push runs `go test ./...`, scoped
+   to `main`."* True as written; it never claimed file scoping, so it was left
+   rather than churned.
+4. **`README.md:38`** — *"the `main`-scoped pre-push test run"*. Same: true,
+   left.
+5. **`docs/audits/2026-08-21-go-quality/REPORT.md:27` and `:282`,
+   `TASKS/gate-integrity/01-…:429-430`, `TASKS/gate-integrity/03-…:280-281`** —
+   dated records that quote the glob as the thing observed or being fixed. A
+   record of what was true when it was written is not a straggler.
+6. **`frontend-lint`** — still `skip: true` (`CW-20260816-0087`), untouched.
+
+### Baseline
+
+```
+go build ./cmd/nanite/                              exit 0
+go vet ./...                                        exit 0
+go clean -testcache && /usr/bin/time -p go test ./...  exit 0 — real 41.72
+/usr/bin/time -p go test ./...                      exit 0 — real  4.40
+./scripts/check.sh                                  exit 0
+    format  OK   1354 Go files (tracked + untracked, per git ls-files)
+    vet     OK
+    lint    ---  examined nothing (0 changed .go files vs 83ac15eb — this
+                                   pass's diff contains no Go file)
+    test    OK   go test ./...  (Tier 1)
+lefthook validate                                   exit 1 — 3 pre-existing
+                                                    skip_empty complaints, one
+                                                    fewer than before this pass
+```
+
+No migration was touched in the repo:
+`git status --porcelain internal/store/migrations/` is empty, and
+`git diff --name-only c169830f..HEAD -- internal/store/migrations/` is empty.
+The scratch clone's throwaway `.sql` edit never left the scratchpad.

@@ -53,9 +53,11 @@ and `migration-purity`, both scoped to the staged diff — nothing at commit tim
 can fail for a reason outside the change in front of you, which is what keeps
 `--no-verify` (all-or-nothing) from being the natural escape. Measured at
 `9591c1a6` across three real one-`.go`-file commits, read off lefthook's own
-summary: **0.17s / 0.06s / 0.06s** total. **pre-push:** `go test ./...`, scoped
-to `main` via `only: - ref: main` — a WIP-branch push reports `go-test (skip) by
-condition`, a docs-only push on `main` reports `(skip) no matching push files`.
+summary: **0.17s / 0.06s / 0.06s** total. **pre-push:** `go test ./...` on every
+push to `main` (`only: - ref: main`). The branch is the only thing that scopes
+it — there is deliberately no `glob`, so the suite runs whatever the push
+contains, `go.mod`- and migration-`.sql`-only pushes included. A WIP-branch push
+reports `go-test (skip) by condition`, the only skip there is.
 Measured at `9591c1a6`: **41.34s** with the test cache cleared
 (`go clean -testcache && /usr/bin/time -p go test ./...`), **5.06s / 4.59s** on
 two back-to-back cached runs, per `lefthook.yml`'s own measured header. That is

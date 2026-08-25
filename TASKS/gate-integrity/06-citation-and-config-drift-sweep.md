@@ -7,7 +7,9 @@
 `TASKS/INDEX.md` (item 8 only, and only if it turns out to need it),
 `TASKS/audit-remediation/PREVENTION.md`,
 `TASKS/audit-remediation/12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md`,
-`docs/engineering/README.md`, `AGENTS.md`. Repo: nanite.
+`docs/engineering/README.md`, `AGENTS.md`, plus the documents carrying the
+incomplete migration-failure mechanism (item 9 — re-derive the set, do not
+trust an enumeration). Repo: nanite.
 
 Deliberately batched into one task. Each item is a few minutes; filed
 individually they would cost more in dispatch overhead than in work, and they
@@ -137,6 +139,74 @@ count it is — an unqualified number that disagrees with the YAML will be
 re-reported as drift by the next reader, which is its own cost. If it shows 17,
 correct it. Either way the outcome is a number a reader can reconcile.
 
+### 9. The migration-failure mechanism is stated as one branch when it is two
+
+**Added 2026-08-25 by the Wave B orchestrator, verified at `b8d3aa61`.** `07`
+corrected this on its own surface (`scripts/check-migration-number.sh` and
+`docs/engineering/tracking-integrity.md`) and deliberately left the rest to this
+sweep, because `06` is scoped to run last and alone — sweeping the other files
+mid-wave would have invalidated this task's own premise.
+
+Many tracked documents say a migration numbered at or below a database's highest
+applied version is *"a hard boot error, not a back-fill."* **That is true of only
+one of two branches.** Verified against goose `v3.27.3`'s
+`internal/gooseutil/resolve.go`, whose selection is keyed on the version integer
+alone — no filename, no checksum — and whose two loops both open with
+`if dbAppliedVersions[v] { continue }`:
+
+- **`N` was never applied by that database** → `missing=[N]`, and with
+  `allowMissing=false` (nanite builds its provider without
+  `WithAllowOutofOrder`) goose returns `newMissingError`. **The documented hard
+  boot failure.**
+- **`N` *was* applied by that database** → both loops `continue`, the apply set
+  is empty, goose returns cleanly reporting itself up to date. **The migration
+  silently never runs.**
+
+Which branch you get depends entirely on the database's vintage. `135` — the
+canonical worked example — is in the *second* bucket for any database that
+applied the old `135_goals.sql` before `63d79028` renumbered it, and the *first*
+for any database created after. Same file, same number, opposite symptom.
+
+The conclusion does not weaken. Silent schema divergence reported as healthy is
+worse than a failure that announces itself. But the stated **mechanism** would
+mislead anyone diagnosing a real incident: they would wait for a startup error
+that never comes.
+
+**Correct each occurrence to state both branches and the condition that selects
+between them.** Do not let a correction claim anything about what any particular
+deployment has applied — the source-level statement covers every database and is
+the stronger form. **Do not open the live database to check**
+(`~/.local/share/nanite/workspaces/default/main.db` is the operator's production
+DB with an active WAL); nothing there is needed for this item.
+
+**Find the occurrences by re-deriving, not from a list.** Two patterns are known
+starting points, and neither is provably complete — a document can state the
+mechanism in words that match neither:
+
+```
+/usr/bin/grep -rl 'not a back-fill\|not a backfill' --include='*.md' . | /usr/bin/grep -v node_modules
+/usr/bin/grep -rl 'WithAllowOutofOrder'              --include='*.md' . | /usr/bin/grep -v node_modules
+```
+
+At `b8d3aa61`, *before this item was written*, the first returned 7 files and the
+second 12, the 7 a strict subset of the 12; a third phrasing tried as a probe
+added nothing, which is weak evidence and not proof. **Writing this item moved
+both counts to 8 and 13**, because the paragraphs above quote both patterns — so
+this task file will appear in your own results, and the recorded counts were
+stale before anyone read them. That is the point of the instruction, demonstrated
+on itself. **Re-derive both, look for phrasings neither catches, and
+treat the counts above as history rather than as a target.** Two of the 12 —
+`docs/engineering/tracking-integrity.md` and `07`'s own task file — are already
+corrected; expect them to fall out of the first pattern and remain in the second.
+
+Use `/usr/bin/grep` or `-F` for these: `grep` at an agent prompt is a shell
+function resolving to ugrep, which reads `$` mid-pattern differently from POSIX
+BRE — see `docs/engineering/agent-verification-discipline.md` §3.
+
+**Highest priority within this item:** `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`.
+A decisions document carrying an incomplete mechanism propagates furthest,
+because later work cites it as settled rather than re-deriving it.
+
 ## What to do
 
 Work items 1-8 above. For each: re-derive the citation, make the smallest
@@ -161,6 +231,12 @@ result, not a skipped item.
   accurate — with the evidence that produced it. If item 7 is a hazard, the §3
   append landed. Recording "checked, not a drift" is a completed item, not a
   skipped one.
+- Item 9: every occurrence found by a freshly re-derived search states both
+  branches and the condition selecting between them, no correction claims
+  anything about a specific deployment, and the Work log records which patterns
+  were run and any phrasing found that neither known pattern caught. Reporting
+  "re-derived, and the known patterns were complete" is a completed item — but it
+  requires having looked beyond them.
 - `go vet ./...` and `golangci-lint run --new-from-rev HEAD` clean, since
   `.golangci.yml` changed.
 

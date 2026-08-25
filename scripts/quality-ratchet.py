@@ -758,10 +758,27 @@ def gosec_command(
        A reduction is banked when it maps to a real code change since the
        committed measurement: read the diff, not the repeat.
 
+    4. gosec_scan_errors reads "Golang errors" and CANNOT SEE a whole class of
+       silent scan failure. Verified in gosec v2.28.0: buildSSA has unnamed
+       returns and a deferred recover() that only logs, so a panic yields
+       (nil, nil); checkAnalyzers guards `err != nil || ssaResult == nil` and
+       has no error return to propagate; it is called per package, so one
+       package's SSA-rule findings vanish and the rest survive -- a strict
+       subset. Metrics.Merge is additive, so merging the empty Metrics{} the
+       failure path returns leaves every Stats field untouched, found included.
+       ParseErrors returns early when len(pkg.Errors) == 0, so "Golang errors"
+       stays empty. Net: a subset of findings missing, full files/lines, empty
+       "Golang errors", exit 0 under -no-fail. That is this task's own phantom
+       drop, and its ONLY trace is two strings on gosec's stderr
+       ("Panic when running SSA analyzer", "Error building the SSA
+       representation") -- gosec.logger writes to os.Stderr. Point 1 catches
+       this whenever it is nondeterministic, which is the real defense. Nothing
+       here catches it when it reproduces.
+
     What the checks below do close is narrower and real: a disagreement fails,
     a "Golang errors" entry fails, a missing Issues array fails, and a scan
     covering a quarter less of the tree fails. None of those is a substitute
-    for point 3.
+    for point 3, and none of them reads stderr.
     """
     baseline_document = load_verified_baseline(baseline_path, runner)
     gosec_baseline = baseline_document.get("standalone_gosec")

@@ -1203,7 +1203,7 @@ the crucial things that prevent us from working in standard ways."*
 | `04a` — gosec advisory reword only (step 6 of `04`) | **A** | reviewed | none |
 | `07-migration-number-collision-guard` | **B — before parallel worktrees** | reviewed | none |
 | *(container image + how checks run inside it)* | **C — with Docker** | not scoped | `01`-`03` |
-| `04b` — gosec wrapper + coverage floor (steps 1-5 of `04`) | **D** | in-progress | none |
+| `04b` — gosec wrapper + coverage floor (steps 1-5 of `04`) | **D** | implemented | none |
 | `05-runbook-report-error-gap` | **D** | implemented | none |
 | `06-citation-and-config-drift-sweep` | **D** | not-started | none |
 

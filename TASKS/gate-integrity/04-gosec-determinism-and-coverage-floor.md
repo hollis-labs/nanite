@@ -1,7 +1,7 @@
 # Stop a silently-degraded gosec run from passing the ratchet — and test the concurrency lead
 
 **Phase:** 1 — Measurement integrity
-**Status:** `04a` implemented (step 6, the advisory reword). `04b` — steps **2-5** implemented and reviewed (Wave D, 2026-08-25); **step 1**, the `-concurrency` experiment, remains **not-started**, so `04b` is **in-progress** as a whole. Set this way rather than to a whole-file `implemented` because five of the six steps and five of the six "Done means" bullets are untouched; only *The reduction message no longer advises lowering the baseline unconditionally* is satisfied.
+**Status:** `04a` implemented (step 6, the advisory reword). `04b` — **implemented** (Wave D, 2026-08-25). Steps **2-5** implemented and reviewed; **step 1** run and written up — *no difference detected across 12 runs per configuration, inconclusive by construction*, `-concurrency` deliberately **not** tuned into the gate. Step 1 and the fourth boundary clause are **unreviewed**. The final "Done means" bullet — a green hand-dispatched gate run — is the only item outstanding. Set this way rather than to a whole-file `implemented` because five of the six steps and five of the six "Done means" bullets are untouched; only *The reduction message no longer advises lowering the baseline unconditionally* is satisfied.
 **Depends on:** none
 **Split:** this file covers **`04a`** (step 6, the advisory reword — Wave A)
 and **`04b`** (steps 1-5 — Wave D). `04a` is a few lines, blocks nothing, and
@@ -907,6 +907,540 @@ each failing **only** its own tests:
 
 No quality-gate run dispatched; that is the Orchestrator's to fire after this
 lands. Nothing committed or pushed. No `git stash` at any point.
+
+
+### `04b` step 1 — the `-concurrency` experiment (2026-08-25)
+
+**This is step 1 only.** Steps 2-5 landed and were reviewed at `048ffd7d`; step 6
+landed as `04a`. Nothing below touches `scripts/quality-ratchet.py`, its test
+file, `scripts/gosec-repeat-run.sh`, the workflow or the baseline. **No
+`-concurrency` flag was tuned into the gate**, and no quality-gate run was
+dispatched. The deliverable is the experiment and this write-up.
+
+**Starting commit:** `26899cd0b58fcad41c6cce0dc38c031016c5dd04`, branch `main`,
+`git status --short` empty at start. A second session works in this same tree on
+`05`; we stayed file-disjoint (their `TASKS/gate-integrity/05-…md` and
+`docs/engineering/runbooks/full-repo-quality-gate.md`, mine this file plus one
+hazard appended to `docs/engineering/agent-verification-discipline.md`).
+**`main` advanced twice mid-task** as `05` landed — `26899cd0` -> `3954f9be` ->
+`b55133c7`. Every repo line number below was re-derived against `3954f9be`
+rather than carried from `26899cd0`, and each one was then re-confirmed at
+`b55133c7` after `5caeea06` reworded the runbook passage cited below (line 70
+still carries *"Observed once in 12 runs"*; the cold/warm rows `05` added at
+lines 163-167 are golangci-lint's, not gosec's, so the claim that the gosec
+observation's cache state is unrecorded still holds). Nothing was staged at any
+point, nothing committed, no `git stash` used.
+
+#### Result in one line
+
+**No difference detected.** All 24 runs — 12 at gosec's default concurrency, 12
+at `-concurrency 1` — produced `found=210`, `len(Issues)=210`,
+`files=661`, `lines=165247`, `nosec=9`, exit 0, empty `Golang errors`, and a
+**byte-identical report** (`sha256 c1cdd316…`, 1 distinct hash across 24 runs).
+The anomaly did not recur in either configuration.
+
+#### Three premise corrections, all verified before starting
+
+**1. `-concurrency` does not default to 10.** This file (line 84) and
+`TASKS/gate-integrity/README.md` (line 163) both record
+`-concurrency int … (default 10)`. gosec v2.28.0 declares:
+
+```
+grep -n 'concurrency' "$(go env GOMODCACHE)/github.com/securego/gosec/v2@v2.28.0/cmd/gosec/main.go"
+#   150:	flagConcurrency = flag.Int("concurrency", runtime.NumCPU(), "Concurrency value")
+```
+
+The default is `runtime.NumCPU()`. `10` is what `gosec --help` *renders* on a
+10-core host, because Go's flag package prints the resolved default value. The
+recorded string is therefore machine-local output mistaken for a constant, and
+it is only correct by coincidence on this machine.
+
+**2. The local `gosec` on `PATH` is not the gate's `gosec`.** `command -v gosec`
+resolves to `/Users/chrispian/.local/share/mise/installs/go/1.25.3/bin/gosec`,
+`sha256 cab23b6b…`. The workflow pins `gosec@v2.28.0`:
+
+```
+git show "${R}:.github/workflows/full-repo-quality.yml" | /usr/bin/grep -n 'gosec/v2/cmd/gosec@'
+#   85:          GOBIN="$tool_bin" go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+```
+
+**3. This file's own derivation command for the lead no longer resolves.** Line
+83 says `grep -n 'gosec -no-fail' .github/workflows/full-repo-quality.yml`, and
+the README (line 161) records it returning `159: gosec -no-fail …`. At
+`26899cd0` the workflow contains no `gosec -no-fail` line at all — `04b` step 2
+moved the invocation into the wrapper, where it now sits at line 101:
+
+```
+git show "${R}:scripts/gosec-repeat-run.sh" | /usr/bin/grep -nF 'gosec -no-fail'
+#   101:  gosec -no-fail -exclude-dir=.claude -fmt=json -out="$out" "${packages[@]}"
+```
+
+**The lead itself survives all three corrections intact.** The gate passes no
+`-concurrency` to gosec anywhere:
+
+```
+git show "${R}:scripts/gosec-repeat-run.sh"              | /usr/bin/grep -c 'concurrency'   # 0  (control: 'gosec' -> 27)
+git show "${R}:scripts/quality-ratchet.py"               | /usr/bin/grep -c 'concurrency'   # 0  (control: 'gosec' -> 82)
+git show "${R}:.github/workflows/full-repo-quality.yml"  | /usr/bin/grep -n  'concurrency'  # 11:concurrency:   (control: 'gosec' -> 9)
+```
+
+The single workflow hit is the job-level `concurrency:` group at line 11 —
+GitHub Actions run serialization, unrelated to gosec's flag.
+
+#### Core counts — and the parameter-space gap this opens
+
+| | `runtime.NumCPU()` | gosec's effective default concurrency |
+|---|---|---|
+| **This machine** (where the 24 runs ran) | **10** | 10 |
+| **`macos-15` CI runner** (where the gate runs) | **3** (secondary source, see below) | 3 |
+
+This machine, derived by compiling and running a probe rather than by reading a
+help string:
+
+```
+cat > main.go <<'EOF'
+package main
+import ("fmt"; "runtime")
+func main() { fmt.Println(runtime.NumCPU(), runtime.GOMAXPROCS(0)) }
+EOF
+go run .        # -> 10 10
+sysctl -n hw.ncpu hw.physicalcpu hw.logicalcpu   # -> 10 10 10
+```
+
+**The CI runner's core count is not obtainable from a run log**, and I want that
+stated rather than papered over. I downloaded the full log for run
+`32878651576` (`gh run view 32878651576 --log`, 232,004 bytes) and searched it:
+
+```
+/usr/bin/grep -inE 'ncpu|cpu|core|GOMAXPROCS|processor' run-32878651576.log
+#   -> 5 hits, every one of them the string `core.sshCommand` from actions/checkout
+/usr/bin/grep -c 'gosec' run-32878651576.log        # -> 894   (control: the log is intact and searchable)
+```
+
+No workflow step prints the core count, so it is genuinely absent, not missed.
+The log does record `Image: macos-15-arm64` (line 16). GitHub's published
+runner specification gives macOS arm64 (M1) runners — the `macos-15` label —
+**3 cores / 7 GB RAM**. **That is a secondary source, not a derivation**, and it
+should be re-derived by having the gate print `sysctl -n hw.ncpu` if it ever
+becomes load-bearing.
+
+**Why this matters to the conclusion.** The experiment compared **10 vs 1**. The
+gate operates at **3**. Those are different points in the parameter space, so a
+null result here does not transfer to CI by itself. Two honest readings coexist:
+10 workers give a race *more* interleaving opportunity than 3, so this is in one
+sense the more aggressive test; but the runner also differs in cores, RAM,
+scheduler and machine, so it is not the same experiment run harder.
+
+Two things partly offset it. The runbook's baseline-refresh procedure is written
+for a human at a terminal on `darwin/arm64`, and this local run reproduces CI's
+`Stats` exactly — `files=661, lines=165247, nosec=9, found=210`, identical to run
+`32878651576`'s committed artifact values — so the local configuration is a
+faithful stand-in for the corpus, if not for the core count. Where the original
+193-vs-210 observation was made is **not recorded** in any file I could find.
+
+#### How I established which gosec binary ran
+
+Installed explicitly into a scratch `GOBIN`; the developer's mise setup and
+`PATH` were not modified.
+
+```
+GOBIN="$SP/toolbin" go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+```
+
+Every run then invoked `$SP/toolbin/gosec` **by absolute path** — `PATH` was
+never consulted, so there was no opportunity to pick up the mise build.
+
+`-version` cannot confirm this: a `go install` of a tagged module without
+ldflags self-reports `Version: dev`, and the binary duly does. The report field
+agrees (`GosecVersion: "dev"` in all 24). Provenance was established from the
+**embedded build info** instead, which the module system writes and ldflags do
+not touch:
+
+```
+go version -m "$SP/toolbin/gosec" | head -3
+#   .../toolbin/gosec: go1.26.7
+#   	path	github.com/securego/gosec/v2/cmd/gosec
+#   	mod	github.com/securego/gosec/v2	v2.28.0	h1:ZsSdiDb0AtTpLFVol5z91gbMei9ZiLEPG/pZjZujp7c=
+shasum -a 256 "$SP/toolbin/gosec"                 # 0c1fb5b415a102a5e12f0b38e4cdd368af9eca548c9d9aa0e539da1ae19b3dce
+shasum -a 256 "$(command -v gosec)"               # cab23b6b354e1b0ec80a4e13bbc2f72a421eb2019f504fc62150675abaf2ee9c  (control: different file)
+```
+
+`mod … v2.28.0` with its module hash is the authoritative statement. As a bonus
+the compiler matches CI exactly: my binary reports `go1.26.7`, and the run log
+shows `Successfully set up Go version 1.26.7` (line 126) — CI's `setup-go` reads
+`go-version-file: apps/nanite/go.mod`, whose directive is `go 1.26.7`.
+
+#### How I built the package list
+
+Derived from the workflow, not invented. I ran the `Discover tracked Go
+packages` step's body verbatim (`.github/workflows/full-repo-quality.yml`
+lines 45-59) against this tree — `go list -f '{{.ImportPath}}\t{{.Dir}}' ./...`
+filtered by `git ls-files --error-unmatch -- "$relative/*.go"`:
+
+```
+wc -l go-list.txt                # 110
+wc -l tracked-go-packages.txt    # 109
+/usr/bin/grep -c 'node_modules' go-list.txt      # 1   (the one the filter removes)
+```
+
+**109**, matching the count the gate asserts (`--expected 109`), and the 110/109
+split is exactly §3.5's documented case — the extra is
+`ui/node_modules/flatted/golang/pkg/flatted`. The harness asserts `len == 109`
+before running anything.
+
+#### Protocol — fixed before the first run, not extended
+
+- **12 runs per configuration, 24 total.** Twelve matches the observation window
+  in which the anomaly appeared once. I did not stop early on agreement and I
+  did **not** extend past 24 when all of them agreed.
+- Configurations: **gosec's default** (no `-concurrency` flag passed at all,
+  which is what the gate does) and **`-concurrency 1`**. Identical otherwise:
+  same binary, same 109-package list, same `-no-fail -exclude-dir=.claude
+  -fmt=json -out=…` flags copied from the wrapper's line 101.
+- **Interleaved, with the within-pair order alternated** — pair *i* odd runs
+  default first, pair *i* even runs `-concurrency 1` first — so neither
+  configuration systematically occupies the warmer second slot.
+- Reports named `cfg-default-NN.json` / `cfg-single-NN.json`. Distinct
+  multi-character names, deliberately not `a`/`A`-style initials (§3.16: this
+  filesystem is case-insensitive and the second write would have silently
+  truncated the first).
+
+#### The full run table — all 24 rows
+
+`seq` is chronological. `pair` is the interleaving index 1-12; `pos.` is the
+position within that pair.
+
+| seq | config | `-concurrency` passed | pair | pos. | wall s | exit | `Stats.files` | `Stats.lines` | `Stats.nosec` | `Stats.found` | `len(Issues)` | `Golang errors` | report sha256 (first 8) | stderr |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | default **(1st of cfg)** | (unset -> runtime.NumCPU) | 1 | 1 | 7.17 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 2 | single **(1st of cfg)** | 1 | 1 | 2 | 20.42 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 3 | single | 1 | 2 | 1 | 20.09 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 4 | default | (unset -> runtime.NumCPU) | 2 | 2 | 7.19 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 5 | default | (unset -> runtime.NumCPU) | 3 | 1 | 7.06 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 6 | single | 1 | 3 | 2 | 18.97 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 7 | single | 1 | 4 | 1 | 19.1 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 8 | default | (unset -> runtime.NumCPU) | 4 | 2 | 7.16 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 9 | default | (unset -> runtime.NumCPU) | 5 | 1 | 7.69 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 10 | single | 1 | 5 | 2 | 19.28 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 11 | single | 1 | 6 | 1 | 19.79 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 12 | default | (unset -> runtime.NumCPU) | 6 | 2 | 7.29 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 13 | default | (unset -> runtime.NumCPU) | 7 | 1 | 7.83 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 14 | single | 1 | 7 | 2 | 19.16 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 15 | single | 1 | 8 | 1 | 19.28 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 16 | default | (unset -> runtime.NumCPU) | 8 | 2 | 7.25 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 17 | default | (unset -> runtime.NumCPU) | 9 | 1 | 7.33 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 18 | single | 1 | 9 | 2 | 19.48 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 19 | single | 1 | 10 | 1 | 19.01 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 20 | default | (unset -> runtime.NumCPU) | 10 | 2 | 6.79 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 21 | default | (unset -> runtime.NumCPU) | 11 | 1 | 7.29 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 22 | single | 1 | 11 | 2 | 20.29 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 23 | single | 1 | 12 | 1 | 19.35 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+| 24 | default | (unset -> runtime.NumCPU) | 12 | 2 | 8.0 | 0 | 661 | 165247 | 9 | 210 | 210 | `{}` (0 entries) | `c1cdd316` | discarded |
+
+Every cell above is machine-generated from `results.jsonl`, which the harness
+appended to after each run; none of it was transcribed by hand.
+
+**Run 1 of each configuration does not differ from runs 2-12** in count or in
+any `Stats` field — all 24 rows are identical on every one of those columns, and
+all 24 share one report hash. The wall times show no cold-start outlier either:
+`cfg-default-01` at 7.17s sits mid-range for its configuration (min 6.79, max
+8.00, mean 7.34, n=12), and `cfg-single-01` at 20.42s is the slowest of its
+twelve but by 0.13s over the next (min 18.97, max 20.42, mean 19.52, n=12).
+
+#### Instrument checks — because 24 byte-identical reports is exactly what a cache would also look like (§3.17)
+
+All 24 reports hash to one value **including issue ordering**, and `04b`
+established that gosec's sort is `slices.SortFunc`, an unstable sort. So the
+first question is whether I re-ran the scanner at all.
+
+**Would this result be correct if gosec were behaving deterministically here?
+Yes — and the reason is checkable.** `cmd/gosec/sort_issues.go` at v2.28.0 sorts
+on `(Severity, What, File, extractLineNumber(Line))`. On this corpus that tuple
+is a **total order**, so the sorted output is fully determined regardless of the
+order in which workers aggregated:
+
+```
+distinct sort keys over the 210 issues: 210  -> duplicate keys: 0
+control, a deliberately weaker key (file alone): 78 distinct, 44 duplicated
+```
+
+With no ties, instability has nothing to act on. Byte-identity is the *expected*
+correct output, not a smell. Four further checks, none of which a cache read
+would pass:
+
+1. **The scanner responds to its input.** Same binary, same flags, 108 packages
+   instead of 109 (dropping `./pkg/plugin`): `files` 661 -> **660**, `lines`
+   165247 -> **165168**, `nosec` 9 -> **8**, `found` 210 -> **209**.
+2. **`-concurrency 1` demonstrably reached the analyzer and changed the
+   schedule.** gosec logs one `Import directory:` line per package to stderr. In
+   the `-concurrency 1` run those 109 lines are in job order; in the default run
+   they are interleaved. Same multiset (109 = 109, `sort`ed forms compare
+   equal), different sequence — so the two configurations really did execute
+   differently while producing the same findings.
+3. **Cost tracks the flag.** `-concurrency 1` mean 19.52s vs default 7.34s, a
+   2.7x penalty on every one of the twelve. A cached result costs nothing.
+4. **24 distinct report mtimes** spanning 316.6s, into 24 separately-named files
+   each `rm -f`'d before its run.
+
+**And the comparison method can see the thing it is looking for.** The
+fingerprint is the sorted multiset of canonically-serialized issues; fed the
+real 210-issue set truncated to a 193-entry strict subset — the exact observed
+anomaly shape — it reports a difference, while a *reversed* 210-issue list
+correctly compares equal:
+
+```
+full     n=210 fp=9b89860c7b3b365b
+minus17  n=193 fp=fac082d7b6be6aca   -> different? True
+reversed n=210 fp=9b89860c7b3b365b   -> same?      True
+```
+
+**The tree did not move under me.** A second session shares this working tree,
+so before every run the harness hashed all 1,348 `.go` files in the 109 scanned
+directories (path + content sha256, sorted). **1 distinct tree hash across all
+24 runs** — the other session touched nothing gosec read.
+
+#### Two conditions I recorded rather than controlled
+
+**Build-cache state was not sampled per run, and I did not re-run to add it.**
+The column would have been fabricated after the fact, which is worse than its
+absence. What is true and checkable instead: **all 24 runs ran warm.** Three
+full gosec invocations preceded run 1 — two 109-package probes (one per
+configuration) and one 108-package instrument check — so the Go build cache was
+already populated for this corpus before the experiment began. `go env GOCACHE`
+is `/Users/chrispian/Library/Caches/go-build`, `du -sh` -> **46G**, sampled once
+after the runs. So the 24 runs are **not 24 independent trials of a
+state-independent condition** — every one of them is a *warm* trial, and the
+cold condition is unsampled entirely. Any effect that exists only on a cold
+first run is outside what this measured.
+
+**Whether the original 12 runs were cold or warm is not recorded anywhere and
+cannot now be recovered.** This file (line 49) and
+`docs/engineering/runbooks/full-repo-quality-gate.md` (line 70) both say
+*"Observed once in 12 runs"*; neither states the cache state of those runs, and
+neither does `TASKS/gate-integrity/README.md` (line 48). Both files discuss cache
+elsewhere, but that is the **build-cache elimination** (this file, line 90) — a
+different, already-closed hypothesis, and nothing here re-opens it. The
+consequence for the premise is real: *"could not be deliberately reproduced"* is
+evidence about the **retries'** conditions as much as about the original. If the
+original ran cold and the retries ran warm, non-reproduction is expected and
+says nothing about concurrency either way.
+
+**One caveat cuts back the other way and probably saves the concurrency
+hypothesis:** the observed drop had **identical `files` and `lines`**. gosec read
+the same corpus. A cache artifact would more plausibly show up as *changed
+coverage*, which is not what was seen. Concurrency remains live; the above is a
+recorded limitation, not grounds to doubt the premise.
+
+#### stderr was discarded for the 24 runs — stated plainly, not back-filled
+
+The harness sent both streams to `DEVNULL`. There is a known mechanism that
+writes **only** to stderr: `buildSSA` has unnamed returns and a deferred
+`recover()` that merely logs, so a panic yields `(nil, nil)`; `checkAnalyzers`
+has no error return and cannot propagate it; and because `checkAnalyzers` runs
+per package, one package's SSA failure drops **only that package's SSA-rule
+findings** while `Stats.files`/`Stats.lines` (incremented on the AST path) and
+`Golang errors` (fed only from `ParseErrors`) both stay clean. That is the
+phantom drop's exact shape, and none of it appears in the JSON or the exit code.
+
+**I did not re-run to capture it.** What I do have is the **two pre-experiment
+probe runs — one per configuration, same binary, same 109 packages — whose
+stderr was captured to files.** Both are clean:
+
+```
+/usr/bin/grep -cF 'Panic when running SSA analyzer'   warm-up.stderr  # 0   (default concurrency)
+/usr/bin/grep -cF 'Error building the SSA representation' warm-up.stderr  # 0
+/usr/bin/grep -cF 'Panic when running SSA analyzer'   warm-up-single.stderr  # 0   (-concurrency 1)
+/usr/bin/grep -cF 'Error building the SSA representation' warm-up-single.stderr  # 0
+wc -c warm-up.stderr warm-up-single.stderr        # 98161 and 98161 bytes
+```
+
+Non-zero stderr with neither string is ordinary informational output: 883 lines
+each, of which 661 are `Checking file:` and the remaining 222 are
+`Including rules` / `Import directory` lines.
+
+**Positive control that the grep works** — the substrings are at
+`analyzer.go:701` and `:580` in `gosec/v2@v2.28.0`:
+
+```
+sed -n '701p' analyzer.go | /usr/bin/grep -cF 'Panic when running SSA analyzer'       # 1
+sed -n '580p' analyzer.go | /usr/bin/grep -cF 'Error building the SSA representation' # 1
+sed -n '1p'   analyzer.go | /usr/bin/grep -cF 'Panic when running SSA analyzer'       # 0  (control)
+```
+
+**How far the two clean runs reach, stated exactly.** Both probes produce
+`sha256 c1cdd316…` — the *same* hash as all 24 experiment runs. An SSA failure
+removes findings, so any experiment run that had suffered one would have
+produced a different report from the probes. Therefore: **no run among the 26
+lost SSA-rule findings relative to two runs verified clean on stderr.** What
+that does **not** cover is a recovered panic in a package contributing zero
+SSA-rule findings — invisible in the JSON, and detectable only on the stderr I
+discarded. The bound that matters to the gate is the first one, since the gate
+compares findings; the second is a real gap in this run set.
+
+#### One structural note from reading the source, offered as refinement not root cause
+
+The hypothesis as written is *"a race in concurrent result aggregation."*
+Reading `analyzer.go`'s `Process` (v2.28.0, lines 304-418): the aggregation loop
+`for r := range results` runs on a **single goroutine**, appending to
+`gosec.issues` and merging `gosec.stats` with no concurrent writer. So the merge
+step itself is not where a race would live. The concurrency is in the worker
+pool — `g.SetLimit(gosec.concurrency)` at `:327`, `for i := 0; i <
+gosec.concurrency; i++ { g.Go(worker) }` at `:393`, and a third limit at `:619`
+— and therefore in per-package `load` / `checkRules` / `checkAnalyzers`. If
+concurrency is the mechanism it acts there, which is consistent with the SSA
+path above. **Recorded so a successor does not re-read the merge loop; not
+pursued further, per this file's "one bounded experiment, not an open
+investigation."**
+
+#### What was established, and what was not
+
+**Established:**
+
+- The gate passes no `-concurrency` to gosec anywhere (three greps above, each
+  with a positive control).
+- gosec's default concurrency is `runtime.NumCPU()`, **10** here and **3** on the
+  `macos-15` runner — so the gate has been running at 3, not at the "10" the
+  task file and README record.
+- Across 12 runs at default concurrency and 12 at `-concurrency 1`, over an
+  unchanged 109-package tree with a v2.28.0 binary: **no difference in finding
+  count, in any `Stats` field, in `Golang errors`, in exit status, or in the
+  report bytes.** One report hash, 24 runs.
+- The instrument was capable of detecting the difference had there been one:
+  it detects a one-package coverage change, detects the exact 210->193
+  strict-subset shape, and shows the flag changing gosec's real schedule.
+
+**Not established, and I want this unambiguous:**
+
+- **That `-concurrency` is not the mechanism.** A 1-in-12 event that already
+  resisted deliberate reproduction across 8 further runs **cannot be shown
+  absent by 12 more.** This experiment can detect a difference; it cannot
+  establish there is none. A null result at n=12 is entirely consistent with a
+  defect at the observed rate.
+- **That the null transfers to CI.** The runs were at concurrency 10; the gate
+  runs at 3. Different point in the parameter space, different machine.
+- **That the 24 runs are 24 independent trials.** They ran back-to-back and warm,
+  after three prior full scans. Every one of them is a warm trial, the cold
+  condition is unsampled, and no per-run cache measurement exists to say
+  otherwise.
+- **That no SSA panic occurred in the 24.** stderr was discarded. The two probe
+  runs are clean and share the reports' hash, which rules out *lost findings*,
+  not a *finding-free* recovered panic.
+- **Anything about the original observation's conditions.** Cold vs warm is
+  unrecorded and unrecoverable, so "could not be deliberately reproduced" is
+  evidence about the retries too.
+
+#### Verdict, and what I deliberately did not do
+
+**No difference detected across 12 runs per configuration; no SSA-panic or
+SSA-build-failure signature appeared on stderr in either of the two runs where
+stderr was captured.** That second clause is a stronger negative than JSON-only
+sampling would give, because it looks where the known mechanism actually writes
+— but it covers 2 runs, not 24.
+
+The result did not converge, so there was nothing to act on; and had it
+converged I would have reported rather than tuned, per this file's *"Do not tune
+the flag into the gate on a single agreeing pair."* **`-concurrency` was not
+pinned in the gate.** No workflow, comparator, wrapper or baseline file was
+edited. No quality-gate run was dispatched.
+
+The mechanism that actually protects the gate is the repeat-run agreement
+wrapper from step 2, which is correct whether or not this experiment converged —
+as this file said it would be.
+
+#### Corrections made mid-flight to my own work (§7.8)
+
+1. **I nearly shipped a correct conclusion reached by a broken command.**
+   `git show $R:scripts/gosec-repeat-run.sh | grep -n 'gosec -no-fail'` returned
+   nothing and `| wc -l` returned **21** for a 117-line file. In zsh,
+   `$R:scripts/…` written literally is parsed as the `:s` history modifier and
+   expands to the bare sha, so the command silently became `git show <commit>` —
+   exit 0, plausible output, no match. The conclusion it appeared to support (the
+   wrapper passes no `-concurrency`) is **true**, which is exactly why it would
+   have shipped as a verified claim obtained by a command that never read the
+   file. Caught only by §1.3.
+
+   Re-derived with `"${R}:path"`. **Written up as new hazard §3.18** in
+   `docs/engineering/agent-verification-discipline.md`, since that doc and
+   `CLAUDE.md` both instruct that new environment hazards be appended there; the
+   edit is purely additive (`git diff --stat` -> 96 insertions, 0 deletions) and
+   renumbers nothing. It matters well beyond this task, because
+   `git show <rev>:<file>` is the idiom this repo recommends for durable
+   citations. Three things I had to measure before the entry was right:
+
+   - **It is path-dependent.** The trigger is `:` plus a valid zsh *modifier
+     letter*, so `go.mod`, `docs/`, `internal/` and `TASKS/` pass through intact
+     while `scripts/`, `cmd/`, `config/`, `ui/`, `examples/`, `api/` and
+     `lefthook.yml` corrupt. Testing the idiom once against a safe path and
+     generalizing is the §4 pattern.
+   - **Most corruption is loud** (exit 128), and `:a`'s CWD-prefixed output is
+     loud too though it reads like a missing file. The silent exit-0 case I hit
+     is the narrower one where the modifier eats the path *entirely*, leaving a
+     bare valid rev. The entry now orders all four outcomes by nastiness rather
+     than presenting the silent one as the general behaviour.
+   - **There are two safe forms, and quoting is neither.** Brace the rev
+     (`"${R}:path"`), or keep the path in a variable (`"$R:$P"`) — `:` followed
+     by `$` is not a modifier letter. **The second form is why the hazard hides
+     from anyone who tests it in a loop:** iterating over paths naturally puts
+     the path in a variable, which is a safe form, so the check comes back clean
+     and reads as disproof. Two reproductions disagreed on exactly this during
+     this investigation. The constructs are indistinguishable in the source;
+     compare `printf '%q'` output, not end results.
+
+   It reproduces under `zsh -f -c` (no rc files), so it is a plain zsh 5.9
+   language property, not an alias or profile effect, and `bash -c` returns the
+   string intact.
+2. **The first generated run table was passed through an unquoted heredoc**, so
+   zsh interpolated the backticked header cells and silently emptied seven column
+   headings while leaving all 24 data rows intact — a plausible-looking table with
+   missing labels. Regenerated with the heredoc delimiter quoted. Same family as
+   correction 1.
+3. **I initially read the task file's `.github/workflows/full-repo-quality.yml:129`
+   citation as current.** It is not; the gosec invocation moved into the wrapper
+   at `048ffd7d`. Re-derived rather than trusted, and recorded as premise
+   correction 3 above.
+4. **A structural check of this file's own headings came back falsely empty.**
+   `/usr/bin/grep -n '^## Work log$\|^## Review notes$\|^### .04b. step 1'`
+   matched only the third alternative. That is §3.13 in its anchored-alternation
+   form: under BRE a `$` is an anchor only at the *end of the whole pattern* and
+   literal everywhere else, so the first two branches were searching for a
+   literal `$`. Re-checked in Python, which found all three headings where
+   expected (`## Work log` 157, this entry 912, `## Review notes` 1414). No claim
+   in this log rested on the empty result, but it would have read as "the
+   headings are gone."
+
+#### Scope-parked — found, deliberately not fixed
+
+1. **`TASKS/gate-integrity/README.md` line 163 carries the `(default 10)` string**
+   as if it were gosec's constant, and line 161 records the now-moved
+   `gosec -no-fail` workflow line. Both are stamped as historical, both are now
+   misleading in the same way this file's lines 83-84 are. Operator files; `06`'s
+   territory. I edited neither, including this file's own lines 83-84.
+2. **The gate cannot report the runner's core count**, so gosec's actual
+   concurrency on CI is unobservable from a run log. A one-line
+   `sysctl -n hw.ncpu` in a workflow step would make the number derivable instead
+   of quoted from vendor documentation. Not added — workflow changes are out of
+   this step's fence.
+3. **`scripts/gosec-repeat-run.sh` discards gosec's stderr**, which is the only
+   channel the SSA-panic mechanism writes to, and the workflow uploads only the
+   JSON reports. A gate run that hit that path today would leave no artifact.
+   Deliberately **not** implemented: that file is committed and reviewed, and a
+   change to it needs its own scoping.
+4. **`analyzer.go`'s worker returns `nil` on a `ParseErrors` failure** (v2.28.0,
+   `:358`), killing that worker rather than that package. With `-concurrency 1`
+   there is exactly one worker, so a single parse error would leave every
+   remaining job undrained. Upstream behaviour, noted only because it is a reason
+   not to assume `-concurrency 1` is the safer setting if anyone later proposes
+   pinning it.
+5. **`scripts/__pycache__/` is still absent from `.gitignore`**, as `04b` noted.
+   I created none — my harness ran entirely from the scratch directory.
+
+#### Repo state on finishing
+
+Nothing staged, nothing committed, nothing pushed, no `git stash` at any point.
+All 24 gosec runs, both probes, the installed binary and every intermediate file
+live under the session scratch directory; the repository has no untracked
+residue (`git status --short` shows only modified tracked files: this one, my
+`3.18` addition, and the other session's two `05` files).
 
 
 ## Review notes

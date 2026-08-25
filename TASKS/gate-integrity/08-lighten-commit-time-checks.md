@@ -569,4 +569,78 @@ throwaway branch (`throwaway/lint-base-proof`) was deleted
 and `test` OK and `lint` correctly reporting `examined nothing` (there is no
 changed `.go` file in this task's final diff).
 
+---
+
+## Third pass — precision corrections (same day, after `7d04c444`)
+
+### A report that names a file as stale is a claim, and mine lacked its grep
+
+The second-pass report told the Orchestrator that **both** `CLAUDE.md` and
+`AGENTS.md` carried the stale *"merge base with `main`"* wording. Only
+`AGENTS.md` did:
+
+```
+grep -n 'merge base' CLAUDE.md     #  -> no output, exit 1
+grep -n 'merge base' AGENTS.md     #  -> 123: … merge base with `main`) …
+```
+
+`CLAUDE.md` said `golangci-lint` *"scoped to what your work added"* and named no
+base at all — imprecise, not false. This is the batch's own failure class
+committed inside the batch: I asserted a second file's contents from memory of
+having written similar prose in it, and shipped the claim without the grep that
+§1.2 requires for a number and equally requires for "this file says X". The fix
+direction happened to be right, so it cost nothing here. Recorded because the
+clean version of this report would simply not have mentioned it.
+
+### What changed
+
+- **`AGENTS.md:123`** — base corrected to `origin/main`.
+- **`CLAUDE.md:50`** — base **added** (`"scoped to what your work added since the
+  merge base with `origin/main`"`). Judgment call, since leaving it was equally
+  defensible: `CLAUDE.md` is loaded into every agent's context, so brevity has
+  real value there — but the precision costs six words, and the specific
+  confusion it forecloses ("is the work I just committed in scope?") is exactly
+  the defect the second pass fixed. Six words to make a just-fixed bug
+  un-re-introducible is worth it.
+- **`scripts/check.sh` header, and its inline comment at the lint stage** — both
+  carried *my own* now-known-imprecise claim that on a feature branch the base
+  "is the branch point" / that the two bases "agree". They agree only while
+  `main` is fully pushed. Both rewritten to state the real behavior where a
+  reader meets it first: the base is the last **pushed** commit; when local
+  `main` is ahead, the stage lints a **superset** of the branch's own diff, so
+  findings from commits you did not write are expected, not a bug. It
+  over-reports and never under-reports, which is the safe direction for this
+  stage. Also stated at the tail of `AGENTS.md`'s landing-check section.
+- **`scripts/check.sh:57`** — the `--help` range is a hardcoded line span and the
+  header grew again, so it was silently truncating 9 lines. Recomputed to
+  `2,50p` and verified by running `./scripts/check.sh --help | wc -l` → **49**,
+  ending exactly on the last header line. That is twice this hardcoded range has
+  gone stale in two passes; making it self-delimiting stays parked, not done,
+  because it is outside what was asked.
+
+No behavior changed in this pass — `check.sh`'s only non-comment edit is the
+`--help` line span. Verified: `go build ./cmd/nanite/` OK, `./scripts/check.sh`
+exit 0 (`format`/`vet`/`test` OK, `lint` correctly `examined nothing`).
+
+### Every place naming the lint base now agrees
+
+```
+grep -rn 'merge base with `main`' --include='*.md' --include='*.sh' . | grep -v node_modules
+#  -> no output, exit 1
+```
+
+`AGENTS.md:123`, `CLAUDE.md:50`, `docs/engineering/testing-workflow.md:115`,
+`scripts/check.sh:36` and `:132` all name `origin/main`. `TASKS/INDEX.md:70`
+does too; that file is the Orchestrator's and was not touched by this task at
+any point.
+
+### The two throwaway commits stay
+
+`1ca86fdf` and `0d91e73a` remain in `main`'s history, confirmed by the
+Orchestrator as the right call: rewriting `main` under a concurrent writer in a
+shared checkout is the same shared-mutable-ref hazard as the repo-global
+`git stash` incidents, and "nothing is pushed" does not make it safe when
+someone else is committing into the same ref. Both are labelled and
+self-documenting; the probe itself is gone.
+
 ## Review notes

@@ -33,18 +33,28 @@
 # runs with `--issues-exit-code=0` against a committed baseline that ratchets
 # (`scripts/quality-ratchet.py`). This stage uses the adoption-mode form that
 # `.golangci.yml`'s own header prescribes: lint only what your work added,
-# measured from the merge base with `origin/main` — on a feature branch that is
-# the branch point, and on `main` it is the last pushed commit, so work you have
-# already committed locally is in scope either way.
+# measured from the merge base with `origin/main`.
 #
-# Override the diff base with CHECK_LINT_BASE=<rev>.
+# **Read that base carefully: it is the last *pushed* commit, not the point your
+# branch started at.** The two coincide only while `main` is fully pushed. When
+# local `main` is ahead of `origin/main`, the base sits further back and this
+# stage lints a **superset** of your branch's own diff — it over-reports, never
+# under-reports, which is the safe direction for a stage like this, but it is
+# not what "merge base" on its own suggests. Findings from commits you did not
+# write are expected in that state, not a bug.
+#
+# What the base is deliberately *not* is local `main`: on `main` that equals
+# HEAD, so every commit you just made would be silently out of scope. Committed
+# and uncommitted work are both in scope here.
+#
+# Override the diff base with CHECK_LINT_BASE=<rev> if you want a narrower one.
 
 set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-  sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 fi
 
@@ -120,12 +130,16 @@ finish "vet" $?
 
 # ── 3. lint ───────────────────────────────────────────────────────────────
 # The base is the merge base with **origin/main**, not with local `main`.
-# On a feature branch the two agree — both give the branch point, and the whole
-# branch gets linted. On `main` they do not: local `main` is HEAD, so
-# `merge-base HEAD main` is HEAD and everything you have already committed is
-# invisible. `origin/main` is the last pushed commit, which is exactly the
-# "run this when a feature lands, before you push" scope this script documents,
-# and it covers committed and uncommitted work alike.
+# On `main`, local `main` is HEAD, so `merge-base HEAD main` is HEAD and
+# everything you have already committed is invisible to `--new-from-rev`.
+# `origin/main` is the last pushed commit, which is the "run this when a feature
+# lands, before you push" scope this script documents, and it covers committed
+# and uncommitted work alike.
+#
+# On a feature branch this resolves to the last pushed ancestor, which equals
+# the branch point only while `main` is fully pushed. Otherwise it sits further
+# back and the stage sees a superset of the branch's own diff — over-reporting,
+# which is the safe direction. See the header.
 lint_base="${CHECK_LINT_BASE:-}"
 if [ -z "$lint_base" ]; then
   lint_base=$(git merge-base HEAD origin/main 2>/dev/null) ||

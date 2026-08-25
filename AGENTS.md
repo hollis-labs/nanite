@@ -120,7 +120,7 @@ make eval           # interaction-quality eval suite (eval build tag)
 `./scripts/check.sh` takes no arguments and runs four stages, naming every one
 that failed: `format` (gofmt + goimports over every Go file), `vet`
 (`go vet ./...`), `lint` (`golangci-lint` scoped to what your work added,
-measured from the merge base with `main`), and `test` (`go test ./...` — Tier 1
+measured from the merge base with `origin/main`), and `test` (`go test ./...` — Tier 1
 of `docs/engineering/testing-workflow.md` §3). Run it when a feature lands,
 before pushing a branch you care about, and before dispatching the full-repo
 quality gate — not on every commit.
@@ -130,6 +130,11 @@ non-zero on a large body of pre-existing findings, and that body is the nightly
 gate's business, where it runs with `--issues-exit-code=0` against a ratcheting
 baseline (`scripts/quality-ratchet.py`). Override the diff base with
 `CHECK_LINT_BASE=<rev>`.
+
+The base is the last **pushed** commit, not your branch point — the two coincide
+only while `main` is fully pushed. When local `main` is ahead, the stage lints a
+superset of your branch's own diff. It over-reports, never under-reports; see
+`scripts/check.sh`'s header.
 
 If your change touched goroutines, channels, `context` cancellation, mutexes,
 atomics, or shutdown ordering, also run Tier 2 (`-race -count=20` on the package

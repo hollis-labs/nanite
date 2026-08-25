@@ -47,7 +47,8 @@ cached). This is the **no-`-race`** suite — not Tier 3.
 
 **The landing check: `./scripts/check.sh`.** Whole-repo analysis lives here, not
 on a hook: gofmt/goimports over every Go file, `go vet ./...`, `golangci-lint`
-scoped to what your work added, and `go test ./...` (Tier 1 of
+scoped to what your work added since the merge base with `origin/main`, and
+`go test ./...` (Tier 1 of
 `docs/engineering/testing-workflow.md` §3). No arguments; it names every stage
 that failed. Measured at `9591c1a6`: **67.36s** with the golangci-lint and test
 caches both cleared, **8.75s** fully warm.

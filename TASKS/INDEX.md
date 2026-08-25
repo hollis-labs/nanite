@@ -1199,7 +1199,7 @@ the crucial things that prevent us from working in standard ways."*
 | `08-lighten-commit-time-checks` | **A — first** | reviewed | none |
 | `01-drop-published-sibling-replaces` | **A** | reviewed | none |
 | `02-release-harness-filters-and-runtime-events` | **A** | reviewed | none (**sibling repos, not nanite**) |
-| `03-drop-remaining-replaces-and-sibling-checkouts` | **A** | not-started | `01`, `02` (both real, not sequencing) |
+| `03-drop-remaining-replaces-and-sibling-checkouts` | **A** | implemented | `01`, `02` (both real, not sequencing) |
 | `04a` — gosec advisory reword only (step 6 of `04`) | **A** | not-started | none |
 | `07-migration-number-collision-guard` | **B — before parallel worktrees** | not-started | none |
 | *(container image + how checks run inside it)* | **C — with Docker** | not scoped | `01`-`03` |

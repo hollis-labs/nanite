@@ -159,7 +159,15 @@ Ask the proxy directly instead:
 curl -sS https://proxy.golang.org/github.com/hollis-labs/<m>/@v/list
 ```
 
-Or clear both overrides: `GOPRIVATE= GONOPROXY=none GOPROXY=https://proxy.golang.org go list …`.
+Or clear the overrides — **with `=none`, not with an empty value.** An empty assignment does not
+clear these; Go falls back to the `GOENV` file and the value survives:
+
+```
+GOPRIVATE=  go env GOPRIVATE GONOSUMDB     # -> github.com/hollis-labs/*   (still set!)
+GOPRIVATE=none go env GOPRIVATE            # -> none
+```
+
+So the working form is `GOPRIVATE=none GONOPROXY=none GONOSUMDB=none GOPROXY=https://proxy.golang.org …`.
 Note CI sets none of these, so CI resolves through the proxy regardless of what your shell does.
 
 `curl -sS` without `-f` exits 0 on a 404, so **check for the version string, not for command
@@ -168,12 +176,20 @@ module is a 404 with a `not found:` body and exit 0.
 
 **`GOPRIVATE` also defaults `GONOSUMDB`** — `go env GONOPROXY GONOSUMDB` returns the same value for
 both. So hashes for these modules are computed from whatever your local fetch returned and are never
-verified against sum.golang.org, and the module cache is populated by direct VCS fetch
-(`Origin.VCS=git` in the `.info` file) rather than from the proxy. **A local `go.sum`, and a local
-`GOMODCACHE`, are not evidence about published bytes** — comparing a sibling checkout against the
-cache compares git to git. Clear `GOPRIVATE` to make the checksum DB apply. This is the sibling half
-of the same hazard and it has already produced one near-tautological "byte-identity" proof in this
-repo.
+verified against sum.golang.org, and the module cache is populated by direct VCS fetch rather than from the
+proxy. **A local `go.sum`, and a local `GOMODCACHE`, are not evidence about published bytes** —
+comparing a sibling checkout against the cache compares git to git. This has already produced one
+near-tautological "byte-identity" proof in this repo.
+
+**Do not try to tell where a cached module came from by reading its `.info`.** `Origin.VCS` is
+`"git"` either way — the proxy serves that field itself, byte-identical to what a direct fetch
+writes. Verified 2026-08-25:
+`curl -sS https://proxy.golang.org/github.com/hollis-labs/go-runtime-events/@v/v0.1.1.info` returns
+`{"Origin":{"VCS":"git",…}}`.
+
+To get real evidence about published bytes, fetch them: download `@v/<version>.zip` from the proxy
+and diff it against `git archive <tag>`, or re-resolve into a **fresh, empty** `GOMODCACHE` with the
+overrides cleared as above so the checksum database actually applies.
 
 ---
 

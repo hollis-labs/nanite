@@ -1259,7 +1259,9 @@ gosec root-cause archaeology; the go-envelopes half-migrated enum; the tesseract
 ~25 drifted migration-filename citations in landed Work Logs, which are historical records
 rather than live claims.
 
-**Parallelization.** Wave A runs largely concurrently: `08` touches `lefthook.yml` plus docs,
+**Dispatch.** Wave A runs **serially** — `08` → `01` → `02` → `03` → `04a`, one at a time, per
+the operator's decision carried in the Wave A kickoff. The disjointness below is why that ordering
+costs little, not a licence to run the tasks concurrently: `08` touches `lefthook.yml` plus docs,
 `02` is in sibling repos entirely, `04a` touches `scripts/quality-ratchet.py`. Two real overlaps —
 `01` and `03` share `go.mod`, `go.sum` and the workflow (sequence `01` → `02` completes → `03`),
 and `08` and `04a` both touch docs describing hook/gate behavior. **Do not use out-of-tree

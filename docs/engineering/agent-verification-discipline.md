@@ -191,29 +191,30 @@ To get real evidence about published bytes, fetch them: download `@v/<version>.z
 and diff it against `git archive <tag>`, or re-resolve into a **fresh, empty** `GOMODCACHE` with the
 overrides cleared as above so the checksum database actually applies.
 
-### 3.12 `/private/tmp/libs` is a symlink to the real sibling tree (Nanite-specific)
+### 3.12 Verify a "path does not exist" proof **at the resolved path**
 
-*Found 2026-08-25.* A decoupling proof usually works by building somewhere the relative
-`../../libs/<module>` path cannot resolve. On this machine that path can resolve when you did not
-expect it to:
+A decoupling proof usually works by building somewhere a relative dependency path cannot resolve —
+for Go, `replace … => ../../libs/<module>` resolved against the main module's directory. The proof is
+only as good as that path really being absent, and directory depth does not establish that.
+Symlinks, `$TMPDIR` indirection, and macOS's `/tmp` -> `/private/tmp` mapping all break the
+inference.
+
+Enumerate and check the path itself:
 
 ```
-ls -la /private/tmp/libs
-#   /private/tmp/libs -> /Users/chrispian/dev/hollis-labs/libs
+resolved=$(cd <clone> && cd ../.. && pwd)/libs
+ls -la "$resolved"     # must be: No such file or directory
 ```
 
-So a scratch clone at `/private/tmp/<one-dir>/nanite` has `../../libs` pointing at the **real**
-sibling checkouts, and a build there passes by using them — the exact outcome the proof is meant to
-rule out, reported as success. Nanite's own scratchpad is deeper than that and resolves to an absent
-path, which is why this has not bitten yet.
+**Never write "no `libs/` anywhere above it."** Say which path you checked and what it returned. A
+proof that passes by silently using the tree it claims independence from is worse than no proof —
+it reports success in exactly the check meant to rule that out.
 
-**Enumerate and check the actual resolved path** rather than reasoning about depth:
-`ls -la "$(cd <clone> && cd ../.. && pwd)/libs"` should be "No such file or directory". Never write
-"no `libs/` anywhere above it" — say which path you checked and what it returned.
-
-The general form: a proof built on "this path does not exist" needs the non-existence **verified at
-the resolved path**, not inferred from directory structure. Symlinks, `$TMPDIR` indirection and
-per-OS `/tmp` -> `/private/tmp` mapping all break the inference.
+*Concrete instance, 2026-08-25:* `/private/tmp/libs` was a symlink to
+`/Users/chrispian/dev/hollis-labs/libs`, so a clone at `/private/tmp/<one-dir>/<module>` resolved
+`../../libs` to the real sibling checkouts. Removed, and no other `/tmp`-family symlink into
+`~/dev/hollis-labs/` remains (`find /private/tmp /tmp "$TMPDIR" -maxdepth 1 -type l`). If one
+reappears, that is a signal, not a coincidence — see Torque `CW-20260825-0019`.
 
 ---
 

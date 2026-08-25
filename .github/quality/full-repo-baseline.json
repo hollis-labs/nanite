@@ -43,6 +43,11 @@
   },
   "standalone_gosec": {
     "version": "v2.28.0",
+    "coverage": {
+      "files": 661,
+      "lines": 165247,
+      "source": "Stats block of full-repo-quality-reports/gosec.json from Full-repo quality gate run 32878651576 (conclusion success, head_sha eb182d713589aea540767e4d8f2060e313729c7a, runner macos-15). The gosec version rests on the workflow pin at .github/workflows/full-repo-quality.yml:85 (go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0), NOT on the report: the artifact's own GosecVersion field reads 'dev', which is what a go install of a tagged module reports without ldflags. Usable here because no Go input changed between that head_sha and the working tree these values were committed from: git diff --name-only eb182d71..9d82c56d | grep -c '\\.go$' -> 0 (control: 10 files changed, 8 of them .md), and the change adding this block touches no .go file itself. Re-derive from a green gate run's artifact before moving these, never from a local gosec."
+    },
     "actionable_rule_counts": {
       "G101": 3,
       "G104": 0,

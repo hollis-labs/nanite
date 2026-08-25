@@ -119,17 +119,28 @@ jobs:
           done < "$RUNNER_TEMP/tracked-go-packages.txt"
           govulncheck "${packages[@]}"
 
-      - name: Run standalone gosec and apply known-noise policy
+      # gosec runs TWICE here, and that is the point of the step. It has
+      # produced a run over an unchanged tree that dropped a strict subset of
+      # its findings with a clean exit, well-formed JSON and unchanged
+      # Stats.files/Stats.lines -- which the comparator reads as an
+      # improvement. The wrapper refuses to hand either report to the
+      # comparator unless the two runs agree; both are uploaded below either
+      # way, because a disagreement is only diagnosable with both halves.
+      #
+      # Agreement rules out gosec run-to-run nondeterminism and nothing else --
+      # it is not confirmation that a reduction was earned. That boundary is
+      # stated in the step's own output and in quality-ratchet.py's
+      # gosec_command docstring; do not restate it as a guarantee here.
+      #
+      # The wrapper's header carries what the second run costs, with the
+      # command to re-derive it. Deliberately not duplicated here: two copies
+      # of one measurement go stale independently.
+      - name: Run standalone gosec twice and apply known-noise policy
         shell: bash
         run: |
-          packages=()
-          while IFS= read -r package; do
-            packages+=("$package")
-          done < "$RUNNER_TEMP/tracked-go-packages.txt"
-          gosec -no-fail -exclude-dir=.claude -fmt=json \
-            -out="$RUNNER_TEMP/gosec.json" "${packages[@]}"
-          python3 scripts/quality-ratchet.py gosec \
-            --report "$RUNNER_TEMP/gosec.json" \
+          scripts/gosec-repeat-run.sh \
+            --package-list "$RUNNER_TEMP/tracked-go-packages.txt" \
+            --output-dir "$RUNNER_TEMP" \
             --runner "${{ matrix.runner }}"
 
       - name: Verify modules
@@ -167,6 +178,7 @@ jobs:
             ${{ runner.temp }}/audit-lint.txt
             ${{ runner.temp }}/audit-linters.json
             ${{ runner.temp }}/gosec.json
+            ${{ runner.temp }}/gosec-repeat.json
             ${{ runner.temp }}/deadcode.txt
           if-no-files-found: ignore
           retention-days: 14

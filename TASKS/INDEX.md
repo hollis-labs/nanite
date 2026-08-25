@@ -1200,7 +1200,7 @@ the crucial things that prevent us from working in standard ways."*
 | `01-drop-published-sibling-replaces` | **A** | reviewed | none |
 | `02-release-harness-filters-and-runtime-events` | **A** | reviewed | none (**sibling repos, not nanite**) |
 | `03-drop-remaining-replaces-and-sibling-checkouts` | **A** | reviewed | `01`, `02` (both real, not sequencing) |
-| `04a` — gosec advisory reword only (step 6 of `04`) | **A** | implemented | none |
+| `04a` — gosec advisory reword only (step 6 of `04`) | **A** | reviewed | none |
 | `07-migration-number-collision-guard` | **B — before parallel worktrees** | not-started | none |
 | *(container image + how checks run inside it)* | **C — with Docker** | not scoped | `01`-`03` |
 | `04b` — gosec wrapper + coverage floor (steps 1-5 of `04`) | **D** | not-started | none |

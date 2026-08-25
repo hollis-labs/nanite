@@ -334,3 +334,76 @@ touched, and nothing was pushed to `origin`.
 
 
 ## Review notes
+
+**`04a` reviewed 2026-08-25 at `d17c8b62`/`f553b0a7` by a fresh reviewer
+dispatch** — no shared context with the implementing worker. Transcribed by the
+Orchestrator; the reviewer agent type is read-only by design. **`04b` is not
+reviewed and not started.**
+
+**Verdict: PASS**, with two low-severity precision findings in the new code
+comment, both since fixed in `aa454aef`.
+
+**Scope held exactly.** The diff touches only `compare_counts`' print, its
+comment, and tests. `.github/workflows/full-repo-quality.yml` and
+`.github/quality/full-repo-baseline.json` are untouched — no part of `04b`
+leaked in.
+
+**Verified independently, not read:** the advisory is genuinely shared —
+`compare_counts` is called at `:309` (`"audit-config linters"`) and `:482`
+(`"standalone gosec actionable rules"`), and the committed baseline carries
+`misspell: 2`. The reviewer reproduced both callers against the real baseline
+and got byte-identical advice under different labels, which is the constraint
+that shaped the wording. The message endorses banking a reduction that
+reproduces, so it does not over-correct into "never trust a reduction" — the
+failure mode that would have been worse than the original defect.
+
+**The §4.1 evidence was re-run rather than trusted:** 45 tests against the
+patched script pass; against `93939f6b`'s script exactly 2 fail, and they are
+the two advisory tests. The pre-existing test asserted only the prefix
+`"reductions detected for gosec"`, which matches both the old and new message —
+confirmed by extracting the parent revision. It could not have detected the
+defect it nominally covered.
+
+**§4.2 answer, recorded honestly:** the reachable vacuous input — an
+unconditional print independent of `reductions` — is closed by the negative
+control. The residual is generic to string-constant assertions: emptying
+`REDUCTION_ADVICE` would silently restore the prefix-only weakness, and nothing
+guards the constant's content. Flagged as the honest answer, not as a defect.
+
+### Finding 1 — "identical Stats" was false. Fixed.
+
+The comment said the suspect gosec run had *"identical Stats"*. `Stats` is
+`{files, lines, nosec, found}`, and `found` equals `len(Issues)` — verified
+against the committed report at
+`docs/audits/2026-08-21-go-quality/raw-1d3bfd96/gosec.json`, where both are
+335. So in a 210-vs-193 run `found` moved with the drop and `Stats` cannot have
+been identical. Every upstream source — this file's own step 3, and the
+runbook — names only `files` and `lines`.
+
+The imprecision pointed the wrong way for its intended reader: `04b` step 3
+keys its floor on `files`/`lines` and **deliberately not on counts**, an
+instruction that only makes sense once you know `found` moves.
+
+### Finding 2 — exclusivity beyond the evidence. Fixed.
+
+*"The one step that can also produce a decrease nobody earned"* is stronger
+than the runbook's calibrated *"one **known** soft spot"*. `Report.Error`
+catches a lint run that failed to analyze, not one that analyzed everything and
+dropped findings silently — the exact shape observed on gosec — and
+`verify_lint_coverage` is a 50%-of-total floor a small unearned decrease would
+pass. Softened to "known to".
+
+### Recorded for `04b`
+
+A coverage floor already exists on the **lint** side (`verify_lint_coverage`,
+total findings against 50% of the Stage 1 baseline). What step 3 asks for — a
+floor on gosec's `Stats.files`/`Stats.lines` — genuinely does not exist.
+Different sides, different keys. Written into step 3 so its implementer does
+not mistake one for the other. Step 4's gap is also confirmed still present at
+`scripts/quality-ratchet.py:429-430`.
+
+### Noted, not acted on
+
+`TASKS/INDEX.md` and `TASKS/gate-integrity/README.md` still quote the old
+message. Both sit under a `77137106` stamp, so they are true as history while
+describing superseded behavior — `06`'s territory.

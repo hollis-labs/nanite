@@ -43,7 +43,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hollis-labs/go-envelopes
-          ref: 7642d69f64499ea180c0c596a48516e00cd28d46
+          ref: 58243d84db7df1480960e2b747bea6ffca9fd6db
           path: libs/go-envelopes
 
       - name: Check out go-harness-filters

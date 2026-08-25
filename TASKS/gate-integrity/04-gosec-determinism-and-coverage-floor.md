@@ -1965,3 +1965,117 @@ gosec source claims in the module cache at `v2@v2.28.0`; the real-data proof in
 both directions; Finding 1's composed output before and after the fix; and the
 post-fix acceptance run — 64 tests OK, `./scripts/check.sh` exit 0,
 `/bin/bash -n` 0, unaltered artifact exit 0, genuine disagreement exit 1.
+
+---
+
+## Review notes — the gosec stderr assertion (operator-authorized follow-up)
+
+**Reviewed 2026-08-25 at `af513279` by a fresh reviewer dispatch** — no shared
+context with the implementing worker. **Verdict: PASS with findings.** No defect
+in the change; every finding was scope-statement accuracy, and the substantive
+one is fixed. Landed `e167a7e1`. Transcribed by the orchestrator; the reviewer
+wrote nothing to this file.
+
+**This closes `04`.** Everything net-new from here lives in Torque under
+`PRJ-20260417-0002`, tagged `gate-integrity`, per the 2026-08-25 tracking ruling.
+
+### What it could not break
+
+Under `/bin/bash` 3.2.57, gosec stub first on `PATH`, payload the real report
+from run `32902785030`, exit codes read without a pipe. All of the following
+**fail closed**: the capture being a directory (BSD grep rc=2 → *"the assertion
+did not run"*), unreadable at mode 000, a dangling symlink, 1,088,982 bytes with
+the marker on the last line, a capture containing an embedded NUL (grep reports
+`Binary file … matches`; non-empty, still fails), gosec exiting 3 with clean
+stderr, gosec exiting 3 carrying a marker, gosec exiting 0 having written
+nothing, an empty package list under `set -u`, and a read-only `--output-dir`.
+The unreadable-capture case also **proves the `$(...)` subshell trap is not
+reintroduced** — the `exit` killed the whole shell and the reviewer's
+post-marker never printed. No divergence between bash 3.2.57 and 5.3.3.
+
+### The positive control was mutation-tested, and it holds
+
+This was the check whose failure would be invisible, so it was attacked
+directly. Five mutants of the marker constants, each driven against a genuinely
+panicking stub: `ssa_panic_marker` misspelled → caught (`got 1 of 2`);
+`ssa_build_marker` misspelled → caught; an empty marker → caught (`got 3 of 2`);
+both markers identical → caught; an over-broad `gosec` marker → caught by the
+control's **negative** half (*"matched a fixture carrying neither marker"*).
+
+The fixture is a literal `<<'FIXTURE'` heredoc, and both markers are exact
+`grep -F` substrings of the pinned source, with a negative control on the
+misspelled variant. **The self-confirming first version is gone** — see
+`agent-verification-discipline.md` §4.5, which this episode produced.
+
+### Finding — the stderr trace is specific to SSA *construction*. Fixed.
+
+The wrapper, the `gosec_command` docstring and the runbook all said the phantom
+drop's *only* trace is one of two stderr strings. True of SSA construction
+failure; **not true of silent partial analysis in general.**
+
+`analyzers/slice_bounds.go:142` declares **named** returns and its deferred
+`recover()` sets both to nil — `err = nil // Return nil error to allow other
+analyzers to continue`. `analyzer.go` then sees no error and a nil result, logs
+**nothing**, and G602's findings for that package vanish with the same intact
+`files`/`lines` and empty `Golang errors`. **No stderr assertion can ever cover
+it; only run-to-run disagreement can.** Verified at source by the orchestrator
+before acting.
+
+Corrected in **all three places that made the claim**, each now stating that the
+check covers one named mechanism rather than every way gosec can quietly return
+less than it found. Note this is a sharper instance of the `recover()`-as-cause
+pattern than `buildSSA`: the comment states the benign intent outright, and the
+result leaves *less* trace.
+
+### The reviewer disproved one of its own findings
+
+It identified `analyzer.go:646` (*"Error running analyzer %s"*) as a third
+uncovered message, then established that all twelve `return nil, err` sites in
+`analyzers/*.go` bottom out at `ssautil.GetSSAResult`, whose only two error
+branches cannot fire because gosec's driver always populates the key they check
+— so the line is unreachable at this pin. It reported the finding as **not** a
+gap while salvaging the useful part: a third needle as version-drift insurance,
+one line, reopening silently on any gosec bump. **Not added** — new matching
+behaviour in a just-reviewed file. Filed as `CW-20260825-0053` with the
+constraint that its control be a literal copy, citing §4.5.
+
+### Scope judgement, and it was correct
+
+`scripts/quality-ratchet_test.py` was outside the dispatch's file list, but the
+same dispatch said *"add to it, don't rewrite"* — an instruction about **how** to
+touch it, which presupposes touching it. The worker flagged the ambiguity rather
+than resolving it silently. The reviewer judged the call correct and the five
+additions sound: purely additive, the clean test doubles as a negative control
+so the three rejection tests cannot be satisfied by an unconditional line, every
+rejection test asserts `ratchet passed` is absent, and the two canaries assert
+in both directions so a transposed redirect fails.
+
+### Also raised, filed to Torque rather than fixed here
+
+`scripts/quality-ratchet_test.py` is invoked by nothing — `grep -rn
+'quality-ratchet_test'` matches only inside `TASKS/`, not `.github/`, not
+`check.sh`, not `lefthook.yml`. Pre-existing and true of all 69 tests, but
+`EXECUTION-PROCESS.md:62` names *"wired but never actually reachable"*
+explicitly, and these five are the only committed proof the assertion works
+(`CW-20260825-0052`). Separately, `.claude/skills` is a **dangling symlink**, so
+the reviewer had no `code-review` skill and reviewed manually against
+`EXECUTION-PROCESS.md:62` and the standards docs — every agent dispatched in
+this repo has been resolving zero project skills, silently (`CW-20260825-0054`).
+
+### Orchestrator re-derivation
+
+Both directions reproduced independently with my own stub and the real CI report
+as payload: clean → `0` (`ratchet passed`), each marker → `1` naming the run and
+the capture path, an unrelated stderr line → `0`. Stream separation confirmed —
+the capture holds the stderr canary and `grep -cF GosecVersion` on it returns
+`0`, so it is not silently holding stdout. `shellcheck` 0 with zero disables,
+`/bin/bash -n` 0, 69 tests OK, `./scripts/check.sh` 0, workflow still 13 steps
+with both captures in the `if: always()` upload, and the only `2>&1 >` in the
+wrapper inside the comment explaining why not to use it.
+
+*One orchestrator error worth recording:* my first stub used a synthetic report
+with an empty `Issues` array and **all four cases exited 1**, including the
+clean one. Uniform-across-cases-that-should-differ is the tell — an empty
+`Issues` array fails a pre-existing known-noise cardinality check, which
+`04b`'s own reviewer had already established. The finding was on the page and I
+walked into it anyway.

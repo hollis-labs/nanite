@@ -157,9 +157,11 @@ line you read.** Measured 2026-08-25 at `d60c8264` against the pinned
 | warm | one mistyped package | 7 | `2813 issues:` | no |
 
 v2.11.4 exits **7** on a scan error *even with* `--issues-exit-code=0`, so
-`set -euo pipefail` aborts the block before `quality-ratchet.py` runs — that
-holds for a paste into an interactive `zsh` or `bash` too, where `set -e` fires
-and takes the shell with it. Were the exit code ever dropped,
+`set -euo pipefail` aborts the block before `quality-ratchet.py` runs — measured
+for an interactive `bash` paste too, where `set -e` fires and takes the shell
+with it. An interactive `zsh` paste also fails safe, but by a route that depends
+on your rc files rather than on the scan error, so do not rely on a mechanism
+there. Were the exit code ever dropped,
 `golangci_scan_error` in `scripts/quality-ratchet.py` reads `Report.Error` and
 raises instead of comparing counts. Grep that function by name; it moves, so do
 not cite a line number for it.
@@ -169,6 +171,11 @@ the broken run's entire stdout is `0 issues.`, with the diagnosis on stderr
 (`level=error msg="[linters_context] typechecking error: … directory not
 found"`). **`0 issues.` beside a nonzero exit is not a clean run — it is a scan
 that did not happen.** Check `$?` before believing any count the block prints.
+
+**The block deletes its own reports on the way out** — that is the `trap` on its
+fifth line — so by the time it returns there is nothing left to inspect. Read
+`$?` there and then, or drop that `trap` line and keep `$report` if you want to
+run the check below against a report you produced yourself.
 
 A report you did not watch being produced carries no exit status at all,
 including `audit-lint.json` from the `full-repo-quality-reports` artifact. Check
@@ -191,7 +198,9 @@ print(f"scan covered its targets: {count} issue(s)")
 PY
 ```
 
-Verified both directions at `d60c8264`: against a report from a mistyped
+Verified both directions at `d60c8264`, against reports from a separate
+two-package run rather than the block above — which is why the path and the
+issue count below differ from the table's: against a report from a mistyped
 invocation it prints `INVALID: … typechecking error: stat
 …/internal/does-not-exist: directory not found` and exits 1; against a good
 `./internal/brand ./internal/mcp` report it prints

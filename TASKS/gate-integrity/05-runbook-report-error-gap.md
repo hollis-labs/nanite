@@ -224,8 +224,12 @@ git show HEAD:<runbook> | awk '<same range>' | /usr/bin/grep -c -F 'quality-ratc
     (positive control: the awk range does select real content at HEAD)
 
 # the comparator
-git show HEAD:scripts/quality-ratchet.py | /usr/bin/grep -n -F 'section.get("Error")'    -> 206
-/usr/bin/grep -n -F 'section.get("Error")' scripts/quality-ratchet.py                    -> 236  (dirty tree, 04b)
+git show d60c8264:scripts/quality-ratchet.py | /usr/bin/grep -n -F 'section.get("Error")' -> 206
+/usr/bin/grep -n -F 'section.get("Error")' scripts/quality-ratchet.py                     -> 236  (working tree at
+                                                                                                 the time of writing,
+                                                                                                 04b uncommitted; 04b
+                                                                                                 landed at 048ffd7d
+                                                                                                 and it now differs)
 git show HEAD:scripts/quality-ratchet.py | /usr/bin/grep -c -F 'def golangci_scan_error' -> 1
 /usr/bin/grep -c -F 'def golangci_scan_error' scripts/quality-ratchet.py                 -> 1
 git show HEAD:scripts/quality-ratchet.py | /usr/bin/grep -n -F 'golangci_scan_error'     -> 22, 175, 296
@@ -241,7 +245,8 @@ gosec --version | /usr/bin/grep Version                                         
 git show HEAD:scripts/quality-ratchet.py | /usr/bin/grep -c -F 'gosec_scan_errors'  -> 0
 /usr/bin/grep -c -F 'gosec_scan_errors' scripts/quality-ratchet.py                  -> 3   (uncommitted, 04b)
 git show HEAD:scripts/quality-ratchet.py | /usr/bin/grep -c -F 'def gosec_command'  -> 1   (positive control)
-git ls-tree HEAD -- scripts/gosec-repeat-run.sh | wc -l                             -> 0   (untracked)
+git ls-tree d60c8264 -- scripts/gosec-repeat-run.sh | wc -l                         -> 0   (untracked at d60c8264;
+                                                                                          tracked as of 048ffd7d)
 
 # the two 04b-assigned passages, re-derived and left alone
 /usr/bin/grep -n 'one item, one direction' <runbook>  -> 65
@@ -324,6 +329,17 @@ So the gosec side is recorded as **pending `04`** and nothing about it was
 written into the runbook. When `04b` lands, the runbook's gosec material needs a
 pass — see the next section.
 
+**Recorded at `d60c8264`.** `04b` steps 2-5 landed at `048ffd7d` shortly after;
+step 1 remains open. This entry describes the tree it was measured on, not the
+current one.
+
+The trigger above has since fired and is discharged outside this task: the
+`:65`/`:74`/`:285` correction is a scheduled pass against nanite-36's revised
+text, not a logged intention. **One dependency does remain outstanding — `04`
+step 1 is still open**, so the runbook's gosec side will not be fully current
+until it lands. If step 1 changes anything the runbook asserts, folding that in
+belongs to `04b`, not to a reopening of `05`.
+
 ### Found and deliberately not fixed (scope-parking, §6)
 
 1. **Two `04b`-assigned passages, noted and untouched.** `:65`
@@ -334,12 +350,18 @@ pass — see the next section.
    writing against uncommitted code. Left exactly as found — the single-hunk
    diff above is the proof.
 
-2. **A third gosec passage in the same family, not in my fence.** `:224`,
+2. **A third gosec passage in the same family, not in my fence.** Find it with
+   `/usr/bin/grep -n -F 'at least three times' <runbook>` — deliberately not
+   cited by line number, per this task's own standing rule. It has moved twice
+   already: `:224` at `d60c8264`, `:285` after `9d82c56d` inserted 61 lines
+   above it, `:294` after this commit. Each of those was correct when measured
+   and wrong within the hour.
+   
    *"**Run `gosec` at least three times and require identical finding sets
    before writing any number into the baseline.**"* — the same manual procedure
    `04b` automates, in the "Standalone gosec known noise" section rather than
    the guarantees section. Not touched. Whoever corrects `:65`/`:74` should
-   look at `:224` in the same pass; it is easy to miss because it is 150 lines
+   look at it in the same pass; it is easy to miss because it sits ~150 lines
    away from the other two.
 
 3. **`golangci_scan_error`'s docstring is stale either way — routed to `06`.**
@@ -427,3 +449,162 @@ explicit paths; no `-A`, no `.`, no `-a`. No `git stash` at any point.
 
 
 ## Review notes
+
+**Reviewer session, fresh dispatch, 2026-08-25. Verdict: accept with findings.**
+Reviewed `9d82c56d` + `354a7543` against base `d60c8264`. The tree moved
+mid-review — `nanite-36` committed `04b` as `048ffd7d`/`26899cd0` — so the
+review range is pinned as `d60c8264..354a7543`, not `..HEAD`. Every number
+below is stamped with the commit it was derived at. `golangci-lint` here is
+`2.11.4`, matching the workflow pin (`:84` at HEAD installs `@v2.11.4`).
+
+The `code-review` skill on this machine is the official plugin's
+`/code-review` **command**, which is `gh`-PR-shaped and dispatches its own
+sub-agents. There is no PR and a reviewer cannot dispatch, so it was not
+applicable; review ran against `EXECUTION-PROCESS.md`'s criteria plus
+`standards/patterns.md` and `standards/code-quality.md` directly.
+
+### Behavioral acceptance — independently reproduced, not accepted on inspection
+
+The reproduction block was extracted byte-for-byte from the committed markdown
+(`git show 354a7543:<runbook> | sed -n '116,138p'`) and broken with exactly one
+added line (`diff` against the control shows `13a14` and nothing else). All
+three rows of the runbook's table reproduce:
+
+```
+cold cache + unmodified   EXIT=0  stdout '2813 issues:'  reaches comparator, 'ratchet passed'
+cold cache + mistyped     EXIT=7  stdout is exactly 1 line: '0 issues.'   comparator NOT reached
+warm cache + mistyped     EXIT=7  stdout '2813 issues:'   comparator NOT reached
+```
+
+Instrument checked per §3.17: `grep -c -F 'ratchet passed'` on the warm-broken
+stdout returns `0`, and the same grep on the control stdout returns `1`.
+stderr in both broken runs is the single line
+`level=error msg="[linters_context] typechecking error: stat …/internal/does-not-exsit: directory not found"`.
+
+The pasteable check was extracted as committed (`sed -n '179,191p'`, heredoc
+verbatim; only the placeholder `report=` was supplied) and run both directions:
+broken report -> `INVALID: golangci-lint set Report.Error, … its 166 issue(s)
+mean nothing: typechecking error: stat …/internal/does-not-exist: directory not
+found`, `exit=1`; good report -> `scan covered its targets: 166 issue(s)`,
+`exit=0`. `166` re-derived independently from `./internal/brand ./internal/mcp`.
+`--issues-exit-code=0` does not suppress exit `7`, confirmed twice.
+
+### Premise rewrite — correct, not convenient
+
+Checked specifically, because a worker rewriting a premise to match its finding
+is the suspicious case. It holds on three independent legs: the block exits `7`;
+`set -e` aborts before the comparator (measured by the absence of comparator
+output, with a positive control); and `golangci_scan_error` is called inside
+`lint_command` and `raise SystemExit(...)`s **before** `compare_counts`. The
+function is byte-identical between `d60c8264` and today's HEAD. The rewrite also
+did not shrink the work — all four `Done means` items were still delivered — which
+is the tell that would distinguish a convenient rewrite from a correct one.
+
+The replacement premise command tests the property it claims. The awk range
+`/^The baseline lives at/,/^Stage 1 is active now/` selects runbook `112`–`170`
+at `d60c8264` (59 lines, positive control: 1 `quality-ratchet.py` hit), which is
+the local-reproduction section and correctly excludes the guarantees-section hit
+at `:61`. Section-scoped `Report.Error`: `0` at `d60c8264`, `4` at `354a7543`.
+Every drift claim about `77137106` is true: whole-file count `0` there (positive
+control `1`), `section.get("Error")` at `183` there, `1`/`206` at `d60c8264`,
+and `261` today — which vindicates citing by function name.
+
+### Scope — clean
+
+`git diff --stat d60c8264..354a7543` is exactly the two permitted paths. The
+runbook diff is `61` insertions / `0` deletions in a single hunk
+`@@ -140,0 +141,61 @@` (positive control: the same deletion grep finds `16` on
+the task file). Everything outside the insertion is byte-identical —
+`head -140` and the tails both `shasum`-match across the two commits. The two
+`04b`-assigned passages are still at `:65` and `:74`, untouched.
+`./scripts/check.sh` -> exit `0`, `format OK (2s)`, `vet OK (1s)`,
+`lint --- (0s) examined nothing` (`0 changed Go files vs d60c8264`),
+`test OK (6s)`, trailer `no stage failed — but these examined nothing: lint`.
+Correct for a markdown-only diff. No volatile `quality-ratchet.py:<line>`
+citation was written into either file (positive control: the pattern matches a
+synthetic citation). `def golangci_scan_error` is unique (`1`).
+
+### Findings
+
+1. **(Main finding) The block destroys its own report, so the newly-added check
+   cannot be pointed at it, and the section never says so.** Block line 5 is
+   `trap 'rm -f "$report" "$linters" "$go_list"' EXIT`. Measured: instrumenting
+   the block to record `$report` and testing the path after it returns gives
+   "does not exist" (positive control: the path was recorded while it ran).
+   `Done means` step 2 asked for a pasteable `Report.Error` check for *the
+   reader running the gate by hand*, "not a description of the concept." What
+   shipped gives that path a description (`Check $?`) and gives the pasteable
+   command only to the artifact path (`audit-lint.json`), which is a different
+   path. The runbook is not wrong — it frames the check as being for "a report
+   you did not watch being produced" — but a reader who goes straight through
+   the section, runs the block, and tries the check on the report it just made
+   will find the file gone with no explanation in front of them. A sentence, or
+   an `--output.json.path` pointing somewhere persistent, closes it.
+
+2. **The zsh half of the interactive-paste claim does not reproduce here.** The
+   runbook says the fail-closed behaviour "holds for a paste into an interactive
+   `zsh` or `bash` too, where `set -e` fires and takes the shell with it." bash
+   confirms exactly (broken -> `exit=7`, marker unreached; unmodified ->
+   `exit=0`, marker reached). In zsh with this machine's rc files the block dies
+   at **line 6** (`go list … ./... > "$go_list"`) under `set -e`, before
+   `golangci-lint` runs, and it dies **identically on the unmodified block** —
+   bisected at 5 lines (survives) vs 6 lines (dies). Isolated: `set -e` alone
+   reproduces it, `set -u` alone does not, and `zsh -isf` (no rc files) survives,
+   as does non-interactive `zsh -c`. So it is rc-file-specific, not a property of
+   zsh, and the safety conclusion still holds — but the stated mechanism is not
+   what happens, and the more useful fact (this block cannot be pasted into that
+   zsh at all, healthy or broken) is not captured. I did not root-cause which rc
+   file does it. The Work log's paste table appears to have used a synthetic
+   `set -e` proxy rather than the real block, which is why this was missed.
+
+3. **Work-log derivation block mixes an immutable stamp with a mutable ref.**
+   It is headed "All at `d60c8264` unless noted", but several entries are written
+   against `HEAD`. Two now reproduce different values:
+   `git ls-tree HEAD -- scripts/gosec-repeat-run.sh | wc -l` is recorded `-> 0`
+   and returns `1` today; `git show HEAD:scripts/quality-ratchet.py | grep -n -F
+   'section.get("Error")'` is recorded `-> 206` and returns `261`. `git show
+   d60c8264:` would have been stable forever. This is audit-trail hygiene only —
+   the shipped runbook has no instance of it and stamps itself correctly.
+
+4. **(nit)** Two spellings of the mistyped path inside the same inserted section:
+   `does-not-exsit` at `:151` (the block test) and `does-not-exist` at `:196`
+   (the report test). Each is right for its own test; a reader may pause.
+
+5. **(nit)** The section says `set -e` "takes the shell with it" on a paste, then
+   two paragraphs later says "Check `$?`". In the paste case there is no shell
+   left to check `$?` in. Correct for the script case, but the text does not
+   distinguish the two.
+
+6. **(nit)** The Work log hands the third gosec passage forward as `:224`. That
+   is right at `d60c8264`, but this task's own +61-line insertion sits above it,
+   so it is `:285` from this commit onward — a volatile line number handed to the
+   next worker by the task whose thesis is not to do that. `:65`/`:74` are
+   unaffected and still accurate.
+
+### Checked and clean
+
+No naming collision (`GLOSSARY.md`'s only adjacent entry is **Landing check**,
+and this change is consistent with its landing-check / quality-gate split). No
+architecture doc owns the quality gate; the runbook is the owner. No fail-open,
+no duplicated hardcoded value, no unreachable wiring beyond finding 1's narrower
+form. `audit-lint.json` and the `full-repo-quality-reports` artifact both exist
+in the workflow (`:177`, `:175` at HEAD) and the runbook advertises the artifact
+at `:9`, so the cross-reference in the inserted text resolves. The pasteable
+check reads the same field the comparator reads (`Report.Error`), so it is not
+weaker than CI, and it fails closed on a missing or malformed file. The
+characterisation of the batch README's correction 7 is accurate.
+
+### Observations for whoever owns the follow-ups (not defects in this task)
+
+- `04b` landed as `048ffd7d` **without touching the runbook**, so `:65`, `:74`
+  and `:285` now describe a manual gosec procedure that `scripts/gosec-repeat-run.sh`
+  automates. The "pending `04`" note is correctly stamped and carries an explicit
+  trigger, so it is not misleading — but the trigger has fired and nothing has
+  acted on it.
+- `TASKS/gate-integrity/README.md:216` still records
+  `grep -c 'Report.Error' <runbook>   # -> 0`. That returns `5` today (it already
+  returned `1` at `d60c8264`). The Work log flags the *test* as wrong; the
+  recorded *number* is also now stale.
+- The `golangci_scan_error` docstring's claim that the local reproduction
+  procedure "does not check it" is still false at HEAD, in both readings. The
+  Work log's routing of it to `06` is correct and still live.

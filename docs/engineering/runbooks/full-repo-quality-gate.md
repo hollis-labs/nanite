@@ -41,8 +41,12 @@ with no consumers. Judge it against that goal, not against a mature CI system.
 grep -c '^      - name:' .github/workflows/full-repo-quality.yml
 ```
 
-Most steps set up the environment. Only some assert. As of 2026-08-25, of 17
-steps, 8 assert and 7 of those 8 are sound.
+Most steps set up the environment. Only some assert. As of 2026-08-25, of 13
+steps, 8 assert and 7 of those 8 are sound. The count fell from 17 as
+`TASKS/gate-integrity/01` and `03` deleted four sibling-checkout steps; none of
+the four asserted anything, so the 8/7 split is unchanged. Note this is the
+workflow's YAML `- name:` count, which is not the same number as the step count
+`gh run view` reports for a run.
 
 ### What it does guarantee
 

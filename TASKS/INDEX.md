@@ -87,17 +87,15 @@ installs nothing by itself, so a fresh clone has no checks until someone runs
 git config --get core.hooksPath      # absolute path into the parent clone
 ```
 
-**But a worktree outside `~/dev/hollis-labs/apps/` still cannot build or test.**
-`go.mod`'s four `replace` directives use relative `../../libs/<module>` paths,
-which do not resolve from an arbitrary worktree location, producing ~16
-unrelated `undefined: envelopes` typecheck errors. `go build`, `go test`,
-`./scripts/check.sh` and the `main`-scoped `pre-push` all fail there. Commit
-time should be unaffected, since neither remaining pre-commit command
-type-checks anything — that follows from the mechanism (`gofmt` is syntactic,
-`migration-purity` is `sed`+`grep`) and has not been tested in a real
-out-of-tree worktree. Either place worktrees as siblings under
-`~/dev/hollis-labs/apps/`, or land `TASKS/gate-integrity/01`-`03`, which remove
-the relative replaces entirely and make worktree location irrelevant.
+**Worktree location is irrelevant.** `go.mod` carries no `replace` directive
+of any kind (`grep -c '=>' go.mod` -> `0`), so every dependency resolves from
+the module proxy at the version `go.mod` records, from any path.
+`TASKS/gate-integrity/01`-`03` removed the four relative `../../libs/<module>`
+replaces that previously made a worktree outside `~/dev/hollis-labs/apps/`
+fail `go build`, `go test` and `./scripts/check.sh` with unrelated typecheck
+errors. Verified in a clone at a decoupled path with a fresh module cache;
+not yet verified in a real out-of-tree `git worktree`, which is the one
+remaining gap in that claim.
 
 **4. The quality gate works now — and it is a detector, not a merge gate.** Run
 [`32791971817`](https://github.com/hollis-labs/nanite/actions/runs/32791971817)
@@ -1199,7 +1197,7 @@ the crucial things that prevent us from working in standard ways."*
 | `08-lighten-commit-time-checks` | **A — first** | reviewed | none |
 | `01-drop-published-sibling-replaces` | **A** | reviewed | none |
 | `02-release-harness-filters-and-runtime-events` | **A** | reviewed | none (**sibling repos, not nanite**) |
-| `03-drop-remaining-replaces-and-sibling-checkouts` | **A** | implemented | `01`, `02` (both real, not sequencing) |
+| `03-drop-remaining-replaces-and-sibling-checkouts` | **A** | reviewed | `01`, `02` (both real, not sequencing) |
 | `04a` — gosec advisory reword only (step 6 of `04`) | **A** | not-started | none |
 | `07-migration-number-collision-guard` | **B — before parallel worktrees** | not-started | none |
 | *(container image + how checks run inside it)* | **C — with Docker** | not scoped | `01`-`03` |
@@ -1207,13 +1205,16 @@ the crucial things that prevent us from working in standard ways."*
 | `05-runbook-report-error-gap` | **D** | not-started | none |
 | `06-citation-and-config-drift-sweep` | **D** | not-started | none |
 
-**`01`-`03` is the keystone, and was undersold when this batch was first written.** Filed as
-CI-pin hygiene, it is actually the change that makes the repo self-contained — and four things
-depend on that: a second person can `git clone && go build` (today that fails unless they
-reproduce the exact `hollis-labs/{apps,libs}` layout); git worktrees work outside
-`~/dev/hollis-labs/apps/`; Docker containers work without mounting siblings at a relative path;
-and CI validates released source. All four have the same root cause — `go.mod`'s four relative
-`../../libs/<module>` replaces.
+**`01`-`03` is the keystone, and it has landed.** Filed as CI-pin hygiene, it was actually the
+change that makes the repo self-contained. `go.mod` now carries zero `replace` directives and the
+quality-gate workflow checks out only nanite, so: a second person can `git clone && go build`
+without reproducing the `hollis-labs/{apps,libs}` layout; git worktrees work outside
+`~/dev/hollis-labs/apps/`; a container needs only the source and proxy access; and CI validates
+released source. **The Go half of this is done. The frontend is not** — three call sites still
+hardcode `../../libs/go-envelopes` (`scripts/generate-plugin-imports.mjs`,
+`scripts/generate-envelope-types.mjs`, `Makefile`), and `ui/package.json`'s `prebuild`/`predev`
+run two of them, so `npm run build`, `npm run dev` and `make install` still require the sibling
+tree. Out of this batch's scope; unresolved.
 
 **`08` is first because the hooks are days old and already being bypassed.** They were activated
 2026-08-24 in `2b3b0216`; within the 6 commits since, `4f3d38c4` required `--no-verify` because

@@ -191,6 +191,30 @@ To get real evidence about published bytes, fetch them: download `@v/<version>.z
 and diff it against `git archive <tag>`, or re-resolve into a **fresh, empty** `GOMODCACHE` with the
 overrides cleared as above so the checksum database actually applies.
 
+### 3.12 `/private/tmp/libs` is a symlink to the real sibling tree (Nanite-specific)
+
+*Found 2026-08-25.* A decoupling proof usually works by building somewhere the relative
+`../../libs/<module>` path cannot resolve. On this machine that path can resolve when you did not
+expect it to:
+
+```
+ls -la /private/tmp/libs
+#   /private/tmp/libs -> /Users/chrispian/dev/hollis-labs/libs
+```
+
+So a scratch clone at `/private/tmp/<one-dir>/nanite` has `../../libs` pointing at the **real**
+sibling checkouts, and a build there passes by using them — the exact outcome the proof is meant to
+rule out, reported as success. Nanite's own scratchpad is deeper than that and resolves to an absent
+path, which is why this has not bitten yet.
+
+**Enumerate and check the actual resolved path** rather than reasoning about depth:
+`ls -la "$(cd <clone> && cd ../.. && pwd)/libs"` should be "No such file or directory". Never write
+"no `libs/` anywhere above it" — say which path you checked and what it returned.
+
+The general form: a proof built on "this path does not exist" needs the non-existence **verified at
+the resolved path**, not inferred from directory structure. Symlinks, `$TMPDIR` indirection and
+per-OS `/tmp` -> `/private/tmp` mapping all break the inference.
+
 ---
 
 ## 4. Verifying that your verification verifies

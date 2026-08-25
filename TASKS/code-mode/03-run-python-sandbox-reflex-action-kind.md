@@ -131,11 +131,20 @@ stale-by-omission once a seventh kind lands — update the sentence to include
 > sibling merged, ask `main`:
 > `git ls-tree --name-only main -- internal/store/migrations/ | sort -t_ -k1 -n | tail -1`.
 >
-> **Do not "helpfully" use `135`.** It is an empty slot, and it is unusable: Nanite builds its
-> goose provider without `WithAllowOutofOrder` (`internal/store/store.go:153`), so a migration
-> numbered below a database's highest applied version aborts `Up` with
+> **Do not "helpfully" use `135`.** It is an empty slot, and it is unusable. Nanite builds its
+> goose provider without `WithAllowOutofOrder` (`Store.migrate` in `internal/store/store.go`),
+> and goose selects migrations by version number alone — in `UpVersions`
+> (`internal/gooseutil/resolve.go`, goose v3.27.3) the applied set is a map keyed on the version
+> integer, no filename and no checksum, and both selection loops skip any version already in it.
+> So for a file numbered at or below a database's highest applied version, **which of two things
+> happens depends on whether that database has already applied that version**: if it has not, the
+> version is collected as missing, `Up` aborts with
 > `detected 1 missing (out-of-order) migration lower than database version (…)` and the service
-> fails to start. Holes are permanently burned.
+> fails to start; if it has, both loops skip the file — it never runs, nothing is reported, goose
+> considers the database up to date. **Silent.** There is no third case: a version equal to the
+> highest applied version is by construction already applied. The silent branch is the dangerous
+> one — schema divergence between databases of different vintages, with no startup failure to
+> announce it. Holes are permanently burned either way.
 >
 > Rule: `TASKS/INDEX.md`'s "Migration numbering — the claiming rule" banner;
 > `docs/engineering/tracking-integrity.md` check 9.

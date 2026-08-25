@@ -7,8 +7,13 @@
 `internal/plugin/schemas/plugin.schema.v1.json` (optional — see Context, not strictly required
 to avoid breaking, but required to actually *validate* the new field), new migration
 `135_plugin_capability_grants.sql` (or equivalent — see Migration numbering note below)
-**[⚠️ `135` MUST NOT BE USED — it is a hole and filling it fails the boot. Next free is 148 at
-`5ec930c8`; re-derive. See the annotation on "Migration numbering" below]**,
+**[⚠️ `135` MUST NOT BE USED — it is a hole. Goose selects migrations by version number
+alone, so what filling it does depends on whether the database being migrated has already
+applied `135`: not previously applied → the run fails with a missing-migration error and the
+service does not boot; already applied → the file is silently skipped and never runs. There is
+no third case, and the silent branch is the dangerous one — schema divergence between databases
+of different vintages, with no startup failure to announce it. Next free is 148 at `5ec930c8`;
+re-derive. See the annotation on "Migration numbering" below]**,
 `internal/store/plugins.go` (or a new `internal/store/plugin_capabilities.go`).
 
 ## Context
@@ -101,19 +106,34 @@ This planning session's own research independently re-verified the starting stat
 > batch's `135`-`143` up to `138`-`146` to clear a collision with Skills, and nothing filled the
 > gap.
 >
-> Nanite builds its goose provider **without** `WithAllowOutofOrder`
-> (`internal/store/store.go:153`), so `allowMissing` is false. A migration numbered below a
-> database's highest applied version is a hard error, not a back-fill. Reproduced against goose
-> v3.27.3 with Nanite's exact provider options:
+> Nanite builds its goose provider **without** `WithAllowOutofOrder` (`Store.migrate` in
+> `internal/store/store.go`), so `allowMissing` is false.
 >
-> ```
-> detected 1 missing (out-of-order) migration lower than database version (137): version 135
-> ```
+> **That has two branches, and only one of them is loud.** Goose selects migrations by version
+> number alone: in `UpVersions` (`internal/gooseutil/resolve.go`, goose v3.27.3) the applied set
+> is a map keyed on the version integer — no filename, no checksum — and both selection loops
+> skip any version already in it. So for a file numbered `135` against a database whose highest
+> applied version is at or above `135`, **which of two things happens depends on whether that
+> database has already applied `135`**:
 >
-> `Store.migrate` surfaces that as `goose up: …` and **the service does not boot**. The live
-> database is already past it — ledger max `137`, no `135` row. This task's own "Done means"
-> requirement to land the migration against a real copy of the backed-up database would fail
-> for that reason, not for anything to do with the DDL.
+> - **`135` not previously applied** → collected as missing, and with `allowMissing` false the
+>   run fails with a missing-migration error. `Store.migrate` surfaces it as `goose up: …` and
+>   **the service does not boot**. Reproduced against goose v3.27.3 with Nanite's exact provider
+>   options:
+>
+>   ```
+>   detected 1 missing (out-of-order) migration lower than database version (137): version 135
+>   ```
+>
+> - **`135` already applied** → both loops skip it. The file never runs, nothing is reported,
+>   goose considers the database up to date. **Silent.**
+>
+> There is no third case: a version equal to the highest applied version is by construction
+> already applied. The silent branch is the dangerous one — **schema divergence between
+> databases of different vintages, with no startup failure to announce it.** This task's own
+> "Done means" requirement to land the migration against a real copy of the backed-up database
+> would hit one branch or the other depending on that copy's vintage — a boot failure, or a
+> file that silently never runs — and neither has anything to do with the DDL.
 >
 > **Next free is 148**, derived at `5ec930c8`:
 >

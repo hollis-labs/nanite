@@ -148,22 +148,35 @@ other).
 > not. `135` is a **hole**: `63d79028` renumbered the Loops batch's `135`-`143` up to
 > `138`-`146` to clear a collision with Skills, and nothing has filled the gap since.
 >
-> Nanite builds its goose provider **without** `WithAllowOutofOrder`
-> (`internal/store/store.go:153` —
+> Nanite builds its goose provider **without** `WithAllowOutofOrder` (`Store.migrate` in
+> `internal/store/store.go` —
 > `goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))`), so
-> `allowMissing` is false. Under that default a migration numbered *below* a database's highest
-> applied version is a hard error, not a back-fill. Reproduced against goose v3.27.3 with those
-> exact options:
+> `allowMissing` is false.
 >
-> ```
-> detected 1 missing (out-of-order) migration lower than database version (137): version 135
-> ```
+> **What that default does has two branches, and only one of them is loud.** Goose selects
+> migrations by version number alone: in `UpVersions` (`internal/gooseutil/resolve.go`, goose
+> v3.27.3) the applied set is a map keyed on the version integer — no filename, no checksum —
+> and both selection loops skip any version already in it. So for a file numbered `135` against
+> a database whose highest applied version is at or above `135`, **which of two things happens
+> depends on whether that database has already applied `135`**:
 >
-> `Store.migrate` surfaces that as `goose up: …`, so **the service does not boot.** The live
-> database is already past it — its ledger max is `137` with no `135` row
-> (`sqlite3 ~/.local/share/nanite/workspaces/default/main.db 'select max(version_id) from goose_db_version'`
-> → `137`). Landing task `04` on `135` would break startup for every existing deployment,
-> including the operator's.
+> - **`135` not previously applied** → collected as missing, and with `allowMissing` false the
+>   run fails with a missing-migration error. `Store.migrate` surfaces it as `goose up: …`, so
+>   **the service does not boot.** Reproduced against goose v3.27.3 with Nanite's exact provider
+>   options:
+>
+>   ```
+>   detected 1 missing (out-of-order) migration lower than database version (137): version 135
+>   ```
+>
+> - **`135` already applied** → both loops skip it. The file never runs, nothing is reported,
+>   goose considers the database up to date. **Silent.**
+>
+> There is no third case: a version equal to the highest applied version is by construction
+> already applied. The silent branch is the dangerous one — **schema divergence between
+> databases of different vintages, with no startup failure to announce it.** Landing task `04`
+> on `135` would therefore break the boot on some databases and quietly diverge others. Neither
+> outcome is a back-fill.
 >
 > **Next free is 148**, derived at `5ec930c8`:
 >

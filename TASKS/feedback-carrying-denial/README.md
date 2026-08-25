@@ -138,9 +138,19 @@ collides with `TASKS/plugin-system`'s `135`, `TASKS/skills`'s `136`-`137`, or
 > migration numbers" verdict above is unaffected and still correct; only the sibling numbers
 > it quotes have moved. Skills' `136`-`137` **landed**. Loops landed `138`-`146`, not
 > "`138`-onward" as planned — `63d79028` shifted its whole range by +3. Plugin System's `135`
-> is **unusable**, not pending: that shift left it a permanently burned hole, and Nanite's
-> goose provider runs without `WithAllowOutofOrder` (`internal/store/store.go:153`), so
-> filling a hole aborts `Up` and the service fails to start. Highest on disk is now `147`;
+> is **unusable**, not pending: that shift left it a permanently burned hole. Nanite's goose
+> provider runs without `WithAllowOutofOrder` (`Store.migrate` in `internal/store/store.go`),
+> and goose selects migrations by version number alone — in `UpVersions`
+> (`internal/gooseutil/resolve.go`, goose v3.27.3) the applied set is a map keyed on the
+> version integer, no filename and no checksum, and both selection loops skip any version
+> already in it. So for a file filling a hole at or below a database's highest applied version,
+> **which of two things happens depends on whether that database has already applied that
+> version**: not previously applied → collected as missing, `Up` aborts and the service fails
+> to start; already applied → both loops skip it, the file never runs, nothing is reported,
+> goose considers the database up to date. **Silent.** There is no third case — a version equal
+> to the highest applied version is by construction already applied. The silent branch is the
+> dangerous one: schema divergence between databases of different vintages, with no startup
+> failure to announce it. Highest on disk is now `147`;
 > next free is **148**, re-derived at use. See `TASKS/INDEX.md`'s "Migration numbering — the
 > claiming rule" banner and `docs/engineering/tracking-integrity.md` check 9.
 

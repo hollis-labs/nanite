@@ -204,8 +204,19 @@ batch's own standing caution.
 > own "no migration needed" verdict is unaffected and still correct. The sibling numbers it
 > quotes have all moved: Skills' `136`-`137` **landed**; Loops landed `138`-`146` (not
 > "`138` onward" as planned — `63d79028` shifted its range by +3); and Plugin System's `135`
-> is **unusable**, a permanently burned hole rather than a pending claim — filling it fails
-> the boot (`internal/store/store.go:153` builds goose without `WithAllowOutofOrder`).
+> is **unusable**, a permanently burned hole rather than a pending claim. `Store.migrate` in
+> `internal/store/store.go` builds goose without `WithAllowOutofOrder`, and goose selects
+> migrations by version number alone — in `UpVersions` (`internal/gooseutil/resolve.go`, goose
+> v3.27.3) the applied set is a map keyed on the version integer, no filename and no checksum,
+> and both selection loops skip any version already in it. So for a file filling a hole at or
+> below a database's highest applied version, **which of two things happens depends on whether
+> that database has already applied that version**: not previously applied → collected as
+> missing, the run fails with a missing-migration error and the service does not boot; already
+> applied → both loops skip it, the file never runs, nothing is reported, goose considers the
+> database up to date. **Silent.** There is no third case — a version equal to the highest
+> applied version is by construction already applied. The silent branch is the dangerous one:
+> schema divergence between databases of different vintages, with no startup failure to
+> announce it.
 >
 > If a task is ever added here that does need a migration: **next free is 148** at `5ec930c8`
 > (`ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1` →

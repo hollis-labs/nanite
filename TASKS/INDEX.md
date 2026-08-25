@@ -35,10 +35,17 @@ files were written.
 **1. Migration numbers — the claiming rule is now published.** It is the
 section directly below this one; read it before writing any migration. The
 one-line version: **next free is one past the highest, never the lowest unused
-integer**, and `135` is a permanently burned hole — a migration numbered there
-is a hard boot failure on every existing deployment, not a back-fill. Any
-migration number sitting in a parked task file is an expired hint. Re-derive it
-at the moment you create the file.
+integer**, and `135` is a permanently burned hole. Goose selects migrations by
+version number alone, so for a migration numbered at or below a database's
+highest applied version, which of two things happens depends on whether that
+database has already applied that number: **not applied** → the boot fails with
+a missing-migration error; **already applied** → the file is skipped, never runs
+and nothing is reported — **silent**. There is no third case, since a number
+equal to the highest applied version is by construction already applied. The
+silent branch is the dangerous one: schema divergence between databases of
+different vintages, with no startup failure to announce it. Any migration number
+sitting in a parked task file is an expired hint. Re-derive it at the moment you
+create the file.
 
 **2. US English is the project standard.** `cancelled` → `canceled` landed
 repo-wide in `4f3d38c4`, including the **persisted enum** — migration
@@ -149,15 +156,27 @@ ask `main` instead:
 
 **"Next free" is one past the highest — never the lowest unused integer.**
 `135` is an empty slot (`63d79028` shifted Loops' `135`–`143` to `138`–`146`
-to clear a collision with Skills) and it looks available. It is not. Nanite
-builds its goose provider without `WithAllowOutofOrder`
-(`internal/store/store.go:153`), so a migration numbered below a database's
-highest applied version is a hard error at boot, not a back-fill — reproduced
-at goose v3.27.3 with Nanite's exact options as
-`detected 1 missing (out-of-order) migration lower than database version (137): version 135`.
-The live database's ledger max is `137` with no `135` row, so this is a
-service that fails to start, not a document that reads wrong. **Holes are
-permanently burned.**
+to clear a collision with Skills) and it looks available. It is not.
+
+Goose selects migrations by version number alone. In `UpVersions`
+(`internal/gooseutil/resolve.go`, goose v3.27.3) the applied set is a map keyed
+on the version integer — no filename, no checksum — and both selection loops
+skip any version already in it. So for a file numbered N at or below a
+database's highest applied version, **which of two things happens depends on
+whether that database has already applied N**:
+
+- **N not previously applied** → collected as missing; since
+  `internal/store/store.go` builds its goose provider without
+  `WithAllowOutofOrder`, the run fails with a missing-migration error. Hard boot
+  error — reproduced at goose v3.27.3 with Nanite's exact options as
+  `detected 1 missing (out-of-order) migration lower than database version (137): version 135`.
+- **N already applied** → both loops skip it. The file never runs, nothing is
+  reported, goose considers the database up to date. **Silent.**
+
+There is no third case: a version equal to the highest applied version is by
+construction already applied. The silent branch is the dangerous one — schema
+divergence between databases of different vintages, with no startup failure to
+announce it. **Holes are permanently burned.**
 
 Full rationale, and the mechanical form as check 9, in
 `docs/engineering/tracking-integrity.md` ("Migration numbers: the claiming
@@ -1143,8 +1162,13 @@ landing it and renumber if any sibling batch lands first.
 > **⚠️ STALE CLAIM — annotated 2026-08-24, `5ec930c8`. Do not use `144`.** Every premise
 > above has moved. `144` is **taken** — `144_workflow_run_waiting_on_loop_status.sql`, landed
 > by Loops, which used `138`-`146` rather than the `138`-`143` cited here. Skills' `136`-`137`
-> landed. `135` was never claimed and is now a permanently burned hole (see the claiming rule
-> at the top of this file — filling it fails the boot, it does not back-fill).
+> landed. `135` was never claimed and is now a permanently burned hole. Filling it does one of
+> two things, depending on whether the database in question has already applied `135`: **not
+> applied** → the boot fails with a missing-migration error; **already applied** → the file is
+> skipped, never runs, and nothing is reported — **silent**. There is no third case, since a
+> number equal to the highest applied version is by construction already applied, and the silent
+> branch is the dangerous one: schema divergence between databases of different vintages, with no
+> startup failure to announce it. Full mechanism in the claiming rule at the top of this file.
 >
 > **Next free is 148**, derived at `5ec930c8`:
 > `ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1` →
@@ -1261,12 +1285,21 @@ ran green at `61698b4e`. §8 was written before §0 was appended and never recon
 
 **`07` is the task that makes parallel batch work safe, and it is the only one of these that
 guards an *unrecoverable* failure.** Everything else the gate catches is directional — found on
-the next manual run, fixed in a follow-up. A bad migration number is a service that fails to
-start on every existing deployment. Nothing guards it today: `migration-purity` greps staged
-file *contents* for a `VALUES` clause and never reads a filename, and it structurally cannot be
-fixed in place because two worktrees each see only their own staged file.
-`internal/store/store.go:153` builds the goose provider without `WithAllowOutofOrder`, so a
-number below a database's highest applied version is a hard boot error, not a back-fill.
+the next manual run, fixed in a follow-up. Nothing guards a bad migration number today:
+`migration-purity` greps staged file *contents* for a `VALUES` clause and never reads a filename,
+and it structurally cannot be fixed in place because two worktrees each see only their own staged
+file. And goose selects migrations by version number alone — in `UpVersions`
+(`internal/gooseutil/resolve.go`, goose v3.27.3) the applied set is a map keyed on the version
+integer, no filename and no checksum, and both selection loops skip any version already in it. So
+for a number N at or below a database's highest applied version, which of two things happens
+depends on whether that database has already applied N: **not previously applied** → collected as
+missing, and since `internal/store/store.go` builds its goose provider without
+`WithAllowOutofOrder` the run fails with a missing-migration error, a service that does not start;
+**already applied** → both loops skip it, the file never runs, nothing is reported, goose
+considers the database up to date — **silent**. There is no third case, since a version equal to
+the highest applied version is by construction already applied. The silent branch is the dangerous
+one: schema divergence between databases of different vintages, with no startup failure to
+announce it.
 
 **`05` landed, and its premise was disproved rather than confirmed.** The task was written around a
 reproduction block believed to be fail-open; it was already fail-closed, twice. The real defect was

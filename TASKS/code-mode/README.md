@@ -233,9 +233,18 @@ reflex_python_sandbox_hook.go`, and `docs/engineering/GLOSSARY.md`. Zero overlap
 > - Skills' `136`-`137` landed as `136_skills_index_redesign.sql` and
 >   `137_agent_known_skills_grant_state_and_drop_agent_skills.sql`.
 > - `TASKS/plugin-system`'s `135` was never taken, and **`135` must never be used now** — that
->   renumber left it as a hole below the highest applied version, and Nanite's goose provider
->   runs without `WithAllowOutofOrder` (`internal/store/store.go:153`), so filling a hole is a
->   hard boot failure, not a back-fill.
+>   renumber left it as a hole below the highest applied version. Goose selects migrations by
+>   version number alone: in `UpVersions` (`internal/gooseutil/resolve.go`, goose v3.27.3) the
+>   applied set is a map keyed on the version integer, with no filename and no checksum, and
+>   both selection loops skip any version already in it. So filling a hole does one of two
+>   things, depending on whether the database in question has already applied that number:
+>   **not applied** → collected as missing, and since `internal/store/store.go` builds its
+>   provider without `WithAllowOutofOrder` the run fails with a missing-migration error, a hard
+>   boot failure; **already applied** → both loops skip it, the file never runs, nothing is
+>   reported, and goose considers the database up to date — **silent**. There is no third case,
+>   since a number equal to the highest applied version is by construction already applied. The
+>   silent branch is the dangerous one: schema divergence between databases of different
+>   vintages, with no startup failure to announce it.
 >
 > **Next free is 148**, derived at `5ec930c8`:
 >

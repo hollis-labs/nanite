@@ -127,8 +127,25 @@ comment lines about the package count, at `:68` and `:70`.
 
 `TASKS/gate-integrity/07-migration-number-collision-guard.md` is `not-started`
 and is the whole of Wave B. It guards the one **unrecoverable** failure class in
-this repo: a migration numbered below a database's highest applied version is a
-hard boot error on every existing deployment, not a back-fill.
+this repo.
+
+Goose selects migrations by version number alone. In `UpVersions`
+(`internal/gooseutil/resolve.go`, goose v3.27.3) the applied set is a map keyed
+on the version integer — no filename, no checksum — and both selection loops
+skip any version already in it. So for a file numbered N at or below a
+database's highest applied version, **which of two things happens depends on
+whether that database has already applied N**:
+
+- **N not previously applied** → collected as missing; since
+  `internal/store/store.go` builds its provider without `WithAllowOutofOrder`,
+  the run fails with a missing-migration error. Hard boot error.
+- **N already applied** → both loops skip it. The file never runs, nothing is
+  reported, goose considers the database up to date. **Silent.**
+
+There is no third case: a version equal to the highest applied version is by
+construction already applied. The silent branch is the dangerous one — schema
+divergence between databases of different vintages, with no startup failure to
+announce it.
 
 Its two structural claims still hold at `d35085ae` — re-derived:
 

@@ -14,7 +14,11 @@ Every assertion below caught real drift in `TASKS/audit-remediation/`
 Checks 1–8 and the first five rows of each table come from that batch. The
 **migration-number** row and **check 9** were added 2026-08-24 from a separate
 source — the pre-unfreeze sweep of frozen batches — and are the one entry here
-whose failure mode is not a wrong document but a service that does not start.
+whose failure mode is not a wrong document but a broken deployment. Which kind
+depends on whether the database it meets has already applied the number: a
+service that does not start if it has not, or, if it has, a schema that silently
+diverges with no startup failure to announce it. There is no third case — see
+the migration-numbers row below, and its section.
 
 ---
 
@@ -27,7 +31,7 @@ whose failure mode is not a wrong document but a service that does not start.
 | **Finding → task** | `findings.json.task_file`, `FINDING-INDEX.md` | A finding pointed at a task file that explicitly disclaimed owning it, and the real task was never written |
 | **Counts** | README dispatch table, README wave sections, INDEX, kickoff prose | 63 vs 65 vs 67; "twelve tasks" while listing thirteen; "six of the eight files" for seven of nine |
 | **Wave membership** | dispatch table, task-sequence section, INDEX section, kickoff | A wave was inserted before its predecessor and omitted from the dispatch table entirely |
-| **Migration numbers** | `internal/store/migrations/` on disk, the claiming task file, that batch's `README.md` "Migration numbering" section, `TASKS/INDEX.md`'s batch section, sibling batches' READMEs restating the claim | **All five, repeatedly.** Two same-batch workers both claimed `138`; two cross-batch workers both claimed `126`; five Phase 1 workers picked `106` four times and `110` twice; a whole nine-migration range was renumbered post-hoc. See below — this one is not just bookkeeping, it can break the boot |
+| **Migration numbers** | `internal/store/migrations/` on disk, the claiming task file, that batch's `README.md` "Migration numbering" section, `TASKS/INDEX.md`'s batch section, sibling batches' READMEs restating the claim | **All five, repeatedly.** Two same-batch workers both claimed `138`; two cross-batch workers both claimed `126`; five Phase 1 workers picked `106` four times and `110` twice; a whole nine-migration range was renumbered post-hoc. See below — this one is not just bookkeeping: depending on whether the database it meets has already applied that number, it either breaks the boot or is silently skipped, leaving schema divergence with no startup failure to announce it. There is no third case |
 
 ## Designate one source; derive the rest
 
@@ -115,16 +119,17 @@ whenever the prefixes are not all the same width.
 
 ### Why filling a hole is worse than a stale number
 
-`internal/store/store.go:153` builds its provider as
+`Store.migrate` in `internal/store/store.go` builds its provider as
 `goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))`.
 There is no `goose.WithAllowOutofOrder(true)`, so `allowMissing` is false —
 goose's default. Under that default a number at or below the ledger's max is
-never applied as a back-fill. It does one of **two** things, and which one is
-decided entirely by the vintage of the database it meets — not by anything
-about the file. `internal/gooseutil/resolve.go` (goose v3.27.3, the version
-`go.mod` pins) keys its ledger map by version number alone, with no filename
-and no checksum, and both of its loops `continue` on an already-applied
-version.
+never applied as a back-fill. It does one of **two** things — there is no
+third case, since a number equal to the ledger's max is by construction already
+applied — and which one is decided entirely by the vintage of the database it
+meets, not by anything about the file. `internal/gooseutil/resolve.go` (goose
+v3.27.3, the version `go.mod` pins) keys its ledger map by version number
+alone, with no filename and no checksum, and both of its loops `continue` on an
+already-applied version.
 
 **Case 1 — the number is not in that database's ledger.** It lands in
 `missing`, and `len(missing) > 0 && !allowMissing` returns an error.
@@ -240,8 +245,11 @@ the claiming rule" above for why this one is not merely bookkeeping.
 - Every `NNN_name.sql` a task file cites either exists on disk **or** is an
   unlanded claim.
 - Every unlanded claim is strictly greater than the highest number on disk.
-  A claim at or below it is stale by definition — and if it targets a hole,
-  boot-breaking.
+  A claim at or below it is stale by definition — and if it targets a hole it
+  either breaks the boot or is silently skipped, depending on whether the
+  database it meets has already applied that number. There is no third case;
+  the silent branch is schema divergence with no startup failure to announce
+  it. See the section above.
 - No two prefixes collide across `internal/store/migrations/` and the set of
   unlanded claims.
 

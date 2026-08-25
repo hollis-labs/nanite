@@ -85,8 +85,8 @@ full picture — the doc-writer derived those independently.
 
 **This is the only task in Wave B**, and it guards the one *unrecoverable*
 failure class. Nothing else in this batch is unrecoverable — everything else is
-found on the next run and fixed in a follow-up. A bad migration number is a
-service that fails to start on every existing deployment.
+found on the next run and fixed in a follow-up. A bad migration number either
+stops a service from starting or diverges its schema in silence.
 
 Why it is unrecoverable, verified:
 
@@ -95,10 +95,26 @@ grep -n 'WithAllowOutofOrder' internal/store/store.go    # absent
 ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1  # 148_..., next free is 149
 ```
 
-goose is built without `WithAllowOutofOrder`, so a migration numbered below a
-database's highest applied version is a hard boot error, not a back-fill. `135`
-is a permanently burned hole. **Next free is one past the highest, never the
-lowest unused integer.**
+Goose selects migrations by version number alone. In `UpVersions`
+(`internal/gooseutil/resolve.go`, goose v3.27.3) the applied set is a map keyed
+on the version integer — no filename, no checksum — and both selection loops
+skip any version already in it. So for a file numbered N at or below a
+database's highest applied version, **which of two things happens depends on
+whether that database has already applied N**:
+
+- **N not previously applied** → collected as missing; with `internal/store/store.go`
+  building the provider without `WithAllowOutofOrder`, the run fails with a
+  missing-migration error. Hard boot error.
+- **N already applied** → both loops skip it. The file never runs, nothing is
+  reported, goose considers the database up to date. **Silent.**
+
+There is no third case: a version equal to the highest applied version is by
+construction already applied. The silent branch is the dangerous one — schema
+divergence between databases of different vintages, with no startup failure to
+announce it.
+
+`135` is a permanently burned hole. **Next free is one past the highest, never
+the lowest unused integer.**
 
 `migration-purity` does **not** catch this and structurally cannot: it greps
 staged migration *contents* for a `VALUES` clause and never reads a filename,

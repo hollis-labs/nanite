@@ -999,8 +999,8 @@ A second instance of the same class, found in the same pass: `GO-STORE-003` (hig
 `DeleteAgentByID` cannot distinguish not-found from a real DB error) was **already in the lint
 output**, attributed by `REPORT.md:693` to golangci's `nilerr` linter at
 `raw/golangci-baseline.log:6421`. `nilerr` is enabled today. It never gated because the pre-commit
-hook runs `golangci-lint run --new` (`lefthook.yml`) — changed code only, which structurally cannot
-surface a pre-existing finding in untouched code.
+hook then ran `golangci-lint run --new` (`lefthook.yml`) — changed code only, which structurally
+cannot surface a pre-existing finding in untouched code.
 **Resolution:** No code fix in this pass (planning only). Both instances are written up as the
 headline analysis in `TASKS/audit-remediation/PREVENTION.md`, which is the specification `12/01`
 (full-repo scheduled lint gate) and `12/02` (engineering standards docs) implement against. The

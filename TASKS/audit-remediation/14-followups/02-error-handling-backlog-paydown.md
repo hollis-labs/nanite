@@ -63,7 +63,7 @@ They were separated from the other linters on evidence, not taste.
 **`nilerr` is the linter that already caught `GO-STORE-003`** — a high-severity
 finding where `DeleteAgentByID` could not distinguish a genuine not-found from
 a real database error. It was sitting in the lint output the whole time,
-invisible because the pre-commit hook runs `golangci-lint run --new` and
+invisible because the pre-commit hook then ran `golangci-lint run --new`, which
 structurally cannot surface a pre-existing finding in untouched code.
 
 That is the argument for zero-tolerance on this class: these three don't report

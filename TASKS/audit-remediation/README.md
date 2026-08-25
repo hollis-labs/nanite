@@ -151,8 +151,8 @@ value-per-line change in the batch**, and `08/09`/`12/01` own it.
 
 `REPORT.md:693` attributes the high-severity `DeleteAgentByID` finding to
 golangci's `nilerr` linter at `raw/golangci-baseline.log:6421`. The linter is
-enabled in `.golangci.yml` today. It didn't gate because the fast hook runs
-`golangci-lint run --new` (`lefthook.yml`) — changed code only, which
+enabled in `.golangci.yml` today. It didn't gate because the fast hook then
+ran `golangci-lint run --new` (`lefthook.yml`) — changed code only, which
 structurally cannot surface a pre-existing finding in untouched code. This is
 the concrete, non-hypothetical argument for `12/01`, and it should be quoted
 in that task rather than argued from first principles.

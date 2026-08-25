@@ -1501,8 +1501,10 @@ include `internal/api/` is the highest value-per-line change in the batch (`08/0
 **`GO-STORE-003` was already in the lint output and nobody saw it.** `REPORT.md:693` attributes the
 high-severity `DeleteAgentByID` finding to golangci's `nilerr` linter at
 `raw/golangci-baseline.log:6421`. `nilerr` is enabled today; it never gated because the pre-commit
-hook runs `golangci-lint run --new` (`lefthook.yml`) — changed code only, which structurally cannot
-surface a pre-existing finding in untouched code. This is the concrete argument for `12/01`.
+hook then ran `golangci-lint run --new` (`lefthook.yml`) — changed code only, which structurally
+cannot surface a pre-existing finding in untouched code. This is the concrete argument for `12/01`,
+and it is stronger now: since `TASKS/gate-integrity/08`, there is no pre-commit lint at all, and
+whole-repo lint belongs to the nightly gate's ratchet.
 
 **Two of the six production islands aren't flagged as needing a decision.** `GO-MEM-002` (Hadron
 context gate) and `GO-MCPTOOL-003` (curated tool-knowledge matcher) carry

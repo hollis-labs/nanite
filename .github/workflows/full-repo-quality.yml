@@ -25,26 +25,12 @@ jobs:
       run:
         working-directory: apps/nanite
     steps:
-      # Nanite's go.mod has four local replaces at ../../libs/<module>.
+      # Nanite's go.mod has two local replaces at ../../libs/<module>.
       # Preserve that exact geometry in the Actions workspace.
       - name: Check out Nanite
         uses: actions/checkout@v4
         with:
           path: apps/nanite
-
-      - name: Check out go-modelsdev
-        uses: actions/checkout@v4
-        with:
-          repository: hollis-labs/go-modelsdev
-          ref: 7d932798b85145ec93f923e392f5d41762894e8c
-          path: libs/go-modelsdev
-
-      - name: Check out go-envelopes
-        uses: actions/checkout@v4
-        with:
-          repository: hollis-labs/go-envelopes
-          ref: 58243d84db7df1480960e2b747bea6ffca9fd6db
-          path: libs/go-envelopes
 
       - name: Check out go-harness-filters
         uses: actions/checkout@v4

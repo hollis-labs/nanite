@@ -17,7 +17,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.45.0
 	github.com/google/jsonschema-go v0.4.2
 	github.com/hollis-labs/agentkit v0.5.0
-	github.com/hollis-labs/go-envelopes v0.1.1
+	github.com/hollis-labs/go-envelopes v0.3.0
 	github.com/hollis-labs/go-modelsdev v0.2.0
 	github.com/hollis-labs/go-otel v0.1.0
 	github.com/hollis-labs/go-providers v0.24.0
@@ -92,28 +92,15 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/hollis-labs/go-modelsdev => ../../libs/go-modelsdev
-
-// CW-20260816-0069: local dev against the go-envelopes schema addition
-// (report-card.session_link) below, mirroring the go-modelsdev precedent
-// above. Points at the sibling checkout in libs/go-envelopes, which has the
-// same change committed. Remove once go-envelopes cuts a release that
-// includes it and bump the `require` version instead.
-replace github.com/hollis-labs/go-envelopes => ../../libs/go-envelopes
-
-// TASKS/agent-host-acp/06: go-harness-filters and go-runtime-events are
-// go-agent-wrapper's own transitive deps, now imported directly by Nanite
-// too (internal/runtime/agent's runtimeevents.Sink implementation). Per
-// this batch's README ("go-harness-filters and go-runtime-events keep the
-// older 'drop before tagging' discipline — nothing outside this repo
-// depends on their replace staying"), their module-proxy-published v0.1.0
-// tags are stale relative to the local sibling checkouts go-agent-wrapper
-// was actually built and reviewed against — confirmed directly: building
-// without these replaces fails with "undefined: hrepair.Chain" inside
-// go-agent-wrapper/filters, a symbol present in the local
-// libs/go-harness-filters checkout but not in the proxy-published v0.1.0.
-// Mirrors the go-agent-wrapper replace immediately above. Remove once both
-// repos cut a release that includes the proxy-published tags catching up.
+// go-harness-filters and go-runtime-events are each pinned one commit ahead
+// of their published v0.1.0 tag, and v0.1.0 is the only version either module
+// has on the module proxy — so the sibling checkouts are the only source of
+// the commits Nanite is built against. Derived 2026-08-25:
+//     git -C ../../libs/<module> rev-list --count v0.1.0..HEAD   -> 1
+//     go list -m -versions github.com/hollis-labs/<module>       -> v0.1.0
+// These two replaces stay until TASKS/gate-integrity/02 tags a release from
+// each pin; TASKS/gate-integrity/03 then deletes them together with the two
+// remaining libs/ checkout steps in .github/workflows/full-repo-quality.yml.
 replace (
 	github.com/hollis-labs/go-harness-filters => ../../libs/go-harness-filters
 	github.com/hollis-labs/go-runtime-events => ../../libs/go-runtime-events

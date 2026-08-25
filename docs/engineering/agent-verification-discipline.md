@@ -58,6 +58,23 @@ The same rule applies to a zero you *want* — verify the mechanism still fires.
 
 ---
 
+### 1.5 A count from memory reads exactly like a count that was measured
+
+Three in one work thread: five per-directory figures summed mentally as `141` when the total was
+`161`; a comment count given as "twice" when it was once; a task id written from expectation rather
+than read out of the create result. All three reached prose, and **all three were caught by the
+person being corrected rather than the person asserting** — one of them inside a message correcting
+somebody else's recollected number.
+
+The pattern is not carelessness. **A count feels like an observation when it is a recollection, and
+nothing in the sentence marks the difference.** "There are five" and "I counted five" are written
+identically and read identically; only one of them happened. Every hedge we write attaches to
+uncertainty, and a remembered number does not feel uncertain.
+
+**The check:** ask whether the figure you are about to write is a measurement or a memory. If it is
+a memory, take the measurement — let the tool do the counting and the arithmetic, and paste the
+result. One command against an unfalsifiable claim in a document that reads as authoritative.
+
 ## 2. Documents and code
 
 ### 2.1 Code wins
@@ -106,6 +123,26 @@ whatever now occupies that line. A wrong line number and a correct one are indis
 page; a grep that returns nothing is not.
 
 ---
+
+### 2.5 Existence is not identity — a reference that resolves feels checked
+
+**A wrong reference that does not exist fails loudly. A wrong reference that exists fails silently.**
+
+Two sessions cited task `CW-20260825-0056` for a finding that lived on `CW-20260825-0087`. Nothing
+could catch it: `0056` is a real, in-review task in another project, created within minutes of the
+id being invented. A reader following it lands on a coherent task and gets no signal at all.
+
+This is §3.16's symlink problem in the reference layer — `[ -e ]` on the id passes. Resolution is
+not correctness.
+
+**The check:** fetch the reference and read its title. Not *does this id resolve* but *is this the
+thing I mean?* An identifier is a stored value and takes the same discipline as a number (§1.1): one
+written from expectation rather than read from a result is an unverified claim that reads exactly
+like a verified one. Where a document carries several, a cross-reference block listing each id with
+what it is, stamped verified-by-fetch, costs one lookup each and makes the unverified ones visible.
+
+**Scope:** identifiers a reader will follow — task ids, tickets, shas, cited paths. Not an argument
+for re-fetching everything on every read; verify one at the moment you first write it down.
 
 ## 3. Environment hazards
 
@@ -290,13 +327,56 @@ printf 'cannot catch\n' | /usr/bin/grep -c  'cannot catch|does not catch'   # 0 
 printf 'cannot catch\n' | /usr/bin/grep -cE 'cannot catch|does not catch'   # 1
 ```
 
+Escaping it as `\|` mostly works and therefore hides the case where it does not. **BRE alternation
+is fine for plain literals and breaks when a branch is anchored** — `^` and `$` anchor only at the
+very start and end of a BRE, not at the edges of an alternation branch, so one branch silently
+stops matching:
+
+```
+printf 'not a back-fill\nnot a backfill\n' | /usr/bin/grep -c 'back-fill\|backfill'   # 2  fine
+printf 'alpha\nbeta\n\ngamma:\n' | /usr/bin/grep -c  '^$\|:$'                        # 1  WRONG
+printf 'alpha\nbeta\n\ngamma:\n' | /usr/bin/grep -cE '^$|:$'                          # 2
+```
+
+Each anchored branch matches correctly on its own (`^$` → 1, `:$` → 1); only the alternation loses
+one. Worth its own mention because **the failure direction is *more* results, not none** — under a
+`-v` filter the lost branch under-excludes, and every other trap in this section fails toward zero,
+where a zero is at least suspicious. An inflated count reads as success.
+
 **(c) A corpus with line breaks your phrase doesn't have.** A `grep -F` for a phrase that wraps
-across two source lines returns `0` while the phrase is plainly present. Match a short fragment that
-cannot wrap.
+across two source lines returns `0` while the phrase is plainly present.
+
+**Never grep a multi-word literal in prose.** Pick the longest single word in the phrase that is
+distinctive on its own and match that; add a second single-word check if one word is too common. In
+hard-wrapped prose the wrap point is a property of the file's width and the paragraph's history, not
+of your phrase — you cannot predict it by looking at the string you typed.
+
+**An edit changes the wrap points of every line after it**, so a post-edit grep of a multi-word
+phrase is unreliable *by construction*, not by bad luck — and it fires at the moment you are
+confirming a fix, when you are most confident and least suspicious. A one-bullet fix to a task file
+rewrapped a sentence the fix was required to *retain*:
+
+```
+grep -cF 'one past the highest' <file>            # 1     looks like a pass
+grep -nF 'one past the highest' <file>            # 553:  ...but that is the work log
+sed -n '1,125p' <file> | grep -cF '...'           # 0     the body: false negative
+sed -n '1,125p' <file> | tr '\n' ' ' | grep -cF … # 1     intact, merely rewrapped
+```
+
+One rewrap gives a **false negative** when you scope to the region you changed, and a **false
+positive** when you don't, because an unrelated copy 428 lines away answers a question you did not
+ask. Neither is distinguishable from a correct answer and they point in opposite directions: the
+careful reader and the careless one are both wrong.
+
+**Same class — the artifact you are reading is not the text you think you are reading.** A
+`git diff -U0` hunk omits unchanged lines, so reading one as contiguous prose can make an intact
+sentence look broken; a passage appeared to read "`Up` aborts with / fails to start" because the
+clause between them was an unchanged line the zero-context diff never printed. Check the file before
+calling a defect. In both cases the corruption is invisible because what comes back is well-formed.
 
 **The reflex, not the awareness.** `-E` by default for anything with alternation, `-F` for anything
-literal, `/usr/bin/grep` when you want POSIX BRE specifically — and a positive control on every
-`→ 0`. Naming a danger without giving a reflex produces an entry you read *after* the mistake: this
+literal, `/usr/bin/grep` when you want POSIX BRE specifically, **single words rather than phrases
+whenever the corpus is prose** — and a positive control on every `→ 0`. Naming a danger without giving a reflex produces an entry you read *after* the mistake: this
 one was in the file, and cost two more wrong answers in the two days after it was written.
 
 ### 3.14 A scratch clone of the real repo has the real repo as `origin`
@@ -478,6 +558,29 @@ as a complete one.
 
 ---
 
+### 3.19 `readlink -f` is not an existence check on macOS
+
+Given a **dangling** symlink, macOS `readlink -f` prints the path with the unresolvable trailing
+component **silently dropped**, and exits 0.
+
+```
+d=$(mktemp -d); ln -s ./nowhere/target "$d/link"
+readlink -f "$d/link"                                  # …/nowhere    <- note: no /target
+[ -e "$d/link" ] && echo present || echo MISSING       # MISSING
+```
+
+Read alone that looks like a link that resolved. **The check:** `[ -e ]` (or `-d`/`-f`) on the link
+path. Use `readlink -f` to *report* a target, `[ -e ]` to *assert* it.
+
+**Scope:** about proving a symlink resolves. Says nothing about non-symlink paths, and nothing about
+GNU `readlink`, which errors on a dangling argument rather than truncating.
+
+**A related trap in the same family:** a bare path to a symlinked directory is silently empty to
+shell tools — `grep -r`, `find`, `du`, and `tar` without `-h` all return nothing or one entry and
+exit 0. A **trailing slash** decides whether the start point is followed at all; hop count only
+decides whether following once is enough. Node's `fs.readdirSync` and Python's `os.walk` are
+unaffected, so the tool you verify with may disagree with the consumer you care about.
+
 ## 4. Verifying that your verification verifies
 
 The defect class named in `failure-modes.md` §6 — a check that reports success without having checked. Four instances surfaced on 2026-08-24.
@@ -557,6 +660,77 @@ real tool. Demonstrated with a mutant — `Panic while running SSA analyzer` for
 **A positive control must be built from the artifact, not from the assertion's own inputs.** The
 fixture is now a literal copy of what the tool emits. Note what that still does not cover: the tool
 renaming its message upstream. Say so rather than implying the control is total.
+
+### 4.6 A discriminator is only evidence about the failure it was designed for
+
+Choosing a discriminator is choosing which failures stay invisible.
+
+A task repaired symlinks that resolved nowhere, verified per-entry with `[ -e ]` — correct for that
+failure, and it caught it. The repaired links then passed `[ -e ]` and `ls` while returning **empty**
+to `find` and `grep -r` over the same path: a second, narrower instance of the very failure the task
+existed to remove. The verification was not sloppy. It was aimed at the previous failure mode.
+
+**The check:** when a fix passes, ask *which* failure your instrument rules out, and name one it does
+not. Where several access patterns exist, **verify that they agree with each other** rather than that
+any one returns a good number. Disagreement between two methods over the same path is itself the
+finding.
+
+**And the qualifier this rule needed, produced by its own author within the hour of writing it.** The
+follow-up fix was verified by exactly this method and its commit message claimed "every access pattern
+agrees." It did not — every method checked shared a trailing slash that was never a conscious choice.
+**Agreement across methods you already thought of is agreement among your assumptions.** Ask what the
+methods you ran have *in common* — a flag, a path form, a working directory — because that shared
+property is the one thing the agreement cannot test.
+
+**Scope:** about verifying a change you just made. Not an argument for running every check on
+everything; an argument for knowing which check you ran and saying what it leaves uncovered.
+
+### 4.7 Counts are not evidence of resolution
+
+A directory of N dangling symlinks and a directory of N working ones are **byte-identical** under
+`ls -1 <dir> | wc -l`. A portfolio survey printed `REAL DIR (20 entries)` for two repos and they were
+read as the known-good reference to copy. Per-entry testing showed both resolved **zero**. Had the
+count been trusted, the fix would have been to replicate a configuration that works nowhere.
+
+This generalizes past symlinks: **any count over a set whose members can individually be broken is
+equally consistent with all-fine and all-broken.** §3.17's question returns *yes* for every such
+count, which makes counts a named blind spot in that rule rather than a separate concern — and it is
+its own entry because someone applying §3.17 would not find it there.
+
+**The check:** test members, not the container. A count answers "how many names are here", never "how
+many of them work". **And when comparing two enumerations, compare sets, not counts** — equal totals
+are not identity, since two different 92s compare equal:
+
+```
+comm -23 a b | wc -l    # 0
+comm -13 a b | wc -l    # 0   <- both empty is the assertion; matching totals is not
+```
+
+Rule out the cheap agreements first: `grep -l ''` skips empty files, `ls` hides dotfiles where `find`
+does not, and a recursive tool counts at every depth. Compare like for like.
+
+### 4.8 An inherited frame is answered rigorously in the wrong space
+
+§4.1–4.7 are instruments answering the wrong question. This is the **question itself** arriving
+pre-shaped, where rigor makes the wrong answer more convincing.
+
+A task reported that a reviewer tried to invoke the `code-review` **skill** and had none. Every
+investigation searched the skills tree. The conclusion — *no skill named `code-review` exists* — was
+derived carefully, stated with its command, verified by two sessions, and written into a commit
+message. It was also beside the point: a **role** named exactly `code-review` existed the whole time,
+one directory over, referenced by three agents in the project config. Nobody looked, because the word
+"skill" arrived in the problem statement and was never treated as a claim.
+
+**The check:** before searching, ask *who chose the noun in this question, and did they verify it?* A
+term inherited from a task description, a bug report, or an upstream agent is a hypothesis about
+where the problem lives, not a constraint on where to look. When a search over the named space comes
+back clean, that is the moment to widen it, not the moment to conclude.
+
+The tell is a confident negative — *"no X named N exists"* is only ever as wide as the space
+searched, and the space came from someone else.
+
+**Scope:** about inheriting the *category* of a thing. Not an argument for unbounded search, and it
+does not apply where the category is genuinely fixed by the request.
 
 ## 5. Amplification has directions
 

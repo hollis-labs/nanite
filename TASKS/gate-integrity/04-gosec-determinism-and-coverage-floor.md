@@ -1,7 +1,7 @@
 # Stop a silently-degraded gosec run from passing the ratchet — and test the concurrency lead
 
 **Phase:** 1 — Measurement integrity
-**Status:** not-started
+**Status:** `04a` implemented (step 6, the advisory reword). `04b` — steps 1-5 — remains **not-started**. Set this way rather than to a whole-file `implemented` because five of the six steps and five of the six "Done means" bullets are untouched; only *The reduction message no longer advises lowering the baseline unconditionally* is satisfied.
 **Depends on:** none
 **Split:** this file covers **`04a`** (step 6, the advisory reword — Wave A)
 and **`04b`** (steps 1-5 — Wave D). `04a` is a few lines, blocks nothing, and
@@ -151,5 +151,182 @@ correct whether or not step 1 converges, and they are the deliverable.
   green.
 
 ## Work log
+
+### `04a` only — step 6, the reduction advisory reword (2026-08-25)
+
+**`04b` (steps 1-5) is untouched and still open.** Nothing below builds the
+repeat-run wrapper, adds a `Stats` coverage floor, fails on a missing `Issues`
+array, decides the `Golang errors` key, or runs the `-concurrency` experiment.
+
+**Starting commit:** `93939f6b139ab51b6612e138e40b357dd02855ce`, branch `main`,
+`git status --porcelain` empty. All line numbers below are from the working tree
+atop that commit. Note this file's own citations are stamped `77137106`, which is
+five commits behind; every one was re-derived rather than trusted.
+
+#### Citations re-derived (§2.2)
+
+| This file says | Actually |
+|---|---|
+| `grep -n 'reductions detected' scripts/quality-ratchet.py` (line 34) | Still the right command. Returned **line 145** at `93939f6b`, not a line number this file states. |
+| `gosec_command` at `scripts/quality-ratchet.py:397` (line 71) | Correct at `93939f6b` — `grep -n 'def gosec_command' scripts/quality-ratchet.py` -> `397`. Now `416` after this change shifted it. |
+| `grep -n 'Stats\|Golang errors\|NumFiles' scripts/quality-ratchet.py` returns no matches (line 69) | Still no matches at `93939f6b`. `04b` step 3 is still needed. |
+
+#### Files changed
+
+**`scripts/quality-ratchet.py`** — `compare_counts`, the reduction branch
+(`scripts/quality-ratchet.py:143-166` after the edit). The printed advisory now
+reads:
+
+```
+<label>: reductions detected for <names>; re-run the same tree and confirm the
+reduction reproduces before lowering the committed baseline. A reduction that
+reproduces is a real improvement -- bank it; one that does not reproduce is a
+dropped-findings run, and baking it into the baseline deletes real findings.
+```
+
+An explanatory comment sits above it (`scripts/quality-ratchet.py:144-158`).
+
+**`scripts/quality-ratchet_test.py`** — see *Tests* below.
+
+#### The advisory is shared by both callers — verified, not assumed
+
+```
+grep -n 'compare_counts(' scripts/quality-ratchet.py
+116:def compare_counts(label: str, baseline: dict[str, int], actual: Counter[str]) -> int:
+309:    stage_1_failed = compare_counts("audit-config linters", baseline, actual)
+482:    comparison_failed = compare_counts(
+```
+
+Two callers, one message. The `audit-config linters` baseline includes
+`misspell: 2`, so a routine misspell fix prints the same string a gosec drop
+does. Proven by running the comparator against the **real committed baseline**
+with a report reducing exactly one rule (throwaway harness, not committed):
+
+```
+=== lint (misspell 2 -> 1) exit 0 ===
+audit-config linters: reductions detected for misspell; re-run the same tree and
+confirm the reduction reproduces before lowering the committed baseline. ...
+=== gosec (G301 59 -> 58) exit 0 ===
+standalone gosec actionable rules: reductions detected for G301; re-run the same
+tree and confirm the reduction reproduces before lowering the committed
+baseline. ...
+```
+
+That constraint drove the wording. The message asks for a repeat run without
+singling out a linter or implying a reduction is suspect: for `misspell` the
+repeat run reproduces, and the message then says to bank it. Increases still
+fail — untouched, and `test_lint_rejects_a_stage_1_regression` still passes.
+
+#### Decision: pointed at the *requirement*, not at the wrapper
+
+Step 6 says to "point at the wrapper." The wrapper is `04b` step 2 and **does
+not exist**, so pointing at it from the tool's output would be a citation to
+nothing — the defect class this batch is removing. Instead:
+
+- the **printed message** states the requirement only (re-run, confirm it
+  reproduces, then move the baseline) and names no tool, path or task;
+- the **code comment** names `TASKS/gate-integrity/04` step 2 (04b) as the
+  planned automation and says plainly that until it lands the repeat run is the
+  operator's to do, and cites the runbook section for the gosec evidence.
+
+The comment deliberately does **not** restate the drop size or the
+one-in-twelve frequency; it points at
+`docs/engineering/runbooks/full-repo-quality-gate.md` for both (§5, derive
+don't store). Nothing in the message or comment describes the gate as
+untrustworthy.
+
+#### Tests — they existed, and were updated
+
+`scripts/quality-ratchet_test.py` already covered this message:
+`test_lint_reports_a_reduction_above_the_coverage_floor` asserted the substring
+`"reductions detected for gosec"`, which is prefix-only and would have passed
+unchanged through this reword. Changes:
+
+- `REDUCTION_ADVICE` module constant (`scripts/quality-ratchet_test.py:35`) —
+  one copy of the advice text, asserted by both caller tests so they cannot
+  drift apart.
+- `test_lint_reports_a_reduction_above_the_coverage_floor`
+  (`scripts/quality-ratchet_test.py:628`) — now asserts label + full advice.
+- `test_gosec_reports_a_reduction_with_the_same_advice`
+  (`scripts/quality-ratchet_test.py:307`), **new** — the standalone-gosec
+  caller, `G101` baseline 1 -> 0 with both known-noise entries still matched
+  once. This is the caller the wording is calibrated for and it had no
+  reduction test at all.
+- Negative control (`scripts/quality-ratchet_test.py:626`) — a report exactly at
+  baseline must **not** print `reductions detected`, so the two assertions above
+  are not satisfied by a message printed unconditionally (§4.2).
+
+**Evidence the assertions can fail (§4.1).** `HEAD`'s script was extracted with
+`git show HEAD:scripts/quality-ratchet.py` into a scratch dir beside a byte-identical
+copy of the final test file (`shasum` matched on both sides; **no `git stash` was
+used at any point**), and the suite run there:
+
+```
+Ran 45 tests ... FAILED (failures=2)
+AssertionError: '... reductions detected for gosec; re-run the same tree ...'
+  not found in '... reductions detected for gosec; lower the committed baseline
+  to preserve them ...'
+```
+
+Exactly the two advisory tests fail; the other 43 pass. Against the patched
+script: `python3 scripts/quality-ratchet_test.py` -> `Ran 45 tests ... OK`
+(44 before this change).
+
+#### Baseline checks
+
+| Command | Result |
+|---|---|
+| `python3 -m py_compile scripts/quality-ratchet.py scripts/quality-ratchet_test.py` | clean |
+| `python3 scripts/quality-ratchet_test.py` | `Ran 45 tests ... OK` |
+| `go build ./cmd/nanite/` | exit 0 |
+| `go vet ./...` | exit 0 |
+| `go test ./...` | exit 0, 99 `ok` packages, no `FAIL` |
+
+No quality-gate run: `TASKS/gate-integrity/README.md`'s Validation section scopes
+that to `01` and `03`. No Go source, schema, workflow or baseline JSON was
+touched, and nothing was pushed to `origin`.
+
+#### Corrections made mid-flight to my own work (§7.8)
+
+1. The first draft of the code comment restated the drop size as a literal
+   number carried from this file. Removed — it now points at the runbook for it.
+2. The first draft of both test assertions prefixed a placeholder-free literal
+   with `f`. Removed.
+3. Two line numbers in the first draft of *this log* were computed by adding my
+   diff's line delta to a pre-edit `grep` result instead of re-running the grep.
+   Both were wrong by two: `gosec_command` was written as `:414` (actually
+   `:416` -- `grep -n 'def gosec_command' scripts/quality-ratchet.py`) and the
+   missing-`Issues` branch as `:426-428` (actually `:429-430`). Corrected above.
+   Arithmetic on a stale citation is still a stale citation.
+
+#### Scope-parked — found, deliberately not fixed
+
+1. **`docs/engineering/runbooks/full-repo-quality-gate.md` is now imprecise**
+   about this tool. Its "What it does not guarantee" section says *"the
+   comparator prints guidance to lower the committed baseline"*, which described
+   the message before this change. Not edited: it is outside the `04a` fence and
+   is the operator's calibrated language. Replacement text handed over
+   separately.
+2. **`TASKS/INDEX.md` and `TASKS/gate-integrity/README.md`** each quote the old
+   message, both correctly stamped `At 77137106`, so both remain true as history
+   and now describe superseded behaviour. Both are the operator's files;
+   untouched by instruction.
+3. **`docs/engineering/failure-modes.md`** (the ratchet transcript around line
+   258) does not quote the changed clause — its sample line is truncated before
+   the `;` — so it needs no edit for this change. It does still say *"The lint
+   side has no equivalent [defense]"*, which the coverage floor in
+   `verify_lint_coverage` has since made stale. Pre-existing, unrelated to
+   `04a`; belongs to `06-citation-and-config-drift-sweep`.
+4. **`gosec_command` still treats a missing `Issues` array as zero findings**
+   (`scripts/quality-ratchet.py:429-430`: `if issues is None: / issues = []`,
+   under `issues = report.get("Issues")` at `:428`).
+   Confirmed present. That is `04b` step 4 — left alone.
+5. **`04b`'s framing of "no coverage floor" needs a distinction when it runs.** A
+   coverage floor already exists on the *lint* side (`verify_lint_coverage`,
+   keyed on total finding count at 50% of the Stage 1 baseline). What `04b` step
+   3 asks for — a floor on gosec's `Stats.files`/`Stats.lines` — genuinely does
+   not exist. Different sides, different keys; noted so `04b` does not mistake
+   one for the other.
+
 
 ## Review notes

@@ -25,6 +25,20 @@ STAGE_1_GOSEC_BASELINE = 40
 # fails loudly here instead of quietly loosening every test below.
 COVERAGE_FLOOR = STAGE_1_GOSEC_BASELINE // 2
 
+# compare_counts' reduction advisory is shared by both of its callers -- the
+# audit-config linter set and standalone gosec -- so one wording has to hold for
+# a routine misspell fix (reproduces, bank it) and for a gosec run that dropped
+# findings it should have reported (does not reproduce, do not bank it). Both
+# tests below assert this one constant so the two callers cannot drift apart,
+# and so a reword has to be made deliberately rather than by loosening a
+# substring match.
+REDUCTION_ADVICE = (
+    "re-run the same tree and confirm the reduction reproduces before lowering "
+    "the committed baseline. A reduction that reproduces is a real improvement "
+    "-- bank it; one that does not reproduce is a dropped-findings run, and "
+    "baking it into the baseline deletes real findings."
+)
+
 
 class QualityRatchetTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -289,6 +303,23 @@ class QualityRatchetTest(unittest.TestCase):
         self.assertIn("expected exactly 1", result.stderr)
         self.assertIn("found 2", result.stderr)
         self.assertIn("G101: 1", result.stdout)
+
+    def test_gosec_reports_a_reduction_with_the_same_advice(self) -> None:
+        """The advisory is compare_counts', not the lint step's.
+
+        Standalone gosec is the caller the wording is calibrated for: this is
+        the step with a known non-reproducible run behind it, so the advice a
+        reduction prints here has to be the advice to confirm it first.
+        """
+        # G101 baseline 1 -> 0, with both known-noise entries still matched
+        # exactly once so nothing else fails the step.
+        result = self.run_gosec_report([self.jitter_issue(), self.accepted_issue()])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "standalone gosec actionable rules: reductions detected for G101; "
+            f"{REDUCTION_ADVICE}",
+            result.stdout,
+        )
 
     # --- enumerated known noise (CW-20260824-0025) -----------------------
     #
@@ -589,13 +620,21 @@ class QualityRatchetTest(unittest.TestCase):
             result.stdout,
         )
         self.assertNotIn("INCREASE", result.stdout)
+        # Negative control for the two advisory tests: a run that reduced
+        # nothing must not print the advice, or asserting its presence proves
+        # nothing about reductions.
+        self.assertNotIn("reductions detected", result.stdout)
 
     def test_lint_reports_a_reduction_above_the_coverage_floor(self) -> None:
         reduced = STAGE_1_GOSEC_BASELINE - 5
         self.assertGreater(reduced, COVERAGE_FLOOR)
         result = self.run_lint(self.covering_issues(reduced))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("reductions detected for gosec", result.stdout)
+        self.assertIn(
+            "audit-config linters: reductions detected for gosec; "
+            f"{REDUCTION_ADVICE}",
+            result.stdout,
+        )
 
     def test_lint_rejects_findings_from_an_unbaselined_linter(self) -> None:
         # This is what stands between a non-compiling repo and a green gate:

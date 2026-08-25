@@ -141,9 +141,28 @@ def compare_counts(label: str, baseline: dict[str, int], actual: Counter[str]) -
         name for name in sorted(baseline) if actual.get(name, 0) < baseline[name]
     ]
     if reductions:
+        # A reduction is the improvement direction, and for most linters it is
+        # exactly what remediation looks like: fix the misspellings, the count
+        # falls, the baseline follows.  The one step that can also produce a
+        # decrease nobody earned is standalone gosec, which has emitted a run
+        # dropping a subset of its findings with identical Stats and a clean
+        # exit.  See `docs/engineering/runbooks/full-repo-quality-gate.md`,
+        # "What this gate guarantees", for the size of that drop and how often
+        # it was seen -- deliberately not restated here.
+        #
+        # A repeat run is what tells the two cases apart, so the advisory asks
+        # for one instead of singling out a linter: it costs a real improvement
+        # one extra run, and it stops a transient one from being written into
+        # the baseline permanently.  Automating the repeat as a gosec-side
+        # agreement check is TASKS/gate-integrity/04 step 2 (04b); until that
+        # lands, the repeat run is the operator's to do.
         print(
-            f"{label}: reductions detected for {', '.join(reductions)}; "
-            "lower the committed baseline to preserve them"
+            f"{label}: reductions detected for {', '.join(reductions)}; re-run "
+            "the same tree and confirm the reduction reproduces before lowering "
+            "the committed baseline. A reduction that reproduces is a real "
+            "improvement -- bank it; one that does not reproduce is a "
+            "dropped-findings run, and baking it into the baseline deletes real "
+            "findings."
         )
     print(f"{label}: ratchet passed")
     return 0

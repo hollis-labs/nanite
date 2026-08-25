@@ -65,9 +65,17 @@ the fix.
 4. Tag `v0.1.1` on each and push the tags.
 5. Confirm the proxy has picked each one up:
    ```
-   GOPROXY=https://proxy.golang.org go list -m -versions github.com/hollis-labs/go-harness-filters
-   GOPROXY=https://proxy.golang.org go list -m -versions github.com/hollis-labs/go-runtime-events
+   curl -sS https://proxy.golang.org/github.com/hollis-labs/go-harness-filters/@v/list
+   curl -sS https://proxy.golang.org/github.com/hollis-labs/go-runtime-events/@v/list
    ```
+
+   **Ask the proxy over HTTP, not via `go list -m -versions`.** `go env
+   GOPRIVATE` is `github.com/hollis-labs/*`, which defaults `GONOPROXY` to the
+   same value and beats a `GOPROXY=` prefix, so `go list` answers from
+   `git ls-remote` on your own origin — it will say `v0.1.1` the instant you
+   push the tag, whether or not the proxy has it. That is a false green on the
+   one thing this step exists to confirm. `agent-verification-discipline.md`
+   §3.11.
    The proxy is not instantaneous. Do not mark this task done until both list
    `v0.1.1`; task `03` cannot start before that.
 6. **Do not touch nanite's `go.mod` or workflow in this task.** That is `03`.
@@ -79,11 +87,14 @@ the fix.
 - Both `v0.1.1` tags point at the exact SHA nanite's workflow pins — verify per
   repo with `git rev-list -n1 v0.1.1` against the pin re-derived from
   `.github/workflows/full-repo-quality.yml`.
-- Both `go list -m -versions` calls above include `v0.1.1`.
+- Both `curl` calls above list `v0.1.1`. Re-run until they do; the proxy
+  populates lazily on first request.
 - Each repo's test suite passed at that SHA with `-count=1`, with the command
   and result recorded in the Work log.
-- Nanite's tree is **unchanged** by this task: `git -C <nanite> status --porcelain`
-  is empty.
+- Nanite is **untouched** by this task. Compare `git -C <nanite> rev-parse HEAD`
+  and `git -C <nanite> status --porcelain` before and after, and show they are
+  identical — do not assert the tree is *empty*, since other Wave A tasks land
+  in nanite around this one and an empty tree is not the property being claimed.
 
 ## Work log
 

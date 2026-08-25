@@ -123,9 +123,14 @@ are byte-identical to published tags, and both of those tags are on the
 proxy:
 
 ```
-GOPROXY=https://proxy.golang.org go list -m -versions github.com/hollis-labs/go-envelopes
-#   -> v0.1.0 v0.1.1 v0.2.0 v0.3.0
+curl -sS https://proxy.golang.org/github.com/hollis-labs/go-envelopes/@v/list
+#   -> v0.3.0 v0.1.0 v0.1.1 v0.2.0
 ```
+
+Ask the proxy over HTTP. `GOPRIVATE=github.com/hollis-labs/*` defaults
+`GONOPROXY` to the same value and overrides a `GOPROXY=` prefix, so
+`go list -m -versions` answers from git and never consults the proxy —
+`agent-verification-discipline.md` §3.11.
 
 So `go-envelopes` and `go-modelsdev` resolve to **the same source** whether
 they come from the `replace` or from the proxy. Their replaces are removable

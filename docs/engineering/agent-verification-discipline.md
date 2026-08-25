@@ -131,6 +131,37 @@ correct — the hazard is specific to `ls-remote` and to `cat-file`-style lookup
 `hollis-labs/libs` siblings use annotated tags, so this bites every pin-versus-tag comparison in
 this repo.
 
+### 3.11 `GOPRIVATE` silently defeats a `GOPROXY=` prefix (Nanite-specific)
+
+*Found 2026-08-25.* `go env GOPRIVATE` is `github.com/hollis-labs/*`, and `GOPRIVATE` **defaults
+`GONOPROXY` to the same value**. `GONOPROXY` beats a `GOPROXY=` prefix, so
+
+```
+GOPROXY=https://proxy.golang.org go list -m -versions github.com/hollis-labs/<m>
+```
+
+never contacts the proxy — it answers from `git ls-remote` on your own origin. Proof: point it at a
+host that cannot resolve and it still succeeds.
+
+```
+GOPROXY=https://invalid.example.invalid go list -m -versions github.com/hollis-labs/go-envelopes
+#   -> v0.1.0 v0.1.1 v0.2.0 v0.3.0        (the proxy was never consulted)
+```
+
+It returns the same answer whether or not the proxy has the version, so it is a §4.2 vacuous check
+wherever "is this published?" is the actual question. proxy.golang.org populates **lazily on first
+request**, so a tag pushed minutes ago exists in git and 404s on the proxy — the window where the
+distinction matters is exactly the window you are usually checking in.
+
+Ask the proxy directly instead:
+
+```
+curl -sS https://proxy.golang.org/github.com/hollis-labs/<m>/@v/list
+```
+
+Or clear both overrides: `GOPRIVATE= GONOPROXY=none GOPROXY=https://proxy.golang.org go list …`.
+Note CI sets none of these, so CI resolves through the proxy regardless of what your shell does.
+
 ---
 
 ## 4. Verifying that your verification verifies

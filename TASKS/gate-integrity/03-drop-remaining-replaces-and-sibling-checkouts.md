@@ -33,10 +33,18 @@ than detectable. `[[nanite_workflow_pinned_sibling_refs]]`
 1. **Gate check first.** Confirm `02` actually published:
    ```
    for m in go-harness-filters go-runtime-events; do
-     GOPROXY=https://proxy.golang.org go list -m -versions github.com/hollis-labs/$m
+     printf '%-20s ' "$m"
+     curl -sS "https://proxy.golang.org/github.com/hollis-labs/$m/@v/list" | tr '\n' ' '; echo
    done
    ```
    Both must list `v0.1.1`. If not, stop — this task is blocked, not slow.
+
+   **Ask the proxy over HTTP.** `go env GOPRIVATE` is `github.com/hollis-labs/*`,
+   which defaults `GONOPROXY` to the same value and overrides a `GOPROXY=`
+   prefix, so `go list -m -versions` answers from git and never consults the
+   proxy — it returns the same "yes" whether or not the proxy has the tag.
+   proxy.golang.org populates lazily on first request, so that difference is
+   real for minutes after a push. See `agent-verification-discipline.md` §3.11.
 2. Remove the `replace (...)` block containing `go-harness-filters` and
    `go-runtime-events`, along with the `TASKS/agent-host-acp/06` comment above
    it (which exists solely to explain why those replaces are needed).

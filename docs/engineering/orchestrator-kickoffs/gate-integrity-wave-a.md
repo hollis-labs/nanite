@@ -87,12 +87,31 @@ not instantaneous. Confirm before dispatching `03`:
 
 ```
 for m in go-harness-filters go-runtime-events; do
-  GOPROXY=https://proxy.golang.org go list -m -versions github.com/hollis-labs/$m
+  printf '%-20s ' "$m"
+  curl -sS "https://proxy.golang.org/github.com/hollis-labs/$m/@v/list" | tr '\n' ' '; echo
 done
 ```
 
 Both must list `v0.1.1`. If not, wait — do not dispatch `03` and do not let a
 worker "work around" it.
+
+**Ask the proxy over HTTP, not through `go list`.** `go env GOPRIVATE` is
+`github.com/hollis-labs/*`, which defaults `GONOPROXY` to the same value, and
+`GONOPROXY` wins over a `GOPROXY=` prefix — so
+`GOPROXY=https://proxy.golang.org go list -m -versions github.com/hollis-labs/<m>`
+answers from `git ls-remote` on the sibling's origin and never touches the
+proxy. Proof: point it at a host that cannot resolve and it still succeeds.
+
+```
+GOPROXY=https://invalid.example.invalid go list -m -versions github.com/hollis-labs/go-envelopes
+#   -> v0.1.0 v0.1.1 v0.2.0 v0.3.0     (the proxy was never consulted)
+```
+
+That matters here specifically: proxy.golang.org populates **lazily, on first
+request**, so a tag pushed minutes earlier exists in git while the proxy still
+404s. A git-derived "yes" is a false green at exactly the moment this gate is
+load-bearing. CI sets no `GOPRIVATE`, so CI resolves through the proxy — which
+is the thing `03` depends on.
 
 ## What Wave A is actually for
 

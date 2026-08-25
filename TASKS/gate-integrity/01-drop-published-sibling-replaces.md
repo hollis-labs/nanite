@@ -432,3 +432,105 @@ is precisely what the pinned checkouts prevented.
   alone.
 
 ## Review notes
+
+**Reviewed 2026-08-25 at `7f868db9` by a fresh reviewer dispatch** — no shared
+context with the implementing worker. Transcribed by the Orchestrator; the
+reviewer agent type is read-only by design. Verdict and findings are the
+reviewer's.
+
+**Verdict: FAIL — narrowly, and only on the Work log as a durable record.** The
+code change is correct and the acceptance criteria that matter are genuinely
+met. Four Work-log claims are wrong or overstated. **The Orchestrator has
+corrected them below rather than dispatching a fix**, since all four are record
+defects, not code defects, and one of them was actively dangerous to `03`.
+
+**Independently re-derived, all reproducing exactly:** every before→after figure
+in the zeros table; `go mod tidy -diff` clean; `go.sum` `--numstat` = `4 0`, the
+two `h1:`/`go.mod` pairs with no removals, each hash matching what the proxy and
+sum.golang.org produce; `go build`/`go vet`/`go test` all exit 0 with 0 FAIL.
+The gate run's `headSha` is the landing commit, `git diff --stat f08ac62a..22d312be`
+is the task markdown only, and `go-envelopes`/`go-modelsdev` appear in its
+2,149-line log exactly twice, both `go: downloading` — the real proof.
+
+**The reviewer rebuilt the decoupling proof from scratch** in its own clone and
+confirmed the worker's reasoning about populating scratch `libs/` with only the
+*other* two siblings: an empty `libs/` fails on `03`'s replaces before `01`'s are
+ever exercised, so it would prove nothing here.
+
+**It also supplied a control the worker's record was missing.** Asked what the
+verification would have produced had decoupling *not* worked, it appended
+`replace github.com/hollis-labs/go-envelopes => ./no-such-dir` and got
+`replacement directory ./no-such-dir does not exist`, build exit 1. So
+`go-envelopes` is genuinely on the build path and a resolution failure is loud
+and named. The proof's mechanism can fail; it was sound, but that was not
+established by the record.
+
+### W1 — corrected. The Work log claimed a defect in documents that do not have one.
+
+The Work log's "Corrections to the record" asserted the task file's and the batch
+README's checks would misread annotated tags. Neither uses `ls-remote`; both use
+`git rev-list -n1`, which peels. The hazard is real and belongs to the worker's
+own `ls-remote` command. Recorded correctly as `agent-verification-discipline.md`
+§3.10. **The Work-log passages at the former `:134-142` and `:370-371` overstate
+this; read them as scoped to `ls-remote` only.**
+
+### W2 — corrected everywhere, and it was a live hazard to `03`.
+
+The Work log's "proxy" column was never derived from the proxy. `GOPRIVATE` is
+`github.com/hollis-labs/*`, which defaults `GONOPROXY` to the same value and
+beats a `GOPROXY=` prefix, so `go list -m -versions` answered from
+`git ls-remote`. Demonstrated by pointing `GOPROXY` at a host that cannot
+resolve and watching it succeed anyway.
+
+`01`'s conclusion is unaffected — both versions really are on the proxy, closed
+independently by `curl`. **But the same command shape was the hard gate between
+`02` and `03`**, where the answer is genuinely unknown: proxy.golang.org
+populates lazily, so a tag pushed minutes earlier is in git and 404s on the
+proxy. It would have returned a false green at exactly the moment it was
+load-bearing. Replaced with a direct `curl` in the kickoff, the batch README,
+and `02` and `03`'s task files, and written up as §3.11.
+
+### W3 — noted. The byte-identity comparison compared git against git.
+
+`$(go env GOMODCACHE)` was populated by direct VCS fetch, not by the proxy — the
+`.info` files carry `Origin.VCS=git`. So the comparison was near-tautological and
+could not have detected a proxy serving different bytes. Its stated exclusion
+rationale was also wrong: `.gitignore` *is* carried in the module, and neither
+repo has any `.github/**` file at the tag. **The conclusion holds** — the reviewer
+closed the gap properly, downloading both from proxy.golang.org into a scratch
+`GOMODCACHE` with the checksum DB on: go-envelopes 51/51 and go-modelsdev 18/18
+byte-identical, `comm` empty both directions, and `go mod download -json` sums
+equal to the four lines added to `go.sum`.
+
+### W4 — noted, and it matters for `03`.
+
+The Work log dropped the `undefined: hrepair.Chain` claim as unverifiable without
+a build. It is verifiable in three commands and it is **true**: `type Chain` is
+absent from `go-harness-filters` at `v0.1.0`, present at `HEAD`, and
+`go-agent-wrapper v0.8.1` calls `hrepair.Chain` in `filters/repair_pipeline.go`.
+So that replace is compile-load-bearing, not merely "one commit ahead," and
+**`03` cannot drop it by bumping `require` to `v0.1.0` — `02` must publish
+first.** The rewritten comment is not defective; everything it states is
+derivable and was re-derived. What it lost is the reason, which is the fact `03`
+needs.
+
+### W5 — met after the review ran.
+
+`CW-20260816-0090` was transitioned to `done` in Torque by the Orchestrator, with
+the landing commit and evidence in the close comment. The reviewer had no Torque
+tooling and correctly declined to assert either way.
+
+### Outside this review
+
+`docs/engineering/runbooks/full-repo-quality-gate.md:12-21` is live-wrong — it
+still says four modules are checked out and names both that `01` removed.
+`docs/engineering/orchestrator-kickoffs/gate-integrity-wave-a.md:101,120-122` the
+same. `Makefile:24,27,31` is a **third** hardcoded `../../libs/go-envelopes`
+call site alongside the two `scripts/*.mjs` ones, and `make install` depends on
+`generate-envelopes`, so it breaks in the same fresh-clone case.
+
+**Process gap the reviewer hit:** `docs/engineering/standards/patterns.md` and
+`standards/code-quality.md` are both stubs whose only heading is *"Not yet
+documented"*, yet `EXECUTION-PROCESS.md`'s review criteria point every reviewer
+at them as the checklist for the regression category. Two reviews in this batch
+have now had to substitute the criteria named inline instead.

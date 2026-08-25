@@ -67,14 +67,15 @@ was switched off honestly rather than left looking like a gate.
 **Whole-repo analysis lives in `./scripts/check.sh`, the landing check.** Four
 stages, each named when it fails: `format` (gofmt + goimports over every Go
 file), `vet` (`go vet ./...`), `lint` (`golangci-lint` scoped to what your work
-added, measured from the merge base) and `test` (`go test ./...` — Tier 1 of
-`docs/engineering/testing-workflow.md` §3). Run it **when a feature lands**,
-before pushing a branch you care about, and before dispatching the quality gate
-— not on every commit. Measured at `9591c1a6`: **67.36s** with the
-golangci-lint and test caches both cleared, **8.75s** fully warm. Its lint stage
-is scoped on purpose: whole-repo `golangci-lint run` exits non-zero on a large
-body of pre-existing findings, and that body is the nightly gate's business,
-where it runs with `--issues-exit-code=0` against a ratcheting baseline.
+added, measured from the merge base with `origin/main`) and `test`
+(`go test ./...` — Tier 1 of `docs/engineering/testing-workflow.md` §3). Run it
+**when a feature lands**, before pushing a branch you care about, and before
+dispatching the quality gate — not on every commit. Measured at `9591c1a6`:
+**67.36s** with the golangci-lint and test caches both cleared, **8.75s** fully
+warm. Its lint stage is scoped on purpose: whole-repo `golangci-lint run` exits
+non-zero on a large body of pre-existing findings, and that body is the nightly
+gate's business, where it runs with `--issues-exit-code=0` against a ratcheting
+baseline.
 
 **Worktrees inherit the hooks; fresh clones do not.** A tracked `lefthook.yml`
 installs nothing by itself, so a fresh clone has no checks until someone runs

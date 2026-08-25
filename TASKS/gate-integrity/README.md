@@ -395,7 +395,13 @@ classifying it.
 
 Cross-checked against each task's own `Touches` list.
 
-- **Wave A can run almost fully concurrently.** `08` touches `lefthook.yml`,
+**Wave A runs serially** — `08` → `01` → `02` → `03` → `04a`, one at a time.
+Operator decision, 2026-08-25, carried in
+`docs/engineering/orchestrator-kickoffs/gate-integrity-wave-a.md`. The
+file-disjointness analysis below is why that ordering costs little, not a
+licence to run the tasks concurrently.
+
+- **Only two pairs actually collide.** `08` touches `lefthook.yml`,
   a new script, and three docs. `02` is in sibling repos entirely. `04a` touches
   `scripts/quality-ratchet.py`.
   - **Real overlap 1:** `01` and `03` both edit `go.mod`, `go.sum` and

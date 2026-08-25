@@ -35,9 +35,11 @@
 # The 0.17s run also re-synced the installed hooks. Re-derive rather than
 # trusting this block: stage one .go file, commit, read lefthook's summary.
 #
-# Push time is branch-scoped, not file-scoped. `pre-push`'s `go-test` runs
-# `go test ./...` on every push to `main` and nothing else decides — see its
-# own note for why it carries no `glob`.
+# Push time is branch-scoped, not file-scoped. Both `pre-push` commands are
+# gated on `only: - ref: main` and nothing else decides: `migration-number`
+# rejects a colliding or back-filling migration number, then `go-test` runs
+# `go test ./...`. Neither carries a `glob` — see their own notes for why a
+# file filter here is a silent fail-open rather than a saving.
 #
 # `skip_empty: true` on the three pre-commit commands is inert at the installed
 # lefthook (2.1.4): `lefthook dump` omits the key and `lefthook validate`
@@ -170,6 +172,59 @@ pre-commit:
 
 pre-push:
   commands:
+
+    migration-number:
+      # The mechanical form of `docs/engineering/tracking-integrity.md`
+      # **check 9**. Rejects a migration whose number collides with one already
+      # on the remote's `main`, or which sits at or below the remote's highest
+      # — a back-fill into a burned hole. Logic and its full rationale live in
+      # `scripts/check-migration-number.sh`; only the placement is decided here.
+      #
+      # WHY PRE-PUSH AND NOT PRE-COMMIT. Not a style preference — pre-commit
+      # structurally cannot catch this. A staged-file hook sees only the files
+      # in its own worktree, so two agents each creating `149_*.sql` in separate
+      # worktrees both pass and the collision only exists once both reach the
+      # remote. That is exactly why `migration-purity` could not simply be
+      # extended: it greps staged migration *contents* for a seed-row `VALUES`
+      # clause and never reads a filename, and bolting a prefix check onto it
+      # would still be comparing against the staged set. The check needs the
+      # remote's state, and it needs it at the moment work leaves this machine.
+      # Push is that moment. Commit is not: a commit can legitimately be made
+      # offline, and this check requires the network.
+      #
+      # It also has to stay off pre-commit for the reason stated at the top of
+      # this file — commit time is formatting only, every pre-commit command
+      # fails only for reasons inside the diff in front of you, and `--no-verify`
+      # is all-or-nothing. A network-dependent check there could disable
+      # `go-format` for everyone on a bad connection.
+      #
+      # `priority: 1` puts this ahead of `go-test`: it costs well under a second
+      # and the failure it catches is unrecoverable, so it should not sit behind
+      # the suite. The key is load-bearing, not decorative — YAML order does not
+      # decide this. At lefthook 2.1.4 the commands otherwise run in name order,
+      # so without `priority` `go-test` goes first. Verified in both directions
+      # against a real push to a scratch remote: no `priority` ->
+      # `go-test (0.05s)` then `migration-number (0.24s)`; `priority: 1` ->
+      # `migration-number (0.17s)` then `go-test`. Re-derive by reading
+      # lefthook's own pre-push summary, not by reading `lefthook dump`, which
+      # renders the commands in name order regardless.
+      #
+      # NO `glob` HERE, DELIBERATELY — same reasoning as `go-test` below, and it
+      # bites harder here. `glob: "internal/store/migrations/*.sql"` looks like
+      # the exactly-right filter and is the worst possible one: lefthook would
+      # print `migration-number (skip) no matching push files` for any push that
+      # did not itself touch a migration, which reads as benign and correct.
+      # The branch condition carries all the scoping. The script derives its own
+      # file set by diffing HEAD against the remote's `main`, which is the only
+      # place the answer actually lives.
+      #
+      # The script fails closed — unreachable remote, missing branch, stale
+      # `origin/main`, or an empty migration set on the remote all abort loudly
+      # with a `git fetch` or equivalent instruction. It never no-ops.
+      priority: 1
+      only:
+        - ref: main
+      run: ./scripts/check-migration-number.sh
 
     go-test:
       # Full test suite gate before code reaches the remote, scoped to `main`.

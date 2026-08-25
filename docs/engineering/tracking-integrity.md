@@ -64,9 +64,33 @@ not because the principle is different.
 ### Deriving it
 
 ```
-$ ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1
-147_remove_untouched_official_catalog_source.sql        # → next free is 148
+ls internal/store/migrations/ | sort -t_ -k1 -n | tail -1
 ```
+
+**No sample output is printed here on purpose.** The next free number is one
+past whatever that prints, and a worked example pinned to a concrete value is
+stale by construction — it is wrong the moment the next migration lands, while
+still reading as authoritative. This page previously carried one, and it spent
+at least one migration's worth of time handing readers an off-by-one on exactly
+the failure class the rest of this section exists to prevent. Run the command.
+
+The rule the example was there to teach does not depend on the current value,
+so state it with numbers that cannot rot: if the directory's highest is `042`
+and `037` is empty, the next free number is **`043`**, not `037`.
+
+> Note the sort key. `-t_ -k1 -n` is correct over **basenames**, where field 1
+> is the numeric prefix. It is *not* correct over paths: in
+> `internal/store/migrations/148_x.sql` field 1 is the whole
+> `internal/store/migrations/148`, which `-n` reads as `0` on every line, so
+> the numeric key never discriminates and ordering silently falls back to a
+> byte comparison — under which `9_a.sql` outranks `148_b.sql`. Bounding the
+> field (`-k1,1`) does not fix it. `scripts/check-migration-number.sh` avoids
+> the trap by extracting the integer and comparing numerically rather than
+> sorting at all.
+
+**`internal/store/migrations/` holds only `NNN_name.sql` files, and the guard
+rejects anything else** — a `README.md` added there to document this very rule
+would block every migration-adding push until it was removed.
 
 Two things that trip people up, both real:
 
@@ -77,33 +101,55 @@ resolve a collision with Skills. It looks available. **It is not, and no hole
 ever is** — see below.
 
 **Run the command against `main`, not against your worktree.** A worktree
-branched before a sibling batch merged will list a stale directory. `git
-ls-tree --name-only main -- internal/store/migrations/ | sort -t_ -k1 -n |
-tail -1` answers the question that actually matters.
+branched before a sibling batch merged will list a stale directory. This is the
+form that answers the question that actually matters — note the `sed`, which is
+load-bearing for the reason given above and not tidying:
+
+```
+git ls-tree --name-only main -- internal/store/migrations/ \
+  | sed 's#.*/##' | sort -t_ -k1 -n | tail -1
+```
+
+Without stripping to basenames first, this variant reports the wrong file
+whenever the prefixes are not all the same width.
 
 ### Why filling a hole is worse than a stale number
 
 `internal/store/store.go:153` builds its provider as
 `goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))`.
 There is no `goose.WithAllowOutofOrder(true)`, so `allowMissing` is false —
-goose's default. Under that default, an unapplied migration whose version is
-*lower* than the ledger's max applied version is a hard error, not a
-back-fill.
+goose's default. Under that default a number at or below the ledger's max is
+never applied as a back-fill. It does one of **two** things, and which one is
+decided entirely by the vintage of the database it meets — not by anything
+about the file. `internal/gooseutil/resolve.go` (goose v3.27.3, the version
+`go.mod` pins) keys its ledger map by version number alone, with no filename
+and no checksum, and both of its loops `continue` on an already-applied
+version.
 
-Reproduced directly against goose v3.27.3 with those exact options — apply
-`134`, `136`, `137`, then introduce a `135` and re-run `Up`:
+**Case 1 — the number is not in that database's ledger.** It lands in
+`missing`, and `len(missing) > 0 && !allowMissing` returns an error.
+Reproduced directly against v3.27.3 with those exact options — apply `134`,
+`136`, `137`, then introduce a `135` and re-run `Up`:
 
 ```
 detected 1 missing (out-of-order) migration lower than database version (137): version 135
 ```
 
 `Store.migrate` surfaces that as `goose up: …` and **the service does not
-boot.** Every already-migrated database is affected, including the operator's:
-its ledger max is `137` with no `135` row
-(`sqlite3 ~/.local/share/nanite/workspaces/default/main.db
-'select max(version_id) from goose_db_version'`). A migration numbered into a
-hole is not a bookkeeping error that a reviewer catches — it is a deployment
-that fails on startup.
+boot** — a deployment that fails on startup, not a bookkeeping error a
+reviewer catches.
+
+**Case 2 — the number is already in that database's ledger.** Both loops
+`continue`, so it is added to neither `missing` nor the apply list; goose
+returns cleanly and **reports itself up to date while the migration never
+runs.** The result is silent schema divergence: such a database quietly lacks
+the change, and nothing announces it.
+
+`135` is the canonical example of both at once. A database that applied the
+old `135_goals.sql` before `63d79028` renumbered it takes case 2; one created
+afterwards takes case 1. Same file, same number, opposite symptom — so anyone
+diagnosing a real incident from the boot-failure description alone would wait
+for a startup error that never arrives.
 
 So: **never reuse a hole, even when the number is genuinely unoccupied.**
 
@@ -211,6 +257,65 @@ A prefix check bolted onto it would also have to compare the staged name
 against **`main`'s tree**, not against the staged set — each worktree only
 ever sees its own staged file, so the two-agents-both-write-`148` case is
 invisible to a purely staged-file check.
+
+### The mechanism: `scripts/check-migration-number.sh`
+
+**This check has one, and it is the only check on this page that does.**
+`scripts/check-migration-number.sh` enforces the bullets above at push time; it
+is wired as `lefthook.yml`'s `pre-push` **`migration-number`** command, gated on
+`only: - ref: main` with no `glob`, and ordered ahead of `go-test` by
+`priority: 1`. The script's header names this check by number, and this section
+names the script — change one and change the other. Run it standalone (no
+arguments, from anywhere in the work tree) to check without pushing.
+
+It differs from the bullets above in three ways that are deliberate, because a
+push-time mechanism can know things a document review cannot:
+
+- **It compares against the remote's `main`, not the local one.** Work here
+  happens on `main` directly, so at pre-push time local `main` already contains
+  the commit being pushed — comparing against it would reject every legitimate
+  migration. `git ls-remote` establishes the remote's sha authoritatively with
+  no fetch, and the tree is then read from `origin/main` only after proving the
+  two are equal. A stale tracking ref is a fail-open (a number already on the
+  remote looks free), so a mismatch aborts with `git fetch origin main`.
+- **It also rejects a number claimed twice inside a single push.** After
+  parallel worktrees are merged sequentially into local `main` and pushed
+  together, two files both claiming `149` are both absent from the remote and
+  both above its highest — checked against the remote alone, both pass. That is
+  the two-agents case, surviving the merge.
+- **It reads files, not task-file claims.** The unlanded-claim bullets above
+  stay a review-time concern; the script sees only what the push actually adds.
+
+It **fails closed, never silently** — unreachable remote, absent branch, stale
+`origin/main`, a path that will not parse as `NNN_name.sql`, or an empty
+migration set on the remote each abort loudly with an actionable fix. **There is
+no skip branch in it at all**: every path the tree read or the diff returns must
+parse, or the run is a hard error. That strictness is load-bearing rather than
+fastidious — git's default `core.quotePath=true` C-escapes and double-quotes any
+path containing a non-ASCII byte, so a real `135_café.sql` arrived as
+`"internal/store/migrations/135_caf\303\251.sql"`, missed a `.sql` suffix test,
+and took a skip branch meant for stray non-migration files: exit 0, no output, a
+back-fill accepted. Both git reads now use `-z`, and the skip is gone, so the
+next unknown mangling fails loudly instead of passing silently.
+
+The empty-set case is a hard error rather than a vacuous pass for the same
+reason: an empty result is also what a wrong path constant looks like. That
+assertion runs **before** the script's offline short-circuit, which is the only
+position where it fires on every invocation — `git diff` with a pathspec
+matching nothing exits 0 with empty output, so behind the short-circuit a wrong
+path constant would silently check nothing.
+
+**Scope limit — two gaps, both real.** A git hook only protects clones where
+`lefthook install` has run; `find .git/hooks -type f ! -name '*.sample'` returns
+nothing until it has. And the command is gated on `only: - ref: main`, which
+lefthook evaluates against the **current branch**, so
+`git push origin feature:main` from a non-`main` branch prints
+`migration-number (skip) by condition` and lands on `main` unchecked. That is
+the ref-gate design working as specified, not a defect in the script — but it is
+the same "reads as a benign, correct skip" shape the no-`glob` rule exists to
+prevent, arriving through the branch condition instead. It is written down here
+because an accepted gap nobody knows about is not an accepted gap. This
+section's manual form remains the coverage for everything outside both.
 
 ---
 

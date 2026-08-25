@@ -258,10 +258,10 @@ isolation is what every batch's parallelization plan assumes.
   `comm` command in `06`, do not carry either number.
 - The register flags `PREVENTION.md:161` for citing a `<15s staged files only`
   claim at `lefthook.yml:3`. Line 3 of `lefthook.yml` is now a **blank comment
-  line**, and the substance has also changed: only 3 of the 5 pre-commit
-  commands are staged-only. `go-vet` and `go-lint` are whole-repo
-  (`sed -n '9,12p' lefthook.yml`). Both the pointer and the claim need fixing,
-  in two files — `06` handles it.
+  line**, so the pointer needs fixing — `06` handles it. Do not carry the
+  register's claim about which commands are staged-only: since `08` landed,
+  every pre-commit command is, and whole-repo analysis lives in
+  `./scripts/check.sh`. Derive the current set from `lefthook.yml` itself.
 
 ## What this batch does NOT do
 

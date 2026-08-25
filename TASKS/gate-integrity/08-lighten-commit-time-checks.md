@@ -644,3 +644,74 @@ someone else is committing into the same ref. Both are labelled and
 self-documenting; the probe itself is gone.
 
 ## Review notes
+
+**Reviewed 2026-08-25 at `ff8840b0` by a fresh reviewer dispatch** — no shared
+context with the implementing worker. Transcribed here by the Orchestrator
+because the reviewer agent type is read-only by design; the verdict and the
+findings are the reviewer's, the transcription is mine.
+
+**Verdict: FAIL — narrow.** The mechanism is correct and every behavioural
+acceptance criterion reproduced independently. Two real defects and one
+fragility remain, none in the core design.
+
+**Reproduced rather than taken on trust:** `pre-commit` accepts a `go vet`
+failure and still rejects a misformatted file; the landing script fails with the
+correct stage name for each of four breakages in isolation; the lint stage
+catches a finding in work already committed on `main`; `pre-push` skips by
+condition on a feature branch that *did* carry a `.go` file, so the skip is
+attributable to the branch rather than an empty file set; the `examined nothing`
+third outcome fires and never prints `OK`; the fallback chain and
+`CHECK_LINT_BASE` behave as documented; tiers are unchanged at five; the cited
+workflow line numbers re-derive correctly.
+
+**Finding 1 — `scripts/check.sh`'s format stage can report `OK` for files it
+never examined.** `gofmt`'s exit status and stderr are both discarded, so a
+missing `gofmt` (exit 127), an unparseable file, or an unreadable path is
+indistinguishable from clean. The stage guards the empty-list input and nothing
+else, while `goimports` immediately below it *is* guarded with `command -v`. The
+reviewer hit this unintentionally mid-review: a tracked `.go` file deleted from
+the worktree but not the index produced `1355 Go files` / `OK` while `gofmt`
+could not open one of them. The printed count comes from `git ls-files`, so it
+names paths git knows about, not files actually examined. Severity low-to-
+moderate, confidence high on mechanism. The same shape exists in `lefthook.yml`'s
+`go-format` hook, which this task left alone — pre-existing, but it is the only
+remaining commit-time gate.
+
+**Finding 2 — four live documents still tell readers `go vet` / `golangci-lint`
+run at commit time.** `README.md:37` (outward-facing Quick Start),
+`.nanite/agents/backend.md:386`, `.nanite/agents/reviewer-backend.md:223`, and
+`TASKS/audit-remediation/PREVENTION.md:123` and `:124`. This misses the "every
+place that documents the hook set" criterion. The straggler grep in *Done means*
+matches only the hyphenated command names `go-lint`/`go-vet`, so it structurally
+cannot find prose forms — the criterion's own verification instrument was too
+narrow. The two `.nanite/agents/` files are per-agent boot context, so an agent
+can read "vet runs via lefthook pre-commit" and skip running it: a document
+asserting a gate that does not exist, which is the `frontend-lint` problem
+inverted.
+
+**Finding 3 — `scripts/check.sh`'s `--help` is a hardcoded `sed` span with no
+assertion.** Correct at this commit (49 lines, ending on the last header line)
+but silently truncated 9 lines one commit earlier, the second drift in two
+passes. `--help` exits 0 unconditionally, so a `sed` that reads nothing still
+succeeds. Separately, `cd "$(git rev-parse --show-toplevel)"` runs before the
+help branch, so a relative-path invocation from a subdirectory re-resolves `$0`
+against the repo root and prints nothing.
+
+**Checked and cleared:** no automatic coverage was lost by removing `go-vet`
+from `pre-commit` — the nightly gate enables `govet` with `enable-all: true`
+minus `fieldalignment`, strictly broader, including the `lostcancel` analyzer
+behind the incident `PREVENTION.md` cites. No Tier 3 or Tier 4 on any hook or in
+the script, and nothing conflates the `pre-push` suite with Tier 3. No naming
+collision for `scripts/check.sh`. The script is bash-3.2-safe. `lefthook
+validate`'s non-zero exit is pre-existing and this task reduced it from six
+carriers of `skip_empty` to four.
+
+**Could not check:** `pre-push` executing the suite on real `main` in this repo,
+which would need a throwaway `.go` commit on shared `main` while the Orchestrator
+was committing — judged not worth the shared-ref hazard. Established instead by
+`lefthook run pre-push` on `main` printing `(skip) no matching push files`
+rather than `(skip) by condition` (proving the `only:` condition passed), plus a
+scratch repo with this `lefthook.yml` copied verbatim where a `.go` commit on
+`main` made the command execute and branches named `feat/wip` and `mainline`
+both skipped by condition. The reviewer flagged the "actually runs" half as
+out-of-repo evidence rather than smoothing it over.

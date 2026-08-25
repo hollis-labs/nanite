@@ -63,6 +63,8 @@ github.com/hollis-labs/go-embed-contracts v0.1.1 h1:PGpgBvFpNwz7dHLRWJ3ewlbOLzsg
 github.com/hollis-labs/go-embed-contracts v0.1.1/go.mod h1:3sLCY4JVhL1oFwqjCBOuC4J5xnJCvpUrlkHvMDRWndo=
 github.com/hollis-labs/go-envelopes v0.3.0 h1:7g3n0PfFeHbV/iuMmSvDWYx80/C4V+Qg1PUGfnkgnyo=
 github.com/hollis-labs/go-envelopes v0.3.0/go.mod h1:v45Dt4l4kYVuUf2oTcxXYh1bBRXSND+Bi6CAM/OxwKY=
+github.com/hollis-labs/go-harness-filters v0.1.1 h1:uTAF+ejKhje+rXMEOwTHsO7ig2fCAQnkANXgZBAyYZA=
+github.com/hollis-labs/go-harness-filters v0.1.1/go.mod h1:84dThT2Ro93bk7Lzpr9KNsRDY4hUcIvYoBtmIB6IEzM=
 github.com/hollis-labs/go-llm-contracts v0.3.0 h1:qVKulEixvxf5iJmUMzDfRoL00gfS6/r0TmAJ1zNX0Dc=
 github.com/hollis-labs/go-llm-contracts v0.3.0/go.mod h1:VIbzjZk7U+NCYuHdfa++ZwcaYI09om5xVxYTGd6cuw8=
 github.com/hollis-labs/go-llm-types v0.3.0 h1:QR4RX0F1zX0fYBh7sDVxnsFxmQ/vjlvc7bC6FWx+8s0=
@@ -79,6 +81,8 @@ github.com/hollis-labs/go-queue v0.1.0 h1:d+hbeoVAWBkeO+Ebvo6tVbFKOkMSGaTDC62q2P
 github.com/hollis-labs/go-queue v0.1.0/go.mod h1:wAP95gDz9kxAhcCWaR4e07Jz54OvFpiNEq+5ERgt2/E=
 github.com/hollis-labs/go-runner v0.5.0 h1:YpfBOmf+dcSFcrsteINh/VNCuGaHqodjPYWxm4FES9o=
 github.com/hollis-labs/go-runner v0.5.0/go.mod h1:FNh0ZK9n70m5k5kz6nCDRKLP/ukY0JK/weDt6c4NloI=
+github.com/hollis-labs/go-runtime-events v0.1.1 h1:wqHpSnN3sQPpF5bhIRayIcb5jTHK0EIKs7Xm+LOPv8Q=
+github.com/hollis-labs/go-runtime-events v0.1.1/go.mod h1:QLoJ1xs+P2KoVuiz4wi+r+JZdE4dqm28I0YfauXAUs0=
 github.com/hollis-labs/go-sandbox v0.2.1 h1:0/JTCIl6S/XhRXPBRRlPR/zqQ2bNBlbR3Q2gHpJofUw=
 github.com/hollis-labs/go-sandbox v0.2.1/go.mod h1:SY3Io7cTHnMahfN1zkQzHvVkcevXzus8mo9ZmtaaHPg=
 github.com/hollis-labs/go-scheduler v0.1.0 h1:FZWyejwVrMfyD8y8GrJJcOubA1n8fHtkPrzIB/EwjxU=

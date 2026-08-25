@@ -36,7 +36,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
-	github.com/hollis-labs/go-harness-filters v0.1.0 // indirect
+	github.com/hollis-labs/go-harness-filters v0.1.1 // indirect
 	github.com/hollis-labs/go-queue v0.1.0 // indirect
 	github.com/hollis-labs/go-runner v0.5.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
@@ -92,20 +92,6 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-// go-harness-filters and go-runtime-events are each pinned one commit ahead
-// of their published v0.1.0 tag, and v0.1.0 is the only version either module
-// has on the module proxy — so the sibling checkouts are the only source of
-// the commits Nanite is built against. Derived 2026-08-25:
-//     git -C ../../libs/<module> rev-list --count v0.1.0..HEAD   -> 1
-//     go list -m -versions github.com/hollis-labs/<module>       -> v0.1.0
-// These two replaces stay until TASKS/gate-integrity/02 tags a release from
-// each pin; TASKS/gate-integrity/03 then deletes them together with the two
-// remaining libs/ checkout steps in .github/workflows/full-repo-quality.yml.
-replace (
-	github.com/hollis-labs/go-harness-filters => ../../libs/go-harness-filters
-	github.com/hollis-labs/go-runtime-events => ../../libs/go-runtime-events
-)
-
 require (
 	github.com/hollis-labs/go-agent-wrapper v0.8.1
 	github.com/hollis-labs/go-apppaths v0.1.0
@@ -113,7 +99,7 @@ require (
 	github.com/hollis-labs/go-llm-contracts v0.3.0
 	github.com/hollis-labs/go-llm-types v0.3.0
 	github.com/hollis-labs/go-messaging v0.2.1
-	github.com/hollis-labs/go-runtime-events v0.1.0
+	github.com/hollis-labs/go-runtime-events v0.1.1
 	github.com/hollis-labs/go-scheduler v0.1.0
 	github.com/hollis-labs/go-sqlite v0.1.0
 	github.com/hollis-labs/tesseract v0.7.1-0.20260518032333-bbce958849ac

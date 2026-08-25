@@ -9,16 +9,16 @@ metadata. Workflow logs and the uploaded
 `full-repo-quality-reports` artifact are visible on the repository's Actions
 page for 14 days.
 
-Nanite is checked out at `apps/nanite`. Its four public local-replace modules
-are checked out at the exact pinned commits below, under `libs/`, preserving
-the `../../libs/<module>` geometry in `go.mod` without a cross-repository
-secret:
+Nanite is the workflow's only checkout, at `apps/nanite`, which is also the
+job's `defaults.run.working-directory`. Every dependency resolves from the
+module proxy at the version recorded in `go.mod` — `go.mod` carries no
+`replace` directive at all, so the Actions workspace needs no sibling-repository
+layout and no cross-repository secret. Derive both facts:
 
-- `go-modelsdev` — `7d932798b85145ec93f923e392f5d41762894e8c`
-- `go-envelopes` — see the workflow; **re-derive, this pin has moved**:
-  `grep -A2 'repository: hollis-labs/go-envelopes' .github/workflows/full-repo-quality.yml`
-- `go-harness-filters` — `57a6b0919c0c5f06db90b367184988a72c430d39`
-- `go-runtime-events` — `8756744985a6602d6ab1fb0df78d5aabc3920b1b`
+```
+grep -c 'actions/checkout' .github/workflows/full-repo-quality.yml   # -> 1
+grep -c '=>' go.mod                                                  # -> 0
+```
 
 Release resolution: the clean-checkout review initially found that public
 go-envelopes stopped at `4456292`, while Nanite's passing local sibling state

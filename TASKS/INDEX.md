@@ -1204,7 +1204,7 @@ the crucial things that prevent us from working in standard ways."*
 | `07-migration-number-collision-guard` | **B — before parallel worktrees** | reviewed | none |
 | *(container image + how checks run inside it)* | **C — with Docker** | not scoped | `01`-`03` |
 | `04b` — gosec wrapper + coverage floor (steps 1-5 of `04`) | **D** | in-progress | none |
-| `05-runbook-report-error-gap` | **D** | not-started | none |
+| `05-runbook-report-error-gap` | **D** | implemented | none |
 | `06-citation-and-config-drift-sweep` | **D** | not-started | none |
 
 **`01`-`03` is the keystone, and it has landed.** Filed as CI-pin hygiene, it was actually the
@@ -1267,6 +1267,22 @@ file *contents* for a `VALUES` clause and never reads a filename, and it structu
 fixed in place because two worktrees each see only their own staged file.
 `internal/store/store.go:153` builds the goose provider without `WithAllowOutofOrder`, so a
 number below a database's highest applied version is a hard boot error, not a back-fill.
+
+**`05` landed, and its premise was disproved rather than confirmed.** The task was written around a
+reproduction block believed to be fail-open; it was already fail-closed, twice. The real defect was
+different and worse: a **broken** `golangci-lint` run prints `0 issues.` on stdout on a cold cache,
+byte-identical to a clean run, with the diagnosis only on stderr — so the success output and the
+total-failure output are the same bytes, and which one you get depends on cache state you did not
+choose and cannot see. Landed `9d82c56d`, review findings closed `3954f9be`, runbook pass
+`5caeea06`. **Status is `implemented`, not `reviewed`, deliberately**: the runbook pass landed after
+the reviewer accepted, so the newest commit is unreviewed.
+
+That runbook pass also corrected three passages `04b` made stale — the automated gosec repeat means
+the manual three-run protocol should no longer be run by hand, while lint still has no automated
+repeat. Two things in that section were deliberately **kept**: the warning that averaging or taking
+the lowest would bake a permanently-red baseline into the gate (a human still picks the number when
+refreshing a baseline), and the per-`rule_id` caveat that a same-run regression in the same rule
+could be masked, which is unrelated to the repeat automation.
 
 **Also load-bearing for parallel work: worktree isolation is currently broken.** Worktrees *do*
 inherit the hooks (`core.hooksPath` is absolute — tested 2026-08-25, correcting the claim in

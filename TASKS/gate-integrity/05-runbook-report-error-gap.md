@@ -390,6 +390,34 @@ This change touches one markdown file, so the golangci-lint stage correctly
 reports `examined nothing: lint`; that is the expected result for a docs-only
 diff, not a gap in the check.
 
+### Commit, and the decision capture
+
+Landed as `9d82c56d` — `git show --stat 9d82c56d` -> exactly the two paths in
+`Touches` plus this file. Committed with the pathspec form
+(`git commit -F <msg> -- <path> <path>`) rather than `git add` + `git commit`,
+because by then `nanite-36` had **staged** its `04b` work: five paths, 952
+insertions, sitting in the shared index. A plain `git commit` would have
+swallowed all of it. The pathspec form builds its tree from `HEAD` plus the
+named paths and leaves the index alone; verified by capturing
+`git diff --cached` before and after and comparing —
+`shasum` -> `0bfed121cff4ef6ba61bc0b91a5b46a87c0bd925` both times, `cmp` clean.
+No `--amend` was used afterwards for the same reason: an amend *does* take the
+index.
+
+`./scripts/check.sh` -> exit `0`; `format OK (1s)`, `vet OK (1s)`,
+`lint --- (0s) examined nothing` (`0 changed Go files vs d60c8264`),
+`test OK (4s)`, trailer
+`check.sh: no stage failed — but these examined nothing: lint`. Expected for a
+docs-only diff.
+
+**Decision capture not performed by this worker.** The standing instruction is
+that decisions go to Tesseract (`user/chrispian/memory/decisions`, tags
+`["nanite","gate-integrity"]`). No `mcp__mux__memory_write` tool was present in
+this session's toolset and no equivalent CLI surface was found
+(`mux --help` exposes no memory command; `/opt/homebrew/bin/tesseract` is the
+OCR binary). The capture text is in this session's report to the dispatcher
+rather than written here, so nothing claims a write that did not happen.
+
 ### Shared-tree discipline
 
 `git status --short` was run after every verification step. The dirty set at

@@ -1,7 +1,7 @@
 ---
 name: worker
-description: Use this agent to implement exactly one Nanite engineering task file (TASKS/phase-N/NN-slug.md) end to end — read, implement, test, document, mark status. Dispatch one per task; use isolation:"worktree" for anything running in parallel with other work.
-tools: Read, Grep, Glob, Bash, Write, Edit, WebFetch, TodoWrite
+description: Use this agent to implement exactly one Nanite engineering task end to end — normally a Torque task id, or a legacy TASKS/ file for records predating the Torque ruling — read, implement, test, document, mark status. Dispatch one per task; use isolation:"worktree" for anything running in parallel with other work.
+tools: Read, Grep, Glob, Bash, Write, Edit, WebFetch, TodoWrite, mcp__mux__memory_write
 ---
 
 You implement exactly one task. You have zero memory of anything else — you get your full task file, not a summary.

@@ -89,3 +89,7 @@ ui/vite.config.ts.timestamp-*.js
 !docs/audits/**/raw/*.out
 !docs/audits/**/raw-*/*.log
 !docs/audits/**/raw-*/*.out
+
+# Python bytecode from scripts/ (py_compile, test runs)
+__pycache__/
+*.pyc

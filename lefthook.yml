@@ -276,3 +276,72 @@ pre-push:
       only:
         - ref: main
       run: go test ./...
+
+    quality-ratchet-test:
+      # The 69-test suite for the full-repo quality comparator. Until this
+      # command existed the suite was committed and run by nothing:
+      #   /usr/bin/grep -rn 'quality-ratchet_test' . | /usr/bin/grep -v node_modules
+      # matched only `TASKS/` and one prose line in
+      # `docs/engineering/failure-modes.md` -- not `.github/`, not
+      # `scripts/check.sh`, not this file. Five of those tests are the only
+      # committed proof that the gosec stderr assertion works at all.
+      #
+      # WHY PRE-PUSH AND NOT `scripts/check.sh`. check.sh was the obvious home
+      # and it is the wrong one for this specific defect. The defect is *a check
+      # exists and nothing is required to run it*; check.sh is opt-in by its own
+      # header ("run it when a feature lands", not always). Moving 69 unrun
+      # tests into a script nobody is obliged to invoke reproduces the original
+      # failure one level up -- it would read as fixed and would not be. This
+      # hook is the only path that is both mandatory and prior to the damage.
+      #
+      # WHY NOT THE NIGHTLY GATE. `scripts/quality-ratchet.py` has exactly one
+      # consumer, `.github/workflows/full-repo-quality.yml`, so "test the tool
+      # immediately before using it" is a real argument. It loses on timing: a
+      # broken comparator would reach `main` and sit until the 07:17 UTC cron,
+      # surfacing inside the one job whose signal is already mixed with a known
+      # intermittent. Late, and noisy when it arrives.
+      #
+      # NO `glob` HERE, DELIBERATELY -- and the argument is stronger than it is
+      # for `go-test`. `glob: "scripts/quality-ratchet*.py"` looks exactly right
+      # and is the trap: the suite also drives `scripts/gosec-repeat-run.sh`
+      # (`WRAPPER` at quality-ratchet_test.py:15, invoked at :1228), so that
+      # filter would drop every change to the shell script these tests exercise
+      # while printing `(skip) no matching push files`. That reads benign. The
+      # branch condition carries all the scoping, as it does for the two
+      # commands above.
+      #
+      # The suite is safe to run from a hook and fails closed:
+      #   * cwd-independent -- SCRIPT/WRAPPER resolve via
+      #     `Path(__file__).with_name(...)`, so no `cd` is needed.
+      #   * no toolchain of its own -- it writes its own `gosec` stub onto PATH
+      #     rather than needing the real binary, and it passes under both
+      #     /usr/bin/python3 (3.9.6, Xcode CLT) and a brew python3 (3.14.0).
+      #   * `go` IS required: setUp runs `go env GOOS GOARCH` with check=True.
+      #     With `PATH=/usr/bin:/bin:/usr/sbin:/sbin` the suite reports
+      #     `FAILED (errors=69)`, not 69 skips. A runner that degraded to green
+      #     on a missing toolchain would be this command's own defect wearing
+      #     the fix, so that direction is the correct one.
+      #
+      # WHAT THIS DOES NOT COVER. Stated because a gate whose boundary is
+      # unwritten gets read as covering everything:
+      #   * any clone where `lefthook install` was never run -- `find .git/hooks
+      #     -type f ! -name '*.sample'` returns nothing there and this enforces
+      #     nothing. Pre-existing, shared with both commands above.
+      #   * `--no-verify`, which is all-or-nothing and takes this with it.
+      #   * pushes to any branch other than `main`, by design.
+      #   * anything merged on github.com without a local push -- no branch
+      #     protection, no merge gate.
+      #   * correctness of the comparator. A green run proves those 69
+      #     assertions hold; it is evidence about the failures they were written
+      #     against and nothing else. A comparator wrong in a way no test
+      #     encodes still passes here.
+      #
+      # `priority: 2` puts this between `migration-number` and `go-test`: it
+      # costs a fraction of the suite and its failures are cheap to fix, so it
+      # should not sit behind the slowest command. Verified by reading
+      # lefthook's own pre-push summary, not `lefthook dump`, which renders
+      # commands in name order regardless.
+      priority: 2
+      only:
+        - ref: main
+      run: python3 scripts/quality-ratchet_test.py

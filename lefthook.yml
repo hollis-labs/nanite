@@ -326,6 +326,14 @@ pre-push:
       #     `FAILED (errors=69)`, not 69 skips. A runner that degraded to green
       #     on a missing toolchain would be this command's own defect wearing
       #     the fix, so that direction is the correct one.
+      #   * a suite that ran NOTHING is caught by the run block below, not by
+      #     the interpreter. `unittest.main()`'s zero-test exit code is
+      #     version-dependent -- 3.13/3.14 exit 5 ("NO TESTS RAN"), but 3.9.6
+      #     (macOS's /usr/bin/python3) prints "OK" and exits 0. So on a stock
+      #     Xcode-CLT box a file that lost its `test_`-prefixed methods, say to
+      #     a refactor into bare pytest-style functions, would pass this gate
+      #     green having asserted nothing -- this command's own reason for
+      #     existing, one level in. Hence the parsed-count floor.
       #
       # WHAT THIS DOES NOT COVER. Stated because a gate whose boundary is
       # unwritten gets read as covering everything:
@@ -333,7 +341,12 @@ pre-push:
       #     -type f ! -name '*.sample'` returns nothing there and this enforces
       #     nothing. Pre-existing, shared with both commands above.
       #   * `--no-verify`, which is all-or-nothing and takes this with it.
-      #   * pushes to any branch other than `main`, by design.
+      #   * pushes to any branch other than `main`, by design -- and note the
+      #     sharper case `migration-number` already spells out: `git push
+      #     <remote> feature:main` is gated on the LOCAL ref, so it prints
+      #     `(skip) by condition` while the commit lands on the remote's
+      #     `main`. Same "reads as a benign, correct skip" shape the no-`glob`
+      #     ruling exists to prevent, and this command inherits it.
       #   * anything merged on github.com without a local push -- no branch
       #     protection, no merge gate.
       #   * correctness of the comparator. A green run proves those 69
@@ -341,9 +354,15 @@ pre-push:
       #     against and nothing else. A comparator wrong in a way no test
       #     encodes still passes here.
       #
-      # `priority: 2` puts this between `migration-number` and `go-test`: it
-      # costs a fraction of the suite and its failures are cheap to fix, so it
-      # should not sit behind the slowest command.
+      # `priority: 2` puts this between `migration-number` and `go-test`,
+      # because its failures are cheap to diagnose and fix -- NOT because it is
+      # cheap to run. Measured at acc46a00, alternating back-to-back:
+      #   python3 scripts/quality-ratchet_test.py   real 5.56 / 5.43
+      #   go test ./...            (warm cache)     real 4.28 / 4.30
+      #   go test ./...            (cold cache)     real 44.66
+      # So on a warm cache this is the SLOWEST of the three, not a fraction of
+      # anything; it is only small against a cold `go test`. Re-derive with
+      # `/usr/bin/time -p` on both rather than trusting these.
       #
       # Verify that ordering from the streamed `|  <name> >` banner lines, NOT
       # from the summary and not from `lefthook dump`. All three disagree. On a
@@ -353,7 +372,28 @@ pre-push:
       # `quality-ratchet-test` last -- the summary sorts failures to the end,
       # so it reports execution order correctly only while everything passes.
       # `lefthook dump` renders commands in name order regardless.
+      #
+      # What a pusher who fails this actually sees: the useful lines -- the
+      # AssertionError, the `FAILED (failures=N)` tail, and any message the
+      # wrapper printed -- reach the STREAM, under this command's own banner.
+      # The summary block carries only `quality-ratchet-test (Ns)` with no
+      # reason attached. Scroll up to the banner, not down to the summary.
       priority: 2
       only:
         - ref: main
-      run: python3 scripts/quality-ratchet_test.py
+      run: |
+        output=$(python3 scripts/quality-ratchet_test.py 2>&1)
+        status=$?
+        printf '%s\n' "$output"
+        if [ "$status" -ne 0 ]; then
+          exit "$status"
+        fi
+        # A zero exit is not on its own a pass -- see the fail-closed note
+        # above. unittest writes its tally to stderr, folded in by the 2>&1.
+        ran=$(printf '%s\n' "$output" | sed -n 's/^Ran \([0-9][0-9]*\) test.*/\1/p' | tail -1)
+        if [ -z "$ran" ] || [ "$ran" -eq 0 ]; then
+          echo "ERROR: quality-ratchet_test.py exited 0 but no test count could be" >&2
+          echo "       confirmed (parsed: '${ran:-none}'). A suite that ran nothing" >&2
+          echo "       is not a pass. Check the file still defines test_ methods." >&2
+          exit 1
+        fi

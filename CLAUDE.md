@@ -38,19 +38,33 @@ staged files), `migration-purity` (no `VALUES` clause in
 `9591c1a6` across three real one-`.go`-file commits: **0.17s / 0.06s / 0.06s**
 total, read off lefthook's own summary.
 
-**pre-push:** `go test ./...` on **every push to `main`**. The branch is the
-only thing that scopes it (`only: - ref: main`, and deliberately no `glob`), so
-the suite runs whatever the push contains — a `go.mod`-only, `go.sum`-only or
-migration-`.sql`-only push included. A push from a WIP branch reports
-`go-test (skip) by condition`, and that is the only skip there is. A file filter
-here is a silent fail-open: `*.go` matches none of `go.mod`, `go.sum`, or the
-non-Go inputs the binary embeds, so it drops a migration-only push while printing
-`(skip) no matching push files`, which reads as a benign, correct skip. Migration
-number collisions are this repo's one unrecoverable failure class, so that is the
-worst thing to skip quietly. Measured at `9591c1a6`:
-**41.34s** with the test cache cleared (`go clean -testcache && /usr/bin/time -p
-go test ./...`), **5.06s / 4.59s** on two back-to-back cached runs (99/99
-cached). This is the **no-`-race`** suite — not Tier 3.
+**pre-push:** three commands on **every push to `main`**, in this execution
+order — `migration-number`, then `quality-ratchet-test`
+(`python3 scripts/quality-ratchet_test.py`, 69 tests, ~5.5s), then `go-test`
+(`go test ./...`). The branch is the only thing that scopes any of them
+(`only: - ref: main`, and deliberately no `glob`), so they run whatever the push
+contains — a `go.mod`-only, `go.sum`-only, migration-`.sql`-only or docs-only
+push included. A push from a WIP branch reports `(skip) by condition`.
+
+Read execution order off the streamed `┃  <name> ❯` banner lines, **not** the
+summary: the summary sorts failed commands to the end and shows a failure with
+no reason attached (the explanation is up in the stream). `lefthook dump` always
+renders name order.
+
+A file filter on any of them is a silent fail-open: `*.go` matches none of
+`go.mod`, `go.sum`, or the non-Go inputs the binary embeds, so it drops a
+migration-only push while printing `(skip) no matching push files`, which reads
+as a benign, correct skip. Migration number collisions are this repo's one
+unrecoverable failure class, so that is the worst thing to skip quietly.
+`quality-ratchet-test` has its own version of the trap — a
+`scripts/quality-ratchet*.py` filter would drop changes to
+`scripts/gosec-repeat-run.sh`, which its tests also drive.
+
+`go-test` measured at `9591c1a6`: **41.34s** with the test cache cleared
+(`go clean -testcache && /usr/bin/time -p go test ./...`), **5.06s / 4.59s** on
+two back-to-back cached runs (99/99 cached). This is the **no-`-race`** suite —
+not Tier 3. Warm, it is not the slowest of the three: `quality-ratchet-test`
+costs ~5.5s against its ~4.3s. `lefthook.yml` carries both numbers.
 
 **The landing check: `./scripts/check.sh`.** Whole-repo analysis lives here, not
 on a hook: gofmt/goimports over every Go file, `go vet ./...`, `golangci-lint`

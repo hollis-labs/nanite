@@ -90,8 +90,15 @@ ssa_build_marker='Error building the SSA representation'
 
 # analyzer.go:646 logs "Error running analyzer %s: %s" when an analyzer's Run
 # returns an error. Name is the rule id -- analyzers/*.go build the analysis
-# .Analyzer with `Name: id` -- so the line reads "Error running analyzer G115:
-# ...". Kept as VERSION-DRIFT INSURANCE, not as a live gap: in v2.28.0 every
+# .Analyzer with `Name: id` -- so the line reads "Error running analyzer G118:
+# ...". The two %s are NOT independent: Name selects which Run produced err and
+# therefore constrains err's text. G118 returns GetSSAResult's error bare
+# (analyzers/context_propagation.go:74); G115 wraps it
+# ("building ssa representation: %w", analyzers/conversion_overflow.go:61), so
+# a G115 line carrying the bare text is a composite that gosec never emits.
+# Pick the analyzer to match the error when refreshing the fixture.
+#
+# Kept as VERSION-DRIFT INSURANCE, not as a live gap: in v2.28.0 every
 # error path under it bottoms out at internal/ssautil.GetSSAResult, whose only
 # two branches return ErrNoSSAResult ("no SSA result found in the analysis
 # pass") and ErrInvalidSSAType, and neither can fire because gosec's own driver
@@ -105,6 +112,14 @@ ssa_build_marker='Error building the SSA representation'
 # name, not a package name, so extracting it would print "G115" where every
 # other caller prints a package. It degrades to empty instead, and the matched
 # lines are printed in full regardless.
+#
+# Insurance is not dormancy. If a future gosec makes this path reachable for a
+# benign reason, the gate VOIDS runs rather than passing them -- for everyone,
+# immediately. That is intended, and follows from the premise above: an
+# analyzer whose Run returned an error contributed no findings, so its report
+# is incomplete, and comparing an incomplete report to a baseline is the
+# phantom-drop mechanism this file exists to stop. Whoever meets that red will
+# be reading this file, not the ticket that added the line.
 ssa_run_marker='Error running analyzer '
 
 # Set by scan_stderr_for_ssa_failure, read by its callers. A global rather than
@@ -208,9 +223,10 @@ scan_stderr_for_ssa_failure() {
 # marker variables -- and the quoted heredoc delimiter makes that structural
 # rather than a thing to remember: a fixture interpolating the same variable
 # the matcher greps for agrees with any typo in it, so a misspelled marker
-# would match the fixture, pass the control, and then never match gosec. Written out separately, the markers are asserted
-# against an independent statement of what gosec writes, and a typo fails here
-# rather than in production. What this still cannot detect is gosec renaming the
+# would match the fixture, pass the control, and then never match gosec.
+# Written out separately, the markers are asserted against an independent
+# statement of what gosec writes, and a typo fails here rather than in
+# production. What this still cannot detect is gosec renaming the
 # message upstream: re-derive both from the module cache when the pin moves.
 verify_ssa_matcher() {
   local hit_fixture="$output_dir/gosec-matcher-control-hit.txt"
@@ -222,7 +238,7 @@ verify_ssa_matcher() {
 [gosec]2026/01/01 00:00:00 Panic when running SSA analyzer on package: ssacontrol. Panic: control fixture
 Stack trace:
 [gosec]2026/01/01 00:00:00 Error building the SSA representation of the package ssacontrol: no ssa result
-[gosec]2026/01/01 00:00:00 Error running analyzer G115: no SSA result found in the analysis pass
+[gosec]2026/01/01 00:00:00 Error running analyzer G118: no SSA result found in the analysis pass
 FIXTURE
   printf '[gosec]2026/01/01 00:00:00 Checking file: /matcher/control.go\n' > "$clean_fixture"
 
@@ -240,18 +256,22 @@ FIXTURE
     exit 1
   fi
 
-  # NEGATIVE control, and what makes the positive one above worth anything. A
-  # corrupted copy of each marker -- first character replaced -- must find
-  # nothing in the same fixture. That is what establishes the greps matched
-  # BECAUSE the markers carry gosec's text, rather than merely that three greps
-  # matched something. The historical failure this pair exists for is a
-  # misspelled marker passing a fixture that agreed with the misspelling.
+  # NEGATIVE control, and a narrow one -- read the bounds before citing it. A
+  # corrupted copy of each marker (first character replaced) must find nothing
+  # in the same fixture. That establishes only that the fixture is not so fuzzy
+  # that near-misses match it; against a quoted heredoc of three fixed literals
+  # searched with grep -F, it is close to a static property of this file.
   #
-  # Bounds, stated because a control with no stated scope gets read as proving
-  # more than it does: this compares the markers against the FIXTURE, so it
-  # catches a marker that no longer matches gosec's text as copied here. It
-  # cannot tell you the fixture still matches GOSEC. Only the module cache can,
-  # and the comment on the markers says to re-derive them when the pin moves.
+  # What it does NOT do, written down because the obvious reading is wrong and
+  # was written here first: it does not catch a marker misspelled in LOCKSTEP
+  # with its fixture line. The corrupted needle misses a misspelled fixture
+  # exactly as cleanly as it misses a correct one, so that mutation passes
+  # here. What catches it is the wrapper suite in scripts/quality-ratchet_test.py,
+  # whose gosec stub emits gosec's real lines as independent literals in
+  # another file: a misspelled marker stops matching the stub and the rejection
+  # tests red. Nothing in this function reads gosec, so nothing in it can tell
+  # you the markers still match gosec -- only the module cache can, and the
+  # marker comments above say to re-derive on a pin move.
   for marker in "$ssa_panic_marker" "$ssa_build_marker" "$ssa_run_marker"; do
     corrupted="X${marker#?}"
     if grep -q -F -- "$corrupted" "$hit_fixture"; then

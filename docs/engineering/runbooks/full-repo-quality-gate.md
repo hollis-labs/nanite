@@ -313,7 +313,9 @@ baseline into the gate: agreement, not aggregation, is the test.
 for severity.** The wrapper captures each run's stderr to `gosec-stderr.txt` and
 `gosec-repeat-stderr.txt`, uploaded alongside the reports, and refuses to hand
 either report to the comparator if either capture carries `Panic when running
-SSA analyzer` or `Error building the SSA representation`. gosec recovers from an
+SSA analyzer`, `Error building the SSA representation`, or `Error running
+analyzer ` (this third one is unreachable in the pinned v2.28.0 and is carried
+as version-drift insurance, so expect never to see it until the pin moves). gosec recovers from an
 SSA panic per package and only logs it, so the scan continues: that package's
 SSA-rule findings vanish while `files`/`lines` stay full, `Golang errors` stays
 empty and the status stays 0 under `-no-fail` — a report shaped exactly like a

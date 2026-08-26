@@ -1192,7 +1192,10 @@ class QualityRatchetTest(unittest.TestCase):
             "of the package stubpkg: no ssa result"
         )
         run_line = (
-            "[gosec]2026/01/01 00:00:00 Error running analyzer G115: "
+            # G118 returns GetSSAResult's error unwrapped
+            # (analyzers/context_propagation.go:74), so this pairing is one
+            # gosec can actually emit. G115 wraps it and would not.
+            "[gosec]2026/01/01 00:00:00 Error running analyzer G118: "
             "no SSA result found in the analysis pass"
         )
         failure_line = {"build": build_line, "run": run_line}.get(marker, panic_line)
@@ -1324,7 +1327,7 @@ class QualityRatchetTest(unittest.TestCase):
         self.assertIn(
             "the first run reported an SSA analysis failure", result.stderr
         )
-        self.assertIn("Error running analyzer G115", result.stderr)
+        self.assertIn("Error running analyzer G118", result.stderr)
         # The %s is an ANALYZER name, so package extraction must stay silent
         # rather than report "G115" where every other caller reports a package.
         self.assertNotIn("failing package(s)", result.stderr)

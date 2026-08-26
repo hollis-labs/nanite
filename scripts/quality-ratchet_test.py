@@ -1174,7 +1174,8 @@ class QualityRatchetTest(unittest.TestCase):
         `fail_on` names which run(s) emit an SSA-failure line -- first, second,
         both or none -- selected from the -out= path, because a hit on one run
         only is the nondeterministic case and has to be distinguishable from a
-        reproducible one.
+        reproducible one. `marker` picks which of the three stderr shapes that
+        line takes: panic (analyzer.go:701), build (:580) or run (:646).
         """
         report = self.write_json(
             "stub-gosec-report.json",
@@ -1190,7 +1191,11 @@ class QualityRatchetTest(unittest.TestCase):
             "[gosec]2026/01/01 00:00:00 Error building the SSA representation "
             "of the package stubpkg: no ssa result"
         )
-        failure_line = build_line if marker == "build" else panic_line
+        run_line = (
+            "[gosec]2026/01/01 00:00:00 Error running analyzer G115: "
+            "no SSA result found in the analysis pass"
+        )
+        failure_line = {"build": build_line, "run": run_line}.get(marker, panic_line)
         directory = self.directory / "stub-bin"
         directory.mkdir(exist_ok=True)
         stub = directory / "gosec"
@@ -1304,6 +1309,25 @@ class QualityRatchetTest(unittest.TestCase):
             "the first run reported an SSA analysis failure", result.stderr
         )
         self.assertIn("Error building the SSA representation", result.stderr)
+        self.assertNotIn("ratchet passed", result.stdout)
+
+    def test_wrapper_rejects_an_analyzer_run_error_on_the_first_run_only(self) -> None:
+        """analyzer.go:646 -- the third needle, carried as version-drift insurance.
+
+        Unreachable in v2.28.0 (every path under it bottoms out at
+        GetSSAResult, whose branches gosec's driver prevents), so this test
+        asserts the WRAPPER matches the shape, not that gosec emits it. The
+        stub supplies the line the pinned source would format.
+        """
+        result = self.run_wrapper(fail_on="first", marker="run")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(
+            "the first run reported an SSA analysis failure", result.stderr
+        )
+        self.assertIn("Error running analyzer G115", result.stderr)
+        # The %s is an ANALYZER name, so package extraction must stay silent
+        # rather than report "G115" where every other caller reports a package.
+        self.assertNotIn("failing package(s)", result.stderr)
         self.assertNotIn("ratchet passed", result.stdout)
 
     def test_wrapper_rejects_a_reproducible_ssa_failure_naming_both_runs(self) -> None:

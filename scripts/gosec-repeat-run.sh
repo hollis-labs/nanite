@@ -78,7 +78,7 @@ output_dir=""
 runner=""
 baseline="$repo_root/.github/quality/full-repo-baseline.json"
 
-# The two strings gosec writes when a package's SSA analysis fails, and the only
+# The strings gosec writes when a package's SSA analysis fails, and the only
 # trace that failure leaves anywhere. Verified in v2.28.0 at
 # "$(go env GOMODCACHE)/github.com/securego/gosec/v2@v2.28.0/analyzer.go":
 # analyzer.go:701 formats "Panic when running SSA analyzer on package: %s. ..."
@@ -87,6 +87,25 @@ baseline="$repo_root/.github/quality/full-repo-baseline.json"
 # here are the parts that do not.
 ssa_panic_marker='Panic when running SSA analyzer'
 ssa_build_marker='Error building the SSA representation'
+
+# analyzer.go:646 logs "Error running analyzer %s: %s" when an analyzer's Run
+# returns an error. Name is the rule id -- analyzers/*.go build the analysis
+# .Analyzer with `Name: id` -- so the line reads "Error running analyzer G115:
+# ...". Kept as VERSION-DRIFT INSURANCE, not as a live gap: in v2.28.0 every
+# error path under it bottoms out at internal/ssautil.GetSSAResult, whose only
+# two branches return ErrNoSSAResult ("no SSA result found in the analysis
+# pass") and ErrInvalidSSAType, and neither can fire because gosec's own driver
+# always populates pass.ResultOf[buildssa.Analyzer]. That is a fact about this
+# pin, not about gosec; nothing keeps the path unreachable across a version
+# bump, which is the whole reason to match it now rather than find it missing
+# later. Trailing space is deliberate: it keeps the needle off any future
+# "Error running analyzers..." message.
+#
+# Deliberately NOT taught to ssa_failed_packages below: %s here is an ANALYZER
+# name, not a package name, so extracting it would print "G115" where every
+# other caller prints a package. It degrades to empty instead, and the matched
+# lines are printed in full regardless.
+ssa_run_marker='Error running analyzer '
 
 # Set by scan_stderr_for_ssa_failure, read by its callers. A global rather than
 # a printed value on purpose: a function whose output is captured with $(...)
@@ -170,7 +189,7 @@ scan_stderr_for_ssa_failure() {
     echo "gosec-repeat-run: stderr capture $file is missing or unreadable, so this run cannot be asserted clean" >&2
     exit 1
   fi
-  ssa_failure_lines=$(grep -F -e "$ssa_panic_marker" -e "$ssa_build_marker" -- "$file") || status=$?
+  ssa_failure_lines=$(grep -F -e "$ssa_panic_marker" -e "$ssa_build_marker" -e "$ssa_run_marker" -- "$file") || status=$?
   # 0 matched, 1 matched nothing, anything else means grep could not do the
   # search — which is a failed assertion, never a clean run.
   if [ "$status" -gt 1 ]; then
@@ -184,11 +203,12 @@ scan_stderr_for_ssa_failure() {
 # which is this task's own failure mode reappearing inside the assertion written
 # to detect it.
 #
-# The two fixture lines are LITERAL copies of the shapes analyzer.go:701 and
-# analyzer.go:580 produce, deliberately not built from the marker variables: a
-# fixture interpolating the same variable the matcher greps for agrees with any
-# typo in it, so a misspelled marker would match the fixture, pass the control,
-# and then never match gosec. Written out separately, the markers are asserted
+# The three fixture lines are LITERAL copies of the shapes analyzer.go:701,
+# analyzer.go:580 and analyzer.go:646 produce, deliberately not built from the
+# marker variables -- and the quoted heredoc delimiter makes that structural
+# rather than a thing to remember: a fixture interpolating the same variable
+# the matcher greps for agrees with any typo in it, so a misspelled marker
+# would match the fixture, pass the control, and then never match gosec. Written out separately, the markers are asserted
 # against an independent statement of what gosec writes, and a typo fails here
 # rather than in production. What this still cannot detect is gosec renaming the
 # message upstream: re-derive both from the module cache when the pin moves.
@@ -196,26 +216,50 @@ verify_ssa_matcher() {
   local hit_fixture="$output_dir/gosec-matcher-control-hit.txt"
   local clean_fixture="$output_dir/gosec-matcher-control-clean.txt"
   local hit_count=0
+  local marker=""
+  local corrupted=""
   cat > "$hit_fixture" <<'FIXTURE'
 [gosec]2026/01/01 00:00:00 Panic when running SSA analyzer on package: ssacontrol. Panic: control fixture
 Stack trace:
 [gosec]2026/01/01 00:00:00 Error building the SSA representation of the package ssacontrol: no ssa result
+[gosec]2026/01/01 00:00:00 Error running analyzer G115: no SSA result found in the analysis pass
 FIXTURE
   printf '[gosec]2026/01/01 00:00:00 Checking file: /matcher/control.go\n' > "$clean_fixture"
 
   scan_stderr_for_ssa_failure "$hit_fixture"
   hit_count=$(printf '%s\n' "$ssa_failure_lines" | grep -c . || true)
-  if [ "$hit_count" -ne 2 ]; then
-    echo "gosec-repeat-run: SSA-failure matcher self-check failed: expected both markers to match the fixture copies of gosec's own messages, got $hit_count of 2" >&2
+  if [ "$hit_count" -ne 3 ]; then
+    echo "gosec-repeat-run: SSA-failure matcher self-check failed: expected all three markers to match the fixture copies of gosec's own messages, got $hit_count of 3" >&2
     echo "gosec-repeat-run: the assertion on gosec's stderr therefore proves nothing, so this run is void" >&2
     exit 1
   fi
 
   scan_stderr_for_ssa_failure "$clean_fixture"
   if [ -n "$ssa_failure_lines" ]; then
-    echo "gosec-repeat-run: SSA-failure matcher self-check failed: matched a fixture carrying neither marker" >&2
+    echo "gosec-repeat-run: SSA-failure matcher self-check failed: matched a fixture carrying none of the markers" >&2
     exit 1
   fi
+
+  # NEGATIVE control, and what makes the positive one above worth anything. A
+  # corrupted copy of each marker -- first character replaced -- must find
+  # nothing in the same fixture. That is what establishes the greps matched
+  # BECAUSE the markers carry gosec's text, rather than merely that three greps
+  # matched something. The historical failure this pair exists for is a
+  # misspelled marker passing a fixture that agreed with the misspelling.
+  #
+  # Bounds, stated because a control with no stated scope gets read as proving
+  # more than it does: this compares the markers against the FIXTURE, so it
+  # catches a marker that no longer matches gosec's text as copied here. It
+  # cannot tell you the fixture still matches GOSEC. Only the module cache can,
+  # and the comment on the markers says to re-derive them when the pin moves.
+  for marker in "$ssa_panic_marker" "$ssa_build_marker" "$ssa_run_marker"; do
+    corrupted="X${marker#?}"
+    if grep -q -F -- "$corrupted" "$hit_fixture"; then
+      echo "gosec-repeat-run: SSA-failure matcher self-check failed: the corrupted marker '$corrupted' matched the control fixture, so the fixture is not an independent copy of gosec's output" >&2
+      echo "gosec-repeat-run: the assertion on gosec's stderr therefore proves nothing, so this run is void" >&2
+      exit 1
+    fi
+  done
 
   rm -f "$hit_fixture" "$clean_fixture"
 }

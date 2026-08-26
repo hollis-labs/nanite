@@ -35,11 +35,16 @@
 # The 0.17s run also re-synced the installed hooks. Re-derive rather than
 # trusting this block: stage one .go file, commit, read lefthook's summary.
 #
-# Push time is branch-scoped, not file-scoped. Both `pre-push` commands are
-# gated on `only: - ref: main` and nothing else decides: `migration-number`
-# rejects a colliding or back-filling migration number, then `go-test` runs
-# `go test ./...`. Neither carries a `glob` — see their own notes for why a
-# file filter here is a silent fail-open rather than a saving.
+# Push time is branch-scoped, not file-scoped. All three `pre-push` commands
+# are gated on `only: - ref: main` and nothing else decides: `migration-number`
+# rejects a colliding or back-filling migration number, then
+# `quality-ratchet-test` runs the 69-test comparator suite, then `go-test` runs
+# `go test ./...`. None carries a `glob` — see their own notes for why a file
+# filter here is a silent fail-open rather than a saving.
+#
+# Reading that order back: use the streamed `|  <name> >` banner lines. The
+# summary block sorts failed commands to the end, so it shows execution order
+# only on an all-green run; `lefthook dump` always renders name order.
 #
 # `skip_empty: true` on the three pre-commit commands is inert at the installed
 # lefthook (2.1.4): `lefthook dump` omits the key and `lefthook validate`
@@ -338,9 +343,16 @@ pre-push:
       #
       # `priority: 2` puts this between `migration-number` and `go-test`: it
       # costs a fraction of the suite and its failures are cheap to fix, so it
-      # should not sit behind the slowest command. Verified by reading
-      # lefthook's own pre-push summary, not `lefthook dump`, which renders
-      # commands in name order regardless.
+      # should not sit behind the slowest command.
+      #
+      # Verify that ordering from the streamed `|  <name> >` banner lines, NOT
+      # from the summary and not from `lefthook dump`. All three disagree. On a
+      # run where this command failed, the banners appeared in execution order
+      # (`migration-number`, `quality-ratchet-test`, `go-test`) while the
+      # summary below them listed `go-test` second and the failed
+      # `quality-ratchet-test` last -- the summary sorts failures to the end,
+      # so it reports execution order correctly only while everything passes.
+      # `lefthook dump` renders commands in name order regardless.
       priority: 2
       only:
         - ref: main

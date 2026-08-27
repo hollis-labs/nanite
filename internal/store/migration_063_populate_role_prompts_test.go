@@ -26,13 +26,17 @@ import (
 //     DB), and 063 seeds the five role slugs.
 //  2. For each of the five expected slugs, assert source='internal',
 //     source_ref='embedded:profiles/<slug>.md', and a non-empty body.
-//  3. Spot-check role identity tokens to guard against accidental body
-//     swaps and to provide the unit-test-stub smoke evidence described
-//     in the CW-20260512-0113 boot prompt (§8).
-//  4. Verify can_execute is set correctly per role: read-only profiles
+//  3. Verify can_execute is set correctly per role: read-only profiles
 //     (researcher, analyst) must be can_execute=false; execution
 //     profiles (file-backend, backend, background-job) must be
 //     can_execute=true.
+//
+// Body CONTENT is deliberately not asserted here. service.NewContainer's
+// AutoIngestAgents pass (container.go) upserts the embedded
+// internal/agent/builtin/profiles/*.md bodies over these seeded rows at
+// every boot, so the body this migration writes is never what a dispatch
+// reads. The .md files are the SOT, and internal/agent/builtin's
+// profiles_test.go is where their content is guarded.
 func TestMigration063_SeedsFiveRolePrompts(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "fresh.db")
@@ -43,9 +47,8 @@ func TestMigration063_SeedsFiveRolePrompts(t *testing.T) {
 	defer s.Close(context.Background())
 
 	type want struct {
-		slug           string
-		canExecute     bool
-		identityTokens []string // role-identity tokens that must appear in the body
+		slug       string
+		canExecute bool
 		// toolPermissionsContains, when non-empty, asserts the raw
 		// tool_permissions JSON contains the substring. The deny-all
 		// pattern for no-tools profiles (analyst) is the regression
@@ -57,32 +60,15 @@ func TestMigration063_SeedsFiveRolePrompts(t *testing.T) {
 		toolPermissionsContains string
 	}
 	cases := []want{
-		{
-			slug:           "researcher",
-			canExecute:     false,
-			identityTokens: []string{"Researcher agent", "read-only", "Cite", "path/to/file.go:line"},
-		},
+		{slug: "researcher", canExecute: false},
 		{
 			slug:                    "analyst",
 			canExecute:              false,
-			identityTokens:          []string{"Analyst agent", "one-shot classifier", "low_confidence"},
 			toolPermissionsContains: `"deny_list":["*"]`,
 		},
-		{
-			slug:           "file-backend",
-			canExecute:     true,
-			identityTokens: []string{"File Backend agent", "file-tier I/O", "dev_glob", "Migrations are immutable"},
-		},
-		{
-			slug:           "backend",
-			canExecute:     true,
-			identityTokens: []string{"Backend agent", "Go server-side", "go test -race", "Migrations are append-only"},
-		},
-		{
-			slug:           "background-job",
-			canExecute:     true,
-			identityTokens: []string{"Background Job agent", "async", "Idempotency", "terminal envelope"},
-		},
+		{slug: "file-backend", canExecute: true},
+		{slug: "backend", canExecute: true},
+		{slug: "background-job", canExecute: true},
 	}
 
 	for _, c := range cases {
@@ -104,11 +90,6 @@ func TestMigration063_SeedsFiveRolePrompts(t *testing.T) {
 		}
 		if got.CanExecute != c.canExecute {
 			t.Errorf("slug=%q: CanExecute = %v, want %v", c.slug, got.CanExecute, c.canExecute)
-		}
-		for _, token := range c.identityTokens {
-			if !strings.Contains(got.SystemPrompt, token) {
-				t.Errorf("slug=%q: body missing identity token %q (role identity drifted from .md SOT?)", c.slug, token)
-			}
 		}
 		if c.toolPermissionsContains != "" {
 			if !strings.Contains(got.ToolPermissions, c.toolPermissionsContains) {
@@ -187,43 +168,4 @@ func TestMigration063_AnalystDeniesAllTools(t *testing.T) {
 		}
 	}
 	t.Error("analyst tool_permissions did not produce a deny-all match for dev_read — regression to permissive empty-allow_list?")
-}
-
-// TestMigration063_RolePromptsExcludeUniversalRules guards against role
-// bodies re-introducing the universal grounding/refusal/verification rules
-// that live in internal/chat/universal_rules.go (CW-20260512-0100 +
-// CW-20260512-0114). Duplicating universal content here would undo the
-// layering benefit and reopen the c160 fabrication regression.
-func TestMigration063_RolePromptsExcludeUniversalRules(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "fresh.db")
-	s, err := New(context.Background(), dbPath)
-	if err != nil {
-		t.Fatalf("store.New: %v", err)
-	}
-	defer s.Close(context.
-
-		// Sentinels lifted verbatim from internal/chat/universal_rules.go.
-		Background())
-
-	universalSentinels := []string{
-		"## Universal rules",
-		"Refuse rather than fabricate",
-		"Acknowledge honestly when you fail",
-		"Use what tools return",
-		"Count, do not estimate",
-	}
-
-	for _, slug := range []string{"researcher", "analyst", "file-backend", "backend", "background-job"} {
-		got, err := s.GetAgentBySlug(context.Background(), slug)
-		if err != nil {
-			t.Errorf("GetAgentBySlug %q: %v", slug, err)
-			continue
-		}
-		for _, sentinel := range universalSentinels {
-			if strings.Contains(got.SystemPrompt, sentinel) {
-				t.Errorf("slug=%q: body duplicates universal sentinel %q — universal_rules.go owns this content", slug, sentinel)
-			}
-		}
-	}
 }

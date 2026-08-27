@@ -1,11 +1,13 @@
 package builtin
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/chat"
 )
 
 // TestInternalProfiles_LoadsAllExpectedSlugs asserts the embedded profiles/
@@ -251,6 +253,67 @@ func TestInternalProfiles_RoleIdentitySmoke(t *testing.T) {
 	}
 }
 
+// boldLead matches a markdown bold run — the `**Refuse rather than
+// fabricate.**` lead of a universal-rules bullet.
+var boldLead = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+
+// universalSentinels derives the duplication sentinels FROM the live
+// universal-rules block instead of hand-copying them.
+//
+// The hand-copied list this replaces coupled two packages by transcription:
+// a legitimate reword in internal/chat/universal_rules.go broke a test in
+// internal/agent/builtin, and keeping them in step was manual. Deriving
+// them means a reword updates both sides in one edit and the guard still
+// holds. internal/chat does not import internal/agent/builtin (it imports
+// internal/agent), so this direction is cycle-free.
+//
+// What it extracts: the block's top-level heading, and every bold bullet
+// lead. Subsection headings (### Grounding, ### Refusal, …) are
+// deliberately NOT sentinels — they are ordinary section names a role body
+// could legitimately use, and the list this replaces did not include them.
+func universalSentinels(t *testing.T) []string {
+	t.Helper()
+	block := chat.UniversalRulesBlock()
+
+	var out []string
+	seen := map[string]bool{}
+	add := func(raw string) {
+		v := strings.TrimRight(strings.TrimSpace(raw), ".:")
+		if v == "" || seen[v] {
+			return
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+
+	for _, line := range strings.Split(block, "\n") {
+		if strings.HasPrefix(line, "## ") {
+			head := strings.TrimPrefix(line, "## ")
+			if i := strings.Index(head, " ("); i >= 0 {
+				head = head[:i]
+			}
+			add("## " + head)
+			break
+		}
+	}
+	for _, m := range boldLead.FindAllStringSubmatch(block, -1) {
+		add(m[1])
+	}
+
+	// Floor. A derived list has one failure mode a literal list does not:
+	// if the block's markdown shape changes, extraction silently yields
+	// nothing and every assertion below passes vacuously. The block has
+	// carried 10 sentinels since CW-20260519-0068; 8 leaves room to drop a
+	// bullet or two without churn while still failing loud on an empty or
+	// gutted parse.
+	if len(out) < 8 {
+		t.Fatalf("derived only %d universal sentinels from UniversalRulesBlock (%v) — "+
+			"the block's markdown shape likely changed and this extraction needs updating; "+
+			"without it the duplication guard below passes vacuously", len(out), out)
+	}
+	return out
+}
+
 // TestInternalProfiles_RoleBodiesExcludeUniversalRules guards the five
 // Wave 4 role bodies against re-introducing universal-layer content.
 // The universal grounding/refusal/verification rules live in
@@ -262,17 +325,10 @@ func TestInternalProfiles_RoleBodiesExcludeUniversalRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InternalProfiles: %v", err)
 	}
-	// Sentinels lifted verbatim from internal/chat/universal_rules.go.
-	universalSentinels := []string{
-		"## Universal rules",
-		"Refuse rather than fabricate",
-		"Acknowledge honestly when you fail",
-		"Use what tools return",
-		"Count, do not estimate",
-	}
+	sentinels := universalSentinels(t)
 	for _, slug := range []string{"researcher", "backend", "background-job", "planner"} {
 		def := findBySlug(t, defs, slug)
-		for _, sentinel := range universalSentinels {
+		for _, sentinel := range sentinels {
 			if strings.Contains(def.SystemPrompt, sentinel) {
 				t.Errorf("slug=%s: body duplicates universal sentinel %q — universal_rules.go owns this", slug, sentinel)
 			}

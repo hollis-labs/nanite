@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -14,6 +13,13 @@ import (
 // pre-internal seed rows with source='builtin', the migration must
 // flip those rows' source column to 'internal' without touching the
 // body (the body update is the boot-sync's job).
+//
+// Body CONTENT is deliberately not asserted here. service.NewContainer's
+// AutoIngestAgents pass (container.go) upserts the embedded
+// internal/agent/builtin/profiles/*.md bodies over these seeded rows at
+// every boot, so the body this migration writes is never what a dispatch
+// reads. The .md files are the SOT, and internal/agent/builtin's
+// profiles_test.go is where their content is guarded.
 func TestMigration060_SeedsFourInternalProfilesAndFlipsSource(t *testing.T) {
 	// Fresh DB — migration 060 INSERT OR IGNORE creates the four rows.
 	tempDir := t.TempDir()
@@ -40,21 +46,5 @@ func TestMigration060_SeedsFourInternalProfilesAndFlipsSource(t *testing.T) {
 		if got.SystemPrompt == "" {
 			t.Errorf("slug=%q: SystemPrompt is empty — migration 060 seed must include the body", slug)
 		}
-	}
-
-	// Worker body must NOT carry execute-or-bust framing.
-	worker, _ := s.GetAgentBySlug(context.Background(), "worker")
-	if strings.Contains(worker.SystemPrompt, "Your job is to execute, not converse") {
-		t.Error("worker body in migration 060 reintroduces the c160 fabrication-chain execute-or-bust framing")
-	}
-	if !strings.Contains(worker.SystemPrompt, "return an explicit failure") {
-		t.Error("worker body in migration 060 missing the explicit-failure escape valve")
-	}
-
-	// Default body must NOT carry the universal Grounding section (those
-	// rules moved to internal/chat/universal_rules.go in CW-20260512-0100).
-	def, _ := s.GetAgentBySlug(context.Background(), "default")
-	if strings.Contains(def.SystemPrompt, "## Grounding") {
-		t.Error("default body in migration 060 reintroduces ## Grounding — universal rules layer owns it")
 	}
 }

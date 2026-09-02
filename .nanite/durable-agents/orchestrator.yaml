@@ -1,0 +1,19 @@
+name: Orchestrator
+slug: orchestrator
+profile_slug: orchestrator
+lifecycle_class: harness
+provider: anthropic
+model: ""
+runtime_kind: api
+launch_source_type: api_chat
+launch_source_id: orchestrator
+metadata:
+    dispatch_scope_notes: 'Scoped test run: subagent-runner fixes CW-20260816-0001 and CW-20260816-0002 only. Both are dispatch-eligible (manual=false). Do not pick up other ready tasks in this project. Do not wait on the architect to update Torque status after a worker completes -- keep polling and dispatching autonomously; the architect handles review and status transitions.'
+    exposure_surface: internal_chat_and_harness_v1
+    integration_status: operator_managed
+    product_story: orchestrator
+    recipe_id: orchestrator
+    recipe_kind: orchestrator
+    role_boundary: polls_torque_task_status_dispatches_via_workflow_run_or_subagent_spawn
+    schema_version: "1"
+    torque_project_id: PRJ-20260417-0002

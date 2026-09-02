@@ -93,3 +93,6 @@ ui/vite.config.ts.timestamp-*.js
 # Python bytecode from scripts/ (py_compile, test runs)
 __pycache__/
 *.pyc
+
+# Personal per-machine Claude Code settings — never tracked
+.claude/settings.local.json

@@ -221,7 +221,7 @@ func TestWrap_RecoverableEnrichesContext(t *testing.T) {
 	if rec.ToolName != "card_show" {
 		t.Errorf("expected tool card_show, got %q", rec.ToolName)
 	}
-	if rec.SchemaURI != "mem://nanite/envelope/report-card.schema.json" {
+	if rec.SchemaURI != "embedded://manifest/schemas/report-card.schema.json" {
 		t.Errorf("unexpected schema_uri: %q", rec.SchemaURI)
 	}
 	if rec.SentArgs == nil {

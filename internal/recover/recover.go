@@ -28,9 +28,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hollis-labs/go-envelopes"
 	"github.com/hollis-labs/nanite/internal/envelope"
-	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
 
 // Kind names a recoverable error class. Values are stable lower-snake-case
@@ -150,9 +149,10 @@ func (e *RecoverableError) Unwrap() error {
 // function: no logging, no side effects.
 //
 // Resolution order, highest specificity first:
-//  1. Direct *envelope.ValidationError (typed) → drill into the leaf for
+//  1. Direct *envelope.ValidationError (typed) → inspect module-owned
+//     structured failures for
 //     KindFormatMismatch / KindTypeCoercion, default KindSchemaValidation.
-//  2. Direct *jsonschema.ValidationError (typed) → same drill-down.
+//  2. A validation error recognized by go-envelopes → same classification.
 //  3. *RecoverableError already wrapped → return its Kind (idempotent).
 //  4. Unrecoverable prose patterns (auth, permission, service unavailable,
 //     not implemented, network) → KindNone explicitly.
@@ -171,17 +171,18 @@ func Classify(err error) Kind {
 		return rec.Kind
 	}
 
-	// (1) Direct typed envelope.ValidationError — strongest signal. The
-	// validator wraps a *jsonschema.ValidationError, so we can drill in.
+	// (1) Direct typed envelope.ValidationError — strongest signal. Generic
+	// validator-tree traversal remains owned by go-envelopes.
 	var ve *envelope.ValidationError
 	if errors.As(err, &ve) && ve != nil {
-		return classifyJSONSchema(ve.Inner)
+		return classifyValidationFailures(ve.Details())
 	}
 
-	// (2) Bare *jsonschema.ValidationError (some callers don't wrap).
-	var jve *jsonschema.ValidationError
-	if errors.As(err, &jve) && jve != nil {
-		return classifyJSONSchema(jve)
+	// (2) Preserve classification for validation errors that have not been
+	// wrapped by an envelope registry, while leaving their traversal and
+	// formatting to the public go-envelopes API.
+	if failures := envelopes.FlattenValidationFailures(err, nil); len(failures) > 0 {
+		return classifyValidationFailures(failures)
 	}
 
 	msg := strings.ToLower(err.Error())
@@ -221,55 +222,23 @@ func Classify(err error) Kind {
 	return KindNone
 }
 
-// classifyJSONSchema drills into a jsonschema validation tree to surface
-// the most-specific recoverable kind. Format failures beat type failures
-// beat the generic schema-validation default — this matches the lens's
-// "deterministic-first" repair ordering (a format reformat is cheaper
-// than a type coercion is cheaper than a structural rebuild).
-func classifyJSONSchema(err error) Kind {
-	if err == nil {
-		return KindNone
-	}
-	var ve *jsonschema.ValidationError
-	if !errors.As(err, &ve) {
-		return KindSchemaValidation
-	}
-	hits := walkLeafKinds(ve)
-	switch {
-	case hits.format:
-		return KindFormatMismatch
-	case hits.typeMismatch:
-		return KindTypeCoercion
-	default:
-		return KindSchemaValidation
-	}
-}
-
-type leafKindHits struct {
-	format       bool
-	typeMismatch bool
-}
-
-func walkLeafKinds(ve *jsonschema.ValidationError) leafKindHits {
-	out := leafKindHits{}
-	if ve == nil {
-		return out
-	}
-	if len(ve.Causes) > 0 {
-		for _, c := range ve.Causes {
-			child := walkLeafKinds(c)
-			out.format = out.format || child.format
-			out.typeMismatch = out.typeMismatch || child.typeMismatch
+// classifyValidationFailures surfaces the most-specific recoverable kind from
+// module-owned validation details. Format failures beat type failures beat the
+// generic schema-validation default.
+func classifyValidationFailures(failures []envelopes.ValidationFailure) Kind {
+	hasTypeMismatch := false
+	for _, failure := range failures {
+		switch failure.Keyword {
+		case "format":
+			return KindFormatMismatch
+		case "type":
+			hasTypeMismatch = true
 		}
-		return out
 	}
-	switch ve.ErrorKind.(type) {
-	case *kind.Format:
-		out.format = true
-	case *kind.Type:
-		out.typeMismatch = true
+	if hasTypeMismatch {
+		return KindTypeCoercion
 	}
-	return out
+	return KindSchemaValidation
 }
 
 // classifyByContainedHints is a fallback for prose-only error strings:
@@ -366,11 +335,14 @@ func Wrap(err error, toolName string, sentArgs map[string]any) error {
 func enrich(rec *RecoverableError, err error) {
 	var ve *envelope.ValidationError
 	if errors.As(err, &ve) && ve != nil {
-		rec.SchemaURI = "mem://nanite/envelope/" + ve.Type + ".schema.json"
+		details := ve.Details()
+		if len(details) > 0 {
+			rec.SchemaURI = details[0].SchemaURI
+		}
 		// Surface the first leaf as the "primary" reason. The full leaf
 		// list is available via envelope.FlattenSchemaError in callers
 		// that want it.
-		leaves := envelope.FlattenSchemaError(ve.Inner, nil)
+		leaves := envelope.FlattenSchemaError(ve, nil)
 		if len(leaves) > 0 {
 			rec.ErrorPath = leaves[0].Path
 			rec.ErrorReason = leaves[0].Reason

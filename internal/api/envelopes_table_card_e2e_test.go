@@ -22,7 +22,7 @@ import (
 //     EnvelopeInstance-persisting path approval-card/elicitation-prompt
 //     already use) would have stored.
 //  2. schema-valid — confirm that payload validates against the real
-//     table-card schema (libs/go-envelopes' table-card.schema.json,
+//     released go-envelopes table-card schema,
 //     loaded via the same envelope.ValidateData path card_show uses).
 //  3. render — this is the payload TableCard.tsx receives as `data` and
 //     renders row-action buttons from.

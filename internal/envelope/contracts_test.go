@@ -2,11 +2,8 @@ package envelope
 
 import (
 	"encoding/json"
-	"io/fs"
-	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-envelopes"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -253,28 +250,21 @@ var invalidPayloads = map[string]string{
 	}`,
 }
 
-// loadSchemaFiles returns all schema files from the go-envelopes lib's
-// embedded manifest. Pre-Cap-5 this read from a local embed.FS that has
-// since been removed; the lib is now the single source of truth.
+// loadSchemaFiles returns all module-owned schema resources, including
+// compatibility resources not attached to a live registry type.
 func loadSchemaFiles(t *testing.T) map[string][]byte {
 	t.Helper()
-	schemas := make(map[string][]byte)
-	libFS := envelopes.EmbeddedFS()
-	entries, err := fs.ReadDir(libFS, "manifest/schemas")
-	if err != nil {
-		t.Fatalf("read manifest/schemas dir: %v", err)
+	registry := EnvelopeRegistry()
+	if registry == nil {
+		t.Fatal("envelope registry is not configured")
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".schema.json") {
-			continue
-		}
-		data, err := fs.ReadFile(libFS, "manifest/schemas/"+entry.Name())
-		if err != nil {
-			t.Fatalf("read schema %s: %v", entry.Name(), err)
-		}
-		// Extract type from filename: "info-card.schema.json" -> "info-card"
-		typeName := strings.TrimSuffix(entry.Name(), ".schema.json")
-		schemas[typeName] = data
+	catalog, err := registry.ExportCatalog()
+	if err != nil {
+		t.Fatalf("export envelope catalog: %v", err)
+	}
+	schemas := make(map[string][]byte, len(catalog.Schemas))
+	for _, resource := range catalog.Schemas {
+		schemas[resource.Type] = append([]byte(nil), resource.Document...)
 	}
 	return schemas
 }

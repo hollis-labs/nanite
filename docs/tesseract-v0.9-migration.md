@@ -101,7 +101,10 @@ Before the first upgraded start:
    the main DB is published last so a partial copy cannot activate silently.
 5. If the destination DB already exists, Nanite leaves it authoritative. If an
    unrelated destination records directory exists without a migration journal,
-   migration fails closed and embedded memory remains disabled.
+   migration fails closed and embedded memory remains disabled. If both a
+   destination DB and migration journal exist after an interrupted activation,
+   Nanite verifies the DB, sidecars, and records against the legacy source;
+   any mismatch fails closed instead of treating the destination as current.
 6. A hand-made `~/.tesseract` tree is not auto-migrated. Move it explicitly
    while all writers are stopped.
 7. Run `tesseract migrate-namespaces` and

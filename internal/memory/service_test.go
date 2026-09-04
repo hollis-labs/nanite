@@ -2,13 +2,55 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/hollis-labs/tesseract"
 	tesseractMemory "github.com/hollis-labs/tesseract/memory"
 )
+
+func TestMemoryRecallManifestDescribesReturnedRows(t *testing.T) {
+	instance, cleanup := newTestTesseract(t)
+	defer cleanup()
+	svc := NewService(instance.MemoryStore())
+	namespace := UserNamespace("manifest")
+	storeTestMemory(t, svc, namespace, "zero", "zero confidence", "withheld body", 0)
+
+	const byteBudget = 400
+	page, err := svc.RecallPage(context.Background(), RecallOpts{
+		Namespaces: []string{namespace}, Ranking: RankingChronological, Limit: 10,
+		PayloadMode: PayloadModeSummary, BudgetBytes: byteBudget,
+	})
+	if err != nil {
+		t.Fatalf("recall page: %v", err)
+	}
+	wire, err := json.Marshal(page.Results)
+	if err != nil {
+		t.Fatalf("marshal returned rows: %v", err)
+	}
+	if page.Manifest == nil {
+		t.Fatal("manifest is nil")
+	}
+	if got, want := page.Manifest.BytesReturned, len(wire); got != want {
+		t.Fatalf("manifest bytes_returned=%d does not describe returned rows (%d bytes): %s", got, want, wire)
+	}
+	if page.Manifest.BytesReturned > byteBudget {
+		t.Fatalf("returned rows use %d bytes, exceed configured budget %d", page.Manifest.BytesReturned, byteBudget)
+	}
+	if got, want := page.Manifest.TokensEstimate, (len(wire)+3)/4; got != want {
+		t.Fatalf("manifest tokens_estimate=%d, want %d for returned rows", got, want)
+	}
+	if !bytesContainJSONField(wire, `"confidence":0`) {
+		t.Fatalf("zero confidence disappeared from summary result: %s", wire)
+	}
+}
+
+func bytesContainJSONField(data []byte, field string) bool {
+	return strings.Contains(string(data), field)
+}
 
 func newTestTesseract(t *testing.T) (*tesseract.Tesseract, func()) {
 	t.Helper()
@@ -111,16 +153,21 @@ func TestMemoryRecallPagedProjectedAndNullableScores(t *testing.T) {
 	if first.Manifest == nil {
 		t.Fatal("manifest is nil")
 	}
-	if first.Total != 3 || first.Manifest.ResultsTotal != 3 || first.Manifest.ResultsReturned != 2 ||
+	if first.Manifest.ResultsTotal != 3 || first.Manifest.ResultsReturned != 2 ||
 		!first.Manifest.Truncated || first.Manifest.NextCursor == nil {
-		t.Fatalf("first manifest = %+v total=%d", *first.Manifest, first.Total)
+		t.Fatalf("first manifest = %+v", *first.Manifest)
 	}
-	for _, memory := range first.Memories {
-		if memory.Score != nil {
-			t.Errorf("chronological score = %v, want nil", *memory.Score)
+	firstRows, ok := first.Results.([]tesseractMemory.ProjectedResult)
+	if !ok {
+		t.Fatalf("first results type = %T, want []memory.ProjectedResult", first.Results)
+	}
+	for _, result := range firstRows {
+		if result.Score != nil {
+			t.Errorf("chronological score = %v, want nil", *result.Score)
 		}
-		if memory.PayloadMode != "summary" || memory.Body != "" || memory.Summary == "" {
-			t.Errorf("summary projection = %+v", memory)
+		if result.PayloadMode != tesseractMemory.PayloadModeSummary || result.Revision.Payload == nil ||
+			result.Revision.Payload.Summary == "" || result.Revision.Payload.Body != "" {
+			t.Errorf("summary projection = %+v", result)
 		}
 	}
 
@@ -131,10 +178,11 @@ func TestMemoryRecallPagedProjectedAndNullableScores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second page: %v", err)
 	}
-	if len(second.Memories) != 1 || second.Manifest == nil || second.Manifest.NextCursor != nil {
+	secondRows, ok := second.Results.([]tesseractMemory.ProjectedResult)
+	if !ok || len(secondRows) != 1 || second.Manifest == nil || second.Manifest.NextCursor != nil {
 		t.Fatalf("second page = %+v", second)
 	}
-	if got := second.Memories[0]; got.PayloadMode != "keys" || got.Summary != "" || got.Body != "" {
+	if got := secondRows[0]; got.PayloadMode != tesseractMemory.PayloadModeKeys || got.Revision.Payload != nil {
 		t.Fatalf("keys projection = %+v", got)
 	}
 
@@ -144,8 +192,9 @@ func TestMemoryRecallPagedProjectedAndNullableScores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("full page: %v", err)
 	}
-	if len(full.Memories) != 1 || full.Memories[0].Body == "" || full.Memories[0].PayloadMode != "" {
-		t.Fatalf("full projection = %+v", full.Memories)
+	fullRows, ok := full.Results.([]tesseractMemory.RecallResult)
+	if !ok || len(fullRows) != 1 || fullRows[0].Revision.Payload.Body == "" {
+		t.Fatalf("full projection = %#v", full.Results)
 	}
 }
 
@@ -181,8 +230,17 @@ func TestMemoryEstimateOnlyMatchesManifestAndWithholdsRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("estimate: %v", err)
 	}
-	if len(page.Memories) != 0 || page.Manifest == nil || page.Manifest.ResultsReturned != 1 || page.Manifest.BytesReturned == 0 {
+	if page.Results != nil || page.Manifest == nil || page.Manifest.ResultsReturned != 1 || page.Manifest.BytesReturned == 0 {
 		t.Fatalf("estimate page = %+v", page)
+	}
+	actual, err := svc.RecallPage(context.Background(), RecallOpts{
+		Namespaces: []string{namespace}, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("actual page: %v", err)
+	}
+	if actual.Manifest == nil || !reflect.DeepEqual(*page.Manifest, *actual.Manifest) {
+		t.Fatalf("estimate manifest = %+v, actual manifest = %+v", page.Manifest, actual.Manifest)
 	}
 }
 
@@ -196,10 +254,14 @@ func TestMemoryHydrateAndTouchLifecycle(t *testing.T) {
 	storeTestMemory(t, svc, namespace, "ignored", "ignored summary", "ignored body", 0.7)
 
 	page, err := svc.RecallPage(ctx, RecallOpts{Namespaces: []string{namespace}, Limit: 10})
-	if err != nil || len(page.Memories) != 2 {
+	if err != nil {
 		t.Fatalf("recall page = %+v err=%v", page, err)
 	}
-	selected := page.Memories[0]
+	memories, err := memoriesFromProjectedResults(page.Results)
+	if err != nil || len(memories) != 2 {
+		t.Fatalf("project results = %+v err=%v", page.Results, err)
+	}
+	selected := memories[0]
 	if touchErr := svc.Touch(ctx, []string{selected.RevisionID, selected.RevisionID}); touchErr != nil {
 		t.Fatalf("touch: %v", touchErr)
 	}
@@ -237,14 +299,14 @@ func TestMemoryRecallOffsetUsesPublicPageAndTotal(t *testing.T) {
 	for _, key := range []string{"one", "two", "three"} {
 		storeTestMemory(t, svc, namespace, key, "needle "+key, "body", 0.8)
 	}
-	page, err := svc.RecallPage(context.Background(), RecallOpts{
+	memories, total, err := svc.List(context.Background(), RecallOpts{
 		Namespaces: []string{namespace}, Search: "needle", Limit: 1, Offset: 1,
 	})
 	if err != nil {
 		t.Fatalf("offset page: %v", err)
 	}
-	if page.Total != 3 || len(page.Memories) != 1 || page.Manifest != nil {
-		t.Fatalf("offset page = %+v", page)
+	if total != 3 || len(memories) != 1 {
+		t.Fatalf("offset page: total=%d memories=%+v", total, memories)
 	}
 }
 
@@ -261,8 +323,9 @@ func TestMemoryReadPrefixSpansTypedNamespaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prefix recall: %v", err)
 	}
-	if page.Total != 2 || len(page.Memories) != 2 {
-		t.Fatalf("prefix page = %+v", page)
+	rows, err := memoriesFromProjectedResults(page.Results)
+	if err != nil || page.Manifest == nil || page.Manifest.ResultsTotal != 2 || len(rows) != 2 {
+		t.Fatalf("prefix page = %+v rows=%+v err=%v", page, rows, err)
 	}
 }
 

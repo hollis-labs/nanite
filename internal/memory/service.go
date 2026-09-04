@@ -38,13 +38,15 @@ const (
 
 // Memory represents a memory item to store or one returned by Tesseract.
 type Memory struct {
-	Namespace  string   `json:"namespace"`
-	MemoryKey  string   `json:"memory_key"`
-	Summary    string   `json:"summary,omitempty"`
-	Body       string   `json:"body,omitempty"`
-	Origin     string   `json:"origin,omitempty"`
-	Trigger    string   `json:"trigger,omitempty"`
-	Confidence float64  `json:"confidence,omitempty"`
+	Namespace string `json:"namespace"`
+	MemoryKey string `json:"memory_key"`
+	Summary   string `json:"summary,omitempty"`
+	Body      string `json:"body,omitempty"`
+	Origin    string `json:"origin,omitempty"`
+	Trigger   string `json:"trigger,omitempty"`
+	// Confidence deliberately has no omitempty. Zero is a valid confidence,
+	// not evidence that a projected field was absent.
+	Confidence float64  `json:"confidence"`
 	Tags       []string `json:"tags,omitempty"`
 	SessionID  string   `json:"session_id,omitempty"`
 	RevisionID string   `json:"revision_id,omitempty"`
@@ -81,11 +83,13 @@ type RecallOpts struct {
 	EstimateOnly bool
 }
 
-// RecallPage is a projected recall page. Manifest is populated for cursor and
-// budget-aware reads; Total is retained for the existing offset-based API.
+// RecallPage is Tesseract's projected recall document plus its matching
+// manifest. Results is kept in the exact upstream shape: []RecallResult for
+// full mode and []ProjectedResult for keys/summary mode. Keeping that pair
+// intact is what makes bytes_returned, tokens_estimate, budgets, cursors, and
+// estimate-only describe the document a caller actually receives.
 type RecallPage struct {
-	Memories []Memory                  `json:"memories"`
-	Total    int                       `json:"total"`
+	Results  any                       `json:"results,omitempty"`
 	Manifest *tesseractMemory.Manifest `json:"manifest,omitempty"`
 }
 
@@ -135,15 +139,21 @@ func (s *Service) Store(ctx context.Context, m Memory) error {
 
 // Recall fetches a single page. Summary projection is the default.
 func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error) {
+	if opts.Search != "" || opts.Offset != 0 {
+		memories, _, err := s.List(ctx, opts)
+		return memories, err
+	}
 	page, err := s.RecallPage(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	return page.Memories, nil
+	return memoriesFromProjectedResults(page.Results)
 }
 
 // RecallPage delegates candidate selection, ordering, filtering, paging,
-// projection accounting, and cursor validation to Tesseract v0.9.
+// projection accounting, and cursor validation to Tesseract v0.9. It does not
+// flatten Tesseract's projected result document into Nanite's legacy Memory
+// shape because doing so would invalidate the upstream manifest and budgets.
 func (s *Service) RecallPage(ctx context.Context, opts RecallOpts) (RecallPage, error) {
 	if s.store == nil {
 		return RecallPage{}, fmt.Errorf("memory service: no memory store configured")
@@ -156,32 +166,8 @@ func (s *Service) RecallPage(ctx context.Context, opts RecallOpts) (RecallPage, 
 	if err != nil {
 		return RecallPage{}, err
 	}
-	if opts.Search != "" {
-		return s.recallLegacySearch(ctx, opts, mode)
-	}
-
-	// The retained offset API uses Tesseract's uncapped public RecallPage
-	// primitive. Cursor and budget behavior belongs to RecallPaged below.
-	if opts.Offset != 0 {
-		if opts.Offset < 0 {
-			return RecallPage{}, fmt.Errorf("tesseract_recall: offset must not be negative")
-		}
-		if opts.Cursor != "" || opts.BudgetBytes != 0 || opts.BudgetTokens != 0 || opts.EstimateOnly {
-			return RecallPage{}, fmt.Errorf("tesseract_recall: offset cannot be combined with cursor, budgets, or estimate_only")
-		}
-		if mode == tesseractMemory.PayloadModeFull && in.Limit > tesseractMemory.MaxRecallLimitFull {
-			in.Limit = tesseractMemory.MaxRecallLimitFull
-		}
-		in.Offset = opts.Offset
-		result, recallErr := s.store.RecallPage(ctx, in)
-		if recallErr != nil {
-			return RecallPage{}, fmt.Errorf("tesseract_recall: %w", recallErr)
-		}
-		memories := projectMemories(result.Results, mode)
-		if opts.EstimateOnly {
-			memories = []Memory{}
-		}
-		return RecallPage{Memories: memories, Total: result.Total}, nil
+	if opts.Search != "" || opts.Offset != 0 {
+		return RecallPage{}, fmt.Errorf("tesseract_recall: search and offset belong to the legacy List surface, not cursor paging")
 	}
 
 	paged, err := s.store.RecallPaged(ctx, in, tesseractMemory.PageRequest{
@@ -197,12 +183,54 @@ func (s *Service) RecallPage(ctx context.Context, opts RecallOpts) (RecallPage, 
 	if err != nil {
 		return RecallPage{}, fmt.Errorf("tesseract_recall: %w", err)
 	}
-	memories := projectMemories(paged.Kept, mode)
+	results := paged.Results
 	if opts.EstimateOnly {
-		memories = []Memory{}
+		// Tesseract computes the same projected rows in estimate mode so its
+		// manifest is exact; the caller-facing surface withholds those rows.
+		results = nil
 	}
 	manifest := paged.Manifest
-	return RecallPage{Memories: memories, Total: manifest.ResultsTotal, Manifest: &manifest}, nil
+	return RecallPage{Results: results, Manifest: &manifest}, nil
+}
+
+// List retains Nanite's offset-based HTTP/UI list contract. It deliberately
+// has no manifest or budget knobs: callers that need those use RecallPage and
+// receive Tesseract's exact projected document.
+func (s *Service) List(ctx context.Context, opts RecallOpts) ([]Memory, int, error) {
+	if s.store == nil {
+		return nil, 0, fmt.Errorf("memory service: no memory store configured")
+	}
+	if opts.Cursor != "" || opts.BudgetBytes != 0 || opts.BudgetTokens != 0 || opts.EstimateOnly {
+		return nil, 0, fmt.Errorf("tesseract_recall: list cannot be combined with cursor, budgets, or estimate_only")
+	}
+	if opts.Offset < 0 {
+		return nil, 0, fmt.Errorf("tesseract_recall: offset must not be negative")
+	}
+	mode, err := payloadMode(opts.PayloadMode)
+	if err != nil {
+		return nil, 0, err
+	}
+	if opts.Search != "" {
+		return s.recallLegacySearch(ctx, opts, mode)
+	}
+	in, err := recallInput(opts)
+	if err != nil {
+		return nil, 0, err
+	}
+	if mode == tesseractMemory.PayloadModeFull && in.Limit > tesseractMemory.MaxRecallLimitFull {
+		in.Limit = tesseractMemory.MaxRecallLimitFull
+	}
+	in.Offset = opts.Offset
+	result, err := s.store.RecallPage(ctx, in)
+	if err != nil {
+		return nil, 0, fmt.Errorf("tesseract_recall: %w", err)
+	}
+	projected := tesseractMemory.ProjectResults(result.Results, mode)
+	memories, err := memoriesFromProjectedResults(projected)
+	if err != nil {
+		return nil, 0, err
+	}
+	return memories, result.Total, nil
 }
 
 func recallInput(opts RecallOpts) (tesseractMemory.RecallInput, error) {
@@ -255,9 +283,9 @@ func recallInput(opts RecallOpts) (tesseractMemory.RecallInput, error) {
 // every database page, filter, and ordering operation to Tesseract. Tesseract's
 // lexical arm intentionally rejects non-ASCII tokens and is not a substring
 // query, so it cannot implement this pre-existing Unicode list-search contract.
-func (s *Service) recallLegacySearch(ctx context.Context, opts RecallOpts, mode tesseractMemory.PayloadMode) (RecallPage, error) {
+func (s *Service) recallLegacySearch(ctx context.Context, opts RecallOpts, mode tesseractMemory.PayloadMode) ([]Memory, int, error) {
 	if opts.Cursor != "" || opts.BudgetBytes != 0 || opts.BudgetTokens != 0 || opts.EstimateOnly {
-		return RecallPage{}, fmt.Errorf("tesseract_recall: legacy search cannot be combined with cursor, budgets, or estimate_only")
+		return nil, 0, fmt.Errorf("tesseract_recall: legacy search cannot be combined with cursor, budgets, or estimate_only")
 	}
 	base := opts
 	base.Search = ""
@@ -265,16 +293,16 @@ func (s *Service) recallLegacySearch(ctx context.Context, opts RecallOpts, mode 
 	base.Limit = tesseractMemory.MaxRecallLimit
 	in, err := recallInput(base)
 	if err != nil {
-		return RecallPage{}, err
+		return nil, 0, err
 	}
 
 	folded := strings.ToLower(opts.Search)
 	var matches []tesseractMemory.RecallResult
 	for offset := 0; ; offset += tesseractMemory.MaxRecallLimit {
 		in.Offset = offset
-		page, err := s.store.RecallPage(ctx, in)
-		if err != nil {
-			return RecallPage{}, fmt.Errorf("tesseract_recall: %w", err)
+		page, recallErr := s.store.RecallPage(ctx, in)
+		if recallErr != nil {
+			return nil, 0, fmt.Errorf("tesseract_recall: %w", recallErr)
 		}
 		for _, result := range page.Results {
 			haystack := strings.ToLower(result.Revision.Payload.Summary + "\n" + result.Revision.Payload.Body)
@@ -290,7 +318,7 @@ func (s *Service) recallLegacySearch(ctx context.Context, opts RecallOpts, mode 
 	total := len(matches)
 	offset := opts.Offset
 	if offset < 0 {
-		return RecallPage{}, fmt.Errorf("tesseract_recall: offset must not be negative")
+		return nil, 0, fmt.Errorf("tesseract_recall: offset must not be negative")
 	}
 	limit := opts.Limit
 	if limit <= 0 {
@@ -304,17 +332,18 @@ func (s *Service) recallLegacySearch(ctx context.Context, opts RecallOpts, mode 
 		limit = ceiling
 	}
 	if offset >= total {
-		return RecallPage{Memories: []Memory{}, Total: total}, nil
+		return []Memory{}, total, nil
 	}
 	end := offset + limit
 	if end > total {
 		end = total
 	}
-	memories := projectMemories(matches[offset:end], mode)
-	if opts.EstimateOnly {
-		memories = []Memory{}
+	projected := tesseractMemory.ProjectResults(matches[offset:end], mode)
+	memories, err := memoriesFromProjectedResults(projected)
+	if err != nil {
+		return nil, 0, err
 	}
-	return RecallPage{Memories: memories, Total: total}, nil
+	return memories, total, nil
 }
 
 func payloadMode(raw PayloadMode) (tesseractMemory.PayloadMode, error) {
@@ -328,27 +357,39 @@ func payloadMode(raw PayloadMode) (tesseractMemory.PayloadMode, error) {
 	return mode, nil
 }
 
-func projectMemories(results []tesseractMemory.RecallResult, mode tesseractMemory.PayloadMode) []Memory {
-	memories := make([]Memory, 0, len(results))
-	for _, result := range results {
-		m := revisionToMemory(result.Revision)
-		m.Score = result.Score
-		if mode != tesseractMemory.PayloadModeFull {
-			m.PayloadMode = string(mode)
-			m.Body = ""
+func memoriesFromProjectedResults(results any) ([]Memory, error) {
+	switch rows := results.(type) {
+	case nil:
+		return []Memory{}, nil
+	case []tesseractMemory.RecallResult:
+		memories := make([]Memory, 0, len(rows))
+		for _, result := range rows {
+			m := revisionToMemory(result.Revision)
+			m.Score = result.Score
+			memories = append(memories, m)
 		}
-		if mode == tesseractMemory.PayloadModeKeys {
-			m.Summary = ""
-			m.Origin = ""
-			m.Trigger = ""
-			m.Confidence = 0
-			m.Tags = nil
-			m.SessionID = ""
-			m.Status = ""
+		return memories, nil
+	case []tesseractMemory.ProjectedResult:
+		memories := make([]Memory, 0, len(rows))
+		for _, result := range rows {
+			revision := result.Revision
+			m := Memory{
+				Namespace: revision.Namespace, MemoryKey: revision.MemoryKey,
+				RevisionID: revision.RevisionID, Status: string(revision.Status),
+				Tags: revision.Tags, Score: result.Score, PayloadMode: string(result.PayloadMode),
+			}
+			if revision.Confidence != nil {
+				m.Confidence = *revision.Confidence
+			}
+			if revision.Payload != nil {
+				m.Summary = revision.Payload.Summary
+			}
+			memories = append(memories, m)
 		}
-		memories = append(memories, m)
+		return memories, nil
+	default:
+		return nil, fmt.Errorf("tesseract_recall: unexpected projected results type %T", results)
 	}
-	return memories
 }
 
 // Get resolves the current revision and reinforces its activation.

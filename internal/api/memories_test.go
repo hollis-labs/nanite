@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,84 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/memory"
 )
+
+func TestMemoryCreateListAndEditPreserveFullBody(t *testing.T) {
+	a, mux := newTestAPI(t)
+
+	create := httptest.NewRequest(http.MethodPost, "/api/memories", bytes.NewBufferString(`{
+		"summary":"Review summary",
+		"body":"PRESERVE-ME",
+		"origin":"user",
+		"confidence":0.8,
+		"scope":"user",
+		"tags":[]
+	}`))
+	create.Header.Set("Content-Type", "application/json")
+	created := httptest.NewRecorder()
+	mux.ServeHTTP(created, create)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("POST /api/memories = %d, want 201; body=%s", created.Code, created.Body.String())
+	}
+
+	list := httptest.NewRequest(http.MethodGet, "/api/memories?scope=user", nil)
+	listed := httptest.NewRecorder()
+	mux.ServeHTTP(listed, list)
+	if listed.Code != http.StatusOK {
+		t.Fatalf("GET /api/memories = %d, want 200; body=%s", listed.Code, listed.Body.String())
+	}
+	var response struct {
+		Memories []struct {
+			memory.Memory
+			Key string `json:"key"`
+		} `json:"memories"`
+	}
+	if err := json.NewDecoder(listed.Body).Decode(&response); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(response.Memories) != 1 {
+		t.Fatalf("listed memories = %d, want 1", len(response.Memories))
+	}
+	got := response.Memories[0]
+	if got.MemoryKey != "review_summary" {
+		t.Fatalf("derived memory key = %q, want v0.9-valid review_summary", got.MemoryKey)
+	}
+	if got.Body != "PRESERVE-ME" {
+		t.Fatalf("listed body = %q, want full editable body", got.Body)
+	}
+	if got.Key == "" {
+		t.Fatal("list response omitted path-safe memory key")
+	}
+
+	// An older/projected client may omit body. Omission means "unchanged",
+	// never "replace the stored body with empty".
+	update := httptest.NewRequest(http.MethodPut, "/api/memories/"+got.Key,
+		bytes.NewBufferString(`{"summary":"Edited summary","origin":"user","confidence":0.8,"tags":[]}`))
+	update.Header.Set("Content-Type", "application/json")
+	updated := httptest.NewRecorder()
+	mux.ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("PUT /api/memories/{key} = %d, want 200; body=%s", updated.Code, updated.Body.String())
+	}
+	stored, err := a.Services.Memory.Get(t.Context(), memory.UserNamespace("default"), "review_summary")
+	if err != nil {
+		t.Fatalf("get updated memory: %v", err)
+	}
+	if stored.Summary != "Edited summary" || stored.Body != "PRESERVE-ME" {
+		t.Fatalf("updated memory = %+v, want edited summary and preserved body", stored)
+	}
+}
+
+func TestListMemoriesUnavailableWithoutEmbeddedFacade(t *testing.T) {
+	a, mux := newTestAPI(t)
+	a.Services.Memory = nil
+
+	req := httptest.NewRequest(http.MethodGet, "/api/memories", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("GET /api/memories without local facade = %d, want 503; body=%s", w.Code, w.Body.String())
+	}
+}
 
 func TestListMemories_FiltersBeforePaginationAndReturnsTrueTotal(t *testing.T) {
 	a, mux := newTestAPI(t)

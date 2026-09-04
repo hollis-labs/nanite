@@ -122,7 +122,7 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 	defer cancel()
 
 	start := time.Now()
-	page, err := s.Memory.RecallPage(recallCtx, opts)
+	memories, err := s.Memory.Recall(recallCtx, opts)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -136,8 +136,6 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 		}
 		return nil, fmt.Errorf("memory source recall: %w", err)
 	}
-	memories := page.Memories
-
 	if len(memories) == 0 {
 		slog.Info("contextbroker/memory: auto-recall hit_count=0",
 			"session_id", intent.SessionID, "agent_id", intent.AgentID,

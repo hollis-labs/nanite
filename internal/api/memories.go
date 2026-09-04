@@ -33,7 +33,7 @@ func memoryKeyDecode(key string) (namespace, memoryKey string, ok bool) {
 // Query params: scope, status, q (search/tag filter), tags (comma-separated), limit (default 50), offset (default 0)
 func (a *API) handleListMemories(w http.ResponseWriter, r *http.Request) {
 	if a.Services.Memory == nil {
-		a.jsonResp(w, http.StatusOK, map[string]any{"memories": []any{}, "total": 0})
+		a.errorResp(w, http.StatusServiceUnavailable, "memory service not available")
 		return
 	}
 
@@ -91,24 +91,23 @@ func (a *API) handleListMemories(w http.ResponseWriter, r *http.Request) {
 	}
 
 	opts := memory.RecallOpts{
-		Namespaces: namespaces,
-		Ranking:    memory.RankingActivation,
-		Limit:      limit,
-		Offset:     offset,
-		Tags:       tags,
-		Search:     q.Get("q"),
+		Namespaces:  namespaces,
+		Ranking:     memory.RankingActivation,
+		Limit:       limit,
+		Offset:      offset,
+		Tags:        tags,
+		Search:      q.Get("q"),
+		PayloadMode: memory.PayloadModeFull,
 	}
 	if status := q.Get("status"); status != "" {
 		opts.Statuses = []string{status}
 	}
 
-	page, err := a.Services.Memory.RecallPage(r.Context(), opts)
+	memories, total, err := a.Services.Memory.List(r.Context(), opts)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "recall failed: "+err.Error())
 		return
 	}
-
-	memories := page.Memories
 
 	// Add computed key to each memory for client use.
 	type memoryWithKey struct {
@@ -122,7 +121,7 @@ func (a *API) handleListMemories(w http.ResponseWriter, r *http.Request) {
 
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"memories": out,
-		"total":    page.Total,
+		"total":    total,
 	})
 }
 
@@ -179,7 +178,7 @@ func (a *API) handleCreateMemory(w http.ResponseWriter, r *http.Request) {
 	// Generate a memory key if not provided.
 	memKey := req.MemoryKey
 	if memKey == "" {
-		// Derive a stable key from the summary (lowercase, spaces→dashes, truncated).
+		// Derive a stable v0.9-valid key from the summary.
 		memKey = derivedKey(req.Summary)
 	}
 
@@ -231,7 +230,7 @@ func (a *API) handleCreateMemory(w http.ResponseWriter, r *http.Request) {
 // updateMemoryRequest is the request body for PUT /api/memories/{key}.
 type updateMemoryRequest struct {
 	Summary    string   `json:"summary"`
-	Body       string   `json:"body"`
+	Body       *string  `json:"body"`
 	Origin     string   `json:"origin"`
 	Confidence float64  `json:"confidence"`
 	Tags       []string `json:"tags"`
@@ -268,13 +267,16 @@ func (a *API) handleUpdateMemory(w http.ResponseWriter, r *http.Request) {
 		Namespace:  ns,
 		MemoryKey:  memKey,
 		Summary:    req.Summary,
-		Body:       req.Body,
+		Body:       current.Body,
 		Origin:     req.Origin,
 		Trigger:    "manual",
 		Confidence: req.Confidence,
 		Tags:       req.Tags,
 		SessionID:  current.SessionID,
 		Status:     current.Status,
+	}
+	if req.Body != nil {
+		updated.Body = *req.Body
 	}
 
 	// Fall back to current values for empty fields.
@@ -441,7 +443,8 @@ func (a *API) handleUpdateMemoryStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // derivedKey generates a stable memory key from a summary string.
-// Lowercases, replaces spaces with dashes, strips non-alphanumeric chars, truncates.
+// Lowercases, replaces separators with underscores, strips invalid chars, and
+// truncates to Tesseract v0.9's [a-z0-9_] key contract.
 func derivedKey(summary string) string {
 	s := strings.ToLower(summary)
 	var b strings.Builder
@@ -452,13 +455,13 @@ func derivedKey(summary string) string {
 		case r >= '0' && r <= '9':
 			b.WriteRune(r)
 		case r == ' ' || r == '-' || r == '_':
-			b.WriteRune('-')
+			b.WriteRune('_')
 		}
 		if b.Len() >= 64 {
 			break
 		}
 	}
-	key := strings.Trim(b.String(), "-")
+	key := strings.Trim(b.String(), "_")
 	if key == "" {
 		key = "memory"
 	}

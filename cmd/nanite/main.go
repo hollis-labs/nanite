@@ -70,6 +70,19 @@ type serveLoggingInitializer func(slogx.Config) (*slog.Logger, io.Closer, error)
 
 type serveOTelInitializer func(context.Context, naniteotel.Config) (func(context.Context) error, error)
 
+type serveRuntimeConfigLoader func() (*config.RuntimeConfig, error)
+
+func loadServeRuntimeConfig(load serveRuntimeConfigLoader) (*config.RuntimeConfig, error) {
+	cfg, err := load()
+	if cfg == nil {
+		// config.Load returns nil on unreadable paths or malformed YAML. Serve
+		// intentionally degrades to safe defaults, so every later composition
+		// read must receive a real zero config rather than a nil pointer.
+		cfg = &config.RuntimeConfig{}
+	}
+	return cfg, err
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
@@ -197,7 +210,7 @@ func cmdServeWithInitializers(
 	}
 
 	// Load agentrc config (user-level + project-level, merged).
-	cfg, cfgErr := config.Load()
+	cfg, cfgErr := loadServeRuntimeConfig(config.Load)
 	if cfgErr != nil {
 		slog.Warn("failed to load agentrc config", "err", cfgErr)
 	} else {

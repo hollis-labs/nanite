@@ -2389,6 +2389,7 @@ export type MemoryStatus = "draft" | "reviewed" | "canonical" | "deprecated";
 export type MemoryScope = "session" | "project" | "user";
 
 export interface Memory {
+  key: string;
   memory_key: string;
   namespace: string;
   summary: string;
@@ -2421,7 +2422,7 @@ export interface MemoryCreateRequest {
 
 export interface MemoryUpdateRequest {
   summary: string;
-  body?: string;
+  body: string;
   origin: MemoryOrigin;
   confidence: number;
   tags: string[];

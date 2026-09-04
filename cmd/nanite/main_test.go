@@ -103,6 +103,37 @@ func TestCmdServeRejectsInvalidBindBeforeInitializers(t *testing.T) {
 	}
 }
 
+func TestMalformedAgentConfigServeFallbackIsNonNilAndSafe(t *testing.T) {
+	root := t.TempDir()
+	userConfig := filepath.Join(root, "config.yaml")
+	if err := os.WriteFile(userConfig, []byte("tesseract: [not-an-object\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadServeRuntimeConfig(func() (*config.RuntimeConfig, error) {
+		return config.LoadFrom(userConfig, filepath.Join(root, "missing-project.yaml"))
+	})
+	if err == nil {
+		t.Fatal("malformed config unexpectedly loaded")
+	}
+	if cfg == nil {
+		t.Fatal("serve fallback returned nil config")
+	}
+	if cfg.Tesseract.Command != "" || cfg.Tesseract.ServerName != "" {
+		t.Fatalf("serve fallback Tesseract config = %+v, want safe embedded defaults", cfg.Tesseract)
+	}
+	// These are the two startup decisions that previously dereferenced the
+	// nil config after config.Load failed.
+	serverName := strings.TrimSpace(cfg.Tesseract.ServerName)
+	if serverName == "" {
+		serverName = "tesseract"
+	}
+	external := strings.TrimSpace(cfg.Tesseract.Command) != ""
+	if serverName != "tesseract" || external {
+		t.Fatalf("fallback ownership: server=%q external=%v", serverName, external)
+	}
+}
+
 func (c *countingCloser) Close() error {
 	c.calls.Add(1)
 	return c.err

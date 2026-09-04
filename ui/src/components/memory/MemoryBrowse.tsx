@@ -145,9 +145,9 @@ export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
           <div className="p-3 space-y-2">
             {memories.map((memory) => (
               <MemoryCard
-                key={memory.memory_key}
+                key={memory.key}
                 memory={memory}
-                onClick={() => onSelect(memory.memory_key)}
+                onClick={() => onSelect(memory.key)}
               />
             ))}
           </div>

@@ -9,6 +9,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/sys/unix"
 )
 
 // LegacyMigrationResult describes whether Nanite activated a legacy
@@ -48,10 +50,41 @@ func migrateLegacyTesseractData(sourceDB, sourceRecords, targetDB, targetRecords
 	if targetDB == "" || targetRecords == "" {
 		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: target DB and records paths are required")
 	}
-	if _, err := os.Stat(targetDB); err == nil {
-		return LegacyMigrationCurrent, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: inspect target DB: %w", err)
+	if mkdirErr := os.MkdirAll(filepath.Dir(targetDB), 0o700); mkdirErr != nil {
+		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: create DB directory: %w", mkdirErr)
+	}
+	if mkdirErr := os.MkdirAll(filepath.Dir(targetRecords), 0o700); mkdirErr != nil {
+		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: create records parent: %w", mkdirErr)
+	}
+
+	// An advisory lock beside the target DB serializes migration attempts in
+	// this and other Nanite processes. The lock file is intentionally retained:
+	// flock state is kernel-owned, so crashes release it without stale-lock
+	// recovery, while O_NOFOLLOW makes a planted lock symlink fail closed.
+	unlock, err := acquireLegacyMigrationLock(filepath.Join(filepath.Dir(targetDB), ".nanite-legacy-conduit-migration.lock"))
+	if err != nil {
+		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: acquire lock: %w", err)
+	}
+	defer unlock()
+
+	journalPath := filepath.Join(filepath.Dir(targetDB), ".nanite-legacy-conduit-migration.json")
+	targetDBExists := false
+	if targetInfo, statErr := os.Lstat(targetDB); statErr == nil {
+		if !targetInfo.Mode().IsRegular() {
+			return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: target DB is not a regular file: %s", targetDB)
+		}
+		targetDBExists = true
+		// A target DB with no journal predates this attempt and remains
+		// authoritative. A surviving journal means an earlier activation may
+		// have crashed or collided; validate the complete pair below instead of
+		// converting that collision into destination_already_current.
+		if _, journalErr := os.Lstat(journalPath); errors.Is(journalErr, os.ErrNotExist) {
+			return LegacyMigrationCurrent, nil
+		} else if journalErr != nil {
+			return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: inspect journal: %w", journalErr)
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: inspect target DB: %w", statErr)
 	}
 	sourceDBInfo, err := os.Lstat(sourceDB)
 	if errors.Is(err, os.ErrNotExist) {
@@ -71,46 +104,37 @@ func migrateLegacyTesseractData(sourceDB, sourceRecords, targetDB, targetRecords
 		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: source records is not a directory: %s", sourceRecords)
 	}
 
-	if mkdirErr := os.MkdirAll(filepath.Dir(targetDB), 0o700); mkdirErr != nil {
-		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: create DB directory: %w", mkdirErr)
-	}
-	if mkdirErr := os.MkdirAll(filepath.Dir(targetRecords), 0o700); mkdirErr != nil {
-		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: create records parent: %w", mkdirErr)
-	}
-
 	want := legacyMigrationJournal{
 		SourceDB: sourceDB, SourceRecords: sourceRecords,
 		TargetDB: targetDB, TargetRecords: targetRecords,
 	}
-	journalPath := filepath.Join(filepath.Dir(targetDB), ".nanite-legacy-conduit-migration.json")
 	resumed, err := loadOrCreateMigrationJournal(journalPath, want, targetRecords)
 	if err != nil {
 		return LegacyMigrationNone, err
 	}
 
 	if sourceRecordsPresent {
-		if targetInfo, targetErr := os.Lstat(targetRecords); errors.Is(targetErr, os.ErrNotExist) {
-			if err := copyDirAtomic(sourceRecords, targetRecords); err != nil {
-				return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: copy records: %w", err)
-			}
-		} else if targetErr != nil {
-			return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: inspect target records: %w", targetErr)
-		} else if !targetInfo.IsDir() {
-			return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: target records is not a directory: %s", targetRecords)
+		if err := copyDirResumable(sourceRecords, targetRecords, resumed); err != nil {
+			return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: copy records: %w", err)
 		}
+	} else if targetInfo, targetErr := os.Lstat(targetRecords); targetErr == nil {
+		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: target records exist but legacy source has none (%s, mode %s)", targetRecords, targetInfo.Mode())
+	} else if !errors.Is(targetErr, os.ErrNotExist) {
+		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: inspect target records: %w", targetErr)
 	}
 
 	// WAL/SHM are part of a SQLite snapshot when present. Publish them first;
 	// targetDB is linked last and is the only completion signal consumers use.
 	for _, suffix := range []string{"-wal", "-shm"} {
-		if err := copyFileIfPresentNoReplace(sourceDB+suffix, targetDB+suffix); err != nil {
+		if err := copySQLiteSidecar(sourceDB+suffix, targetDB+suffix); err != nil {
 			return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: copy SQLite sidecar %s: %w", suffix, err)
 		}
 	}
-	if err := copyFileNoReplace(sourceDB, targetDB); err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			return LegacyMigrationCurrent, nil
-		}
+	activate := copyFileNoReplace
+	if targetDBExists {
+		activate = copyFileIfPresentNoReplace
+	}
+	if err := activate(sourceDB, targetDB); err != nil {
 		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: activate DB: %w", err)
 	}
 	if err := os.Remove(journalPath); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -123,8 +147,7 @@ func migrateLegacyTesseractData(sourceDB, sourceRecords, targetDB, targetRecords
 }
 
 func loadOrCreateMigrationJournal(path string, want legacyMigrationJournal, targetRecords string) (bool, error) {
-	// #nosec G304 -- path is the exact migration journal beside the resolved target DB.
-	data, err := os.ReadFile(path)
+	data, err := readRegularFileNoFollow(path)
 	if err == nil {
 		var got legacyMigrationJournal
 		if decodeErr := json.Unmarshal(data, &got); decodeErr != nil {
@@ -138,7 +161,10 @@ func loadOrCreateMigrationJournal(path string, want legacyMigrationJournal, targ
 	if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("tesseract legacy migration: read journal: %w", err)
 	}
-	if _, statErr := os.Stat(targetRecords); statErr == nil {
+	if targetInfo, statErr := os.Lstat(targetRecords); statErr == nil {
+		if !targetInfo.IsDir() {
+			return false, fmt.Errorf("tesseract legacy migration: target records is not a directory: %s", targetRecords)
+		}
 		return false, fmt.Errorf("tesseract legacy migration: target records exist without a migration journal")
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return false, fmt.Errorf("tesseract legacy migration: inspect target records: %w", statErr)
@@ -147,13 +173,13 @@ func loadOrCreateMigrationJournal(path string, want legacyMigrationJournal, targ
 	if err != nil {
 		return false, fmt.Errorf("tesseract legacy migration: encode journal: %w", err)
 	}
-	if err := writeFileAtomic(path, data, 0o600); err != nil {
+	if err := writeFileNoReplace(path, data, 0o600); err != nil {
 		return false, fmt.Errorf("tesseract legacy migration: write journal: %w", err)
 	}
 	return false, nil
 }
 
-func writeFileAtomic(path string, data []byte, mode fs.FileMode) error {
+func writeFileNoReplace(path string, data []byte, mode fs.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".nanite-migration-journal-")
 	if err != nil {
 		return err
@@ -175,28 +201,48 @@ func writeFileAtomic(path string, data []byte, mode fs.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	return os.Link(tmpName, path)
 }
 
-func copyDirAtomic(source, target string) error {
-	tmp, err := os.MkdirTemp(filepath.Dir(target), ".nanite-conduit-records-")
+// copyDirResumable claims a new records root with mkdir (which cannot replace
+// a raced directory), or resumes only when a matching journal was loaded.
+// Individual files use no-replace publication and the completed trees are
+// compared before the database activation point.
+func copyDirResumable(source, target string, resumed bool) error {
+	sourceInfo, err := os.Lstat(source)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.RemoveAll(tmp) }()
-	if err := copyDirContents(source, tmp); err != nil {
+	if !sourceInfo.IsDir() {
+		return fmt.Errorf("source records is not a directory: %s", source)
+	}
+	targetInfo, targetErr := os.Lstat(target)
+	switch {
+	case errors.Is(targetErr, os.ErrNotExist):
+		if mkdirErr := os.Mkdir(target, sourceInfo.Mode().Perm()); mkdirErr != nil {
+			return mkdirErr
+		}
+	case targetErr != nil:
+		return targetErr
+	case !targetInfo.IsDir():
+		return fmt.Errorf("target records is not a directory: %s", target)
+	case !resumed:
+		return fmt.Errorf("target records appeared during migration: %s", target)
+	}
+	if copyErr := copyDirContents(source, target, resumed); copyErr != nil {
+		return copyErr
+	}
+	equal, err := dirsHaveEqualContents(source, target)
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, target); err != nil {
-		if _, statErr := os.Stat(target); statErr == nil {
-			return nil
-		}
-		return err
+	if !equal {
+		return fmt.Errorf("published target records differ from legacy source: %s", target)
 	}
 	return nil
 }
 
-func copyDirContents(source, target string) error {
+func copyDirContents(source, target string, resumed bool) error {
 	entries, err := os.ReadDir(source)
 	if err != nil {
 		return err
@@ -212,10 +258,20 @@ func copyDirContents(source, target string) error {
 			return fmt.Errorf("refusing symlink %s", sourcePath)
 		}
 		if info.IsDir() {
-			if err := os.Mkdir(targetPath, info.Mode().Perm()); err != nil {
-				return err
+			targetInfo, targetErr := os.Lstat(targetPath)
+			switch {
+			case errors.Is(targetErr, os.ErrNotExist):
+				if err := os.Mkdir(targetPath, info.Mode().Perm()); err != nil {
+					return err
+				}
+			case targetErr != nil:
+				return targetErr
+			case !targetInfo.IsDir():
+				return fmt.Errorf("target records entry is not a directory: %s", targetPath)
+			case !resumed:
+				return fmt.Errorf("target records entry appeared during migration: %s", targetPath)
 			}
-			if err := copyDirContents(sourcePath, targetPath); err != nil {
+			if err := copyDirContents(sourcePath, targetPath, resumed); err != nil {
 				return err
 			}
 			continue
@@ -223,11 +279,128 @@ func copyDirContents(source, target string) error {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("refusing non-regular file %s", sourcePath)
 		}
-		if err := copyFileNoReplace(sourcePath, targetPath); err != nil {
+		copyFile := copyFileNoReplace
+		if resumed {
+			copyFile = copyFileIfPresentNoReplace
+		}
+		if err := copyFile(sourcePath, targetPath); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func dirsHaveEqualContents(left, right string) (bool, error) {
+	leftEntries, err := os.ReadDir(left)
+	if err != nil {
+		return false, err
+	}
+	rightEntries, err := os.ReadDir(right)
+	if err != nil {
+		return false, err
+	}
+	if len(leftEntries) != len(rightEntries) {
+		return false, nil
+	}
+	for i, leftEntry := range leftEntries {
+		rightEntry := rightEntries[i]
+		if leftEntry.Name() != rightEntry.Name() {
+			return false, nil
+		}
+		leftInfo, err := leftEntry.Info()
+		if err != nil {
+			return false, err
+		}
+		rightInfo, err := rightEntry.Info()
+		if err != nil {
+			return false, err
+		}
+		if leftInfo.Mode()&os.ModeSymlink != 0 || rightInfo.Mode()&os.ModeSymlink != 0 {
+			return false, fmt.Errorf("refusing symlink while comparing records: %s or %s", filepath.Join(left, leftEntry.Name()), filepath.Join(right, rightEntry.Name()))
+		}
+		if leftInfo.IsDir() != rightInfo.IsDir() || leftInfo.Mode().IsRegular() != rightInfo.Mode().IsRegular() {
+			return false, nil
+		}
+		leftPath := filepath.Join(left, leftEntry.Name())
+		rightPath := filepath.Join(right, rightEntry.Name())
+		if leftInfo.IsDir() {
+			equal, compareErr := dirsHaveEqualContents(leftPath, rightPath)
+			if compareErr != nil || !equal {
+				return equal, compareErr
+			}
+			continue
+		}
+		if !leftInfo.Mode().IsRegular() || leftInfo.Size() != rightInfo.Size() {
+			return false, nil
+		}
+		equal, err := filesHaveEqualSHA256(leftPath, rightPath)
+		if err != nil || !equal {
+			return equal, err
+		}
+	}
+	return true, nil
+}
+
+func copySQLiteSidecar(source, target string) error {
+	_, sourceErr := os.Lstat(source)
+	if errors.Is(sourceErr, os.ErrNotExist) {
+		if targetInfo, targetErr := os.Lstat(target); targetErr == nil {
+			return fmt.Errorf("target sidecar exists without legacy source: %s (mode %s)", target, targetInfo.Mode())
+		} else if !errors.Is(targetErr, os.ErrNotExist) {
+			return targetErr
+		}
+		return nil
+	}
+	if sourceErr != nil {
+		return sourceErr
+	}
+	return copyFileIfPresentNoReplace(source, target)
+}
+
+func acquireLegacyMigrationLock(path string) (func(), error) {
+	fd, err := unix.Open(path, unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	// #nosec G115 -- unix.Open returned a valid native file descriptor; the
+	// conversion is the exact representation os.NewFile requires.
+	file := os.NewFile(uintptr(fd), path)
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, fmt.Errorf("lock is not a regular file: %s", path)
+	}
+	if err := unix.Flock(fd, unix.LOCK_EX); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return func() {
+		_ = unix.Flock(fd, unix.LOCK_UN)
+		_ = file.Close()
+	}, nil
+}
+
+func readRegularFileNoFollow(path string) ([]byte, error) {
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	// #nosec G115 -- unix.Open returned a valid native file descriptor; the
+	// conversion is the exact representation os.NewFile requires.
+	file := os.NewFile(uintptr(fd), path)
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("file is not regular: %s", path)
+	}
+	return io.ReadAll(file)
 }
 
 func copyFileIfPresentNoReplace(source, target string) error {

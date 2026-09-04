@@ -53,6 +53,9 @@ internal/server/ui_dist/assets/
 # Scratch artifact-tool output (session-local, not build output)
 /data/artifacts/
 
+# Local exports
+/exports/
+
 # Vendored skill packages (internal/skillvendor, TASKS/skills/03/05) --
 # content-addressed install output, not source. Was incidentally caught by
 # the bare `vendor/` rule above (the default root is data/skills/vendor/),

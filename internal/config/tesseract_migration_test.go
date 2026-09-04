@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -319,6 +320,87 @@ func TestMigrateLegacyTesseractDataDoesNotConvertJournaledDBCollisionToCurrent(t
 	}
 	if result == LegacyMigrationCurrent {
 		t.Fatalf("journaled DB collision became destination current: %q", result)
+	}
+}
+
+func TestMigrateLegacyTesseractDataRefusesMissingSourceWithJournal(t *testing.T) {
+	for _, partialTarget := range []bool{false, true} {
+		name := "no_published_targets"
+		if partialTarget {
+			name = "partially_published_targets"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			sourceDB := filepath.Join(root, "legacy", "context.db")
+			sourceRecords := filepath.Join(root, "legacy", "records")
+			targetDB := filepath.Join(root, "target", "main.db")
+			targetRecords := filepath.Join(root, "state", "records")
+			if err := os.MkdirAll(filepath.Dir(targetDB), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			want := legacyMigrationJournal{
+				SourceDB: sourceDB, SourceRecords: sourceRecords,
+				TargetDB: targetDB, TargetRecords: targetRecords,
+			}
+			data, err := json.Marshal(want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			journal := filepath.Join(filepath.Dir(targetDB), ".nanite-legacy-conduit-migration.json")
+			if writeErr := os.WriteFile(journal, data, 0o600); writeErr != nil {
+				t.Fatal(writeErr)
+			}
+			if partialTarget {
+				if mkdirErr := os.MkdirAll(targetRecords, 0o700); mkdirErr != nil {
+					t.Fatal(mkdirErr)
+				}
+				if writeErr := os.WriteFile(filepath.Join(targetRecords, "record"), []byte("partially-published"), 0o600); writeErr != nil {
+					t.Fatal(writeErr)
+				}
+				if writeErr := os.WriteFile(targetDB+"-wal", []byte("partially-published"), 0o600); writeErr != nil {
+					t.Fatal(writeErr)
+				}
+			}
+
+			result, err := migrateLegacyTesseractData(sourceDB, sourceRecords, targetDB, targetRecords)
+			if err == nil {
+				t.Fatalf("missing source with journal returned success: result=%q", result)
+			}
+			if result != LegacyMigrationNone {
+				t.Fatalf("missing source result=%q, want %q", result, LegacyMigrationNone)
+			}
+			if !strings.Contains(err.Error(), "source DB is missing while migration journal remains") {
+				t.Fatalf("missing source error = %v, want journal/source diagnostic", err)
+			}
+			if _, statErr := os.Lstat(targetDB); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("target DB was activated after refusal: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestMigrateLegacyTesseractDataRefusesMissingSourceWithUnjournaledPartialTarget(t *testing.T) {
+	root := t.TempDir()
+	sourceDB := filepath.Join(root, "legacy", "context.db")
+	sourceRecords := filepath.Join(root, "legacy", "records")
+	targetDB := filepath.Join(root, "target", "main.db")
+	targetRecords := filepath.Join(root, "state", "records")
+	if err := os.MkdirAll(targetRecords, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetRecords, "record"), []byte("unknown-owner"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := migrateLegacyTesseractData(sourceDB, sourceRecords, targetDB, targetRecords)
+	if err == nil {
+		t.Fatalf("missing source with unjournaled partial target returned success: result=%q", result)
+	}
+	if !strings.Contains(err.Error(), "partial target state exists") {
+		t.Fatalf("missing source error = %v, want partial-target diagnostic", err)
+	}
+	if _, statErr := os.Lstat(targetDB); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("target DB was activated after refusal: %v", statErr)
 	}
 }
 

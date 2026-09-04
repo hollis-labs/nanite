@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -68,26 +69,46 @@ func migrateLegacyTesseractData(sourceDB, sourceRecords, targetDB, targetRecords
 	defer unlock()
 
 	journalPath := filepath.Join(filepath.Dir(targetDB), ".nanite-legacy-conduit-migration.json")
+	want := legacyMigrationJournal{
+		SourceDB: sourceDB, SourceRecords: sourceRecords,
+		TargetDB: targetDB, TargetRecords: targetRecords,
+	}
 	targetDBExists := false
 	if targetInfo, statErr := os.Lstat(targetDB); statErr == nil {
 		if !targetInfo.Mode().IsRegular() {
 			return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: target DB is not a regular file: %s", targetDB)
 		}
 		targetDBExists = true
-		// A target DB with no journal predates this attempt and remains
-		// authoritative. A surviving journal means an earlier activation may
-		// have crashed or collided; validate the complete pair below instead of
-		// converting that collision into destination_already_current.
-		if _, journalErr := os.Lstat(journalPath); errors.Is(journalErr, os.ErrNotExist) {
-			return LegacyMigrationCurrent, nil
-		} else if journalErr != nil {
-			return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: inspect journal: %w", journalErr)
-		}
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: inspect target DB: %w", statErr)
 	}
+	journalPresent, err := loadMigrationJournal(journalPath, want)
+	if err != nil {
+		return LegacyMigrationNone, err
+	}
+	// A target DB with no journal predates this attempt and remains
+	// authoritative. A surviving journal means an earlier activation may have
+	// crashed or collided; validate the complete pair below instead of
+	// converting that collision into destination_already_current.
+	if targetDBExists && !journalPresent {
+		return LegacyMigrationCurrent, nil
+	}
 	sourceDBInfo, err := os.Lstat(sourceDB)
 	if errors.Is(err, os.ErrNotExist) {
+		partialTargets, inspectErr := legacyMigrationPartialTargets(targetDB, targetRecords)
+		if inspectErr != nil {
+			return LegacyMigrationNone, inspectErr
+		}
+		if journalPresent {
+			detail := ""
+			if len(partialTargets) != 0 {
+				detail = "; partial targets: " + strings.Join(partialTargets, ", ")
+			}
+			return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: source DB is missing while migration journal remains%s", detail)
+		}
+		if len(partialTargets) != 0 {
+			return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: source DB is missing while partial target state exists: %s", strings.Join(partialTargets, ", "))
+		}
 		return LegacyMigrationNone, nil
 	} else if err != nil {
 		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: inspect source DB: %w", err)
@@ -104,10 +125,6 @@ func migrateLegacyTesseractData(sourceDB, sourceRecords, targetDB, targetRecords
 		return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: source records is not a directory: %s", sourceRecords)
 	}
 
-	want := legacyMigrationJournal{
-		SourceDB: sourceDB, SourceRecords: sourceRecords,
-		TargetDB: targetDB, TargetRecords: targetRecords,
-	}
 	resumed, err := loadOrCreateMigrationJournal(journalPath, want, targetRecords)
 	if err != nil {
 		return LegacyMigrationNone, err
@@ -146,7 +163,54 @@ func migrateLegacyTesseractData(sourceDB, sourceRecords, targetDB, targetRecords
 	return LegacyMigrationCopied, nil
 }
 
+func legacyMigrationPartialTargets(targetDB, targetRecords string) ([]string, error) {
+	candidates := []struct {
+		label string
+		path  string
+	}{
+		{label: "database", path: targetDB},
+		{label: "database WAL", path: targetDB + "-wal"},
+		{label: "database SHM", path: targetDB + "-shm"},
+		{label: "records", path: targetRecords},
+	}
+	var present []string
+	for _, candidate := range candidates {
+		info, err := os.Lstat(candidate.path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("tesseract legacy migration: inspect partial target %s: %w", candidate.label, err)
+		}
+		present = append(present, fmt.Sprintf("%s %s (mode %s)", candidate.label, candidate.path, info.Mode()))
+	}
+	return present, nil
+}
+
 func loadOrCreateMigrationJournal(path string, want legacyMigrationJournal, targetRecords string) (bool, error) {
+	resumed, err := loadMigrationJournal(path, want)
+	if err != nil || resumed {
+		return resumed, err
+	}
+	if targetInfo, statErr := os.Lstat(targetRecords); statErr == nil {
+		if !targetInfo.IsDir() {
+			return false, fmt.Errorf("tesseract legacy migration: target records is not a directory: %s", targetRecords)
+		}
+		return false, fmt.Errorf("tesseract legacy migration: target records exist without a migration journal")
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return false, fmt.Errorf("tesseract legacy migration: inspect target records: %w", statErr)
+	}
+	data, err := json.Marshal(want)
+	if err != nil {
+		return false, fmt.Errorf("tesseract legacy migration: encode journal: %w", err)
+	}
+	if err := writeFileNoReplace(path, data, 0o600); err != nil {
+		return false, fmt.Errorf("tesseract legacy migration: write journal: %w", err)
+	}
+	return false, nil
+}
+
+func loadMigrationJournal(path string, want legacyMigrationJournal) (bool, error) {
 	data, err := readRegularFileNoFollow(path)
 	if err == nil {
 		var got legacyMigrationJournal
@@ -160,21 +224,6 @@ func loadOrCreateMigrationJournal(path string, want legacyMigrationJournal, targ
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("tesseract legacy migration: read journal: %w", err)
-	}
-	if targetInfo, statErr := os.Lstat(targetRecords); statErr == nil {
-		if !targetInfo.IsDir() {
-			return false, fmt.Errorf("tesseract legacy migration: target records is not a directory: %s", targetRecords)
-		}
-		return false, fmt.Errorf("tesseract legacy migration: target records exist without a migration journal")
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return false, fmt.Errorf("tesseract legacy migration: inspect target records: %w", statErr)
-	}
-	data, err = json.Marshal(want)
-	if err != nil {
-		return false, fmt.Errorf("tesseract legacy migration: encode journal: %w", err)
-	}
-	if err := writeFileNoReplace(path, data, 0o600); err != nil {
-		return false, fmt.Errorf("tesseract legacy migration: write journal: %w", err)
 	}
 	return false, nil
 }

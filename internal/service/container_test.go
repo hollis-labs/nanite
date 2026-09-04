@@ -3,7 +3,9 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime/pprof"
 	"strings"
@@ -385,6 +387,64 @@ func TestNewContainer_ExternalTesseractDoesNotOpenEmbeddedOwner(t *testing.T) {
 	t.Cleanup(container.Shutdown)
 	if container.Tesseract != nil || container.Memory != nil {
 		t.Fatalf("external mode opened embedded owner: tesseract=%v memory=%v", container.Tesseract, container.Memory)
+	}
+}
+
+func TestNewContainer_MissingLegacySourceWithJournalDisablesEmbeddedTesseract(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	targetDB := filepath.Join(root, "xdg", "data", "tesseract", "workspaces", "default", "main.db")
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "xdg", "data"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg", "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "xdg", "cache"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg", "config"))
+	t.Setenv("TESSERACT_DB_PATH", targetDB)
+	t.Setenv("TESSERACT_WORKSPACE", "default")
+
+	layout, err := config.ResolveTesseractLayout()
+	if err != nil {
+		t.Fatalf("ResolveTesseractLayout: %v", err)
+	}
+	targetRecords := filepath.Join(layout.StateDir(), "records")
+	if mkdirErr := os.MkdirAll(filepath.Dir(targetDB), 0o700); mkdirErr != nil {
+		t.Fatal(mkdirErr)
+	}
+	journalData, err := json.Marshal(map[string]string{
+		"source_db":      filepath.Join(home, ".conduit", "data", "index", "context.db"),
+		"source_records": filepath.Join(home, ".conduit", "data", "records"),
+		"target_db":      targetDB,
+		"target_records": targetRecords,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(filepath.Dir(targetDB), ".nanite-legacy-conduit-migration.json")
+	if writeErr := os.WriteFile(journal, journalData, 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+
+	st, err := storetest.New(t, context.Background(), filepath.Join(root, "nanite.db"))
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
+	container, err := NewContainer(ContainerConfig{
+		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
+		ManagedConfigRoot: filepath.Join(root, ".nanite"),
+	})
+	if err != nil {
+		t.Fatalf("NewContainer: %v", err)
+	}
+	t.Cleanup(container.Shutdown)
+	if container.Tesseract != nil || container.Memory != nil {
+		t.Fatalf("interrupted migration opened an empty embedded store: tesseract=%v memory=%v", container.Tesseract, container.Memory)
+	}
+	if _, statErr := os.Lstat(targetDB); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("interrupted migration created target DB: %v", statErr)
+	}
+	if _, statErr := os.Lstat(journal); statErr != nil {
+		t.Fatalf("interrupted migration removed its recovery journal: %v", statErr)
 	}
 }
 

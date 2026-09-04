@@ -221,7 +221,7 @@ func TestFilterToolsByAgentTools(t *testing.T) {
 	catalog := []llmtypes.ToolDefinition{
 		{Name: "engine_task_create"},
 		{Name: "engine_task_list"},
-		{Name: "context_search"},
+		{Name: "tesseract_recall"},
 	}
 	SyncKnownTools(ctx, st, catalog, func(string) bool { return true })
 
@@ -303,13 +303,13 @@ func TestCountMCPOriginTools(t *testing.T) {
 		{Name: "request_tools"},
 	})
 	mixed := []llmtypes.ToolDefinition{
-		{Name: "task_create"},    // MCP-origin
-		{Name: "dev_read"},       // builtin
-		{Name: "context_search"}, // MCP-origin
-		{Name: "request_tools"},  // builtin (meta)
+		{Name: "task_create"},      // MCP-origin
+		{Name: "dev_read"},         // builtin
+		{Name: "tesseract_recall"}, // MCP-origin
+		{Name: "request_tools"},    // builtin (meta)
 	}
 	if got := countMCPOriginTools(tc, mixed); got != 2 {
-		t.Errorf("countMCPOriginTools = %d, want 2 (only task_create + context_search)", got)
+		t.Errorf("countMCPOriginTools = %d, want 2 (only task_create + tesseract_recall)", got)
 	}
 }
 

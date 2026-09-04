@@ -167,7 +167,7 @@ const thinkToolBlockV1 = `
 Use the think tool to plan before multi-step tool sequences or when new context changes your approach.
 
 - **Scratchpad** (scratchpad_write/read): stash interim values within a turn; avoid re-fetching.
-- **Memory** (memory_recall/write): recall durable facts before research or planning; save conclusions.
+- **Memory** (tesseract_recall/memory_write): recall durable facts before research or planning; save conclusions.
 - **Playbooks** (reflex catalog): reach for a pre-defined pattern (researcher, planner, reviewer, worker) before improvising.
 - **Peer-query** (forthcoming — F5/CW-20260420-0022): agent-to-agent consultation not yet wired; use memory/scratchpad to share state.`
 

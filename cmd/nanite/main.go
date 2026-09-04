@@ -439,23 +439,30 @@ func cmdServeWithInitializers(
 	// (CW-20260814-0003) — the same "point a subprocess at this live
 	// harness" address CLI-launched agents use.
 	apiBaseURL := fmt.Sprintf("http://127.0.0.1:%d", *port)
+	tesseractServerName := strings.TrimSpace(cfg.Tesseract.ServerName)
+	if tesseractServerName == "" {
+		tesseractServerName = "tesseract"
+	}
+	externalTesseract := strings.TrimSpace(cfg.Tesseract.Command) != "" || mcpManager.HasServer(tesseractServerName)
 	container, err := service.NewContainer(service.ContainerConfig{
-		Store:           s,
-		Providers:       registry,
-		MCP:             mcpManager,
-		ToolClient:      tb,
-		Plugins:         pluginHost,
-		AppConfig:       appCfg,
-		APIBaseURL:      apiBaseURL,
-		Activity:        activity,
-		OutputFilter:    outputFilters,
-		UtilityProvider: utilityProvider,
-		UtilityModel:    utilityModel,
-		MaxCLIProcesses: maxCLIProcs,
-		CoordStore:      coord,
-		Worktrees:       wtMgr,
-		CLIAdapters:     cliAdapters,
-		ProviderCatalog: providerCatalog,
+		Store:                    s,
+		Providers:                registry,
+		MCP:                      mcpManager,
+		ToolClient:               tb,
+		Plugins:                  pluginHost,
+		AppConfig:                appCfg,
+		APIBaseURL:               apiBaseURL,
+		Activity:                 activity,
+		OutputFilter:             outputFilters,
+		UtilityProvider:          utilityProvider,
+		UtilityModel:             utilityModel,
+		MaxCLIProcesses:          maxCLIProcs,
+		CoordStore:               coord,
+		Worktrees:                wtMgr,
+		CLIAdapters:              cliAdapters,
+		ProviderCatalog:          providerCatalog,
+		DisableEmbeddedTesseract: externalTesseract,
+		TesseractServerName:      tesseractServerName,
 		// CW-20260512-0118 (SP-20260512-0010 W2): thread the dev-tools
 		// allow-list onto the ContextClient so the per-session
 		// SlotPermissions summary surfaces the baseline READ roots.
@@ -850,10 +857,10 @@ func cmdServeWithInitializers(
 	// calls from reminder_set hit the correct shared Engine instance.
 	selfTools.ReminderEngine = container.ReminderEngine
 
-	// D1 (CW-20260429-0009): wire the Vanta-backed learning recorder
+	// D1 (CW-20260429-0009): wire the Tesseract-backed learning recorder
 	// + recaller used by lesson_capture and the lesson-recall slot
 	// extension. memory.Service satisfies the learnings.LearningStore
-	// interface; when it is nil (Conduit not initialized) both wires
+	// interface; when it is nil (Tesseract not initialized) both wires
 	// stay nil and the self-tool returns a clear errorResult.
 	if container.Memory != nil {
 		selfTools.LearningRecorder = learnings.NewRecorder(container.Memory)
@@ -1230,13 +1237,9 @@ func initMCP(s *store.Store, cfg *config.RuntimeConfig, appCfg *config.TunablesC
 		slog.Error("mcp: failed to register builtin server", "name", mcp.SelfServerName, "err", err)
 	}
 
-	// CW-20260501-0005 sub-ticket 2: register Vanta MCP server when configured.
-	// Vanta is the durable memory/knowledge/context substrate (vanta-primary-since
-	// 2026-04-19). Trust tier defaults to plugin_http per docs/mcp-trust-model.md
-	// (Vanta is the user's own infrastructure, not third-party). Tools added to
-	// the chat surface in sub-ticket 3 (rollout); this scaffold only registers
-	// the server so AutoDiscover picks up the tool list.
-	registerVantaServer(mcpManager, cfg)
+	// Register the optional external Tesseract v0.9 MCP endpoint before tool
+	// discovery so its normalized tool surface is available to agents.
+	registerTesseractServer(mcpManager, cfg)
 
 	loadPersistedMCPServers(s, mcpManager)
 	// Phase 0 item 22 (decision log §11): the go-toolbroker LocalBroker that
@@ -1501,59 +1504,55 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 	}
 }
 
-// registerVantaServer registers the Vanta MCP HTTP server when configured.
-// Reads cfg.Vanta and the NANITE_VANTA_TOKEN environment variable; the env
+// registerTesseractServer registers the released Tesseract stdio MCP process.
+// Reads cfg.Tesseract and NANITE_TESSERACT_TOKEN; the environment variable
 // var overrides the YAML token so the secret can stay out of config files.
 //
-// Trust tier defaults to plugin_http (Vanta is the user's own infrastructure,
-// per docs/mcp-trust-model.md and the orchestrator decision in
-// CW-20260501-0005). Override with cfg.Vanta.TrustTier if needed.
-//
-// When cfg is nil or cfg.Vanta.URL is empty, the function is a no-op — Vanta
-// integration is opt-in. CW-20260501-0005 sub-ticket 2.
-func registerVantaServer(m *mcp.Manager, cfg *config.RuntimeConfig) {
-	if cfg == nil || strings.TrimSpace(cfg.Vanta.URL) == "" {
+// Trust tier defaults to plugin_stdio. When Command is empty, integration is
+// disabled; there is no invented HTTP MCP endpoint on the v0.9 binary.
+func registerTesseractServer(m *mcp.Manager, cfg *config.RuntimeConfig) {
+	if cfg == nil || strings.TrimSpace(cfg.Tesseract.Command) == "" {
 		return
 	}
 
-	serverName := strings.TrimSpace(cfg.Vanta.ServerName)
+	serverName := strings.TrimSpace(cfg.Tesseract.ServerName)
 	if serverName == "" {
-		serverName = "vanta"
+		serverName = "tesseract"
 	}
 
-	// Resolve tier. Default plugin_http per the trust model: Vanta is the
-	// user's own infrastructure (not third-party HTTP), but it's HTTP-based
-	// and outside the in-process builtin set, so plugin_http is the natural
-	// fit. Operators who run an in-process Vanta build can override to
-	// builtin via cfg.Vanta.TrustTier.
-	tier := mcp.TierPluginHTTP
-	if t := strings.TrimSpace(cfg.Vanta.TrustTier); t != "" {
+	tier := mcp.TierPluginStdio
+	if t := strings.TrimSpace(cfg.Tesseract.TrustTier); t != "" {
 		tier = mcp.TrustTier(t)
 	}
 
 	// Token: env var wins over YAML so the secret stays out of config files.
-	token := strings.TrimSpace(os.Getenv(brand.Env("VANTA_TOKEN")))
+	token := strings.TrimSpace(os.Getenv(brand.Env("TESSERACT_TOKEN")))
 	if token == "" {
-		token = strings.TrimSpace(cfg.Vanta.Token)
+		token = strings.TrimSpace(cfg.Tesseract.Token)
 	}
 
-	headers := map[string]string{}
+	args := []string{"mcp"}
 	if token != "" {
-		headers["Authorization"] = "Bearer " + token
+		args = append(args, "--token", token)
 	}
-
-	var err error
-	if len(headers) > 0 {
-		err = m.AddHTTPServerWithHeaders(serverName, cfg.Vanta.URL, headers, tier)
-	} else {
-		err = m.AddHTTPServer(serverName, cfg.Vanta.URL, tier)
+	envAllowlist := append([]string(nil), cfg.Tesseract.EnvAllowlist...)
+	if envAllowlist == nil {
+		envAllowlist = []string{
+			"PATH", "HOME",
+			"XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
+			"TESSERACT_DB_PATH", "TESSERACT_WORKSPACE",
+		}
 	}
+	err := m.AddStdioServer(serverName, strings.TrimSpace(cfg.Tesseract.Command), args,
+		append([]string(nil), cfg.Tesseract.Env...), envAllowlist, tier)
 	if err != nil {
-		slog.Warn("mcp: failed to register vanta server",
-			"name", serverName, "url", cfg.Vanta.URL, "err", err)
+		// #nosec G706 -- configuration values and err are structured attributes, not a formatted log message.
+		slog.Warn("mcp: failed to register tesseract server",
+			"name", serverName, "command", cfg.Tesseract.Command, "err", err)
 		return
 	}
-	slog.Info("mcp: registered vanta server",
+	// #nosec G706 -- configuration values are structured attributes, not a formatted log message.
+	slog.Info("mcp: registered tesseract server",
 		"name", serverName, "tier", string(tier), "auth", token != "")
 }
 

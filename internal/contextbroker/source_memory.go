@@ -20,12 +20,12 @@ const memoryDefaultLimit = 30
 // the prior hardcoded value.
 const memoryDefaultMinConfidence = 0.4
 
-// memoryDefaultTimeout caps the Vanta round-trip when Intent.AutoRecallTimeout
+// memoryDefaultTimeout caps the Tesseract round-trip when Intent.AutoRecallTimeout
 // is zero. Memory is enrichment, not identity — the chat loop should not
 // stall on a slow recall. Matches the implementer-prompt's 2s budget.
 const memoryDefaultTimeout = 2 * time.Second
 
-// MemorySource retrieves memories from Vanta Conduit via the MemoryService.
+// MemorySource retrieves memories from Tesseract via the MemoryService.
 // It cascades through session, project, and user namespaces to assemble
 // relevant memories for the current context.
 type MemorySource struct {
@@ -87,7 +87,7 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 
 	// Session-scoped memories (most specific).
 	if intent.SessionID != "" {
-		namespaces = append(namespaces, memory.SessionNamespace(intent.SessionID))
+		namespaces = append(namespaces, memory.SessionMemoryPrefix(intent.SessionID))
 	}
 
 	// Project-scoped memories.
@@ -96,12 +96,12 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 		projectID = s.ProjectID
 	}
 	if projectID != "" {
-		namespaces = append(namespaces, memory.ProjectNamespace(projectID))
+		namespaces = append(namespaces, memory.ProjectMemoryPrefix(projectID))
 	}
 
 	// User-scoped memories (broadest).
 	if s.UserID != "" {
-		namespaces = append(namespaces, memory.UserNamespace(s.UserID))
+		namespaces = append(namespaces, memory.UserMemoryPrefix(s.UserID))
 	}
 
 	// If no specific namespaces, use glob for all Nanite memories.
@@ -111,7 +111,8 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 
 	opts := memory.RecallOpts{
 		Namespaces:    namespaces,
-		Ranking:       "relevance", // hybrid BM25 + cosine via RRF (Vanta v0.4.0+)
+		Ranking:       memory.RankingRelevance,
+		SearchMode:    memory.SearchModeHybrid,
 		Query:         intent.QueryText,
 		Limit:         limit,
 		MinConfidence: minConfidence,
@@ -121,12 +122,12 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 	defer cancel()
 
 	start := time.Now()
-	memories, err := s.Memory.Recall(recallCtx, opts)
+	page, err := s.Memory.RecallPage(recallCtx, opts)
 	elapsed := time.Since(start)
 
 	if err != nil {
 		// Distinguish timeouts from other errors so operators can spot a
-		// slow Vanta from a misconfigured source.
+		// slow Tesseract from a misconfigured source.
 		if errors.Is(err, context.DeadlineExceeded) {
 			slog.Info("contextbroker/memory: auto-recall timed out",
 				"session_id", intent.SessionID, "agent_id", intent.AgentID,
@@ -135,6 +136,7 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 		}
 		return nil, fmt.Errorf("memory source recall: %w", err)
 	}
+	memories := page.Memories
 
 	if len(memories) == 0 {
 		slog.Info("contextbroker/memory: auto-recall hit_count=0",
@@ -146,6 +148,7 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 
 	// Convert recalled memories to context items, respecting token budget.
 	var items []ContextItem
+	var usedRevisionIDs []string
 	usedTokens := 0
 
 	for _, m := range memories {
@@ -179,7 +182,14 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 				"origin":     m.Origin,
 			},
 		})
+		usedRevisionIDs = append(usedRevisionIDs, m.RevisionID)
 		usedTokens += tokens
+	}
+
+	// A recall candidate is not an access signal. Reinforce only the rows the
+	// broker actually selected into the assembled context.
+	if err := s.Memory.Touch(recallCtx, usedRevisionIDs); err != nil {
+		slog.Warn("contextbroker/memory: touch selected memories failed", "err", err)
 	}
 
 	// Single structured INFO line per turn — mirrors S3b's tool_cache classify

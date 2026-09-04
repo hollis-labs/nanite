@@ -29,10 +29,10 @@ func TestBuiltinHints_MinimumCount(t *testing.T) {
 }
 
 // TestBuiltinHints_ContainsCoreAffordances verifies the four v1 affordances
-// (scratchpad, memory_recall, playbook_research, peer_query) are present.
+// (scratchpad, tesseract_recall, playbook_research, peer_query) are present.
 func TestBuiltinHints_ContainsCoreAffordances(t *testing.T) {
 	hints := BuiltinHints()
-	required := []string{"scratchpad", "memory_recall", "playbook_research", "peer_query"}
+	required := []string{"scratchpad", "tesseract_recall", "playbook_research", "peer_query"}
 	for _, id := range required {
 		if _, ok := HintByID(hints, id); !ok {
 			t.Errorf("core affordance %q missing from catalog", id)

@@ -564,7 +564,7 @@ func classifyAndFormatToolError(err error, toolName string, input map[string]any
 // buildAgentErrorEnvelope renders the agent-facing JSON shape for a
 // classified recoverable error. The shape is intentionally conservative
 // — kind / reason / suggestion / schema_uri / path / tool — because C2's
-// auto-repair pass and the future Vanta learning hint both key off this
+// auto-repair pass and the future Tesseract learning hint both key off this
 // payload.
 //
 // On marshaling failure (which would be a programmer bug since all

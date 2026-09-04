@@ -39,7 +39,7 @@ type Hint struct {
 	// ID is the unique slug (a-z, 0-9, -).
 	ID string `yaml:"id"`
 
-	// Affordance is the display name (e.g. "scratchpad", "memory_recall").
+	// Affordance is the display name (e.g. "scratchpad", "tesseract_recall").
 	Affordance string `yaml:"affordance"`
 
 	// Body is the prompt text injected when this hint is selected.

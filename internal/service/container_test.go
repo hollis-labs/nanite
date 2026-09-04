@@ -334,12 +334,12 @@ func TestNewContainer_TesseractDBIsPackageTempIsolated(t *testing.T) {
 		t.Fatalf("NewContainer: %v", err)
 	}
 	t.Cleanup(container.Shutdown)
-	if container.Conduit == nil {
-		t.Fatal("NewContainer did not open Conduit")
+	if container.Tesseract == nil {
+		t.Fatal("NewContainer did not open Tesseract")
 	}
 
 	var openedDB string
-	rows, err := container.Conduit.MemoryStore().DB().Query("PRAGMA database_list")
+	rows, err := container.Tesseract.MemoryStore().DB().Query("PRAGMA database_list")
 	if err != nil {
 		t.Fatalf("PRAGMA database_list: %v", err)
 	}
@@ -364,6 +364,27 @@ func TestNewContainer_TesseractDBIsPackageTempIsolated(t *testing.T) {
 	assertServiceTestPathUnder(t, serviceTestRoot, "opened main DB", openedDB)
 	if canonicalTestPath(t, openedDB) != canonicalTestPath(t, layout.MainDB()) {
 		t.Fatalf("opened Tesseract DB = %q, resolved DB = %q", openedDB, layout.MainDB())
+	}
+}
+
+func TestNewContainer_ExternalTesseractDoesNotOpenEmbeddedOwner(t *testing.T) {
+	root := t.TempDir()
+	st, err := storetest.New(t, context.Background(), filepath.Join(root, "nanite.db"))
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
+
+	container, err := NewContainer(ContainerConfig{
+		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
+		ManagedConfigRoot: filepath.Join(root, ".nanite"), DisableEmbeddedTesseract: true,
+	})
+	if err != nil {
+		t.Fatalf("NewContainer: %v", err)
+	}
+	t.Cleanup(container.Shutdown)
+	if container.Tesseract != nil || container.Memory != nil {
+		t.Fatalf("external mode opened embedded owner: tesseract=%v memory=%v", container.Tesseract, container.Memory)
 	}
 }
 

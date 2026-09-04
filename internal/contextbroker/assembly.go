@@ -2,7 +2,7 @@
 //
 // SP-20260512-0008 W1A (CW-20260512-0104): the Context Broker's primary
 // role is to DECIDE which slots ship this turn, not to fetch content.
-// External content retrieval (Vanta memory, Conduit, PCC) remains in the
+// External content retrieval (Tesseract memory/context, PCC) remains in the
 // `*Broker.Fetch` path; that's a sub-step the broker may use to populate
 // memory/context slots. The assembly decider takes the full slot store
 // (already produced by chat.AssembleSlotSources) plus an intent + mode

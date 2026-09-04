@@ -27,8 +27,8 @@
         ]
       },
       "sources": [
-        {"tool_use_id": "toolu_01abc", "tool_name": "memory_recall", "note": "Sprint state recall"},
-        {"tool_use_id": "toolu_01def", "tool_name": "knowledge_get", "note": "Phase B status doc"}
+        {"tool_use_id": "toolu_01abc", "tool_name": "tesseract_recall", "note": "Sprint state recall"},
+        {"tool_use_id": "toolu_01def", "tool_name": "tesseract_get", "note": "Phase B status doc"}
       ]
     },
     "notes": "report-card and document-viewer are grounded — at least one source with tool_use_id or tool_name is required. The executor stamps generated_at via its injected clock if the data does not already carry it."

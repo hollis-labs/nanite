@@ -29,7 +29,7 @@ func workflowRunToolDefinition() mcp.Tool {
 		Description: "Run a named, defined workflow to completion (CW-20260813-0014). Use this instead of task_execute when the request matches a rigid, repeatable process that already has a registered workflow definition — a fixed sequence of steps that should run in that order regardless of what an LLM would decide on its own, optionally with independent verification of each step's result.\n\n" +
 			"**When to use:** Only when `workflow_name` names a workflow already registered in the workflow-definitions directory. Do not guess a name — if unsure whether one exists for this task, use task_execute instead.\n\n" +
 			"**What happens:** A template-class durable-agent instance is created for audit/bookkeeping, then the workflow's steps run through the built-in DAG engine (llm/tool/gate steps, with optional per-step verification) until completion or an unresolved gate. This call blocks until the run reaches a terminal state (or times out) — it does not return partial progress.\n\n" +
-			"**Output shape:** An envelope summarizing the run's status and each step's outcome, same conduit as task_execute.",
+			"**Output shape:** An envelope summarizing the run's status and each step's outcome, same channel as task_execute.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

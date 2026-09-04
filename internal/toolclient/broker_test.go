@@ -18,7 +18,7 @@ func TestSelectTools_ReturnsTools(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
 		{Name: "example_task_create", Description: "Create a task"},
 		{Name: "example_task_list", Description: "List tasks"},
-		{Name: "conduit_context_view", Description: "View context"},
+		{Name: "knowledge_context_view", Description: "View context"},
 	}
 	tb.RegisterTools(tools)
 
@@ -313,7 +313,7 @@ func TestSelectByIntent_FindsRelevantTools(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
 		{Name: "example_task_create", Description: "Create a new task in the backlog"},
 		{Name: "example_sprint_list", Description: "List all sprints"},
-		{Name: "conduit_context_view", Description: "View a context packet"},
+		{Name: "knowledge_context_view", Description: "View a context packet"},
 		{Name: "hadron_pipeline_run", Description: "Run a build pipeline"},
 	}
 	tb := newTestBrokerWithTools(tools)
@@ -357,7 +357,7 @@ func TestSelectByIntent_RespectsMaxTools(t *testing.T) {
 func TestSelectByIntent_EmptyOnNoMatch(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
 		{Name: "example_task_create", Description: "Create a new task"},
-		{Name: "conduit_context_view", Description: "View a context packet"},
+		{Name: "knowledge_context_view", Description: "View a context packet"},
 	}
 	tb := newTestBrokerWithTools(tools)
 
@@ -530,7 +530,7 @@ func TestSelectToolsAsProvider_BrokerToolsDefaultNonStrict(t *testing.T) {
 	// returns them. It must leave Strict nil (default-off) when converting.
 	registeredTools := []llmtypes.ToolDefinition{
 		{Name: "example_task_create", Description: "Create a task in the backlog"},
-		{Name: "conduit_context_view", Description: "View a context packet"},
+		{Name: "knowledge_context_view", Description: "View a context packet"},
 	}
 	tb.RegisterTools(registeredTools)
 

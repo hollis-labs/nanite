@@ -6,7 +6,7 @@
 // Design references:
 //   - agent-workspaces/planning/agent-boot-unification/2026-05-07-cross-app-design.md
 //   - agent-workspaces/planning/agent-boot-unification/2026-05-08-lib-tier-status.md
-//   - Vanta decisions:
+//   - Tesseract decisions:
 //     decisions.nanite.architecture.adopt_agent_boot_pattern
 //     decisions.nanite.architecture.cli_pty_long_lived_default
 //     decisions.portfolio.architecture.agent_boot_pattern

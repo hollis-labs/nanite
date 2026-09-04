@@ -33,14 +33,14 @@ func TestHintDispatchAdapter_NilSpawnerReturnsNil(t *testing.T) {
 func TestHintDispatchAdapter_DispatchPassesPayloadAndSlug(t *testing.T) {
 	t.Parallel()
 	sp := &fakeSpawner{
-		res: &dispatch.SpawnResult{Summary: `["scratchpad","memory_recall"]`},
+		res: &dispatch.SpawnResult{Summary: `["scratchpad","tesseract_recall"]`},
 	}
 	d := NewHintDispatchAdapter(sp)
 	got, err := d.Dispatch(context.Background(), `{"user_input":"hi"}`)
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
-	if got != `["scratchpad","memory_recall"]` {
+	if got != `["scratchpad","tesseract_recall"]` {
 		t.Fatalf("got %q; want raw summary", got)
 	}
 	if sp.last.Role != chat.HintSelectorSlug {

@@ -182,7 +182,7 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 
 	// Marshal the envelope back to JSON for the tool result. The Chat
 	// agent's harness prompt instructs it to relay the structured
-	// payload — this is the conduit through which the worker's result
+	// payload — this is the channel through which the worker's result
 	// reaches the frontend, with no raw text leakage.
 	envJSON, err := json.Marshal(envelope)
 	if err != nil {

@@ -10,7 +10,7 @@ Chat agent narrates the Summary to the user.
 
 Your tools: `card_show` (emit), `tool_describe` and `validate` (lens),
 `remember` (lessons), and read-only data tools (`todo_list`, `chat_search`,
-`memory_recall`, `knowledge_get`).
+`tesseract_recall`, `tesseract_get`).
 
 ## Render judgment
 

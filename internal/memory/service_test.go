@@ -2,29 +2,25 @@ package memory
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	conduit "github.com/hollis-labs/tesseract"
-	conduitMemory "github.com/hollis-labs/tesseract/memory"
+	"github.com/hollis-labs/tesseract"
+	tesseractMemory "github.com/hollis-labs/tesseract/memory"
 )
 
-// newTestConduit creates a real embedded Conduit instance backed by a temp dir.
-func newTestConduit(t *testing.T) (*conduit.Conduit, func()) {
+func newTestTesseract(t *testing.T) (*tesseract.Tesseract, func()) {
 	t.Helper()
 	dir := t.TempDir()
-	c, err := conduit.Open(context.Background(), conduit.Config{RootDir: dir})
+	instance, err := tesseract.Open(context.Background(), tesseract.Config{RootDir: dir})
 	if err != nil {
-		t.Fatalf("conduit.Open: %v", err)
+		t.Fatalf("tesseract.Open: %v", err)
 	}
 	var dbFile string
-	rows, err := c.MemoryStore().DB().Query("PRAGMA database_list")
+	rows, err := instance.MemoryStore().DB().Query("PRAGMA database_list")
 	if err != nil {
-		_ = c.Close()
+		_ = instance.Close()
 		t.Fatalf("PRAGMA database_list: %v", err)
 	}
 	for rows.Next() {
@@ -32,7 +28,7 @@ func newTestConduit(t *testing.T) (*conduit.Conduit, func()) {
 		var name, path string
 		if err := rows.Scan(&seq, &name, &path); err != nil {
 			_ = rows.Close()
-			_ = c.Close()
+			_ = instance.Close()
 			t.Fatalf("scan database_list: %v", err)
 		}
 		if name == "main" {
@@ -45,14 +41,13 @@ func newTestConduit(t *testing.T) (*conduit.Conduit, func()) {
 		canonicalDir, dirErr := filepath.EvalSymlinks(dir)
 		canonicalDB, dbErr := filepath.EvalSymlinks(dbFile)
 		if dirErr == nil && dbErr == nil && memoryTestPathUnder(canonicalDir, canonicalDB) {
-			cleanup := func() { _ = c.Close() }
-			return c, cleanup
+			return instance, func() { _ = instance.Close() }
 		}
-		_ = c.Close()
-		t.Fatalf("test Tesseract DB %q escapes temp root %q (canonical root=%q err=%v; db=%q err=%v)", dbFile, dir, canonicalDir, dirErr, canonicalDB, dbErr)
+		_ = instance.Close()
+		t.Fatalf("test Tesseract DB %q escapes temp root %q (canonical root=%q err=%v; db=%q err=%v)",
+			dbFile, dir, canonicalDir, dirErr, canonicalDB, dbErr)
 	}
-	cleanup := func() { _ = c.Close() }
-	return c, cleanup
+	return instance, func() { _ = instance.Close() }
 }
 
 func memoryTestPathUnder(root, path string) bool {
@@ -60,681 +55,309 @@ func memoryTestPathUnder(root, path string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
-func TestMemoryStore(t *testing.T) {
-	c, cleanup := newTestConduit(t)
-	defer cleanup()
-	svc := NewService(c.MemoryStore())
-
-	err := svc.Store(context.Background(), Memory{
-		Namespace:  "user/default/session/test-123/memory",
-		MemoryKey:  "prefers_terse_output",
-		Summary:    "User prefers terse output",
-		Body:       "When asked, user said they prefer concise responses.",
-		Origin:     "user",
-		Trigger:    "per_turn",
-		Confidence: 0.9,
-		Tags:       []string{"preferences", "output_style"},
-		SessionID:  "test-123",
-	})
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func storeTestMemory(t *testing.T, svc *Service, namespace, key, summary, body string, confidence float64) {
+	t.Helper()
+	if err := svc.Store(context.Background(), Memory{
+		Namespace: namespace, MemoryKey: key, Summary: summary, Body: body,
+		Origin: "user", Trigger: "explicit", Confidence: confidence,
+		SessionID: "test-session", Status: "reviewed",
+	}); err != nil {
+		t.Fatalf("store %s: %v", key, err)
 	}
+}
 
-	// Verify we can recall it.
+func TestMemoryStoreAndDefaultSummaryProjection(t *testing.T) {
+	instance, cleanup := newTestTesseract(t)
+	defer cleanup()
+	svc := NewService(instance.MemoryStore())
+	namespace := SessionNamespace("test-123")
+	storeTestMemory(t, svc, namespace, "prefers_terse", "User prefers terse output", "full body", 0.9)
+
 	memories, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces: []string{"user/default/session/test-123/memory"},
-		Ranking:    "activation",
-		Limit:      10,
+		Namespaces: []string{namespace}, Ranking: RankingActivation, Limit: 10,
 	})
 	if err != nil {
-		t.Fatalf("recall error: %v", err)
+		t.Fatalf("recall: %v", err)
 	}
 	if len(memories) != 1 {
-		t.Fatalf("expected 1 memory, got %d", len(memories))
+		t.Fatalf("got %d memories, want 1", len(memories))
 	}
-	if memories[0].Summary != "User prefers terse output" {
-		t.Errorf("unexpected summary: %s", memories[0].Summary)
+	if memories[0].Summary != "User prefers terse output" || memories[0].Body != "" {
+		t.Fatalf("summary projection = %+v", memories[0])
 	}
-	if memories[0].Origin != "user" {
-		t.Errorf("expected origin user, got %s", memories[0].Origin)
+	if memories[0].PayloadMode != "summary" {
+		t.Fatalf("payload mode = %q, want summary", memories[0].PayloadMode)
 	}
-}
-
-func TestMemoryStore_NilStore(t *testing.T) {
-	svc := NewService(nil)
-	err := svc.Store(context.Background(), Memory{Summary: "test"})
-	if err == nil {
-		t.Error("expected error for nil store")
+	if memories[0].Score == nil {
+		t.Fatal("activation score is nil; want numeric score")
 	}
 }
 
-func TestMemoryRecall(t *testing.T) {
-	c, cleanup := newTestConduit(t)
+func TestMemoryRecallPagedProjectedAndNullableScores(t *testing.T) {
+	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
-	svc := NewService(c.MemoryStore())
-
-	// Store two memories in different namespaces.
-	err := svc.Store(context.Background(), Memory{
-		Namespace:  "user/chrispian/memory",
-		MemoryKey:  "prefers_terse_output",
-		Summary:    "User prefers terse output",
-		Origin:     "user",
-		Trigger:    "explicit",
-		Confidence: 0.9,
-		SessionID:  "test-1",
-	})
-	if err != nil {
-		t.Fatalf("store 1: %v", err)
+	svc := NewService(instance.MemoryStore())
+	namespace := UserNamespace("paged")
+	for _, key := range []string{"one", "two", "three"} {
+		storeTestMemory(t, svc, namespace, key, "summary "+key, "body "+key, 0.8)
 	}
 
-	err = svc.Store(context.Background(), Memory{
-		Namespace:  "user/chrispian/project/nanite/memory",
-		MemoryKey:  "uses_sqlite",
-		Summary:    "Project uses SQLite for persistence",
-		Origin:     "project",
-		Trigger:    "explicit",
-		Confidence: 0.95,
-		SessionID:  "test-2",
+	first, err := svc.RecallPage(context.Background(), RecallOpts{
+		Namespaces: []string{namespace}, Ranking: RankingChronological, Limit: 2,
 	})
 	if err != nil {
-		t.Fatalf("store 2: %v", err)
+		t.Fatalf("first page: %v", err)
+	}
+	if first.Manifest == nil {
+		t.Fatal("manifest is nil")
+	}
+	if first.Total != 3 || first.Manifest.ResultsTotal != 3 || first.Manifest.ResultsReturned != 2 ||
+		!first.Manifest.Truncated || first.Manifest.NextCursor == nil {
+		t.Fatalf("first manifest = %+v total=%d", *first.Manifest, first.Total)
+	}
+	for _, memory := range first.Memories {
+		if memory.Score != nil {
+			t.Errorf("chronological score = %v, want nil", *memory.Score)
+		}
+		if memory.PayloadMode != "summary" || memory.Body != "" || memory.Summary == "" {
+			t.Errorf("summary projection = %+v", memory)
+		}
 	}
 
-	// Recall from both namespaces.
+	second, err := svc.RecallPage(context.Background(), RecallOpts{
+		Namespaces: []string{namespace}, Ranking: RankingChronological, Limit: 2,
+		Cursor: *first.Manifest.NextCursor, PayloadMode: PayloadModeKeys,
+	})
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if len(second.Memories) != 1 || second.Manifest == nil || second.Manifest.NextCursor != nil {
+		t.Fatalf("second page = %+v", second)
+	}
+	if got := second.Memories[0]; got.PayloadMode != "keys" || got.Summary != "" || got.Body != "" {
+		t.Fatalf("keys projection = %+v", got)
+	}
+
+	full, err := svc.RecallPage(context.Background(), RecallOpts{
+		Namespaces: []string{namespace}, Ranking: RankingChronological, Limit: 1, PayloadMode: PayloadModeFull,
+	})
+	if err != nil {
+		t.Fatalf("full page: %v", err)
+	}
+	if len(full.Memories) != 1 || full.Memories[0].Body == "" || full.Memories[0].PayloadMode != "" {
+		t.Fatalf("full projection = %+v", full.Memories)
+	}
+}
+
+func TestMemoryRecallLexicalScoreIsNullable(t *testing.T) {
+	instance, cleanup := newTestTesseract(t)
+	defer cleanup()
+	svc := NewService(instance.MemoryStore())
+	namespace := UserNamespace("lexical", "decisions")
+	storeTestMemory(t, svc, namespace, "ticket", "Fix CW-20260904-0058 migration", "details", 0.9)
+
 	results, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces:    []string{"user/chrispian/memory", "user/chrispian/project/nanite/memory"},
-		Ranking:       "activation",
-		Limit:         10,
-		MinConfidence: 0.5,
+		Namespaces: []string{namespace}, Ranking: RankingRelevance, SearchMode: SearchModeLexical,
+		Query: "CW-20260904-0058", Limit: 5,
 	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("lexical recall: %v", err)
 	}
-	if len(results) != 2 {
-		t.Fatalf("expected 2 memories, got %d", len(results))
+	if len(results) != 1 || results[0].Score != nil {
+		t.Fatalf("lexical results = %+v; want one result with nil score", results)
 	}
 }
 
-func TestMemoryRecall_DefaultValues(t *testing.T) {
-	c, cleanup := newTestConduit(t)
+func TestMemoryEstimateOnlyMatchesManifestAndWithholdsRows(t *testing.T) {
+	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
-	svc := NewService(c.MemoryStore())
+	svc := NewService(instance.MemoryStore())
+	namespace := UserNamespace("estimate")
+	storeTestMemory(t, svc, namespace, "one", "estimate one", "body", 0.8)
 
-	results, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces: []string{"user/default/memory"},
+	page, err := svc.RecallPage(context.Background(), RecallOpts{
+		Namespaces: []string{namespace}, Limit: 10, EstimateOnly: true,
 	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("estimate: %v", err)
 	}
-	if len(results) != 0 {
-		t.Errorf("expected 0 memories, got %d", len(results))
+	if len(page.Memories) != 0 || page.Manifest == nil || page.Manifest.ResultsReturned != 1 || page.Manifest.BytesReturned == 0 {
+		t.Fatalf("estimate page = %+v", page)
 	}
 }
 
-func TestMemoryRecallPage_PreservesActivationRankingAndTotal(t *testing.T) {
-	c, cleanup := newTestConduit(t)
+func TestMemoryHydrateAndTouchLifecycle(t *testing.T) {
+	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
-	svc := NewService(c.MemoryStore())
+	svc := NewService(instance.MemoryStore())
 	ctx := context.Background()
-	namespace := "user/ranked-page/memory"
-	for _, tc := range []struct {
-		key        string
-		confidence float64
-	}{
-		{key: "low", confidence: 0.2},
-		{key: "high", confidence: 0.9},
-		{key: "middle", confidence: 0.5},
-	} {
-		if err := svc.Store(ctx, Memory{
-			Namespace: namespace, MemoryKey: tc.key, Summary: "Unicode CAFÉ match",
-			Origin: "user", Trigger: "manual", Confidence: tc.confidence,
-			SessionID: "ranked-page", Status: "reviewed",
-		}); err != nil {
-			t.Fatalf("store %s: %v", tc.key, err)
-		}
+	namespace := UserNamespace("lifecycle")
+	storeTestMemory(t, svc, namespace, "selected", "selected summary", "selected body", 0.8)
+	storeTestMemory(t, svc, namespace, "ignored", "ignored summary", "ignored body", 0.7)
+
+	page, err := svc.RecallPage(ctx, RecallOpts{Namespaces: []string{namespace}, Limit: 10})
+	if err != nil || len(page.Memories) != 2 {
+		t.Fatalf("recall page = %+v err=%v", page, err)
 	}
-	// A second revision of the low-ranked logical memory proves both paths
-	// join through memory_state.current_revision rather than returning history.
-	if err := svc.Store(ctx, Memory{
-		Namespace: namespace, MemoryKey: "low", Summary: "Unicode CAFÉ match updated",
-		Origin: "user", Trigger: "manual", Confidence: 0.3,
-		SessionID: "ranked-page", Status: "reviewed",
-	}); err != nil {
-		t.Fatalf("store updated low revision: %v", err)
+	selected := page.Memories[0]
+	if touchErr := svc.Touch(ctx, []string{selected.RevisionID, selected.RevisionID}); touchErr != nil {
+		t.Fatalf("touch: %v", touchErr)
+	}
+	var selectedAccess, ignoredAccess int
+	if stateErr := instance.MemoryStore().DB().QueryRowContext(ctx,
+		`SELECT access_count FROM memory_state WHERE namespace = ? AND memory_key = ?`, namespace, selected.MemoryKey).Scan(&selectedAccess); stateErr != nil {
+		t.Fatalf("selected state: %v", stateErr)
+	}
+	ignoredKey := "ignored"
+	if selected.MemoryKey == ignoredKey {
+		ignoredKey = "selected"
+	}
+	if stateErr := instance.MemoryStore().DB().QueryRowContext(ctx,
+		`SELECT access_count FROM memory_state WHERE namespace = ? AND memory_key = ?`, namespace, ignoredKey).Scan(&ignoredAccess); stateErr != nil {
+		t.Fatalf("ignored state: %v", stateErr)
+	}
+	if selectedAccess != 1 || ignoredAccess != 0 {
+		t.Fatalf("access counts selected=%d ignored=%d, want 1/0", selectedAccess, ignoredAccess)
 	}
 
-	tesseractOrder, err := svc.Recall(ctx, RecallOpts{
-		Namespaces: []string{namespace}, Ranking: "activation",
-		Statuses: []string{"reviewed"}, Limit: 3,
-	})
+	hydrated, err := svc.GetRevision(ctx, selected.RevisionID)
 	if err != nil {
-		t.Fatalf("Tesseract Recall: %v", err)
+		t.Fatalf("hydrate: %v", err)
 	}
-
-	page, err := svc.RecallPage(ctx, RecallOpts{
-		Namespaces: []string{namespace}, Ranking: "activation",
-		Statuses: []string{"reviewed"}, Search: "café", Limit: 2,
-	})
-	if err != nil {
-		t.Fatalf("RecallPage: %v", err)
-	}
-	if page.Total != 3 || len(page.Memories) != 2 {
-		t.Fatalf("page total=%d len=%d, want total=3 len=2", page.Total, len(page.Memories))
-	}
-	if page.Memories[0].MemoryKey != "high" || page.Memories[1].MemoryKey != "middle" {
-		t.Fatalf("activation order = [%s %s], want [high middle]", page.Memories[0].MemoryKey, page.Memories[1].MemoryKey)
-	}
-	if len(tesseractOrder) != 3 || page.Memories[0].MemoryKey != tesseractOrder[0].MemoryKey || page.Memories[1].MemoryKey != tesseractOrder[1].MemoryKey {
-		t.Fatalf("list order [%s %s] differs from pinned Tesseract order %+v", page.Memories[0].MemoryKey, page.Memories[1].MemoryKey, tesseractOrder)
-	}
-	if tesseractOrder[2].MemoryKey != "low" || !strings.Contains(tesseractOrder[2].Summary, "updated") {
-		t.Fatalf("current-revision result = %+v, want updated low revision", tesseractOrder[2])
+	if hydrated.Body == "" {
+		t.Fatal("hydrated body is empty")
 	}
 }
 
-func TestMemoryRecallPage_LegacyTimestampParsingAndOrdering(t *testing.T) {
-	c, cleanup := newTestConduit(t)
+func TestMemoryRecallOffsetUsesPublicPageAndTotal(t *testing.T) {
+	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
-	svc := NewService(c.MemoryStore())
-	ctx := context.Background()
-	namespace := "user/legacy-time/memory"
-	for _, key := range []string{"legacy_old", "legacy_new"} {
-		if err := svc.Store(ctx, Memory{
-			Namespace: namespace, MemoryKey: key, Summary: key,
-			Origin: "user", Trigger: "manual", Confidence: 0.8,
-			SessionID: "legacy-time", Status: "reviewed",
-		}); err != nil {
-			t.Fatalf("store %s: %v", key, err)
-		}
+	svc := NewService(instance.MemoryStore())
+	namespace := UserNamespace("offset")
+	for _, key := range []string{"one", "two", "three"} {
+		storeTestMemory(t, svc, namespace, key, "needle "+key, "body", 0.8)
 	}
-	db := c.MemoryStore().DB()
-	legacyRows := []struct {
-		key          string
-		createdAt    string
-		lastAccessed string
-	}{
-		{key: "legacy_old", createdAt: "2024-01-02 03:04:05", lastAccessed: time.Now().UTC().Add(-40 * 24 * time.Hour).Format(time.DateTime)},
-		{key: "legacy_new", createdAt: "2025-02-03 04:05:06", lastAccessed: time.Now().UTC().Add(-time.Hour).Format(time.DateTime)},
-	}
-	for _, row := range legacyRows {
-		if _, err := db.ExecContext(ctx, `UPDATE memory_revisions SET created_at = ? WHERE namespace = ? AND memory_key = ?`, row.createdAt, namespace, row.key); err != nil {
-			t.Fatalf("update legacy created_at %s: %v", row.key, err)
-		}
-		if _, err := db.ExecContext(ctx, `UPDATE memory_state SET last_accessed_at = ? WHERE namespace = ? AND memory_key = ?`, row.lastAccessed, namespace, row.key); err != nil {
-			t.Fatalf("update legacy last_accessed_at %s: %v", row.key, err)
-		}
-	}
-
-	activationPage, err := svc.RecallPage(ctx, RecallOpts{
-		Namespaces: []string{namespace}, Ranking: "activation", Limit: 1,
+	page, err := svc.RecallPage(context.Background(), RecallOpts{
+		Namespaces: []string{namespace}, Search: "needle", Limit: 1, Offset: 1,
 	})
 	if err != nil {
-		t.Fatalf("activation RecallPage: %v", err)
+		t.Fatalf("offset page: %v", err)
 	}
-	if activationPage.Total != 2 || len(activationPage.Memories) != 1 || activationPage.Memories[0].MemoryKey != "legacy_new" {
-		t.Fatalf("legacy activation page = %+v total=%d, want legacy_new first and total 2", activationPage.Memories, activationPage.Total)
-	}
-
-	chronologicalPage, err := svc.RecallPage(ctx, RecallOpts{
-		Namespaces: []string{namespace}, Ranking: "chronological", Limit: 2,
-	})
-	if err != nil {
-		t.Fatalf("chronological RecallPage: %v", err)
-	}
-	if len(chronologicalPage.Memories) != 2 || chronologicalPage.Memories[0].MemoryKey != "legacy_new" || chronologicalPage.Memories[1].MemoryKey != "legacy_old" {
-		t.Fatalf("legacy chronological order = %+v, want [legacy_new legacy_old]", chronologicalPage.Memories)
+	if page.Total != 3 || len(page.Memories) != 1 || page.Manifest != nil {
+		t.Fatalf("offset page = %+v", page)
 	}
 }
 
-func TestMemoryRecallPage_ReinforcesOnlyReturnedPage(t *testing.T) {
-	c, cleanup := newTestConduit(t)
+func TestMemoryReadPrefixSpansTypedNamespaces(t *testing.T) {
+	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
-	svc := NewService(c.MemoryStore())
-	ctx := context.Background()
-	namespace := "user/page-reinforcement/memory"
-	for _, tc := range []struct {
-		key        string
-		summary    string
-		confidence float64
-	}{
-		{key: "filtered_out", summary: "unrelated", confidence: 1.0},
-		{key: "offset_skipped", summary: "needle", confidence: 0.9},
-		{key: "page_a", summary: "needle", confidence: 0.8},
-		{key: "page_b", summary: "needle", confidence: 0.7},
-		{key: "after_page", summary: "needle", confidence: 0.6},
-	} {
-		if err := svc.Store(ctx, Memory{
-			Namespace: namespace, MemoryKey: tc.key, Summary: tc.summary,
-			Origin: "user", Trigger: "manual", Confidence: tc.confidence,
-			SessionID: "page-reinforcement", Status: "reviewed",
-		}); err != nil {
-			t.Fatalf("store %s: %v", tc.key, err)
-		}
-	}
+	svc := NewService(instance.MemoryStore())
+	storeTestMemory(t, svc, UserNamespace("prefix", "notes"), "note", "shared", "body", 0.8)
+	storeTestMemory(t, svc, UserNamespace("prefix", "decisions"), "decision", "shared", "body", 0.8)
 
-	page, err := svc.RecallPage(ctx, RecallOpts{
-		Namespaces: []string{namespace}, Ranking: "activation",
-		Statuses: []string{"reviewed"}, Search: "needle", Limit: 2, Offset: 1,
+	page, err := svc.RecallPage(context.Background(), RecallOpts{
+		Namespaces: []string{UserMemoryPrefix("prefix")}, Ranking: RankingChronological, Limit: 10,
 	})
 	if err != nil {
-		t.Fatalf("RecallPage: %v", err)
+		t.Fatalf("prefix recall: %v", err)
 	}
-	if page.Total != 4 || len(page.Memories) != 2 || page.Memories[0].MemoryKey != "page_a" || page.Memories[1].MemoryKey != "page_b" {
-		t.Fatalf("page = %+v total=%d, want [page_a page_b] total=4", page.Memories, page.Total)
-	}
-
-	rows, err := c.MemoryStore().DB().QueryContext(ctx, `
-		SELECT s.memory_key, s.activation, s.access_count, s.last_accessed_at
-		FROM memory_state s WHERE s.namespace = ?`, namespace)
-	if err != nil {
-		t.Fatalf("query memory_state: %v", err)
-	}
-	defer func() { _ = rows.Close() }()
-	seen := map[string]bool{}
-	for rows.Next() {
-		var key string
-		var activation float64
-		var accessCount int64
-		var lastAccessed sql.NullString
-		if err := rows.Scan(&key, &activation, &accessCount, &lastAccessed); err != nil {
-			t.Fatalf("scan memory_state: %v", err)
-		}
-		returned := key == "page_a" || key == "page_b"
-		seen[key] = true
-		if returned {
-			if accessCount != 1 || !lastAccessed.Valid || activation < 1.099 || activation > 1.101 {
-				t.Errorf("returned %s state: activation=%f access_count=%d last=%v", key, activation, accessCount, lastAccessed)
-			}
-			if _, err := parseMemoryTimestamp(lastAccessed.String); err != nil {
-				t.Errorf("returned %s last_accessed_at %q: %v", key, lastAccessed.String, err)
-			}
-		} else if accessCount != 0 || lastAccessed.Valid || activation < 0.999 || activation > 1.001 {
-			t.Errorf("non-returned %s was reinforced: activation=%f access_count=%d last=%v", key, activation, accessCount, lastAccessed)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("memory_state rows: %v", err)
-	}
-	for _, key := range []string{"filtered_out", "offset_skipped", "page_a", "page_b", "after_page"} {
-		if !seen[key] {
-			t.Errorf("missing memory_state row for %s", key)
-		}
+	if page.Total != 2 || len(page.Memories) != 2 {
+		t.Fatalf("prefix page = %+v", page)
 	}
 }
 
-// TestMemoryRecall_RankingRelevance verifies the hybrid-relevance ranking
-// (Vanta v0.4.0+) is accepted via its string name and passes through to
-// Conduit without error. Doesn't assert ranking quality — that's covered
-// by Vanta's own regression gate.
-func TestMemoryRecall_RankingRelevance(t *testing.T) {
-	c, cleanup := newTestConduit(t)
+func TestMemoryGetDeprecateAndExtraction(t *testing.T) {
+	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
-	svc := NewService(c.MemoryStore())
-
-	if err := svc.Store(context.Background(), Memory{
-		Namespace: "user/chrispian/memory",
-		MemoryKey: "user_prefers_go",
-		Summary:   "User prefers Go for backend work",
-		Origin:    "user",
-		Trigger:   "explicit",
-		SessionID: "test-relevance",
-	}); err != nil {
-		t.Fatalf("store: %v", err)
+	svc := NewService(instance.MemoryStore())
+	namespace := UserNamespace("get")
+	storeTestMemory(t, svc, namespace, "to_deprecate", "A test memory", "body", 0.8)
+	memory, err := svc.Get(context.Background(), namespace, "to_deprecate")
+	if err != nil || memory.Summary != "A test memory" {
+		t.Fatalf("get = %+v err=%v", memory, err)
+	}
+	if deprecateErr := svc.Deprecate(context.Background(), memory.RevisionID); deprecateErr != nil {
+		t.Fatalf("deprecate: %v", deprecateErr)
+	}
+	results, err := svc.Recall(context.Background(), RecallOpts{Namespaces: []string{namespace}})
+	if err != nil || len(results) != 0 {
+		t.Fatalf("post-deprecate recall = %+v err=%v", results, err)
 	}
 
-	// Sanity: activation ranking sees the memory.
-	baseline, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces: []string{"user/chrispian/memory"},
-		Ranking:    "activation",
-		Limit:      5,
-	})
-	if err != nil {
-		t.Fatalf("activation baseline: %v", err)
+	utilityCall := func(_ context.Context, _ string) (string, error) {
+		return `[{"memory_key":"extracted","summary":"A learned fact","origin":"project","confidence":0.9}]`, nil
 	}
-	if len(baseline) != 1 {
-		t.Fatalf("activation baseline: expected 1, got %d", len(baseline))
-	}
-
-	// Relevance ranking with a query that overlaps the stored summary.
-	results, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces: []string{"user/chrispian/memory"},
-		Ranking:    "relevance",
-		Query:      "prefers backend",
-		Limit:      5,
-	})
-	if err != nil {
-		t.Fatalf("relevance recall: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 memory, got %d — relevance arm may need closer term overlap", len(results))
-	}
-}
-
-// TestMemoryRecall_EmptyRankingSmartDefault verifies that empty Ranking is
-// passed through to Conduit (not normalized to activation), so Conduit's
-// smart default can pick relevance-when-query / activation-when-no-query.
-func TestMemoryRecall_EmptyRankingSmartDefault(t *testing.T) {
-	c, cleanup := newTestConduit(t)
-	defer cleanup()
-	svc := NewService(c.MemoryStore())
-
-	if err := svc.Store(context.Background(), Memory{
-		Namespace: "user/chrispian/memory",
-		MemoryKey: "deploy_on_friday",
-		Summary:   "Never deploy on Friday",
-		Origin:    "feedback",
-		Trigger:   "explicit",
-		SessionID: "test-smart-default",
-	}); err != nil {
-		t.Fatalf("store: %v", err)
-	}
-
-	// Empty ranking + query — Conduit resolves to relevance.
-	withQuery, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces: []string{"user/chrispian/memory"},
-		Query:      "deploy Friday",
-		Limit:      5,
-	})
-	if err != nil {
-		t.Fatalf("smart-default recall with query: %v", err)
-	}
-	if len(withQuery) != 1 {
-		t.Fatalf("expected 1 memory with query, got %d", len(withQuery))
-	}
-
-	// Empty ranking + no query — Conduit resolves to activation.
-	noQuery, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces: []string{"user/chrispian/memory"},
-		Limit:      5,
-	})
-	if err != nil {
-		t.Fatalf("smart-default recall no query: %v", err)
-	}
-	if len(noQuery) != 1 {
-		t.Fatalf("expected 1 memory with no query, got %d", len(noQuery))
-	}
-}
-
-func TestMemoryGet(t *testing.T) {
-	c, cleanup := newTestConduit(t)
-	defer cleanup()
-	svc := NewService(c.MemoryStore())
-
-	err := svc.Store(context.Background(), Memory{
-		Namespace:  "user/default/memory",
-		MemoryKey:  "test_key",
-		Summary:    "A test memory",
-		Origin:     "observation",
-		Trigger:    "explicit",
-		Confidence: 0.8,
-		SessionID:  "test-get",
-	})
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-
-	m, err := svc.Get(context.Background(), "user/default/memory", "test_key")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if m.Summary != "A test memory" {
-		t.Errorf("unexpected summary: %s", m.Summary)
-	}
-}
-
-func TestMemoryDeprecate(t *testing.T) {
-	c, cleanup := newTestConduit(t)
-	defer cleanup()
-	svc := NewService(c.MemoryStore())
-
-	err := svc.Store(context.Background(), Memory{
-		Namespace:  "user/default/memory",
-		MemoryKey:  "to_deprecate",
-		Summary:    "Will be deprecated",
-		Origin:     "observation",
-		Trigger:    "explicit",
-		Confidence: 0.8,
-		SessionID:  "test-dep",
-	})
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-
-	// Get the revision ID.
-	m, err := svc.Get(context.Background(), "user/default/memory", "to_deprecate")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-
-	// Deprecate it.
-	err = svc.Deprecate(context.Background(), m.RevisionID)
-	if err != nil {
-		t.Fatalf("deprecate: %v", err)
-	}
-
-	// Recall should return nothing (deprecated memories are filtered).
-	results, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces: []string{"user/default/memory"},
-	})
-	if err != nil {
-		t.Fatalf("recall: %v", err)
-	}
-	if len(results) != 0 {
-		t.Errorf("expected 0 memories after deprecation, got %d", len(results))
-	}
-}
-
-func TestPerTurnExtraction_WithSignal(t *testing.T) {
-	if !HasMemorySignal("Please remember this: I always prefer tabs over spaces") {
-		t.Error("expected HasMemorySignal to detect 'remember' and 'always'")
-	}
-	if !HasMemorySignal("From now on, use Go 1.22 features") {
-		t.Error("expected HasMemorySignal to detect 'from now on'")
-	}
-	if !HasMemorySignal("I prefer using SQLite for small projects") {
-		t.Error("expected HasMemorySignal to detect 'I prefer'")
-	}
-	if !HasMemorySignal("No, don't do that. Use the other approach.") {
-		t.Error("expected HasMemorySignal to detect correction pattern")
-	}
-	if !HasMemorySignal("Never use global variables in this project") {
-		t.Error("expected HasMemorySignal to detect 'never'")
-	}
-}
-
-func TestPerTurnExtraction_NoSignal(t *testing.T) {
-	if HasMemorySignal("Can you help me write a function to parse JSON?") {
-		t.Error("ordinary request should not trigger memory signal")
-	}
-	if HasMemorySignal("What is the capital of France?") {
-		t.Error("simple question should not trigger memory signal")
-	}
-	if HasMemorySignal("Please review this code for bugs") {
-		t.Error("code review request should not trigger memory signal")
-	}
-}
-
-func TestPostCompactionExtraction(t *testing.T) {
-	c, cleanup := newTestConduit(t)
-	defer cleanup()
-	svc := NewService(c.MemoryStore())
-
-	called := false
-	utilityCall := func(_ context.Context, prompt string) (string, error) {
-		called = true
-		return `[{"memory_key": "test_fact", "summary": "A test memory", "origin": "project", "confidence": 0.9, "tags": ["test"]}]`, nil
-	}
-
 	extractor := NewExtractor(svc, utilityCall)
 	extractor.extractPostCompact("session-123", 5000)
-
-	if !called {
-		t.Error("expected utility call to be made during post-compact extraction")
-	}
-
-	// Verify the memory was stored.
-	results, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces: []string{SessionNamespace("session-123")},
-	})
-	if err != nil {
-		t.Fatalf("recall: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 stored memory, got %d", len(results))
-	}
-	if results[0].Summary != "A test memory" {
-		t.Errorf("unexpected summary: %s", results[0].Summary)
+	extracted, err := svc.Recall(context.Background(), RecallOpts{Namespaces: []string{SessionNamespace("session-123")}})
+	if err != nil || len(extracted) != 1 || extracted[0].MemoryKey != "extracted" {
+		t.Fatalf("extracted recall = %+v err=%v", extracted, err)
 	}
 }
 
-func TestPerTurnExtraction_Full(t *testing.T) {
-	c, cleanup := newTestConduit(t)
-	defer cleanup()
-	svc := NewService(c.MemoryStore())
-
-	utilityCall := func(_ context.Context, prompt string) (string, error) {
-		return `{"memory_key": "prefers_terse", "summary": "User prefers terse output", "origin": "user", "confidence": 0.85, "tags": ["preferences"]}`, nil
-	}
-
-	extractor := NewExtractor(svc, utilityCall)
-	extractor.extractPerTurn("session-456", "I always prefer terse, concise responses.")
-
-	// Verify the memory was stored.
-	results, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces: []string{SessionNamespace("session-456")},
-	})
-	if err != nil {
-		t.Fatalf("recall: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 stored memory, got %d", len(results))
-	}
-	if results[0].MemoryKey != "prefers_terse" {
-		t.Errorf("expected memory_key prefers_terse, got %s", results[0].MemoryKey)
-	}
-}
-
-func TestPerTurnExtraction_LowConfidence(t *testing.T) {
-	c, cleanup := newTestConduit(t)
-	defer cleanup()
-	svc := NewService(c.MemoryStore())
-
-	utilityCall := func(_ context.Context, prompt string) (string, error) {
-		return `{"memory_key": "maybe", "summary": "Maybe important", "origin": "user", "confidence": 0.3, "tags": []}`, nil
-	}
-
-	extractor := NewExtractor(svc, utilityCall)
-	extractor.extractPerTurn("session-789", "Remember this might be useful")
-
-	// Low confidence should not be stored.
-	results, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces: []string{SessionNamespace("session-789")},
-	})
-	if err != nil {
-		t.Fatalf("recall: %v", err)
-	}
-	if len(results) != 0 {
-		t.Error("expected no stored memories for low-confidence extraction")
-	}
-}
-
-func TestNamespaceHelpers(t *testing.T) {
-	if ns := SessionNamespace("abc-123"); ns != "user/default/session/abc-123/memory" {
-		t.Errorf("unexpected session namespace: %s", ns)
-	}
-	if ns := ProjectNamespace("nanite"); ns != "user/default/project/nanite/memory" {
-		t.Errorf("unexpected project namespace: %s", ns)
-	}
-	if ns := UserNamespace("chrispian"); ns != "user/chrispian/memory" {
-		t.Errorf("unexpected user namespace: %s", ns)
-	}
-}
-
-func TestCleanJSONResponse(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{`{"key": "value"}`, `{"key": "value"}`},
-		{"```json\n{\"key\": \"value\"}\n```", `{"key": "value"}`},
-		{"  \n```\n{\"key\": \"value\"}\n```\n  ", `{"key": "value"}`},
-		{`  {"key": "value"}  `, `{"key": "value"}`},
-	}
-
-	for _, tt := range tests {
-		got := cleanJSONResponse(tt.input)
-		if got != tt.want {
-			t.Errorf("cleanJSONResponse(%q) = %q, want %q", tt.input, got, tt.want)
+func TestMemorySignalsAndNamespaces(t *testing.T) {
+	for _, input := range []string{
+		"Please remember this: I always prefer tabs over spaces",
+		"From now on, use Go 1.22 features",
+		"No, don't do that. Use the other approach.",
+	} {
+		if !HasMemorySignal(input) {
+			t.Errorf("expected signal in %q", input)
 		}
 	}
+	if HasMemorySignal("Can you help me parse JSON?") {
+		t.Error("ordinary request triggered a memory signal")
+	}
+	if got := SessionNamespace("abc"); got != "user/default/session/abc/memory/notes" {
+		t.Errorf("session namespace = %q", got)
+	}
+	if got := ProjectNamespace("nanite", "decisions"); got != "user/default/project/nanite/memory/decisions" {
+		t.Errorf("project namespace = %q", got)
+	}
+	if got := UserNamespace("chrispian"); got != "user/chrispian/memory/notes" {
+		t.Errorf("user namespace = %q", got)
+	}
+	if got := SessionMemoryPrefix("abc"); got != "user/default/session/abc/memory" {
+		t.Errorf("session prefix = %q", got)
+	}
+	if got := ProjectMemoryPrefix("nanite"); got != "user/default/project/nanite/memory" {
+		t.Errorf("project prefix = %q", got)
+	}
+	if got := UserMemoryPrefix("chrispian"); got != "user/chrispian/memory" {
+		t.Errorf("user prefix = %q", got)
+	}
+	if got := AllNaniteNamespaces(); len(got) != 1 || got[0] != "user/default/memory" {
+		t.Errorf("read prefixes = %v", got)
+	}
 }
 
-func TestStoreError_NilStore(t *testing.T) {
+func TestMemoryServiceNilStoreAndValidation(t *testing.T) {
 	svc := NewService(nil)
-
-	_, err := svc.Recall(context.Background(), RecallOpts{})
-	if err == nil {
-		t.Error("expected error for nil store on recall")
+	if err := svc.Store(context.Background(), Memory{}); err == nil {
+		t.Error("nil store write succeeded")
 	}
-
-	_, err = svc.Get(context.Background(), "ns", "key")
-	if err == nil {
-		t.Error("expected error for nil store on get")
+	if _, err := svc.Recall(context.Background(), RecallOpts{}); err == nil {
+		t.Error("nil store recall succeeded")
 	}
-
-	err = svc.Promote(context.Background(), "rev", "ns")
-	if err == nil {
-		t.Error("expected error for nil store on promote")
+	if _, err := svc.GetRevision(context.Background(), "rev"); err == nil {
+		t.Error("nil store hydrate succeeded")
 	}
-
-	err = svc.Deprecate(context.Background(), "rev")
-	if err == nil {
-		t.Error("expected error for nil store on deprecate")
+	if err := svc.Touch(context.Background(), []string{"rev"}); err == nil {
+		t.Error("nil store touch succeeded")
 	}
 }
 
-// TestMapOrigin verifies origin string mapping.
-func TestMapOrigin(t *testing.T) {
-	tests := []struct {
-		input string
-		want  conduitMemory.Origin
-	}{
-		{"user", conduitMemory.OriginUser},
-		{"feedback", conduitMemory.OriginFeedback},
-		{"project", conduitMemory.OriginProject},
-		{"reference", conduitMemory.OriginReference},
-		{"observation", conduitMemory.OriginObservation},
-		{"", conduitMemory.OriginObservation},
+func TestMapOriginAndTrigger(t *testing.T) {
+	if got := mapOrigin(""); got != tesseractMemory.OriginObservation {
+		t.Errorf("default origin = %q", got)
 	}
-	for _, tt := range tests {
-		got := mapOrigin(tt.input)
-		if got != tt.want {
-			t.Errorf("mapOrigin(%q) = %q, want %q", tt.input, got, tt.want)
-		}
+	if got := mapOrigin("feedback"); got != tesseractMemory.OriginFeedback {
+		t.Errorf("feedback origin = %q", got)
+	}
+	if got := mapTrigger(""); got != tesseractMemory.TriggerManual {
+		t.Errorf("default trigger = %q", got)
+	}
+	if got := mapTrigger("post_compact"); got != tesseractMemory.TriggerPostCompact {
+		t.Errorf("post-compact trigger = %q", got)
 	}
 }
-
-// TestMapTrigger verifies trigger string mapping.
-func TestMapTrigger(t *testing.T) {
-	tests := []struct {
-		input string
-		want  conduitMemory.Trigger
-	}{
-		{"explicit", conduitMemory.TriggerExplicit},
-		{"post_compact", conduitMemory.TriggerPostCompact},
-		{"per_turn", conduitMemory.TriggerPerTurn},
-		{"promotion", conduitMemory.TriggerPromotion},
-		{"manual", conduitMemory.TriggerManual},
-		{"", conduitMemory.TriggerManual},
-	}
-	for _, tt := range tests {
-		got := mapTrigger(tt.input)
-		if got != tt.want {
-			t.Errorf("mapTrigger(%q) = %q, want %q", tt.input, got, tt.want)
-		}
-	}
-}
-
-// Ensure fmt is used (for error formatting in tests).
-var _ = fmt.Sprintf

@@ -9,11 +9,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	conduit "github.com/hollis-labs/tesseract"
+	"github.com/hollis-labs/tesseract"
 
 	embedcontracts "github.com/hollis-labs/go-embed-contracts"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
@@ -122,9 +123,9 @@ type Container struct {
 	// Internal todo/plan system.
 	Todos TodoService
 
-	// Memory system (embedded Conduit).
-	Conduit *conduit.Conduit
-	Memory  *memory.Service
+	// Memory system (embedded Tesseract).
+	Tesseract *tesseract.Tesseract
+	Memory    *memory.Service
 	// EmbeddingStatus is the resolved state of the embedder at container build
 	// time: "active" | "disabled" | "missing_credentials" | "unreachable".
 	// Surfaced by the settings API and consumed by the first-turn warning.
@@ -304,6 +305,13 @@ type ContainerConfig struct {
 	Plugins    *plugin.Host
 	AppConfig  *config.TunablesConfig
 	WorkingDir string
+	// DisableEmbeddedTesseract selects an externally managed MCP process as
+	// the sole Tesseract owner. This prevents two decay workers/write handles
+	// from being opened on the same XDG store.
+	DisableEmbeddedTesseract bool
+	// TesseractServerName is the configured external MCP server name. Empty
+	// resolves to "tesseract".
+	TesseractServerName string
 	// ManagedConfigRoot overrides the default project-local config root
 	// used for operator-managed agents and durable manifests.
 	ManagedConfigRoot string
@@ -651,41 +659,37 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Info("service container: task tracking disabled (no coordination store)")
 	}
 
-	// Embedded Conduit instance for memory storage.
-	var conduitInstance *conduit.Conduit
+	// Embedded Tesseract instance for memory storage.
+	var tesseractInstance *tesseract.Tesseract
 	var memorySvc *memory.Service
 	var embeddingStatus string
 	var embeddingProviderID, embeddingModel string
-	{
-		// CW-20260517-0061: Tesseract migrated to go-apppaths
-		// (CW-20260517-0066) — its context.db moved to
-		// ~/.local/share/tesseract/workspaces/default/main.db and its
-		// records/ tree to ~/.local/state/tesseract/records. nanite resolves
-		// those migrated paths directly via paths.Resolve("tesseract") and
-		// passes them through the additive conduit.Config.DBPath/RecordsDir
-		// override fields (added in the same Tesseract PR), so the embedded
-		// memory store points at the migrated DB without relying on the
-		// Phase 2 ~/.tesseract → XDG compat symlink.
-		//
-		// RootDir is still required by conduit.Config; it stays at the legacy
-		// ~/.conduit dotdir purely as the base the library would derive from
-		// when DBPath/RecordsDir are unset — here both ARE set, so RootDir is
-		// inert for path derivation. (Pre-migration, RootDir-relative
-		// derivation also pointed at the now-retired ~/.conduit/data/records,
-		// which is exactly why the explicit override matters.) The ~/.conduit
-		// dotdir evacuation is a separate follow-up.
-		homeDir, _ := os.UserHomeDir()
-		conduitRoot := filepath.Join(homeDir, ".conduit")
-
-		var conduitDBPath, conduitRecordsDir string
+	if cfg.DisableEmbeddedTesseract {
+		embeddingStatus = "disabled"
+		slog.Info("service container: embedded Tesseract disabled; using external MCP process")
+	} else {
+		// Resolve Tesseract's XDG paths once. If layout resolution or legacy
+		// migration fails, memory stays disabled; opening a fresh fallback store
+		// would hide the operator's durable data.
+		var tesseractDBPath, tesseractRecordsDir, tesseractRoot string
+		pathsReady := false
 		if tessLayout, tessLayoutErr := config.ResolveTesseractLayout(); tessLayoutErr != nil {
-			slog.Warn("service container: resolve tesseract layout failed; embedded memory falls back to RootDir derivation",
-				"err", tessLayoutErr)
+			slog.Warn("service container: resolve tesseract layout failed; embedded memory disabled", "err", tessLayoutErr)
 		} else {
-			conduitDBPath = tessLayout.MainDB()
-			conduitRecordsDir = filepath.Join(tessLayout.StateDir(), "records")
+			tesseractDBPath = tessLayout.MainDB()
+			tesseractRecordsDir = filepath.Join(tessLayout.StateDir(), "records")
+			tesseractRoot = filepath.Join(tessLayout.StateDir(), "embedded")
 			slog.Info("service container: tesseract memory paths resolved (go-apppaths)",
-				"db", conduitDBPath, "records", conduitRecordsDir)
+				"db", tesseractDBPath, "records", tesseractRecordsDir)
+			homeDir, homeErr := os.UserHomeDir()
+			if homeErr != nil {
+				slog.Warn("service container: resolve home for legacy tesseract migration failed; embedded memory disabled", "err", homeErr)
+			} else if migrationResult, migrationErr := config.MigrateLegacyTesseractData(homeDir, tesseractDBPath, tesseractRecordsDir); migrationErr != nil {
+				slog.Warn("service container: legacy tesseract migration failed; embedded memory disabled", "err", migrationErr)
+			} else {
+				pathsReady = true
+				slog.Info("service container: legacy tesseract migration checked", "result", migrationResult)
+			}
 		}
 
 		// Embedder selection: resolve from user settings via selectEmbedder.
@@ -713,29 +717,29 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			"model", embeddingModel,
 		)
 
-		var conduitOpts []conduit.Option
+		var tesseractOpts []tesseract.Option
 		if embedder != nil {
-			conduitOpts = append(conduitOpts, conduit.WithEmbedder(embedder))
-			conduitOpts = append(conduitOpts, conduit.WithEmbeddingModel(embeddingModel))
+			tesseractOpts = append(tesseractOpts, tesseract.WithEmbedder(embedder))
+			tesseractOpts = append(tesseractOpts, tesseract.WithEmbeddingModel(embeddingModel))
 		}
-		// Bridge Conduit's printf-style logger callback into slog. Conduit
+		// Bridge Tesseract's printf-style logger callback into slog. Tesseract
 		// formats its own messages, so we emit them verbatim at Info level —
 		// structured attrs aren't available on this callback boundary.
-		conduitOpts = append(conduitOpts, conduit.WithLogger(func(format string, args ...any) {
-			slog.Info("conduit: " + fmt.Sprintf(format, args...))
+		tesseractOpts = append(tesseractOpts, tesseract.WithLogger(func(format string, args ...any) {
+			slog.Info("tesseract: " + fmt.Sprintf(format, args...))
 		}))
 
-		var conduitErr error
-		conduitInstance, conduitErr = conduit.Open(context.Background(), conduit.Config{
-			RootDir:    conduitRoot,
-			DBPath:     conduitDBPath,     // migrated tesseract context.db (empty → RootDir derivation)
-			RecordsDir: conduitRecordsDir, // migrated tesseract records/ (empty → RootDir derivation)
-		}, conduitOpts...)
-		if conduitErr != nil {
-			slog.Warn("service container: failed to open Conduit", "err", conduitErr)
-		} else {
-			memorySvc = memory.NewService(conduitInstance.MemoryStore())
-			slog.Info("service container: memory service enabled (embedded Conduit)")
+		if pathsReady {
+			var tesseractErr error
+			tesseractInstance, tesseractErr = tesseract.Open(context.Background(), tesseract.Config{
+				RootDir: tesseractRoot, DBPath: tesseractDBPath, RecordsDir: tesseractRecordsDir,
+			}, tesseractOpts...)
+			if tesseractErr != nil {
+				slog.Warn("service container: failed to open Tesseract", "err", tesseractErr)
+			} else {
+				memorySvc = memory.NewService(tesseractInstance.MemoryStore())
+				slog.Info("service container: memory service enabled (embedded Tesseract)")
+			}
 		}
 	}
 
@@ -839,9 +843,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			sources = append(sources, contextbroker.NewMemorySource(memorySvc))
 		}
 
-		// ConduitSource — requires MCP manager (calls Conduit tools).
-		if cfg.MCP != nil {
-			sources = append(sources, contextbroker.NewConduitSource(cfg.MCP))
+		// TesseractSource — requires the configured MCP server (calls context_plan).
+		tesseractServerName := strings.TrimSpace(cfg.TesseractServerName)
+		if tesseractServerName == "" {
+			tesseractServerName = "tesseract"
+		}
+		if cfg.MCP != nil && cfg.MCP.HasServer(tesseractServerName) {
+			source := contextbroker.NewTesseractSource(cfg.MCP)
+			source.ServerName = tesseractServerName
+			sources = append(sources, source)
 		}
 
 		// PCCSource — reads filesystem, always available.
@@ -1383,10 +1393,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Info("service container: memory extraction hooks registered")
 	}
 
-	// Memory tools (nanite_memory_save / nanite_memory_recall) were
-	// removed in CW-20260508-0017 (Decision 3): the local SQLite memory
-	// store is no longer agent-facing — Vanta is the canonical memory
-	// substrate (vanta-primary-since: 2026-04-19). The underlying
+	// The former in-process memory tool surface was removed in
+	// CW-20260508-0017 (Decision 3): the local SQLite memory
+	// store is no longer agent-facing — Tesseract is the canonical memory
+	// substrate. The underlying
 	// memory.Service stays load-bearing for contextbroker.NewMemorySource
 	// and the per-turn / post-compact
 	// extractor hooks; only the agent-facing tool surface and the
@@ -1421,7 +1431,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Background:          backgroundSvc,
 		Elicitation:         elicitSvc,
 		Todos:               todos,
-		Conduit:             conduitInstance,
+		Tesseract:           tesseractInstance,
 		Memory:              memorySvc,
 		EmbeddingStatus:     embeddingStatus,
 		EmbeddingProvider:   embeddingProviderID,
@@ -1574,10 +1584,10 @@ func (c *Container) shutdownWithMaxWait(maxWait time.Duration) {
 			}
 		})
 	}
-	if c.Conduit != nil {
-		run("conduit", func() {
-			if err := c.Conduit.Close(); err != nil {
-				slog.Warn("shutdown: conduit close", "err", err)
+	if c.Tesseract != nil {
+		run("tesseract", func() {
+			if err := c.Tesseract.Close(); err != nil {
+				slog.Warn("shutdown: tesseract close", "err", err)
 			}
 		})
 	}

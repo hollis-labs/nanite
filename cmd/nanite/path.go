@@ -25,7 +25,7 @@ import (
 // paths.WithoutMaterialize() so introspection never creates directories.
 //
 // CW-20260517-0061. Mirrors torque/cmd/torque/path.go and
-// tesseract/cmd/contextd/path.go.
+// tesseract/cmd/tesseract/path.go.
 func cmdPath(args []string) {
 	opts := []paths.Option{paths.WithoutMaterialize()}
 	// Reflect the legacy NANITE_DB compat alias so `nanite path` prints the

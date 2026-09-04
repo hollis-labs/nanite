@@ -380,7 +380,7 @@ export function ChatTranscript({
          * Locked by:
          *   ui/src/__tests__/chat-transcript-plugin-envelope-render.test.tsx
          *
-         * Source incident: Vanta `followups.nanite.dropped_plugin_envelopes_render_block`
+         * Source incident: Tesseract `followups.nanite.dropped_plugin_envelopes_render_block`
          * (rev 01KR89NWKFY52QW17R8PPC8V5S). Skip-when-render_target branch routes
          * to drawer/panel inbox via panel-signal.ts (not the chat thread). */}
         {pluginEnvelopes.map((item) =>

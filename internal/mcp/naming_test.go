@@ -61,7 +61,7 @@ func TestIsReservedSelfToolName(t *testing.T) {
 		{"self publishes post-rename name", SelfServerName, "card_show", true},
 		{"self publishes another post-rename name", SelfServerName, "tool_describe", true},
 		{"self publishes legacy nanite_ name (pre-cutover)", SelfServerName, "nanite_todo_create", true},
-		{"self publishes vanta-style name", SelfServerName, "memory_recall", true},
+		{"self publishes tesseract-style name", SelfServerName, "tesseract_recall", true},
 
 		// Third-party servers — never reserved, even if the name shape
 		// matches a self-tool. Pre-rename prefix checks would have falsely
@@ -69,7 +69,7 @@ func TestIsReservedSelfToolName(t *testing.T) {
 		{"third-party publishes nanite_-prefixed name", "evil", "nanite_secret", false},
 		{"third-party shadow attempt on post-rename name", "evil", "card_show", false},
 		{"third-party shadow attempt on tool_describe", "rogue", "tool_describe", false},
-		{"third-party shadow attempt on memory_recall", "external", "memory_recall", false},
+		{"third-party shadow attempt on tesseract_recall", "external", "tesseract_recall", false},
 		{"third-party publishes its own name", "mux", "memory_write", false},
 
 		// Empty / whitespace tool name is never reserved.
@@ -93,7 +93,7 @@ func TestManager_UniformIndex_NoCollisions(t *testing.T) {
 	mgr := NewManager()
 	if err := mgr.AddServer("mux", &fakeTieredTransport{tools: []Tool{
 		{Name: "memory_write"},
-		{Name: "knowledge_get"},
+		{Name: "tesseract_get"},
 	}}, TierBuiltin); err != nil {
 		t.Fatalf("AddServer mux: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestManager_UniformIndex_NoCollisions(t *testing.T) {
 	tools := mgr.GetAllTools()
 	wantNames := map[string]bool{
 		"memory_write":   true,
-		"knowledge_get":  true,
+		"tesseract_get":  true,
 		"hadron_run_get": true,
 	}
 	if len(tools) != len(wantNames) {
@@ -264,14 +264,14 @@ func TestManager_UniformIndex_ReservedNamespaceForcesPrefix(t *testing.T) {
 // `nanite_show_card` → `card_show`), the reserved-namespace defense
 // must still hold. The defense is server-scoped, so a third-party MCP
 // publishing a post-rename self-tool name (`card_show`,
-// `tool_describe`, `memory_recall`) gets force-prefixed; the self
+// `tool_describe`, `tesseract_recall`) gets force-prefixed; the self
 // server keeps the bare slot.
 //
 // Without this guard, a third-party server could shadow the harness's
 // envelope-rendering tool (or any post-rename self-tool) by publishing
 // the same bare name.
 func TestManager_UniformIndex_PostRenameShadowDefense(t *testing.T) {
-	postRenameSelfNames := []string{"card_show", "tool_describe", "memory_recall"}
+	postRenameSelfNames := []string{"card_show", "tool_describe", "tesseract_recall"}
 
 	mgr := NewManager()
 	selfTools := make([]Tool, 0, len(postRenameSelfNames))
@@ -455,8 +455,8 @@ func TestManager_HasServer(t *testing.T) {
 	if !mgr.HasServer("engine") {
 		t.Error("HasServer(engine) = false, want true")
 	}
-	if mgr.HasServer("conduit") {
-		t.Error("HasServer(conduit) = true, want false (server not registered)")
+	if mgr.HasServer("tesseract") {
+		t.Error("HasServer(tesseract) = true, want false (server not registered)")
 	}
 }
 

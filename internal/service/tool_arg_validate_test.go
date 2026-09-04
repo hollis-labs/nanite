@@ -419,7 +419,7 @@ func TestArgValidator_CoerceAcrossMultipleTypes(t *testing.T) {
 		"limit":  "10",
 		"ratio":  "3.14",
 		"active": "0",
-		"name":   "conduit",
+		"name":   "tesseract",
 	}
 	if msg := v.validate("test_tool", schema, args); msg != "" {
 		t.Fatalf("expected valid, got: %s", msg)
@@ -433,8 +433,8 @@ func TestArgValidator_CoerceAcrossMultipleTypes(t *testing.T) {
 	if v, ok := args["active"].(bool); !ok || v != false {
 		t.Errorf("active: expected false bool, got %T %v", args["active"], args["active"])
 	}
-	if v, ok := args["name"].(string); !ok || v != "conduit" {
-		t.Errorf("name: expected 'conduit', got %T %v", args["name"], args["name"])
+	if v, ok := args["name"].(string); !ok || v != "tesseract" {
+		t.Errorf("name: expected 'tesseract', got %T %v", args["name"], args["name"])
 	}
 }
 

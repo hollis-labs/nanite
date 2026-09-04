@@ -244,7 +244,7 @@ func (m *Manager) AddStdioServer(name, command string, args []string, env []stri
 	slog.Info("mcp: server using stdio transport",
 		"name", name,
 		"command", command,
-		"args", strings.Join(args, " "),
+		"arg_count", len(args),
 		"tier", string(tier),
 		"env_allowlist", envAllowlist,
 	)

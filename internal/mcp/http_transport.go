@@ -92,7 +92,7 @@ func NewHTTPTransport(serverURL string) *HTTPTransport {
 // auth (Bearer token, API key) or routing headers. The headers map is copied
 // so callers may reuse or mutate their original after construction.
 //
-// CW-20260501-0005 sub-ticket 2 (Vanta MCP integration scaffold).
+// CW-20260501-0005 sub-ticket 2 (external Tesseract MCP integration scaffold).
 func NewHTTPTransportWithHeaders(serverURL string, headers map[string]string) *HTTPTransport {
 	t := NewHTTPTransport(serverURL)
 	if len(headers) > 0 {
@@ -145,7 +145,7 @@ func (t *HTTPTransport) call(ctx context.Context, method string, params any) (*J
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// Apply optional static headers (e.g. Authorization for Vanta) supplied at
+	// Apply optional static headers (e.g. Authorization for Tesseract) supplied at
 	// construction. Set after Content-Type so callers can override it if
 	// needed (rare). The headers map is read-only after construction.
 	for k, v := range t.headers {

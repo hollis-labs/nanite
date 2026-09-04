@@ -43,7 +43,7 @@ Rules:
 - If the task is complex (multiple steps, multiple contexts, requires research + action), decompose it.
 - Each sub-task should be independently executable with minimal context.
 - context_hints should list only the specific files, topics, or data each sub-task needs — NOT everything.
-- tool_requirements should list tool categories needed (e.g. "file_read", "web_search", "code_edit", "engine", "conduit").
+- tool_requirements should list tool categories needed (e.g. "file_read", "web_search", "code_edit", "engine", "tesseract").
 - The aggregation field describes how to combine sub-task results into a final answer.
 - Keep sub-tasks to 2-6 items. More than 6 means you should consolidate.
 

@@ -139,7 +139,7 @@ func (tb *ToolClient) IsBuiltinTool(name string) bool {
 
 // strictTrue is a pointer to true, retained for tools that explicitly opt into
 // Anthropic server-side input-schema enforcement. Default for new tools is nil
-// (non-strict). See decisions.nanite.tools.strict_default_off in Vanta.
+// (non-strict). See decisions.nanite.tools.strict_default_off in Tesseract.
 var strictTrue = func() *bool { v := true; return &v }()
 
 // RegisterTools registers tool definitions directly on this ToolClient's
@@ -374,7 +374,7 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 	// benefit from Anthropic server-side input-schema enforcement can opt
 	// in explicitly by setting Strict to strictTrue (declared above) at
 	// registration time. See decisions.nanite.tools.strict_default_off in
-	// Vanta for the full rationale: strict was being applied blanket-fashion
+	// Tesseract for the full rationale: strict was being applied blanket-fashion
 	// to all tools, which conflated input-shape validation (where strict
 	// adds value) with high-blast-radius permissions (which belong at
 	// project/session/agent-profile scope, not at the schema level).

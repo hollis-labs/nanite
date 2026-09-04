@@ -46,19 +46,19 @@ func (a *API) handleListMemories(w http.ResponseWriter, r *http.Request) {
 	case "session":
 		sid := q.Get("session_id")
 		if sid != "" {
-			namespaces = append(namespaces, memory.SessionNamespace(sid))
+			namespaces = append(namespaces, memory.SessionMemoryPrefix(sid))
 		} else {
 			namespaces = memory.AllNaniteNamespaces()
 		}
 	case "project":
 		pid := q.Get("project_id")
 		if pid != "" {
-			namespaces = append(namespaces, memory.ProjectNamespace(pid))
+			namespaces = append(namespaces, memory.ProjectMemoryPrefix(pid))
 		} else {
 			namespaces = memory.AllNaniteNamespaces()
 		}
 	case "user":
-		namespaces = []string{memory.UserNamespace("default")}
+		namespaces = []string{memory.UserMemoryPrefix("default")}
 	default:
 		namespaces = memory.AllNaniteNamespaces()
 	}
@@ -92,7 +92,7 @@ func (a *API) handleListMemories(w http.ResponseWriter, r *http.Request) {
 
 	opts := memory.RecallOpts{
 		Namespaces: namespaces,
-		Ranking:    "activation",
+		Ranking:    memory.RankingActivation,
 		Limit:      limit,
 		Offset:     offset,
 		Tags:       tags,
@@ -165,14 +165,14 @@ func (a *API) handleCreateMemory(w http.ResponseWriter, r *http.Request) {
 			if req.SessionID != "" {
 				ns = memory.SessionNamespace(req.SessionID)
 			} else {
-				ns = memory.AllNaniteNamespaces()[0]
+				ns = memory.UserNamespace("default")
 			}
 		case "project":
-			ns = memory.AllNaniteNamespaces()[0]
+			ns = memory.UserNamespace("default")
 		case "user", "":
 			ns = memory.UserNamespace("default")
 		default:
-			ns = memory.AllNaniteNamespaces()[0]
+			ns = memory.UserNamespace("default")
 		}
 	}
 

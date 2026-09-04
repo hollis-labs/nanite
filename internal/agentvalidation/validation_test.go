@@ -12,7 +12,7 @@ func TestValidAgent(t *testing.T) {
 		Name:         "Test Agent",
 		Slug:         "test-agent",
 		SystemPrompt: "You are a test agent.",
-		MCPServers:   `["conduit"]`,
+		MCPServers:   `["tesseract"]`,
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {
@@ -55,7 +55,7 @@ func TestValidAgentWithAllowAndMCPServers(t *testing.T) {
 		Name:         "Full Agent",
 		Slug:         "full-agent",
 		SystemPrompt: "You are a full agent.",
-		MCPServers:   `["conduit","engine"]`,
+		MCPServers:   `["tesseract","engine"]`,
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {
@@ -90,7 +90,7 @@ func TestParentDispatchAllowlist(t *testing.T) {
 				Name:                    "Allowlist Agent",
 				Slug:                    "allowlist-agent",
 				SystemPrompt:            "You dispatch.",
-				MCPServers:              `["conduit"]`,
+				MCPServers:              `["tesseract"]`,
 				ParentDispatchAllowlist: tc.allowlist,
 			}
 			result := ValidateAgentConfig(agent)
@@ -115,7 +115,7 @@ func TestPrefixGlobIsValid(t *testing.T) {
 		Name:         "Prefix Glob",
 		Slug:         "prefix-glob",
 		SystemPrompt: "You use prefix globs.",
-		MCPServers:   `["conduit"]`,
+		MCPServers:   `["tesseract"]`,
 		Tools:        `["memory_*","engine_task_*"]`,
 	}
 	result := ValidateAgentConfig(agent)
@@ -129,7 +129,7 @@ func TestToolsInvalidGlobPattern(t *testing.T) {
 		Name:         "Bad Glob",
 		Slug:         "bad-glob",
 		SystemPrompt: "You have bad patterns.",
-		MCPServers:   `["conduit"]`,
+		MCPServers:   `["tesseract"]`,
 		Tools:        `["memory_[invalid"]`,
 	}
 	result := ValidateAgentConfig(agent)

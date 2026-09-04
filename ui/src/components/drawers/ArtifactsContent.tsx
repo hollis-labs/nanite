@@ -160,7 +160,7 @@ interface ArtifactsContentProps {
  *
  * The C2 mini-card path on the bottom drawer is unchanged. Auto-emitting
  * artifact-mini envelopes from BE artifact creation is explicitly out of
- * scope (decision: keep agent-emit symmetry — see Vanta
+ * scope (decision: keep agent-emit symmetry — see Tesseract
  * `decisions.nanite.collab_ui_v1.drawer_cards_implementation_choices`).
  */
 export function ArtifactsContent({ onTitleChange }: ArtifactsContentProps) {

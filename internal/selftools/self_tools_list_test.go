@@ -302,15 +302,14 @@ func TestFirstSentenceSummary(t *testing.T) {
 // CW-20260501-0001: with a wired ToolInventoryLookup the discovery
 // primitive must surface tools registered on sibling MCP servers, not
 // just the in-process self-tools. The motivating bug was c121, where
-// the agent burned 6 list calls trying to find `memory_recall`
-// (registered on `nanite-memory`) and concluded it didn't exist.
+// the agent burned 6 list calls trying to find the durable recall tool.
 func TestNaniteToolList_CrossServerEnumeration(t *testing.T) {
 	st := newSelfTools(t)
 	st.Inventory = &stubInventoryLookup{
 		tools: []llmtypes.ToolDefinition{
 			{
-				Name:        "memory_recall",
-				Description: "Recall memories relevant to the current turn from the durable Vanta substrate.",
+				Name:        "tesseract_recall",
+				Description: "Recall memory records relevant to the current turn from Tesseract.",
 			},
 			{
 				Name:        "memory_write",
@@ -351,9 +350,9 @@ func TestNaniteToolList_CrossServerEnumeration(t *testing.T) {
 		saw[tool.Name] = true
 	}
 
-	// memory_recall MUST surface — the c121 motivating case.
-	if !saw["memory_recall"] {
-		t.Error("filter=memory must surface memory_recall (the cross-server bug fix)")
+	// tesseract_recall MUST surface — the c121 motivating case.
+	if !saw["tesseract_recall"] {
+		t.Error("filter=memory must surface tesseract_recall (the cross-server bug fix)")
 	}
 	// memory_write matches filter=memory by name and surfaces too —
 	// discovery shows the full inventory regardless of caller role.
@@ -419,7 +418,7 @@ func TestNaniteToolList_CrossServerSizeMeasurement(t *testing.T) {
 	st.Inventory = &stubInventoryLookup{
 		tools: []llmtypes.ToolDefinition{
 			{
-				Name:        "memory_recall",
+				Name:        "tesseract_recall",
 				Description: "Recall memories relevant to the current turn from durable storage.",
 			},
 		},

@@ -10,7 +10,7 @@ Capture an architectural decision as a formal ADR. Runs via sub-agent to keep ma
 
 ## IMPORTANT: Run in Sub-Agent
 
-This skill MUST be executed via the Agent tool (subagent) to keep the main context clean. The sub-agent does the research, writing, and Vanta Conduit registration. Main context gets only the confirmation.
+This skill MUST be executed via the Agent tool (subagent) to keep the main context clean. The sub-agent does the research, writing, and optional Tesseract registration. Main context gets only the confirmation.
 
 ## Procedure
 
@@ -59,8 +59,9 @@ You are an ADR writer. Write a formal Architecture Decision Record.
 
    {Related ADRs, design docs, backlog items, or external resources.}
 
-4. Register in Vanta Conduit (if available):
-   - Use mcp__vanta__context_typed_write with type=adr if the tool is available
+4. Register the ADR in Tesseract (if available):
+   - Use `mcp__tesseract__knowledge_write` with namespace `user/{USER}/knowledge/{PROJECT}`, key `adr-{NNN}`, kind `doc`, source `filesystem`, pointer scheme `file`, pointer locator `{absolute file path}`, a concise summary, optional body, and the required `author_agent_id` and `session_id`
+   - Encode tags as a JSON string, for example `["adr","project:{PROJECT}"]`
    - If not available, skip — the file is the primary artifact
 
 5. Return ONLY this format:

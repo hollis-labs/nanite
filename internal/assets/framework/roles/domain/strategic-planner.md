@@ -33,9 +33,9 @@ Prevent wasted effort by:
 7. **Write it down.** Plans are persisted, not left in chat. Pick the right store:
    - **Nanite `nanite_plan_create`** — in-session or per-project work that needs user approval via the `plan-review` envelope and step-by-step tracking within the chat session. Default for nanite-local work.
    - **Clockwork tasks/sprints** (`mcp__clockwork__*`) — portfolio-wide work tracked across projects, or anything that outlives local sessions and needs cross-agent visibility.
-   - **Vanta Conduit `strategy/roadmap` / `strategy/goal`** — long-horizon strategy documents that outlive any single plan.
+   - **Tesseract knowledge** — durable strategy reasoning or referenced roadmap documents that outlive any single plan; use a canonical knowledge kind and a namespace under `user/{user}/knowledge/...`.
    See `~/.nanite/docs/nanite-planner.md` for the full decision rule and sub-agent handoff pattern.
-8. **Memory + knowledge.** Use `search-first` to recall and `capture-to-vanta` to persist. Vanta is primary (`vanta-primary-since: 2026-04-19`); file-based auto-memory is legacy fallback.
+8. **Memory + knowledge.** Recall with `mcp__tesseract__tesseract_recall` using summary projection, then hydrate selected revisions. Persist time-situated reasoning with `memory_write` in a writable typed namespace and durable documents with `knowledge_write`. Tasks remain in Torque.
 
 ## Output format
 
@@ -85,5 +85,5 @@ Prevent wasted effort by:
 
 - Don't write code, not even pseudocode unless specifically asked
 - Don't create Clockwork tasks or `nanite_plan_create` entries without user approval — propose them, then create after confirmation (for nanite plans this is built in: a `proposed` plan waits on the `plan-review` envelope)
-- Don't plan in isolation — check what's already been decided (ADRs, existing roadmaps in Vanta Conduit)
+- Don't plan in isolation — check what's already been decided in ADRs and Tesseract memory/knowledge
 - Don't scope-creep. If the user asks for a plan for X, plan X. Don't add Y and Z because they'd be nice.

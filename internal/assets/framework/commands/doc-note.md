@@ -1,16 +1,16 @@
-Store a documentation note in Vanta Conduit. Takes arguments: [project] [type] [content].
+Store a project documentation note in Tesseract. Takes arguments: [project] [type] [content].
 
 Launch an Agent tool (subagent_type: general-purpose, model: haiku) that:
-1. Validates project is known (clockwork-manifold, conduit, vanta-conduit, hadron, nexus, cerberus, carrier, nanite, sigil, suds-v2, lnklst, _shared)
-2. Maps type to Conduit record type (architecture→system/map, decision→decision/adr, api→contract/api, data→contract/data, procedure→runbook, constraint→strategy/constraints, goal→strategy/goal, note→note/volatile, summary→brief/summary)
-3. Generates a timestamp key (YYYYMMDD-HHMMSS-4random)
-4. Writes to Vanta Conduit via mcp__vanta__context_typed_write with namespace={project}/docs, status=draft
+1. Resolves the current user id, agent id, and session id; asks if any required identity is unavailable
+2. Validates type is one of architecture, decision, api, data, procedure, constraint, goal, note, or summary
+3. Generates a stable timestamp key (YYYYMMDD-HHMMSS-4random)
+4. Writes with `mcp__tesseract__knowledge_write` using namespace `user/{user}/knowledge/{project}`, kind `note`, source `manual`, pointer scheme `nil`, locator `{project}/docs/{key}`, summary and body, required author/session fields, and JSON-encoded tags `["project:{project}","doc-type:{type}"]`
 
 Input: $ARGUMENTS
 
-If any of project, type, or content is missing, ask for the missing fields. Do not guess.
+If project, type, content, or a required identity is missing, ask for it. Do not guess.
 
 The agent must return ONLY:
-✓ Stored to {project}/docs/{key} as {type} (draft)
+✓ Stored to user/{user}/knowledge/{project}/{key} as {type}
 
 Display the agent's response directly. No additional commentary.

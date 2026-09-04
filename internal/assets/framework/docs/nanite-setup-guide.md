@@ -21,6 +21,27 @@ Concretely:
 
 The `nanite-agent init` command sets up all symlinks and scaffolding automatically.
 
+## Install and Upgrade the Global Framework
+
+Install the embedded framework into `~/.nanite` before initializing a project:
+
+```bash
+nanite-agent init
+```
+
+After upgrading the binary, refresh the global framework explicitly, then refresh each project adapter:
+
+```bash
+nanite-agent init --refresh
+nanite-agent init --project .
+```
+
+Refresh is version-aware. A file whose digest matches a shipped historical framework version is stock and upgrades automatically. A file that differs from every known shipped digest is treated as a user customization: Nanite preserves it and writes deterministic comparison copies under `.framework-conflicts/<new-version>/` (`*.existing` and `*.new`). Review and merge those files manually. Retired stock paths are removed; customized retired paths are preserved and reported.
+
+The whole-tree install is staged and atomically swapped. Repeating the same refresh is idempotent, including conflict files. `--force` deliberately replaces customized framework files and removes customized retired paths; use it only after backing up intentional edits. Runtime directories and user-created files outside the shipped manifest remain intact.
+
+Tesseract itself follows XDG paths. Run `tesseract path` to resolve the live layout; defaults are `~/.local/share/tesseract`, `~/.local/state/tesseract`, `~/.cache/tesseract`, and `~/.config/tesseract`. The binary and stdio server invocation are `tesseract` and `tesseract mcp`. See `~/.nanite/docs/tesseract-v0.9-contract.md` before migrating an older process or data layout.
+
 **Context beats instructions.** "Use `Panel` for card containers — see `components/ui/panel.tsx`" is more useful than "use appropriate components."
 
 ## Roles
@@ -102,7 +123,7 @@ touch <project>/.nanite/agents/frontend.md
 
 ```yaml
 # <project>/.nanite/config.yaml
-nanite_version: 2.2.0
+nanite_version: 2.4.0
 
 agents:
   my-backend:

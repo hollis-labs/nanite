@@ -41,7 +41,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  init      install or refresh the Nanite agent framework")
 	fmt.Fprintln(os.Stderr, "              --project <dir>   inject into a project's .nanite/")
 	fmt.Fprintln(os.Stderr, "              (no --project)    install global ~/.nanite/")
-	fmt.Fprintln(os.Stderr, "              --refresh         re-extract embedded assets to ~/.nanite/")
+	fmt.Fprintln(os.Stderr, "              --refresh         upgrade stock assets; preserve custom files")
 	fmt.Fprintln(os.Stderr, "              --rollback        reverse last migration for --project")
 	fmt.Fprintln(os.Stderr, "              --resume|--restart  recover from a partial install")
 	fmt.Fprintln(os.Stderr, "              see `nanite-agent init --help` for the full flag list")

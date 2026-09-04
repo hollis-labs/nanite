@@ -6,7 +6,7 @@ Quick-capture a backlog item to Clockwork. Runs via sub-agent to keep main conte
 
 - When the user types `:blg` or `/blg` with an idea or future work item
 - When something comes up in conversation that should be tracked but isn't urgent
-- Example: `/blg Investigate PostgreSQL migration path for Vanta Conduit`
+- Example: `/blg Investigate PostgreSQL migration path for Tesseract`
 
 ## IMPORTANT: Run in Sub-Agent
 

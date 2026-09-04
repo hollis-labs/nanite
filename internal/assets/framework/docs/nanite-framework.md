@@ -9,7 +9,7 @@ Reference document for the Nanite agent framework (previously known as agentrc).
 3. **Focused agents > general agents.** Load context for the task, not the universe.
 4. **Skills for knowledge, hooks for enforcement.** Skills load on demand. Hooks run silently unless they block.
 5. **Sub-agent output isolation.** Heavy work runs in sub-agents. Main context gets one-line confirmations.
-6. **Progressive context disclosure.** Boot gives identity + task. Skills give procedure. Vanta Conduit gives memory.
+6. **Progressive context disclosure.** Boot gives identity + task. Skills give procedure. Tesseract v0.9 gives context, memory, and knowledge.
 
 ## Agent Model
 
@@ -184,8 +184,8 @@ Any `*.md` context docs found in `.nanite/` root (not in `agents/`) are moved to
 The global config (`~/.nanite/config.yaml`) defines `default_skills` and `default_tools` — loaded for every agent session on top of agent-specific lists.
 
 ```yaml
-default_skills: [fast-triage, end-of-session, escalate]
-default_tools:  [clockwork, vanta, hadron, cerberus]
+default_skills: [fast-triage, end-of-session, escalate, doc-search, doc-note]
+default_tools:  [clockwork, tesseract, hadron, cerberus]
 ```
 
 **default_skills** — Skills every agent gets regardless of its `skills:` array. Agent-specific skills are additive; they never replace defaults. A skill belongs here when every agent benefits from having it (e.g., structured user input, session handoff, blocker escalation).
@@ -216,8 +216,8 @@ Everything an agent outputs consumes context window tokens. Design skills to pro
 |-------|---------|------|
 | adr | Architectural decision capture | sub-agent |
 | blg | Quick backlog capture | sub-agent |
-| doc-note | Store docs in Vanta Conduit | sub-agent |
-| doc-search | Query docs from Vanta Conduit | inline |
+| doc-note | Store durable project notes in Tesseract | sub-agent |
+| doc-search | Recall project notes from Tesseract | inline |
 | boot-prompt | Session handoff document | manual |
 | qstatus | Compact status snapshot | sub-agent |
 | qhealth | Service health check | sub-agent |
@@ -282,24 +282,18 @@ Good: envelope-guard blocks a write and explains why. Bad: audit hook logs every
 ### Hooks for enforcement, not capture
 Use hooks to prevent bad actions. Don't use hooks for logging or context injection.
 
-## Namespace Convention (Vanta Conduit)
+## Tesseract v0.9 contract
 
 ```
-{project}/
-├── docs/          # Project documentation
-├── history/       # Session snapshots, summaries
-├── plans/         # Active plans, roadmaps
-└── context/       # Agent-generated context
-
-_shared/
-└── docs/          # Cross-project documentation
+user/{user}/memory/{type}
+user/{user}/project/{project}/memory/{type}
+user/{user}/session/{session}/memory/{type}
+user/{user}/knowledge/{project}
 ```
 
-### Keys
-Auto-generated timestamps (YYYYMMDD-HHMMSS-4random). Meaning from namespace, type, tags, and search.
+Writable memory types are `decisions`, `feedback`, `followups`, `learnings`, `limitations`, `notes`, `outcomes`, and `references`. Knowledge kinds are `doc`, `handoff`, `investigation`, `learning`, `mcp_server`, `note`, `package`, `playbook`, `pointer`, `project_canonical`, and `session_close`. Tasks and execution state belong in Torque.
 
-### Lifecycle
-All agent writes start as `draft`. Promotion to `canonical` requires explicit action.
+Recall uses `mcp__tesseract__tesseract_recall`, normally with `payload_mode: summary`; hydrate selected `revision_id` values with `tesseract_get_revision`. Recall returns `{results, facets, manifest}`. Missing bodies under projection are withheld, not empty. `manifest.next_cursor` is opaque and query-bound. Touch only summary-only results that shaped work; hydrated reads already reinforce once. Array-valued MCP arguments are JSON-encoded strings. See `docs/tesseract-v0.9-contract.md` for the full generated contract.
 
 ## Registry
 
@@ -326,12 +320,12 @@ sqlite3 -column -header ~/.nanite/registry.db "SELECT project, system, version F
 sqlite3 -column -header ~/.nanite/registry.db "SELECT slug FROM projects WHERE has_agentrc=1 AND has_nanite=0;"
 ```
 
-## Config Schema (v2.3.0)
+## Config Schema (v2.4.0)
 
 Single config file at `~/.nanite/config.yaml`:
 
 ```yaml
-version: 2.3.0
+version: 2.4.0
 
 roles:
   <name>:
@@ -350,7 +344,7 @@ Playbooks are file-based (not config-based). They live in `~/.nanite/playbooks/`
 
 ### Project registry
 
-The global config lists both monorepos and individual modules as first-class project entries. Current registered projects (all on v2.2.0):
+The global config lists monorepos and individual modules as first-class project entries. Current registered projects include:
 
 | Slug | Description |
 |------|-------------|
@@ -367,16 +361,15 @@ The global config lists both monorepos and individual modules as first-class pro
 | clockwork-manifold | Clockwork Manifold — task orchestration and execution engine |
 | fragments-engine | Monorepo root (legacy, superseded by clockwork-manifold) |
 | engine | Legacy task/sprint/project core (read-only history; superseded by clockwork-manifold) |
-| conduit | Chat interface and conversation management |
-| vanta-conduit | Vanta Conduit — context memory, RAG, and document storage |
+| tesseract | Tesseract v0.9 — context, memory, and knowledge runtime |
 | libs | Shared libraries (MCP, OTel, plugin, toolbroker) |
 
-`engine`, `conduit`, `vanta-conduit`, and `libs` are modules within the legacy `fragments-engine` monorepo, listed individually so agents can scope to a single module. New task/sprint/project work happens in `clockwork-manifold`.
+Historical task modules remain listed only for read-only reference. New task/sprint/project work happens in `clockwork-manifold`.
 
 Project-level config at `<project>/.nanite/config.yaml`:
 
 ```yaml
-nanite_version: 2.2.0
+nanite_version: 2.4.0
 
 agents:
   <slug>:
@@ -394,6 +387,7 @@ All skills and commands reference `mcp__clockwork__*` tools. The legacy `mcp__vo
 
 ## Version History
 
+- **v2.4.0** — Regenerated framework assets for Tesseract v0.9, current MCP request/response and pagination contracts, XDG layout, and manifest-based safe global upgrades.
 - **v2.3.0** — Playbooks: parameterized session templates. New primitive type in `~/.nanite/playbooks/`. `/playbook` command and skill. Boot loader updated: agents → playbooks → roles resolution order. First playbook: `explore` (cross-project capability mapping). 20 skills, 20 commands.
 - **v2.2.0** — Agent composition model. Roles split into domain/stack/meta. Named agents in project config. projects.yaml absorbed into config.yaml. Context files moved to agents/ dir. 18 skills, 18 commands. Monorepo modules registered as individual projects. Legacy archive convention (`.agentrc-legacy/`). `mcp__engine__*` replaces `mcp__volon__*`. `backend` and `frontend` roles gain `## What NOT to do` sections. `/health-check` aliased to `/qhealth`. All 14 portfolio projects on v2.2.0.
 - **v2.1.0** — Install/uninstall system. Directory symlinks. Three-tier install model.

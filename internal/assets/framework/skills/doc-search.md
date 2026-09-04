@@ -1,69 +1,42 @@
 # Doc Search (:doc-search)
 
-Search project documentation stored in Vanta Conduit. Returns results without interpretation.
+Search project documentation stored in Tesseract without interpreting it.
 
-## When to use
+## Input
 
-- When the user types `:doc-search` or `/doc-search` with a query
-- When any agent needs to retrieve documentation context
-- Example: `/doc-search "how does the runner work"` — semantic search across all projects
-- Example: `/doc-search --project clockwork-manifold --type architecture` — filtered structured query
-- Example: `/doc-search --project nexus "broker pattern"` — scoped semantic search
-
-## Input Format
-
-```
+```text
 /doc-search [query] [--project X] [--type Y] [--status Z] [--limit N]
 ```
 
-**query** — Natural language question or keywords. Triggers semantic search via embeddings.
-
-**--project** — Scope to a single project namespace (e.g., `clockwork-manifold`, `vanta-conduit`). Optional.
-
-**--type** — Filter by document type: architecture, decision, api, data, procedure, constraint, goal, note, summary. Optional.
-
-**--status** — Filter by lifecycle: draft, reviewed, canonical, deprecated. Default: all non-deprecated.
-
-**--limit** — Max results. Default: 5.
+Default `limit` is 5. Supported document types match `doc-note`. Status is optional; omitting it uses current revision scope and excludes deprecated records.
 
 ## Procedure
 
-Parse the user's input for query text and optional filters.
+Call `mcp__tesseract__tesseract_recall` with JSON-encoded array strings:
 
-### If query text is provided → Semantic Search
-
-Use `mcp__vanta__context_rag_query` with:
-- query: the search text
-- namespace: `{project}/docs` if --project given, otherwise `*/docs`
-- limit: from --limit or default 5
-
-### If only filters, no query text → Structured Query
-
-Use `mcp__vanta__context_typed_view` with:
-- namespaces: `{project}/docs` if --project given, otherwise `*/docs`
-- types: mapped from --type to Conduit type (same mapping as doc-note)
-- status: from --status if given
-- limit: from --limit or default 5
-
-### Format Results
-
-For each result, display:
-
-```
-[{status}] {namespace}/{key}  ({record_type})
-  {first 200 chars of content}...
+```json
+{
+  "namespaces": "[\"user/{USER}/knowledge/{PROJECT}\"]",
+  "domains": "[\"knowledge\"]",
+  "facet_kinds": "[\"note\"]",
+  "payload_mode": "summary",
+  "limit": 5
+}
 ```
 
-If no results, say: "No documents found matching query."
+When there is query text, add `query`, `ranking: relevance`, and `search_mode: hybrid`. Without query text use `ranking: chronological`. Add JSON-encoded `tags` for `project:{PROJECT}` and `doc-type:{TYPE}` filters, and `statuses` only when explicitly requested. With no project, recall under the current user's `user/{USER}/knowledge` prefix.
 
-## Output
+Parse the outer `{results, facets, manifest}` envelope. For each result display its status, namespace/key, kind, summary, and `revision_id`. A missing body under `summary` means withheld, never empty. If the full body is needed, hydrate that revision with `mcp__tesseract__tesseract_get_revision`; this deliberate read already reinforces it once.
 
-Display the formatted results list. No interpretation, no summary, no recommendations. The caller decides what to do with the results.
+`manifest` includes totals, returned count, byte/token estimates, truncation details, and nullable `next_cursor`. A cursor is opaque and query-bound: continue only with identical namespaces, ranking, search mode, revision scope, query, and filters. Projection and page size may change. Summary/keys pages cap at 500; full pages cap at 100.
+
+Call `mcp__tesseract__tesseract_touch` only for summary-only hits that actually informed work. Recall itself does not reinforce; do not touch every candidate or double-reinforce hydrated hits.
+
+If there are no results, return `No documents found matching query.` Otherwise return only the formatted results plus a pagination notice when `next_cursor` is non-null.
 
 ## Invariants
 
-- This skill reads only. It never writes, updates, or deletes.
-- Results are returned as-is from Vanta Conduit. No filtering by the skill beyond what was requested.
-- If `context_rag_query` returns an error or empty results, fall back to `context_search` with keyword matching and note: "Semantic search unavailable, using keyword fallback."
-- If zero results after fallback, say: "No documents found matching query."
-- Default excludes deprecated records unless --status explicitly includes them.
+- Read only; never write, update, or deprecate.
+- Use `tesseract_recall`, not a domain-specific retired read.
+- Treat optional scores as comparable only within one response.
+- On cursor validation failure, restart the read; never manufacture or edit a cursor.

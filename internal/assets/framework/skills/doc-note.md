@@ -1,94 +1,49 @@
 # Doc Note (:doc-note)
 
-Store a documentation note in Vanta Conduit. Runs via sub-agent to keep main context clean.
+Store a durable project documentation note in Tesseract through a sub-agent.
 
-## When to use
+## Input
 
-- When the user types `:doc-note` or `/doc-note` with content to record
-- When any agent needs to persist a documentation note during work
-- Example: `/doc-note clockwork-manifold architecture "Clockwork uses a plugin-based runner with provider strategy"`
-- Example: `/doc-note nexus decision "ADR-034 established Nexus as the agent infrastructure lib"`
-
-## IMPORTANT: Run in Sub-Agent
-
-This skill MUST be executed via the Agent tool (subagent) to keep the main context clean. The sub-agent validates, maps, writes to Vanta Conduit, and returns a one-line confirmation.
-
-## Input Format
-
-```
+```text
 /doc-note [project] [type] [content]
 ```
 
-**project** — Target project namespace. Must be one of the known projects or `_shared` for cross-project docs.
-
-**type** — Document type. One of:
-| Input       | Conduit Type          | Use for                              |
-|-------------|-----------------------|--------------------------------------|
-| architecture | system/map           | Structure, topology, how things connect |
-| decision    | decision/adr          | Choices made and why                  |
-| api         | contract/api          | API contracts, interfaces             |
-| data        | contract/data         | Data models, schemas                  |
-| procedure   | runbook               | How-to, step-by-step processes        |
-| constraint  | strategy/constraints  | Design rules, invariants              |
-| goal        | strategy/goal         | Objectives, success criteria          |
-| note        | note/volatile         | Ephemeral rough thought (14-day TTL)  |
-| summary     | brief/summary         | Session/sprint summary (90-day TTL)   |
-
-**content** — The note text. Can be quoted or unquoted.
-
-## Known Projects
-
-clockwork-manifold, conduit, vanta-conduit, hadron, nexus, cerberus, carrier, nanite, sigil, suds-v2, lnklst, _shared
+The supported types are `architecture`, `decision`, `api`, `data`, `procedure`, `constraint`, `goal`, `note`, and `summary`. Types are stored as tags; the canonical Tesseract knowledge kind is `note`.
 
 ## Procedure
 
-Parse the user's input for project, type, and content. If any field is missing or ambiguous, ask — do not infer.
+If project, type, content, current user id, agent id, or session id is unavailable, ask for it. Do not infer required identity.
 
-Launch an Agent with this prompt (fill in from parsed input):
+Launch a sub-agent that validates the input, generates a key in `YYYYMMDD-HHMMSS-4random` form, and calls:
 
-```
-You are a documentation clerk for the Clockwork Manifold portfolio. Your only job is to store a note in Vanta Conduit.
-
-## Input:
-- Project: {PROJECT}
-- Type: {TYPE} (maps to Conduit type: {CONDUIT_TYPE})
-- Content: {CONTENT}
-
-## Steps:
-
-1. Validate the input:
-   - Project must be one of: clockwork-manifold, conduit, vanta-conduit, hadron, nexus, cerberus, carrier, nanite, sigil, suds-v2, lnklst, _shared
-   - Type must map to a known Conduit type (see table above)
-   - Content must be non-empty
-   - If any validation fails, return: ✗ Missing or invalid: {field}. Provide {what's needed}.
-
-2. Generate a key:
-   - Format: {timestamp}-{4-char-random}
-   - Example: 20260321-143022-a7f2
-
-3. Write to Vanta Conduit:
-   - Use mcp__vanta__context_typed_write with:
-     - namespace: {PROJECT}/docs
-     - key: {generated-key}
-     - record_type: {CONDUIT_TYPE}
-     - status: draft
-     - payload: the content text
-     - actor: doc-note
-
-4. Return ONLY this format:
-   ✓ Stored to {PROJECT}/docs/{key} as {CONDUIT_TYPE} (draft)
+```json
+mcp__tesseract__knowledge_write {
+  "namespace": "user/{USER}/knowledge/{PROJECT}",
+  "key": "{KEY}",
+  "kind": "note",
+  "source": "manual",
+  "pointer_scheme": "nil",
+  "pointer_locator": "{PROJECT}/docs/{KEY}",
+  "summary": "{ONE-LINE SUMMARY}",
+  "body": "{CONTENT}",
+  "author_agent_id": "{AGENT_ID}",
+  "session_id": "{SESSION_ID}",
+  "tags": "[\"project:{PROJECT}\",\"doc-type:{TYPE}\"]"
+}
 ```
 
-## Output
+The `nil` pointer scheme is intentional: the stored body is the artifact, so pointer health is `not_applicable`. `source`, both pointer fields, `summary`, `author_agent_id`, and `session_id` are required by Tesseract v0.9. Array-valued MCP arguments such as `tags` are JSON-encoded strings.
 
-Display the sub-agent's one-line confirmation. No additional commentary needed.
+Return only:
+
+```text
+✓ Stored to user/{USER}/knowledge/{PROJECT}/{KEY} as {TYPE}
+```
 
 ## Invariants
 
-- ALWAYS run via sub-agent
-- ALWAYS write with status: draft — never canonical
-- If project or type is unclear, ASK. Do not guess or infer.
-- Namespace pattern: {project}/docs — keeps all project context together
-- Keys are auto-generated timestamps, never human-meaningful
-- This skill writes only. It does not retrieve, search, or summarize.
-- Content is stored as-is. The clerk does not edit, expand, or interpret.
+- Always use a sub-agent and `mcp__tesseract__knowledge_write`.
+- Preserve content in `body`; do not expand or reinterpret it.
+- Use the writable knowledge namespace shape `{user|app}/{id}/knowledge[/...]`.
+- Reuse a stable key and set `supersedes` only when deliberately replacing a known revision.
+- Tasks and execution state belong in Torque, not Tesseract.

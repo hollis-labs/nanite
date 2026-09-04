@@ -14,7 +14,7 @@ This skill does significant work (blueprint generation, validation, registration
 
 ## Examples
 - `/blueprint-builder run-integration-tests — Run go test with race detection on all packages in a project, outputting a JUnit XML report`
-- `/blueprint-builder sync-conduit-backup — Export all Vanta Conduit namespaces to a timestamped JSON file in ~/.conduit/backups/`
+- `/blueprint-builder sync-tesseract-backup — Stop Tesseract, resolve all paths with tesseract path, and back up its database, records, state, and configuration together`
 
 ## Instructions
 

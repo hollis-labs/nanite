@@ -21,7 +21,7 @@ import (
 func Run(label string, args []string) {
 	fs := flag.NewFlagSet(label, flag.ExitOnError)
 	project := fs.String("project", "", "target project directory (omit to install to ~/.nanite/)")
-	refresh := fs.Bool("refresh", false, "re-extract embedded assets to ~/.nanite/, skipping user-modified files")
+	refresh := fs.Bool("refresh", false, "upgrade stock assets in ~/.nanite/ and preserve user-modified files")
 	force := fs.Bool("force", false, "overwrite user-modified files during --refresh")
 	printDiff := fs.Bool("print-diff", false, "dry-run: show what would change (not yet implemented)")
 	adapters := fs.String("adapters", "", "comma-separated list of CLI adapters to manage (claude, codex, gemini, opencode)")
@@ -46,14 +46,15 @@ func Run(label string, args []string) {
 		if err != nil {
 			die(label, "install home", err)
 		}
-		fmt.Printf("%s: created=%d unchanged=%d skipped=%d forced=%d\n",
-			label, report.Created, report.Unchanged, report.Skipped, report.Forced)
+		fmt.Printf("%s: created=%d updated=%d removed=%d unchanged=%d skipped=%d forced=%d\n",
+			label, report.Created, report.Updated, report.Removed, report.Unchanged, report.Skipped, report.Forced)
 		if len(report.SkippedFiles) > 0 {
 			fmt.Println("  skipped (user-modified):")
 			for _, f := range report.SkippedFiles {
 				fmt.Printf("    %s\n", f)
 			}
 		}
+		printConflictFiles(report.ConflictFiles)
 		return
 	}
 
@@ -68,14 +69,15 @@ func Run(label string, args []string) {
 		if err != nil {
 			die(label, "refresh home", err)
 		}
-		fmt.Printf("%s refresh: created=%d unchanged=%d skipped=%d forced=%d\n",
-			label, report.Created, report.Unchanged, report.Skipped, report.Forced)
+		fmt.Printf("%s refresh: created=%d updated=%d removed=%d unchanged=%d skipped=%d forced=%d\n",
+			label, report.Created, report.Updated, report.Removed, report.Unchanged, report.Skipped, report.Forced)
 		if len(report.SkippedFiles) > 0 {
 			fmt.Println("  skipped (user-modified):")
 			for _, f := range report.SkippedFiles {
 				fmt.Printf("    %s\n", f)
 			}
 		}
+		printConflictFiles(report.ConflictFiles)
 		return
 	}
 
@@ -130,6 +132,16 @@ func Run(label string, args []string) {
 			fmt.Printf("%s: deleted %s (was managed-section-only)\n",
 				label, filepath.Base(cleanup.FilePath))
 		}
+	}
+}
+
+func printConflictFiles(paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	fmt.Println("  comparison copies (merge manually; originals were preserved):")
+	for _, path := range paths {
+		fmt.Printf("    %s\n", filepath.ToSlash(path))
 	}
 }
 

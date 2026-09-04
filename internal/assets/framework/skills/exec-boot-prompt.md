@@ -44,7 +44,7 @@ If any of these are missing, stop and ask the user to produce them first (usuall
 **Last updated:** <date> after the planner session.
 **Scope:** This boot prompt is **focused on <feature> only**. For session-agnostic state use `boot/<project>/boot-prompt.md`.
 
-> **Memory + knowledge:** Vanta-primary (`vanta-primary-since: 2026-04-19`). Recall Vanta first (`memory_recall`/`conduit_lookup`), file-based is legacy fallback. Writes → Vanta only via `capture-to-vanta`. See `~/.claude/CLAUDE.md` for full contract.
+> **Memory + knowledge:** Tesseract v0.9 is primary. Recall first with `mcp__tesseract__tesseract_recall` using summary projection, hydrate selected `revision_id` values with `tesseract_get_revision`, and touch only summary-only hits that shaped work. Use typed memory namespaces and knowledge namespaces under `user/{id}/knowledge`; tasks remain in Torque. See `~/.nanite/docs/tesseract-v0.9-contract.md` for the full contract.
 
 ## Where we are
 
@@ -125,11 +125,19 @@ Two-root contract: code → work_root, tracking → tracking_root.
 
 1. `cd <work_root>`
 2. `git status` — confirm clean, `main` at `<sha>` or later.
-3. **Vanta recall** — surface any prior follow-ups, decisions, or limitations relevant to this feature BEFORE implementation starts:
+3. **Tesseract recall** — surface prior follow-ups, decisions, or limitations before implementation starts:
+   ```json
+   mcp__tesseract__tesseract_recall {
+     "namespaces": "[\"user/<user>/memory\",\"user/<user>/knowledge\"]",
+     "domains": "[\"memory\",\"knowledge\"]",
+     "query": "<project> <feature-slug> follow-ups limitations decisions",
+     "ranking": "relevance",
+     "search_mode": "hybrid",
+     "payload_mode": "summary",
+     "limit": 20
+   }
    ```
-   mcp__vanta__conduit_lookup namespaces=["user/<user>/memory"] query="<project> <feature-slug> follow-ups limitations decisions"
-   ```
-   Review the top 5–10 results. Flag anything that contradicts the plan's decisions-locked section OR names a known-limitation that this session touches. If something material surfaces, pause and reconcile before starting Task 1.
+   Read `{results, facets, manifest}`; a missing body is withheld, not empty. Hydrate selected results with `tesseract_get_revision`. Touch only summary-only hits that shape the work; hydrated reads already reinforce once. Follow `manifest.next_cursor` only with unchanged ordering inputs. Reconcile material contradictions before Task 1.
 4. `git switch -c feat/<slug>`
 5. Read the plan doc front-to-back.
 6. Read the spec's key sections for the *why*.
@@ -169,8 +177,8 @@ Two-root contract: code → work_root, tracking → tracking_root.
 - **Out-of-scope section is a fence, not a wish list.** Every deferred item should either be a BLG or a KB GAP with a pointer.
 - **Two-root contract** must be stated — code → work_root, tracking → tracking_root — so the executor doesn't mix artifacts.
 - **Exit gate must be copy-paste from the spec.** Don't invent new criteria in the boot prompt.
-- **Vanta-first anchor is required.** Insert the blockquote between the `**Scope:**` line and the first `##` section, verbatim from this skill's template. This ensures direct-boot sessions (`Boot @path`) still honor the Vanta-primary memory contract even when nanite agent resolution is skipped.
-- **Vanta recall step is required in "How to boot this session".** The `conduit_lookup` call is the natural moment when prior-session follow-ups and decisions need to surface — BEFORE the executor starts Task 1. Skipping it means the executor misses signal the prior session deliberately captured for this moment.
+- **Tesseract anchor is required.** Insert the blockquote between the `**Scope:**` line and the first `##` section, verbatim from this skill's template. This ensures direct-boot sessions (`Boot @path`) still honor the v0.9 memory contract even when Nanite agent resolution is skipped.
+- **Tesseract recall is required in "How to boot this session".** The call is the natural moment when prior-session follow-ups and decisions need to surface — BEFORE the executor starts Task 1.
 
 ## Adjacent skills + docs
 

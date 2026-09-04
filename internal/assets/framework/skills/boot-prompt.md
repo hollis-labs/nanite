@@ -19,7 +19,7 @@ Generate a boot prompt for the next session. Manual trigger only — never autom
 ```markdown
 # Session Boot — {date}
 
-> **Memory + knowledge:** Vanta-primary (`vanta-primary-since: 2026-04-19`). Recall Vanta first (`memory_recall`/`conduit_lookup`), file-based is legacy fallback. Writes → Vanta only via `capture-to-vanta`. See `~/.claude/CLAUDE.md` for full contract.
+> **Memory + knowledge:** Tesseract v0.9 is primary. Recall first with `mcp__tesseract__tesseract_recall` using summary projection, hydrate selected `revision_id` values with `tesseract_get_revision`, and touch only summary-only hits that shaped work. Use typed memory namespaces and knowledge namespaces under `user/{id}/knowledge`; tasks remain in Torque. See `~/.nanite/docs/tesseract-v0.9-contract.md` for the full contract.
 
 ## Where We Left Off
 {1-3 sentences: what was accomplished this session}
@@ -47,4 +47,4 @@ Skip this section entirely if the next actions are self-explanatory.}
 - Focus on WHAT'S NEXT, not what happened. The next agent needs direction, not history.
 - Do not include portfolio state, epic counts, or system context.
 - Overwrite previous boot-prompt.md — there's only ever one.
-- ALWAYS include the Vanta-first anchor blockquote between the title and the first `##` section. It's part of the standard boot-prompt contract. Copy it verbatim from this skill's template.
+- ALWAYS include the Tesseract anchor blockquote between the title and the first `##` section. It is part of the standard boot-prompt contract. Copy it verbatim from this skill's template.

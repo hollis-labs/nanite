@@ -1,5 +1,7 @@
 # Cleanup Tasks — Agent Framework Reset
 
+> Historical archive. Retired product and tool names below are preserved only as migration history; do not copy them into executable prompts or current documentation.
+
 ## 1. Global CLAUDE.md (~/.claude/CLAUDE.md)
 
 **Current state:** Contains the Agent Auto-Boot (MANDATORY) block that forces every session to load .nanite/agent-boot.md + profile + bootstrap.md.

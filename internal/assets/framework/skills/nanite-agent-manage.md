@@ -102,7 +102,7 @@ You are building a new agent role definition for the Nanite agent framework.
 
 **Examples:**
 - `/nanite-agent-manage context hadron frontend` — Audit Hadron's frontend and generate style guide
-- `/nanite-agent-manage context vanta-conduit backend` — Audit Vanta Conduit's Go backend and generate conventions doc
+- `/nanite-agent-manage context tesseract backend` — Audit Tesseract's Go backend and generate conventions doc
 - `/nanite-agent-manage context cerberus infra` — Audit Cerberus's infrastructure setup
 
 **Procedure:** Launch a sub-agent with:
@@ -237,7 +237,7 @@ You are building a new skill for the Nanite agent framework.
 ```
 
 **Examples:**
-- `/nanite-agent-manage agent conduit-plugin-dev conduit --roles backend,go --skills go-build,go-lint,go-test,doc-note,doc-search --context agents/plugin-dev.md --description "Develop and maintain Conduit plugins"`
+- `/nanite-agent-manage agent nanite-plugin-dev nanite --roles backend,go --skills go-build,go-lint,go-test,doc-note,doc-search --context agents/plugin-dev.md --description "Develop and maintain Nanite plugins"`
 - `/nanite-agent-manage agent clockwork-backend clockwork-manifold --roles backend,go --skills go-build,go-lint,go-test`
 - `/nanite-agent-manage agent nanite-frontend nanite --roles frontend,react --context agents/frontend.md`
 
@@ -249,7 +249,7 @@ You are creating a new agent definition for the Nanite agent framework. An agent
 ## Agent to create
 - Slug: {SLUG}
 - Project: {PROJECT}
-- Name: {NAME} (derive from slug if not provided — title case, e.g., "conduit-plugin-dev" → "Conduit Plugin Developer")
+- Name: {NAME} (derive from slug if not provided — title case, e.g., "nanite-plugin-dev" → "Nanite Plugin Developer")
 - Description: {DESCRIPTION} (ask user if not provided)
 - Roles: {ROLES} (default: [backend, go] — ask user if unclear)
 - Skills: {SKILLS} (default: [] — ask user if task-specific skills are needed)
@@ -266,7 +266,7 @@ You are creating a new agent definition for the Nanite agent framework. An agent
 
 3. Read 2-3 existing agent context docs for reference on structure and quality:
    - Check the target project's .nanite/agents/ for existing docs
-   - If none exist, read from another project (e.g., cerberus, hadron, or conduit)
+   - If none exist, read from another project (e.g., cerberus, hadron, or tesseract)
 
 4. Add the agent entry to {PROJECT_ROOT}/.nanite/config.yaml under `agents:`:
 

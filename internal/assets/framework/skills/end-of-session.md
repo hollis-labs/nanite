@@ -230,11 +230,11 @@ Behavior forks by workspace mode (determined in step 2):
 
 After the checklist completes, emit the end-of-session report (see Output contract below).
 
-### 10. Vanta sweep — capture uncaptured session findings
+### 10. Tesseract sweep — capture uncaptured session findings
 
 Two passes: (a) history-based, (b) tracking-file heading scan.
 
-**10a. Tool-call / conversation history.** Review the session's tool-call and edit history for findings that match `capture-to-vanta` triggers (cross-project pattern, non-obvious decision, surprise/workaround, user feedback, reusable insight) but were not captured mid-flight.
+**10a. Tool-call / conversation history.** Review the session's tool-call and edit history for durable decisions, feedback, follow-ups, learnings, limitations, notes, outcomes, and references that were not captured mid-flight.
 
 **10b. Tracking-file heading scan.** For every tracking-root file written or modified this session (anything under `execution/<project>/.../<YYYY-MM-DD>/`, `planning/<topic>/`, `boot/<project>/`), grep for these section headings:
 
@@ -247,21 +247,24 @@ Two passes: (a) history-based, (b) tracking-file heading scan.
 
 Each matched section is a capture candidate. The sub-bullets under the heading are the content (strip Markdown list syntax; preserve the rationale).
 
-**For each candidate**, invoke the appropriate capture skill (they dedup via `conduit_lookup` before writing):
+**For each candidate**, recall before writing with `mcp__tesseract__tesseract_recall`. Use a JSON-encoded `namespaces` array, narrow to `domains: "[\"memory\"]"`, request `payload_mode: summary`, and hydrate selected matches with `tesseract_get_revision`. If a summary-only hit shaped the decision, touch that revision; do not touch every result or double-touch a hydrated result.
 
-- Decisions → `capture-to-vanta` with tag `decision` (or the `/capture-decision` slash command)
-- Follow-ups → `capture-to-vanta` with tag `followup` (or `/capture-followup`)
-- Known limitations + preserved tech debt → `capture-to-vanta` with tag `limitation` (or `/capture-limitation`)
-- Out of scope (WITH rationale; skip bare lists) → `capture-to-vanta` with tag `out_of_scope`
-
-The skill emits one-line `Captured: <title> → <namespace/key>` per write so the wrap-up report can summarize.
+Write new memories with `mcp__tesseract__memory_write` into exactly one writable typed namespace: `user/{user}/memory/{type}`, `user/{user}/project/{project}/memory/{type}`, or `user/{user}/session/{session}/memory/{type}`. The built-in types are `decisions`, `feedback`, `followups`, `learnings`, `limitations`, `notes`, `outcomes`, and `references`. Use a stable key and set `supersedes` only when replacing a known revision. Tasks and execution state stay in Torque.
 
 **Skip this step** when: trivial session (no commits, no plan advances), or tracking files were not touched, or all candidates were already captured mid-flight. No narration needed in the wrap-up report if the sweep produced zero writes.
 
 **10c. Draft review.** After the sweep, recall all `draft`-status memories from the current session:
 
-```
-mcp__vanta__memory_recall namespaces=["user/chrispian/memory"] statuses=["draft"] since=<session_start_time>
+```json
+mcp__tesseract__tesseract_recall {
+  "namespaces": "[\"user/{user}/session/{session_id}/memory\"]",
+  "domains": "[\"memory\"]",
+  "statuses": "[\"draft\"]",
+  "since": "<session_start_time RFC3339>",
+  "ranking": "chronological",
+  "payload_mode": "summary",
+  "limit": 500
+}
 ```
 
 If any drafts exist, present them as a compact list (key + one-line summary) and ask the user to decide on each:
@@ -273,24 +276,23 @@ If any drafts exist, present them as a compact list (key + one-line summary) and
 >
 > For each: **promote to canonical**, **leave as draft** (needs more info), or **discard** (no longer relevant).
 
-**Important — memory records use write-time status only.** `context_status_promote` and `context_status_deprecate` operate on context-domain records and will return `not_found` for memory records. Use these patterns instead:
+Use these exact patterns:
 
-- **Promote to canonical:** call `mcp__vanta__memory_write` with the same namespace + key, `status: canonical`, and `supersedes: <revision_id>` (the revision_id from the recall result). This writes a new canonical revision superseding the draft.
-- **Discard:** call `mcp__vanta__memory_write` with the same namespace + key, `status: draft`, a `ttl_seconds: 1` to expire it immediately, and `supersedes: <revision_id>`. Alternatively, simply leave it — drafts have lower activation weight and won't surface prominently.
+- **Promote to canonical:** call `mcp__tesseract__memory_write` with the same typed namespace and `memory_key`, `status: canonical`, the required author/trigger/session/origin/confidence/payload fields, and `supersedes: <revision_id>`.
+- **Leave as draft:** do nothing.
+- **Discard:** call `mcp__tesseract__tesseract_deprecate` with the draft's `revision_id`.
 
 **Skip 10c** when: no drafts exist for this session, or the session_id is unknown (cannot filter by session). In that case note "no session drafts found" in the report.
 
-**Memory-key normalization.** Vanta keys require `a-z 0-9 _` per segment — the capture skills normalize hyphens → underscores automatically. Direct `memory_write` calls must pre-normalize.
+Parse the recall envelope, including nullable `manifest.next_cursor`. A missing body in summary projection means withheld, not empty. Continue a cursor only with the same namespaces, ranking, search mode, revision scope, query, and filters; projection and limit may change.
 
-Vanta-primary transition note (`vanta-primary-since: 2026-04-19`): this step is Wave 1 of the memory migration. Wave 3 will fold this into Step 5 with Clockwork reconciliation and full file-based deprecation.
-
-**10d. Marker sweep.** Invoke the `marker-parser` skill's sweep mode to scan session message history for unresolved inline markers (`:decision`, `:adr`, `:memory`, `:draft`, `:note`, `:todo`, `:defer`, `:promote`, `:archive`, `:review`, `:research`, `:finding`, `:preference`). Each marker routes per the marker-parser table; memory-domain markers dedupe-and-write to Vanta; process markers (`:promote`, `:archive`) surface via 3-option template rather than auto-resolving. Record the count + destinations for the report's `Markers resolved` line.
+**10d. Marker sweep.** Invoke the `marker-parser` skill's sweep mode to scan session message history for unresolved inline markers (`:decision`, `:adr`, `:memory`, `:draft`, `:note`, `:todo`, `:defer`, `:promote`, `:archive`, `:review`, `:research`, `:finding`, `:preference`). Each marker routes per the marker-parser table; memory-domain markers dedupe and write through Tesseract; process markers (`:promote`, `:archive`) surface via the 3-option template rather than auto-resolving. Record the count and destinations for the report's `Markers resolved` line.
 
 **Skip 10d** when: the session contained no inline markers (the sweep is cheap — this is mostly a belt-and-suspenders step catching markers that weren't resolved mid-flight). If marker-parser isn't installed, note "marker-parser not available — skipped" and continue.
 
 ### 11. Write the session-close record (closeout packet)
 
-Write a single structured `session_close` record to Vanta (knowledge domain) as the durable continuity signal for the next session's boot. This is the primary input the boot compiler reads — do not rely on the chat report alone.
+Write a single structured `session_close` record to Tesseract's knowledge domain as the durable continuity signal for the next session's boot. This is the primary input the boot compiler reads — do not rely on the chat report alone.
 
 **Scope key is required.** Derive the scope key from:
 1. Role file's `lineage_alias` field if present
@@ -299,7 +301,7 @@ Write a single structured `session_close` record to Vanta (knowledge domain) as 
 
 **Call:**
 ```
-mcp__vanta__knowledge_write
+mcp__tesseract__knowledge_write
   namespace = user/chrispian/knowledge/session-close/<project>
   kind = session_close
   source = agent
@@ -308,8 +310,8 @@ mcp__vanta__knowledge_write
   key = <session_id>
   summary = <one-line session headline: what shipped + what's still open>
   body = <structured payload, see below>
-  tags = ["session-close", "scope:<scope_key>", "vanta-primary-since:2026-04-19",
-          "<project>", "<role>", "phase:<phase-if-applicable>"]
+  tags = "[\"session-close\",\"scope:<scope_key>\",\"<project>\",\"<role>\",\"phase:<phase-if-applicable>\"]"
+  author_agent_id = <current agent id>
   session_id = <CLAUDE_SESSION_KEY or SESSION: value from hook>
 ```
 
@@ -339,7 +341,7 @@ mcp__vanta__knowledge_write
 - tickets_touched: <list of Clockwork IDs with transitions (and any read-only legacy Engine IDs cited)>
 - prs: <list of PR numbers/urls>
 - adrs: <list of new ADR paths>
-- vanta_captures: <list of memory_id/revision_id from Step 10 captures>
+- tesseract_captures: <list of revision_id values from Step 10 captures>
 
 ## boot_delta_candidates
 - <one-line description of a change the next boot-prompt should reflect>
@@ -381,7 +383,7 @@ in the structured sections above.>
 
 **Skip step 11 when:** the session is trivial (no commits, no plan advances, no captures). A one-line report is sufficient for trivial sessions.
 
-**Failure mode:** Vanta write fails → surface via 3-option: A) retry, B) dump to `execution/<project>/session-close-fallback/<date>.md`, C) skip. Never hard-fail.
+**Failure mode:** Tesseract write fails → surface via 3-option: A) retry, B) dump to `execution/<project>/session-close-fallback/<date>.md`, C) skip. Never hard-fail.
 
 ---
 
@@ -419,11 +421,11 @@ mcp__clockwork__clockwork_comment_add
 - No Clockwork tasks are identifiable for the session.
 - Note in the wrap-up report: `Clockwork comment: skipped (no tasks advanced)`.
 
-**Why both Vanta and Clockwork:**
-- **Vanta session_close** = structured compiler input for the boot generator; scope-filtered by agent identity; drives §2/§3/§7 of the next boot prompt.
+**Why both Tesseract and Clockwork:**
+- **Tesseract session_close** = structured compiler input for the boot generator; scope-filtered by agent identity; drives §2/§3/§7 of the next boot prompt.
 - **Clockwork comment** = task-scoped work narrative; searchable by task/ticket; audit trail visible in the Clockwork UI; extractable for task-level review.
 
-They're complementary, not redundant. The `clockwork_comment_id` in the Vanta record links the two.
+They're complementary, not redundant. The `clockwork_comment_id` in the Tesseract record links the two.
 
 ## Output contract
 
@@ -496,7 +498,7 @@ This skill does one thing: the end-of-session handoff checklist. It does NOT:
 - Squash, rebase, or amend prior commits — those are history-rewriting operations and need explicit user authorization.
 - Generate the boot-prompt automatically — that's `/boot-prompt`'s job, and it's manual-only.
 - Archive or clean up worktrees — separate concern.
-- Write to Vanta Conduit / NANITE directly — if the user picks option B on a surface, invoke `/nanite` or `/doc-note` from there. This skill is the checklist, not the capture mechanism.
+- Write to Tesseract / Nanite directly — if the user picks option B on a surface, invoke `/nanite` or `/doc-note` from there. This skill is the checklist, not the capture mechanism.
 - Analyze code quality or flag technical debt — use `/deep-review` for that.
 - Update `~/.nanite/docs/nanite-framework.md` or any framework doc — that's the agentrc-manager role's job.
 

@@ -1,5 +1,5 @@
 # nanite global framework config
-version: 2.3.0
+version: 2.4.0
 
 # ─── Roles ───────────────────────────────────────────────
 # Domain roles define *what kind of work* (backend, frontend, reviewer)
@@ -57,8 +57,8 @@ roles:
 # Skills and tools loaded for every agent, on top of agent-specific lists.
 # Agent-specific skills/tools are additive — they never replace defaults.
 
-default_skills: [fast-triage, end-of-session, escalate, search-first, capture-to-vanta]
-default_tools:  [clockwork, vanta, hadron, cerberus]
+default_skills: [fast-triage, end-of-session, escalate, doc-search, doc-note]
+default_tools:  [clockwork, tesseract, hadron, cerberus]
 
 # ─── Docs ────────────────────────────────────────────────
 # Framework reference doc. nanite-agent-manager role keeps this current.
@@ -90,7 +90,7 @@ docs:
 
 projects:
   # Fragments Engine (legacy monorepo — superseded by Clockwork Manifold for task/sprint/project
-  # management. Repo retained as read-only history; do not boot for new work. Conduit, cortex, and
+  # management. Repo retained as read-only history; do not boot for new work. Historical modules
   # libs were extracted into standalone repos elsewhere in ~/Projects-apps.)
   fragments-engine:
     root: ~/Projects-apps/fragments-engine
@@ -101,7 +101,7 @@ projects:
 
   # Individual project entries (standalone repos)
   engine:         { root: ~/Projects-apps/fragments-engine/engine, lang: go, description: "Legacy task/sprint/project core — superseded by clockwork-manifold; read-only history" }
-  vanta-conduit:  { root: ~/Projects-apps/vanta-conduit, lang: go, description: "Vanta Conduit — context memory, RAG, and document storage" }
+  tesseract:      { root: ~/dev/hollis-labs/apps/tesseract, lang: go, description: "Tesseract v0.9 — context, memory, and knowledge runtime" }
 
   # Shared Go libraries monorepo (formerly fragments-engine/libs)
   framework:
@@ -119,7 +119,7 @@ projects:
 
   # Services
   hadron:    { root: ~/Projects-apps/hadron, lang: go, description: Blueprint automation engine }
-  nanite:    { root: ~/Projects-apps/nanite, lang: go, description: RAG and document ingestion }
+  nanite:    { root: ~/dev/hollis-labs/apps/nanite, lang: go, description: "CLI agent framework and plugin host" }
   cerberus:  { root: ~/Projects-apps/cerberus, lang: go, description: Service lifecycle manager }
   carrier:   { root: ~/Projects-apps/carrier, description: Message transport layer }
   nexus:     { root: ~/Projects-apps/nexus, lang: go, description: Agent discovery and routing }

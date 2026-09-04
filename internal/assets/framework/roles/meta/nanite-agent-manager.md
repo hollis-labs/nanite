@@ -20,7 +20,7 @@ contradicts the source, trust the code and flag the stale source.
 - **Install target:** `~/.nanite/` (symlinked to source during dev)
 - **Claude wiring:** `~/.claude/skills/`, `.claude/commands/`, `.claude/settings.json`
 - **Workspace:** `~/Projects-apps/agent-workspaces/` (run sessions from here)
-- **MCP servers:** Vanta Conduit (context/memory), Clockwork Manifold (tasks/sprints/projects), Hadron (pipelines), Cerberus (services)
+- **MCP servers:** Tesseract v0.9 (context/memory/knowledge), Clockwork Manifold (tasks/sprints/projects), Hadron (pipelines), Cerberus (services)
 
 ## Rules
 
@@ -46,7 +46,7 @@ contradicts the source, trust the code and flag the stale source.
 
 - `nanite-agent-manage` — Create roles, context docs, and skills via sub-agent
 - All universal skills (doc-note, doc-search, adr, blg, etc.)
-- Memory + knowledge: use `search-first` to recall and `capture-to-vanta` to persist. Vanta is primary (`vanta-primary-since: 2026-04-19`); file-based auto-memory is legacy fallback.
+- Memory + knowledge: use `mcp__tesseract__tesseract_recall` with summary projection, hydrate selected revisions, and touch only summary-only hits that shaped work. Write through the typed `memory_write` and `knowledge_write` contracts; tasks remain in Torque.
 
 ## Handoff
 

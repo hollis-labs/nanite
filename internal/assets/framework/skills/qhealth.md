@@ -29,7 +29,7 @@ Services:
   | Service | URL | Endpoint |
   |---------|-----|----------|
   | Clockwork GUI | http://127.0.0.1:8085 | /v1/tasks |
-  | Conduit | http://127.0.0.1:8080 | /v1/health/readiness |
+  | Tesseract | http://127.0.0.1:8089 | /v1/health/readiness |
   | Hadron | http://127.0.0.1:8095 | /v1/health |
 
 Also check Cerberus daemon:
@@ -39,7 +39,7 @@ Return this EXACT format and nothing else:
 
 === QHEALTH ===
 Clockwork [UP/DOWN]  <http_code>  <latency>ms
-Conduit   [UP/DOWN]  <http_code>  <latency>ms
+Tesseract [UP/DOWN]  <http_code>  <latency>ms
 Hadron    [UP/DOWN]  <http_code>  <latency>ms
 Cerberus  [UP/DOWN]  <N> services managed, <M> running
 ================
@@ -55,3 +55,4 @@ Display the sub-agent's response directly. No additional commentary.
 - Read-only — no state changes
 - 3s timeout per service, 15s max total
 - Always show all services even if down
+- Tesseract's released default address is `:8089`; use the deployment's configured address when it is explicitly overridden

@@ -42,10 +42,10 @@ type InstallHomeOptions struct {
 //  2. If the target exists, extract into a sibling staging dir
 //     (<target>.staging.<pid>-<nanos>) so a crash mid-extract cannot leave
 //     the live install in a mixed-version state.
-//  3. ExtractTo preserves user-modified files by default (it skips when
-//     bytes differ). For the staging path we pre-seed the staging dir with
-//     a copy of the current install so those "skip" decisions can still be
-//     observed, then ExtractTo runs against the staging copy.
+//  3. ExtractTo upgrades files matching a known shipped historical digest and
+//     preserves files that differ from every known version. For the staging
+//     path we pre-seed a copy of the current install so those per-file upgrade
+//     and conflict decisions can be made without touching the live tree.
 //  4. On success, os.Rename(target -> target.bak.<ts>) then
 //     os.Rename(staging -> target). Both renames are single-directory
 //     operations so they are atomic on POSIX.
@@ -54,8 +54,8 @@ type InstallHomeOptions struct {
 //     but the staging rename fails, the backup is preserved for manual
 //     recovery and a wrapped error is returned.
 //
-// Skips user-modified files unless Force is set. Returns the extract report
-// from assets.ExtractTo.
+// Preserves user-modified files with deterministic conflict snapshots unless
+// Force is set. Returns the extract report from assets.ExtractTo.
 func (s *Service) InstallHome(opts InstallHomeOptions) (*assets.ExtractReport, error) {
 	if err := Preflight(); err != nil {
 		return nil, err

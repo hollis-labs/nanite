@@ -1,40 +1,21 @@
 #!/usr/bin/env node
-// generate-plugin-imports.mjs
-// Generates ui/src/generated/plugin-envelopes.ts from the go-envelopes
-// canonical manifest (../go-envelopes/manifest/envelopes.yaml).
-//
-// After Phase 2 Track D.3, all compiled-in envelopes are core. Runtime plugin
-// envelopes are registered dynamically via the plugin registry (see
-// ui/src/lib/plugin-loader.ts) — they do not participate in codegen.
-//
-// Usage:
-//   node scripts/generate-plugin-imports.mjs          # generate
-//   node scripts/generate-plugin-imports.mjs --check  # validate only (CI)
+// Generates Nanite's React loader registry from the module-owned go-envelopes
+// catalog. Generic manifest/schema parsing stays in go-envelopes; this file
+// owns only Nanite's component existence checks and host presentation policy.
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const ROOT = resolve(__dirname, '..');
+import { exportCatalog } from './lib/envelope-catalog.mjs';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUTPUT_FILE = join(ROOT, 'ui', 'src', 'generated', 'plugin-envelopes.ts');
 const UI_SRC = join(ROOT, 'ui', 'src');
-const MANIFEST_PATH = resolve(ROOT, '..', '..', 'libs', 'go-envelopes', 'manifest', 'envelopes.yaml');
-
 const CHECK_MODE = process.argv.includes('--check');
 
-// Local host-side overrides for core envelope entries whose frontend mapping
-// intentionally leads the manifest. This keeps generated output stable without
-// requiring edits in the shared go-envelopes repo for host-only renderers.
-//
-// CW-20260517-0006: the interactive cards below override `props` to
-// `"envelope"` so EnvelopeRenderer hands them the whole envelope wrapper.
-// They need it to read `envelope.prior_response` and hydrate a persisted
-// decision after a page reload — the discriminated `approval` / `proposal`
-// props strip the wrapper, hiding `prior_response`. This is a host-side
-// rendering concern, so the override leads the shared manifest here rather
-// than requiring an edit in the go-envelopes repo.
+// These interactive cards need the complete wrapper so persisted responses
+// hydrate after reload. This is a Nanite renderer policy, not schema metadata.
 const CORE_OVERRIDES = {
   'approval-card': { props: 'envelope' },
   'proposal-card': { props: 'envelope' },
@@ -43,142 +24,64 @@ const CORE_OVERRIDES = {
   'elicitation-prompt': { props: 'envelope' },
 };
 
-// --- Minimal YAML parser (handles the flat list-of-objects subset we need) ---
-
-function parseYamlList(content, sectionKey) {
-  const entries = [];
-  const lines = content.split('\n');
-  let inSection = false;
-  let currentEntry = null;
-
-  for (const line of lines) {
-    const trimmed = line.trimEnd();
-
-    if (new RegExp(`^${sectionKey}:\\s*$`).test(trimmed)) {
-      inSection = true;
-      continue;
-    }
-    if (/^\S/.test(trimmed) && !trimmed.startsWith('#') && trimmed !== '') {
-      if (inSection) {
-        break;
-      }
-      continue;
-    }
-
-    if (!inSection) continue;
-    if (trimmed.trim() === '' || trimmed.trim().startsWith('#')) continue;
-
-    const listMatch = trimmed.match(/^\s+-\s+(\w+):\s*(.+)$/);
-    if (listMatch) {
-      if (currentEntry) entries.push({ ...currentEntry });
-      currentEntry = {};
-      currentEntry[listMatch[1]] = listMatch[2].trim();
-      continue;
-    }
-
-    const listStartOnly = trimmed.match(/^\s+-\s+(\w+):\s*$/);
-    if (listStartOnly) {
-      if (currentEntry) entries.push({ ...currentEntry });
-      currentEntry = {};
-      currentEntry[listStartOnly[1]] = '';
-      continue;
-    }
-
-    const kvMatch = trimmed.match(/^\s+(\w+):\s*(.+)$/);
-    if (kvMatch && currentEntry) {
-      currentEntry[kvMatch[1]] = kvMatch[2].trim();
-    }
-  }
-
-  if (currentEntry) entries.push({ ...currentEntry });
-  return entries;
-}
-
-// --- Schema validation (subset — checks required fields, patterns, constraints) ---
-
-function validateManifest(entries) {
-  const errors = [];
-  const typePattern = /^[a-z][a-z0-9-]+$/;
-  const exportPattern = /^[A-Z][A-Za-z0-9]+$/;
-  const seen = new Set();
-
-  if (!entries || entries.length === 0) {
-    errors.push('Manifest must have at least one core entry');
-    return errors;
-  }
-
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i];
-    const prefix = `core[${i}]`;
-
-    if (!e.type) {
-      errors.push(`${prefix}: missing required field "type"`);
-      continue;
-    }
-    if (!typePattern.test(e.type)) {
-      errors.push(`${prefix}: type "${e.type}" must match ${typePattern}`);
-    }
-    if (seen.has(e.type)) {
-      errors.push(`${prefix}: duplicate type "${e.type}"`);
-    }
-    seen.add(e.type);
-
-    if (e.component && !e.export) {
-      errors.push(`${prefix} (${e.type}): "component" requires "export"`);
-    }
-    if (e.export && !e.component) {
-      errors.push(`${prefix} (${e.type}): "export" requires "component"`);
-    }
-    if (e.export && !exportPattern.test(e.export)) {
-      errors.push(`${prefix} (${e.type}): export "${e.export}" must match ${exportPattern}`);
-    }
-    if (e.props !== undefined && !['approval', 'proposal', 'envelope'].includes(e.props)) {
-      errors.push(`${prefix} (${e.type}): props "${e.props}" must be one of "approval" | "proposal" | "envelope"`);
-    }
-  }
-
-  return errors;
-}
-
-// --- Code generation ---
-
 const VALID_PROPS = new Set(['approval', 'proposal', 'envelope']);
 
-function generateLazyImport(type, component, exportName) {
-  return `  "${type}": {
-    component: lazy(() =>
-      import("@/${component}").then((m) => ({
-        default: m.${exportName},
-      })),
-    ),`;
+function coreEntries(catalog) {
+  return catalog.types.map((entry) => {
+    if (entry.source !== 'core') {
+      throw new Error(`build-time catalog unexpectedly contains non-core type ${entry.name}`);
+    }
+    const metadata = entry.typescript?.import ?? {};
+    return {
+      type: entry.name,
+      component: metadata.component,
+      export: metadata.export,
+      props: CORE_OVERRIDES[entry.name]?.props ?? metadata.props,
+    };
+  });
 }
 
-function generateOutput(coreEntries) {
-  const coreWithComponents = coreEntries.filter(e => e.component && e.export);
-  const coreWithoutComponents = coreEntries.filter(e => !e.component);
-
-  const coreLines = coreWithComponents.map(e => {
-    let propsLine = '';
-    if (e.props) {
-      if (!VALID_PROPS.has(e.props)) {
-        throw new Error(`envelope ${e.type}: props "${e.props}" must be one of ${[...VALID_PROPS].join(', ')}`);
-      }
-      propsLine = `\n    props: "${e.props}",`;
+function validateHostMetadata(entries) {
+  for (const entry of entries) {
+    if (Boolean(entry.component) !== Boolean(entry.export)) {
+      throw new Error(`envelope ${entry.type}: component and export must be provided together`);
     }
-    return `${generateLazyImport(e.type, e.component, e.export)}
-    source: "core",${propsLine}
-  },`;
-  });
-
-  let coreComment = '';
-  if (coreWithoutComponents.length > 0) {
-    coreComment = `\n  // Backend-only types (no frontend component): ${coreWithoutComponents.map(e => e.type).join(', ')}`;
+    if (entry.props && !VALID_PROPS.has(entry.props)) {
+      throw new Error(
+        `envelope ${entry.type}: props ${JSON.stringify(entry.props)} must be one of ${[...VALID_PROPS].join(', ')}`,
+      );
+    }
+    if (entry.component) {
+      const componentPath = join(UI_SRC, `${entry.component}.tsx`);
+      if (!existsSync(componentPath)) {
+        throw new Error(`envelope ${entry.type}: component not found: ${componentPath}`);
+      }
+    }
   }
+}
+
+function generateLazyImport(entry) {
+  const props = entry.props ? `\n    props: ${JSON.stringify(entry.props)},` : '';
+  return `  ${JSON.stringify(entry.type)}: {
+    component: lazy(() =>
+      import(${JSON.stringify(`@/${entry.component}`)}).then((m) => ({
+        default: m.${entry.export},
+      })),
+    ),
+    source: "core",${props}
+  },`;
+}
+
+export function generateOutput(entries, source) {
+  const withComponents = entries.filter((entry) => entry.component && entry.export);
+  const withoutComponents = entries.filter((entry) => !entry.component);
+  const backendOnly = withoutComponents.length
+    ? `\n  // Backend-only types (no frontend component): ${withoutComponents.map((entry) => entry.type).join(', ')}`
+    : '';
 
   return `// AUTO-GENERATED by scripts/generate-plugin-imports.mjs — do not edit manually.
-// Core entries from ../go-envelopes/manifest/envelopes.yaml. Runtime plugin
-// envelopes are registered dynamically via plugin-loader.ts and resolved by
-// getDynamicEnvelope.
+// Source: ${source.module}@${source.moduleVersion}; manifest ${source.manifestDigest}.
+// Runtime plugin envelopes are registered dynamically via plugin-loader.ts.
 // Run \`npm run generate:plugins\` to regenerate.
 import { lazy } from "react";
 import type { ComponentType } from "react";
@@ -196,9 +99,9 @@ export interface EnvelopeRegistryEntry {
   props?: "approval" | "proposal" | "envelope";
 }
 
-// --- CORE ENVELOPES (generated from ../go-envelopes/manifest/envelopes.yaml) ---
-const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {${coreComment}
-${coreLines.join('\n')}
+// --- CORE ENVELOPES (generated from the released go-envelopes catalog) ---
+const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {${backendOnly}
+${withComponents.map(generateLazyImport).join('\n')}
 };
 
 // Compiled-in registry — core only. Runtime plugins resolve via getDynamicEnvelope.
@@ -222,7 +125,6 @@ export function getEnvelopeComponent(
     return entry;
   }
 
-  // Fallback: check dynamically loaded plugins (skip in recover mode).
   if (recoverMode) return undefined;
   const dynamic = getDynamicEnvelope(type);
   if (!dynamic) return undefined;
@@ -231,68 +133,34 @@ export function getEnvelopeComponent(
 `;
 }
 
-// --- Main ---
-
 function main() {
-  console.log('Envelope codegen: generating plugin-envelopes.ts');
+  let catalog;
+  try {
+    catalog = exportCatalog(ROOT);
+    const entries = coreEntries(catalog);
+    validateHostMetadata(entries);
+    const output = generateOutput(entries, catalog.source);
 
-  if (!existsSync(MANIFEST_PATH)) {
-    console.error(`ERROR: Core envelope manifest not found: ${MANIFEST_PATH}`);
-    process.exit(1);
-  }
-
-  const manifestContent = readFileSync(MANIFEST_PATH, 'utf-8');
-  const coreEntries = parseYamlList(manifestContent, 'core').map((entry) => ({
-    ...entry,
-    ...(CORE_OVERRIDES[entry.type] ?? {}),
-  }));
-
-  const validationErrors = validateManifest(coreEntries);
-  if (validationErrors.length > 0) {
-    console.error('ERROR: Envelope manifest validation failed:');
-    for (const err of validationErrors) {
-      console.error(`  - ${err}`);
-    }
-    process.exit(1);
-  }
-
-  for (const e of coreEntries) {
-    if (e.component) {
-      const componentPath = join(UI_SRC, e.component + '.tsx');
-      if (!existsSync(componentPath)) {
-        console.error(`ERROR: Core envelope "${e.type}" — component not found: ${componentPath}`);
+    if (CHECK_MODE) {
+      if (!existsSync(OUTPUT_FILE) || readFileSync(OUTPUT_FILE, 'utf8') !== output) {
+        console.error('CHECK FAILED: generated plugin envelope registry is stale.');
+        console.error('Run: npm run generate:plugins');
         process.exit(1);
       }
+      console.log('Plugin envelope registry is up to date.');
+      return;
     }
-  }
 
-  console.log(`  Core: ${coreEntries.length} type(s) from ${MANIFEST_PATH}`);
-
-  if (CHECK_MODE) {
-    const output = generateOutput(coreEntries);
-    if (existsSync(OUTPUT_FILE)) {
-      const existing = readFileSync(OUTPUT_FILE, 'utf-8');
-      if (existing === output) {
-        console.log('  CHECK PASSED: generated file is up to date');
-        process.exit(0);
-      } else {
-        console.error('  CHECK FAILED: generated file is out of date — run npm run generate:plugins');
-        process.exit(1);
-      }
-    } else {
-      console.error('  CHECK FAILED: generated file does not exist');
-      process.exit(1);
-    }
-  }
-
-  const output = generateOutput(coreEntries);
-  writeFileSync(OUTPUT_FILE, output, 'utf-8');
-  console.log(`  Written: ${OUTPUT_FILE}`);
-
-  for (const e of coreEntries) {
-    const status = e.component ? `-> ${e.component}` : '(backend-only)';
-    console.log(`    [core] ${e.type} ${status}`);
+    writeFileSync(OUTPUT_FILE, output, 'utf8');
+    console.log(
+      `Generated ${entries.length} core envelope registry entries from ${catalog.source.module}@${catalog.source.moduleVersion}`,
+    );
+  } catch (error) {
+    console.error(`Envelope registry generation failed: ${error.message}`);
+    process.exit(1);
   }
 }
 
-main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}

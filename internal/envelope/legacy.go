@@ -3,7 +3,6 @@ package envelope
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"time"
 
@@ -76,9 +75,8 @@ func LegacyTypeName(bare string) string {
 
 // RegisterOrphans registers every entry in OrphanTypes against reg using
 // the lib's RegisterTypeFromManifest path with pluginID = nanite-legacy.
-// Schemas are read from envelopes.EmbeddedFS() at the canonical
-// manifest/schemas/<type>.schema.json path. Returns the count of types
-// successfully registered and the first error encountered (if any).
+// Schema source comes from the module-owned export catalog. Returns the count
+// of types successfully registered and the first error encountered (if any).
 //
 // Best-effort by design: if a single orphan fails to load (e.g. the lib
 // drops a schema in a future release) the rest still register and the
@@ -87,13 +85,19 @@ func RegisterOrphans(reg *envelopes.Registry) (registered int, err error) {
 	if reg == nil {
 		return 0, fmt.Errorf("envelope: nil registry")
 	}
-	libFS := envelopes.EmbeddedFS()
+	catalog, catalogErr := reg.ExportCatalog()
+	if catalogErr != nil {
+		return 0, fmt.Errorf("export envelope catalog: %w", catalogErr)
+	}
+	schemas := make(map[string][]byte, len(catalog.Schemas))
+	for _, resource := range catalog.Schemas {
+		schemas[resource.Type] = resource.Document
+	}
 	for _, bare := range OrphanTypes {
-		schemaPath := "manifest/schemas/" + bare + ".schema.json"
-		schemaBytes, readErr := fs.ReadFile(libFS, schemaPath)
-		if readErr != nil {
+		schemaBytes := schemas[bare]
+		if len(schemaBytes) == 0 {
 			if err == nil {
-				err = fmt.Errorf("read orphan %q schema: %w", bare, readErr)
+				err = fmt.Errorf("orphan %q schema not present in envelope catalog", bare)
 			}
 			continue
 		}

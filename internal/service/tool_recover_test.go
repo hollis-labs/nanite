@@ -13,7 +13,7 @@ import (
 // C1 acceptance check at the harness boundary: a bad card_show
 // payload comes back with IsError=true and a JSON envelope carrying
 // kind=schema_validation, the missing-field reason, a suggestion that
-// names 'metrics', and the stable mem://...report-card schema URI.
+// names 'metrics', and the stable module-owned embedded:// schema URI.
 func TestClassifyAndFormatToolError_SchemaValidation_EmitsAgentEnvelope(t *testing.T) {
 	// Real validator path so we test against the production error type.
 	err := envelope.ValidateData("report-card", map[string]any{"title": "x"})
@@ -43,8 +43,8 @@ func TestClassifyAndFormatToolError_SchemaValidation_EmitsAgentEnvelope(t *testi
 	if env["tool"] != "card_show" {
 		t.Errorf("envelope tool = %v, want card_show", env["tool"])
 	}
-	if uri, _ := env["schema_uri"].(string); !strings.HasSuffix(uri, "report-card.schema.json") || !strings.HasPrefix(uri, "mem://") {
-		t.Errorf("schema_uri must be the stable mem:// form, got %q", uri)
+	if uri, _ := env["schema_uri"].(string); uri != "embedded://manifest/schemas/report-card.schema.json" {
+		t.Errorf("schema_uri must be the stable module-owned form, got %q", uri)
 	}
 	if reason, _ := env["reason"].(string); reason == "" {
 		t.Errorf("expected a reason in the envelope: %+v", env)

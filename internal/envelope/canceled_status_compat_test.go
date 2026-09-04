@@ -13,26 +13,19 @@ import (
 // 'cancelled' to 'canceled' break envelopes already persisted with the old
 // spelling when they are read back?
 //
-// Answer, derived from the code rather than assumed: NO, and the reason is
-// that the read path never consults the JSON Schema at all. Two independent
-// mechanisms are asserted below, because the safety rests on the gap between
-// them:
+// Answer: NO. The released v0.4.x contract now supplies two independent
+// compatibility mechanisms:
 //
-//   - The EMIT path (envelope.ValidateData, reached from
-//     executor/envelope_render and selftools' transport) does enforce the enum.
-//     This is where the contract change bites, and it is the intended effect.
+//   - Schema validation accepts the legacy double-l spelling as input during the bounded
+//     v0.4.x read-compatibility window. New output still uses "canceled".
 //   - The READ path (chat.ParseEnvelopes -> chat.ValidateEnvelope, the only
 //     validation applied to envelope blocks recovered from stored assistant
 //     message content) checks kind, version and type-registration only. It
 //     never loads a schema, so no `data` value — including a status the schema
 //     no longer lists — can fail it.
 //
-// Because of that gap, neither a tolerant reader nor a JSON backfill of stored
-// envelope blocks was added. That is a deliberate decision, not an omission:
-// there is nothing on the read path to be tolerant *of*. Migration 148 does
-// still backfill envelope_instances.response_status and the envelope_response
-// message prefix, which are separate persisted surfaces that carry a status
-// string outside any envelope `data` blob.
+// Migration 148 still backfills envelope_instances.response_status and the
+// envelope_response message prefix, which are separate persisted surfaces.
 //
 // Supporting measurement (2026-08-24, this session): the live dev database and
 // the operator backup both hold zero persisted session-task envelopes and zero
@@ -51,11 +44,9 @@ import (
 // a fixed one are not the same thing.)
 const legacyStatus = "cancelled"
 
-// TestSessionTaskEmitPathEnforcesUSEnglishStatus pins the intended contract
-// change. Both directions are asserted: a bare rejection test would also pass
-// against a schema that rejected everything, and a bare acceptance test would
-// pass against a schema with no enum at all.
-func TestSessionTaskEmitPathEnforcesUSEnglishStatus(t *testing.T) {
+// TestSessionTaskValidationAcceptsV04CompatibilityStatus pins the released
+// v0.4.x read contract while proving the enum still rejects unknown values.
+func TestSessionTaskValidationAcceptsV04CompatibilityStatus(t *testing.T) {
 	base := func(status string) map[string]any {
 		return map[string]any{"task_id": "t-1", "title": "Probe", "status": status}
 	}
@@ -64,12 +55,12 @@ func TestSessionTaskEmitPathEnforcesUSEnglishStatus(t *testing.T) {
 		t.Errorf("session-task status=\"canceled\" rejected on the emit path, want accepted: %v", err)
 	}
 
-	err := envelope.ValidateData("session-task", base(legacyStatus))
-	if err == nil {
-		t.Errorf("session-task status=%q accepted on the emit path, want rejected — "+
-			"the go-envelopes manifest enum did not move", legacyStatus)
-	} else if !strings.Contains(err.Error(), "canceled") {
-		t.Errorf("rejection message does not name the accepted spelling, got: %v", err)
+	if err := envelope.ValidateData("session-task", base(legacyStatus)); err != nil {
+		t.Errorf("session-task legacy status=%q rejected during the v0.4.x compatibility window: %v", legacyStatus, err)
+	}
+
+	if err := envelope.ValidateData("session-task", base("not-a-status")); err == nil {
+		t.Error("session-task accepted an unknown status; compatibility must not disable enum validation")
 	}
 
 	// Control: the untouched members of the same enum still validate, proving

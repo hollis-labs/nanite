@@ -11,10 +11,8 @@ import (
 	envelopes "github.com/hollis-labs/go-envelopes"
 )
 
-// TestEnvelopeRegistrySync verifies that every core envelope type declared
-// in the go-envelopes manifest (../go-envelopes/manifest/envelopes.yaml,
-// the source of truth post Cap-5 migration) has a matching entry in the
-// generated frontend registry (ui/src/generated/plugin-envelopes.ts).
+// TestEnvelopeRegistrySync verifies that every core component declared by the
+// released go-envelopes catalog has a matching generated frontend entry.
 func TestEnvelopeRegistrySync(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -38,7 +36,7 @@ func TestEnvelopeRegistrySync(t *testing.T) {
 	// Check that every manifest entry with a component appears in the TS registry.
 	var missing []string
 	for _, spec := range registry.All() {
-		component, _ := spec.UIMetadata["component"].(string)
+		component := spec.TypeScript.Import.Component
 		if component == "" {
 			continue // backend-only type, no frontend component expected
 		}

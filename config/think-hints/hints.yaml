@@ -28,10 +28,10 @@ hints:
       scope_tier_in: [trivial, small, medium, large, open]
     priority: 40
 
-  - id: memory_recall
-    affordance: memory_recall
+  - id: tesseract_recall
+    affordance: tesseract_recall
     body: >-
-      **Memory** (nanite_memory_recall/save): recall durable facts before
+      **Memory** (tesseract_recall/memory_write): recall durable facts before
       research or planning; save conclusions after.
     triggers:
       scope_tier_in: [small, medium, large, open]

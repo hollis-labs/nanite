@@ -13,10 +13,10 @@ import (
 
 // OrchestrationPlan represents the plan for executing decomposed sub-tasks.
 type OrchestrationPlan struct {
-	SubTasks    []SubTask `json:"sub_tasks"`
-	Aggregation string    `json:"aggregation"`
-	HasCortex   bool      `json:"has_cortex"` // whether Vanta Conduit is available for knowledge
-	PlanOnly    bool      `json:"plan_only"`  // true if no MCP services available to execute
+	SubTasks     []SubTask `json:"sub_tasks"`
+	Aggregation  string    `json:"aggregation"`
+	HasTesseract bool      `json:"has_tesseract"` // whether Tesseract is available for durable context
+	PlanOnly     bool      `json:"plan_only"`     // true if no MCP services available to execute
 }
 
 // SubTaskResult holds the result of executing a single sub-task.
@@ -55,12 +55,12 @@ func (o *Orchestrator) HasDecomposer() bool {
 }
 
 // BuildPlan creates an orchestration plan from a decomposition result.
-// It checks for Vanta Conduit availability for knowledge grounding.
+// It checks for Tesseract availability for knowledge grounding.
 func (o *Orchestrator) BuildPlan(ctx context.Context, decomposition *DecompositionResult, projectID string) (*OrchestrationPlan, error) {
 	plan := &OrchestrationPlan{
-		SubTasks:    decomposition.SubTasks,
-		Aggregation: decomposition.Aggregation,
-		HasCortex:   o.hasToolPrefix("conduit"),
+		SubTasks:     decomposition.SubTasks,
+		Aggregation:  decomposition.Aggregation,
+		HasTesseract: o.hasToolPrefix("tesseract"),
 	}
 
 	// If no MCP manager, return plan only.
@@ -70,9 +70,9 @@ func (o *Orchestrator) BuildPlan(ctx context.Context, decomposition *Decompositi
 		return plan, nil
 	}
 
-	// Check Vanta Conduit for relevant knowledge before executing sub-tasks.
-	if plan.HasCortex {
-		slog.Info("orchestrator: conduit available — sub-tasks can leverage agent knowledge")
+	// Check Tesseract for relevant knowledge before executing sub-tasks.
+	if plan.HasTesseract {
+		slog.Info("orchestrator: tesseract available — sub-tasks can leverage durable context")
 	}
 
 	return plan, nil

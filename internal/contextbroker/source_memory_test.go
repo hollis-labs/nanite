@@ -6,21 +6,27 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/memory"
-	conduit "github.com/hollis-labs/tesseract"
+	"github.com/hollis-labs/tesseract"
 )
 
-// newTestMemoryService spins up a real embedded Conduit instance backed by a
+// newTestMemoryService spins up a real embedded Tesseract instance backed by a
 // temp directory. Mirrors the fixture in internal/learnings/integration_test.go
 // so MemorySource's tests exercise the same backend as production.
 func newTestMemoryService(t *testing.T) *memory.Service {
 	t.Helper()
+	svc, _ := newTestMemoryServiceAndRoot(t)
+	return svc
+}
+
+func newTestMemoryServiceAndRoot(t *testing.T) (*memory.Service, *tesseract.Tesseract) {
+	t.Helper()
 	dir := t.TempDir()
-	c, err := conduit.Open(context.Background(), conduit.Config{RootDir: dir})
+	c, err := tesseract.Open(context.Background(), tesseract.Config{RootDir: dir})
 	if err != nil {
-		t.Fatalf("conduit.Open: %v", err)
+		t.Fatalf("tesseract.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	return memory.NewService(c.MemoryStore())
+	return memory.NewService(c.MemoryStore()), c
 }
 
 // seedTestMemory writes a single memory record so Recall has something to
@@ -143,7 +149,7 @@ func TestMemorySource_TimeoutShortCircuits(t *testing.T) {
 	}
 
 	// 1ns timeout virtually guarantees the recall context expires before
-	// Vanta returns. Fetch should swallow the timeout and return empty.
+	// Tesseract returns. Fetch should swallow the timeout and return empty.
 	items, err := src.Fetch(context.Background(), intent, 5000)
 	if err != nil {
 		t.Fatalf("timeout should be silent (nil error), got: %v", err)
@@ -178,6 +184,38 @@ func TestMemorySource_MinConfidenceZeroIsHonored(t *testing.T) {
 	}
 	if len(items) == 0 {
 		t.Fatalf("min_confidence=0 should return the low-confidence seed; got 0 items")
+	}
+}
+
+func TestMemorySourceTouchesOnlyReturnedResults(t *testing.T) {
+	svc, root := newTestMemoryServiceAndRoot(t)
+	namespace := memory.UserNamespace("default")
+	for _, key := range []string{"selected", "not_returned"} {
+		if err := svc.Store(context.Background(), memory.Memory{
+			Namespace: namespace, MemoryKey: key, Summary: "widget " + key,
+			Body: "widget details", Origin: "observation", Trigger: "manual",
+			Confidence: 0.9, SessionID: "test-session", Status: "canonical",
+		}); err != nil {
+			t.Fatalf("store %s: %v", key, err)
+		}
+	}
+
+	enabled := true
+	items, err := NewMemorySource(svc).Fetch(context.Background(), Intent{
+		QueryText: "widget", AutoRecall: &enabled, AutoRecallLimit: 1,
+	}, 5000)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("Fetch items=%+v err=%v", items, err)
+	}
+	var totalAccesses, touchedRows int
+	if err := root.MemoryStore().DB().QueryRowContext(context.Background(), `
+		SELECT COALESCE(SUM(access_count), 0),
+		       COALESCE(SUM(CASE WHEN access_count > 0 THEN 1 ELSE 0 END), 0)
+		FROM memory_state WHERE namespace = ?`, namespace).Scan(&totalAccesses, &touchedRows); err != nil {
+		t.Fatalf("read activation state: %v", err)
+	}
+	if totalAccesses != 1 || touchedRows != 1 {
+		t.Fatalf("accesses total=%d touched_rows=%d, want 1/1", totalAccesses, touchedRows)
 	}
 }
 

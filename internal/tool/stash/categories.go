@@ -32,11 +32,11 @@ var BuiltinCategories = map[string]string{
 	"url_decode": "http",
 
 	// Think / memory / context.
-	"think":           categoryContext,
-	"memory_recall":   categoryContext,
-	"memory_write":    categoryContext,
-	"engine_navigate": categoryContext,
-	"engine_refresh":  categoryContext,
+	"think":            categoryContext,
+	"tesseract_recall": categoryContext,
+	"memory_write":     categoryContext,
+	"engine_navigate":  categoryContext,
+	"engine_refresh":   categoryContext,
 
 	// Agent management + plans + todos.
 	"agent_create":    categoryAgent,

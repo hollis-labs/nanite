@@ -233,7 +233,7 @@ var ErrNoWrapper = errors.New("dispatch: no envelope wrapper configured")
 //  5. Wraps the output in an envelope.
 //  6. Returns the envelope. Raw worker output never leaves this function
 //     in a form the Chat agent can read — the envelope is the only
-//     conduit.
+//     channel.
 //
 // On any failure the primitive returns an error; the caller is
 // responsible for surfacing the failure to the user (typically via an

@@ -28,7 +28,7 @@ const (
 	// MinConfidence. The implementer prompt suggested 0.5; we keep 0.4 for
 	// continuity and let profiles raise the floor.
 	DefaultAutoRecallMinConfidence = 0.4
-	// DefaultAutoRecallTimeout caps the Vanta round-trip per turn. Memory
+	// DefaultAutoRecallTimeout caps the Tesseract round-trip per turn. Memory
 	// is enrichment, not identity — better to render an empty slot than
 	// hold the chat loop waiting on a slow recall.
 	DefaultAutoRecallTimeout = 2 * time.Second

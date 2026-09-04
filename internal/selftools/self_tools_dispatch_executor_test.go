@@ -242,7 +242,7 @@ func TestCallDispatchExecutor_PassesAllOptionalFields(t *testing.T) {
 		"user_request":         "summarize the sprint",
 		"data":                 map[string]any{"title": "Sprint"},
 		"sources": []any{
-			map[string]any{"tool_use_id": "toolu_01abc", "tool_name": "memory_recall", "note": "sprint state"},
+			map[string]any{"tool_use_id": "toolu_01abc", "tool_name": "tesseract_recall", "note": "sprint state"},
 		},
 		"context_handles": []any{
 			map[string]any{"source": "scratchpad", "key": "sprint:notes"},

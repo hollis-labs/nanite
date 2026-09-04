@@ -21,11 +21,11 @@ func TestApplyChatSurfaceFilter_DropsLensPrimitives(t *testing.T) {
 		{Name: "lesson_capture"},
 		{Name: "card_show"},
 		{Name: "dev_grep"},
-		{Name: "memory_recall"},
-		{Name: "knowledge_get"},
+		{Name: "tesseract_recall"},
+		{Name: "tesseract_get"},
 	}
 	got := applyChatSurfaceFilter(tools, dispatch.DefaultChatToolSurface())
-	wantNames := []string{"dev_grep", "knowledge_get", "memory_recall"}
+	wantNames := []string{"dev_grep", "tesseract_get", "tesseract_recall"}
 	if names := sortedNames(got); !sliceEq(names, wantNames) {
 		t.Errorf("applyChatSurfaceFilter names = %v, want %v", names, wantNames)
 	}
@@ -81,7 +81,7 @@ func TestSelectForAgent_ChatRoleStripsLensPrimitives(t *testing.T) {
 	}
 	// At least one of the non-lens companions must still be present so
 	// we know the filter didn't accidentally clear everything.
-	wantOne := map[string]bool{"dev_grep": true, "memory_recall": true, "knowledge_get": true}
+	wantOne := map[string]bool{"dev_grep": true, "tesseract_recall": true, "tesseract_get": true}
 	hit := false
 	for _, n := range names {
 		if wantOne[n] {
@@ -154,8 +154,8 @@ func buildToolClientWithLens(t *testing.T) *toolclient.ToolClient {
 		{Name: "lesson_capture", Description: "remember a one-sentence lesson (lens)"},
 		{Name: "card_show", Description: "render an envelope card"},
 		{Name: "dev_grep", Description: "search files for a pattern"},
-		{Name: "memory_recall", Description: "recall durable memory entries"},
-		{Name: "knowledge_get", Description: "fetch a knowledge entry by key"},
+		{Name: "tesseract_recall", Description: "recall durable memory entries"},
+		{Name: "tesseract_get", Description: "fetch an entry by key"},
 	})
 	return tc
 }

@@ -95,7 +95,7 @@ func testPathUnder(root, path string) bool {
 func TestNewTestAPI_TesseractDBIsTempIsolated(t *testing.T) {
 	a, _ := newTestAPI(t)
 	var dbFile string
-	rows, err := a.Services.Conduit.MemoryStore().DB().Query("PRAGMA database_list")
+	rows, err := a.Services.Tesseract.MemoryStore().DB().Query("PRAGMA database_list")
 	if err != nil {
 		t.Fatalf("PRAGMA database_list: %v", err)
 	}

@@ -187,24 +187,24 @@ func TestMaybeAppendFailureFooter_EmptyText_FooterStandalone(t *testing.T) {
 
 // CW-20260501-0013: c121-shaped reproducer. The exact failure that produced
 // the "I don't have access to a memory recall tool" hallucination — a single
-// tool error from memory_recall with reason "memory service not
+// tool error from tesseract_recall with reason "memory service not
 // configured" — must surface that reason verbatim in the next-turn footer.
 func TestMaybeAppendFailureFooter_C121Reproducer_VerbatimReasonInlined(t *testing.T) {
 	t.Setenv(failureFooterEnvVar, "")
 
 	refs := []chat.ToolCallRef{
-		{ID: "t1", Name: "memory_recall", Status: "error", ErrorReason: "memory service not configured"},
+		{ID: "t1", Name: "tesseract_recall", Status: "error", ErrorReason: "memory service not configured"},
 	}
 	// Use a body that does NOT contain any honesty marker so the footer fires.
 	got := maybeAppendFailureFooter("I'll get right on that.", refs)
 	if !strings.Contains(got, `"memory service not configured"`) {
 		t.Fatalf("c121 reproducer: verbatim reason missing from footer.\noutput:\n%s", got)
 	}
-	if !strings.Contains(got, "`memory_recall`") {
+	if !strings.Contains(got, "`tesseract_recall`") {
 		t.Fatalf("c121 reproducer: tool name missing from footer.\noutput:\n%s", got)
 	}
 	// Sanity: the inlined slot should be `tool` — "reason".
-	wantSubstr := "`memory_recall` — \"memory service not configured\""
+	wantSubstr := "`tesseract_recall` — \"memory service not configured\""
 	if !strings.Contains(got, wantSubstr) {
 		t.Fatalf("c121 reproducer: expected substring %q in footer.\noutput:\n%s", wantSubstr, got)
 	}

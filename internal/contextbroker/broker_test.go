@@ -96,10 +96,10 @@ func TestBrokerFetch_BudgetEnforcement(t *testing.T) {
 }
 
 func TestBrokerFetch_MultipleSources(t *testing.T) {
-	conduit := &mockSource{
-		name: "conduit",
+	tesseract := &mockSource{
+		name: "tesseract",
 		items: []ContextItem{
-			{Source: "conduit", Key: "c1", Content: "conduit data", TokenEstimate: 5, Relevance: 0.8},
+			{Source: "tesseract", Key: "c1", Content: "tesseract data", TokenEstimate: 5, Relevance: 0.8},
 		},
 	}
 	pcc := &mockSource{
@@ -109,7 +109,7 @@ func TestBrokerFetch_MultipleSources(t *testing.T) {
 		},
 	}
 
-	b := New(DefaultBudget(), conduit, pcc)
+	b := New(DefaultBudget(), tesseract, pcc)
 	packet, err := b.Fetch(context.Background(), Intent{Type: IntentCustom})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -124,7 +124,7 @@ func TestBrokerFetch_MultipleSources(t *testing.T) {
 
 func TestBrokerFetch_NormalizesRelevanceAcrossLiveSources(t *testing.T) {
 	sources := []*mockSource{
-		{name: "conduit", items: []ContextItem{{Source: "conduit", Key: "positive-infinity", TokenEstimate: 1, Relevance: math.Inf(1)}}},
+		{name: "tesseract", items: []ContextItem{{Source: "tesseract", Key: "positive-infinity", TokenEstimate: 1, Relevance: math.Inf(1)}}},
 		{name: "memory", items: []ContextItem{{Source: "memory", Key: "nan", TokenEstimate: 1, Relevance: math.NaN()}}},
 		{name: "pcc", items: []ContextItem{{Source: "pcc", Key: "negative", TokenEstimate: 1, Relevance: -0.25}}},
 		{name: "session", items: []ContextItem{
@@ -135,10 +135,10 @@ func TestBrokerFetch_NormalizesRelevanceAcrossLiveSources(t *testing.T) {
 	b := New(BudgetConfig{
 		MaxTokens: 100,
 		SourceWeights: map[string]float64{
-			"conduit": 0.25,
-			"memory":  0.25,
-			"pcc":     0.25,
-			"session": 0.25,
+			"tesseract": 0.25,
+			"memory":    0.25,
+			"pcc":       0.25,
+			"session":   0.25,
 		},
 	}, sources[0], sources[1], sources[2], sources[3])
 
@@ -211,20 +211,20 @@ func TestEstimateTokens(t *testing.T) {
 func TestFormatPacket(t *testing.T) {
 	packet := &ContextPacket{
 		Items: []ContextItem{
-			{Source: "conduit", Key: "app/test", Content: "test data"},
+			{Source: "tesseract", Key: "app/test", Content: "test data"},
 			{Source: "pcc", Key: "mentat/00_project.md", Content: "project info"},
 		},
 	}
 
 	result := FormatPacket(packet)
-	if !strings.Contains(result, "conduit") {
-		t.Error("expected conduit section in formatted output")
+	if !strings.Contains(result, "tesseract") {
+		t.Error("expected tesseract section in formatted output")
 	}
 	if !strings.Contains(result, "pcc") {
 		t.Error("expected pcc section in formatted output")
 	}
 	if !strings.Contains(result, "test data") {
-		t.Error("expected conduit content in formatted output")
+		t.Error("expected tesseract content in formatted output")
 	}
 }
 

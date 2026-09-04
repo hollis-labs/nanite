@@ -1,5 +1,5 @@
 // Package contextbroker provides universal context retrieval for Nanite.
-// It aggregates context from multiple sources (Vanta Conduit, Memory, PCC, Session)
+// It aggregates context from multiple sources (Tesseract, Memory, PCC, Session)
 // and returns a budget-bounded context packet for any consumer.
 //
 // This package will move to core/context during library consolidation.
@@ -30,7 +30,7 @@ type BudgetConfig struct {
 
 	// SourceWeights maps source names to relative weight (0.0–1.0).
 	// Sources not listed get equal share of remaining budget.
-	// Example: {"conduit": 0.3, "memory": 0.2, "pcc": 0.3, "session": 0.2}
+	// Example: {"tesseract": 0.3, "memory": 0.2, "pcc": 0.3, "session": 0.2}
 	SourceWeights map[string]float64
 }
 
@@ -39,17 +39,17 @@ func DefaultBudget() BudgetConfig {
 	return BudgetConfig{
 		MaxTokens: 50000,
 		SourceWeights: map[string]float64{
-			"conduit": 0.25,
-			"memory":  0.15,
-			"pcc":     0.30,
-			"session": 0.15,
+			"tesseract": 0.25,
+			"memory":    0.15,
+			"pcc":       0.30,
+			"session":   0.15,
 		},
 	}
 }
 
 // ContextSource is the interface that all context adapters must implement.
 type ContextSource interface {
-	// Name returns the source identifier (e.g. "conduit", "memory", "pcc", "session").
+	// Name returns the source identifier (e.g. "tesseract", "memory", "pcc", "session").
 	Name() string
 
 	// Fetch retrieves context items for the given intent within a token budget.
@@ -101,7 +101,7 @@ type Intent struct {
 	// so a missing override surfaces as a negative (e.g. -1) here.
 	AutoRecallMinConfidence float64
 
-	// AutoRecallTimeout, when > 0, caps the Vanta round-trip for this
+	// AutoRecallTimeout, when > 0, caps the Tesseract round-trip for this
 	// turn's recall. Zero means "use the source default" (currently 2s).
 	AutoRecallTimeout time.Duration
 }

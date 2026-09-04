@@ -26,7 +26,7 @@ import (
 //
 // CW-20260501-0001 (SP6 follow-up): the original implementation only
 // enumerated tools defined in `self_tools.go`, which silently hid tools
-// registered on sibling MCP servers (e.g. Vanta's `memory_recall`).
+// registered on sibling MCP servers (e.g. Tesseract's `tesseract_recall`).
 // The list now sources from the full MCP Manager surface (via the
 // ToolInventoryLookup interface).
 //

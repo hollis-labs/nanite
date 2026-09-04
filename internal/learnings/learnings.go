@@ -4,22 +4,18 @@
 //
 // Design rules (from the ticket and the lens doc):
 //
-//  1. Single Vanta integration boundary. The Recorder/Recaller talk to
+//  1. Single Tesseract integration boundary. The Recorder/Recaller talk to
 //     a narrow LearningStore interface; *memory.Service satisfies it in
 //     production, tests substitute an in-memory stub. The mcp/transport
-//     packages never touch Vanta directly — only through this package.
+//     packages never touch Tesseract directly — only through this package.
 //
-//  2. Namespaces obey Vanta's strict three-form contract. The ticket
-//     described a hierarchical namespace
-//     ("user/<user>/memory/learnings/tool_use/<tool>"); Vanta v0.4 only
-//     accepts `user/{user}/memory`, `user/{user}/project/{p}/memory`,
-//     `user/{user}/session/{s}/memory` (see vanta-conduit/internal/
-//     memory/namespaces.go). We map the requested scopes onto those
-//     forms and carry tool/scope identity in tags + memory_key:
+//  2. Namespaces obey Tesseract v0.9's typed memory contract. Learnings use
+//     the built-in `learnings` type and carry tool/scope identity in tags and
+//     memory_key:
 //
-//     tool_use → user/<user>/memory                (tag: tool:<tool>)
-//     project  → user/<user>/project/<id>/memory
-//     session  → user/<user>/session/<id>/memory
+//     tool_use → user/<user>/memory/learnings (tag: tool:<tool>)
+//     project  → user/<user>/project/<id>/memory/learnings
+//     session  → user/<user>/session/<id>/memory/learnings
 //
 //     Recall by tool name combines the user namespace with a
 //     tag-filter on `tool:<tool>`, so per-tool isolation still works
@@ -33,7 +29,7 @@
 //  4. Status defaults to "draft". Promotion is a separate review action
 //     (out of scope for v1).
 //
-//  5. Recall is best-effort. A nil Recaller, a Vanta error, or a timeout
+//  5. Recall is best-effort. A nil Recaller, a Tesseract error, or a timeout
 //     yields zero hints — never an error to the caller. Failing-open is
 //     the right call here: a missing learning hurts less than a blocked
 //     tool execution.
@@ -70,7 +66,7 @@ const DefaultUserID = "default"
 const MaxRecallHints = 2
 
 // RecallSimilarityThreshold is the minimum confidence/similarity score a
-// hit must clear before Recall surfaces it. Defensive — Vanta returns
+// hit must clear before Recall surfaces it. Defensive — Tesseract returns
 // confidence 0 for keyword-only hits when no embedder is present, so a
 // strict threshold could surface zero results in tests; we keep it loose
 // (>=0) and let MaxRecallHints + Limit do the gating.
@@ -114,10 +110,10 @@ func ScopeRequiresSubject(s Scope) bool {
 	return s == ScopeToolUse || s == ScopeProject || s == ScopeSession
 }
 
-// LearningStore is the narrow Vanta surface this package needs. The
+// LearningStore is the narrow Tesseract surface this package needs. The
 // production wiring satisfies it with *memory.Service; tests pass an
 // in-memory stub. Keeping the interface tight (Store + Recall only)
-// means a switch to a non-Vanta backend stays a one-file change.
+// means a switch to a different backend stays a one-file change.
 type LearningStore interface {
 	Store(ctx context.Context, m memory.Memory) error
 	Recall(ctx context.Context, opts memory.RecallOpts) ([]memory.Memory, error)
@@ -146,7 +142,7 @@ type CaptureInput struct {
 	SourceEventID string
 
 	// SessionID is the originating chat session. Required by the
-	// underlying Conduit memory store; falls back to "manual:nanite"
+	// underlying Tesseract memory store; falls back to "manual:nanite"
 	// when empty (matches memory.Service.Store's own fallback).
 	SessionID string
 
@@ -167,7 +163,7 @@ type CaptureOutcome struct {
 	// Stable across re-writes of the same hint (key is derived
 	// deterministically from the hint body).
 	MemoryID string `json:"memory_id"`
-	// Namespace is the full Conduit namespace string the entry
+	// Namespace is the full Tesseract namespace string the entry
 	// landed in.
 	Namespace string `json:"namespace"`
 }
@@ -268,25 +264,25 @@ func NewRecaller(store LearningStore) *Recaller {
 type Hint struct {
 	// Summary is the lesson body (the original hint sentence).
 	Summary string
-	// Confidence is the score Vanta returned for the hit.
+	// Confidence is the confidence Tesseract returned for the hit.
 	Confidence float64
 	// MemoryKey is stable across rewrites; useful for debug telemetry.
 	MemoryKey string
-	// Namespace is the Vanta namespace the entry came from.
+	// Namespace is the Tesseract namespace the entry came from.
 	Namespace string
 }
 
 // RecallByToolName returns up to MaxRecallHints learnings for the named
 // tool, surfaced from the user's tool_use bucket. Failing-open: a nil
-// recaller, a missing store, or a Vanta error returns (nil, nil) so
+// recaller, a missing store, or a Tesseract error returns nil so
 // callers don't have to defensively wrap every call site.
 //
 // userID empty falls back to DefaultUserID.
 //
 // Implementation note: tool_use entries land in the user-scoped
-// namespace (Vanta's strict three-form contract — see package doc), so
+// typed learnings namespace (see package doc), so
 // the tool identity is reconstructed from a `tool:<name>` tag. We pull
-// a generous slice from Vanta and tag-filter client-side because
+// a generous slice from Tesseract and tag-filter client-side because
 // memory.RecallOpts.Tags is an OR filter (matches any tag), not a
 // strict AND — surfacing the wrong tool's lessons would defeat the
 // whole layer.
@@ -302,7 +298,7 @@ func (r *Recaller) RecallByToolName(ctx context.Context, userID, toolName string
 	toolTag := "tool:" + SanitizeSubject(toolName)
 	opts := memory.RecallOpts{
 		Namespaces:    []string{ns},
-		Ranking:       "activation",
+		Ranking:       memory.RankingActivation,
 		Limit:         recallFetchLimit,
 		Tags:          []string{toolTag},
 		MinConfidence: RecallSimilarityThreshold,
@@ -315,7 +311,7 @@ func (r *Recaller) RecallByToolName(ctx context.Context, userID, toolName string
 	for _, m := range mems {
 		// Defensive: even though we asked for the tool-tag, a recall
 		// against the broad user namespace can surface other entries
-		// that share *any* of the requested tags (Conduit's filter is
+		// that share *any* of the requested tags (Tesseract's filter is
 		// permissive). Re-check.
 		if !hasTag(m.Tags, "learning") || !hasTag(m.Tags, toolTag) {
 			continue
@@ -336,7 +332,7 @@ func (r *Recaller) RecallByToolName(ctx context.Context, userID, toolName string
 	return hints
 }
 
-// recallFetchLimit is how many candidates we ask Vanta for before the
+// recallFetchLimit is how many candidates we ask Tesseract for before the
 // client-side strict-AND tag filter narrows to MaxRecallHints. Headroom
 // of 10x covers the common case where many learnings share the
 // "learning" tag but only a few share the per-tool tag.
@@ -353,18 +349,16 @@ func hasTag(tags []string, target string) bool {
 	return false
 }
 
-// Namespace returns the Conduit namespace string for a given scope +
+// Namespace returns the typed Tesseract namespace for a given scope +
 // subject. Public so the MCP handler can echo it back in the
 // CaptureOutcome and so tests can assert on the exact path without
 // reimplementing the formatter.
 //
-// Shape (constrained by Vanta's three-form namespace contract — see
-// package doc for the rationale and the `vanta-conduit/internal/memory/
-// namespaces.go` policy):
+// Shape (Tesseract v0.9 typed-memory namespace policy):
 //
-//	tool_use → user/<user>/memory                           (subject lives in tags + memory_key)
-//	project  → user/<user>/project/<subject>/memory
-//	session  → user/<user>/session/<subject>/memory
+//	tool_use → user/<user>/memory/learnings
+//	project  → user/<user>/project/<subject>/memory/learnings
+//	session  → user/<user>/session/<subject>/memory/learnings
 func Namespace(scope Scope, userID, subject string) string {
 	if userID == "" {
 		userID = DefaultUserID
@@ -372,13 +366,13 @@ func Namespace(scope Scope, userID, subject string) string {
 	subject = SanitizeSubject(subject)
 	switch scope {
 	case ScopeProject:
-		return fmt.Sprintf("user/%s/project/%s/memory", userID, subject)
+		return fmt.Sprintf("user/%s/project/%s/memory/learnings", userID, subject)
 	case ScopeSession:
-		return fmt.Sprintf("user/%s/session/%s/memory", userID, subject)
+		return fmt.Sprintf("user/%s/session/%s/memory/learnings", userID, subject)
 	case ScopeToolUse:
 		fallthrough
 	default:
-		return fmt.Sprintf("user/%s/memory", userID)
+		return fmt.Sprintf("user/%s/memory/learnings", userID)
 	}
 }
 
@@ -387,7 +381,7 @@ func Namespace(scope Scope, userID, subject string) string {
 // underscores, runs of underscores collapsed, leading/trailing
 // underscores trimmed.
 //
-// Vanta's namespace key constraint is `a-z 0-9 _` per segment (per the
+// Tesseract's namespace key constraint is `a-z 0-9 _` per segment (per the
 // global instruction note); we keep `-` here too because tool names
 // contain dashes (`my-tool`) and the wider memory layer accepts them.
 // Underscore canonicalization happens at the package boundary so
@@ -418,12 +412,12 @@ func SanitizeSubject(subject string) string {
 	return out
 }
 
-// keyKeepRE matches characters allowed in a Vanta memory_key (per the
+// keyKeepRE matches characters allowed in a Tesseract memory_key (per the
 // global instruction: `a-z 0-9 _` per segment).
 var keyKeepRE = regexp.MustCompile(`[^a-z0-9_]+`)
 
-// MaxMemoryKeyLen is Vanta's per-segment ceiling on memory_key length.
-// Pinned here so changes in vanta-conduit/internal/memory/keys.go
+// MaxMemoryKeyLen is Tesseract's per-segment ceiling on memory_key length.
+// Pinned here so upstream changes
 // (which currently caps at 64) surface as a deliberate update rather
 // than a silent runtime rejection.
 const MaxMemoryKeyLen = 64
@@ -435,12 +429,12 @@ const MaxMemoryKeyLen = 64
 // explicitly defers cross-key dedup to a follow-up).
 //
 // The scope/subject prefix matters because tool_use entries share a
-// single user namespace (Vanta's strict three-form rule); without the
+// single user learning namespace; without the
 // prefix two different tools' identical hint sentences would collapse
 // into one row.
 //
 // The result is truncated to MaxMemoryKeyLen so writes never trip
-// Vanta's per-segment length cap. Truncation favors the prefix
+// Tesseract's per-segment length cap. Truncation favors the prefix
 // (scope+subject) so different hints under the same (scope, subject)
 // still land in distinct keys when at all possible — within budget.
 func DeriveMemoryKey(scope Scope, subject, hint string) string {
@@ -497,7 +491,7 @@ func SystemPromptBlock(toolName string, hints []Hint) string {
 
 // buildTags assembles the canonical tag set for a learning. The order
 // matters for downstream consumers that pattern-match on the first tag
-// (Conduit treats tags as an unordered set, but human review tools
+// (Tesseract treats tags as an unordered set, but human review tools
 // often render them in insertion order).
 //
 // toolForTag is the sanitized tool name to encode as `tool:<name>`.

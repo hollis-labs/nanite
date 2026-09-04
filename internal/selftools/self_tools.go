@@ -217,7 +217,7 @@ func selfToolDefinitions() []mcp.Tool {
 					},
 					"project_id": map[string]any{
 						"type":        "string",
-						"description": "Filter by project ID (e.g. 'nanite', 'engine', 'conduit'). Optional.",
+						"description": "Filter by project ID (e.g. 'nanite', 'engine', 'tesseract'). Optional.",
 					},
 					"status": map[string]any{
 						"type":        "string",
@@ -831,8 +831,8 @@ without re-deriving from the transcript. Use it when you'd otherwise re-run a
 tool call to look up a value you already fetched, or when you need to accumulate
 state across multiple tool calls.
 
-**When NOT to use:** Do NOT use as long-term memory — that is Vanta
-(memory_write / memory_recall). Do NOT use to pass data to another agent
+**When NOT to use:** Do NOT use as long-term memory — that is Tesseract
+(memory_write / tesseract_recall). Do NOT use to pass data to another agent
 — that is peer_query. Do NOT use across sessions — the scratchpad clears on
 turn exit. This is NOT a replacement for the think tool: think is for reasoning
 within one LLM call; scratchpad_write is for persisting a value you want to
@@ -870,7 +870,7 @@ the key to read all current entries.
 
 **When NOT to use:** Do not use to read data from previous turns or other
 sessions — the scratchpad is cleared on turn exit and is per-generation only.
-For cross-session data use Vanta (memory_recall). For data from other agents
+For cross-session data use Tesseract (tesseract_recall). For data from other agents
 use peer_query.
 
 **Output shape:** {"entries": {key: value, ...}} — a map of matching entries.
@@ -920,7 +920,7 @@ the current turn for subsequent writes.
 				"compacted into a summary. Pass `target` (short code like `c248` / `#c248`, or session UUID) to " +
 				"search a SIBLING chat instead — e.g. recovering context from a crashed session or an earlier related chat.\n\n" +
 				"**Anti-pattern:** Do NOT use for general knowledge questions or external research — this only searches " +
-				"chat history. Use Vanta or web search for those.\n\n" +
+				"chat history. Use Tesseract or web search for those.\n\n" +
 				"**Scope boundary:** cross-session reads stay within your workspace. Targets in other workspaces are rejected.\n\n" +
 				"**Output shape:** Returns up to N snippets, each with: turn_id, role (user/assistant), excerpt with " +
 				"query highlighted, source (active|summary), compaction_event_id (if from a summary). When `target` " +

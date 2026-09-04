@@ -13,17 +13,19 @@ func TestLoadFrom_MergeProjectOverridesUser(t *testing.T) {
 	projectFile := filepath.Join(dir, "project.yaml")
 
 	userYAML := `
-vanta:
-  url: http://localhost:6810/mcp
-  server_name: vanta
+tesseract:
+  command: /usr/local/bin/tesseract
+  server_name: tesseract
+  env_allowlist: [PATH, HOME]
 `
 	projectYAML := `
 project:
   name: nanite
   root: ~/Projects-apps/nanite
 role: ops-managed
-vanta:
-  url: http://localhost:7000/mcp
+tesseract:
+  command: /opt/tesseract
+  env: [OPENAI_API_KEY=test-key]
 `
 	if err := os.WriteFile(userFile, []byte(userYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -45,13 +47,19 @@ vanta:
 		t.Errorf("Role = %q, want %q", cfg.Role, "ops-managed")
 	}
 
-	// Vanta merges per-field: project overrides URL, user's ServerName
-	// (unset by project) is preserved.
-	if cfg.Vanta.URL != "http://localhost:7000/mcp" {
-		t.Errorf("Vanta.URL = %q, want %q (project overrides user)", cfg.Vanta.URL, "http://localhost:7000/mcp")
+	// Tesseract merges per-field: project overrides Command and Env, while the
+	// user's ServerName and EnvAllowlist (unset by project) are preserved.
+	if cfg.Tesseract.Command != "/opt/tesseract" {
+		t.Errorf("Tesseract.Command = %q, want %q (project overrides user)", cfg.Tesseract.Command, "/opt/tesseract")
 	}
-	if cfg.Vanta.ServerName != "vanta" {
-		t.Errorf("Vanta.ServerName = %q, want %q (user-only field preserved)", cfg.Vanta.ServerName, "vanta")
+	if cfg.Tesseract.ServerName != "tesseract" {
+		t.Errorf("Tesseract.ServerName = %q, want %q (user-only field preserved)", cfg.Tesseract.ServerName, "tesseract")
+	}
+	if len(cfg.Tesseract.Env) != 1 || cfg.Tesseract.Env[0] != "OPENAI_API_KEY=test-key" {
+		t.Errorf("Tesseract.Env = %v, want project override", cfg.Tesseract.Env)
+	}
+	if len(cfg.Tesseract.EnvAllowlist) != 2 || cfg.Tesseract.EnvAllowlist[1] != "HOME" {
+		t.Errorf("Tesseract.EnvAllowlist = %v, want user value preserved", cfg.Tesseract.EnvAllowlist)
 	}
 }
 

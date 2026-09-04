@@ -57,7 +57,7 @@ func (d *badJSONDispatcher) Dispatch(_ context.Context, _ string) (string, error
 type proseWrappedDispatcher struct{}
 
 func (d *proseWrappedDispatcher) Dispatch(_ context.Context, _ string) (string, error) {
-	return `Here are the hints: ["scratchpad","memory_recall"] — done.`, nil
+	return `Here are the hints: ["scratchpad","tesseract_recall"] — done.`, nil
 }
 
 // -------------------------------------------------------------------
@@ -108,7 +108,7 @@ func TestThinkToolBlockWithDispatch_V2WhenPeerSucceeds(t *testing.T) {
 	t.Setenv("NANITE_THINK_BLOCK_V1", "true")
 	t.Setenv("NANITE_THINK_BLOCK_V2_ENABLED", "true")
 
-	disp := &okDispatcher{ids: []string{"scratchpad", "memory_recall"}}
+	disp := &okDispatcher{ids: []string{"scratchpad", "tesseract_recall"}}
 	got := ThinkToolBlockWithDispatch(context.Background(), disp, "write a plan", "large", "planner-mention")
 	// Should NOT be the static v1 block (it's dynamic).
 	if got == thinkToolBlockV1 {

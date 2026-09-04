@@ -64,7 +64,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
 
   // Fetch memories list to find the one being edited
   const { data } = useMemories({ limit: 1000 });
-  const memory: Memory | undefined = data?.memories.find((m) => m.memory_key === memoryKey);
+  const memory: Memory | undefined = data?.memories.find((m) => m.key === memoryKey);
 
   // Hydrate form when memory loads
   useEffect(() => {
@@ -84,7 +84,10 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
   const statusMutation = useUpdateMemoryStatus();
 
   const handleSave = useCallback(() => {
-    const data = { summary, body: body || undefined, origin, confidence, tags };
+    // The list endpoint deliberately returns full editable rows. Always send
+    // the actual form value so an explicit clear is distinct from an older
+    // projected client omitting body (which the server treats as unchanged).
+    const data = { summary, body, origin, confidence, tags };
     if (isCreate) {
       createMutation.mutate({ ...data, scope }, { onSuccess: onBack });
     } else if (memoryKey) {

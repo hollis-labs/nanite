@@ -47,17 +47,16 @@ func ResolveLayout(extra ...paths.Option) (paths.Layout, error) {
 const tesseractAppName = "tesseract"
 
 // ResolveTesseractLayout resolves the on-disk layout of the embedded
-// Tesseract memory store via go-apppaths, so nanite can point conduit.Open at
-// Tesseract's migrated context.db / records/ directly (CW-20260517-0061)
-// rather than relying on the Phase 2 ~/.tesseract → XDG compat symlink.
+// Tesseract memory store via go-apppaths, so Nanite can pass explicit DB and
+// records paths to tesseract.Open.
 //
 // Tesseract migrated under CW-20260517-0066: its main DB is
 // ~/.local/share/tesseract/workspaces/default/main.db and its records/ tree
 // is ~/.local/state/tesseract/records. WithoutMaterialize keeps this a pure
-// path computation — conduit.Open MkdirAll's the directories it needs.
+// path computation — tesseract.Open creates the directories it needs.
 //
 // This honors the TESSERACT_DB_PATH / TESSERACT_WORKSPACE env vars natively,
-// matching what the standalone contextd daemon resolves.
+// matching what the standalone tesseract process resolves.
 func ResolveTesseractLayout(extra ...paths.Option) (paths.Layout, error) {
 	opts := append([]paths.Option{paths.WithoutMaterialize()}, extra...)
 	return paths.Resolve(tesseractAppName, opts...)

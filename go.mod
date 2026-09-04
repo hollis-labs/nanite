@@ -85,7 +85,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.45.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.45.0
 	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.40.0
 	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.74.3 // indirect
@@ -104,6 +104,6 @@ require (
 	github.com/hollis-labs/go-scheduler v0.2.0
 	github.com/hollis-labs/go-sqlite v0.1.0
 	github.com/hollis-labs/go-workflow v0.1.0
-	github.com/hollis-labs/tesseract v0.7.1-0.20260518032333-bbce958849ac
+	github.com/hollis-labs/tesseract v0.9.0
 	github.com/pressly/goose/v3 v3.27.3
 )

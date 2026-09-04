@@ -180,7 +180,7 @@ type SelfToolsTransport struct {
 	// selfToolDefinitions() (the legacy SP6 behavior).
 	Inventory ToolInventoryLookup
 
-	// LearningRecorder is the Vanta-backed write surface for the D1
+	// LearningRecorder is the Tesseract-backed write surface for the D1
 	// lesson_capture self-tool (CW-20260429-0009). When unset, the
 	// tool returns a clear errorResult on every call so a wiring miss
 	// is visible rather than silently dropped.
@@ -409,7 +409,7 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		// nanite-side loopState). Return an actionable error instead of a
 		// bare "unknown tool" so the agent understands the tool is real but
 		// out of scope for this dispatch path.
-		return mcp.ErrorResult(fmt.Sprintf("%s is a per-turn tool backed by in-process chat-loop state; it is not available to CLI-launch sessions, which have no nanite-side turn loop. Use Vanta memory tools for state that must persist beyond a single call.", name)), nil
+		return mcp.ErrorResult(fmt.Sprintf("%s is a per-turn tool backed by in-process chat-loop state; it is not available to CLI-launch sessions, which have no nanite-side turn loop. Use Tesseract memory tools for state that must persist beyond a single call.", name)), nil
 	default:
 		return mcp.ErrorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}

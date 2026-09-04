@@ -65,7 +65,7 @@ const thinkBlockMaxTokens = 200
 //
 // Contract:
 //   - payload is a JSON object: {user_input, scope_tier, reflex_match, hint_catalog}
-//   - response is a JSON array of hint ID strings, e.g. ["scratchpad","memory_recall"]
+//   - response is a JSON array of hint ID strings, e.g. ["scratchpad","tesseract_recall"]
 //   - On failure (timeout, peer unavailable, etc.) return "", err.
 type HintDispatcher interface {
 	Dispatch(ctx context.Context, payload string) (string, error)

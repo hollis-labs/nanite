@@ -49,3 +49,6 @@ See `docs/` for architecture and demo script. Agent Workflows specifically are
 sequenced exclusively by the embedded `go-workflow v0.1.0` module and are
 documented in [the engine boundary](docs/architecture/workflow-engine.md) and
 [the operator runbook](docs/workflow-operations.md).
+
+Embedded-memory and external MCP operators upgrading to Tesseract v0.9 should
+follow [Nanite's Tesseract v0.9 migration guide](docs/tesseract-v0.9-migration.md).

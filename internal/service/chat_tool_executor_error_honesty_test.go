@@ -5,7 +5,7 @@ package service
 // tool_result content block verbatim, NEVER replaced by a truncation hint or
 // dropped to a cache pointer.
 //
-// c121 evidence: agent called memory_recall, tool returned
+// c121 evidence: agent called tesseract_recall, tool returned
 // errorResult("memory service not configured"), agent narrated "I don't have
 // access to a memory recall tool" — a fabricated non-existence claim.
 //
@@ -108,7 +108,7 @@ func runPostProcessForError(
 func TestPostProcess_ShortError_PreservedVerbatim(t *testing.T) {
 	const errText = "test error"
 
-	blocks := runPostProcessForError(t, "memory_recall", errText)
+	blocks := runPostProcessForError(t, "tesseract_recall", errText)
 
 	if len(blocks) != 1 {
 		t.Fatalf("expected 1 result block, got %d", len(blocks))
@@ -130,9 +130,9 @@ func TestPostProcess_ShortError_PreservedVerbatim(t *testing.T) {
 // wraps the transport error. The full string still must reach the agent's
 // tool_result content block intact.
 func TestPostProcess_RealisticErrorString_PreservedVerbatim(t *testing.T) {
-	const errText = "Error: call tool memory_recall on builtin: tool error: memory service not configured"
+	const errText = "Error: call tool tesseract_recall on builtin: tool error: memory service not configured"
 
-	blocks := runPostProcessForError(t, "memory_recall", errText)
+	blocks := runPostProcessForError(t, "tesseract_recall", errText)
 
 	if len(blocks) != 1 {
 		t.Fatalf("expected 1 result block, got %d", len(blocks))
@@ -242,7 +242,7 @@ func runPostProcessForErrorReturningRefs(
 func TestPostProcess_ErrorReason_PopulatedOnRef(t *testing.T) {
 	const errText = "memory service not configured"
 
-	refs := runPostProcessForErrorReturningRefs(t, "memory_recall", errText)
+	refs := runPostProcessForErrorReturningRefs(t, "tesseract_recall", errText)
 	if len(refs) != 1 {
 		t.Fatalf("expected 1 ref, got %d", len(refs))
 	}
@@ -260,12 +260,12 @@ func TestPostProcess_ErrorReason_PopulatedOnRef(t *testing.T) {
 func TestPostProcess_C121Pipeline_ReasonInlinedInFooter(t *testing.T) {
 	const errText = "memory service not configured"
 
-	refs := runPostProcessForErrorReturningRefs(t, "memory_recall", errText)
+	refs := runPostProcessForErrorReturningRefs(t, "tesseract_recall", errText)
 	got := maybeAppendFailureFooter("Sure, let me look into that.", refs)
 	if !strings.Contains(got, `"memory service not configured"`) {
 		t.Fatalf("c121 pipeline: verbatim reason missing from footer.\noutput:\n%s", got)
 	}
-	if !strings.Contains(got, "`memory_recall`") {
+	if !strings.Contains(got, "`tesseract_recall`") {
 		t.Fatalf("c121 pipeline: tool name missing from footer.\noutput:\n%s", got)
 	}
 }

@@ -61,40 +61,38 @@ type RuntimeConfig struct {
 	// self-tool calls fail with "unknown workflow" but nothing else changes
 	// ("no catalog → no behavior change").
 	WorkflowDefinitionsPath string `yaml:"workflow_definitions_path"`
-	// Vanta is the optional Vanta MCP server configuration (CW-20260501-0005
-	// sub-ticket 2). When URL is non-empty, the chat harness registers a
-	// `vanta` MCP server at startup so the chat agent can reach
-	// memory_recall / memory_write / knowledge_* / context_* tools. Trust
-	// tier defaults to plugin_http per docs/mcp-trust-model.md (Vanta is
-	// the user's own infrastructure).
-	Vanta VantaConfig `yaml:"vanta"`
+	// Tesseract is the optional Tesseract v0.9 stdio MCP process. A non-empty
+	// command registers it under the tesseract server name.
+	Tesseract TesseractConfig `yaml:"tesseract"`
 }
 
-// VantaConfig holds Vanta MCP server connection details. Loaded from the
+// TesseractConfig holds Tesseract MCP server connection details. Loaded from the
 // user-level XDG config file ($XDG_CONFIG_HOME/nanite/config.yaml, default
 // ~/.config/nanite/config.yaml) or project-level ./nanite.yaml. Token may
-// also be supplied via the NANITE_VANTA_TOKEN environment variable, which
+// also be supplied via the NANITE_TESSERACT_TOKEN environment variable, which
 // overrides any value in the config file (so the secret never has to live
 // in YAML).
-//
-// CW-20260501-0005 sub-ticket 2.
-type VantaConfig struct {
-	// URL is the Vanta MCP HTTP endpoint, e.g. "http://localhost:6810/mcp".
-	// Leave empty to disable Vanta integration.
-	URL string `yaml:"url"`
-	// Token is an optional Bearer token sent in the Authorization header on
-	// every JSON-RPC request. Set via NANITE_VANTA_TOKEN env var to keep the
-	// secret out of YAML.
+type TesseractConfig struct {
+	// Command is the released Tesseract executable. A non-empty value enables
+	// the external stdio MCP mode; Nanite invokes it as `tesseract mcp`.
+	Command string `yaml:"command"`
+	// Token is the optional capability token passed to `tesseract mcp`.
+	// Set NANITE_TESSERACT_TOKEN to keep the secret out of YAML.
 	Token string `yaml:"token"`
-	// TrustTier overrides the default trust tier for Vanta. Allowed values
-	// are the four mcp.TrustTier constants: builtin, plugin_stdio,
-	// plugin_http (default), third_party_http. Most users should leave this
+	// TrustTier overrides the default trust tier for Tesseract. Allowed values
+	// are the four mcp.TrustTier constants: builtin, plugin_stdio (default),
+	// plugin_http, third_party_http. Most users should leave this
 	// unset.
 	TrustTier string `yaml:"trust_tier"`
 	// ServerName overrides the registered MCP server name. Defaults to
-	// "vanta" — only set this if "vanta" collides with another registered
+	// "tesseract" — only set this if it collides with another registered
 	// server in your environment (rare).
 	ServerName string `yaml:"server_name"`
+	// Env contains explicit KEY=VALUE entries for the child process.
+	Env []string `yaml:"env"`
+	// EnvAllowlist names host variables the child may inherit. When omitted,
+	// Nanite passes only PATH/HOME and Tesseract's XDG/path overrides.
+	EnvAllowlist []string `yaml:"env_allowlist"`
 }
 
 // ProjectConfig identifies the current project.
@@ -240,19 +238,25 @@ func merge(user, project *RuntimeConfig) *RuntimeConfig {
 		out.WorkflowDefinitionsPath = project.WorkflowDefinitionsPath
 	}
 
-	// Vanta: per-field merge so a project file can override URL alone without
-	// resetting Token/TrustTier/ServerName the user set globally.
-	if project.Vanta.URL != "" {
-		out.Vanta.URL = project.Vanta.URL
+	// Tesseract: per-field merge so a project file can override Command alone
+	// without resetting Token/TrustTier/ServerName the user set globally.
+	if project.Tesseract.Command != "" {
+		out.Tesseract.Command = project.Tesseract.Command
 	}
-	if project.Vanta.Token != "" {
-		out.Vanta.Token = project.Vanta.Token
+	if project.Tesseract.Token != "" {
+		out.Tesseract.Token = project.Tesseract.Token
 	}
-	if project.Vanta.TrustTier != "" {
-		out.Vanta.TrustTier = project.Vanta.TrustTier
+	if project.Tesseract.TrustTier != "" {
+		out.Tesseract.TrustTier = project.Tesseract.TrustTier
 	}
-	if project.Vanta.ServerName != "" {
-		out.Vanta.ServerName = project.Vanta.ServerName
+	if project.Tesseract.ServerName != "" {
+		out.Tesseract.ServerName = project.Tesseract.ServerName
+	}
+	if project.Tesseract.Env != nil {
+		out.Tesseract.Env = append([]string(nil), project.Tesseract.Env...)
+	}
+	if project.Tesseract.EnvAllowlist != nil {
+		out.Tesseract.EnvAllowlist = append([]string(nil), project.Tesseract.EnvAllowlist...)
 	}
 
 	return &out

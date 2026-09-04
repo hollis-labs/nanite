@@ -71,7 +71,7 @@ func (e *Embedder) Embed(ctx context.Context, text, model string) (*embedcontrac
 
 // EmbedBatch runs a batch embedding request in a single API call. Per-row
 // token counts are not surfaced by the OpenAI API, so total_tokens is split
-// evenly across rows (matching vanta-conduit's wrapper convention).
+// evenly across rows (matching Tesseract's wrapper convention).
 func (e *Embedder) EmbedBatch(ctx context.Context, texts []string, model string) ([]embedcontracts.EmbeddingResult, error) {
 	if model == "" {
 		return nil, errors.New("openai embed-batch: model is required")
@@ -106,7 +106,7 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string, model string)
 // dimensions endpoint.
 //
 // Decision (CW-20260508-0012, 2026-05-09): Option B — model→dim table — is
-// strictly more useful than vanta-conduit's Option A (always 0) and matches
+// strictly more useful than Tesseract's Option A (always 0) and matches
 // the implementer prompt's recommendation. Nanite's
 // pkg/models/registry.go.EmbeddingDimensionsFor is the broader portfolio
 // authority; this table is a wrapper-local convenience that mirrors the

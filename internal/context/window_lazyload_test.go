@@ -16,7 +16,7 @@ func TestAssemble_LazyLoadShipsLoadHint(t *testing.T) {
 	cw.SetContent(SlotMemory, strings.Repeat("memory body ", 1000))
 	cw.SetFlags(SlotMemory, SlotFlags{
 		LazyLoad: true,
-		LoadHint: "[memory pointer — call memory_recall(query:\"<term>\") to load]",
+		LoadHint: "[memory pointer — call tesseract_recall(query:\"<term>\") to load]",
 	})
 
 	blocks := cw.Assemble()

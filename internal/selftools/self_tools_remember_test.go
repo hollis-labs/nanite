@@ -39,7 +39,7 @@ func (s *rememberStubStore) Recall(_ context.Context, _ memory.RecallOpts) ([]me
 
 // newRememberSelfTools wires a SelfToolsTransport with a stub
 // LearningStore so callRemember executes end-to-end without touching
-// real Conduit.
+// real Tesseract.
 func newRememberSelfTools(t *testing.T, store learnings.LearningStore) *SelfToolsTransport {
 	t.Helper()
 	st := newSelfTools(t)
@@ -88,7 +88,7 @@ func TestRememberToolDefinition_Surface(t *testing.T) {
 
 // TestRemember_HappyPath_ToolUse is the headline acceptance check from
 // the ticket: lesson_capture(scope='tool_use', subject='card_show',
-// hint='...') writes through to Vanta with the right tags + namespace
+// hint='...') writes through to Tesseract with the right tags + namespace
 // and returns the memory_id.
 func TestRemember_HappyPath_ToolUse(t *testing.T) {
 	store := &rememberStubStore{}
@@ -112,8 +112,8 @@ func TestRemember_HappyPath_ToolUse(t *testing.T) {
 	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
 		t.Fatalf("unmarshal: %v\nbody: %s", err, res.Content[0].Text)
 	}
-	if out.Namespace != "user/default/memory" {
-		t.Errorf("namespace = %q, want user/default/memory", out.Namespace)
+	if out.Namespace != "user/default/memory/learnings" {
+		t.Errorf("namespace = %q, want user/default/memory/learnings", out.Namespace)
 	}
 	if out.MemoryID == "" {
 		t.Error("memory_id must be non-empty")
@@ -211,11 +211,11 @@ func TestRemember_NilRecorder_ClearError(t *testing.T) {
 	}
 }
 
-// TestRemember_StoreFailure_SurfacesAsErrorResult ensures Vanta
+// TestRemember_StoreFailure_SurfacesAsErrorResult ensures Tesseract
 // transport failures surface as structured errors (so the agent can
 // react) rather than crashing.
 func TestRemember_StoreFailure_SurfacesAsErrorResult(t *testing.T) {
-	store := &rememberStubStore{storeErr: errors.New("conduit closed")}
+	store := &rememberStubStore{storeErr: errors.New("tesseract closed")}
 	st := newRememberSelfTools(t, store)
 	res, err := st.CallTool(context.Background(), "lesson_capture", map[string]any{
 		"scope": "tool_use", "subject": "x", "hint": "y",
@@ -226,7 +226,7 @@ func TestRemember_StoreFailure_SurfacesAsErrorResult(t *testing.T) {
 	if !res.IsError {
 		t.Fatal("expected IsError=true on store failure")
 	}
-	if !strings.Contains(res.Content[0].Text, "conduit closed") {
+	if !strings.Contains(res.Content[0].Text, "tesseract closed") {
 		t.Errorf("error must wrap underlying store error; got: %s", res.Content[0].Text)
 	}
 }

@@ -11,7 +11,7 @@ import (
 
 // stubStore is a minimal in-memory LearningStore used by every test in
 // this file. Capturing the inputs lets each test assert on the exact
-// shape of the Vanta call without needing a real Conduit instance.
+// shape of the Tesseract call without needing a real instance.
 type stubStore struct {
 	stored      []memory.Memory
 	storeErr    error
@@ -38,31 +38,30 @@ func (s *stubStore) Recall(_ context.Context, opts memory.RecallOpts) ([]memory.
 
 // TestNamespace_ToolUse pins the user-scoped namespace shape that
 // tool_use lessons land in. The tool identity rides in tags +
-// memory_key, not in the namespace, because Vanta's strict three-form
-// contract forbids extra segments under /memory.
+// memory_key, not in the namespace; /learnings is the type segment.
 func TestNamespace_ToolUse(t *testing.T) {
 	got := Namespace(ScopeToolUse, "alice", "card_show")
-	want := "user/alice/memory"
+	want := "user/alice/memory/learnings"
 	if got != want {
 		t.Errorf("Namespace tool_use mismatch: got %q want %q", got, want)
 	}
 }
 
 // TestNamespace_Project verifies the project namespace lands in
-// Vanta's documented "user/{user}/project/{id}/memory" form.
+// Tesseract's project-scoped typed-memory form.
 func TestNamespace_Project(t *testing.T) {
 	got := Namespace(ScopeProject, "alice", "nanite")
-	want := "user/alice/project/nanite/memory"
+	want := "user/alice/project/nanite/memory/learnings"
 	if got != want {
 		t.Errorf("Namespace project mismatch: got %q want %q", got, want)
 	}
 }
 
 // TestNamespace_Session verifies the session namespace lands in
-// Vanta's "user/{user}/session/{id}/memory" form.
+// Tesseract's session-scoped typed-memory form.
 func TestNamespace_Session(t *testing.T) {
 	got := Namespace(ScopeSession, "alice", "sess-9")
-	want := "user/alice/session/sess-9/memory"
+	want := "user/alice/session/sess-9/memory/learnings"
 	if got != want {
 		t.Errorf("Namespace session mismatch: got %q want %q", got, want)
 	}
@@ -72,14 +71,14 @@ func TestNamespace_Session(t *testing.T) {
 // "default" namespace root, matching the rest of the memory layer.
 func TestNamespace_DefaultUser(t *testing.T) {
 	got := Namespace(ScopeProject, "", "PRJ-1")
-	want := "user/default/project/prj-1/memory"
+	want := "user/default/project/prj-1/memory/learnings"
 	if got != want {
 		t.Errorf("Namespace default user mismatch: got %q want %q", got, want)
 	}
 }
 
 // TestNamespace_SubjectSanitization confirms project/session subjects
-// with awkward characters get normalised so Vanta's segment constraint
+// with awkward characters get normalised so Tesseract's segment constraint
 // never trips. (tool_use does not embed the subject in the namespace,
 // so it's not exercised here.)
 func TestNamespace_SubjectSanitization(t *testing.T) {
@@ -88,9 +87,9 @@ func TestNamespace_SubjectSanitization(t *testing.T) {
 		in    string
 		want  string
 	}{
-		{ScopeProject, "My Project", "user/default/project/my_project/memory"},
-		{ScopeSession, "-leading-dash-", "user/default/session/leading-dash/memory"},
-		{ScopeProject, "!!!", "user/default/project/_/memory"},
+		{ScopeProject, "My Project", "user/default/project/my_project/memory/learnings"},
+		{ScopeSession, "-leading-dash-", "user/default/session/leading-dash/memory/learnings"},
+		{ScopeProject, "!!!", "user/default/project/_/memory/learnings"},
 	}
 	for _, c := range cases {
 		got := Namespace(c.scope, "", c.in)
@@ -113,7 +112,7 @@ func TestDeriveMemoryKey_Deterministic(t *testing.T) {
 	if k1 == "" {
 		t.Error("DeriveMemoryKey returned empty key")
 	}
-	// must not contain disallowed Vanta key chars
+	// must not contain disallowed Tesseract key chars
 	for _, r := range k1 {
 		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_'
 		if !ok {
@@ -124,7 +123,7 @@ func TestDeriveMemoryKey_Deterministic(t *testing.T) {
 
 // TestDeriveMemoryKey_DifferentToolsDoNotCollide guards against the
 // shared-namespace risk: same hint sentence, different tool, must
-// produce different keys so Vanta doesn't overwrite the wrong row.
+// produce different keys so Tesseract doesn't overwrite the wrong row.
 func TestDeriveMemoryKey_DifferentToolsDoNotCollide(t *testing.T) {
 	hint := "shared-shape lesson"
 	a := DeriveMemoryKey(ScopeToolUse, "card_show", hint)
@@ -136,7 +135,7 @@ func TestDeriveMemoryKey_DifferentToolsDoNotCollide(t *testing.T) {
 
 // TestDeriveMemoryKey_FitsVantaSegmentBudget pins the truncation
 // invariant — a generously-long hint must still produce a key within
-// Vanta's per-segment cap so writes don't fail at the boundary.
+// Tesseract's per-segment cap so writes don't fail at the boundary.
 func TestDeriveMemoryKey_FitsVantaSegmentBudget(t *testing.T) {
 	long := strings.Repeat("longhint-", 30) // ~270 chars
 	k := DeriveMemoryKey(ScopeToolUse, "card_show", long)
@@ -166,7 +165,7 @@ func TestCapture_HappyPath_ToolUse(t *testing.T) {
 	if out == nil {
 		t.Fatal("Capture returned nil outcome on success")
 	}
-	if out.Namespace != "user/alice/memory" {
+	if out.Namespace != "user/alice/memory/learnings" {
 		t.Errorf("namespace mismatch: %s", out.Namespace)
 	}
 	if out.MemoryID == "" {
@@ -268,11 +267,11 @@ func TestCapture_NilStore(t *testing.T) {
 	}
 }
 
-// TestCapture_StoreErrorPropagates makes sure a Vanta failure surfaces
+// TestCapture_StoreErrorPropagates makes sure a Tesseract failure surfaces
 // as a Go error so the MCP handler can render it as a structured tool
 // error instead of silently dropping the write.
 func TestCapture_StoreErrorPropagates(t *testing.T) {
-	store := &stubStore{storeErr: errors.New("conduit unavailable")}
+	store := &stubStore{storeErr: errors.New("tesseract unavailable")}
 	rec := NewRecorder(store)
 	_, err := rec.Capture(context.Background(), CaptureInput{
 		Scope:   ScopeToolUse,
@@ -282,7 +281,7 @@ func TestCapture_StoreErrorPropagates(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when store fails")
 	}
-	if !strings.Contains(err.Error(), "conduit unavailable") {
+	if !strings.Contains(err.Error(), "tesseract unavailable") {
 		t.Errorf("error should wrap underlying store error, got: %v", err)
 	}
 }
@@ -299,7 +298,7 @@ func TestCapture_ProjectScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "user/default/project/nanite/memory"
+	want := "user/default/project/nanite/memory/learnings"
 	if out.Namespace != want {
 		t.Errorf("project namespace = %q, want %q", out.Namespace, want)
 	}
@@ -317,7 +316,7 @@ func TestCapture_SessionScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "user/default/session/sess-9/memory"
+	want := "user/default/session/sess-9/memory/learnings"
 	if out.Namespace != want {
 		t.Errorf("session namespace = %q, want %q", out.Namespace, want)
 	}
@@ -328,9 +327,9 @@ func TestCapture_SessionScope(t *testing.T) {
 func TestRecallByToolName_HappyPath(t *testing.T) {
 	store := &stubStore{
 		recallReply: []memory.Memory{
-			{Summary: "report-card requires metrics, not sections", Confidence: 0.85, MemoryKey: "k1", Namespace: "user/alice/memory",
+			{Summary: "report-card requires metrics, not sections", Confidence: 0.85, MemoryKey: "k1", Namespace: "user/alice/memory/learnings",
 				Tags: []string{"learning", "tool:card_show"}},
-			{Summary: "info-card 'sources' is optional", Confidence: 0.85, MemoryKey: "k2", Namespace: "user/alice/memory",
+			{Summary: "info-card 'sources' is optional", Confidence: 0.85, MemoryKey: "k2", Namespace: "user/alice/memory/learnings",
 				Tags: []string{"learning", "tool:card_show"}},
 		},
 	}
@@ -342,11 +341,11 @@ func TestRecallByToolName_HappyPath(t *testing.T) {
 	if !strings.Contains(hints[0].Summary, "report-card") {
 		t.Errorf("first hint should be the report-card lesson, got: %s", hints[0].Summary)
 	}
-	wantNS := "user/alice/memory"
+	wantNS := "user/alice/memory/learnings"
 	if store.recallOpts.Namespaces[0] != wantNS {
 		t.Errorf("recall namespace = %q, want %q", store.recallOpts.Namespaces[0], wantNS)
 	}
-	// We always pass the per-tool tag so Conduit narrows by tool.
+	// We always pass the per-tool tag so Tesseract narrows by tool.
 	wantTag := "tool:card_show"
 	hasToolTag := false
 	for _, tg := range store.recallOpts.Tags {
@@ -380,11 +379,11 @@ func TestRecallByToolName_FiltersOutWrongTool(t *testing.T) {
 	}
 }
 
-// TestRecallByToolName_FailsOpen verifies a Vanta error returns an
+// TestRecallByToolName_FailsOpen verifies a Tesseract error returns an
 // empty slice rather than bubbling up. Failing-open is the documented
 // design choice.
 func TestRecallByToolName_FailsOpen(t *testing.T) {
-	store := &stubStore{recallErr: errors.New("conduit timeout")}
+	store := &stubStore{recallErr: errors.New("tesseract timeout")}
 	r := NewRecaller(store)
 	hints := r.RecallByToolName(context.Background(), "alice", "card_show")
 	if hints != nil {
@@ -414,7 +413,7 @@ func TestRecallByToolName_EmptyToolName(t *testing.T) {
 	r := NewRecaller(store)
 	hints := r.RecallByToolName(context.Background(), "alice", "  ")
 	if hints != nil {
-		t.Errorf("blank tool name should not query Vanta, got hints %v", hints)
+		t.Errorf("blank tool name should not query Tesseract, got hints %v", hints)
 	}
 }
 

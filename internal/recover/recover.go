@@ -85,7 +85,7 @@ const (
 func (k Kind) IsRecoverable() bool { return k != KindNone && k != "" }
 
 // String returns the kind as its canonical lower-snake-case string. This
-// is the form that lands in logs, JSON envelopes, and Vanta keys.
+// is the form that lands in logs, JSON envelopes, and Tesseract keys.
 func (k Kind) String() string {
 	if k == "" {
 		return string(KindNone)

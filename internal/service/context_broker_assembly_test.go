@@ -111,7 +111,7 @@ func TestAssembleSlots_StableCachePrefix_AcrossTurns(t *testing.T) {
 func TestDecideAssembly_SkipEmitsEmptyContentAndStashes(t *testing.T) {
 	// We exercise contextbroker.DecideAssembly directly here because
 	// populating SlotContext from the real broker requires a live
-	// Vanta/PCC/Conduit wiring. The decision logic is the unit under test;
+	// Tesseract/PCC wiring. The decision logic is the unit under test;
 	// end-to-end integration with AssembleSlots → SlotBlocks is covered by
 	// TestAssembleSlots_PlanReachesResult.
 	plan := contextbroker.DecideAssembly(context.Background(), contextbroker.AssemblyInput{

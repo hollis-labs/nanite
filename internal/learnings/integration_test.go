@@ -5,30 +5,30 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/memory"
-	conduit "github.com/hollis-labs/tesseract"
+	"github.com/hollis-labs/tesseract"
 )
 
-// newConduitMemory spins up a real embedded Conduit instance backed by
+// newTesseractMemory spins up a real embedded Tesseract instance backed by
 // a temp dir. Mirrors the fixture in internal/memory/service_test.go so
 // the integration tests here exercise the same code path production
-// uses (memory.Service → conduit.MemoryStore).
-func newConduitMemory(t *testing.T) *memory.Service {
+// uses (memory.Service → tesseract.MemoryStore).
+func newTesseractMemory(t *testing.T) *memory.Service {
 	t.Helper()
 	dir := t.TempDir()
-	c, err := conduit.Open(context.Background(), conduit.Config{RootDir: dir})
+	c, err := tesseract.Open(context.Background(), tesseract.Config{RootDir: dir})
 	if err != nil {
-		t.Fatalf("conduit.Open: %v", err)
+		t.Fatalf("tesseract.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	return memory.NewService(c.MemoryStore())
 }
 
-// TestIntegration_CaptureAndRecall_RoundTrip is the ticket's "Vanta
+// TestIntegration_CaptureAndRecall_RoundTrip is the ticket's Tesseract
 // integration tested end-to-end" acceptance check. It writes a learning
 // via the Recorder, then reads it back via the Recaller — both pointed
-// at the same real Conduit instance.
+// at the same real Tesseract instance.
 func TestIntegration_CaptureAndRecall_RoundTrip(t *testing.T) {
-	svc := newConduitMemory(t)
+	svc := newTesseractMemory(t)
 	rec := NewRecorder(svc)
 	rcl := NewRecaller(svc)
 
@@ -69,7 +69,7 @@ func TestIntegration_CaptureAndRecall_RoundTrip(t *testing.T) {
 // namespace isolation: a learning about card_show must NOT
 // surface when recalling for giphy_search.
 func TestIntegration_DifferentToolsDoNotBleed(t *testing.T) {
-	svc := newConduitMemory(t)
+	svc := newTesseractMemory(t)
 	rec := NewRecorder(svc)
 	rcl := NewRecaller(svc)
 	ctx := context.Background()
@@ -95,7 +95,7 @@ func TestIntegration_DifferentToolsDoNotBleed(t *testing.T) {
 // RecallByToolName. The ticket cites this exact lesson body, so any
 // regression in tag/namespace shape surfaces here loudly.
 func TestIntegration_AcceptanceFromTicket(t *testing.T) {
-	svc := newConduitMemory(t)
+	svc := newTesseractMemory(t)
 	rec := NewRecorder(svc)
 	rcl := NewRecaller(svc)
 	ctx := context.Background()
@@ -109,7 +109,7 @@ func TestIntegration_AcceptanceFromTicket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	if out.Namespace != "user/default/memory" {
+	if out.Namespace != "user/default/memory/learnings" {
 		t.Errorf("unexpected namespace: %s", out.Namespace)
 	}
 	hints := rcl.RecallByToolName(ctx, "default", "card_show")

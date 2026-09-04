@@ -6,196 +6,321 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/oklog/ulid/v2"
 )
 
-// ErrScheduleRunNotFound is returned when a schedule_runs row cannot be
-// located (GetOpenScheduleRun/GetLatestScheduleRun) or when
-// RecordScheduleRunAttempt's WHERE id=? matches nothing.
-var ErrScheduleRunNotFound = errors.New("schedule run not found")
+// ErrScheduleFireNotFound is returned when a durable fire cannot be located.
+var ErrScheduleFireNotFound = errors.New("schedule fire not found")
 
-// schedule_runs.status vocabulary -- migration 127
-// (TASKS/scheduling/01-schema-schedule-kind-collapse-and-retry-columns.md),
-// taken verbatim from that migration's CHECK constraint. 'pending'/'failed'
-// are the two non-terminal ("open," still eligible for a further retry
-// attempt) statuses; 'succeeded'/'exhausted' are terminal.
 const (
-	ScheduleRunStatusPending   = "pending"
-	ScheduleRunStatusSucceeded = "succeeded"
-	ScheduleRunStatusFailed    = "failed"
-	ScheduleRunStatusExhausted = "exhausted"
+	ScheduleFireStatusPending   = "pending"
+	ScheduleFireStatusClaimed   = "claimed"
+	ScheduleFireStatusRetrying  = "retrying"
+	ScheduleFireStatusSucceeded = "succeeded"
+	ScheduleFireStatusSkipped   = "skipped"
+	ScheduleFireStatusExhausted = "exhausted"
 )
 
-// ScheduleRun is one row in the schedule_runs table -- retry-attempt
-// bookkeeping for a single schedule firing, read/written by
-// internal/scheduler's RetryingRunner
-// (TASKS/scheduling/04-retry-backoff-on-fail-policy.md).
-type ScheduleRun struct {
-	ID         string `json:"id"`
-	ScheduleID string `json:"schedule_id"`
-	// RunID is go-scheduler's Job.RunID for the attempt that created this
-	// row. NOTE: RunID is NOT a stable identifier across retry attempts of
-	// the "same" logical firing -- see RetryingRunner's package doc comment
-	// in internal/scheduler for why (libs/go-scheduler/engine.go's tick()
-	// generates a fresh RunID every tick). This field records the first
-	// attempt's RunID and is not updated on subsequent retries of the same
-	// row; correlation across retries is done by ScheduleID + open status,
-	// not by RunID.
-	RunID string `json:"run_id"`
-	// FiredAt is RFC3339, the first attempt's Job.FiredAt (or the row's
-	// creation time, if FiredAt was zero).
-	FiredAt       string `json:"fired_at"`
-	Status        string `json:"status"`
-	AttemptCount  int64  `json:"attempt_count"`
-	LastError     string `json:"last_error"`
-	NextAttemptAt string `json:"next_attempt_at"` // RFC3339; empty = no backoff window active
+// ScheduleFire is Nanite's persisted representation of a go-scheduler Fire.
+// RunID is the stable library Fire.ID; ID remains Nanite's internal row key.
+type ScheduleFire struct {
+	ID                     string
+	ScheduleID             string
+	RunID                  string
+	ScheduledAt            string
+	FiredAt                string
+	ClaimExpiresAt         string
+	DispatchAcceptedAt     string
+	Status                 string
+	AttemptCount           int64
+	LastError              string
+	NextAttemptAt          string
+	RetryMaxAttempts       int64
+	RetryBackoffStrategy   string
+	RetryInitialDelayNanos int64
+	RetryMaximumDelayNanos int64
+	JobType                string
+	JobPayload             string
 }
 
-const scheduleRunColumns = `id, schedule_id, run_id, fired_at, status, attempt_count,
-       COALESCE(last_error,''), COALESCE(next_attempt_at,'')`
+type ScheduleFireCreation struct {
+	ScheduleID   string
+	ExpectedNext time.Time
+	NextRun      time.Time
+	Fire         ScheduleFire
+}
 
-func scanScheduleRun(scanner interface{ Scan(...any) error }, r *ScheduleRun) error {
+type ScheduleFireClaim struct {
+	FireID          string
+	ExpectedStatus  string
+	ExpectedAttempt int64
+	ExpectedFiredAt time.Time
+	ClaimedAt       time.Time
+	ClaimExpiresAt  time.Time
+}
+
+type ScheduleFireTransition struct {
+	FireID        string
+	Attempt       int64
+	From          string
+	ClaimedAt     time.Time
+	To            string
+	NextAttemptAt time.Time
+	LastError     string
+}
+
+const scheduleFireColumns = `id, schedule_id, run_id, scheduled_at, fired_at,
+       COALESCE(claim_expires_at,''), COALESCE(dispatch_accepted_at,''), status, attempt_count,
+       COALESCE(last_error,''), COALESCE(next_attempt_at,''),
+       retry_max_attempts, retry_backoff_strategy, retry_initial_delay_ns,
+       retry_max_delay_ns, job_type, job_payload`
+
+func scanScheduleFire(scanner interface{ Scan(...any) error }, fire *ScheduleFire) error {
 	return scanner.Scan(
-		&r.ID, &r.ScheduleID, &r.RunID, &r.FiredAt, &r.Status, &r.AttemptCount,
-		&r.LastError, &r.NextAttemptAt,
+		&fire.ID, &fire.ScheduleID, &fire.RunID, &fire.ScheduledAt, &fire.FiredAt,
+		&fire.ClaimExpiresAt, &fire.DispatchAcceptedAt, &fire.Status, &fire.AttemptCount,
+		&fire.LastError, &fire.NextAttemptAt,
+		&fire.RetryMaxAttempts, &fire.RetryBackoffStrategy,
+		&fire.RetryInitialDelayNanos, &fire.RetryMaximumDelayNanos,
+		&fire.JobType, &fire.JobPayload,
 	)
 }
 
-// GetOpenScheduleRun returns the most recent non-terminal (pending/failed)
-// schedule_runs row for scheduleID -- the row representing whichever
-// firing's retry sequence is currently in progress, or
-// ErrScheduleRunNotFound if none is open.
-//
-// Correlated by schedule_id + open status, deliberately NOT by
-// go-scheduler's Job.RunID (the architecture doc's own illustrative "one
-// row per firing, keyed by run_id" language) -- see internal/scheduler's
-// RetryingRunner doc comment for the full finding: reading
-// libs/go-scheduler/engine.go's tick() directly shows Job.RunID
-// (fmt.Sprintf("sched-%s-%d", sch.ID, now.Unix())) is generated fresh on
-// every tick, not stable across a firing's retry attempts, so keying
-// lookups strictly by run_id would silently create a brand-new row (and
-// reset the retry budget to zero) on every single retry attempt in real
-// production use -- defeating the entire point of max_retries. schedule_id
-// is the value that stays stable across retries of the same firing (the
-// engine keeps resetting agent_schedules.next_run back to the same
-// expectedNext on every failed Enqueue until this layer returns nil), so
-// that is the real correlation key.
-func (s *Store) GetOpenScheduleRun(ctx context.Context, scheduleID string) (*ScheduleRun, error) {
-	var out ScheduleRun
-	row := s.DB.QueryRowContext(ctx,
-		`SELECT `+scheduleRunColumns+` FROM schedule_runs
-		 WHERE schedule_id = ? AND status IN (?, ?)
-		 ORDER BY fired_at DESC, rowid DESC
-		 LIMIT 1`,
-		scheduleID, ScheduleRunStatusPending, ScheduleRunStatusFailed,
-	)
-	if err := scanScheduleRun(row, &out); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrScheduleRunNotFound
-		}
-		return nil, fmt.Errorf("get open schedule_runs row: %w", err)
+// CreateScheduleFire atomically advances agent_schedules.next_run and inserts
+// one immutable fire snapshot. A stale schedule CAS or existing fire ID is a
+// clean loss (false, nil) and changes neither record.
+func (s *Store) CreateScheduleFire(ctx context.Context, creation ScheduleFireCreation) (bool, error) {
+	if creation.ScheduleID == "" || creation.Fire.RunID == "" {
+		return false, fmt.Errorf("create schedule fire: schedule_id and fire id are required")
 	}
-	return &out, nil
-}
+	if creation.Fire.ID == "" {
+		creation.Fire.ID = creation.Fire.RunID
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("create schedule fire: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 
-// GetLatestScheduleRun returns the most recent schedule_runs row for
-// scheduleID regardless of status, or ErrScheduleRunNotFound if none
-// exists. Used by RetryingRunner to detect the "caller kept calling
-// Enqueue with an unchanged Job after this layer already terminated that
-// firing" case (a fixed-Job test harness simulating repeated ticking, or a
-// go-scheduler tick landing before agent_schedules.next_run has actually
-// advanced) without re-creating a fresh retry budget for a firing that has
-// already concluded.
-func (s *Store) GetLatestScheduleRun(ctx context.Context, scheduleID string) (*ScheduleRun, error) {
-	var out ScheduleRun
-	row := s.DB.QueryRowContext(ctx,
-		`SELECT `+scheduleRunColumns+` FROM schedule_runs
-		 WHERE schedule_id = ?
-		 ORDER BY fired_at DESC, rowid DESC
-		 LIMIT 1`,
-		scheduleID,
-	)
-	if err := scanScheduleRun(row, &out); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrScheduleRunNotFound
-		}
-		return nil, fmt.Errorf("get latest schedule_runs row: %w", err)
+	var exists int
+	if queryErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schedule_runs WHERE run_id = ?)`, creation.Fire.RunID).Scan(&exists); queryErr != nil {
+		return false, fmt.Errorf("create schedule fire: check identity: %w", queryErr)
 	}
-	return &out, nil
-}
-
-// CreateScheduleRun inserts a new schedule_runs row representing the first
-// attempt of a new firing -- attempt_count/last_error/next_attempt_at
-// always start at their zero values regardless of what row.AttemptCount/
-// row.LastError/row.NextAttemptAt hold on the way in (a genuinely new
-// firing has made zero real attempts yet, by definition).
-func (s *Store) CreateScheduleRun(ctx context.Context, row ScheduleRun) (*ScheduleRun, error) {
-	if row.ScheduleID == "" {
-		return nil, fmt.Errorf("create schedule_runs: schedule_id is required")
+	if exists != 0 {
+		return false, nil
 	}
-	if row.RunID == "" {
-		return nil, fmt.Errorf("create schedule_runs: run_id is required")
-	}
-	if row.ID == "" {
-		row.ID = "sr-" + ulid.Make().String()
-	}
-	if row.Status == "" {
-		row.Status = ScheduleRunStatusPending
-	}
-	if row.FiredAt == "" {
-		row.FiredAt = time.Now().UTC().Format(time.RFC3339)
-	}
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO schedule_runs
-		    (id, schedule_id, run_id, fired_at, status, attempt_count, last_error, next_attempt_at)
-		 VALUES (?, ?, ?, ?, ?, 0, NULL, NULL)`,
-		row.ID, row.ScheduleID, row.RunID, row.FiredAt, row.Status,
+	res, err := tx.ExecContext(ctx,
+		`UPDATE agent_schedules
+		    SET last_fired_at = ?, next_run = ?, fired_count = fired_count + 1
+		  WHERE id = ? AND status = ? AND next_run = ?`,
+		creation.Fire.ScheduledAt, nullableFireTime(creation.NextRun),
+		creation.ScheduleID, ScheduleStatusActive, formatFireTime(creation.ExpectedNext),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create schedule_runs: %w", err)
+		return false, fmt.Errorf("create schedule fire: advance schedule: %w", err)
 	}
-	row.AttemptCount = 0
-	row.LastError = ""
-	row.NextAttemptAt = ""
-	return &row, nil
+	updated, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("create schedule fire: advance rows affected: %w", err)
+	}
+	if updated == 0 {
+		return false, nil
+	}
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO schedule_runs (
+		    id, schedule_id, run_id, scheduled_at, fired_at, claim_expires_at, dispatch_accepted_at,
+		    status, attempt_count, last_error, next_attempt_at,
+		    retry_max_attempts, retry_backoff_strategy, retry_initial_delay_ns,
+		    retry_max_delay_ns, job_type, job_payload
+		 ) SELECT ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`,
+		creation.Fire.ID, creation.ScheduleID, creation.Fire.RunID,
+		creation.Fire.ScheduledAt, creation.Fire.FiredAt,
+		creation.Fire.Status, creation.Fire.AttemptCount,
+		nullIfEmpty(creation.Fire.LastError), nullIfEmpty(creation.Fire.NextAttemptAt),
+		creation.Fire.RetryMaxAttempts, creation.Fire.RetryBackoffStrategy,
+		creation.Fire.RetryInitialDelayNanos, creation.Fire.RetryMaximumDelayNanos,
+		creation.Fire.JobType, creation.Fire.JobPayload,
+	)
+	if err != nil {
+		return false, fmt.Errorf("create schedule fire: insert: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("create schedule fire: commit: %w", err)
+	}
+	return true, nil
 }
 
-// RecordScheduleRunAttempt is the single write path after every real
-// dispatch attempt (success, retriable failure, or exhaustion): it
-// unconditionally increments attempt_count and sets status/last_error/
-// next_attempt_at to the outcome the caller already decided. nextAttemptAt
-// nil (or zero) clears the backoff window (NULL) -- the correct value on
-// success and on exhaustion, since neither state has a further attempt to
-// wait for.
-func (s *Store) RecordScheduleRunAttempt(ctx context.Context, id, status, lastError string, nextAttemptAt *time.Time) error {
-	switch status {
-	case ScheduleRunStatusPending, ScheduleRunStatusSucceeded, ScheduleRunStatusFailed, ScheduleRunStatusExhausted:
-	default:
-		return fmt.Errorf("record schedule_runs attempt: invalid status %q", status)
+// ListDueScheduleFires returns claimable fires, including claimed fires whose
+// lease is missing (legacy migration) or expired.
+func (s *Store) ListDueScheduleFires(ctx context.Context, now time.Time, limit int) ([]ScheduleFire, error) {
+	if limit <= 0 {
+		limit = 100
 	}
-	var nextAttemptVal any
-	if nextAttemptAt != nil && !nextAttemptAt.IsZero() {
-		nextAttemptVal = nextAttemptAt.UTC().Format(time.RFC3339)
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT `+scheduleFireColumns+` FROM schedule_runs
+		  WHERE (
+		      status IN (?, ?) AND julianday(COALESCE(next_attempt_at, scheduled_at)) <= julianday(?)
+		  ) OR (
+		      status = ? AND (claim_expires_at IS NULL OR julianday(claim_expires_at) <= julianday(?))
+		  )
+		 ORDER BY julianday(COALESCE(next_attempt_at, scheduled_at)), run_id
+		 LIMIT ?`,
+		ScheduleFireStatusPending, ScheduleFireStatusRetrying, formatFireTime(now),
+		ScheduleFireStatusClaimed, formatFireTime(now), limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list due schedule fires: %w", err)
+	}
+	defer closeRows(rows)
+	out := make([]ScheduleFire, 0)
+	for rows.Next() {
+		var fire ScheduleFire
+		if err := scanScheduleFire(rows, &fire); err != nil {
+			return nil, fmt.Errorf("list due schedule fires: scan: %w", err)
+		}
+		out = append(out, fire)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list due schedule fires: iterate: %w", err)
+	}
+	return out, nil
+}
+
+// ClaimScheduleFire claims a pending/retrying attempt or recovers an expired
+// claim. Recovery preserves its attempt while replacing the claim timestamp,
+// which fences the prior owner from transitioning it later.
+func (s *Store) ClaimScheduleFire(ctx context.Context, claim ScheduleFireClaim) (ScheduleFire, bool, error) {
+	newAttempt := claim.ExpectedAttempt + 1
+	recoveryClause := ""
+	args := []any{
+		newAttempt, formatFireTime(claim.ClaimedAt), formatFireTime(claim.ClaimExpiresAt),
+		claim.FireID, claim.ExpectedStatus, claim.ExpectedAttempt, formatFireTime(claim.ExpectedFiredAt),
+	}
+	if claim.ExpectedStatus == ScheduleFireStatusClaimed {
+		newAttempt = claim.ExpectedAttempt
+		args[0] = newAttempt
+		recoveryClause = ` AND (claim_expires_at IS NULL OR julianday(claim_expires_at) <= julianday(?))`
+		args = append(args, formatFireTime(claim.ClaimedAt))
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ScheduleFire{}, false, fmt.Errorf("claim schedule fire: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE schedule_runs
+		    SET status = ?, attempt_count = ?, fired_at = ?, claim_expires_at = ?, next_attempt_at = NULL
+		  WHERE run_id = ? AND status = ? AND attempt_count = ? AND fired_at = ?`+recoveryClause,
+		append([]any{ScheduleFireStatusClaimed}, args...)...,
+	)
+	if err != nil {
+		return ScheduleFire{}, false, fmt.Errorf("claim schedule fire: update: %w", err)
+	}
+	updated, err := res.RowsAffected()
+	if err != nil {
+		return ScheduleFire{}, false, fmt.Errorf("claim schedule fire: rows affected: %w", err)
+	}
+	if updated == 0 {
+		return ScheduleFire{}, false, nil
+	}
+	var fire ScheduleFire
+	if err := scanScheduleFire(tx.QueryRowContext(ctx,
+		`SELECT `+scheduleFireColumns+` FROM schedule_runs WHERE run_id = ?`, claim.FireID), &fire); err != nil {
+		return ScheduleFire{}, false, fmt.Errorf("claim schedule fire: read result: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return ScheduleFire{}, false, fmt.Errorf("claim schedule fire: commit: %w", err)
+	}
+	return fire, true, nil
+}
+
+// TransitionScheduleFire applies an attempt result with a fenced CAS.
+func (s *Store) TransitionScheduleFire(ctx context.Context, transition ScheduleFireTransition) (bool, error) {
+	res, err := s.DB.ExecContext(ctx,
+		`UPDATE schedule_runs
+		    SET status = ?, claim_expires_at = NULL, next_attempt_at = ?, last_error = ?
+		  WHERE run_id = ? AND status = ? AND attempt_count = ? AND fired_at = ?`,
+		transition.To, nullableFireTime(transition.NextAttemptAt), nullIfEmpty(transition.LastError),
+		transition.FireID, transition.From, transition.Attempt, formatFireTime(transition.ClaimedAt),
+	)
+	if err != nil {
+		return false, fmt.Errorf("transition schedule fire: %w", err)
+	}
+	updated, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("transition schedule fire: rows affected: %w", err)
+	}
+	return updated == 1, nil
+}
+
+func (s *Store) GetScheduleFire(ctx context.Context, fireID string) (*ScheduleFire, error) {
+	var fire ScheduleFire
+	err := scanScheduleFire(s.DB.QueryRowContext(ctx,
+		`SELECT `+scheduleFireColumns+` FROM schedule_runs WHERE run_id = ?`, fireID), &fire)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrScheduleFireNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get schedule fire: %w", err)
+	}
+	return &fire, nil
+}
+
+// IsScheduleFireDispatchAccepted reports whether RunnerAdapter already
+// completed the application dispatch for this stable Fire ID.
+func (s *Store) IsScheduleFireDispatchAccepted(ctx context.Context, fireID string) (bool, error) {
+	var accepted int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT dispatch_accepted_at IS NOT NULL FROM schedule_runs WHERE run_id = ?`, fireID,
+	).Scan(&accepted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return s.IsWorkflowActivationDispatchAccepted(ctx, fireID)
+	}
+	if err != nil {
+		return false, fmt.Errorf("check schedule fire dispatch receipt: %w", err)
+	}
+	return accepted != 0, nil
+}
+
+// MarkScheduleFireDispatchAccepted persists the application dispatch receipt
+// while the caller still owns the exact claimed attempt. The claim timestamp
+// fences a worker whose lease was recovered while it was dispatching.
+func (s *Store) MarkScheduleFireDispatchAccepted(
+	ctx context.Context,
+	fireID string,
+	attempt int,
+	claimedAt, acceptedAt time.Time,
+) (bool, error) {
+	if _, err := s.GetWorkflowActivationFire(ctx, fireID); err == nil {
+		return s.MarkWorkflowActivationDispatchAccepted(ctx, fireID, attempt, claimedAt, acceptedAt)
+	} else if !errors.Is(err, ErrWorkflowActivationFireNotFound) {
+		return false, err
 	}
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE schedule_runs
-		    SET attempt_count = attempt_count + 1,
-		        status = ?,
-		        last_error = ?,
-		        next_attempt_at = ?
-		  WHERE id = ?`,
-		status, nullIfEmpty(lastError), nextAttemptVal, id,
+		    SET dispatch_accepted_at = COALESCE(dispatch_accepted_at, ?)
+		  WHERE run_id = ? AND status = ? AND attempt_count = ? AND fired_at = ?`,
+		formatFireTime(acceptedAt), fireID, ScheduleFireStatusClaimed, attempt, formatFireTime(claimedAt),
 	)
 	if err != nil {
-		return fmt.Errorf("record schedule_runs attempt: %w", err)
+		return false, fmt.Errorf("mark schedule fire dispatch accepted: %w", err)
 	}
-	n, err := res.RowsAffected()
+	updated, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("record schedule_runs attempt rows affected: %w", err)
+		return false, fmt.Errorf("mark schedule fire dispatch accepted rows affected: %w", err)
 	}
-	if n == 0 {
-		return ErrScheduleRunNotFound
+	return updated == 1, nil
+}
+
+func formatFireTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
 	}
-	return nil
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func nullableFireTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return formatFireTime(t)
 }

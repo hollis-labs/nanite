@@ -80,7 +80,7 @@ steps:
 	}
 }
 
-func TestParseDefinitionYAML_RejectsCycle(t *testing.T) {
+func TestParseDefinitionYAML_PreservesGraphForSharedCompiler(t *testing.T) {
 	data := []byte(`
 name: cyclic
 steps:
@@ -95,31 +95,12 @@ steps:
     config:
       tool: noop
 `)
-	_, err := ParseDefinitionYAML(data)
-	if err == nil {
-		t.Fatal("expected cycle rejection, got nil error")
+	wf, err := ParseDefinitionYAML(data)
+	if err != nil {
+		t.Fatalf("ParseDefinitionYAML: %v", err)
 	}
-	if !strings.Contains(err.Error(), "cycle") {
-		t.Fatalf("error = %v, want cycle mention", err)
-	}
-}
-
-func TestParseDefinitionYAML_RejectsUnknownDependency(t *testing.T) {
-	data := []byte(`
-name: dangling
-steps:
-  - id: a
-    kind: tool
-    depends_on: [nonexistent]
-    config:
-      tool: noop
-`)
-	_, err := ParseDefinitionYAML(data)
-	if err == nil {
-		t.Fatal("expected unknown-dependency rejection, got nil error")
-	}
-	if !strings.Contains(err.Error(), "unknown step") {
-		t.Fatalf("error = %v, want unknown-step mention", err)
+	if len(wf.Steps) != 2 || len(wf.Steps[0].DependsOn) != 1 || wf.Steps[0].DependsOn[0] != "b" {
+		t.Fatalf("graph DTO was not preserved: %+v", wf.Steps)
 	}
 }
 
@@ -160,31 +141,8 @@ steps:
 	}
 }
 
-func TestParseDefinitionYAML_RejectsDuplicateStepID(t *testing.T) {
-	data := []byte(`
-name: dup
-steps:
-  - id: a
-    kind: tool
-    config:
-      tool: noop
-  - id: a
-    kind: tool
-    config:
-      tool: noop
-`)
-	_, err := ParseDefinitionYAML(data)
-	if err == nil {
-		t.Fatal("expected duplicate-id rejection, got nil error")
-	}
-	if !strings.Contains(err.Error(), "duplicate") {
-		t.Fatalf("error = %v, want duplicate mention", err)
-	}
-}
-
 // TestParseDefinitionYAML_Engine_Empty proves an unset engine field decodes
-// to "" rather than some accidental non-empty zero value — WorkflowLauncher.
-// Launch relies on "" meaning "use EngineBuiltin".
+// to the shared-host default rather than an accidental compatibility value.
 func TestParseDefinitionYAML_Engine_Empty(t *testing.T) {
 	data := []byte(`
 name: no-engine-field
@@ -221,5 +179,47 @@ steps:
 	}
 	if wf.Engine != EngineLangGraph {
 		t.Fatalf("Engine = %q, want %q", wf.Engine, EngineLangGraph)
+	}
+}
+
+func TestParseDefinitionYAML_EngineCompatibilityValues(t *testing.T) {
+	engines := []string{
+		"", EngineBuiltin, EngineHadron, EngineLangGraph, EngineCrewAI,
+		EngineGoogleADK, EngineAutoGen, EngineLangChain,
+	}
+	for _, engine := range engines {
+		name := engine
+		if name == "" {
+			name = "default"
+		}
+		t.Run(name, func(t *testing.T) {
+			definition := "name: accepted\n"
+			if engine != "" {
+				definition += "engine: " + engine + "\n"
+			}
+			definition += "steps:\n  - id: work\n    kind: tool\n    config:\n      tool: noop\n"
+			workflow, err := ParseDefinitionYAML([]byte(definition))
+			if err != nil {
+				t.Fatalf("ParseDefinitionYAML: %v", err)
+			}
+			if workflow.Engine != engine {
+				t.Fatalf("Engine = %q, want %q", workflow.Engine, engine)
+			}
+		})
+	}
+}
+
+func TestParseDefinitionYAML_RejectsUnknownEngine(t *testing.T) {
+	_, err := ParseDefinitionYAML([]byte(`
+name: unsupported
+engine: renamed-local-sequencer
+steps:
+  - id: work
+    kind: tool
+    config:
+      tool: noop
+`))
+	if err == nil || !strings.Contains(err.Error(), `unsupported engine "renamed-local-sequencer"`) {
+		t.Fatalf("ParseDefinitionYAML error = %v, want unsupported engine", err)
 	}
 }

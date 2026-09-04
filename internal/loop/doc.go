@@ -20,16 +20,10 @@
 //     operates one level up: it decides what happens *between* whole
 //     WorkflowRun executions, not within one turn's tool-call loop.
 //
-//  2. internal/workflow.LoopStep (internal/workflow/handlers.go) — a step
-//     handler in the older, generic YAML-authored pipeline runner (live and
-//     API-wired via POST /api/workflows/runs; shell/skill/parallel/loop step
-//     kinds). It repeats a step until a gate passes or a max-iteration count
-//     is reached: narrow, deterministic-only, no LLM involvement, for an
-//     ops/automation-pipeline audience. It is not retired or replaced by
-//     this package — see 21-loops.md's "Legacy internal/workflow.LoopStep"
-//     section. This package (loop) is an agentic, goal-driven control layer
-//     over agentworkflow, a structurally different mechanism for a
-//     different audience.
+//  2. The retired generic YAML pipeline's LoopStep — a deterministic step
+//     repeater with no LLM involvement. This package (loop) is instead an
+//     agentic, goal-driven control layer over agentworkflow, a structurally
+//     different mechanism for a different audience.
 //
 // This package needs no doc-comment claim about DAG-only-no-cycles the way
 // internal/agentworkflow's own doc.go makes one for that package (see

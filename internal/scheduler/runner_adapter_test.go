@@ -3,10 +3,13 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
+	workflowwait "github.com/hollis-labs/go-workflow/wait"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/loop"
@@ -41,6 +44,21 @@ type fakeWorkflowLauncher struct {
 	called bool
 }
 
+type fakeWorkflowActivationDispatcher struct {
+	activation workflowwait.Activation
+	firedAt    time.Time
+	applied    bool
+	err        error
+	calls      int
+}
+
+func (f *fakeWorkflowActivationDispatcher) DispatchWorkflowActivation(_ context.Context, activation workflowwait.Activation, firedAt time.Time) (bool, error) {
+	f.calls++
+	f.activation = activation
+	f.firedAt = firedAt
+	return f.applied, f.err
+}
+
 func (f *fakeWorkflowLauncher) Launch(ctx context.Context, req service.WorkflowLaunchRequest) (*service.WorkflowLaunchResult, error) {
 	f.called = true
 	f.gotReq = req
@@ -57,10 +75,12 @@ type fakeCommandExecutor struct {
 	result     *service.ToolResult
 	err        error
 	called     bool
+	calls      int
 }
 
 func (f *fakeCommandExecutor) Execute(ctx context.Context, agentID, toolName string, input map[string]any) (*service.ToolResult, error) {
 	f.called = true
+	f.calls++
 	f.gotAgentID = agentID
 	f.gotTool = toolName
 	f.gotInput = input
@@ -229,6 +249,51 @@ func TestEnqueue_AgentWorkflowRun_MissingAgentProfileID(t *testing.T) {
 	}
 	if launcher.called {
 		t.Fatalf("Launch should not have been called")
+	}
+}
+
+func TestEnqueue_WorkflowActivation_DispatchesExactFireIdentity(t *testing.T) {
+	fireAt := time.Date(2026, time.September, 4, 20, 0, 0, 123, time.UTC)
+	activation := workflowwait.Activation{
+		ID: "wait-wake-activation", Kind: "wait_wake", RunID: "workflow-run", NodeID: "timer-node",
+		WaitID: "timer-wait", FireAt: fireAt, DedupKey: "wait-wake-activation",
+	}
+	dispatcher := &fakeWorkflowActivationDispatcher{applied: true}
+	runner := &RunnerAdapter{WorkflowActivations: dispatcher}
+	job := gosched.Job{
+		ScheduleID: store.WorkflowActivationScheduleID(string(activation.ID)),
+		RunID:      "fire-one", FireID: "fire-one", JobType: JobTypeWorkflowActivation,
+		Payload: mustJSON(t, activation), ScheduledAt: fireAt,
+		FiredAt: fireAt.Add(time.Second), Attempt: 1,
+	}
+	if err := runner.Enqueue(t.Context(), job); err != nil {
+		t.Fatalf("Enqueue workflow activation: %v", err)
+	}
+	if dispatcher.calls != 1 || dispatcher.activation.ID != activation.ID || !dispatcher.firedAt.Equal(job.FiredAt) {
+		t.Fatalf("workflow activation dispatch = calls:%d activation:%+v firedAt:%s", dispatcher.calls, dispatcher.activation, dispatcher.firedAt)
+	}
+}
+
+func TestEnqueue_WorkflowActivation_RejectsMismatchedAndTerminalMaterial(t *testing.T) {
+	fireAt := time.Date(2026, time.September, 4, 20, 30, 0, 0, time.UTC)
+	activation := workflowwait.Activation{
+		ID: "wait-timeout-activation", Kind: "wait_timeout", RunID: "workflow-run", NodeID: "gate-node",
+		WaitID: "gate-wait", FireAt: fireAt, DedupKey: "wait-timeout-activation",
+	}
+	dispatcher := &fakeWorkflowActivationDispatcher{applied: true}
+	runner := &RunnerAdapter{WorkflowActivations: dispatcher}
+	job := gosched.Job{
+		ScheduleID: store.WorkflowActivationScheduleID(string(activation.ID)), RunID: "fire-two",
+		JobType: JobTypeWorkflowActivation, Payload: mustJSON(t, activation),
+		ScheduledAt: fireAt.Add(time.Second), FiredAt: fireAt.Add(time.Second), Attempt: 1,
+	}
+	if err := runner.Enqueue(t.Context(), job); err == nil || dispatcher.calls != 0 {
+		t.Fatalf("mismatched Fire identity = error:%v calls:%d", err, dispatcher.calls)
+	}
+	job.ScheduledAt = fireAt
+	dispatcher.applied = false
+	if err := runner.Enqueue(t.Context(), job); !errors.Is(err, gosched.ErrDuplicateJob) || dispatcher.calls != 1 {
+		t.Fatalf("terminal activation = error:%v calls:%d", err, dispatcher.calls)
 	}
 }
 
@@ -463,7 +528,7 @@ func TestEnqueue_LoopRunTick_MissingLoopRunID(t *testing.T) {
 
 func TestEnqueue_NotConfiguredReturnsClearError(t *testing.T) {
 	r := &RunnerAdapter{}
-	for _, jobType := range []string{JobTypeDurableAgentWake, JobTypeAgentWorkflowRun, JobTypeCommandRun, JobTypeReflexDispatch, JobTypeLoopRunTick} {
+	for _, jobType := range []string{JobTypeDurableAgentWake, JobTypeAgentWorkflowRun, JobTypeCommandRun, JobTypeReflexDispatch, JobTypeLoopRunTick, JobTypeWorkflowActivation} {
 		job := gosched.Job{RunID: "run-x", JobType: jobType, Payload: []byte(`{}`)}
 		if err := r.Enqueue(context.Background(), job); err == nil {
 			t.Errorf("job type %q: expected a not-configured error on a zero-value RunnerAdapter", jobType)
@@ -525,6 +590,12 @@ func TestEnqueue_MalformedPayload_ReturnsErrorNotPanic(t *testing.T) {
 			},
 			jobType: JobTypeLoopRunTick,
 			payload: []byte(`{"loop_run_id":`),
+		},
+		{
+			name:    "workflow_activation invalid JSON",
+			r:       &RunnerAdapter{WorkflowActivations: &fakeWorkflowActivationDispatcher{}},
+			jobType: JobTypeWorkflowActivation,
+			payload: []byte(`{"id":`),
 		},
 	}
 

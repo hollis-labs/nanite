@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -45,6 +47,10 @@ type WorkflowLaunchRequest struct {
 	// TimeoutSeconds caps the run's wall time. <= 0 uses
 	// DefaultWorkflowLaunchTimeout.
 	TimeoutSeconds int
+	// IdempotencyKey selects a stable durable-agent and workflow-run identity.
+	// It is reserved for product operations with their own persisted request
+	// journal, such as TeamRun launch recovery.
+	IdempotencyKey string
 }
 
 // WorkflowLaunchResult is a completed workflow run's outcome.
@@ -57,6 +63,20 @@ type WorkflowLaunchResult struct {
 	Error        string
 }
 
+// DurableWorkflowHost is the single execution and control boundary used by
+// every product workflow entrypoint. The embedded workflowhost.Engine
+// satisfies it; callers never select or type-assert concrete engines.
+type DurableWorkflowHost interface {
+	Run(context.Context, agentworkflow.WorkflowDefinition, agentworkflow.WorkflowInput, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error)
+	Resume(context.Context, string, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error)
+	ResumeGate(context.Context, string, string, string, string, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error)
+	Cancel(context.Context, string, string) (agentworkflow.WorkflowResult, error)
+}
+
+type keyedDurableWorkflowHost interface {
+	RunKeyed(context.Context, string, agentworkflow.WorkflowDefinition, agentworkflow.WorkflowInput, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error)
+}
+
 // WorkflowLauncher maps a workflow run onto the existing template-class
 // durable-agent lifecycle (design doc, "Integration with the rest of
 // Nanite" — CW-20260813-0014): a workflow run IS a template-class durable
@@ -64,8 +84,8 @@ type WorkflowLaunchResult struct {
 // audit/bookkeeping rather than a second, parallel tracking system.
 //
 // Deliberately does NOT go through driveBootSession or a chat turn. The
-// built-in engine calls StepExecutor directly, in-process (design doc:
-// "no wrapper needed, same binary") — it never needs a booted CLI/HTTP
+// shared host calls Nanite StepKind adapters directly, in-process; it never
+// needs a booted CLI/HTTP
 // runtime session, so Start() here only produces the session-attach
 // bookkeeping / durable_agent_events audit trail; the engine runs
 // synchronously against l.exec right after.
@@ -77,33 +97,14 @@ type WorkflowLaunchResult struct {
 // returned WorkflowResult).
 type WorkflowLauncher struct {
 	registry *agentworkflow.Registry
-	// engines is keyed by each WorkflowEngine's own Name() — the identity
-	// a WorkflowDefinition.Engine field selects against (CW-20260814-0003:
-	// engine selection so LangGraph/CrewAI are reachable alongside the
-	// built-in engine, not just it).
-	engines map[string]agentworkflow.WorkflowEngine
-	exec    agentworkflow.StepExecutor
-	durable DurableAgentService
+	host     DurableWorkflowHost
+	exec     agentworkflow.StepExecutor
+	durable  DurableAgentService
 }
 
-// NewWorkflowLauncher constructs a WorkflowLauncher. registry, exec, and
-// durable are required; engines must contain at least one entry keyed
-// under agentworkflow.EngineBuiltin — checked at call time so a wiring bug
-// surfaces as a typed error rather than a nil-pointer panic or a
-// launch-time "unknown engine" surprise for the common case.
-func NewWorkflowLauncher(registry *agentworkflow.Registry, engines map[string]agentworkflow.WorkflowEngine, exec agentworkflow.StepExecutor, durable DurableAgentService) *WorkflowLauncher {
-	return &WorkflowLauncher{registry: registry, engines: engines, exec: exec, durable: durable}
-}
-
-// GetEngine returns the workflow engine registered under the given name.
-// CW-20260814-0017: exposed for TaskManager to access the built-in engine
-// when resuming workflows after gate resolution.
-func (l *WorkflowLauncher) GetEngine(name string) (agentworkflow.WorkflowEngine, bool) {
-	if l == nil || l.engines == nil {
-		return nil, false
-	}
-	engine, ok := l.engines[name]
-	return engine, ok
+// NewWorkflowLauncher constructs a launcher over the one durable host.
+func NewWorkflowLauncher(registry *agentworkflow.Registry, host DurableWorkflowHost, exec agentworkflow.StepExecutor, durable DurableAgentService) *WorkflowLauncher {
+	return &WorkflowLauncher{registry: registry, host: host, exec: exec, durable: durable}
 }
 
 // GetStepExecutor returns the StepExecutor the launcher uses for workflow runs.
@@ -120,36 +121,45 @@ func (l *WorkflowLauncher) GetStepExecutor() agentworkflow.StepExecutor {
 // instance's lifecycle (stopped, with the run id stashed in metadata_json)
 // regardless of whether the run itself succeeded.
 func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest) (*WorkflowLaunchResult, error) {
-	// l.engines[EngineBuiltin] == nil catches both an empty/nil map and a
-	// map that omits (or nils out) the one entry every empty-Engine
-	// workflow resolves to — the doc comment on NewWorkflowLauncher
-	// promises this is checked at call time, so it's checked here rather
-	// than left to surface as a confusing per-launch "unknown engine"
-	// error, or a nil-interface panic on engine.Run below.
-	if l == nil || l.registry == nil || l.engines[agentworkflow.EngineBuiltin] == nil || l.exec == nil || l.durable == nil {
+	if l == nil || l.registry == nil {
 		return nil, fmt.Errorf("workflow: launcher not fully configured")
 	}
-	if req.WorkflowName == "" {
+	if strings.TrimSpace(req.WorkflowName) == "" {
 		return nil, fmt.Errorf("workflow: workflow name is required")
 	}
 	wf, ok := l.registry.Get(req.WorkflowName)
 	if !ok {
 		return nil, fmt.Errorf("workflow: unknown workflow %q", req.WorkflowName)
 	}
-	engineName := wf.Engine
-	if engineName == "" {
-		engineName = agentworkflow.EngineBuiltin
+	return l.launchDefinition(ctx, wf, req)
+}
+
+// LaunchDefinition launches generated canonical material without publishing
+// it into the mutable name registry. The durable host records the compiled
+// plan before execution, so later Resume calls need only the run identity.
+func (l *WorkflowLauncher) LaunchDefinition(ctx context.Context, definition agentworkflow.WorkflowDefinition, req WorkflowLaunchRequest) (*WorkflowLaunchResult, error) {
+	if strings.TrimSpace(definition.Name) == "" {
+		return nil, fmt.Errorf("workflow: definition name is required")
 	}
-	// engine == nil (not just !ok) also rejects a map entry deliberately
-	// or accidentally set to a nil WorkflowEngine value for a
-	// non-builtin engine name — the same panic-on-Run risk the builtin
-	// check above guards against, generalized to every engine.
-	engine, ok := l.engines[engineName]
-	if !ok || engine == nil {
-		return nil, fmt.Errorf("workflow: workflow %q targets engine %q, which is not registered on this launcher", wf.Name, engineName)
+	if req.WorkflowName != "" && req.WorkflowName != definition.Name {
+		return nil, fmt.Errorf("workflow: request name %q does not match definition name %q", req.WorkflowName, definition.Name)
 	}
-	if req.AgentProfileID == "" {
+	req.WorkflowName = definition.Name
+	return l.launchDefinition(ctx, definition, req)
+}
+
+func (l *WorkflowLauncher) launchDefinition(ctx context.Context, wf agentworkflow.WorkflowDefinition, req WorkflowLaunchRequest) (*WorkflowLaunchResult, error) {
+	if l == nil || l.host == nil || l.exec == nil || l.durable == nil {
+		return nil, fmt.Errorf("workflow: launcher not fully configured")
+	}
+	if err := agentworkflow.Validate(wf); err != nil {
+		return nil, fmt.Errorf("workflow: invalid definition: %w", err)
+	}
+	if strings.TrimSpace(req.AgentProfileID) == "" {
 		return nil, fmt.Errorf("workflow: agent_profile_id is required (durable_agent_instances.profile_id is a required FK)")
+	}
+	if missing := missingWorkflowInputs(wf, req.Params); len(missing) != 0 {
+		return nil, fmt.Errorf("workflow: workflow %q requires input(s) not present in params: %s", wf.Name, strings.Join(missing, ", "))
 	}
 
 	instName := fmt.Sprintf("workflow: %s", wf.Name)
@@ -165,24 +175,58 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 		LaunchSourceType: store.DurableAgentLaunchTaskTemplateRun,
 		LaunchSourceID:   wf.Name,
 	}
-	if err := l.durable.Create(ctx, inst); err != nil {
-		return nil, fmt.Errorf("workflow: create durable agent instance: %w", err)
+	keyed := strings.TrimSpace(req.IdempotencyKey) != ""
+	if keyed {
+		digest := fmt.Sprintf("%x", sha256.Sum256([]byte(req.IdempotencyKey)))
+		inst.ID = "workflow-" + digest
+		inst.Slug = "workflow-keyed-" + digest
 	}
-
-	startResult, err := l.durable.Start(ctx, inst.ID, DurableAgentStartRequest{
-		ProjectID:   req.ProjectID,
-		WakePayload: DurableAgentWakePayload{Reason: DurableAgentWakeManual},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("workflow: start durable agent instance %s: %w", inst.ID, err)
+	if !keyed {
+		if err := l.durable.Create(ctx, inst); err != nil {
+			return nil, fmt.Errorf("workflow: create durable agent instance: %w", err)
+		}
+	} else {
+		existing, getErr := l.durable.Get(ctx, inst.ID)
+		switch {
+		case getErr == nil:
+			if existing.ProfileID != inst.ProfileID || existing.LaunchSourceID != inst.LaunchSourceID {
+				return nil, fmt.Errorf("workflow: idempotency key belongs to a different durable workflow launch")
+			}
+			inst = existing
+		case !errors.Is(getErr, store.ErrDurableAgentInstanceNotFound):
+			return nil, fmt.Errorf("workflow: inspect durable agent instance: %w", getErr)
+		default:
+			if err := l.durable.Create(ctx, inst); err != nil {
+				existing, getErr = l.durable.Get(context.WithoutCancel(ctx), inst.ID)
+				if getErr != nil || existing.ProfileID != inst.ProfileID || existing.LaunchSourceID != inst.LaunchSourceID {
+					return nil, fmt.Errorf("workflow: create keyed durable agent instance: %w", err)
+				}
+				inst = existing
+			}
+		}
 	}
 	// Threaded into WorkflowInput.SessionID below so an external engine's
 	// spawned MCP subprocess scopes its callback tool calls to this run's
 	// own session — audit correlation, mirroring CLI-launched agents.
-	// BuiltinWorkflowEngine does not read WorkflowInput.SessionID.
-	sessionID := ""
-	if startResult != nil && startResult.Session != nil {
-		sessionID = startResult.Session.ID
+	// The shared host threads WorkflowInput.SessionID into step invocations.
+	sessionID := inst.CurrentSessionID
+	if sessionID == "" {
+		stableSessionID := ""
+		if keyed {
+			digest := fmt.Sprintf("%x", sha256.Sum256([]byte(req.IdempotencyKey+"\x00workflow-session")))
+			stableSessionID = "workflow-session-" + digest[:32]
+		}
+		startResult, err := l.durable.Start(ctx, inst.ID, DurableAgentStartRequest{
+			ProjectID:   req.ProjectID,
+			SessionID:   stableSessionID,
+			WakePayload: DurableAgentWakePayload{Reason: DurableAgentWakeManual},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("workflow: start durable agent instance %s: %w", inst.ID, err)
+		}
+		if startResult != nil && startResult.Session != nil {
+			sessionID = startResult.Session.ID
+		}
 	}
 
 	timeout := DefaultWorkflowLaunchTimeout
@@ -192,12 +236,22 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	result, runErr := engine.Run(runCtx, wf, agentworkflow.WorkflowInput{Params: req.Params, SessionID: sessionID}, l.exec)
+	var result agentworkflow.WorkflowResult
+	var runErr error
+	if keyed {
+		host, ok := l.host.(keyedDurableWorkflowHost)
+		if !ok {
+			return nil, errors.New("workflow: durable host does not support keyed launch")
+		}
+		result, runErr = host.RunKeyed(runCtx, req.IdempotencyKey, wf, agentworkflow.WorkflowInput{Params: req.Params, SessionID: sessionID}, l.exec)
+	} else {
+		result, runErr = l.host.Run(runCtx, wf, agentworkflow.WorkflowInput{Params: req.Params, SessionID: sessionID}, l.exec)
+	}
 
 	// Finalize the instance's lifecycle regardless of runErr — an
-	// infra-level engine failure still leaves an instance that must not be
-	// left dangling in "active". BuiltinWorkflowEngine returns a zero-value
-	// WorkflowResult on an infra error, so RunID is omitted (not stamped as
+	// infra-level host failure still leaves an instance that must not be
+	// left dangling in "active". A failure before durable run creation returns
+	// a zero-value WorkflowResult, so RunID is omitted (not stamped as
 	// a misleading empty string) when there was no real run to link to.
 	metaBytes, marshalErr := json.Marshal(workflowInstanceMetadata{
 		WorkflowName:  wf.Name,
@@ -218,18 +272,64 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 			"instance_id", inst.ID, "err", stopErr)
 	}
 
-	if runErr != nil {
-		return nil, fmt.Errorf("workflow: run %q: %w", wf.Name, runErr)
-	}
-
-	return &WorkflowLaunchResult{
+	launchResult := &WorkflowLaunchResult{
 		InstanceID:   inst.ID,
 		RunID:        result.RunID,
 		WorkflowName: wf.Name,
 		Status:       result.Status,
 		StepResults:  result.StepResults,
 		Error:        result.Error,
-	}, nil
+	}
+	if runErr != nil {
+		return launchResult, fmt.Errorf("workflow: run %q: %w", wf.Name, runErr)
+	}
+
+	return launchResult, nil
+}
+
+// Resume continues a persisted run through the same durable host used for
+// launch. No workflow definition registry lookup is involved.
+func (l *WorkflowLauncher) Resume(ctx context.Context, runID string) (agentworkflow.WorkflowResult, error) {
+	if l == nil || l.host == nil || l.exec == nil {
+		return agentworkflow.WorkflowResult{}, fmt.Errorf("workflow: launcher not fully configured")
+	}
+	if strings.TrimSpace(runID) == "" {
+		return agentworkflow.WorkflowResult{}, fmt.Errorf("workflow: run id is required")
+	}
+	return l.host.Resume(ctx, runID, l.exec)
+}
+
+// ResumeGate authorizes and resolves one persisted human gate, then resumes
+// the run through the durable host.
+func (l *WorkflowLauncher) ResumeGate(ctx context.Context, runID, stepID, input, responderReference string) (agentworkflow.WorkflowResult, error) {
+	if l == nil || l.host == nil || l.exec == nil {
+		return agentworkflow.WorkflowResult{}, fmt.Errorf("workflow: launcher not fully configured")
+	}
+	if strings.TrimSpace(runID) == "" || strings.TrimSpace(stepID) == "" || strings.TrimSpace(responderReference) == "" {
+		return agentworkflow.WorkflowResult{}, fmt.Errorf("workflow: run id, step id, and responder reference are required")
+	}
+	return l.host.ResumeGate(ctx, runID, stepID, input, responderReference, l.exec)
+}
+
+// Cancel cancels one persisted run through the durable host.
+func (l *WorkflowLauncher) Cancel(ctx context.Context, runID, reason string) (agentworkflow.WorkflowResult, error) {
+	if l == nil || l.host == nil {
+		return agentworkflow.WorkflowResult{}, fmt.Errorf("workflow: launcher not fully configured")
+	}
+	if strings.TrimSpace(runID) == "" {
+		return agentworkflow.WorkflowResult{}, fmt.Errorf("workflow: run id is required")
+	}
+	return l.host.Cancel(ctx, runID, reason)
+}
+
+func missingWorkflowInputs(definition agentworkflow.WorkflowDefinition, params map[string]any) []string {
+	var missing []string
+	for _, key := range agentworkflow.RequiredInputs(definition) {
+		if _, ok := params[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	return missing
 }
 
 // workflowInstanceMetadata is the shape stashed into a workflow-run

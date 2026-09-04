@@ -10,6 +10,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
+	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
@@ -200,6 +201,62 @@ func TestExecuteToolStep_RequiresToolName(t *testing.T) {
 	}
 }
 
+func TestExecuteToolStep_StampsWorkflowRunAndCallerIdentity(t *testing.T) {
+	tools := &fakeWorkflowToolService{
+		executeFunc: func(ctx context.Context, agentID, _ string, _ map[string]any) (*ToolResult, error) {
+			if got := mcp.SessionIDFromContext(ctx); got != "workflow-run-1" {
+				t.Errorf("SessionIDFromContext = %q, want workflow-run-1", got)
+			}
+			if got := mcp.CallerProfileFromContext(ctx); got != "agent-1" {
+				t.Errorf("CallerProfileFromContext = %q, want agent-1", got)
+			}
+			if agentID != "agent-1" {
+				t.Errorf("ToolService agentID = %q, want agent-1", agentID)
+			}
+			return &ToolResult{Output: "ok"}, nil
+		},
+	}
+	executor := NewWorkflowStepExecutor(tools, &fakeProviderResolver{}, nil)
+
+	_, err := executor.ExecuteToolStep(context.Background(), agentworkflow.ToolStepRequest{
+		WorkflowRunID: "workflow-run-1",
+		AgentID:       "agent-1",
+		Tool:          "python_run",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteToolStep: %v", err)
+	}
+}
+
+func TestExecuteToolStep_ConfiguredSessionOverridesWorkflowRun(t *testing.T) {
+	req := agentworkflow.ToolStepRequest{
+		WorkflowRunID: "workflow-run-2",
+		StepID:        "python",
+		SessionID:     "author-session",
+		AgentID:       "agent-2",
+		Tool:          "python_run",
+	}
+	if req.SessionID != "author-session" {
+		t.Fatalf("built SessionID = %q, want author-session", req.SessionID)
+	}
+
+	tools := &fakeWorkflowToolService{
+		executeFunc: func(ctx context.Context, _ string, _ string, _ map[string]any) (*ToolResult, error) {
+			if got := mcp.SessionIDFromContext(ctx); got != "author-session" {
+				t.Errorf("SessionIDFromContext = %q, want author-session", got)
+			}
+			if got := mcp.CallerProfileFromContext(ctx); got != "agent-2" {
+				t.Errorf("CallerProfileFromContext = %q, want agent-2", got)
+			}
+			return &ToolResult{Output: "ok"}, nil
+		},
+	}
+	executor := NewWorkflowStepExecutor(tools, &fakeProviderResolver{}, nil)
+	if _, err := executor.ExecuteToolStep(context.Background(), req); err != nil {
+		t.Fatalf("ExecuteToolStep: %v", err)
+	}
+}
+
 // --- ExecuteLLMStep: capability restriction ---
 
 func TestExecuteLLMStep_OnlyOffersRequestedToolSurface(t *testing.T) {
@@ -237,6 +294,111 @@ func TestExecuteLLMStep_OnlyOffersRequestedToolSurface(t *testing.T) {
 	got := toolDefNames(prov.gotReqs[0].Tools)
 	if len(got) != 1 || got[0] != "torque_task_get" {
 		t.Fatalf("expected only [torque_task_get] offered to the model, got %v", got)
+	}
+}
+
+func TestExecuteLLMStep_ConsumesProviderEventsThroughTurn(t *testing.T) {
+	tools := &fakeWorkflowToolService{}
+	prov := &scriptedProvider{responses: [][]llmtypes.StreamEvent{
+		{
+			{Type: llmtypes.EventDelta, Content: "shared "},
+			{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{InputTokens: 3, OutputTokens: 1, CacheCreationTokens: 2, StopReason: "tool_use"}},
+			{Type: llmtypes.EventDelta, Content: "turn"},
+			{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{InputTokens: 4, OutputTokens: 5, CacheReadTokens: 6, StopReason: "end_turn"}},
+		},
+	}}
+	exec := NewWorkflowStepExecutor(tools, &fakeProviderResolver{providers: map[string]llmcontracts.Provider{
+		"anthropic": prov,
+	}}, nil)
+
+	result, err := exec.ExecuteLLMStep(context.Background(), agentworkflow.LLMStepRequest{
+		AgentID:  "agent-1",
+		Provider: "anthropic",
+		Model:    "claude",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteLLMStep returned error: %v", err)
+	}
+	if result.Text != "shared turn" {
+		t.Fatalf("Text = %q, want shared turn", result.Text)
+	}
+	wantUsage := &llmtypes.Usage{
+		InputTokens: 7, OutputTokens: 6, CacheCreationTokens: 2,
+		CacheReadTokens: 6, StopReason: "end_turn",
+	}
+	if result.Usage == nil || *result.Usage != *wantUsage {
+		t.Fatalf("Usage = %#v, want %#v", result.Usage, wantUsage)
+	}
+	if result.StopReason != "end_turn" {
+		t.Fatalf("StopReason = %q, want end_turn", result.StopReason)
+	}
+}
+
+func TestExecuteLLMStep_StampsWorkflowRunAndCallerIdentity(t *testing.T) {
+	tools := &fakeWorkflowToolService{
+		summaries: []toolclient.ToolSummary{{Name: "python_run", Description: "run Python"}},
+		schemas:   map[string]map[string]any{"python_run": {"type": "object"}},
+		executeFunc: func(ctx context.Context, agentID, toolName string, _ map[string]any) (*ToolResult, error) {
+			if got := mcp.SessionIDFromContext(ctx); got != "workflow-run-llm" {
+				t.Errorf("SessionIDFromContext = %q, want workflow-run-llm", got)
+			}
+			if got := mcp.CallerProfileFromContext(ctx); got != "agent-llm" {
+				t.Errorf("CallerProfileFromContext = %q, want agent-llm", got)
+			}
+			if agentID != "agent-llm" || toolName != "python_run" {
+				t.Errorf("Execute identity = (%q, %q), want (agent-llm, python_run)", agentID, toolName)
+			}
+			return &ToolResult{Output: "ok"}, nil
+		},
+	}
+	prov := &scriptedProvider{responses: [][]llmtypes.StreamEvent{
+		{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "call-1", Name: "python_run"}}},
+		{{Type: llmtypes.EventDelta, Content: "done"}},
+	}}
+	exec := NewWorkflowStepExecutor(tools, &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}, nil)
+
+	_, err := exec.ExecuteLLMStep(context.Background(), agentworkflow.LLMStepRequest{
+		WorkflowRunID: "workflow-run-llm",
+		AgentID:       "agent-llm",
+		Provider:      "anthropic",
+		Tools:         []string{"python_run"},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteLLMStep: %v", err)
+	}
+}
+
+func TestExecuteLLMStep_ConfiguredSessionOverridesWorkflowRun(t *testing.T) {
+	req := agentworkflow.LLMStepRequest{
+		WorkflowRunID: "workflow-run-llm",
+		StepID:        "llm-python",
+		SessionID:     "authored-llm-session",
+		AgentID:       "agent-llm",
+		Provider:      "anthropic",
+		Messages:      []llmtypes.ChatMessage{{Role: "user", Content: "use python"}},
+		Tools:         []string{"python_run"},
+	}
+	if req.WorkflowRunID != "workflow-run-llm" || req.SessionID != "authored-llm-session" {
+		t.Fatalf("built identity = run %q session %q", req.WorkflowRunID, req.SessionID)
+	}
+
+	tools := &fakeWorkflowToolService{
+		summaries: []toolclient.ToolSummary{{Name: "python_run", Description: "run Python"}},
+		schemas:   map[string]map[string]any{"python_run": {"type": "object"}},
+		executeFunc: func(ctx context.Context, _ string, _ string, _ map[string]any) (*ToolResult, error) {
+			if got := mcp.SessionIDFromContext(ctx); got != "authored-llm-session" {
+				t.Errorf("SessionIDFromContext = %q, want authored-llm-session", got)
+			}
+			return &ToolResult{Output: "ok"}, nil
+		},
+	}
+	prov := &scriptedProvider{responses: [][]llmtypes.StreamEvent{
+		{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "call-1", Name: "python_run"}}},
+		{{Type: llmtypes.EventDelta, Content: "done"}},
+	}}
+	exec := NewWorkflowStepExecutor(tools, &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}, nil)
+	if _, err := exec.ExecuteLLMStep(context.Background(), req); err != nil {
+		t.Fatalf("ExecuteLLMStep: %v", err)
 	}
 }
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +54,9 @@ type DurableAgentLaunchPolicy struct {
 type DurableAgentStartRequest struct {
 	ProjectID   string
 	WakePayload DurableAgentWakePayload
+	// SessionID optionally supplies a caller-journaled stable session identity.
+	// Replays reuse the exact matching session instead of creating another.
+	SessionID string
 }
 
 type DurableAgentLaunchResult struct {
@@ -711,6 +715,18 @@ func durableAgentLaunchPolicyFor(inst *store.DurableAgentInstance, wake DurableA
 }
 
 func (s *durableAgentService) selectOrCreateLaunchSession(inst *store.DurableAgentInstance, policy DurableAgentLaunchPolicy, req DurableAgentStartRequest) (*store.Session, bool, error) {
+	if req.SessionID != "" {
+		existing, err := s.store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, req.SessionID)
+		if err == nil {
+			if existing.ContextType != "durable_agent" || existing.ContextID != inst.ID {
+				return nil, false, fmt.Errorf("stable session %s belongs to another launch", req.SessionID)
+			}
+			return existing, true, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, false, err
+		}
+	}
 	switch policy.SessionPolicy {
 	case DurableAgentSessionPolicyReuseLatestOrCreate, DurableAgentSessionPolicyReuseManaged:
 		if sess, err := s.latestAttachedSession(inst, true); err != nil {
@@ -728,6 +744,7 @@ func (s *durableAgentService) selectOrCreateLaunchSession(inst *store.DurableAge
 		sessionTitle = inst.ID
 	}
 	sess := &store.Session{
+		ID:          req.SessionID,
 		ProjectID:   req.ProjectID,
 		Provider:    inst.Provider,
 		Model:       inst.Model,

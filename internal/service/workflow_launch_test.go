@@ -14,27 +14,59 @@ import (
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
-// fakeFailingWorkflowEngine simulates an infra-level engine failure (e.g. a
-// persistence error before any run row exists) — BuiltinWorkflowEngine
-// returns a zero-value WorkflowResult in that case, which is what exercises
-// the metadata omitempty path.
-type fakeFailingWorkflowEngine struct{}
+// fakeFailingWorkflowHost simulates an infra-level host failure before any
+// durable run identity exists, exercising the metadata omitempty path.
+type fakeFailingWorkflowHost struct{}
 
-func (fakeFailingWorkflowEngine) Name() string { return "fake-failing" }
-
-func (fakeFailingWorkflowEngine) Run(context.Context, agentworkflow.WorkflowDefinition, agentworkflow.WorkflowInput, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
+func (fakeFailingWorkflowHost) Run(context.Context, agentworkflow.WorkflowDefinition, agentworkflow.WorkflowInput, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
 	return agentworkflow.WorkflowResult{}, fmt.Errorf("simulated infra failure")
 }
 
-var _ agentworkflow.WorkflowEngine = fakeFailingWorkflowEngine{}
+func (fakeFailingWorkflowHost) Resume(context.Context, string, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
+	return agentworkflow.WorkflowResult{}, fmt.Errorf("simulated infra failure")
+}
 
-// builtinEngineSet wraps a single engine as the "builtin"-keyed engine set
-// most tests need — a workflow with an empty Engine field resolves to
-// agentworkflow.EngineBuiltin (WorkflowLauncher.Launch's default), so
-// registering the fixture engine under that key exercises the same
-// resolution path production wiring uses.
-func builtinEngineSet(engine agentworkflow.WorkflowEngine) map[string]agentworkflow.WorkflowEngine {
-	return map[string]agentworkflow.WorkflowEngine{agentworkflow.EngineBuiltin: engine}
+func (fakeFailingWorkflowHost) ResumeGate(context.Context, string, string, string, string, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
+	return agentworkflow.WorkflowResult{}, fmt.Errorf("simulated infra failure")
+}
+
+func (fakeFailingWorkflowHost) Cancel(context.Context, string, string) (agentworkflow.WorkflowResult, error) {
+	return agentworkflow.WorkflowResult{}, fmt.Errorf("simulated infra failure")
+}
+
+var _ DurableWorkflowHost = fakeFailingWorkflowHost{}
+
+type executingTestWorkflowHost struct{}
+
+func (executingTestWorkflowHost) Run(ctx context.Context, definition agentworkflow.WorkflowDefinition, _ agentworkflow.WorkflowInput, exec agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
+	result := agentworkflow.WorkflowResult{RunID: "test-shared-host-run", Status: agentworkflow.RunStatusCompleted, StepResults: map[string]agentworkflow.StepResult{}}
+	for _, step := range definition.Steps {
+		tool, _ := step.Config["tool"].(string)
+		executed, err := exec.ExecuteToolStep(ctx, agentworkflow.ToolStepRequest{WorkflowRunID: result.RunID, StepID: step.ID, Tool: tool})
+		stepResult := agentworkflow.StepResult{StepID: step.ID, Kind: step.Kind, Output: executed.Output, IsError: executed.IsError || err != nil}
+		if err != nil {
+			stepResult.Output = err.Error()
+		}
+		result.StepResults[step.ID] = stepResult
+		if stepResult.IsError {
+			result.Status = agentworkflow.RunStatusFailed
+			result.Error = stepResult.Output
+			break
+		}
+	}
+	return result, nil
+}
+
+func (executingTestWorkflowHost) Resume(context.Context, string, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
+	return agentworkflow.WorkflowResult{}, fmt.Errorf("resume not configured in test host")
+}
+
+func (executingTestWorkflowHost) ResumeGate(context.Context, string, string, string, string, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
+	return agentworkflow.WorkflowResult{}, fmt.Errorf("gate resume not configured in test host")
+}
+
+func (executingTestWorkflowHost) Cancel(context.Context, string, string) (agentworkflow.WorkflowResult, error) {
+	return agentworkflow.WorkflowResult{}, fmt.Errorf("cancel not configured in test host")
 }
 
 // singleToolStepWorkflow is a minimal, valid workflow definition — one
@@ -76,10 +108,9 @@ func TestWorkflowLauncher_Launch_Success(t *testing.T) {
 	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
 		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
 	})
-	engine := NewBuiltinWorkflowEngine(st)
 	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	durable := NewDurableAgentService(st)
-	launcher := NewWorkflowLauncher(registry, builtinEngineSet(engine), exec, durable)
+	launcher := NewWorkflowLauncher(registry, executingTestWorkflowHost{}, exec, durable)
 
 	result, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "noop-workflow",
@@ -133,9 +164,8 @@ func TestWorkflowLauncher_Launch_Success(t *testing.T) {
 func TestWorkflowLauncher_Launch_UnknownWorkflow(t *testing.T) {
 	st, profile := newWorkflowLaunchTestFixture(t)
 	registry := agentworkflow.NewRegistry(nil)
-	engine := NewBuiltinWorkflowEngine(st)
 	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
-	launcher := NewWorkflowLauncher(registry, builtinEngineSet(engine), exec, NewDurableAgentService(st))
+	launcher := NewWorkflowLauncher(registry, executingTestWorkflowHost{}, exec, NewDurableAgentService(st))
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "does-not-exist",
@@ -158,9 +188,8 @@ func TestWorkflowLauncher_Launch_RequiresAgentProfileID(t *testing.T) {
 	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
 		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
 	})
-	engine := NewBuiltinWorkflowEngine(st)
 	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
-	launcher := NewWorkflowLauncher(registry, builtinEngineSet(engine), exec, NewDurableAgentService(st))
+	launcher := NewWorkflowLauncher(registry, executingTestWorkflowHost{}, exec, NewDurableAgentService(st))
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName: "noop-workflow",
@@ -182,7 +211,6 @@ func TestWorkflowLauncher_Launch_RespectsTimeout(t *testing.T) {
 	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
 		"slow-workflow": singleToolStepWorkflow("slow-workflow"),
 	})
-	engine := NewBuiltinWorkflowEngine(st)
 	tools := &fakeWorkflowToolService{
 		executeFunc: func(ctx context.Context, _, _ string, _ map[string]any) (*ToolResult, error) {
 			<-ctx.Done()
@@ -191,7 +219,7 @@ func TestWorkflowLauncher_Launch_RespectsTimeout(t *testing.T) {
 	}
 	exec := NewWorkflowStepExecutor(tools, &fakeProviderResolver{}, nil)
 	durable := NewDurableAgentService(st)
-	launcher := NewWorkflowLauncher(registry, builtinEngineSet(engine), exec, durable)
+	launcher := NewWorkflowLauncher(registry, executingTestWorkflowHost{}, exec, durable)
 
 	start := time.Now()
 	result, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
@@ -230,43 +258,6 @@ func TestWorkflowLauncher_Launch_RespectsTimeout(t *testing.T) {
 	}
 }
 
-func TestBuiltinWorkflowEngine_PersistWorkflowRunStepOutcome_SurvivesCanceledContext(t *testing.T) {
-	st, _ := newWorkflowLaunchTestFixture(t)
-	runID := "canceled-outcome-run"
-	if err := st.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{
-		ID: runID, DefinitionName: "canceled-outcome", Status: "running", InputJSON: "{}",
-	}); err != nil {
-		t.Fatalf("CreateWorkflowRun: %v", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	exec := &fakeStepExecutor{
-		toolFunc: func(agentworkflow.ToolStepRequest) (agentworkflow.ToolStepResult, error) {
-			cancel()
-			return agentworkflow.ToolStepResult{}, context.Canceled
-		},
-	}
-	engine := NewBuiltinWorkflowEngine(st)
-	outcome := engine.runStep(ctx, runID, singleToolStepWorkflow("canceled-outcome").Steps[0], nil, agentworkflow.WorkflowInput{}, exec)
-	if outcome.Err != nil {
-		t.Fatalf("runStep: %v", outcome.Err)
-	}
-	if !outcome.Result.IsError {
-		t.Fatalf("runStep result = %+v, want cancellation error outcome", outcome.Result)
-	}
-
-	rows, err := st.ListWorkflowRunSteps(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("ListWorkflowRunSteps: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("len(rows) = %d, want 1", len(rows))
-	}
-	if rows[0].Status != "failed" || !rows[0].IsError || !strings.Contains(rows[0].Output, context.Canceled.Error()) {
-		t.Fatalf("persisted row = %+v, want failed cancellation outcome", rows[0])
-	}
-}
-
 // TestWorkflowLauncher_Launch_StampsParentSessionIDInName proves
 // ParentSessionID is actually used, not just documented — a workflow-run
 // instance's Name should surface which session launched it so an operator
@@ -276,9 +267,8 @@ func TestWorkflowLauncher_Launch_StampsParentSessionIDInName(t *testing.T) {
 	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
 		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
 	})
-	engine := NewBuiltinWorkflowEngine(st)
 	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
-	launcher := NewWorkflowLauncher(registry, builtinEngineSet(engine), exec, NewDurableAgentService(st))
+	launcher := NewWorkflowLauncher(registry, executingTestWorkflowHost{}, exec, NewDurableAgentService(st))
 
 	result, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:    "noop-workflow",
@@ -310,7 +300,7 @@ func TestWorkflowLauncher_Launch_EngineInfraError_OmitsEmptyRunID(t *testing.T) 
 	})
 	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	durable := NewDurableAgentService(st)
-	launcher := NewWorkflowLauncher(registry, builtinEngineSet(fakeFailingWorkflowEngine{}), exec, durable)
+	launcher := NewWorkflowLauncher(registry, fakeFailingWorkflowHost{}, exec, durable)
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "noop-workflow",

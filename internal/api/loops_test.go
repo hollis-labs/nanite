@@ -50,10 +50,9 @@ func newTestAPIWithLoopLauncher(t *testing.T) (*API, *http.ServeMux, *store.Stor
 	st := a.Services.Store
 
 	registry := agentworkflow.NewRegistry(nil)
-	engine := service.NewBuiltinWorkflowEngine(st)
-	engines := map[string]agentworkflow.WorkflowEngine{agentworkflow.EngineBuiltin: engine}
+	engine := newAPITestWorkflowHost(t, st)
 	durable := service.NewDurableAgentService(st)
-	launcher := service.NewWorkflowLauncher(registry, engines, &fakeAPIStepExecutor{}, durable)
+	launcher := service.NewWorkflowLauncher(registry, engine, &fakeAPIStepExecutor{}, durable)
 	loopEngine := loop.NewLoopEngine(st, registry, launcher)
 	a.SetLoopLauncher(loop.NewLoopLauncher(loopEngine, st))
 

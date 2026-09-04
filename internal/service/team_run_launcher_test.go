@@ -18,30 +18,42 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/workflowhost"
 )
 
 // --- fixtures ---
 
 // newTeamRunLauncherTestFixtures wires a real (t.TempDir()-scoped)
-// *store.Store, a fresh *agentworkflow.Registry, a real BuiltinWorkflowEngine
-// with WithFlexSupport wired (mirroring cmd/nanite/main.go's own production
-// wiring, TASKS/teams/06-stepkindflex-executor.md's Work Log), a real
-// WorkflowLauncher, and the TeamRunLauncher under test — the same
-// dependency shape production wiring uses, no mocks below the
+// *store.Store, a fresh *agentworkflow.Registry, a real shared workflow host,
+// a real WorkflowLauncher, and the TeamRunLauncher under test — the same
+// dependency shape production wiring uses, with only the Team signal boundary
+// represented by a local test host and no mocks below the
 // fakeStepExecutor (which is never actually called by any test here: the
 // SME example's phase sequence has no llm/tool steps, only flex/gate).
+type unresolvedTeamStepHost struct{}
+
+func (unresolvedTeamStepHost) ResolveWorkflowTeamStep(context.Context, workflowhost.TeamStepResolveRequest) (workflowhost.TeamStepResolveResult, error) {
+	return workflowhost.TeamStepResolveResult{}, nil
+}
+
 func newTeamRunLauncherTestFixtures(t *testing.T) (*store.Store, *agentworkflow.Registry, *TeamRunLauncher) {
 	t.Helper()
 	st := newTestWorkflowStore(t)
 	registry := agentworkflow.NewRegistry(nil)
-	engine := NewBuiltinWorkflowEngine(st).WithFlexSupport(st, &reflexes.StateCollector{Store: st, Window: 5})
-	engines := map[string]agentworkflow.WorkflowEngine{agentworkflow.EngineBuiltin: engine}
+	state, err := workflowhost.NewWorkflowStateStore(st)
+	if err != nil {
+		t.Fatalf("NewWorkflowStateStore: %v", err)
+	}
+	engine, err := workflowhost.NewEngine(state)
+	if err != nil {
+		t.Fatalf("workflowhost.NewEngine: %v", err)
+	}
+	engine.WithTeamStepHost(unresolvedTeamStepHost{})
 	durable := NewDurableAgentService(st)
-	wl := NewWorkflowLauncher(registry, engines, &fakeStepExecutor{}, durable)
-	trl := NewTeamRunLauncher(st, registry, wl, durable)
+	wl := NewWorkflowLauncher(registry, engine, &fakeStepExecutor{}, durable)
+	trl := NewTeamRunLauncher(st, wl, durable)
 	return st, registry, trl
 }
 
@@ -159,7 +171,7 @@ func buildSMETeam(t *testing.T, st *store.Store, architectProfileID string) *sto
 // every resolved slot, and reaches the first flex step in a waiting
 // state.
 func TestLaunchTeamRun_SMEExample_ReachesFirstFlexStepWaiting(t *testing.T) {
-	st, _, trl := newTeamRunLauncherTestFixtures(t)
+	st, registry, trl := newTeamRunLauncherTestFixtures(t)
 	ctx := context.Background()
 
 	createTestRoleBoundAgent(t, st, "orchestrator")
@@ -178,6 +190,9 @@ func TestLaunchTeamRun_SMEExample_ReachesFirstFlexStepWaiting(t *testing.T) {
 	}
 	if result.Status != agentworkflow.RunStatusWaitingOnFlex {
 		t.Fatalf("Status = %q, want %q (error=%s)", result.Status, agentworkflow.RunStatusWaitingOnFlex, result.Error)
+	}
+	if names := registry.Names(); len(names) != 0 {
+		t.Fatalf("generated team definition leaked into mutable registry: %v", names)
 	}
 
 	// A real workflow_runs row exists.

@@ -430,61 +430,6 @@ func (s *Store) ListDueAgentSchedules(ctx context.Context, now time.Time, limit 
 	return out, rows.Err()
 }
 
-// ClaimAgentScheduleRun is the compare-and-set the go-scheduler engine's
-// duplicate-dispatch safety rests on: it advances last_fired_at/next_run
-// only if the row's *current* next_run still equals expectedNext, and
-// reports whether the claim succeeded (RowsAffected()==1). A losing
-// concurrent caller gets (false, nil) -- not an error, and no row is
-// touched.
-//
-// Safe by construction under a single-writer connection pool (store.go's
-// sqlitekit.OpenSingle, WAL + busy_timeout(5s) + _txlock=immediate on every
-// connection) without any additional locking -- see
-// docs/engineering/architecture/12-scheduling.md's "The Store adapter"
-// section for the full argument. last_fired_at is the pre-existing column
-// migration 127 repurposed for this (not a new "last_run" column) per that
-// migration's own Work Log.
-func (s *Store) ClaimAgentScheduleRun(ctx context.Context, id string, expectedNext, lastRun, nextRun time.Time) (bool, error) {
-	res, err := s.DB.ExecContext(ctx,
-		`UPDATE agent_schedules
-		    SET last_fired_at = ?, next_run = ?
-		  WHERE id = ? AND next_run = ?`,
-		lastRun.UTC().Format(time.RFC3339), nextRun.UTC().Format(time.RFC3339),
-		id, expectedNext.UTC().Format(time.RFC3339),
-	)
-	if err != nil {
-		return false, fmt.Errorf("claim agent_schedules run %s: %w", id, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("claim agent_schedules run %s rows affected: %w", id, err)
-	}
-	return n == 1, nil
-}
-
-// SetAgentScheduleNextRun resets next_run unconditionally -- no CAS check,
-// unlike ClaimAgentScheduleRun. go-scheduler's engine calls the matching
-// Store method to roll a schedule back to its pre-claim next_run after a
-// failed Runner.Enqueue, so the same firing becomes due again on the next
-// tick (libs/go-scheduler/engine.go's tick()).
-func (s *Store) SetAgentScheduleNextRun(ctx context.Context, id string, nextRun time.Time) error {
-	res, err := s.DB.ExecContext(ctx,
-		`UPDATE agent_schedules SET next_run = ? WHERE id = ?`,
-		nextRun.UTC().Format(time.RFC3339), id,
-	)
-	if err != nil {
-		return fmt.Errorf("set agent_schedules next_run %s: %w", id, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("set agent_schedules next_run %s rows affected: %w", id, err)
-	}
-	if n == 0 {
-		return ErrAgentScheduleNotFound
-	}
-	return nil
-}
-
 // backfillScheduleNextRun computes agent_schedules.next_run for every
 // active cron/one_shot row that doesn't already have one -- covers rows
 // that pre-date migration 127's next_run column (which the migration's
@@ -495,7 +440,7 @@ func (s *Store) SetAgentScheduleNextRun(ctx context.Context, id string, nextRun 
 // Idempotent by construction: only rows with next_run IS NULL are
 // touched, so this is a safe no-op on every boot after the one that
 // actually needed to backfill something. TASKS/scheduling/02-store-
-// adapter.md's Store adapter (ClaimAndUpdateScheduleRun/SetScheduleNextRun)
+// adapter.md's Store adapter (CreateFire)
 // keeps next_run populated going forward once a schedule has fired at
 // least once under the new engine, so this function's job is strictly
 // "cover the gap between migration 127 landing and the new engine's first

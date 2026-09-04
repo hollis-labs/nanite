@@ -290,6 +290,64 @@ func (s *Store) InsertAgentReflex(ctx context.Context, row AgentReflex) (string,
 	return row.ID, nil
 }
 
+// InsertAgentReflexIfAbsent inserts a caller-keyed reflex without replacing an
+// existing row. Replays preserve fired_count/last_fired_at; a deterministic-ID
+// collision with different immutable routing material fails closed.
+func (s *Store) InsertAgentReflexIfAbsent(ctx context.Context, row AgentReflex) (bool, error) {
+	if row.ID == "" || row.Name == "" || row.TriggerKind == "" || row.TriggerSpec == "" || row.ActionKind == "" || row.ActionSpec == "" {
+		return false, errors.New("insert agent reflex if absent: id, name, trigger, and action are required")
+	}
+	if row.Status == "" {
+		row.Status = ReflexStatusActive
+	}
+	if row.CreatedBy == "" {
+		row.CreatedBy = "operator"
+	}
+	if row.ProvenanceTier == "" {
+		if row.CreatedBy == "system" {
+			row.ProvenanceTier = "system"
+		} else {
+			row.ProvenanceTier = "operator"
+		}
+	}
+	result, err := s.DB.ExecContext(ctx,
+		`INSERT OR IGNORE INTO agent_reflexes
+		    (id, agent_id, class_tag, name, trigger_kind, trigger_spec,
+		     action_kind, action_spec, status, priority, fired_count,
+		     last_fired_at, created_at, created_by, opt_out_allowed,
+		     provenance_tier, recurrence_override_seconds, workflow_run_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(NULLIF(?, ''), datetime('now')), ?, ?, ?, ?, ?)`,
+		row.ID, nullIfEmpty(row.AgentID), nullIfEmpty(row.ClassTag), row.Name,
+		row.TriggerKind, row.TriggerSpec, row.ActionKind, row.ActionSpec, row.Status,
+		row.Priority, row.FiredCount, nullIfEmpty(row.LastFiredAt), row.CreatedAt,
+		row.CreatedBy, row.OptOutAllowed, row.ProvenanceTier,
+		nullIfNilInt64(row.RecurrenceOverrideSeconds), nullIfEmpty(row.WorkflowRunID),
+	)
+	if err != nil {
+		return false, fmt.Errorf("insert agent reflex if absent: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("insert agent reflex if absent rows: %w", err)
+	}
+	if count == 1 {
+		return true, nil
+	}
+	existing, err := s.GetAgentReflex(ctx, row.ID)
+	if err != nil {
+		return false, err
+	}
+	if existing.AgentID != row.AgentID || existing.ClassTag != row.ClassTag || existing.Name != row.Name ||
+		existing.TriggerKind != row.TriggerKind || existing.TriggerSpec != row.TriggerSpec ||
+		existing.ActionKind != row.ActionKind || existing.ActionSpec != row.ActionSpec ||
+		existing.Status != row.Status || existing.Priority != row.Priority || existing.CreatedBy != row.CreatedBy ||
+		existing.OptOutAllowed != row.OptOutAllowed || existing.ProvenanceTier != row.ProvenanceTier ||
+		existing.WorkflowRunID != row.WorkflowRunID {
+		return false, fmt.Errorf("insert agent reflex if absent: id %q belongs to different reflex material", row.ID)
+	}
+	return false, nil
+}
+
 // GetAgentReflex returns the row by ID, or ErrAgentReflexNotFound.
 func (s *Store) GetAgentReflex(ctx context.Context, id string) (*AgentReflex, error) {
 	var out AgentReflex

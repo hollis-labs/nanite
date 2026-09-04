@@ -6,16 +6,15 @@ import (
 	"strings"
 )
 
-// templateRefPattern mirrors internal/service/workflow_engine.go's pattern
-// of the same name byte-for-byte — captures everything between {{ }}
-// (anything but a closing brace), with no restriction on the captured
-// content. The engine's resolveTemplateRef then does a bare
-// strings.TrimPrefix(ref, "input.") with no further validation on the key
-// shape, so a key can contain hyphens, dots, or anything else that isn't
+// templateRefPattern captures everything between {{ }} (anything but a
+// closing brace), with no restriction on the captured content. The shared
+// host's Nanite value resolver then strips the "input." prefix with no
+// further validation on the key shape, so a key can contain hyphens, dots,
+// or anything else that isn't
 // "}". An earlier version of this file narrowed the key to [a-zA-Z0-9_]+,
 // which silently missed real references like {{input.task-id}} — this
-// pattern + the prefix-strip below must stay in lock-step with the
-// engine's actual parsing, not a guessed-at subset of it.
+// pattern + the prefix-strip below must stay in lock-step with the host's
+// actual parsing, not a guessed-at subset of it.
 var templateRefPattern = regexp.MustCompile(`\{\{\s*([^}]+?)\s*\}\}`)
 
 // RequiredInputs statically scans every step's Config for {{input.<key>}}
@@ -26,8 +25,8 @@ var templateRefPattern = regexp.MustCompile(`\{\{\s*([^}]+?)\s*\}\}`)
 // This is a best-effort scan, not a formal declaration — WorkflowDefinition
 // has no separate "inputs" schema (CW-20260815-0022's finding: it never
 // did), so "referenced anywhere in a step's Config" is the only signal
-// available. It only covers the built-in engine's resolution surface (a
-// step's Config map, recursively) — an external-engine definition's Steps
+// available. It only covers the native StepKind translation surface (a step's
+// Config map, recursively) — an external-engine definition's Steps
 // exist only as human-readable documentation of intent (see
 // WorkflowDefinition.Engine's doc comment) and are scanned the same way for
 // whatever value that has, but the real requirement for those lives in the

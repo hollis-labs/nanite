@@ -4,17 +4,26 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
+	"github.com/hollis-labs/nanite/internal/mcp"
 )
 
 // DefaultMaxToolIterations bounds an ExecuteLLMStep tool-call loop when the
 // request doesn't specify one — a misbehaving or looping model can't run
 // forever.
 const DefaultMaxToolIterations = 10
+
+// workflowTurnIdleTimeout is deliberately owned by the workflow-step Run,
+// rather than inherited from the interactive chat loop. ExecuteLLMStep had no
+// inactivity bound before it adopted ExecuteTurn; fifteen minutes adds a
+// generous liveness guard for background workflow model calls without imposing
+// a whole-Run deadline or coupling this path to chat-specific policy.
+const workflowTurnIdleTimeout = 15 * time.Minute
 
 // reviewerSystemPrompt instructs a mode:agent reviewer step (a nested
 // ExecuteLLMStep call) to return a parseable verdict. Kept narrow and
@@ -120,8 +129,8 @@ var workflowEngineChecks = map[string]workflowEngineCheck{
 }
 
 // workflowStepExecutor is the real, single implementation of
-// agentworkflow.StepExecutor. Every WorkflowEngine — built-in or external —
-// calls through this; it is never reimplemented per consumer.
+// agentworkflow.StepExecutor. The shared host calls through this one
+// implementation for every Nanite-owned execution step.
 type workflowStepExecutor struct {
 	tools      ToolService
 	providers  WorkflowProviderResolver
@@ -151,6 +160,17 @@ func (e *workflowStepExecutor) ExecuteToolStep(ctx context.Context, req agentwor
 		return agentworkflow.ToolStepResult{}, fmt.Errorf("workflow: tool step requires a tool name")
 	}
 
+	sessionID := req.SessionID
+	if sessionID == "" {
+		sessionID = req.WorkflowRunID
+	}
+	if sessionID != "" {
+		ctx = mcp.WithSessionID(ctx, sessionID)
+	}
+	if req.AgentID != "" {
+		ctx = mcp.WithCallerProfile(ctx, req.AgentID)
+	}
+
 	result, err := e.tools.Execute(ctx, req.AgentID, req.Tool, req.Args)
 	if err != nil {
 		return agentworkflow.ToolStepResult{}, fmt.Errorf("workflow: tool step %q: %w", req.Tool, err)
@@ -158,12 +178,13 @@ func (e *workflowStepExecutor) ExecuteToolStep(ctx context.Context, req agentwor
 	return agentworkflow.ToolStepResult{Output: result.Output, IsError: result.IsError}, nil
 }
 
-// ExecuteLLMStep runs one capability-restricted agent turn through the
-// harness's provider/tool-broker/permission-engine machinery. The tool
+// ExecuteLLMStep runs a bounded, capability-restricted Run composed of Turns
+// through the harness's provider/tool-broker machinery. The tool
 // surface offered to the model is exactly req.Tools — there is no fallback
 // to a broader default. Session history, agent/mode/workspace prompt
 // content, and Tesseract memory recall are only pulled in when the request
-// opts in via EnableContextAssembly (see resolveTurnContext).
+// opts in via EnableContextAssembly (see resolveTurnContext). See the Turn vs.
+// Run architecture and glossary entries for this vocabulary boundary.
 func (e *workflowStepExecutor) ExecuteLLMStep(ctx context.Context, req agentworkflow.LLMStepRequest) (agentworkflow.LLMStepResult, error) {
 	if e.tools == nil {
 		return agentworkflow.LLMStepResult{}, fmt.Errorf("workflow: llm step executor has no ToolService configured")
@@ -202,49 +223,47 @@ func (e *workflowStepExecutor) ExecuteLLMStep(ctx context.Context, req agentwork
 	var toolCalls []agentworkflow.ToolCallRecord
 	var lastUsage *llmtypes.Usage
 
+	// Stamp workflow identity once for every provider Turn and tool settlement
+	// in this Run. An authored session wins; otherwise the WorkflowRun itself
+	// is the stable permission/audit scope.
+	sessionID := req.SessionID
+	if sessionID == "" {
+		sessionID = req.WorkflowRunID
+	}
+	if sessionID != "" {
+		ctx = mcp.WithSessionID(ctx, sessionID)
+	}
+	if req.AgentID != "" {
+		ctx = mcp.WithCallerProfile(ctx, req.AgentID)
+	}
+
 	for iter := 0; ; iter++ {
 		if iter >= maxIter {
 			return agentworkflow.LLMStepResult{}, fmt.Errorf("workflow: llm step exceeded max tool iterations (%d)", maxIter)
 		}
 
-		chatReq := llmtypes.ChatRequest{
-			Model:        req.Model,
-			SystemPrompt: systemPrompt,
-			Messages:     messages,
-			Tools:        toolDefs,
-		}
-
-		events, err := prov.StreamChat(ctx, chatReq)
+		turn, err := ExecuteTurn(ctx, TurnRequest{
+			Stream: func(turnCtx context.Context) (<-chan llmtypes.StreamEvent, error) {
+				return prov.StreamChat(turnCtx, llmtypes.ChatRequest{
+					Model:        req.Model,
+					SystemPrompt: systemPrompt,
+					Messages:     messages,
+					Tools:        toolDefs,
+				})
+			},
+			IdleTimeout: workflowTurnIdleTimeout,
+			Sink:        TurnSink{},
+		})
 		if err != nil {
 			return agentworkflow.LLMStepResult{}, fmt.Errorf("workflow: llm step stream error: %w", err)
 		}
 
 		var textBuf strings.Builder
-		var pendingToolUses []llmtypes.ToolUseBlock
-		var stopReason string
-		var streamErr error
-
-		for ev := range events {
-			switch ev.Type {
-			case llmtypes.EventDelta:
-				textBuf.WriteString(ev.Content)
-			case llmtypes.EventToolUse:
-				if ev.ToolUse != nil {
-					pendingToolUses = append(pendingToolUses, *ev.ToolUse)
-				}
-			case llmtypes.EventUsage:
-				if ev.Usage != nil {
-					lastUsage = ev.Usage
-					if ev.Usage.StopReason != "" {
-						stopReason = ev.Usage.StopReason
-					}
-				}
-			case llmtypes.EventError:
-				streamErr = fmt.Errorf("workflow: llm step provider error: %s", ev.Error)
-			}
-		}
-		if streamErr != nil {
-			return agentworkflow.LLMStepResult{}, streamErr
+		textBuf.WriteString(turn.Text)
+		pendingToolUses := turn.ToolUseBlocks
+		stopReason := turn.StopReason
+		if turn.Usage != nil {
+			lastUsage = turn.Usage
 		}
 
 		if len(pendingToolUses) == 0 {

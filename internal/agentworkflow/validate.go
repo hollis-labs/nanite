@@ -2,16 +2,17 @@ package agentworkflow
 
 import "fmt"
 
-// Validate checks a WorkflowDefinition is well-formed before it's handed to
-// a WorkflowEngine: known step kinds, a well-formed verify modifier where
-// present, and — via Levels — no duplicate ids, no unknown DependsOn
-// references, and no cycles (design doc: "DAG only, no cycles"; matches
-// Hadron's and Torque's pattern of never accepting a cyclic dependency
-// graph). Callers should run this at load/registration time, not at
-// execution time.
+// Validate checks only Nanite's product DTO contract: required display
+// identity, supported product StepKinds, and verifier configuration. Graph
+// semantics deliberately do not live here. The shared go-workflow compiler is
+// the sole authority for normalized node identity, dependencies, cycles, and
+// executable-plan validation.
 func Validate(wf WorkflowDefinition) error {
 	if wf.Name == "" {
 		return fmt.Errorf("agentworkflow: workflow definition requires a name")
+	}
+	if !IsSupportedEngine(wf.Engine) {
+		return fmt.Errorf("agentworkflow: workflow %q has unsupported engine %q", wf.Name, wf.Engine)
 	}
 	if len(wf.Steps) == 0 {
 		return fmt.Errorf("agentworkflow: workflow %q has no steps", wf.Name)
@@ -33,9 +34,6 @@ func Validate(wf WorkflowDefinition) error {
 		}
 	}
 
-	if _, err := Levels(wf.Steps); err != nil {
-		return fmt.Errorf("agentworkflow: workflow %q: %w", wf.Name, err)
-	}
 	return nil
 }
 

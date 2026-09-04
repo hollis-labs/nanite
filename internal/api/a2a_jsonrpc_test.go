@@ -10,11 +10,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
+	"github.com/hollis-labs/nanite/internal/workflowhost"
 )
 
 // TestA2AJSONRPC_MethodRouting verifies that the JSON-RPC handler routes
@@ -248,4 +251,132 @@ func TestA2AJSONRPC_HandleTaskCancel_Workflow_Unsupported(t *testing.T) {
 	if resp.Error.Code != a2a.ErrTaskNotCancelable {
 		t.Errorf("resp.Error.Code = %d, want %d (ErrTaskNotCancelable)", resp.Error.Code, a2a.ErrTaskNotCancelable)
 	}
+}
+
+func TestA2AJSONRPC_ProvideInputResumesHadronGate(t *testing.T) {
+	st, err := storetest.New(t, t.Context(), filepath.Join(t.TempDir(), "hadron-a2a-api.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
+	state, err := workflowhost.NewWorkflowStateStore(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waits := &workflowruntime.WaitCoordinator{
+		Store: state, Authorizer: workflowhost.NaniteResponderAuthorizer{},
+	}
+	engine, err := workflowhost.NewEngine(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.WithWaitCoordinator(waits)
+	executor := &apiHadronStepExecutor{}
+	const taskID = "a2a-api-hadron-gate"
+	definition := agentworkflow.WorkflowDefinition{
+		Name: "A2A API Hadron approval", Engine: agentworkflow.EngineHadron,
+		Steps: []agentworkflow.StepDefinition{
+			{ID: "approval step", Kind: agentworkflow.StepKindGate},
+			{ID: "publish", Kind: agentworkflow.StepKindTool, DependsOn: []string{"approval step"}, Config: map[string]any{
+				"tool": "publish", "agent_id": "api-publisher", "args": map[string]any{"decision": "{{steps.approval step.output}}"},
+			}},
+		},
+	}
+	waiting, err := engine.Run(t.Context(), definition, agentworkflow.WorkflowInput{
+		Params: map[string]any{"_nanite_a2a_task_id": taskID}, SessionID: "api-session",
+	}, executor)
+	if err != nil || waiting.Status != agentworkflow.RunStatusWaiting {
+		t.Fatalf("Run=%+v err=%v", waiting, err)
+	}
+	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{definition.Name: definition})
+	launcher := service.NewWorkflowLauncher(registry, engine, executor, nil)
+	tm := service.NewTaskManager(st, launcher, nil, fakeInstanceCanceller{}, registry, nil)
+	if createErr := st.CreateA2ATask(t.Context(), &store.A2ATask{
+		ID: taskID, TargetKind: "workflow", TargetRef: definition.Name,
+		WorkflowRunID: sql.NullString{String: waiting.RunID, Valid: true}, State: a2a.TaskStateWorking,
+	}); createErr != nil {
+		t.Fatal(createErr)
+	}
+	api := &API{Services: &service.Container{TaskManager: tm}}
+
+	_, before := postJSONRPC(t, api, a2a.JSONRPCRequest{
+		JSONRPC: a2a.JSONRPCVersion, Method: methodGetTask,
+		Params: a2a.TaskGetRequest{TaskID: taskID}, ID: 1,
+	})
+	if before.Error != nil {
+		t.Fatalf("GetTask error=%+v", before.Error)
+	}
+	beforeBytes, _ := json.Marshal(before.Result)
+	var beforeResult a2a.TaskGetResponse
+	if decodeErr := json.Unmarshal(beforeBytes, &beforeResult); decodeErr != nil || beforeResult.Task.State != a2a.TaskStateInputRequired {
+		t.Fatalf("waiting API task=%+v err=%v", beforeResult, decodeErr)
+	}
+
+	_, response := postJSONRPC(t, api, a2a.JSONRPCRequest{
+		JSONRPC: a2a.JSONRPCVersion, Method: methodProvideTaskInput,
+		Params: a2a.TaskProvideInputRequest{TaskID: taskID, Input: "approved"}, ID: 2,
+	})
+	if response.Error != nil {
+		t.Fatalf("ProvideInput error=%+v", response.Error)
+	}
+	responseBytes, _ := json.Marshal(response.Result)
+	var result a2a.TaskProvideInputResponse
+	if decodeErr := json.Unmarshal(responseBytes, &result); decodeErr != nil || result.TaskID != taskID || result.State != a2a.TaskStateCompleted {
+		t.Fatalf("ProvideInput result=%+v err=%v", result, decodeErr)
+	}
+	if len(executor.tools) != 1 || executor.tools[0].WorkflowRunID != waiting.RunID ||
+		executor.tools[0].SessionID != "api-session" || executor.tools[0].Args["decision"] != "approved" {
+		t.Fatalf("tool identity=%+v", executor.tools)
+	}
+	run, err := st.GetWorkflowRun(t.Context(), waiting.RunID)
+	if err != nil || run == nil || run.DefinitionName != definition.Name || run.Status != "completed" {
+		t.Fatalf("product run=%+v err=%v", run, err)
+	}
+
+	const canceledTaskID = "a2a-api-hadron-cancel"
+	cancelWaiting, err := engine.Run(t.Context(), definition, agentworkflow.WorkflowInput{
+		Params: map[string]any{"_nanite_a2a_task_id": canceledTaskID}, SessionID: "cancel-session",
+	}, executor)
+	if err != nil || cancelWaiting.Status != agentworkflow.RunStatusWaiting {
+		t.Fatalf("Run(cancel fixture)=%+v err=%v", cancelWaiting, err)
+	}
+	if createErr := st.CreateA2ATask(t.Context(), &store.A2ATask{
+		ID: canceledTaskID, TargetKind: "workflow", TargetRef: definition.Name,
+		WorkflowRunID: sql.NullString{String: cancelWaiting.RunID, Valid: true}, State: a2a.TaskStateWorking,
+	}); createErr != nil {
+		t.Fatal(createErr)
+	}
+	_, cancelResponse := postJSONRPC(t, api, a2a.JSONRPCRequest{
+		JSONRPC: a2a.JSONRPCVersion, Method: methodCancelTask,
+		Params: a2a.TaskCancelRequest{TaskID: canceledTaskID}, ID: 3,
+	})
+	if cancelResponse.Error != nil {
+		t.Fatalf("CancelTask error=%+v", cancelResponse.Error)
+	}
+	cancelBytes, _ := json.Marshal(cancelResponse.Result)
+	var cancelResult a2a.TaskCancelResponse
+	if decodeErr := json.Unmarshal(cancelBytes, &cancelResult); decodeErr != nil || cancelResult.TaskID != canceledTaskID || cancelResult.State != a2a.TaskStateCanceled {
+		t.Fatalf("CancelTask result=%+v err=%v", cancelResult, decodeErr)
+	}
+	canceledRun, err := st.GetWorkflowRun(t.Context(), cancelWaiting.RunID)
+	if err != nil || canceledRun == nil || canceledRun.Status != "canceled" {
+		t.Fatalf("canceled product run=%+v err=%v", canceledRun, err)
+	}
+}
+
+type apiHadronStepExecutor struct {
+	tools []agentworkflow.ToolStepRequest
+}
+
+func (*apiHadronStepExecutor) ExecuteLLMStep(context.Context, agentworkflow.LLMStepRequest) (agentworkflow.LLMStepResult, error) {
+	return agentworkflow.LLMStepResult{}, nil
+}
+
+func (e *apiHadronStepExecutor) ExecuteToolStep(_ context.Context, request agentworkflow.ToolStepRequest) (agentworkflow.ToolStepResult, error) {
+	e.tools = append(e.tools, request)
+	return agentworkflow.ToolStepResult{Output: "published"}, nil
+}
+
+func (*apiHadronStepExecutor) Verify(context.Context, agentworkflow.VerifyRequest) (agentworkflow.VerifyResult, error) {
+	return agentworkflow.VerifyResult{Passed: true}, nil
 }

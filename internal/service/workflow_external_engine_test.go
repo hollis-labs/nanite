@@ -12,7 +12,7 @@ import (
 )
 
 // skipIfNoPython3 mirrors internal/workflowrunner/launch_test.go's guard —
-// these tests exercise ExternalWorkflowEngine.Run end to end through a real
+// these tests exercise ExternalWorkflowEngine.ExecuteWorkflowStep end to end through a real
 // subprocess, same as workflowrunner's own tests do.
 func skipIfNoPython3(t *testing.T) {
 	t.Helper()
@@ -59,11 +59,7 @@ func TestExternalWorkflowEngine_Name(t *testing.T) {
 	}
 }
 
-// TestExternalWorkflowEngine_Run_Success proves a clean-exit subprocess maps
-// onto RunStatusCompleted, an empty RunID (external engines don't persist a
-// workflow_runs row), and the subprocess's stdout captured under the
-// synthetic "run" StepResult.
-func TestExternalWorkflowEngine_Run_Success(t *testing.T) {
+func TestExternalWorkflowEngine_ExecuteWorkflowStep_Success(t *testing.T) {
 	skipIfNoPython3(t)
 
 	script := writeExternalEngineScript(t, `
@@ -77,34 +73,23 @@ print(json.dumps({"received_params": payload.get("params", {})}))
 		t.Fatalf("NewExternalWorkflowEngine: %v", err)
 	}
 
-	wf := agentworkflow.WorkflowDefinition{Name: "langgraph-workflow", Engine: agentworkflow.EngineLangGraph}
-	result, err := e.Run(context.Background(), wf, agentworkflow.WorkflowInput{Params: map[string]any{"greeting": "hi"}}, nil)
+	result, err := e.ExecuteWorkflowStep(context.Background(), "run:external", "langgraph-workflow", map[string]any{"greeting": "hi"}, "")
 	if err != nil {
-		t.Fatalf("Run: %v", err)
+		t.Fatalf("ExecuteWorkflowStep: %v", err)
 	}
-	if result.RunID != "" {
-		t.Errorf("RunID = %q, want empty (external engines don't persist a run row)", result.RunID)
+	if result.IsError {
+		t.Fatal("IsError = true, want false")
 	}
-	if result.Status != agentworkflow.RunStatusCompleted {
-		t.Errorf("Status = %q, want completed", result.Status)
-	}
-	sr, ok := result.StepResults[externalRunStepID]
-	if !ok {
-		t.Fatalf("StepResults[%q] missing: %+v", externalRunStepID, result.StepResults)
-	}
-	if sr.IsError {
-		t.Errorf("StepResults[%q].IsError = true, want false", externalRunStepID)
-	}
-	if !strings.Contains(sr.Output, `"greeting": "hi"`) {
-		t.Errorf("Output = %q, want it to contain the round-tripped params", sr.Output)
+	if !strings.Contains(result.Output, `"greeting": "hi"`) || !strings.Contains(result.Output, `"_nanite_idempotency_key": "run:external"`) {
+		t.Errorf("Output = %q, want params and stable key", result.Output)
 	}
 }
 
-// TestExternalWorkflowEngine_Run_NonZeroExit proves a non-zero exit is a
-// normal (non-Go-error) RunStatusFailed outcome, with stderr folded into
+// TestExternalWorkflowEngine_ExecuteWorkflowStep_NonZeroExit proves a non-zero exit is a
+// normal (non-Go-error) step failure, with stderr folded into
 // the step's Output for debuggability — never a Go error, matching
 // workflowrunner.Launch's own "non-zero exit is not a Go error" contract.
-func TestExternalWorkflowEngine_Run_NonZeroExit(t *testing.T) {
+func TestExternalWorkflowEngine_ExecuteWorkflowStep_NonZeroExit(t *testing.T) {
 	skipIfNoPython3(t)
 
 	script := writeExternalEngineScript(t, `
@@ -117,34 +102,23 @@ sys.exit(3)
 		t.Fatalf("NewExternalWorkflowEngine: %v", err)
 	}
 
-	wf := agentworkflow.WorkflowDefinition{Name: "langgraph-workflow", Engine: agentworkflow.EngineLangGraph}
-	result, err := e.Run(context.Background(), wf, agentworkflow.WorkflowInput{}, nil)
+	result, err := e.ExecuteWorkflowStep(context.Background(), "run:external", "langgraph-workflow", nil, "")
 	if err != nil {
 		t.Fatalf("Run returned a Go error for a plain non-zero exit: %v", err)
 	}
-	if result.Status != agentworkflow.RunStatusFailed {
-		t.Errorf("Status = %q, want failed", result.Status)
+	if !result.IsError {
+		t.Error("IsError = false, want true")
 	}
-	if result.Error == "" {
-		t.Error("Error is empty, want a failure message")
-	}
-	sr := result.StepResults[externalRunStepID]
-	if !sr.IsError {
-		t.Error("StepResults[run].IsError = false, want true")
-	}
-	if !strings.Contains(sr.Output, "boom") {
-		t.Errorf("Output = %q, want stderr (\"boom\") folded in", sr.Output)
+	if !strings.Contains(result.Output, "boom") {
+		t.Errorf("Output = %q, want stderr (\"boom\") folded in", result.Output)
 	}
 }
 
-// TestExternalWorkflowEngine_Run_LaunchFailureIsGoError proves a
+// TestExternalWorkflowEngine_ExecuteWorkflowStep_LaunchFailureIsGoError proves a
 // launch-level failure (a PythonPath that doesn't resolve to a real
 // interpreter — a spawn failure, distinct from a script that fails once
-// running) surfaces as a Go error, not a WorkflowResult — the same
-// infra-vs-semantic-failure split BuiltinWorkflowEngine.Run follows,
-// load-bearing for WorkflowLauncher.Launch's shared finalize-on-any-error
-// handling.
-func TestExternalWorkflowEngine_Run_LaunchFailureIsGoError(t *testing.T) {
+// running) surfaces as a Go error rather than a semantic step failure.
+func TestExternalWorkflowEngine_ExecuteWorkflowStep_LaunchFailureIsGoError(t *testing.T) {
 	script := writeExternalEngineScript(t, `print("unreachable")`)
 	cfg := baseExternalEngineConfig(t, script)
 	cfg.PythonPath = filepath.Join(t.TempDir(), "no-such-interpreter")
@@ -153,12 +127,11 @@ func TestExternalWorkflowEngine_Run_LaunchFailureIsGoError(t *testing.T) {
 		t.Fatalf("NewExternalWorkflowEngine: %v", err)
 	}
 
-	wf := agentworkflow.WorkflowDefinition{Name: "langgraph-workflow", Engine: agentworkflow.EngineLangGraph}
-	result, runErr := e.Run(context.Background(), wf, agentworkflow.WorkflowInput{}, nil)
+	result, runErr := e.ExecuteWorkflowStep(context.Background(), "run:external", "langgraph-workflow", nil, "")
 	if runErr == nil {
 		t.Fatal("expected a Go error for a missing script path")
 	}
-	if result.Status != "" || result.StepResults != nil {
-		t.Errorf("result = %+v, want zero-value WorkflowResult on infra error", result)
+	if result != (ExternalWorkflowStepResult{}) {
+		t.Errorf("result = %+v, want zero-value step result on infra error", result)
 	}
 }

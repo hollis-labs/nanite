@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
+	"github.com/hollis-labs/nanite/internal/workflowhost"
 )
 
 // TestA2AGateIntegration verifies the full gate ↔ input-required flow:
@@ -57,6 +60,98 @@ func TestA2AGateIntegration(t *testing.T) {
 	// 5. Verify workflow resumes and completes
 	// task = taskMgr.GetTask(ctx, result.TaskID)
 	// if task.State != a2a.TaskStateCompleted { t.Fatal(...) }
+}
+
+func TestA2AHadronGateInputResumesExactRunAndPreservesIdentity(t *testing.T) {
+	st := newTestStore(t)
+	state, err := workflowhost.NewWorkflowStateStore(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waits := &workflowruntime.WaitCoordinator{Store: state, Authorizer: workflowhost.NaniteResponderAuthorizer{}}
+	engine, err := workflowhost.NewEngine(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.WithWaitCoordinator(waits)
+
+	const taskID = "a2a-hadron-gate-task"
+	definition := agentworkflow.WorkflowDefinition{
+		Name: "A2A Hadron approval flow", Engine: agentworkflow.EngineHadron,
+		Steps: []agentworkflow.StepDefinition{
+			{ID: "approve release", Kind: agentworkflow.StepKindGate},
+			{ID: "publish", Kind: agentworkflow.StepKindTool, DependsOn: []string{"approve release"}, Config: map[string]any{
+				"tool": "publish", "agent_id": "release-agent", "args": map[string]any{"approval": "{{steps.approve release.output}}"},
+			}},
+		},
+	}
+	executor := &a2aHadronStepExecutor{}
+	waiting, err := engine.Run(t.Context(), definition, agentworkflow.WorkflowInput{
+		Params: map[string]any{"_nanite_a2a_task_id": taskID}, SessionID: "a2a-workflow-session",
+	}, executor)
+	if err != nil || waiting.Status != agentworkflow.RunStatusWaiting {
+		t.Fatalf("Run = %+v, %v", waiting, err)
+	}
+	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{definition.Name: definition})
+	launcher := NewWorkflowLauncher(registry, engine, executor, nil)
+	tm := &TaskManager{store: st, launcher: launcher, registry: registry, logger: testLogger(t), pushNotifier: NewA2APushNotifier(st, testLogger(t))}
+	if createErr := st.CreateA2ATask(t.Context(), &store.A2ATask{
+		ID: taskID, TargetKind: "workflow", TargetRef: definition.Name,
+		WorkflowRunID: sql.NullString{String: waiting.RunID, Valid: true}, State: a2a.TaskStateWorking,
+	}); createErr != nil {
+		t.Fatal(createErr)
+	}
+
+	task, err := tm.GetTask(t.Context(), taskID)
+	if err != nil || task.State != a2a.TaskStateInputRequired {
+		t.Fatalf("waiting task = %+v, %v", task, err)
+	}
+	if provideErr := tm.ProvideTaskInput(t.Context(), taskID, "approved"); provideErr != nil {
+		t.Fatalf("ProvideTaskInput: %v", provideErr)
+	}
+	task, err = tm.GetTask(t.Context(), taskID)
+	if err != nil || task.State != a2a.TaskStateCompleted {
+		t.Fatalf("completed task = %+v, %v", task, err)
+	}
+	run, err := st.GetWorkflowRun(t.Context(), waiting.RunID)
+	if err != nil || run == nil || run.DefinitionName != definition.Name || run.Status != "completed" {
+		t.Fatalf("product run = %+v, %v", run, err)
+	}
+	steps, err := st.ListWorkflowRunSteps(t.Context(), waiting.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[string]*store.WorkflowRunStepRow, len(steps))
+	for _, step := range steps {
+		byID[step.StepID] = step
+	}
+	if gate := byID["approve release"]; gate == nil || gate.Status != "completed" || gate.GateInput != "approved" {
+		t.Fatalf("gate projection = %+v", gate)
+	}
+	if len(executor.tools) != 1 {
+		t.Fatalf("tool calls = %+v", executor.tools)
+	}
+	tool := executor.tools[0]
+	if tool.WorkflowRunID != waiting.RunID || tool.SessionID != "a2a-workflow-session" || tool.AgentID != "release-agent" || tool.Args["approval"] != "approved" {
+		t.Fatalf("tool identity = %+v", tool)
+	}
+}
+
+type a2aHadronStepExecutor struct {
+	tools []agentworkflow.ToolStepRequest
+}
+
+func (*a2aHadronStepExecutor) ExecuteLLMStep(context.Context, agentworkflow.LLMStepRequest) (agentworkflow.LLMStepResult, error) {
+	return agentworkflow.LLMStepResult{}, nil
+}
+
+func (e *a2aHadronStepExecutor) ExecuteToolStep(_ context.Context, request agentworkflow.ToolStepRequest) (agentworkflow.ToolStepResult, error) {
+	e.tools = append(e.tools, request)
+	return agentworkflow.ToolStepResult{Output: "published"}, nil
+}
+
+func (*a2aHadronStepExecutor) Verify(context.Context, agentworkflow.VerifyRequest) (agentworkflow.VerifyResult, error) {
+	return agentworkflow.VerifyResult{Passed: true}, nil
 }
 
 // TestDeriveFromWorkflowRun_WaitingOnGate verifies that a workflow run in

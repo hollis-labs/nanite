@@ -45,4 +45,7 @@ Commit time is formatting only, by design. Whole-repo analysis — `go vet`,
 scoped `golangci-lint`, and the test suite — lives in `./scripts/check.sh`,
 the landing check; run it when a feature lands, not on every commit.
 
-See `docs/` for architecture and demo script.
+See `docs/` for architecture and demo script. Agent Workflows specifically are
+sequenced exclusively by the embedded `go-workflow v0.1.0` module and are
+documented in [the engine boundary](docs/architecture/workflow-engine.md) and
+[the operator runbook](docs/workflow-operations.md).

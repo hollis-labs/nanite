@@ -106,26 +106,19 @@ steps:
 	}
 }
 
-func TestLoadRegistryDir_PropagatesInvalidDefinition(t *testing.T) {
+func TestLoadRegistryDir_PropagatesInvalidProductDefinition(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowFile(t, dir, "cyclic.yaml", `
-name: cyclic
+name: invalid-kind
 steps:
   - id: a
-    kind: tool
-    depends_on: [b]
-    config:
-      tool: noop
-  - id: b
-    kind: tool
-    depends_on: [a]
-    config:
-      tool: noop
+    kind: unsupported
+    config: {}
 `)
 
 	_, err := LoadRegistryDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "cycle") {
-		t.Fatalf("err = %v, want cycle rejection to propagate", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown kind") {
+		t.Fatalf("err = %v, want product validation error to propagate", err)
 	}
 }
 
@@ -166,19 +159,18 @@ func TestRegistry_Register_RejectsEmptyName(t *testing.T) {
 	}
 }
 
-func TestRegistry_Register_RejectsInvalidDefinition(t *testing.T) {
+func TestRegistry_Register_RejectsInvalidProductDefinition(t *testing.T) {
 	reg := NewRegistry(nil)
 	wf := WorkflowDefinition{
-		Name: "cyclic",
+		Name: "invalid",
 		Steps: []StepDefinition{
-			{ID: "a", Kind: StepKindTool, DependsOn: []string{"b"}, Config: map[string]any{"tool": "noop"}},
-			{ID: "b", Kind: StepKindTool, DependsOn: []string{"a"}, Config: map[string]any{"tool": "noop"}},
+			{ID: "a", Kind: StepKind("unsupported"), Config: map[string]any{}},
 		},
 	}
-	if err := reg.Register(wf); err == nil || !strings.Contains(err.Error(), "cycle") {
-		t.Fatalf("err = %v, want cycle rejection", err)
+	if err := reg.Register(wf); err == nil || !strings.Contains(err.Error(), "unknown kind") {
+		t.Fatalf("err = %v, want product validation rejection", err)
 	}
-	if _, ok := reg.Get("cyclic"); ok {
+	if _, ok := reg.Get("invalid"); ok {
 		t.Fatal("Get(cyclic) ok = true, want the invalid definition to never be registered")
 	}
 }

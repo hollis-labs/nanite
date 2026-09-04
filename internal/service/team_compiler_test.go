@@ -7,10 +7,9 @@ package service
 //     typed;
 //   - a fully fluid (gate-free) Team compiles into a valid
 //     WorkflowDefinition with only flex steps;
-//   - the compiled definition always has Engine set to the builtin
-//     default, never a caller-suppliable value;
+//   - the compiled definition carries no legacy engine selector;
 //   - every flex step's compiled Config genuinely round-trips through
-//     task 06's real parseFlexStepConfig (same package, called directly --
+//     the shared-host product resolver's parser (same package, called directly --
 //     not just asserted to "look right").
 //
 // No live database anywhere in this file -- CompileTeam takes an
@@ -98,8 +97,8 @@ func TestCompileTeam_SMEExample(t *testing.T) {
 	if wf.Name != "Feature Development" {
 		t.Errorf("Name = %q, want %q", wf.Name, "Feature Development")
 	}
-	if wf.Engine != agentworkflow.EngineBuiltin {
-		t.Errorf("Engine = %q, want %q", wf.Engine, agentworkflow.EngineBuiltin)
+	if wf.Engine != "" {
+		t.Errorf("Engine = %q, want empty shared-host selector", wf.Engine)
 	}
 	if len(wf.Steps) != 4 {
 		t.Fatalf("len(Steps) = %d, want 4: %v", len(wf.Steps), stepIDs(wf))
@@ -175,12 +174,12 @@ func TestCompileTeam_SMEExample(t *testing.T) {
 	}
 }
 
-// TestCompileTeam_SMEExample_FlexStepsRoundTripParseFlexStepConfig is the
+// TestCompileTeam_SMEExample_FlexStepsRoundTripProductConfig is the
 // genuine integration check this task's own required reading calls for:
 // every compiled flex step's Config must actually parse successfully
-// through task 06's real parseFlexStepConfig (same package, called
+// through the product resolver's real config parser (same package, called
 // directly here) -- not just "look like" the right shape.
-func TestCompileTeam_SMEExample_FlexStepsRoundTripParseFlexStepConfig(t *testing.T) {
+func TestCompileTeam_SMEExample_FlexStepsRoundTripProductConfig(t *testing.T) {
 	wf, err := CompileTeam("Feature Development", smeTeamPhases(), nil)
 	if err != nil {
 		t.Fatalf("CompileTeam: %v", err)
@@ -227,8 +226,8 @@ func TestCompileTeam_FullyFluidTeam(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompileTeam: %v", err)
 	}
-	if wf.Engine != agentworkflow.EngineBuiltin {
-		t.Errorf("Engine = %q, want %q", wf.Engine, agentworkflow.EngineBuiltin)
+	if wf.Engine != "" {
+		t.Errorf("Engine = %q, want empty shared-host selector", wf.Engine)
 	}
 	if len(wf.Steps) != 2 {
 		t.Fatalf("len(Steps) = %d, want 2", len(wf.Steps))
@@ -269,24 +268,20 @@ func TestCompileTeam_SingleFlexPhaseTeam(t *testing.T) {
 	if len(wf.Steps) != 1 || wf.Steps[0].Kind != agentworkflow.StepKindFlex {
 		t.Fatalf("Steps = %+v, want exactly one flex step", wf.Steps)
 	}
-	if wf.Engine != agentworkflow.EngineBuiltin {
-		t.Errorf("Engine = %q, want %q", wf.Engine, agentworkflow.EngineBuiltin)
+	if wf.Engine != "" {
+		t.Errorf("Engine = %q, want empty shared-host selector", wf.Engine)
 	}
 }
 
-// TestCompileTeam_EngineAlwaysBuiltin confirms there is no way for a
-// caller to produce a compiled definition with any Engine value other than
-// the builtin default -- CompileTeam's signature has no Engine input at
-// all, so this is a structural guarantee, not just a default; this test
-// exists to keep it that way (a future edit that added an Engine
-// passthrough would need to consciously break this test).
-func TestCompileTeam_EngineAlwaysBuiltin(t *testing.T) {
+// TestCompileTeam_UsesSharedHostIdentity keeps generated Teams from
+// reintroducing a per-definition engine-selection path.
+func TestCompileTeam_UsesSharedHostIdentity(t *testing.T) {
 	wf, err := CompileTeam("Feature Development", smeTeamPhases(), nil)
 	if err != nil {
 		t.Fatalf("CompileTeam: %v", err)
 	}
-	if wf.Engine != agentworkflow.EngineBuiltin {
-		t.Fatalf("Engine = %q, want %q (hard-coded, not caller-configurable)", wf.Engine, agentworkflow.EngineBuiltin)
+	if wf.Engine != "" {
+		t.Fatalf("Engine = %q, want empty shared-host selector", wf.Engine)
 	}
 	if wf.Engine == agentworkflow.EngineLangGraph || wf.Engine == agentworkflow.EngineCrewAI {
 		t.Fatalf("Engine leaked an external-engine value: %q", wf.Engine)
@@ -322,7 +317,7 @@ func TestCompileTeam_Errors(t *testing.T) {
 		}
 	})
 
-	t.Run("flex phase missing active_slots fails the parseFlexStepConfig round-trip", func(t *testing.T) {
+	t.Run("flex phase missing active_slots fails the product config round-trip", func(t *testing.T) {
 		phases := []store.TeamPhase{{
 			ID:          "p1",
 			Kind:        "flex",
@@ -333,7 +328,7 @@ func TestCompileTeam_Errors(t *testing.T) {
 		}
 	})
 
-	t.Run("flex phase missing exit_trigger fails the parseFlexStepConfig round-trip", func(t *testing.T) {
+	t.Run("flex phase missing exit_trigger fails the product config round-trip", func(t *testing.T) {
 		phases := []store.TeamPhase{{
 			ID:          "p1",
 			Kind:        "flex",

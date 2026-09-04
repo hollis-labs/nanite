@@ -8,6 +8,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/loop"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/service"
+	"github.com/hollis-labs/nanite/internal/workflowcompat"
 )
 
 // API holds dependencies for HTTP handlers.
@@ -43,6 +44,19 @@ type API struct {
 	// cmd/nanite/main.go's own loopEngine local variable isn't threaded
 	// through Container either.
 	loopLauncher *loop.LoopLauncher
+	// workflowSurface is the durable shared-engine projection for the existing
+	// Agent Workflows routes. The pilot engine=hadron spelling remains an exact
+	// alias at the HTTP boundary during extraction.
+	workflowSurface workflowcompat.Surface
+	// workflowExternalExecutionAdmin is a separate, authenticated operator
+	// surface so private subprocess receipt state never leaks through ordinary
+	// workflow run reads.
+	workflowExternalExecutionAdmin workflowExternalExecutionAdmin
+	// workflowResponderAuthenticator returns the principal authenticated by
+	// the server boundary. It is deliberately injected rather than inferred
+	// from request JSON or an unverified header. A nil authenticator fails
+	// callback and approval requests closed.
+	workflowResponderAuthenticator func(*http.Request) (string, bool)
 }
 
 // New creates a new API instance from a service container.
@@ -77,6 +91,31 @@ func (a *API) SetEmbedderSelectDeps(deps service.EmbedderSelectDeps) {
 // documented on the loopLauncher field above).
 func (a *API) SetLoopLauncher(l *loop.LoopLauncher) {
 	a.loopLauncher = l
+}
+
+// SetWorkflowSurface wires the shared durable workflow projection.
+func (a *API) SetWorkflowSurface(surface workflowcompat.Surface) {
+	a.workflowSurface = surface
+}
+
+// SetWorkflowExternalExecutionAdmin wires the fail-closed operator path for
+// ambiguous external workflow effects.
+func (a *API) SetWorkflowExternalExecutionAdmin(admin workflowExternalExecutionAdmin) {
+	a.workflowExternalExecutionAdmin = admin
+}
+
+// SetHadronWorkflowSurface retains source compatibility with pilot
+// composition while callers migrate to SetWorkflowSurface.
+// Deprecated: use SetWorkflowSurface.
+func (a *API) SetHadronWorkflowSurface(surface workflowcompat.Surface) {
+	a.SetWorkflowSurface(surface)
+}
+
+// SetWorkflowResponderAuthenticator wires the HTTP authentication boundary
+// used by callback and approval resume requests. The returned principal is
+// persisted as responder provenance by the shared host.
+func (a *API) SetWorkflowResponderAuthenticator(authenticate func(*http.Request) (string, bool)) {
+	a.workflowResponderAuthenticator = authenticate
 }
 
 // RegisterRoutes wires all API routes onto the given ServeMux.
@@ -510,7 +549,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workflows/runs", a.handleRunWorkflow)
 	mux.HandleFunc("GET /api/workflows/runs/{runId}", a.handleGetWorkflowRun)
 	mux.HandleFunc("POST /api/workflows/runs/{runId}/cancel", a.handleCancelWorkflowRun)
+	mux.HandleFunc("POST /api/workflows/runs/{runId}/callbacks/{stepId}", a.handleResumeWorkflowCallback)
+	mux.HandleFunc("POST /api/workflows/runs/{runId}/approvals/{stepId}", a.handleResumeWorkflowApproval)
 	mux.HandleFunc("GET /api/workflows/events", a.handleWorkflowEvents)
+	mux.HandleFunc("GET /api/workflows/external-executions/ambiguous", a.handleListAmbiguousWorkflowExternalExecutions)
+	mux.HandleFunc("POST /api/workflows/external-executions/{receiptId}/resolve", a.handleResolveWorkflowExternalExecution)
 
 	// Workers (multi-agent orchestration)
 	mux.HandleFunc("GET /api/workers", a.handleListWorkers)

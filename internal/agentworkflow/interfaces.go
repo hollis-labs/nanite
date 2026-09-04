@@ -2,22 +2,8 @@ package agentworkflow
 
 import "context"
 
-// WorkflowEngine decides sequencing only — which step runs when. It never
-// executes a unit of work itself; every LLM turn, tool call, and
-// verification check runs through the StepExecutor it is given. This holds
-// for the built-in engine and for external engines (LangGraph, CrewAI)
-// identically (design doc, "The one principle everything else follows
-// from"). Mirrors Dependencies.ProviderAdapter from
-// internal/runtime/agent — a thin resolver/adapter shape, not a new
-// architectural pattern for this codebase.
-type WorkflowEngine interface {
-	Name() string
-	Run(ctx context.Context, wf WorkflowDefinition, input WorkflowInput, exec StepExecutor) (WorkflowResult, error)
-}
-
-// StepExecutor is the single execution substrate every WorkflowEngine —
-// built-in or external — calls into for real work. Its implementation
-// lives in internal/service as plain functions (see
+// StepExecutor is the single Nanite execution substrate the shared workflow
+// host calls for real work. Its implementation lives in internal/service (see
 // workflow_step_executor.go), reusing the harness's existing tool broker
 // and permission engine rather than reimplementing them. Context assembly
 // and memory recall (the ContextService.AssembleSlots/Tesseract path
@@ -29,7 +15,7 @@ type WorkflowEngine interface {
 // never touching model inference are load-bearing invariants of this
 // interface, not implementation details left to callers.
 type StepExecutor interface {
-	// ExecuteLLMStep runs one capability-restricted agent turn.
+	// ExecuteLLMStep runs a bounded, capability-restricted Run composed of Turns.
 	ExecuteLLMStep(ctx context.Context, req LLMStepRequest) (LLMStepResult, error)
 
 	// ExecuteToolStep calls a named tool directly with the given args.

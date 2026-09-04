@@ -18,10 +18,10 @@
 //     looked like the obvious precedent (same "/api/workflows"-shaped
 //     path this task's own Context section explicitly names as something
 //     to check), but is a RED HERRING: it drives an entirely different
-//     execution engine (internal/workflow's YAML-pipeline Executor/
-//     RunStore/Broadcaster), never agentworkflow.WorkflowDefinition/
-//     WorkflowLaunchRequest/WorkflowLauncher at all. Confirmed directly
-//     against the handler body, not assumed from the route name.
+//     execution engine (the now-retired process-local YAML-pipeline
+//     executor), never agentworkflow.WorkflowDefinition/
+//     WorkflowLaunchRequest/WorkflowLauncher at all. The route now exposes
+//     only compatibility projections and the explicit durable engine.
 //  2. internal/selftools/self_tools_workflow_run.go's workflow_run
 //     self-tool -- the real, working "launch a named agentworkflow
 //     definition with params" entry point, constructing a real
@@ -73,6 +73,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+
+	"github.com/oklog/ulid/v2"
 
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -116,10 +119,11 @@ type teamLaunchRequest struct {
 // resolved for this launch, so a caller doesn't need a second round-trip
 // just to see who got resolved into which Team Slot.
 type teamLaunchResponse struct {
-	WorkflowRunID string                `json:"workflow_run_id"`
-	Status        string                `json:"status"`
-	Error         string                `json:"error,omitempty"`
-	Members       []store.TeamRunMember `json:"members,omitempty"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	WorkflowRunID  string                `json:"workflow_run_id"`
+	Status         string                `json:"status"`
+	Error          string                `json:"error,omitempty"`
+	Members        []store.TeamRunMember `json:"members,omitempty"`
 }
 
 // handleLaunchTeam launches a saved Team by id with invocation-time
@@ -145,6 +149,14 @@ func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusServiceUnavailable, "team routing service not available")
 		return
 	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		// Preserve pre-cutover clients while returning the generated key in both
+		// the header and body. Callers that need retry guarantees should supply a
+		// stable key before their first attempt.
+		idempotencyKey = ulid.Make().String()
+	}
+	w.Header().Set("Idempotency-Key", idempotencyKey)
 
 	var req teamLaunchRequest
 	if err := a.decode(r, &req); err != nil {
@@ -153,6 +165,7 @@ func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	overrides := service.TeamRunOverrides{
+		IdempotencyKey:   idempotencyKey,
 		SlotMemberCounts: req.SlotMemberCounts,
 		Params:           req.Params,
 		ProjectID:        req.ProjectID,
@@ -163,8 +176,24 @@ func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 
 	result, err := a.Services.TeamRunLauncher.LaunchTeamRun(r.Context(), id, overrides)
 	if err != nil {
+		if errors.Is(err, store.ErrTeamRunLaunchConflict) {
+			a.errorResp(w, http.StatusConflict, err.Error())
+			return
+		}
 		if errors.Is(err, store.ErrTeamNotFound) {
 			a.errorResp(w, http.StatusNotFound, "team not found")
+			return
+		}
+		var durableErr *service.TeamRunLaunchError
+		if errors.As(err, &durableErr) && durableErr.RunID != "" {
+			status := ""
+			if result != nil {
+				status = string(result.Status)
+			}
+			a.jsonResp(w, http.StatusInternalServerError, teamLaunchResponse{
+				IdempotencyKey: idempotencyKey, WorkflowRunID: durableErr.RunID, Status: status,
+				Error: "Team launch requires durable reconciliation: " + err.Error(),
+			})
 			return
 		}
 		// Every other LaunchTeamRun failure this batch's own tests exercise
@@ -213,9 +242,19 @@ func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 			errMessage += fmt.Sprintf("; cleaned %d partially installed routing reflex(es)", len(installedRoutingIDs))
 		}
 		a.jsonResp(w, http.StatusInternalServerError, teamLaunchResponse{
-			WorkflowRunID: result.RunID,
-			Status:        string(result.Status),
-			Error:         errMessage,
+			IdempotencyKey: idempotencyKey,
+			WorkflowRunID:  result.RunID,
+			Status:         string(result.Status),
+			Error:          errMessage,
+		})
+		return
+	}
+	if markErr := a.Services.TeamRunLauncher.MarkRoutingReady(context.WithoutCancel(r.Context()), idempotencyKey, result.RunID); markErr != nil {
+		a.jsonResp(w, http.StatusInternalServerError, teamLaunchResponse{
+			IdempotencyKey: idempotencyKey,
+			WorkflowRunID:  result.RunID,
+			Status:         string(result.Status),
+			Error:          "Team routing committed but durable readiness acknowledgement needs reconciliation: " + markErr.Error(),
 		})
 		return
 	}
@@ -233,9 +272,10 @@ func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusOK, teamLaunchResponse{
-		WorkflowRunID: result.RunID,
-		Status:        string(result.Status),
-		Error:         result.Error,
-		Members:       members,
+		IdempotencyKey: idempotencyKey,
+		WorkflowRunID:  result.RunID,
+		Status:         string(result.Status),
+		Error:          result.Error,
+		Members:        members,
 	})
 }

@@ -26,16 +26,12 @@ package loop
 //     21-loops.md's "Trigger surface": human resolution / a reflex firing
 //     / a scheduled tick); the outer WorkflowRun's own .Resume call is
 //     made by LoopResumeNotifier, internal/service/
-//     workflow_engine_loop.go, from inside that same LoopEngine.Resume
+//     workflow_loop_adapter.go, from inside that same LoopEngine.Resume
 //     call — never by this test directly.
 //
-// This lives in package loop (not internal/service) because it needs to
-// construct both a real *service.BuiltinWorkflowEngine (the outer run) and
-// a real *LoopEngine (the inner run) wired together — internal/loop
-// already imports internal/service (task 08's own WorkflowLauncher
-// dependency), so this is the one package that can do this without an
-// import cycle. See internal/service/workflow_engine_loop.go's own package
-// doc comment for the full cycle analysis.
+// This lives in package loop because it composes a real shared workflow host,
+// the product bridge, and a real LoopEngine without introducing a production
+// package cycle.
 
 import (
 	"context"
@@ -44,6 +40,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/workflowbridge"
+	"github.com/hollis-labs/nanite/internal/workflowhost"
 )
 
 func TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume(t *testing.T) {
@@ -52,20 +50,21 @@ func TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume(t *te
 	registry := agentworkflow.NewRegistry(nil)
 	exec := &fakeStepExecutor{}
 
-	// One shared BuiltinWorkflowEngine backs both the outer run and every
-	// loop iteration's inner run — exactly production wiring
-	// (cmd/nanite/main.go constructs exactly one workflowEngine for
-	// everything), not two separate engine instances that happen to share
-	// a store.
-	builtin := service.NewBuiltinWorkflowEngine(st)
-	engines := map[string]agentworkflow.WorkflowEngine{agentworkflow.EngineBuiltin: builtin}
+	state, err := workflowhost.NewWorkflowStateStore(st)
+	if err != nil {
+		t.Fatalf("NewWorkflowStateStore: %v", err)
+	}
+	host, err := workflowhost.NewEngine(state)
+	if err != nil {
+		t.Fatalf("workflowhost.NewEngine: %v", err)
+	}
 	durable := service.NewDurableAgentService(st)
-	launcher := service.NewWorkflowLauncher(registry, engines, exec, durable)
+	launcher := service.NewWorkflowLauncher(registry, host, exec, durable)
 
 	loopEngine := NewLoopEngine(st, registry, launcher)
-	notifier := service.NewLoopResumeNotifier(st, registry, launcher)
+	notifier := service.NewLoopResumeNotifier(st, launcher)
 	loopEngine.WithOuterResumeNotifier(notifier)
-	builtin.WithLoopSupport(st, loopEngine)
+	host.WithLoopStepHost(workflowbridge.LoopAdapter{Launcher: loopEngine, Runs: st})
 
 	profile := createTestLoopAgentProfile(t, st, "stepkindloop-agent")
 
@@ -122,7 +121,7 @@ func TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume(t *te
 
 	// --- Step 1: launch the outer run; it must reach RunStatusWaitingOnLoop ---
 
-	result, err := builtin.Run(ctx, outerWF, agentworkflow.WorkflowInput{}, exec)
+	result, err := host.Run(ctx, outerWF, agentworkflow.WorkflowInput{}, exec)
 	if err != nil {
 		t.Fatalf("outer Run: %v", err)
 	}
@@ -185,8 +184,8 @@ func TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume(t *te
 		t.Fatal("iteration 1 has no workflow_run_id")
 	}
 
-	if err := st.ResolveGate(context.Background(), innerRunID, "approve", "approved"); err != nil {
-		t.Fatalf("ResolveGate: %v", err)
+	if _, resumeErr := host.ResumeGate(context.Background(), innerRunID, "approve", "approved", "test-operator", exec); resumeErr != nil {
+		t.Fatalf("ResumeGate: %v", resumeErr)
 	}
 	if err := st.RecordGoalEvidence(ctx, &store.GoalEvidence{
 		GoalID: goal.ID, EvidenceType: store.GoalEvidenceTypeGateApproval,
@@ -209,8 +208,8 @@ func TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume(t *te
 	// --- Step 3: the real assertion — the OUTER workflow_run must have
 	// genuinely transitioned out of waiting_on_loop, purely as a side
 	// effect of the LoopRun going terminal (NotifyLoopRunTerminal calling
-	// builtin.Resume internally) — this test never calls
-	// builtin.Resume/loopEngine.Run again on the outer run itself. ---
+	// the shared host's Resume internally) — this test never resumes the outer
+	// run directly. ---
 
 	outerRunAfter, err := st.GetWorkflowRun(context.Background(), outerRunID)
 	if err != nil {

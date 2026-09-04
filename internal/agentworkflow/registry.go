@@ -15,16 +15,9 @@ import (
 // resolves against — nothing in agentworkflow itself calls
 // LoadDefinitionYAMLFile/ParseDefinitionYAML in production before this.
 //
-// mu guards definitions. LoadRegistryDir/NewRegistry build a Registry
-// once, read-only thereafter, in every pre-Teams caller — but
-// TASKS/teams/08-team-run-launcher.md's Register (below) makes runtime
-// registration a real, concurrent-safe operation: a TeamRun compiles and
-// registers its own WorkflowDefinition at launch time, and more than one
-// TeamRun can launch concurrently against the same shared *Registry
-// (the one instance cmd/nanite/main.go constructs and hands to
-// WorkflowLauncher/TaskManager/AgentCardGenerator alike). Get/Names/
-// Register all take the lock so a concurrent launch-time write can never
-// race a concurrent lookup.
+// The mutex makes product-definition publication and lookup race-free. The
+// registry is an authoring/catalog surface only; it contains no scheduler or
+// executable runtime state.
 type Registry struct {
 	mu          sync.RWMutex
 	definitions map[string]WorkflowDefinition
@@ -42,17 +35,15 @@ func NewRegistry(definitions map[string]WorkflowDefinition) *Registry {
 
 // LoadRegistryDir reads every *.yaml/*.yml file directly under dir (no
 // recursion — matches the config/agents/*.md file-SoT convention), parses
-// each as a WorkflowDefinition via LoadDefinitionYAMLFile (which validates
-// the DAG at load time), and indexes the result by its Name field.
+// each as a WorkflowDefinition and indexes the result by its Name field.
 //
 // An empty dir returns an empty, inert Registry — no error — mirroring
 // BootProfileCatalogPath's "no catalog configured → no behavior change"
 // rule. A configured-but-missing directory is also treated as empty+inert
 // (logged by the caller, not here — this package has no logger dependency)
-// so a stale/unset path never blocks startup. A malformed file, a duplicate
-// Name across files, or a cyclic/invalid definition IS an error: silently
-// dropping a broken workflow definition would let an operator believe a
-// workflow exists when it doesn't.
+// so a stale/unset path never blocks startup. A malformed file, duplicate
+// Name, or invalid Nanite product field is an error. Graph diagnostics belong
+// to go-workflow and are returned when the immutable definition is compiled.
 func LoadRegistryDir(dir string) (*Registry, error) {
 	reg := NewRegistry(nil)
 	if dir == "" {
@@ -137,11 +128,9 @@ func (r *Registry) Names() []string {
 // wf.Name must be non-empty and not already registered — a caller that
 // wants a fresh, always-launchable definition (e.g. one TeamRun launch)
 // should give it a unique name (TeamRun launch appends a fresh ID) rather
-// than rely on Register silently overwriting a prior entry. wf must also
-// pass Validate — the same DAG-shape check LoadRegistryDir already applies
-// to every YAML-loaded definition, so a caller can't register something
-// WorkflowLauncher.Launch would only fail on later, deeper in the call
-// stack.
+// than rely on Register silently overwriting a prior entry. wf must also pass
+// Nanite's shallow product validation. The shared compiler owns graph and
+// execution-plan validation.
 func (r *Registry) Register(wf WorkflowDefinition) error {
 	if r == nil {
 		return fmt.Errorf("agentworkflow: register: nil registry")

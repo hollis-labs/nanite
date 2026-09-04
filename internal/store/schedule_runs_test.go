@@ -7,160 +7,159 @@ import (
 	"time"
 )
 
-// makeTestSchedule inserts a minimal agent_schedules row (the FK target for
-// schedule_runs.schedule_id) and returns its ID.
-func makeTestSchedule(t *testing.T, s *Store, agentID, id string) string {
+func makeTestSchedule(t *testing.T, s *Store, agentID, id string, next time.Time) string {
 	t.Helper()
 	if err := s.InsertAgentSchedule(context.Background(), AgentSchedule{
-		ID:           id,
-		AgentID:      agentID,
-		Name:         "test-schedule-" + id,
-		ScheduleKind: ScheduleKindCron,
-		ScheduleSpec: "0 9 * * *",
-		Body:         "test body",
+		ID: id, AgentID: agentID, Name: "test-" + id, Body: "body",
+		ScheduleKind: ScheduleKindCron, ScheduleSpec: "* * * * *",
+		NextRun: next.UTC().Format(time.RFC3339Nano),
+		JobType: ScheduleJobTypeCommandRun, JobPayload: `{"command":"noop"}`,
 	}); err != nil {
 		t.Fatalf("InsertAgentSchedule: %v", err)
 	}
 	return id
 }
 
-func TestScheduleRun_CreateAndGetOpen(t *testing.T) {
+func testFireCreation(scheduleID, fireID string, at time.Time) ScheduleFireCreation {
+	return ScheduleFireCreation{
+		ScheduleID: scheduleID, ExpectedNext: at, NextRun: at.Add(time.Minute),
+		Fire: ScheduleFire{
+			ID: fireID, RunID: fireID, ScheduleID: scheduleID,
+			ScheduledAt:      at.UTC().Format(time.RFC3339Nano),
+			Status:           ScheduleFireStatusPending,
+			NextAttemptAt:    at.UTC().Format(time.RFC3339Nano),
+			RetryMaxAttempts: 3, RetryBackoffStrategy: "exponential",
+			RetryInitialDelayNanos: int64(30 * time.Second),
+			RetryMaximumDelayNanos: int64(5 * time.Minute),
+			JobType:                ScheduleJobTypeCommandRun, JobPayload: `{"command":"noop"}`,
+		},
+	}
+}
+
+func TestScheduleFireCreateIsAtomicAndIdentityIsImmutable(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	agent := makeTestAgent(t, s, "sr-create")
-	schedID := makeTestSchedule(t, s, agent.ID, "sched-sr-create")
+	agent := makeTestAgent(t, s, "fire-create")
+	at := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	scheduleID := makeTestSchedule(t, s, agent.ID, "fire-create", at)
+	creation := testFireCreation(scheduleID, "fire-stable", at)
 
-	if _, err := s.GetOpenScheduleRun(ctx, schedID); !errors.Is(err, ErrScheduleRunNotFound) {
-		t.Fatalf("GetOpenScheduleRun before create: got err=%v, want ErrScheduleRunNotFound", err)
+	created, err := s.CreateScheduleFire(ctx, creation)
+	if err != nil || !created {
+		t.Fatalf("CreateScheduleFire = (%v, %v), want (true, nil)", created, err)
+	}
+	created, err = s.CreateScheduleFire(ctx, creation)
+	if err != nil || created {
+		t.Fatalf("duplicate CreateScheduleFire = (%v, %v), want (false, nil)", created, err)
+	}
+	row, err := s.GetScheduleFire(ctx, "fire-stable")
+	if err != nil {
+		t.Fatalf("GetScheduleFire: %v", err)
+	}
+	if row.RunID != "fire-stable" || row.Status != ScheduleFireStatusPending || row.AttemptCount != 0 {
+		t.Fatalf("unexpected fire: %+v", row)
+	}
+	schedule, err := s.GetAgentSchedule(ctx, scheduleID)
+	if err != nil {
+		t.Fatalf("GetAgentSchedule: %v", err)
+	}
+	if schedule.NextRun != creation.NextRun.Format(time.RFC3339Nano) || schedule.LastFiredAt != creation.Fire.ScheduledAt {
+		t.Fatalf("schedule was not atomically advanced: %+v", schedule)
+	}
+	if schedule.FiredCount != 1 {
+		t.Fatalf("fired_count = %d, want 1 after one materialization", schedule.FiredCount)
+	}
+	if _, err := s.GetScheduleFire(ctx, "missing"); !errors.Is(err, ErrScheduleFireNotFound) {
+		t.Fatalf("missing fire error = %v", err)
+	}
+}
+
+func TestScheduleFireClaimRecoveryAndFencedTransition(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	agent := makeTestAgent(t, s, "fire-claim")
+	at := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	scheduleID := makeTestSchedule(t, s, agent.ID, "fire-claim", at)
+	creation := testFireCreation(scheduleID, "fire-claim-id", at)
+	if ok, err := s.CreateScheduleFire(ctx, creation); err != nil || !ok {
+		t.Fatalf("CreateScheduleFire = (%v, %v)", ok, err)
 	}
 
-	created, err := s.CreateScheduleRun(ctx, ScheduleRun{
-		ScheduleID: schedID,
-		RunID:      "run-1",
+	firstAt := at.Add(time.Second)
+	first, won, err := s.ClaimScheduleFire(ctx, ScheduleFireClaim{
+		FireID: "fire-claim-id", ExpectedStatus: ScheduleFireStatusPending,
+		ExpectedAttempt: 0, ClaimedAt: firstAt, ClaimExpiresAt: firstAt.Add(time.Minute),
 	})
-	if err != nil {
-		t.Fatalf("CreateScheduleRun: %v", err)
+	if err != nil || !won || first.AttemptCount != 1 || first.Status != ScheduleFireStatusClaimed {
+		t.Fatalf("first claim = (%+v, %v, %v)", first, won, err)
 	}
-	if created.ID == "" {
-		t.Fatalf("CreateScheduleRun: expected generated ID")
-	}
-	if created.Status != ScheduleRunStatusPending || created.AttemptCount != 0 {
-		t.Fatalf("CreateScheduleRun: unexpected defaults: %+v", created)
+	if _, earlyWon, earlyErr := s.ClaimScheduleFire(ctx, ScheduleFireClaim{
+		FireID: first.RunID, ExpectedStatus: ScheduleFireStatusClaimed,
+		ExpectedAttempt: 1, ExpectedFiredAt: firstAt,
+		ClaimedAt: firstAt.Add(30 * time.Second), ClaimExpiresAt: firstAt.Add(2 * time.Minute),
+	}); earlyErr != nil || earlyWon {
+		t.Fatalf("unexpired recovery = (%v, %v), want false,nil", earlyWon, earlyErr)
 	}
 
-	open, err := s.GetOpenScheduleRun(ctx, schedID)
-	if err != nil {
-		t.Fatalf("GetOpenScheduleRun after create: %v", err)
+	recoveredAt := firstAt.Add(time.Minute)
+	recovered, won, err := s.ClaimScheduleFire(ctx, ScheduleFireClaim{
+		FireID: first.RunID, ExpectedStatus: ScheduleFireStatusClaimed,
+		ExpectedAttempt: 1, ExpectedFiredAt: firstAt,
+		ClaimedAt: recoveredAt, ClaimExpiresAt: recoveredAt.Add(time.Minute),
+	})
+	if err != nil || !won || recovered.AttemptCount != 1 {
+		t.Fatalf("expired recovery = (%+v, %v, %v)", recovered, won, err)
 	}
-	if open.ID != created.ID || open.RunID != "run-1" {
-		t.Fatalf("GetOpenScheduleRun: unexpected row: %+v", open)
+	if won, err := s.TransitionScheduleFire(ctx, ScheduleFireTransition{
+		FireID: first.RunID, Attempt: 1, From: ScheduleFireStatusClaimed,
+		ClaimedAt: firstAt, To: ScheduleFireStatusSucceeded,
+	}); err != nil || won {
+		t.Fatalf("stale transition = (%v, %v), want false,nil", won, err)
+	}
+	if won, err := s.TransitionScheduleFire(ctx, ScheduleFireTransition{
+		FireID: recovered.RunID, Attempt: 1, From: ScheduleFireStatusClaimed,
+		ClaimedAt: recoveredAt, To: ScheduleFireStatusRetrying,
+		NextAttemptAt: recoveredAt.Add(30 * time.Second), LastError: "boom",
+	}); err != nil || !won {
+		t.Fatalf("winning transition = (%v, %v), want true,nil", won, err)
+	}
+	row, _ := s.GetScheduleFire(ctx, recovered.RunID)
+	if row.Status != ScheduleFireStatusRetrying || row.AttemptCount != 1 || row.LastError != "boom" || row.ClaimExpiresAt != "" {
+		t.Fatalf("unexpected transitioned fire: %+v", row)
 	}
 }
 
-func TestScheduleRun_RecordAttempt_FailureThenSuccess(t *testing.T) {
+func TestListDueScheduleFiresHonorsBackoffLeaseAndTerminalStates(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	agent := makeTestAgent(t, s, "sr-record")
-	schedID := makeTestSchedule(t, s, agent.ID, "sched-sr-record")
-
-	row, err := s.CreateScheduleRun(ctx, ScheduleRun{ScheduleID: schedID, RunID: "run-1"})
+	agent := makeTestAgent(t, s, "fire-due")
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	for i, id := range []string{"due", "future", "claimed", "terminal"} {
+		at := now.Add(time.Duration(i) * time.Second)
+		scheduleID := makeTestSchedule(t, s, agent.ID, "sched-"+id, at)
+		creation := testFireCreation(scheduleID, "fire-"+id, at)
+		if ok, err := s.CreateScheduleFire(ctx, creation); err != nil || !ok {
+			t.Fatalf("create %s = (%v,%v)", id, ok, err)
+		}
+	}
+	if won, err := s.TransitionScheduleFire(ctx, ScheduleFireTransition{
+		FireID: "fire-terminal", Attempt: 0, From: ScheduleFireStatusPending,
+		To: ScheduleFireStatusSucceeded,
+	}); err != nil || !won {
+		t.Fatalf("terminal transition = (%v,%v)", won, err)
+	}
+	claimedAt := now.Add(-2 * time.Minute)
+	if _, won, err := s.ClaimScheduleFire(ctx, ScheduleFireClaim{
+		FireID: "fire-claimed", ExpectedStatus: ScheduleFireStatusPending,
+		ExpectedAttempt: 0, ClaimedAt: claimedAt, ClaimExpiresAt: now.Add(-time.Minute),
+	}); err != nil || !won {
+		t.Fatalf("expired claim = (%v,%v)", won, err)
+	}
+	due, err := s.ListDueScheduleFires(ctx, now, 100)
 	if err != nil {
-		t.Fatalf("CreateScheduleRun: %v", err)
+		t.Fatalf("ListDueScheduleFires: %v", err)
 	}
-
-	nextAt := time.Now().UTC().Add(30 * time.Second)
-	if err := s.RecordScheduleRunAttempt(ctx, row.ID, ScheduleRunStatusFailed, "boom", &nextAt); err != nil {
-		t.Fatalf("RecordScheduleRunAttempt (failed): %v", err)
-	}
-
-	open, err := s.GetOpenScheduleRun(ctx, schedID)
-	if err != nil {
-		t.Fatalf("GetOpenScheduleRun after failure: %v", err)
-	}
-	if open.AttemptCount != 1 {
-		t.Fatalf("AttemptCount: got %d, want 1", open.AttemptCount)
-	}
-	if open.Status != ScheduleRunStatusFailed {
-		t.Fatalf("Status: got %q, want failed", open.Status)
-	}
-	if open.LastError != "boom" {
-		t.Fatalf("LastError: got %q, want boom", open.LastError)
-	}
-	if open.NextAttemptAt == "" {
-		t.Fatalf("NextAttemptAt: expected non-empty")
-	}
-
-	if err := s.RecordScheduleRunAttempt(ctx, row.ID, ScheduleRunStatusSucceeded, "", nil); err != nil {
-		t.Fatalf("RecordScheduleRunAttempt (succeeded): %v", err)
-	}
-
-	if _, err := s.GetOpenScheduleRun(ctx, schedID); !errors.Is(err, ErrScheduleRunNotFound) {
-		t.Fatalf("GetOpenScheduleRun after success: got err=%v, want ErrScheduleRunNotFound (succeeded is terminal)", err)
-	}
-
-	latest, err := s.GetLatestScheduleRun(ctx, schedID)
-	if err != nil {
-		t.Fatalf("GetLatestScheduleRun: %v", err)
-	}
-	if latest.Status != ScheduleRunStatusSucceeded || latest.AttemptCount != 2 {
-		t.Fatalf("unexpected latest row: %+v", latest)
-	}
-	if latest.NextAttemptAt != "" {
-		t.Fatalf("NextAttemptAt should clear on success, got %q", latest.NextAttemptAt)
-	}
-}
-
-func TestScheduleRun_RecordAttempt_NotFound(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	if err := s.RecordScheduleRunAttempt(ctx, "does-not-exist", ScheduleRunStatusFailed, "x", nil); !errors.Is(err, ErrScheduleRunNotFound) {
-		t.Fatalf("RecordScheduleRunAttempt: got err=%v, want ErrScheduleRunNotFound", err)
-	}
-}
-
-func TestScheduleRun_GetLatest_MultipleFirings(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	agent := makeTestAgent(t, s, "sr-multi")
-	schedID := makeTestSchedule(t, s, agent.ID, "sched-sr-multi")
-
-	first, err := s.CreateScheduleRun(ctx, ScheduleRun{ScheduleID: schedID, RunID: "run-1", FiredAt: "2026-01-01T00:00:00Z"})
-	if err != nil {
-		t.Fatalf("CreateScheduleRun first: %v", err)
-	}
-	if err := s.RecordScheduleRunAttempt(ctx, first.ID, ScheduleRunStatusSucceeded, "", nil); err != nil {
-		t.Fatalf("RecordScheduleRunAttempt first: %v", err)
-	}
-
-	second, err := s.CreateScheduleRun(ctx, ScheduleRun{ScheduleID: schedID, RunID: "run-2", FiredAt: "2026-01-02T00:00:00Z"})
-	if err != nil {
-		t.Fatalf("CreateScheduleRun second: %v", err)
-	}
-
-	latest, err := s.GetLatestScheduleRun(ctx, schedID)
-	if err != nil {
-		t.Fatalf("GetLatestScheduleRun: %v", err)
-	}
-	if latest.ID != second.ID {
-		t.Fatalf("GetLatestScheduleRun: got %+v, want second row %+v", latest, second)
-	}
-
-	open, err := s.GetOpenScheduleRun(ctx, schedID)
-	if err != nil {
-		t.Fatalf("GetOpenScheduleRun: %v", err)
-	}
-	if open.ID != second.ID {
-		t.Fatalf("GetOpenScheduleRun: got %+v, want second (only open) row %+v", open, second)
-	}
-}
-
-func TestScheduleRun_CreateValidation(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	if _, err := s.CreateScheduleRun(ctx, ScheduleRun{RunID: "x"}); err == nil {
-		t.Fatalf("expected error for missing schedule_id")
-	}
-	if _, err := s.CreateScheduleRun(ctx, ScheduleRun{ScheduleID: "x"}); err == nil {
-		t.Fatalf("expected error for missing run_id")
+	if len(due) != 2 || due[0].RunID != "fire-claimed" && due[1].RunID != "fire-claimed" {
+		t.Fatalf("due fires = %+v, want pending due + expired claim", due)
 	}
 }

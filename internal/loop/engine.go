@@ -36,27 +36,13 @@ package loop
 // TeamExecutionEngine/..., that would be the Guardrail's own drift signal")
 // warn against.
 //
-// # WorkflowLauncher has no bare .Resume method -- confirmed directly
-// against the real code this session, not assumed from the design doc's
-// paraphrase
+// # Resuming through the shared durable host
 //
-// WorkflowLauncher.Launch (internal/service/workflow_launch.go:122) is
-// real; there is no WorkflowLauncher.Resume. Resuming a specific,
-// already-launched WorkflowRun goes through WorkflowLauncher.GetEngine
-// (line 101) to get the concrete engine, then that engine's own
-// .Resume(ctx, runID, wf, exec) -- BuiltinWorkflowEngine.Resume
-// (internal/service/workflow_engine.go:125), type-asserted off the
-// generic agentworkflow.WorkflowEngine interface since Resume isn't part
-// of that interface (only gate/flex/loop-capable engines have it). The one
-// real caller precedent, confirmed directly, is
-// internal/service/a2a_task_manager.go's resumeWorkflowRun (lines
-// 708-762): re-fetch the WorkflowRun row, look its WorkflowDefinition up
-// by name in the *shared* agentworkflow.Registry (a separate field the
-// caller holds -- WorkflowLauncher itself exposes no GetRegistry accessor,
-// confirmed directly; TaskManager holds its own registry reference,
-// injected at construction alongside the launcher, and LoopEngine does
-// the same below), then call the concrete engine's own .Resume.
-// resumeBlockedIteration (below) follows this exact pattern.
+// Every already-launched WorkflowRun is resumed through
+// WorkflowLauncher.Resume. The launcher delegates to the same durable host
+// that owns Run and recovers canonical plan material from the run itself;
+// LoopEngine never re-selects a concrete engine or re-loads a mutable
+// definition registry entry for resume correctness.
 //
 // # Resolving TASKS/ESCALATIONS.md's 2026-08-21 goal-evidence-formula
 // duplication entry
@@ -204,6 +190,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -288,8 +276,8 @@ func decodeLoopRunPersistentConfig(raw string) (loopRunPersistentConfig, error) 
 // Run launches a new LoopRun against input's Goal (existing or inline) and
 // drives it, iteration by iteration, synchronously within this one call --
 // 21-loops.md: "for a bounded loop ... Run drives iteration-to-iteration
-// synchronously within one call, exactly as BuiltinWorkflowEngine.Run
-// already iterates over ready DAG nodes in one call." Returns once the
+// synchronously within one call, while each ordinary WorkflowRun delegates
+// sequencing to the shared durable host. Returns once the
 // LoopRun reaches a paused (waiting_on_gate/waiting_on_escalation) or
 // terminal (completed/failed) status.
 func (e *LoopEngine) Run(ctx context.Context, def LoopDefinition, input LoopInput) (LoopResult, error) {
@@ -301,6 +289,20 @@ func (e *LoopEngine) Run(ctx context.Context, def LoopDefinition, input LoopInpu
 	}
 	if input.AgentProfileID == "" {
 		return LoopResult{}, fmt.Errorf("loop: run: agent_profile_id is required")
+	}
+	loopRunID := ""
+	if input.IdempotencyKey != "" {
+		loopRunID = deterministicLoopIdentity(input.IdempotencyKey)
+		existing, getErr := e.store.GetLoopRun(ctx, loopRunID)
+		switch {
+		case getErr == nil:
+			if existing.DefinitionName != def.WorkflowName || (input.GoalID != "" && existing.GoalID != input.GoalID) {
+				return LoopResult{}, fmt.Errorf("loop: run: idempotency key already belongs to a different launch")
+			}
+			return LoopResult{LoopRunID: existing.ID, Status: existing.Status, CurrentIteration: existing.CurrentIteration}, nil
+		case !errors.Is(getErr, store.ErrLoopRunNotFound):
+			return LoopResult{}, fmt.Errorf("loop: run: recover idempotent loop run: %w", getErr)
+		}
 	}
 
 	goal, err := e.resolveGoal(ctx, input)
@@ -333,6 +335,7 @@ func (e *LoopEngine) Run(ctx context.Context, def LoopDefinition, input LoopInpu
 	}
 
 	lr := &store.LoopRun{
+		ID:                     loopRunID,
 		GoalID:                 goal.ID,
 		DefinitionName:         def.WorkflowName,
 		ContinuationPolicyJSON: cfgJSON,
@@ -419,6 +422,16 @@ func (e *LoopEngine) resolveGoal(ctx context.Context, input LoopInput) (store.Go
 			Owner:        input.Goal.Owner,
 			Source:       input.Goal.Source,
 		}
+		if input.IdempotencyKey != "" {
+			g.ID = deterministicLoopIdentity(input.IdempotencyKey + ":goal")
+			existing, getErr := e.store.GetGoal(ctx, g.ID)
+			if getErr == nil {
+				return *existing, nil
+			}
+			if !errors.Is(getErr, store.ErrGoalNotFound) {
+				return store.Goal{}, fmt.Errorf("loop: run: recover idempotent inline goal: %w", getErr)
+			}
+		}
 		if err := g.SetDesiredState(input.Goal.DesiredState); err != nil {
 			return store.Goal{}, fmt.Errorf("loop: run: inline goal desired_state: %w", err)
 		}
@@ -438,6 +451,10 @@ func (e *LoopEngine) resolveGoal(ctx context.Context, input LoopInput) (store.Go
 	default:
 		return store.Goal{}, fmt.Errorf("loop: run: exactly one of GoalID or Goal must be set")
 	}
+}
+
+func deterministicLoopIdentity(key string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("nanite-workflow-loop:"+key)).String()
 }
 
 // driveIterations is Run/Resume's shared synchronous iteration loop:
@@ -755,9 +772,7 @@ func (e *LoopEngine) applyRearchitect(ctx context.Context, goal *store.Goal, rev
 
 // resumeBlockedIteration resumes the most recent iteration's own
 // WorkflowRun (still in flight -- WorkflowRunID set, Decision empty, per
-// launchIteration's own doc comment) via GetEngine+concrete-engine
-// .Resume, mirroring a2a_task_manager.go's resumeWorkflowRun shape exactly
-// (see this file's own package-level doc comment). If that WorkflowRun is
+// launchIteration's own doc comment) through WorkflowLauncher.Resume. If that WorkflowRun is
 // still paused after resuming, loop_runs.status is left as
 // waiting_on_gate and this returns without further progress. Otherwise it
 // falls through into the same evaluate/decide/persist/act sequence a
@@ -773,30 +788,13 @@ func (e *LoopEngine) resumeBlockedIteration(ctx context.Context, lr *store.LoopR
 		return LoopResult{}, fmt.Errorf("loop: resume %s: status is %q but the most recent iteration %d is not a genuinely in-flight workflow run", lr.ID, lr.Status, last.IterationNumber)
 	}
 
-	runRow, err := e.store.GetWorkflowRun(ctx, last.WorkflowRunID)
-	if err != nil {
-		return LoopResult{}, fmt.Errorf("loop: resume %s: load workflow run %s: %w", lr.ID, last.WorkflowRunID, err)
-	}
-	wf, ok := e.registry.Get(runRow.DefinitionName)
-	if !ok {
-		return LoopResult{}, fmt.Errorf("loop: resume %s: workflow definition %q not found in registry", lr.ID, runRow.DefinitionName)
-	}
-	genericEngine, ok := e.launcher.GetEngine(agentworkflow.EngineBuiltin)
-	if !ok {
-		return LoopResult{}, fmt.Errorf("loop: resume %s: built-in workflow engine not available", lr.ID)
-	}
-	builtinEngine, ok := genericEngine.(*service.BuiltinWorkflowEngine)
-	if !ok {
-		return LoopResult{}, fmt.Errorf("loop: resume %s: workflow engine registered for %q does not support resume", lr.ID, agentworkflow.EngineBuiltin)
-	}
-
-	result, err := builtinEngine.Resume(ctx, last.WorkflowRunID, wf, e.launcher.GetStepExecutor())
+	result, err := e.launcher.Resume(ctx, last.WorkflowRunID)
 	if err != nil {
 		return LoopResult{}, fmt.Errorf("loop: resume %s: resume workflow run %s: %w", lr.ID, last.WorkflowRunID, err)
 	}
 	launchResult := &service.WorkflowLaunchResult{
 		RunID:        result.RunID,
-		WorkflowName: wf.Name,
+		WorkflowName: lr.DefinitionName,
 		Status:       result.Status,
 		StepResults:  result.StepResults,
 		Error:        result.Error,
@@ -825,9 +823,9 @@ func (e *LoopEngine) resumeBlockedIteration(ctx context.Context, lr *store.LoopR
 }
 
 // isPausedRunStatus reports whether status means "this WorkflowRun made
-// all the progress it currently can, but is not done" -- the three
-// non-terminal RunStatus values a built-in-engine run can return
-// (agentworkflow/types.go). RunStatusWaitingOnLoop (task 09, StepKindLoop's
+// all the progress it currently can, but is not done" -- including a durable
+// retry activation and the three external-wait statuses in
+// agentworkflow/types.go. RunStatusWaitingOnLoop (task 09, StepKindLoop's
 // own execution behavior) is included for the nested case: one loop
 // iteration's own WorkflowRun can itself contain a StepKindLoop step, and
 // a paused iteration must not be evaluated/decided (evaluateDecideAndAct)
@@ -835,7 +833,7 @@ func (e *LoopEngine) resumeBlockedIteration(ctx context.Context, lr *store.LoopR
 // cases.
 func isPausedRunStatus(status agentworkflow.RunStatus) bool {
 	switch status {
-	case agentworkflow.RunStatusWaiting, agentworkflow.RunStatusWaitingOnFlex, agentworkflow.RunStatusWaitingOnLoop:
+	case agentworkflow.RunStatusRunning, agentworkflow.RunStatusWaiting, agentworkflow.RunStatusWaitingOnFlex, agentworkflow.RunStatusWaitingOnLoop:
 		return true
 	default:
 		return false
@@ -866,7 +864,7 @@ func classifyIterationProgress(res *service.WorkflowLaunchResult) (store.Evaluat
 	}
 
 	switch res.Status {
-	case agentworkflow.RunStatusWaiting, agentworkflow.RunStatusWaitingOnFlex, agentworkflow.RunStatusWaitingOnLoop:
+	case agentworkflow.RunStatusRunning, agentworkflow.RunStatusWaiting, agentworkflow.RunStatusWaitingOnFlex, agentworkflow.RunStatusWaitingOnLoop:
 		// Defensive, not reached in practice for the same reason
 		// isPausedRunStatus's own doc comment gives: driveIterations/
 		// resumeBlockedIteration both already filter every paused status

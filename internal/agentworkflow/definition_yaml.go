@@ -9,11 +9,10 @@ import (
 
 // YAML is the authoring format for a WorkflowDefinition — consistent with
 // how other config-shaped things in this codebase are declared
-// (internal/config, internal/plugin's catalog/plugin.yaml,
-// internal/workflow's own pipeline YAML). Decodes directly into the
-// existing agentworkflow.WorkflowDefinition/StepDefinition types from the
-// adapter-interfaces ticket rather than an intermediate model, since those
-// types are already the shape a WorkflowEngine consumes.
+// (internal/config and internal/plugin's catalog/plugin.yaml). Decodes directly into the
+// existing agentworkflow.WorkflowDefinition/StepDefinition product DTOs rather
+// than an intermediate model. The shared host translates these DTOs into Graph
+// IR and is the sole graph-validation authority.
 
 type yamlWorkflowDefinition struct {
 	Name   string     `yaml:"name"`
@@ -56,11 +55,10 @@ func LoadDefinitionYAMLFile(path string) (WorkflowDefinition, error) {
 	return wf, nil
 }
 
-// ParseDefinitionYAML parses YAML bytes into a WorkflowDefinition and
-// validates it (design doc: reject cycles at load/registration time) — a
-// caller of this function never holds a definition with a cycle, a
-// duplicate step id, an unknown DependsOn reference, an unknown step kind,
-// or a malformed verify modifier.
+// ParseDefinitionYAML parses YAML bytes into a WorkflowDefinition and validates
+// Nanite's product fields. Dependency and cycle diagnostics are produced by
+// the shared go-workflow compiler when the definition is published/launched;
+// this package contains no parallel DAG validator.
 func ParseDefinitionYAML(data []byte) (WorkflowDefinition, error) {
 	var raw yamlWorkflowDefinition
 	if err := yaml.Unmarshal(data, &raw); err != nil {

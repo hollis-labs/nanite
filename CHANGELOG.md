@@ -8,6 +8,21 @@ lives in the git log.
 
 ### Breaking
 
+- **Agent Workflows now use the shared `go-workflow v0.1.0` engine
+  exclusively** (EP-20260904-0006 / CW-20260904-0061). The parallel local
+  sequencer and its mutable engine-selection path have been removed. New
+  launches, approvals, cancellation, scheduler activations, A2A requests,
+  Loops, Teams, and external-framework steps all enter one SQLite-backed host
+  with immutable definition revisions and run-to-plan bindings. Existing
+  Hadron-pilot runs retain their frozen engine identity for recovery; historical
+  legacy rows remain readable but cannot be launched or resumed. On first
+  startup, active legacy runs require an explicit drained/canceled/failed
+  disposition before the one-way `shared_only` cutover completes. See
+  [`docs/architecture/workflow-engine.md`](docs/architecture/workflow-engine.md)
+  for the ownership boundary and
+  [`docs/workflow-operations.md`](docs/workflow-operations.md) for the startup,
+  recovery, callback, and rollback procedure.
+
 - **The HTTP server now binds to loopback by default** (GO-RUNTIME-002,
   AD-15). Upgrading a deployment that relied on the previous bind-all default
   can affect custom Docker port mappings, LAN or remote-development access,

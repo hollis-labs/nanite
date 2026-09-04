@@ -206,13 +206,15 @@ func (tm *TaskManager) submitWorkflowTask(ctx context.Context, task *store.A2ATa
 		// { "prompt": "<message>" } structure. Future iterations can support
 		// richer param extraction.
 		Params: map[string]any{
-			"prompt": req.Message,
+			"prompt": req.Message, "_nanite_a2a_task_id": task.ID,
 		},
 		ProjectID: req.ProjectID,
-		// TODO: Thread through AgentProfileID when we have a way to derive it
-		// from the A2A request context. For now, leave it empty and rely on
-		// WorkflowLauncher's defaults.
 	}
+	profileID, err := tm.resolveA2AWorkflowProfile(ctx, task.TargetRef)
+	if err != nil {
+		return err
+	}
+	launchReq.AgentProfileID = profileID
 
 	result, err := tm.launcher.Launch(ctx, launchReq)
 	if err != nil {
@@ -346,14 +348,12 @@ func (tm *TaskManager) GetTask(ctx context.Context, taskID string) (*a2a.Task, e
 	}, nil
 }
 
-// ErrWorkflowCancelUnsupported is returned by CancelTask for
-// target_kind = 'workflow' tasks. WorkflowLauncher.Launch runs the engine
-// synchronously, in-process, inside the original SubmitTask call — its
-// per-run context.CancelFunc is local and deferred, never stored in any
-// registry a later, separate CancelTask request could reach. There is no
-// real interrupt primitive to call yet (see
+// ErrWorkflowCancelUnsupported is returned by CancelTask for workflow engines
+// that have no durable cancellation primitive. The built-in compatibility
+// engine still runs synchronously with only a process-local Context cancel;
+// Hadron runs route to its durable run-cancellation contract. See
 // TASKS/phase-0/08-a2a-conformance.md's Work log and TASKS/ESCALATIONS.md
-// for the full investigation — this was escalated rather than half-built).
+// for the original compatibility investigation.
 var ErrWorkflowCancelUnsupported = errors.New("workflow task cancellation not supported: no interrupt primitive exists for in-flight workflow runs")
 
 // CancelTask cancels a Task, deriving the correct cancellation primitive
@@ -365,10 +365,9 @@ var ErrWorkflowCancelUnsupported = errors.New("workflow task cancellation not su
 //     session-control machinery. RequestStop already transitions
 //     durable_agent_instances.status and calls into
 //     DurableAgentRuntimeController.StopSession for any live session.
-//   - target_kind = 'workflow': no real interrupt primitive exists today
-//     (see ErrWorkflowCancelUnsupported) — returns a typed error rather
-//     than silently no-op'ing or faking a 'canceled' state that doesn't
-//     reflect real execution.
+//   - target_kind = 'workflow': Hadron-backed runs use their durable engine
+//     cancellation seam; older engines without that seam return the typed
+//     ErrWorkflowCancelUnsupported rather than faking cancellation.
 //
 // A task already in a terminal state (completed/failed/canceled/rejected)
 // is left alone: canceled is treated as an idempotent success (matches the
@@ -425,11 +424,15 @@ func (tm *TaskManager) CancelTask(ctx context.Context, taskID string) (*a2a.Task
 			return nil, fmt.Errorf("failed to stop durable agent instance: %w", err)
 		}
 	case "workflow":
-		tm.logger.Warn("a2a: workflow task cancellation requested but unsupported",
-			"task_id", taskID,
-			"workflow_run_id", task.WorkflowRunID.String,
-		)
-		return nil, ErrWorkflowCancelUnsupported
+		if !task.WorkflowRunID.Valid || task.WorkflowRunID.String == "" {
+			return nil, fmt.Errorf("task %s has no attached workflow run to cancel", taskID)
+		}
+		if tm.launcher == nil {
+			return nil, ErrWorkflowCancelUnsupported
+		}
+		if _, cancelErr := tm.launcher.Cancel(ctx, task.WorkflowRunID.String, "canceled through A2A task "+taskID); cancelErr != nil {
+			return nil, fmt.Errorf("failed to cancel workflow run: %w", cancelErr)
+		}
 	default:
 		return nil, fmt.Errorf("unknown target_kind: %s", task.TargetKind)
 	}
@@ -700,13 +703,11 @@ func (tm *TaskManager) ProvideTaskInput(ctx context.Context, taskID, input strin
 		"input", input,
 	)
 
-	if err := tm.store.ResolveGate(ctx, runID, gate.StepID, input); err != nil {
-		return fmt.Errorf("failed to resolve gate: %w", err)
+	if tm.launcher == nil {
+		return fmt.Errorf("workflow launcher not configured")
 	}
-
-	// Resume the workflow run now that the gate is resolved.
-	if err := tm.resumeWorkflowRun(ctx, task); err != nil {
-		return fmt.Errorf("failed to resume workflow after gate resolution: %w", err)
+	if _, resumeErr := tm.launcher.ResumeGate(ctx, runID, gate.StepID, input, task.ID); resumeErr != nil {
+		return fmt.Errorf("failed to resolve workflow gate: %w", resumeErr)
 	}
 
 	tm.logger.Info("a2a: gate resolved and workflow resumed",
@@ -725,37 +726,10 @@ func (tm *TaskManager) resumeWorkflowRun(ctx context.Context, task *store.A2ATas
 	}
 
 	runID := task.WorkflowRunID.String
-	run, err := tm.store.GetWorkflowRun(ctx, runID)
-	if err != nil {
-		return fmt.Errorf("failed to get workflow run: %w", err)
+	if tm.launcher == nil {
+		return fmt.Errorf("workflow launcher not configured")
 	}
-	if run == nil {
-		return fmt.Errorf("workflow run not found: %s", runID)
-	}
-
-	// Get the workflow definition.
-	wf, ok := tm.registry.Get(run.DefinitionName)
-	if !ok {
-		return fmt.Errorf("workflow definition not found: %s", run.DefinitionName)
-	}
-
-	// Get the built-in engine from the launcher. GetEngine returns the
-	// WorkflowEngine interface (Name/Run only) — Resume is a real method
-	// on the concrete *BuiltinWorkflowEngine, not part of that interface,
-	// since only the built-in engine supports gate steps at all (external
-	// engines' DAG shape lives in hand-authored Python, not this format).
-	engine, ok := tm.launcher.GetEngine(agentworkflow.EngineBuiltin)
-	if !ok {
-		return fmt.Errorf("built-in workflow engine not available")
-	}
-	builtinEngine, ok := engine.(*BuiltinWorkflowEngine)
-	if !ok {
-		return fmt.Errorf("workflow engine registered for %q does not support gate resume", agentworkflow.EngineBuiltin)
-	}
-
-	// Resume using the launcher's exec (the same StepExecutor that ran the
-	// original workflow).
-	result, err := builtinEngine.Resume(ctx, runID, wf, tm.launcher.GetStepExecutor())
+	result, err := tm.launcher.Resume(ctx, runID)
 	if err != nil {
 		tm.logger.Error("a2a: workflow resume failed",
 			"task_id", task.ID,
@@ -776,4 +750,53 @@ func (tm *TaskManager) resumeWorkflowRun(ctx context.Context, task *store.A2ATas
 	// workflow run's updated status.
 
 	return nil
+}
+
+func (tm *TaskManager) resolveA2AWorkflowProfile(ctx context.Context, workflowName string) (string, error) {
+	if tm == nil || tm.store == nil || tm.registry == nil {
+		return "", fmt.Errorf("a2a workflow profile resolution is not configured")
+	}
+	definition, ok := tm.registry.Get(workflowName)
+	if !ok {
+		return "", fmt.Errorf("unknown workflow skill: %s", workflowName)
+	}
+
+	var candidates []string
+	settings, err := tm.store.GetUserSettings(ctx)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("resolve A2A workflow profile settings: %w", err)
+	}
+	if settings != nil && strings.TrimSpace(settings.DefaultAgent) != "" {
+		candidates = append(candidates, strings.TrimSpace(settings.DefaultAgent))
+	}
+	for _, step := range definition.Steps {
+		if configured, ok := step.Config["agent_id"].(string); ok && strings.TrimSpace(configured) != "" {
+			candidates = append(candidates, strings.TrimSpace(configured))
+		}
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		if _, duplicate := seen[candidate]; duplicate {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		if profile, loadErr := tm.store.GetAgent(ctx, candidate); loadErr == nil && profile.Status != "disabled" {
+			return profile.ID, nil
+		}
+		if profile, loadErr := tm.store.GetAgentBySlug(ctx, candidate); loadErr == nil && profile.Status != "disabled" {
+			return profile.ID, nil
+		}
+	}
+
+	profiles, err := tm.store.ListAgents(ctx)
+	if err != nil {
+		return "", fmt.Errorf("resolve A2A workflow profile fallback: %w", err)
+	}
+	for _, profile := range profiles {
+		if profile.Status != "disabled" {
+			return profile.ID, nil
+		}
+	}
+	return "", fmt.Errorf("workflow %q has no persisted active agent profile for A2A launch", workflowName)
 }

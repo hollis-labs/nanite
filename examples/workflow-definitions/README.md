@@ -37,26 +37,26 @@ catalog → no behavior change", matching `boot_profile_catalog_path`).
 ## What the example exercises
 
 - A `kind: llm` Worker step with a `verify: {mode: agent}` modifier — the
-  engine runs the worker's turn, then dispatches an independent,
+  shared host runs the worker's turn, then dispatches an independent,
   capability-restricted reviewer turn (different prompt, different
   narrow tool surface, same underlying `ExecuteLLMStep` primitive) and
   parses its `PASS`/`FAIL` verdict. A failed verify marks the worker step
   failed, same as any other step-level failure.
 - A `kind: gate` step depending on the worker — the engine marks it
   `waiting_on_gate` and the run returns `Status: waiting_on_gate`
-  immediately. This is a legitimate terminal outcome for a run to reach,
-  not a stall: there is currently no approve-gate tool/endpoint in this
-  codebase, so a gate step is designed to pause a run promptly and wait
-  for a human decision, not resolve itself.
+  immediately. This is a durable pause, not a stall: approval resolves the
+  persisted wait and resumes the exact plan and StepKind catalog that launched
+  the run.
 
 ## Running the smoke
 
-`go test ./internal/service/ -run TestWorkflowDefinitionsSmoke_`. The
+`go test ./internal/service -run TestWorkflowDefinitionsSharedSmoke`. The
 smoke test loads this exact directory via `agentworkflow.LoadRegistryDir`
 (a real file, not an in-memory literal), then launches
 `worker-reviewer-gate` end to end through the real
-`WorkflowLauncher`/`BuiltinWorkflowEngine`/`WorkflowStepExecutor` stack —
+`WorkflowLauncher`/shared `go-workflow` host/`WorkflowStepExecutor` stack —
 a scripted LLM provider stands in for the worker and reviewer turns (no
 live Anthropic credentials needed) — and asserts the run reaches
-`Status: waiting_on_gate` with the worker step's verify recorded as
-passed and the gate step persisted as `waiting_on_gate`.
+`Status: waiting_on_gate` with the worker step's verify recorded as passed and
+the gate step persisted as `waiting_on_gate`. The authenticated approval API
+can then resolve that durable wait and resume the same immutable plan.

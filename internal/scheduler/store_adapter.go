@@ -1,60 +1,6 @@
-// This file (store_adapter.go) implements gosched.Store: the persistence
-// seam go-scheduler's Engine polls every tick, converting agent_schedules
-// rows into the library's neutral gosched.Schedule type and back.
-//
-// See docs/engineering/architecture/12-scheduling.md ("The Store adapter")
-// for the design, and apps/hadron/internal/scheduler/adapter.go for the
-// directly-transferable storeAdapter template this file follows.
-//
-// Package-location and embedding-vs-wrapper calls (TASKS/scheduling/
-// 02-store-adapter.md's Context asked both to be made and documented
-// explicitly):
-//
-//   - Package: internal/scheduler, the same package runner_adapter.go
-//     (TASKS/scheduling/03) already lives in -- confirmed via grep before
-//     writing this file that no internal/scheduler-shaped concept already
-//     existed under a different name (internal/agent/reflexes'
-//     recurrence.go is a fire-cooldown/debounce guard, not a next-
-//     occurrence calculator; see docs/engineering/GLOSSARY.md's Reflexes
-//     entry).
-//
-//   - Embedding vs. separate wrapper: this file does NOT follow Hadron's
-//     `type storeAdapter struct { *persistence.Store }` embedding shortcut,
-//     even though it would work mechanically (ClaimAndUpdateScheduleRun/
-//     SetScheduleNextRun/DisableSchedule could be added directly onto
-//     *store.Store with gosched-matching signatures, using only time.Time/
-//     string/bool/error -- no gosched import needed on the store package's
-//     side -- and then promoted). Deliberately not done, for two reasons:
-//     (1) internal/store/agent_schedules.go already has a consistent,
-//     Nanite-flavored naming convention for this table (InsertAgentSchedule,
-//     GetAgentSchedule, ListAgentSchedules, UpdateAgentScheduleStatus,
-//     BumpAgentScheduleFireCount) -- bare gosched-interface-shaped names
-//     (ClaimAndUpdateScheduleRun, SetScheduleNextRun, DisableSchedule) with
-//     no AgentSchedule-qualifying prefix would break that convention and
-//     make it ambiguous whether a given *store.Store method is a Nanite-
-//     native concept or a go-scheduler-interface promotion target. (2) this
-//     package's sibling file, runner_adapter.go (03, already merged),
-//     explicitly documents and follows a narrow-dependency-interface
-//     convention specifically to avoid exposing a wide concrete service
-//     type's entire method surface through a scheduler-package wrapper;
-//     embedding *store.Store (a large, general-purpose type used across the
-//     whole app for sessions/agents/reflexes/etc., not a type designed
-//     around scheduling the way Hadron's persistence.Store apparently was)
-//     would silently promote that type's entire API through StoreAdapter,
-//     the opposite of that convention. Instead: three small, Nanite-
-//     convention-named low-level DB methods were added to
-//     internal/store/agent_schedules.go (ListDueAgentSchedules,
-//     ClaimAgentScheduleRun, SetAgentScheduleNextRun), and DisableSchedule
-//     reuses the existing UpdateAgentScheduleStatus (see this file's
-//     DisableSchedule doc comment for the status mapping). StoreAdapter
-//     holds *store.Store as a plain named field (not narrowed to an
-//     interface, unlike runner_adapter.go's dependencies) because the CAS
-//     claim's correctness argument is specifically tied to *store.Store's
-//     own sqlitekit.OpenSingle single-writer-connection configuration, not
-//     to "anything satisfying a narrow Store-shaped interface" -- narrowing
-//     it here would blur that argument. TASKS/scheduling/02-store-
-//     adapter.md's own required regression test (a real, not
-//     in-memory-only, *store.Store) reflects the same reasoning.
+// StoreAdapter implements go-scheduler's durable v0.2 Store contract over
+// Nanite's agent_schedules and schedule_runs tables. The application owns the
+// schema and payload mapping; the library owns fire lifecycle and retry rules.
 package scheduler
 
 import (
@@ -63,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
@@ -88,6 +35,14 @@ type StoreAdapter struct {
 	Store  *store.Store
 	Logger *slog.Logger
 }
+
+const (
+	scheduleRetryInitialDelay = 30 * time.Second
+	scheduleRetryMaximumDelay = 5 * time.Minute
+	workflowRetryInitialDelay = time.Second
+	workflowRetryMaximumDelay = 30 * time.Second
+	workflowRetryMaxAttempts  = 3
+)
 
 var _ gosched.Store = (*StoreAdapter)(nil)
 
@@ -120,7 +75,50 @@ func (a *StoreAdapter) ListDueSchedules(ctx context.Context, now time.Time, limi
 		}
 		out = append(out, sched)
 	}
+	activations, err := a.Store.ListDueWorkflowActivationSchedules(ctx, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: list due workflow activations: %w", err)
+	}
+	for _, row := range activations {
+		sched, convErr := toWorkflowActivationSchedule(row)
+		if convErr != nil {
+			a.Logger.Warn("scheduler: skipping workflow activation that could not convert to gosched.Schedule",
+				"schedule_id", row.ScheduleID, "activation_id", row.ActivationID, "error", convErr)
+			continue
+		}
+		out = append(out, sched)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].NextRun.Equal(out[j].NextRun) {
+			return out[i].NextRun.Before(out[j].NextRun)
+		}
+		return out[i].ID < out[j].ID
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
+}
+
+func toWorkflowActivationSchedule(row store.WorkflowActivationSchedule) (gosched.Schedule, error) {
+	nextRun, err := parseScheduleTime(row.NextRun)
+	if err != nil {
+		return gosched.Schedule{}, fmt.Errorf("parse activation next_run %q: %w", row.NextRun, err)
+	}
+	if !json.Valid([]byte(row.ActivationJSON)) {
+		return gosched.Schedule{}, fmt.Errorf("activation payload is not valid JSON")
+	}
+	return gosched.Schedule{
+		ID: row.ScheduleID, NextRun: nextRun, Enabled: row.Status == "active",
+		JobType: JobTypeWorkflowActivation, Payload: []byte(row.ActivationJSON),
+		Retry: gosched.RetryPolicy{
+			MaxAttempts: workflowRetryMaxAttempts,
+			Backoff: gosched.BackoffPolicy{
+				Strategy: gosched.BackoffExponential, InitialDelay: workflowRetryInitialDelay,
+				MaxDelay: workflowRetryMaximumDelay,
+			},
+		},
+	}, nil
 }
 
 // toSchedule converts one AgentSchedule row into a neutral gosched.Schedule.
@@ -132,20 +130,8 @@ func (a *StoreAdapter) ListDueSchedules(ctx context.Context, now time.Time, limi
 // encoding in schedule_spec today), matching go-scheduler's own "empty
 // CronExpr means one-time" convention (libs/go-scheduler/scheduler.go:26).
 //
-// Neither this method nor any other part of this adapter calls
-// gosched.NextRun/hand-rolls cron-next-occurrence math: libs/go-
-// scheduler/engine.go's tick() already owns computing a cron schedule's
-// next next_run (via its own NextRun call) and a one-time schedule's
-// disable-after-fire placeholder, then hands the result to
-// ClaimAndUpdateScheduleRun -- this adapter only ever persists whatever
-// next-run value the engine computed, exactly matching Hadron's own
-// adapter.go (which also contains zero cron-math). This is the strongest
-// form of TASKS/scheduling/02-store-adapter.md step 5's "don't hand-roll a
-// second cron-math implementation": there is no cron-math in this package
-// to duplicate go-scheduler's own NextRun in the first place. See this
-// file's regression test (TestStoreAdapter_NextRunRoundTrip_OneShotAndCron)
-// for the round-trip proof, which calls gosched.NextRun directly to
-// simulate exactly what the real engine does.
+// Cron math stays inside go-scheduler. CreateFire receives and atomically
+// persists the next-run value the engine computed.
 func (a *StoreAdapter) toSchedule(row store.AgentSchedule) (gosched.Schedule, error) {
 	nextRun, err := parseScheduleTime(row.NextRun)
 	if err != nil {
@@ -171,6 +157,16 @@ func (a *StoreAdapter) toSchedule(row store.AgentSchedule) (gosched.Schedule, er
 		Enabled:  row.Status == store.ScheduleStatusActive,
 		JobType:  row.JobType,
 		Payload:  payload,
+		Retry: gosched.RetryPolicy{
+			// Nanite's max_retries has historically meant total attempts,
+			// despite its name. Keep that persisted behavior at the boundary.
+			MaxAttempts: int(row.MaxRetries),
+			Backoff: gosched.BackoffPolicy{
+				Strategy:     gosched.BackoffExponential,
+				InitialDelay: scheduleRetryInitialDelay,
+				MaxDelay:     scheduleRetryMaximumDelay,
+			},
+		},
 	}, nil
 }
 
@@ -280,27 +276,188 @@ func (a *StoreAdapter) resolveDurableAgentInstanceID(profileID string) (string, 
 	}
 }
 
-// ClaimAndUpdateScheduleRun is the compare-and-set claim go-scheduler's
-// duplicate-dispatch safety rests on -- see internal/store/
-// agent_schedules.go's ClaimAgentScheduleRun doc comment for the full
-// safety argument (single-writer connection pool, no additional locking
-// needed).
-func (a *StoreAdapter) ClaimAndUpdateScheduleRun(ctx context.Context, id string, expectedNext, lastRun, nextRun time.Time) (bool, error) {
-	claimed, err := a.Store.ClaimAgentScheduleRun(ctx, id, expectedNext, lastRun, nextRun)
-	if err != nil {
-		return false, fmt.Errorf("scheduler: claim agent_schedules run %s: %w", id, err)
+// CreateFire atomically materializes a stable durable fire and advances the
+// schedule through the store's single transaction/CAS boundary.
+func (a *StoreAdapter) CreateFire(ctx context.Context, creation gosched.FireCreation) (bool, error) {
+	request := store.ScheduleFireCreation{
+		ScheduleID:   creation.ScheduleID,
+		ExpectedNext: creation.ExpectedNext,
+		NextRun:      creation.NextRun,
+		Fire:         fromFire(creation.Fire),
 	}
-	return claimed, nil
+	var created bool
+	var err error
+	if store.IsWorkflowActivationScheduleID(creation.ScheduleID) {
+		created, err = a.Store.CreateWorkflowActivationFire(ctx, request)
+	} else {
+		created, err = a.Store.CreateScheduleFire(ctx, request)
+	}
+	if err != nil {
+		return false, fmt.Errorf("scheduler: create fire %s: %w", creation.Fire.ID, err)
+	}
+	return created, nil
 }
 
-// SetScheduleNextRun resets a schedule's next_run unconditionally -- the
-// engine's own rollback path after a failed Runner.Enqueue
-// (libs/go-scheduler/engine.go's tick()).
-func (a *StoreAdapter) SetScheduleNextRun(ctx context.Context, id string, nextRun time.Time) error {
-	if err := a.Store.SetAgentScheduleNextRun(ctx, id, nextRun); err != nil {
-		return fmt.Errorf("scheduler: set agent_schedules next_run %s: %w", id, err)
+func (a *StoreAdapter) ListDueFires(ctx context.Context, now time.Time, limit int) ([]gosched.Fire, error) {
+	rows, err := a.Store.ListDueScheduleFires(ctx, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: list due fires: %w", err)
 	}
-	return nil
+	out := make([]gosched.Fire, 0, len(rows))
+	for _, row := range rows {
+		fire, conversionErr := toFire(row)
+		if conversionErr != nil {
+			return nil, fmt.Errorf("scheduler: decode fire %s: %w", row.RunID, conversionErr)
+		}
+		out = append(out, fire)
+	}
+	workflowRows, err := a.Store.ListDueWorkflowActivationFires(ctx, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: list due workflow activation fires: %w", err)
+	}
+	for _, row := range workflowRows {
+		fire, convErr := toFire(row)
+		if convErr != nil {
+			return nil, fmt.Errorf("scheduler: decode workflow activation fire %s: %w", row.RunID, convErr)
+		}
+		out = append(out, fire)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left, right := out[i].NextAttemptAt, out[j].NextAttemptAt
+		if left.IsZero() {
+			left = out[i].ScheduledAt
+		}
+		if right.IsZero() {
+			right = out[j].ScheduledAt
+		}
+		if !left.Equal(right) {
+			return left.Before(right)
+		}
+		return out[i].ID < out[j].ID
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (a *StoreAdapter) ClaimFire(ctx context.Context, claim gosched.FireClaim) (gosched.Fire, bool, error) {
+	request := store.ScheduleFireClaim{
+		FireID:          claim.FireID,
+		ExpectedStatus:  string(claim.ExpectedStatus),
+		ExpectedAttempt: int64(claim.ExpectedAttempt),
+		ExpectedFiredAt: claim.ExpectedFiredAt,
+		ClaimedAt:       claim.ClaimedAt,
+		ClaimExpiresAt:  claim.ClaimExpiresAt,
+	}
+	var row store.ScheduleFire
+	var won bool
+	var err error
+	if _, lookupErr := a.Store.GetWorkflowActivationFire(ctx, claim.FireID); lookupErr == nil {
+		row, won, err = a.Store.ClaimWorkflowActivationFire(ctx, request)
+	} else if !errors.Is(lookupErr, store.ErrWorkflowActivationFireNotFound) {
+		return gosched.Fire{}, false, lookupErr
+	} else {
+		row, won, err = a.Store.ClaimScheduleFire(ctx, request)
+	}
+	if err != nil || !won {
+		return gosched.Fire{}, won, err
+	}
+	fire, err := toFire(row)
+	if err != nil {
+		return gosched.Fire{}, false, fmt.Errorf("scheduler: decode claimed fire %s: %w", claim.FireID, err)
+	}
+	return fire, true, nil
+}
+
+func (a *StoreAdapter) TransitionFire(ctx context.Context, transition gosched.FireTransition) (bool, error) {
+	request := store.ScheduleFireTransition{
+		FireID:        transition.FireID,
+		Attempt:       int64(transition.Attempt),
+		From:          string(transition.From),
+		ClaimedAt:     transition.ClaimedAt,
+		To:            string(transition.To),
+		NextAttemptAt: transition.NextAttemptAt,
+		LastError:     transition.Error,
+	}
+	var transitioned bool
+	var err error
+	if _, lookupErr := a.Store.GetWorkflowActivationFire(ctx, transition.FireID); lookupErr == nil {
+		transitioned, err = a.Store.TransitionWorkflowActivationFire(ctx, request)
+	} else if !errors.Is(lookupErr, store.ErrWorkflowActivationFireNotFound) {
+		return false, lookupErr
+	} else {
+		transitioned, err = a.Store.TransitionScheduleFire(ctx, request)
+	}
+	if err != nil {
+		return false, fmt.Errorf("scheduler: transition fire %s: %w", transition.FireID, err)
+	}
+	return transitioned, nil
+}
+
+func fromFire(fire gosched.Fire) store.ScheduleFire {
+	strategy := fire.Retry.Backoff.Strategy
+	if strategy == "" {
+		strategy = gosched.BackoffNone
+	}
+	return store.ScheduleFire{
+		ID:                     fire.ID,
+		ScheduleID:             fire.ScheduleID,
+		RunID:                  fire.ID,
+		ScheduledAt:            formatScheduleTime(fire.ScheduledAt),
+		FiredAt:                formatScheduleTime(fire.FiredAt),
+		ClaimExpiresAt:         formatScheduleTime(fire.ClaimExpiresAt),
+		Status:                 string(fire.Status),
+		AttemptCount:           int64(fire.Attempt),
+		LastError:              fire.LastError,
+		NextAttemptAt:          formatScheduleTime(fire.NextAttemptAt),
+		RetryMaxAttempts:       int64(fire.Retry.MaxAttempts),
+		RetryBackoffStrategy:   string(strategy),
+		RetryInitialDelayNanos: int64(fire.Retry.Backoff.InitialDelay),
+		RetryMaximumDelayNanos: int64(fire.Retry.Backoff.MaxDelay),
+		JobType:                fire.JobType,
+		JobPayload:             string(fire.Payload),
+	}
+}
+
+func toFire(row store.ScheduleFire) (gosched.Fire, error) {
+	scheduledAt, err := parseScheduleTime(row.ScheduledAt)
+	if err != nil {
+		return gosched.Fire{}, fmt.Errorf("parse scheduled_at: %w", err)
+	}
+	firedAt, err := parseScheduleTime(row.FiredAt)
+	if err != nil {
+		return gosched.Fire{}, fmt.Errorf("parse fired_at: %w", err)
+	}
+	claimExpiresAt, err := parseScheduleTime(row.ClaimExpiresAt)
+	if err != nil {
+		return gosched.Fire{}, fmt.Errorf("parse claim_expires_at: %w", err)
+	}
+	nextAttemptAt, err := parseScheduleTime(row.NextAttemptAt)
+	if err != nil {
+		return gosched.Fire{}, fmt.Errorf("parse next_attempt_at: %w", err)
+	}
+	return gosched.Fire{
+		ID:             row.RunID,
+		ScheduleID:     row.ScheduleID,
+		ScheduledAt:    scheduledAt,
+		FiredAt:        firedAt,
+		ClaimExpiresAt: claimExpiresAt,
+		Attempt:        int(row.AttemptCount),
+		Status:         gosched.FireStatus(row.Status),
+		NextAttemptAt:  nextAttemptAt,
+		LastError:      row.LastError,
+		Retry: gosched.RetryPolicy{
+			MaxAttempts: int(row.RetryMaxAttempts),
+			Backoff: gosched.BackoffPolicy{
+				Strategy:     gosched.BackoffStrategy(row.RetryBackoffStrategy),
+				InitialDelay: time.Duration(row.RetryInitialDelayNanos),
+				MaxDelay:     time.Duration(row.RetryMaximumDelayNanos),
+			},
+		},
+		JobType: row.JobType,
+		Payload: []byte(row.JobPayload),
+	}, nil
 }
 
 // DisableSchedule marks a schedule disabled. The engine's only call site
@@ -317,6 +474,12 @@ func (a *StoreAdapter) SetScheduleNextRun(ctx context.Context, id string, nextRu
 // 'paused' is reserved for a reversible, operator-toggled-off state, which
 // this is not).
 func (a *StoreAdapter) DisableSchedule(ctx context.Context, id string) error {
+	if store.IsWorkflowActivationScheduleID(id) {
+		if err := a.Store.DisableWorkflowActivationSchedule(ctx, id, time.Now().UTC()); err != nil {
+			return fmt.Errorf("scheduler: disable workflow activation schedule %s: %w", id, err)
+		}
+		return nil
+	}
 	if err := a.Store.UpdateAgentScheduleStatus(ctx, id, store.ScheduleStatusExpired); err != nil {
 		return fmt.Errorf("scheduler: disable agent_schedules row %s: %w", id, err)
 	}
@@ -332,11 +495,18 @@ func (a *StoreAdapter) DisableSchedule(ctx context.Context, id string) error {
 // zeroing on a genuinely malformed (non-empty, unparseable) value, since an
 // agent_schedules row should never have one: every writer in this codebase
 // (InsertAgentSchedule via nullIfEmpty, BumpAgentScheduleFireCount,
-// ClaimAgentScheduleRun, SetAgentScheduleNextRun, backfillScheduleNextRun)
-// only ever writes time.RFC3339 or NULL.
+// CreateScheduleFire, backfillScheduleNextRun)
+// only ever writes RFC3339 timestamps or NULL.
 func parseScheduleTime(v string) (time.Time, error) {
 	if v == "" {
 		return time.Time{}, nil
 	}
-	return time.Parse(time.RFC3339, v)
+	return time.Parse(time.RFC3339Nano, v)
+}
+
+func formatScheduleTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }

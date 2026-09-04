@@ -134,9 +134,9 @@ func (s *durableWakeService) ListDue(ctx context.Context, now time.Time) ([]Dura
 // "durable-agent-wake-tick"), and as of TASKS/scheduling/
 // 05-engine-wiring-and-full-replace.md, superseded for automatic dispatch
 // by the go-scheduler.Engine wired into cmd/nanite/main.go — which claims
-// and fires due schedules on its own 1-second tick via a real CAS
-// (internal/scheduler.StoreAdapter.ClaimAndUpdateScheduleRun), advancing
-// next_run as it goes. RunDue is kept as a manual operator convenience,
+// and fires due schedules on its own 1-second tick via atomic durable Fire
+// materialization (internal/scheduler.StoreAdapter.CreateFire), advancing
+// next_run in the same transaction. RunDue is kept as a manual operator convenience,
 // not retired, because it's a real, still-used admin-panel affordance (not
 // a dead/undocumented surface); it is deliberately NOT repointed onto the
 // Engine's own claim path (e.g. Engine.TickNow), because doing so would
@@ -488,7 +488,7 @@ func wakeSkipReason(inst *store.DurableAgentInstance, activationMode string) str
 // single real source of truth for "when is this schedule next due" —
 // go-scheduler.Engine's own Store adapter (internal/scheduler.StoreAdapter)
 // is the sole writer of this column once a schedule has fired at least once
-// under the new engine (ClaimAndUpdateScheduleRun/SetScheduleNextRun); this
+// under the new engine (CreateFire); this
 // function only ever reads it, exactly like the engine's own
 // ListDueSchedules query (internal/store/agent_schedules.go's
 // ListDueAgentSchedules) does — same due-ness definition, no second

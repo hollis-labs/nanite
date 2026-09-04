@@ -11,9 +11,8 @@ package loop
 //
 // Live-verification safety (EXECUTION-PROCESS.md): every test below uses a
 // real, t.TempDir()-rooted SQLite *store.Store (newTestLoopStore, mirroring
-// internal/service/workflow_engine_test.go's/team_run_launcher_test.go's
-// own newTestWorkflowStore convention) and a real BuiltinWorkflowEngine +
-// WorkflowLauncher -- only the leaf StepExecutor is a stub
+// internal/service's own newTestWorkflowStore convention) and a real shared
+// workflowhost.Engine + WorkflowLauncher -- only the leaf StepExecutor is a stub
 // (fakeStepExecutor, already declared in this package's own
 // decide_test.go), matching this task's own "Done means" instruction ("no
 // real LLM call needed if the test uses a stub StepExecutor, matching
@@ -32,6 +31,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
+	"github.com/hollis-labs/nanite/internal/workflowbridge"
+	"github.com/hollis-labs/nanite/internal/workflowhost"
 )
 
 func newTestLoopStore(t *testing.T) *store.Store {
@@ -48,11 +49,19 @@ func newLoopEngineTestFixtures(t *testing.T, exec agentworkflow.StepExecutor) (*
 	t.Helper()
 	st := newTestLoopStore(t)
 	registry := agentworkflow.NewRegistry(nil)
-	builtin := service.NewBuiltinWorkflowEngine(st)
-	engines := map[string]agentworkflow.WorkflowEngine{agentworkflow.EngineBuiltin: builtin}
+	state, err := workflowhost.NewWorkflowStateStore(st)
+	if err != nil {
+		t.Fatalf("NewWorkflowStateStore: %v", err)
+	}
+	host, err := workflowhost.NewEngine(state)
+	if err != nil {
+		t.Fatalf("workflowhost.NewEngine: %v", err)
+	}
 	durable := service.NewDurableAgentService(st)
-	launcher := service.NewWorkflowLauncher(registry, engines, exec, durable)
-	return st, registry, NewLoopEngine(st, registry, launcher)
+	launcher := service.NewWorkflowLauncher(registry, host, exec, durable)
+	engine := NewLoopEngine(st, registry, launcher)
+	host.WithLoopStepHost(workflowbridge.LoopAdapter{Launcher: engine, Runs: st})
+	return st, registry, engine
 }
 
 func createTestLoopAgentProfile(t *testing.T, st *store.Store, slug string) *store.AgentProfile {
@@ -423,6 +432,46 @@ func TestLoopEngine_Run_InlineGoalSpec_CreatesGoalAndFailsOnBudgetExhausted(t *t
 	}
 	if goal.Intent != "an inline goal" {
 		t.Fatalf("goal.Intent = %q, want %q", goal.Intent, "an inline goal")
+	}
+}
+
+func TestLoopEngine_Run_IdempotencyKeyRecoversSameChildAfterCompletion(t *testing.T) {
+	ctx := context.Background()
+	exec := &fakeStepExecutor{}
+	st, registry, eng := newLoopEngineTestFixtures(t, exec)
+	profile := createTestLoopAgentProfile(t, st, "loop-agent-idempotent")
+	wf := oneStepIterationDefinition("test-iteration-idempotent")
+	if err := registry.Register(wf); err != nil {
+		t.Fatal(err)
+	}
+
+	input := LoopInput{
+		IdempotencyKey: "workflow-run-1:loop-step",
+		Goal:           &LoopGoalSpec{Intent: "one durable child", AcceptanceCriteria: []string{"not met"}},
+		AgentProfileID: profile.ID,
+		Budget:         store.Budget{MaxIterations: 1, OnExhausted: store.LoopRunOnExhaustedFail},
+	}
+	first, err := eng.Run(ctx, LoopDefinition{WorkflowName: wf.Name}, input)
+	if err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	callsAfterFirst := exec.calls
+	second, err := eng.Run(ctx, LoopDefinition{WorkflowName: wf.Name}, input)
+	if err != nil {
+		t.Fatalf("replayed Run: %v", err)
+	}
+	if second.LoopRunID != first.LoopRunID || second.Status != first.Status || second.CurrentIteration != first.CurrentIteration {
+		t.Fatalf("replayed result = %+v, want identity/status of %+v", second, first)
+	}
+	if exec.calls != callsAfterFirst {
+		t.Fatalf("replay executed workflow again: calls=%d, want %d", exec.calls, callsAfterFirst)
+	}
+	runs, err := st.ListLoopRuns(ctx, store.LoopRunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("loop runs = %d, want exactly one", len(runs))
 	}
 }
 

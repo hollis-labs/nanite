@@ -36,8 +36,9 @@ import (
 func (e *LoopEngine) LaunchLoop(ctx context.Context, req service.LoopStepLaunchRequest) (service.LoopStepLaunchResult, error) {
 	def := LoopDefinition{WorkflowName: req.WorkflowName}
 	input := LoopInput{
-		GoalID: req.GoalID,
-		Budget: req.Budget,
+		IdempotencyKey: req.IdempotencyKey,
+		GoalID:         req.GoalID,
+		Budget:         req.Budget,
 		ContinuationPolicy: ContinuationPolicy{
 			Provider:  req.ContinuationPolicy.Provider,
 			Model:     req.ContinuationPolicy.Model,

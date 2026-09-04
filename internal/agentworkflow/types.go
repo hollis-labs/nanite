@@ -59,13 +59,15 @@ const (
 )
 
 // RunStatus is a workflow run's terminal-for-this-call status. A run isn't
-// always fully resolved when a WorkflowEngine.Run (or Resume) call returns —
-// RunStatusWaiting covers the built-in engine's gate pause (design doc:
-// "gate steps persist a pending/waiting state and block that branch of the
-// DAG until externally resolved").
+// always fully resolved when the durable host Run or Resume call returns —
+// RunStatusRunning covers a durably scheduled retry. RunStatusWaiting covers
+// a durable wait that must be resolved by an external actor or signal.
 type RunStatus string
 
 const (
+	// RunStatusRunning means execution is durably parked behind an engine
+	// activation such as retry backoff, not waiting for human input.
+	RunStatusRunning   RunStatus = "running"
 	RunStatusCompleted RunStatus = "completed"
 	RunStatusFailed    RunStatus = "failed"
 	RunStatusCanceled  RunStatus = "canceled"
@@ -81,8 +83,7 @@ const (
 	// make internal/service/a2a_task_manager.go's deriveFromWorkflowRun
 	// misreport a flex-waiting run as needing human input). If a run has
 	// both an unresolved gate and an unresolved flex step blocking it at
-	// once, RunStatusWaiting (gate) takes priority — see
-	// BuiltinWorkflowEngine.finishRun's waitingRunStatus.
+	// once, RunStatusWaiting (gate) takes priority in the product projection.
 	RunStatusWaitingOnFlex RunStatus = "waiting_on_flex"
 	// RunStatusWaitingOnLoop means the run made all the progress it
 	// currently can and every remaining-blocked step is a loop step
@@ -94,10 +95,7 @@ const (
 	// A loop is not a gate and is not a flex phase — an outer consumer
 	// needs to tell all three apart." Precedence when a run is blocked by
 	// more than one kind at once: gate, then flex, then loop — "the least
-	// human-attention-demanding kind loses the tie-break" — see
-	// BuiltinWorkflowEngine.finishRun's waitingRunStatus (formerly
-	// flexOrGateWaitingStatus, extended to this three-way precedence by
-	// task 09).
+	// human-attention-demanding kind loses the tie-break."
 	RunStatusWaitingOnLoop RunStatus = "waiting_on_loop"
 )
 
@@ -113,8 +111,8 @@ type ToolCallRecord struct {
 	IsError bool           `json:"is_error"`
 }
 
-// LLMStepRequest is the input to StepExecutor.ExecuteLLMStep — one
-// capability-restricted agent turn.
+// LLMStepRequest is the input to StepExecutor.ExecuteLLMStep — one bounded,
+// capability-restricted Run composed of model Turns and tool settlement.
 type LLMStepRequest struct {
 	// WorkflowRunID and StepID identify the calling context for logging
 	// and for a future engine's persistence layer (out of scope here —
@@ -203,6 +201,11 @@ type ToolStepRequest struct {
 	WorkflowRunID string `json:"workflow_run_id,omitempty"`
 	StepID        string `json:"step_id,omitempty"`
 
+	// SessionID, when non-empty, scopes this tool call's permission checks
+	// and downstream tool-side session lookups. ExecuteToolStep falls back to
+	// WorkflowRunID when the workflow author does not provide an override.
+	SessionID string `json:"session_id,omitempty"`
+
 	// AgentID identifies the calling identity for permission checks.
 	AgentID string `json:"agent_id,omitempty"`
 
@@ -283,8 +286,8 @@ type StepDefinition struct {
 	// Config carries the step's author-time configuration in whatever
 	// shape Kind implies (a prompt template + tool surface for llm, a
 	// tool name + arg template for tool, human-gate parameters for gate).
-	// Deliberately untyped here: the built-in engine (downstream of this
-	// ticket) owns the authoring/templating format — how a static step
+	// Deliberately untyped here: the Nanite StepKind adapter owns the
+	// authoring/templating format — how a static step
 	// config becomes a runtime LLMStepRequest/ToolStepRequest (prompt
 	// templating, dependency-result interpolation) — and should design
 	// that shape against real workflow definitions rather than have it
@@ -297,14 +300,16 @@ type StepDefinition struct {
 	Verify *VerifySpec
 }
 
-// Engine name constants — the values a WorkflowDefinition.Engine field
-// selects and a WorkflowEngine.Name() returns, shared so both sides of the
-// selection stay in sync (design doc, "How external engines integrate").
+// Engine values are authoring compatibility selectors. Nanite always uses the
+// shared host for workflow lifecycle; external values select the single
+// external-framework StepKind adapter used inside that host.
 const (
-	// EngineBuiltin is the DAG-executing in-process engine (design doc,
-	// "Built-in engine"). WorkflowDefinition.Engine defaults to this when
-	// left empty.
+	// EngineBuiltin is retained only so existing definition bytes round-trip.
+	// Empty and builtin definitions both compile through go-workflow.
 	EngineBuiltin = "builtin"
+	// EngineHadron is the exact pilot spelling retained for compatibility.
+	// It no longer selects a Hadron application runtime.
+	EngineHadron = "hadron"
 	// EngineLangGraph runs the hand-authored LangGraph POC graph
 	// (CW-20260813-0012) via internal/workflowrunner.
 	EngineLangGraph = "langgraph"
@@ -322,21 +327,40 @@ const (
 	EngineLangChain = "langchain"
 )
 
-// WorkflowDefinition describes a workflow's steps and dependencies for a
-// WorkflowEngine to sequence. DAG only, no cycles (design doc scope).
+// IsSupportedEngine reports whether engine is an exact, documented
+// WorkflowDefinition compatibility value. The empty value is the canonical
+// default. These values select translation into the shared host; they never
+// select an alternative workflow sequencer.
+func IsSupportedEngine(engine string) bool {
+	switch engine {
+	case "", EngineBuiltin, EngineHadron, EngineLangGraph, EngineCrewAI,
+		EngineGoogleADK, EngineAutoGen, EngineLangChain:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsExternalEngine reports whether engine selects the external-framework
+// StepKind translation inside the shared host.
+func IsExternalEngine(engine string) bool {
+	switch engine {
+	case EngineLangGraph, EngineCrewAI, EngineGoogleADK, EngineAutoGen, EngineLangChain:
+		return true
+	default:
+		return false
+	}
+}
+
+// WorkflowDefinition is Nanite's authoring DTO. The shared compiler validates
+// and sequences its graph.
 type WorkflowDefinition struct {
 	Name string
 
-	// Engine selects which registered WorkflowEngine runs this definition
-	// — EngineBuiltin, or one of the registered external engines
-	// (EngineLangGraph, EngineCrewAI, EngineGoogleADK, EngineAutoGen,
-	// EngineLangChain). Empty defaults to EngineBuiltin, so every workflow
-	// defined before this field existed
-	// is unaffected. A name with no matching registered engine is a
-	// launch-time error (WorkflowLauncher.Launch), not a load-time one —
-	// which engines are actually available is a per-process wiring
-	// concern (e.g. no Python on PATH), not a property of the definition
-	// itself.
+	// Engine is a compatibility field. Empty, builtin, and hadron all compile
+	// as native shared-host graphs. External framework values compile to one
+	// durable external-framework StepKind whose adapter availability is a
+	// process-wiring concern (for example, Python may be unavailable).
 	//
 	// When Engine names an external engine, Steps is NOT consumed by that
 	// engine — the DAG shape for LangGraph/CrewAI lives in the hand-
@@ -360,9 +384,8 @@ type WorkflowInput struct {
 	// WorkflowLauncher.Launch created for this run's durable-agent
 	// instance — audit/telemetry correlation, mirroring how CLI-launched
 	// agents scope their MCP server. Set by WorkflowLauncher, not by
-	// callers of Launch directly. BuiltinWorkflowEngine does not read
-	// this field: a built-in step's session_id comes from its own
-	// author-time Config, not from here.
+	// callers of Launch directly. The shared host binds it as workflow input;
+	// an individual step may still provide an explicit session_id override.
 	SessionID string `json:"session_id,omitempty"`
 }
 
@@ -381,10 +404,8 @@ type StepResult struct {
 
 // WorkflowResult is a completed workflow run's terminal outcome.
 type WorkflowResult struct {
-	// RunID identifies the persisted workflow_runs row (built-in engine
-	// only — external engines that don't persist a run row leave this
-	// empty). Lets a caller link the run back to whatever launched it
-	// (CW-20260813-0014: a template-class durable-agent instance).
+	// RunID identifies the persisted workflow_runs row. External framework
+	// calls are nodes inside that same durable run.
 	RunID  string
 	Status RunStatus
 	// StepResults holds each step's result keyed by step ID.

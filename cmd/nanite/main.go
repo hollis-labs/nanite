@@ -32,6 +32,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	gosched "github.com/hollis-labs/go-scheduler"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/api"
@@ -57,6 +58,9 @@ import (
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/truncate"
 	"github.com/hollis-labs/nanite/internal/version"
+	"github.com/hollis-labs/nanite/internal/workflowbridge"
+	"github.com/hollis-labs/nanite/internal/workflowcompat"
+	"github.com/hollis-labs/nanite/internal/workflowhost"
 	"github.com/hollis-labs/nanite/internal/workflowrunner"
 
 	agentbroker "github.com/hollis-labs/agentkit/broker"
@@ -469,6 +473,11 @@ func cmdServeWithInitializers(
 		slog.Error("failed to create service container", "err", err)
 		return fmt.Errorf("failed to create service container: %w", err)
 	}
+	// Wire python_run's sandbox bridge to the same permission engine and
+	// ToolService used by ordinary chat-turn tool execution. These are set
+	// after NewContainer because selfTools is constructed earlier in initMCP.
+	selfTools.PythonPermChecker = container.Permissions
+	selfTools.PythonDispatcher = service.NewPythonToolDispatcher(container.Tools)
 
 	// CW-20260813-0011: wire the StepExecutor implementation
 	// (CW-20260813-0009) behind the workflow_execute_llm_step /
@@ -485,13 +494,8 @@ func cmdServeWithInitializers(
 	workflowStepExecutor := service.NewWorkflowStepExecutor(container.Tools, registry, workflowContextAssembler)
 	selfTools.WorkflowExecutor = workflowStepExecutor
 
-	// CW-20260813-0014: wire the built-in engine (CW-20260813-0010) behind
-	// the workflow_run self-tool and dispatch's RoleWorkflow outcome. The
-	// same workflowStepExecutor instance above backs both the external-
-	// engine MCP callbacks and this in-process launch path — "engines
-	// only sequence, harness always executes" holds identically for both
-	// (design doc). workflowDefinitionsRegistry is empty+inert when
-	// workflow_definitions_path is unset.
+	// Load Nanite's product definitions. The registry is authoring/lookup only;
+	// go-workflow owns compilation, sequencing, and durable runtime state.
 	workflowDefinitionsRegistry, err := agentworkflow.LoadRegistryDir(resolveWorkflowDefinitionsPath(cfg))
 	if err != nil {
 		slog.Error("failed to load workflow definitions registry", "err", err)
@@ -499,15 +503,63 @@ func cmdServeWithInitializers(
 	}
 	slog.Info("workflow definitions registry loaded",
 		"path", resolveWorkflowDefinitionsPath(cfg), "count", len(workflowDefinitionsRegistry.Names()))
-	workflowEngine := service.NewBuiltinWorkflowEngine(container.Store)
-	// TASKS/teams/06-stepkindflex-executor.md: wire flex-step (StepKindFlex)
-	// support so a TeamRun's fluid-coordination phases can actually resolve
-	// — team_run_members lookups reuse container.Store directly (it already
-	// satisfies service.TeamMembershipStore structurally), and exit-trigger
-	// evaluation reuses the same reflexes.StateCollector shape
-	// reflexes.NewEngine builds internally (Window: 5), not a second one.
-	workflowEngine.WithFlexSupport(container.Store, &reflexes.StateCollector{Store: container.Store, Window: 5})
-	workflowEngines := map[string]agentworkflow.WorkflowEngine{agentworkflow.EngineBuiltin: workflowEngine}
+
+	// Complete the one-way cutover before publishing any launch surface. Active
+	// legacy rows are never assigned fabricated plans: the coordinator returns
+	// their immutable audit cohort and startup stops for explicit disposition.
+	cutover, err := workflowcompat.NewCutoverCoordinator(container.Store)
+	if err != nil {
+		return fmt.Errorf("construct Agent Workflows cutover coordinator: %w", err)
+	}
+	cutoverHost, _ := os.Hostname()
+	cutoverRequest := workflowcompat.CutoverRequest{
+		Owner: fmt.Sprintf("nanite:%s:%d", cutoverHost, os.Getpid()),
+		Token: fmt.Sprintf("startup-%d", time.Now().UTC().UnixNano()),
+		Now:   time.Now().UTC(), LeaseDuration: 30 * time.Second,
+	}
+	var cutoverReport workflowcompat.CutoverReport
+	if rawPlan := strings.TrimSpace(os.Getenv("NANITE_WORKFLOW_LEGACY_DISPOSITIONS")); rawPlan != "" {
+		var decisions []workflowcompat.LegacyDispositionDecision
+		if parseErr := json.Unmarshal([]byte(rawPlan), &decisions); parseErr != nil {
+			return fmt.Errorf("parse NANITE_WORKFLOW_LEGACY_DISPOSITIONS: %w", parseErr)
+		}
+		cutoverReport, err = cutover.PrepareSharedStartupWithDecisions(context.Background(), cutoverRequest, decisions)
+	} else {
+		cutoverReport, err = cutover.PrepareSharedStartup(context.Background(), cutoverRequest)
+	}
+	if err != nil {
+		pending := make([]string, 0, len(cutoverReport.PendingLegacy))
+		for _, disposition := range cutoverReport.PendingLegacy {
+			pending = append(pending, disposition.RunID)
+		}
+		return fmt.Errorf("prepare Agent Workflows shared cutover (pending legacy runs %v): %w", pending, err)
+	}
+	slog.Info("Agent Workflows shared cutover ready", "phase", cutoverReport.State.Phase, "generation", cutoverReport.State.Generation)
+
+	workflowState, err := workflowhost.NewWorkflowStateStore(container.Store)
+	if err != nil {
+		return fmt.Errorf("construct shared workflow state: %w", err)
+	}
+	workflowArtifactRoot := appCfg.Artifacts.StorageDir
+	if workflowArtifactRoot == "" {
+		workflowArtifactRoot = config.DefaultAppConfig().Artifacts.StorageDir
+	}
+	workflowArtifactStore, err := workflowhost.NewArtifactStore(workflowhost.WorkflowArtifactRoot(workflowArtifactRoot), workflowhost.ArtifactAccessAuthorizer{})
+	if err != nil {
+		return fmt.Errorf("construct shared workflow artifact store: %w", err)
+	}
+	workflowActivationScheduler := workflowhost.NewActivationScheduler(container.Store)
+	workflowWaitCoordinator := &workflowruntime.WaitCoordinator{
+		Store: workflowState, Scheduler: workflowActivationScheduler,
+		Materializer: workflowhost.NewWaitMaterializer(container.Store),
+		Authorizer:   workflowhost.NaniteResponderAuthorizer{},
+	}
+	sharedWorkflowEngine, err := workflowhost.NewEngine(workflowState)
+	if err != nil {
+		return fmt.Errorf("construct shared workflow engine: %w", err)
+	}
+	sharedWorkflowEngine.WithWaitCoordinator(workflowWaitCoordinator).WithArtifactStore(workflowArtifactStore)
+	externalWorkflowSteps := make(map[string]service.ExternalWorkflowStepEngine)
 
 	// CW-20260814-0003: wire the external-engine invocation path — a
 	// WorkflowDefinition with Engine: "langgraph"/"crewai" now reaches a
@@ -516,19 +568,18 @@ func cmdServeWithInitializers(
 	// binary (internal/workflowrunner's go:embed) and materialized under
 	// the app's state dir so a Cerberus-deployed binary — which ships
 	// alone, no repo checkout alongside it — can still locate them.
-	// Materialization failure disables only the external engines (logged,
-	// not fatal): the built-in engine and every workflow that doesn't
-	// name an external engine are unaffected.
+	// Materialization failure disables only the external-framework StepKind;
+	// ordinary shared-host workflows remain available.
 	workflowScriptsDir := filepath.Join(serveLayout.StateDir(), "workflow-runner-scripts")
 	if scriptPaths, wsErr := workflowrunner.MaterializeScripts(workflowScriptsDir); wsErr != nil {
-		slog.Warn("workflow-runner: failed to materialize external-engine scripts, langgraph/crewai engines unavailable",
+		slog.Warn("workflow-runner: failed to materialize external-framework scripts",
 			"dir", workflowScriptsDir, "err", wsErr)
 	} else {
 		externalBinPath := ""
 		if exe, exeErr := os.Executable(); exeErr == nil {
 			externalBinPath = resolveBinaryPath(exe)
 		} else {
-			slog.Warn("workflow-runner: os.Executable failed, langgraph/crewai engines unavailable", "err", exeErr)
+			slog.Warn("workflow-runner: os.Executable failed, external frameworks unavailable", "err", exeErr)
 		}
 		externalEngineSpecs := []struct {
 			name       string
@@ -558,34 +609,32 @@ func cmdServeWithInitializers(
 					"engine", spec.name, "err", extErr)
 				continue
 			}
-			workflowEngines[spec.name] = extEngine
+			externalWorkflowSteps[spec.name] = extEngine
 		}
-		slog.Info("workflow-runner: external engines registered",
-			"dir", workflowScriptsDir, "engines", len(workflowEngines)-1)
+		slog.Info("workflow-runner: external framework StepKind adapters registered",
+			"dir", workflowScriptsDir, "frameworks", len(externalWorkflowSteps))
 	}
 
-	workflowLauncher := service.NewWorkflowLauncher(workflowDefinitionsRegistry, workflowEngines, workflowStepExecutor, container.DurableAgents)
+	workflowLauncher := service.NewWorkflowLauncher(workflowDefinitionsRegistry, sharedWorkflowEngine, workflowStepExecutor, container.DurableAgents)
 	selfTools.WorkflowLauncher = service.NewDispatchWorkflowLauncher(workflowLauncher)
 	// CW-20260815-0022: same registry instance, wired separately so
 	// callWorkflowRun can look up a named workflow's required inputs
 	// ahead of Launch — see WorkflowRegistry's doc comment.
 	selfTools.WorkflowRegistry = workflowDefinitionsRegistry
 
-	// TASKS/loops/09-stepkindloop-executor-and-waiting-status.md: wire
-	// StepKindLoop (a Workflow containing a Loop, docs/engineering/
-	// architecture/21-loops.md Decision 1) support. loopEngine reuses the
-	// exact same workflowDefinitionsRegistry/workflowLauncher pair every
-	// other workflow-launching path above shares — a loop iteration is
-	// just an ordinary WorkflowDefinition, launched the same way. The
-	// notifier is the real push mechanism: the moment a LoopRun launched
-	// from a StepKindLoop step reaches a terminal state, it resumes the
-	// specific outer WorkflowRun waiting on it directly, rather than
-	// leaving that to a lazy re-check some unrelated caller might never
-	// trigger (see workflow_engine_loop.go's own package doc comment for
-	// the full import-cycle reasoning behind this two-interface shape).
+	// A contained LoopRun launches ordinary named definitions through the same
+	// shared host. Its terminal push resumes the exact persisted outer run.
 	loopEngine := loop.NewLoopEngine(container.Store, workflowDefinitionsRegistry, workflowLauncher)
-	loopResumeNotifier := service.NewLoopResumeNotifier(container.Store, workflowDefinitionsRegistry, workflowLauncher)
+	loopResumeNotifier := service.NewLoopResumeNotifier(container.Store, workflowLauncher)
 	loopEngine.WithOuterResumeNotifier(loopResumeNotifier)
+	teamStepResolver := service.NewWorkflowTeamStepResolver(
+		container.Store,
+		&reflexes.StateCollector{Store: container.Store, Window: 5},
+	)
+	sharedWorkflowEngine.
+		WithLoopStepHost(workflowbridge.LoopAdapter{Launcher: loopEngine, Runs: container.Store}).
+		WithTeamStepHost(workflowbridge.TeamAdapter{Resolver: teamStepResolver}).
+		WithExternalStepHost(workflowbridge.ExternalAdapter{Engines: externalWorkflowSteps})
 
 	// Integration fix, TASKS/ESCALATIONS.md's 2026-08-21 entry ("Phase 3's
 	// two parallel trigger tasks (11, 12) built compatible but disconnected
@@ -602,7 +651,6 @@ func cmdServeWithInitializers(
 	// wired into the chat-turn reflex-evaluation path (container.go's FU-30
 	// wiring) -- reused here, not constructed a second time.
 	loopTickResumeBridge := loop.NewTickResumeBridge(loopEngine, container.ReflexEngine)
-	workflowEngine.WithLoopSupport(container.Store, loopEngine)
 
 	// CW-20260814-0014: A2A Agent Card generator for /.well-known/agent-card.json
 	// Uses the workflow registry to derive skills. TASKS/phase-2/04-
@@ -614,17 +662,10 @@ func cmdServeWithInitializers(
 		version.Full(),
 	)
 
-	// TASKS/teams/11-team-run-launch-api.md: wire the "launch a saved Team
-	// by name" entry point behind POST /api/teams/{id}/launch. Same
-	// workflowDefinitionsRegistry/workflowLauncher pair AgentCardGenerator/
-	// TaskManager above are wired from — TeamRunLauncher.LaunchTeamRun
-	// registers its own per-launch compiled TeamRun definition into this
-	// same shared registry (agentworkflow.Registry.Register), which is
-	// exactly why AgentCardGenerator.Generate's own IsTeamRunDefinitionName
-	// filter matters: it's the same *Registry instance in both places.
+	// TeamRun definitions launch directly as immutable shared-host material;
+	// they are not installed into the mutable named registry.
 	container.TeamRunLauncher = service.NewTeamRunLauncher(
 		container.Store,
-		workflowDefinitionsRegistry,
 		workflowLauncher,
 		container.DurableAgents,
 	)
@@ -636,6 +677,7 @@ func cmdServeWithInitializers(
 		container.Messaging,
 		container.TeamRunLauncher,
 	)
+	container.TeamRunLauncher.WithRoutingInstaller(container.TeamRouting)
 
 	// CW-20260814-0015, CW-20260814-0016: A2A TaskManager for JSON-RPC task methods.
 	// Routes Task submissions to workflow launch or durable-agent wake.
@@ -656,13 +698,10 @@ func cmdServeWithInitializers(
 	// wakeScheduleDue lookback heuristic (both removed by this same task —
 	// see docs/engineering/architecture/12-scheduling.md's "Full replace,
 	// not dual-run"). Store side: 02's StoreAdapter over the shared *store.
-	// Store. Runner side: 04's RetryingRunner (retry/backoff/on_fail
-	// policy) wrapping 03's RunnerAdapter as its Inner — the
-	// RetryingRunner, never the bare RunnerAdapter, is what gets handed to
-	// gosched.New, or 04's entire retry/backoff/on_fail policy is silently
-	// bypassed (04's own Work Log flags this explicitly; see also this
-	// package's regression test that asserts against the wired-in type,
-	// not just a passing build).
+	// Store. go-scheduler v0.2 owns durable fire identity, retry/backoff,
+	// exhaustion, and claim/transition CAS. Nanite's RunnerAdapter is handed
+	// directly to it; PolicyObserver retains only application on_fail policy
+	// and schedule_fire telemetry.
 	//
 	// Wired here, not inside service.NewContainer: RunnerAdapter's
 	// Workflows field needs workflowLauncher (constructed just above),
@@ -700,11 +739,15 @@ func cmdServeWithInitializers(
 		Commands:      container.Tools,
 		Loops:         loopTickResumeBridge,
 		LoopRunLookup: s.GetLoopRun,
+		WorkflowActivations: &workflowhost.ActivationDispatcher{
+			State: workflowState, Waits: workflowWaitCoordinator,
+			Engine: sharedWorkflowEngine, Executor: workflowStepExecutor,
+		},
+		Dispatches: s,
 	}
-	scheduleRetryingRunner := &scheduler.RetryingRunner{
-		Inner:     scheduleRunnerAdapter,
-		Runs:      s,
+	schedulePolicyObserver := &scheduler.PolicyObserver{
 		Schedules: s,
+		Fires:     s,
 		Disabler:  scheduleStoreAdapter,
 		Logger:    slog.Default(),
 		// TASKS/scheduling/06-schedule-fire-telemetry.md: *store.Store
@@ -719,7 +762,11 @@ func cmdServeWithInitializers(
 	// service.Container's own Engine field doc comment. Start()ed below,
 	// alongside the rest of the daemon's background goroutines
 	// (startBackgroundWorkers); Stop()ed from Container.Shutdown().
-	container.Engine = gosched.New(scheduleStoreAdapter, scheduleRetryingRunner)
+	container.Engine = gosched.New(
+		scheduleStoreAdapter,
+		scheduleRunnerAdapter,
+		gosched.WithObserver(schedulePolicyObserver),
+	)
 
 	// TASKS/harness-reactive-self-tools/07-worked-example-task-update-
 	// report.md: wire the harness-reactive self-tools reaction engine
@@ -819,6 +866,18 @@ func cmdServeWithInitializers(
 			slog.Warn("task restore", "err", err)
 		}
 	}
+	if container.TeamRunLauncher != nil {
+		teamRecovery := container.TeamRunLauncher.ReconcileTeamRuns(context.Background(), 100)
+		if len(teamRecovery.Failures) != 0 {
+			return fmt.Errorf("recover Team workflows (pending=%d signals=%d): %v", teamRecovery.PendingInspected, teamRecovery.SignalsInspected, teamRecovery.Failures)
+		}
+		slog.Info("Team workflow startup recovery complete", "pending", teamRecovery.PendingInspected, "signals", teamRecovery.SignalsInspected, "recovered", teamRecovery.Recovered)
+	}
+	workflowRecovery, err := sharedWorkflowEngine.RecoverActive(context.Background(), workflowStepExecutor, 100)
+	if err != nil {
+		return fmt.Errorf("recover active shared/pilot workflows (inspected=%d resumed=%d): %w", workflowRecovery.Inspected, workflowRecovery.Resumed, err)
+	}
+	slog.Info("Agent Workflows startup recovery complete", "inspected", workflowRecovery.Inspected, "resumed", workflowRecovery.Resumed)
 
 	// Clean up orphaned worktrees from previous runs.
 	if container.Worktrees != nil {
@@ -839,6 +898,16 @@ func cmdServeWithInitializers(
 
 	// Create API layer.
 	a := api.New(container)
+	workflowSurface, err := workflowcompat.NewSharedSurface(container.Store, workflowState, sharedWorkflowEngine, workflowStepExecutor)
+	if err != nil {
+		return fmt.Errorf("construct shared workflow API compatibility surface: %w", err)
+	}
+	a.SetWorkflowSurface(workflowSurface)
+	a.SetWorkflowExternalExecutionAdmin(workflowSurface)
+	a.SetWorkflowResponderAuthenticator(api.NewBasicWorkflowResponderAuthenticator(
+		os.Getenv("NANITE_AUTH_USER"),
+		os.Getenv("NANITE_AUTH_PASSWORD"),
+	))
 	// Back POST /api/tools/call with the fully-wired self-tools transport
 	// so a CLI-launched chat agent's `nanite mcp` subprocess can forward
 	// self-tool calls into this running harness.
@@ -875,6 +944,13 @@ func cmdServeWithInitializers(
 	})
 
 	// Start periodic background workers (cleanup, snapshots, reapers).
+	daemonLifecycle.Go("shared-workflow-reconcile", func(ctx context.Context) {
+		sharedWorkflowEngine.RunActiveRecoveryLoop(ctx, workflowStepExecutor, 5*time.Second, 100, func(report workflowhost.ActiveRecoveryReport, err error) {
+			if err != nil {
+				slog.Warn("shared workflow reconciliation failed", "inspected", report.Inspected, "resumed", report.Resumed, "err", err)
+			}
+		})
+	})
 	startBackgroundWorkers(daemonLifecycle, container)
 
 	// Start HTTP server.
@@ -1210,6 +1286,16 @@ func initMCP(s *store.Store, cfg *config.RuntimeConfig, appCfg *config.TunablesC
 // and reapers on the supplied lifecycle manager. Each daemon's inner loop
 // selects on ctx.Done() so Shutdown drains them deterministically.
 func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container) {
+	if container.TeamRunLauncher != nil {
+		lc.Go("team-workflow-reconcile", func(ctx context.Context) {
+			container.TeamRunLauncher.RunReconciler(ctx, 5*time.Second, 100, func(report service.TeamRunReconcileReport) {
+				for _, err := range report.Failures {
+					slog.Warn("Team workflow reconciliation failed", "err", err)
+				}
+			})
+		})
+	}
+
 	// Periodic cleanup of saved tool outputs.
 	lc.Go("truncate-cleanup", func(ctx context.Context) {
 		truncate.Cleanup()

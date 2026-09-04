@@ -9,13 +9,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/workflowrunner"
 )
 
-// externalRunStepID is the synthetic StepResult key an ExternalWorkflowEngine
-// reports its run under. External engines have no per-step granularity
-// visible to Go — LangGraph/CrewAI's internal node/task structure is opaque
-// to Nanite (design doc, POC scope: no compiler from Nanite's step format to
-// theirs) — so the whole subprocess run is reported as exactly one step.
-const externalRunStepID = "run"
-
 // ExternalWorkflowEngineConfig configures one ExternalWorkflowEngine — one
 // instance per external framework (langgraph, crewai), each pinned to its
 // own hand-authored runner script.
@@ -72,10 +65,9 @@ func (cfg ExternalWorkflowEngineConfig) validate() error {
 	return nil
 }
 
-// ExternalWorkflowEngine is the agentworkflow.WorkflowEngine adapter for a
-// one-shot external Python framework (LangGraph, CrewAI), launched via
-// internal/workflowrunner.Launch (design doc, "How external engines
-// integrate").
+// ExternalWorkflowEngine is a one-shot external Python framework runner,
+// launched via internal/workflowrunner.Launch. The shared host invokes it as
+// one StepKind; it never owns or selects workflow lifecycle sequencing.
 //
 // Run's own `exec agentworkflow.StepExecutor` parameter is deliberately
 // unused: this engine's real work never calls it directly (the built-in
@@ -102,24 +94,28 @@ func NewExternalWorkflowEngine(cfg ExternalWorkflowEngineConfig) (*ExternalWorkf
 	return &ExternalWorkflowEngine{cfg: cfg}, nil
 }
 
-var _ agentworkflow.WorkflowEngine = (*ExternalWorkflowEngine)(nil)
-
-// Name identifies this engine — see ExternalWorkflowEngineConfig.EngineName.
+// Name identifies the external framework adapter.
 func (e *ExternalWorkflowEngine) Name() string { return e.cfg.EngineName }
 
-// Run launches this engine's runner script as a one-shot subprocess and
-// maps its outcome onto agentworkflow.WorkflowResult. wf.Steps is not
-// consulted — see WorkflowDefinition.Engine's doc comment. input.SessionID,
-// when set, scopes the spawned MCP subprocess (workflowrunner.Config.
-// SessionID) to the run's durable-agent session for audit correlation.
-func (e *ExternalWorkflowEngine) Run(ctx context.Context, wf agentworkflow.WorkflowDefinition, input agentworkflow.WorkflowInput, _ agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
+// ExecuteWorkflowStep invokes this external framework as one keyed node under
+// the shared durable workflow host. The stable key is included in the exact
+// external input so framework-side effect boundaries can deduplicate retries.
+func (e *ExternalWorkflowEngine) ExecuteWorkflowStep(ctx context.Context, idempotencyKey, workflowName string, params map[string]any, sessionID string) (ExternalWorkflowStepResult, error) {
+	if idempotencyKey == "" {
+		return ExternalWorkflowStepResult{}, fmt.Errorf("workflow: external engine %q: idempotency key is required", e.cfg.EngineName)
+	}
+	keyedParams := make(map[string]any, len(params)+1)
+	for key, value := range params {
+		keyedParams[key] = value
+	}
+	keyedParams["_nanite_idempotency_key"] = idempotencyKey
 	rcfg := workflowrunner.Config{
 		PythonPath:       e.cfg.PythonPath,
 		ScriptPath:       e.cfg.ScriptPath,
 		ExtraArgs:        e.cfg.ExtraArgs,
 		NaniteBinaryPath: e.cfg.NaniteBinaryPath,
 		DBPath:           e.cfg.DBPath,
-		SessionID:        input.SessionID,
+		SessionID:        sessionID,
 		APIBaseURL:       e.cfg.APIBaseURL,
 		MCPServerID:      e.cfg.MCPServerID,
 		Timeout:          e.cfg.Timeout,
@@ -127,39 +123,18 @@ func (e *ExternalWorkflowEngine) Run(ctx context.Context, wf agentworkflow.Workf
 		Env:              e.cfg.Env,
 	}
 
-	result, err := workflowrunner.Launch(ctx, rcfg, input)
+	result, err := workflowrunner.Launch(ctx, rcfg, agentworkflow.WorkflowInput{Params: keyedParams, SessionID: sessionID})
 	if err != nil {
-		// A Launch-level error (bad config, spawn failure, timeout) is
-		// infra-level, exactly like a persistence failure is for
-		// BuiltinWorkflowEngine.Run — returned as a Go error so
-		// WorkflowLauncher.Launch's shared infra-error handling (finalize
-		// the instance, omit workflow_run_id) fires identically for both
-		// engines.
-		return agentworkflow.WorkflowResult{}, fmt.Errorf("workflow: external engine %q: %w", e.cfg.EngineName, err)
+		return ExternalWorkflowStepResult{}, fmt.Errorf("workflow: external engine %q workflow %q: %w", e.cfg.EngineName, workflowName, err)
 	}
 
-	sr := agentworkflow.StepResult{
-		StepID:  externalRunStepID,
-		Output:  result.Stdout,
-		IsError: result.ExitCode != 0,
-	}
-	status := agentworkflow.RunStatusCompleted
-	errMsg := ""
-	if sr.IsError {
-		status = agentworkflow.RunStatusFailed
-		errMsg = fmt.Sprintf("%s runner exited %d", e.cfg.EngineName, result.ExitCode)
+	stepResult := ExternalWorkflowStepResult{Output: result.Stdout, IsError: result.ExitCode != 0}
+	if stepResult.IsError {
 		if result.Stderr != "" {
-			sr.Output += "\n\nstderr:\n" + result.Stderr
+			stepResult.Output += "\n\nstderr:\n" + result.Stderr
 		}
 	}
-
-	return agentworkflow.WorkflowResult{
-		// RunID intentionally empty — external engines don't persist a
-		// workflow_runs row (WorkflowResult.RunID doc comment).
-		Status: status,
-		Error:  errMsg,
-		StepResults: map[string]agentworkflow.StepResult{
-			externalRunStepID: sr,
-		},
-	}, nil
+	return stepResult, nil
 }
+
+var _ ExternalWorkflowStepEngine = (*ExternalWorkflowEngine)(nil)

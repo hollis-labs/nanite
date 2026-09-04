@@ -435,16 +435,16 @@ func TestStoreAdapter_Payload_CompatibleWithRunnerAdapter_AllJobTypes(t *testing
 	}
 }
 
-// --- ClaimAndUpdateScheduleRun: the CAS claim ------------------------------
+// --- CreateFire: atomic materialization CAS --------------------------------
 
-// TestStoreAdapter_ClaimAndUpdateScheduleRun_ConcurrentClaim is the single
+// TestStoreAdapter_CreateFire_ConcurrentMaterialization is the single
 // most important correctness property in this task: two goroutines racing
-// ClaimAndUpdateScheduleRun on the same due schedule -- exactly one must
+// CreateFire on the same due schedule -- exactly one must
 // win, the other must see (false, nil), never an error and never a silent
 // double-claim. Run against a real *store.Store (sqlitekit.OpenSingle's
 // single-writer connection pool), not an in-memory-only fake, per the
 // task's own Done-means bullet.
-func TestStoreAdapter_ClaimAndUpdateScheduleRun_ConcurrentClaim(t *testing.T) {
+func TestStoreAdapter_CreateFire_ConcurrentMaterialization(t *testing.T) {
 	ctx := context.Background()
 	s := newAdapterTestStore(t)
 	agent := makeAdapterTestAgent(t, s, "cas-race")
@@ -470,7 +470,14 @@ func TestStoreAdapter_ClaimAndUpdateScheduleRun_ConcurrentClaim(t *testing.T) {
 		go func(i int) {
 			defer done.Done()
 			start.Wait()
-			ok, err := adapter.ClaimAndUpdateScheduleRun(ctx, "cas-race-1", expectedNext, now, now.Add(time.Minute))
+			ok, err := adapter.CreateFire(ctx, gosched.FireCreation{
+				ScheduleID: "cas-race-1", ExpectedNext: expectedNext, NextRun: now.Add(time.Minute),
+				Fire: gosched.Fire{
+					ID: "fire-cas-race", ScheduleID: "cas-race-1", ScheduledAt: expectedNext,
+					Status: gosched.FirePending, NextAttemptAt: expectedNext,
+					JobType: JobTypeCommandRun, Payload: []byte(`{"command":"noop"}`),
+				},
+			})
 			claimed[i] = ok
 			errs[i] = err
 		}(i)
@@ -499,13 +506,13 @@ func TestStoreAdapter_ClaimAndUpdateScheduleRun_ConcurrentClaim(t *testing.T) {
 	if got.NextRun != wantNext {
 		t.Errorf("NextRun after claim = %q, want %q", got.NextRun, wantNext)
 	}
-	wantLastFired := now.Format(time.RFC3339)
+	wantLastFired := expectedNext.Format(time.RFC3339)
 	if got.LastFiredAt != wantLastFired {
 		t.Errorf("LastFiredAt after claim = %q, want %q", got.LastFiredAt, wantLastFired)
 	}
 }
 
-func TestStoreAdapter_ClaimAndUpdateScheduleRun_WrongExpectedNext_ReturnsFalseNotError(t *testing.T) {
+func TestStoreAdapter_CreateFire_WrongExpectedNext_ReturnsFalseNotError(t *testing.T) {
 	ctx := context.Background()
 	s := newAdapterTestStore(t)
 	agent := makeAdapterTestAgent(t, s, "cas-mismatch")
@@ -520,12 +527,19 @@ func TestStoreAdapter_ClaimAndUpdateScheduleRun_WrongExpectedNext_ReturnsFalseNo
 
 	adapter := &StoreAdapter{Store: s, Logger: slog.Default()}
 	wrongExpected := realNext.Add(-time.Hour)
-	claimed, err := adapter.ClaimAndUpdateScheduleRun(ctx, "cas-mismatch-1", wrongExpected, now, now.Add(time.Minute))
+	claimed, err := adapter.CreateFire(ctx, gosched.FireCreation{
+		ScheduleID: "cas-mismatch-1", ExpectedNext: wrongExpected, NextRun: now.Add(time.Minute),
+		Fire: gosched.Fire{
+			ID: "fire-cas-mismatch", ScheduleID: "cas-mismatch-1", ScheduledAt: wrongExpected,
+			Status: gosched.FirePending, NextAttemptAt: wrongExpected,
+			JobType: JobTypeCommandRun, Payload: []byte(`{"command":"noop"}`),
+		},
+	})
 	if err != nil {
-		t.Fatalf("ClaimAndUpdateScheduleRun: unexpected error: %v", err)
+		t.Fatalf("CreateFire: unexpected error: %v", err)
 	}
 	if claimed {
-		t.Fatalf("ClaimAndUpdateScheduleRun: claimed=true for a mismatched expectedNext, want false")
+		t.Fatalf("CreateFire: created=true for a mismatched expectedNext, want false")
 	}
 
 	got, err := s.GetAgentSchedule(ctx, "cas-mismatch-1")
@@ -537,9 +551,9 @@ func TestStoreAdapter_ClaimAndUpdateScheduleRun_WrongExpectedNext_ReturnsFalseNo
 	}
 }
 
-// --- SetScheduleNextRun / DisableSchedule ---------------------------------
+// --- Fire lifecycle / DisableSchedule -------------------------------------
 
-func TestStoreAdapter_SetScheduleNextRun(t *testing.T) {
+func TestStoreAdapter_ClaimAndTransitionFire(t *testing.T) {
 	ctx := context.Background()
 	s := newAdapterTestStore(t)
 	agent := makeAdapterTestAgent(t, s, "set-next-run")
@@ -552,16 +566,35 @@ func TestStoreAdapter_SetScheduleNextRun(t *testing.T) {
 	})
 
 	adapter := &StoreAdapter{Store: s, Logger: slog.Default()}
-	rollback := now.Add(-30 * time.Minute)
-	if err := adapter.SetScheduleNextRun(ctx, "set-next-run-1", rollback); err != nil {
-		t.Fatalf("SetScheduleNextRun: %v", err)
+	fireID := gosched.DeriveFireID("set-next-run-1", now)
+	created, err := adapter.CreateFire(ctx, gosched.FireCreation{
+		ScheduleID: "set-next-run-1", ExpectedNext: now, NextRun: now.Add(time.Minute),
+		Fire: gosched.Fire{
+			ID: fireID, ScheduleID: "set-next-run-1", ScheduledAt: now,
+			Status: gosched.FirePending, NextAttemptAt: now,
+			JobType: JobTypeCommandRun, Payload: []byte(`{"command":"noop"}`),
+		},
+	})
+	if err != nil || !created {
+		t.Fatalf("CreateFire = (%v, %v)", created, err)
 	}
-	got, err := s.GetAgentSchedule(ctx, "set-next-run-1")
-	if err != nil {
-		t.Fatalf("GetAgentSchedule: %v", err)
+	claimed, won, err := adapter.ClaimFire(ctx, gosched.FireClaim{
+		FireID: fireID, ExpectedStatus: gosched.FirePending, ExpectedAttempt: 0,
+		ClaimedAt: now.Add(time.Second), ClaimExpiresAt: now.Add(time.Minute),
+	})
+	if err != nil || !won || claimed.Attempt != 1 {
+		t.Fatalf("ClaimFire = (%+v, %v, %v)", claimed, won, err)
 	}
-	if got.NextRun != rollback.UTC().Format(time.RFC3339) {
-		t.Errorf("NextRun = %q, want %q", got.NextRun, rollback.UTC().Format(time.RFC3339))
+	transitioned, err := adapter.TransitionFire(ctx, gosched.FireTransition{
+		FireID: fireID, Attempt: claimed.Attempt, From: gosched.FireClaimed,
+		ClaimedAt: claimed.FiredAt, To: gosched.FireSucceeded,
+	})
+	if err != nil || !transitioned {
+		t.Fatalf("TransitionFire = (%v, %v)", transitioned, err)
+	}
+	got, err := s.GetScheduleFire(ctx, fireID)
+	if err != nil || got.Status != store.ScheduleFireStatusSucceeded {
+		t.Fatalf("GetScheduleFire = (%+v, %v)", got, err)
 	}
 }
 
@@ -647,12 +680,19 @@ func TestStoreAdapter_NextRunRoundTrip_OneShotAndCron(t *testing.T) {
 	// after a successful dispatch.
 	const oneTimeHorizon = 100 * 365 * 24 * time.Hour
 	oneShotNext := now.Add(oneTimeHorizon)
-	claimed, err := adapter.ClaimAndUpdateScheduleRun(ctx, oneShot.ID, oneShot.NextRun, now, oneShotNext)
+	claimed, err := adapter.CreateFire(ctx, gosched.FireCreation{
+		ScheduleID: oneShot.ID, ExpectedNext: oneShot.NextRun, NextRun: oneShotNext,
+		Fire: gosched.Fire{
+			ID: gosched.DeriveFireID(oneShot.ID, oneShot.NextRun), ScheduleID: oneShot.ID,
+			ScheduledAt: oneShot.NextRun, Status: gosched.FirePending, NextAttemptAt: oneShot.NextRun,
+			JobType: oneShot.JobType, Payload: oneShot.Payload,
+		},
+	})
 	if err != nil {
-		t.Fatalf("ClaimAndUpdateScheduleRun (one_shot): %v", err)
+		t.Fatalf("CreateFire (one_shot): %v", err)
 	}
 	if !claimed {
-		t.Fatalf("ClaimAndUpdateScheduleRun (one_shot): claimed=false, want true")
+		t.Fatalf("CreateFire (one_shot): created=false, want true")
 	}
 	if err := adapter.DisableSchedule(ctx, oneShot.ID); err != nil {
 		t.Fatalf("DisableSchedule: %v", err)
@@ -683,12 +723,19 @@ func TestStoreAdapter_NextRunRoundTrip_OneShotAndCron(t *testing.T) {
 	if !cronNext.Equal(wantCronNext) {
 		t.Fatalf("gosched.NextRun(%q, %v) = %v, want %v", cron.CronExpr, now, cronNext, wantCronNext)
 	}
-	claimed, err = adapter.ClaimAndUpdateScheduleRun(ctx, cron.ID, cron.NextRun, now, cronNext)
+	claimed, err = adapter.CreateFire(ctx, gosched.FireCreation{
+		ScheduleID: cron.ID, ExpectedNext: cron.NextRun, NextRun: cronNext,
+		Fire: gosched.Fire{
+			ID: gosched.DeriveFireID(cron.ID, cron.NextRun), ScheduleID: cron.ID,
+			ScheduledAt: cron.NextRun, Status: gosched.FirePending, NextAttemptAt: cron.NextRun,
+			JobType: cron.JobType, Payload: cron.Payload,
+		},
+	})
 	if err != nil {
-		t.Fatalf("ClaimAndUpdateScheduleRun (cron): %v", err)
+		t.Fatalf("CreateFire (cron): %v", err)
 	}
 	if !claimed {
-		t.Fatalf("ClaimAndUpdateScheduleRun (cron): claimed=false, want true")
+		t.Fatalf("CreateFire (cron): created=false, want true")
 	}
 	gotCron, err := s.GetAgentSchedule(ctx, "cron-rt")
 	if err != nil {

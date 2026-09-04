@@ -112,8 +112,19 @@ finish_examined_nothing() {
 # Tracked and untracked Go files, NUL-separated. Excludes ui/node_modules,
 # which carries a stray vendored Go package that is not ours to format.
 go_files() {
-  git ls-files -z '*.go'
-  git ls-files -z --others --exclude-standard '*.go'
+  # `git ls-files` reads the index, so it includes tracked paths intentionally
+  # deleted in the worktree until their deletion is staged. Feeding those
+  # nonexistent paths to gofmt/goimports makes a valid pre-commit deletion
+  # impossible to check. Keep every tracked/untracked Go file that exists and
+  # omit only deleted tracked entries; the NUL loop preserves unusual paths.
+  {
+    git ls-files -z '*.go'
+    git ls-files -z --others --exclude-standard '*.go'
+  } | while IFS= read -r -d '' file; do
+    if [ -f "$file" ]; then
+      printf '%s\0' "$file"
+    fi
+  done
 }
 
 # ── 1. format ─────────────────────────────────────────────────────────────

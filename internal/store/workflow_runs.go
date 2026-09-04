@@ -13,12 +13,16 @@ import (
 type WorkflowRunRow struct {
 	ID             string
 	DefinitionName string
-	Status         string
-	InputJSON      string
-	Error          string
-	StartedAt      time.Time
-	CompletedAt    time.Time
-	UpdatedAt      time.Time
+	// DefinitionRevisionID binds a shared-engine run to the exact immutable
+	// authored definition revision selected before execution. It is nil for
+	// legacy rows and low-level conformance fixtures without authored material.
+	DefinitionRevisionID *string
+	Status               string
+	InputJSON            string
+	Error                string
+	StartedAt            time.Time
+	CompletedAt          time.Time
+	UpdatedAt            time.Time
 
 	// LoopRunID scopes this WorkflowRun to one loop_runs.id when it was
 	// launched as one iteration of a Loop (docs/engineering/architecture/
@@ -119,14 +123,26 @@ func (s *Store) CreateWorkflowRun(ctx context.Context, row *WorkflowRunRow) erro
 	}
 	row.UpdatedAt = row.StartedAt
 
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO workflow_runs (`+workflowRunColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		row.ID, row.DefinitionName, row.Status, row.InputJSON, row.Error,
-		formatTimeRFC3339Nano(row.StartedAt), formatTimeRFC3339NanoOrEmpty(row.CompletedAt),
-		formatTimeRFC3339Nano(row.UpdatedAt),
-		row.LoopRunID, row.LoopIteration,
-	)
+	var err error
+	if row.DefinitionRevisionID == nil {
+		_, err = s.DB.ExecContext(ctx,
+			`INSERT INTO workflow_runs (`+workflowRunColumns+`)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			row.ID, row.DefinitionName, row.Status, row.InputJSON, row.Error,
+			formatTimeRFC3339Nano(row.StartedAt), formatTimeRFC3339NanoOrEmpty(row.CompletedAt),
+			formatTimeRFC3339Nano(row.UpdatedAt),
+			row.LoopRunID, row.LoopIteration,
+		)
+	} else {
+		_, err = s.DB.ExecContext(ctx,
+			`INSERT INTO workflow_runs (`+workflowRunColumns+`, definition_revision_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			row.ID, row.DefinitionName, row.Status, row.InputJSON, row.Error,
+			formatTimeRFC3339Nano(row.StartedAt), formatTimeRFC3339NanoOrEmpty(row.CompletedAt),
+			formatTimeRFC3339Nano(row.UpdatedAt),
+			row.LoopRunID, row.LoopIteration, row.DefinitionRevisionID,
+		)
+	}
 	if err != nil {
 		return fmt.Errorf("create workflow_runs row %s: %w", row.ID, err)
 	}
@@ -205,6 +221,23 @@ func (s *Store) GetWorkflowRun(ctx context.Context, id string) (*WorkflowRunRow,
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get workflow_runs %s: %w", id, err)
+	}
+	var hasRevisionColumn int
+	if err := s.DB.QueryRowContext(ctx, `
+SELECT COUNT(1) FROM pragma_table_info('workflow_runs')
+WHERE name = 'definition_revision_id'`).Scan(&hasRevisionColumn); err != nil {
+		return nil, fmt.Errorf("get workflow_runs %s revision schema: %w", id, err)
+	}
+	if hasRevisionColumn != 0 {
+		var revisionID sql.NullString
+		if err := s.DB.QueryRowContext(ctx,
+			`SELECT definition_revision_id FROM workflow_runs WHERE id = ?`, id,
+		).Scan(&revisionID); err != nil {
+			return nil, fmt.Errorf("get workflow_runs %s definition revision: %w", id, err)
+		}
+		if revisionID.Valid {
+			r.DefinitionRevisionID = &revisionID.String
+		}
 	}
 	return r, nil
 }

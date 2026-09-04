@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/a2a"
-	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -39,13 +38,13 @@ func newTestAPIWithTeamRunLauncher(t *testing.T) (*API, *http.ServeMux, *store.S
 	st := a.Services.Store
 
 	registry := agentworkflow.NewRegistry(nil)
-	engine := service.NewBuiltinWorkflowEngine(st).WithFlexSupport(st, &reflexes.StateCollector{Store: st, Window: 5})
-	engines := map[string]agentworkflow.WorkflowEngine{agentworkflow.EngineBuiltin: engine}
+	engine := newAPITestWorkflowHost(t, st)
 	durable := service.NewDurableAgentService(st)
-	launcher := service.NewWorkflowLauncher(registry, engines, &fakeAPIStepExecutor{}, durable)
+	launcher := service.NewWorkflowLauncher(registry, engine, &fakeAPIStepExecutor{}, durable)
 
-	a.Services.TeamRunLauncher = service.NewTeamRunLauncher(st, registry, launcher, durable)
+	a.Services.TeamRunLauncher = service.NewTeamRunLauncher(st, launcher, durable)
 	a.Services.TeamRouting = service.NewTeamRoutingService(st, a.Services.Messaging, a.Services.TeamRunLauncher)
+	a.Services.TeamRunLauncher.WithRoutingInstaller(a.Services.TeamRouting)
 	a.Services.AgentCardGenerator = service.NewAgentCardGenerator(registry, "http://example.test", "test")
 
 	return a, mux, st
@@ -154,6 +153,7 @@ func TestTeamRunLaunchAPI_EndToEnd_ReachesRealWorkflowRunAndTeamRunMembers(t *te
 
 	body := `{"slot_member_counts":{"engineer":2},"params":{"objective":"ship it"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/teams/"+team.ID+"/launch", bytes.NewBufferString(body))
+	req.Header.Set("Idempotency-Key", "team-api-e2e")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -241,11 +241,80 @@ func TestTeamRunLaunchAPI_EndToEnd_ReachesRealWorkflowRunAndTeamRunMembers(t *te
 	}
 }
 
+func TestTeamRunLaunchAPIIdempotencyReplayConflictAndLegacyKeyGeneration(t *testing.T) {
+	_, mux, st := newTestAPIWithTeamRunLauncher(t)
+	createTeamRunTestRoleBoundAgent(t, st, "orchestrator")
+	createTeamRunTestRoleBoundAgent(t, st, "engineer")
+	team := buildTeamRunAPITestTeam(t, st)
+
+	launch := func(key, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/teams/"+team.ID+"/launch", bytes.NewBufferString(body))
+		if key != "" {
+			req.Header.Set("Idempotency-Key", key)
+		}
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+
+	// Existing clients remain source-compatible: Nanite generates and returns
+	// a key when the request omitted one.
+	legacy := launch("", `{}`)
+	if legacy.Code != http.StatusOK {
+		t.Fatalf("legacy launch = %d body=%s", legacy.Code, legacy.Body.String())
+	}
+	var legacyResponse teamLaunchResponse
+	if err := json.NewDecoder(legacy.Body).Decode(&legacyResponse); err != nil {
+		t.Fatal(err)
+	}
+	if legacyResponse.IdempotencyKey == "" || legacy.Header().Get("Idempotency-Key") != legacyResponse.IdempotencyKey {
+		t.Fatalf("generated key header/body = %q/%q", legacy.Header().Get("Idempotency-Key"), legacyResponse.IdempotencyKey)
+	}
+
+	const key = "team-api-replay"
+	first := launch(key, `{"params":{"objective":"ship"}}`)
+	second := launch(key, `{"params":{"objective":"ship"}}`)
+	if first.Code != http.StatusOK || second.Code != http.StatusOK {
+		t.Fatalf("replay codes = %d/%d bodies=%s / %s", first.Code, second.Code, first.Body.String(), second.Body.String())
+	}
+	var firstResponse, secondResponse teamLaunchResponse
+	if err := json.NewDecoder(first.Body).Decode(&firstResponse); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.NewDecoder(second.Body).Decode(&secondResponse); err != nil {
+		t.Fatal(err)
+	}
+	if firstResponse.WorkflowRunID == "" || secondResponse.WorkflowRunID != firstResponse.WorkflowRunID {
+		t.Fatalf("replayed run ids = %q/%q", firstResponse.WorkflowRunID, secondResponse.WorkflowRunID)
+	}
+	var runs int
+	if err := st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM workflow_runs WHERE id=?`, firstResponse.WorkflowRunID).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 1 {
+		t.Fatalf("workflow run rows = %d, want 1", runs)
+	}
+	var routingRows int
+	if err := st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_reflexes WHERE workflow_run_id=?`, firstResponse.WorkflowRunID).Scan(&routingRows); err != nil {
+		t.Fatal(err)
+	}
+	if routingRows != 4 {
+		t.Fatalf("routing rows after keyed replay = %d, want 4", routingRows)
+	}
+
+	conflict := launch(key, `{"params":{"objective":"different"}}`)
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("conflicting replay = %d, want 409 body=%s", conflict.Code, conflict.Body.String())
+	}
+}
+
 // TestTeamRunLaunchAPI_UnknownTeam404 proves the not-found path, matching
 // task 10's own teams.go CRUD posture (errors.Is-dispatched 404).
 func TestTeamRunLaunchAPI_UnknownTeam404(t *testing.T) {
 	_, mux, _ := newTestAPIWithTeamRunLauncher(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/teams/does-not-exist/launch", bytes.NewBufferString(`{}`))
+	req.Header.Set("Idempotency-Key", "team-api-unknown")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
@@ -262,6 +331,7 @@ func TestTeamRunLaunchAPI_MalformedBody400(t *testing.T) {
 	team := buildTeamRunAPITestTeam(t, st)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/teams/"+team.ID+"/launch", bytes.NewBufferString(`{not json`))
+	req.Header.Set("Idempotency-Key", "team-api-malformed")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -280,6 +350,7 @@ func TestTeamRunLaunchAPI_SlotMemberCountAboveMax400(t *testing.T) {
 
 	body := `{"slot_member_counts":{"engineer":99}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/teams/"+team.ID+"/launch", bytes.NewBufferString(body))
+	req.Header.Set("Idempotency-Key", "team-api-invalid-count")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -318,6 +389,7 @@ func TestTeamRunLaunchAPI_ServiceUnavailableWhenRoutingNotWired(t *testing.T) {
 		t.Fatalf("count workflow_runs before request: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/teams/"+team.ID+"/launch", bytes.NewBufferString(`{}`))
+	req.Header.Set("Idempotency-Key", "team-api-no-routing")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusServiceUnavailable {
@@ -349,6 +421,7 @@ func TestTeamRunLaunchAPI_RoutingInstallFailureReturnsRunAndCleansPartialRows(t 
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/teams/"+team.ID+"/launch", bytes.NewBufferString(`{}`))
+	req.Header.Set("Idempotency-Key", "team-api-routing-failure")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusInternalServerError {
@@ -414,6 +487,7 @@ func TestTeamRunLaunchAPI_RegistryGrowth_TeamRunDefinitionNeverPollutesAgentCard
 	team := buildTeamRunAPITestTeam(t, st)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/teams/"+team.ID+"/launch", bytes.NewBufferString(`{}`))
+	req.Header.Set("Idempotency-Key", "team-api-agent-card")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

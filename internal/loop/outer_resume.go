@@ -80,9 +80,9 @@ func (e *LoopEngine) WithOuterResumeNotifier(n OuterResumeNotifier) *LoopEngine 
 // waiting on it successfully got poked this call. Known limitation, and a
 // documented follow-up candidate: there is no automatic retry of a failed
 // push. An operator who notices a stuck waiting_on_loop run can always
-// resume the outer WorkflowRun directly (the same GetEngine+concrete-
-// engine-.Resume path the notifier itself uses) without waiting on a
-// second LoopRun terminal transition that will never come.
+// resume the outer WorkflowRun directly through WorkflowLauncher.Resume
+// and the same durable host, without waiting on a second LoopRun terminal
+// transition that will never come.
 func (e *LoopEngine) notifyOuterOnTerminal(ctx context.Context, loopRunID, status string) {
 	if e.outerResume == nil {
 		return

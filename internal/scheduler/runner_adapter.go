@@ -18,8 +18,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
+	workflowwait "github.com/hollis-labs/go-workflow/wait"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/loop"
@@ -41,11 +43,12 @@ import (
 // declared -- see that constant's own doc comment for why this is a
 // deliberate duplication, not a shared alias.
 const (
-	JobTypeDurableAgentWake = "durable_agent_wake"
-	JobTypeAgentWorkflowRun = "agent_workflow_run"
-	JobTypeCommandRun       = "command_run"
-	JobTypeReflexDispatch   = "reflex_dispatch"
-	JobTypeLoopRunTick      = "loop_run_tick"
+	JobTypeDurableAgentWake   = "durable_agent_wake"
+	JobTypeAgentWorkflowRun   = "agent_workflow_run"
+	JobTypeCommandRun         = "command_run"
+	JobTypeReflexDispatch     = "reflex_dispatch"
+	JobTypeLoopRunTick        = "loop_run_tick"
+	JobTypeWorkflowActivation = "workflow_activation"
 )
 
 // --- Payload shapes -------------------------------------------------------
@@ -196,6 +199,23 @@ type LoopResumer interface {
 // narrowing. store.Store.GetLoopRun satisfies this today.
 type LoopRunLookup func(ctx context.Context, id string) (*store.LoopRun, error)
 
+// DispatchReceiptStore makes application dispatch idempotent across the
+// library's intentional at-least-once expired-claim recovery. A receipt is
+// fenced to the exact claimed attempt so a stale owner cannot record success
+// after another engine has recovered its lease.
+type DispatchReceiptStore interface {
+	IsScheduleFireDispatchAccepted(ctx context.Context, fireID string) (bool, error)
+	MarkScheduleFireDispatchAccepted(ctx context.Context, fireID string, attempt int, claimedAt, acceptedAt time.Time) (bool, error)
+}
+
+// WorkflowActivationDispatcher hands a due Hadron wait/retry activation back
+// to the embedded workflow host. The bool reports whether durable workflow
+// progress was accepted; false is translated to go-scheduler's duplicate-job
+// terminal outcome.
+type WorkflowActivationDispatcher interface {
+	DispatchWorkflowActivation(context.Context, workflowwait.Activation, time.Time) (bool, error)
+}
+
 // RunnerAdapter implements gosched.Runner over Nanite's own dispatch
 // targets, following Hadron's runnerAdapter pattern (adapter.go): decode
 // Job.Payload per Job.JobType, dispatch to the matching narrow
@@ -208,28 +228,58 @@ type LoopRunLookup func(ctx context.Context, id string) (*store.LoopRun, error)
 // job types it actually needs live (e.g. a test wiring only Commands) and
 // lets tests fake at the same field.
 type RunnerAdapter struct {
-	Wake           DurableAgentWaker
-	Workflows      WorkflowLauncher
-	Commands       CommandExecutor
-	ReflexLookup   ReflexLookup
-	ReflexExecutor *reflexes.Executor
-	Loops          LoopResumer
-	LoopRunLookup  LoopRunLookup
+	Wake                DurableAgentWaker
+	Workflows           WorkflowLauncher
+	Commands            CommandExecutor
+	ReflexLookup        ReflexLookup
+	ReflexExecutor      *reflexes.Executor
+	Loops               LoopResumer
+	LoopRunLookup       LoopRunLookup
+	WorkflowActivations WorkflowActivationDispatcher
+	Dispatches          DispatchReceiptStore
 }
 
 var _ gosched.Runner = (*RunnerAdapter)(nil)
 
-// Enqueue dispatches a fired schedule's job to the matching target. See
-// this file's package doc comment and TASKS/scheduling/
-// 03-runner-adapter-and-job-taxonomy.md's Work Log for the per-job-type
-// duplicate-run-signal finding: none of the four job types currently
-// expose an "already running" signal on the dispatch-target side (see
-// each enqueueX function's doc comment for why), so no gosched.
-// ErrDuplicateJob translation happens in this version — there is
-// currently nothing for such a translation to guard against. This is a
-// documented finding, not an oversight; add the translation at the
-// specific call site the day a real duplicate-run signal exists.
+// Enqueue dispatches a fired schedule's job to the matching target.
+//
+// DispatchReceipts is optional for isolated unit callers, but production wires
+// it to *store.Store. Once the target accepts a job, the receipt is persisted
+// before Enqueue returns. Recovery of a crash between that return and the
+// engine's success transition then produces ErrDuplicateJob and a terminal
+// skipped Fire without repeating the target side effect.
 func (r *RunnerAdapter) Enqueue(ctx context.Context, job gosched.Job) error {
+	fireID := job.FireID
+	if fireID == "" {
+		fireID = job.RunID
+	}
+	if r.Dispatches != nil {
+		accepted, err := r.Dispatches.IsScheduleFireDispatchAccepted(ctx, fireID)
+		if err != nil {
+			return fmt.Errorf("scheduler: check dispatch receipt for fire %s: %w", fireID, err)
+		}
+		if accepted {
+			return fmt.Errorf("scheduler: fire %s dispatch already accepted: %w", fireID, gosched.ErrDuplicateJob)
+		}
+	}
+
+	err := r.dispatch(ctx, job)
+	if err != nil || r.Dispatches == nil {
+		return err
+	}
+	marked, markErr := r.Dispatches.MarkScheduleFireDispatchAccepted(
+		context.WithoutCancel(ctx), fireID, job.Attempt, job.FiredAt, time.Now().UTC(),
+	)
+	if markErr != nil {
+		return fmt.Errorf("scheduler: persist dispatch receipt for fire %s: %w", fireID, markErr)
+	}
+	if !marked {
+		return fmt.Errorf("scheduler: persist dispatch receipt for fire %s: claim was lost", fireID)
+	}
+	return nil
+}
+
+func (r *RunnerAdapter) dispatch(ctx context.Context, job gosched.Job) error {
 	switch job.JobType {
 	case JobTypeDurableAgentWake:
 		return r.enqueueDurableAgentWake(ctx, job)
@@ -241,9 +291,36 @@ func (r *RunnerAdapter) Enqueue(ctx context.Context, job gosched.Job) error {
 		return r.enqueueReflexDispatch(ctx, job)
 	case JobTypeLoopRunTick:
 		return r.enqueueLoopRunTick(ctx, job)
+	case JobTypeWorkflowActivation:
+		return r.enqueueWorkflowActivation(ctx, job)
 	default:
 		return fmt.Errorf("scheduler: unknown job type %q (run %s)", job.JobType, job.RunID)
 	}
+}
+
+func (r *RunnerAdapter) enqueueWorkflowActivation(ctx context.Context, job gosched.Job) error {
+	if r.WorkflowActivations == nil {
+		return fmt.Errorf("scheduler: workflow_activation dispatch not configured (run %s)", job.RunID)
+	}
+	var activation workflowwait.Activation
+	if err := json.Unmarshal(job.Payload, &activation); err != nil {
+		return fmt.Errorf("scheduler: decode workflow_activation payload (run %s): %w", job.RunID, err)
+	}
+	if err := activation.Validate(); err != nil {
+		return fmt.Errorf("scheduler: validate workflow_activation payload (run %s): %w", job.RunID, err)
+	}
+	if job.ScheduleID != store.WorkflowActivationScheduleID(string(activation.ID)) ||
+		!job.ScheduledAt.Equal(activation.FireAt.UTC()) {
+		return fmt.Errorf("scheduler: workflow_activation payload does not match Fire identity (run %s)", job.RunID)
+	}
+	applied, err := r.WorkflowActivations.DispatchWorkflowActivation(ctx, activation, job.FiredAt)
+	if err != nil {
+		return fmt.Errorf("scheduler: workflow_activation dispatch (run %s): %w", job.RunID, err)
+	}
+	if !applied {
+		return fmt.Errorf("scheduler: workflow_activation already terminal (run %s): %w", job.RunID, gosched.ErrDuplicateJob)
+	}
+	return nil
 }
 
 // enqueueDurableAgentWake decodes a DurableAgentWakePayload and calls
@@ -335,9 +412,8 @@ func (r *RunnerAdapter) enqueueAgentWorkflowRun(ctx context.Context, job gosched
 // (it encodes failure into the returned ToolResult so a chat-turn caller
 // can hand it back to the LLM), but a scheduled command_run has no LLM
 // turn to hand a failure envelope to, so folding it into the Enqueue error
-// is what makes the failure visible to go-scheduler's retry path (and,
-// once TASKS/scheduling/04 lands, to the schedule_runs retry/backoff
-// bookkeeping) instead of being silently discarded.
+// is what makes the failure visible to go-scheduler's durable Fire retry
+// path instead of being silently discarded.
 func (r *RunnerAdapter) enqueueCommandRun(ctx context.Context, job gosched.Job) error {
 	if r.Commands == nil {
 		return fmt.Errorf("scheduler: command_run dispatch not configured (run %s)", job.RunID)

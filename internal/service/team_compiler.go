@@ -61,11 +61,10 @@ import (
 // step's Config["active_slots"] verbatim. This is not just the smaller
 // surface area -- it is very likely the *only* shape that actually
 // interoperates with what task 06 already built and merged:
-// internal/service/workflow_engine_flex.go's evaluateFlexExit calls
-// e.teamMembers.ListTeamRunMembersByRun(ctx, runID) and filters that live
-// team_run_members list down to cfg.ActiveSlots (activeMembersForSlots) --
-// it re-resolves slot names against team_run_members at flex-step-entry
-// (and on every subsequent Resume-driven re-check) time, not once at
+// WorkflowTeamStepResolver calls ListTeamRunMembersByRun and filters that
+// live team_run_members list down to the authored active slot names. It
+// re-resolves slot names against durable membership at signal-resolution
+// time, not once at
 // compile time. Baking in concrete (agent_id, session_id) tuples instead
 // would (a) go stale the moment a member is replaced mid-run (a
 // `replaced`-status member from task 02's status vocabulary would require
@@ -79,28 +78,13 @@ import (
 // preference here; it is the shape the already-merged consumer actually
 // requires.
 //
-// Gate phases: ApproverSlot compiles to Config["approver_slot"] as
-// documentation-carrying metadata only. Confirmed directly against
-// internal/service/workflow_engine.go's runStep (the real StepKindGate
-// branch): on entry it unconditionally marks the step "waiting_on_gate"
-// and returns -- it reads zero keys from the gate step's Config. The only
-// real resolution path today is external: store.ResolveGate(runID,
-// stepID, input) (called by internal/service/a2a_task_manager.go's
-// ProvideTaskInput, itself driven by an A2A "input-required" client
-// action), which accepts an arbitrary string input with no approver-slot
-// check of any kind. So 15-teams.md's illustrative `config: {approver_slot:
-// reviewer}` is not, today, a literal read of anything the engine
-// enforces -- it is included here anyway (matching the design doc's own
-// illustrative shape verbatim) as forward-compatible metadata for a
-// not-yet-built gate-approval-enforcement mechanism. This is a documented
-// finding, not a claim that approval enforcement exists.
+// Gate phases retain ApproverSlot as product policy metadata. The shared
+// host owns the durable gate/wait contract and Nanite's responder adapter
+// enforces the authenticated authority at resume time.
 //
-// Engine is a hard, not-configurable EngineBuiltin -- there is no caller
-// input that can set it to anything else. Routing a Team through an
-// external engine (LangGraph/CrewAI/GoogleADK/AutoGen/LangChain) would be
-// meaningless: none of those consume Steps at all (agentworkflow.
-// WorkflowDefinition.Engine's own doc comment), so a Team compiled against
-// one would silently run nothing.
+// CompileTeam deliberately leaves the legacy Engine field empty. All product
+// workflows run through the one configured shared durable host; a Team cannot
+// select a competing sequencer.
 func CompileTeam(name string, phases []store.TeamPhase, resolvedMembers map[string][]store.TeamRunMember) (agentworkflow.WorkflowDefinition, error) {
 	// resolvedMembers is deliberately unconsumed here -- see doc comment
 	// above ("Design call -- active_slots holds Team Slot names").
@@ -113,11 +97,16 @@ func CompileTeam(name string, phases []store.TeamPhase, resolvedMembers map[stri
 	}
 
 	steps := make([]agentworkflow.StepDefinition, 0, len(phases))
+	seenIDs := make(map[string]struct{}, len(phases))
 	var prevID string
 	for i, phase := range phases {
 		if phase.ID == "" {
 			return agentworkflow.WorkflowDefinition{}, fmt.Errorf("compile team %q: phase %d has an empty id", name, i)
 		}
+		if _, exists := seenIDs[phase.ID]; exists {
+			return agentworkflow.WorkflowDefinition{}, fmt.Errorf("compile team %q: duplicate phase id %q", name, phase.ID)
+		}
+		seenIDs[phase.ID] = struct{}{}
 
 		step := agentworkflow.StepDefinition{ID: phase.ID}
 		// Linear chain: each phase depends on exactly the phase before it
@@ -139,7 +128,7 @@ func CompileTeam(name string, phases []store.TeamPhase, resolvedMembers map[stri
 				"exit_trigger": phase.ExitTrigger,
 			}
 			// Real integration check, not a shape assumption: this must
-			// actually parse through task 06's real parseFlexStepConfig
+			// actually parse through the shared-host product resolver's config parser
 			// (same package, called directly -- not re-implemented or
 			// approximated here). A phase whose Config would fail task
 			// 06's executor at run time fails to compile instead, with a
@@ -167,9 +156,8 @@ func CompileTeam(name string, phases []store.TeamPhase, resolvedMembers map[stri
 	}
 
 	wf := agentworkflow.WorkflowDefinition{
-		Name:   name,
-		Engine: agentworkflow.EngineBuiltin,
-		Steps:  steps,
+		Name:  name,
+		Steps: steps,
 	}
 	if err := agentworkflow.Validate(wf); err != nil {
 		return agentworkflow.WorkflowDefinition{}, fmt.Errorf("compile team %q: %w", name, err)

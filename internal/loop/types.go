@@ -62,6 +62,10 @@ type LoopGoalSpec struct {
 // internal/service/workflow_launch.go, for what each forwarded field
 // means).
 type LoopInput struct {
+	// IdempotencyKey, when set, makes repeated launches recover the same
+	// LoopRun rather than create a second child after a caller crash.
+	IdempotencyKey string
+
 	// GoalID references an existing goals row. Exactly one of GoalID/Goal
 	// must be set -- Run rejects both empty and both set.
 	GoalID string

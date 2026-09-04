@@ -112,6 +112,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -578,11 +579,13 @@ func (svc *TeamRoutingService) InstallTeamRunRouting(ctx context.Context, runID,
 		}
 		reason := fmt.Sprintf("team routing rule %q -> %s (team %q)", rule.Name, targetSlot.Name, team.Name)
 		for _, agentID := range askers {
-			id, err := svc.insertTeamRoutingReflex(ctx, runID, team, agentID, rule.Name, triggerSpec, priority, targetSlot.Name, agentSlug, reason)
+			id, created, err := svc.insertTeamRoutingReflex(ctx, runID, team, agentID, rule.Name, triggerSpec, priority, targetSlot.Name, agentSlug, reason)
 			if err != nil {
 				return installed, err
 			}
-			installed = append(installed, id)
+			if created {
+				installed = append(installed, id)
+			}
 		}
 	}
 
@@ -614,11 +617,13 @@ func (svc *TeamRoutingService) InstallTeamRunRouting(ctx context.Context, runID,
 	triggerSpec := map[string]any{"kind": "user_regex_window", "window": 1, "pattern": ".*"}
 	reason := fmt.Sprintf("team coordinator fallback -> %s (team %q)", coordinatorSlot.Name, team.Name)
 	for _, agentID := range askers {
-		id, err := svc.insertTeamRoutingReflex(ctx, runID, team, agentID, "coordinator_fallback", triggerSpec, coordinatorFallbackPriority, coordinatorSlot.Name, agentSlug, reason)
+		id, created, err := svc.insertTeamRoutingReflex(ctx, runID, team, agentID, "coordinator_fallback", triggerSpec, coordinatorFallbackPriority, coordinatorSlot.Name, agentSlug, reason)
 		if err != nil {
 			return installed, err
 		}
-		installed = append(installed, id)
+		if created {
+			installed = append(installed, id)
+		}
 	}
 
 	return installed, nil
@@ -636,10 +641,10 @@ func (svc *TeamRoutingService) InstallTeamRunRouting(ctx context.Context, runID,
 // dispatch_to_agent consumer (chat_reflex_dispatch.go/self_tools_dispatch.go
 // only ever read agent_slug/confidence/reason) and pass straight through
 // into EmitFirings' own traceRecord.Spec.
-func (svc *TeamRoutingService) insertTeamRoutingReflex(ctx context.Context, runID string, team *store.Team, agentID, ruleName string, triggerSpec map[string]any, priority int64, targetSlotName, agentSlug, reason string) (string, error) {
+func (svc *TeamRoutingService) insertTeamRoutingReflex(ctx context.Context, runID string, team *store.Team, agentID, ruleName string, triggerSpec map[string]any, priority int64, targetSlotName, agentSlug, reason string) (string, bool, error) {
 	triggerJSON, err := json.Marshal(triggerSpec)
 	if err != nil {
-		return "", fmt.Errorf("team routing: marshal trigger_spec: %w", err)
+		return "", false, fmt.Errorf("team routing: marshal trigger_spec: %w", err)
 	}
 	actionSpec := map[string]any{
 		"agent_slug":       agentSlug,
@@ -649,9 +654,12 @@ func (svc *TeamRoutingService) insertTeamRoutingReflex(ctx context.Context, runI
 	}
 	actionJSON, err := json.Marshal(actionSpec)
 	if err != nil {
-		return "", fmt.Errorf("team routing: marshal action_spec: %w", err)
+		return "", false, fmt.Errorf("team routing: marshal action_spec: %w", err)
 	}
-	id, err := svc.store.InsertAgentReflex(ctx, store.AgentReflex{
+	digest := sha256.Sum256([]byte(runID + "\x00" + agentID + "\x00" + ruleName))
+	id := fmt.Sprintf("rfx-team-%x", digest[:16])
+	created, err := svc.store.InsertAgentReflexIfAbsent(ctx, store.AgentReflex{
+		ID:             id,
 		AgentID:        agentID,
 		Name:           fmt.Sprintf("team-routing:%s:%s:%s", team.Name, ruleName, agentID),
 		TriggerKind:    store.ReflexTriggerPredicate,
@@ -664,9 +672,9 @@ func (svc *TeamRoutingService) insertTeamRoutingReflex(ctx context.Context, runI
 		WorkflowRunID:  runID,
 	})
 	if err != nil {
-		return "", fmt.Errorf("team routing: insert run-scoped reflex for rule %q (agent %s): %w", ruleName, agentID, err)
+		return "", false, fmt.Errorf("team routing: insert run-scoped reflex for rule %q (agent %s): %w", ruleName, agentID, err)
 	}
-	return id, nil
+	return id, created, nil
 }
 
 // resolveAgentSlugForSlot resolves the agent_profiles.slug a run-scoped

@@ -57,7 +57,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/tool/stash"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/worker"
-	"github.com/hollis-labs/nanite/internal/workflow"
+	workflowapi "github.com/hollis-labs/nanite/internal/workflowapi"
 	"github.com/hollis-labs/nanite/internal/workspace"
 	"github.com/hollis-labs/nanite/internal/worktree"
 	"github.com/hollis-labs/nanite/pkg/models"
@@ -153,7 +153,7 @@ type Container struct {
 	// Start()ed in cmd/nanite/main.go (mirroring apps/hadron/cmd/hadrond/
 	// main.go's construct-at-boot/Start-with-the-rest-of-the-daemon/
 	// Stop-on-shutdown lifecycle) once its Store/Runner adapters
-	// (internal/scheduler.StoreAdapter, .RunnerAdapter, .RetryingRunner)
+	// (internal/scheduler.StoreAdapter, .RunnerAdapter, .PolicyObserver)
 	// are available — nil in any Container built directly via NewContainer
 	// without that main.go wiring (e.g. most tests), matching
 	// AgentCardGenerator/TaskManager's own existing "set post-hoc from
@@ -198,8 +198,8 @@ type Container struct {
 	PathGrants *permission.PathGrants
 
 	// Workflow run store and SSE broadcaster. nil = workflow system disabled.
-	RunStore            *workflow.RunStore
-	WorkflowBroadcaster *workflow.Broadcaster
+	RunStore            *workflowapi.RunStore
+	WorkflowBroadcaster *workflowapi.Broadcaster
 
 	// AdapterRegistry holds registered CLIAgentAdapters for discovery and sandbox ops.
 	AdapterRegistry *agent.AdapterRegistry
@@ -1396,9 +1396,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	modelSelector := provider.NewStaticModelSelector(cfg.UtilityProvider, cfg.UtilityModel)
 
 	// Workflow run store and SSE broadcaster — always enabled.
-	runStore := workflow.NewRunStore(50)
-	workflowBroadcaster := workflow.NewBroadcaster()
-	slog.Info("service container: workflow engine enabled")
+	runStore := workflowapi.NewRunStore(50)
+	workflowBroadcaster := workflowapi.NewBroadcaster()
+	slog.Info("service container: workflow API compatibility enabled")
 
 	slog.Info("service container: all services wired")
 

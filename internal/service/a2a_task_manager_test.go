@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -28,8 +27,7 @@ func newA2ATaskManagerTestStore(t *testing.T) *store.Store {
 func TestTaskManager_classifyTarget(t *testing.T) {
 	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
 		"test-workflow": {
-			Name:   "test-workflow",
-			Engine: agentworkflow.EngineBuiltin,
+			Name: "test-workflow",
 		},
 	})
 
@@ -73,14 +71,12 @@ func TestTaskManager_classifyTarget(t *testing.T) {
 			errContains: "invalid msg:// address",
 		},
 		{
-			// "group" is not a recognized AddressKind in the pinned
-			// go-messaging v0.2.1 (only agent/user/service/session/workflow
-			// exist there), so this fails at parse time, not at the
-			// post-parse "only agent is supported" semantic check below.
-			name:        "unrecognized address kind (group) fails to parse",
+			// go-messaging v0.3.0 parses group as a recognized address kind;
+			// TaskManager still intentionally accepts only agent targets.
+			name:        "recognized but unsupported group address",
 			target:      "msg://group/nanite/grp_xyz",
 			wantErr:     true,
-			errContains: "invalid msg:// address",
+			errContains: "unsupported address kind: group",
 		},
 	}
 
@@ -396,11 +392,9 @@ func TestTaskManager_CancelTask_InstanceTarget_Success(t *testing.T) {
 	}
 }
 
-// TestTaskManager_CancelTask_WorkflowTarget_Unsupported verifies the
-// escalated finding: workflow-backed tasks have no real interrupt
-// primitive today, so CancelTask must return ErrWorkflowCancelUnsupported
-// rather than silently no-op'ing or faking a 'canceled' state.
-func TestTaskManager_CancelTask_WorkflowTarget_Unsupported(t *testing.T) {
+// TestTaskManager_CancelTask_WorkflowTarget_UsesSharedHost verifies workflow
+// cancellation goes through WorkflowLauncher rather than a concrete engine.
+func TestTaskManager_CancelTask_WorkflowTarget_UsesSharedHost(t *testing.T) {
 	st := newA2ATaskManagerTestStore(t)
 
 	runID := "run_cancel_test"
@@ -424,23 +418,107 @@ func TestTaskManager_CancelTask_WorkflowTarget_Unsupported(t *testing.T) {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 
+	host := &recordingDurableWorkflowHost{}
 	tm := &TaskManager{
-		store:  st,
+		store: st, launcher: NewWorkflowLauncher(nil, host, nil, nil),
 		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 
-	_, err := tm.CancelTask(context.Background(), task.ID)
-	if !errors.Is(err, ErrWorkflowCancelUnsupported) {
-		t.Fatalf("CancelTask() error = %v, want errors.Is match for ErrWorkflowCancelUnsupported", err)
+	got, err := tm.CancelTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("CancelTask() error = %v", err)
+	}
+	if got.State != a2a.TaskStateCanceled || host.cancelRunID != runID {
+		t.Fatalf("CancelTask() = %+v, host=%+v", got, host)
 	}
 
-	// The task must not have been mutated into a fake 'canceled' state.
 	persisted, err := st.GetA2ATask(context.Background(), task.ID)
 	if err != nil {
 		t.Fatalf("GetA2ATask: %v", err)
 	}
-	if persisted.State == a2a.TaskStateCanceled {
-		t.Errorf("persisted task.State = %v, must not be canceled when cancellation is unsupported", persisted.State)
+	if persisted.State != a2a.TaskStateCanceled {
+		t.Errorf("persisted task.State = %v, want canceled", persisted.State)
+	}
+}
+
+type a2aLaunchRecordingHost struct {
+	store *store.Store
+	input agentworkflow.WorkflowInput
+}
+
+func (h *a2aLaunchRecordingHost) Run(ctx context.Context, definition agentworkflow.WorkflowDefinition, input agentworkflow.WorkflowInput, _ agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
+	h.input = input
+	const runID = "a2a-shared-host-run"
+	if err := h.store.CreateWorkflowRun(ctx, &store.WorkflowRunRow{ID: runID, DefinitionName: definition.Name, Status: "running"}); err != nil {
+		return agentworkflow.WorkflowResult{}, err
+	}
+	return agentworkflow.WorkflowResult{RunID: runID, Status: agentworkflow.RunStatusRunning}, nil
+}
+
+func (*a2aLaunchRecordingHost) Resume(context.Context, string, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
+	return agentworkflow.WorkflowResult{}, nil
+}
+
+func (*a2aLaunchRecordingHost) ResumeGate(context.Context, string, string, string, string, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
+	return agentworkflow.WorkflowResult{}, nil
+}
+
+func (*a2aLaunchRecordingHost) Cancel(context.Context, string, string) (agentworkflow.WorkflowResult, error) {
+	return agentworkflow.WorkflowResult{}, nil
+}
+
+func TestTaskManagerSubmitWorkflowUsesConfiguredPersistedProfileAndSharedHost(t *testing.T) {
+	st := newA2ATaskManagerTestStore(t)
+	profile := &store.AgentProfile{Name: "A2A Workflow Owner", Slug: "a2a-workflow-owner", SystemPrompt: "x"}
+	if err := st.CreateAgent(t.Context(), profile); err != nil {
+		t.Fatal(err)
+	}
+	definition := agentworkflow.WorkflowDefinition{
+		Name: "a2a-shared-host",
+		Steps: []agentworkflow.StepDefinition{{ID: "work", Kind: agentworkflow.StepKindTool, Config: map[string]any{
+			"tool": "noop", "agent_id": profile.ID, "args": map[string]any{"prompt": "{{input.prompt}}"},
+		}}},
+	}
+	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{definition.Name: definition})
+	host := &a2aLaunchRecordingHost{store: st}
+	exec := &fakeStepExecutor{}
+	durable := NewDurableAgentService(st)
+	launcher := NewWorkflowLauncher(registry, host, exec, durable)
+	manager := NewTaskManager(st, launcher, nil, durable, registry, testLogger(t))
+
+	result, err := manager.SubmitTask(t.Context(), TaskSubmitRequest{Target: definition.Name, Message: "ship it"})
+	if err != nil {
+		t.Fatalf("SubmitTask: %v", err)
+	}
+	task, err := st.GetA2ATask(t.Context(), result.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := st.GetDurableAgentInstance(t.Context(), task.DurableAgentInstanceID.String)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instance.ProfileID != profile.ID || host.input.Params["prompt"] != "ship it" || host.input.Params["_nanite_a2a_task_id"] != result.TaskID {
+		t.Fatalf("profile/input = %q, %+v", instance.ProfileID, host.input.Params)
+	}
+}
+
+func TestTaskManagerWorkflowProfileResolutionFallsBackDeterministically(t *testing.T) {
+	st := newA2ATaskManagerTestStore(t)
+	definition := agentworkflow.WorkflowDefinition{
+		Name:  "a2a-no-profile",
+		Steps: []agentworkflow.StepDefinition{{ID: "work", Kind: agentworkflow.StepKindTool, Config: map[string]any{"tool": "noop"}}},
+	}
+	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{definition.Name: definition})
+	manager := NewTaskManager(st, nil, nil, nil, registry, testLogger(t))
+
+	first, err := manager.resolveA2AWorkflowProfile(t.Context(), definition.Name)
+	if err != nil || first == "" {
+		t.Fatalf("first resolveA2AWorkflowProfile = %q, %v", first, err)
+	}
+	second, err := manager.resolveA2AWorkflowProfile(t.Context(), definition.Name)
+	if err != nil || second != first {
+		t.Fatalf("second resolveA2AWorkflowProfile = %q, %v; want %q", second, err, first)
 	}
 }
 

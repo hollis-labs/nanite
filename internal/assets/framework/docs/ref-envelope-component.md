@@ -1,6 +1,6 @@
 # Build a Nanite envelope component
 
-Envelopes are structured cards embedded in chat messages. Core envelope definitions are owned by the pinned [`github.com/hollis-labs/go-envelopes`](https://github.com/hollis-labs/go-envelopes) module: its `manifest/envelopes.yaml`, `manifest/envelopes.schema.json`, and `manifest/schemas/` tree are the source of truth. Nanite consumes that released module; it does not maintain a second local core manifest.
+Envelopes are structured cards embedded in chat messages. Core envelope definitions are owned by the pinned [`github.com/hollis-labs/go-envelopes`](https://github.com/hollis-labs/go-envelopes) module: its `manifest/envelopes.yaml`, `manifest/envelopes.schema.json`, and `manifest/schemas/` tree are the upstream source of truth. Nanite consumes the released module's public catalog and TypeScript exporter selected by `go.mod`; it does not locate module-cache files, require a sibling checkout, or maintain a second local core manifest.
 
 ## Wire format
 
@@ -26,10 +26,9 @@ Agents emit JSON in a `nanite-envelope` fence:
 
 1. Add the definition and schema to the go-envelopes module's `manifest/envelopes.yaml` and `manifest/schemas/`, validate it against `manifest/envelopes.schema.json`, then release that module.
 2. Bump Nanite's pinned `github.com/hollis-labs/go-envelopes` version.
-3. Check out the same released go-envelopes tag at the repository's expected sibling path, `../../libs/go-envelopes`; both frontend generators read that module-owned source tree rather than the Go module cache.
-4. Add the React component under `ui/src/components/chat/envelopes/` and keep its data props aligned with the released schema. Put the normal `component`, `export`, and `props` mapping in the upstream manifest; use `CORE_OVERRIDES` only for an intentional Nanite-only deviation.
-5. Run `make generate-envelopes`; `scripts/generate-envelope-types.mjs` consumes the sibling checkout's `manifest/schemas/`. Run `npm run generate:plugins` from `ui/`; `scripts/generate-plugin-imports.mjs` consumes its `manifest/envelopes.yaml` and owns `ui/src/generated/plugin-envelopes.ts`.
-6. Verify both generators are clean on a second run, then exercise the live SSE streaming and persisted-message reload paths.
+3. Add the React component under `ui/src/components/chat/envelopes/` and keep its data props aligned with the released schema. Put the normal `component`, `export`, and `props` mapping in the upstream manifest; use `CORE_OVERRIDES` only for an intentional Nanite-only deviation.
+4. Run `make generate-envelopes`; `scripts/generate-envelope-types.mjs` invokes `github.com/hollis-labs/go-envelopes/cmd/envelopes-export` for module-owned TypeScript. Run `npm run generate:plugins` from `ui/`; `scripts/generate-plugin-imports.mjs` uses the same public exporter for catalog/import metadata and owns `ui/src/generated/plugin-envelopes.ts`.
+5. Run `make check-envelopes`, then exercise the live SSE streaming and persisted-message reload paths.
 
 Never hand-edit generated registries. The manifest and component are authored inputs; generators own derived files.
 
@@ -45,12 +44,14 @@ Keep interactions narrow. An envelope should submit a clear user intent back thr
 |---|---|
 | Core manifest source of truth | go-envelopes `manifest/envelopes.yaml` |
 | Core manifest schema | go-envelopes `manifest/envelopes.schema.json` |
+| Released catalog and type exporter | `github.com/hollis-labs/go-envelopes/cmd/envelopes-export` |
 | Envelope parser | `internal/chat/envelope.go` |
 | React renderers | `ui/src/components/chat/envelopes/` |
 | Message rendering | `ui/src/components/chat/ChatMessage.tsx` |
-| Generator input checkout | `../../libs/go-envelopes` at the same released tag as `go.mod` |
+| Exporter adapter | `scripts/lib/envelope-catalog.mjs` |
 | Core type generator | `scripts/generate-envelope-types.mjs` (`make generate-envelopes`) |
 | Renderer registry generator | `scripts/generate-plugin-imports.mjs` (`ui/package.json` `generate:plugins`) |
+| Generated core data types | `ui/src/generated/envelope-types.generated.ts` |
 | Generated renderer registry | `ui/src/generated/plugin-envelopes.ts` |
 
 ## Verification

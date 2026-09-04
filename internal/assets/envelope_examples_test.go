@@ -187,13 +187,8 @@ func TestRepositorySourcesClassifyRetiredTypesAndNeverInvokeThem(t *testing.T) {
 		if readErr != nil {
 			return readErr
 		}
-		generated := strings.HasPrefix(rel, "ui/src/generated/")
 		for _, retiredType := range retiredTypes {
 			plain := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(retiredType) + `\b`)
-			if generated && plain.Match(data) {
-				violations = append(violations, rel+": generated output names "+retiredType)
-				continue
-			}
 			invocations := []*regexp.Regexp{
 				regexp.MustCompile(`(?i)["']type["']\s*:\s*["']` + regexp.QuoteMeta(retiredType) + `["']`),
 				regexp.MustCompile(`(?i)\btype\s*(?:==|!=|=|:)\s*["']` + regexp.QuoteMeta(retiredType) + `["']`),
@@ -335,10 +330,12 @@ func TestEmbeddedEnvelopeReferencesDescribeCurrentWorkflow(t *testing.T) {
 		t.Fatalf("load documented module-owned core envelope manifest: %v", err)
 	}
 	localPaths := []string{
+		"scripts/lib/envelope-catalog.mjs",
 		"scripts/generate-plugin-imports.mjs",
 		"scripts/generate-envelope-types.mjs",
 		"ui/src/generated/plugin-envelopes.ts",
 	}
+	documentedGeneratedPaths := []string{"ui/src/generated/envelope-types.generated.ts"}
 	for _, localPath := range localPaths {
 		if _, err := os.Stat(filepath.Join("..", "..", filepath.FromSlash(localPath))); err != nil {
 			t.Fatalf("documented local envelope path %s does not exist: %v", localPath, err)
@@ -353,13 +350,17 @@ func TestEmbeddedEnvelopeReferencesDescribeCurrentWorkflow(t *testing.T) {
 			t.Fatalf("read embedded framework doc %s: %v", docPath, err)
 		}
 		text := string(data)
-		if strings.Contains(text, "config/envelopes.yaml") {
-			t.Errorf("%s points to nonexistent config/envelopes.yaml", docPath)
+		for _, forbidden := range []string{"config/envelopes.yaml", "../../libs/go-envelopes"} {
+			if strings.Contains(text, forbidden) {
+				t.Errorf("%s retains obsolete envelope workflow path %q", docPath, forbidden)
+			}
 		}
-		for _, required := range append([]string{
+		requiredPaths := append(append([]string{
 			"github.com/hollis-labs/go-envelopes",
+			"github.com/hollis-labs/go-envelopes/cmd/envelopes-export",
 			"manifest/envelopes.yaml",
-		}, localPaths...) {
+		}, localPaths...), documentedGeneratedPaths...)
+		for _, required := range requiredPaths {
 			if !strings.Contains(text, required) {
 				t.Errorf("%s does not document current envelope workflow path %q", docPath, required)
 			}

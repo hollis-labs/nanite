@@ -1554,7 +1554,7 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	}
 
 	// CW-20260519-0066: subagent → parent envelope hop. A subagent that
-	// produced a structured envelope (a plan-review / approval / proposal
+	// produced a structured envelope (a content, approval, or proposal
 	// card) had it stranded on the child session's message row — it never
 	// reached the parent session's transcript or the operator's GUI, so
 	// the operator could not see or act on the card. Lift any envelope(s)
@@ -1772,8 +1772,8 @@ type liftedEnvelope struct {
 //
 //   - Success path (subagent_runner.go ChatRunner.Run): ResultJSON is the
 //     child's terminal envelope JSON verbatim, i.e. the envelope wire
-//     shape {"kind":"envelope","version":1,"type":"plan-review",
-//     "data":{...}}. drainCapture accumulates it last-wins, so there is
+//     shape {"kind":"envelope","version":1,"type":"list-card",
+//     "data":{"items":[...]}}. drainCapture accumulates it last-wins, so there is
 //     at most one envelope on this path.
 //   - Partial-capture path (CW-20260519-0071 partialResult): ResultJSON is
 //     {"partial":true,"summary":...,"envelope":{...},"tools":{...}} — the
@@ -1837,7 +1837,7 @@ func extractLiftableEnvelopes(result *Result) []liftedEnvelope {
 // subagent produced onto the PARENT session's stream + persists each as
 // an EnvelopeInstance row on the parent (CW-20260519-0066).
 //
-// Before this hop existed, a subagent-produced plan-review / approval /
+// Before this hop existed, a subagent-produced content / approval /
 // proposal card was persisted only on the subagent's own message row and
 // never reached the parent transcript or the operator's GUI — the
 // operator could not see or act on the card. svc.approver.Emit is the

@@ -12,8 +12,8 @@ Five MCP tools are exposed to the LLM (always-on, no plugin required):
 |---|---|
 | `nanite_todo_create` | Create a todo item (workspace/project/session scope, optional parent, priority, labels) |
 | `nanite_todo_update` | Transition status, change priority, edit title/description/labels |
-| `nanite_todo_list` | List/filter todos (by scope, status, priority). The tool description prompts the agent to wrap results in a `todo-list` envelope when presenting to the user. |
-| `nanite_plan_create` | Create a plan with ordered steps. The tool description prompts the agent to wrap the returned plan in a `plan-review` envelope when status is `proposed`. |
+| `nanite_todo_list` | List/filter todos (by scope, status, priority). A scoped call automatically emits a live `list-card`; do not emit another envelope manually. |
+| `nanite_plan_create` | Create a plan with ordered steps. After creating a `proposed` plan, emit the `list-card` + `confirmation-card` pair shown below with the returned `plan_id`. |
 | `nanite_plan_update` | Update plan fields, or transition a single step (`step_id=...`) |
 
 Full HTTP is also available under `/api/todos/*` and `/api/plans/*` (13 routes total) for non-LLM callers (UI, CLI, sub-agent runners). See `docs/planner.md`.
@@ -49,7 +49,7 @@ Agents may use both in the same turn — `TodoWrite` to drive their own procedur
 | | Todo | Plan |
 |---|---|---|
 | **Shape** | Flat or nested (`parent_id`), independent items | Ordered steps with dependencies and acceptance criteria |
-| **Approval** | None — created in `pending`, work proceeds freely | Typically `proposed` → user approves via `plan-review` envelope → `approved` |
+| **Approval** | None — created in `pending`, work proceeds freely | Typically `proposed` → user approves via the `confirmation-card` paired with the plan's `list-card` → `approved` |
 | **Lifecycle** | `pending → in_progress → done` (or `blocked`) | `proposed → approved → in_progress → complete` (or `abandoned`) |
 | **Use when** | Items are independent, or approval isn't needed | Multi-step work where sequence, dependencies, or user approval matters |
 
@@ -92,12 +92,22 @@ Plan steps and todos can be coupled: a step carries an optional `todo_id` linkin
 
 ## Envelope integration
 
-Two S5 envelope types pair with these tools. Note: the tool handlers themselves return plain text; the *agent* wraps the results in a `nanite-envelope` block. The tool descriptions prompt the agent to do this when presenting to the user.
+The work tools use registered core envelope primitives from the released go-envelopes manifest:
 
-- **`todo-list`** — paired with `nanite_todo_list`. The UI renders an interactive card; users can toggle status directly.
-- **`plan-review`** — paired with `nanite_plan_create` when status is `proposed`. The UI renders approve/reject affordances; user interaction transitions the plan to `approved` or `abandoned`.
+- A scoped `nanite_todo_list` call automatically emits a `list-card` with `data_source.kind="todos"`, `scope`, and `scope_id`. Do not emit another envelope manually; the tool handler owns that live card. A scopeless call returns text only.
+- After `nanite_plan_create` returns a `proposed` plan, the agent emits a `list-card` + `confirmation-card`. Both cards share the same `plan_id`: the list uses `data_source.kind="plans"`, while the confirmation uses `data_source.kind="plan_approval"`.
 
-Wrap results in these envelopes when you want the user to see or act on them in the chat UI. Skip the envelope for pure agent-internal reads.
+Use the returned plan ID and the real step IDs/text in these two blocks. `list-card` item text belongs in `label`, not `title`:
+
+```nanite-envelope
+{"kind":"envelope","version":1,"type":"list-card","data":{"title":"Implementation plan","items":[{"id":"step-1","label":"First step","status":"pending"}],"data_source":{"kind":"plans","plan_id":"<plan_id>"}}}
+```
+
+```nanite-envelope
+{"kind":"envelope","version":1,"type":"confirmation-card","data":{"title":"Approve this plan?","message":"Review the ordered steps before work begins.","confirm_label":"Approve plan","cancel_label":"Reject","data_source":{"kind":"plan_approval","plan_id":"<plan_id>"}}}
+```
+
+The UI re-fetches live todo/plan state from these pointers, so do not substitute a different type or omit either plan card. Skip manual envelopes for pure agent-internal reads.
 
 ## Sub-agent handoff pattern
 
@@ -105,7 +115,7 @@ Plans are the default substrate for parent → sub-agent handoff.
 
 **Parent agent:**
 
-1. `nanite_plan_create scope=session scope_id=<sid> title=... steps=[...]` — status defaults to `proposed`; wrap the returned plan in a `plan-review` envelope.
+1. `nanite_plan_create scope=session scope_id=<sid> title=... steps=[...]` — status defaults to `proposed`; emit the `list-card` + `confirmation-card` pair above with the returned `plan_id` in both data sources.
 2. User approves → plan transitions to `approved`.
 3. Parent spawns sub-agent via the inline subagent runner (Phase 3 S7 groundwork) or external mechanism, **passing the `plan_id` and the target `step_id`** as part of the spawn context.
 
@@ -177,7 +187,7 @@ nanite_plan_create
       acceptance: "make check-envelopes passes" }
     { id: "4", title: "verify streaming and persisted reload", depends_on: ["3"] }
   ]
-  // status defaults to "proposed" — plan-review envelope rendered
+  // status defaults to "proposed" — emit the list-card + confirmation-card pair
 ```
 
 User clicks Approve → plan is `approved`. Agent (or sub-agent) claims steps in order, transitioning each to `in_progress` → `done`.
@@ -186,6 +196,6 @@ User clicks Approve → plan is `approved`. Agent (or sub-agent) claims steps in
 
 - **Don't duplicate `TodoWrite` items into `nanite_todo_*`.** Pick one layer per item.
 - **Don't create `workspace`-scoped todos as a reflex.** Default to `session` or `project`. Workspace scope is for a handful of truly global items.
-- **Don't skip the plan-review envelope for multi-step work.** If you're creating a plan you intend the user to see, let the UI render the approval step — don't create as `approved` directly.
+- **Don't skip either card for proposed multi-step work.** Emit both the live `list-card` and its `confirmation-card`, sharing the returned `plan_id`; don't create the plan as `approved` directly.
 - **Don't mark plan-level `complete` before all steps are `done` or `skipped`.** Transition steps first, then plan.
 - **Don't use plans for single-step work.** A plan with one step is a todo wearing a suit.

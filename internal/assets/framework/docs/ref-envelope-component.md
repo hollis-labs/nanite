@@ -9,7 +9,7 @@ Agents emit JSON in a `nanite-envelope` fence:
 ````markdown
 ```nanite-envelope
 {
-  "kind": "content",
+  "kind": "envelope",
   "version": 1,
   "type": "info-card",
   "data": {
@@ -20,7 +20,7 @@ Agents emit JSON in a `nanite-envelope` fence:
 ```
 ````
 
-`kind` and `version` are required; current envelopes use a non-empty semantic kind and wire version `1`. `type` selects a registered renderer, and `data` must match that envelope's declared shape. Do not emit prose inside the fence or use a historical fence name.
+`kind` and `version` are required; current envelopes use the exact kind `"envelope"` and wire version `1`. `type` selects a registered renderer, and `data` must match that envelope's declared shape. Do not emit prose inside the fence or use a historical fence name.
 
 ## Add a core envelope
 

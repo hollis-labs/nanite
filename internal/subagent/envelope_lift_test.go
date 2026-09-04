@@ -16,17 +16,18 @@ func (r envelopeRunner) Run(_ context.Context, _ *Run) (*Result, error) {
 	return &Result{Summary: "did the work", ResultJSON: r.resultJSON}, nil
 }
 
-const planReviewEnvelope = `{"kind":"envelope","version":1,"type":"plan-review",` +
-	`"data":{"plan_id":"e2d2685a","status":"proposed","steps":["a","b","c","d","e"]}}`
+const listCardEnvelope = `{"kind":"envelope","version":1,"type":"list-card",` +
+	`"data":{"title":"Plan","items":[{"label":"a"},{"label":"b"},{"label":"c"},{"label":"d"},{"label":"e"}],` +
+	`"data_source":{"kind":"plans","plan_id":"e2d2685a"}}}`
 
 // TestSpawn_LiftsChildEnvelopeToParent is the CW-20260519-0066 fix: a
-// sync subagent that produced a plan-review card has that envelope
+// sync subagent that produced a list-card has that envelope
 // re-emitted onto the PARENT session via the ApprovalEmitter, so the
 // operator sees the card in the parent transcript.
 func TestSpawn_LiftsChildEnvelopeToParent(t *testing.T) {
 	db, _ := newTestDB(t)
 	emitter := &stubEmitter{}
-	svc := NewService(db, envelopeRunner{resultJSON: planReviewEnvelope},
+	svc := NewService(db, envelopeRunner{resultJSON: listCardEnvelope},
 		&stubPoster{}, emitter, stubSettings{})
 
 	_, err := svc.Spawn(context.Background(), SpawnRequest{
@@ -41,27 +42,29 @@ func TestSpawn_LiftsChildEnvelopeToParent(t *testing.T) {
 	}
 
 	if emitter.Count() != 1 {
-		t.Fatalf("emitter calls = %d, want 1 (the lifted plan-review card)", emitter.Count())
+		t.Fatalf("emitter calls = %d, want 1 (the lifted list-card)", emitter.Count())
 	}
 	last := emitter.Last()
 	if last.sessionID != "parent-sess" {
 		t.Errorf("lifted envelope session = %q, want parent-sess", last.sessionID)
 	}
-	if last.typ != "plan-review" {
-		t.Errorf("lifted envelope type = %q, want plan-review", last.typ)
+	if last.typ != "list-card" {
+		t.Errorf("lifted envelope type = %q, want list-card", last.typ)
 	}
 	// The emitted payload is the envelope's `data` blob — Emit rebuilds
 	// the kind/version/type frame around it.
 	var data struct {
-		PlanID string   `json:"plan_id"`
-		Status string   `json:"status"`
-		Steps  []string `json:"steps"`
+		Items      []struct{ Label string } `json:"items"`
+		DataSource struct {
+			Kind   string `json:"kind"`
+			PlanID string `json:"plan_id"`
+		} `json:"data_source"`
 	}
 	if err := json.Unmarshal(last.payload, &data); err != nil {
 		t.Fatalf("lifted payload not valid JSON (%q): %v", last.payload, err)
 	}
-	if data.PlanID != "e2d2685a" || data.Status != "proposed" || len(data.Steps) != 5 {
-		t.Errorf("lifted payload = %+v, want the child's plan-review data", data)
+	if data.DataSource.Kind != "plans" || data.DataSource.PlanID != "e2d2685a" || len(data.Items) != 5 {
+		t.Errorf("lifted payload = %+v, want the child's live plan list-card data", data)
 	}
 }
 
@@ -97,7 +100,7 @@ func TestSpawn_PartialResultEnvelopeLifted(t *testing.T) {
 	db, _ := newTestDB(t)
 	emitter := &stubEmitter{}
 	partialJSON := `{"partial":true,"summary":"cut mid-task",` +
-		`"envelope":` + planReviewEnvelope + `,` +
+		`"envelope":` + listCardEnvelope + `,` +
 		`"tools":{"calls":3,"results_success":3,"results_error":0}}`
 	svc := NewService(db, partialEnvelopeRunner{resultJSON: partialJSON},
 		&stubPoster{}, emitter, stubSettings{})
@@ -115,8 +118,8 @@ func TestSpawn_PartialResultEnvelopeLifted(t *testing.T) {
 	if emitter.Count() != 1 {
 		t.Fatalf("emitter calls = %d, want 1 (lifted from partial result)", emitter.Count())
 	}
-	if got := emitter.Last().typ; got != "plan-review" {
-		t.Errorf("lifted envelope type = %q, want plan-review", got)
+	if got := emitter.Last().typ; got != "list-card" {
+		t.Errorf("lifted envelope type = %q, want list-card", got)
 	}
 }
 
@@ -145,11 +148,11 @@ func TestExtractLiftableEnvelopes(t *testing.T) {
 		{"summary wrapper, not an envelope",
 			&Result{ResultJSON: `{"summary":"did stuff"}`}, 0, ""},
 		{"malformed json", &Result{ResultJSON: `{not json`}, 0, ""},
-		{"success-path plan-review",
-			&Result{ResultJSON: planReviewEnvelope}, 1, "plan-review"},
+		{"success-path list-card",
+			&Result{ResultJSON: listCardEnvelope}, 1, "list-card"},
 		{"partial-capture nested envelope",
-			&Result{ResultJSON: `{"partial":true,"envelope":` + planReviewEnvelope + `}`},
-			1, "plan-review"},
+			&Result{ResultJSON: `{"partial":true,"envelope":` + listCardEnvelope + `}`},
+			1, "list-card"},
 		{"partial-capture with no envelope",
 			&Result{ResultJSON: `{"partial":true,"envelope":{},"summary":"x"}`}, 0, ""},
 		{"envelope with no data field still lifts",
@@ -176,7 +179,7 @@ func TestExtractLiftableEnvelopes(t *testing.T) {
 // wiring) does not panic — the lift is simply skipped.
 func TestSpawn_NilApprover_LiftIsNoOp(t *testing.T) {
 	db, _ := newTestDB(t)
-	svc := NewService(db, envelopeRunner{resultJSON: planReviewEnvelope},
+	svc := NewService(db, envelopeRunner{resultJSON: listCardEnvelope},
 		&stubPoster{}, nil, stubSettings{})
 
 	if _, err := svc.Spawn(context.Background(), SpawnRequest{

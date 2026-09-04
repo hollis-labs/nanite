@@ -436,7 +436,7 @@ func TestMaterializeSkill_Fork_PendingApproval_ReturnsDistinguishableError(t *te
 // draft's discriminator (any JSON with a non-empty `summary`) would
 // have done.
 func TestForkResultText_PartialCaptureShape_FoldsBackVerbatim(t *testing.T) {
-	raw := `{"partial":true,"summary":"cut short mid-task","envelope":{"kind":"envelope","type":"plan-review","data":{"plan":"do the thing"}},"tools":{"calls":3}}`
+	raw := `{"partial":true,"summary":"cut short mid-task","envelope":{"kind":"envelope","version":1,"type":"list-card","data":{"title":"Plan","items":[{"label":"do the thing"}]}},"tools":{"calls":3}}`
 	run := &subagent.Run{Status: subagent.StatusCompleted, ResultJSON: raw}
 
 	result, ok := forkResultText(run)

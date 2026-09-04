@@ -1,7 +1,16 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "framework_version": "2.4.0",
-  "source": "github.com/hollis-labs/tesseract@v0.9.0",
+  "corpus_source": "github.com/hollis-labs/nanite/internal/assets/framework",
+  "generated_inputs": [
+    {
+      "output": "docs/tesseract-v0.9-contract.md",
+      "module": "github.com/hollis-labs/tesseract",
+      "version": "v0.9.0",
+      "path": "docs/guides/tesseract-adoption-and-v0.9-migration.md",
+      "source_url": "https://github.com/hollis-labs/tesseract/blob/v0.9.0/docs/guides/tesseract-adoption-and-v0.9-migration.md"
+    }
+  ],
   "files": {
     "VERSION": "2ad7b0c3f0ede58c3165b7a8a5479e890a758d39bfe8683eaef50ce6afad7232",
     "agent-boot.md": "52440371b0b1762a1772ac13304469fbfa3ef7cbb37beacb8a949a5278adf056",
@@ -28,15 +37,15 @@
     "docs/archive/cleanup-tasks.md": "5f5bb35a1377ac92b87df1c1e7e66c5c9005a6c6a2a50ba56c98526a841bf7bf",
     "docs/nanite-framework.md": "f11bbdb786aa7245b7b5addb2c1b9a2349915ea7fb5f2dfe224e62a9bfbc70fa",
     "docs/nanite-messaging.md": "b5cd2fde7c73e5505f2ff252a515fbd8bf9fc3f66c7101e7591f773178ef4c32",
-    "docs/nanite-planner.md": "d7073103adc2ed2e16f4e1f2ad2e7d36a5f4d47f6e07b183443cb4d959b6dbe5",
+    "docs/nanite-planner.md": "e5d486df75224e254b317ddd3853855084167d93dd629606d7e1ebd467e1688c",
     "docs/nanite-setup-guide.md": "bb7b4069e3b279a31e6ef6fb4975b5275cb708e787d9fc4880ce31e3ada337df",
-    "docs/ref-envelope-component.md": "448ecb253d78a671cad1e32563bceb9e75a72d151a315d47450607fee7fea3f7",
-    "docs/ref-nanite-plugin.md": "9a22fc9cdbdd88eec79da617d2d0cd69f6fdad7ac25c99625e121ac2df8505b3",
+    "docs/ref-envelope-component.md": "f6b320cf818cac8b565a420b1c350ffd7e0737a5d2d443399d3e3f236533eafa",
+    "docs/ref-nanite-plugin.md": "f313bd129d361d6ea34a7a9569ed93433a0cdcfaf6f183acdefa608627aa6fd9",
     "docs/ref-playwright-bowser/SKILL.md": "993cf29d1d88b1857286ed69ebd3520e46229a613401537271844ab209580622",
     "docs/ref-tokf-filter/SKILL.md": "15d7173500efb6c3d9fecd6f1bfa1afe067e4c0d1fe5e489aec0ee0cbe9fa526",
     "docs/ref-tokf-filter/references/examples.toml": "d423458845fd29f90625c2e3f65478ce912df23811351a1a9551c18c5aa0e222",
     "docs/ref-tokf-filter/references/step-reference.md": "32de2af0a7d4386fa5f2c5790f0922292ff964bd6ba0f2450507e564fa9f1c7c",
-    "docs/tesseract-v0.9-contract.md": "40a4dc9d4abb44d9a7048286cbe867bea73848a27b08a3f69a0e17cb639895e5",
+    "docs/tesseract-v0.9-contract.md": "ee7811ffddd5b52c8129b743b39bda5fea49e6edaa179d5a8272b744baca6187",
     "roles/domain/auditor.md": "1343c3611f59895af66feb1edad961372c80a5e07ca7370fb264d1adec46d787",
     "roles/domain/backend.md": "01798d52cc1deab17db23c3109b84a3e8c8c8c10cb99a8f41d1b298e71aca76d",
     "roles/domain/code-review.md": "da63758adac6c417e41e729d977e27ed13c555deee794ac60f04f099b693d62e",

@@ -1,7 +1,7 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "framework_version": "2.3.0",
-  "source": "git:a9a2067d972d7098e6640d9b2f985941106029c9",
+  "corpus_source": "git:a9a2067d972d7098e6640d9b2f985941106029c9:internal/assets/framework",
   "files": {
     "VERSION": "a42caf4a54bbbe27aa45b6efbc6356c5e299b19763e728b6cdb7201b02ebbe36",
     "agent-boot.md": "20b7d5cca03d287b1afded8a2b2766ad7feace2ea9e3255b28cc9205a3e9f48b",

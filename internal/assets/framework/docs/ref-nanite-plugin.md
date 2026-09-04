@@ -62,11 +62,13 @@ Agents emit an envelope as a fenced JSON block named `nanite-envelope`:
 
 ````markdown
 ```nanite-envelope
-{"type":"example-card","data":{"title":"Hello"}}
+{"kind":"content","version":1,"type":"info-card","data":{"title":"Hello","body":"A released core envelope."}}
 ```
 ````
 
-The envelope type must exist in `config/envelopes.yaml` and have a matching React renderer. Generate the Go and TypeScript sides with the repository generator, then verify both the streaming SSE path and persisted reload path.
+`kind` and `version` are required; the current wire version is `1`. Core types and schemas are owned by the pinned [`github.com/hollis-labs/go-envelopes`](https://github.com/hollis-labs/go-envelopes) module in `manifest/envelopes.yaml`, `manifest/envelopes.schema.json`, and `manifest/schemas/`. Plugin types remain declared in each plugin's `plugin.yaml`; Nanite loads both sources into its shared registry.
+
+For a new core type, update and release go-envelopes first, then bump Nanite's module pin. Check out that same released tag at `../../libs/go-envelopes`, because the frontend generators read the sibling source tree rather than the Go module cache. Run `make generate-envelopes` so `scripts/generate-envelope-types.mjs` consumes its module-owned schemas. Add the matching renderer under `ui/src/components/chat/envelopes/`, recording the normal `component`, `export`, and `props` mapping in the upstream manifest. Use `CORE_OVERRIDES` in `scripts/generate-plugin-imports.mjs` only for an intentional Nanite-only deviation. Run `npm run generate:plugins` from `ui/`; that generator consumes the sibling `manifest/envelopes.yaml` and owns `ui/src/generated/plugin-envelopes.ts`. Never hand-edit generated registries. Verify both the streaming SSE path and persisted reload path.
 
 ## Verification
 

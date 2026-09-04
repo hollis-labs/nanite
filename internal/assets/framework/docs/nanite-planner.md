@@ -162,20 +162,20 @@ This outlives the session and shows up when the user opens the project's todo li
 
 ### Multi-step work with approval
 
-User: "migrate the envelope registry to YAML."
+User: "add a core release-health envelope."
 
 Agent:
 
 ```
 nanite_plan_create
   scope=project scope_id=<pid>
-  title="migrate envelope registry to YAML"
+  title="add release-health core envelope"
   steps=[
-    { id: "1", title: "read current Go-registered envelopes" }
-    { id: "2", title: "draft config/envelopes.yaml", depends_on: ["1"] }
-    { id: "3", title: "add loader + validation", depends_on: ["2"],
-      acceptance: "go test ./internal/envelope passes" }
-    { id: "4", title: "migrate register sites to YAML entries", depends_on: ["3"] }
+    { id: "1", title: "update go-envelopes manifest and schema" }
+    { id: "2", title: "release go-envelopes and bump Nanite module pin", depends_on: ["1"] }
+    { id: "3", title: "add React renderer and regenerate registries", depends_on: ["2"],
+      acceptance: "make check-envelopes passes" }
+    { id: "4", title: "verify streaming and persisted reload", depends_on: ["3"] }
   ]
   // status defaults to "proposed" — plan-review envelope rendered
 ```

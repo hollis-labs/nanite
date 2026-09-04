@@ -3,10 +3,12 @@ package assets
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -22,6 +24,7 @@ var retiredAssetPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(?:context_head|context_history|memory_get|memory_history|knowledge_get|knowledge_history|tesseract_lookup)`),
 	regexp.MustCompile(`(?i)context_(?:rag_query|search|typed_(?:write|view)|status_(?:promote|deprecate))`),
 	regexp.MustCompile(`(?i)memory_(?:recall|get_revision|deprecate)`),
+	regexp.MustCompile(`config/envelopes\.yaml`),
 	regexp.MustCompile(`(?i)context_broker_(?:plan|fetch)`),
 	regexp.MustCompile(`(?i)(?:views_evaluate|context_packet|context_(?:bulk|chunked)_ingest|context_(?:types|views|namespaces)_list|context_namespace_show|context_promote_(?:request|approve|apply|list)|context_audit|context_session_snapshot)`),
 }
@@ -99,8 +102,18 @@ func TestCurrentManifestMatchesEmbeddedFramework(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load manifests: %v", err)
 	}
-	if set.current.Source != "github.com/hollis-labs/tesseract@v0.9.0" {
-		t.Fatalf("manifest source = %q, want released Tesseract v0.9.0", set.current.Source)
+	if set.current.CorpusSource != "github.com/hollis-labs/nanite/internal/assets/framework" {
+		t.Fatalf("manifest corpus source = %q, want Nanite's embedded framework corpus", set.current.CorpusSource)
+	}
+	if len(set.current.GeneratedInputs) != 1 {
+		t.Fatalf("manifest generated inputs = %+v, want one Tesseract guide input", set.current.GeneratedInputs)
+	}
+	input := set.current.GeneratedInputs[0]
+	if input.Module != "github.com/hollis-labs/tesseract" || input.Version != "v0.9.0" ||
+		input.Output != "docs/tesseract-v0.9-contract.md" ||
+		input.Path != "docs/guides/tesseract-adoption-and-v0.9-migration.md" ||
+		input.SourceURL != "https://github.com/hollis-labs/tesseract/blob/v0.9.0/docs/guides/tesseract-adoption-and-v0.9-migration.md" {
+		t.Fatalf("manifest generated input provenance is inaccurate: %+v", input)
 	}
 	seen := make(map[string]bool)
 	err = fs.WalkDir(frameworkAssets, "framework", func(path string, entry fs.DirEntry, walkErr error) error {
@@ -332,6 +345,182 @@ func TestExtractTo_ForceOverwrites(t *testing.T) {
 	embedded, _ := File("VERSION")
 	if string(after) != string(embedded) {
 		t.Errorf("Force=true did not overwrite: got %q want %q", after, embedded)
+	}
+}
+
+func TestExtractTo_CurrentLeafSymlinksDoNotEscape(t *testing.T) {
+	for _, targetKind := range []string{"file", "directory", "dangling"} {
+		for _, force := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/force=%t", targetKind, force), func(t *testing.T) {
+				dir := t.TempDir()
+				outside := t.TempDir()
+				if _, err := ExtractTo(dir, ExtractOptions{}); err != nil {
+					t.Fatalf("fresh ExtractTo: %v", err)
+				}
+
+				target, assertTarget := hostileSymlinkTarget(t, outside, targetKind)
+				assetPath := filepath.Join(dir, "commands", "doc-note.md")
+				if err := os.Remove(assetPath); err != nil {
+					t.Fatalf("remove current asset: %v", err)
+				}
+				if err := os.Symlink(target, assetPath); err != nil {
+					t.Fatalf("create hostile current symlink: %v", err)
+				}
+
+				report, err := ExtractTo(dir, ExtractOptions{Force: force})
+				if err != nil {
+					t.Fatalf("ExtractTo with hostile current symlink: %v", err)
+				}
+				assertTarget()
+				info, err := os.Lstat(assetPath)
+				if err != nil {
+					t.Fatalf("lstat current asset: %v", err)
+				}
+				if force {
+					if !info.Mode().IsRegular() {
+						t.Fatalf("force refresh left current asset mode %s, want regular", info.Mode())
+					}
+					got, readErr := os.ReadFile(assetPath) // #nosec G304 -- exact test path beneath t.TempDir.
+					want, _ := File("commands/doc-note.md")
+					if readErr != nil || !bytes.Equal(got, want) {
+						t.Fatalf("force refresh did not install current bytes: err=%v", readErr)
+					}
+					if report.Forced == 0 {
+						t.Fatal("force refresh did not report the symlink replacement")
+					}
+				} else {
+					if info.Mode()&os.ModeSymlink == 0 {
+						t.Fatalf("normal refresh changed hostile symlink to mode %s", info.Mode())
+					}
+					if !slices.Contains(report.SkippedFiles, "commands/doc-note.md") {
+						t.Fatalf("normal refresh did not report skipped symlink: %+v", report)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestExtractTo_RetiredLeafSymlinksDoNotEscape(t *testing.T) {
+	for _, targetKind := range []string{"file", "directory", "dangling"} {
+		for _, force := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/force=%t", targetKind, force), func(t *testing.T) {
+				dir := t.TempDir()
+				outside := t.TempDir()
+				if _, err := ExtractTo(dir, ExtractOptions{}); err != nil {
+					t.Fatalf("fresh ExtractTo: %v", err)
+				}
+
+				target, assertTarget := hostileSymlinkTarget(t, outside, targetKind)
+				retiredPath := filepath.Join(dir, "docs", "ref-conduit-plugin.md")
+				if err := os.Symlink(target, retiredPath); err != nil {
+					t.Fatalf("create hostile retired symlink: %v", err)
+				}
+
+				report, err := ExtractTo(dir, ExtractOptions{Force: force})
+				if err != nil {
+					t.Fatalf("ExtractTo with hostile retired symlink: %v", err)
+				}
+				assertTarget()
+				info, statErr := os.Lstat(retiredPath)
+				if force {
+					if !errors.Is(statErr, fs.ErrNotExist) {
+						t.Fatalf("force refresh retained retired symlink: info=%v err=%v", info, statErr)
+					}
+					if !slices.Contains(report.RemovedFiles, "docs/ref-conduit-plugin.md") {
+						t.Fatalf("force refresh did not report retired symlink removal: %+v", report)
+					}
+				} else {
+					if statErr != nil || info.Mode()&os.ModeSymlink == 0 {
+						t.Fatalf("normal refresh changed retired symlink: info=%v err=%v", info, statErr)
+					}
+					if !slices.Contains(report.SkippedFiles, "docs/ref-conduit-plugin.md") {
+						t.Fatalf("normal refresh did not report skipped retired symlink: %+v", report)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestExtractTo_ForceRepairsManagedParentSymlinkBeforeRetirement(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := ExtractTo(dir, ExtractOptions{}); err != nil {
+		t.Fatalf("fresh ExtractTo: %v", err)
+	}
+	docsPath := filepath.Join(dir, "docs")
+	if err := os.Rename(docsPath, filepath.Join(dir, "docs-original")); err != nil {
+		t.Fatalf("move managed docs directory: %v", err)
+	}
+	runtimeDir := filepath.Join(dir, "plugin-cache")
+	if err := os.Mkdir(runtimeDir, 0o700); err != nil {
+		t.Fatalf("create runtime directory: %v", err)
+	}
+	runtimeRetiredLeaf := filepath.Join(runtimeDir, "ref-conduit-plugin.md")
+	const sentinel = "runtime file must survive parent-symlink repair\n"
+	if err := fsutil.AtomicWriteFile(runtimeRetiredLeaf, []byte(sentinel), 0o600); err != nil {
+		t.Fatalf("write runtime sentinel: %v", err)
+	}
+	if err := os.Symlink("plugin-cache", docsPath); err != nil {
+		t.Fatalf("replace docs with runtime symlink: %v", err)
+	}
+
+	if _, err := ExtractTo(dir, ExtractOptions{Force: true}); err != nil {
+		t.Fatalf("force ExtractTo with managed parent symlink: %v", err)
+	}
+	docsInfo, err := os.Lstat(docsPath)
+	if err != nil || !docsInfo.IsDir() || docsInfo.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("managed docs directory was not repaired lexically: info=%v err=%v", docsInfo, err)
+	}
+	got, err := os.ReadFile(runtimeRetiredLeaf) // #nosec G304 -- exact runtime sentinel beneath t.TempDir.
+	if err != nil || string(got) != sentinel {
+		t.Fatalf("runtime path targeted through parent symlink changed: got=%q err=%v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(docsPath, "ref-conduit-plugin.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("retired path exists in repaired managed directory: %v", err)
+	}
+}
+
+func hostileSymlinkTarget(t *testing.T, outside, kind string) (string, func()) {
+	t.Helper()
+	target := filepath.Join(outside, "target")
+	switch kind {
+	case "file":
+		const sentinel = "outside file survives\n"
+		if err := os.WriteFile(target, []byte(sentinel), 0o600); err != nil {
+			t.Fatalf("write outside file: %v", err)
+		}
+		return target, func() {
+			t.Helper()
+			got, err := os.ReadFile(target) // #nosec G304 -- exact hostile target beneath t.TempDir.
+			if err != nil || string(got) != sentinel {
+				t.Fatalf("outside file changed: got=%q err=%v", got, err)
+			}
+		}
+	case "directory":
+		if err := os.Mkdir(target, 0o700); err != nil {
+			t.Fatalf("create outside directory: %v", err)
+		}
+		sentinelPath := filepath.Join(target, "sentinel")
+		if err := os.WriteFile(sentinelPath, []byte("outside directory survives\n"), 0o600); err != nil {
+			t.Fatalf("write outside directory sentinel: %v", err)
+		}
+		return target, func() {
+			t.Helper()
+			if _, err := os.Stat(sentinelPath); err != nil {
+				t.Fatalf("outside directory target changed: %v", err)
+			}
+		}
+	case "dangling":
+		return target, func() {
+			t.Helper()
+			if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("dangling target was created: %v", err)
+			}
+		}
+	default:
+		t.Fatalf("unknown hostile target kind %q", kind)
+		return "", nil
 	}
 }
 

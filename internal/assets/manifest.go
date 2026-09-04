@@ -16,10 +16,19 @@ const currentManifestPath = "manifests/current.json"
 type contentManifest struct {
 	SchemaVersion    int               `json:"schema_version"`
 	FrameworkVersion string            `json:"framework_version"`
-	Source           string            `json:"source,omitempty"`
+	CorpusSource     string            `json:"corpus_source"`
+	GeneratedInputs  []generatedInput  `json:"generated_inputs,omitempty"`
 	Files            map[string]string `json:"files"`
 	RetiredPaths     []string          `json:"retired_paths,omitempty"`
 	LegacyAllowPaths []string          `json:"legacy_allow_paths,omitempty"`
+}
+
+type generatedInput struct {
+	Output    string `json:"output"`
+	Module    string `json:"module"`
+	Version   string `json:"version"`
+	Path      string `json:"path"`
+	SourceURL string `json:"source_url"`
 }
 
 type manifestSet struct {
@@ -65,7 +74,7 @@ func loadManifest(path string) (contentManifest, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return contentManifest{}, fmt.Errorf("decode embedded manifest %s: %w", path, err)
 	}
-	if manifest.SchemaVersion != 1 || manifest.FrameworkVersion == "" || len(manifest.Files) == 0 {
+	if manifest.SchemaVersion != 2 || manifest.FrameworkVersion == "" || manifest.CorpusSource == "" || len(manifest.Files) == 0 {
 		return contentManifest{}, fmt.Errorf("embedded manifest %s is incomplete or unsupported", path)
 	}
 	for rel, digest := range manifest.Files {

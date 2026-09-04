@@ -155,6 +155,73 @@ func TestService_InstallHome_UpgradesLegacyStockAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestService_InstallHome_ForceSymlinkSafetySurvivesStagedPromotion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := mustTestPath(t, home, ".nanite")
+	svc := New()
+	if _, err := svc.InstallHome(InstallHomeOptions{Target: target}); err != nil {
+		t.Fatalf("fresh InstallHome: %v", err)
+	}
+
+	currentPath := mustTestPath(t, target, "commands/doc-note.md")
+	if err := os.Remove(currentPath); err != nil {
+		t.Fatalf("remove current asset: %v", err)
+	}
+	if err := os.Symlink("../plugin-data", currentPath); err != nil {
+		t.Fatalf("create current runtime symlink: %v", err)
+	}
+	docsPath := mustTestPath(t, target, "docs")
+	if err := os.Rename(docsPath, mustTestPath(t, target, "docs-original")); err != nil {
+		t.Fatalf("move managed docs directory: %v", err)
+	}
+	if err := os.Symlink("plugin-cache", docsPath); err != nil {
+		t.Fatalf("create managed parent runtime symlink: %v", err)
+	}
+	for _, runtimePath := range []string{"plugin-data", "plugin-cache"} {
+		sentinel := mustTestPath(t, target, runtimePath+"/sentinel")
+		if err := fsutil.AtomicWriteFile(sentinel, []byte(runtimePath+" survives\n"), 0o600); err != nil {
+			t.Fatalf("write %s sentinel: %v", runtimePath, err)
+		}
+	}
+	const retiredSentinel = "runtime retired-name file survives\n"
+	runtimeRetiredLeaf := mustTestPath(t, target, "plugin-cache/ref-conduit-plugin.md")
+	if err := fsutil.AtomicWriteFile(runtimeRetiredLeaf, []byte(retiredSentinel), 0o600); err != nil {
+		t.Fatalf("write runtime retired-name sentinel: %v", err)
+	}
+
+	report, err := svc.InstallHome(InstallHomeOptions{Target: target, Force: true})
+	if err != nil {
+		t.Fatalf("force staged InstallHome: %v", err)
+	}
+	if report.Forced < 1 {
+		t.Fatalf("force staged InstallHome report = %+v, want current leaf symlink handled", report)
+	}
+	info, err := os.Lstat(currentPath)
+	if err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("current asset was not promoted as a regular file: info=%v err=%v", info, err)
+	}
+	retiredPath := mustTestPath(t, target, "docs/ref-conduit-plugin.md")
+	if _, statErr := os.Lstat(retiredPath); !os.IsNotExist(statErr) {
+		t.Fatalf("retired symlink survived staged promotion: %v", statErr)
+	}
+	docsInfo, err := os.Lstat(docsPath)
+	if err != nil || !docsInfo.IsDir() || docsInfo.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("managed docs parent was not promoted as a real directory: info=%v err=%v", docsInfo, err)
+	}
+	for _, runtimePath := range []string{"plugin-data", "plugin-cache"} {
+		sentinel := mustTestPath(t, target, runtimePath+"/sentinel")
+		got, readErr := os.ReadFile(sentinel) // #nosec G304 -- exact test path confined by mustTestPath.
+		if readErr != nil || string(got) != runtimePath+" survives\n" {
+			t.Fatalf("%s runtime state changed: got=%q err=%v", runtimePath, got, readErr)
+		}
+	}
+	got, err := os.ReadFile(runtimeRetiredLeaf) // #nosec G304 -- exact test path confined by mustTestPath.
+	if err != nil || string(got) != retiredSentinel {
+		t.Fatalf("runtime retired-name file changed through staged parent symlink: got=%q err=%v", got, err)
+	}
+}
+
 func snapshotTree(t *testing.T, root string) []byte {
 	t.Helper()
 	var snapshot bytes.Buffer

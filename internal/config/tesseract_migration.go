@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hollis-labs/go-sqlite/sqlitekit"
 	"golang.org/x/sys/unix"
+
+	// Register the SQLite driver used by sqlitekit's read-only validator.
+	_ "modernc.org/sqlite"
 )
 
 // LegacyMigrationResult describes whether Nanite activated a legacy
@@ -91,6 +96,9 @@ func migrateLegacyTesseractData(sourceDB, sourceRecords, targetDB, targetRecords
 	// crashed or collided; validate the complete pair below instead of
 	// converting that collision into destination_already_current.
 	if targetDBExists && !journalPresent {
+		if validateErr := validateInitializedTesseractDB(targetDB); validateErr != nil {
+			return LegacyMigrationNone, fmt.Errorf("tesseract legacy migration: target DB is not a valid initialized Tesseract store: %w", validateErr)
+		}
 		return LegacyMigrationCurrent, nil
 	}
 	sourceDBInfo, err := os.Lstat(sourceDB)
@@ -161,6 +169,130 @@ func migrateLegacyTesseractData(sourceDB, sourceRecords, targetDB, targetRecords
 		return LegacyMigrationResumed, nil
 	}
 	return LegacyMigrationCopied, nil
+}
+
+// validateInitializedTesseractDB distinguishes an authoritative existing
+// Tesseract store from a regular file left by a partial copy or unrelated
+// SQLite user. OpenReadOnly prevents this validation from initializing or
+// migrating the candidate. quick_check validates the existing SQLite image;
+// contiguous version history plus version-gated schema/object probes provide
+// Tesseract's durable identity while still allowing an older initialized store
+// to be upgraded by tesseract.Open after migration classifies it as current.
+func validateInitializedTesseractDB(path string) error {
+	ctx := context.Background()
+	db, err := sqlitekit.OpenReadOnly(ctx, path, sqlitekit.OpenOptions{})
+	if err != nil {
+		return fmt.Errorf("open read-only: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	rows, err := db.QueryContext(ctx, `PRAGMA quick_check(1)`)
+	if err != nil {
+		return fmt.Errorf("SQLite quick_check: %w", err)
+	}
+	quickCheckOK := false
+	for rows.Next() {
+		var result string
+		if scanErr := rows.Scan(&result); scanErr != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan SQLite quick_check: %w", scanErr)
+		}
+		if result != "ok" {
+			_ = rows.Close()
+			return fmt.Errorf("SQLite quick_check: %s", result)
+		}
+		quickCheckOK = true
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		_ = rows.Close()
+		return fmt.Errorf("read SQLite quick_check: %w", rowsErr)
+	}
+	if closeErr := rows.Close(); closeErr != nil {
+		return fmt.Errorf("close SQLite quick_check: %w", closeErr)
+	}
+	if !quickCheckOK {
+		return errors.New("SQLite quick_check returned no result")
+	}
+
+	var version int
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&version); err != nil {
+		return fmt.Errorf("read Tesseract schema version: %w", err)
+	}
+	if version < 1 {
+		return fmt.Errorf("tesseract schema version must be positive, got %d", version)
+	}
+	var minimumVersion, versionRows int
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MIN(version), 0), COUNT(*) FROM schema_version`).Scan(&minimumVersion, &versionRows); err != nil {
+		return fmt.Errorf("read Tesseract schema history: %w", err)
+	}
+	if minimumVersion != 1 || versionRows != version {
+		return fmt.Errorf("tesseract schema history is incomplete: min=%d max=%d rows=%d", minimumVersion, version, versionRows)
+	}
+
+	coreSchemaProbes := []struct {
+		minimumVersion int
+		name           string
+		query          string
+	}{
+		{minimumVersion: 1, name: "schema_version", query: `SELECT version, applied_at FROM schema_version LIMIT 0`},
+		{minimumVersion: 1, name: "records v1", query: `SELECT record_id, namespace, key_name, revision, actor, created_at, file_path FROM records LIMIT 0`},
+		{minimumVersion: 1, name: "heads v1", query: `SELECT namespace, key_name, head_revision, head_record_id, updated_at FROM heads LIMIT 0`},
+		{minimumVersion: 2, name: "audit_events", query: `SELECT id, event_type, actor, namespace, key_name, revision, created_at FROM audit_events LIMIT 0`},
+		{minimumVersion: 3, name: "auth_tokens v3", query: `SELECT token_id, token_hash, label, created_at FROM auth_tokens LIMIT 0`},
+		{minimumVersion: 4, name: "namespace_policies", query: `SELECT namespace, owner_type, owner_id, policy_json, updated_at FROM namespace_policies LIMIT 0`},
+		{minimumVersion: 5, name: "records v5", query: `SELECT metadata_json FROM records LIMIT 0`},
+		{minimumVersion: 5, name: "record_tags", query: `SELECT record_id, tag FROM record_tags LIMIT 0`},
+		{minimumVersion: 6, name: "auth_tokens v6", query: `SELECT client_id, scopes, namespace_globs FROM auth_tokens LIMIT 0`},
+		{minimumVersion: 7, name: "records v7", query: `SELECT record_type, status, ttl, content_version, pointers_json, provenance_json FROM records LIMIT 0`},
+		{minimumVersion: 7, name: "heads v7", query: `SELECT record_type, status FROM heads LIMIT 0`},
+		{minimumVersion: 8, name: "embeddings", query: `SELECT record_id, model, dimensions, vector, created_at FROM embeddings LIMIT 0`},
+		{minimumVersion: 9, name: "memory_state v9", query: `SELECT memory_id, namespace, memory_key, current_revision, activation, access_count, last_accessed_at, created_at FROM memory_state LIMIT 0`},
+		{minimumVersion: 9, name: "memory_revisions v9", query: `SELECT revision_id, memory_id, namespace, memory_key, status, supersedes, created_at, author_agent_id, author_version, "trigger", session_id, origin, confidence, tags, ttl_seconds, expires_at, payload_summary, payload_body, embedding_model, embedding_vector FROM memory_revisions LIMIT 0`},
+		{minimumVersion: 10, name: "memory domains", query: `SELECT s.domain, r.domain FROM memory_state AS s, memory_revisions AS r LIMIT 0`},
+		{minimumVersion: 11, name: "knowledge facets", query: `SELECT facet_kind, facet_source, facet_pointer_scheme, facet_pointer_locator, facet_pointer_resolved_at FROM memory_revisions LIMIT 0`},
+		{minimumVersion: 12, name: "memory FTS v12", query: `SELECT payload_summary, payload_body, tags FROM memory_revisions_fts LIMIT 0`},
+		{minimumVersion: 13, name: "pointer_verifications", query: `SELECT id, revision_id, scheme, locator, outcome, checked_at, detail FROM pointer_verifications LIMIT 0`},
+		{minimumVersion: 14, name: "decay baseline", query: `SELECT last_decayed_at FROM memory_state LIMIT 0`},
+		{minimumVersion: 15, name: "memory FTS v15", query: `SELECT memory_key FROM memory_revisions_fts LIMIT 0`},
+	}
+	for _, probe := range coreSchemaProbes {
+		if version < probe.minimumVersion {
+			continue
+		}
+		statement, prepareErr := db.PrepareContext(ctx, probe.query)
+		if prepareErr != nil {
+			return fmt.Errorf("validate Tesseract %s schema: %w", probe.name, prepareErr)
+		}
+		if closeErr := statement.Close(); closeErr != nil {
+			return fmt.Errorf("close Tesseract %s schema probe: %w", probe.name, closeErr)
+		}
+	}
+	requiredObjects := []struct {
+		minimumVersion int
+		objectType     string
+		name           string
+	}{
+		{minimumVersion: 12, objectType: "trigger", name: "memory_revisions_fts_ai"},
+		{minimumVersion: 12, objectType: "trigger", name: "memory_revisions_fts_ad"},
+		{minimumVersion: 15, objectType: "trigger", name: "memory_revisions_fts_au"},
+		{minimumVersion: 16, objectType: "index", name: "idx_memory_revisions_supersedes"},
+		{minimumVersion: 16, objectType: "index", name: "idx_pointer_verifications_checked_at"},
+	}
+	for _, object := range requiredObjects {
+		if version < object.minimumVersion {
+			continue
+		}
+		var count int
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = ? AND name = ?`, object.objectType, object.name,
+		).Scan(&count); err != nil {
+			return fmt.Errorf("validate Tesseract %s %s: %w", object.objectType, object.name, err)
+		}
+		if count != 1 {
+			return fmt.Errorf("tesseract %s %s is missing", object.objectType, object.name)
+		}
+	}
+	return nil
 }
 
 func legacyMigrationPartialTargets(targetDB, targetRecords string) ([]string, error) {

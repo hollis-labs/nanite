@@ -448,6 +448,49 @@ func TestNewContainer_MissingLegacySourceWithJournalDisablesEmbeddedTesseract(t 
 	}
 }
 
+func TestNewContainer_EmptyUnjournaledTargetDBDisablesEmbeddedTesseract(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	targetDB := filepath.Join(root, "xdg", "data", "tesseract", "workspaces", "default", "main.db")
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "xdg", "data"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg", "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "xdg", "cache"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg", "config"))
+	t.Setenv("TESSERACT_DB_PATH", targetDB)
+	t.Setenv("TESSERACT_WORKSPACE", "default")
+	if err := os.MkdirAll(filepath.Dir(targetDB), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(targetDB, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := storetest.New(t, context.Background(), filepath.Join(root, "nanite.db"))
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
+	container, err := NewContainer(ContainerConfig{
+		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
+		ManagedConfigRoot: filepath.Join(root, ".nanite"),
+	})
+	if err != nil {
+		t.Fatalf("NewContainer: %v", err)
+	}
+	t.Cleanup(container.Shutdown)
+	if container.Tesseract != nil || container.Memory != nil {
+		t.Fatalf("empty unjournaled target opened an embedded store: tesseract=%v memory=%v", container.Tesseract, container.Memory)
+	}
+	info, err := os.Lstat(targetDB)
+	if err != nil {
+		t.Fatalf("empty target DB was removed: %v", err)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("empty target DB was initialized during validation: size=%d", info.Size())
+	}
+}
+
 func assertServiceTestPathUnder(t *testing.T, root, label, path string) {
 	t.Helper()
 	rel, err := filepath.Rel(root, path)

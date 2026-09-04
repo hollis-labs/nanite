@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/hollis-labs/go-sqlite/sqlitekit"
 	"github.com/hollis-labs/tesseract"
 	tesseractMemory "github.com/hollis-labs/tesseract/memory"
 )
@@ -404,6 +405,200 @@ func TestMigrateLegacyTesseractDataRefusesMissingSourceWithUnjournaledPartialTar
 	}
 }
 
+func TestMigrateLegacyTesseractDataRefusesUnjournaledInvalidTargetDB(t *testing.T) {
+	tests := []struct {
+		name string
+		seed func(t *testing.T, targetDB string)
+	}{
+		{
+			name: "zero_byte",
+			seed: func(t *testing.T, targetDB string) {
+				t.Helper()
+				if err := os.WriteFile(targetDB, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "truncated_sqlite_header",
+			seed: func(t *testing.T, targetDB string) {
+				t.Helper()
+				if err := os.WriteFile(targetDB, []byte("SQLite format 3\x00truncated"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "unrelated_sqlite_database",
+			seed: func(t *testing.T, targetDB string) {
+				t.Helper()
+				db, err := sqlitekit.OpenSingle(context.Background(), targetDB, sqlitekit.OpenOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`CREATE TABLE unrelated (id INTEGER PRIMARY KEY)`); err != nil {
+					_ = db.Close()
+					t.Fatal(err)
+				}
+				if err := db.Close(); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "incomplete_tesseract_like_schema",
+			seed: func(t *testing.T, targetDB string) {
+				t.Helper()
+				db, err := sqlitekit.OpenSingle(context.Background(), targetDB, sqlitekit.OpenOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`
+CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+INSERT INTO schema_version (version, applied_at) VALUES (16, '2026-09-04T00:00:00Z');
+`); err != nil {
+					_ = db.Close()
+					t.Fatal(err)
+				}
+				if err := db.Close(); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "claimed_current_schema_missing_memory_tables",
+			seed: func(t *testing.T, targetDB string) {
+				t.Helper()
+				db, err := sqlitekit.OpenSingle(context.Background(), targetDB, sqlitekit.OpenOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`
+CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+INSERT INTO schema_version (version, applied_at) VALUES
+  (1, '2026-09-04T00:00:00Z'), (2, '2026-09-04T00:00:00Z'),
+  (3, '2026-09-04T00:00:00Z'), (4, '2026-09-04T00:00:00Z'),
+  (5, '2026-09-04T00:00:00Z'), (6, '2026-09-04T00:00:00Z'),
+  (7, '2026-09-04T00:00:00Z'), (8, '2026-09-04T00:00:00Z'),
+  (9, '2026-09-04T00:00:00Z'), (10, '2026-09-04T00:00:00Z'),
+  (11, '2026-09-04T00:00:00Z'), (12, '2026-09-04T00:00:00Z'),
+  (13, '2026-09-04T00:00:00Z'), (14, '2026-09-04T00:00:00Z'),
+  (15, '2026-09-04T00:00:00Z'), (16, '2026-09-04T00:00:00Z');
+CREATE TABLE records (
+  record_id TEXT PRIMARY KEY, namespace TEXT NOT NULL, key_name TEXT NOT NULL,
+  revision INTEGER NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL,
+  checksum TEXT, file_path TEXT NOT NULL
+);
+CREATE TABLE heads (
+  namespace TEXT NOT NULL, key_name TEXT NOT NULL, head_revision INTEGER NOT NULL,
+  head_record_id TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY(namespace, key_name)
+);
+`); err != nil {
+					_ = db.Close()
+					t.Fatal(err)
+				}
+				if err := db.Close(); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			sourceDB := filepath.Join(root, "legacy", "context.db")
+			sourceRecords := filepath.Join(root, "legacy", "records")
+			targetDB := filepath.Join(root, "target", "main.db")
+			targetRecords := filepath.Join(root, "state", "records")
+			if err := os.MkdirAll(filepath.Dir(targetDB), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			test.seed(t, targetDB)
+			// #nosec G304 -- targetDB is an exact path beneath this subtest's t.TempDir.
+			before, err := os.ReadFile(targetDB)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := migrateLegacyTesseractData(sourceDB, sourceRecords, targetDB, targetRecords)
+			if err == nil {
+				t.Fatalf("invalid target DB returned success: result=%q", result)
+			}
+			if result != LegacyMigrationNone {
+				t.Fatalf("invalid target result=%q, want %q", result, LegacyMigrationNone)
+			}
+			if !strings.Contains(err.Error(), "not a valid initialized Tesseract store") {
+				t.Fatalf("invalid target error = %v, want Tesseract-store diagnostic", err)
+			}
+			// #nosec G304 -- targetDB is the same exact t.TempDir path validated above.
+			after, readErr := os.ReadFile(targetDB)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if string(after) != string(before) {
+				t.Fatal("invalid target DB was modified during validation")
+			}
+		})
+	}
+}
+
+func TestMigrateLegacyTesseractDataAcceptsInitializedCurrentStoreWithoutLegacySource(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	targetDB := filepath.Join(root, "target", "main.db")
+	targetRecords := filepath.Join(root, "state", "records")
+	instance, err := tesseract.Open(ctx, tesseract.Config{
+		RootDir: filepath.Join(root, "inert"), DBPath: targetDB, RecordsDir: targetRecords,
+	})
+	if err != nil {
+		t.Fatalf("open current Tesseract: %v", err)
+	}
+	if _, writeErr := instance.MemoryStore().WriteRevision(ctx, tesseractMemory.WriteInput{
+		Domain: tesseractMemory.DomainMemory, Namespace: "user/current/memory/notes", MemoryKey: "preserve",
+		Status:  tesseractMemory.StatusReviewed,
+		Author:  tesseractMemory.Author{AgentID: "migration-test", AgentVersion: "1"},
+		Trigger: tesseractMemory.TriggerManual, SessionID: "migration-test",
+		Origin: tesseractMemory.OriginUser, Confidence: 0.9,
+		Payload: tesseractMemory.Payload{Summary: "keep current", Body: "PRESERVE-CURRENT"},
+	}); writeErr != nil {
+		_ = instance.Close()
+		t.Fatalf("seed current Tesseract: %v", writeErr)
+	}
+	if closeErr := instance.Close(); closeErr != nil {
+		t.Fatalf("close current Tesseract: %v", closeErr)
+	}
+
+	result, err := migrateLegacyTesseractData(
+		filepath.Join(root, "missing-legacy", "context.db"),
+		filepath.Join(root, "missing-legacy", "records"),
+		targetDB,
+		targetRecords,
+	)
+	if err != nil || result != LegacyMigrationCurrent {
+		t.Fatalf("current-store result=%q err=%v", result, err)
+	}
+
+	reopened, err := tesseract.Open(ctx, tesseract.Config{
+		RootDir: filepath.Join(root, "inert"), DBPath: targetDB, RecordsDir: targetRecords,
+	})
+	if err != nil {
+		t.Fatalf("reopen current Tesseract: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+	page, err := reopened.MemoryStore().RecallPaged(ctx, tesseractMemory.RecallInput{
+		Namespaces: []string{"user/current/memory/notes"},
+		Ranking:    tesseractMemory.RankingChronological,
+	}, tesseractMemory.PageRequest{Limit: 10, PayloadMode: tesseractMemory.PayloadModeFull})
+	if err != nil {
+		t.Fatalf("recall current Tesseract: %v", err)
+	}
+	if len(page.Kept) != 1 || page.Kept[0].Revision.Payload.Body != "PRESERVE-CURRENT" {
+		t.Fatalf("current Tesseract contents changed: %+v", page.Kept)
+	}
+}
+
 func TestMigrateLegacyTesseractDataSerializesCompetingMigrations(t *testing.T) {
 	for iteration := 0; iteration < 20; iteration++ {
 		root := t.TempDir()
@@ -419,11 +614,25 @@ func TestMigrateLegacyTesseractDataSerializesCompetingMigrations(t *testing.T) {
 			{db: filepath.Join(root, "legacy-b", "context.db"), records: filepath.Join(root, "legacy-b", "records"), marker: "B"},
 		}
 		for _, source := range sources {
-			if err := os.MkdirAll(source.records, 0o700); err != nil {
-				t.Fatal(err)
+			instance, err := tesseract.Open(context.Background(), tesseract.Config{
+				RootDir: filepath.Join(root, "inert-"+source.marker), DBPath: source.db, RecordsDir: source.records,
+			})
+			if err != nil {
+				t.Fatalf("seed source %s: %v", source.marker, err)
 			}
-			if err := os.WriteFile(source.db, []byte("db-"+source.marker), 0o600); err != nil {
-				t.Fatal(err)
+			if _, err := instance.MemoryStore().WriteRevision(context.Background(), tesseractMemory.WriteInput{
+				Domain: tesseractMemory.DomainMemory, Namespace: "user/competing/memory/notes", MemoryKey: "winner",
+				Status:  tesseractMemory.StatusReviewed,
+				Author:  tesseractMemory.Author{AgentID: "migration-test", AgentVersion: "1"},
+				Trigger: tesseractMemory.TriggerManual, SessionID: "migration-test",
+				Origin: tesseractMemory.OriginUser, Confidence: 0.9,
+				Payload: tesseractMemory.Payload{Summary: "winner", Body: "memory-" + source.marker},
+			}); err != nil {
+				_ = instance.Close()
+				t.Fatalf("write source %s: %v", source.marker, err)
+			}
+			if err := instance.Close(); err != nil {
+				t.Fatalf("close source %s: %v", source.marker, err)
 			}
 			if err := os.WriteFile(filepath.Join(source.records, "record"), []byte("record-"+source.marker), 0o600); err != nil {
 				t.Fatal(err)
@@ -461,20 +670,36 @@ func TestMigrateLegacyTesseractDataSerializesCompetingMigrations(t *testing.T) {
 		if counts[LegacyMigrationCopied] != 1 || counts[LegacyMigrationCurrent] != 1 {
 			t.Fatalf("iteration %d results = %v, want one copied and one current", iteration, counts)
 		}
-		// #nosec G304 -- targetDB is an exact path inside t.TempDir.
-		db, err := os.ReadFile(targetDB)
+		winner, err := tesseract.Open(context.Background(), tesseract.Config{
+			RootDir: filepath.Join(root, "target-inert"), DBPath: targetDB, RecordsDir: targetRecords,
+		})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("iteration %d open winner: %v", iteration, err)
+		}
+		page, err := winner.MemoryStore().RecallPaged(context.Background(), tesseractMemory.RecallInput{
+			Namespaces: []string{"user/competing/memory/notes"},
+			Ranking:    tesseractMemory.RankingChronological,
+		}, tesseractMemory.PageRequest{Limit: 10, PayloadMode: tesseractMemory.PayloadModeFull})
+		if err != nil {
+			_ = winner.Close()
+			t.Fatalf("iteration %d recall winner: %v", iteration, err)
+		}
+		if closeErr := winner.Close(); closeErr != nil {
+			t.Fatalf("iteration %d close winner: %v", iteration, closeErr)
+		}
+		if len(page.Kept) != 1 {
+			t.Fatalf("iteration %d winner memories = %d, want 1", iteration, len(page.Kept))
 		}
 		// #nosec G304 -- the record path is fixed beneath t.TempDir.
 		record, err := os.ReadFile(filepath.Join(targetRecords, "record"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		pairA := string(db) == "db-A" && string(record) == "record-A"
-		pairB := string(db) == "db-B" && string(record) == "record-B"
+		body := page.Kept[0].Revision.Payload.Body
+		pairA := body == "memory-A" && string(record) == "record-A"
+		pairB := body == "memory-B" && string(record) == "record-B"
 		if !pairA && !pairB {
-			t.Fatalf("iteration %d mixed migration pair: db=%q record=%q", iteration, db, record)
+			t.Fatalf("iteration %d mixed migration pair: body=%q record=%q", iteration, body, record)
 		}
 	}
 }

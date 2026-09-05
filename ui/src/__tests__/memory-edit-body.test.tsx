@@ -50,10 +50,10 @@ describe("memory editing", () => {
           headers: { "Content-Type": "application/json" },
         });
       }
-      return new Response(
-        JSON.stringify(memoryListResponse),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify(memoryListResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -80,11 +80,12 @@ describe("memory editing", () => {
   it("opens an item with the API's path-safe key", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(JSON.stringify(memoryListResponse), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(memoryListResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
       ),
     );
     const onSelect = vi.fn();

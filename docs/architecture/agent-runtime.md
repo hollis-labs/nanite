@@ -19,15 +19,13 @@ lease through broker adoption. Stale observers neither clear successor state
 nor dispatch recovery over it; runtime retirement never deletes turn-owned
 slot, tool-partition, or router state.
 
-When a canonical `runtimeevents.Sink` is injected, every normalized event
-reaches it before Nanite projects the small legacy subset onto chat
-SSE/provider callbacks. Process, lifecycle, interrupt, permission, raw-I/O,
-and unknown future kinds are forwarded intact. There is deliberately no
-default raw-event persistence: prompts, tool payloads, stdout, and stderr may
-contain secrets, and an unredacted append-only workspace journal would be
-unsafe and unbounded. An injected sink owns redaction, retention, bounds, and
-lifecycle. A durable/redacted public feed is a separate CW-20260904-0129
-contract; this change exposes no raw events through the API.
+Every normalized event reaches Nanite's canonical sink before the small legacy
+subset is projected onto chat SSE/provider callbacks. The canonical sink now
+also feeds the bounded, allowlisted [host runtime feed](host-runtime-feed.md).
+The source event itself is never persisted: prompts, tool payloads, stdout,
+stderr, and model deltas may contain secrets. The public feed stores metadata
+and explicitly safe per-kind state only, with independent cursor, retention,
+gap, redaction, and runtime-generation semantics.
 
 Native selection remains Nanite product policy: Claude uses streaming stdio;
 Codex and OpenCode use subprocess-per-turn. The selection is expressed through

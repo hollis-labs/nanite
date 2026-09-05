@@ -93,6 +93,9 @@ type Container struct {
 	Chat        ChatService
 	Context     ContextService
 	Streams     *StreamManager
+	// RuntimeFeed is the independent, durable session activity feed. It does
+	// not share StreamManager's message-SSE ownership or takeover registry.
+	RuntimeFeed *HostRuntimeFeed
 	Events      EventEmitter
 	Providers   *provider.Registry
 	Commands    *chat.CommandRegistry
@@ -979,6 +982,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			provider.NewOpencodeAdapter(),
 		}
 	}
+	runtimeFeed := NewHostRuntimeFeed(cfg.Store)
+	runtimeFeedCommitted := false
+	defer func() {
+		if !runtimeFeedCommitted {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_ = runtimeFeed.Close(ctx)
+		}
+	}()
 	agentDepsBundle, agentDepsErr := BuildAgentDependencies(AgentDepsConfig{
 		Store:            cfg.Store,
 		PathGrants:       pathGrants,
@@ -990,6 +1002,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		APIBaseURL:       cfg.APIBaseURL,
 		CLIWritableRoots: cfg.DevToolsAllowedPaths,
 		Permissions:      permissions,
+		RuntimeFeed:      runtimeFeed,
 		// TASKS/skills/10: threads the same vendored skill store
 		// constructed above (skillVendor, possibly nil on init failure —
 		// see its own comment) onto runtimeagent.Dependencies.SkillVendor
@@ -1355,6 +1368,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Chat:                chatSvc,
 		Context:             ctxService,
 		Streams:             streams,
+		RuntimeFeed:         runtimeFeed,
 		Events:              events,
 		Providers:           cfg.Providers,
 		Commands:            commands,
@@ -1407,6 +1421,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	}
 	containerCommitted = true
 	chatLifecycleCommitted = true
+	runtimeFeedCommitted = true
 	return container, nil
 }
 
@@ -1570,6 +1585,15 @@ func (c *Container) shutdownWithMaxWait(maxWait time.Duration) {
 		}
 	case <-shutdownCtx.Done():
 		slog.Warn("shutdown: chat timed out; skipping plugin unload", "timeout", maxWait.String())
+	}
+
+	// Wrapper producers are owned by Chat. Once its drain completes (or the
+	// shared deadline expires), close feed admission and flush every event
+	// already accepted before the Store is released by the process owner.
+	if c.RuntimeFeed != nil {
+		if err := c.RuntimeFeed.Close(shutdownCtx); err != nil {
+			slog.Warn("shutdown: host runtime feed did not drain", "err", err)
+		}
 	}
 
 	if chatDrained && c.Plugins != nil {

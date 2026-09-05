@@ -27,27 +27,30 @@
  * `DrawerPinCapError` on HTTP 409).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { GripHorizontal, Pin, PinOff, X } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useLayoutStore } from '@/stores/useLayoutStore'
-import { useAppStore } from '@/stores/useAppStore'
-import { useShellStore } from '@/stores/useShellStore'
-import { useChatStore } from '@/stores/useChatStore'
-import { useSettings } from '@/hooks/useSettings'
+import { GripHorizontal, Pin, PinOff, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Banner, type BannerProps } from '@/components/chat/Banner'
 import type { ChatDrawerTab } from '@/components/chat/ChatDrawerTabStrip'
 import { EnvelopeRenderer } from '@/components/chat/envelopes/EnvelopeRenderer'
 import { ArtifactsContent } from '@/components/drawers/ArtifactsContent'
-import { Banner, type BannerProps } from '@/components/chat/Banner'
+import { useHostRuntimeFeed } from '@/hooks/useHostRuntimeFeed'
+import { useSettings } from '@/hooks/useSettings'
 import { api, DrawerPinCapError } from '@/lib/api'
 import { CHAT_DRAWER_PIN_CAP } from '@/lib/constants'
+import type { HostRuntimeFeedState } from '@/lib/host-runtime-feed'
 import type { DynamicCardTab, Envelope } from '@/lib/types'
+import { useAppStore } from '@/stores/useAppStore'
+import { useChatStore } from '@/stores/useChatStore'
+import { useLayoutStore } from '@/stores/useLayoutStore'
+import { useShellStore } from '@/stores/useShellStore'
 
 const FIXED_TABS: { id: string; label: string; devOnly?: boolean }[] = [
   { id: 'scratchpad', label: 'Scratchpad' },
   { id: 'terminal-1', label: 'Terminal 1' },
   { id: 'terminal-2', label: 'Terminal 2', devOnly: true },
   { id: 'artifacts', label: 'Artifacts' },
+  { id: 'runtime', label: 'Runtime' },
   { id: 'session-context', label: 'Session Context' },
 ]
 
@@ -100,6 +103,10 @@ export function ChatWorkingDrawer({
   const queryClient = useQueryClient()
   const { data: settings } = useSettings()
   const developerMode = settings?.developer_mode ?? false
+  // This subscription is mounted for the active session even while the
+  // drawer is closed or another tab is selected. Runtime activity therefore
+  // remains independent of the currently active message EventSource.
+  const runtimeFeed = useHostRuntimeFeed(activeSessionId)
 
   // Reactive: when a new envelope arrives in panelEnvelopes['bottom_chat_drawer'],
   // append it as a DynamicCardTab and clear the inbox slot.
@@ -339,7 +346,7 @@ export function ChatWorkingDrawer({
                 }`}
               >
                 <main className="flex-1 min-w-0 overflow-hidden">
-                  <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} />
+                  <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} runtimeFeed={runtimeFeed} />
                 </main>
 
                 <aside className="w-[140px] shrink-0 border-l border-border-subtle bg-surface/30 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -413,7 +420,15 @@ export function ChatWorkingDrawer({
   )
 }
 
-function DrawerBody({ activeTab, cardTabs }: { activeTab: string; cardTabs: DynamicCardTab[] }) {
+function DrawerBody({
+  activeTab,
+  cardTabs,
+  runtimeFeed,
+}: {
+  activeTab: string
+  cardTabs: DynamicCardTab[]
+  runtimeFeed: HostRuntimeFeedState
+}) {
   switch (activeTab) {
     case 'scratchpad':
       return <ScratchpadTab />
@@ -423,6 +438,8 @@ function DrawerBody({ activeTab, cardTabs }: { activeTab: string; cardTabs: Dyna
       return <Terminal2Tab />
     case 'artifacts':
       return <ArtifactsTab />
+    case 'runtime':
+      return <RuntimeActivityTab state={runtimeFeed} />
     case 'session-context':
       return <SessionContextTab />
     default:
@@ -432,6 +449,91 @@ function DrawerBody({ activeTab, cardTabs }: { activeTab: string; cardTabs: Dyna
       }
       return null
   }
+}
+
+function RuntimeActivityTab({ state }: { state: HostRuntimeFeedState }) {
+  const visibleEvents = [...state.recentEvents].reverse().slice(0, 30)
+  const usage = Object.entries(state.usage)
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 border-b border-border-subtle px-3 py-2 text-[11px]">
+        <RuntimeDatum label="Status" value={state.status} />
+        <RuntimeDatum label="Interrupt" value={state.interrupt} />
+        <RuntimeDatum label="Provider" value={state.provider || '—'} />
+        <RuntimeDatum label="Transport" value={state.runtime || '—'} />
+        <RuntimeDatum label="Provider session" value={state.providerSessionID || 'not reported'} mono />
+        <RuntimeDatum label="Runtime generation" value={state.runtimeGeneration ? String(state.runtimeGeneration) : '—'} mono />
+        <RuntimeDatum label="Feed cursor" value={String(state.lastCursor)} mono />
+      </div>
+
+      {state.gap && (
+        <div className="border-b border-warning/30 bg-warning/10 px-3 py-1.5 text-[11px] text-warning">
+          Runtime history is incomplete ({state.gap.reason}; {state.gap.missing_cursor_span} cursor
+          {state.gap.missing_cursor_span === 1 ? '' : 's'} unavailable). State was rebuilt from the oldest retained event.
+        </div>
+      )}
+
+      {(state.tools.length > 0 || usage.length > 0) && (
+        <div className="grid grid-cols-2 gap-3 border-b border-border-subtle px-3 py-2">
+          <div>
+            <p className="mb-1 text-[10px] uppercase tracking-wide text-fg-faint">Tools</p>
+            <div className="space-y-1">
+              {state.tools.slice(-5).map((tool) => (
+                <div key={tool.id} className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="truncate font-mono text-fg-secondary">{tool.name}</span>
+                  <span className={tool.stage === 'failed' ? 'text-danger' : tool.stage === 'completed' ? 'text-success' : 'text-warning'}>
+                    {tool.stage}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] uppercase tracking-wide text-fg-faint">Usage</p>
+            <div className="space-y-1">
+              {usage.length === 0 ? (
+                <p className="text-[11px] text-fg-faint">Not reported</p>
+              ) : (
+                usage.map(([key, value]) => (
+                  <div key={key} className="flex justify-between gap-2 text-[11px]">
+                    <span className="text-fg-muted">{key.replaceAll('_', ' ')}</span>
+                    <span className="font-mono text-fg-secondary">{value.toLocaleString()}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <p className="mb-1 text-[10px] uppercase tracking-wide text-fg-faint">Recent events</p>
+        {visibleEvents.length === 0 ? (
+          <p className="py-3 text-xs text-fg-faint">No retained runtime activity for this session.</p>
+        ) : (
+          <div className="space-y-1">
+            {visibleEvents.map((event) => (
+              <div key={`${event.cursor}:${event.source_event_id}`} className="flex items-center gap-2 text-[11px]">
+                <span className="w-12 shrink-0 font-mono text-fg-faint">#{event.cursor}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-fg-secondary">{event.kind}</span>
+                <span className="shrink-0 text-fg-faint">seq {event.source_sequence}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function RuntimeDatum({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-2">
+      <span className="text-fg-faint">{label}</span>
+      <span className={`truncate text-fg-secondary ${mono ? 'font-mono' : ''}`}>{value}</span>
+    </div>
+  )
 }
 
 function envelopeFallbackLabel(env: Envelope): string {

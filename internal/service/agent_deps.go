@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/google/uuid"
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
@@ -42,6 +44,10 @@ type AgentDepsConfig struct {
 	DBPath          string
 	SandboxBaseProf sandbox.Profile
 	Permissions     *permission.Engine
+	// RuntimeFeed is the session-scoped, durable public projection of the
+	// canonical wrapper event stream. Nil keeps focused dependency tests and
+	// embedding callers on the legacy-only path.
+	RuntimeFeed *HostRuntimeFeed
 
 	// CLIWritableRoots is the directory allow-list a CLI-launch agent
 	// (codex / claude) may write to beyond its boot dir. Threaded onto
@@ -188,7 +194,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 
 	telemetry := agentTelemetry{}
 
-	bridge := &agentEventBridge{streams: cfg.Streams}
+	bridge := &agentEventBridge{streams: cfg.Streams, runtimeFeed: cfg.RuntimeFeed}
 	approvalRequestSink := func(req *permission.ApprovalRequest) {
 		if req == nil {
 			return
@@ -713,6 +719,7 @@ func (agentTelemetry) RecordPTYRestart(sessionID string, attempt int, prevExit *
 // used by spawned agents and background tasks.
 type agentEventBridge struct {
 	streams       *StreamManager
+	runtimeFeed   *HostRuntimeFeed
 	seq           atomic.Uint64
 	routers       sync.Map // sessionID -> *sessionRouter
 	preRunRouters sync.Map // sessionID -> *sessionRouter, consumed by sink factory
@@ -745,16 +752,18 @@ type sessionRouter struct {
 // delayed predecessor terminal is looked up by its immutable TurnID and can
 // never close a successor router merely because both share a chat session ID.
 type runtimeEventBridgeSink struct {
-	mu        sync.Mutex
-	bridge    *agentEventBridge
-	sessionID string
-	acp       bool
-	pending   []*sessionRouter
-	turns     map[string]*sessionRouter
-	untagged  *sessionRouter
-	hadRouter bool
-	retired   map[string]struct{}
-	retireOrd []string
+	mu            sync.Mutex
+	bridge        *agentEventBridge
+	sessionID     string
+	acp           bool
+	runID         string
+	runGeneration int64
+	pending       []*sessionRouter
+	turns         map[string]*sessionRouter
+	untagged      *sessionRouter
+	hadRouter     bool
+	retired       map[string]struct{}
+	retireOrd     []string
 }
 
 const (
@@ -764,8 +773,18 @@ const (
 
 func newRuntimeEventBridgeSink(bridge *agentEventBridge, sessionID string, isACP bool) *runtimeEventBridgeSink {
 	sink := &runtimeEventBridgeSink{
-		bridge: bridge, sessionID: sessionID, acp: isACP,
+		bridge: bridge, sessionID: sessionID, acp: isACP, runID: uuid.NewString(),
 		turns: make(map[string]*sessionRouter), retired: make(map[string]struct{}),
+	}
+	if bridge != nil && bridge.runtimeFeed != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		generation, err := bridge.runtimeFeed.ReserveRuntimeGeneration(ctx, sessionID)
+		cancel()
+		if err != nil {
+			slog.Warn("host runtime feed: reserve runtime generation", "session_id", sessionID, "err", err)
+		} else {
+			sink.runGeneration = generation
+		}
 	}
 	// Auto-fire modes can emit their first TurnStarted inside Wrapper.Run,
 	// before Boot returns a Session on which the caller could register. Their
@@ -854,14 +873,28 @@ func (s *runtimeEventBridgeSink) rememberRetired(turnID string) {
 
 func (*runtimeEventBridgeSink) OwnsLegacyStreamProjection() {}
 
-func (s *runtimeEventBridgeSink) Write(_ context.Context, ev runtimeevents.Event) error {
+func (s *runtimeEventBridgeSink) Write(ctx context.Context, ev runtimeevents.Event) error {
+	var feedErr error
+	if s.bridge != nil && s.bridge.runtimeFeed != nil {
+		// Publish copies and allow-list-projects the event before returning.
+		// It never performs persistence or network IO on this runtime thread.
+		// The factory-bound session is authoritative for public routing even
+		// if a malformed/injected source envelope claims a different session.
+		publicEvent := ev
+		publicEvent.SessionID = s.sessionID
+		if s.runGeneration < 1 {
+			feedErr = errors.New("host runtime feed generation was not reserved")
+		} else {
+			feedErr = s.bridge.runtimeFeed.Publish(ctx, s.runID, s.runGeneration, s.acp, publicEvent)
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.bridge == nil {
-		return nil
+		return feedErr
 	}
 	s.routeNormalizedEvent(ev)
-	return nil
+	return feedErr
 }
 
 func newSessionRouter(ch chan llmtypes.StreamEvent) *sessionRouter {

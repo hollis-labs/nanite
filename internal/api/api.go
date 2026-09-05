@@ -143,6 +143,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}/details", a.handleGetSessionDetails)
 	mux.HandleFunc("GET /api/sessions/{id}/messages", a.handleListSessionMessages)
 	mux.HandleFunc("GET /api/sessions/{id}/plugin-envelopes", a.handleListSessionPluginEnvelopes)
+	mux.HandleFunc("GET /api/sessions/{id}/runtime-events", a.handleHostRuntimeFeed)
 
 	// Messages
 	mux.HandleFunc("POST /api/messages", a.handleSendMessage)

@@ -126,8 +126,73 @@ func scanAgentSchedule(scanner interface{ Scan(...any) error }, s *AgentSchedule
 
 // InsertAgentSchedule upserts an agent_schedules row by ID.
 func (s *Store) InsertAgentSchedule(ctx context.Context, row AgentSchedule) error {
-	if err := ValidateAgentSchedule(row); err != nil {
+	row, err := prepareAgentSchedule(row)
+	if err != nil {
 		return fmt.Errorf("insert agent_schedules: %w", err)
+	}
+	_, err = s.DB.ExecContext(ctx,
+		`INSERT OR REPLACE INTO agent_schedules
+		    (id, agent_id, session_id, name, schedule_kind, schedule_spec,
+		     body, priority, status, expires_at, fired_count, last_fired_at,
+		     created_at, created_by, max_retries, on_fail, next_run,
+		     job_type, job_payload)
+		 VALUES (?, ?, ?, ?, ?, ?,
+		         ?, ?, ?, ?, ?, ?,
+		         COALESCE(NULLIF(?, ''), datetime('now')),
+		         ?, ?, ?, ?, ?, ?)`,
+		agentScheduleInsertArgs(row)...,
+	)
+	if err != nil {
+		return fmt.Errorf("insert agent_schedules: %w", err)
+	}
+	return nil
+}
+
+// InsertAgentScheduleIfNameMissing inserts row only when the agent has no
+// schedule with the same semantic name. The decision and insert are one
+// SQLite statement, so concurrent builtin reconciliation cannot overwrite an
+// operator/deployed row or create duplicate builtin rows after separate
+// list-then-insert checks both observe an absence.
+//
+// The bool reports whether this call inserted the row. A false result is an
+// intentional no-op: either the semantic name already exists or row.ID is
+// already occupied. Both cases preserve the existing authoritative row.
+func (s *Store) InsertAgentScheduleIfNameMissing(ctx context.Context, row AgentSchedule) (bool, error) {
+	row, err := prepareAgentSchedule(row)
+	if err != nil {
+		return false, fmt.Errorf("insert missing agent_schedules: %w", err)
+	}
+	args := agentScheduleInsertArgs(row)
+	args = append(args, row.AgentID, row.Name)
+	result, err := s.DB.ExecContext(ctx,
+		`INSERT INTO agent_schedules
+		    (id, agent_id, session_id, name, schedule_kind, schedule_spec,
+		     body, priority, status, expires_at, fired_count, last_fired_at,
+		     created_at, created_by, max_retries, on_fail, next_run,
+		     job_type, job_payload)
+		 SELECT ?, ?, ?, ?, ?, ?,
+		        ?, ?, ?, ?, ?, ?,
+		        COALESCE(NULLIF(?, ''), datetime('now')),
+		        ?, ?, ?, ?, ?, ?
+		 WHERE NOT EXISTS (
+		     SELECT 1 FROM agent_schedules WHERE agent_id = ? AND name = ?
+		 )
+		 ON CONFLICT(id) DO NOTHING`,
+		args...,
+	)
+	if err != nil {
+		return false, fmt.Errorf("insert missing agent_schedules: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("insert missing agent_schedules rows affected: %w", err)
+	}
+	return rows == 1, nil
+}
+
+func prepareAgentSchedule(row AgentSchedule) (AgentSchedule, error) {
+	if err := ValidateAgentSchedule(row); err != nil {
+		return AgentSchedule{}, err
 	}
 	if row.Status == "" {
 		row.Status = ScheduleStatusActive
@@ -158,16 +223,11 @@ func (s *Store) InsertAgentSchedule(ctx context.Context, row AgentSchedule) erro
 	if row.JobPayload == "" {
 		row.JobPayload = "{}"
 	}
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT OR REPLACE INTO agent_schedules
-		    (id, agent_id, session_id, name, schedule_kind, schedule_spec,
-		     body, priority, status, expires_at, fired_count, last_fired_at,
-		     created_at, created_by, max_retries, on_fail, next_run,
-		     job_type, job_payload)
-		 VALUES (?, ?, ?, ?, ?, ?,
-		         ?, ?, ?, ?, ?, ?,
-		         COALESCE(NULLIF(?, ''), datetime('now')),
-		         ?, ?, ?, ?, ?, ?)`,
+	return row, nil
+}
+
+func agentScheduleInsertArgs(row AgentSchedule) []any {
+	return []any{
 		row.ID, row.AgentID, nullIfEmpty(row.SessionID), row.Name,
 		row.ScheduleKind, row.ScheduleSpec,
 		row.Body, row.Priority, row.Status, nullIfEmpty(row.ExpiresAt),
@@ -175,11 +235,7 @@ func (s *Store) InsertAgentSchedule(ctx context.Context, row AgentSchedule) erro
 		row.CreatedAt,
 		row.CreatedBy, row.MaxRetries, row.OnFail, nullIfEmpty(row.NextRun),
 		row.JobType, row.JobPayload,
-	)
-	if err != nil {
-		return fmt.Errorf("insert agent_schedules: %w", err)
 	}
-	return nil
 }
 
 // ValidateAgentSchedule is the shared domain rule for every producer of an
@@ -296,13 +352,10 @@ func (s *Store) ListAgentSchedules(ctx context.Context, agentID string) ([]Agent
 // GET /api/schedules (TASKS/scheduling/09-operator-http-api.md) -- the
 // operator HTTP surface is the first caller that needs a cross-agent view;
 // every other existing caller of this table (durable_wake.go, the
-// go-scheduler StoreAdapter, the reflex hook, managed_durable_configs.go)
-// is agent-scoped by construction and has no need for it. Deliberately not
-// added to the AgentStateStore interface above: that interface exists to
-// let a future per-agent-file backend swap in for the per-agent state
-// tables, and "list every agent's schedules in one call" is not a
-// per-agent-state concept that backend would need to reason about --
-// it's a plain operator-surface convenience specific to the central DB.
+// go-scheduler StoreAdapter, and the reflex hook) is agent-scoped by
+// construction and has no need for it. Deliberately not added to the
+// AgentStateStore interface above because it is a plain operator-surface
+// convenience specific to the central DB.
 func (s *Store) ListAllAgentSchedules(ctx context.Context) ([]AgentSchedule, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+agentScheduleColumns+`
@@ -514,17 +567,9 @@ func (s *Store) backfillScheduleNextRun(ctx context.Context, now time.Time) erro
 
 // ComputeAgentScheduleNextRun computes the next-fire time for a cron/
 // one_shot schedule given its kind/spec, as of now. Factored out of
-// backfillScheduleNextRun (above) so a schedule producer that inserts a
-// genuinely new row mid-process (managed_durable_configs.go's
-// syncManagedDurableAgentSchedule is the one real caller today) can compute
-// a usable next_run at insert time, instead of leaving it NULL until the
-// next process restart's backfillScheduleNextRun pass — see that function's
-// call site for the full finding (TASKS/scheduling/
-// 05-engine-wiring-and-full-replace.md's Work Log) on why a NULL next_run
-// on a freshly-synced row is a real, not hypothetical, gap: backfillScheduleNextRun
-// only runs once, at Store.New() boot time, strictly before
-// SyncManagedDurableAgentConfigs (container.go) ever gets a chance to
-// upsert a schedule row for the first time.
+// backfillScheduleNextRun (above) so any schedule producer that inserts a
+// genuinely new row mid-process can compute a usable next_run immediately,
+// instead of leaving it NULL until the next process restart.
 //
 // one_shot rows: no independent target-time encoding exists in spec today
 // (see backfillScheduleNextRun's own doc comment) — "now" matches the

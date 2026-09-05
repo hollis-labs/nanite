@@ -13,10 +13,8 @@ import (
 //
 // The file-based agent runtime (TASKS/adhoc/01-eliminate-file-based-agent-
 // runtime.md) is eliminated: there is no more deterministic "file-<slug>"
-// fallback identity. d.ID is either a real, stamped agent_profiles UUID (a
-// managed file already carrying `id:` frontmatter) or empty (an unstamped
-// definition, e.g. an internal builtin seed profile that has never been
-// ingested into a DB row yet) -- the standard agent-creation path
+// fallback identity. d.ID is either an explicitly imported identity or empty
+// (for example, an internal builtin seed profile not yet in the DB) -- the standard agent-creation path
 // (store.CreateAgent, called from upsertAgentDef) mints a fresh UUID for the
 // empty case exactly the way it does for any other newly created agent.
 func (d *Definition) ToProfile() *store.AgentProfile {

@@ -24,8 +24,8 @@ func TestToStoreSkill(t *testing.T) {
 
 	sk := def.ToStoreSkill()
 
-	if sk.ID != "file-go-lint" {
-		t.Errorf("ID = %q, want %q", sk.ID, "file-go-lint")
+	if sk.ID != "" {
+		t.Errorf("ID = %q, want empty so CreateSkill mints a UUID", sk.ID)
 	}
 	if sk.Name != "Go Lint" {
 		t.Errorf("Name = %q", sk.Name)
@@ -40,7 +40,7 @@ func TestToStoreSkill(t *testing.T) {
 		t.Errorf("SourceTier = %q, want %q (from Definition.Source)", sk.SourceTier, "project")
 	}
 	if !sk.Enabled {
-		t.Error("Enabled should be true for file-based skills")
+		t.Error("Enabled should be true")
 	}
 	if sk.InputSchema != "{}" {
 		t.Errorf("InputSchema = %q, want %q", sk.InputSchema, "{}")
@@ -104,31 +104,5 @@ func TestToStoreSkill_InputSchemaFromParameters(t *testing.T) {
 	required, ok := schema["required"].([]any)
 	if !ok || len(required) != 1 || required[0] != "target" {
 		t.Errorf("required = %v, want [\"target\"]", schema["required"])
-	}
-}
-
-func TestIsFileBasedID(t *testing.T) {
-	tests := []struct {
-		id   string
-		want bool
-	}{
-		{"file-go-lint", true},
-		{"file-", false},
-		{"uuid-1234", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		if got := IsFileBasedID(tt.id); got != tt.want {
-			t.Errorf("IsFileBasedID(%q) = %v, want %v", tt.id, got, tt.want)
-		}
-	}
-}
-
-func TestSlugFromFileID(t *testing.T) {
-	if got := SlugFromFileID("file-go-lint"); got != "go-lint" {
-		t.Errorf("SlugFromFileID = %q, want %q", got, "go-lint")
-	}
-	if got := SlugFromFileID("not-file"); got != "" {
-		t.Errorf("SlugFromFileID = %q, want empty", got)
 	}
 }

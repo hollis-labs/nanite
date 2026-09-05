@@ -6,24 +6,19 @@ package service
 // agent without creating an import cycle (store → agent → store is the
 // cycle; service sits above both).
 //
-// Auto-ingestion is called from NewContainer after Discover() returns.
-// It makes the DB the runtime source of truth: files are the import path,
-// DB is where the runtime reads from.
+// Auto-ingestion is called from NewContainer for compiled-in seed definitions
+// and any definitions supplied by an adapter extension. It makes the DB the
+// runtime source of truth.
 //
 // TASKS/phase-1/08 ("Kill the file-reingest-on-boot pattern, in full"):
 // AutoIngestAgents runs unconditionally on every boot, but once a def has
 // already been ingested into a DB row, that row's content is frozen against
-// further boot-time file-parse passes -- the file stays the *first-ingest*
-// path, not a standing sync. The one exception is a genuine provenance
+// further boot-time seed passes. The one exception is a genuine provenance
 // transition (existing.Source != the incoming def's Source, e.g. the
 // historical builtin->internal migration flip, CW-20260512-0111) -- that's
 // a deliberate, one-time reclassification, not an ordinary repeated boot,
-// so it still content-syncs once. A real, deliberate re-import (an agent
-// edited through the managed-agent write path,
-// AgentConfigService.Update/writeManaged/SaveManagedAgentProfile, all of
-// which call IngestAgentDefinition directly, not through the boot-time
-// AutoIngestAgents pass) is unaffected by the freeze -- see upsertAgentDef's
-// bootPass parameter.
+// so it still content-syncs once. Operator edits use AgentConfigService's
+// direct database path and never re-import a definition file.
 //
 // TASKS/skills/01: this file used to carry the skill-side counterpart,
 // AutoIngestSkills/upsertSkillDef/resolveSkillModeIDs, feeding
@@ -54,15 +49,9 @@ import (
 //   - def.Source == "plugin" → default_trust_tier = "untrusted"
 //   - other sources          → default_trust_tier = "normal" (preserved)
 //
-// A per-definition failure leaves that agent visible via file discovery
-// (agentServiceImpl.List/Get read fileDefs directly) but with no backing
-// agent_profiles row — a real gap, not a cosmetic one: anything that needs
-// the DB row (durable-agent apply, copy-to-managed, FK children) breaks for
-// it. CW-20260815-0009 found exactly this happen with zero operator-visible
-// signal beyond a per-item slog.Warn easy to miss in startup noise. In
-// addition to that per-item Warn, emit one aggregate slog.Error naming every
-// failed slug + reason when any occur, so "N of M agent files failed to
-// ingest" is discoverable from logs alone — no DB query required.
+// A per-definition failure leaves that seed absent from agent_profiles. In
+// addition to the per-item warning, emit one aggregate error naming every
+// failed slug and reason.
 //
 // knownTools, when non-nil, is the set of currently-registered tool names
 // (builtins + live MCP discovery) used to validate every def.RoleTools /
@@ -91,7 +80,7 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools m
 			continue
 		}
 		considered++
-		if err := upsertAgentDef(st, def, true /* bootPass: freeze already-ingested rows */); err != nil {
+		if err := upsertAgentDef(st, def); err != nil {
 			slog.Warn("service: auto-ingest agent", "slug", def.Slug, "err", err)
 			failures = append(failures, fmt.Sprintf("%s: %v", def.Slug, err))
 			continue
@@ -111,7 +100,7 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools m
 		}
 	}
 	if len(failures) > 0 {
-		slog.Error("service: agent auto-ingest failed for one or more files — these agents are file-discoverable but have no working agent_profiles row until fixed and the service is restarted",
+		slog.Error("service: one or more agent seed definitions failed to ingest into agent_profiles",
 			"failed", len(failures), "considered", considered, "succeeded", count, "discovered", len(defs), "failures", failures)
 	}
 	if len(unknownToolRefs) > 0 {
@@ -146,37 +135,13 @@ func unknownDeclaredTools(def *agentpkg.Definition, knownTools map[string]bool) 
 	return bad
 }
 
-// IngestAgentDefinition is the explicit, deliberate reimport path -- called
-// by AgentConfigService.writeManaged/SaveManagedAgentProfile immediately
-// after a managed agent's file is written, so the edit that was just made
-// takes effect in the DB right away. Unlike AutoIngestAgents' boot-time bulk
-// pass, this always content-syncs the row (bootPass=false) -- it is the one
-// legitimate "pull this file's content into the DB" action TASKS/phase-1/08
-// preserves, not the standing every-boot sync it kills.
-func IngestAgentDefinition(st *store.Store, def *agentpkg.Definition) error {
-	if def == nil || def.Slug == "" {
-		return fmt.Errorf("definition slug is required")
-	}
-	return upsertAgentDef(st, def, false /* bootPass: explicit reimport always syncs */)
-}
-
 // upsertAgentDef inserts or updates one agent_profiles row from a Definition.
 // Uses ToProfile() for field mapping; applies H1 trust tier; sets ingestion metadata.
 //
-// bootPass distinguishes the two legitimate callers (TASKS/phase-1/08):
-//   - true  (AutoIngestAgents' boot-time bulk pass): once a row already
-//     exists under its current source, content sync (UpdateAgent, plus the
-//     secondary seedProcedures/seedRoleToolsFromIngest passes) is skipped --
-//     the DB is authoritative, the file is not re-synced on every process
-//     start. The one exception is a genuine provenance transition (the
-//     existing row's source differs from this def's source) -- that's a
-//     deliberate one-time reclassification (e.g. the historical
-//     builtin->internal migration flip), not an ordinary repeated boot, so
-//     it still syncs once.
-//   - false (IngestAgentDefinition's explicit reimport): always syncs,
-//     regardless of whether a row already exists -- this is the deliberate
-//     "the operator/API just edited this file, commit it" action.
-func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) error {
+// Once a row exists under the same source, the seed pass leaves its content
+// and capability children untouched. A source transition syncs once for
+// historical migrations such as builtin -> internal.
+func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// H1 trust: user/plugin-dropped files are untrusted until promoted.
@@ -196,12 +161,8 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 	profile.OriginSystem = "nanite"
 	profile.Format = "markdown"
 
-	// Identity resolution. A managed file stamped with a UUID (`id:`) owns a
-	// stable identity that survives slug renames — look it up by ID first so a
-	// renamed file updates the existing row (and its FK children) instead of
-	// colliding on a fresh insert. Fall back to slug for unstamped
-	// definitions (e.g. an internal builtin seed profile with no `id:`
-	// frontmatter, not yet ingested).
+	// Imported definitions may supply an explicit identity. Otherwise resolve
+	// by slug and let CreateAgent mint a UUID for a new seed.
 	var existing *store.AgentProfile
 	if def.ID != "" {
 		if row, err := st.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.ID); err == nil {
@@ -215,15 +176,12 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 	}
 
 	if existing == nil {
-		// Unstamped definitions (def.ID == "", so profile.ID == "" too --
+		// Definitions without IDs (def.ID == "", so profile.ID == "" too --
 		// see Definition.ToProfile) get a minted DB UUID here, through the
 		// exact same store.CreateAgent path any other newly created agent
 		// goes through (TASKS/adhoc/01-eliminate-file-based-agent-runtime.md
-		// -- this is now the one-time seed for the 9 internal builtin
-		// profiles: no more parallel "file-<slug>" runtime identity, no
-		// special-casing). A managed file stamped with a real UUID already
-		// carries it in profile.ID and CreateAgent uses it as-is, so
-		// reflex/known-tool/boot-plan FKs resolve correctly from creation.
+		// -- this is the one-time seed for the internal builtin profiles:
+		// no parallel synthetic runtime identity or special-casing).
 		profile.Kind = "internal"
 		profile.CapabilitiesJSON = "[]"
 		profile.LimitsJSON = "{}"
@@ -247,16 +205,10 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 		}
 		// role_id / consumer_id / model_id (Phase 1 items 02/03,
 		// architecture/01-agent-construction.md's composition model) have
-		// zero frontmatter representation -- def.ToProfile() always
-		// returns their empty zero-value for a file-backed definition.
-		// Without this, ANY reingest through this path -- every
-		// managed-agent edit via AgentConfigService.Create/Update,
-		// including ones with nothing to do with composition -- would
-		// silently wipe a value set through TASKS/phase-5/01-build-
-		// assignment-api.md's composition write path
-		// (store.UpdateAgentComposition) back to NULL the next time the
-		// agent's file was saved for an unrelated reason. Preserve the
-		// existing row's values here -- "DB wins" on the write side, same
+		// zero representation in Definition -- def.ToProfile() always returns
+		// their empty zero-value. Without this, a provenance-transition seed
+		// could silently wipe a value set through the composition write path.
+		// Preserve the existing row's values here -- "DB wins" on the write side, same
 		// as the read side (agentServiceImpl.Get/GetBySlug/List just
 		// return the row as-is now; see TASKS/adhoc/01-eliminate-file-
 		// based-agent-runtime.md).
@@ -273,9 +225,8 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 		// protocol-transport-config.md) are the identical shape: zero
 		// frontmatter representation, written via the direct-DB
 		// store.UpdateAgentACPConfig path (mirroring store.
-		// UpdateAgentComposition above). Without this preservation line,
-		// the very next unrelated managed-agent edit through this path
-		// would silently wipe an operator's protocol="acp" configuration
+		// UpdateAgentComposition above). Without this preservation line, a
+		// later provenance transition could wipe an operator's protocol="acp" configuration
 		// back to "" (native) — same regression this file's RoleID/
 		// ConsumerID/ModelID preservation exists to prevent.
 		profile.Protocol = existing.Protocol
@@ -285,7 +236,7 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 		// sync so a DB-side edit (however it landed) survives the next
 		// restart. sourceChanged (below) carves out the one legitimate
 		// exception: a genuine provenance transition still syncs once.
-		if !(bootPass && existing.Source == profile.Source) {
+		if existing.Source != profile.Source {
 			if err := st.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile); err != nil {
 				return fmt.Errorf("update: %w", err)
 			}
@@ -297,10 +248,10 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 	// should also run. It mirrors the UpdateAgent gate above so a frozen
 	// boot-time reingest doesn't re-stomp a GUI/API customization to either
 	// child table either.
-	freshContent := existing == nil || !bootPass || existing.Source != profile.Source
+	freshContent := existing == nil || existing.Source != profile.Source
 
-	// Apply H1 trust tier. Always reconcile — if a file was promoted to trusted
-	// and then the source changed (e.g., file moved to ~/.nanite/agents/), re-ingest
+	// Apply H1 trust tier. Always reconcile — if an import was promoted to trusted
+	// and then its source changes, a later seed
 	// should not silently leave it trusted. We only override when the tier is
 	// deterministic from Source; workspace overrides (workspace_role_trust) are
 	// not touched — they remain independent per the H1 design.

@@ -21,8 +21,8 @@ import (
 // Deliberately gated by requireAgent (existence only), NOT
 // requireMutableAgent. agent_known_tools/reflexes/procedures (the other
 // per-agent capability write endpoints in agent_capabilities.go) bundle
-// their writes with the managed-file-editability gate, but agent_tools is
-// a DB-only mechanism structurally independent of file-management status --
+// their writes with the profile-editability gate, but agent_tools is
+// structurally independent of profile ownership --
 // and the internal/embedded agents (worker, default, planner, ...) that
 // most need a fresh grant once known_tools gains a new entry (per 05's
 // Work Log item 4 -- there is no more live "unrestricted" bypass for a

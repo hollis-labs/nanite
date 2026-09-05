@@ -44,11 +44,8 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 
 	// --- v2 field validation ---
 
-	// 4a. Validate slug (GO-AGENT-001): the slug is later joined into a
-	// managed-config filesystem path (agent.ManagedAgentPath) — reject an
-	// unsafe value here so the HTTP layer returns a clean
-	// `400 validation_failed` instead of the caller discovering the
-	// rejection at the filesystem layer. Empty is tolerated here (a blank
+	// 4a. Validate slug: URL-safe identifiers are shared by DB lookups and API
+	// routes. Empty is tolerated here (a blank
 	// slug on Update falls back to the existing agent's slug at the service
 	// layer, internal/service.AgentConfigService.Update; Create's HTTP
 	// handler already rejects an empty slug before validation runs).

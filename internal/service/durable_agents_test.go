@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -56,6 +57,321 @@ func newDurableAgentServiceTestStore(t *testing.T) *store.Store {
 	}
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 	return st
+}
+
+func newLoomDurableFixture(t *testing.T, st *store.Store) (*store.AgentProfile, *store.DurableAgentInstance) {
+	t.Helper()
+	profile := &store.AgentProfile{
+		Name: "Loom Curator", Slug: loomCuratorDurableSlug, SystemPrompt: "Curate Loom fragments.", Durable: true,
+	}
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	return profile, &store.DurableAgentInstance{
+		Name: "Loom Curator", Slug: loomCuratorDurableSlug, ProfileID: profile.ID,
+		LifecycleClass: store.DurableAgentClassProcess, LaunchSourceType: store.DurableAgentLaunchProcessTick,
+	}
+}
+
+type failOnceBuiltinScheduleStore struct {
+	DurableAgentStore
+	mu       sync.Mutex
+	attempts int
+	err      error
+}
+
+func (s *failOnceBuiltinScheduleStore) InsertAgentScheduleIfNameMissing(ctx context.Context, row store.AgentSchedule) (bool, error) {
+	s.mu.Lock()
+	s.attempts++
+	attempt := s.attempts
+	s.mu.Unlock()
+	if attempt == 1 {
+		return false, s.err
+	}
+	return s.DurableAgentStore.InsertAgentScheduleIfNameMissing(ctx, row)
+}
+
+type pauseAfterInstanceCreateStore struct {
+	DurableAgentStore
+	once     sync.Once
+	inserted chan struct{}
+	release  chan struct{}
+}
+
+type pauseAfterInstanceListStore struct {
+	DurableAgentStore
+	once    sync.Once
+	listed  chan struct{}
+	proceed chan struct{}
+}
+
+func (s *pauseAfterInstanceListStore) ListDurableAgentInstances(ctx context.Context, includeArchived bool) ([]store.DurableAgentInstance, error) {
+	instances, err := s.DurableAgentStore.ListDurableAgentInstances(ctx, includeArchived)
+	if err != nil {
+		return nil, err
+	}
+	wait := false
+	s.once.Do(func() {
+		wait = true
+		close(s.listed)
+	})
+	if wait {
+		<-s.proceed
+	}
+	return instances, nil
+}
+
+func (s *pauseAfterInstanceCreateStore) CreateDurableAgentInstance(ctx context.Context, inst *store.DurableAgentInstance) error {
+	if err := s.DurableAgentStore.CreateDurableAgentInstance(ctx, inst); err != nil {
+		return err
+	}
+	wait := false
+	s.once.Do(func() {
+		wait = true
+		close(s.inserted)
+	})
+	if wait {
+		<-s.release
+	}
+	return nil
+}
+
+func TestDurableAgentCreateProvisionsLoomCuratorBuiltinSchedule(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	profile := &store.AgentProfile{
+		Name: "Loom Curator", Slug: "loom-curator", SystemPrompt: "Curate Loom fragments.", Durable: true,
+	}
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	inst := &store.DurableAgentInstance{
+		Name: "Loom Curator", Slug: "loom-curator", ProfileID: profile.ID,
+		LifecycleClass: store.DurableAgentClassProcess, LaunchSourceType: store.DurableAgentLaunchProcessTick,
+	}
+	svc := NewDurableAgentService(st)
+	if err := svc.Create(context.Background(), inst); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	schedules, err := st.ListAgentSchedules(context.Background(), profile.ID)
+	if err != nil {
+		t.Fatalf("ListAgentSchedules: %v", err)
+	}
+	if len(schedules) != 1 {
+		t.Fatalf("schedules = %d, want one builtin Loom schedule: %+v", len(schedules), schedules)
+	}
+	got := schedules[0]
+	if got.Name != "lint-and-export" || got.ScheduleKind != store.ScheduleKindCron || got.ScheduleSpec != "0 3 * * *" {
+		t.Fatalf("builtin schedule = %+v", got)
+	}
+	if wantID := builtinDurableAgentScheduleID(profile.ID, loomLintExportName); got.ID != wantID {
+		t.Fatalf("builtin schedule ID = %q, want stable legacy ID %q", got.ID, wantID)
+	}
+	if got.NextRun == "" || got.CreatedBy != "builtin" {
+		t.Fatalf("builtin schedule missing live next_run/provenance: %+v", got)
+	}
+	for _, want := range []string{"loom_bundle_conformance", "message_*", "loom_export_bundle"} {
+		if !strings.Contains(got.Body, want) {
+			t.Errorf("builtin schedule body missing %q: %q", want, got.Body)
+		}
+	}
+	before := got
+	if provisionErr := svc.(*durableAgentService).provisionBuiltinDurableSchedules(context.Background(), inst); provisionErr != nil {
+		t.Fatalf("repeat provisioning: %v", provisionErr)
+	}
+	after, err := st.ListAgentSchedules(context.Background(), profile.ID)
+	if err != nil || len(after) != 1 || after[0] != before {
+		t.Fatalf("repeat provisioning was not idempotent: before=%+v after=%+v err=%v", before, after, err)
+	}
+}
+
+func TestDurableAgentCreatePreservesCustomizedLoomCuratorSchedule(t *testing.T) {
+	ctx := context.Background()
+	st := newDurableAgentServiceTestStore(t)
+	profile := &store.AgentProfile{
+		Name: "Loom Curator", Slug: "loom-curator", SystemPrompt: "Curate Loom fragments.", Durable: true,
+	}
+	if err := st.CreateAgent(ctx, profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	custom := store.AgentSchedule{
+		ID: "operator-custom-loom-schedule", AgentID: profile.ID, Name: "lint-and-export",
+		ScheduleKind: store.ScheduleKindCron, ScheduleSpec: "15 4 * * 1", Body: "Operator-customized body.",
+		Priority: 42, Status: store.ScheduleStatusPaused, CreatedBy: "operator", NextRun: "2030-01-07T04:15:00Z",
+		MaxRetries: 9, OnFail: store.ScheduleOnFailNotify, JobType: store.ScheduleJobTypeDurableAgentWake,
+		JobPayload: `{"custom":true}`,
+	}
+	if err := st.InsertAgentSchedule(ctx, custom); err != nil {
+		t.Fatalf("InsertAgentSchedule: %v", err)
+	}
+	before, err := st.GetAgentSchedule(ctx, custom.ID)
+	if err != nil {
+		t.Fatalf("GetAgentSchedule before: %v", err)
+	}
+
+	inst := &store.DurableAgentInstance{
+		Name: "Loom Curator", Slug: "loom-curator", ProfileID: profile.ID,
+		LifecycleClass: store.DurableAgentClassProcess, LaunchSourceType: store.DurableAgentLaunchProcessTick,
+	}
+	svc := NewDurableAgentService(st)
+	if createErr := svc.Create(ctx, inst); createErr != nil {
+		t.Fatalf("Create: %v", createErr)
+	}
+	if _, listErr := svc.List(ctx, false); listErr != nil {
+		t.Fatalf("List reconciliation: %v", listErr)
+	}
+	after, err := st.GetAgentSchedule(ctx, custom.ID)
+	if err != nil {
+		t.Fatalf("GetAgentSchedule after: %v", err)
+	}
+	if *after != *before {
+		t.Fatalf("builtin provisioning overwrote customized schedule:\n before=%+v\n  after=%+v", before, after)
+	}
+	schedules, err := st.ListAgentSchedules(ctx, profile.ID)
+	if err != nil || len(schedules) != 1 {
+		t.Fatalf("schedules after create = %+v, %v; want only customized row", schedules, err)
+	}
+}
+
+func TestDurableAgentCanceledCreateRepairsMissingBuiltinScheduleDuringReconcile(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	profile, inst := newLoomDurableFixture(t, st)
+	svc := NewDurableAgentService(st)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := svc.Create(canceled, inst); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Create error = %v, want context.Canceled after instance commit", err)
+	}
+	instances, err := st.ListDurableAgentInstances(context.Background(), true)
+	if err != nil || len(instances) != 1 {
+		t.Fatalf("committed instances = %+v, %v; want one positive-control partial instance", instances, err)
+	}
+	before, err := st.ListAgentSchedules(context.Background(), profile.ID)
+	if err != nil || len(before) != 0 {
+		t.Fatalf("schedules before recovery = %+v, %v; want deterministic missing-schedule case", before, err)
+	}
+
+	if _, listErr := svc.List(context.Background(), false); listErr != nil {
+		t.Fatalf("List reconciliation: %v", listErr)
+	}
+	after, err := st.ListAgentSchedules(context.Background(), profile.ID)
+	if err != nil || len(after) != 1 || after[0].Name != loomLintExportName {
+		t.Fatalf("schedules after reconciliation = %+v, %v; want repaired builtin", after, err)
+	}
+}
+
+func TestDurableAgentCreateRetryRepairsTransientBuiltinScheduleFailure(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	profile, inst := newLoomDurableFixture(t, st)
+	injected := errors.New("injected transient schedule write failure")
+	faults := &failOnceBuiltinScheduleStore{DurableAgentStore: st, err: injected}
+	svc := NewDurableAgentService(faults)
+
+	if err := svc.Create(context.Background(), inst); !errors.Is(err, injected) {
+		t.Fatalf("first Create error = %v, want injected schedule failure", err)
+	}
+	before, err := st.ListAgentSchedules(context.Background(), profile.ID)
+	if err != nil || len(before) != 0 {
+		t.Fatalf("schedules before retry = %+v, %v; want committed partial state", before, err)
+	}
+	if retryErr := svc.Create(context.Background(), inst); retryErr != nil {
+		t.Fatalf("idempotent Create retry: %v", retryErr)
+	}
+	after, err := st.ListAgentSchedules(context.Background(), profile.ID)
+	if err != nil || len(after) != 1 || after[0].Name != loomLintExportName {
+		t.Fatalf("schedules after retry = %+v, %v; want repaired builtin", after, err)
+	}
+	invalid := *inst
+	invalid.LifecycleClass = "not-a-lifecycle-class"
+	if err := svc.Create(context.Background(), &invalid); err == nil {
+		t.Fatal("different invalid Create request was masked as an idempotent retry")
+	}
+}
+
+func TestDurableAgentConcurrentCreateAndReconcileProvisionOneBuiltinSchedule(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	profile, inst := newLoomDurableFixture(t, st)
+	paused := &pauseAfterInstanceCreateStore{
+		DurableAgentStore: st,
+		inserted:          make(chan struct{}),
+		release:           make(chan struct{}),
+	}
+	svc := NewDurableAgentService(paused)
+	var releaseOnce sync.Once
+	releaseCreate := func() { releaseOnce.Do(func() { close(paused.release) }) }
+	defer releaseCreate()
+	createDone := make(chan error, 1)
+	go func() {
+		createDone <- svc.Create(context.Background(), inst)
+	}()
+	<-paused.inserted
+
+	const reconcilers = 24
+	reconcileErrs := make(chan error, reconcilers)
+	var reconcileWG sync.WaitGroup
+	for i := 0; i < reconcilers; i++ {
+		reconcileWG.Add(1)
+		go func() {
+			defer reconcileWG.Done()
+			_, err := svc.List(context.Background(), false)
+			reconcileErrs <- err
+		}()
+	}
+	reconcileWG.Wait()
+	close(reconcileErrs)
+	for err := range reconcileErrs {
+		if err != nil {
+			t.Fatalf("concurrent reconciliation: %v", err)
+		}
+	}
+	releaseCreate()
+	if err := <-createDone; err != nil {
+		t.Fatalf("concurrent Create: %v", err)
+	}
+
+	schedules, err := st.ListAgentSchedules(context.Background(), profile.ID)
+	if err != nil || len(schedules) != 1 || schedules[0].Name != loomLintExportName {
+		t.Fatalf("schedules after concurrent create/reconcile = %+v, %v; want exactly one builtin", schedules, err)
+	}
+}
+
+func TestDurableAgentReconcileRepairsCanceledConcurrentCreateAfterStaleSnapshot(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	profile, inst := newLoomDurableFixture(t, st)
+	paused := &pauseAfterInstanceListStore{
+		DurableAgentStore: st,
+		listed:            make(chan struct{}),
+		proceed:           make(chan struct{}),
+	}
+	reconcileSvc := NewDurableAgentService(paused)
+	reconcileDone := make(chan error, 1)
+	go func() {
+		_, err := reconcileSvc.List(context.Background(), false)
+		reconcileDone <- err
+	}()
+	<-paused.listed
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := NewDurableAgentService(st).Create(canceled, inst); !errors.Is(err, context.Canceled) {
+		close(paused.proceed)
+		t.Fatalf("concurrent Create error = %v, want context.Canceled", err)
+	}
+	before, err := st.ListAgentSchedules(context.Background(), profile.ID)
+	if err != nil || len(before) != 0 {
+		close(paused.proceed)
+		t.Fatalf("schedules before stale reconciliation resumes = %+v, %v; want missing", before, err)
+	}
+	close(paused.proceed)
+	if reconcileErr := <-reconcileDone; reconcileErr != nil {
+		t.Fatalf("stale-snapshot reconciliation: %v", reconcileErr)
+	}
+
+	schedules, err := st.ListAgentSchedules(context.Background(), profile.ID)
+	if err != nil || len(schedules) != 1 || schedules[0].Name != loomLintExportName {
+		t.Fatalf("schedules after stale-snapshot recovery = %+v, %v; want exactly one builtin", schedules, err)
+	}
 }
 
 // TestDurableAgentServiceLifecycleRequests is a Phase 0 item 2

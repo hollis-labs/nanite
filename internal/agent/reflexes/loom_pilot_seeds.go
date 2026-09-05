@@ -13,10 +13,8 @@ import (
 
 // AgentReflexSeed declares an AgentID-scoped reflex keyed by the target
 // agent's SLUG rather than its resolved agent_profiles.id — the id is
-// not known until agent.Discover + ReconcileManagedAgentIDs +
-// AutoIngestAgents have run against .nanite/agents/*.md (container.go's
-// boot sequence resolves it before SeedAgentReflexesBySlug is called;
-// see container.go's ordering comment next to the call site). This is
+// resolved from the database after compiled-in first-run seeds have been
+// applied (see container.go's ordering comment next to the call site). This is
 // the AgentID-scoped sibling of BaseReflexSeed (class-scoped): where
 // BaseSeeds()/SeedBaseReflexes() idempotently attach reflexes to every
 // agent of a class, AgentReflexSeed/SeedAgentReflexesBySlug idempotently
@@ -60,9 +58,8 @@ const wikiOrLoomToolPattern = `^(wiki_|loom_)`
 
 // LoomPilotReflexSeeds returns CW-20260816-0023's two-reflex pilot,
 // scoped to Loom Curator's and Loom Weaver's resolved agent profiles —
-// see the ticket's Step 1 findings for why: .nanite/config.yaml's
-// project-agent personas (nanite-backend, nanite-frontend, ...) never
-// receive an agent_profiles row and are never evaluated by
+// see the ticket's Step 1 findings for why: the former project-file personas
+// (nanite-backend, nanite-frontend, ...) have no agent_profiles rows and are never evaluated by
 // reflexEngine.Evaluate, so they cannot host these reflexes; Curator
 // and Weaver are the only reflex-engine-compatible, non-portfolio-wide
 // candidates, accepted here as a first structural dry-run despite the
@@ -173,15 +170,10 @@ func LoomPilotReflexSeeds() []AgentReflexSeed {
 // last_fired_at survive repeated boots and an operator's pause/delete/
 // re-priority edits are never silently undone.
 //
-// A seed whose AgentSlug isn't in agent_profiles yet (sql.ErrNoRows
-// from GetAgentBySlug) is skipped with a warning, not treated as
-// fatal: this mirrors SyncManagedDurableAgentConfigs's per-config
-// warn-and-continue handling of the same "profile not ingested on
-// this boot" condition, since agent.Discover + ReconcileManagedAgentIDs
-// + AutoIngestAgents may not have processed the seed's .nanite/agents/
-// file yet in every environment this seeder runs in (e.g. before a
-// fresh checkout's first full boot). Re-running this function on a
-// later boot, once the profile exists, seeds it then.
+// A seed whose AgentSlug isn't in agent_profiles yet (sql.ErrNoRows from
+// GetAgentBySlug) is skipped with a warning, not treated as fatal. Re-running
+// this function on a later boot, once the profile has been provisioned,
+// seeds it then.
 //
 // Returns the number of newly inserted rows.
 func SeedAgentReflexesBySlug(ctx context.Context, st *store.Store, seeds []AgentReflexSeed, logger *slog.Logger) (int, error) {

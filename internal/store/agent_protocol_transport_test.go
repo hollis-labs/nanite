@@ -114,9 +114,8 @@ func TestCreateAgent_TransportRequiresACPProtocol(t *testing.T) {
 
 // TestUpdateAgentACPConfig_DirectWrite confirms the store.UpdateAgentACPConfig
 // direct-DB write path (mirroring UpdateAgentComposition's RoleID/ConsumerID/
-// ModelID precedent) sets/clears protocol/transport independent of the
-// managed-file round-trip, and that every OTHER existing agent's row is
-// left completely untouched by it.
+// ModelID precedent) sets/clears protocol/transport without rewriting other
+// profile fields, and leaves every OTHER existing agent's row untouched.
 func TestUpdateAgentACPConfig_DirectWrite(t *testing.T) {
 	s := newTestStore(t)
 

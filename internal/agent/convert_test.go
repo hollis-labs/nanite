@@ -181,11 +181,6 @@ func TestDefinition_ToProfile_Minimal(t *testing.T) {
 // agent-file mode concept to convert. TestDefinition_ToModes was removed
 // with it.
 
-// TestIsFileBasedID / TestOverlayDBFields / TestSlugFromFileID were removed
-// by TASKS/adhoc/01-eliminate-file-based-agent-runtime.md: the file-based
-// agent runtime (IsFileBasedID/SlugFromFileID/CanonicalID()'s "file-<slug>"
-// fallback, and the OverlayDBFields merge helper that existed solely to
-// patch DB-only columns onto a file-derived profile) no longer exists. See
-// TestDefinition_ToProfile / TestDefinition_ToProfile_Minimal above for the
-// replacement coverage (an unstamped Definition's ToProfile().ID is simply
-// empty now, not a synthetic alias).
+// The former synthetic-ID and file-overlay tests were removed with the
+// parallel file runtime. The conversion tests above pin that an imported
+// definition has no identity until CreateAgent mints one.

@@ -167,17 +167,26 @@ Envelopes are structured UI cards injected into chat messages. The system has tw
 
 ## Nanite Agents
 
-Agent configuration for this project lives in `.nanite/config.yaml`. Roles load from `~/.nanite/roles/`, skills from `~/.nanite/skills/`, and per-agent project context from `.nanite/agents/`.
+Nanite runtime agent profiles and durable instances are stored in SQLite and
+managed through the Admin/API/self-tool surfaces. Compiled-in profiles are
+first-run seeds; project files under `.nanite/` are not read as agent
+definitions or durable-agent manifests. This repository has no
+`.nanite/config.yaml` agent catalog, and `Boot <agent>` is not a Nanite runtime
+resolution mechanism.
 
-**Available agents:**
+The former tracked durable-agent YAML catalog was removed outright, rather
+than retained as an implicit import path. Existing SQLite instances and
+schedules survive unchanged; their `managed_file` fields are historical
+provenance only. Provision new profiles and durable instances through their
+database-backed API surfaces. Creating Loom Curator is the one builtin
+exception for schedules: its creation path inserts the canonical
+`lint-and-export` row only when no schedule with that name already exists;
+thereafter the SQLite row is authoritative and operator customization is
+preserved.
 
-- `nanite-backend` — Go service development for the Nanite chat harness
-- `nanite-frontend` — React/TypeScript UI development for the chat interface
-- `nanite-plugin-dev` — Develop, audit, and maintain Nanite plugins and the plugin scaffold
-- `nanite-planner` — Strategic planning, scoping, and architecture decisions
-- `nanite-reviewer` — Code review for Nanite PRs
-
-**Boot a specific agent:** say `Boot nanite-plugin-dev` (or any agent above). The boot process reads `.nanite/config.yaml`, loads the listed roles and skills, and reads the per-agent context file.
+For local coding-session orchestration, follow `AGENTS.md` and the active
+session's instructions. Files under `.claude/agents/` belong to Claude Code's
+own subagent feature and are not Nanite runtime profiles.
 
 **Session state** (if present) lives in `.nanite/boot-prompt.md` — read it first when starting a new session.
 

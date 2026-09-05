@@ -10,9 +10,7 @@ import (
 
 // seedLoomPilotAgents creates loom-weaver (advisor) and loom-curator
 // (process) agent_profiles rows so GetAgentBySlug resolves the way it
-// would once container.go's boot sequence (agent.Discover +
-// ReconcileManagedAgentIDs + AutoIngestAgents) has ingested
-// .nanite/agents/loom-weaver.md / loom-curator.md.
+// would once the profiles have been provisioned in the database.
 func seedLoomPilotAgents(t *testing.T, st *store.Store) (weaverID, curatorID string) {
 	t.Helper()
 	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
@@ -137,14 +135,9 @@ func TestSeedAgentReflexesBySlug_SeedsLoomPilotPairIdempotently(t *testing.T) {
 }
 
 // TestSeedAgentReflexesBySlug_SkipsUningestedAgentGracefully proves the
-// "profile not ingested on this boot yet" case is a graceful skip, not
-// an error — the same warn-and-continue discipline
-// SyncManagedDurableAgentConfigs already uses for the analogous
-// schedule-seeding case (CW-20260816-0021). This matters because
-// SeedAgentReflexesBySlug runs on every container boot per
-// container.go's cadence, including boots before .nanite/agents/
-// loom-weaver.md / loom-curator.md have been ingested into
-// agent_profiles.
+// "profile not provisioned yet" case is a graceful skip, not an error.
+// This matters because SeedAgentReflexesBySlug runs on every container boot,
+// including clean databases where these optional profiles do not exist.
 func TestSeedAgentReflexesBySlug_SkipsUningestedAgentGracefully(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t) // no agent_profiles rows created at all

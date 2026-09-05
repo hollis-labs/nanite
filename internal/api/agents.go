@@ -34,8 +34,8 @@ func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, views)
 }
 
-// agentView decorates a stored profile with management metadata (class,
-// editability, file revision) for the GUI. nil-safe when AgentConfig is unset
+// agentView decorates a stored profile with database ownership metadata for
+// the GUI. Revision remains empty for wire compatibility. nil-safe when AgentConfig is unset
 // (lightweight test setups) — it falls back to source-only classification.
 func (a *API) agentView(p store.AgentProfile) AgentProfileView {
 	var class agentpkg.ManageClass
@@ -46,7 +46,7 @@ func (a *API) agentView(p store.AgentProfile) AgentProfileView {
 		revision = a.Services.AgentConfig.Revision(&p)
 		persisted = a.Services.AgentConfig.Persisted(&p)
 	} else {
-		class = agentpkg.Classification{}.Classify(p.Source, p.SourceRef)
+		class = agentpkg.Classification{}.Classify(p.Source)
 	}
 	return AgentProfileView{
 		AgentProfile:  p,
@@ -76,11 +76,11 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Source == "" {
 		req.Source = "user"
 	}
-	// source='internal' is reserved for file-sourced internal profiles
+	// source='internal' is reserved for compiled-in internal profiles
 	// (boot sync from internal/agent/builtin/profiles/). API-created agents
 	// cannot claim that provenance.
 	if req.Source == "internal" {
-		a.errorResp(w, http.StatusBadRequest, "source='internal' is reserved for file-sourced internal profiles; use source='user' (the default) or another non-reserved value")
+		a.errorResp(w, http.StatusBadRequest, "source='internal' is reserved for compiled-in internal profiles; use source='user' (the default) or another non-reserved value")
 		return
 	}
 
@@ -138,12 +138,8 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// role_id/consumer_id/model_id (Phase 5 item 01,
-	// TASKS/phase-5/01-build-assignment-api.md) are DB-only composition
-	// columns with zero frontmatter representation -- AgentConfigService.
-	// Create's managed-file write pipeline above cannot carry them (see
-	// store.UpdateAgentComposition's doc comment), so they're set via a
-	// direct, separate DB write once the profile row exists.
+	// role_id/consumer_id/model_id use the composition writer so pointer/FK
+	// validation remains shared with the assignment API.
 	if req.RoleID != "" || req.ConsumerID != "" || req.ModelID != "" {
 		if err := a.Services.Store.UpdateAgentComposition(r.Context(), res.Profile.ID, ptrOrNilString(req.RoleID), ptrOrNilString(req.ConsumerID), ptrOrNilString(req.ModelID)); err != nil {
 			a.errorResp(w, http.StatusBadRequest, err.Error())
@@ -205,18 +201,16 @@ func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	// Resolve through the AgentService (a plain DB lookup -- TASKS/adhoc/01-
-	// eliminate-file-based-agent-runtime.md removed the old legacy
-	// "file-<slug>" in-memory-definition resolution branch); the returned
-	// row's own Source/SourceRef drive classification below.
+	// Resolve through the AgentService; the stored provenance drives the
+	// database ownership classification below.
 	existing, err := a.Services.Agents.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
-	// Editability gate. Managed file-backed agents are writable in place;
-	// embedded internal and plugin/vendor agents are not — but instead of a
+	// Editability gate. Operator-owned agents are writable in place; embedded
+	// internal and plugin/vendor agents are not — but instead of a
 	// dead-end we tell the client whether a copy-to-managed path is offered.
 	if class := a.Services.AgentConfig.Classify(existing); !class.Editable() {
 		a.writeNotManaged(w, existing, class)
@@ -224,8 +218,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Snapshot the pre-edit profile so the write service has the original
-	// identity (ID), file path (SourceRef), and provenance to drive the
-	// in-place rewrite, rename, and optimistic-concurrency baseline.
+	// identity and provenance.
 	original := *existing
 
 	var req UpdateAgentRequest
@@ -324,19 +317,11 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Preserve the file's procedures across a profile edit — they are managed
-	// through the dedicated capability endpoints, not the profile body.
-	var procedures []agentpkg.ProcedureDefinition
-	if original.SourceRef != "" {
-		if def, err := agentpkg.ParseMDFile(original.SourceRef); err == nil {
-			procedures = def.Procedures
-		}
-	}
-	res, err := a.Services.AgentConfig.Update(&original, existing, procedures, req.Revision)
+	// Procedures are relational capability rows and are untouched by profile
+	// edits; no filesystem round-trip is needed to preserve them.
+	res, err := a.Services.AgentConfig.Update(&original, existing, nil, req.Revision)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrAgentRevisionConflict):
-			a.errorResp(w, http.StatusConflict, err.Error())
 		case errors.Is(err, service.ErrAgentNotManaged):
 			a.writeNotManaged(w, &original, a.Services.AgentConfig.Classify(&original))
 		default:
@@ -373,7 +358,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeNotManaged emits the standard 409 response for an attempt to mutate a
-// read-only agent, telling the client the management class, the file ref, and
+// read-only agent, telling the client the management class, provenance, and
 // whether a copy-to-managed ("make editable") path is offered instead of a
 // dead-end.
 func (a *API) writeNotManaged(w http.ResponseWriter, ag *store.AgentProfile, class agentpkg.ManageClass) {
@@ -384,7 +369,7 @@ func (a *API) writeNotManaged(w http.ResponseWriter, ag *store.AgentProfile, cla
 	case agentpkg.ManageClassPlugin:
 		msg = "agent is plugin/vendor-provided (read-only); copy it to the managed layer to edit"
 	case agentpkg.ManageClassExternal:
-		msg = "agent is not in a writable managed location (read-only); copy it to the managed layer to edit"
+		msg = "agent has external/imported provenance (read-only); copy it to the managed layer to edit"
 	}
 	a.jsonResp(w, http.StatusConflict, map[string]any{
 		"error":           "agent_not_managed",
@@ -396,8 +381,8 @@ func (a *API) writeNotManaged(w http.ResponseWriter, ag *store.AgentProfile, cla
 	})
 }
 
-// handleDeleteAgent removes a managed file-backed agent: the file, the DB
-// projection (and its FK children), and the live registry entry. Read-only
+// handleDeleteAgent removes an operator-managed database profile and its FK
+// children. Read-only
 // sources (internal/plugin/external) are rejected. The GUI gates this behind
 // an irreversible-confirmation dialog.
 func (a *API) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
@@ -422,8 +407,9 @@ func (a *API) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted", "slug": existing.Slug})
 }
 
-// handleCopyAgentToManaged forks a read-only agent (plugin/vendor/external)
-// into a fresh editable managed config with a new identity ("make editable").
+// handleCopyAgentToManaged forks a plugin/vendor/external agent into a fresh
+// editable managed config with a new identity ("make editable"). Internal
+// harness profiles are read-only but deliberately not copyable.
 func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	source, err := a.Services.Agents.Get(r.Context(), id)
@@ -431,16 +417,22 @@ func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
+	class := a.Services.AgentConfig.Classify(source)
+	if !class.CopyToManagedAllowed() {
+		if class.Editable() {
+			a.errorResp(w, http.StatusConflict, service.ErrAgentAlreadyManaged.Error())
+		} else {
+			a.writeNotManaged(w, source, class)
+		}
+		return
+	}
 	res, err := a.Services.AgentConfig.CopyToManaged(source, nil)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrAgentAlreadyManaged):
 			a.errorResp(w, http.StatusConflict, err.Error())
-		case errors.Is(err, service.ErrAgentNotIngested):
-			// Distinct from ErrAgentAlreadyManaged: the file classifies as a
-			// managed config but has no backing agent_profiles row (ingestion
-			// failed at startup). 409 would misreport it as a working config.
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
+		case errors.Is(err, service.ErrAgentNotManaged):
+			a.writeNotManaged(w, source, class)
 		case errors.Is(err, service.ErrManagedSlugExists):
 			a.errorResp(w, http.StatusConflict, err.Error())
 		default:

@@ -3,9 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,25 +15,17 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// TestSaveManagedDurableInstance_MissingProfileWrapsSQLNoRows is a
-// CW-20260815-0009 follow-up (Copilot review on PR #241): the actionable
-// error message added for a missing agent_profiles row must still wrap the
-// underlying sql.ErrNoRows via %w, not replace it with a bare string, so
-// errors.Is/diagnostics chains still work for callers.
-func TestSaveManagedDurableInstance_MissingProfileWrapsSQLNoRows(t *testing.T) {
-	a, _ := newTestAPI(t)
-
-	_, err := a.saveManagedDurableInstance(&store.DurableAgentInstance{
-		ProfileID: "does-not-exist",
-	}, false)
-	if err == nil {
-		t.Fatal("expected an error for a missing agent profile")
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("expected errors.Is(err, sql.ErrNoRows) to hold, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "auto-ingest agent") {
-		t.Fatalf("expected an actionable message pointing at startup ingestion logs, got: %v", err)
+func TestDurableAgentsAPI_MissingProfileNamesDatabaseProvisioning(t *testing.T) {
+	_, mux := newTestAPI(t)
+	body, _ := json.Marshal(CreateDurableAgentRequest{
+		Name: "Missing", Slug: "missing", ProfileID: "does-not-exist",
+	})
+	req := httptest.NewRequest("POST", "/api/durable-agents", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "create or import it through the agent API") {
+		t.Fatalf("missing profile = %d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -43,8 +33,7 @@ func TestSaveManagedDurableInstance_MissingProfileWrapsSQLNoRows(t *testing.T) {
 // regression test for the durable-agent sibling of GO-AGENT-001: a crafted
 // slug on PATCH/PUT /api/durable-agents/{id} (the rename-shaped update
 // handleUpdateDurableAgent performs at durable_agents.go:139-141) must be
-// rejected before any filesystem write, and the existing managed config
-// file must survive untouched.
+// rejected without changing the canonical database row or writing files.
 func TestDurableAgentsAPI_UpdateRejectsSlugTraversal(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Traversal Profile", Slug: "traversal-profile", SystemPrompt: "x"}
@@ -73,14 +62,6 @@ func TestDurableAgentsAPI_UpdateRejectsSlugTraversal(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
 		t.Fatalf("decode create: %v", err)
 	}
-	legitPath := filepath.Join(a.Services.ManagedConfigRoot, "durable-agents", "torque-supervisor-traversal.yaml")
-	if _, err := os.Stat(legitPath); err != nil {
-		t.Fatalf("precondition: legit managed config file missing: %v", err)
-	}
-	// Pre-fix, ManagedDurableAgentPath(configRoot, "../evil") would have
-	// joined to configRoot/evil.yaml — one level up from durable-agents/.
-	escapePath := filepath.Join(a.Services.ManagedConfigRoot, "evil.yaml")
-
 	for _, malicious := range []string{"../evil", "../../etc/evil", "a/b", "UPPER"} {
 		patch, _ := json.Marshal(UpdateDurableAgentRequest{Slug: &malicious})
 		req = httptest.NewRequest("PATCH", "/api/durable-agents/"+created.ID, bytes.NewReader(patch))
@@ -91,11 +72,12 @@ func TestDurableAgentsAPI_UpdateRejectsSlugTraversal(t *testing.T) {
 			t.Fatalf("rename with slug %q = %d, want 400; body=%s", malicious, w.Code, w.Body.String())
 		}
 	}
-	if _, err := os.Stat(escapePath); !os.IsNotExist(err) {
-		t.Fatalf("rejected rename wrote outside the managed durable-agents/ directory: %v", err)
+	persisted, err := a.Services.DurableAgents.Get(context.Background(), created.ID)
+	if err != nil || persisted.Slug != created.Slug {
+		t.Fatalf("rejected rename changed DB row: %#v, %v", persisted, err)
 	}
-	if _, err := os.Stat(legitPath); err != nil {
-		t.Fatalf("original managed config file missing after rejected rename attempts: %v", err)
+	if _, err := os.Stat(filepath.Join(a.Services.WorkingDir, ".nanite", "durable-agents")); !os.IsNotExist(err) {
+		t.Fatalf("durable API produced a filesystem projection: %v", err)
 	}
 }
 
@@ -161,6 +143,12 @@ func TestDurableAgentsAPI_CreateGetPatchArchive(t *testing.T) {
 	}
 	if archived.Status != store.DurableAgentStatusArchived {
 		t.Fatalf("archived status = %q", archived.Status)
+	}
+	if strings.Contains(archived.MetadataJSON, "managed_config_path") {
+		t.Fatalf("durable API injected filesystem metadata: %s", archived.MetadataJSON)
+	}
+	if _, err := os.Stat(filepath.Join(a.Services.WorkingDir, ".nanite", "durable-agents")); !os.IsNotExist(err) {
+		t.Fatalf("durable lifecycle produced a filesystem projection: %v", err)
 	}
 }
 

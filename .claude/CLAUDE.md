@@ -2,9 +2,9 @@
 
 ## nanite
 - If `.nanite/boot-prompt.md` exists, read it first for session context.
-- If the user says "Boot <agent>", look up the agent in `.nanite/config.yaml` under `agents:`. Load each role file from `~/.nanite/roles/` (using the `file:` path from `~/.nanite/config.yaml` role definitions), load the listed skills, and read the project context file from `.nanite/` if specified.
-- If the user says "Boot <role>" and no agent matches, fall back to loading that single role from `~/.nanite/roles/` by type directory (domain/, stack/, meta/).
-- After context compaction, re-read the active role and project context files.
+- Follow the repository `AGENTS.md` and the active session's instructions for coding work. There is no `.nanite/config.yaml` agent catalog to resolve `Boot <agent>` requests from.
+- Nanite runtime agent profiles and durable instances are database-backed. Do not treat `.nanite/agents/` or `.nanite/durable-agents/` as runtime configuration.
+- `.claude/agents/` contains Claude Code subagent definitions. It is a separate adapter concern and is not part of Nanite's runtime agent storage.
 - Do not guess when uncertain. Stop and ask.
 - Prefer focused, minimal output. No trailing summaries.
 - Sub-agent output stays in the sub-agent. Main context gets one-line confirmations.

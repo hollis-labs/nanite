@@ -698,10 +698,10 @@ func (a *API) requireAgent(w http.ResponseWriter, r *http.Request) (*store.Agent
 }
 
 // requireMutableAgent resolves the agent and enforces the managed-editability
-// gate used by all capability/reflex write endpoints. Managed file-backed
-// agents are now fully writable in place (their reflexes, known tools/skills,
-// procedures, and knowledge seeds persist against the DB projection keyed by
-// the agent's stamped UUID). Embedded internal and plugin/vendor agents are
+// gate used by all capability/reflex write endpoints. Operator-owned database
+// agents are writable in place (their reflexes, known tools/skills,
+// procedures, and knowledge seeds persist against the profile UUID).
+// Embedded internal and plugin/vendor agents are
 // rejected with a copy-to-managed affordance rather than a dead-end.
 func (a *API) requireMutableAgent(w http.ResponseWriter, r *http.Request) (*store.AgentProfile, bool) {
 	agent, ok := a.requireAgent(w, r)

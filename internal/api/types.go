@@ -110,20 +110,15 @@ type CreateAgentRequest struct {
 	// TASKS/phase-5/01-build-assignment-api.md) -- the composition-model
 	// FKs architecture/01-agent-construction.md names (agents.role_id ->
 	// roles(id), agents.consumer_id -> consumers(id), agents.model_id ->
-	// models(id)). These are DB-only columns with zero frontmatter
-	// representation at all -- the handler
-	// writes them via store.UpdateAgentComposition, a direct-DB step
-	// separate from AgentConfigService.Create's file-based write, not
-	// through this struct's other fields' usual store.AgentProfile path.
+	// models(id)). The handler writes them via store.UpdateAgentComposition
+	// so FK and pointer semantics are shared with the assignment API.
 	RoleID     string `json:"role_id"`
 	ConsumerID string `json:"consumer_id"`
 	ModelID    string `json:"model_id"`
 	// Protocol/Transport (TASKS/agent-host-acp/11-nanite-per-agent-protocol-
 	// transport-config.md) select which wire protocol/transport pairing
-	// this agent's CLI process launches through -- same "DB-only, zero
-	// frontmatter representation" shape as RoleID/ConsumerID/ModelID above,
-	// written the same way (store.UpdateAgentACPConfig, a direct-DB step
-	// separate from AgentConfigService.Create's file-based write). Empty
+	// this agent's CLI process launches through, written via
+	// store.UpdateAgentACPConfig. Empty
 	// means "use this provider's existing native protocol" (the default,
 	// preserving every pre-existing agent's behavior unchanged).
 	Protocol  string `json:"protocol"`
@@ -170,16 +165,13 @@ type UpdateAgentRequest struct {
 	// "native protocol," a pointer to a non-empty value sets it.
 	Protocol  *string `json:"protocol"`
 	Transport *string `json:"transport"`
-	// Revision is the optimistic-concurrency token the client loaded with the
-	// agent (the managed file's content hash). When set, the update is
-	// rejected with 409 if the on-disk file changed underneath. Empty skips
-	// the guard (back-compat).
+	// Revision is accepted for wire compatibility with older clients and is
+	// ignored now that updates are database-backed.
 	Revision string `json:"revision"`
 }
 
 // AgentProfileView wraps a store.AgentProfile with the computed management
-// metadata the GUI needs to decide editability and run the optimistic-
-// concurrency guard. The embedded profile flattens into the same JSON shape
+// metadata the GUI needs to decide editability. The embedded profile flattens into the same JSON shape
 // existing consumers expect; the extra fields are additive.
 type AgentProfileView struct {
 	store.AgentProfile
@@ -190,13 +182,10 @@ type AgentProfileView struct {
 	// CopyToManaged reports whether a read-only agent can be forked into the
 	// managed layer ("make editable").
 	CopyToManaged bool `json:"copy_to_managed"`
-	// Revision is the current optimistic-concurrency token (file hash).
+	// Revision is retained for wire compatibility and is always empty.
 	Revision string `json:"revision"`
 	// Persisted reports whether a real agent_profiles DB row backs this
-	// profile. False means the source file was discovered and parsed but
-	// failed to ingest into the database (see AutoIngestAgents / server
-	// startup logs) — the agent shows up here but isn't actually usable
-	// (e.g. durable-agent apply will fail to resolve it). CW-20260815-0009.
+	// profile. Database list/get results are always persisted.
 	Persisted bool `json:"persisted"`
 }
 

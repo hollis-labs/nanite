@@ -237,8 +237,8 @@ type AgentProfile struct {
 // column, since exhaustive grep confirmed nothing anywhere read the old
 // 2-value column for behavior (durable_wake.go's wakeSkipReason -- the
 // intended real consumer -- switched on lifecycle_class instead). 'instance'
-// is retired as a valid value; every pre-existing row (and every
-// .nanite/agents/*.md file) was migrated to 'fresh-per-wake' in lockstep.
+// is retired as a valid value; every pre-existing row was migrated to
+// 'fresh-per-wake' in lockstep.
 func validateAgentMultiAgentFields(a *AgentProfile) error {
 	switch a.ActivationMode {
 	case "", "singleton", "fresh-per-wake", "concurrent":
@@ -772,17 +772,10 @@ func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
 	return nil
 }
 
-// UpdateAgentComposition directly sets an agent's DB-only composition
+// UpdateAgentComposition sets an agent's composition
 // columns (role_id, consumer_id, model_id) -- see the RoleID/ConsumerID/
-// ModelID field doc comments above: all three have zero frontmatter
-// representation. That matters for writes, not just reads:
-// AgentConfigService.Create/Update's managed-agent write pipeline
-// (writeManaged -> file write -> file reparse -> IngestAgentDefinition ->
-// upsertAgentDef) always reconstructs its store.AgentProfile from a fresh
-// file parse, whose Definition has no role_id/consumer_id/model_id fields
-// at all -- so routing a composition write through that pipeline would
-// silently wipe these columns back to NULL. This is the one legitimate
-// direct-DB write path for them (TASKS/phase-5/01-build-assignment-api.md).
+// ModelID field doc comments above. This narrower writer provides the pointer
+// semantics and FK validation used by the assignment API.
 //
 // roleID/consumerID/modelID are each a *string: nil leaves that column
 // untouched; non-nil (including a pointer to "") sets or clears it. A
@@ -826,15 +819,9 @@ func (s *Store) UpdateAgentComposition(ctx context.Context, agentID string, role
 	return nil
 }
 
-// UpdateAgentACPConfig directly sets an agent's Protocol/Transport columns
+// UpdateAgentACPConfig sets an agent's Protocol/Transport columns
 // (TASKS/agent-host-acp/11-nanite-per-agent-protocol-transport-config.md),
-// mirroring UpdateAgentComposition's exact shape and for the identical
-// reason: like role_id/consumer_id/model_id, Protocol/Transport have zero
-// frontmatter representation in internal/agent's markdown Definition
-// format, so routing a write through AgentConfigService.Create/Update's
-// managed-file pipeline (write -> reparse -> IngestAgentDefinition) would
-// silently wipe them back to NULL on every save. This is the one
-// legitimate direct-DB write path for them.
+// mirroring UpdateAgentComposition's narrow partial-update shape.
 //
 // protocol/transport are each a *string: nil leaves that column untouched;
 // non-nil (including a pointer to "") sets or clears it. Validated against

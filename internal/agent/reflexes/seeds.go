@@ -359,9 +359,9 @@ func BaseSeeds() []BaseReflexSeed {
 		// dispatch_to_agent reflex rows. Two entries (documentor-mention,
 		// strategist-mention) are deliberately DROPPED, not migrated —
 		// both left `resolves_to.profile` empty in the old catalog
-		// because no matching agent profile exists (no `documentor.md`;
-		// `.nanite/agents/content-strategist.md` is a real but unrelated,
-		// narrower Glyph-editorial role) — see the task file's Work Log
+		// because no matching agent profile exists (the previously deployed
+		// content-strategist profile was a separate, narrower Glyph-editorial
+		// role) — see the task file's Work Log
 		// for the full phantom-entry accounting.
 		//
 		// Priority: every entry here is > 10 (dispatch_to_agent_open_

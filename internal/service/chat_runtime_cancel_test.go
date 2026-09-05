@@ -614,7 +614,7 @@ func TestRunGeneration_UncanceledGatedExitRetainsUnsafeTombstoneForLaterTakeover
 	b.predecessor = a
 	svc.activeGen[sessionID] = b
 	bStream := make(chan chat.StreamEvent)
-	svc.runGeneration("unsafe-gated-b", sessionID, "b", "payload", bStream, dispatcher.CallerChat, context.Background(), func() {}, b, a)
+	svc.runGeneration(context.Background(), "unsafe-gated-b", sessionID, "b", "payload", bStream, dispatcher.CallerChat, func() {}, b, a)
 	select {
 	case _, open := <-bStream:
 		if open {
@@ -686,7 +686,7 @@ func TestUnsafeGenerationResolvesOnlyAfterExactRuntimeTerminalAndDrain(t *testin
 	gen := newInFlightGen("unsafe-root", func() {})
 	defer close(gen.done)
 	svc := &chatServiceImpl{agentEventBridge: bridge, activeGen: map[string]*inFlightGen{sessionID: gen}}
-	svc.markGenerationUnsafe(sessionID, gen, gen)
+	svc.markGenerationUnsafe(gen, gen)
 	svc.observeUnsafeRuntimeBoundary(sessionID, gen, binding, nil)
 	select {
 	case <-gen.safeBoundary:
@@ -735,7 +735,7 @@ func TestUnsafeGenerationComposesInheritedAndOwnRuntimeBoundaries(t *testing.T) 
 	gen := newInFlightGen("own-runtime", func() {})
 	defer close(gen.done)
 	svc := &chatServiceImpl{agentEventBridge: bridge, activeGen: map[string]*inFlightGen{sessionID: gen}}
-	svc.markGenerationUnsafe(sessionID, gen, root)
+	svc.markGenerationUnsafe(gen, root)
 	svc.observeUnsafeRuntimeBoundary(sessionID, gen, binding, root)
 
 	// Resolving only the inherited root must not bypass this generation's own
@@ -997,7 +997,7 @@ func TestRunGeneration_CanceledWhileTakeoverGatedClosesUnownedStream(t *testing.
 	genCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	stream := make(chan chat.StreamEvent)
-	svc.runGeneration("gated", "session", "new-message", "payload", stream, dispatcher.CallerChat, genCtx, func() {}, current, predecessor)
+	svc.runGeneration(genCtx, "gated", "session", "new-message", "payload", stream, dispatcher.CallerChat, func() {}, current, predecessor)
 	select {
 	case <-stream:
 		t.Fatal("canceled generation bypassed predecessor cancellation barrier")

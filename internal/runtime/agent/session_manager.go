@@ -23,15 +23,16 @@ var (
 	ErrRecoveryInProgress   = errors.New("agent: session recovery is in progress")
 )
 
-type recoveryLease uint64
+// RecoveryLease identifies one in-progress session recovery attempt.
+type RecoveryLease uint64
 
 type SessionManager struct {
 	mu sync.RWMutex
 
 	sessions   map[string]*Session
 	pending    map[*Session]struct{}
-	recovering map[string]recoveryLease
-	nextLease  recoveryLease
+	recovering map[string]RecoveryLease
+	nextLease  RecoveryLease
 	closed     bool
 	launches   sync.WaitGroup
 
@@ -68,7 +69,7 @@ func NewSessionManager() *SessionManager {
 	return &SessionManager{
 		sessions:   make(map[string]*Session),
 		pending:    make(map[*Session]struct{}),
-		recovering: make(map[string]recoveryLease),
+		recovering: make(map[string]RecoveryLease),
 		acp:        acp.NewManager(),
 	}
 }
@@ -219,7 +220,7 @@ func (m *SessionManager) Retire(id string, expected *Session) bool {
 
 // BeginRecovery atomically retires expected and reserves id until Adopt or
 // EndRecovery. A stale observer cannot recover over an installed successor.
-func (m *SessionManager) BeginRecovery(id string, expected *Session) (recoveryLease, bool) {
+func (m *SessionManager) BeginRecovery(id string, expected *Session) (RecoveryLease, bool) {
 	if m == nil || expected == nil {
 		return 0, false
 	}
@@ -240,7 +241,7 @@ func (m *SessionManager) BeginRecovery(id string, expected *Session) (recoveryLe
 
 // EndRecovery releases id only if lease is still current. Adopt clears it
 // first when the broker produced a replacement.
-func (m *SessionManager) EndRecovery(id string, lease recoveryLease) {
+func (m *SessionManager) EndRecovery(id string, lease RecoveryLease) {
 	if m == nil || lease == 0 {
 		return
 	}

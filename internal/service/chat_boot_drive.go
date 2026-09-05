@@ -362,7 +362,7 @@ func (s *chatServiceImpl) driveBootSession(
 			// Establish the unsafe tombstone before publishing EventError: the
 			// consumer may drain and deregister immediately after this send.
 			if gen != nil {
-				s.markGenerationUnsafe(sessionID, gen, gen)
+				s.markGenerationUnsafe(gen, gen)
 				s.observeUnsafeRuntimeBoundary(sessionID, gen, bindingForCleanup, nil)
 			}
 			if s.afterFailedRuntimeSendUnsafe != nil {

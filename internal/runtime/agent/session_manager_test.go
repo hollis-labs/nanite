@@ -23,7 +23,9 @@ func TestSessionManager_RecoveryReplacementCannotBeDeletedByPredecessor(t *testi
 
 func TestSessionManager_UsesSingleSharedACPManager(t *testing.T) {
 	manager := NewSessionManager()
-	if manager.ACPManager() == nil || manager.ACPManager() != manager.ACPManager() {
+	first := manager.ACPManager()
+	second := manager.ACPManager()
+	if first == nil || first != second {
 		t.Fatal("ACPManager must return one stable manager shared by wrappers")
 	}
 }

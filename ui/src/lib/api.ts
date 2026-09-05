@@ -1116,8 +1116,8 @@ export const api = {
     return res.json();
   },
 
-  // `data` is sent as the JSON body as-is. Callers may include an optional
-  // `revision` optimistic-concurrency token; a stale/changed file → 409.
+  // `data` is sent as the JSON body as-is. `revision` remains optional for
+  // compatibility with older clients and is ignored by the DB-backed API.
   updateAgentProfile: async (
     id: string,
     data: UpdateAgentProfileRequest & { revision?: string },

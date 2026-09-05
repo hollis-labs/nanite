@@ -577,9 +577,8 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 	// parentRules is nil and DeriveSubagentRuleSet treats it as empty.
 	//
 	// Subagent rules source: the spawned agent's profile rules. Today
-	// no agent profile carries a per-profile permission.RuleSet
-	// (file-based agents may set a frontmatter `permissions` block in
-	// the future; DB-backed agents have no schema column for this yet).
+	// no agent profile carries a per-profile permission.RuleSet; DB-backed
+	// agents have no schema column for this yet.
 	// When subagentRules is nil the derivation is parent-only-forwarding,
 	// which is the H1 protection the ticket requires. As soon as agent
 	// profile rules are wired, the same derivation pass picks them up.
@@ -894,9 +893,8 @@ func (r *ChatRunner) registerSubagentDerivedRules(childID, parentSessionID strin
 
 	// Subagent rules: the profile-level RuleSet for the spawned agent.
 	// Not wired today — agent profiles don't carry a permission.RuleSet
-	// field. When that lands (file-based agents may grow a frontmatter
-	// `permissions:` block; DB-backed agents would need a schema
-	// column), populate subagentRules from the agent definition here.
+	// field. When a DB-backed schema column lands, populate subagentRules
+	// from the agent profile here.
 	//
 	// For now this leaves subagentRules nil — the derivation reduces to
 	// "forward all parent denies into the child", which is the H1

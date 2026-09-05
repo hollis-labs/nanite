@@ -55,7 +55,7 @@ test:
 
 # Full lint pass: go vet + uncapped golangci-lint + staticcheck + errcheck +
 # govulncheck. All four external tools must resolve on PATH
-# (`go install` via the canonical invocations — see .nanite/agents/backend.md).
+# (`go install` via each tool's canonical upstream invocation).
 # Each step is run in sequence; the first failure aborts the pipeline.
 lint:
 	go vet ./...

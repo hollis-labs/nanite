@@ -21,10 +21,9 @@ var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 // ValidateSlug rejects any slug that is not a bare, URL-safe identifier —
 // lowercase letters, digits, and hyphens only, no path separators, no `..`,
-// no leading/trailing hyphen. This is the single canonical gate every
-// caller that turns a caller-supplied slug into a filesystem path (agent
-// profile, durable-agent config, or any similar identifier elsewhere) must
-// call before doing so. See GO-AGENT-001.
+// no leading/trailing hyphen. This remains the canonical gate for agent and
+// durable-agent API identifiers and for any caller that maps a slug to a
+// filesystem path. See GO-AGENT-001.
 func ValidateSlug(slug string) error {
 	if !slugPattern.MatchString(slug) {
 		return fmt.Errorf("slug must contain only lowercase letters, digits, and hyphens (e.g. %q), got %q", "code-reviewer", slug)

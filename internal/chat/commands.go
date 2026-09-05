@@ -221,8 +221,8 @@ func (r *CommandRegistry) RegisterPluginCommand(cmd nplugin.SlashCommandDef, sou
 // UnloadPlugin sweep can clear plugin-registered slash commands during
 // hot-unload.
 //
-// Built-in commands ("builtin"), skill commands ("skill"), and file-based
-// commands ("file") use reserved Source values that no plugin can assume,
+// Built-in commands ("builtin") and file-based commands ("file") use
+// reserved Source values that no plugin can assume,
 // so they're safe from this sweep. An empty pluginID is a no-op — we never
 // want to mass-delete commands that happen to have no source attribution.
 func (r *CommandRegistry) RemoveByPlugin(pluginID string) int {
@@ -253,35 +253,6 @@ func scratchpadHandler(_ context.Context, _ string, args string) (*CommandResult
 		return &CommandResult{Action: "client", Content: "scratch_open"}, nil
 	}
 	return &CommandResult{Action: "scratch_append", Content: text}, nil
-}
-
-// RegisterSkillCommand registers a file-based skill as a slash command.
-// Skills are server-side commands with category "skill".
-func (r *CommandRegistry) RegisterSkillCommand(slug, name, description, argumentHint string) {
-	cmd := SlashCommand{
-		Name:        slug,
-		Description: description,
-		Category:    "skill",
-		Source:      "file",
-	}
-	if argumentHint != "" {
-		cmd.Args = []CommandArg{{
-			Name:        "args",
-			Description: argumentHint,
-			Required:    false,
-			Type:        "string",
-		}}
-	}
-
-	// Skill commands use a "client" action — the frontend sends the skill
-	// slug + args back via the normal message flow where the chat service
-	// resolves and executes the skill.
-	r.Register(cmd, func(_ context.Context, sessionID, args string) (*CommandResult, error) {
-		return &CommandResult{
-			Action:  "skill",
-			Content: fmt.Sprintf("%s %s", slug, args),
-		}, nil
-	})
 }
 
 // List returns all registered commands.

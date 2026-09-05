@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -40,71 +39,37 @@ func (a *API) handleCreateDurableAgent(w http.ResponseWriter, r *http.Request) {
 		WorkRoot:         req.WorkRoot,
 		MetadataJSON:     req.MetadataJSON,
 	}
-	saved, err := a.saveManagedDurableInstance(inst, false)
+	if err := agent.ValidateSlug(strings.TrimSpace(inst.Slug)); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "slug: "+err.Error())
+		return
+	}
+	if _, err := durableMetadataMap(inst.MetadataJSON); err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := a.Services.Store.GetAgent(r.Context(), inst.ProfileID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			a.errorResp(w, http.StatusBadRequest, fmt.Sprintf("agent profile %s not found in agent_profiles; create or import it through the agent API first", inst.ProfileID))
+			return
+		}
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	err := a.Services.DurableAgents.Create(r.Context(), inst)
 	if err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	saved, err := a.Services.DurableAgents.Get(r.Context(), inst.ID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	a.jsonResp(w, http.StatusCreated, saved)
 }
 
-// saveManagedDurableInstance is the shared write path for
-// POST /api/durable-agents (create) and PUT/PATCH /api/durable-agents/{id}
-// (update, including a slug rename via req.Slug — the durable-agent sibling
-// of GO-AGENT-001's agent-profile rename risk). No dedicated validation
-// function exists for ManagedDurableAgentConfig/DurableAgentInstance the way
-// agentvalidation.ValidateAgentConfig exists for agent profiles, so the slug
-// is checked explicitly here, before any filesystem call —
-// service.ManagedDurableAgentPath (called downstream via
-// SaveManagedDurableAgentConfig) independently re-validates and confines the
-// same slug, so this is early-rejection UX on top of that backstop, not the
-// only gate. The slug check runs after the profile lookup, not before it,
-// so a request with both a missing profile and an unset/invalid slug (e.g.
-// TestSaveManagedDurableInstance_MissingProfileWrapsSQLNoRows's fixture)
-// still surfaces the more specific "profile not found" diagnostic rather
-// than a generic slug-format rejection.
-func (a *API) saveManagedDurableInstance(inst *store.DurableAgentInstance, archived bool) (*store.DurableAgentInstance, error) {
-	profile, err := a.Services.Store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst.ProfileID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			// CW-20260815-0009: this profile ID resolves via file discovery
-			// (that's how a recipe/request got it in the first place) but has
-			// no agent_profiles row — the .md file failed AutoIngestAgents at
-			// startup. The raw sql.ErrNoRows here used to be the only signal;
-			// name the real cause so it doesn't require DB-level investigation
-			// to diagnose again.
-			return nil, fmt.Errorf("agent profile %s not found in agent_profiles — its source file may have failed database ingestion; check server startup logs for \"auto-ingest agent\" errors: %w", inst.ProfileID, err)
-		}
-		return nil, err
-	}
-	if err := agent.ValidateSlug(strings.TrimSpace(inst.Slug)); err != nil {
-		return nil, fmt.Errorf("slug: %w", err)
-	}
-	metadata, err := durableMetadataMap(inst.MetadataJSON)
-	if err != nil {
-		return nil, err
-	}
-	cfg := service.ManagedDurableAgentConfig{
-		Name:             inst.Name,
-		Slug:             inst.Slug,
-		ProfileSlug:      profile.Slug,
-		LifecycleClass:   inst.LifecycleClass,
-		Provider:         inst.Provider,
-		Model:            inst.Model,
-		RuntimeKind:      inst.RuntimeKind,
-		LaunchSourceType: inst.LaunchSourceType,
-		LaunchSourceID:   inst.LaunchSourceID,
-		WorkRoot:         inst.WorkRoot,
-		Metadata:         metadata,
-		Archived:         archived,
-	}
-	return service.SaveManagedDurableAgentConfig(a.Services.Store, a.Services.ManagedConfigRoot, cfg)
-}
-
-// durableMetadataMap parses the persisted metadata_json blob into the
-// {[string]string} shape ManagedDurableAgentConfig expects. Invalid JSON or
-// non-string values surface as an error so callers can return 400 instead of
-// silently discarding operator input.
+// durableMetadataMap validates the durable metadata wire contract. The raw
+// JSON remains canonical in SQLite; no filesystem representation is produced.
 func durableMetadataMap(raw string) (map[string]string, error) {
 	if raw == "" {
 		return nil, nil
@@ -145,28 +110,21 @@ func (a *API) handleUpdateDurableAgent(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	existing, err := a.Services.DurableAgents.Get(r.Context(), r.PathValue("id"))
-	if errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
-		a.errorResp(w, http.StatusNotFound, "durable agent not found")
-		return
-	}
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if req.Name != nil {
-		existing.Name = *req.Name
-	}
 	if req.Slug != nil {
-		existing.Slug = *req.Slug
-	}
-	if req.WorkRoot != nil {
-		existing.WorkRoot = *req.WorkRoot
+		if err := agent.ValidateSlug(strings.TrimSpace(*req.Slug)); err != nil {
+			a.errorResp(w, http.StatusBadRequest, "slug: "+err.Error())
+			return
+		}
 	}
 	if req.MetadataJSON != nil {
-		existing.MetadataJSON = *req.MetadataJSON
+		if _, err := durableMetadataMap(*req.MetadataJSON); err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
-	saved, err := a.saveManagedDurableInstance(existing, false)
+	saved, err := a.Services.DurableAgents.Update(r.Context(), r.PathValue("id"), store.DurableAgentInstanceUpdate{
+		Name: req.Name, Slug: req.Slug, WorkRoot: req.WorkRoot, MetadataJSON: req.MetadataJSON,
+	})
 	if errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
 		a.errorResp(w, http.StatusNotFound, "durable agent not found")
 		return
@@ -179,16 +137,11 @@ func (a *API) handleUpdateDurableAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleArchiveDurableAgent(w http.ResponseWriter, r *http.Request) {
-	existing, err := a.Services.DurableAgents.Get(r.Context(), r.PathValue("id"))
+	archived, err := a.Services.DurableAgents.Archive(r.Context(), r.PathValue("id"))
 	if errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
 		a.errorResp(w, http.StatusNotFound, "durable agent not found")
 		return
 	}
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	archived, err := a.saveManagedDurableInstance(existing, true)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

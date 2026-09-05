@@ -15,14 +15,9 @@ import (
 // after the closing --- becomes SystemPrompt.
 type Definition struct {
 	// Identity
-	// ID is the durable agent identity stamped into the managed file's
-	// frontmatter (`id:`). When present it is the canonical primary key the
-	// DB projection and all FK children (reflexes, known tools/skills,
-	// procedures, boot plans) key off — so the slug can change freely
-	// without orphaning anything. Empty for embedded internal profiles and
-	// freshly hand-dropped/imported files; the boot reconcile pass mints or
-	// adopts a UUID and writes it back to writable managed files. See
-	// internal/service AgentConfigService + ingest reconciliation.
+	// ID is an optional identity in an explicitly imported definition. Empty
+	// definitions receive their durable UUID from the database. Nanite never
+	// writes an assigned identity back into the source file.
 	ID          string   `yaml:"id,omitempty"`
 	Name        string   `yaml:"name"`
 	Slug        string   `yaml:"slug"`

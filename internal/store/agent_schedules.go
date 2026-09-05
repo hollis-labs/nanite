@@ -296,13 +296,10 @@ func (s *Store) ListAgentSchedules(ctx context.Context, agentID string) ([]Agent
 // GET /api/schedules (TASKS/scheduling/09-operator-http-api.md) -- the
 // operator HTTP surface is the first caller that needs a cross-agent view;
 // every other existing caller of this table (durable_wake.go, the
-// go-scheduler StoreAdapter, the reflex hook, managed_durable_configs.go)
-// is agent-scoped by construction and has no need for it. Deliberately not
-// added to the AgentStateStore interface above: that interface exists to
-// let a future per-agent-file backend swap in for the per-agent state
-// tables, and "list every agent's schedules in one call" is not a
-// per-agent-state concept that backend would need to reason about --
-// it's a plain operator-surface convenience specific to the central DB.
+// go-scheduler StoreAdapter, and the reflex hook) is agent-scoped by
+// construction and has no need for it. Deliberately not added to the
+// AgentStateStore interface above because it is a plain operator-surface
+// convenience specific to the central DB.
 func (s *Store) ListAllAgentSchedules(ctx context.Context) ([]AgentSchedule, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+agentScheduleColumns+`
@@ -514,17 +511,9 @@ func (s *Store) backfillScheduleNextRun(ctx context.Context, now time.Time) erro
 
 // ComputeAgentScheduleNextRun computes the next-fire time for a cron/
 // one_shot schedule given its kind/spec, as of now. Factored out of
-// backfillScheduleNextRun (above) so a schedule producer that inserts a
-// genuinely new row mid-process (managed_durable_configs.go's
-// syncManagedDurableAgentSchedule is the one real caller today) can compute
-// a usable next_run at insert time, instead of leaving it NULL until the
-// next process restart's backfillScheduleNextRun pass — see that function's
-// call site for the full finding (TASKS/scheduling/
-// 05-engine-wiring-and-full-replace.md's Work Log) on why a NULL next_run
-// on a freshly-synced row is a real, not hypothetical, gap: backfillScheduleNextRun
-// only runs once, at Store.New() boot time, strictly before
-// SyncManagedDurableAgentConfigs (container.go) ever gets a chance to
-// upsert a schedule row for the first time.
+// backfillScheduleNextRun (above) so any schedule producer that inserts a
+// genuinely new row mid-process can compute a usable next_run immediately,
+// instead of leaving it NULL until the next process restart.
 //
 // one_shot rows: no independent target-time encoding exists in spec today
 // (see backfillScheduleNextRun's own doc comment) — "now" matches the

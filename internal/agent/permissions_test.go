@@ -14,7 +14,7 @@ import (
 // TestDefinition_ToProfile_Minimal in convert_test.go for that coverage.
 
 // CW-20260512-0107 (SP-20260512-0008 W2A): parentDispatchAllowlist
-// frontmatter on a file-based agent must surface through ToProfile so the
+// frontmatter on an explicitly parsed agent definition must surface through ToProfile so the
 // Tool Broker Describer renders the per-caller dispatch enumeration.
 func TestParseMD_ParentDispatchAllowlist(t *testing.T) {
 	data := []byte(`---
@@ -55,7 +55,7 @@ func TestDefinition_ToProfile_ParentDispatchAllowlistMarshalsJSON(t *testing.T) 
 }
 
 // Empty frontmatter list must serialize to "[]" so the schema column
-// default invariant holds for file-based agents.
+// default invariant holds for parsed seed/import definitions.
 func TestDefinition_ToProfile_ParentDispatchAllowlistEmptyDefaultsToBracketBracket(t *testing.T) {
 	def := &Definition{Slug: "legacy"}
 	p := def.ToProfile()

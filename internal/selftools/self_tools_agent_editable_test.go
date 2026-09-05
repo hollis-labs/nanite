@@ -94,7 +94,7 @@ func TestSelfToolsTransport_UpdateAgent_RejectsNonEditableClasses(t *testing.T) 
 			name:      "external",
 			source:    "adapter",
 			sourceRef: "/opt/external/agents/foo.md",
-			wantSnip:  "not in a writable managed location",
+			wantSnip:  "external/imported provenance",
 		},
 	}
 
@@ -192,7 +192,7 @@ func TestSelfToolsTransport_CreateAgent_RejectsSlugCollisionWithNonEditableClass
 			name:      "external",
 			source:    "adapter",
 			sourceRef: "/opt/external/agents/bar.md",
-			wantSnip:  "not in a writable managed location",
+			wantSnip:  "external/imported provenance",
 		},
 	}
 

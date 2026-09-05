@@ -8,10 +8,10 @@ import (
 
 // TestMigration062_EjectsNonInternalProfiles is the acceptance smoke for
 // CW-20260512-0112 Wave 2 originally wiped every agent_profiles row whose
-// source != 'internal'. Now that project-managed file-backed profiles under
-// .nanite/agents/*.md are durable config source-of-truth, migration 062 keeps
-// both source='internal' and source='project' rows while ejecting every other
-// ambiguous source.
+// source != 'internal'. It was later amended to keep historical
+// source='project' rows while ejecting every other ambiguous source. Today
+// those rows are ordinary database records; project provenance does not grant
+// a file authority path.
 //
 // Test shape:
 //  1. Open a fresh DB. Migrations 001-062 run in order; migration 061 seeds
@@ -68,7 +68,7 @@ func TestMigration062_EjectsNonInternalProfiles(t *testing.T) {
 	}
 
 	// Insert fixture rows representing ambiguous legacy sources plus the two
-	// keep-list classes (internal and project-managed file-backed).
+	// keep-list classes (internal and operator-managed project provenance).
 	// Only minimal columns are populated — table defaults handle the rest.
 	fixtures := []struct {
 		id, name, slug, body, source string

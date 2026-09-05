@@ -727,7 +727,7 @@ export interface AgentProfile {
   //   truth for whether the GUI may edit/delete in place.
   // copy_to_managed: true for plugin/external (offer "Make editable" fork);
   //   false for internal and managed.
-  // revision: optimistic-concurrency token (file content hash); may be "".
+  // revision: legacy compatibility field; database-backed agents return "".
   manage_class?: string;
   editable?: boolean;
   copy_to_managed?: boolean;

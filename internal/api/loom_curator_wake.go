@@ -73,10 +73,9 @@ type LoomCuratorWakeRequest struct {
 	Fragment  LoomCuratorWakeFragment `json:"fragment"`
 }
 
-// loomCuratorInstanceSlug is the .nanite/durable-agents/loom-curator.yaml
-// `slug:` value. Resolving by slug (instead of requiring FE to know
-// Curator's DB-minted instance UUID) is what lets this endpoint's URL stay
-// fixed and version-controlled across environments and DB resets.
+// loomCuratorInstanceSlug is the database-provisioned durable instance slug.
+// Resolving by slug keeps the callback URL stable across environments and DB
+// restores without exposing the instance UUID to Fragments Engine.
 const loomCuratorInstanceSlug = "loom-curator"
 
 // handleLoomCuratorWake decodes FE's callback payload, resolves it to the
@@ -98,10 +97,7 @@ func (a *API) handleLoomCuratorWake(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
 			a.errorResp(w, http.StatusServiceUnavailable,
-				"loom curator durable-agent instance not provisioned: "+
-					".nanite/durable-agents/loom-curator.yaml has not been synced yet "+
-					"(the service must be restarted once after that file is added — "+
-					"SyncManagedDurableAgentConfigs only runs at container boot)")
+				"loom curator durable-agent instance not provisioned; create the loom-curator profile and durable instance through the database-backed agent APIs")
 			return
 		}
 		a.errorResp(w, http.StatusInternalServerError, err.Error())

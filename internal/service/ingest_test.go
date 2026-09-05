@@ -435,41 +435,6 @@ func TestAutoIngestAgents_ReingestDoesNotOverwriteExistingRow(t *testing.T) {
 	}
 }
 
-// TestIngestAgentDefinition_ExplicitReimportStillSyncs proves the other half
-// of TASKS/phase-1/08's contract: IngestAgentDefinition -- the explicit,
-// deliberate reimport path used by AgentConfigService.writeManaged /
-// SaveManagedAgentProfile immediately after a managed agent's file is
-// written -- is NOT subject to the boot-time freeze. It always
-// content-syncs, even when a row already exists under the same source; this
-// is the one legitimate "pull this file's content into the DB" action the
-// task explicitly preserves.
-func TestIngestAgentDefinition_ExplicitReimportStillSyncs(t *testing.T) {
-	st := newIngestTestStore(t)
-
-	def := &agentpkg.Definition{
-		Slug:         "managed-agent",
-		Name:         "Managed Agent",
-		SystemPrompt: "v1 prompt",
-		Source:       "user",
-	}
-	if err := IngestAgentDefinition(st, def); err != nil {
-		t.Fatalf("IngestAgentDefinition (create): %v", err)
-	}
-
-	def.SystemPrompt = "v2 prompt — deliberate edit"
-	if err := IngestAgentDefinition(st, def); err != nil {
-		t.Fatalf("IngestAgentDefinition (reimport): %v", err)
-	}
-
-	a, err := st.GetAgentBySlug(context.Background(), "managed-agent")
-	if err != nil {
-		t.Fatalf("GetAgentBySlug: %v", err)
-	}
-	if a.SystemPrompt != "v2 prompt — deliberate edit" {
-		t.Errorf("SystemPrompt: got %q, want the deliberate reimport's updated value (explicit reimport must not be frozen)", a.SystemPrompt)
-	}
-}
-
 // TestAutoIngestAgents_DBEditSurvivesBootReingest is TASKS/phase-1/08's
 // literal Done-means scenario, simulated at the ingest layer: a DB-side
 // edit to an agent's content -- however it landed (REST API PATCH, an

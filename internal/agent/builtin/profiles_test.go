@@ -32,8 +32,8 @@ func TestInternalProfiles_LoadsAllExpectedSlugs(t *testing.T) {
 		// prompt framing). Phase 2 migrated the zero-ref product/tooling
 		// agents (analyst, code-auditor, file-backend, agent-builder,
 		// agridd-project-manager, proxima, torque-supervisor,
-		// torque-task-writer) out to the managed config layer
-		// (.nanite/agents/) where they are operator-editable.
+		// torque-task-writer) out of the compiled-in inventory. Operators may
+		// provision replacements through the database-backed management API.
 		"backend", "background-job", "researcher",
 		// Standing roles resolved via subagent_spawn / prompt framing.
 		"reviewer", "system-architect",
@@ -51,8 +51,8 @@ func TestInternalProfiles_LoadsAllExpectedSlugs(t *testing.T) {
 
 // TestInternalProfiles_SourceAndRef asserts every internal profile carries
 // Source="internal" and a SourceRef that points back to its embedded path.
-// The Wave 2 cleanup migration keys off Source value, and the UI uses
-// SourceRef to render the "edit this file at:" affordance.
+// The Wave 2 cleanup migration keys off Source value; SourceRef is embedded
+// build provenance only and does not grant filesystem editability.
 func TestInternalProfiles_SourceAndRef(t *testing.T) {
 	defs, err := InternalProfiles()
 	if err != nil {

@@ -49,7 +49,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/recovery/orphansweep"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
@@ -69,8 +68,8 @@ import (
 type Container struct {
 	Sessions SessionService
 	Agents   AgentService
-	// AgentConfig is the shared write path for managed file-backed agent
-	// configs (GUI/API/CLI/MCP all route mutations through it).
+	// AgentConfig is the shared database write path for operator-managed
+	// profiles (GUI/API/CLI/MCP all route mutations through it).
 	AgentConfig *AgentConfigService
 	Skills      SkillService
 	// SkillVendor is the content-addressed vendored skill store (internal/
@@ -176,12 +175,8 @@ type Container struct {
 	// need it (artifact storage root, http caps, etc.). May be nil in
 	// lightweight test setups — handlers must nil-check.
 	AppConfig *config.TunablesConfig
-	// WorkingDir is the project root for project-scoped discovery and
-	// operator-managed config writes.
+	// WorkingDir is the project root for project-scoped runtime operations.
 	WorkingDir string
-	// ManagedConfigRoot is the on-disk config root used for file-backed
-	// operator-managed agents and durable manifests.
-	ManagedConfigRoot string
 
 	// Utility provider/model for lightweight calls (autotitle, etc.).
 	UtilityProvider string
@@ -312,10 +307,6 @@ type ContainerConfig struct {
 	// TesseractServerName is the configured external MCP server name. Empty
 	// resolves to "tesseract".
 	TesseractServerName string
-	// ManagedConfigRoot overrides the default project-local config root
-	// used for operator-managed agents and durable manifests.
-	ManagedConfigRoot string
-
 	// APIBaseURL is the base URL the local HTTP API server listens on
 	// (e.g. "http://127.0.0.1:8090"). Threaded into the agent-runtime
 	// boot dir so a CLI-launched chat agent's `nanite mcp` subprocess
@@ -392,11 +383,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	if workingDir == "" {
 		workingDir = "."
 	}
-	managedConfigRoot := cfg.ManagedConfigRoot
-	if managedConfigRoot == "" {
-		managedConfigRoot = filepath.Join(workingDir, ".nanite")
-	}
-
 	// --- Foundation (Wave 0) ---
 
 	// Event emitter: fans out to activity + plugin sinks. Plugin dispatch and
@@ -429,12 +415,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// For now, the registry is created and passed through; adapter plugins
 	// will be wired when the plugin host supports adapter registration.
 	adapterRegistry := newRuntimeAdapterRegistry()
-
-	// Ensure ~/.nanite/agents/ exists on first run (J6, CW-20260421-0006).
-	// Silently continue on error — a missing home dir is non-fatal at startup.
-	if err := agent.EnsureHomeDirs(""); err != nil {
-		slog.Warn("service container: ensure agent home dirs", "err", err)
-	}
 
 	// Discover agent definitions from the remaining tiers (CLI --agent flag,
 	// currently unreachable, plus adapter-discovered). As of
@@ -478,23 +458,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	} else if muxDef != nil {
 		agentDefs = append(agentDefs, muxDef)
 	}
-	slog.Info("service container: discovered file-based agents", "count", len(agentDefs))
+	slog.Info("service container: loaded seed agent definitions", "count", len(agentDefs))
 
-	// Source classification roots: the project managed config root and the
-	// user nanite data dir are writable-in-place; embedded internal and
-	// plugin/vendor agents are read-only. Shared by the boot reconcile pass,
-	// the AgentConfigService write contract, and the API editability gate.
-	userDataDir := ""
-	if home, herr := os.UserHomeDir(); herr == nil && home != "" {
-		userDataDir = filepath.Join(home, ".nanite")
-	}
-	agentClassification := agent.NewClassification(managedConfigRoot, userDataDir)
-
-	// Boot reconcile: durably stamp a UUID identity into writable managed
-	// agent files (adopt the existing projection's id, else mint), so the
-	// subsequent ingest uses it as the DB row PK and FK children resolve.
-	// Idempotent — already-stamped files are skipped. Runs before ingest.
-	ReconcileManagedAgentIDs(cfg.Store, agentDefs, agentClassification)
+	// Editability is provenance-based. Filesystem paths are historical import
+	// metadata only and never participate in ownership or writes.
+	agentClassification := agent.NewClassification()
 
 	// J7 (CW-20260421-0011): auto-ingest discovered agent definitions into DB.
 	// File → parse → DB upsert. H1 trust: user/plugin sources → untrusted tier.
@@ -560,15 +528,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Events:   events,
 	})
 
-	// Shared managed-agent write service. GUI/API/CLI/MCP route all managed
-	// config mutations through this one path (validate → atomic file write
-	// → DB upsert/reindex → event). TASKS/adhoc/01-eliminate-file-based-
-	// agent-runtime.md dropped the live in-memory-registry reload step
-	// (AgentRegistryReloader/ReloadFileAgent/RemoveFileAgent) — agentServiceImpl
-	// now reads straight from the DB on every call, so the row writeManaged
-	// already upserted synchronously is immediately visible with no reload
-	// needed.
-	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, managedConfigRoot, nil)
+	// Shared managed-agent database write service. GUI/API/CLI/MCP mutations
+	// are immediately visible because the runtime also reads from the DB.
+	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, nil)
 
 	// agent_permissions.go (newFileAgentPermissionResolver) and
 	// ToolClient.PermissionResolver/GetPermissions/CheckPermission/
@@ -597,23 +559,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	events.WithSessionWriter(messagingSvc)
 	slog.Info("service container: messaging service enabled")
 
-	// Ensure ~/.nanite/skills/ exists on first run (J6, CW-20260421-0006).
-	// Silently continue on error — a missing home dir is non-fatal at startup.
-	if err := skill.EnsureHomeDirs(""); err != nil {
-		slog.Warn("service container: ensure skill home dirs", "err", err)
-	}
-
-	// TASKS/skills/01: file-based skill discovery, boot-time builtin loading,
-	// and the AutoIngestSkills boot pass are all cut in full — see
-	// docs/engineering/architecture/20-skills.md's "Migration: clean slate,
-	// no carried-forward content" section. skill.Discover/DiscoverOptions and
-	// internal/skill/builtin no longer exist; there is no file-based skill
-	// source to feed SkillServiceConfig.FileSkills until the install/sync
-	// pipeline (TASKS/skills/04-05) lands.
-	skills := NewSkillService(SkillServiceConfig{
-		Skills:     cfg.Store,
-		FileSkills: nil,
-	})
+	// Skills are installed packages indexed in the database; there is no
+	// file-definition overlay or boot-time discovery path.
+	skills := NewSkillService(SkillServiceConfig{Skills: cfg.Store})
 
 	// TASKS/skills/05: the content-addressed vendored skill store backing
 	// the explicit install/sync pipeline. Rooted at AppConfig.Skills.
@@ -917,9 +865,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	commands.RegisterServerCommands(cfg.Store, cfg.Providers)
 	RegisterToolCacheCommand(commands, overrideStore)
 
-	// Register file-based skills as slash commands.
-	RegisterSkillCommands(commands, skills)
-
 	// Process tracker.
 	processTracker := chat.NewProcessTracker()
 	if cfg.MaxCLIProcesses > 0 {
@@ -1014,13 +959,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	}
 	// CW-20260816-0023: Loom Curator/Weaver pilot reflex pair
 	// (check_before_answer, capture_on_discovery). AgentID-scoped, so it
-	// must run after agent.Discover + ReconcileManagedAgentIDs +
-	// AutoIngestAgents (above, ~line 399-469) have resolved Curator's/
-	// Weaver's real agent_profiles.id from .nanite/agents/*.md — this is
-	// the same "earliest point the ID is known" boot spot
-	// syncManagedDurableAgentConfig uses for CW-20260816-0021's schedule
-	// seeding. A seed whose target isn't ingested yet is skipped with a
-	// warning (not fatal) and picked up on a later boot once it is.
+	// must run after the compiled-in seed pass above has resolved the target
+	// agent_profiles IDs. A seed whose target is absent is skipped with a
+	// warning (not fatal) and picked up after the profile is provisioned.
 	if n, err := reflexes.SeedAgentReflexesBySlug(context.Background(), cfg.Store, reflexes.LoomPilotReflexSeeds(), slog.Default()); err != nil {
 		slog.Warn("service container: loom pilot reflex seed", "err", err)
 	} else if n > 0 {
@@ -1312,11 +1253,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		stopCatalog()
 		return nil, fmt.Errorf("service container: durable agent recipes: %w", err)
 	}
-	if err := SyncManagedDurableAgentConfigs(cfg.Store, managedConfigRoot); err != nil {
-		stopCatalog()
-		return nil, fmt.Errorf("service container: sync managed durable agents: %w", err)
-	}
-
 	// F5 follow-up (CW-20260420-0022): wire the HintDispatcher adapter
 	// into ContextClient so NANITE_THINK_BLOCK_V2_ENABLED=true actually
 	// fires v2 dynamic hints in production. Without this assignment the
@@ -1464,7 +1400,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		WorkflowBroadcaster: workflowBroadcaster,
 		AppConfig:           cfg.AppConfig,
 		WorkingDir:          workingDir,
-		ManagedConfigRoot:   managedConfigRoot,
 		AgentConfig:         agentConfig,
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,

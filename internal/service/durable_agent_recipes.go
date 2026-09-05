@@ -372,8 +372,8 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			Tags: []string{"advisor", "architecture", "product"},
 		},
 		{
-			// Profile pairing: operator selects the `conductor` AgentProfile
-			// (.nanite/agents/conductor.md) at apply-time. Conductor
+			// Profile pairing: operator selects a database-provisioned
+			// `conductor` AgentProfile at apply-time. Conductor
 			// (CW-20260816-0066) is the chat-facing entry point across the
 			// user's concurrent projects — it delegates *down* to existing
 			// per-project execution (Orchestrator/Torque) and *out* to
@@ -520,8 +520,8 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			Tags: []string{"cli", "harness"},
 		},
 		{
-			// Profile pairing: operator selects the `orchestrator` AgentProfile
-			// (.nanite/agents/orchestrator.md) at apply-time. Its roleTools are
+			// Profile pairing: operator selects a database-provisioned
+			// `orchestrator` AgentProfile at apply-time. Its roleTools are
 			// the one place in this whole role family that DOES include
 			// subagent_spawn/workflow_run — by design, this is the only role
 			// permitted to dispatch (Planner/PM/Reviewer must never get these).
@@ -569,14 +569,14 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			Tags: []string{"harness", "orchestrator", "dispatch", "product"},
 		},
 		{
-			// Profile pairing: operator selects the `task-planner` AgentProfile
-			// (.nanite/agents/task-planner.md) at apply-time — NOT the existing
+			// Profile pairing: operator selects a database-provisioned
+			// `task-planner` AgentProfile at apply-time — NOT the existing
 			// `planner` AgentProfile slug. That slug is reserved for the
 			// Phase-6 cognition-arc stub (internal/agent/builtin/profiles/planner.md,
 			// deliberately tool-less, resolved via dispatch.PlannerRoleSlug for
 			// reflex-routed decomposition) and is a different role entirely —
 			// reusing it here would silently overwrite that migration-tracked
-			// identity at boot-time upsert. `task-planner`'s roleTools grant
+			// identity. `task-planner`'s roleTools grant
 			// full Torque task-lifecycle write access but exclude
 			// subagent_spawn/workflow_run (Planner produces the plan; it never
 			// dispatches it — that's the Orchestrator's job).
@@ -697,8 +697,8 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			Tags: []string{"advisor", "project"},
 		},
 		{
-			// Profile pairing: operator selects the `project-manager` AgentProfile
-			// (.nanite/agents/project-manager.md) at apply-time — its roleTools
+			// Profile pairing: operator selects a database-provisioned
+			// `project-manager` AgentProfile at apply-time — its roleTools
 			// already excludes subagent_spawn/workflow_run, which must stay
 			// excluded (PM coordinates; it never dispatches). The older
 			// `agridd-project-manager` profile is the POC this was generalized

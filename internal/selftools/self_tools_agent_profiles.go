@@ -24,8 +24,7 @@ type AgentClassifier interface {
 	Classify(profile *store.AgentProfile) agent.ManageClass
 }
 
-// AgentProfileTools owns profile CRUD, classification/editability policy, and
-// directory-facing source resolution.
+// AgentProfileTools owns profile CRUD and provenance-based editability policy.
 type AgentProfileTools struct {
 	Store      AgentProfileStore
 	Classifier AgentClassifier
@@ -40,7 +39,7 @@ func (at *AgentProfileTools) classifyAgent(profile *store.AgentProfile) agent.Ma
 		return at.Classifier.Classify(profile)
 	}
 	var fallback agent.Classification
-	return fallback.Classify(profile.Source, profile.SourceRef)
+	return fallback.Classify(profile.Source)
 }
 
 // agentNotEditableError mirrors the REST-layer editability rejection shape.
@@ -52,7 +51,7 @@ func agentNotEditableError(slug string, class agent.ManageClass) string {
 	case agent.ManageClassPlugin:
 		msg = "agent is plugin/vendor-provided (read-only); copy it to the managed layer to edit"
 	case agent.ManageClassExternal:
-		msg = "agent is not in a writable managed location (read-only); copy it to the managed layer to edit"
+		msg = "agent has external/imported provenance (read-only); copy it to the managed layer to edit"
 	}
 	return fmt.Sprintf("%s (slug=%q, manage_class=%s)", msg, slug, string(class))
 }

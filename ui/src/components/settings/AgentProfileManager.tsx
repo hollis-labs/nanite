@@ -427,8 +427,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
         onUpdateAgent={(data) =>
           updateMutation.mutate({
             id: agent.id,
-            // Thread the optimistic-concurrency token: a stale/changed file → 409.
-            data: { ...data, revision: agent.revision },
+            data,
           })
         }
         onDeleteAgent={() => deleteMutation.mutate(agent.id)}

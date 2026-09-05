@@ -283,7 +283,6 @@ func TestNewContainer_PostReaperFailureStopsReapers(t *testing.T) {
 		Store:                          st,
 		Providers:                      provider.NewRegistry(),
 		WorkingDir:                     root,
-		ManagedConfigRoot:              filepath.Join(root, ".nanite"),
 		DurableAgentRecipeCatalogPaths: []string{filepath.Join(root, "missing-recipes.yaml")},
 	})
 	if err == nil || !strings.Contains(err.Error(), "durable agent recipes") {
@@ -327,10 +326,9 @@ func TestNewContainer_TesseractDBIsPackageTempIsolated(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	container, err := NewContainer(ContainerConfig{
-		Store:             st,
-		Providers:         provider.NewRegistry(),
-		WorkingDir:        root,
-		ManagedConfigRoot: filepath.Join(root, ".nanite"),
+		Store:      st,
+		Providers:  provider.NewRegistry(),
+		WorkingDir: root,
 	})
 	if err != nil {
 		t.Fatalf("NewContainer: %v", err)
@@ -379,7 +377,7 @@ func TestNewContainer_ExternalTesseractDoesNotOpenEmbeddedOwner(t *testing.T) {
 
 	container, err := NewContainer(ContainerConfig{
 		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
-		ManagedConfigRoot: filepath.Join(root, ".nanite"), DisableEmbeddedTesseract: true,
+		DisableEmbeddedTesseract: true,
 	})
 	if err != nil {
 		t.Fatalf("NewContainer: %v", err)
@@ -431,7 +429,6 @@ func TestNewContainer_MissingLegacySourceWithJournalDisablesEmbeddedTesseract(t 
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 	container, err := NewContainer(ContainerConfig{
 		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
-		ManagedConfigRoot: filepath.Join(root, ".nanite"),
 	})
 	if err != nil {
 		t.Fatalf("NewContainer: %v", err)
@@ -473,7 +470,6 @@ func TestNewContainer_EmptyUnjournaledTargetDBDisablesEmbeddedTesseract(t *testi
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 	container, err := NewContainer(ContainerConfig{
 		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
-		ManagedConfigRoot: filepath.Join(root, ".nanite"),
 	})
 	if err != nil {
 		t.Fatalf("NewContainer: %v", err)

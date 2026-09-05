@@ -72,9 +72,13 @@ func (a *API) handleApplyDurableAgentRecipe(w http.ResponseWriter, r *http.Reque
 		a.errorResp(w, http.StatusConflict, service.ErrDurableAgentRecipeApplyNotReady.Error()+": "+strings.Join(plan.Unsupported, ", "))
 		return
 	}
-	inst, err := a.saveManagedDurableInstance(&plan.Instance, false)
+	if createErr := a.Services.DurableAgents.Create(r.Context(), &plan.Instance); createErr != nil {
+		a.errorResp(w, http.StatusBadRequest, createErr.Error())
+		return
+	}
+	inst, err := a.Services.DurableAgents.Get(r.Context(), plan.Instance.ID)
 	if err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	result := &service.DurableAgentRecipeApplyResult{

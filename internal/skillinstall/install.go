@@ -270,17 +270,8 @@ func (i *Installer) upsertIndex(def *skill.Definition, address string, deps []st
 	fresh.DeclaredDependencies = string(depsJSON)
 
 	if existing == nil {
-		// ToStoreSkill sets a deterministic "file-<slug>" ID — a sentinel
-		// skill.IsFileBasedID() (and the hard Update/Delete rejections in
-		// service.skillServiceImpl) reserve for the old, pre-redesign
-		// virtual/ephemeral file-based rows that convention was written
-		// for. This is a real, persisted CreateSkill call, not one of
-		// those ephemeral views, so it must not inherit that sentinel:
-		// clear it and let store.Store.CreateSkill's own
-		// `if sk.ID == "" { sk.ID = uuid.New().String() }` fallback mint a
-		// real UUID, exactly like every other real CreateSkill caller in
-		// this codebase already gets.
-		fresh.ID = ""
+		// ToStoreSkill deliberately leaves ID empty so the durable index owns
+		// identity creation through CreateSkill.
 		if err := i.Index.CreateSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, fresh); err != nil {
 			return nil, fmt.Errorf("create skill index row: %w", err)
 		}

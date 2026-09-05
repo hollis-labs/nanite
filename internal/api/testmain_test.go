@@ -17,6 +17,13 @@ func TestMain(m *testing.M) {
 		_, _ = fmt.Fprintf(os.Stderr, "create API test temp root: %v\n", err)
 		os.Exit(1)
 	}
+	// A number of API paths use os.UserHomeDir as their execution or fixture
+	// root. TestMain points HOME at this isolated tree, so create the directory
+	// before tests attempt to chdir or create children beneath it.
+	if err := os.MkdirAll(filepath.Join(root, "home"), 0o700); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "create API test home: %v\n", err)
+		os.Exit(1)
+	}
 	for env, dir := range map[string]string{
 		"HOME":                filepath.Join(root, "home"),
 		"XDG_DATA_HOME":       filepath.Join(root, "xdg", "data"),

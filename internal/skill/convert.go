@@ -7,23 +7,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-const fileIDPrefix = "file-"
-
-// IsFileBasedID returns true if the skill ID was generated from a file-based definition.
-func IsFileBasedID(id string) bool {
-	return len(id) > len(fileIDPrefix) && id[:len(fileIDPrefix)] == fileIDPrefix
-}
-
-// SlugFromFileID extracts the slug from a file-based skill ID.
-func SlugFromFileID(id string) string {
-	if !IsFileBasedID(id) {
-		return ""
-	}
-	return id[len(fileIDPrefix):]
-}
-
 // ToStoreSkill converts a Definition to a store.Skill index row.
-// The ID is deterministic: "file-{slug}".
+// ID is deliberately empty so CreateSkill mints the durable database UUID.
 //
 // TASKS/skills/02: this shrinks significantly against the redesigned,
 // index-only store.Skill shape (docs/engineering/architecture/20-skills.md's
@@ -38,7 +23,7 @@ func (d *Definition) ToStoreSkill() *store.Skill {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	return &store.Skill{
-		ID:                   fileIDPrefix + d.Slug,
+		ID:                   "",
 		Name:                 d.Name,
 		Slug:                 d.Slug,
 		Description:          d.Description,

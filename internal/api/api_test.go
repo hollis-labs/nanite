@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -21,11 +22,15 @@ import (
 func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	t.Helper()
 	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatalf("create isolated test home: %v", err)
+	}
 	// NewContainer resolves its embedded Tesseract store independently of the
 	// Nanite test DB. Pin every XDG root plus the explicit Tesseract DB before
 	// construction so an API test can never open the operator's real store.
 	for env, dir := range map[string]string{
-		"HOME":            filepath.Join(root, "home"),
+		"HOME":            home,
 		"XDG_DATA_HOME":   filepath.Join(root, "xdg", "data"),
 		"XDG_STATE_HOME":  filepath.Join(root, "xdg", "state"),
 		"XDG_CACHE_HOME":  filepath.Join(root, "xdg", "cache"),
@@ -53,10 +58,9 @@ func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	t.Cleanup(func() { s.Close(context.Background()) })
 
 	svc, err := service.NewContainer(service.ContainerConfig{
-		Store:             s,
-		Providers:         provider.NewRegistry(),
-		WorkingDir:        root,
-		ManagedConfigRoot: filepath.Join(root, ".nanite"),
+		Store:      s,
+		Providers:  provider.NewRegistry(),
+		WorkingDir: root,
 	})
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)

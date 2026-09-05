@@ -6,10 +6,9 @@ icon: chat
 ---
 > **Superseded (CW-20260815-0004):** this is an older, unrelated POC —
 > different tools (`mux_launch`/`mux_send`/`mux_stop`), chat-driven, no
-> Torque awareness. The current Orchestrator role (polls Torque task
-> state, dispatches via `workflow_run`/`subagent_spawn`) lives at
-> `.nanite/agents/orchestrator.md` and the `orchestrator` durable-agent
-> recipe in `internal/service/durable_agent_recipes.go`. Don't confuse
+> Torque awareness. Current orchestration profiles are provisioned in the
+> database, with an `orchestrator` durable-agent recipe in
+> `internal/service/durable_agent_recipes.go`. Don't confuse
 > the two — this file is legacy, kept for reference, not the current
 > Orchestrator design.
 

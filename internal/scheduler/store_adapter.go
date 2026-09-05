@@ -239,11 +239,8 @@ func (a *StoreAdapter) buildPayload(row store.AgentSchedule) ([]byte, error) {
 // single profile_id this schedule row already carries against every
 // instance).
 //
-// Today's real data shape (confirmed via managed_durable_configs.go's
-// syncManagedDurableAgentConfig, which creates exactly one instance and
-// then exactly one profile-scoped schedule per managed YAML config) is
-// 1:1: one profile_id maps to one instance. Nothing in the schema enforces
-// that going forward, though -- agent_schedules is scoped to a profile,
+// Most deployed data currently has one instance per profile, but nothing in
+// the schema enforces that -- agent_schedules is scoped to a profile,
 // not an instance, so two instances of the same profile sharing one
 // schedule row is a real (if currently unexercised) possibility. Rather
 // than guess which instance a schedule fires against in that case, this

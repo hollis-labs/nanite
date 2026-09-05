@@ -292,7 +292,7 @@ func (a *API) normalizeAgentBuilderProfile(req AgentBuilderDryRunRequest) (Agent
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("profile %q not found", input.ID))
 			} else if existing.Source == "internal" {
-				errors = append(errors, "internal/file-SOT profiles remain read-only through Agent Builder dry-run")
+				errors = append(errors, "internal profiles remain read-only through Agent Builder dry-run")
 			}
 		}
 	}

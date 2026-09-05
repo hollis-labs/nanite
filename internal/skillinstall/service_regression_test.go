@@ -6,12 +6,10 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/service"
-	"github.com/hollis-labs/nanite/internal/skill"
 )
 
-// TestInstall_ResultRoundTripsThroughSkillService is the regression test for
-// the "installed skills got a permanent file-<slug> ID" bug (fresh reviewer,
-// 2026-08-21, TASKS/skills/04's "Fix required" section). It goes one layer
+// TestInstall_ResultRoundTripsThroughSkillService proves an installed package
+// receives a durable database identity and goes one layer
 // above the direct store.Store assertions the rest of this package's tests
 // make: install a real package through Installer.Install, then round-trip
 // the resulting row through service.SkillService.Update and .Delete — the
@@ -19,14 +17,6 @@ import (
 // wired to PUT/DELETE /api/skills/{id}) — against the *same* underlying
 // *store.Store the Installer's Index field used, so this exercises the same
 // rows the pipeline actually created, not two disconnected stores.
-//
-// Before the fix, def.ToStoreSkill()'s unconditional "file-<slug>" ID was
-// passed straight into a real CreateSkill call, and skill.IsFileBasedID
-// (skillServiceImpl.Update/Delete's guard, reserved for the old pre-redesign
-// virtual/ephemeral file-based rows) matched it — so both calls hard-rejected
-// every installed skill with "cannot update/delete file-based skill ... edit/
-// remove the .md file instead". This test fails on that rejection if the bug
-// regresses.
 func TestInstall_ResultRoundTripsThroughSkillService(t *testing.T) {
 	inst, _, idx := newTestInstaller(t)
 
@@ -35,11 +25,11 @@ func TestInstall_ResultRoundTripsThroughSkillService(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	if skill.IsFileBasedID(result.Skill.ID) {
-		t.Fatalf("installed skill got a file-based sentinel ID: %q — should be a real UUID", result.Skill.ID)
+	if result.Skill.ID == "" {
+		t.Fatal("installed skill did not receive a database identity")
 	}
 
-	svc := service.NewSkillService(service.SkillServiceConfig{Skills: idx, FileSkills: nil})
+	svc := service.NewSkillService(service.SkillServiceConfig{Skills: idx})
 
 	installed, err := svc.Get(context.Background(), result.Skill.ID)
 	if err != nil {

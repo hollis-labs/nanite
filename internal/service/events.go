@@ -4,8 +4,22 @@ import (
 	"context"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/messaging"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/plugin"
+)
+
+// Host runtime event types stored alongside mailbox events in session_events.
+// Mailbox mutation event names live in go-messaging/mailbox; provider,
+// compaction, and harness lifecycle vocabulary remains owned by Nanite.
+const (
+	EventPTYTurnStart    = "pty_turn_start"
+	EventPTYTurnComplete = "pty_turn_complete"
+	EventPTYTurnFailed   = "pty_turn_failed"
+
+	EventContextPreCompact  = "context_pre_compact"
+	EventContextPostCompact = "context_post_compact"
+
+	EventHarnessTriggeredTurn = "harness_triggered_turn"
 )
 
 // EventEmitter unifies activity events (Engine GUI), plugin events, and
@@ -30,9 +44,9 @@ type EventEmitter interface {
 }
 
 // SessionEventWriter is the narrow interface for writing lifecycle events
-// directly into the session_events table. Satisfied by *messaging.Service
-// (WriteSessionEvent). Optional in ChatServiceConfig — nil-safe at all
-// call sites.
+// directly into the session_events table. The production implementation is
+// the Nanite-owned session-event adapter installed beside mailbox.Service.
+// Optional in ChatServiceConfig — nil-safe at all call sites.
 type SessionEventWriter interface {
 	WriteSessionEvent(ctx context.Context, sessionID, eventType, channel, payloadJSON string)
 }

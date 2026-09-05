@@ -37,6 +37,12 @@ const (
 	ModeInteractive = "interactive"
 )
 
+// ResultMessageKind is Nanite's host-specific mailbox kind for a completed or
+// failed subagent run. The shared mailbox package deliberately owns only its
+// transport-neutral kind vocabulary; turn-start injection and wake suppression
+// for this value remain Nanite runtime policy.
+const ResultMessageKind = "subagent_result"
+
 // Run status constants. Lifecycle:
 //
 //	requested → approved → running → completed | failed | over_budget | stalled | canceled

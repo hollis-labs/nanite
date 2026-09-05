@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/classify"
-	"github.com/hollis-labs/nanite/internal/messaging"
 )
 
 type immediateBackgroundBackend struct{}

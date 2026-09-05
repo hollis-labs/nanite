@@ -492,7 +492,7 @@ func (a *API) handleSyncSkill(w http.ResponseWriter, r *http.Request) {
 // precedent among its siblings.
 //
 // Note: internal/server/caller_identity.go's callerIdentityMiddleware IS a
-// real, wired-in caller-identity mechanism — internal/messaging's own authz
+// real, wired-in caller-identity mechanism — go-messaging/mailbox's authz
 // checks (Inbox caller-match, Thread participant filter, Ack/Resolve
 // recipient check, UnreadCount caller-match), consumed via
 // internal/api/messaging.go's handlers, already rely on it. It is simply

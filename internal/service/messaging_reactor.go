@@ -4,7 +4,7 @@ package service
 // messaging.WakeReactor (CW-20260816-0065, "unify SendMessage to trigger
 // live wake"). Sibling to subagentCompletionReactor: same shape (resolve
 // policy → busy-check → TriggerXxx), different event source (a live
-// internal/messaging A2A send vs. a subagent completion) and a different
+// go-messaging/mailbox A2A send vs. a subagent completion) and a different
 // default policy — see resolveMessageWakePolicy's doc comment for why the
 // default is inverted relative to resolveSubagentCompletionPolicy's.
 
@@ -13,9 +13,10 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/agent/override"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/messaging"
+	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
 type messagingWakeReactor struct {
@@ -30,13 +31,11 @@ type messagingWakeReactor struct {
 // stays durably queryable via message_inbox/message_thread, just
 // without a proactive nudge.
 //
-// Called by messaging.Service.SendMessage in its own goroutine (see that
-// call site's comment) for every eligible send, so this does not need to
-// re-guard against Kind==KindSubagentResult itself — SendMessage already
-// filters that out before invoking the reactor at all, leaving that kind
-// exclusively to subagent.CompletionReactor.
+// Called by mailbox.Service.SendMessage in its own goroutine for every send.
+// The first guard below is Nanite's host-owned exclusion for subagent results,
+// leaving that kind exclusively to subagent.CompletionReactor.
 func (r *messagingWakeReactor) ReactToMessage(ctx context.Context, msg *messaging.Message) {
-	if r == nil || r.chat == nil || msg == nil || msg.ToSessionID == "" {
+	if r == nil || r.chat == nil || msg == nil || msg.ToSessionID == "" || msg.Kind == subagent.ResultMessageKind {
 		return
 	}
 

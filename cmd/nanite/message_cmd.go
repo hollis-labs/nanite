@@ -9,11 +9,12 @@ import (
 	"strings"
 	"time"
 
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
+	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/brand"
-	"github.com/hollis-labs/nanite/internal/messaging"
-	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
 )
 
 // cliProcessStartUnix captures the unix time at the CLI process's
@@ -151,7 +152,7 @@ func messageSend(svc *messaging.Service, args []string) {
 	// --from=<id> always wins; explicit --from=user with --cli is
 	// treated as "I want a deterministic CLI id, not literal user".
 	fromID := *from
-	if *cliMode && (fromID == "" || fromID == messaging.UserSentinel) {
+	if *cliMode && (fromID == "" || fromID == a2a.UserSentinel) {
 		fromID = cliDeterministicFromAgentID()
 	}
 
@@ -365,26 +366,8 @@ func messageHandoff(svc *messaging.Service, args []string) {
 	}
 }
 
-// newMessagingServiceForCLI wires a minimal AgentService as the
-// messaging.Service resolver for CLI use, backed entirely by the DB.
-//
-// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md removed the file
-// discovery + internal-profile-loading this function used to do to
-// populate an in-memory fileDefs registry so a "file-<slug>" address would
-// resolve without touching the DB: that registry no longer exists anywhere
-// (AgentServiceConfig has no FileAgents field), and every agent -- the 9
-// internal builtin profiles included -- already has a real agent_profiles
-// row with a real ID from the server's own boot-time AutoIngestAgents pass,
-// which always runs before this CLI command would have anything meaningful
-// to address anyway. Events is nil: the CLI doesn't emit activity, and
-// AgentService.Get — the only method messaging.Service calls via
-// AgentResolver — never dereferences the Events field.
+// newMessagingServiceForCLI uses the same mailbox and Nanite-owned adapters as
+// the server composition root, backed entirely by the DB.
 func newMessagingServiceForCLI(s *store.Store) (*messaging.Service, error) {
-	agents := service.NewAgentService(service.AgentServiceConfig{
-		Agents:   s,
-		Writers:  s,
-		Settings: s,
-		Events:   nil,
-	})
-	return messaging.NewService(messaging.NewSQLiteStore(s.DB), s.DB, agents, s), nil
+	return mailboxadapter.New(s).Service, nil
 }

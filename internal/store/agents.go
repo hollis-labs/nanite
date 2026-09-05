@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hollis-labs/nanite/internal/a2a"
 )
 
 // urnPrefix mirrors agent.URNPrefix without an import cycle on the
@@ -448,10 +449,10 @@ func (s *Store) GetAgent(ctx context.Context, id string) (*AgentProfile, error) 
 
 // CreateAgent inserts a new agent profile.
 func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
-	if a.Slug == "user" {
+	if a.Slug == a2a.UserSentinel {
 		return fmt.Errorf("agent slug %q is reserved (messaging user sentinel)", a.Slug)
 	}
-	if a.ID == "user" {
+	if a.ID == a2a.UserSentinel {
 		return fmt.Errorf("agent id %q is reserved (messaging user sentinel)", a.ID)
 	}
 	if a.ID == "" {

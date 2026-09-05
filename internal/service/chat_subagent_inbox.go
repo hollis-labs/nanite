@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"log/slog"
+	"strings"
 
-	"github.com/hollis-labs/nanite/internal/messaging"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
+	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
 // evaluateAndInjectSubagentResults surfaces pending kind=subagent_result
@@ -24,7 +26,7 @@ func (s *chatServiceImpl) evaluateAndInjectSubagentResults(ctx context.Context, 
 		return nil
 	}
 	pending, err := s.subagentInbox.Inbox(ctx, sessionID, agentID,
-		messaging.InboxFilter{Status: messaging.StatusUnread, Kind: messaging.KindSubagentResult},
+		messaging.InboxFilter{Status: messaging.StatusUnread, Kind: subagent.ResultMessageKind},
 		sessionID, agentID)
 	if err != nil {
 		slog.Warn("chat-service: subagent result inbox query failed", "session_id", sessionID, "err", err)
@@ -34,7 +36,7 @@ func (s *chatServiceImpl) evaluateAndInjectSubagentResults(ctx context.Context, 
 		return nil
 	}
 
-	injection := messaging.FormatSubagentResultInjection(pending)
+	injection := formatSubagentResultInjection(pending)
 	appendUserContext(slotResult, injection)
 
 	for _, m := range pending {
@@ -43,4 +45,25 @@ func (s *chatServiceImpl) evaluateAndInjectSubagentResults(ctx context.Context, 
 		}
 	}
 	return pending
+}
+
+func formatSubagentResultInjection(messages []messaging.Message) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("<system-reminder>\n")
+	for _, message := range messages {
+		body := strings.TrimSpace(message.Body)
+		if body == "" {
+			body = "(no summary)"
+		}
+		builder.WriteString("Subagent result (from ")
+		builder.WriteString(message.FromAgentID)
+		builder.WriteString("): ")
+		builder.WriteString(body)
+		builder.WriteString("\n")
+	}
+	builder.WriteString("</system-reminder>")
+	return builder.String()
 }

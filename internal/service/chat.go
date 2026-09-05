@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
@@ -25,7 +26,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
@@ -909,14 +909,14 @@ func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, rea
 
 	if s.sessionEventWriter != nil {
 		payload := fmt.Sprintf(`{"triggered_by":%q,"run_id":%q,"assistant_msg_id":%q}`, reason, runID, assistantMsgID)
-		s.sessionEventWriter.WriteSessionEvent(ctx, sessionID, messaging.EventHarnessTriggeredTurn, "", payload)
+		s.sessionEventWriter.WriteSessionEvent(ctx, sessionID, EventHarnessTriggeredTurn, "", payload)
 	}
 
 	return assistantMsgID, nil
 }
 
 // TriggerMessageWake enqueues a harness-initiated turn on sessionID in
-// reaction to an inbound internal/messaging A2A message — the
+// reaction to an inbound go-messaging/mailbox A2A message — the
 // CW-20260816-0065 sibling to TriggerHarnessTurn (subagent completions)
 // and SendAgentMessage (direct agent-to-agent sends), called by
 // messagingWakeReactor (messaging_reactor.go) rather than invented at a
@@ -968,7 +968,7 @@ func (s *chatServiceImpl) TriggerMessageWake(ctx context.Context, sessionID stri
 
 	if s.sessionEventWriter != nil {
 		payload := fmt.Sprintf(`{"triggered_by":"a2a_message","message_id":%q,"assistant_msg_id":%q}`, msg.ID, assistantMsgID)
-		s.sessionEventWriter.WriteSessionEvent(ctx, sessionID, messaging.EventHarnessTriggeredTurn, "", payload)
+		s.sessionEventWriter.WriteSessionEvent(ctx, sessionID, EventHarnessTriggeredTurn, "", payload)
 	}
 
 	return assistantMsgID, nil

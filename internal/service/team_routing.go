@@ -122,7 +122,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/hollis-labs/nanite/internal/messaging"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 

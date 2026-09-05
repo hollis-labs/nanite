@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/messaging"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 )
 
 // TestCallerIdentityMiddleware_StampsBothHeaders confirms the G-6.3

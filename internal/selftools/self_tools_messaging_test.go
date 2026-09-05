@@ -6,9 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
+	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
 )
 
 func messagingToolText(t *testing.T, st *SelfToolsTransport, ctx context.Context, name string, args map[string]any) string {
@@ -35,12 +37,6 @@ func createMessagingSession(t *testing.T, s *store.Store) string {
 	return sess.ID
 }
 
-type messagingStoreAgentResolver struct{ store *store.Store }
-
-func (r messagingStoreAgentResolver) Get(ctx context.Context, id string) (*store.AgentProfile, error) {
-	return r.store.GetAgent(ctx, id)
-}
-
 func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 	t.Run("normal send inbox thread ack resolve and catch-up default", func(t *testing.T) {
 		st := newSelfTools(t)
@@ -52,9 +48,9 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 		)
 		sendText := messagingToolText(t, st, t.Context(), "message_send", map[string]any{
 			"from_session_id": fromSession,
-			"from_agent_id":   messaging.UserSentinel,
+			"from_agent_id":   a2a.UserSentinel,
 			"to_session_id":   toSession,
-			"to_agent_id":     messaging.UserSentinel,
+			"to_agent_id":     a2a.UserSentinel,
 			"body":            "characterize transport",
 		})
 		messageID := strings.TrimPrefix(sendText, "sent: ")
@@ -64,7 +60,7 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 
 		inboxText := messagingToolText(t, st, t.Context(), "message_inbox", map[string]any{
 			"session_id": toSession,
-			"agent_id":   messaging.UserSentinel,
+			"agent_id":   a2a.UserSentinel,
 		})
 		var inbox []messaging.Message
 		if err := json.Unmarshal([]byte(inboxText), &inbox); err != nil {
@@ -77,7 +73,7 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 		threadText := messagingToolText(t, st, t.Context(), "message_thread", map[string]any{
 			"thread_id":  inbox[0].ThreadID,
 			"session_id": toSession,
-			"agent_id":   messaging.UserSentinel,
+			"agent_id":   a2a.UserSentinel,
 		})
 		var thread []messaging.Message
 		if err := json.Unmarshal([]byte(threadText), &thread); err != nil {
@@ -89,14 +85,14 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 
 		if got := messagingToolText(t, st, t.Context(), "message_ack", map[string]any{
 			"session_id": toSession,
-			"agent_id":   messaging.UserSentinel,
+			"agent_id":   a2a.UserSentinel,
 			"message_id": messageID,
 		}); got != "acked" {
 			t.Fatalf("message_ack = %q, want acked", got)
 		}
 		if got := messagingToolText(t, st, t.Context(), "message_resolve", map[string]any{
 			"session_id": toSession,
-			"agent_id":   messaging.UserSentinel,
+			"agent_id":   a2a.UserSentinel,
 			"message_id": messageID,
 		}); got != "resolved" {
 			t.Fatalf("message_resolve = %q, want resolved", got)
@@ -105,9 +101,9 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 		for i := 0; i < 25; i++ {
 			messagingToolText(t, st, t.Context(), "message_send", map[string]any{
 				"from_session_id": fromSession,
-				"from_agent_id":   messaging.UserSentinel,
+				"from_agent_id":   a2a.UserSentinel,
 				"to_session_id":   toSession,
-				"to_agent_id":     messaging.UserSentinel,
+				"to_agent_id":     a2a.UserSentinel,
 				"body":            "catch-up",
 			})
 		}
@@ -128,14 +124,14 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 		st.MessagingTools.Service = newTestMessaging(t)
 		if got := messagingToolText(t, st, t.Context(), "message_inbox", map[string]any{
 			"session_id": "empty-session",
-			"agent_id":   messaging.UserSentinel,
+			"agent_id":   a2a.UserSentinel,
 		}); got != "[]" {
 			t.Fatalf("empty inbox = %q, want []", got)
 		}
 		if got := messagingToolText(t, st, t.Context(), "message_thread", map[string]any{
 			"thread_id":  "empty-thread",
 			"session_id": "empty-session",
-			"agent_id":   messaging.UserSentinel,
+			"agent_id":   a2a.UserSentinel,
 		}); got != "[]" {
 			t.Fatalf("empty thread = %q, want []", got)
 		}
@@ -143,12 +139,7 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 
 	t.Run("handoff uses context session and supports approve reject", func(t *testing.T) {
 		st := newSelfTools(t)
-		st.MessagingTools.Service = messaging.NewService(
-			messaging.NewSQLiteStore(st.Store.DB),
-			st.Store.DB,
-			messagingStoreAgentResolver{store: st.Store},
-			st.Store,
-		)
+		st.MessagingTools.Service = mailboxadapter.New(st.Store).Service
 		fromAgent := seedAgent(t, st.Store, "From Agent", "handoff-from", "", "")
 		toAgent := seedAgent(t, st.Store, "To Agent", "handoff-to", "", "")
 		sessionID := createMessagingSession(t, st.Store)

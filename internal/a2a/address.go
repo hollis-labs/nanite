@@ -24,6 +24,12 @@ const (
 	// in internal/store/agents.go that was copied without imports.
 	AuthorityNanite = "nanite"
 
+	// UserSentinel is Nanite's reserved mailbox participant ID for the human
+	// user. go-messaging intentionally treats participant identifiers as opaque;
+	// the Nanite resolver recognizes this host-owned identity without requiring
+	// an agent_profiles row.
+	UserSentinel = "user"
+
 	// agentIDPrefix is the prefix for generated agent IDs.
 	agentIDPrefix = "agt_"
 )
@@ -37,17 +43,13 @@ type Address = messaging.Address
 type AddressKind = messaging.AddressKind
 
 // Address kinds from go-messaging (re-exported for convenience).
-//
-// KindGroup is deliberately not re-exported here: it only exists in
-// go-messaging v0.3.0+, and Nanite is pinned to v0.2.1 (go.mod). Add it
-// back if/when the pin moves — see the design doc's explicit non-goal on
-// reconciling this version gap.
 const (
 	KindAgent    = messaging.KindAgent
 	KindUser     = messaging.KindUser
 	KindService  = messaging.KindService
 	KindSession  = messaging.KindSession
 	KindWorkflow = messaging.KindWorkflow
+	KindGroup    = messaging.KindGroup
 )
 
 // ParseURN parses a canonical messaging URN into an Address.

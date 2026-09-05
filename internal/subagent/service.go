@@ -15,8 +15,8 @@ import (
 
 	"github.com/google/uuid"
 
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/dispatch"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -1611,7 +1611,7 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 		ToSessionID:   run.ParentSessionID,
 		ToAgentID:     toAgentID,
 		Channel:       replyChannel,
-		Kind:          messaging.KindSubagentResult,
+		Kind:          ResultMessageKind,
 		Body:          summary,
 		PayloadJSON:   resultPayload,
 		Type:          messaging.TypeMessage,

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/hollis-labs/nanite/internal/messaging"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 )
 
 // messagingStatus returns the HTTP status code for a messaging.Service

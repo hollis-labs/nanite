@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/messaging"
 )
 
 // messagingStreamSink bridges messaging.Service's NotifyReceived hook

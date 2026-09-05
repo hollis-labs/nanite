@@ -8,7 +8,6 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/safego"
 )
 
@@ -184,7 +183,7 @@ func (c *CompositeEmitter) EmitPreCompact(ctx context.Context, sessionID string,
 	if c.sessionWriter != nil {
 		payload := fmt.Sprintf(`{"message_count":%d,"trigger_kind":%q}`, messageCount, reason)
 		c.sessionWriter.WriteSessionEvent(ctx, sessionID,
-			messaging.EventContextPreCompact, reason, payload)
+			EventContextPreCompact, reason, payload)
 	}
 }
 
@@ -212,6 +211,6 @@ func (c *CompositeEmitter) EmitPostCompact(ctx context.Context, sessionID string
 		payload := fmt.Sprintf(`{"tokens_saved":%d,"stages_applied":%s}`,
 			tokensSaved, stagesJSON)
 		c.sessionWriter.WriteSessionEvent(ctx, sessionID,
-			messaging.EventContextPostCompact, "compaction", payload)
+			EventContextPostCompact, "compaction", payload)
 	}
 }

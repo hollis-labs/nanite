@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/messaging"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 )
 
 // envelopePostTimeout bounds the messaging.SendMessage call when

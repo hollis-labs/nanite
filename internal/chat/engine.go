@@ -62,7 +62,7 @@ type AgentConstraints struct {
 
 	// MessageWakePolicy (CW-20260816-0065) is this agent profile's default
 	// reaction to a live agent-to-agent message (an
-	// internal/messaging.Service.SendMessage send whose Kind is not
+	// mailbox.Service.SendMessage send whose Kind is not
 	// subagent_result — that kind has its own dedicated policy/path, see
 	// SubagentCompletionPolicy) arriving for this session: "" (unset) or
 	// "auto_summarize" (proactively trigger a harness turn carrying the

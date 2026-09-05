@@ -4,17 +4,16 @@ import (
 	"context"
 	"testing"
 
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/elicitation"
-	"github.com/hollis-labs/nanite/internal/messaging"
+	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
 )
 
 // newTestMessaging creates a real messaging.Service backed by the test store.
 func newTestMessaging(t *testing.T) *messaging.Service {
 	t.Helper()
 	s := newTestStore(t)
-	sqlStore := messaging.NewSQLiteStore(s.DB)
-	svc := messaging.NewService(sqlStore, s.DB, nil, s)
-	return svc
+	return mailboxadapter.New(s).Service
 }
 
 // stubElicitationService is a local copy of internal/mcp/elicitation_test.go's

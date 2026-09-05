@@ -71,7 +71,7 @@ func TestTaskManager_classifyTarget(t *testing.T) {
 			errContains: "invalid msg:// address",
 		},
 		{
-			// go-messaging v0.3.0 parses group as a recognized address kind;
+			// go-messaging v0.4.0 parses group as a recognized address kind;
 			// TaskManager still intentionally accepts only agent targets.
 			name:        "recognized but unsupported group address",
 			target:      "msg://group/nanite/grp_xyz",

@@ -15,16 +15,16 @@ import (
 
 	"github.com/google/uuid"
 
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/classify"
-	"github.com/hollis-labs/nanite/internal/messaging"
 )
 
 // Messenger is the narrow surface Service uses to deliver completion
 // envelopes back to the originating session. *messaging.Service
 // satisfies this structurally; tests inject a stub.
 //
-// Defined here (rather than reusing internal/messaging directly with
-// its full surface) so test doubles stay minimal and the dependency
+// Defined here rather than depending on mailbox.Service's full surface so
+// test doubles stay minimal and the dependency
 // boundary is explicit. This is the same pattern internal/subagent.MessagePoster
 // uses for the same reason.
 type Messenger interface {

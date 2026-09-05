@@ -7,7 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/messaging"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
+	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -42,7 +43,7 @@ func seedMessageInbox(t *testing.T, a *API) {
 	sqlStore := messaging.NewSQLiteStore(a.Services.Store.DB)
 	if _, err := sqlStore.Send(context.Background(), messaging.SendInput{
 		FromSessionID: "sess-other",
-		FromAgentID:   messaging.UserSentinel,
+		FromAgentID:   a2a.UserSentinel,
 		ToSessionID:   "sess-1",
 		ToAgentID:     "test-file-backend",
 		Body:          "hi",

@@ -4,8 +4,6 @@ import (
 	"context"
 	"sync"
 	"testing"
-
-	"github.com/hollis-labs/nanite/internal/messaging"
 )
 
 // captureSessionEventWriter is a test double for SessionEventWriter that records
@@ -41,26 +39,23 @@ func (c *captureSessionEventWriter) events() []capturedSessionEvent {
 	return out
 }
 
-// Compile-time assertion: *messaging.Service must satisfy SessionEventWriter.
-var _ SessionEventWriter = (*messaging.Service)(nil)
-
 // TestCaptureSessionEventWriter_RecordsWrites is a sanity check for the test
 // double itself. Validates that captureSessionEventWriter records calls
 // thread-safely.
 func TestCaptureSessionEventWriter_RecordsWrites(t *testing.T) {
 	w := &captureSessionEventWriter{}
 
-	w.WriteSessionEvent(context.Background(), "sess-1", messaging.EventPTYTurnStart, "pty", `{"x":1}`)
-	w.WriteSessionEvent(context.Background(), "sess-1", messaging.EventPTYTurnComplete, "pty", `{"x":2}`)
+	w.WriteSessionEvent(context.Background(), "sess-1", EventPTYTurnStart, "pty", `{"x":1}`)
+	w.WriteSessionEvent(context.Background(), "sess-1", EventPTYTurnComplete, "pty", `{"x":2}`)
 
 	evts := w.events()
 	if len(evts) != 2 {
 		t.Fatalf("len=%d, want 2", len(evts))
 	}
-	if evts[0].EventType != messaging.EventPTYTurnStart {
-		t.Errorf("evts[0].EventType = %q, want %q", evts[0].EventType, messaging.EventPTYTurnStart)
+	if evts[0].EventType != EventPTYTurnStart {
+		t.Errorf("evts[0].EventType = %q, want %q", evts[0].EventType, EventPTYTurnStart)
 	}
-	if evts[1].EventType != messaging.EventPTYTurnComplete {
-		t.Errorf("evts[1].EventType = %q, want %q", evts[1].EventType, messaging.EventPTYTurnComplete)
+	if evts[1].EventType != EventPTYTurnComplete {
+		t.Errorf("evts[1].EventType = %q, want %q", evts[1].EventType, EventPTYTurnComplete)
 	}
 }

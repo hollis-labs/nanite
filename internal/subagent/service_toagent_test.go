@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
 )
 
 // TestSpawn_ReplyDelivery_ParentSlug_ToAgentIDResolution is the regression pin
@@ -46,8 +46,7 @@ func TestSpawn_ReplyDelivery_ParentSlug_ToAgentIDResolution(t *testing.T) {
 	// newTestDB already seeds the "worker" profile at id="blt-worker-001"
 	// (migration 060) for the child role.
 
-	msgStore := messaging.NewSQLiteStore(db)
-	messagingSvc := messaging.NewService(msgStore, db, storeAgentResolver{st: st}, st)
+	messagingSvc := mailboxadapter.New(st).Service
 
 	svc := NewService(db, EchoRunner{}, messagingSvc, nil, stubSettings{})
 	svc.SetProfileResolver(st)
@@ -86,7 +85,7 @@ func TestSpawn_ReplyDelivery_ParentSlug_ToAgentIDResolution(t *testing.T) {
 
 	replies := 0
 	for _, m := range msgs {
-		if m.Kind == messaging.KindSubagentResult {
+		if m.Kind == ResultMessageKind {
 			// Additional verification: the message should be TO the
 			// resolved ID, not the slug.
 			if m.ToAgentID != "agt-operator-001" {

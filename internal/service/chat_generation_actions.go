@@ -20,7 +20,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/effort"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -241,7 +240,7 @@ func (s *chatServiceImpl) initializeRun(
 		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		startCancel = cancel
 		s.sessionEventWriter.WriteSessionEvent(
-			startCtx, sessionID, messaging.EventPTYTurnStart, providerName, startPayload)
+			startCtx, sessionID, EventPTYTurnStart, providerName, startPayload)
 	}
 
 	// Emit agent.loaded plugin event (fire-and-forget).

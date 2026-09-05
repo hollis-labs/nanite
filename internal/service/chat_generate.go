@@ -19,7 +19,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/classify"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -146,9 +145,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if !lifecycle.ptyTurnStarted || s.sessionEventWriter == nil {
 			return
 		}
-		eventType := messaging.EventPTYTurnFailed
+		eventType := EventPTYTurnFailed
 		if lifecycle.ptyTurnSucceeded {
-			eventType = messaging.EventPTYTurnComplete
+			eventType = EventPTYTurnComplete
 		}
 		payload := fmt.Sprintf(`{"message_id":%q,"provider":%q,"duration_ms":%d}`,
 			assistantMsgID, lifecycle.ptyProviderName, time.Since(lifecycle.startTime).Milliseconds())

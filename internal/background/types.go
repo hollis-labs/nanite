@@ -24,8 +24,8 @@
 //   - D3 — Long-term dispatch swaps to agent-mux behind the Backend
 //     interface defined here. Activation is a separate ticket; this
 //     package must NOT import or call agent-mux.
-//   - D4 — Result delivery uses the existing messaging system
-//     (internal/messaging). Result posts back to the originating
+//   - D4 — Result delivery uses go-messaging/mailbox through Nanite's
+//     composition adapter. Result posts back to the originating
 //     session as a notification on completion.
 //   - D5 — classify.PatternBackground is the gate. Service.Submit
 //     rejects anything other than PatternBackground.

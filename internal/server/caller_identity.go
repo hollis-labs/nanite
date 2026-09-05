@@ -3,7 +3,7 @@ package server
 import (
 	"net/http"
 
-	"github.com/hollis-labs/nanite/internal/messaging"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 )
 
 // HTTP caller-identity header names. Callers that want the service

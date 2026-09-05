@@ -13,8 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/messaging"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
 	"github.com/hollis-labs/nanite/internal/storetest"
 
 	_ "modernc.org/sqlite"
@@ -150,8 +151,8 @@ func TestSpawn_SyncEchoRunner_RoundTrip(t *testing.T) {
 	// CW-20260512-0019: completion replies now carry Kind=subagent_result
 	// (not the generic KindReply) so downstream turn-start injection and
 	// the harness-reaction layer can filter for them specifically.
-	if in.Kind != messaging.KindSubagentResult {
-		t.Errorf("reply Kind = %q, want %q", in.Kind, messaging.KindSubagentResult)
+	if in.Kind != ResultMessageKind {
+		t.Errorf("reply Kind = %q, want %q", in.Kind, ResultMessageKind)
 	}
 	if in.Channel != messaging.ChannelChat {
 		t.Errorf("sync mode reply Channel = %q, want %q", in.Channel, messaging.ChannelChat)
@@ -1012,29 +1013,15 @@ func TestReject_NotPending(t *testing.T) {
 	}
 }
 
-// storeAgentResolver adapts *store.Store to messaging.AgentResolver so
-// tests can wire a REAL messaging.Service instead of stubPoster —
-// necessary for TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision,
-// which needs to exercise messaging's actual auto-register/slug-collision
-// path, not just assert the shape of what subagent handed it.
-type storeAgentResolver struct{ st *store.Store }
-
-func (r storeAgentResolver) Get(_ context.Context, id string) (*store.AgentProfile, error) {
-	return r.st.GetAgent(context.
-
-		// TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision is the
-		// regression pin for CW-20260815-0023: reply delivery used to pass the bare
-		// role string (e.g. "worker") as FromAgentID with RegisterAs="external".
-		// Since every dispatchable role already has an agent_profiles row (Spawn's
-		// own GetAgentBySlug gate requires it) whose real ID is never equal to its
-		// slug, messaging's auto-register path would try to INSERT a brand-new row
-		// with Slug=role and collide with the UNIQUE constraint on the existing
-		// row — on every single reply, not just repeated ones. Spawns two children
-		// with the SAME role in sequence (mirrors the ticket's ask) against a REAL
-		// messaging.Service (not a stub) so the actual DB constraint is exercised.
-		Background(), id)
-}
-
+// TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision is the
+// regression pin for CW-20260815-0023: reply delivery used to pass the bare
+// role string (e.g. "worker") as FromAgentID with RegisterAs="external".
+// Since every dispatchable role already has an agent_profiles row (Spawn's
+// own GetAgentBySlug gate requires it) whose real ID is never equal to its
+// slug, messaging's auto-register path would try to INSERT a brand-new row
+// with Slug=role and collide with the UNIQUE constraint on the existing
+// row — on every single reply, not just repeated ones. Spawns two children
+// with the SAME role in sequence against the production mailbox adapters.
 func TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision(t *testing.T) {
 	db, st := newTestDB(t)
 
@@ -1053,8 +1040,7 @@ func TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision(t *testing
 		t.Fatalf("seed parent profile: %v", err)
 	}
 
-	msgStore := messaging.NewSQLiteStore(db)
-	messagingSvc := messaging.NewService(msgStore, db, storeAgentResolver{st: st}, st)
+	messagingSvc := mailboxadapter.New(st).Service
 
 	svc := NewService(db, EchoRunner{}, messagingSvc, nil, stubSettings{})
 	svc.SetProfileResolver(st)
@@ -1092,7 +1078,7 @@ func TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision(t *testing
 		// Kind=subagent_result, not the generic KindReply.
 		replies := 0
 		for _, m := range msgs {
-			if m.Kind == messaging.KindSubagentResult {
+			if m.Kind == ResultMessageKind {
 				replies++
 			}
 		}

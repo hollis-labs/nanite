@@ -16,8 +16,8 @@ import (
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
@@ -106,6 +106,24 @@ func TestEvaluateAndInjectSubagentResults_EmptyInbox_NoOp(t *testing.T) {
 	}
 	if len(fake.ackedIDs()) != 0 {
 		t.Errorf("expected no Ack calls for empty inbox, got %v", fake.ackedIDs())
+	}
+}
+
+func TestFormatSubagentResultInjection_PreservesPromptShape(t *testing.T) {
+	if got := formatSubagentResultInjection(nil); got != "" {
+		t.Fatalf("empty injection = %q, want empty", got)
+	}
+	got := formatSubagentResultInjection([]messaging.Message{
+		{FromAgentID: "researcher", Body: "summary here"},
+		{FromAgentID: "analyst", Body: "  "},
+	})
+	if !strings.HasPrefix(got, "<system-reminder>\n") || !strings.HasSuffix(got, "</system-reminder>") {
+		t.Fatalf("injection framing changed: %q", got)
+	}
+	for _, fragment := range []string{"researcher", "summary here", "analyst", "(no summary)"} {
+		if !strings.Contains(got, fragment) {
+			t.Fatalf("injection %q missing %q", got, fragment)
+		}
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/tesseract"
 
 	embedcontracts "github.com/hollis-labs/go-embed-contracts"
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
 	gosched "github.com/hollis-labs/go-scheduler"
@@ -36,7 +37,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	adapterclaude "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
@@ -52,6 +52,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
 	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/tool"
@@ -581,20 +582,16 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// the sole tool-permission gate everywhere, including inside
 	// ToolClient.CallTool's own execution-time backstop.
 
-	// Messaging service. Uses the AgentService as its resolver -- every
-	// agent is DB-backed now (TASKS/adhoc/01-eliminate-file-based-agent-
-	// runtime.md). Takes the SQLite-backed messaging Store plus the
-	// underlying *sql.DB so
-	// handoff transactions (which span session_handoffs +
-	// session_agents) can run as a single txn.
-	msgStore := messaging.NewSQLiteStore(cfg.Store.DB)
-	// cfg.Store satisfies messaging.AgentRegistrar via its CreateAgent
-	// method — enables T6 auto-register-on-first-send.
-	messagingSvc := messaging.NewService(msgStore, cfg.Store.DB, agents, cfg.Store)
+	// Messaging service. go-messaging owns mailbox validation, persistence,
+	// auth, subscriptions, and hooks; mailboxadapter.New supplies
+	// Nanite's DB-backed participant registry plus its session-event and
+	// handoff schema adapters.
+	messagingComposition := mailboxadapter.New(cfg.Store)
+	messagingSvc := messagingComposition.Service
 	// Wire the session_events writer into the composite emitter so
 	// EmitPreCompact / EmitPostCompact persist context_pre_compact /
 	// context_post_compact rows for P8 part C (CW-20260426-0002).
-	events.WithSessionWriter(messagingSvc)
+	events.WithSessionWriter(messagingComposition.Events)
 	slog.Info("service container: messaging service enabled")
 
 	// Ensure ~/.nanite/skills/ exists on first run (J6, CW-20260421-0006).
@@ -1093,7 +1090,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		EmbeddingProvider:  embeddingProviderID,
 		ResultCache:        buildResultCache(cfg.Store),
 		ModelCatalog:       modelCatalog,
-		SessionEventWriter: messagingSvc,
+		SessionEventWriter: messagingComposition.Events,
 		SubagentInbox:      messagingSvc,
 		DBPath:             cfg.Store.DBPath(catalogCtx),
 		AdapterRegistry:    adapterRegistry,
@@ -1200,7 +1197,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// generateResponse goroutines on Shutdown is the right scope, not a
 	// separate lifecycle. chatSvcImpl already exists by this point (same
 	// ordering constraint as SetWakeReactor immediately above).
-	messagingSvc.SetLifecycleManager(chatSvcImpl.lifecycle)
+	messagingSvc.SetAsyncRunner(chatSvcImpl.lifecycle)
 	// H1 (CW-20260421-0014): wire trust resolver + audit event logger.
 	subagentSvc.SetTrustResolver(cfg.Store)
 	subagentSvc.SetEventLogger(cfg.Store)

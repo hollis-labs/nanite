@@ -11,10 +11,11 @@ import (
 	"strings"
 	"testing"
 
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
 // --- resolveMessageWakePolicy ---
@@ -86,7 +87,7 @@ func TestResolveMessageWakePolicy_UnrecognizedSessionOverride_FallsThrough(t *te
 // TestResolveMessageWakePolicy_UsesReadOnlyAgentResolution is the
 // regression test for a code-review finding: resolveMessageWakePolicy runs
 // from a fire-and-forget goroutine on every eligible A2A SendMessage
-// (internal/messaging/service.go), so its agent-profile-default tier must
+// (go-messaging/mailbox), so its agent-profile-default tier must
 // use the non-mutating ResolveForSessionReadOnly rather than
 // ResolveForSession — the latter auto-assigns a session_agents row and
 // emits AgentAssigned as a side effect for any session with no existing
@@ -159,6 +160,20 @@ func TestReactToMessage_RenderAndWait_NoTrigger(t *testing.T) {
 	}
 	if sw.count() != 0 {
 		t.Errorf("expected no session_events row for render_and_wait, got %d", sw.count())
+	}
+}
+
+func TestReactToMessage_SubagentResultUsesDedicatedCompletionPath(t *testing.T) {
+	svc, cs, sw := newMessagingReactorTestService(t, `{"message_wake_policy":"auto_summarize"}`)
+	r := &messagingWakeReactor{chat: svc}
+
+	r.ReactToMessage(context.Background(), &messaging.Message{
+		ID: "msg-1", ToSessionID: "sess-1", FromAgentID: "worker",
+		Kind: subagent.ResultMessageKind, Body: "done",
+	})
+
+	if cs.callCount != 0 || sw.count() != 0 {
+		t.Fatalf("subagent result used generic wake path: messages=%d events=%d", cs.callCount, sw.count())
 	}
 }
 

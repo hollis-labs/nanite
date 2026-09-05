@@ -9,7 +9,6 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
@@ -236,16 +235,16 @@ func TestCompositeEmitter_SessionEventsOrdering(t *testing.T) {
 		t.Fatalf("session_events written = %d, want >= 2", len(evts))
 	}
 	// Pre-compact comes first.
-	if evts[0].EventType != messaging.EventContextPreCompact {
-		t.Errorf("evts[0].EventType = %q, want %q", evts[0].EventType, messaging.EventContextPreCompact)
+	if evts[0].EventType != EventContextPreCompact {
+		t.Errorf("evts[0].EventType = %q, want %q", evts[0].EventType, EventContextPreCompact)
 	}
 	// trigger_kind is in pre-compact payload.
 	if !strings.Contains(evts[0].PayloadJSON, compactTriggerContextOverflow) {
 		t.Errorf("pre-compact payload missing trigger_kind: %s", evts[0].PayloadJSON)
 	}
 	// Post-compact comes second.
-	if evts[1].EventType != messaging.EventContextPostCompact {
-		t.Errorf("evts[1].EventType = %q, want %q", evts[1].EventType, messaging.EventContextPostCompact)
+	if evts[1].EventType != EventContextPostCompact {
+		t.Errorf("evts[1].EventType = %q, want %q", evts[1].EventType, EventContextPostCompact)
 	}
 	// stages_applied is in post-compact payload.
 	if !strings.Contains(evts[1].PayloadJSON, "drop_enrichment") {

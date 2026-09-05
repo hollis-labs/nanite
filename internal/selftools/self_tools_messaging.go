@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/messaging"
 )
 
 // MessagingTools owns the internal messaging and session-handoff self-tool

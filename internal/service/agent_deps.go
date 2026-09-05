@@ -767,8 +767,11 @@ type runtimeEventBridgeSink struct {
 }
 
 const (
-	retainedTerminalTurnIDs = 64
-	maxPendingRuntimeTurns  = 4096
+	retainedTerminalTurnIDs              = 64
+	maxPendingRuntimeTurns               = 4096
+	hostRuntimeGenerationReserveAttempts = 3
+	hostRuntimeGenerationReserveTimeout  = 750 * time.Millisecond
+	hostRuntimeGenerationRetryDelay      = 25 * time.Millisecond
 )
 
 func newRuntimeEventBridgeSink(bridge *agentEventBridge, sessionID string, isACP bool) *runtimeEventBridgeSink {
@@ -777,9 +780,7 @@ func newRuntimeEventBridgeSink(bridge *agentEventBridge, sessionID string, isACP
 		turns: make(map[string]*sessionRouter), retired: make(map[string]struct{}),
 	}
 	if bridge != nil && bridge.runtimeFeed != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		generation, err := bridge.runtimeFeed.ReserveRuntimeGeneration(ctx, sessionID)
-		cancel()
+		generation, err := reserveRuntimeGenerationWithRetry(bridge.runtimeFeed, sessionID, sink.runID)
 		if err != nil {
 			slog.Warn("host runtime feed: reserve runtime generation", "session_id", sessionID, "err", err)
 		} else {
@@ -795,6 +796,23 @@ func newRuntimeEventBridgeSink(bridge *agentEventBridge, sessionID string, isACP
 		}
 	}
 	return sink
+}
+
+func reserveRuntimeGenerationWithRetry(feed *HostRuntimeFeed, sessionID, runID string) (int64, error) {
+	var lastErr error
+	for attempt := 1; attempt <= hostRuntimeGenerationReserveAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), hostRuntimeGenerationReserveTimeout)
+		generation, err := feed.ReserveRuntimeGeneration(ctx, sessionID, runID)
+		cancel()
+		if err == nil {
+			return generation, nil
+		}
+		lastErr = err
+		if attempt < hostRuntimeGenerationReserveAttempts {
+			time.Sleep(hostRuntimeGenerationRetryDelay)
+		}
+	}
+	return 0, fmt.Errorf("reserve runtime generation after %d attempts: %w", hostRuntimeGenerationReserveAttempts, lastErr)
 }
 
 // AdmitRuntimeTurnOwner queues the exact router before Session.SendInput may

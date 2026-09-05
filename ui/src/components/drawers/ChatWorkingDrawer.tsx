@@ -469,8 +469,8 @@ function RuntimeActivityTab({ state }: { state: HostRuntimeFeedState }) {
 
       {state.gap && (
         <div className="border-b border-warning/30 bg-warning/10 px-3 py-1.5 text-[11px] text-warning">
-          Runtime history is incomplete ({state.gap.reason}; {state.gap.missing_cursor_span} cursor
-          {state.gap.missing_cursor_span === 1 ? '' : 's'} unavailable). State was rebuilt from the oldest retained event.
+          Runtime history is incomplete ({state.gap.reason}; {state.gap.missing_cursor_span} record
+          {state.gap.missing_cursor_span === 1 ? '' : 's'} unavailable). Available state may be partial.
         </div>
       )}
 

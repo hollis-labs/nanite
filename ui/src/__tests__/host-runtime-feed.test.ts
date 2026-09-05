@@ -111,6 +111,7 @@ describe("host runtime reducer", () => {
     );
     expect(state.runtimeRunID).toBe("run-b");
     expect(state.status).toBe("processing");
+    expect(state.gap?.reason).toBe("ingestion");
 
     const current = {
       ...event(10, "session.heartbeat", {}, "run-b", 2),
@@ -131,12 +132,20 @@ describe("host runtime reducer", () => {
       latest_cursor: 12,
       missing_cursor_span: 7,
       retention_dropped: 8,
+      runtime_generation_floor: 2,
+      current_runtime_run_id: "run-b",
     });
     expect(state.lastCursor).toBe(8);
     expect(state.status).toBe("unknown");
     expect(state.gap?.reason).toBe("retention");
+    expect(state.runtimeGeneration).toBe(2);
+    expect(state.runtimeRunID).toBe("run-b");
 
-    state = reduceHostRuntimeEvent(state, event(9, "session.processing", {}, "run-b", 2));
+    state = reduceHostRuntimeEvent(state, event(9, "process.started", {}, "run-a", 1));
+    expect(state.status).toBe("unknown");
+    expect(state.runtimeRunID).toBe("run-b");
+
+    state = reduceHostRuntimeEvent(state, event(10, "session.processing", {}, "run-b", 2));
     expect(state.status).toBe("processing");
     expect(state.runtimeRunID).toBe("run-b");
   });

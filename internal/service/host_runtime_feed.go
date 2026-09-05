@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"strings"
 	"sync"
@@ -17,16 +18,18 @@ import (
 )
 
 const (
-	hostRuntimeFeedQueueCapacity = 1024
-	hostRuntimeFeedRetention     = 512
-	hostRuntimePayloadMaxBytes   = 4096
-	hostRuntimeEventMaxBytes     = store.HostRuntimeFeedMaxEventBytes
-	hostRuntimeStringMaxBytes    = 384
+	hostRuntimeFeedQueueCapacity     = 1024
+	hostRuntimeFeedRetention         = 512
+	hostRuntimePayloadMaxBytes       = 4096
+	hostRuntimeEventMaxBytes         = store.HostRuntimeFeedMaxEventBytes
+	hostRuntimeStringMaxBytes        = 384
+	hostRuntimeLossLedgerMaxSessions = 256
 )
 
 var (
-	hostRuntimeSecretValue = regexp.MustCompile(`(?i)(bearer\s+[^\s,;]+|sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9_]{8,}|(?:api[_-]?key|token|secret|password|authorization|cookie|credential)\s*[:=]\s*[^\s,;]+)`)
-	hostRuntimeSecretKey   = regexp.MustCompile(`(?i)^(api.?key|token|secret|password|authorization|cookie|credential|private.?key|raw.?input|arguments?|args|prompt|stdin|stdout|stderr|result|output|content|bytes|terminal.?output)$`)
+	hostRuntimeSecretValue            = regexp.MustCompile(`(?i)(bearer\s+[^\s,;]+|sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9_]{8,}|(?:api[_-]?key|token|secret|password|authorization|cookie|credential)\s*[:=]\s*[^\s,;]+)`)
+	hostRuntimeSecretKey              = regexp.MustCompile(`(?i)^(api.?key|token|secret|password|authorization|cookie|credential|private.?key|raw.?input|arguments?|args|prompt|stdin|stdout|stderr|result|output|content|bytes|terminal.?output)$`)
+	errHostRuntimeLossLedgerSaturated = errors.New("host runtime loss ledger is saturated")
 )
 
 // HostRuntimeFeed owns the bounded ingestion FIFO between wrapper IO and the
@@ -36,52 +39,83 @@ var (
 type HostRuntimeFeed struct {
 	store *store.Store
 
-	mu      sync.Mutex
-	closed  bool
-	queue   chan store.HostRuntimeEvent
-	pending map[hostRuntimeDropKey]*hostRuntimeDrop
-	done    chan struct{}
-}
+	lifecycleMu    sync.RWMutex
+	mu             sync.Mutex
+	closed         bool
+	queue          chan store.HostRuntimeEvent
+	pending        map[string]*hostRuntimeDrop
+	asyncErr       error
+	workerCtx      context.Context
+	cancelWorker   context.CancelFunc
+	reserveCtx     context.Context
+	cancelReserves context.CancelFunc
+	done           chan struct{}
 
-type hostRuntimeDropKey struct {
-	sessionID  string
-	runID      string
-	generation int64
+	persistFn func(context.Context, store.HostRuntimeEvent) (bool, error)
+	reserveFn func(context.Context, string, string) (int64, error)
 }
 
 type hostRuntimeDrop struct {
-	count         int64
-	firstSequence uint64
-	lastSequence  uint64
+	count              int64
+	firstSequence      uint64
+	lastSequence       uint64
+	firstRunID         string
+	lastRunID          string
+	maxGeneration      int64
+	maxGenerationRunID string
+	spansRuns          bool
+	countTruncated     bool
 }
 
 func NewHostRuntimeFeed(s *store.Store) *HostRuntimeFeed {
+	workerCtx, cancelWorker := context.WithCancel(context.Background())
+	reserveCtx, cancelReserves := context.WithCancel(context.Background())
 	f := &HostRuntimeFeed{
-		store:   s,
-		queue:   make(chan store.HostRuntimeEvent, hostRuntimeFeedQueueCapacity),
-		pending: make(map[hostRuntimeDropKey]*hostRuntimeDrop),
-		done:    make(chan struct{}),
+		store:          s,
+		queue:          make(chan store.HostRuntimeEvent, hostRuntimeFeedQueueCapacity),
+		pending:        make(map[string]*hostRuntimeDrop),
+		workerCtx:      workerCtx,
+		cancelWorker:   cancelWorker,
+		reserveCtx:     reserveCtx,
+		cancelReserves: cancelReserves,
+		done:           make(chan struct{}),
+	}
+	if s != nil {
+		f.persistFn = func(ctx context.Context, event store.HostRuntimeEvent) (bool, error) {
+			_, inserted, err := s.AppendHostRuntimeEvent(ctx, event, hostRuntimeFeedRetention)
+			return inserted, err
+		}
+		f.reserveFn = s.ReserveHostRuntimeRun
 	}
 	go f.run()
 	return f
 }
 
-func (f *HostRuntimeFeed) ReserveRuntimeGeneration(ctx context.Context, sessionID string) (int64, error) {
-	if f == nil || f.store == nil {
+func (f *HostRuntimeFeed) ReserveRuntimeGeneration(ctx context.Context, sessionID, runID string) (int64, error) {
+	if f == nil || f.reserveFn == nil {
 		return 0, errors.New("host runtime feed is unavailable")
 	}
+	f.lifecycleMu.RLock()
+	defer f.lifecycleMu.RUnlock()
 	f.mu.Lock()
 	closed := f.closed
 	f.mu.Unlock()
 	if closed {
 		return 0, errors.New("host runtime feed is closed")
 	}
-	return f.store.ReserveHostRuntimeGeneration(ctx, sessionID)
+	reserveCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(f.reserveCtx, cancel)
+	defer func() {
+		stop()
+		cancel()
+	}()
+	return f.reserveFn(reserveCtx, sessionID, runID)
 }
 
 // Publish projects and copies ev before returning, then admits it without
-// blocking the wrapper runtime. Queue overflow is accumulated per runtime run
-// and becomes a durable host_runtime.ingest_gap record before the next event.
+// blocking the wrapper runtime. Queue overflow is accumulated per session and
+// becomes a durable host_runtime.ingest_gap record before the next event for
+// that session, including when the next event belongs to a successor run.
 func (f *HostRuntimeFeed) Publish(_ context.Context, runtimeRunID string, runtimeGeneration int64, isACP bool, ev runtimeevents.Event) error {
 	if f == nil || f.store == nil {
 		return nil
@@ -90,51 +124,73 @@ func (f *HostRuntimeFeed) Publish(_ context.Context, runtimeRunID string, runtim
 		return errors.New("host runtime feed run identity is incomplete")
 	}
 	projected := projectHostRuntimeEvent(runtimeRunID, runtimeGeneration, isACP, ev)
-	key := hostRuntimeDropKey{sessionID: projected.SessionID, runID: projected.RuntimeRunID, generation: projected.RuntimeGeneration}
+	sessionID := projected.SessionID
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {
 		return errors.New("host runtime feed is closed")
 	}
-	if pending := f.pending[key]; pending != nil {
+	if f.asyncErr != nil {
+		return f.asyncErr
+	}
+	if pending := f.pending[sessionID]; pending != nil {
 		select {
-		case f.queue <- newHostRuntimeIngestGap(key, *pending):
-			delete(f.pending, key)
+		case f.queue <- newHostRuntimeIngestGap(sessionID, *pending):
+			delete(f.pending, sessionID)
 		default:
-			f.noteDropLocked(key, projected.SourceSequence)
-			return nil
+			if err := f.noteDropLocked(projected); err != nil {
+				return err
+			}
+			return f.asyncErr
 		}
 	}
 	select {
 	case f.queue <- projected:
 	default:
-		f.noteDropLocked(key, projected.SourceSequence)
+		if err := f.noteDropLocked(projected); err != nil {
+			return err
+		}
+	}
+	return f.asyncErr
+}
+
+func (f *HostRuntimeFeed) noteDropLocked(event store.HostRuntimeEvent) error {
+	if err := addHostRuntimeDrop(f.pending, event); err != nil {
+		f.asyncErr = err
+		slog.Error("host runtime feed: publish loss ledger saturated", "sessions", len(f.pending), "session_id", event.SessionID)
+		f.cancelWorker()
+		return err
 	}
 	return nil
 }
 
-func (f *HostRuntimeFeed) noteDropLocked(key hostRuntimeDropKey, sequence uint64) {
-	drop := f.pending[key]
+func addHostRuntimeDrop(ledger map[string]*hostRuntimeDrop, event store.HostRuntimeEvent) error {
+	drop := ledger[event.SessionID]
 	if drop == nil {
-		drop = &hostRuntimeDrop{firstSequence: sequence}
-		f.pending[key] = drop
+		if len(ledger) >= hostRuntimeLossLedgerMaxSessions {
+			return errHostRuntimeLossLedgerSaturated
+		}
+		drop = &hostRuntimeDrop{}
+		ledger[event.SessionID] = drop
 	}
-	drop.count++
-	drop.lastSequence = sequence
+	mergeHostRuntimeDrop(drop, dropFromHostRuntimeEvent(event))
+	return nil
 }
 
-func newHostRuntimeIngestGap(key hostRuntimeDropKey, drop hostRuntimeDrop) store.HostRuntimeEvent {
+func newHostRuntimeIngestGap(sessionID string, drop hostRuntimeDrop) store.HostRuntimeEvent {
 	payload, _ := json.Marshal(map[string]any{
 		"dropped_events":        drop.count,
 		"first_source_sequence": drop.firstSequence,
 		"last_source_sequence":  drop.lastSequence,
+		"spans_runtime_runs":    drop.spansRuns,
+		"count_truncated":       drop.countTruncated,
 	})
 	event := store.HostRuntimeEvent{
 		SchemaVersion:     store.HostRuntimeFeedSchemaVersion,
-		SessionID:         key.sessionID,
-		RuntimeRunID:      key.runID,
-		RuntimeGeneration: key.generation,
+		SessionID:         sessionID,
+		RuntimeRunID:      drop.maxGenerationRunID,
+		RuntimeGeneration: drop.maxGeneration,
 		SourceEventID:     "nanite-gap-" + uuid.NewString(),
 		Kind:              "host_runtime.ingest_gap",
 		OccurredAt:        time.Now().UTC().Format(time.RFC3339Nano),
@@ -147,37 +203,51 @@ func newHostRuntimeIngestGap(key hostRuntimeDropKey, drop hostRuntimeDrop) store
 
 func (f *HostRuntimeFeed) run() {
 	defer close(f.done)
-	failed := make(map[hostRuntimeDropKey]*hostRuntimeDrop)
+	failed := make(map[string]*hostRuntimeDrop)
 	for event := range f.queue {
-		key := hostRuntimeDropKey{sessionID: event.SessionID, runID: event.RuntimeRunID, generation: event.RuntimeGeneration}
-		if pending := failed[key]; pending != nil {
-			if err := f.persist(newHostRuntimeIngestGap(key, *pending)); err != nil {
+		if f.workerCtx.Err() != nil {
+			break
+		}
+		sessionID := event.SessionID
+		if pending := failed[sessionID]; pending != nil {
+			if err := f.persist(newHostRuntimeIngestGap(sessionID, *pending)); err != nil {
+				if f.workerCtx.Err() != nil {
+					break
+				}
 				mergeHostRuntimeDrop(pending, dropFromHostRuntimeEvent(event))
 				slog.Warn("host runtime feed: persist recovery gap", "session_id", event.SessionID, "runtime_run_id", event.RuntimeRunID, "err", err)
 				continue
 			}
-			delete(failed, key)
+			delete(failed, sessionID)
 		}
 		if err := f.persist(event); err != nil {
-			drop := failed[key]
-			if drop == nil {
-				drop = &hostRuntimeDrop{}
-				failed[key] = drop
+			if f.workerCtx.Err() != nil {
+				break
 			}
-			mergeHostRuntimeDrop(drop, dropFromHostRuntimeEvent(event))
+			if err := addHostRuntimeDrop(failed, event); err != nil {
+				f.setAsyncError(err)
+				slog.Error("host runtime feed: persistence loss ledger saturated", "sessions", len(failed), "session_id", sessionID)
+				continue
+			}
 			slog.Warn("host runtime feed: persist event", "session_id", event.SessionID, "runtime_run_id", event.RuntimeRunID, "kind", event.Kind, "err", err)
 		}
 	}
-	for key, pending := range failed {
-		if err := f.persist(newHostRuntimeIngestGap(key, *pending)); err != nil {
-			slog.Warn("host runtime feed: final persistence gap unavailable", "session_id", key.sessionID, "runtime_run_id", key.runID, "dropped_events", pending.count, "err", err)
+	if f.workerCtx.Err() != nil {
+		if len(failed) > 0 || len(f.queue) > 0 {
+			slog.Warn("host runtime feed: canceled with unpersisted records", "failed_sessions", len(failed), "queued_events", len(f.queue))
+		}
+		return
+	}
+	for sessionID, pending := range failed {
+		if err := f.persist(newHostRuntimeIngestGap(sessionID, *pending)); err != nil {
+			slog.Warn("host runtime feed: final persistence gap unavailable", "session_id", sessionID, "runtime_run_id", pending.lastRunID, "dropped_events", pending.count, "err", err)
 		}
 	}
 }
 
 func (f *HostRuntimeFeed) persist(event store.HostRuntimeEvent) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	_, inserted, err := f.store.AppendHostRuntimeEvent(ctx, event, hostRuntimeFeedRetention)
+	ctx, cancel := context.WithTimeout(f.workerCtx, 3*time.Second)
+	inserted, err := f.persistFn(ctx, event)
 	cancel()
 	if err != nil {
 		return err
@@ -190,17 +260,27 @@ func (f *HostRuntimeFeed) persist(event store.HostRuntimeEvent) error {
 
 func dropFromHostRuntimeEvent(event store.HostRuntimeEvent) hostRuntimeDrop {
 	if event.Kind != "host_runtime.ingest_gap" {
-		return hostRuntimeDrop{count: 1, firstSequence: event.SourceSequence, lastSequence: event.SourceSequence}
+		return hostRuntimeDrop{
+			count: 1, firstSequence: event.SourceSequence, lastSequence: event.SourceSequence,
+			firstRunID: event.RuntimeRunID, lastRunID: event.RuntimeRunID,
+			maxGeneration: event.RuntimeGeneration, maxGenerationRunID: event.RuntimeRunID,
+		}
 	}
 	var payload struct {
-		Count int64  `json:"dropped_events"`
-		First uint64 `json:"first_source_sequence"`
-		Last  uint64 `json:"last_source_sequence"`
+		Count     int64  `json:"dropped_events"`
+		First     uint64 `json:"first_source_sequence"`
+		Last      uint64 `json:"last_source_sequence"`
+		Spans     bool   `json:"spans_runtime_runs"`
+		Truncated bool   `json:"count_truncated"`
 	}
 	if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.Count < 1 {
-		return hostRuntimeDrop{count: 1}
+		return hostRuntimeDrop{count: 1, firstRunID: event.RuntimeRunID, lastRunID: event.RuntimeRunID, maxGeneration: event.RuntimeGeneration, maxGenerationRunID: event.RuntimeRunID}
 	}
-	return hostRuntimeDrop{count: payload.Count, firstSequence: payload.First, lastSequence: payload.Last}
+	return hostRuntimeDrop{
+		count: payload.Count, firstSequence: payload.First, lastSequence: payload.Last,
+		firstRunID: event.RuntimeRunID, lastRunID: event.RuntimeRunID,
+		maxGeneration: event.RuntimeGeneration, maxGenerationRunID: event.RuntimeRunID, spansRuns: payload.Spans, countTruncated: payload.Truncated,
+	}
 }
 
 func mergeHostRuntimeDrop(dst *hostRuntimeDrop, incoming hostRuntimeDrop) {
@@ -209,9 +289,33 @@ func mergeHostRuntimeDrop(dst *hostRuntimeDrop, incoming hostRuntimeDrop) {
 	}
 	if dst.count == 0 {
 		dst.firstSequence = incoming.firstSequence
+		dst.firstRunID = incoming.firstRunID
 	}
-	dst.count += incoming.count
+	if incoming.count > math.MaxInt64-dst.count {
+		dst.count = math.MaxInt64
+		dst.countTruncated = true
+	} else {
+		dst.count += incoming.count
+	}
+	dst.countTruncated = dst.countTruncated || incoming.countTruncated
 	dst.lastSequence = incoming.lastSequence
+	if dst.firstRunID != incoming.lastRunID || incoming.spansRuns {
+		dst.spansRuns = true
+	}
+	dst.lastRunID = incoming.lastRunID
+	if incoming.maxGeneration > dst.maxGeneration {
+		dst.maxGeneration = incoming.maxGeneration
+		dst.maxGenerationRunID = incoming.maxGenerationRunID
+	}
+}
+
+func (f *HostRuntimeFeed) setAsyncError(err error) {
+	f.mu.Lock()
+	if f.asyncErr == nil {
+		f.asyncErr = err
+	}
+	f.mu.Unlock()
+	f.cancelWorker()
 }
 
 // Close stops admission, flushes any queued overflow markers, and drains all
@@ -221,15 +325,17 @@ func (f *HostRuntimeFeed) Close(ctx context.Context) error {
 	if f == nil {
 		return nil
 	}
+	f.cancelReserves()
+	f.lifecycleMu.Lock()
 	f.mu.Lock()
 	var flushErr error
 	if !f.closed {
 		f.closed = true
 	flushPending:
-		for key, drop := range f.pending {
+		for sessionID, drop := range f.pending {
 			select {
-			case f.queue <- newHostRuntimeIngestGap(key, *drop):
-				delete(f.pending, key)
+			case f.queue <- newHostRuntimeIngestGap(sessionID, *drop):
+				delete(f.pending, sessionID)
 			case <-ctx.Done():
 				flushErr = ctx.Err()
 				break flushPending
@@ -241,13 +347,26 @@ func (f *HostRuntimeFeed) Close(ctx context.Context) error {
 		close(f.queue)
 	}
 	f.mu.Unlock()
+	f.lifecycleMu.Unlock()
 	if flushErr != nil {
-		return flushErr
+		f.mu.Lock()
+		pendingSessions := len(f.pending)
+		f.mu.Unlock()
+		slog.Warn("host runtime feed: close could not enqueue all loss records", "pending_sessions", pendingSessions, "err", flushErr)
 	}
 	select {
 	case <-f.done:
-		return nil
+		f.cancelWorker()
+		f.mu.Lock()
+		asyncErr := f.asyncErr
+		f.mu.Unlock()
+		if flushErr != nil {
+			return flushErr
+		}
+		return asyncErr
 	case <-ctx.Done():
+		f.cancelWorker()
+		<-f.done
 		return ctx.Err()
 	}
 }
@@ -464,13 +583,14 @@ func publicUsage(value any) map[string]any {
 		return nil
 	}
 	result := map[string]any{}
-	copyFirstNumber(result, "input_tokens", usage, "input_tokens", "InputTokens")
-	copyFirstNumber(result, "output_tokens", usage, "output_tokens", "OutputTokens")
-	copyFirstNumber(result, "total_tokens", usage, "total_tokens", "TotalTokens")
-	copyFirstNumber(result, "cache_creation_input_tokens", usage, "cache_creation_input_tokens", "CacheCreationTokens")
-	copyFirstNumber(result, "cache_read_input_tokens", usage, "cache_read_input_tokens", "CacheReadTokens")
+	copyFirstNumber(result, "input_tokens", usage, "input_tokens", "inputTokens", "InputTokens")
+	copyFirstNumber(result, "output_tokens", usage, "output_tokens", "outputTokens", "OutputTokens")
+	copyFirstNumber(result, "total_tokens", usage, "total_tokens", "totalTokens", "TotalTokens")
+	copyFirstNumber(result, "thought_tokens", usage, "thought_tokens", "thoughtTokens", "ThoughtTokens")
+	copyFirstNumber(result, "cache_creation_input_tokens", usage, "cache_creation_input_tokens", "cachedWriteTokens", "CacheCreationTokens")
+	copyFirstNumber(result, "cache_read_input_tokens", usage, "cache_read_input_tokens", "cachedReadTokens", "CacheReadTokens")
 	copyFirstNumber(result, "cached_tokens", usage, "cached_tokens", "CachedTokens")
-	copyFirstNumber(result, "cost_usd", usage, "cost_usd", "CostUSD")
+	copyFirstNumber(result, "cost_usd", usage, "cost_usd", "costUsd", "costUSD", "CostUSD")
 	return result
 }
 

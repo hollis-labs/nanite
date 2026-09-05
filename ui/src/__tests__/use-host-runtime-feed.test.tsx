@@ -79,6 +79,47 @@ describe("useHostRuntimeFeed", () => {
     act(() => first.emit("host_runtime.v1", ready));
     expect(screen.getByTestId("state").textContent?.match(/source-ready/g)).toHaveLength(2);
 
+    // A reconnect gap installs the durable successor floor before replaying
+    // retained rows. The only retained predecessor event cannot reclaim it.
+    act(() =>
+      first.emit("host_runtime.gap.v1", {
+        schema_version: "host_runtime.gap.v1",
+        session_id: "session-a",
+        reason: "retention",
+        requested_cursor: 12,
+        oldest_available: 20,
+        latest_cursor: 21,
+        missing_cursor_span: 7,
+        retention_dropped: 19,
+        runtime_generation_floor: 2,
+        current_runtime_run_id: "run-b",
+      }),
+    );
+    act(() =>
+      first.emit("host_runtime.v1", {
+        ...ready,
+        cursor: 20,
+        runtime_run_id: "run-a",
+        runtime_generation: 1,
+        source_event_id: "late-predecessor",
+        kind: "process.exited",
+        payload: { disconnected: true },
+      }),
+    );
+    expect(screen.getByTestId("state").textContent).toContain('"runtimeRunID":"run-b"');
+    expect(screen.getByTestId("state").textContent).toContain('"status":"unknown"');
+    act(() =>
+      first.emit("host_runtime.v1", {
+        ...ready,
+        cursor: 21,
+        runtime_run_id: "run-b",
+        runtime_generation: 2,
+        source_event_id: "successor-processing",
+        kind: "session.processing",
+      }),
+    );
+    expect(screen.getByTestId("state").textContent).toContain('"status":"processing"');
+
     act(() => first.onerror?.(new Event("error")));
     expect(first.closed).toBe(false);
 

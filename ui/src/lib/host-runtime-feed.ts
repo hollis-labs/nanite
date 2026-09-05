@@ -30,6 +30,8 @@ export interface HostRuntimeFeedGap {
   latest_cursor: number;
   missing_cursor_span: number;
   retention_dropped: number;
+  runtime_generation_floor: number;
+  current_runtime_run_id?: string;
 }
 
 export type HostRuntimeToolStage = "started" | "update" | "completed" | "failed";
@@ -97,9 +99,11 @@ export function reduceHostRuntimeEvent(
   const sameRun =
     event.runtime_generation === state.runtimeGeneration &&
     event.runtime_run_id === state.runtimeRunID;
+  const matchesUnboundFloor =
+    event.runtime_generation === state.runtimeGeneration && !state.runtimeRunID;
   const newerRun = event.runtime_generation > state.runtimeGeneration;
-  const adoptsRun = sameRun || newerRun;
-  const changedRun = newerRun;
+  const adoptsRun = sameRun || matchesUnboundFloor || newerRun;
+  const changedRun = matchesUnboundFloor || newerRun;
   const base: HostRuntimeFeedState = changedRun
     ? {
         ...initialHostRuntimeFeedState,
@@ -118,8 +122,22 @@ export function reduceHostRuntimeEvent(
   };
 
   if (event.kind === "host_runtime.ingest_gap") {
-    if (!adoptsRun || event.runtime_run_id !== next.runtimeRunID) return next;
     const dropped = numericValue(event.payload.dropped_events);
+    const gap: HostRuntimeFeedGap = {
+      schema_version: "host_runtime.gap.v1",
+      session_id: event.session_id,
+      reason: "ingestion",
+      requested_cursor: Math.max(0, event.cursor - 1),
+      oldest_available: event.cursor + 1,
+      latest_cursor: event.cursor,
+      missing_cursor_span: dropped,
+      retention_dropped: 0,
+      runtime_generation_floor: Math.max(state.runtimeGeneration, event.runtime_generation),
+      current_runtime_run_id: adoptsRun ? event.runtime_run_id : state.runtimeRunID,
+    };
+    if (!adoptsRun || event.runtime_run_id !== next.runtimeRunID) {
+      return { ...next, gap };
+    }
     return {
       ...initialHostRuntimeFeedState,
       lastCursor: event.cursor,
@@ -127,16 +145,7 @@ export function reduceHostRuntimeEvent(
       runtimeGeneration: event.runtime_generation,
       recentEvents,
       seenSourceEventIDs,
-      gap: {
-        schema_version: "host_runtime.gap.v1",
-        session_id: event.session_id,
-        reason: "ingestion",
-        requested_cursor: Math.max(0, event.cursor - 1),
-        oldest_available: event.cursor + 1,
-        latest_cursor: event.cursor,
-        missing_cursor_span: dropped,
-        retention_dropped: 0,
-      },
+      gap,
     };
   }
 
@@ -200,9 +209,17 @@ export function reduceHostRuntimeGap(
   gap: HostRuntimeFeedGap,
 ): HostRuntimeFeedState {
   if (gap.schema_version !== "host_runtime.gap.v1") return state;
+  const gapFloor = Number.isSafeInteger(gap.runtime_generation_floor)
+    ? Math.max(0, gap.runtime_generation_floor)
+    : 0;
+  const existingIsNewer = state.runtimeGeneration > gapFloor;
   return {
     ...initialHostRuntimeFeedState,
-    lastCursor: Math.max(0, gap.oldest_available - 1),
+    lastCursor: Math.max(state.lastCursor, gap.oldest_available - 1, 0),
+    runtimeRunID: existingIsNewer
+      ? state.runtimeRunID
+      : (gap.current_runtime_run_id ?? state.runtimeRunID),
+    runtimeGeneration: Math.max(state.runtimeGeneration, gapFloor),
     gap,
   };
 }

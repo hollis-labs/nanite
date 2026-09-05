@@ -3,7 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -160,7 +164,7 @@ func TestProjectHostRuntimePayloadNormalizesNativeAndACPToolsAndCompletion(t *te
 			name:   "ACP usage completion is terminal",
 			kind:   runtimeevents.KindTurnCompleted,
 			acp:    true,
-			raw:    `{"usage":{"input_tokens":5,"output_tokens":3}}`,
+			raw:    `{"usage":{"inputTokens":5,"outputTokens":3,"totalTokens":8}}`,
 			checks: map[string]any{"terminal": true},
 		},
 	}
@@ -183,6 +187,34 @@ func TestProjectHostRuntimePayloadNormalizesNativeAndACPToolsAndCompletion(t *te
 	}
 }
 
+func TestPublicUsageNormalizesReleasedAdapterShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want map[string]any
+	}{
+		{
+			name: "claude ACP standard camelCase",
+			raw:  `{"inputTokens":11,"outputTokens":7,"totalTokens":23,"thoughtTokens":2,"cachedReadTokens":2,"cachedWriteTokens":1}`,
+			want: map[string]any{"input_tokens": float64(11), "output_tokens": float64(7), "total_tokens": float64(23), "thought_tokens": float64(2), "cache_read_input_tokens": float64(2), "cache_creation_input_tokens": float64(1)},
+		},
+		{name: "codex and opencode fixture total", raw: `{"totalTokens":5}`, want: map[string]any{"total_tokens": float64(5)}},
+		{name: "native Go JSON", raw: `{"InputTokens":3,"OutputTokens":2,"CacheCreationTokens":1,"CacheReadTokens":4}`, want: map[string]any{"input_tokens": float64(3), "output_tokens": float64(2), "cache_creation_input_tokens": float64(1), "cache_read_input_tokens": float64(4)}},
+		{name: "pi and copilot no usage", raw: `{}`, want: map[string]any{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var decoded map[string]any
+			if err := json.Unmarshal([]byte(tc.raw), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if got := publicUsage(decoded); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("publicUsage(%s) = %#v, want %#v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHostRuntimeFeedPersistsFIFOWithDistinctHostCursor(t *testing.T) {
 	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "feed.db"))
 	if err != nil {
@@ -190,6 +222,9 @@ func TestHostRuntimeFeedPersistsFIFOWithDistinctHostCursor(t *testing.T) {
 	}
 	defer func() { _ = s.Close(context.Background()) }()
 	feed := NewHostRuntimeFeed(s)
+	if generation, err := feed.ReserveRuntimeGeneration(context.Background(), "session-a", "run-a"); err != nil || generation != 1 {
+		t.Fatalf("reserve runtime run = %d, %v", generation, err)
+	}
 
 	for i, kind := range []runtimeevents.EventKind{runtimeevents.KindSessionReady, runtimeevents.KindProcessStarted, runtimeevents.KindSessionProcessing} {
 		event := runtimeevents.Event{
@@ -221,12 +256,14 @@ func TestHostRuntimeFeedPersistsFIFOWithDistinctHostCursor(t *testing.T) {
 	}
 }
 
-func TestHostRuntimeFeedQueueOverflowEmitsGapBeforeNextEvent(t *testing.T) {
+func TestHostRuntimeFeedQueueOverflowIsSessionOrderedAcrossRuns(t *testing.T) {
+	_, cancelWorker := context.WithCancel(context.Background())
 	feed := &HostRuntimeFeed{
-		store:   &store.Store{},
-		queue:   make(chan store.HostRuntimeEvent, 2),
-		pending: make(map[hostRuntimeDropKey]*hostRuntimeDrop),
-		done:    make(chan struct{}),
+		store:        &store.Store{},
+		queue:        make(chan store.HostRuntimeEvent, 2),
+		pending:      make(map[string]*hostRuntimeDrop),
+		cancelWorker: cancelWorker,
+		done:         make(chan struct{}),
 	}
 	feed.queue <- store.HostRuntimeEvent{Kind: "filler-1"}
 	feed.queue <- store.HostRuntimeEvent{Kind: "filler-2"}
@@ -241,22 +278,258 @@ func TestHostRuntimeFeedQueueOverflowEmitsGapBeforeNextEvent(t *testing.T) {
 			Source:        runtimeevents.Source{Channel: runtimeevents.ChannelJSONRPC},
 		}
 	}
-	if err := feed.Publish(context.Background(), "run-a", 1, true, source("dropped", 7)); err != nil {
-		t.Fatalf("overflow publish: %v", err)
+	if err := feed.Publish(context.Background(), "run-b", 2, true, source("dropped-successor", 7)); err != nil {
+		t.Fatalf("successor overflow publish: %v", err)
+	}
+	if err := feed.Publish(context.Background(), "run-a", 1, true, source("dropped-delayed-predecessor", 8)); err != nil {
+		t.Fatalf("predecessor overflow publish: %v", err)
 	}
 	<-feed.queue
 	<-feed.queue
-	if err := feed.Publish(context.Background(), "run-a", 1, true, source("next", 8)); err != nil {
+	if err := feed.Publish(context.Background(), "run-c", 3, true, source("next", 1)); err != nil {
 		t.Fatalf("next publish: %v", err)
 	}
 	gap := <-feed.queue
 	next := <-feed.queue
-	if gap.Kind != "host_runtime.ingest_gap" || next.SourceEventID != "next" {
+	if gap.Kind != "host_runtime.ingest_gap" || gap.RuntimeGeneration != 2 || gap.RuntimeRunID != "run-b" || next.SourceEventID != "next" || next.RuntimeGeneration != 3 {
 		t.Fatalf("post-overflow order = %q then %q, want gap then next", gap.Kind, next.SourceEventID)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(gap.Payload, &payload); err != nil || payload["dropped_events"] != float64(1) || payload["first_source_sequence"] != float64(7) {
-		t.Fatalf("gap payload = %s (%v), want one dropped source sequence 7", gap.Payload, err)
+	if err := json.Unmarshal(gap.Payload, &payload); err != nil || payload["dropped_events"] != float64(2) || payload["spans_runtime_runs"] != true {
+		t.Fatalf("gap payload = %s (%v), want two dropped events spanning runs", gap.Payload, err)
+	}
+}
+
+func TestHostRuntimeLossLedgerHasHardSessionBound(t *testing.T) {
+	for _, ledgerName := range []string{"publisher pending", "worker failures"} {
+		t.Run(ledgerName, func(t *testing.T) {
+			ledger := make(map[string]*hostRuntimeDrop)
+			for i := 0; i < hostRuntimeLossLedgerMaxSessions; i++ {
+				event := store.HostRuntimeEvent{SessionID: fmt.Sprintf("session-%03d", i), RuntimeRunID: "run", RuntimeGeneration: 1}
+				if err := addHostRuntimeDrop(ledger, event); err != nil {
+					t.Fatalf("add bounded ledger entry %d: %v", i, err)
+				}
+			}
+			if err := addHostRuntimeDrop(ledger, store.HostRuntimeEvent{SessionID: "session-overflow", RuntimeRunID: "run", RuntimeGeneration: 1}); !errors.Is(err, errHostRuntimeLossLedgerSaturated) {
+				t.Fatalf("overflow error = %v", err)
+			}
+			if len(ledger) != hostRuntimeLossLedgerMaxSessions {
+				t.Fatalf("loss ledger size = %d, want hard cap %d", len(ledger), hostRuntimeLossLedgerMaxSessions)
+			}
+		})
+	}
+}
+
+func TestHostRuntimeLossCountSaturates(t *testing.T) {
+	drop := hostRuntimeDrop{count: math.MaxInt64 - 1, firstRunID: "run-a", lastRunID: "run-a", maxGeneration: 1, maxGenerationRunID: "run-a"}
+	mergeHostRuntimeDrop(&drop, hostRuntimeDrop{count: 2, firstRunID: "run-b", lastRunID: "run-b", maxGeneration: 2, maxGenerationRunID: "run-b"})
+	if drop.count != math.MaxInt64 || !drop.countTruncated || !drop.spansRuns || drop.maxGenerationRunID != "run-b" {
+		t.Fatalf("saturated drop = %+v", drop)
+	}
+}
+
+func TestRuntimeEventBridgeReservationExhaustionPreservesLegacyProjection(t *testing.T) {
+	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "reserve-exhausted.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(context.Background()) }()
+	feed := NewHostRuntimeFeed(s)
+	calls := 0
+	feed.reserveFn = func(context.Context, string, string) (int64, error) {
+		calls++
+		return 0, errors.New("persistent reservation failure")
+	}
+	streams := NewStreamManager()
+	producer := streams.CreateStream("message-exhausted", "session-exhausted")
+	defer close(producer)
+	legacy, _, ok := streams.Subscribe("message-exhausted", 0)
+	if !ok {
+		t.Fatal("legacy stream unavailable")
+	}
+	sink := newRuntimeEventBridgeSink(&agentEventBridge{streams: streams, runtimeFeed: feed}, "session-exhausted", true)
+	if calls != hostRuntimeGenerationReserveAttempts || sink.runGeneration != 0 {
+		t.Fatalf("reservation calls/generation = %d/%d", calls, sink.runGeneration)
+	}
+	err = sink.Write(context.Background(), runtimeevents.Event{
+		SchemaVersion: runtimeevents.SchemaVersion, ID: "source-delta", Kind: runtimeevents.KindAgentDelta,
+		Time: time.Now(), SessionID: "session-exhausted", Sequence: 1,
+		Payload: json.RawMessage(`{"content":"legacy survives"}`),
+	})
+	if err == nil || !strings.Contains(err.Error(), "generation was not reserved") {
+		t.Fatalf("feed admission error = %v", err)
+	}
+	select {
+	case event := <-legacy:
+		if event.Type != "delta" || event.Content != "legacy survives" {
+			t.Fatalf("legacy event = %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("legacy projection was blocked by runtime feed reservation failure")
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := feed.Close(closeCtx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHostRuntimePersistenceFailureGapPrecedesSuccessorRun(t *testing.T) {
+	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "persist-order.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(context.Background()) }()
+	feed := NewHostRuntimeFeed(s)
+	genA, err := feed.ReserveRuntimeGeneration(context.Background(), "session-order", "run-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	genB, err := feed.ReserveRuntimeGeneration(context.Background(), "session-order", "run-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalPersist := feed.persistFn
+	failedFirst := false
+	var attempts []string
+	feed.persistFn = func(ctx context.Context, event store.HostRuntimeEvent) (bool, error) {
+		attempts = append(attempts, event.Kind+":"+event.RuntimeRunID)
+		if !failedFirst {
+			failedFirst = true
+			return false, errors.New("injected one-shot write failure")
+		}
+		return originalPersist(ctx, event)
+	}
+	source := func(id string) runtimeevents.Event {
+		return runtimeevents.Event{
+			SchemaVersion: runtimeevents.SchemaVersion, ID: id, Kind: runtimeevents.KindSessionReady,
+			Time: time.Now(), SessionID: "session-order", Sequence: 1,
+			Source: runtimeevents.Source{Channel: runtimeevents.ChannelJSONRPC},
+		}
+	}
+	if err := feed.Publish(context.Background(), "run-a", genA, true, source("a-ready")); err != nil {
+		t.Fatal(err)
+	}
+	if err := feed.Publish(context.Background(), "run-b", genB, true, source("b-ready")); err != nil {
+		t.Fatal(err)
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := feed.Close(closeCtx); err != nil {
+		t.Fatal(err)
+	}
+	wantAttempts := []string{"session.ready:run-a", "host_runtime.ingest_gap:run-a", "session.ready:run-b"}
+	if fmt.Sprint(attempts) != fmt.Sprint(wantAttempts) {
+		t.Fatalf("persistence attempts = %v, want %v", attempts, wantAttempts)
+	}
+	replay, err := s.HostRuntimeEventsAfter(context.Background(), "session-order", 0, 10)
+	if err != nil || len(replay.Events) != 2 || replay.Events[0].Kind != "host_runtime.ingest_gap" || replay.Events[1].RuntimeRunID != "run-b" {
+		t.Fatalf("ordered persistence replay = %+v, %v", replay, err)
+	}
+}
+
+func TestHostRuntimeCloseCancelsAndJoinsBlockedPersistence(t *testing.T) {
+	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "blocked-close.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(context.Background()) }()
+	feed := NewHostRuntimeFeed(s)
+	gen, err := feed.ReserveRuntimeGeneration(context.Background(), "session-close", "run-close")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	returned := make(chan struct{})
+	feed.persistFn = func(ctx context.Context, _ store.HostRuntimeEvent) (bool, error) {
+		close(started)
+		<-ctx.Done()
+		close(returned)
+		return false, ctx.Err()
+	}
+	if err := feed.Publish(context.Background(), "run-close", gen, true, runtimeevents.Event{
+		SchemaVersion: runtimeevents.SchemaVersion, ID: "blocked", Kind: runtimeevents.KindSessionReady,
+		Time: time.Now(), SessionID: "session-close", Sequence: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	closeCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := feed.Close(closeCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("close error = %v, want deadline", err)
+	}
+	select {
+	case <-returned:
+	default:
+		t.Fatal("Close returned before blocked persistence exited")
+	}
+	select {
+	case <-feed.done:
+	default:
+		t.Fatal("Close returned before worker joined")
+	}
+	if err := s.DB.PingContext(context.Background()); err != nil {
+		t.Fatalf("store unusable after joined close: %v", err)
+	}
+}
+
+func TestHostRuntimeCloseCancelsReservationAndClosesAdmission(t *testing.T) {
+	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "reserve-close.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(context.Background()) }()
+	feed := NewHostRuntimeFeed(s)
+	started := make(chan struct{})
+	feed.reserveFn = func(ctx context.Context, _, _ string) (int64, error) {
+		close(started)
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
+	reserveDone := make(chan error, 1)
+	go func() {
+		_, err := feed.ReserveRuntimeGeneration(context.Background(), "session-reserve", "run-reserve")
+		reserveDone <- err
+	}()
+	<-started
+	closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := feed.Close(closeCtx); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if err := <-reserveDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("reservation error = %v, want canceled", err)
+	}
+	if _, err := feed.ReserveRuntimeGeneration(context.Background(), "session-after", "run-after"); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("post-close reservation error = %v", err)
+	}
+}
+
+func TestRuntimeEventBridgeRetriesTransientGenerationReservation(t *testing.T) {
+	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "reserve-retry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(context.Background()) }()
+	feed := NewHostRuntimeFeed(s)
+	originalReserve := feed.reserveFn
+	calls := 0
+	feed.reserveFn = func(ctx context.Context, sessionID, runID string) (int64, error) {
+		calls++
+		if calls < hostRuntimeGenerationReserveAttempts {
+			return 0, errors.New("transient reservation failure")
+		}
+		return originalReserve(ctx, sessionID, runID)
+	}
+	sink := newRuntimeEventBridgeSink(&agentEventBridge{runtimeFeed: feed}, "session-retry", true)
+	if calls != hostRuntimeGenerationReserveAttempts || sink.runGeneration != 1 {
+		t.Fatalf("reservation calls/generation = %d/%d", calls, sink.runGeneration)
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := feed.Close(closeCtx); err != nil {
+		t.Fatal(err)
 	}
 }
 

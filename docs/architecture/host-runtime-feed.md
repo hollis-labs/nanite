@@ -20,17 +20,32 @@ Every sink instance also receives an immutable `runtime_run_id` and a durable,
 per-session monotonic `runtime_generation` reserved when the sink is created.
 Old and new runtime processes can overlap during replacement, so clients use
 the numeric generation—not event arrival time or UUID ordering—to keep any
-delayed predecessor lifecycle event from reclaiming successor state. A fresh
-connection without a cursor receives the retained snapshot from cursor zero.
+delayed predecessor lifecycle event from reclaiming successor state. The
+durable head stores the latest generation and its run ID atomically. Replay-gap
+frames carry that floor even if retention leaves only late predecessor rows, so
+a reconnect cannot adopt stale lifecycle state. A fresh connection without a
+cursor receives the retained snapshot from cursor zero.
 
 The feed keeps 512 committed records per session. If a requested cursor has
 been pruned or is ahead of the session head, the server first emits a
 `host_runtime.gap.v1` control frame describing the unavailable cursor span and
-the oldest available record. Ingestion is serialized through a bounded
-1,024-record FIFO so wrapper IO never waits for SQLite. Queue overflow and a
-recoverable persistence failure are represented by a durable
-`host_runtime.ingest_gap` record before later source events. A database that
-remains unavailable through shutdown can only be reported in the host log.
+the oldest available record, plus the current runtime-generation floor.
+Ingestion is serialized through a bounded 1,024-record FIFO so wrapper IO never
+waits for SQLite. Queue-overflow and persistence-failure loss is accumulated in
+session-scoped order across runtime replacements and represented by a durable
+`host_runtime.ingest_gap` record before the next event for that session. Both
+loss ledgers are fixed at 256 sessions; count arithmetic saturates rather than
+wrapping, and distinct-session saturation fails the feed closed with an error
+and host log instead of claiming continuity. Shutdown cancels in-flight
+persistence and joins the worker before returning. A database that remains
+unavailable through shutdown can only be reported in the host log.
+
+The short event history has a separate compact identity ledger. Event hashes
+survive replay pruning, so an identical retransmission remains idempotent and
+conflicting identity reuse remains an integrity error for the most recent
+4,096 session cursors. The ledger is pruned by cursor beyond that documented
+horizon; a much older retransmission is admitted as a new observation rather
+than growing tombstones without bound.
 
 Records are committed before the SSE DB tail can observe them. Slow or
 disconnected clients do not affect ingestion; they resume from their last

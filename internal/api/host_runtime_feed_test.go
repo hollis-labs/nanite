@@ -21,6 +21,9 @@ func TestHostRuntimeFeedSSEReplaysAfterCommittedCursor(t *testing.T) {
 		t.Fatalf("new store: %v", err)
 	}
 	defer func() { _ = s.Close(context.Background()) }()
+	if generation, err := s.ReserveHostRuntimeRun(context.Background(), "session-a", "run-a"); err != nil || generation != 1 {
+		t.Fatalf("reserve runtime run = %d, %v", generation, err)
+	}
 	for i, kind := range []string{"process.started", "session.ready"} {
 		_, _, err := s.AppendHostRuntimeEvent(context.Background(), store.HostRuntimeEvent{
 			SessionID:         "session-a",

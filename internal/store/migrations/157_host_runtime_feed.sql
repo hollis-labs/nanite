@@ -6,6 +6,7 @@ CREATE TABLE host_runtime_feed_heads (
     session_id              TEXT PRIMARY KEY,
     last_cursor             INTEGER NOT NULL DEFAULT 0 CHECK (last_cursor >= 0),
     last_runtime_generation INTEGER NOT NULL DEFAULT 0 CHECK (last_runtime_generation >= 0),
+    current_runtime_run_id  TEXT NOT NULL DEFAULT '',
     pruned_through_cursor   INTEGER NOT NULL DEFAULT 0 CHECK (pruned_through_cursor >= 0),
     retention_dropped       INTEGER NOT NULL DEFAULT 0 CHECK (retention_dropped >= 0),
     updated_at              TEXT NOT NULL
@@ -29,6 +30,23 @@ CREATE TABLE host_runtime_feed_events (
 CREATE INDEX idx_host_runtime_feed_events_replay
     ON host_runtime_feed_events(session_id, cursor);
 
+-- Source identities outlive the short UI replay window so retransmission and
+-- conflicting reuse remain detectable after event rows are pruned. This
+-- compact ledger has its own larger, cursor-based bound.
+CREATE TABLE host_runtime_feed_identities (
+    session_id       TEXT NOT NULL,
+    runtime_run_id   TEXT NOT NULL,
+    source_event_id  TEXT NOT NULL,
+    event_hash       TEXT NOT NULL,
+    first_cursor     INTEGER NOT NULL CHECK (first_cursor > 0),
+    created_at       TEXT NOT NULL,
+    PRIMARY KEY (session_id, runtime_run_id, source_event_id)
+);
+
+CREATE INDEX idx_host_runtime_feed_identities_retention
+    ON host_runtime_feed_identities(session_id, first_cursor);
+
 -- +goose Down
+DROP TABLE IF EXISTS host_runtime_feed_identities;
 DROP TABLE IF EXISTS host_runtime_feed_events;
 DROP TABLE IF EXISTS host_runtime_feed_heads;

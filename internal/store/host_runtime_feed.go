@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,10 @@ const HostRuntimeFeedSchemaVersion = "host_runtime.v1"
 // HostRuntimeFeedMaxEventBytes is enforced again at the persistence boundary,
 // after the committed cursor has been assigned.
 const HostRuntimeFeedMaxEventBytes = 8192
+
+// HostRuntimeFeedIdentityRetention keeps compact dedupe hashes well beyond
+// the 512-row public replay window without creating an unbounded ledger.
+const HostRuntimeFeedIdentityRetention = 4096
 
 // HostRuntimeEvent is the persisted and streamed public runtime projection.
 // Cursor is allocated by Nanite per session and is never derived from the
@@ -54,29 +59,36 @@ type HostRuntimeProcess struct {
 // HostRuntimeGap is a host-generated control record. It is not a source
 // runtime event and therefore has no source sequence or source event ID.
 type HostRuntimeGap struct {
-	SchemaVersion     string `json:"schema_version"`
-	SessionID         string `json:"session_id"`
-	Reason            string `json:"reason"`
-	RequestedCursor   int64  `json:"requested_cursor"`
-	OldestAvailable   int64  `json:"oldest_available"`
-	LatestCursor      int64  `json:"latest_cursor"`
-	MissingCursorSpan int64  `json:"missing_cursor_span"`
-	RetentionDropped  int64  `json:"retention_dropped"`
+	SchemaVersion          string `json:"schema_version"`
+	SessionID              string `json:"session_id"`
+	Reason                 string `json:"reason"`
+	RequestedCursor        int64  `json:"requested_cursor"`
+	OldestAvailable        int64  `json:"oldest_available"`
+	LatestCursor           int64  `json:"latest_cursor"`
+	MissingCursorSpan      int64  `json:"missing_cursor_span"`
+	RetentionDropped       int64  `json:"retention_dropped"`
+	RuntimeGenerationFloor int64  `json:"runtime_generation_floor"`
+	CurrentRuntimeRunID    string `json:"current_runtime_run_id,omitempty"`
 }
 
 type HostRuntimeReplay struct {
-	Events        []HostRuntimeEvent
-	NextCursor    int64
-	LatestCursor  int64
-	PrunedThrough int64
-	Gap           *HostRuntimeGap
+	Events                 []HostRuntimeEvent
+	NextCursor             int64
+	LatestCursor           int64
+	PrunedThrough          int64
+	RuntimeGenerationFloor int64
+	CurrentRuntimeRunID    string
+	Gap                    *HostRuntimeGap
 }
 
-// ReserveHostRuntimeGeneration allocates a durable, per-session runtime epoch
-// when a wrapper sink is created. It deliberately happens before any runtime
-// event: observation order cannot distinguish a delayed predecessor event from
-// a newly-created successor wrapper.
-func (s *Store) ReserveHostRuntimeGeneration(ctx context.Context, sessionID string) (int64, error) {
+// ReserveHostRuntimeRun atomically allocates the durable generation and binds
+// the host-owned run ID used by reconnect snapshots. It deliberately happens
+// before any runtime event: observation order cannot distinguish a delayed
+// predecessor event from a newly-created successor wrapper.
+func (s *Store) ReserveHostRuntimeRun(ctx context.Context, sessionID, runID string) (int64, error) {
+	if runID == "" {
+		return 0, errors.New("host runtime run id is required")
+	}
 	if sessionID == "" {
 		return 0, errors.New("host runtime session id is required")
 	}
@@ -85,12 +97,13 @@ func (s *Store) ReserveHostRuntimeGeneration(ctx context.Context, sessionID stri
 	err := s.DB.QueryRowContext(ctx, `
 		INSERT INTO host_runtime_feed_heads (
 			session_id, last_cursor, last_runtime_generation,
-			pruned_through_cursor, retention_dropped, updated_at
-		) VALUES (?, 0, 1, 0, 0, ?)
+			current_runtime_run_id, pruned_through_cursor, retention_dropped, updated_at
+		) VALUES (?, 0, 1, ?, 0, 0, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			last_runtime_generation = host_runtime_feed_heads.last_runtime_generation + 1,
+			current_runtime_run_id = excluded.current_runtime_run_id,
 			updated_at = excluded.updated_at
-		RETURNING last_runtime_generation`, sessionID, now).Scan(&generation)
+		RETURNING last_runtime_generation`, sessionID, runID, now).Scan(&generation)
 	if err != nil {
 		return 0, fmt.Errorf("reserve host runtime generation: %w", err)
 	}
@@ -108,40 +121,54 @@ func (s *Store) AppendHostRuntimeEvent(ctx context.Context, event HostRuntimeEve
 	if retain < 1 {
 		return HostRuntimeEvent{}, false, errors.New("host runtime retention must be positive")
 	}
+	if retain > HostRuntimeFeedIdentityRetention {
+		return HostRuntimeEvent{}, false, errors.New("host runtime event retention exceeds identity horizon")
+	}
+	if len(event.Payload) > HostRuntimeFeedMaxEventBytes {
+		return HostRuntimeEvent{}, false, fmt.Errorf("host runtime event exceeds %d-byte public bound", HostRuntimeFeedMaxEventBytes)
+	}
 	event.SchemaVersion = HostRuntimeFeedSchemaVersion
 	event.Cursor = 0
+	identityHash, err := hostRuntimeIdentityHash(event)
+	if err != nil {
+		return HostRuntimeEvent{}, false, err
+	}
 
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return HostRuntimeEvent{}, false, fmt.Errorf("begin host runtime append: %w", err)
 	}
 	defer rollbackUnlessCommitted(tx)
+	var generationFloor int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT last_runtime_generation
+		FROM host_runtime_feed_heads WHERE session_id = ?`, event.SessionID).Scan(&generationFloor); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return HostRuntimeEvent{}, false, errors.New("host runtime generation was not reserved")
+		}
+		return HostRuntimeEvent{}, false, fmt.Errorf("load host runtime generation floor: %w", err)
+	}
+	if event.RuntimeGeneration > generationFloor {
+		return HostRuntimeEvent{}, false, errors.New("host runtime event generation exceeds reserved floor")
+	}
 
-	var existingJSON string
+	var existingHash string
+	var existingCursor int64
 	err = tx.QueryRowContext(ctx, `
-		SELECT event_json
-		FROM host_runtime_feed_events
+		SELECT event_hash, first_cursor
+		FROM host_runtime_feed_identities
 		WHERE session_id = ? AND runtime_run_id = ? AND source_event_id = ?`,
 		event.SessionID, event.RuntimeRunID, event.SourceEventID,
-	).Scan(&existingJSON)
+	).Scan(&existingHash, &existingCursor)
 	if err == nil {
-		var existing HostRuntimeEvent
-		if decodeErr := json.Unmarshal([]byte(existingJSON), &existing); decodeErr != nil {
-			return HostRuntimeEvent{}, false, fmt.Errorf("decode existing host runtime event: %w", decodeErr)
-		}
-		candidate := event
-		candidate.Cursor = existing.Cursor
-		candidateJSON, marshalErr := json.Marshal(candidate)
-		if marshalErr != nil {
-			return HostRuntimeEvent{}, false, fmt.Errorf("encode duplicate host runtime event: %w", marshalErr)
-		}
-		if string(candidateJSON) != existingJSON {
+		if existingHash != identityHash {
 			return HostRuntimeEvent{}, false, errors.New("host runtime source event identity reused with different contents")
 		}
 		if commitErr := tx.Commit(); commitErr != nil {
 			return HostRuntimeEvent{}, false, fmt.Errorf("commit duplicate host runtime lookup: %w", commitErr)
 		}
-		return existing, false, nil
+		event.Cursor = existingCursor
+		return event, false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return HostRuntimeEvent{}, false, fmt.Errorf("lookup host runtime event: %w", err)
@@ -149,14 +176,10 @@ func (s *Store) AppendHostRuntimeEvent(ctx context.Context, event HostRuntimeEve
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := tx.QueryRowContext(ctx, `
-		INSERT INTO host_runtime_feed_heads (
-			session_id, last_cursor, last_runtime_generation,
-			pruned_through_cursor, retention_dropped, updated_at
-		) VALUES (?, 1, ?, 0, 0, ?)
-		ON CONFLICT(session_id) DO UPDATE SET
-			last_cursor = host_runtime_feed_heads.last_cursor + 1,
-			updated_at = excluded.updated_at
-		RETURNING last_cursor`, event.SessionID, event.RuntimeGeneration, now).Scan(&event.Cursor); err != nil {
+		UPDATE host_runtime_feed_heads
+		SET last_cursor = last_cursor + 1, updated_at = ?
+		WHERE session_id = ?
+		RETURNING last_cursor`, now, event.SessionID).Scan(&event.Cursor); err != nil {
 		return HostRuntimeEvent{}, false, fmt.Errorf("allocate host runtime cursor: %w", err)
 	}
 	eventJSON, err := json.Marshal(event)
@@ -175,6 +198,14 @@ func (s *Store) AppendHostRuntimeEvent(ctx context.Context, event HostRuntimeEve
 		event.SourceSequence, event.Kind, string(eventJSON), event.OccurredAt, now,
 	); err != nil {
 		return HostRuntimeEvent{}, false, fmt.Errorf("insert host runtime event: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO host_runtime_feed_identities (
+			session_id, runtime_run_id, source_event_id, event_hash, first_cursor, created_at
+		) VALUES (?, ?, ?, ?, ?, ?)`,
+		event.SessionID, event.RuntimeRunID, event.SourceEventID, identityHash, event.Cursor, now,
+	); err != nil {
+		return HostRuntimeEvent{}, false, fmt.Errorf("insert host runtime event identity: %w", err)
 	}
 
 	pruneThrough := event.Cursor - int64(retain)
@@ -198,10 +229,28 @@ func (s *Store) AppendHostRuntimeEvent(ctx context.Context, event HostRuntimeEve
 			return HostRuntimeEvent{}, false, fmt.Errorf("update host runtime retention head: %w", err)
 		}
 	}
+	identityPruneThrough := event.Cursor - HostRuntimeFeedIdentityRetention
+	if identityPruneThrough > 0 {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM host_runtime_feed_identities
+			WHERE session_id = ? AND first_cursor <= ?`, event.SessionID, identityPruneThrough); err != nil {
+			return HostRuntimeEvent{}, false, fmt.Errorf("prune host runtime event identities: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return HostRuntimeEvent{}, false, fmt.Errorf("commit host runtime event: %w", err)
 	}
 	return event, true, nil
+}
+
+func hostRuntimeIdentityHash(event HostRuntimeEvent) (string, error) {
+	event.Cursor = 0
+	raw, err := json.Marshal(event)
+	if err != nil {
+		return "", fmt.Errorf("encode host runtime event identity: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf("sha256:%x", sum[:]), nil
 }
 
 // HostRuntimeEventsAfter returns a stable page after a client cursor and an
@@ -222,11 +271,13 @@ func (s *Store) HostRuntimeEventsAfter(ctx context.Context, sessionID string, af
 	}
 	defer rollbackUnlessCommitted(tx)
 
-	var latest, prunedThrough, retentionDropped int64
+	var latest, prunedThrough, retentionDropped, generationFloor int64
+	var currentRunID string
 	err = tx.QueryRowContext(ctx, `
-		SELECT last_cursor, pruned_through_cursor, retention_dropped
+		SELECT last_cursor, pruned_through_cursor, retention_dropped,
+		       last_runtime_generation, current_runtime_run_id
 		FROM host_runtime_feed_heads WHERE session_id = ?`, sessionID,
-	).Scan(&latest, &prunedThrough, &retentionDropped)
+	).Scan(&latest, &prunedThrough, &retentionDropped, &generationFloor, &currentRunID)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
 			return HostRuntimeReplay{}, fmt.Errorf("commit empty host runtime replay: %w", err)
@@ -249,14 +300,16 @@ func (s *Store) HostRuntimeEventsAfter(ctx context.Context, sessionID string, af
 			missing = after - latest
 		}
 		gap = &HostRuntimeGap{
-			SchemaVersion:     "host_runtime.gap.v1",
-			SessionID:         sessionID,
-			Reason:            reason,
-			RequestedCursor:   after,
-			OldestAvailable:   prunedThrough + 1,
-			LatestCursor:      latest,
-			MissingCursorSpan: missing,
-			RetentionDropped:  retentionDropped,
+			SchemaVersion:          "host_runtime.gap.v1",
+			SessionID:              sessionID,
+			Reason:                 reason,
+			RequestedCursor:        after,
+			OldestAvailable:        prunedThrough + 1,
+			LatestCursor:           latest,
+			MissingCursorSpan:      missing,
+			RetentionDropped:       retentionDropped,
+			RuntimeGenerationFloor: generationFloor,
+			CurrentRuntimeRunID:    currentRunID,
 		}
 		replayAfter = prunedThrough
 	}
@@ -298,10 +351,12 @@ func (s *Store) HostRuntimeEventsAfter(ctx context.Context, sessionID string, af
 		next = latest
 	}
 	return HostRuntimeReplay{
-		Events:        events,
-		NextCursor:    next,
-		LatestCursor:  latest,
-		PrunedThrough: prunedThrough,
-		Gap:           gap,
+		Events:                 events,
+		NextCursor:             next,
+		LatestCursor:           latest,
+		PrunedThrough:          prunedThrough,
+		RuntimeGenerationFloor: generationFloor,
+		CurrentRuntimeRunID:    currentRunID,
+		Gap:                    gap,
 	}, nil
 }

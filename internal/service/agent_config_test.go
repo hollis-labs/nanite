@@ -141,6 +141,41 @@ func TestAgentConfigCopyDoesNotDereferenceSourceRef(t *testing.T) {
 	}
 }
 
+func TestAgentConfigCopyRejectsInternalRegardlessOfSourceRef(t *testing.T) {
+	svc, st, _ := newAgentConfigTestService(t)
+	internal := &store.AgentProfile{
+		Name: "Chat", Slug: "chat-internal", SystemPrompt: "x", Source: "internal",
+		SourceRef: "/plugin-looking/path/that/must-not-change-ownership.md",
+	}
+	if err := st.CreateAgent(context.Background(), internal); err != nil {
+		t.Fatalf("seed internal: %v", err)
+	}
+	if _, err := svc.CopyToManaged(internal, nil); !errors.Is(err, ErrAgentNotManaged) {
+		t.Fatalf("CopyToManaged internal error = %v, want ErrAgentNotManaged", err)
+	}
+	if _, err := st.GetAgentBySlug(context.Background(), "chat-internal-copy"); err == nil {
+		t.Fatal("internal profile was copied despite CopyToManagedAllowed=false")
+	}
+}
+
+func TestAgentConfigCopyAllowsExternalRegardlessOfSourceRef(t *testing.T) {
+	svc, st, _ := newAgentConfigTestService(t)
+	external := &store.AgentProfile{
+		Name: "Adapter Agent", Slug: "adapter-agent", SystemPrompt: "x", Source: "adapter",
+		SourceRef: "/internal-looking/path/that-must-not-change-ownership.md",
+	}
+	if err := st.CreateAgent(context.Background(), external); err != nil {
+		t.Fatalf("seed external: %v", err)
+	}
+	result, err := svc.CopyToManaged(external, nil)
+	if err != nil {
+		t.Fatalf("CopyToManaged external: %v", err)
+	}
+	if result.Profile.Source != "user" || result.Profile.SourceRef != "" || result.Profile.ID == external.ID {
+		t.Fatalf("external copy = %+v", result.Profile)
+	}
+}
+
 func TestAgentConfigDeleteIsDatabaseOnlyAndCascades(t *testing.T) {
 	svc, st, _ := newAgentConfigTestService(t)
 	created, err := svc.Create(&store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x"},

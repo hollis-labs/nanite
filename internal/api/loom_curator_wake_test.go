@@ -17,9 +17,10 @@ import (
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
-// newTestAPIWithLoomCurator provisions the profile, durable instance, and
-// schedule directly in SQLite before boot. This is the same durable state the
-// endpoint consumes in production and deliberately has no config-file input.
+// newTestAPIWithLoomCurator provisions the profile and durable instance through
+// the normal database-backed service path before boot. That creation path also
+// supplies the canonical builtin schedule; the fixture never inserts it by
+// hand and deliberately has no config-file input.
 func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 	t.Helper()
 	root := t.TempDir()
@@ -55,17 +56,8 @@ func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 		LaunchSourceType: store.DurableAgentLaunchProcessTick, LaunchSourceID: "loom-curator",
 		Status: store.DurableAgentStatusSleeping, MetadataJSON: `{"provisioned_by":"test"}`,
 	}
-	if createErr := s.CreateDurableAgentInstance(context.Background(), instance); createErr != nil {
+	if createErr := service.NewDurableAgentService(s).Create(context.Background(), instance); createErr != nil {
 		t.Fatalf("create loom-curator instance: %v", createErr)
-	}
-	schedule := store.AgentSchedule{
-		ID: "loom-curator-lint-and-export", AgentID: profile.ID, Name: "lint-and-export",
-		ScheduleKind: store.ScheduleKindCron, ScheduleSpec: "0 3 * * *",
-		Body: "Run loom_bundle_conformance, then loom_export_bundle.", Priority: 10,
-		Status: store.ScheduleStatusActive, CreatedBy: "operator", NextRun: "2026-09-05T03:00:00Z",
-	}
-	if scheduleErr := s.InsertAgentSchedule(context.Background(), schedule); scheduleErr != nil {
-		t.Fatalf("create loom-curator schedule: %v", scheduleErr)
 	}
 
 	svc, err := service.NewContainer(service.ContainerConfig{
@@ -273,9 +265,8 @@ func TestLoomCuratorDatabaseScheduleRuns(t *testing.T) {
 		t.Fatalf("schedule body missing expected loom_* tool references: %q", sched.Body)
 	}
 
-	// Due-ness is next_run-based. The fixture uses a fixed future occurrence
-	// before simulatedNow so ListDue/RunDue reliably exercise dispatch.
-	simulatedNow := time.Date(2027, time.January, 4, 3, 5, 0, 0, time.UTC)
+	// Due-ness is next_run-based. Simulate after the freshly-computed next run
+	// so ListDue/RunDue reliably exercise dispatch without a hand-written row.
 	if sched.NextRun == "" {
 		t.Fatalf("schedule.NextRun is empty: %+v", sched)
 	}
@@ -283,6 +274,7 @@ func TestLoomCuratorDatabaseScheduleRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("schedule.NextRun %q does not parse as RFC3339: %v", sched.NextRun, err)
 	}
+	simulatedNow := nextRun.Add(5 * time.Minute)
 	if !nextRun.Before(simulatedNow) {
 		t.Fatalf("schedule.NextRun = %s, want before simulatedNow %s (test's own due-ness assumption)", nextRun, simulatedNow)
 	}

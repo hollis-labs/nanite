@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -136,21 +137,21 @@ func TestRetiredDurableAgentFileAuthorityPreservesDatabaseState(t *testing.T) {
 
 // TestRetiredFileAuthorityRealDatabaseCopySurvivesMigrationAndBoot is an
 // opt-in dogfood proof over an isolated SQLite backup of the deployed Nanite
-// database. It refuses the deployed path itself. Set NANITE_REAL_DB_COPY to a
-// disposable writable backup; the normal test suite skips this case.
+// database. It refuses the deployed file and all aliases of it. Set
+// NANITE_REAL_DB_COPY to a disposable writable backup and NANITE_LIVE_DB to
+// the read-only source path; the normal test suite skips this case.
 func TestRetiredFileAuthorityRealDatabaseCopySurvivesMigrationAndBoot(t *testing.T) {
 	copyPath := os.Getenv("NANITE_REAL_DB_COPY")
 	if copyPath == "" {
 		t.Skip("set NANITE_REAL_DB_COPY to an isolated writable backup")
 	}
-	absCopy, err := filepath.Abs(copyPath)
-	if err != nil {
-		t.Fatalf("resolve copy path: %v", err)
+	livePath := os.Getenv("NANITE_LIVE_DB")
+	if livePath == "" {
+		t.Fatal("set NANITE_LIVE_DB to the read-only deployed database used to create the backup")
 	}
-	home, _ := os.UserHomeDir()
-	livePath := filepath.Join(home, ".local", "share", "nanite", "workspaces", "default", "main.db")
-	if absCopy == livePath {
-		t.Fatalf("refusing to open deployed database for write: %s", absCopy)
+	absCopy, err := validateWritableDatabaseCopy(copyPath, livePath)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	ctx := context.Background()
@@ -169,7 +170,7 @@ func TestRetiredFileAuthorityRealDatabaseCopySurvivesMigrationAndBoot(t *testing
 		t.Fatalf("backup lacks positive controls: instances=%d schedules=%d", len(before.Instances), len(before.Schedules))
 	}
 
-	migrated, err := store.New(ctx, absCopy)
+	migrated, err := openWritableDatabaseCopy(ctx, absCopy, livePath)
 	if err != nil {
 		t.Fatalf("migrate backup: %v", err)
 	}
@@ -201,6 +202,91 @@ func TestRetiredFileAuthorityRealDatabaseCopySurvivesMigrationAndBoot(t *testing
 	}
 	if !reflect.DeepEqual(afterBoot, before) {
 		t.Fatalf("boot changed former file-managed durable state:\n before=%#v\n after=%#v", before, afterBoot)
+	}
+}
+
+var errWritableDatabaseIsLive = errors.New("refusing to open deployed database for write")
+
+// validateWritableDatabaseCopy is the mandatory guard before the opt-in proof
+// passes a database path to writable Store.New.
+func validateWritableDatabaseCopy(copyPath, livePath string) (string, error) {
+	absCopy, err := filepath.Abs(copyPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve database copy path: %w", err)
+	}
+	absLive, err := filepath.Abs(livePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve deployed database path: %w", err)
+	}
+	resolvedCopy, err := filepath.EvalSymlinks(absCopy)
+	if err != nil {
+		return "", fmt.Errorf("resolve database copy symlinks: %w", err)
+	}
+	resolvedLive, err := filepath.EvalSymlinks(absLive)
+	if err != nil {
+		return "", fmt.Errorf("resolve deployed database symlinks: %w", err)
+	}
+	// #nosec G703 -- these explicit opt-in test paths are only statted so
+	// os.SameFile can reject aliases before any writable database open.
+	copyInfo, err := os.Stat(resolvedCopy)
+	if err != nil {
+		return "", fmt.Errorf("stat database copy: %w", err)
+	}
+	// #nosec G703 -- read-only identity inspection of the explicit deployed
+	// path is the safety control; Store.New is never called with this path.
+	liveInfo, err := os.Stat(resolvedLive)
+	if err != nil {
+		return "", fmt.Errorf("stat deployed database: %w", err)
+	}
+	if resolvedCopy == resolvedLive || os.SameFile(copyInfo, liveInfo) {
+		return "", fmt.Errorf("%w: %s", errWritableDatabaseIsLive, absCopy)
+	}
+	return resolvedCopy, nil
+}
+
+func openWritableDatabaseCopy(ctx context.Context, copyPath, livePath string) (*store.Store, error) {
+	safePath, err := validateWritableDatabaseCopy(copyPath, livePath)
+	if err != nil {
+		return nil, err
+	}
+	return store.New(ctx, safePath)
+}
+
+func TestWritableDatabaseCopyRejectsLiveDatabaseAliases(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	livePath := filepath.Join(root, "live.db")
+	live, err := store.New(ctx, livePath)
+	if err != nil {
+		t.Fatalf("create live fixture: %v", err)
+	}
+	if err := live.Close(ctx); err != nil {
+		t.Fatalf("close live fixture: %v", err)
+	}
+
+	symlinkPath := filepath.Join(root, "live-symlink.db")
+	if err := os.Symlink(livePath, symlinkPath); err != nil {
+		t.Fatalf("create symlink alias: %v", err)
+	}
+	hardlinkPath := filepath.Join(root, "live-hardlink.db")
+	if err := os.Link(livePath, hardlinkPath); err != nil {
+		t.Fatalf("create hardlink alias: %v", err)
+	}
+
+	for name, candidate := range map[string]string{
+		"exact path": livePath,
+		"symlink":    symlinkPath,
+		"hardlink":   hardlinkPath,
+	} {
+		t.Run(name, func(t *testing.T) {
+			opened, openErr := openWritableDatabaseCopy(ctx, candidate, livePath)
+			if opened != nil {
+				_ = opened.Close(ctx)
+			}
+			if !errors.Is(openErr, errWritableDatabaseIsLive) {
+				t.Fatalf("open error = %v, want alias refusal before Store.New", openErr)
+			}
+		})
 	}
 }
 

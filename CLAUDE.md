@@ -177,8 +177,12 @@ resolution mechanism.
 The former tracked durable-agent YAML catalog was removed outright, rather
 than retained as an implicit import path. Existing SQLite instances and
 schedules survive unchanged; their `managed_file` fields are historical
-provenance only. Provision new profiles, durable instances, and schedules
-explicitly through their database-backed API surfaces.
+provenance only. Provision new profiles and durable instances through their
+database-backed API surfaces. Creating Loom Curator is the one builtin
+exception for schedules: its creation path inserts the canonical
+`lint-and-export` row only when no schedule with that name already exists;
+thereafter the SQLite row is authoritative and operator customization is
+preserved.
 
 For local coding-session orchestration, follow `AGENTS.md` and the active
 session's instructions. Files under `.claude/agents/` belong to Claude Code's

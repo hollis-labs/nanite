@@ -407,8 +407,9 @@ func (a *API) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted", "slug": existing.Slug})
 }
 
-// handleCopyAgentToManaged forks a read-only agent (plugin/vendor/external)
-// into a fresh editable managed config with a new identity ("make editable").
+// handleCopyAgentToManaged forks a plugin/vendor/external agent into a fresh
+// editable managed config with a new identity ("make editable"). Internal
+// harness profiles are read-only but deliberately not copyable.
 func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	source, err := a.Services.Agents.Get(r.Context(), id)
@@ -416,11 +417,22 @@ func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
+	class := a.Services.AgentConfig.Classify(source)
+	if !class.CopyToManagedAllowed() {
+		if class.Editable() {
+			a.errorResp(w, http.StatusConflict, service.ErrAgentAlreadyManaged.Error())
+		} else {
+			a.writeNotManaged(w, source, class)
+		}
+		return
+	}
 	res, err := a.Services.AgentConfig.CopyToManaged(source, nil)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrAgentAlreadyManaged):
 			a.errorResp(w, http.StatusConflict, err.Error())
+		case errors.Is(err, service.ErrAgentNotManaged):
+			a.writeNotManaged(w, source, class)
 		case errors.Is(err, service.ErrManagedSlugExists):
 			a.errorResp(w, http.StatusConflict, err.Error())
 		default:

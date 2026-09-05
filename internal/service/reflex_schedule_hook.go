@@ -22,10 +22,10 @@ import (
 
 // reflexScheduleSource is the agent_schedules.created_by value stamped on
 // every row this hook inserts -- lets an operator tell a reflex-authored
-// schedule apart from a boot-time YAML-synced one
-// (managedDurableConfigSource, managed_durable_configs.go) or an
-// operator-authored one (InsertAgentSchedule's own "operator" default) at a
-// glance. No CHECK constraint governs created_by (migration
+// schedule apart from a builtin-provisioned one or an operator-authored one
+// (InsertAgentSchedule's own "operator" default) at a glance. Historical
+// rows may still retain created_by="managed_file" as provenance. No CHECK
+// constraint governs created_by (migration
 // 127_schedule_runs_and_retry_policy.sql leaves it free-text), so this is
 // just a convention, not a schema requirement.
 const reflexScheduleSource = "reflex"

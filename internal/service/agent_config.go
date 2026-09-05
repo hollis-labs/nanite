@@ -145,8 +145,12 @@ func (s *AgentConfigService) CopyToManaged(source *store.AgentProfile, procedure
 	if source == nil {
 		return nil, fmt.Errorf("source profile is required")
 	}
-	if s.Classify(source).Editable() {
+	class := s.Classify(source)
+	if class.Editable() {
 		return nil, ErrAgentAlreadyManaged
+	}
+	if !class.CopyToManagedAllowed() {
+		return nil, ErrAgentNotManaged
 	}
 	if procedures == nil {
 		rows, err := s.store.ListAgentProcedures(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, source.ID)

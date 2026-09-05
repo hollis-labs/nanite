@@ -127,6 +127,8 @@ type DurableAgentStore interface {
 	ListDurableAgentEvents(ctx context.Context, instanceID string, limit int) ([]store.DurableAgentEvent, error)
 	GetAgent(ctx context.Context, id string) (*store.AgentProfile, error)
 	ListAgents(ctx context.Context) ([]store.AgentProfile, error)
+	InsertAgentSchedule(ctx context.Context, row store.AgentSchedule) error
+	ListAgentSchedules(ctx context.Context, agentID string) ([]store.AgentSchedule, error)
 	GetSession(ctx context.Context, id string) (*store.Session, error)
 	CreateSession(ctx context.Context, sess *store.Session) error
 	EnsureSessionAgent(ctx context.Context, sessionID, agentID, mode string, isPrimary bool) error
@@ -145,8 +147,11 @@ func NewDurableAgentServiceWithRuntime(st DurableAgentStore, runtime DurableAgen
 	return &durableAgentService{store: st, runtime: runtime}
 }
 
-func (s *durableAgentService) Create(_ context.Context, inst *store.DurableAgentInstance) error {
+func (s *durableAgentService) Create(ctx context.Context, inst *store.DurableAgentInstance) error {
 	if err := s.store.CreateDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst); err != nil {
+		return err
+	}
+	if err := s.provisionBuiltinDurableSchedules(ctx, inst); err != nil {
 		return err
 	}
 	s.recordEvent(&store.DurableAgentEvent{
@@ -200,6 +205,9 @@ func (s *durableAgentService) reconcileProfileBackedInstances() error {
 		inst := durableAgentInstanceFromProfile(profile)
 		if err := s.store.CreateDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst); err != nil {
 			return fmt.Errorf("reconcile durable agent instance for profile %s: %w", profile.ID, err)
+		}
+		if err := s.provisionBuiltinDurableSchedules(context.TODO(), inst); err != nil {
+			return fmt.Errorf("reconcile durable agent schedules for profile %s: %w", profile.ID, err)
 		}
 		byProfileID[profile.ID] = struct{}{}
 		bySlug[profile.Slug] = struct{}{}

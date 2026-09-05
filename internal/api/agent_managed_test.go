@@ -165,6 +165,23 @@ func TestCopyPluginAgentToManagedIsDatabaseOnly(t *testing.T) {
 	}
 }
 
+func TestCopyInternalAgentToManagedIsRejected(t *testing.T) {
+	a, mux := newTestAPI(t)
+	internal := storeAgent("internal-copy-guard", "Internal Copy Guard", "internal")
+	internal.SourceRef = "/plugin-looking/path/that-must-not-change-ownership.md"
+	if err := a.Services.Store.CreateAgent(context.Background(), internal); err != nil {
+		t.Fatalf("seed internal agent: %v", err)
+	}
+	w, body := mgReq(t, mux, "POST", "/api/agents/"+internal.ID+"/copy-to-managed", "")
+	if w.Code != http.StatusConflict || !strings.Contains(string(body), `"manage_class":"internal"`) ||
+		!strings.Contains(string(body), `"copy_to_managed":false`) {
+		t.Fatalf("internal copy-to-managed = %d body=%s", w.Code, body)
+	}
+	if _, err := a.Services.Store.GetAgentBySlug(context.Background(), "internal-copy-guard-copy"); err == nil {
+		t.Fatal("endpoint created a managed copy of an internal profile")
+	}
+}
+
 func TestManageableListExcludesInternal(t *testing.T) {
 	_, mux := newTestAPI(t)
 	w, body := mgReq(t, mux, "GET", "/api/agents?manageable=1", "")

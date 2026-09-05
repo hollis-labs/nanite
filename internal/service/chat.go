@@ -396,6 +396,11 @@ type chatServiceImpl struct {
 	// with a self-referencing runner adapter so the "one door"
 	// invariant is structural.
 	dispatcher *dispatcher.Dispatcher
+
+	// beforeRuntimeSend is a focused-test seam for holding the tiny interval
+	// after a generation has admitted a send but before Session.SendInput is
+	// invoked. Production never sets it.
+	beforeRuntimeSend func()
 }
 
 func (s *chatServiceImpl) runtimeSessions() *runtimeagent.SessionManager {
@@ -421,6 +426,7 @@ type inFlightGen struct {
 	cancelOnce   sync.Once
 	turnMu       sync.Mutex
 	turn         *runtimeTurnBinding
+	predecessor  *inFlightGen
 	cancelAsked  bool
 	cancelSafe   bool
 }
@@ -430,8 +436,11 @@ type inFlightGen struct {
 // wrapper generation and router token; it never resolves either by session ID
 // after asynchronous work begins.
 type runtimeTurnBinding struct {
-	session *runtimeagent.Session
-	router  *sessionRouter
+	session      *runtimeagent.Session
+	router       *sessionRouter
+	sendReturned chan struct{}
+	sendDecided  bool
+	sendStarted  bool
 }
 
 type inFlightGenContextKey struct{}
@@ -444,7 +453,7 @@ func generationFromContext(ctx context.Context) *inFlightGen {
 // admitRuntimeTurn serializes prompt/router admission with cancellation. bind
 // must publish router and must not block; it runs under turnMu so a concurrent
 // cancellation either captures this exact binding or prevents it entirely.
-func (g *inFlightGen) admitRuntimeTurn(ctx context.Context, binding *runtimeTurnBinding, bind func()) bool {
+func (g *inFlightGen) admitRuntimeTurn(ctx context.Context, binding *runtimeTurnBinding, bind func() bool) bool {
 	if g == nil || binding == nil || binding.session == nil || binding.router == nil {
 		return false
 	}
@@ -453,8 +462,36 @@ func (g *inFlightGen) admitRuntimeTurn(ctx context.Context, binding *runtimeTurn
 	if g.cancelAsked || ctx.Err() != nil {
 		return false
 	}
-	bind()
+	if binding.sendReturned == nil {
+		binding.sendReturned = make(chan struct{})
+	}
+	if !bind() {
+		return false
+	}
 	g.turn = binding
+	return true
+}
+
+// beginRuntimeSend is the second half of prompt admission. Cancellation may
+// arrive after the router/session pointer is published but before the
+// SendInput goroutine is scheduled. Serializing that decision on turnMu means
+// the sender either observes the already-claimed cancellation and never calls
+// the wrapper, or publishes sendStarted for the cancellation worker to await
+// through the wrapper's real Processing/terminal boundary.
+func (g *inFlightGen) beginRuntimeSend(ctx context.Context, binding *runtimeTurnBinding) bool {
+	if g == nil || binding == nil {
+		return false
+	}
+	g.turnMu.Lock()
+	defer g.turnMu.Unlock()
+	if binding.sendDecided {
+		return binding.sendStarted
+	}
+	binding.sendDecided = true
+	if g.turn != binding || g.cancelAsked || ctx.Err() != nil {
+		return false
+	}
+	binding.sendStarted = true
 	return true
 }
 
@@ -585,6 +622,7 @@ func (s *chatServiceImpl) registerGeneration(sessionID, msgID string, cancel con
 		prev = cur
 	}
 	current = newInFlightGen(msgID, cancel)
+	current.predecessor = prev
 	s.activeGen[sessionID] = current
 	return prev, current
 }
@@ -596,20 +634,31 @@ func (s *chatServiceImpl) deregisterGeneration(sessionID string, gen *inFlightGe
 	if gen == nil {
 		return
 	}
-	// User cancellation is intentionally asynchronous, but the registry entry
-	// remains a takeover barrier until its exact CancelTurn/Stop settles. A new
-	// request arriving after generateResponse returns must still inherit it.
+	s.activeGenMu.Lock()
+	if cur := s.activeGen[sessionID]; cur != gen {
+		s.activeGenMu.Unlock()
+		return
+	}
+	// The global lock is always acquired before turnMu. A concurrent user
+	// stop therefore either claims this exact slot before deletion or observes
+	// it gone; deregistration never acts on a stale cancelAsked snapshot.
 	gen.turnMu.Lock()
 	cancelAsked := gen.cancelAsked
-	gen.turnMu.Unlock()
-	if cancelAsked && gen.cancelIssued != nil {
-		<-gen.cancelIssued
+	barrier := gen.cancelIssued
+	if !cancelAsked {
+		delete(s.activeGen, sessionID)
 	}
+	gen.turnMu.Unlock()
+	s.activeGenMu.Unlock()
+	if !cancelAsked || barrier == nil {
+		return
+	}
+	<-barrier
 	s.activeGenMu.Lock()
-	defer s.activeGenMu.Unlock()
 	if cur := s.activeGen[sessionID]; cur == gen {
 		delete(s.activeGen, sessionID)
 	}
+	s.activeGenMu.Unlock()
 }
 
 // registerGenerationIfIdle atomically registers a new in-flight generation
@@ -636,87 +685,171 @@ func (s *chatServiceImpl) registerGenerationIfIdle(sessionID, msgID string, canc
 	return current, true
 }
 
-// requestGenerationCancellation cancels Nanite's generation context and
-// requests provider turn cancellation against the exact wrapper generation
-// captured when its prompt/router was admitted. The provider call is bounded
-// and asynchronous. cancelIssued
-// closes only after it returns, allowing a takeover to order its next Prompt
-// behind this request without blocking the initiating API call.
-func (s *chatServiceImpl) requestGenerationCancellation(sessionID string, gen *inFlightGen) {
+// claimGenerationCancellationLocked is the synchronous half of cancellation.
+// The caller holds activeGenMu, giving every cancellation source and
+// deregistration one lock order: activeGenMu -> turnMu. It captures the exact
+// wrapper/router and closes the pre-SendInput admission gap before returning.
+func (s *chatServiceImpl) claimGenerationCancellationLocked(gen *inFlightGen) (binding *runtimeTurnBinding, predecessor *inFlightGen, sendStarted, claimed bool) {
 	if gen == nil {
-		return
+		return nil, nil, false, false
 	}
 	gen.cancelOnce.Do(func() {
+		claimed = true
 		if gen.cancelIssued == nil {
 			gen.cancelIssued = make(chan struct{})
 		}
 		gen.turnMu.Lock()
 		gen.cancelAsked = true
-		binding := gen.turn
+		binding = gen.turn
+		predecessor = gen.predecessor
+		if binding != nil {
+			if binding.sendReturned == nil {
+				binding.sendReturned = make(chan struct{})
+			}
+			if !binding.sendDecided {
+				binding.sendDecided = true
+			}
+			sendStarted = binding.sendStarted
+		}
 		gen.turnMu.Unlock()
-		if gen.cancel != nil {
-			gen.cancel()
-		}
-		if binding != nil && binding.router != nil {
-			if s.agentEventBridge != nil {
-				s.agentEventBridge.ReleasePerSessionRouter(sessionID, binding.router)
-			} else {
-				binding.router.closeOnce()
-			}
-		}
-		request := func(ownerCtx context.Context) {
-			defer close(gen.cancelIssued)
-			var sess *runtimeagent.Session
-			if binding != nil {
-				sess = binding.session
-			}
-			if sess == nil {
-				gen.turnMu.Lock()
-				gen.cancelSafe = true
-				gen.turnMu.Unlock()
-				return
-			}
-			cancelCtx, cancel := context.WithTimeout(ownerCtx, runtimeTurnCancelMaxWait)
-			err := s.runtimeSessions().CancelSession(cancelCtx, sess)
-			safe := false
-			switch {
-			case err == nil:
-				// ACP Cancel acknowledges the request before the terminal turn
-				// event necessarily arrives. Do not release a successor Prompt
-				// until wrapper's authoritative state leaves Processing.
-				safe = sess.WaitTurnTerminal(cancelCtx) == nil
-			case errors.Is(err, runtimeagent.ErrTurnCancelUnsupported):
-				// Native runtimes truthfully have no turn cancel. Stop this exact
-				// wrapper so takeover cold-boots instead of racing a second turn.
-				stopErr := sess.Stop(cancelCtx)
-				waitErr := sess.Wait(cancelCtx)
-				safe = !errors.Is(waitErr, context.Canceled) && !errors.Is(waitErr, context.DeadlineExceeded)
-				if stopErr != nil && !safe {
-					err = errors.Join(err, stopErr)
-				}
-			}
-			cancel()
-			if !safe && ownerCtx.Err() == nil {
-				stopCtx, stopCancel := context.WithTimeout(ownerCtx, runtimeTurnCancelMaxWait)
-				stopErr := sess.Stop(stopCtx)
-				waitErr := sess.Wait(stopCtx)
-				stopCancel()
-				safe = !errors.Is(waitErr, context.Canceled) && !errors.Is(waitErr, context.DeadlineExceeded)
-				if !safe && !errors.Is(stopErr, context.Canceled) && !errors.Is(stopErr, context.DeadlineExceeded) {
-					slog.Warn("chat-service: cancel runtime turn could not establish terminal boundary",
-						"session_id", sessionID, "cancel_err", err, "stop_err", stopErr, "wait_err", waitErr)
-				}
-			}
-			gen.turnMu.Lock()
-			gen.cancelSafe = safe
-			gen.turnMu.Unlock()
-		}
-		if s.lifecycle != nil {
-			s.lifecycle.Go("cancel-runtime-turn", request)
-			return
-		}
-		go request(context.Background())
 	})
+	return binding, predecessor, sendStarted, claimed
+}
+
+func waitClosed(ctx context.Context, ch <-chan struct{}) bool {
+	if ch == nil {
+		return true
+	}
+	select {
+	case <-ch:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// generationBoundarySafe carries safety transitively through takeover chains.
+// A binding-less canceled B cannot report itself safe until its own
+// predecessor A completed a safe cancellation and fully returned.
+func generationBoundarySafe(ctx context.Context, predecessor *inFlightGen) bool {
+	if predecessor == nil {
+		return true
+	}
+	if !waitClosed(ctx, predecessor.cancelIssued) || !waitClosed(ctx, predecessor.done) {
+		return false
+	}
+	predecessor.turnMu.Lock()
+	safe := predecessor.cancelSafe
+	predecessor.turnMu.Unlock()
+	return safe
+}
+
+func (s *chatServiceImpl) waitRuntimeRouterDrain(ctx context.Context, router *sessionRouter) bool {
+	if router == nil {
+		return true
+	}
+	if s.agentEventBridge == nil {
+		// No bridge means there is no buffered routing path that can target a
+		// successor. Provider terminality itself is the boundary.
+		router.markTerminalDrained()
+	}
+	return router.waitTerminalDrained(ctx) == nil
+}
+
+func (s *chatServiceImpl) finishClaimedCancellation(sessionID string, gen *inFlightGen, binding *runtimeTurnBinding, predecessor *inFlightGen, sendStarted bool) {
+	if gen.cancel != nil {
+		gen.cancel()
+	}
+	request := func(ownerCtx context.Context) {
+		defer close(gen.cancelIssued)
+
+		predecessorCtx, predecessorCancel := context.WithTimeout(ownerCtx, runtimeTurnCancelMaxWait)
+		predecessorSafe := generationBoundarySafe(predecessorCtx, predecessor)
+		predecessorCancel()
+		turnSafe := true
+
+		if binding != nil {
+			binding.router.closeOnce()
+			if !sendStarted {
+				// Cancellation claimed admission before SendInput. No provider
+				// terminal can exist, so exact release is the drain boundary.
+				if s.agentEventBridge != nil {
+					s.agentEventBridge.finishPerSessionRouter(sessionID, binding.router)
+				} else {
+					binding.router.markTerminalDrained()
+				}
+				drainCtx, drainCancel := context.WithTimeout(ownerCtx, runtimeTurnCancelMaxWait)
+				turnSafe = s.waitRuntimeRouterDrain(drainCtx, binding.router)
+				drainCancel()
+			} else {
+				sess := binding.session
+				turnCtx, turnCancel := context.WithTimeout(ownerCtx, runtimeTurnCancelMaxWait)
+				cancelable, startErr := sess.WaitTurnCancelable(turnCtx, binding.sendReturned)
+				var cancelErr error
+				if startErr == nil && cancelable {
+					cancelErr = s.runtimeSessions().CancelSession(turnCtx, sess)
+				}
+				switch {
+				case startErr == nil && !cancelable:
+					turnSafe = waitClosed(turnCtx, binding.sendReturned) && s.waitRuntimeRouterDrain(turnCtx, binding.router)
+				case startErr == nil && cancelErr == nil:
+					turnSafe = sess.WaitTurnTerminal(turnCtx) == nil &&
+						waitClosed(turnCtx, binding.sendReturned) &&
+						s.waitRuntimeRouterDrain(turnCtx, binding.router)
+				default:
+					turnSafe = false
+				}
+				turnCancel()
+
+				if !turnSafe && ownerCtx.Err() == nil {
+					// Unsupported or failed cancellation falls back to stopping the
+					// captured wrapper. Wait for both Run and the exact SendInput call;
+					// normalized sink delivery is synchronous inside Run, so exact
+					// router release after those waits is an ordered drain ack.
+					stopCtx, stopCancel := context.WithTimeout(ownerCtx, runtimeTurnCancelMaxWait)
+					stopErr := sess.Stop(stopCtx)
+					waitErr := sess.Wait(stopCtx)
+					turnSafe = !errors.Is(waitErr, context.Canceled) &&
+						!errors.Is(waitErr, context.DeadlineExceeded) &&
+						waitClosed(stopCtx, binding.sendReturned)
+					if turnSafe {
+						if s.agentEventBridge != nil {
+							s.agentEventBridge.finishPerSessionRouter(sessionID, binding.router)
+						} else {
+							binding.router.markTerminalDrained()
+						}
+					} else if !errors.Is(stopErr, context.Canceled) && !errors.Is(stopErr, context.DeadlineExceeded) {
+						slog.Warn("chat-service: cancel runtime turn could not establish terminal boundary",
+							"session_id", sessionID, "start_err", startErr, "cancel_err", cancelErr, "stop_err", stopErr, "wait_err", waitErr)
+					}
+					stopCancel()
+				}
+			}
+		}
+		gen.turnMu.Lock()
+		gen.cancelSafe = predecessorSafe && turnSafe
+		gen.turnMu.Unlock()
+	}
+	if s.lifecycle != nil {
+		s.lifecycle.Go("cancel-runtime-turn", request)
+		return
+	}
+	go request(context.Background())
+}
+
+// requestGenerationCancellation cancels Nanite's generation context and
+// starts bounded provider cancellation after atomically claiming the exact
+// turn. cancelIssued closes only after the full provider/router boundary.
+func (s *chatServiceImpl) requestGenerationCancellation(sessionID string, gen *inFlightGen) {
+	if gen == nil {
+		return
+	}
+	s.activeGenMu.Lock()
+	binding, predecessor, sendStarted, claimed := s.claimGenerationCancellationLocked(gen)
+	s.activeGenMu.Unlock()
+	if claimed {
+		s.finishClaimedCancellation(sessionID, gen, binding, predecessor, sendStarted)
+	}
 }
 
 // CancelActiveGeneration cancels the in-flight generateResponse goroutine
@@ -731,11 +864,19 @@ func (s *chatServiceImpl) requestGenerationCancellation(sessionID string, gen *i
 func (s *chatServiceImpl) CancelActiveGeneration(sessionID string) bool {
 	s.activeGenMu.Lock()
 	cur, ok := s.activeGen[sessionID]
+	var binding *runtimeTurnBinding
+	var predecessor *inFlightGen
+	var sendStarted, claimed bool
+	if ok && cur != nil {
+		binding, predecessor, sendStarted, claimed = s.claimGenerationCancellationLocked(cur)
+	}
 	s.activeGenMu.Unlock()
 	if !ok || cur == nil {
 		return false
 	}
-	s.requestGenerationCancellation(sessionID, cur)
+	if claimed {
+		s.finishClaimedCancellation(sessionID, cur, binding, predecessor, sendStarted)
+	}
 	return true
 }
 

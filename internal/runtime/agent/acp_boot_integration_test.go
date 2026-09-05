@@ -179,7 +179,7 @@ func TestBoot_ACPWrapperLifecycle_MultiTurnResumeCancelIdentityAndCleanup(t *tes
 	deps, st := acpBootTestDeps(t, client)
 	var eventMu sync.Mutex
 	var canonicalEvents []runtimeevents.Event
-	deps.RuntimeEventSink = func(string) runtimeevents.Sink {
+	deps.RuntimeEventSink = func(string, bool) runtimeevents.Sink {
 		return runtimeevents.SinkFunc(func(_ context.Context, ev runtimeevents.Event) error {
 			eventMu.Lock()
 			canonicalEvents = append(canonicalEvents, ev)
@@ -316,7 +316,7 @@ func TestSessionManager_ShutdownWaitsForReadyRunTail(t *testing.T) {
 	tailEntered := make(chan struct{})
 	tailRelease := make(chan struct{})
 	var enterOnce sync.Once
-	deps.RuntimeEventSink = func(string) runtimeevents.Sink {
+	deps.RuntimeEventSink = func(string, bool) runtimeevents.Sink {
 		return runtimeevents.SinkFunc(func(ctx context.Context, ev runtimeevents.Event) error {
 			if ev.Kind != runtimeevents.KindProcessExited {
 				return nil

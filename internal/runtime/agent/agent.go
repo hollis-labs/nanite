@@ -524,7 +524,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 
 	var canonicalSink runtimeevents.Sink
 	if deps.RuntimeEventSink != nil {
-		canonicalSink = deps.RuntimeEventSink(sessID)
+		canonicalSink = deps.RuntimeEventSink(sessID, isACP)
 	}
 	sink := &runtimeEventSink{acp: isACP, canonical: canonicalSink}
 	if deps.EventFanout != nil {

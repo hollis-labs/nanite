@@ -277,25 +277,40 @@ func (s *chatServiceImpl) driveBootSession(
 	// The router must already be bound or those events route to SSE
 	// instead of turnCh and the harness persists an empty assistant row.
 	turnCh := make(chan llmtypes.StreamEvent, 64)
-	router := &sessionRouter{ch: turnCh}
-	if gen := generationFromContext(ctx); gen != nil {
-		binding := &runtimeTurnBinding{session: sess, router: router}
-		if !gen.admitRuntimeTurn(ctx, binding, func() {
-			s.agentEventBridge.bindPerSessionRouter(sessionID, router)
+	router := newSessionRouter(turnCh)
+	gen := generationFromContext(ctx)
+	var binding *runtimeTurnBinding
+	if gen != nil {
+		binding = &runtimeTurnBinding{
+			session:      sess,
+			router:       router,
+			sendReturned: make(chan struct{}),
+		}
+		if !gen.admitRuntimeTurn(ctx, binding, func() bool {
+			return s.agentEventBridge.bindPerSessionRouterExact(sessionID, router)
 		}) {
-			router.closeOnce()
+			s.agentEventBridge.finishPerSessionRouter(sessionID, router)
 			return turnCh, context.Canceled
 		}
 	} else {
 		// Direct focused tests and non-generation callers do not carry a chat
 		// generation token. They still receive exact router ownership here.
-		s.agentEventBridge.bindPerSessionRouter(sessionID, router)
+		if !s.agentEventBridge.bindPerSessionRouterExact(sessionID, router) {
+			router.closeOnce()
+			return turnCh, context.Canceled
+		}
 	}
 
 	go func() {
 		<-ctx.Done()
-		// Release only this turn's token. A delayed predecessor watcher must
-		// never remove or close a successor router bound to the same session.
+		if gen != nil {
+			// End the caller-visible stream, but retain exact routing ownership
+			// until the normalized terminal has crossed the bridge. The cancel
+			// barrier waits that acknowledgement before a successor may bind.
+			router.closeOnce()
+			return
+		}
+		// Non-generation callers have no successor barrier to protect.
 		s.agentEventBridge.ReleasePerSessionRouter(sessionID, router)
 	}()
 
@@ -313,6 +328,16 @@ func (s *chatServiceImpl) driveBootSession(
 	// Done/Error, which never arrives when SendInput itself failed).
 	payload := s.composeBootPayload(sessionID, session, agent, sess.BootDir, slotResult, userContent, recoverThisBoot)
 	go func() {
+		if gen != nil {
+			if !gen.beginRuntimeSend(ctx, binding) {
+				s.agentEventBridge.finishPerSessionRouter(sessionID, router)
+				return
+			}
+			if s.beforeRuntimeSend != nil {
+				s.beforeRuntimeSend()
+			}
+			defer close(binding.sendReturned)
+		}
 		if err := sess.SendInput([]byte(payload)); err != nil {
 			slog.Warn("driveBootSession: send input failed",
 				"session_id", sessionID, "err", err)
@@ -322,7 +347,7 @@ func (s *chatServiceImpl) driveBootSession(
 				Type:  llmtypes.EventError,
 				Error: fmt.Sprintf("driveBootSession: send input: %v", err),
 			})
-			s.agentEventBridge.ReleasePerSessionRouter(sessionID, router)
+			s.agentEventBridge.finishPerSessionRouter(sessionID, router)
 		}
 	}()
 
@@ -555,7 +580,7 @@ func (s *chatServiceImpl) stopDisplacedSession(sessionID string, prev *runtimeag
 // profile's DefaultProvider, masking provider-specific bugs across
 // the retry boundary.
 func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, sessionID, agentProfile, provider, workdir string, bootedAt time.Time, usedResume bool) {
-	if sess == nil || s.agentDeps == nil || s.agentDeps.Recovery == nil {
+	if sess == nil || s.agentDeps == nil {
 		return
 	}
 
@@ -626,6 +651,14 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 				broker.ClearSession(sessionID)
 			}
 		}
+		return
+	}
+	if s.agentDeps.Recovery == nil {
+		// ExternalLifecycleObserver transfers retirement only when this
+		// goroutine actually owns the Wait. Recovery hooks are optional, but
+		// exact manager retirement is not; otherwise terminal chat sessions
+		// remain permanently registered when no broker is configured.
+		s.runtimeSessions().Retire(sessionID, sess)
 		return
 	}
 

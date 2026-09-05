@@ -12,6 +12,7 @@ import (
 	"time"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
@@ -155,6 +156,43 @@ func TestAgentEventBridge_NoRouterFallsBackToSSE(t *testing.T) {
 
 	// Allow the goroutine to drain.
 	time.Sleep(20 * time.Millisecond)
+}
+
+func TestRuntimeEventBridge_NoRouterPreservesSSEProjection(t *testing.T) {
+	streams := NewStreamManager()
+	const sessionID = "normalized-no-router"
+	producer := streams.CreateStream("normalized-message", sessionID)
+	defer close(producer)
+	sub, _, ok := streams.Subscribe("normalized-message", 0)
+	if !ok {
+		t.Fatal("Subscribe did not find normalized message stream")
+	}
+	bridge := &agentEventBridge{streams: streams}
+	sink := &runtimeEventBridgeSink{
+		bridge: bridge, sessionID: sessionID, acp: true,
+		source: newRuntimeEventSource(),
+	}
+	events := []runtimeevents.Event{
+		{Kind: runtimeevents.KindAgentDelta, TurnID: "turn-no-router", Payload: []byte(`{"content":"hello"}`)},
+		{Kind: runtimeevents.KindTurnCompleted, TurnID: "turn-no-router"},
+		{Kind: runtimeevents.KindTurnFailed, TurnID: "late-stale", Payload: []byte(`{"error":"boom"}`)},
+	}
+	for _, ev := range events {
+		if err := sink.Write(context.Background(), ev); err != nil {
+			t.Fatalf("Write(%s): %v", ev.Kind, err)
+		}
+	}
+	want := []string{"delta", "stream_end", "error"}
+	for i, wantType := range want {
+		select {
+		case got := <-sub:
+			if got.Type != wantType {
+				t.Fatalf("event %d type = %q, want %q", i, got.Type, wantType)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for no-router event %d (%s)", i, wantType)
+		}
+	}
 }
 
 // TestComposeUserPayload_PrependsUserContext verifies UserContext slot

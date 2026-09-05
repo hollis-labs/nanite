@@ -177,6 +177,35 @@ func (s *Session) WaitTurnTerminal(ctx context.Context) error {
 	}
 }
 
+// WaitTurnCancelable waits until an admitted SendInput has either reached
+// ACP Processing (where CancelTurn is meaningful) or returned without ever
+// becoming cancelable. Closing sendReturned is owned by the exact SendInput
+// invocation. Native adapters have no Processing snapshot; callers stop the
+// exact wrapper and still wait sendReturned before declaring takeover safe.
+func (s *Session) WaitTurnCancelable(ctx context.Context, sendReturned <-chan struct{}) (bool, error) {
+	if s == nil || s.wr == nil {
+		return false, errors.New("agent.Session.WaitTurnCancelable: session not initialized")
+	}
+	if !s.isACP {
+		return true, nil
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		snapshot, ok := s.wr.ACPSnapshot()
+		if ok && snapshot.State == acp.StateProcessing {
+			return true, nil
+		}
+		select {
+		case <-sendReturned:
+			return false, nil
+		case <-ticker.C:
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
+}
+
 // ProviderSessionID returns wrapper's current provider-assigned identity.
 func (s *Session) ProviderSessionID() string {
 	if s == nil || s.wr == nil {

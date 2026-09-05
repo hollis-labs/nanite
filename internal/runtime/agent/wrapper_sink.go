@@ -48,6 +48,14 @@ type runtimeEventSink struct {
 
 var _ runtimeevents.Sink = (*runtimeEventSink)(nil)
 
+// legacyStreamProjectionOwner marks a canonical sink that also owns the
+// llmtypes stream projection. The service bridge uses this to preserve
+// normalized TurnID ownership through terminal delivery; arbitrary injected
+// canonical sinks do not satisfy it and retain the normal legacy projection.
+type legacyStreamProjectionOwner interface {
+	OwnsLegacyStreamProjection()
+}
+
 // Write implements runtimeevents.Sink. Invoked synchronously from
 // wrapper.Wrapper.Run's translator goroutine (per runtimeevents.Sink's own
 // doc contract) — never blocks indefinitely: channel sends respect ctx and
@@ -62,9 +70,12 @@ func (s *runtimeEventSink) Write(ctx context.Context, ev runtimeevents.Event) er
 		s.signalReady()
 	}
 
+	_, canonicalOwnsStream := s.canonical.(legacyStreamProjectionOwner)
 	switch ev.Kind {
 	case runtimeevents.KindAgentDelta:
-		s.handleDelta(ctx, ev.Payload)
+		if !canonicalOwnsStream {
+			s.handleDelta(ctx, ev.Payload)
+		}
 	case runtimeevents.KindAgentToolUse:
 		s.handleToolUse(ev.Payload)
 	case runtimeevents.KindAgentToolResult:
@@ -72,9 +83,13 @@ func (s *runtimeEventSink) Write(ctx context.Context, ev runtimeevents.Event) er
 	case runtimeevents.KindAgentSubagentSpawn:
 		s.handleSubagentSpawn(ev.Payload)
 	case runtimeevents.KindTurnCompleted:
-		s.handleTurnCompleted(ctx, ev.Payload)
+		if !canonicalOwnsStream {
+			s.handleTurnCompleted(ctx, ev.Payload)
+		}
 	case runtimeevents.KindTurnFailed:
-		s.handleTurnFailed(ctx, ev.Payload)
+		if !canonicalOwnsStream {
+			s.handleTurnFailed(ctx, ev.Payload)
+		}
 	default:
 		// No legacy equivalent. The exact event already reached canonical;
 		// raw/unknown kinds stay internal until CW-20260904-0129 defines a

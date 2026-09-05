@@ -37,6 +37,8 @@ type cancelACPClient struct {
 	cancelCount int
 	cancelEnter chan struct{}
 	cancelGate  <-chan struct{}
+	promptEnter chan struct{}
+	promptGate  <-chan struct{}
 	launchEnter chan struct{}
 	launchGate  <-chan struct{}
 }
@@ -62,8 +64,21 @@ func (c *cancelACPClient) Launch(ctx context.Context, _ acp.LaunchParams) error 
 	c.emit(runtimeevents.Event{Kind: runtimeevents.KindSessionReady})
 	return nil
 }
-func (c *cancelACPClient) Prompt(context.Context, string) error {
+func (c *cancelACPClient) Prompt(ctx context.Context, _ string) error {
 	c.emit(runtimeevents.Event{Kind: runtimeevents.KindTurnStarted})
+	c.mu.Lock()
+	enter, gate := c.promptEnter, c.promptGate
+	c.mu.Unlock()
+	if enter != nil {
+		close(enter)
+	}
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return nil
 }
 func (c *cancelACPClient) Cancel(ctx context.Context) error {
@@ -193,12 +208,17 @@ func TestCancelActiveGeneration_CapturesExactSessionAndTakeoverWaitsForTerminal(
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	_, predecessor := svc.registerGeneration(sessionID, "old-message", cancel)
-	if !predecessor.admitRuntimeTurn(context.Background(), &runtimeTurnBinding{
+	binding := &runtimeTurnBinding{
 		session: oldSession,
-		router:  &sessionRouter{ch: make(chan llmtypes.StreamEvent, 1)},
-	}, func() {}) {
+		router:  newSessionRouter(make(chan llmtypes.StreamEvent, 1)),
+	}
+	if !predecessor.admitRuntimeTurn(context.Background(), binding, func() bool { return true }) {
 		t.Fatal("failed to bind exact predecessor runtime turn")
 	}
+	if !predecessor.beginRuntimeSend(context.Background(), binding) {
+		t.Fatal("failed to mark already-started predecessor prompt")
+	}
+	close(binding.sendReturned)
 
 	// Install a successor before cancellation begins. The request must use the
 	// Session captured when the old prompt was admitted, never Manager.Load the
@@ -273,6 +293,273 @@ func TestCancelActiveGeneration_CapturesExactSessionAndTakeoverWaitsForTerminal(
 		}
 	case <-time.After(time.Second):
 		t.Fatal("takeover did not resume after predecessor terminal return")
+	}
+}
+
+func TestCancelActiveGeneration_ClaimsBeforeDeregisterCanDeleteSlot(t *testing.T) {
+	svc := &chatServiceImpl{activeGen: make(map[string]*inFlightGen)}
+	_, gen := svc.registerGeneration("atomic-cancel", "message", func() {})
+	predecessor := newInFlightGen("unsafe-predecessor", func() {})
+	gen.predecessor = predecessor
+
+	// Hold turnMu so CancelActiveGeneration can acquire activeGenMu and stop
+	// at the prescribed activeGenMu -> turnMu boundary.
+	gen.turnMu.Lock()
+	cancelResult := make(chan bool, 1)
+	go func() { cancelResult <- svc.CancelActiveGeneration("atomic-cancel") }()
+	deadline := time.Now().Add(time.Second)
+	for svc.activeGenMu.TryLock() {
+		svc.activeGenMu.Unlock()
+		if time.Now().After(deadline) {
+			gen.turnMu.Unlock()
+			t.Fatal("CancelActiveGeneration never claimed activeGenMu")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	deregistered := make(chan struct{})
+	go func() {
+		svc.deregisterGeneration("atomic-cancel", gen)
+		close(deregistered)
+	}()
+	gen.turnMu.Unlock()
+	if !<-cancelResult {
+		t.Fatal("CancelActiveGeneration returned false for active slot")
+	}
+	select {
+	case <-deregistered:
+		t.Fatal("deregister deleted a synchronously claimed cancellation barrier")
+	case <-time.After(25 * time.Millisecond):
+	}
+	predecessor.turnMu.Lock()
+	predecessor.cancelSafe = true
+	predecessor.turnMu.Unlock()
+	close(predecessor.cancelIssued)
+	close(predecessor.done)
+	select {
+	case <-deregistered:
+	case <-time.After(time.Second):
+		t.Fatal("deregister did not finish after claimed barrier settled")
+	}
+}
+
+func TestCancelActiveGeneration_BeforeSendCommitPreventsPrompt(t *testing.T) {
+	const sessionID = "cancel-before-send-commit"
+	bridge := &agentEventBridge{streams: NewStreamManager()}
+	svc := &chatServiceImpl{agentEventBridge: bridge, activeGen: make(map[string]*inFlightGen)}
+	_, gen := svc.registerGeneration(sessionID, "message", func() {})
+	binding := &runtimeTurnBinding{
+		session: &runtimeagent.Session{},
+		router:  newSessionRouter(make(chan llmtypes.StreamEvent, 1)),
+	}
+	if !gen.admitRuntimeTurn(context.Background(), binding, func() bool {
+		return bridge.bindPerSessionRouterExact(sessionID, binding.router)
+	}) {
+		t.Fatal("failed to admit runtime turn")
+	}
+	if !svc.CancelActiveGeneration(sessionID) {
+		t.Fatal("CancelActiveGeneration returned false")
+	}
+	select {
+	case <-gen.cancelIssued:
+	case <-time.After(time.Second):
+		t.Fatal("pre-send cancellation barrier did not finish")
+	}
+	if gen.beginRuntimeSend(context.Background(), binding) {
+		t.Fatal("SendInput admission reopened after cancellation claimed it")
+	}
+	gen.turnMu.Lock()
+	safe := gen.cancelSafe
+	gen.turnMu.Unlock()
+	if !safe {
+		t.Fatal("prevented SendInput was not a safe takeover boundary")
+	}
+}
+
+func TestTakeoverCancellation_AdmittedPromptCannotStartAfterBarrier(t *testing.T) {
+	const sessionID = "admitted-prompt-barrier"
+	deps := bootRealDeps(t)
+	bridge := &agentEventBridge{streams: NewStreamManager()}
+	deps.RuntimeEventSink = func(id string, isACP bool) runtimeevents.Sink {
+		return &runtimeEventBridgeSink{bridge: bridge, sessionID: id, acp: isACP, source: newRuntimeEventSource()}
+	}
+	client := newCancelACPClient()
+	client.promptEnter = make(chan struct{})
+	promptGate := make(chan struct{})
+	client.promptGate = promptGate
+	client.cancelEnter = make(chan struct{})
+	sess := bootCancelACPSession(t, deps, sessionID, client)
+
+	sendAdmitted := make(chan struct{})
+	sendGate := make(chan struct{})
+	svc := &chatServiceImpl{
+		agentDeps: deps, agentEventBridge: bridge, activeSessions: deps.Manager,
+		activeGen: make(map[string]*inFlightGen),
+		beforeRuntimeSend: func() {
+			close(sendAdmitted)
+			<-sendGate
+		},
+	}
+	_, gen := svc.registerGeneration(sessionID, "message", func() {})
+	turnCtx := context.WithValue(context.Background(), inFlightGenContextKey{}, gen)
+	turnCh, err := svc.driveBootSession(turnCtx, sessionID, &store.Session{}, &store.AgentProfile{}, nil, "hello", 0, "opencode")
+	if err != nil {
+		t.Fatalf("driveBootSession: %v", err)
+	}
+	select {
+	case <-sendAdmitted:
+	case <-time.After(time.Second):
+		t.Fatal("SendInput did not reach admitted pre-call barrier")
+	}
+	if !svc.CancelActiveGeneration(sessionID) {
+		t.Fatal("CancelActiveGeneration returned false")
+	}
+	select {
+	case <-client.promptEnter:
+		t.Fatal("Prompt started while the admitted SendInput call was held")
+	default:
+	}
+	select {
+	case <-gen.cancelIssued:
+		t.Fatal("takeover barrier completed before the admitted Prompt call resolved")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(sendGate)
+	select {
+	case <-client.promptEnter:
+	case <-time.After(time.Second):
+		t.Fatal("released SendInput never invoked Prompt")
+	}
+	select {
+	case <-client.cancelEnter:
+	case <-time.After(time.Second):
+		t.Fatal("CancelTurn was not issued after Prompt reached Processing")
+	}
+	select {
+	case <-gen.cancelIssued:
+		t.Fatal("takeover barrier completed before exact SendInput returned")
+	default:
+	}
+	close(promptGate)
+	select {
+	case <-gen.cancelIssued:
+	case <-time.After(time.Second):
+		t.Fatal("takeover barrier did not complete after cancel terminal and SendInput return")
+	}
+	gen.turnMu.Lock()
+	safe := gen.cancelSafe
+	gen.turnMu.Unlock()
+	if !safe {
+		t.Fatal("exact admitted Prompt cancellation was not marked safe")
+	}
+	select {
+	case _, open := <-turnCh:
+		if open {
+			t.Fatal("canceled turn stream remained open")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled turn stream did not close")
+	}
+	_ = sess
+}
+
+func TestTakeoverCancellation_UnsafeBoundaryPropagatesTransitively(t *testing.T) {
+	a := newInFlightGen("a", func() {})
+	a.turnMu.Lock()
+	a.cancelSafe = false
+	a.cancelAsked = true
+	a.turnMu.Unlock()
+	close(a.cancelIssued)
+	close(a.done)
+
+	b := newInFlightGen("b", func() {})
+	b.predecessor = a
+	svc := &chatServiceImpl{activeGen: map[string]*inFlightGen{"session": b}}
+	svc.requestGenerationCancellation("session", b)
+	select {
+	case <-b.cancelIssued:
+	case <-time.After(time.Second):
+		t.Fatal("binding-less B cancellation did not finish")
+	}
+	close(b.done)
+	b.turnMu.Lock()
+	bSafe := b.cancelSafe
+	b.turnMu.Unlock()
+	if bSafe {
+		t.Fatal("binding-less B masked unsafe predecessor A")
+	}
+	c := newInFlightGen("c", func() {})
+	c.predecessor = b
+	if waitForPredecessor(context.Background(), context.Background(), b) {
+		t.Fatal("C crossed B barrier after A's unsafe status should propagate")
+	}
+}
+
+func TestRuntimeEventBridge_DelayedTerminalCannotReachSuccessor(t *testing.T) {
+	const sessionID = "turn-owned-router"
+	bridge := &agentEventBridge{streams: NewStreamManager()}
+	sink := &runtimeEventBridgeSink{
+		bridge: bridge, sessionID: sessionID, acp: true,
+		source: newRuntimeEventSource(),
+	}
+	oldCh := make(chan llmtypes.StreamEvent, 4)
+	old := newSessionRouter(oldCh)
+	if !bridge.bindPerSessionRouterExact(sessionID, old) {
+		t.Fatal("failed to bind predecessor router")
+	}
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnStarted, TurnID: "old-turn"})
+	blockedSuccessor := newSessionRouter(make(chan llmtypes.StreamEvent, 1))
+	if bridge.bindPerSessionRouterExact(sessionID, blockedSuccessor) {
+		t.Fatal("successor replaced predecessor before terminal drain")
+	}
+	blockedSuccessor.closeOnce()
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnCompleted, TurnID: "old-turn"})
+	if err := old.waitTerminalDrained(context.Background()); err != nil {
+		t.Fatalf("predecessor terminal drain: %v", err)
+	}
+
+	freshCh := make(chan llmtypes.StreamEvent, 4)
+	fresh := newSessionRouter(freshCh)
+	if !bridge.bindPerSessionRouterExact(sessionID, fresh) {
+		t.Fatal("failed to bind successor after predecessor drain")
+	}
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnStarted, TurnID: "fresh-turn"})
+	// Both a delayed duplicate terminal and an impossible replayed start for
+	// old-turn are source/TurnID-owned and must not touch fresh.
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnFailed, TurnID: "old-turn", Payload: []byte(`{"error":"late"}`)})
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnStarted, TurnID: "old-turn"})
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindAgentDelta, TurnID: "fresh-turn", Payload: []byte(`{"content":"fresh"}`)})
+	select {
+	case ev, open := <-freshCh:
+		if !open || ev.Type != llmtypes.EventDelta || ev.Content != "fresh" {
+			t.Fatalf("successor event = %+v open=%v, want fresh delta", ev, open)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("successor router did not receive its exact turn delta")
+	}
+	bridge.finishPerSessionRouter(sessionID, fresh)
+}
+
+func TestObserveSessionForRecovery_NilHookStillWaitsAndRetires(t *testing.T) {
+	const sessionID = "nil-recovery-observer"
+	deps := bootRealDeps(t)
+	client := newCancelACPClient()
+	sess := bootCancelACPSession(t, deps, sessionID, client)
+	deps.Recovery = nil
+	svc := &chatServiceImpl{agentDeps: deps, activeSessions: deps.Manager}
+	workdir := t.TempDir()
+	done := make(chan struct{})
+	go func() {
+		svc.observeSessionForRecovery(sess, sessionID, "agent", "opencode", workdir, time.Now(), false)
+		close(done)
+	}()
+	client.failProcess()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("nil-Recovery observer did not Wait terminal session")
+	}
+	if got, ok := deps.Manager.Load(sessionID); ok || got != nil {
+		t.Fatalf("terminal session remained registered without Recovery: %p, %v", got, ok)
 	}
 }
 

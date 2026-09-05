@@ -64,8 +64,10 @@ type Dependencies struct {
 	// the deliberately lossy legacy chat/SSE projection. Nil means no canonical
 	// capture: raw events are never persisted by default. Callers that inject a
 	// sink own its redaction, retention, bounds, and lifecycle. Unknown event
-	// kinds remain internal; this does not expose them via API.
-	RuntimeEventSink func(sessionID string) runtimeevents.Sink
+	// kinds remain internal; this does not expose them via API. isACP lets a
+	// sink that deliberately owns the legacy stream projection preserve the
+	// protocol's usage+terminal coalescing without inspecting adapter internals.
+	RuntimeEventSink func(sessionID string, isACP bool) runtimeevents.Sink
 
 	// Permissions and ApprovalRequestSink form the existing Nanite approval
 	// layer used only when an ACP provider sends session/request_permission.

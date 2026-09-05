@@ -17,9 +17,9 @@ import (
 )
 
 func TestHostRuntimeFeedSSEReplaysAfterCommittedCursor(t *testing.T) {
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "runtime-feed.db"))
-	if err != nil {
-		t.Fatalf("new store: %v", err)
+	s, openErr := store.New(context.Background(), filepath.Join(t.TempDir(), "runtime-feed.db"))
+	if openErr != nil {
+		t.Fatalf("new store: %v", openErr)
 	}
 	defer func() { _ = s.Close(context.Background()) }()
 	if generation, err := s.ReserveHostRuntimeRun(context.Background(), "session-a", "run-a"); err != nil || generation != 1 {
@@ -182,9 +182,9 @@ func TestHostRuntimeFeedSSEHeadOrdersFreshAndLiveReplacementWithoutSpam(t *testi
 }
 
 func TestHostRuntimeFeedSSECursorAheadOrdersHeadGapAndReplay(t *testing.T) {
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "runtime-rewind.db"))
-	if err != nil {
-		t.Fatal(err)
+	s, openErr := store.New(context.Background(), filepath.Join(t.TempDir(), "runtime-rewind.db"))
+	if openErr != nil {
+		t.Fatal(openErr)
 	}
 	defer func() { _ = s.Close(context.Background()) }()
 	if generation, reserveErr := s.ReserveHostRuntimeRun(context.Background(), "session-rewind", "run-restored"); reserveErr != nil || generation != 1 {

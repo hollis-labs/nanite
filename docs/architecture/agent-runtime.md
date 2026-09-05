@@ -2,7 +2,7 @@
 
 Nanite compiles product inputs (agent/boot profile, work directory, child
 environment, sandbox profile, recovery metadata, and UI sinks), then hands the
-resolved launch to `go-agent-wrapper` v0.9.0. `wrapper.Wrapper` owns native and
+resolved launch to `go-agent-wrapper` v0.9.1. `wrapper.Wrapper` owns native and
 ACP start, resume/new, prompt, turn cancellation, close, provider session ID,
 event draining, process exit, and cleanup. ACP wrappers share one
 `acp.Manager`; Nanite's `SessionManager` is only the runtime-ID-to-wrapper
@@ -73,7 +73,7 @@ authoritative pre-execution gate for host-owned tools and is not routed through
 the wrapper policy-observer API.
 
 The measured provider coverage is deliberately narrow (the canonical details
-live with the v0.9.0 wrapper API):
+live with the v0.9.1 wrapper API):
 
 | ACP adapter | Measured provider behavior |
 |---|---|

@@ -16,8 +16,8 @@ import (
 
 const (
 	agentWrapperModule    = "github.com/hollis-labs/go-agent-wrapper"
-	agentWrapperVersion   = "v0.9.0"
-	agentWrapperSum       = "h1:RPwtWZJgTQNAX9neWK1/5UJpgk3nIpPorgx1vjrpuGY="
+	agentWrapperVersion   = "v0.9.1"
+	agentWrapperSum       = "h1:Xg+ddQrGnztfh72Q18dBHIcOdOt04HJNcUU2mg+trK0="
 	agentWrapperGoModSum  = "h1:cRkJmUNd39Jxg6mv28stv3BZUFwv4peWSlkcbY5uQ/U="
 	runtimeEventsModule   = "github.com/hollis-labs/go-runtime-events"
 	runtimeEventsVersion  = "v0.1.2"

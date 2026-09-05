@@ -154,13 +154,13 @@ func (s *Store) AppendHostRuntimeEvent(ctx context.Context, event HostRuntimeEve
 	}
 	defer rollbackUnlessCommitted(tx)
 	var generationFloor int64
-	if err := tx.QueryRowContext(ctx, `
+	if queryErr := tx.QueryRowContext(ctx, `
 		SELECT last_runtime_generation
-		FROM host_runtime_feed_heads WHERE session_id = ?`, event.SessionID).Scan(&generationFloor); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		FROM host_runtime_feed_heads WHERE session_id = ?`, event.SessionID).Scan(&generationFloor); queryErr != nil {
+		if errors.Is(queryErr, sql.ErrNoRows) {
 			return HostRuntimeEvent{}, false, errors.New("host runtime generation was not reserved")
 		}
-		return HostRuntimeEvent{}, false, fmt.Errorf("load host runtime generation floor: %w", err)
+		return HostRuntimeEvent{}, false, fmt.Errorf("load host runtime generation floor: %w", queryErr)
 	}
 	if event.RuntimeGeneration > generationFloor {
 		return HostRuntimeEvent{}, false, errors.New("host runtime event generation exceeds reserved floor")
@@ -189,12 +189,12 @@ func (s *Store) AppendHostRuntimeEvent(ctx context.Context, event HostRuntimeEve
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := tx.QueryRowContext(ctx, `
+	if queryErr := tx.QueryRowContext(ctx, `
 		UPDATE host_runtime_feed_heads
 		SET last_cursor = last_cursor + 1, updated_at = ?
 		WHERE session_id = ?
-		RETURNING last_cursor`, now, event.SessionID).Scan(&event.Cursor); err != nil {
-		return HostRuntimeEvent{}, false, fmt.Errorf("allocate host runtime cursor: %w", err)
+		RETURNING last_cursor`, now, event.SessionID).Scan(&event.Cursor); queryErr != nil {
+		return HostRuntimeEvent{}, false, fmt.Errorf("allocate host runtime cursor: %w", queryErr)
 	}
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
@@ -313,8 +313,8 @@ func (s *Store) HostRuntimeEventsAfter(ctx context.Context, sessionID string, af
 				RuntimeGenerationFloor: 0,
 			}
 		}
-		if err := tx.Commit(); err != nil {
-			return HostRuntimeReplay{}, fmt.Errorf("commit empty host runtime replay: %w", err)
+		if commitErr := tx.Commit(); commitErr != nil {
+			return HostRuntimeReplay{}, fmt.Errorf("commit empty host runtime replay: %w", commitErr)
 		}
 		return replay, nil
 	}

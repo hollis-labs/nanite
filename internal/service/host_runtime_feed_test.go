@@ -216,9 +216,9 @@ func TestPublicUsageNormalizesReleasedAdapterShapes(t *testing.T) {
 }
 
 func TestHostRuntimeFeedPersistsFIFOWithDistinctHostCursor(t *testing.T) {
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "feed.db"))
-	if err != nil {
-		t.Fatalf("new store: %v", err)
+	s, openErr := store.New(context.Background(), filepath.Join(t.TempDir(), "feed.db"))
+	if openErr != nil {
+		t.Fatalf("new store: %v", openErr)
 	}
 	defer func() { _ = s.Close(context.Background()) }()
 	feed := NewHostRuntimeFeed(s)
@@ -268,11 +268,12 @@ func TestHostRuntimeFeedQueueOverflowIsSessionOrderedAcrossRuns(t *testing.T) {
 	feed.queue <- store.HostRuntimeEvent{Kind: "filler-1"}
 	feed.queue <- store.HostRuntimeEvent{Kind: "filler-2"}
 	source := func(id string, sequence uint64) runtimeevents.Event {
+		second := int(sequence) //nolint:gosec // Test fixtures pass fixed single-digit sequence values.
 		return runtimeevents.Event{
 			SchemaVersion: runtimeevents.SchemaVersion,
 			ID:            id,
 			Kind:          runtimeevents.KindSessionHeartbeat,
-			Time:          time.Date(2026, 9, 5, 12, 0, int(sequence), 0, time.UTC),
+			Time:          time.Date(2026, 9, 5, 12, 0, second, 0, time.UTC),
 			SessionID:     "session-a",
 			Sequence:      sequence,
 			Source:        runtimeevents.Source{Channel: runtimeevents.ChannelJSONRPC},
@@ -375,9 +376,9 @@ func TestRuntimeEventBridgeReservationExhaustionPreservesLegacyProjection(t *tes
 }
 
 func TestHostRuntimePersistenceFailureGapPrecedesSuccessorRun(t *testing.T) {
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "persist-order.db"))
-	if err != nil {
-		t.Fatal(err)
+	s, openErr := store.New(context.Background(), filepath.Join(t.TempDir(), "persist-order.db"))
+	if openErr != nil {
+		t.Fatal(openErr)
 	}
 	defer func() { _ = s.Close(context.Background()) }()
 	feed := NewHostRuntimeFeed(s)
@@ -407,16 +408,16 @@ func TestHostRuntimePersistenceFailureGapPrecedesSuccessorRun(t *testing.T) {
 			Source: runtimeevents.Source{Channel: runtimeevents.ChannelJSONRPC},
 		}
 	}
-	if err := feed.Publish(context.Background(), "run-a", genA, true, source("a-ready")); err != nil {
-		t.Fatal(err)
+	if publishErr := feed.Publish(context.Background(), "run-a", genA, true, source("a-ready")); publishErr != nil {
+		t.Fatal(publishErr)
 	}
-	if err := feed.Publish(context.Background(), "run-b", genB, true, source("b-ready")); err != nil {
-		t.Fatal(err)
+	if publishErr := feed.Publish(context.Background(), "run-b", genB, true, source("b-ready")); publishErr != nil {
+		t.Fatal(publishErr)
 	}
 	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := feed.Close(closeCtx); err != nil {
-		t.Fatal(err)
+	if closeErr := feed.Close(closeCtx); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	wantAttempts := []string{"session.ready:run-a", "host_runtime.ingest_gap:run-a", "session.ready:run-b"}
 	if fmt.Sprint(attempts) != fmt.Sprint(wantAttempts) {
@@ -534,9 +535,9 @@ func TestRuntimeEventBridgeRetriesTransientGenerationReservation(t *testing.T) {
 }
 
 func TestRuntimeEventBridgeFeedsBoundSessionAndPreservesLegacyProjection(t *testing.T) {
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "bridge-feed.db"))
-	if err != nil {
-		t.Fatalf("new store: %v", err)
+	s, openErr := store.New(context.Background(), filepath.Join(t.TempDir(), "bridge-feed.db"))
+	if openErr != nil {
+		t.Fatalf("new store: %v", openErr)
 	}
 	defer func() { _ = s.Close(context.Background()) }()
 	feed := NewHostRuntimeFeed(s)

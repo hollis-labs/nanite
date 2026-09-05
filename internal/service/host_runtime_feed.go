@@ -24,6 +24,7 @@ const (
 	hostRuntimeEventMaxBytes         = store.HostRuntimeFeedMaxEventBytes
 	hostRuntimeStringMaxBytes        = 384
 	hostRuntimeLossLedgerMaxSessions = 256
+	acpCanceledWireOutcome           = "cancelled" //nolint:misspell // Immutable ACP compatibility wire spelling.
 )
 
 var (
@@ -224,8 +225,8 @@ func (f *HostRuntimeFeed) run() {
 			if f.workerCtx.Err() != nil {
 				break
 			}
-			if err := addHostRuntimeDrop(failed, event); err != nil {
-				f.setAsyncError(err)
+			if ledgerErr := addHostRuntimeDrop(failed, event); ledgerErr != nil {
+				f.setAsyncError(ledgerErr)
 				slog.Error("host runtime feed: persistence loss ledger saturated", "sessions", len(failed), "session_id", sessionID)
 				continue
 			}
@@ -430,7 +431,7 @@ func projectHostRuntimePayload(kind runtimeevents.EventKind, isACP bool, raw jso
 	case runtimeevents.KindProcessExited:
 		projected["state"] = "exited"
 		copyNumber(projected, "exit_code", source, "exit_code")
-		outcome := safeEnum(source["outcome"], "completed", "failed", "canceled", "cancelled", "disconnect", "disconnected", "exited")
+		outcome := safeEnum(source["outcome"], "completed", "failed", "canceled", acpCanceledWireOutcome, "disconnect", "disconnected", "exited")
 		if outcome != "" {
 			projected["outcome"] = outcome
 		}
@@ -473,7 +474,7 @@ func projectHostRuntimePayload(kind runtimeevents.EventKind, isACP bool, raw jso
 		projected["state"] = "requested"
 	case runtimeevents.KindAgentPermissionResolved:
 		projected["state"] = "resolved"
-		if outcome := safeEnum(source["outcome"], "approved", "denied", "canceled", "cancelled"); outcome != "" {
+		if outcome := safeEnum(source["outcome"], "approved", "denied", "canceled", acpCanceledWireOutcome); outcome != "" {
 			projected["outcome"] = outcome
 		}
 	case runtimeevents.KindPolicyNudge, runtimeevents.KindPolicyRewrite,
@@ -574,7 +575,7 @@ func publicToolResult(source map[string]any) map[string]any {
 }
 
 func publicToolStatus(value any) string {
-	return safeEnum(value, "pending", "started", "running", "in_progress", "completed", "success", "succeeded", "done", "failed", "error", "canceled", "cancelled")
+	return safeEnum(value, "pending", "started", "running", "in_progress", "completed", "success", "succeeded", "done", "failed", "error", "canceled", acpCanceledWireOutcome)
 }
 
 func publicUsage(value any) map[string]any {
@@ -685,11 +686,11 @@ func redactRuntimeString(value string) string {
 	return hostRuntimeSecretValue.ReplaceAllString(value, "[REDACTED]")
 }
 
-func boundedRuntimeString(value string, max int) string {
-	if max < 1 || len(value) <= max {
+func boundedRuntimeString(value string, maxBytes int) string {
+	if maxBytes < 1 || len(value) <= maxBytes {
 		return value
 	}
-	return value[:max] + "…"
+	return value[:maxBytes] + "…"
 }
 
 func (f *HostRuntimeFeed) String() string {

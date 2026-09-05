@@ -41,8 +41,8 @@ func TestHostRuntimeFeedCursorReplayRetentionAndIdempotency(t *testing.T) {
 		t.Fatalf("duplicate append = (%+v, %v, %v), want existing cursor", duplicate, inserted, err)
 	}
 	conflict := event("run-a", generationA, "source-1", 44, "turn.failed")
-	if _, _, err := s.AppendHostRuntimeEvent(ctx, conflict, 2); err == nil || !strings.Contains(err.Error(), "different contents") {
-		t.Fatalf("conflicting duplicate error = %v, want integrity error", err)
+	if _, _, conflictErr := s.AppendHostRuntimeEvent(ctx, conflict, 2); conflictErr == nil || !strings.Contains(conflictErr.Error(), "different contents") {
+		t.Fatalf("conflicting duplicate error = %v, want integrity error", conflictErr)
 	}
 
 	// A recovered runtime can restart its source sequence. The host cursor
@@ -60,16 +60,16 @@ func TestHostRuntimeFeedCursorReplayRetentionAndIdempotency(t *testing.T) {
 		t.Fatalf("third append = (%+v, %v), want cursor 3", third, err)
 	}
 	dbPath := s.dbPath
-	if err := s.Close(ctx); err != nil {
-		t.Fatalf("close before replay: %v", err)
+	if closeErr := s.Close(ctx); closeErr != nil {
+		t.Fatalf("close before replay: %v", closeErr)
 	}
 	s, err = New(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("reopen before replay: %v", err)
 	}
 	defer func() { _ = s.Close(context.Background()) }()
-	if generation, err := s.ReserveHostRuntimeRun(ctx, "session-a", "run-c"); err != nil || generation != 3 {
-		t.Fatalf("generation after reopen = %d, %v, want durable generation 3", generation, err)
+	if generation, reserveErr := s.ReserveHostRuntimeRun(ctx, "session-a", "run-c"); reserveErr != nil || generation != 3 {
+		t.Fatalf("generation after reopen = %d, %v, want durable generation 3", generation, reserveErr)
 	}
 
 	replay, err := s.HostRuntimeEventsAfter(ctx, "session-a", 0, 512)
@@ -88,8 +88,8 @@ func TestHostRuntimeFeedCursorReplayRetentionAndIdempotency(t *testing.T) {
 		t.Fatalf("duplicate after event prune = (%+v, %v, %v), want original cursor 1", prunedDuplicate, inserted, err)
 	}
 	prunedConflict := event("run-a", generationA, "source-1", 44, "turn.failed")
-	if _, _, err := s.AppendHostRuntimeEvent(ctx, prunedConflict, 2); err == nil || !strings.Contains(err.Error(), "different contents") {
-		t.Fatalf("conflict after event prune error = %v, want integrity error", err)
+	if _, _, conflictErr := s.AppendHostRuntimeEvent(ctx, prunedConflict, 2); conflictErr == nil || !strings.Contains(conflictErr.Error(), "different contents") {
+		t.Fatalf("conflict after event prune error = %v, want integrity error", conflictErr)
 	}
 
 	afterTwo, err := s.HostRuntimeEventsAfter(ctx, "session-a", 2, 1)
@@ -113,18 +113,18 @@ func TestHostRuntimeReplayGapCarriesCurrentGenerationFloor(t *testing.T) {
 			Source: HostRuntimeEventSource{Channel: "test"}, Payload: json.RawMessage(`{}`), PayloadVisibility: "public_metadata",
 		}
 	}
-	if _, _, err := s.AppendHostRuntimeEvent(ctx, event("run-a", "a-ready", "session.ready", genA), 1); err != nil {
-		t.Fatal(err)
+	if _, _, appendErr := s.AppendHostRuntimeEvent(ctx, event("run-a", "a-ready", "session.ready", genA), 1); appendErr != nil {
+		t.Fatal(appendErr)
 	}
 	genB, err := s.ReserveHostRuntimeRun(ctx, "session-floor", "run-b")
 	if err != nil || genB != 2 {
 		t.Fatalf("reserve successor = %d, %v", genB, err)
 	}
-	if _, _, err := s.AppendHostRuntimeEvent(ctx, event("run-b", "b-ready", "session.ready", genB), 1); err != nil {
-		t.Fatal(err)
+	if _, _, appendErr := s.AppendHostRuntimeEvent(ctx, event("run-b", "b-ready", "session.ready", genB), 1); appendErr != nil {
+		t.Fatal(appendErr)
 	}
-	if _, _, err := s.AppendHostRuntimeEvent(ctx, event("run-a", "a-late-exit", "process.exited", genA), 1); err != nil {
-		t.Fatal(err)
+	if _, _, appendErr := s.AppendHostRuntimeEvent(ctx, event("run-a", "a-late-exit", "process.exited", genA), 1); appendErr != nil {
+		t.Fatal(appendErr)
 	}
 	replay, err := s.HostRuntimeEventsAfter(ctx, "session-floor", 0, 10)
 	if err != nil || replay.Gap == nil || len(replay.Events) != 1 {
@@ -152,15 +152,15 @@ func TestHostRuntimeReplayHeadPrecedesGapFreeDelayedPredecessor(t *testing.T) {
 			Source: HostRuntimeEventSource{Channel: "test"}, Payload: json.RawMessage(`{}`), PayloadVisibility: "public_metadata",
 		}
 	}
-	if _, _, err := s.AppendHostRuntimeEvent(ctx, event("a-ready", "session.ready"), 10); err != nil {
-		t.Fatal(err)
+	if _, _, appendErr := s.AppendHostRuntimeEvent(ctx, event("a-ready", "session.ready"), 10); appendErr != nil {
+		t.Fatal(appendErr)
 	}
 	genB, err := s.ReserveHostRuntimeRun(ctx, "session-head", "run-b")
 	if err != nil || genB != 2 {
 		t.Fatalf("reserve successor = %d, %v", genB, err)
 	}
-	if _, _, err := s.AppendHostRuntimeEvent(ctx, event("a-late-exit", "process.exited"), 10); err != nil {
-		t.Fatal(err)
+	if _, _, appendErr := s.AppendHostRuntimeEvent(ctx, event("a-late-exit", "process.exited"), 10); appendErr != nil {
+		t.Fatal(appendErr)
 	}
 	replay, err := s.HostRuntimeEventsAfter(ctx, "session-head", 0, 10)
 	if err != nil || replay.Gap != nil || len(replay.Events) != 2 {

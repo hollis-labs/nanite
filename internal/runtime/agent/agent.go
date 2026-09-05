@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -79,6 +78,12 @@ func (m Mode) String() string {
 type Options struct {
 	// Mode selects the lifecycle policy. Zero value is ModeLongLived.
 	Mode Mode
+
+	// ExternalLifecycleObserver transfers terminal retirement to the caller.
+	// Chat sets this because its recovery observer must atomically claim the
+	// exact session and hold a same-ID recovery lease across broker adoption.
+	// Other Boot owners leave it false and the Run tail retires itself.
+	ExternalLifecycleObserver bool
 
 	// AgentProfile is the agent identifier resolved against
 	// Dependencies.Agents. Empty falls back to the default profile.
@@ -518,18 +523,8 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	}
 
 	var canonicalSink runtimeevents.Sink
-	var ownedCanonicalSink io.Closer
 	if deps.RuntimeEventSink != nil {
 		canonicalSink = deps.RuntimeEventSink(sessID)
-	}
-	if canonicalSink == nil {
-		fileSink, openErr := runtimeevents.OpenFileSink(filepath.Join(ws.LogDir, "runtime-events.jsonl"))
-		if openErr != nil {
-			_ = deps.Store.MarkRuntimeFailed(sessID, openErr.Error())
-			return cleanup(fmt.Errorf("agent.Boot: open normalized runtime event journal: %w", openErr))
-		}
-		canonicalSink = fileSink
-		ownedCanonicalSink = fileSink
 	}
 	sink := &runtimeEventSink{acp: isACP, canonical: canonicalSink}
 	if deps.EventFanout != nil {
@@ -565,9 +560,6 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		FirstTurnPayload:  string(firstTurnPayload),
 	})
 	if err != nil {
-		if ownedCanonicalSink != nil {
-			_ = ownedCanonicalSink.Close()
-		}
 		if hadLineage && deps.PathGrants != nil {
 			deps.PathGrants.ClearLineage(sessID)
 		}
@@ -592,9 +584,6 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	}
 	if err := deps.Manager.AdmitLaunch(sess); err != nil {
 		runCancel()
-		if ownedCanonicalSink != nil {
-			_ = ownedCanonicalSink.Close()
-		}
 		_ = deps.Store.MarkRuntimeFailed(sessID, err.Error())
 		return cleanup(fmt.Errorf("agent.Boot: admit session launch: %w", err))
 	}
@@ -631,12 +620,15 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	// already the correct, sufficient interrupt mechanism — see
 	// manager.go's Stop.
 	go func() {
+		// Non-chat owners do not install the recovery observer. Keep the exact
+		// binding through runDone closure so a concurrent Shutdown either sees
+		// and reaps it or observes it already fully terminal before retirement.
+		if !opts.ExternalLifecycleObserver {
+			defer deps.Manager.Retire(sessID, sess)
+		}
 		defer deps.Manager.DiscardPending(sess)
 		defer runCancel()
 		defer close(sess.runDone)
-		if ownedCanonicalSink != nil {
-			defer func() { _ = ownedCanonicalSink.Close() }()
-		}
 		sess.runErr = recoveryCompatibleWrapperError(wr.Run(runCtx), isACP)
 		state := "done"
 		if sess.runErr != nil {

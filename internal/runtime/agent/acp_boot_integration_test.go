@@ -41,6 +41,9 @@ type bootACPTestClient struct {
 	cancelCount      int
 	launchEntered    chan struct{}
 	blockLaunchUntil <-chan struct{}
+	closeEntered     chan struct{}
+	blockCloseUntil  <-chan struct{}
+	closeEnteredOnce sync.Once
 }
 
 func newBootACPTestClient() *bootACPTestClient {
@@ -98,7 +101,20 @@ func (c *bootACPTestClient) InterruptCapability() adapters.InterruptCapability {
 }
 func (c *bootACPTestClient) ProviderSessionID() string { return c.providerID }
 
-func (c *bootACPTestClient) Close(context.Context) error {
+func (c *bootACPTestClient) Close(ctx context.Context) error {
+	c.mu.Lock()
+	entered, block := c.closeEntered, c.blockCloseUntil
+	c.mu.Unlock()
+	if entered != nil {
+		c.closeEnteredOnce.Do(func() { close(entered) })
+	}
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.closeCount++
@@ -161,6 +177,16 @@ func waitACPState(t *testing.T, sess *Session, want acp.State) {
 func TestBoot_ACPWrapperLifecycle_MultiTurnResumeCancelIdentityAndCleanup(t *testing.T) {
 	client := newBootACPTestClient()
 	deps, st := acpBootTestDeps(t, client)
+	var eventMu sync.Mutex
+	var canonicalEvents []runtimeevents.Event
+	deps.RuntimeEventSink = func(string) runtimeevents.Sink {
+		return runtimeevents.SinkFunc(func(_ context.Context, ev runtimeevents.Event) error {
+			eventMu.Lock()
+			canonicalEvents = append(canonicalEvents, ev)
+			eventMu.Unlock()
+			return nil
+		})
+	}
 	sess, err := Boot(context.Background(), deps, Options{
 		Mode:                    ModeLongLived,
 		SessionID:               "acp-integration",
@@ -235,13 +261,19 @@ func TestBoot_ACPWrapperLifecycle_MultiTurnResumeCancelIdentityAndCleanup(t *tes
 	if len(prompts) != 4 {
 		t.Fatalf("prompts = %q, want four turns", prompts)
 	}
-	journal, err := os.ReadFile(filepath.Join(sess.WorkspaceDir, "logs", "runtime-events.jsonl"))
-	if err != nil {
-		t.Fatalf("read canonical runtime event journal: %v", err)
-	}
+	eventMu.Lock()
+	gotEvents := append([]runtimeevents.Event(nil), canonicalEvents...)
+	eventMu.Unlock()
 	for _, kind := range []string{"session.ready", "turn.started", "agent.delta", "turn.completed", "interrupt.requested", "interrupt.acknowledged"} {
-		if !strings.Contains(string(journal), `"kind":"`+kind+`"`) {
-			t.Errorf("canonical runtime event journal missing %q", kind)
+		found := false
+		for _, ev := range gotEvents {
+			if string(ev.Kind) == kind {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("injected canonical runtime sink missing %q", kind)
 		}
 	}
 }
@@ -269,6 +301,124 @@ func TestBoot_ACPWrapperLifecycle_DisconnectAndProcessExit(t *testing.T) {
 	}
 	if deps.Manager.IsLive(sess.ID) {
 		t.Fatal("disconnected ACP session still reported live")
+	}
+	if _, ok := deps.Manager.Load(sess.ID); ok {
+		t.Fatal("Boot without an external observer retained its terminal binding")
+	}
+	if _, statErr := os.Stat(filepath.Join(sess.WorkspaceDir, "logs", "runtime-events.jsonl")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("default Boot persisted raw canonical journal: %v", statErr)
+	}
+}
+
+func TestSessionManager_ShutdownWaitsForReadyRunTail(t *testing.T) {
+	client := newBootACPTestClient()
+	deps, st := acpBootTestDeps(t, client)
+	tailEntered := make(chan struct{})
+	tailRelease := make(chan struct{})
+	var enterOnce sync.Once
+	deps.RuntimeEventSink = func(string) runtimeevents.Sink {
+		return runtimeevents.SinkFunc(func(ctx context.Context, ev runtimeevents.Event) error {
+			if ev.Kind != runtimeevents.KindProcessExited {
+				return nil
+			}
+			enterOnce.Do(func() { close(tailEntered) })
+			select {
+			case <-tailRelease:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	}
+	sess, err := Boot(context.Background(), deps, Options{
+		Mode: ModeLongLived, SessionID: "acp-ready-shutdown-tail", Workdir: t.TempDir(),
+		ExternalLifecycleObserver: true,
+	})
+	if err != nil {
+		t.Fatalf("Boot: %v", err)
+	}
+
+	shutdownDone := make(chan error, 1)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go func() { shutdownDone <- deps.Manager.Shutdown(shutdownCtx) }()
+	select {
+	case <-tailEntered:
+	case <-time.After(time.Second):
+		t.Fatal("Wrapper.Run tail did not reach final process event")
+	}
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("Shutdown returned before Run tail drained: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(tailRelease)
+	if err := <-shutdownDone; err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	select {
+	case <-sess.runDone:
+	default:
+		t.Fatal("Shutdown returned before session runDone closed")
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if len(st.states) == 0 || st.states[len(st.states)-1].State != "done" {
+		t.Fatalf("runtime states = %+v, want final done before Shutdown returns", st.states)
+	}
+	if deps.Manager.Len() != 0 {
+		t.Fatalf("manager retained %d ready session(s) after Shutdown", deps.Manager.Len())
+	}
+}
+
+func TestSessionManager_ShutdownStopsReadySessionsConcurrently(t *testing.T) {
+	blockedClient := newBootACPTestClient()
+	blockedClient.closeEntered = make(chan struct{})
+	closeGate := make(chan struct{})
+	blockedClient.blockCloseUntil = closeGate
+	blockedDeps, _ := acpBootTestDeps(t, blockedClient)
+	if _, err := Boot(context.Background(), blockedDeps, Options{
+		Mode: ModeLongLived, SessionID: "shutdown-blocked-stop", Workdir: t.TempDir(),
+		ExternalLifecycleObserver: true,
+	}); err != nil {
+		t.Fatalf("Boot blocked session: %v", err)
+	}
+
+	peerClient := newBootACPTestClient()
+	peerDeps, _ := acpBootTestDeps(t, peerClient)
+	peerDeps.Manager = blockedDeps.Manager
+	if _, err := Boot(context.Background(), peerDeps, Options{
+		Mode: ModeLongLived, SessionID: "shutdown-peer-stop", Workdir: t.TempDir(),
+		ExternalLifecycleObserver: true,
+	}); err != nil {
+		t.Fatalf("Boot peer session: %v", err)
+	}
+
+	shutdownDone := make(chan error, 1)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go func() { shutdownDone <- blockedDeps.Manager.Shutdown(shutdownCtx) }()
+	select {
+	case <-blockedClient.closeEntered:
+	case <-time.After(time.Second):
+		t.Fatal("blocked session Stop did not start")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		peerClient.mu.Lock()
+		peerClosed := peerClient.closeCount
+		peerClient.mu.Unlock()
+		if peerClosed > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("peer Stop was starved behind blocked session")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(closeGate)
+	if err := <-shutdownDone; err != nil {
+		t.Fatalf("Shutdown: %v", err)
 	}
 }
 

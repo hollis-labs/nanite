@@ -674,13 +674,14 @@ func TestChatService_RegisterGeneration_Takeover(t *testing.T) {
 	cancelA := context.CancelFunc(func() { close(canceledA) })
 
 	// First registration: no prior cancel.
-	if prev, _ := svc.registerGeneration("sess", "msg-A", cancelA); prev != nil {
+	prev, first := svc.registerGeneration("sess", "msg-A", cancelA)
+	if prev != nil {
 		t.Fatalf("expected nil prev for first register, got %v", prev)
 	}
 
 	// Second registration on the same session: returns the first cancel.
 	cancelB := context.CancelFunc(func() {})
-	prev, _ := svc.registerGeneration("sess", "msg-B", cancelB)
+	prev, second := svc.registerGeneration("sess", "msg-B", cancelB)
 	if prev == nil {
 		t.Fatal("expected prev cancel on second register, got nil")
 	}
@@ -692,7 +693,7 @@ func TestChatService_RegisterGeneration_Takeover(t *testing.T) {
 	}
 
 	// Deregistering the first msgID is a no-op because msg-B is current.
-	svc.deregisterGeneration("sess", "msg-A")
+	svc.deregisterGeneration("sess", first)
 	svc.activeGenMu.Lock()
 	cur := svc.activeGen["sess"]
 	svc.activeGenMu.Unlock()
@@ -701,7 +702,7 @@ func TestChatService_RegisterGeneration_Takeover(t *testing.T) {
 	}
 
 	// Deregistering the current msgID clears the slot.
-	svc.deregisterGeneration("sess", "msg-B")
+	svc.deregisterGeneration("sess", second)
 	svc.activeGenMu.Lock()
 	if _, ok := svc.activeGen["sess"]; ok {
 		t.Fatal("expected slot cleared after deregister of active msg")

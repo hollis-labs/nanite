@@ -18,9 +18,9 @@ import (
 // consumption internally (agent.go pre-migration fed those two surfaces
 // straight to Dependencies.EventFanout / Dependencies.TypedEventCallback;
 // Wrapper.Run now consumes them itself and re-emits a normalized
-// runtimeevents.Event stream instead). This Sink first writes that complete
-// normalized contract to the canonical sink, then projects the subset with
-// legacy equivalents back onto the two surfaces
+// runtimeevents.Event stream instead). When a canonical sink is configured,
+// this Sink first writes that complete normalized contract there, then
+// projects the subset with legacy equivalents back onto the two surfaces
 // internal/service/agentEventBridge already knows how to turn into chat SSE
 // (delta / tool_call / tool_result / stream_end / error). See
 // go-agent-wrapper's wrapper/event_translator.go for the forward mapping the

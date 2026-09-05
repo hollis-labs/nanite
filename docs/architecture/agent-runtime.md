@@ -10,21 +10,24 @@ binding used by chat lookup, recovery replacement, orphan checks, and daemon
 shutdown. It does not keep a second lifecycle state.
 
 `SessionManager` admits a launch before `Wrapper.Run` begins. Shutdown closes
-that admission boundary first and waits for ready, pre-ready, and
-recovery-pending launches, so a concurrent Boot cannot escape the stop set.
-Terminal observers retire only the exact wrapper pointer they watched. An
-erroring observer holds a per-session recovery lease while the broker decides
-whether to adopt a replacement; stale observers neither clear successor state
-nor dispatch recovery over it.
+that admission boundary first, stops all de-duplicated wrappers concurrently,
+and waits for ready, pre-ready, and recovery-pending Run tails under one shared
+deadline, so a concurrent Boot cannot escape the stop set. Non-chat Boots
+retire their exact pointer in the Run tail. Chat explicitly transfers that
+retirement to its recovery observer, which may need to claim a same-ID recovery
+lease through broker adoption. Stale observers neither clear successor state
+nor dispatch recovery over it; runtime retirement never deletes turn-owned
+slot, tool-partition, or router state.
 
-Every normalized `runtimeevents.Event` first reaches Nanite's canonical sink.
-The default is an internal append-only
-`<workspace>/logs/runtime-events.jsonl`; composition tests or future internal
-consumers may inject another sink. Only afterward does Nanite project the
-small legacy subset onto chat SSE/provider callbacks. Process, lifecycle,
-interrupt, permission, raw-I/O, and unknown future kinds are therefore
-preserved without exposing raw events on the public API (that transport is a
-separate contract).
+When a canonical `runtimeevents.Sink` is injected, every normalized event
+reaches it before Nanite projects the small legacy subset onto chat
+SSE/provider callbacks. Process, lifecycle, interrupt, permission, raw-I/O,
+and unknown future kinds are forwarded intact. There is deliberately no
+default raw-event persistence: prompts, tool payloads, stdout, and stderr may
+contain secrets, and an unredacted append-only workspace journal would be
+unsafe and unbounded. An injected sink owns redaction, retention, bounds, and
+lifecycle. A durable/redacted public feed is a separate CW-20260904-0129
+contract; this change exposes no raw events through the API.
 
 Native selection remains Nanite product policy: Claude uses streaming stdio;
 Codex and OpenCode use subprocess-per-turn. The selection is expressed through
@@ -34,9 +37,11 @@ mode, so no shell or generated process wrapper is involved. ACP selection uses
 the wrapper's shipped Claude, Codex, OpenCode, Copilot, and Pi ACP adapters.
 
 User stop and same-session takeover cancel the Nanite generation context and
-request `Wrapper.CancelTurn` against the exact captured wrapper generation.
-The request is bounded and does not block the API caller; a successor prompt
-waits until the provider request and predecessor terminal boundary complete.
+request `Wrapper.CancelTurn` against the exact wrapper and router token bound
+when that generation admitted its prompt. No delayed cancellation or router
+cleanup resolves a mutable session-ID binding. The request is bounded and does
+not block the API caller; the generation remains a takeover barrier until the
+provider request and predecessor terminal/cleanup boundary complete.
 ACP uses its real turn-scoped cancel. Native runtimes honestly report that
 turn cancellation is unsupported, so Nanite stops that exact wrapper and the
 next turn cold-boots instead of pretending a wire-level cancel occurred.

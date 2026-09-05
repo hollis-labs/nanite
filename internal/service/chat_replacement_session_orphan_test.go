@@ -73,10 +73,11 @@ func bootRealDeps(t *testing.T) *runtimeagent.Dependencies {
 func bootRealLongLivedSession(t *testing.T, deps *runtimeagent.Dependencies, sessionID string) *runtimeagent.Session {
 	t.Helper()
 	sess, err := runtimeagent.Boot(context.Background(), deps, runtimeagent.Options{
-		Mode:      runtimeagent.ModeLongLived,
-		SessionID: sessionID,
-		Provider:  "codex",
-		Workdir:   t.TempDir(),
+		Mode:                      runtimeagent.ModeLongLived,
+		SessionID:                 sessionID,
+		Provider:                  "codex",
+		Workdir:                   t.TempDir(),
+		ExternalLifecycleObserver: true,
 	})
 	if err != nil {
 		t.Fatalf("bootRealLongLivedSession: Boot: %v", err)

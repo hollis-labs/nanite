@@ -117,10 +117,7 @@ func (s *chatServiceImpl) driveBootSession(
 		if !ok {
 			break
 		}
-		if s.runtimeSessions().Retire(sessionID, stale, func() {
-			s.activeSessionSlots.Delete(sessionID)
-			s.toolPartitionStates.Delete(sessionID)
-		}) {
+		if s.runtimeSessions().Retire(sessionID, stale) {
 			break
 		}
 	}
@@ -144,11 +141,12 @@ func (s *chatServiceImpl) driveBootSession(
 		workdir := bootSessionWorkdir(session)
 		role := bootSessionRole(agent)
 		bootOpts := runtimeagent.Options{
-			Mode:         runtimeagent.ModeLongLived,
-			SessionID:    sessionID,
-			AgentProfile: profileSlug,
-			Workdir:      workdir,
-			Role:         role,
+			Mode:                      runtimeagent.ModeLongLived,
+			SessionID:                 sessionID,
+			AgentProfile:              profileSlug,
+			Workdir:                   workdir,
+			Role:                      role,
+			ExternalLifecycleObserver: true,
 		}
 		applyLegacyCLIProviderToBootOpts(&bootOpts, providerName)
 		// Phase 2 item 02 (TASKS/phase-2/02-port-forward-dynamic-resolver.md):
@@ -279,13 +277,26 @@ func (s *chatServiceImpl) driveBootSession(
 	// The router must already be bound or those events route to SSE
 	// instead of turnCh and the harness persists an empty assistant row.
 	turnCh := make(chan llmtypes.StreamEvent, 64)
-	s.agentEventBridge.SetPerSessionRouter(sessionID, turnCh)
+	router := &sessionRouter{ch: turnCh}
+	if gen := generationFromContext(ctx); gen != nil {
+		binding := &runtimeTurnBinding{session: sess, router: router}
+		if !gen.admitRuntimeTurn(ctx, binding, func() {
+			s.agentEventBridge.bindPerSessionRouter(sessionID, router)
+		}) {
+			router.closeOnce()
+			return turnCh, context.Canceled
+		}
+	} else {
+		// Direct focused tests and non-generation callers do not carry a chat
+		// generation token. They still receive exact router ownership here.
+		s.agentEventBridge.bindPerSessionRouter(sessionID, router)
+	}
 
 	go func() {
 		<-ctx.Done()
-		// Unbind + close. SetPerSessionRouter(nil) is idempotent against
-		// the bridge's own close-on-Done path.
-		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
+		// Release only this turn's token. A delayed predecessor watcher must
+		// never remove or close a successor router bound to the same session.
+		s.agentEventBridge.ReleasePerSessionRouter(sessionID, router)
 	}()
 
 	// 5. Compose + deliver the per-turn payload asynchronously. SendInput
@@ -305,18 +316,13 @@ func (s *chatServiceImpl) driveBootSession(
 		if err := sess.SendInput([]byte(payload)); err != nil {
 			slog.Warn("driveBootSession: send input failed",
 				"session_id", sessionID, "err", err)
-			if v, ok := s.agentEventBridge.routers.Load(sessionID); ok {
-				if r, rOK := v.(*sessionRouter); rOK {
-					// Non-blocking; drops if the router already closed or
-					// its buffer is full. Either way the harness still
-					// terminates via the unbind below.
-					r.send(llmtypes.StreamEvent{
-						Type:  llmtypes.EventError,
-						Error: fmt.Sprintf("driveBootSession: send input: %v", err),
-					})
-				}
-			}
-			s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
+			// Report only into the router admitted for this exact turn. It is a
+			// no-op if cancellation/terminal cleanup already closed it.
+			router.send(llmtypes.StreamEvent{
+				Type:  llmtypes.EventError,
+				Error: fmt.Sprintf("driveBootSession: send input: %v", err),
+			})
+			s.agentEventBridge.ReleasePerSessionRouter(sessionID, router)
 		}
 	}()
 
@@ -465,9 +471,9 @@ func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtim
 		}
 	}
 	// The recovery lease keeps the failed generation authoritative through
-	// broker dispatch and adoption. Its exact-pointer retirement performs the
-	// slot/tool cleanup atomically with removal; a stale observer cannot clear
-	// state after this replacement is bound. The boot dir itself is reused —
+	// broker dispatch and adoption. Exact-pointer retirement never clears
+	// session/turn-owned slot or tool state, so a stale observer cannot erase
+	// state published for this replacement. The boot dir itself is reused —
 	// agent.Boot's IsRelaunch=true path skips CreateRuntimeRow + workdir reseed.
 
 	// Refresh the BootDir adapter's registry entry — the relaunched
@@ -579,12 +585,8 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	// mid-stream-error-triggered replacement supersedes an older
 	// session, undermining the "escalate to permanent after N attempts"
 	// guard the cap exists for.
-	ownedCleanup := func() {
-		s.activeSessionSlots.Delete(sessionID)
-		s.toolPartitionStates.Delete(sessionID)
-	}
 	if _, displaced := s.displacedSessions.LoadAndDelete(sess); displaced {
-		s.runtimeSessions().Retire(sessionID, sess, ownedCleanup)
+		s.runtimeSessions().Retire(sessionID, sess)
 		slog.Info("recovery: displaced session stopped by adoptReplacementSession — skipping broker",
 			"session_id", sessionID)
 		return
@@ -599,7 +601,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	if _, rebooting := s.rebootingSessions.LoadAndDelete(sess); rebooting {
 		// Pointer-owned retirement keeps a concurrent successor and its
 		// session-ID-keyed auxiliary state intact.
-		retired := s.runtimeSessions().Retire(sessionID, sess, ownedCleanup)
+		retired := s.runtimeSessions().Retire(sessionID, sess)
 		if retired {
 			if broker, ok := s.agentDeps.Recovery.(*broker.Broker); ok {
 				broker.ClearSession(sessionID)
@@ -615,7 +617,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	var xe *agentsessions.ExitError
 	if !errors.As(err, &xe) {
 		// Clean exit — nothing for the broker to recover.
-		retired := s.runtimeSessions().Retire(sessionID, sess, ownedCleanup)
+		retired := s.runtimeSessions().Retire(sessionID, sess)
 		// Comma-ok rather than panicking type assert: future
 		// RecoveryHooks impls (mocks in tests) may not expose
 		// ClearSession; the cleanup is best-effort.
@@ -631,7 +633,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	// call. The lease blocks an ordinary cold Boot while OnSessionExit makes
 	// its synchronous replacement decision; if a successor already won the
 	// ID, the stale observer performs no cleanup and never invokes recovery.
-	lease, owned := s.runtimeSessions().BeginRecovery(sessionID, sess, ownedCleanup)
+	lease, owned := s.runtimeSessions().BeginRecovery(sessionID, sess)
 	if !owned {
 		return
 	}

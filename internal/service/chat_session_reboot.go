@@ -122,13 +122,10 @@ func (s *chatServiceImpl) rebootRuntime(ctx context.Context, sessionID string, f
 		return RebootResult{}, fmt.Errorf("RebootSessionAgent: stop runtime: %w", err)
 	}
 
-	// Evict the exact generation and its auxiliary state atomically with
-	// respect to successor admission. If a concurrent successor already won
-	// the ID, leave its state and cold-boot policy untouched.
-	retired := s.runtimeSessions().Retire(sessionID, sess, func() {
-		s.activeSessionSlots.Delete(sessionID)
-		s.toolPartitionStates.Delete(sessionID)
-	})
+	// Evict only the exact runtime generation. Slot and tool-partition state
+	// are turn/session-owned, not wrapper-generation-owned; deleting them here
+	// could erase state published by a concurrently admitted next turn.
+	retired := s.runtimeSessions().Retire(sessionID, sess)
 
 	// CW-20260525-0001: a clean reboot must stay fresh — arm the one-shot flag
 	// so the next cold-boot skips auto-recovery (pack + provider resume).

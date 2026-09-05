@@ -61,9 +61,10 @@ type Dependencies struct {
 
 	// RuntimeEventSink optionally supplies Nanite's canonical normalized
 	// event destination. Boot writes every runtime event to this sink before
-	// the deliberately lossy legacy chat/SSE projection. When nil, Boot opens
-	// a private append-only JSONL journal under the session workspace. Raw and
-	// unknown event kinds remain internal; this does not expose them via API.
+	// the deliberately lossy legacy chat/SSE projection. Nil means no canonical
+	// capture: raw events are never persisted by default. Callers that inject a
+	// sink own its redaction, retention, bounds, and lifecycle. Unknown event
+	// kinds remain internal; this does not expose them via API.
 	RuntimeEventSink func(sessionID string) runtimeevents.Sink
 
 	// Permissions and ApprovalRequestSink form the existing Nanite approval

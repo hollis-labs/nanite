@@ -411,16 +411,51 @@ func (s *chatServiceImpl) runtimeSessions() *runtimeagent.SessionManager {
 }
 
 // inFlightGen records the currently-running generateResponse for a session
-// so a fresh launch can cancel it. Keyed by msgID so the deregister path
-// only clears the slot if we're still the active one.
+// so a fresh launch can cancel it. The registry uses pointer identity so a
+// predecessor's deregister path cannot clear its successor.
 type inFlightGen struct {
 	msgID        string
 	cancel       context.CancelFunc
 	done         chan struct{}
 	cancelIssued chan struct{}
 	cancelOnce   sync.Once
-	cancelMu     sync.Mutex
+	turnMu       sync.Mutex
+	turn         *runtimeTurnBinding
+	cancelAsked  bool
 	cancelSafe   bool
+}
+
+// runtimeTurnBinding is captured at the same admission boundary that publishes
+// the per-turn router, before Session.SendInput. Cancellation owns this exact
+// wrapper generation and router token; it never resolves either by session ID
+// after asynchronous work begins.
+type runtimeTurnBinding struct {
+	session *runtimeagent.Session
+	router  *sessionRouter
+}
+
+type inFlightGenContextKey struct{}
+
+func generationFromContext(ctx context.Context) *inFlightGen {
+	gen, _ := ctx.Value(inFlightGenContextKey{}).(*inFlightGen)
+	return gen
+}
+
+// admitRuntimeTurn serializes prompt/router admission with cancellation. bind
+// must publish router and must not block; it runs under turnMu so a concurrent
+// cancellation either captures this exact binding or prevents it entirely.
+func (g *inFlightGen) admitRuntimeTurn(ctx context.Context, binding *runtimeTurnBinding, bind func()) bool {
+	if g == nil || binding == nil || binding.session == nil || binding.router == nil {
+		return false
+	}
+	g.turnMu.Lock()
+	defer g.turnMu.Unlock()
+	if g.cancelAsked || ctx.Err() != nil {
+		return false
+	}
+	bind()
+	g.turn = binding
+	return true
 }
 
 func newInFlightGen(msgID string, cancel context.CancelFunc) *inFlightGen {
@@ -557,10 +592,22 @@ func (s *chatServiceImpl) registerGeneration(sessionID, msgID string, cancel con
 // deregisterGeneration clears the registry slot if and only if the caller
 // is still the active generation. A takeover will have replaced the slot;
 // in that case this is a no-op.
-func (s *chatServiceImpl) deregisterGeneration(sessionID, msgID string) {
+func (s *chatServiceImpl) deregisterGeneration(sessionID string, gen *inFlightGen) {
+	if gen == nil {
+		return
+	}
+	// User cancellation is intentionally asynchronous, but the registry entry
+	// remains a takeover barrier until its exact CancelTurn/Stop settles. A new
+	// request arriving after generateResponse returns must still inherit it.
+	gen.turnMu.Lock()
+	cancelAsked := gen.cancelAsked
+	gen.turnMu.Unlock()
+	if cancelAsked && gen.cancelIssued != nil {
+		<-gen.cancelIssued
+	}
 	s.activeGenMu.Lock()
 	defer s.activeGenMu.Unlock()
-	if cur := s.activeGen[sessionID]; cur != nil && cur.msgID == msgID {
+	if cur := s.activeGen[sessionID]; cur == gen {
 		delete(s.activeGen, sessionID)
 	}
 }
@@ -591,30 +638,42 @@ func (s *chatServiceImpl) registerGenerationIfIdle(sessionID, msgID string, canc
 
 // requestGenerationCancellation cancels Nanite's generation context and
 // requests provider turn cancellation against the exact wrapper generation
-// captured now. The provider call is bounded and asynchronous. cancelIssued
+// captured when its prompt/router was admitted. The provider call is bounded
+// and asynchronous. cancelIssued
 // closes only after it returns, allowing a takeover to order its next Prompt
 // behind this request without blocking the initiating API call.
 func (s *chatServiceImpl) requestGenerationCancellation(sessionID string, gen *inFlightGen) {
 	if gen == nil {
 		return
 	}
-	if gen.cancel != nil {
-		gen.cancel()
-	}
 	gen.cancelOnce.Do(func() {
 		if gen.cancelIssued == nil {
 			gen.cancelIssued = make(chan struct{})
 		}
-		var sess *runtimeagent.Session
-		if manager := s.runtimeSessions(); manager != nil {
-			sess, _ = manager.Load(sessionID)
+		gen.turnMu.Lock()
+		gen.cancelAsked = true
+		binding := gen.turn
+		gen.turnMu.Unlock()
+		if gen.cancel != nil {
+			gen.cancel()
+		}
+		if binding != nil && binding.router != nil {
+			if s.agentEventBridge != nil {
+				s.agentEventBridge.ReleasePerSessionRouter(sessionID, binding.router)
+			} else {
+				binding.router.closeOnce()
+			}
 		}
 		request := func(ownerCtx context.Context) {
 			defer close(gen.cancelIssued)
+			var sess *runtimeagent.Session
+			if binding != nil {
+				sess = binding.session
+			}
 			if sess == nil {
-				gen.cancelMu.Lock()
+				gen.turnMu.Lock()
 				gen.cancelSafe = true
-				gen.cancelMu.Unlock()
+				gen.turnMu.Unlock()
 				return
 			}
 			cancelCtx, cancel := context.WithTimeout(ownerCtx, runtimeTurnCancelMaxWait)
@@ -648,9 +707,9 @@ func (s *chatServiceImpl) requestGenerationCancellation(sessionID string, gen *i
 						"session_id", sessionID, "cancel_err", err, "stop_err", stopErr, "wait_err", waitErr)
 				}
 			}
-			gen.cancelMu.Lock()
+			gen.turnMu.Lock()
 			gen.cancelSafe = safe
-			gen.cancelMu.Unlock()
+			gen.turnMu.Unlock()
 		}
 		if s.lifecycle != nil {
 			s.lifecycle.Go("cancel-runtime-turn", request)
@@ -732,7 +791,7 @@ func (s *chatServiceImpl) runGeneration(name, sessionID, assistantMsgID, userCon
 		}()
 		defer close(stopBridge)
 		defer cancel()
-		defer s.deregisterGeneration(sessionID, assistantMsgID)
+		defer s.deregisterGeneration(sessionID, current)
 		if current != nil && current.done != nil {
 			defer close(current.done)
 		}
@@ -751,7 +810,8 @@ func (s *chatServiceImpl) runGeneration(name, sessionID, assistantMsgID, userCon
 		// be unreachable in production), close the channel so the
 		// caller's defer doesn't deadlock waiting for a stream that
 		// will never come.
-		if err := s.dispatcher.Run(genCtx, dispatcher.Request{
+		dispatchCtx := context.WithValue(genCtx, inFlightGenContextKey{}, current)
+		if err := s.dispatcher.Run(dispatchCtx, dispatcher.Request{
 			SessionID:      sessionID,
 			AssistantMsgID: assistantMsgID,
 			UserContent:    userContent,
@@ -780,19 +840,17 @@ func waitForPredecessor(genCtx, ownerCtx context.Context, predecessor *inFlightG
 		}
 		select {
 		case <-barrier:
-		case <-genCtx.Done():
-			return false
 		case <-ownerCtx.Done():
 			return false
 		}
 	}
-	predecessor.cancelMu.Lock()
+	predecessor.turnMu.Lock()
 	safe := predecessor.cancelSafe
-	predecessor.cancelMu.Unlock()
+	predecessor.turnMu.Unlock()
 	if predecessor.cancelIssued != nil && !safe {
 		return false
 	}
-	return true
+	return genCtx.Err() == nil
 }
 
 // maybeEmitEmbeddingWarning pushes a one-time dismissible warning onto the
@@ -1044,7 +1102,7 @@ func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, rea
 		Metadata:  fmt.Sprintf(`{"source":"harness","triggered_by":%q,"run_id":%q}`, reason, runID),
 	}
 	if err := s.store.CreateMessage(ctx, msg); err != nil {
-		s.deregisterGeneration(sessionID, assistantMsgID)
+		s.deregisterGeneration(sessionID, current)
 		cancel()
 		return "", fmt.Errorf("create harness-triggered message: %w", err)
 	}
@@ -1104,7 +1162,7 @@ func (s *chatServiceImpl) TriggerMessageWake(ctx context.Context, sessionID stri
 		Metadata:  fmt.Sprintf(`{"source":"agent_message","from_session":%q,"from_agent":%q,"message_id":%q}`, msg.FromSessionID, msg.FromAgentID, msg.ID),
 	}
 	if err := s.store.CreateMessage(ctx, newMsg); err != nil {
-		s.deregisterGeneration(sessionID, assistantMsgID)
+		s.deregisterGeneration(sessionID, current)
 		cancel()
 		return "", fmt.Errorf("create message-wake turn: %w", err)
 	}

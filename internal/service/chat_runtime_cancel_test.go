@@ -9,6 +9,7 @@ import (
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/go-agent-wrapper/acp"
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
@@ -133,12 +134,47 @@ func bootCancelACPSession(t *testing.T, deps *runtimeagent.Dependencies, session
 	}
 	sess, err := runtimeagent.Boot(context.Background(), deps, runtimeagent.Options{
 		Mode: runtimeagent.ModeLongLived, SessionID: sessionID, Workdir: t.TempDir(),
+		ExternalLifecycleObserver: true,
 	})
 	if err != nil {
 		t.Fatalf("Boot ACP session: %v", err)
 	}
 	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
 	return sess
+}
+
+func TestDriveBootSession_BindsExactRuntimeAndRouterToGenerationBeforePrompt(t *testing.T) {
+	const sessionID = "drive-exact-turn-binding"
+	deps := bootRealDeps(t)
+	client := newCancelACPClient()
+	sess := bootCancelACPSession(t, deps, sessionID, client)
+	bridge := &agentEventBridge{streams: NewStreamManager()}
+	svc := &chatServiceImpl{
+		agentDeps:        deps,
+		agentEventBridge: bridge,
+		activeSessions:   deps.Manager,
+	}
+	gen := newInFlightGen("turn-message", func() {})
+	turnCtx, cancel := context.WithCancel(context.WithValue(context.Background(), inFlightGenContextKey{}, gen))
+	turnCh, err := svc.driveBootSession(turnCtx, sessionID, &store.Session{}, &store.AgentProfile{}, nil, "hello", 0, "opencode")
+	if err != nil {
+		t.Fatalf("driveBootSession: %v", err)
+	}
+	gen.turnMu.Lock()
+	binding := gen.turn
+	gen.turnMu.Unlock()
+	if binding == nil || binding.session != sess || binding.router == nil {
+		t.Fatalf("generation binding = %+v, want exact session %p and router", binding, sess)
+	}
+	if current, ok := bridge.routers.Load(sessionID); !ok || current != binding.router {
+		t.Fatalf("bridge router = %p, %v; want generation token %p", current, ok, binding.router)
+	}
+	cancel()
+	select {
+	case <-turnCh:
+	case <-time.After(time.Second):
+		t.Fatal("exact router did not close on turn context cancellation")
+	}
 }
 
 func TestCancelActiveGeneration_CapturesExactSessionAndTakeoverWaitsForTerminal(t *testing.T) {
@@ -157,6 +193,23 @@ func TestCancelActiveGeneration_CapturesExactSessionAndTakeoverWaitsForTerminal(
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	_, predecessor := svc.registerGeneration(sessionID, "old-message", cancel)
+	if !predecessor.admitRuntimeTurn(context.Background(), &runtimeTurnBinding{
+		session: oldSession,
+		router:  &sessionRouter{ch: make(chan llmtypes.StreamEvent, 1)},
+	}, func() {}) {
+		t.Fatal("failed to bind exact predecessor runtime turn")
+	}
+
+	// Install a successor before cancellation begins. The request must use the
+	// Session captured when the old prompt was admitted, never Manager.Load the
+	// successor currently bound under the shared chat session ID.
+	successorDeps := *deps
+	successorDeps.Manager = runtimeagent.NewSessionManager()
+	successorClient := newCancelACPClient()
+	successor := bootCancelACPSession(t, &successorDeps, "cancel-successor-runtime", successorClient)
+	if _, _, err := deps.Manager.Adopt(sessionID, successor); err != nil {
+		t.Fatalf("Adopt successor: %v", err)
+	}
 	if !svc.CancelActiveGeneration(sessionID) {
 		t.Fatal("CancelActiveGeneration returned false")
 	}
@@ -166,21 +219,32 @@ func TestCancelActiveGeneration_CapturesExactSessionAndTakeoverWaitsForTerminal(
 		t.Fatal("exact predecessor CancelTurn was not called")
 	}
 
-	// Install a successor while the old client's Cancel call is deliberately
-	// blocked. The already-dispatched request must stay bound to oldSession;
-	// it must never re-load by ID and cancel the successor.
-	successorDeps := *deps
-	successorDeps.Manager = runtimeagent.NewSessionManager()
-	successorClient := newCancelACPClient()
-	successor := bootCancelACPSession(t, &successorDeps, "cancel-successor-runtime", successorClient)
-	if _, _, err := deps.Manager.Adopt(sessionID, successor); err != nil {
-		t.Fatalf("Adopt successor: %v", err)
+	// Even when generateResponse deregisters before the provider cancel
+	// settles, the old registry slot remains as the next request's barrier.
+	deregisterDone := make(chan struct{})
+	go func() {
+		svc.deregisterGeneration(sessionID, predecessor)
+		close(deregisterDone)
+	}()
+	select {
+	case <-deregisterDone:
+		t.Fatal("canceled generation deregistered before CancelTurn settled")
+	case <-time.After(25 * time.Millisecond):
+	}
+	_, next := svc.registerGeneration(sessionID, "next-message", func() {})
+	if next == nil {
+		t.Fatal("next generation was not registered")
 	}
 	close(cancelGate)
 	select {
 	case <-predecessor.cancelIssued:
 	case <-time.After(time.Second):
 		t.Fatal("bounded CancelTurn request did not finish")
+	}
+	select {
+	case <-deregisterDone:
+	case <-time.After(time.Second):
+		t.Fatal("deregister did not finish after exact cancel settled")
 	}
 	oldClient.mu.Lock()
 	oldCancels := oldClient.cancelCount
@@ -233,11 +297,14 @@ func TestObserveSessionForRecovery_StaleErrorCannotCleanOrRecoverOverSuccessor(t
 	successorDeps.Recovery = nil
 	successorClient := newCancelACPClient()
 	successor := bootCancelACPSession(t, &successorDeps, "stale-successor-runtime", successorClient)
+	// A new turn can publish its slot/tool state before it replaces a dead
+	// runtime binding. Runtime retirement does not own these maps and must not
+	// erase that already-published successor-turn state.
+	svc.activeSessionSlots.Store(sessionID, uint64(77))
+	svc.toolPartitionStates.Store(sessionID, "successor-tool-state")
 	if _, _, err := deps.Manager.Adopt(sessionID, successor); err != nil {
 		t.Fatalf("Adopt successor: %v", err)
 	}
-	svc.activeSessionSlots.Store(sessionID, uint64(77))
-	svc.toolPartitionStates.Store(sessionID, "successor-tool-state")
 
 	oldClient.failProcess()
 	select {
@@ -318,6 +385,16 @@ func TestRunGeneration_CanceledWhileTakeoverGatedClosesUnownedStream(t *testing.
 	stream := make(chan chat.StreamEvent)
 	svc.runGeneration("gated", "session", "new-message", "payload", stream, dispatcher.CallerChat, genCtx, func() {}, current, predecessor)
 	select {
+	case <-stream:
+		t.Fatal("canceled generation bypassed predecessor cancellation barrier")
+	case <-time.After(25 * time.Millisecond):
+	}
+	predecessor.turnMu.Lock()
+	predecessor.cancelSafe = true
+	predecessor.turnMu.Unlock()
+	close(predecessor.cancelIssued)
+	close(predecessor.done)
+	select {
 	case _, ok := <-stream:
 		if ok {
 			t.Fatal("gated generation emitted an unexpected stream value")
@@ -325,6 +402,36 @@ func TestRunGeneration_CanceledWhileTakeoverGatedClosesUnownedStream(t *testing.
 	case <-time.After(time.Second):
 		t.Fatal("generation canceled before dispatcher left its stream open")
 	}
+}
+
+func TestPerTurnRouter_StaleCleanupCannotCloseOrInjectSuccessor(t *testing.T) {
+	bridge := &agentEventBridge{}
+	const sessionID = "router-generation-owner"
+	oldCh := make(chan llmtypes.StreamEvent, 1)
+	old := bridge.BindPerSessionRouter(sessionID, oldCh)
+	freshCh := make(chan llmtypes.StreamEvent, 1)
+	fresh := bridge.BindPerSessionRouter(sessionID, freshCh)
+
+	// Models both delayed ctx cleanup and delayed SendInput-error cleanup from
+	// the predecessor. Neither may resolve the current router by session ID.
+	old.send(llmtypes.StreamEvent{Type: llmtypes.EventError, Error: "stale"})
+	bridge.ReleasePerSessionRouter(sessionID, old)
+	select {
+	case ev, ok := <-freshCh:
+		t.Fatalf("successor router changed by stale cleanup: event=%+v open=%v", ev, ok)
+	default:
+	}
+
+	fresh.send(llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "fresh"})
+	select {
+	case ev, ok := <-freshCh:
+		if !ok || ev.Content != "fresh" {
+			t.Fatalf("successor router event=%+v open=%v", ev, ok)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("successor router was closed by stale cleanup")
+	}
+	bridge.ReleasePerSessionRouter(sessionID, fresh)
 }
 
 var _ adapters.Adapter = (*cancelACPAdapter)(nil)

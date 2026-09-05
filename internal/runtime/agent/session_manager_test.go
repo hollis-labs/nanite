@@ -28,7 +28,7 @@ func TestSessionManager_UsesSingleSharedACPManager(t *testing.T) {
 	}
 }
 
-func TestSessionManager_StaleGenerationCannotCleanOrRecoverOverSuccessor(t *testing.T) {
+func TestSessionManager_StaleGenerationCannotRetireOrRecoverOverSuccessor(t *testing.T) {
 	manager := NewSessionManager()
 	old := &Session{}
 	successor := &Session{}
@@ -38,18 +38,11 @@ func TestSessionManager_StaleGenerationCannotCleanOrRecoverOverSuccessor(t *test
 	if _, _, err := manager.Swap("session", successor); err != nil {
 		t.Fatalf("Swap successor: %v", err)
 	}
-	cleaned := false
-	if manager.Retire("session", old, func() { cleaned = true }) {
+	if manager.Retire("session", old) {
 		t.Fatal("stale generation retired successor")
 	}
-	if cleaned {
-		t.Fatal("stale generation ran successor-owned auxiliary cleanup")
-	}
-	if _, ok := manager.BeginRecovery("session", old, func() { cleaned = true }); ok {
+	if _, ok := manager.BeginRecovery("session", old); ok {
 		t.Fatal("stale generation acquired recovery lease over successor")
-	}
-	if cleaned {
-		t.Fatal("stale generation ran cleanup while acquiring recovery")
 	}
 	if got, ok := manager.Load("session"); !ok || got != successor {
 		t.Fatalf("Load = %p, %v; want successor %p", got, ok, successor)
@@ -63,7 +56,7 @@ func TestSessionManager_RecoveryLeaseBlocksOrdinaryStoreButAllowsAdoption(t *tes
 	if err := manager.Store("session", old); err != nil {
 		t.Fatalf("Store old: %v", err)
 	}
-	lease, ok := manager.BeginRecovery("session", old, nil)
+	lease, ok := manager.BeginRecovery("session", old)
 	if !ok {
 		t.Fatal("BeginRecovery did not claim current generation")
 	}

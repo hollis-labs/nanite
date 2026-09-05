@@ -198,13 +198,13 @@ func (m *SessionManager) LoadAndDelete(id string) (*Session, bool) {
 
 // CompareAndDelete removes id only when it still names expected.
 func (m *SessionManager) CompareAndDelete(id string, expected *Session) bool {
-	return m.Retire(id, expected, nil)
+	return m.Retire(id, expected)
 }
 
-// Retire removes expected and runs ownedCleanup while admission is locked.
-// A successor therefore cannot be installed between pointer validation and
-// cleanup of session-ID-keyed auxiliary state.
-func (m *SessionManager) Retire(id string, expected *Session, ownedCleanup func()) bool {
+// Retire removes only expected. Session/turn auxiliary state is deliberately
+// outside this operation: it can be published before a successor runtime is
+// bound, so runtime retirement cannot prove ownership of ID-keyed state.
+func (m *SessionManager) Retire(id string, expected *Session) bool {
 	if m == nil || expected == nil {
 		return false
 	}
@@ -213,16 +213,13 @@ func (m *SessionManager) Retire(id string, expected *Session, ownedCleanup func(
 	if m.sessions[id] != expected {
 		return false
 	}
-	if ownedCleanup != nil {
-		ownedCleanup()
-	}
 	delete(m.sessions, id)
 	return true
 }
 
 // BeginRecovery atomically retires expected and reserves id until Adopt or
 // EndRecovery. A stale observer cannot recover over an installed successor.
-func (m *SessionManager) BeginRecovery(id string, expected *Session, ownedCleanup func()) (recoveryLease, bool) {
+func (m *SessionManager) BeginRecovery(id string, expected *Session) (recoveryLease, bool) {
 	if m == nil || expected == nil {
 		return 0, false
 	}
@@ -230,9 +227,6 @@ func (m *SessionManager) BeginRecovery(id string, expected *Session, ownedCleanu
 	defer m.mu.Unlock()
 	if m.closed || m.sessions[id] != expected {
 		return 0, false
-	}
-	if ownedCleanup != nil {
-		ownedCleanup()
 	}
 	delete(m.sessions, id)
 	m.nextLease++
@@ -317,8 +311,11 @@ func (m *SessionManager) CloseAdmission() {
 }
 
 // Shutdown atomically closes admission before snapshotting both bound and
-// ready-but-not-yet-adopted wrappers. A concurrent readiness registration is
-// therefore either included or rejected and stopped by Boot.
+// ready-but-not-yet-adopted wrappers. Every de-duplicated wrapper is stopped
+// and reaped concurrently under the caller's one shared deadline; return is
+// therefore after Wrapper.Run's final event/store/sink tail, not merely after
+// Stop acknowledged. A concurrent readiness registration is either included
+// or rejected and stopped by Boot.
 func (m *SessionManager) Shutdown(ctx context.Context) error {
 	if m == nil {
 		return nil
@@ -342,21 +339,52 @@ func (m *SessionManager) Shutdown(ctx context.Context) error {
 	for _, sess := range admitted {
 		sess.cancelBoot()
 	}
-	var errs []error
+
+	// Stop and Wait each exact generation concurrently. Sequential Stop calls
+	// would let one wedged wrapper consume the shared deadline and starve all
+	// later sessions of even a stop attempt.
+	results := make(chan error, len(sessions))
 	for sess := range sessions {
-		if err := sess.Stop(ctx); err != nil {
-			errs = append(errs, err)
-		}
+		sess := sess
+		go func() {
+			stopErr := sess.Stop(ctx)
+			waitErr := sess.Wait(ctx)
+			m.CompareAndDelete(sess.ID, sess)
+			// Runtime terminal errors were already persisted by Boot's Run tail;
+			// preserve Shutdown's prior contract by returning Stop failures and
+			// only deadline/cancellation failures from the reap itself.
+			if waitErr != nil {
+				// The session's own terminal error is lifecycle evidence, not a
+				// shutdown failure. Only failure to reap within Shutdown's shared
+				// caller deadline changes the result.
+				waitErr = ctx.Err()
+			}
+			results <- errors.Join(stopErr, waitErr)
+		}()
 	}
+
 	launchesDone := make(chan struct{})
 	go func() {
 		m.launches.Wait()
 		close(launchesDone)
 	}()
-	select {
-	case <-launchesDone:
-	case <-ctx.Done():
-		errs = append(errs, ctx.Err())
+	var errs []error
+	remaining := len(sessions)
+	launchesDrained := false
+	for remaining > 0 || !launchesDrained {
+		select {
+		case err := <-results:
+			remaining--
+			if err != nil {
+				errs = append(errs, err)
+			}
+		case <-launchesDone:
+			launchesDrained = true
+			launchesDone = nil
+		case <-ctx.Done():
+			errs = append(errs, ctx.Err())
+			return errors.Join(errs...)
+		}
 	}
 	return errors.Join(errs...)
 }

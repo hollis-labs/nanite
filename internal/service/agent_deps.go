@@ -363,6 +363,10 @@ func (a *agentBootAdapter) Boot(ctx context.Context, opts runtimeagent.Options) 
 		}
 	}
 	opts.IsRelaunch = true
+	// Broker replacements are always handed to chat's recovery observer by
+	// adoptReplacementSession. Keep retirement with that observer so it can
+	// hold the same-ID recovery lease across any later retry.
+	opts.ExternalLifecycleObserver = true
 	return runtimeagent.Boot(ctx, a.deps, opts)
 }
 
@@ -711,9 +715,8 @@ type agentEventBridge struct {
 }
 
 // sessionRouter wraps a per-turn turnCh with a close-once guard so the bridge
-// fanout goroutine, the chat-harness ctx-cancel watcher, and explicit
-// SetPerSessionRouter(nil) calls can all race to release the chan without
-// double-close panics.
+// fanout goroutine and exact-token cancellation/SendInput cleanup can race to
+// release the chan without double-close panics.
 //
 // CW-20260824-0001: releasing the chan is not the only thing those goroutines
 // race over — they also race the *senders*. `closed` is therefore guarded by
@@ -766,6 +769,38 @@ func (r *sessionRouter) closeOnce() {
 	}
 }
 
+// BindPerSessionRouter publishes one exact per-turn router and returns its
+// ownership token. Callers that may outlive a turn must retain this pointer
+// and pass it to ReleasePerSessionRouter; a session ID alone is not sufficient
+// because a successor turn can reuse the same ID before stale cleanup runs.
+func (b *agentEventBridge) BindPerSessionRouter(sessionID string, ch chan llmtypes.StreamEvent) *sessionRouter {
+	router := &sessionRouter{ch: ch}
+	b.bindPerSessionRouter(sessionID, router)
+	return router
+}
+
+func (b *agentEventBridge) bindPerSessionRouter(sessionID string, router *sessionRouter) {
+	if b == nil || router == nil {
+		return
+	}
+	if prev, loaded := b.routers.Swap(sessionID, router); loaded {
+		slog.Warn("agent_event_bridge: session takeover — closing stale per-turn chan",
+			"session_id", sessionID)
+		prev.(*sessionRouter).closeOnce()
+	}
+}
+
+// ReleasePerSessionRouter unbinds only owner. It always closes owner's
+// channel, even when a successor has already replaced it, but it never closes
+// or removes that successor.
+func (b *agentEventBridge) ReleasePerSessionRouter(sessionID string, owner *sessionRouter) {
+	if b == nil || owner == nil {
+		return
+	}
+	b.routers.CompareAndDelete(sessionID, owner)
+	owner.closeOnce()
+}
+
 func (b *agentEventBridge) nextEventID() uint64 {
 	return b.seq.Add(1)
 }
@@ -775,9 +810,10 @@ func (b *agentEventBridge) nextEventID() uint64 {
 // previously bound chan. The bridge owns the close lifecycle so callers don't
 // race against in-flight sends.
 //
-// Phase 4c.4: driveBootSession binds turnCh before SendInput; the bridge
-// unbinds + closes when EventDone or EventError flows through, or when the
-// chat-harness explicitly clears the router on ctx cancel.
+// Compatibility helper for owners whose session ID is itself unique (notably
+// BootRunner child sessions) and CloseAgentSession's unconditional teardown.
+// Long-lived chat turns use Bind/ReleasePerSessionRouter so stale cleanup is
+// exact-token-owned. The bridge also closes on EventDone or EventError.
 func (b *agentEventBridge) SetPerSessionRouter(sessionID string, ch chan llmtypes.StreamEvent) {
 	if ch == nil {
 		if v, ok := b.routers.LoadAndDelete(sessionID); ok {
@@ -785,28 +821,7 @@ func (b *agentEventBridge) SetPerSessionRouter(sessionID string, ch chan llmtype
 		}
 		return
 	}
-	router := &sessionRouter{ch: ch}
-	if prev, loaded := b.routers.Swap(sessionID, router); loaded {
-		// Phase 4c.7 (CW-20260508-0002): session takeover detected. The
-		// prior turn's Done hadn't arrived yet (or its ctx-cancel watcher
-		// hadn't run) when the chat-harness bound a fresh turnCh — most
-		// likely a user-driven retry / new message before the prior
-		// generateResponse drained.
-		//
-		// Conservative semantics: release the stale router (close-once
-		// terminates the prior streamLoop), then let the new turn proceed.
-		// The Boot'd CLI process is still running; its mid-turn output may
-		// interleave with the new turn's response.
-		//
-		// Known limitation: claude-code's PTY surface doesn't expose a
-		// mid-turn interrupt today, so we can't tell the agent to abort
-		// the prior turn before delivering new input. Phase 5+ adds
-		// Session.Interrupt(ctx) once go-agent-sessions surfaces a
-		// non-blocking interrupt (follow-up ticket).
-		slog.Warn("agent_event_bridge: session takeover — closing stale per-turn chan",
-			"session_id", sessionID)
-		prev.(*sessionRouter).closeOnce()
-	}
+	b.bindPerSessionRouter(sessionID, &sessionRouter{ch: ch})
 }
 
 // fanout returns the per-session StreamEvent channel. Closes naturally when

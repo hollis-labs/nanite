@@ -40,7 +40,7 @@ func TestRebootSessionAgent_RejectsInFlightTurn(t *testing.T) {
 	s := &chatServiceImpl{activeGen: map[string]*inFlightGen{}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s.registerGeneration("sess-busy", "msg-1", cancel)
+	_, _ = s.registerGeneration("sess-busy", "msg-1", cancel)
 
 	if _, err := s.RebootSessionAgent(ctx, "sess-busy"); !errors.Is(err, ErrSessionBusy) {
 		t.Fatalf("expected ErrSessionBusy for an in-flight turn, got %v", err)

@@ -5,8 +5,10 @@ import (
 	"time"
 
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
 	"github.com/hollis-labs/go-sandbox/sandbox"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -57,6 +59,13 @@ type Dependencies struct {
 	// tool_result events. Closes G-PTY-NO-TOOL-EVENTS.
 	TypedEventCallback func(sessionID string) provider.EventsCallback
 
+	// RuntimeEventSink optionally supplies Nanite's canonical normalized
+	// event destination. Boot writes every runtime event to this sink before
+	// the deliberately lossy legacy chat/SSE projection. When nil, Boot opens
+	// a private append-only JSONL journal under the session workspace. Raw and
+	// unknown event kinds remain internal; this does not expose them via API.
+	RuntimeEventSink func(sessionID string) runtimeevents.Sink
+
 	// Permissions and ApprovalRequestSink form the existing Nanite approval
 	// layer used only when an ACP provider sends session/request_permission.
 	// When either is nil Boot leaves the wrapper responder nil, retaining the
@@ -69,6 +78,11 @@ type Dependencies struct {
 	// (claude / codex / opencode / ...). The adapter advertises its
 	// Caps and BootDirSpec.
 	ProviderAdapter func(providerName string) provider.CLIAdapter
+
+	// ACPAdapterFactory is the test/composition seam for an ACP-backed
+	// adapters.Adapter. Production leaves it nil and uses the five shipped
+	// wrapper adapters selected by newACPAdapter.
+	ACPAdapterFactory func(providerName string, transport adapters.Transport) (adapters.Adapter, error)
 
 	// MCPConfig describes how to plant the per-session .mcp.json. Nanite
 	// MCP transport is subprocess-spawn-based: the planted config names

@@ -18,12 +18,13 @@ import (
 // consumption internally (agent.go pre-migration fed those two surfaces
 // straight to Dependencies.EventFanout / Dependencies.TypedEventCallback;
 // Wrapper.Run now consumes them itself and re-emits a normalized
-// runtimeevents.Event stream instead) — this Sink is the reverse
-// translation back onto the exact two surfaces
-// internal/service/agentEventBridge already knows how to turn into chat
-// SSE (delta / tool_call / tool_result / stream_end / error), so that
-// consumer needs zero changes. See go-agent-wrapper's
-// wrapper/event_translator.go for the forward mapping this reverses.
+// runtimeevents.Event stream instead). This Sink first writes that complete
+// normalized contract to the canonical sink, then projects the subset with
+// legacy equivalents back onto the two surfaces
+// internal/service/agentEventBridge already knows how to turn into chat SSE
+// (delta / tool_call / tool_result / stream_end / error). See
+// go-agent-wrapper's wrapper/event_translator.go for the forward mapping the
+// compatibility projection reverses.
 //
 // Also doubles as the Boot-time readiness signal: wrapper.Wrapper.Run sets
 // its internal session handle immediately before emitting
@@ -32,9 +33,14 @@ import (
 // safe to call on the *wrapper.Wrapper — Boot blocks on it (via onReady)
 // before returning a *Session to its own caller.
 type runtimeEventSink struct {
-	fanout  chan<- llmtypes.StreamEvent
-	typedCB provider.EventsCallback
-	acp     bool
+	// canonical receives the complete normalized contract before the
+	// compatibility projection below. It preserves lifecycle, process, raw,
+	// permission, interrupt, and future/unknown kinds that have no legacy
+	// llmtypes/provider equivalent. It is deliberately not an SSE surface.
+	canonical runtimeevents.Sink
+	fanout    chan<- llmtypes.StreamEvent
+	typedCB   provider.EventsCallback
+	acp       bool
 
 	readyOnce sync.Once
 	onReady   func()
@@ -48,6 +54,10 @@ var _ runtimeevents.Sink = (*runtimeEventSink)(nil)
 // silently drop on cancellation, matching Sink.Write's "drop on overflow
 // without erroring" guidance.
 func (s *runtimeEventSink) Write(ctx context.Context, ev runtimeevents.Event) error {
+	var canonicalErr error
+	if s.canonical != nil {
+		canonicalErr = s.canonical.Write(ctx, ev)
+	}
 	if ev.Kind == runtimeevents.KindSessionReady {
 		s.signalReady()
 	}
@@ -66,13 +76,11 @@ func (s *runtimeEventSink) Write(ctx context.Context, ev runtimeevents.Event) er
 	case runtimeevents.KindTurnFailed:
 		s.handleTurnFailed(ctx, ev.Payload)
 	default:
-		// Lifecycle / process / plant / sandbox / policy / raw-IO kinds
-		// have no equivalent EventFanout / TypedEventCallback surface
-		// today (pre-migration agent.go never fed process-lifecycle or
-		// raw-IO signals through either channel) — no-op, matching prior
-		// behavior exactly.
+		// No legacy equivalent. The exact event already reached canonical;
+		// raw/unknown kinds stay internal until CW-20260904-0129 defines a
+		// public transport contract.
 	}
-	return nil
+	return canonicalErr
 }
 
 func (s *runtimeEventSink) signalReady() {

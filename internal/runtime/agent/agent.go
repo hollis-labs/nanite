@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"github.com/hollis-labs/go-agent-wrapper/activity"
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	"github.com/hollis-labs/go-agent-wrapper/wrapper"
+	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/oklog/ulid/v2"
 )
@@ -246,6 +248,9 @@ type Session struct {
 	// runErr without further synchronization.
 	runDone chan struct{}
 	runErr  error
+	// runCancel is reserved for SessionManager's pre-ready/adoption shutdown
+	// boundary. Ordinary Stop deliberately does not cancel it; see manager.go.
+	runCancel context.CancelFunc
 }
 
 // expandUserHome replaces a leading "~" or "~/" in path with the
@@ -415,7 +420,11 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 
 	var selectedAdapter adapters.Adapter
 	if isACP {
-		selectedAdapter, err = newACPAdapter(providerName, effectiveACPTransport(profile))
+		factory := deps.ACPAdapterFactory
+		if factory == nil {
+			factory = newACPAdapter
+		}
+		selectedAdapter, err = factory(providerName, effectiveACPTransport(profile))
 	} else {
 		if deps.ProviderAdapter == nil {
 			return cleanup(errors.New("agent.Boot: Dependencies.ProviderAdapter is required for native protocol"))
@@ -508,7 +517,21 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		}
 	}
 
-	sink := &runtimeEventSink{acp: isACP}
+	var canonicalSink runtimeevents.Sink
+	var ownedCanonicalSink io.Closer
+	if deps.RuntimeEventSink != nil {
+		canonicalSink = deps.RuntimeEventSink(sessID)
+	}
+	if canonicalSink == nil {
+		fileSink, openErr := runtimeevents.OpenFileSink(filepath.Join(ws.LogDir, "runtime-events.jsonl"))
+		if openErr != nil {
+			_ = deps.Store.MarkRuntimeFailed(sessID, openErr.Error())
+			return cleanup(fmt.Errorf("agent.Boot: open normalized runtime event journal: %w", openErr))
+		}
+		canonicalSink = fileSink
+		ownedCanonicalSink = fileSink
+	}
+	sink := &runtimeEventSink{acp: isACP, canonical: canonicalSink}
 	if deps.EventFanout != nil {
 		sink.fanout = deps.EventFanout(sessID)
 	}
@@ -542,6 +565,9 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		FirstTurnPayload:  string(firstTurnPayload),
 	})
 	if err != nil {
+		if ownedCanonicalSink != nil {
+			_ = ownedCanonicalSink.Close()
+		}
 		if hadLineage && deps.PathGrants != nil {
 			deps.PathGrants.ClearLineage(sessID)
 		}
@@ -562,16 +588,24 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		wr:           wr,
 		isACP:        isACP,
 		runDone:      make(chan struct{}),
+		runCancel:    runCancel,
 	}
+	if err := deps.Manager.AdmitLaunch(sess); err != nil {
+		runCancel()
+		if ownedCanonicalSink != nil {
+			_ = ownedCanonicalSink.Close()
+		}
+		_ = deps.Store.MarkRuntimeFailed(sessID, err.Error())
+		return cleanup(fmt.Errorf("agent.Boot: admit session launch: %w", err))
+	}
+	var registrationErr error
 	sink.onReady = func() {
 		// Registration is part of the synchronous readiness observation so a
 		// fast process exit cannot race Boot into publishing a dead handle.
-		// Recovery replacements are adopted by the service with Swap so it can
+		// Recovery replacements are adopted by the service with Adopt so it can
 		// still capture and stop a live predecessor; pre-storing here would
 		// overwrite that only reference before adoption.
-		if !opts.IsRelaunch {
-			deps.Manager.Store(sessID, sess)
-		}
+		registrationErr = deps.Manager.RegisterReady(sessID, sess, opts.IsRelaunch)
 		close(readyCh)
 	}
 
@@ -597,10 +631,13 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	// already the correct, sufficient interrupt mechanism — see
 	// manager.go's Stop.
 	go func() {
+		defer deps.Manager.DiscardPending(sess)
 		defer runCancel()
 		defer close(sess.runDone)
+		if ownedCanonicalSink != nil {
+			defer func() { _ = ownedCanonicalSink.Close() }()
+		}
 		sess.runErr = recoveryCompatibleWrapperError(wr.Run(runCtx), isACP)
-		deps.Manager.CompareAndDelete(sessID, sess)
 		state := "done"
 		if sess.runErr != nil {
 			state = "failed"
@@ -610,6 +647,14 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 
 	select {
 	case <-readyCh:
+		if registrationErr != nil {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = sess.Stop(stopCtx)
+			stopCancel()
+			<-sess.runDone
+			_ = deps.Store.MarkRuntimeFailed(sessID, registrationErr.Error())
+			return cleanup(fmt.Errorf("agent.Boot: register ready session: %w", registrationErr))
+		}
 		_ = deps.Store.UpdateState(sessID, "running", 0)
 	case <-sess.runDone:
 		runCancel()

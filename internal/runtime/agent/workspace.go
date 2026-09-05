@@ -15,7 +15,8 @@ import (
 //	<Root>/
 //	├── prompts/    — boot.md and any planted kickoff payloads
 //	├── state/      — plan.json, checkpoints/
-//	└── logs/       — session.log (PTY transcript), stderr.<runID>.log
+//	└── logs/       — session.log (PTY transcript), runtime-events.jsonl,
+//	                  stderr.<runID>.log
 //
 // The boot dir lives in $TMPDIR and is cleaned on session done; the
 // workspace dir survives for forensic value and ModeResume.

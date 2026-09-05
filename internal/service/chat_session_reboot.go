@@ -109,7 +109,7 @@ func (s *chatServiceImpl) rebootRuntime(ctx context.Context, sessionID string, f
 	// the process, while we are still inside Stop — sees the flag and skips
 	// the recovery broker. A SIGTERM/SIGKILL exit can otherwise present as
 	// an *agentsessions.ExitError and be misread as a crash.
-	s.rebootingSessions.Store(sessionID, struct{}{})
+	s.rebootingSessions.Store(sess, struct{}{})
 
 	stopCtx, cancel := context.WithTimeout(ctx, stopRebootGrace)
 	defer cancel()
@@ -118,24 +118,23 @@ func (s *chatServiceImpl) rebootRuntime(ctx context.Context, sessionID string, f
 		// flag so a later genuine crash of this session is still
 		// recoverable, and leave activeSessions intact (a half-stopped
 		// session is better left tracked than orphaned).
-		s.rebootingSessions.Delete(sessionID)
+		s.rebootingSessions.Delete(sess)
 		return RebootResult{}, fmt.Errorf("RebootSessionAgent: stop runtime: %w", err)
 	}
 
-	// Evict per-session runtime state so the next turn hits the cold-boot
-	// branch in driveBootSession. CompareAndDelete on activeSessions guards
-	// against clobbering a replacement a concurrent turn may have already
-	// stored. The observer performs the same eviction idempotently when it
-	// wakes; doing it here too makes the reboot synchronous for the caller.
-	s.runtimeSessions().CompareAndDelete(sessionID, sess)
-	s.activeSessionSlots.Delete(sessionID)
-	s.toolPartitionStates.Delete(sessionID)
+	// Evict the exact generation and its auxiliary state atomically with
+	// respect to successor admission. If a concurrent successor already won
+	// the ID, leave its state and cold-boot policy untouched.
+	retired := s.runtimeSessions().Retire(sessionID, sess, func() {
+		s.activeSessionSlots.Delete(sessionID)
+		s.toolPartitionStates.Delete(sessionID)
+	})
 
 	// CW-20260525-0001: a clean reboot must stay fresh — arm the one-shot flag
 	// so the next cold-boot skips auto-recovery (pack + provider resume).
 	// Recover (fresh=false) leaves it unset so the next turn recovers; a daemon
 	// restart never sets it either, so it also recovers.
-	if fresh {
+	if fresh && retired {
 		s.freshBootSessions.Store(sessionID, struct{}{})
 	}
 

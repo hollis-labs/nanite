@@ -85,7 +85,7 @@ func TestRegisterGenerationIfIdle_ConcurrentCallers_ExactlyOneWins(t *testing.T)
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
-			if svc.registerGenerationIfIdle("sess-1", "msg", func() {}) {
+			if _, ok := svc.registerGenerationIfIdle("sess-1", "msg", func() {}); ok {
 				mu.Lock()
 				wins++
 				mu.Unlock()

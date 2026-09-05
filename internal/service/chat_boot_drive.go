@@ -104,10 +104,25 @@ func (s *chatServiceImpl) driveBootSession(
 		return closed, nil
 	}
 
-	// 1. Look up the active runtime session.
+	// 1. Look up the active runtime session. A Wrapper that has already
+	// terminated remains bound until its exact observer (or this next-turn
+	// path) retires it; that keeps cleanup generation-safe.
 	var sess *runtimeagent.Session
-	if existing, ok := s.runtimeSessions().Load(sessionID); ok {
-		sess = existing
+	for {
+		if existing, ok := s.runtimeSessions().LoadLive(sessionID); ok {
+			sess = existing
+			break
+		}
+		stale, ok := s.runtimeSessions().Load(sessionID)
+		if !ok {
+			break
+		}
+		if s.runtimeSessions().Retire(sessionID, stale, func() {
+			s.activeSessionSlots.Delete(sessionID)
+			s.toolPartitionStates.Delete(sessionID)
+		}) {
+			break
+		}
 	}
 
 	// CW-20260525-0001: capture cold-boot BEFORE the boot block reassigns
@@ -172,7 +187,8 @@ func (s *chatServiceImpl) driveBootSession(
 		if err != nil {
 			return nil, fmt.Errorf("driveBootSession: boot: %w", err)
 		}
-		s.runtimeSessions().Store(sessionID, booted)
+		// Boot registered the handle atomically at wrapper readiness. Repeating
+		// Store here would reopen a recovery/shutdown admission race.
 		// Track the bootDir + Options on the recovery BootDirOps adapter
 		// so a Repopulate / RegenerateCLAUDEMD remediation can rebuild
 		// the same SetupParams without us re-encoding them ad-hoc here.
@@ -420,44 +436,39 @@ func hashSlots(slotResult *SlotAssemblyResult) uint64 {
 // replacement would not be observed and a second-tier failure would go
 // unrecovered.
 //
-// TASKS/agent-host-acp/21: this function's own doc comment used to state
-// an invariant — "the prior session's Delete(sessionID) ran before
-// adoptReplacementSession is invoked" — that only actually holds for the
-// observeSessionForRecovery call path (path 1: it Deletes its own entry
-// BEFORE calling the broker, so this function's Store lands in an empty
-// slot). notifyRecoveryBrokerForHTTPStreamError (chat_http_broker_notify.go,
-// path 2 — a chat-harness-level mid-stream error, entirely independent of
-// whether the underlying process actually exited) has no such Delete: a
-// live CLI session can still be cached under sessionID when its broker
-// call reaches here. A confirmed clean repro (chat_replacement_session_
-// orphan_test.go) showed the bare Store this function used to do silently
-// overwrote that live session — no .Stop() anywhere — orphaning its real
-// subprocess (plus MCP sidecar) and leaving its own
-// observeSessionForRecovery goroutine blocked on Wait() forever.
-//
-// Fixed here (not narrowly in notifyRecoveryBrokerForHTTPStreamError)
-// because this is the one seam every replacement-adoption call path
-// funnels through — defensive against any future third caller reaching
-// the broker without its own pre-clear, not just today's two.
-// activeSessions.Swap atomically captures whatever was displaced so
-// stopDisplacedSession can tear it down; the common path-1 case (prev is
-// absent, or prev == sess on an idempotent re-invoke) is a no-op here,
-// identical to the pre-fix behavior for that path.
+// Adoption is the only path allowed through a recovery lease. It atomically
+// captures any still-live predecessor (the HTTP mid-stream-error path can
+// have one) so stopDisplacedSession can tear it down, and it rejects/stops a
+// replacement when shutdown has already closed admission.
 func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtimeagent.Session) {
 	if sess == nil {
 		return
 	}
-	if prev, hadPrev := s.runtimeSessions().Swap(sessionID, sess); hadPrev {
+	prev, hadPrev, err := s.runtimeSessions().Adopt(sessionID, sess)
+	if err != nil {
+		// Shutdown may close admission after the broker launched this
+		// replacement but before the synchronous adoption hook runs. Keep the
+		// failed adoption owned and bounded; never leave an untracked Wrapper.
+		s.goTracked("recovery.stop-unadmitted-replacement", func(ownerCtx context.Context) {
+			stopCtx, cancel := context.WithTimeout(ownerCtx, stopRebootGrace)
+			defer cancel()
+			if stopErr := sess.Stop(stopCtx); stopErr != nil {
+				slog.Warn("adoptReplacementSession: stop unadmitted replacement failed",
+					"session_id", sessionID, "admission_err", err, "stop_err", stopErr)
+			}
+		})
+		return
+	}
+	if hadPrev {
 		if prev != nil && prev != sess {
 			s.stopDisplacedSession(sessionID, prev)
 		}
 	}
-	// Slot hash + tool-partition state reset is implicit: the prior
-	// session's Delete(sessionID) ran before adoptReplacementSession is
-	// invoked (see observeSessionForRecovery's call ordering), so the
-	// replacement starts with a clean slot/regen window. The boot dir
-	// itself is reused — agent.Boot's IsRelaunch=true path skips
-	// CreateRuntimeRow + workdir reseed.
+	// The recovery lease keeps the failed generation authoritative through
+	// broker dispatch and adoption. Its exact-pointer retirement performs the
+	// slot/tool cleanup atomically with removal; a stale observer cannot clear
+	// state after this replacement is bound. The boot dir itself is reused —
+	// agent.Boot's IsRelaunch=true path skips CreateRuntimeRow + workdir reseed.
 
 	// Refresh the BootDir adapter's registry entry — the relaunched
 	// session has a fresh $TMPDIR-rolled bootDir but reuses the original
@@ -568,10 +579,12 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	// mid-stream-error-triggered replacement supersedes an older
 	// session, undermining the "escalate to permanent after N attempts"
 	// guard the cap exists for.
-	if _, displaced := s.displacedSessions.LoadAndDelete(sess); displaced {
-		s.runtimeSessions().CompareAndDelete(sessionID, sess)
+	ownedCleanup := func() {
 		s.activeSessionSlots.Delete(sessionID)
 		s.toolPartitionStates.Delete(sessionID)
+	}
+	if _, displaced := s.displacedSessions.LoadAndDelete(sess); displaced {
+		s.runtimeSessions().Retire(sessionID, sess, ownedCleanup)
 		slog.Info("recovery: displaced session stopped by adoptReplacementSession — skipping broker",
 			"session_id", sessionID)
 		return
@@ -583,15 +596,14 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	// SIGTERM/SIGKILL exit can present as an *agentsessions.ExitError —
 	// and do NOT route it to the recovery broker as a crash. The next
 	// user turn cold-boots a fresh agent via driveBootSession.
-	if _, rebooting := s.rebootingSessions.LoadAndDelete(sessionID); rebooting {
-		// CompareAndDelete so a replacement a concurrent turn already
-		// stored is not clobbered. The aux maps are session-id keyed and
-		// a fresh boot re-stores them, so a plain Delete is safe there.
-		s.runtimeSessions().CompareAndDelete(sessionID, sess)
-		s.activeSessionSlots.Delete(sessionID)
-		s.toolPartitionStates.Delete(sessionID)
-		if broker, ok := s.agentDeps.Recovery.(*broker.Broker); ok {
-			broker.ClearSession(sessionID)
+	if _, rebooting := s.rebootingSessions.LoadAndDelete(sess); rebooting {
+		// Pointer-owned retirement keeps a concurrent successor and its
+		// session-ID-keyed auxiliary state intact.
+		retired := s.runtimeSessions().Retire(sessionID, sess, ownedCleanup)
+		if retired {
+			if broker, ok := s.agentDeps.Recovery.(*broker.Broker); ok {
+				broker.ClearSession(sessionID)
+			}
 		}
 		slog.Info("recovery: session exited via intentional reboot — skipping broker",
 			"session_id", sessionID)
@@ -603,17 +615,27 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	var xe *agentsessions.ExitError
 	if !errors.As(err, &xe) {
 		// Clean exit — nothing for the broker to recover.
-		s.runtimeSessions().Delete(sessionID)
-		s.activeSessionSlots.Delete(sessionID)
-		s.toolPartitionStates.Delete(sessionID)
+		retired := s.runtimeSessions().Retire(sessionID, sess, ownedCleanup)
 		// Comma-ok rather than panicking type assert: future
 		// RecoveryHooks impls (mocks in tests) may not expose
 		// ClearSession; the cleanup is best-effort.
-		if broker, ok := s.agentDeps.Recovery.(*broker.Broker); ok {
-			broker.ClearSession(sessionID)
+		if retired {
+			if broker, ok := s.agentDeps.Recovery.(*broker.Broker); ok {
+				broker.ClearSession(sessionID)
+			}
 		}
 		return
 	}
+
+	// Claim this exact generation before any persistence cleanup or broker
+	// call. The lease blocks an ordinary cold Boot while OnSessionExit makes
+	// its synchronous replacement decision; if a successor already won the
+	// ID, the stale observer performs no cleanup and never invokes recovery.
+	lease, owned := s.runtimeSessions().BeginRecovery(sessionID, sess, ownedCleanup)
+	if !owned {
+		return
+	}
+	defer s.runtimeSessions().EndRecovery(sessionID, lease)
 
 	// CW-20260525-0001 Slice 3 follow-up: stale-resume detection. A boot that
 	// used --resume and died within a few seconds is overwhelmingly likely to
@@ -642,20 +664,6 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 		"cause", xe.Cause,
 		"code", xe.Code,
 		"signal", xe.Signal)
-
-	// Per-session state cleanup happens BEFORE OnSessionExit. The broker
-	// may dispatch a replacement session (DispatchRetry → agent.Boot),
-	// at which point it invokes the replacement-session hook installed
-	// at container.go and that hook re-stores the new session into
-	// activeSessions. Cleaning up after OnSessionExit returns would
-	// race-clobber the freshly stored replacement.
-	//
-	// toolPartitionStates is session-id-keyed too — the replacement
-	// session boots fresh, so pruning here mirrors the activeSessions
-	// reset.
-	s.runtimeSessions().Delete(sessionID)
-	s.activeSessionSlots.Delete(sessionID)
-	s.toolPartitionStates.Delete(sessionID)
 
 	s.agentDeps.Recovery.OnSessionExit(sessionID, xe, meta)
 }

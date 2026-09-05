@@ -9,12 +9,37 @@ event draining, process exit, and cleanup. ACP wrappers share one
 binding used by chat lookup, recovery replacement, orphan checks, and daemon
 shutdown. It does not keep a second lifecycle state.
 
+`SessionManager` admits a launch before `Wrapper.Run` begins. Shutdown closes
+that admission boundary first and waits for ready, pre-ready, and
+recovery-pending launches, so a concurrent Boot cannot escape the stop set.
+Terminal observers retire only the exact wrapper pointer they watched. An
+erroring observer holds a per-session recovery lease while the broker decides
+whether to adopt a replacement; stale observers neither clear successor state
+nor dispatch recovery over it.
+
+Every normalized `runtimeevents.Event` first reaches Nanite's canonical sink.
+The default is an internal append-only
+`<workspace>/logs/runtime-events.jsonl`; composition tests or future internal
+consumers may inject another sink. Only afterward does Nanite project the
+small legacy subset onto chat SSE/provider callbacks. Process, lifecycle,
+interrupt, permission, raw-I/O, and unknown future kinds are therefore
+preserved without exposing raw events on the public API (that transport is a
+separate contract).
+
 Native selection remains Nanite product policy: Claude uses streaming stdio;
 Codex and OpenCode use subprocess-per-turn. The selection is expressed through
 `adapters.Select` with Nanite's already-configured `provider.CLIAdapter`.
 Per-session environment isolation uses `wrapper.ChildEnvironment` in replace
 mode, so no shell or generated process wrapper is involved. ACP selection uses
 the wrapper's shipped Claude, Codex, OpenCode, Copilot, and Pi ACP adapters.
+
+User stop and same-session takeover cancel the Nanite generation context and
+request `Wrapper.CancelTurn` against the exact captured wrapper generation.
+The request is bounded and does not block the API caller; a successor prompt
+waits until the provider request and predecessor terminal boundary complete.
+ACP uses its real turn-scoped cancel. Native runtimes honestly report that
+turn cancellation is unsupported, so Nanite stops that exact wrapper and the
+next turn cold-boots instead of pretending a wire-level cancel occurred.
 
 ## ACP permission requests
 

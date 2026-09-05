@@ -674,17 +674,17 @@ func TestChatService_RegisterGeneration_Takeover(t *testing.T) {
 	cancelA := context.CancelFunc(func() { close(canceledA) })
 
 	// First registration: no prior cancel.
-	if prev := svc.registerGeneration("sess", "msg-A", cancelA); prev != nil {
+	if prev, _ := svc.registerGeneration("sess", "msg-A", cancelA); prev != nil {
 		t.Fatalf("expected nil prev for first register, got %v", prev)
 	}
 
 	// Second registration on the same session: returns the first cancel.
 	cancelB := context.CancelFunc(func() {})
-	prev := svc.registerGeneration("sess", "msg-B", cancelB)
+	prev, _ := svc.registerGeneration("sess", "msg-B", cancelB)
 	if prev == nil {
 		t.Fatal("expected prev cancel on second register, got nil")
 	}
-	prev()
+	prev.cancel()
 	select {
 	case <-canceledA:
 	case <-time.After(200 * time.Millisecond):
@@ -716,10 +716,10 @@ func TestChatService_RegisterGeneration_ScopedPerSession(t *testing.T) {
 	cancelA := context.CancelFunc(func() {})
 	cancelB := context.CancelFunc(func() {})
 
-	if prev := svc.registerGeneration("sess-1", "msg-1", cancelA); prev != nil {
+	if prev, _ := svc.registerGeneration("sess-1", "msg-1", cancelA); prev != nil {
 		t.Fatalf("expected nil prev for sess-1, got %v", prev)
 	}
-	if prev := svc.registerGeneration("sess-2", "msg-2", cancelB); prev != nil {
+	if prev, _ := svc.registerGeneration("sess-2", "msg-2", cancelB); prev != nil {
 		t.Fatal("expected nil prev for sess-2 — different session")
 	}
 }
@@ -734,7 +734,7 @@ func TestChatService_CancelActiveGeneration_DispatchesCancel(t *testing.T) {
 	canceled := make(chan struct{})
 	cancel := context.CancelFunc(func() { close(canceled) })
 
-	svc.registerGeneration("sess-active", "msg-1", cancel)
+	_, _ = svc.registerGeneration("sess-active", "msg-1", cancel)
 
 	if ok := svc.CancelActiveGeneration("sess-active"); !ok {
 		t.Fatal("CancelActiveGeneration returned false for an active generation")

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
@@ -13,6 +14,62 @@ import (
 	"github.com/hollis-labs/go-providers/provider/events"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
 )
+
+func TestRuntimeEventSink_ForwardsEveryNormalizedAndUnknownKindBeforeLegacyProjection(t *testing.T) {
+	kinds := []runtimeevents.EventKind{
+		runtimeevents.KindProcessStarted, runtimeevents.KindProcessExited,
+		runtimeevents.KindSessionReady, runtimeevents.KindSessionIdle,
+		runtimeevents.KindSessionProcessing, runtimeevents.KindSessionHeartbeat,
+		runtimeevents.KindTurnStarted, runtimeevents.KindTurnCompleted, runtimeevents.KindTurnFailed,
+		runtimeevents.KindStdinWrite, runtimeevents.KindStdoutRaw, runtimeevents.KindStderrRaw,
+		runtimeevents.KindStdoutLine, runtimeevents.KindStderrLine,
+		runtimeevents.KindAgentDelta, runtimeevents.KindAgentToolUse,
+		runtimeevents.KindAgentToolResult, runtimeevents.KindAgentSubagentSpawn,
+		runtimeevents.KindAgentPermissionRequested, runtimeevents.KindAgentPermissionResolved,
+		runtimeevents.KindPolicyNudge, runtimeevents.KindPolicyRewrite,
+		runtimeevents.KindPolicyBlock, runtimeevents.KindPolicyApprovalRequested,
+		runtimeevents.KindPlantStarted, runtimeevents.KindPlantCompleted,
+		runtimeevents.KindSandboxApplied,
+		runtimeevents.KindInterruptRequested, runtimeevents.KindInterruptAcknowledged,
+		runtimeevents.EventKind("future.kind.unknown-to-nanite"),
+	}
+
+	var got []runtimeevents.Event
+	canonical := runtimeevents.SinkFunc(func(_ context.Context, ev runtimeevents.Event) error {
+		got = append(got, ev)
+		return nil
+	})
+	legacyObservedAfterCanonical := true
+	sink := &runtimeEventSink{
+		canonical: canonical,
+		typedCB: func(events.Event) {
+			legacyObservedAfterCanonical = legacyObservedAfterCanonical && len(got) > 0
+		},
+		fanout: make(chan llmtypes.StreamEvent, 128),
+	}
+	want := make([]runtimeevents.Event, 0, len(kinds))
+	for i, kind := range kinds {
+		payload := json.RawMessage(`{"sentinel":true}`)
+		if kind == runtimeevents.KindAgentToolUse {
+			payload = json.RawMessage(`{"tool_call_id":"call-order","name":"Read","raw_input":{}}`)
+		}
+		ev := runtimeevents.Event{
+			SchemaVersion: "1.0", ID: fmt.Sprintf("ev-%d", i), Kind: kind,
+			SessionID: "session", TurnID: "turn", Sequence: uint64(i + 1),
+			Payload: payload,
+		}
+		want = append(want, ev)
+		if err := sink.Write(context.Background(), ev); err != nil {
+			t.Fatalf("Write(%s): %v", kind, err)
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("canonical events differ\ngot:  %#v\nwant: %#v", got, want)
+	}
+	if !legacyObservedAfterCanonical {
+		t.Fatal("legacy projection ran before canonical normalized sink")
+	}
+}
 
 func TestRuntimeEventSink_ACPDeltaShapes(t *testing.T) {
 	cases := []struct {

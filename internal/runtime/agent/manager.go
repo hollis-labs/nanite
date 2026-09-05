@@ -5,10 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/go-agent-wrapper/acp"
+	"github.com/hollis-labs/go-agent-wrapper/wrapper"
 )
+
+// ErrTurnCancelUnsupported is the wrapper-owned native-runtime ceiling. It is
+// re-exported at Nanite's runtime boundary so service code can treat the
+// honest unsupported result as expected without importing wrapper directly.
+var ErrTurnCancelUnsupported = wrapper.ErrTurnCancelUnsupported
 
 // SendInput delivers a user message into the live runtime. ModeLongLived
 // chat sessions call this per turn; ModeOneShot / ModeSubagent /
@@ -144,6 +151,32 @@ func (s *Session) CancelTurn(ctx context.Context) error {
 	return s.wr.CancelTurn(ctx)
 }
 
+// WaitTurnTerminal waits until an ACP turn is no longer processing. Native
+// wrappers cannot expose that boundary today and return
+// ErrTurnCancelUnsupported; callers that require takeover safety must stop
+// and cold-boot that exact native session instead.
+func (s *Session) WaitTurnTerminal(ctx context.Context) error {
+	if s == nil || s.wr == nil {
+		return errors.New("agent.Session.WaitTurnTerminal: session not initialized")
+	}
+	if !s.isACP {
+		return ErrTurnCancelUnsupported
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		snapshot, ok := s.wr.ACPSnapshot()
+		if !ok || snapshot.State != acp.StateProcessing {
+			return nil
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 // ProviderSessionID returns wrapper's current provider-assigned identity.
 func (s *Session) ProviderSessionID() string {
 	if s == nil || s.wr == nil {
@@ -166,5 +199,14 @@ func (s *Session) isLive() bool {
 		return false
 	default:
 		return true
+	}
+}
+
+// cancelBoot aborts Wrapper.Run only at the manager's launch/adoption
+// shutdown boundary. It is intentionally separate from Stop so ordinary
+// cooperative session termination retains Wrapper's clean-exit semantics.
+func (s *Session) cancelBoot() {
+	if s != nil && s.runCancel != nil {
+		s.runCancel()
 	}
 }

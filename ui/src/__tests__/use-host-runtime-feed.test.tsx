@@ -74,6 +74,17 @@ describe("useHostRuntimeFeed", () => {
       payload: { state: "ready" },
       payload_visibility: "public_metadata",
     };
+    act(() =>
+      first.emit("host_runtime.head.v1", {
+        schema_version: "host_runtime.head.v1",
+        session_id: "session-a",
+        latest_cursor: 12,
+        pruned_through_cursor: 0,
+        retention_dropped: 0,
+        runtime_generation_floor: 1,
+        current_runtime_run_id: "run-a",
+      }),
+    );
     act(() => first.emit("host_runtime.v1", ready));
     expect(screen.getByTestId("state").textContent).toContain('"lastCursor":12');
     act(() => first.emit("host_runtime.v1", ready));
@@ -81,6 +92,17 @@ describe("useHostRuntimeFeed", () => {
 
     // A reconnect gap installs the durable successor floor before replaying
     // retained rows. The only retained predecessor event cannot reclaim it.
+    act(() =>
+      first.emit("host_runtime.head.v1", {
+        schema_version: "host_runtime.head.v1",
+        session_id: "session-a",
+        latest_cursor: 21,
+        pruned_through_cursor: 19,
+        retention_dropped: 19,
+        runtime_generation_floor: 2,
+        current_runtime_run_id: "run-b",
+      }),
+    );
     act(() =>
       first.emit("host_runtime.gap.v1", {
         schema_version: "host_runtime.gap.v1",
@@ -119,6 +141,47 @@ describe("useHostRuntimeFeed", () => {
       }),
     );
     expect(screen.getByTestId("state").textContent).toContain('"status":"processing"');
+
+    // A cursor-ahead response may authoritatively restore an older database
+    // generation. Its matching head+gap rewinds the committed cursor so the
+    // lower-generation rows can rebuild state.
+    act(() =>
+      first.emit("host_runtime.head.v1", {
+        schema_version: "host_runtime.head.v1",
+        session_id: "session-a",
+        latest_cursor: 10,
+        pruned_through_cursor: 0,
+        retention_dropped: 0,
+        runtime_generation_floor: 1,
+        current_runtime_run_id: "run-restored",
+      }),
+    );
+    act(() =>
+      first.emit("host_runtime.gap.v1", {
+        schema_version: "host_runtime.gap.v1",
+        session_id: "session-a",
+        reason: "cursor_ahead",
+        requested_cursor: 21,
+        oldest_available: 1,
+        latest_cursor: 10,
+        missing_cursor_span: 11,
+        retention_dropped: 0,
+        runtime_generation_floor: 1,
+        current_runtime_run_id: "run-restored",
+      }),
+    );
+    act(() =>
+      first.emit("host_runtime.v1", {
+        ...ready,
+        cursor: 1,
+        runtime_run_id: "run-restored",
+        runtime_generation: 1,
+        source_event_id: "restored-ready",
+      }),
+    );
+    expect(screen.getByTestId("state").textContent).toContain('"lastCursor":1');
+    expect(screen.getByTestId("state").textContent).toContain('"runtimeRunID":"run-restored"');
+    expect(screen.getByTestId("state").textContent).toContain('"status":"ready"');
 
     act(() => first.onerror?.(new Event("error")));
     expect(first.closed).toBe(false);

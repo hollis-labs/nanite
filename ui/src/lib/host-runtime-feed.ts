@@ -34,6 +34,16 @@ export interface HostRuntimeFeedGap {
   current_runtime_run_id?: string;
 }
 
+export interface HostRuntimeFeedHead {
+  schema_version: "host_runtime.head.v1";
+  session_id: string;
+  latest_cursor: number;
+  pruned_through_cursor: number;
+  retention_dropped: number;
+  runtime_generation_floor: number;
+  current_runtime_run_id?: string;
+}
+
 export type HostRuntimeToolStage = "started" | "update" | "completed" | "failed";
 
 export interface HostRuntimeTool {
@@ -65,6 +75,7 @@ export interface HostRuntimeFeedState {
   tools: HostRuntimeTool[];
   recentEvents: HostRuntimeFeedEvent[];
   seenSourceEventIDs: string[];
+  head?: HostRuntimeFeedHead;
   gap?: HostRuntimeFeedGap;
 }
 
@@ -109,6 +120,7 @@ export function reduceHostRuntimeEvent(
         ...initialHostRuntimeFeedState,
         runtimeRunID: event.runtime_run_id,
         runtimeGeneration: event.runtime_generation,
+        head: state.head,
         gap: state.gap,
       }
     : state;
@@ -145,6 +157,7 @@ export function reduceHostRuntimeEvent(
       runtimeGeneration: event.runtime_generation,
       recentEvents,
       seenSourceEventIDs,
+      head: state.head,
       gap,
     };
   }
@@ -204,22 +217,82 @@ export function reduceHostRuntimeEvent(
   return next;
 }
 
+export function reduceHostRuntimeHead(
+  state: HostRuntimeFeedState,
+  head: HostRuntimeFeedHead,
+): HostRuntimeFeedState {
+  if (
+    head.schema_version !== "host_runtime.head.v1" ||
+    !Number.isSafeInteger(head.latest_cursor) ||
+    head.latest_cursor < 0 ||
+    !Number.isSafeInteger(head.pruned_through_cursor) ||
+    head.pruned_through_cursor < 0 ||
+    !Number.isSafeInteger(head.retention_dropped) ||
+    head.retention_dropped < 0 ||
+    !Number.isSafeInteger(head.runtime_generation_floor) ||
+    head.runtime_generation_floor < 0
+  ) {
+    return state;
+  }
+  const newerOwner = head.runtime_generation_floor > state.runtimeGeneration;
+  const bindsCurrentFloor =
+    head.runtime_generation_floor === state.runtimeGeneration &&
+    !state.runtimeRunID &&
+    !!head.current_runtime_run_id;
+  if (!newerOwner && !bindsCurrentFloor) {
+    // Keep the latest ordered snapshot even when a restored lower-generation
+    // head must wait for its matching cursor_ahead gap to authorize rewind.
+    return { ...state, head };
+  }
+  return {
+    ...initialHostRuntimeFeedState,
+    lastCursor: state.lastCursor,
+    runtimeRunID: head.current_runtime_run_id ?? "",
+    runtimeGeneration: head.runtime_generation_floor,
+    head,
+    gap: state.gap,
+  };
+}
+
 export function reduceHostRuntimeGap(
   state: HostRuntimeFeedState,
   gap: HostRuntimeFeedGap,
 ): HostRuntimeFeedState {
-  if (gap.schema_version !== "host_runtime.gap.v1") return state;
-  const gapFloor = Number.isSafeInteger(gap.runtime_generation_floor)
-    ? Math.max(0, gap.runtime_generation_floor)
-    : 0;
-  const existingIsNewer = state.runtimeGeneration > gapFloor;
+  if (
+    gap.schema_version !== "host_runtime.gap.v1" ||
+    (gap.reason !== "retention" && gap.reason !== "cursor_ahead") ||
+    !Number.isSafeInteger(gap.requested_cursor) ||
+    gap.requested_cursor < 0 ||
+    !Number.isSafeInteger(gap.oldest_available) ||
+    gap.oldest_available < 1 ||
+    !Number.isSafeInteger(gap.latest_cursor) ||
+    gap.latest_cursor < 0 ||
+    !Number.isSafeInteger(gap.retention_dropped) ||
+    gap.retention_dropped < 0 ||
+    !Number.isSafeInteger(gap.runtime_generation_floor) ||
+    gap.runtime_generation_floor < 0
+  ) {
+    return state;
+  }
+  const gapFloor = gap.runtime_generation_floor;
+  if (gap.requested_cursor !== state.lastCursor) return state;
+  if (
+    state.head &&
+    (state.head.latest_cursor !== gap.latest_cursor ||
+      state.head.pruned_through_cursor + 1 !== gap.oldest_available ||
+      state.head.retention_dropped !== gap.retention_dropped ||
+      state.head.runtime_generation_floor !== gapFloor ||
+      (state.head.current_runtime_run_id ?? "") !== (gap.current_runtime_run_id ?? ""))
+  ) {
+    return state;
+  }
+  if (gap.reason !== "cursor_ahead" && gapFloor < state.runtimeGeneration) return state;
   return {
     ...initialHostRuntimeFeedState,
-    lastCursor: Math.max(state.lastCursor, gap.oldest_available - 1, 0),
-    runtimeRunID: existingIsNewer
-      ? state.runtimeRunID
-      : (gap.current_runtime_run_id ?? state.runtimeRunID),
-    runtimeGeneration: Math.max(state.runtimeGeneration, gapFloor),
+    lastCursor: Math.max(0, gap.oldest_available - 1),
+    runtimeRunID: gap.current_runtime_run_id ?? "",
+    runtimeGeneration: gapFloor,
+    head: state.head,
     gap,
   };
 }

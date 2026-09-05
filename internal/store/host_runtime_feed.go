@@ -71,6 +71,19 @@ type HostRuntimeGap struct {
 	CurrentRuntimeRunID    string `json:"current_runtime_run_id,omitempty"`
 }
 
+// HostRuntimeHead is the authoritative runtime owner observed in the same
+// transaction as a replay page. It is an SSE control frame, not a committed
+// event, so LatestCursor is informational and never advances a client cursor.
+type HostRuntimeHead struct {
+	SchemaVersion          string `json:"schema_version"`
+	SessionID              string `json:"session_id"`
+	LatestCursor           int64  `json:"latest_cursor"`
+	PrunedThroughCursor    int64  `json:"pruned_through_cursor"`
+	RetentionDropped       int64  `json:"retention_dropped"`
+	RuntimeGenerationFloor int64  `json:"runtime_generation_floor"`
+	CurrentRuntimeRunID    string `json:"current_runtime_run_id,omitempty"`
+}
+
 type HostRuntimeReplay struct {
 	Events                 []HostRuntimeEvent
 	NextCursor             int64
@@ -78,6 +91,7 @@ type HostRuntimeReplay struct {
 	PrunedThrough          int64
 	RuntimeGenerationFloor int64
 	CurrentRuntimeRunID    string
+	Head                   HostRuntimeHead
 	Gap                    *HostRuntimeGap
 }
 
@@ -279,10 +293,30 @@ func (s *Store) HostRuntimeEventsAfter(ctx context.Context, sessionID string, af
 		FROM host_runtime_feed_heads WHERE session_id = ?`, sessionID,
 	).Scan(&latest, &prunedThrough, &retentionDropped, &generationFloor, &currentRunID)
 	if errors.Is(err, sql.ErrNoRows) {
+		replay := HostRuntimeReplay{
+			Events: []HostRuntimeEvent{},
+			Head: HostRuntimeHead{
+				SchemaVersion: "host_runtime.head.v1",
+				SessionID:     sessionID,
+			},
+		}
+		if after > 0 {
+			replay.Gap = &HostRuntimeGap{
+				SchemaVersion:          "host_runtime.gap.v1",
+				SessionID:              sessionID,
+				Reason:                 "cursor_ahead",
+				RequestedCursor:        after,
+				OldestAvailable:        1,
+				MissingCursorSpan:      after,
+				RetentionDropped:       0,
+				CurrentRuntimeRunID:    "",
+				RuntimeGenerationFloor: 0,
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return HostRuntimeReplay{}, fmt.Errorf("commit empty host runtime replay: %w", err)
 		}
-		return HostRuntimeReplay{Events: []HostRuntimeEvent{}}, nil
+		return replay, nil
 	}
 	if err != nil {
 		return HostRuntimeReplay{}, fmt.Errorf("load host runtime replay head: %w", err)
@@ -357,6 +391,15 @@ func (s *Store) HostRuntimeEventsAfter(ctx context.Context, sessionID string, af
 		PrunedThrough:          prunedThrough,
 		RuntimeGenerationFloor: generationFloor,
 		CurrentRuntimeRunID:    currentRunID,
-		Gap:                    gap,
+		Head: HostRuntimeHead{
+			SchemaVersion:          "host_runtime.head.v1",
+			SessionID:              sessionID,
+			LatestCursor:           latest,
+			PrunedThroughCursor:    prunedThrough,
+			RetentionDropped:       retentionDropped,
+			RuntimeGenerationFloor: generationFloor,
+			CurrentRuntimeRunID:    currentRunID,
+		},
+		Gap: gap,
 	}, nil
 }

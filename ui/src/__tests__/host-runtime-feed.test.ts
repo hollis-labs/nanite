@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   type HostRuntimeFeedEvent,
+  type HostRuntimeFeedHead,
   initialHostRuntimeFeedState,
   reduceHostRuntimeEvent,
   reduceHostRuntimeGap,
+  reduceHostRuntimeHead,
 } from "@/lib/host-runtime-feed";
 
 function event(
@@ -27,6 +29,24 @@ function event(
     process: { provider: "claude", runtime: "jsonrpc-stdio" },
     payload,
     payload_visibility: "public_metadata",
+  };
+}
+
+function head(
+  latestCursor: number,
+  generation: number,
+  run: string,
+  prunedThroughCursor = 0,
+  retentionDropped = 0,
+): HostRuntimeFeedHead {
+  return {
+    schema_version: "host_runtime.head.v1",
+    session_id: "session-a",
+    latest_cursor: latestCursor,
+    pruned_through_cursor: prunedThroughCursor,
+    retention_dropped: retentionDropped,
+    runtime_generation_floor: generation,
+    current_runtime_run_id: run,
   };
 }
 
@@ -121,8 +141,21 @@ describe("host runtime reducer", () => {
     expect(state.providerSessionID).toBe("new-provider-session");
   });
 
+  it("installs a reservation-only head before a gap-free delayed predecessor", () => {
+    let state = reduceHostRuntimeEvent(initialHostRuntimeFeedState, event(1, "session.ready"));
+    state = reduceHostRuntimeHead(state, head(2, 2, "run-b"));
+    expect(state.lastCursor).toBe(1);
+    expect(state.runtimeRunID).toBe("run-b");
+    expect(state.status).toBe("unknown");
+
+    state = reduceHostRuntimeEvent(state, event(2, "process.exited", {}, "run-a", 1));
+    expect(state.runtimeRunID).toBe("run-b");
+    expect(state.status).toBe("unknown");
+  });
+
   it("marks replay gaps incomplete and rebuilds from subsequent retained events", () => {
     let state = reduceHostRuntimeEvent(initialHostRuntimeFeedState, event(1, "session.ready"));
+    state = reduceHostRuntimeHead(state, head(12, 2, "run-b", 8, 8));
     state = reduceHostRuntimeGap(state, {
       schema_version: "host_runtime.gap.v1",
       session_id: "session-a",
@@ -148,6 +181,62 @@ describe("host runtime reducer", () => {
     state = reduceHostRuntimeEvent(state, event(10, "session.processing", {}, "run-b", 2));
     expect(state.status).toBe("processing");
     expect(state.runtimeRunID).toBe("run-b");
+  });
+
+  it("authoritatively rewinds cursor-ahead restores and ignores delayed gaps", () => {
+    let state = reduceHostRuntimeEvent(
+      initialHostRuntimeFeedState,
+      event(99, "session.processing", {}, "run-z", 7),
+    );
+    state = reduceHostRuntimeHead(state, head(10, 1, "run-a"));
+    expect(state.runtimeGeneration).toBe(7);
+    state = reduceHostRuntimeGap(state, {
+      schema_version: "host_runtime.gap.v1",
+      session_id: "session-a",
+      reason: "cursor_ahead",
+      requested_cursor: 99,
+      oldest_available: 1,
+      latest_cursor: 10,
+      missing_cursor_span: 89,
+      retention_dropped: 0,
+      runtime_generation_floor: 1,
+      current_runtime_run_id: "run-a",
+    });
+    expect(state.lastCursor).toBe(0);
+    expect(state.runtimeGeneration).toBe(1);
+    expect(state.runtimeRunID).toBe("run-a");
+    expect(state.status).toBe("unknown");
+
+    state = reduceHostRuntimeEvent(state, event(1, "session.ready", {}, "run-a", 1));
+    state = reduceHostRuntimeEvent(state, event(10, "session.processing", {}, "run-a", 1));
+    const rebuilt = state;
+    state = reduceHostRuntimeGap(state, {
+      schema_version: "host_runtime.gap.v1",
+      session_id: "session-a",
+      reason: "retention",
+      requested_cursor: 5,
+      oldest_available: 8,
+      latest_cursor: 10,
+      missing_cursor_span: 2,
+      retention_dropped: 7,
+      runtime_generation_floor: 1,
+      current_runtime_run_id: "run-a",
+    });
+    expect(state).toBe(rebuilt);
+
+    state = reduceHostRuntimeGap(state, {
+      schema_version: "host_runtime.gap.v1",
+      session_id: "session-a",
+      reason: "retention",
+      requested_cursor: 10,
+      oldest_available: 2,
+      latest_cursor: 9,
+      missing_cursor_span: 1,
+      retention_dropped: 1,
+      runtime_generation_floor: 1,
+      current_runtime_run_id: "run-a",
+    });
+    expect(state).toBe(rebuilt);
   });
 
   it("resets derived state at a durable ingestion-gap boundary", () => {

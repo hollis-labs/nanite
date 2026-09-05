@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import {
   type HostRuntimeFeedEvent,
   type HostRuntimeFeedGap,
+  type HostRuntimeFeedHead,
   type HostRuntimeFeedState,
   initialHostRuntimeFeedState,
   reduceHostRuntimeEvent,
   reduceHostRuntimeGap,
+  reduceHostRuntimeHead,
 } from "@/lib/host-runtime-feed";
 
 export function useHostRuntimeFeed(sessionID: string | null): HostRuntimeFeedState {
@@ -35,7 +37,17 @@ export function useHostRuntimeFeed(sessionID: string | null): HostRuntimeFeedSta
         // See onRuntimeEvent: tolerate a malformed control record.
       }
     };
+    const onHead = (rawEvent: Event) => {
+      try {
+        const head = JSON.parse((rawEvent as MessageEvent<string>).data) as HostRuntimeFeedHead;
+        if (head.session_id !== sessionID) return;
+        setState((current) => reduceHostRuntimeHead(current, head));
+      } catch {
+        // See onRuntimeEvent: tolerate a malformed control record.
+      }
+    };
 
+    source.addEventListener("host_runtime.head.v1", onHead);
     source.addEventListener("host_runtime.v1", onRuntimeEvent);
     source.addEventListener("host_runtime.gap.v1", onGap);
     source.onerror = () => {
@@ -43,6 +55,7 @@ export function useHostRuntimeFeed(sessionID: string | null): HostRuntimeFeedSta
       // here: the backend's committed cursor makes replay idempotent.
     };
     return () => {
+      source.removeEventListener("host_runtime.head.v1", onHead);
       source.removeEventListener("host_runtime.v1", onRuntimeEvent);
       source.removeEventListener("host_runtime.gap.v1", onGap);
       source.close();

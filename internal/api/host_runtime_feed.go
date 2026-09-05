@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 const hostRuntimeReplayPageSize = 128
@@ -52,12 +54,32 @@ func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	cursor := after
+	headWritten := false
+	var lastHead store.HostRuntimeHead
 	writePending := func() bool {
 		gapWritten := false
 		for {
 			replay, replayErr := a.Services.Store.HostRuntimeEventsAfter(r.Context(), sessionID, cursor, hostRuntimeReplayPageSize)
 			if replayErr != nil {
 				return false
+			}
+			ownerChanged := replay.Head.RuntimeGenerationFloor != lastHead.RuntimeGenerationFloor ||
+				replay.Head.CurrentRuntimeRunID != lastHead.CurrentRuntimeRunID
+			gapSnapshotChanged := replay.Gap != nil && replay.Head != lastHead
+			if !headWritten || ownerChanged || gapSnapshotChanged {
+				data, marshalErr := json.Marshal(replay.Head)
+				if marshalErr != nil {
+					return false
+				}
+				// A head is snapshot authority, not a committed feed record. It
+				// deliberately has no SSE id, so disconnecting after this frame
+				// cannot skip the replay rows that follow it.
+				if _, writeErr := fmt.Fprintf(w, "event: host_runtime.head.v1\ndata: %s\n\n", data); writeErr != nil {
+					return false
+				}
+				flusher.Flush()
+				headWritten = true
+				lastHead = replay.Head
 			}
 			if replay.Gap != nil && !gapWritten {
 				data, marshalErr := json.Marshal(replay.Gap)

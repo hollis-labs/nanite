@@ -26,10 +26,25 @@ frames carry that floor even if retention leaves only late predecessor rows, so
 a reconnect cannot adopt stale lifecycle state. A fresh connection without a
 cursor receives the retained snapshot from cursor zero.
 
+Every SSE connection begins with `host_runtime.head.v1`, an authoritative
+control frame read in the same transaction as the replay page. It carries the
+current generation/run, latest cursor, retention boundary, and retained-drop
+count. It intentionally has no SSE `id`: receiving the head and disconnecting
+before its rows must not move `Last-Event-ID` past unseen committed records.
+The server suppresses identical heads while polling, but emits a replacement
+head before any subsequent event as soon as a reservation changes the current
+runtime owner, even when that new run has emitted no event yet.
+
 The feed keeps 512 committed records per session. If a requested cursor has
-been pruned or is ahead of the session head, the server first emits a
-`host_runtime.gap.v1` control frame describing the unavailable cursor span and
-the oldest available record, plus the current runtime-generation floor.
+been pruned or is ahead of the session head, the server next emits a
+`host_runtime.gap.v1` control frame describing the unavailable cursor span,
+the oldest available record, and the current runtime-generation floor.
+Gap frames retain an SSE ID at the retention boundary. A `cursor_ahead` gap is
+an authoritative database restore/rewind: clients reset both cursor and runtime
+owner to the matching head snapshot, even when its generation is lower, then
+replay from `oldest_available`. Retention gaps advance to the same boundary.
+Clients reject delayed gaps whose requested cursor or head-snapshot metadata no
+longer matches their current stream state.
 Ingestion is serialized through a bounded 1,024-record FIFO so wrapper IO never
 waits for SQLite. Queue-overflow and persistence-failure loss is accumulated in
 session-scoped order across runtime replacements and represented by a durable

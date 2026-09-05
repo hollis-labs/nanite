@@ -133,6 +133,56 @@ func TestHostRuntimeReplayGapCarriesCurrentGenerationFloor(t *testing.T) {
 	if replay.Gap.RuntimeGenerationFloor != 2 || replay.Gap.CurrentRuntimeRunID != "run-b" || replay.Events[0].RuntimeGeneration != 1 {
 		t.Fatalf("floor/current/retained predecessor = %+v / %+v", replay.Gap, replay.Events)
 	}
+	if replay.Head.RuntimeGenerationFloor != 2 || replay.Head.CurrentRuntimeRunID != "run-b" || replay.Head.LatestCursor != 3 || replay.Head.PrunedThroughCursor != 2 {
+		t.Fatalf("transactional replay head = %+v", replay.Head)
+	}
+}
+
+func TestHostRuntimeReplayHeadPrecedesGapFreeDelayedPredecessor(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	genA, err := s.ReserveHostRuntimeRun(ctx, "session-head", "run-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := func(sourceID, kind string) HostRuntimeEvent {
+		return HostRuntimeEvent{
+			SessionID: "session-head", RuntimeRunID: "run-a", RuntimeGeneration: genA,
+			SourceEventID: sourceID, SourceSequence: 1, Kind: kind, OccurredAt: "2026-09-05T12:00:00Z",
+			Source: HostRuntimeEventSource{Channel: "test"}, Payload: json.RawMessage(`{}`), PayloadVisibility: "public_metadata",
+		}
+	}
+	if _, _, err := s.AppendHostRuntimeEvent(ctx, event("a-ready", "session.ready"), 10); err != nil {
+		t.Fatal(err)
+	}
+	genB, err := s.ReserveHostRuntimeRun(ctx, "session-head", "run-b")
+	if err != nil || genB != 2 {
+		t.Fatalf("reserve successor = %d, %v", genB, err)
+	}
+	if _, _, err := s.AppendHostRuntimeEvent(ctx, event("a-late-exit", "process.exited"), 10); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := s.HostRuntimeEventsAfter(ctx, "session-head", 0, 10)
+	if err != nil || replay.Gap != nil || len(replay.Events) != 2 {
+		t.Fatalf("gap-free replay = %+v, %v", replay, err)
+	}
+	if replay.Head.SchemaVersion != "host_runtime.head.v1" || replay.Head.RuntimeGenerationFloor != 2 || replay.Head.CurrentRuntimeRunID != "run-b" || replay.Head.LatestCursor != 2 {
+		t.Fatalf("authoritative head = %+v", replay.Head)
+	}
+	if replay.Events[1].RuntimeGeneration != 1 || replay.Events[1].Kind != "process.exited" {
+		t.Fatalf("retained delayed predecessor = %+v", replay.Events[1])
+	}
+}
+
+func TestHostRuntimeEmptyReplayRewindsCursorAhead(t *testing.T) {
+	s := newTestStore(t)
+	replay, err := s.HostRuntimeEventsAfter(context.Background(), "empty-session", 99, 10)
+	if err != nil || replay.Gap == nil {
+		t.Fatalf("empty cursor-ahead replay = %+v, %v", replay, err)
+	}
+	if replay.Head.SchemaVersion != "host_runtime.head.v1" || replay.Head.LatestCursor != 0 || replay.Gap.Reason != "cursor_ahead" || replay.Gap.OldestAvailable != 1 || replay.Gap.LatestCursor != 0 {
+		t.Fatalf("empty replay authority = head %+v gap %+v", replay.Head, replay.Gap)
+	}
 }
 
 func TestHostRuntimeIdentityLedgerHasDocumentedBound(t *testing.T) {

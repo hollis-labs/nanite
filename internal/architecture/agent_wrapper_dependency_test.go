@@ -203,6 +203,72 @@ func prompt(ctx context.Context, client protocol.Client) {
 }`,
 			want: []string{"acp.Client", "direct ACP client lifecycle Prompt"},
 		},
+		"short declaration ACP client alias": {
+			source: `package agent
+import (
+    "context"
+    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+)
+func prompt(ctx context.Context) {
+    client := protocol.NewClient()
+    alias := client
+    _ = alias.Prompt(ctx, "hello")
+}`,
+			want: []string{"acp.NewClient", "direct ACP client lifecycle Prompt"},
+		},
+		"var ACP client alias": {
+			source: `package agent
+import (
+    "context"
+    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+)
+func prompt(ctx context.Context, client protocol.Client) {
+    var alias = client
+    _ = alias.Prompt(ctx, "hello")
+}`,
+			want: []string{"acp.Client", "direct ACP client lifecycle Prompt"},
+		},
+		"later assignment ACP client alias": {
+			source: `package agent
+import (
+    "context"
+    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+)
+func cancel(ctx context.Context, client protocol.Client) {
+    var alias any
+    alias = client
+    _ = alias.Cancel(ctx)
+}`,
+			want: []string{"acp.Client", "direct ACP client lifecycle Cancel"},
+		},
+		"known holder field ACP client alias": {
+			source: `package agent
+import (
+    "context"
+    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+)
+type holder struct { client protocol.Client }
+func closeClient(ctx context.Context, value *holder) {
+    alias := value.client
+    _ = alias.Close(ctx)
+}`,
+			want: []string{"acp.Client", "direct ACP client lifecycle Close"},
+		},
+		"multi-hop ACP client alias": {
+			source: `package agent
+import (
+    "context"
+    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+)
+var client protocol.Client
+var third = second
+var second = first
+var first = client
+func prompt(ctx context.Context) {
+    _ = third.Prompt(ctx, "hello")
+}`,
+			want: []string{"acp.Client", "direct ACP client lifecycle Prompt"},
+		},
 		"direct adapter client": {
 			source: `package agent
 import (
@@ -226,6 +292,12 @@ var manager = sessions.NewManager(nil)`,
 import _ "github.com/hollis-labs/go-agent-wrapper/acp"`,
 			want: []string{"blank import has no reviewed Agent Host symbol use"},
 		},
+		"dot os StartProcess": {
+			source: `package agent
+import . "os"
+func start() { _, _ = StartProcess("agent", nil, nil) }`,
+			want: []string{"dot import can bypass the Agent Host ownership guard"},
+		},
 		"retired local ownership": {
 			source: `package agent
 type envWrappedCLIAdapter struct{}
@@ -247,6 +319,29 @@ func writeEnvWrapperScript() {}`,
 				}
 			}
 		})
+	}
+}
+
+func TestAgentOwnershipGuardDoesNotTaintUnrelatedIdentifiers(t *testing.T) {
+	const productionPath = "internal/runtime/agent/unrelated.go"
+	files := fstest.MapFS{productionPath: {Data: []byte(`package agent
+import (
+    "context"
+    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+)
+type holder struct { client protocol.Client }
+type unrelated struct { client string }
+func retain(client protocol.Client) {}
+func use(ctx context.Context, client unrelated) {
+    alias := client.client
+    _ = alias.Prompt(ctx, "not an ACP client")
+}`)}}
+	violations, err := scanAgentOwnership(files, "internal/runtime/agent", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsViolation(violations, "direct ACP client lifecycle Prompt") {
+		t.Fatalf("unrelated identifiers inherited ACP client taint:\n- %s", strings.Join(violations, "\n- "))
 	}
 }
 
@@ -454,7 +549,7 @@ func inspectAgentOwnership(fileSet *token.FileSet, path string, file *ast.File, 
 			alias = imported.Name.Name
 		}
 		if alias == "." {
-			if guardedOwnershipImport(importPath) || importPath == "os/exec" || importPath == "syscall" {
+			if guardedOwnershipImport(importPath) || importPath == "os" || importPath == "os/exec" || importPath == "syscall" {
 				violations = append(violations, declarationViolation(fileSet, path, imported.Pos(), "dot import can bypass the Agent Host ownership guard"))
 			}
 			continue
@@ -473,40 +568,7 @@ func inspectAgentOwnership(fileSet *token.FileSet, path string, file *ast.File, 
 		}
 	}
 
-	clientNames := make(map[string]bool)
-	clientFields := make(map[string]bool)
-	ast.Inspect(file, func(node ast.Node) bool {
-		switch value := node.(type) {
-		case *ast.ValueSpec:
-			if isDirectACPClientType(value.Type, aliases) {
-				for _, name := range value.Names {
-					clientNames[name.Name] = true
-				}
-			}
-			for index, expression := range value.Values {
-				if index < len(value.Names) && isDirectACPClientConstructor(expression, aliases) {
-					clientNames[value.Names[index].Name] = true
-				}
-			}
-		case *ast.Field:
-			if isDirectACPClientType(value.Type, aliases) {
-				for _, name := range value.Names {
-					clientNames[name.Name] = true
-					clientFields[name.Name] = true
-				}
-			}
-		case *ast.AssignStmt:
-			for index, expression := range value.Rhs {
-				if index >= len(value.Lhs) || !isDirectACPClientConstructor(expression, aliases) {
-					continue
-				}
-				if name, ok := value.Lhs[index].(*ast.Ident); ok {
-					clientNames[name.Name] = true
-				}
-			}
-		}
-		return true
-	})
+	clientTaint := collectDirectACPClientTaint(file, aliases)
 
 	ast.Inspect(file, func(node ast.Node) bool {
 		switch value := node.(type) {
@@ -551,7 +613,7 @@ func inspectAgentOwnership(fileSet *token.FileSet, path string, file *ast.File, 
 			}
 		case *ast.CallExpr:
 			selector, ok := value.Fun.(*ast.SelectorExpr)
-			if ok && directACPClientLifecycleMethods[selector.Sel.Name] && isDirectACPClientReceiver(selector.X, aliases, clientNames, clientFields) {
+			if ok && directACPClientLifecycleMethods[selector.Sel.Name] && clientTaint.contains(selector.X) {
 				violations = append(violations, declarationViolation(fileSet, path, selector.Pos(), "direct ACP client lifecycle "+selector.Sel.Name+"; route lifecycle through wrapper.Wrapper/acp.Manager"))
 			}
 		}
@@ -566,6 +628,164 @@ func guardedOwnershipImport(importPath string) bool {
 
 var directACPClientLifecycleMethods = map[string]bool{
 	"Launch": true, "Prompt": true, "Cancel": true, "Events": true, "InterruptCapability": true, "Close": true,
+}
+
+type directACPClientAlias struct {
+	target *ast.Object
+	source ast.Expr
+}
+
+type directACPClientTaint struct {
+	aliases            map[string]string
+	objects            map[*ast.Object]bool
+	objectTypes        map[*ast.Object]string
+	directClientFields map[string]map[string]bool
+}
+
+// collectDirectACPClientTaint follows local bindings by ast.Object identity,
+// rather than identifier spelling, so a client variable in one lexical scope
+// cannot taint an unrelated variable with the same name. Alias edges are
+// resolved to a fixed point, making declaration and assignment order
+// irrelevant to this structural guard.
+func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *directACPClientTaint {
+	taint := &directACPClientTaint{
+		aliases:            aliases,
+		objects:            make(map[*ast.Object]bool),
+		objectTypes:        make(map[*ast.Object]string),
+		directClientFields: make(map[string]map[string]bool),
+	}
+	var edges []directACPClientAlias
+
+	ast.Inspect(file, func(node ast.Node) bool {
+		switch value := node.(type) {
+		case *ast.TypeSpec:
+			structure, ok := value.Type.(*ast.StructType)
+			if !ok {
+				break
+			}
+			for _, field := range structure.Fields.List {
+				if !isDirectACPClientType(field.Type, aliases) {
+					continue
+				}
+				if taint.directClientFields[value.Name.Name] == nil {
+					taint.directClientFields[value.Name.Name] = make(map[string]bool)
+				}
+				for _, name := range field.Names {
+					taint.directClientFields[value.Name.Name][name.Name] = true
+				}
+			}
+		case *ast.ValueSpec:
+			for _, name := range value.Names {
+				if isDirectACPClientType(value.Type, aliases) {
+					taint.mark(name)
+				}
+				if typeName := localNamedType(value.Type); typeName != "" && name.Obj != nil {
+					taint.objectTypes[name.Obj] = typeName
+				}
+			}
+			for index, expression := range value.Values {
+				if index >= len(value.Names) {
+					continue
+				}
+				edges = append(edges, directACPClientAlias{target: value.Names[index].Obj, source: expression})
+				if typeName := localCompositeType(expression); typeName != "" && value.Names[index].Obj != nil {
+					taint.objectTypes[value.Names[index].Obj] = typeName
+				}
+			}
+		case *ast.Field:
+			for _, name := range value.Names {
+				if isDirectACPClientType(value.Type, aliases) {
+					taint.mark(name)
+				}
+				if typeName := localNamedType(value.Type); typeName != "" && name.Obj != nil {
+					taint.objectTypes[name.Obj] = typeName
+				}
+			}
+		case *ast.AssignStmt:
+			for index, expression := range value.Rhs {
+				if index >= len(value.Lhs) {
+					continue
+				}
+				name, ok := value.Lhs[index].(*ast.Ident)
+				if !ok {
+					continue
+				}
+				edges = append(edges, directACPClientAlias{target: name.Obj, source: expression})
+				if typeName := localCompositeType(expression); typeName != "" && name.Obj != nil {
+					taint.objectTypes[name.Obj] = typeName
+				}
+			}
+		}
+		return true
+	})
+
+	for changed := true; changed; {
+		changed = false
+		for _, edge := range edges {
+			if edge.target == nil || taint.objects[edge.target] || !taint.contains(edge.source) {
+				continue
+			}
+			taint.objects[edge.target] = true
+			changed = true
+		}
+	}
+	return taint
+}
+
+func (t *directACPClientTaint) mark(name *ast.Ident) {
+	if name != nil && name.Obj != nil {
+		t.objects[name.Obj] = true
+	}
+}
+
+func (t *directACPClientTaint) contains(expression ast.Expr) bool {
+	switch value := expression.(type) {
+	case *ast.ParenExpr:
+		return t.contains(value.X)
+	case *ast.StarExpr:
+		return t.contains(value.X)
+	case *ast.UnaryExpr:
+		return t.contains(value.X)
+	case *ast.Ident:
+		return value.Obj != nil && t.objects[value.Obj]
+	case *ast.SelectorExpr:
+		receiver, ok := value.X.(*ast.Ident)
+		if !ok || receiver.Obj == nil {
+			return false
+		}
+		typeName := t.objectTypes[receiver.Obj]
+		return typeName != "" && t.directClientFields[typeName][value.Sel.Name]
+	case *ast.CallExpr:
+		return isDirectACPClientConstructor(value, t.aliases)
+	default:
+		return false
+	}
+}
+
+func localNamedType(expression ast.Expr) string {
+	switch value := expression.(type) {
+	case *ast.Ident:
+		return value.Name
+	case *ast.ParenExpr:
+		return localNamedType(value.X)
+	case *ast.StarExpr:
+		return localNamedType(value.X)
+	default:
+		return ""
+	}
+}
+
+func localCompositeType(expression ast.Expr) string {
+	switch value := expression.(type) {
+	case *ast.CompositeLit:
+		return localNamedType(value.Type)
+	case *ast.UnaryExpr:
+		return localCompositeType(value.X)
+	case *ast.ParenExpr:
+		return localCompositeType(value.X)
+	default:
+		return ""
+	}
 }
 
 var retiredAgentOwnershipDeclarations = map[string]string{
@@ -625,19 +845,4 @@ func isDirectACPClientConstructor(expression ast.Expr, aliases map[string]string
 	importPath := aliases[ident.Name]
 	return (importPath == agentWrapperModule+"/acp" && strings.HasPrefix(selector.Sel.Name, "New")) ||
 		(strings.HasPrefix(importPath, agentWrapperModule+"/adapters/") && selector.Sel.Name == "NewClient")
-}
-
-func isDirectACPClientReceiver(expression ast.Expr, aliases map[string]string, names, fields map[string]bool) bool {
-	switch value := expression.(type) {
-	case *ast.ParenExpr:
-		return isDirectACPClientReceiver(value.X, aliases, names, fields)
-	case *ast.Ident:
-		return names[value.Name]
-	case *ast.SelectorExpr:
-		return fields[value.Sel.Name]
-	case *ast.CallExpr:
-		return isDirectACPClientConstructor(value, aliases)
-	default:
-		return false
-	}
 }

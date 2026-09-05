@@ -23,10 +23,10 @@ func TestSession_NilGuards(t *testing.T) {
 		t.Errorf("nil Session.Checkpoint should error")
 	}
 
-	// Session with deps but nil SessionsManager — same pattern.
+	// Zero Session without a wrapper handle — same pattern.
 	zero := &Session{deps: &Dependencies{}}
 	if err := zero.SendInput([]byte("x")); err == nil {
-		t.Errorf("zero Session.SendInput should error on nil SessionsManager")
+		t.Errorf("zero Session.SendInput should error on nil wrapper")
 	}
 	if err := zero.Stop(context.Background()); err == nil ||
 		!strings.Contains(err.Error(), "session not initialized") {

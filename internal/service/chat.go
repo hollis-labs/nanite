@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
@@ -180,10 +179,9 @@ type ChatServiceConfig struct {
 	// haven't wired the runtime yet.
 	AgentDeps *runtimeagent.Dependencies
 
-	// AgentSessionsManager is the singleton agentsessions.Manager owned
-	// by the runtime. Held by the chat service so Shutdown can drain
-	// running sessions cleanly. nil-safe: drain is skipped when absent.
-	AgentSessionsManager *agentsessions.Manager
+	// AgentSessionManager is the single registry for wrapper-owned runtime
+	// handles. Chat lookup and daemon shutdown share it with agent.Boot.
+	AgentSessionManager *runtimeagent.SessionManager
 
 	// AgentEventBridge is the per-session event router owned by the chat
 	// service. driveBootSession (Phase 4c.4) uses it to bind a per-turn
@@ -296,15 +294,12 @@ type chatServiceImpl struct {
 	// when the runtime is not wired (legacy chat-harness path universal).
 	agentDeps *runtimeagent.Dependencies
 
-	// agentSessionsManager is the singleton runtime manager. Held so
-	// Shutdown can drain running sessions cleanly. nil-safe.
-	agentSessionsManager *agentsessions.Manager
-
 	// activeSessions tracks long-lived runtime sessions keyed by chat
 	// session id (Phase 4c). First HandleMessage call for a CLI-PTY-capable
 	// session boots the runtime; subsequent calls SendInput on the existing
 	// session. Map values are *runtimeagent.Session.
-	activeSessions sync.Map
+	activeSessionsOnce sync.Once
+	activeSessions     *runtimeagent.SessionManager
 
 	// freshBootSessions is a one-shot, in-memory set of session ids whose
 	// NEXT cold-boot must skip auto-recovery (no recovery pack, no provider
@@ -396,6 +391,18 @@ type chatServiceImpl struct {
 	dispatcher *dispatcher.Dispatcher
 }
 
+func (s *chatServiceImpl) runtimeSessions() *runtimeagent.SessionManager {
+	s.activeSessionsOnce.Do(func() {
+		if s.activeSessions == nil && s.agentDeps != nil {
+			s.activeSessions = s.agentDeps.Manager
+		}
+		if s.activeSessions == nil {
+			s.activeSessions = runtimeagent.NewSessionManager()
+		}
+	})
+	return s.activeSessions
+}
+
 // inFlightGen records the currently-running generateResponse for a session
 // so a fresh launch can cancel it. Keyed by msgID so the deregister path
 // only clears the slot if we're still the active one.
@@ -437,6 +444,13 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 			um = resolvedModel
 		}
 	}
+	activeSessions := cfg.AgentSessionManager
+	if activeSessions == nil && cfg.AgentDeps != nil {
+		activeSessions = cfg.AgentDeps.Manager
+	}
+	if activeSessions == nil {
+		activeSessions = runtimeagent.NewSessionManager()
+	}
 	impl := &chatServiceImpl{
 		sessions:                cfg.Sessions,
 		agents:                  cfg.Agents,
@@ -474,7 +488,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		reminderEngine:          cfg.ReminderEngine,
 		reflexEngine:            cfg.ReflexEngine,
 		agentDeps:               cfg.AgentDeps,
-		agentSessionsManager:    cfg.AgentSessionsManager,
+		activeSessions:          activeSessions,
 		agentEventBridge:        cfg.AgentEventBridge,
 		agentBootDirAdapter:     cfg.AgentBootDirAdapter,
 		envelopeRenderExecutor:  cfg.EnvelopeRenderExecutor,
@@ -993,27 +1007,11 @@ func (s *chatServiceImpl) shutdownWithMaxWait(maxWait time.Duration) error {
 	if s.processTracker != nil {
 		s.processTracker.KillAll()
 	}
-	if s.agentSessionsManager != nil {
+	if sessions := s.runtimeSessions(); sessions != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), maxWait)
-		if err := s.agentSessionsManager.Shutdown(ctx); err != nil {
+		if err := sessions.Shutdown(ctx); err != nil {
 			slog.Warn("chat-service: agent sessions shutdown", "err", err)
 			shutdownErrs = append(shutdownErrs, fmt.Errorf("agent sessions shutdown: %w", err))
-		}
-		cancel()
-	}
-	// TASKS/agent-host-acp/06: agentSessionsManager.Shutdown above no
-	// longer has anything to drain — Boot drives sessions through
-	// wrapper.Wrapper.Run directly and never registers them with
-	// *agentsessions.Manager (see internal/runtime/agent/agent.go's Boot),
-	// so its own Shutdown call is now a harmless no-op left in place for
-	// any other future Manager use, not a real drain path. This is the
-	// direct replacement: stop every session runtimeagent.Dependencies is
-	// still tracking as live.
-	if s.agentDeps != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), maxWait)
-		if err := s.agentDeps.StopAllLiveSessions(ctx); err != nil {
-			slog.Warn("chat-service: wrapper-driven agent sessions shutdown", "err", err)
-			shutdownErrs = append(shutdownErrs, fmt.Errorf("wrapper-driven agent sessions shutdown: %w", err))
 		}
 		cancel()
 	}
@@ -1043,7 +1041,7 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 	if sessionID == "" {
 		return
 	}
-	v, ok := s.activeSessions.LoadAndDelete(sessionID)
+	sess, ok := s.runtimeSessions().LoadAndDelete(sessionID)
 	if !ok {
 		return
 	}
@@ -1055,10 +1053,6 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 	}
 	if s.agentBootDirAdapter != nil {
 		s.agentBootDirAdapter.Untrack(sessionID)
-	}
-	sess, typeOK := v.(*runtimeagent.Session)
-	if !typeOK {
-		return
 	}
 	if err := sess.Stop(ctx); err != nil {
 		slog.Warn("chat-service: CloseAgentSession Stop", "session_id", sessionID, "err", err)

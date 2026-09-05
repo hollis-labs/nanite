@@ -106,10 +106,8 @@ func (s *chatServiceImpl) driveBootSession(
 
 	// 1. Look up the active runtime session.
 	var sess *runtimeagent.Session
-	if v, ok := s.activeSessions.Load(sessionID); ok {
-		if existing, typeOK := v.(*runtimeagent.Session); typeOK {
-			sess = existing
-		}
+	if existing, ok := s.runtimeSessions().Load(sessionID); ok {
+		sess = existing
 	}
 
 	// CW-20260525-0001: capture cold-boot BEFORE the boot block reassigns
@@ -174,7 +172,7 @@ func (s *chatServiceImpl) driveBootSession(
 		if err != nil {
 			return nil, fmt.Errorf("driveBootSession: boot: %w", err)
 		}
-		s.activeSessions.Store(sessionID, booted)
+		s.runtimeSessions().Store(sessionID, booted)
 		// Track the bootDir + Options on the recovery BootDirOps adapter
 		// so a Repopulate / RegenerateCLAUDEMD remediation can rebuild
 		// the same SetupParams without us re-encoding them ad-hoc here.
@@ -449,9 +447,9 @@ func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtim
 	if sess == nil {
 		return
 	}
-	if prev, hadPrev := s.activeSessions.Swap(sessionID, sess); hadPrev {
-		if prevSess, ok := prev.(*runtimeagent.Session); ok && prevSess != nil && prevSess != sess {
-			s.stopDisplacedSession(sessionID, prevSess)
+	if prev, hadPrev := s.runtimeSessions().Swap(sessionID, sess); hadPrev {
+		if prev != nil && prev != sess {
+			s.stopDisplacedSession(sessionID, prev)
 		}
 	}
 	// Slot hash + tool-partition state reset is implicit: the prior
@@ -571,7 +569,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	// session, undermining the "escalate to permanent after N attempts"
 	// guard the cap exists for.
 	if _, displaced := s.displacedSessions.LoadAndDelete(sess); displaced {
-		s.activeSessions.CompareAndDelete(sessionID, sess)
+		s.runtimeSessions().CompareAndDelete(sessionID, sess)
 		s.activeSessionSlots.Delete(sessionID)
 		s.toolPartitionStates.Delete(sessionID)
 		slog.Info("recovery: displaced session stopped by adoptReplacementSession — skipping broker",
@@ -589,7 +587,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 		// CompareAndDelete so a replacement a concurrent turn already
 		// stored is not clobbered. The aux maps are session-id keyed and
 		// a fresh boot re-stores them, so a plain Delete is safe there.
-		s.activeSessions.CompareAndDelete(sessionID, sess)
+		s.runtimeSessions().CompareAndDelete(sessionID, sess)
 		s.activeSessionSlots.Delete(sessionID)
 		s.toolPartitionStates.Delete(sessionID)
 		if broker, ok := s.agentDeps.Recovery.(*broker.Broker); ok {
@@ -605,7 +603,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	var xe *agentsessions.ExitError
 	if !errors.As(err, &xe) {
 		// Clean exit — nothing for the broker to recover.
-		s.activeSessions.Delete(sessionID)
+		s.runtimeSessions().Delete(sessionID)
 		s.activeSessionSlots.Delete(sessionID)
 		s.toolPartitionStates.Delete(sessionID)
 		// Comma-ok rather than panicking type assert: future
@@ -655,7 +653,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	// toolPartitionStates is session-id-keyed too — the replacement
 	// session boots fresh, so pruning here mirrors the activeSessions
 	// reset.
-	s.activeSessions.Delete(sessionID)
+	s.runtimeSessions().Delete(sessionID)
 	s.activeSessionSlots.Delete(sessionID)
 	s.toolPartitionStates.Delete(sessionID)
 

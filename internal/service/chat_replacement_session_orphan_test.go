@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
@@ -47,16 +46,16 @@ func bootRealDeps(t *testing.T) *runtimeagent.Dependencies {
 		Agents: &fakeAgentProfilesResolver{profile: &store.AgentProfile{
 			ID: "agent-1", Slug: "test-agent", DefaultProvider: "codex",
 		}},
-		SessionsManager: agentsessions.NewManager(nil),
-		Store:           &agentRuntimeStore{store: st},
-		PathGrants:      permission.NewPathGrants(),
+		Manager:    runtimeagent.NewSessionManager(),
+		Store:      &agentRuntimeStore{store: st},
+		PathGrants: permission.NewPathGrants(),
 		ProviderAdapter: func(name string) provider.CLIAdapter {
 			return &fakeCLIAdapter{name: name}
 		},
 		MCPConfig:      runtimeagent.MCPConfig{}, // empty DBPath disables .mcp.json planting
 		WorkspacesRoot: t.TempDir(),
 	}
-	t.Cleanup(func() { _ = deps.SessionsManager.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = deps.Manager.Shutdown(context.Background()) })
 	return deps
 }
 
@@ -137,7 +136,7 @@ func TestAdoptReplacementSession_MidStreamErrorPath_StopsDisplacedSession(t *tes
 	t.Cleanup(func() { _ = replacement.Stop(context.Background()) })
 
 	svc := &chatServiceImpl{}
-	svc.activeSessions.Store(sessionID, oldSess)
+	svc.runtimeSessions().Store(sessionID, oldSess)
 
 	adopted := make(chan struct{}, 1)
 	b := broker.NewBroker(
@@ -167,11 +166,10 @@ func TestAdoptReplacementSession_MidStreamErrorPath_StopsDisplacedSession(t *tes
 	// The replacement must be what's live in activeSessions now — this
 	// half of the contract already worked pre-fix; asserting it here
 	// pins it against a regression from the fix itself.
-	v, ok := svc.activeSessions.Load(sessionID)
+	got, ok := svc.runtimeSessions().Load(sessionID)
 	if !ok {
 		t.Fatal("activeSessions has no entry for sessionID after adoption")
 	}
-	got, _ := v.(*runtimeagent.Session)
 	if got != replacement {
 		t.Fatalf("activeSessions holds %+v, want the replacement session %+v", got, replacement)
 	}
@@ -225,7 +223,7 @@ func TestAdoptReplacementSession_ObserveSessionForRecoveryPath_NoDoubleNotify(t 
 	})
 
 	svc := &chatServiceImpl{agentDeps: &runtimeagent.Dependencies{Recovery: b}}
-	svc.activeSessions.Store(sessionID, oldSess)
+	svc.runtimeSessions().Store(sessionID, oldSess)
 	b.SetReplacementSessionHook(svc.adoptReplacementSession)
 
 	// A second, independent Wait-observer goroutine for oldSess — mirrors
@@ -266,11 +264,11 @@ func TestAdoptReplacementSession_ObserveSessionForRecoveryPath_NoDoubleNotify(t 
 
 	// The replacement must still be the live activeSessions entry — the
 	// old observer's own cleanup must not have clobbered it.
-	v, ok := svc.activeSessions.Load(sessionID)
+	got, ok := svc.runtimeSessions().Load(sessionID)
 	if !ok {
 		t.Fatal("activeSessions has no entry for sessionID after both observers settled")
 	}
-	if got, _ := v.(*runtimeagent.Session); got != replacement {
+	if got != replacement {
 		t.Fatalf("activeSessions holds %+v after oldSess's observer settled, want the replacement %+v (clobber race)", got, replacement)
 	}
 }

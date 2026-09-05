@@ -989,6 +989,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Providers:        cfg.Providers,
 		APIBaseURL:       cfg.APIBaseURL,
 		CLIWritableRoots: cfg.DevToolsAllowedPaths,
+		Permissions:      permissions,
 		// TASKS/skills/10: threads the same vendored skill store
 		// constructed above (skillVendor, possibly nil on init failure —
 		// see its own comment) onto runtimeagent.Dependencies.SkillVendor
@@ -1043,9 +1044,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		ReminderEngine: reminderEngine,
 		ReflexEngine:   reflexEngine,
 		// Phase 4c.1 (CW-20260508-0002): agent-runtime composition root.
-		AgentDeps:            agentDeps,
-		AgentSessionsManager: agentManager,
-		AgentEventBridge:     agentBridge,
+		AgentDeps:           agentDeps,
+		AgentSessionManager: agentManager,
+		AgentEventBridge:    agentBridge,
 		// Phase 9 (CW-20260510-0014): bootdir adapter for the recovery
 		// broker. Chat-side callers Track / Untrack so the broker can
 		// repopulate the session's sandbox dir / regenerate CLAUDE.md

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -27,17 +26,17 @@ func makeBootDeps(t *testing.T, profileProvider string) (*Dependencies, *fakeRun
 	pg := permission.NewPathGrants()
 	profile := storeProfile(profileProvider)
 	deps := &Dependencies{
-		Agents:          &fakeAgentProfiles{profile: &profile},
-		SessionsManager: agentsessions.NewManager(nil),
-		Store:           store,
-		PathGrants:      pg,
+		Agents:     &fakeAgentProfiles{profile: &profile},
+		Manager:    NewSessionManager(),
+		Store:      store,
+		PathGrants: pg,
 		ProviderAdapter: func(name string) provider.CLIAdapter {
 			return &fakeAdapter{name: name}
 		},
 		MCPConfig:      MCPConfig{}, // empty disables .mcp.json planting
 		WorkspacesRoot: t.TempDir(),
 	}
-	t.Cleanup(func() { _ = deps.SessionsManager.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = deps.Manager.Shutdown(context.Background()) })
 	return deps, store
 }
 

@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
-
-	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 )
 
 // stopRebootGrace bounds the cooperative Stop of the outgoing runtime
@@ -100,19 +98,12 @@ func (s *chatServiceImpl) rebootRuntime(ctx context.Context, sessionID string, f
 		return RebootResult{}, ErrSessionBusy
 	}
 
-	v, ok := s.activeSessions.Load(sessionID)
+	sess, ok := s.runtimeSessions().Load(sessionID)
 	if !ok {
 		// No live runtime agent. The next turn cold-boots fresh anyway, so
 		// the reboot intent is already satisfied — report it as a no-op.
 		return RebootResult{Rebooted: false, Status: "no_active_agent"}, nil
 	}
-	sess, _ := v.(*runtimeagent.Session)
-	if sess == nil {
-		// Defensive: a non-Session value should never be stored here.
-		s.activeSessions.CompareAndDelete(sessionID, v)
-		return RebootResult{Rebooted: false, Status: "no_active_agent"}, nil
-	}
-
 	// Flag the session BEFORE Stop so the Wait-observer
 	// (observeSessionForRecovery) — which may wake the instant Stop kills
 	// the process, while we are still inside Stop — sees the flag and skips
@@ -136,7 +127,7 @@ func (s *chatServiceImpl) rebootRuntime(ctx context.Context, sessionID string, f
 	// against clobbering a replacement a concurrent turn may have already
 	// stored. The observer performs the same eviction idempotently when it
 	// wakes; doing it here too makes the reboot synchronous for the caller.
-	s.activeSessions.CompareAndDelete(sessionID, sess)
+	s.runtimeSessions().CompareAndDelete(sessionID, sess)
 	s.activeSessionSlots.Delete(sessionID)
 	s.toolPartitionStates.Delete(sessionID)
 

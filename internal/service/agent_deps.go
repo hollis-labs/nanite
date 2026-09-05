@@ -30,7 +30,7 @@ import (
 // build *runtimeagent.Dependencies. Construction is deliberately a separate
 // step from chatServiceImpl wiring so the deps can be re-used by the subagent
 // runner and (eventually) the background dispatcher without re-creating the
-// agentsessions.Manager singleton.
+// shared wrapper session registry.
 type AgentDepsConfig struct {
 	Store           *store.Store
 	PathGrants      *permission.PathGrants
@@ -40,6 +40,7 @@ type AgentDepsConfig struct {
 	BinaryPath      string
 	DBPath          string
 	SandboxBaseProf sandbox.Profile
+	Permissions     *permission.Engine
 
 	// CLIWritableRoots is the directory allow-list a CLI-launch agent
 	// (codex / claude) may write to beyond its boot dir. Threaded onto
@@ -90,9 +91,9 @@ type AgentDepsBundle struct {
 	// into runtimeagent.Boot.
 	Deps *runtimeagent.Dependencies
 
-	// Manager is the singleton agentsessions.Manager held by the chat
-	// service for daemon-bootstrap orphan sweep + Shutdown drain.
-	Manager *agentsessions.Manager
+	// Manager is the single Nanite binding registry for wrapper-owned
+	// sessions, shared by chat lookup, recovery, reaping, and shutdown.
+	Manager *runtimeagent.SessionManager
 
 	// Bridge is the agentEventBridge held by the chat service so
 	// driveBootSession can bind per-session routers.
@@ -114,8 +115,8 @@ type AgentDepsBundle struct {
 	BootAdapter *agentBootAdapter
 }
 
-// BuildAgentDependencies wires a *runtimeagent.Dependencies plus the singleton
-// agentsessions.Manager. Returns an AgentDepsBundle aggregating the composed
+// BuildAgentDependencies wires runtime dependencies plus the single wrapper
+// session binding registry. Returns an AgentDepsBundle aggregating the composed
 // Dependencies struct, the Manager instance (for daemon-bootstrap orphan
 // sweep + Shutdown drain), the agentEventBridge (held by the chat service
 // so driveBootSession can bind per-turn routers), and the per-adapter
@@ -124,7 +125,7 @@ type AgentDepsBundle struct {
 //
 // The composition root is the single point that:
 //
-//   - constructs *agentsessions.Manager with its sinks
+//   - constructs the shared Wrapper/ACP session manager
 //   - wires the Store-backed RuntimeStore
 //   - wires the AgentProfileResolver
 //   - resolves the per-provider CLIAdapter
@@ -164,10 +165,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		dbPath = cfg.Store.DBPath(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	}
 
-	stateSink := &agentRuntimeStateSink{store: cfg.Store}
-	eventSink := &agentRuntimeEventSink{}
-	manager := agentsessions.NewManager(stateSink).
-		WithEventSink(eventSink)
+	manager := runtimeagent.NewSessionManager()
 
 	resolver := &agentProfileResolver{store: cfg.Store}
 	runtimeStore := &agentRuntimeStore{store: cfg.Store}
@@ -190,15 +188,35 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 	telemetry := agentTelemetry{}
 
 	bridge := &agentEventBridge{streams: cfg.Streams}
+	approvalRequestSink := func(req *permission.ApprovalRequest) {
+		if req == nil {
+			return
+		}
+		payload, err := json.Marshal(chat.ApprovalRequestPayload{
+			RequestID: req.ID,
+			Tool:      req.ToolName,
+			Input:     req.Input,
+			Reason:    req.Reason,
+		})
+		if err != nil {
+			return
+		}
+		_ = cfg.Streams.BroadcastSessionStreamEvent(req.SessionID, chat.StreamEvent{
+			Type: "approval_request",
+			Data: string(payload),
+		})
+	}
 
 	deps := &runtimeagent.Dependencies{
-		Agents:             resolver,
-		SessionsManager:    manager,
-		Store:              runtimeStore,
-		PathGrants:         cfg.PathGrants,
-		EventFanout:        bridge.fanout,
-		TypedEventCallback: bridge.typedCallback,
-		ProviderAdapter:    providerAdapter,
+		Agents:              resolver,
+		Manager:             manager,
+		Store:               runtimeStore,
+		PathGrants:          cfg.PathGrants,
+		EventFanout:         bridge.fanout,
+		TypedEventCallback:  bridge.typedCallback,
+		Permissions:         cfg.Permissions,
+		ApprovalRequestSink: approvalRequestSink,
+		ProviderAdapter:     providerAdapter,
 		MCPConfig: runtimeagent.MCPConfig{
 			BinaryPath: binPath,
 			DBPath:     dbPath,
@@ -228,19 +246,9 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 	if cfg.SkillVendor != nil {
 		deps.SkillVendor = cfg.SkillVendor
 	}
-	// CW-20260518-0085, revised by TASKS/agent-host-acp/06: orphan sweep +
-	// periodic reaper consult the in-process session registry to
-	// distinguish "process gone but session still alive in this nanite"
-	// from "stale row left over from a pre-restart session." Pre-migration
-	// this was wired against *agentsessions.Manager (same source of truth
-	// as SessionsManager above); post-migration, Boot drives sessions
-	// through wrapper.Wrapper.Run directly and never registers them with
-	// Manager at all, so Manager's own registry would never see a
-	// wrapper-driven session as live. deps now answers LiveSessionChecker
-	// itself (runtimeagent.Dependencies.IsLive, backed by its own
-	// wrapper-driven-session registry) — set here rather than inline in
-	// the struct literal above because the value is self-referential.
-	deps.LiveSessions = deps
+	// Orphan reconciliation consults the same registry chat and shutdown
+	// use; no second liveness map can drift during recovery replacement.
+	deps.LiveSessions = manager
 
 	// BootDir adapter — satisfies broker.BootDirOps by re-running the
 	// per-provider sandbox-dir population logic against the existing
@@ -578,12 +586,8 @@ func (s *agentRuntimeStore) MarkRuntimeFailed(id, reason string) error {
 	return s.store.MarkAgentRuntimeFailed(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, reason)
 }
 
-// UpdateState delegates to the same store.SetAgentRuntimeState the
-// pre-migration agentRuntimeStateSink (below) drove automatically via
-// *agentsessions.Manager's StateSink callback. Boot and Session's own
-// completion path (internal/runtime/agent/agent.go) now call this
-// directly — see runtimeagent.RuntimeStore.UpdateState's doc comment for
-// why.
+// UpdateState persists the wrapper readiness and exit boundaries observed by
+// Boot's lifecycle goroutine.
 func (s *agentRuntimeStore) UpdateState(id, state string, pid int) error {
 	return s.store.SetAgentRuntimeState(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, state, pid)
 }
@@ -656,57 +660,6 @@ func marshalMeta(m map[string]any) string {
 		return "{}"
 	}
 	return string(b)
-}
-
-// --- StateSink adapter ---
-
-// agentRuntimeStateSink translates agentsessions.Manager state events into
-// agent_runtime row updates. The lib emits launching → running → done|failed;
-// orphaned is set separately by orphansweep.RuntimeReaper.SweepOnce.
-type agentRuntimeStateSink struct {
-	store *store.Store
-}
-
-func (s *agentRuntimeStateSink) UpdateSessionState(id string, state agentsessions.State, pid int, exit *int) error {
-	return s.store.SetAgentRuntimeState(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, string(state), pid)
-}
-
-// --- LiveSessions adapter ---
-//
-// managerLiveSessions (the pre-migration runtimeagent.LiveSessionChecker
-// backed by *agentsessions.Manager.Get) is retired by
-// TASKS/agent-host-acp/06 — Boot no longer registers sessions with
-// Manager at all (wrapper.Wrapper.Run drives agentkit/agentsessions
-// directly), so Manager.Get would never find a wrapper-driven session
-// regardless of whether it's genuinely live. deps.LiveSessions is now
-// wired directly against the composed *runtimeagent.Dependencies value
-// itself (see this file's BuildAgentDependencies, "deps.LiveSessions =
-// deps") — Dependencies.IsLive is backed by its own wrapper-driven-session
-// registry, populated/cleared by Boot/Session directly. See
-// runtimeagent.Dependencies' liveSessions field doc comment for the full
-// rationale.
-
-// --- EventSink adapter ---
-
-// agentRuntimeEventSink forwards lifecycle events to slog at debug level.
-// Production observability (OTEL spans, counters) lands once the cross-app
-// telemetry seam stabilizes; the sink shape is preserved so the upgrade is
-// drop-in.
-type agentRuntimeEventSink struct{}
-
-func (s *agentRuntimeEventSink) Emit(ctx context.Context, ev agentsessions.LifecycleEvent) {
-	exit := -1
-	if ev.ExitCode != nil {
-		exit = *ev.ExitCode
-	}
-	slog.Debug("agent_runtime: lifecycle",
-		"session_id", ev.SessionID,
-		"kind", string(ev.Kind),
-		"from", string(ev.From),
-		"to", string(ev.To),
-		"exit", exit,
-		"reason", ev.Reason,
-	)
 }
 
 // --- Telemetry ---

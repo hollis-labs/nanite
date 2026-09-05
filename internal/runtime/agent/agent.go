@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-agent-wrapper/activity"
+	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	"github.com/hollis-labs/go-agent-wrapper/wrapper"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/oklog/ulid/v2"
@@ -232,21 +233,8 @@ type Session struct {
 	// pre-ready failure) before ever returning a *Session, so every method
 	// below can assume wr is ready.
 	//
-	// Mutually exclusive with acp (below) — a Session is driven through
-	// exactly one backend, decided once at Boot by factory.go's
-	// useACPProtocol.
-	wr *wrapper.Wrapper
-
-	// acp, when non-nil, is the ACP-client-driven backend for a session
-	// configured with agent_profiles.protocol="acp"
-	// (TASKS/agent-host-acp/11-nanite-per-agent-protocol-transport-
-	// config.md) — see acp_session.go's package doc for why this bypasses
-	// wr/wrapper.Wrapper.Run entirely rather than routing an ACP-protocol
-	// agent through the same wrapper.Config.Adapter seam as the native
-	// path. SendInput/Stop (manager.go) branch on this field being set;
-	// Wait/Checkpoint are backend-agnostic (runDone/runErr are populated
-	// identically by both bootACP and the native Boot path).
-	acp *acpSession
+	wr    *wrapper.Wrapper
+	isACP bool
 
 	// runDone closes once the background goroutine Boot started observes
 	// wr.Run(runCtx) return (clean exit or error alike) — safe for any
@@ -311,12 +299,9 @@ func effectiveProvider(opts Options, profile *store.AgentProfile) string {
 // boot dir, composes env + system prompt, selects a runtime (PTY for chat
 // sessions with PTY-capable adapters; subprocess-per-turn elsewhere), wires
 // sandbox gates per Mode, persists the runtime row, and starts the runtime
-// via a go-agent-wrapper wrapper.Wrapper — TASKS/agent-host-acp/06's
-// migration off the pre-migration direct
-// agentsessions.StartOptions/Dependencies.SessionsManager.Start call. Boot
-// still does not register the session with Dependencies.SessionsManager
-// (kept wired for other, orphan-sweep/shutdown-adjacent uses — see
-// deps.go) — wrapper.Wrapper.Run drives agentkit/agentsessions directly.
+// via go-agent-wrapper. Native and ACP launches deliberately share this one
+// lifecycle path: only boot-profile compilation, sandbox inputs, recovery
+// persistence, and UI event translation remain Nanite-owned.
 //
 // Mode-specific dispatch is documented per-Mode constant. The chat harness
 // owns turn orchestration; Boot only owns process lifecycle.
@@ -327,14 +312,11 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	if deps == nil {
 		return nil, errors.New("agent.Boot: Dependencies is required")
 	}
-	if deps.SessionsManager == nil {
-		return nil, errors.New("agent.Boot: Dependencies.SessionsManager is required")
+	if deps.Manager == nil {
+		return nil, errors.New("agent.Boot: Dependencies.Manager is required")
 	}
 	if deps.Agents == nil {
 		return nil, errors.New("agent.Boot: Dependencies.Agents is required")
-	}
-	if deps.ProviderAdapter == nil {
-		return nil, errors.New("agent.Boot: Dependencies.ProviderAdapter is required")
 	}
 	if deps.Store == nil {
 		return nil, errors.New("agent.Boot: Dependencies.Store is required")
@@ -352,6 +334,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	if sessID == "" {
 		sessID = newSessionID()
 	}
+	opts.SessionID = sessID
 
 	// CW-20260514-0054: ensure the project workdir exists before any
 	// subprocess is spawned. Boot profiles (and future call sites) can
@@ -395,30 +378,29 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		hadLineage = true
 	}
 
-	// providerName is resolved here (moved ahead of the native bootdir-setup
-	// block below) so the ACP dispatch branch immediately after can consult
-	// it before ever calling composeBootdirParams/layout.Setup —
-	// TASKS/agent-host-acp/11: an ACP-configured agent (factory.go's
-	// useACPProtocol) skips Nanite's provider-specific boot-dir planting
-	// entirely (no planted CLAUDE.md/config.toml — neither task 09's nor
-	// task 10's native ACP adapter has been shown to consume it; see
-	// acp_session.go's package doc), so it must never reach
-	// bootdirLayoutFor(providerName), which has no case for an ACP-only
-	// provider name like "copilot" and would fail with "bootdir for
-	// provider ... is not yet implemented."
 	providerName := effectiveProvider(opts, profile)
-
-	if useACPProtocol(profile) {
-		return bootACP(ctx, deps, opts, profile, providerName, sessID, ws, hadLineage)
+	isACP := useACPProtocol(profile)
+	bootDir := ""
+	spawnWorkdir := opts.Workdir
+	if spawnWorkdir == "" {
+		spawnWorkdir = ws.Root
 	}
+	envMap := composeEnv(profile, opts)
 
-	layout, params := composeBootdirParams(deps, opts, profile, sessID)
-	bootDir, err := layout.Setup(params)
-	if err != nil {
-		if hadLineage && deps.PathGrants != nil {
-			deps.PathGrants.ClearLineage(sessID)
+	// ACP agents consume their system prompt over session/new|load and do
+	// not consume Nanite's native provider boot files. Native agents retain
+	// the existing boot-profile/layout compilation unchanged.
+	if !isACP {
+		layout, params := composeBootdirParams(deps, opts, profile, sessID)
+		bootDir, err = layout.Setup(params)
+		if err != nil {
+			if hadLineage && deps.PathGrants != nil {
+				deps.PathGrants.ClearLineage(sessID)
+			}
+			return nil, fmt.Errorf("agent.Boot: bootdir setup: %w", err)
 		}
-		return nil, fmt.Errorf("agent.Boot: bootdir setup: %w", err)
+		envMap = layout.AmendEnv(envMap, bootDir)
+		spawnWorkdir = layout.SpawnWorkdir(bootDir, opts.Workdir)
 	}
 
 	// Anything past this point that fails must clean the boot dir to avoid
@@ -431,23 +413,22 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		return nil, failure
 	}
 
-	envMap := composeEnv(profile, opts)
-	envMap = layout.AmendEnv(envMap, bootDir)
-
-	spawnWorkdir := layout.SpawnWorkdir(bootDir, opts.Workdir)
-
-	adapter := deps.ProviderAdapter(providerName)
-	if adapter == nil {
-		return cleanup(fmt.Errorf("agent.Boot: no adapter registered for provider %q", providerName))
+	var selectedAdapter adapters.Adapter
+	if isACP {
+		selectedAdapter, err = newACPAdapter(providerName, effectiveACPTransport(profile))
+	} else {
+		if deps.ProviderAdapter == nil {
+			return cleanup(errors.New("agent.Boot: Dependencies.ProviderAdapter is required for native protocol"))
+		}
+		cli := deps.ProviderAdapter(providerName)
+		if cli == nil {
+			return cleanup(fmt.Errorf("agent.Boot: no adapter registered for provider %q", providerName))
+		}
+		selectedAdapter, err = selectNativeAdapter(providerName, opts.Mode, cli)
 	}
-
-	// runtimeCfg's Caps output is reused (not recomputed) below to pick the
-	// wrapper.Config.Adapter's Protocol/Transport pair — the untouched,
-	// single source of truth for the PTY/StreamingStdio runtime-shape
-	// decision. runtimeCfg itself is no longer fed into
-	// agentsessions.NewFromAdapter directly (wrapper.Wrapper.Run builds
-	// its own AdapterRuntimeConfig internally from the Descriptor).
-	runtimeCfg := runtimeConfigForAdapter(adapter, providerName, opts.Mode)
+	if err != nil {
+		return cleanup(fmt.Errorf("agent.Boot: select wrapper adapter: %w", err))
+	}
 
 	parentPtr := (*string)(nil)
 	if opts.ParentSessionID != "" {
@@ -490,25 +471,19 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		}
 	}
 
-	// Pre-migration this block conditionally built an
-	// agentsessions.SupervisorOptions for StartOptions.Supervisor when
-	// opts.Mode == ModeLongLived && runtimeCfg.Caps.PTY — i.e. never,
-	// since shouldUsePTY always returns false today (dead code, confirmed
-	// non-load-bearing in this task's own folded-in escalation finding 3).
-	// wrapper.Config has no Supervisor-equivalent field at all, so there is
-	// nothing left to wire this into; deps.Telemetry/deps.Recovery.OnRestart
-	// stay as documented, unused-today seams for a future PTY-capable
-	// adapter (Telemetry itself is untouched by this task).
-
 	sandboxProfile := buildSandboxProfile(deps.SandboxBaseProfile, opts, ws.Root, bootDir)
 
 	onSessionID := func(id string) {
 		_ = deps.Store.SetProviderSessionID(sessID, id)
 	}
 
-	// First-turn payload: ModeOneShot can override with OneShotPrompt; all
-	// others use the kickoff convention pointing at the planted boot.md.
+	// Native agents point at Nanite's planted boot file. ACP agents receive
+	// equivalent boot content directly because they do not consume those
+	// provider-specific files.
 	firstTurn := composeKickoff(opts.Role, sessID, opts.ParentSessionID)
+	if isACP {
+		firstTurn = composeKickoffRaw(opts)
+	}
 	if opts.Mode == ModeOneShot && opts.OneShotPrompt != "" {
 		firstTurn = opts.OneShotPrompt
 	}
@@ -527,27 +502,13 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	// escalation finding 3 — claude's planted CLAUDE.md is already
 	// auto-discovered via cwd, per claudeLayout.SpawnWorkdir), so there is
 	// no raw-boot-prompt-on-stdin write path left to suppress.
-	if shouldUseStreamingStdio(providerName, opts.Mode) {
+	if !isACP && shouldUseStreamingStdio(providerName, opts.Mode) {
 		if framed, ferr := streamingStdioUserFrame(firstTurn); ferr == nil {
 			firstTurnPayload = framed
 		}
 	}
 
-	// Env-parity workaround for a wrapper.Config gap task 05a did not
-	// cover — see wrapEnvForSpawn's doc comment (wrapper_adapter.go) for
-	// the full rationale: wrapper.Wrapper.Run's hardcoded StartOptions{}
-	// literal never sets Env, so without this the spawned child would
-	// silently inherit the Nanite daemon's own process environment instead
-	// of the per-session composed envMap — for Codex/OpenCode this means
-	// silently losing CODEX_HOME/OPENCODE_CONFIG_DIR, the sole redirect to
-	// their planted, sandboxed config.
-	wrappedCLI, err := wrapEnvForSpawn(adapter, providerName, bootDir, envMap)
-	if err != nil {
-		return cleanup(fmt.Errorf("agent.Boot: wrap env for spawn: %w", err))
-	}
-	nAdapter := newNativeAdapter(providerName, wrappedCLI, runtimeCfg.Caps)
-
-	sink := &runtimeEventSink{}
+	sink := &runtimeEventSink{acp: isACP}
 	if deps.EventFanout != nil {
 		sink.fanout = deps.EventFanout(sessID)
 	}
@@ -555,19 +516,27 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		sink.typedCB = deps.TypedEventCallback(sessID)
 	}
 	readyCh := make(chan struct{})
-	sink.onReady = func() { close(readyCh) }
 
 	wr, err := wrapper.New(wrapper.Config{
-		App:               "nanite",
-		Adapter:           nAdapter,
-		Activity:          activity.NewBridge(sink),
-		Workdir:           spawnWorkdir,
-		BootDir:           bootDir,
-		SessionID:         sessID,
-		WorkspaceDir:      ws.Root,
-		LogPath:           ws.LogPath,
-		SandboxProfile:    sandboxProfile,
-		SessionIDPreset:   sessionIDPreset,
+		App:      "nanite",
+		Adapter:  selectedAdapter,
+		Activity: activity.NewBridge(sink),
+		Workdir:  spawnWorkdir,
+		Environment: wrapper.ChildEnvironment{
+			Mode: wrapper.EnvironmentReplace,
+			Set:  envMapToSlice(envMap),
+		},
+		BootDir:         bootDir,
+		SessionID:       sessID,
+		WorkspaceDir:    ws.Root,
+		LogPath:         ws.LogPath,
+		SandboxProfile:  sandboxProfile,
+		SessionIDPreset: sessionIDPreset,
+		SystemPrompt:    ResolveSystemPrompt(opts.Role, profile, opts.Mode, opts.BootPromptOverride, opts.DynamicContext),
+		ACPManager:      deps.Manager.ACPManager(),
+		ACPBestEffortPermissionRequestResponder: bestEffortPermissionResponder(
+			sessID, deps.Permissions, deps.ApprovalRequestSink,
+		),
 		OnSessionID:       onSessionID,
 		AutoFireFirstTurn: shouldAutoFireFirstTurn(opts.Mode),
 		FirstTurnPayload:  string(firstTurnPayload),
@@ -591,13 +560,23 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		startedAt:    time.Now(),
 		hadLineage:   hadLineage,
 		wr:           wr,
+		isACP:        isACP,
 		runDone:      make(chan struct{}),
+	}
+	sink.onReady = func() {
+		// Registration is part of the synchronous readiness observation so a
+		// fast process exit cannot race Boot into publishing a dead handle.
+		// Recovery replacements are adopted by the service with Swap so it can
+		// still capture and stop a live predecessor; pre-storing here would
+		// overwrite that only reference before adoption.
+		if !opts.IsRelaunch {
+			deps.Manager.Store(sessID, sess)
+		}
+		close(readyCh)
 	}
 
 	// wrapper.Wrapper.Run owns the full start-wait-emit-exit lifecycle and
-	// blocks until the session exits (a materially different call shape
-	// than the pre-migration SessionsManager.Start, which returned once
-	// the runtime was merely registered) — run it on a background
+	// blocks until the session exits, so run it on a background
 	// goroutine detached from ctx (a long-lived ModeLongLived chat session
 	// must outlive the request-scoped ctx a caller passes into Boot).
 	// sess.wr becomes usable for SendInput/Stop the moment Wrapper.Run
@@ -620,8 +599,8 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	go func() {
 		defer runCancel()
 		defer close(sess.runDone)
-		sess.runErr = wr.Run(runCtx)
-		deps.untrackLiveSession(sessID)
+		sess.runErr = recoveryCompatibleWrapperError(wr.Run(runCtx), isACP)
+		deps.Manager.CompareAndDelete(sessID, sess)
 		state := "done"
 		if sess.runErr != nil {
 			state = "failed"
@@ -632,7 +611,6 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	select {
 	case <-readyCh:
 		_ = deps.Store.UpdateState(sessID, "running", 0)
-		deps.trackLiveSession(sessID, sess)
 	case <-sess.runDone:
 		runCancel()
 		if hadLineage && deps.PathGrants != nil {
@@ -667,12 +645,8 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 }
 
 // envMapToSlice flattens the composed env map into a sorted KEY=VALUE
-// slice. Pre-migration this fed agentsessions.StartOptions.Env directly;
-// post-migration it's reused by writeEnvWrapperScript (wrapper_adapter.go)
-// to render the same composed env deterministically into the per-session
-// wrapper script — same helper, same sort-for-determinism rationale
-// (stable test assertions, stable child-process debug output), different
-// consumer.
+// slice for wrapper.ChildEnvironment. Sorting keeps validation, tests, and
+// child-process diagnostics deterministic.
 func envMapToSlice(env map[string]string) []string {
 	if len(env) == 0 {
 		return nil

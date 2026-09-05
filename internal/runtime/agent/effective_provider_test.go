@@ -53,7 +53,7 @@ func TestExpandUserHome(t *testing.T) {
 //
 // The function is small but every dispatch site downstream
 // (bootdirLayoutFor, deps.ProviderAdapter, RuntimeRow.Provider,
-// Session.Provider, runtimeConfigForAdapter) depends on this contract
+// Session.Provider, wrapper adapter selection) depends on this contract
 // silently, so a future refactor that flips precedence would have
 // downstream consequences this test localizes.
 func TestEffectiveProvider_Precedence(t *testing.T) {

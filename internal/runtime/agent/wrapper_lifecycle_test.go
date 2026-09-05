@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-providers/provider/events"
@@ -75,10 +74,10 @@ func TestBoot_WrapperLifecycle_Claude(t *testing.T) {
 	pg := permission.NewPathGrants()
 	profile := storeProfile("claude")
 	deps := &Dependencies{
-		Agents:          &fakeAgentProfiles{profile: &profile},
-		SessionsManager: agentsessions.NewManager(nil),
-		Store:           store,
-		PathGrants:      pg,
+		Agents:     &fakeAgentProfiles{profile: &profile},
+		Manager:    NewSessionManager(),
+		Store:      store,
+		PathGrants: pg,
 		ProviderAdapter: func(name string) provider.CLIAdapter {
 			if name != "claude" {
 				return nil
@@ -95,7 +94,7 @@ func TestBoot_WrapperLifecycle_Claude(t *testing.T) {
 		},
 		WorkspacesRoot: t.TempDir(),
 	}
-	t.Cleanup(func() { _ = deps.SessionsManager.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = deps.Manager.Shutdown(context.Background()) })
 
 	sess, err := Boot(context.Background(), deps, Options{
 		Mode:          ModeOneShot,
@@ -111,11 +110,10 @@ func TestBoot_WrapperLifecycle_Claude(t *testing.T) {
 	}
 
 	// Boot only returns once wrapper.Wrapper.Run reaches
-	// runtimeevents.KindSessionReady — deps.IsLive must already reflect
-	// that (Boot's readyCh branch calls trackLiveSession before
-	// returning).
-	if !deps.IsLive(sess.ID) {
-		t.Errorf("deps.IsLive(%q) = false immediately after Boot, want true", sess.ID)
+	// runtimeevents.KindSessionReady — the shared Manager must already
+	// expose that wrapper handle before Boot returns.
+	if !deps.Manager.IsLive(sess.ID) {
+		t.Errorf("deps.Manager.IsLive(%q) = false immediately after Boot, want true", sess.ID)
 	}
 
 	waitCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -125,9 +123,9 @@ func TestBoot_WrapperLifecycle_Claude(t *testing.T) {
 	}
 
 	// Once Wait returns, wr.Run's background goroutine has fully finished
-	// — deps.untrackLiveSession already ran (see agent.go's Boot).
-	if deps.IsLive(sess.ID) {
-		t.Errorf("deps.IsLive(%q) = true after Wait, want false", sess.ID)
+	// and removed its binding from the shared Manager.
+	if deps.Manager.IsLive(sess.ID) {
+		t.Errorf("deps.Manager.IsLive(%q) = true after Wait, want false", sess.ID)
 	}
 
 	// Drain whatever landed on fanoutCh — Run's translator goroutine only
@@ -249,10 +247,10 @@ func TestBoot_WrapperLifecycle_Stop(t *testing.T) {
 	pg := permission.NewPathGrants()
 	profile := storeProfile("claude")
 	deps := &Dependencies{
-		Agents:          &fakeAgentProfiles{profile: &profile},
-		SessionsManager: agentsessions.NewManager(nil),
-		Store:           store,
-		PathGrants:      pg,
+		Agents:     &fakeAgentProfiles{profile: &profile},
+		Manager:    NewSessionManager(),
+		Store:      store,
+		PathGrants: pg,
 		ProviderAdapter: func(name string) provider.CLIAdapter {
 			if name != "claude" {
 				return nil
@@ -262,7 +260,7 @@ func TestBoot_WrapperLifecycle_Stop(t *testing.T) {
 		EventFanout:    func(string) chan<- llmtypes.StreamEvent { return fanoutCh },
 		WorkspacesRoot: t.TempDir(),
 	}
-	t.Cleanup(func() { _ = deps.SessionsManager.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = deps.Manager.Shutdown(context.Background()) })
 
 	sess, err := Boot(context.Background(), deps, Options{
 		Mode:    ModeLongLived,
@@ -274,8 +272,8 @@ func TestBoot_WrapperLifecycle_Stop(t *testing.T) {
 	}
 	bootDir := sess.BootDir
 
-	if !deps.IsLive(sess.ID) {
-		t.Errorf("deps.IsLive(%q) = false immediately after Boot, want true", sess.ID)
+	if !deps.Manager.IsLive(sess.ID) {
+		t.Errorf("deps.Manager.IsLive(%q) = false immediately after Boot, want true", sess.ID)
 	}
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -295,20 +293,18 @@ func TestBoot_WrapperLifecycle_Stop(t *testing.T) {
 	if _, statErr := os.Stat(bootDir); !os.IsNotExist(statErr) {
 		t.Errorf("boot dir %s still exists after Stop", bootDir)
 	}
-	if deps.IsLive(sess.ID) {
-		t.Errorf("deps.IsLive(%q) = true after Stop+Wait, want false", sess.ID)
+	if deps.Manager.IsLive(sess.ID) {
+		t.Errorf("deps.Manager.IsLive(%q) = true after Stop+Wait, want false", sess.ID)
 	}
 }
 
 // fakeCodexExecScript is a POSIX sh script standing in for the real
 // codex binary in `codex exec <prompt> --json` mode. It proves
-// wrapEnvForSpawn's env-wrapper-script mechanism (wrapper_adapter.go)
-// genuinely propagates the composed env — specifically CODEX_HOME, the
+// wrapper.ChildEnvironment genuinely propagates the composed env — specifically CODEX_HOME, the
 // sole redirect to codex's planted, sandboxed config.toml — into the real
 // spawned process. Writes CODEX_HOME's observed value to
-// $NANITE_TEST_PROBE_FILE (itself only reachable through the same
-// wrapper-script env propagation, since the script's exec chain clears
-// the inherited environment via `env -i` before re-exec-ing this script)
+// $NANITE_TEST_PROBE_FILE (itself only reachable through that explicit
+// replacement environment)
 // before printing canned codex --json stream output.
 const fakeCodexExecScript = `#!/bin/sh
 printf '%s' "$CODEX_HOME" > "$NANITE_TEST_PROBE_FILE"
@@ -317,10 +313,8 @@ echo '{"type":"turn.completed","turn_id":"t1"}'
 `
 
 // TestBoot_WrapperLifecycle_Codex_EnvParity is this task's own regression
-// test for the most severe gap it found and worked around entirely within
-// this repo (no libs/go-agent-wrapper change): wrapper.Config has no Env
-// seam (wrapEnvForSpawn's doc comment, wrapper_adapter.go, has the full
-// citation trail), so without the env-wrapper-script workaround, a
+// test for the environment contract now owned by wrapper v0.9.0. Without
+// the explicit ChildEnvironment replacement, a
 // wrapper.Wrapper.Run-driven Codex session would silently drop
 // codexLayout.AmendEnv's CODEX_HOME redirect and fall back to the
 // operator's real, global ~/.codex config — a sandbox-restriction bypass.
@@ -340,10 +334,10 @@ func TestBoot_WrapperLifecycle_Codex_EnvParity(t *testing.T) {
 	pg := permission.NewPathGrants()
 	profile := storeProfile("codex")
 	deps := &Dependencies{
-		Agents:          &fakeAgentProfiles{profile: &profile},
-		SessionsManager: agentsessions.NewManager(nil),
-		Store:           store,
-		PathGrants:      pg,
+		Agents:     &fakeAgentProfiles{profile: &profile},
+		Manager:    NewSessionManager(),
+		Store:      store,
+		PathGrants: pg,
 		ProviderAdapter: func(name string) provider.CLIAdapter {
 			if name != "codex" {
 				return nil
@@ -353,7 +347,7 @@ func TestBoot_WrapperLifecycle_Codex_EnvParity(t *testing.T) {
 		EventFanout:    func(string) chan<- llmtypes.StreamEvent { return fanoutCh },
 		WorkspacesRoot: t.TempDir(),
 	}
-	t.Cleanup(func() { _ = deps.SessionsManager.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = deps.Manager.Shutdown(context.Background()) })
 
 	sess, err := Boot(context.Background(), deps, Options{
 		Mode:          ModeOneShot,
@@ -410,22 +404,22 @@ func TestBoot_WrapperLifecycle_Codex_EnvParity(t *testing.T) {
 
 	seen, err := os.ReadFile(probeFile)
 	if err != nil {
-		t.Fatalf("read probe file (fake codex process never ran, or wrapEnvForSpawn's script chain is broken): %v", err)
+		t.Fatalf("read probe file (fake codex process never ran, or wrapper child environment is broken): %v", err)
 	}
 	if string(seen) != bootDir {
-		t.Errorf("fake codex process observed CODEX_HOME=%q, want %q (agent.Boot's env-wrapper-script workaround is not propagating codexLayout.AmendEnv's redirect)", string(seen), bootDir)
+		t.Errorf("fake codex process observed CODEX_HOME=%q, want %q (wrapper ChildEnvironment is not propagating codexLayout.AmendEnv's redirect)", string(seen), bootDir)
 	}
 }
 
 // fakeOpencodeRunScript is a POSIX sh script standing in for the real
 // opencode binary in `opencode run --agent <slug> ... "<prompt>"` mode
 // (Mode="" — the only mode cmd/nanite's composition root actually wires up,
-// per wrapper_adapter.go's own doc comment: opencode's HTTP+SSE "serve-http"
+// under Nanite's product policy: opencode's HTTP+SSE "serve-http"
 // Mode is unused today; Nanite drives opencode as a subprocess-per-turn
 // "adapter runtime" exactly like Codex). Ignores argv (AutoFireFirstTurn's
 // NDJSON-framed kickoff is irrelevant to the fake), writes
 // OPENCODE_CONFIG_DIR's observed value to $NANITE_TEST_PROBE_FILE — proving
-// wrapEnvForSpawn's env-wrapper-script mechanism propagates
+// wrapper.ChildEnvironment propagates
 // opencodeLayout.AmendEnv's redirect exactly as it does for Codex — then
 // prints one plain-text line, driving OpencodeAdapter.ParseLine's real
 // production parser (each non-empty stdout line -> llmtypes.EventDelta; no
@@ -467,10 +461,10 @@ func TestBoot_WrapperLifecycle_OpenCode(t *testing.T) {
 	pg := permission.NewPathGrants()
 	profile := storeProfile("opencode")
 	deps := &Dependencies{
-		Agents:          &fakeAgentProfiles{profile: &profile},
-		SessionsManager: agentsessions.NewManager(nil),
-		Store:           store,
-		PathGrants:      pg,
+		Agents:     &fakeAgentProfiles{profile: &profile},
+		Manager:    NewSessionManager(),
+		Store:      store,
+		PathGrants: pg,
 		ProviderAdapter: func(name string) provider.CLIAdapter {
 			if name != "opencode" {
 				return nil
@@ -480,7 +474,7 @@ func TestBoot_WrapperLifecycle_OpenCode(t *testing.T) {
 		EventFanout:    func(string) chan<- llmtypes.StreamEvent { return fanoutCh },
 		WorkspacesRoot: t.TempDir(),
 	}
-	t.Cleanup(func() { _ = deps.SessionsManager.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = deps.Manager.Shutdown(context.Background()) })
 
 	sess, err := Boot(context.Background(), deps, Options{
 		Mode: ModeOneShot,
@@ -544,9 +538,9 @@ func TestBoot_WrapperLifecycle_OpenCode(t *testing.T) {
 
 	seen, err := os.ReadFile(probeFile)
 	if err != nil {
-		t.Fatalf("read probe file (fake opencode process never ran, or wrapEnvForSpawn's script chain is broken): %v", err)
+		t.Fatalf("read probe file (fake opencode process never ran, or wrapper child environment is broken): %v", err)
 	}
 	if string(seen) != bootDir {
-		t.Errorf("fake opencode process observed OPENCODE_CONFIG_DIR=%q, want %q (agent.Boot's env-wrapper-script workaround is not propagating opencodeLayout.AmendEnv's redirect)", string(seen), bootDir)
+		t.Errorf("fake opencode process observed OPENCODE_CONFIG_DIR=%q, want %q (wrapper ChildEnvironment is not propagating opencodeLayout.AmendEnv's redirect)", string(seen), bootDir)
 	}
 }

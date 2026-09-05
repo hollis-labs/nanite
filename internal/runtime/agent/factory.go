@@ -3,7 +3,6 @@ package agent
 import (
 	"encoding/json"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -33,50 +32,6 @@ func streamingStdioUserFrame(text string) ([]byte, error) {
 		Message userMsg `json:"message"`
 	}
 	return json.Marshal(frame{Type: "user", Message: userMsg{Role: "user", Content: text}})
-}
-
-// shouldUsePTY decides between PTY allocation and regular stdio pipes
-// for the long-lived runtime. The function name now slightly outlives
-// its original intent: post-CW-20260515-0004 it returns false for every
-// supported provider because the long-lived shape we ship today is
-// claude's Streaming Input Mode (NDJSON over regular stdin/stdout
-// pipes, parsed by ParseLineEvents), which does NOT want a PTY. The
-// helper is retained as the single insertion point for any future
-// adapter that genuinely needs a PTY.
-//
-// Not a CLI-vs-API routing decision. By the time anything in this
-// package runs, the CLI-vs-API choice has already been made upstream
-// (Phase 2 item 01, TASKS/phase-2/01-wire-runtime-kind-routing.md —
-// primarily agent_profiles.runtime_kind, consulted in
-// service/chat_generate.go and service/chat.go's classifyNilProvider);
-// internal/runtime/agent is the CLI runtime, reached only once that
-// decision already routed here. shouldUsePTY's own true/false choice is
-// a narrower, still-open question within the CLI runtime itself (raw
-// terminal vs. NDJSON-over-stdio), currently always false — see
-// TASKS/phase-7/01-rename-pty-naming-scrub.md for that distinction's
-// full writeup and the eventual name this function should carry once
-// "PTY" is scrubbed.
-//
-// History (decisions.nanite.architecture.cli_pty_long_lived_default
-// rev 01KR2Y16TZJC8X88E6P497JBH3): the original design routed claude
-// long-lived through a PTY runtime expecting "per-tool SSE via
-// TypedEventCallback". That path emitted bare-claude (TUI) argv whose
-// output is ANSI/screen redraws — ParseLine/ParseLineEvents have no
-// TUI scraper, so sessions ran forever with zero assistant deltas
-// surfaced (c202). StreamingStdio replaces both prior shapes:
-// long-lived AND parseable AND no PTY required.
-//
-// CW-20260514-0045: dropdown / legacy prefixed aliases ("pty",
-// "pty-claude") normalize to "claude" before the switch so any
-// future adapter that DOES want a PTY can be added below without
-// drift between the chat and runtime layers. See
-// bootdir.normalizeProviderName for the rule set.
-func shouldUsePTY(providerName string, mode Mode) bool {
-	if mode != ModeLongLived {
-		return false
-	}
-	_ = normalizeProviderName(providerName) // normalize kept warm for future cases
-	return false
 }
 
 // shouldUseStreamingStdio picks the long-lived NDJSON-over-stdio
@@ -109,10 +64,9 @@ func shouldUsePTY(providerName string, mode Mode) bool {
 // subprocess-per-turn adapter runtime — their BuildArgs emit per-turn
 // shape and per-adapter long-lived work is outstanding.
 //
-// Lifecycle flags are mutually exclusive in agentsessions
-// (Capabilities.validateLifecycle); callers must ensure at most one of
-// {PTY, StreamingStdio, JsonRpcStdio} is true. runtimeConfigForAdapter
-// is the single insertion point and enforces this by construction.
+// Adapter selection is delegated to go-agent-wrapper/adapters.Select; this
+// helper remains only because Claude-native payload framing follows the same
+// selected launch mode.
 func shouldUseStreamingStdio(providerName string, mode Mode) bool {
 	_ = mode // intentionally mode-agnostic; see doc comment
 	switch normalizeProviderName(providerName) {
@@ -141,26 +95,21 @@ func shouldAutoFireFirstTurn(mode Mode) bool {
 	}
 }
 
-// runtimeConfigForAdapter is the factory the chat / subagent / background
-// callers use to construct an agentsessions.AdapterRuntimeConfig with the
-// correct Caps for the spawn. Phase 3 fills in capability propagation
-// (CheckpointResume, ProviderSessionID, BinaryRequired, Resize).
-//
-// Lifecycle-flag invariant (CW-20260515-0006): {PTY, StreamingStdio,
-// JsonRpcStdio} are mutually exclusive in agentsessions; this factory
-// is the single insertion point and picks at most one. PTY currently
-// returns false everywhere (see shouldUsePTY); StreamingStdio handles
-// claude long-lived. Codex / opencode get the implicit
-// subprocess-per-turn adapter runtime (no flag set), which is correct
-// for their per-turn argv shape.
-func runtimeConfigForAdapter(adapter provider.CLIAdapter, providerName string, mode Mode) agentsessions.AdapterRuntimeConfig {
-	cfg := agentsessions.AdapterRuntimeConfig{
-		Adapter: adapter,
+// selectNativeAdapter delegates descriptor, lifecycle shape, and CLIAdapter
+// validation to the wrapper's canonical native factory. Nanite keeps the
+// product decision (Claude streaming stdio; Codex/OpenCode per-turn) and its
+// already-configured adapter, including Claude developer-mode behavior.
+func selectNativeAdapter(providerName string, mode Mode, cli provider.CLIAdapter) (adapters.RuntimeAdapter, error) {
+	launchMode := adapters.LaunchSubprocessPerTurn
+	if shouldUseStreamingStdio(providerName, mode) {
+		launchMode = adapters.LaunchStreamingStdio
 	}
-	cfg.Caps.PTY = shouldUsePTY(providerName, mode)
-	cfg.Caps.StreamingStdio = shouldUseStreamingStdio(providerName, mode)
-	cfg.Caps.Resize = true
-	return cfg
+	return adapters.Select(adapters.Selection{
+		Provider:    adapters.Provider(normalizeProviderName(providerName)),
+		RuntimeKind: adapters.RuntimeKindCLI,
+		LaunchMode:  launchMode,
+		CLIAdapter:  cli,
+	})
 }
 
 // useACPProtocol reports whether profile is explicitly configured to
@@ -170,9 +119,8 @@ func runtimeConfigForAdapter(adapter provider.CLIAdapter, providerName string, m
 //
 // This is the per-agent Protocol/Transport dispatch decision
 // TASKS/agent-host-acp/11-nanite-per-agent-protocol-transport-config.md
-// adds, consulted from agent.Boot at the same point runtimeConfigForAdapter
-// (above) picks the native runtime shape — the same conceptual
-// "provider-dispatch logic" slot, per this task's own instruction.
+// adds, consulted from agent.Boot at the same adapter-selection boundary as
+// the native wrapper factory.
 //
 // Empty/unset profile.Protocol (the default for every pre-existing
 // agent_profiles row, and for any agent an operator hasn't explicitly

@@ -34,6 +34,7 @@ import (
 type runtimeEventSink struct {
 	fanout  chan<- llmtypes.StreamEvent
 	typedCB provider.EventsCallback
+	acp     bool
 
 	readyOnce sync.Once
 	onReady   func()
@@ -95,11 +96,14 @@ func (s *runtimeEventSink) sendFanout(ctx context.Context, ev llmtypes.StreamEve
 // KindAgentDelta shapes: {"content": ev.Content} for EventDelta and
 // {"thinking": ev.ThinkingBlock} for EventThinking.
 type deltaPayload struct {
-	Content  string `json:"content"`
-	Thinking *struct {
-		Thinking  string `json:"Thinking"`
-		Signature string `json:"Signature"`
-	} `json:"thinking"`
+	Content  string          `json:"content"`
+	Phase    string          `json:"phase"`
+	Thinking json.RawMessage `json:"thinking"`
+}
+
+type thinkingPayload struct {
+	Thinking  string `json:"Thinking"`
+	Signature string `json:"Signature"`
 }
 
 func (s *runtimeEventSink) handleDelta(ctx context.Context, raw json.RawMessage) {
@@ -107,13 +111,27 @@ func (s *runtimeEventSink) handleDelta(ctx context.Context, raw json.RawMessage)
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &p)
 	}
-	if p.Thinking != nil {
+	if len(p.Thinking) > 0 && string(p.Thinking) != "false" && string(p.Thinking) != "null" {
+		var thinking thinkingPayload
+		if p.Thinking[0] == '{' {
+			_ = json.Unmarshal(p.Thinking, &thinking)
+		}
+		if thinking.Thinking == "" {
+			thinking.Thinking = p.Content
+		}
 		s.sendFanout(ctx, llmtypes.StreamEvent{
 			Type: llmtypes.EventThinking,
 			ThinkingBlock: &llmtypes.ThinkingBlock{
-				Thinking:  p.Thinking.Thinking,
-				Signature: p.Thinking.Signature,
+				Thinking:  thinking.Thinking,
+				Signature: thinking.Signature,
 			},
+		})
+		return
+	}
+	if p.Phase == "thought" {
+		s.sendFanout(ctx, llmtypes.StreamEvent{
+			Type:          llmtypes.EventThinking,
+			ThinkingBlock: &llmtypes.ThinkingBlock{Thinking: p.Content},
 		})
 		return
 	}
@@ -145,13 +163,29 @@ func (s *runtimeEventSink) handleToolUse(raw json.RawMessage) {
 		return
 	}
 	var p toolUsePayload
-	if err := json.Unmarshal(raw, &p); err != nil || p.ToolUse == nil {
+	if err := json.Unmarshal(raw, &p); err == nil && p.ToolUse != nil {
+		s.typedCB(events.ToolUse{
+			ID:   p.ToolUse.ID,
+			Name: p.ToolUse.Name,
+			Args: p.ToolUse.Input,
+		})
 		return
 	}
+	var flat struct {
+		ToolCallID string          `json:"tool_call_id"`
+		Name       string          `json:"name"`
+		Title      string          `json:"title"`
+		RawInput   json.RawMessage `json:"raw_input"`
+	}
+	if err := json.Unmarshal(raw, &flat); err != nil || flat.ToolCallID == "" {
+		return
+	}
+	var input map[string]any
+	_ = json.Unmarshal(flat.RawInput, &input)
 	s.typedCB(events.ToolUse{
-		ID:   p.ToolUse.ID,
-		Name: p.ToolUse.Name,
-		Args: p.ToolUse.Input,
+		ID:   flat.ToolCallID,
+		Name: firstNonEmpty(flat.Name, flat.Title),
+		Args: input,
 	})
 }
 
@@ -170,13 +204,32 @@ func (s *runtimeEventSink) handleToolResult(raw json.RawMessage) {
 		return
 	}
 	var p toolResultPayload
-	if err := json.Unmarshal(raw, &p); err != nil || p.ToolResult == nil {
+	if err := json.Unmarshal(raw, &p); err == nil && p.ToolResult != nil {
+		s.typedCB(events.ToolResult{
+			ID:             p.ToolResult.ID,
+			IsError:        p.ToolResult.IsError,
+			ContentPreview: p.ToolResult.ContentPreview,
+		})
 		return
 	}
+	var flat struct {
+		ToolCallID string `json:"tool_call_id"`
+		IsError    bool   `json:"is_error"`
+		Result     any    `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &flat); err != nil || flat.ToolCallID == "" {
+		return
+	}
+	preview := ""
+	if flat.Result != nil {
+		if encoded, err := json.Marshal(flat.Result); err == nil {
+			preview = string(encoded)
+		}
+	}
 	s.typedCB(events.ToolResult{
-		ID:             p.ToolResult.ID,
-		IsError:        p.ToolResult.IsError,
-		ContentPreview: p.ToolResult.ContentPreview,
+		ID:             flat.ToolCallID,
+		IsError:        flat.IsError,
+		ContentPreview: preview,
 	})
 }
 
@@ -218,6 +271,11 @@ func (s *runtimeEventSink) handleTurnCompleted(ctx context.Context, raw json.Raw
 		return
 	}
 	s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: p.Usage})
+	if s.acp {
+		// ACP reports usage and terminal completion together in one event;
+		// native adapters emit a second empty KindTurnCompleted event.
+		s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+	}
 	// llmtypes.EventUsage and llmtypes.EventDone arrive as two distinct
 	// StreamEvents pre-migration (parseCodexStreamLine's turn.completed
 	// case emits both when usage is present) — translateStreamEvent maps

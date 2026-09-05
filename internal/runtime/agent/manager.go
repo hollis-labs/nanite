@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	"github.com/hollis-labs/go-agent-wrapper/acp"
 )
 
 // SendInput delivers a user message into the live runtime. ModeLongLived
@@ -19,25 +22,15 @@ import (
 // its input parser (c207/c208). Non-streaming runtimes (PTY, codex/
 // opencode subprocess-per-turn) receive the payload unchanged.
 //
-// Routes through wr.SendInput (go-agent-wrapper's Wrapper.SendInput)
-// instead of Dependencies.SessionsManager directly — see agent.go's Boot
-// for why Boot no longer registers this session with
-// Dependencies.SessionsManager at all.
+// Routes through go-agent-wrapper for both native and ACP protocols.
 func (s *Session) SendInput(payload []byte) error {
 	if s == nil {
 		return errors.New("agent.Session.SendInput: session not initialized")
 	}
-	// ACP backend (TASKS/agent-host-acp/11): acp.Client.Prompt drives its
-	// own ACP-native framing internally -- none of the streaming-stdio
-	// NDJSON framing below applies (that's specific to claude's native
-	// protocol, an entirely different wire shape from ACP).
-	if s.acp != nil {
-		return s.acp.SendInput(context.Background(), payload)
-	}
 	if s.wr == nil {
 		return errors.New("agent.Session.SendInput: session not initialized")
 	}
-	if shouldUseStreamingStdio(s.Provider, s.Mode) {
+	if !s.isACP && shouldUseStreamingStdio(s.Provider, s.Mode) {
 		framed, err := streamingStdioUserFrame(string(payload))
 		if err != nil {
 			return fmt.Errorf("agent.Session.SendInput: frame streaming-stdio payload: %w", err)
@@ -63,20 +56,11 @@ func (s *Session) Stop(ctx context.Context) error {
 	if s == nil {
 		return errors.New("agent.Session.Stop: session not initialized")
 	}
-	if s.wr == nil && s.acp == nil {
+	if s.wr == nil {
 		return errors.New("agent.Session.Stop: session not initialized")
 	}
 
-	var err error
-	if s.acp != nil {
-		// ACP backend (TASKS/agent-host-acp/11): acpSession.Stop
-		// Cancel-then-Closes the acp.Client directly -- see its own doc
-		// comment for why this mirrors wr.Stop's interrupt-then-terminate
-		// shape without touching wr at all.
-		err = s.acp.Stop(ctx)
-	} else {
-		err = s.wr.Stop(ctx)
-	}
+	err := s.wr.Stop(ctx)
 
 	// Path-grant lineage clears even if Stop fails — Boot registered it
 	// during launch, so a failed Stop must not leak the lineage entry.
@@ -96,12 +80,12 @@ func (s *Session) Stop(ctx context.Context) error {
 }
 
 // Wait blocks until the runtime exits or ctx is canceled. Returns the
-// error wr.Run's background goroutine (started in Boot) observed —
-// wrapper.Wrapper.Run's own Session.Wait call underneath still surfaces a
-// *agentsessions.ExitError on an abnormal exit (wrapped, not replaced, by
-// Run's "wrapper: session exited with error: %w"), so
-// errors.As(err, &exitErr) at every existing internal/recovery/broker call
-// site continues to unwrap correctly with zero broker-side changes.
+// error wr.Run's background goroutine (started in Boot) observed. Native
+// wrappers retain agentkit's *agentsessions.ExitError. ACP wrappers return
+// the richer *acp.LifecycleError; Boot joins a compatibility ExitError at
+// this Nanite-owned recovery/UI translation boundary so the existing broker
+// can still classify abnormal exits without taking lifecycle ownership back
+// from Wrapper.
 //
 // Safe to call from any number of goroutines concurrently — see runDone's
 // doc comment on Session for the happens-before argument.
@@ -117,6 +101,25 @@ func (s *Session) Wait(ctx context.Context) error {
 	}
 }
 
+// recoveryCompatibleWrapperError preserves wrapper's normalized ACP error
+// while adding the legacy shape Nanite's recovery broker consumes. Code -1
+// retains the pre-v0.9 ACP contract: the protocol exposes a classified
+// lifecycle outcome but not a portable child exit code or signal.
+func recoveryCompatibleWrapperError(err error, isACP bool) error {
+	if err == nil || !isACP {
+		return err
+	}
+	var lifecycleErr *acp.LifecycleError
+	if !errors.As(err, &lifecycleErr) {
+		return err
+	}
+	var exitErr *agentsessions.ExitError
+	if errors.As(err, &exitErr) {
+		return err
+	}
+	return errors.Join(err, &agentsessions.ExitError{Code: -1})
+}
+
 // Checkpoint requests a session-state snapshot. The agentkit/go-agent-
 // wrapper surface does not expose CheckpointHints directly today;
 // ModeResume relies on the persisted RuntimeStore checkpoint payload
@@ -125,9 +128,43 @@ func (s *Session) Wait(ctx context.Context) error {
 // empty id without error so callers can no-op — unchanged by this
 // migration.
 func (s *Session) Checkpoint(ctx context.Context) (string, error) {
-	if s == nil || (s.wr == nil && s.acp == nil) {
+	if s == nil || s.wr == nil {
 		return "", errors.New("agent.Session.Checkpoint: session not initialized")
 	}
 	_ = ctx
 	return "", nil
+}
+
+// CancelTurn requests turn-scoped cancellation through Wrapper. ACP adapters
+// support it; native adapters return wrapper.ErrTurnCancelUnsupported.
+func (s *Session) CancelTurn(ctx context.Context) error {
+	if s == nil || s.wr == nil {
+		return errors.New("agent.Session.CancelTurn: session not initialized")
+	}
+	return s.wr.CancelTurn(ctx)
+}
+
+// ProviderSessionID returns wrapper's current provider-assigned identity.
+func (s *Session) ProviderSessionID() string {
+	if s == nil || s.wr == nil {
+		return ""
+	}
+	return s.wr.ProviderSessionID()
+}
+
+func (s *Session) isLive() bool {
+	if s == nil || s.wr == nil || s.runDone == nil {
+		return false
+	}
+	if s.isACP {
+		if snapshot, ok := s.wr.ACPSnapshot(); ok {
+			return snapshot.Live
+		}
+	}
+	select {
+	case <-s.runDone:
+		return false
+	default:
+		return true
+	}
 }

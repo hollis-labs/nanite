@@ -375,7 +375,7 @@ func TestDriveBootSession_ACPSessionSkipsSkillReplant(t *testing.T) {
 	// in. Pre-registering it in activeSessions routes driveBootSession
 	// into its "already active" branch (the one containing the guarded
 	// call), skipping the cold-boot path entirely.
-	s.activeSessions.Store(sessionID, &runtimeagent.Session{Provider: "claude-acp", BootDir: ""})
+	s.runtimeSessions().Store(sessionID, &runtimeagent.Session{Provider: "claude-acp", BootDir: ""})
 
 	agent := &store.AgentProfile{ID: "agent-acp-guard-1", Slug: "acp-agent"}
 	cw := ctxpkg.NewContextWindow(200_000, ctxpkg.DefaultEstimator{})
@@ -423,7 +423,7 @@ func TestDriveBootSession_RealBootDirStillTriggersSkillReplant(t *testing.T) {
 		agentEventBridge: &agentEventBridge{streams: NewStreamManager()},
 	}
 	sessionID := "sess-realboot-1"
-	s.activeSessions.Store(sessionID, &runtimeagent.Session{Provider: "claude", BootDir: bootDir})
+	s.runtimeSessions().Store(sessionID, &runtimeagent.Session{Provider: "claude", BootDir: bootDir})
 
 	agent := &store.AgentProfile{ID: "agent-realboot-1", Slug: "realboot-agent"}
 	cw := ctxpkg.NewContextWindow(200_000, ctxpkg.DefaultEstimator{})

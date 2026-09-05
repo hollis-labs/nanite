@@ -846,7 +846,7 @@ func (s *chatServiceImpl) markGenerationSafe(sessionID string, gen *inFlightGen)
 	})
 }
 
-func (s *chatServiceImpl) markGenerationUnsafe(sessionID string, gen, root *inFlightGen) {
+func (s *chatServiceImpl) markGenerationUnsafe(gen, root *inFlightGen) {
 	if gen == nil {
 		return
 	}
@@ -886,7 +886,7 @@ func (s *chatServiceImpl) retainUnsafePredecessor(sessionID string, gen, predece
 		return
 	}
 	root := generationUnsafeRoot(predecessor)
-	s.markGenerationUnsafe(sessionID, gen, root)
+	s.markGenerationUnsafe(gen, root)
 	s.observeUnsafePredecessor(sessionID, gen, root)
 }
 
@@ -1023,7 +1023,7 @@ func (s *chatServiceImpl) finishClaimedCancellation(sessionID string, gen *inFli
 				root = gen
 			}
 		}
-		s.markGenerationUnsafe(sessionID, gen, root)
+		s.markGenerationUnsafe(gen, root)
 		if !turnSafe && binding != nil && sendStarted {
 			s.observeUnsafeRuntimeBoundary(sessionID, gen, binding, predecessor)
 		} else if !predecessorSafe {
@@ -1111,14 +1111,14 @@ func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, user
 		s.requestGenerationCancellation(sessionID, prev)
 	}
 
-	s.runGeneration(name, sessionID, assistantMsgID, userContent, ch, callerType, genCtx, cancel, current, prev)
+	s.runGeneration(genCtx, name, sessionID, assistantMsgID, userContent, ch, callerType, cancel, current, prev)
 }
 
 // runGeneration is the shared goroutine body launchGeneration (takeover)
 // and TriggerHarnessTurn's reject-if-busy path both dispatch through —
 // registration in the activeGen map has already happened by the time this
 // is called; this only owns running the turn and cleaning up afterward.
-func (s *chatServiceImpl) runGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, genCtx context.Context, cancel context.CancelFunc, current, predecessor *inFlightGen) {
+func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, cancel context.CancelFunc, current, predecessor *inFlightGen) {
 	s.lifecycle.Go(name, func(bgCtx context.Context) {
 		// Bridge lifecycle shutdown (bgCtx) into our takeover-ctx so
 		// generateResponse still aborts on process Shutdown.
@@ -1449,7 +1449,7 @@ func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, rea
 
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	s.runGeneration("triggerHarnessTurn.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground, genCtx, cancel, current, nil)
+	s.runGeneration(genCtx, "triggerHarnessTurn.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground, cancel, current, nil)
 
 	if s.sessionEventWriter != nil {
 		payload := fmt.Sprintf(`{"triggered_by":%q,"run_id":%q,"assistant_msg_id":%q}`, reason, runID, assistantMsgID)
@@ -1509,7 +1509,7 @@ func (s *chatServiceImpl) TriggerMessageWake(ctx context.Context, sessionID stri
 
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	s.runGeneration("triggerMessageWake.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground, genCtx, cancel, current, nil)
+	s.runGeneration(genCtx, "triggerMessageWake.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground, cancel, current, nil)
 
 	if s.sessionEventWriter != nil {
 		payload := fmt.Sprintf(`{"triggered_by":"a2a_message","message_id":%q,"assistant_msg_id":%q}`, msg.ID, assistantMsgID)

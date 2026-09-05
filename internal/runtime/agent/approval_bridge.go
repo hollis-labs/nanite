@@ -41,7 +41,7 @@ func bestEffortPermissionResponder(
 			// Turn cancellation and close cancel the wrapper-supplied
 			// callback context. Do not translate that lifecycle signal into a
 			// fresh provider permission choice.
-			return acp.PermissionSelection{}, nil
+			return acp.PermissionSelection{}, nil //nolint:nilerr // Zero selection is the ACP contract for an explicit cancellation, not an error.
 		}
 		return selectACPOption(request.Options, response), nil
 	}

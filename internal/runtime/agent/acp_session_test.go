@@ -174,7 +174,7 @@ func TestRecoveryCompatibleWrapperError_PreservesACPAndBrokerShapes(t *testing.T
 	if !errors.As(got, &exit) || exit.Code != -1 {
 		t.Fatalf("broker-compatible exit = %+v, error %v", exit, got)
 	}
-	if native := recoveryCompatibleWrapperError(lifecycle, false); native != lifecycle {
+	if native := recoveryCompatibleWrapperError(lifecycle, false); !errors.Is(native, lifecycle) {
 		t.Fatal("native error was unexpectedly translated")
 	}
 }

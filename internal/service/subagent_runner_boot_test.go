@@ -7,8 +7,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
@@ -124,6 +126,11 @@ func (b *fakeBridge) SetPerSessionRouter(sessionID string, ch chan llmtypes.Stre
 		return
 	}
 	b.bound[sessionID] = ch
+}
+
+func (b *fakeBridge) PrepareRuntimeTurnOwner(sessionID string, ch chan llmtypes.StreamEvent) bool {
+	b.SetPerSessionRouter(sessionID, ch)
+	return true
 }
 
 func (b *fakeBridge) chanFor(sessionID string) chan llmtypes.StreamEvent {
@@ -357,6 +364,46 @@ func TestBootRunner_CLIProvider_BootsAndDrains(t *testing.T) {
 	}
 	if capturedOpts.Role != run.Role {
 		t.Errorf("Boot Role = %q, want %q", capturedOpts.Role, run.Role)
+	}
+}
+
+func TestBootRunner_ModeSubagentAutoFireUsesPreparedRuntimeOwner(t *testing.T) {
+	bridge := &agentEventBridge{streams: NewStreamManager()}
+	deps := bootRealDeps(t)
+	deps.RuntimeEventSink = func(id string, isACP bool) runtimeevents.Sink {
+		return newRuntimeEventBridgeSink(bridge, id, isACP)
+	}
+	client := newCancelACPClient()
+	client.promptTurn = "subagent-turn"
+	client.promptAfter = []runtimeevents.Event{
+		{Kind: runtimeevents.KindAgentDelta, TurnID: "subagent-turn", Payload: []byte(`{"content":"prepared owner"}`)},
+		{Kind: runtimeevents.KindTurnCompleted, TurnID: "subagent-turn"},
+	}
+	profile := &store.AgentProfile{
+		ID: "subagent-acp", Slug: "subagent-acp", DefaultProvider: "opencode",
+		Protocol: "acp", Transport: "stdio",
+	}
+	deps.Agents = &fakeAgentProfilesResolver{profile: profile}
+	deps.ProviderAdapter = func(string) provider.CLIAdapter { return &fakeCLIAdapter{name: "opencode"} }
+	deps.ACPAdapterFactory = func(string, adapters.Transport) (adapters.Adapter, error) {
+		return &cancelACPAdapter{client: client}, nil
+	}
+	st := &recordingSessionStore{parents: map[string]*store.Session{
+		"subagent-parent": {ID: "subagent-parent", Provider: "opencode"},
+	}}
+	runner := &BootRunner{
+		deps: deps, bridge: bridge,
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{"subagent-acp": profile}},
+		store:  st, persistFn: func(context.Context, string, string) error { return nil },
+	}
+	result, err := runner.Run(context.Background(), &subagent.Run{
+		ID: "subagent-auto-fire", Role: "subagent-acp", ParentSessionID: "subagent-parent", Prompt: "run",
+	})
+	if err != nil {
+		t.Fatalf("BootRunner.Run: %v", err)
+	}
+	if result.Summary != "prepared owner" {
+		t.Fatalf("Summary = %q, want normalized auto-fire delta", result.Summary)
 	}
 }
 

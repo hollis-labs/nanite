@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -39,12 +40,16 @@ type cancelACPClient struct {
 	cancelGate  <-chan struct{}
 	promptEnter chan struct{}
 	promptGate  <-chan struct{}
+	promptStart bool
+	promptTurn  string
+	promptErr   error
+	promptAfter []runtimeevents.Event
 	launchEnter chan struct{}
 	launchGate  <-chan struct{}
 }
 
 func newCancelACPClient() *cancelACPClient {
-	return &cancelACPClient{events: make(chan runtimeevents.Event, 16)}
+	return &cancelACPClient{events: make(chan runtimeevents.Event, 16), promptStart: true}
 }
 
 func (c *cancelACPClient) Launch(ctx context.Context, _ acp.LaunchParams) error {
@@ -65,10 +70,14 @@ func (c *cancelACPClient) Launch(ctx context.Context, _ acp.LaunchParams) error 
 	return nil
 }
 func (c *cancelACPClient) Prompt(ctx context.Context, _ string) error {
-	c.emit(runtimeevents.Event{Kind: runtimeevents.KindTurnStarted})
 	c.mu.Lock()
 	enter, gate := c.promptEnter, c.promptGate
+	start, promptErr := c.promptStart, c.promptErr
+	after := append([]runtimeevents.Event(nil), c.promptAfter...)
 	c.mu.Unlock()
+	if start {
+		c.emit(runtimeevents.Event{Kind: runtimeevents.KindTurnStarted, TurnID: c.promptTurn})
+	}
 	if enter != nil {
 		close(enter)
 	}
@@ -79,7 +88,10 @@ func (c *cancelACPClient) Prompt(ctx context.Context, _ string) error {
 			return ctx.Err()
 		}
 	}
-	return nil
+	for _, ev := range after {
+		c.emit(ev)
+	}
+	return promptErr
 }
 func (c *cancelACPClient) Cancel(ctx context.Context) error {
 	c.mu.Lock()
@@ -375,12 +387,12 @@ func TestCancelActiveGeneration_BeforeSendCommitPreventsPrompt(t *testing.T) {
 	}
 }
 
-func TestTakeoverCancellation_AdmittedPromptCannotStartAfterBarrier(t *testing.T) {
+func TestTakeoverCancellation_WaitsForPromptWrittenAckBeforeCancelTurn(t *testing.T) {
 	const sessionID = "admitted-prompt-barrier"
 	deps := bootRealDeps(t)
 	bridge := &agentEventBridge{streams: NewStreamManager()}
 	deps.RuntimeEventSink = func(id string, isACP bool) runtimeevents.Sink {
-		return &runtimeEventBridgeSink{bridge: bridge, sessionID: id, acp: isACP, source: newRuntimeEventSource()}
+		return newRuntimeEventBridgeSink(bridge, id, isACP)
 	}
 	client := newCancelACPClient()
 	client.promptEnter = make(chan struct{})
@@ -431,8 +443,8 @@ func TestTakeoverCancellation_AdmittedPromptCannotStartAfterBarrier(t *testing.T
 	}
 	select {
 	case <-client.cancelEnter:
-	case <-time.After(time.Second):
-		t.Fatal("CancelTurn was not issued after Prompt reached Processing")
+		t.Fatal("CancelTurn ran while client.Prompt was still blocked before its write acknowledgement")
+	case <-time.After(25 * time.Millisecond):
 	}
 	select {
 	case <-gen.cancelIssued:
@@ -440,6 +452,11 @@ func TestTakeoverCancellation_AdmittedPromptCannotStartAfterBarrier(t *testing.T
 	default:
 	}
 	close(promptGate)
+	select {
+	case <-client.cancelEnter:
+	case <-time.After(time.Second):
+		t.Fatal("CancelTurn was not issued after client.Prompt returned its write acknowledgement")
+	}
 	select {
 	case <-gen.cancelIssued:
 	case <-time.After(time.Second):
@@ -460,6 +477,89 @@ func TestTakeoverCancellation_AdmittedPromptCannotStartAfterBarrier(t *testing.T
 		t.Fatal("canceled turn stream did not close")
 	}
 	_ = sess
+}
+
+func TestFailedRuntimeSendWithoutEventsRetainsThenClearsExactOwner(t *testing.T) {
+	const sessionID = "failed-send-no-events"
+	deps := bootRealDeps(t)
+	bridge := &agentEventBridge{streams: NewStreamManager()}
+	var sink *runtimeEventBridgeSink
+	deps.RuntimeEventSink = func(id string, isACP bool) runtimeevents.Sink {
+		sink = newRuntimeEventBridgeSink(bridge, id, isACP)
+		return sink
+	}
+	client := newCancelACPClient()
+	client.promptStart = false
+	client.promptErr = errors.New("prompt rejected before normalized turn")
+	_ = bootCancelACPSession(t, deps, sessionID, client)
+
+	svc := &chatServiceImpl{
+		agentDeps: deps, agentEventBridge: bridge, activeSessions: deps.Manager,
+		activeGen: make(map[string]*inFlightGen),
+	}
+	_, gen := svc.registerGeneration(sessionID, "failed-message", func() {})
+	defer close(gen.done)
+	unsafePublished := make(chan struct{})
+	svc.afterFailedRuntimeSendUnsafe = func() {
+		// This is the exact former deletion window: a fast EventError consumer
+		// could finish generation immediately. The slot must already be retained.
+		svc.deregisterGeneration(sessionID, gen)
+		svc.activeGenMu.Lock()
+		got := svc.activeGen[sessionID]
+		svc.activeGenMu.Unlock()
+		if got != gen {
+			t.Errorf("failed-send tombstone = %p, want %p before EventError", got, gen)
+		}
+		close(unsafePublished)
+	}
+	turnCtx, cancel := context.WithCancel(context.WithValue(context.Background(), inFlightGenContextKey{}, gen))
+	defer cancel()
+	turnCh, err := svc.driveBootSession(turnCtx, sessionID, &store.Session{}, &store.AgentProfile{}, nil, "hello", 0, "opencode")
+	if err != nil {
+		t.Fatalf("driveBootSession: %v", err)
+	}
+	select {
+	case <-unsafePublished:
+	case <-time.After(time.Second):
+		t.Fatal("failed SendInput did not publish unsafe state")
+	}
+	var sawError bool
+	for ev := range turnCh {
+		if ev.Type == llmtypes.EventError {
+			sawError = true
+		}
+	}
+	if !sawError {
+		t.Fatal("failed SendInput did not reach caller stream")
+	}
+	select {
+	case <-gen.safeBoundary:
+	case <-time.After(2 * time.Second):
+		t.Fatal("failed SendInput did not resolve after exact Stop+Wait")
+	}
+	sink.mu.Lock()
+	pending := len(sink.pending)
+	sink.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("zero-event failed owner remained pending: %d", pending)
+	}
+
+	freshCh := make(chan llmtypes.StreamEvent, 2)
+	fresh := newSessionRouter(freshCh)
+	if !bridge.bindPerSessionRouterExact(sessionID, fresh) || !sink.AdmitRuntimeTurnOwner(fresh) {
+		t.Fatal("failed to admit successor after exact cleanup")
+	}
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnStarted, TurnID: "fresh-after-error"})
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindAgentDelta, TurnID: "fresh-after-error", Payload: []byte(`{"content":"fresh"}`)})
+	select {
+	case ev := <-freshCh:
+		if ev.Type != llmtypes.EventDelta || ev.Content != "fresh" {
+			t.Fatalf("successor event = %+v, want fresh delta", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cleared failed owner poisoned successor FIFO")
+	}
+	bridge.finishPerSessionRouter(sessionID, fresh)
 }
 
 func TestTakeoverCancellation_UnsafeBoundaryPropagatesTransitively(t *testing.T) {
@@ -494,17 +594,177 @@ func TestTakeoverCancellation_UnsafeBoundaryPropagatesTransitively(t *testing.T)
 	}
 }
 
+func TestRunGeneration_UncanceledGatedExitRetainsUnsafeTombstoneForLaterTakeover(t *testing.T) {
+	const sessionID = "unsafe-gated-chain"
+	owner := lifecycle.NewManager("test.unsafe-gated-chain")
+	t.Cleanup(func() { _ = owner.Shutdown(time.Second) })
+	svc := &chatServiceImpl{lifecycle: owner, activeGen: make(map[string]*inFlightGen)}
+
+	a := newInFlightGen("a", func() {})
+	a.turnMu.Lock()
+	a.cancelAsked = true
+	a.cancelSafe = false
+	a.retainUnsafe = true
+	a.unsafeRoot = a
+	a.turnMu.Unlock()
+	close(a.cancelIssued)
+	close(a.done)
+
+	b := newInFlightGen("b", func() {})
+	b.predecessor = a
+	svc.activeGen[sessionID] = b
+	bStream := make(chan chat.StreamEvent)
+	svc.runGeneration("unsafe-gated-b", sessionID, "b", "payload", bStream, dispatcher.CallerChat, context.Background(), func() {}, b, a)
+	select {
+	case _, open := <-bStream:
+		if open {
+			t.Fatal("gated B emitted an unexpected value")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unsafe predecessor did not terminate gated B")
+	}
+	select {
+	case <-b.done:
+	case <-time.After(time.Second):
+		t.Fatal("gated B did not finish")
+	}
+	svc.activeGenMu.Lock()
+	got := svc.activeGen[sessionID]
+	svc.activeGenMu.Unlock()
+	if got != b {
+		t.Fatalf("gated B tombstone = %p, want %p", got, b)
+	}
+
+	prev, c := svc.registerGeneration(sessionID, "c", func() {})
+	if prev != b || c.predecessor != b {
+		t.Fatalf("later C predecessor = %p/%p, want B %p", prev, c.predecessor, b)
+	}
+	svc.requestGenerationCancellation(sessionID, b)
+	select {
+	case <-b.cancelIssued:
+	case <-time.After(time.Second):
+		t.Fatal("later C did not settle B's inherited cancellation claim")
+	}
+	if waitForPredecessor(context.Background(), context.Background(), b) {
+		t.Fatal("C crossed B while exact unsafe root A remained unresolved")
+	}
+
+	// Models A's exact wrapper finally reaching the terminal/drained boundary.
+	// Only that boundary closes A's safety token; B then resolves transitively.
+	svc.markGenerationSafe(sessionID, a)
+	select {
+	case <-b.safeBoundary:
+	case <-time.After(time.Second):
+		t.Fatal("B tombstone did not resolve after exact root boundary")
+	}
+	if !waitForPredecessor(context.Background(), context.Background(), b) {
+		t.Fatal("C remained blocked after exact root and B were safe")
+	}
+	svc.activeGenMu.Lock()
+	got = svc.activeGen[sessionID]
+	svc.activeGenMu.Unlock()
+	if got != c {
+		t.Fatalf("unsafe tombstone cleanup clobbered successor: got %p want %p", got, c)
+	}
+}
+
+func TestUnsafeGenerationResolvesOnlyAfterExactRuntimeTerminalAndDrain(t *testing.T) {
+	const sessionID = "unsafe-exact-runtime-boundary"
+	deps := bootRealDeps(t)
+	bridge := &agentEventBridge{streams: NewStreamManager()}
+	deps.RuntimeEventSink = func(id string, isACP bool) runtimeevents.Sink {
+		return newRuntimeEventBridgeSink(bridge, id, isACP)
+	}
+	client := newCancelACPClient()
+	sess := bootCancelACPSession(t, deps, sessionID, client)
+	router := newSessionRouter(make(chan llmtypes.StreamEvent, 1))
+	if !bridge.bindPerSessionRouterExact(sessionID, router) || !sess.AdmitRuntimeTurnOwner(router) {
+		t.Fatal("failed to admit exact runtime owner")
+	}
+	binding := &runtimeTurnBinding{session: sess, router: router, sendReturned: make(chan struct{})}
+	close(binding.sendReturned)
+	gen := newInFlightGen("unsafe-root", func() {})
+	defer close(gen.done)
+	svc := &chatServiceImpl{agentEventBridge: bridge, activeGen: map[string]*inFlightGen{sessionID: gen}}
+	svc.markGenerationUnsafe(sessionID, gen, gen)
+	svc.observeUnsafeRuntimeBoundary(sessionID, gen, binding, nil)
+	select {
+	case <-gen.safeBoundary:
+		t.Fatal("unsafe root resolved before exact wrapper terminal/drain")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	client.failProcess()
+	select {
+	case <-gen.safeBoundary:
+	case <-time.After(2 * time.Second):
+		t.Fatal("unsafe root did not resolve after exact wrapper terminal/drain")
+	}
+	select {
+	case <-router.terminalDrained:
+	case <-time.After(time.Second):
+		t.Fatal("exact router was not drained with terminal wrapper")
+	}
+}
+
+func TestUnsafeGenerationComposesInheritedAndOwnRuntimeBoundaries(t *testing.T) {
+	const sessionID = "unsafe-composed-boundaries"
+	deps := bootRealDeps(t)
+	bridge := &agentEventBridge{streams: NewStreamManager()}
+	deps.RuntimeEventSink = func(id string, isACP bool) runtimeevents.Sink {
+		return newRuntimeEventBridgeSink(bridge, id, isACP)
+	}
+	client := newCancelACPClient()
+	sess := bootCancelACPSession(t, deps, sessionID, client)
+	router := newSessionRouter(make(chan llmtypes.StreamEvent, 1))
+	if !bridge.bindPerSessionRouterExact(sessionID, router) || !sess.AdmitRuntimeTurnOwner(router) {
+		t.Fatal("failed to admit exact runtime owner")
+	}
+	binding := &runtimeTurnBinding{session: sess, router: router, sendReturned: make(chan struct{})}
+	close(binding.sendReturned)
+
+	root := newInFlightGen("inherited-root", func() {})
+	root.turnMu.Lock()
+	root.cancelAsked = true
+	root.cancelSafe = false
+	root.retainUnsafe = true
+	root.unsafeRoot = root
+	root.turnMu.Unlock()
+	close(root.cancelIssued)
+	close(root.done)
+	gen := newInFlightGen("own-runtime", func() {})
+	defer close(gen.done)
+	svc := &chatServiceImpl{agentEventBridge: bridge, activeGen: map[string]*inFlightGen{sessionID: gen}}
+	svc.markGenerationUnsafe(sessionID, gen, root)
+	svc.observeUnsafeRuntimeBoundary(sessionID, gen, binding, root)
+
+	// Resolving only the inherited root must not bypass this generation's own
+	// exact SendInput/router/runtime boundary.
+	svc.markGenerationSafe(sessionID, root)
+	select {
+	case <-gen.safeBoundary:
+		t.Fatal("inherited root masked generation's own unsafe runtime boundary")
+	case <-time.After(25 * time.Millisecond):
+	}
+	client.failProcess()
+	select {
+	case <-gen.safeBoundary:
+	case <-time.After(2 * time.Second):
+		t.Fatal("composed generation did not resolve after both boundaries")
+	}
+}
+
 func TestRuntimeEventBridge_DelayedTerminalCannotReachSuccessor(t *testing.T) {
 	const sessionID = "turn-owned-router"
 	bridge := &agentEventBridge{streams: NewStreamManager()}
-	sink := &runtimeEventBridgeSink{
-		bridge: bridge, sessionID: sessionID, acp: true,
-		source: newRuntimeEventSource(),
-	}
+	sink := newRuntimeEventBridgeSink(bridge, sessionID, true)
 	oldCh := make(chan llmtypes.StreamEvent, 4)
 	old := newSessionRouter(oldCh)
 	if !bridge.bindPerSessionRouterExact(sessionID, old) {
 		t.Fatal("failed to bind predecessor router")
+	}
+	if !sink.AdmitRuntimeTurnOwner(old) {
+		t.Fatal("failed to admit predecessor router")
 	}
 	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnStarted, TurnID: "old-turn"})
 	blockedSuccessor := newSessionRouter(make(chan llmtypes.StreamEvent, 1))
@@ -522,6 +782,9 @@ func TestRuntimeEventBridge_DelayedTerminalCannotReachSuccessor(t *testing.T) {
 	if !bridge.bindPerSessionRouterExact(sessionID, fresh) {
 		t.Fatal("failed to bind successor after predecessor drain")
 	}
+	if !sink.AdmitRuntimeTurnOwner(fresh) {
+		t.Fatal("failed to admit successor router")
+	}
 	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnStarted, TurnID: "fresh-turn"})
 	// Both a delayed duplicate terminal and an impossible replayed start for
 	// old-turn are source/TurnID-owned and must not touch fresh.
@@ -535,6 +798,70 @@ func TestRuntimeEventBridge_DelayedTerminalCannotReachSuccessor(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("successor router did not receive its exact turn delta")
+	}
+	bridge.finishPerSessionRouter(sessionID, fresh)
+}
+
+func TestRuntimeEventBridge_LateFailedSendClaimsRetiredOwnerNotSuccessor(t *testing.T) {
+	const sessionID = "late-failed-send-owner"
+	streams := NewStreamManager()
+	producer := streams.CreateStream("late-failed-send-message", sessionID)
+	defer close(producer)
+	sub, _, ok := streams.Subscribe("late-failed-send-message", 0)
+	if !ok {
+		t.Fatal("Subscribe did not find active message stream")
+	}
+	bridge := &agentEventBridge{streams: streams}
+	sink := newRuntimeEventBridgeSink(bridge, sessionID, true)
+
+	old := newSessionRouter(make(chan llmtypes.StreamEvent, 4))
+	if !bridge.bindPerSessionRouterExact(sessionID, old) || !sink.AdmitRuntimeTurnOwner(old) {
+		t.Fatal("failed to admit predecessor router")
+	}
+	// Models SendInput returning an error before the wrapper's serialized
+	// normalized sink has delivered the preceding TurnStarted. The global chat
+	// slot is retired immediately, but the per-runtime FIFO owner must remain.
+	bridge.retirePerSessionRouter(sessionID, old)
+	select {
+	case <-old.terminalDrained:
+		t.Fatal("SendInput error retirement falsely acknowledged terminal drain")
+	default:
+	}
+
+	freshCh := make(chan llmtypes.StreamEvent, 4)
+	fresh := newSessionRouter(freshCh)
+	if !bridge.bindPerSessionRouterExact(sessionID, fresh) || !sink.AdmitRuntimeTurnOwner(fresh) {
+		t.Fatal("failed to admit successor router")
+	}
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnStarted, TurnID: "old-late"})
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnFailed, TurnID: "old-late", Payload: []byte(`{"error":"old"}`)})
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnFailed, TurnID: "old-late", Payload: []byte(`{"error":"duplicate"}`)})
+	select {
+	case <-old.terminalDrained:
+	case <-time.After(time.Second):
+		t.Fatal("late predecessor terminal did not acknowledge exact drain")
+	}
+
+	select {
+	case ev, open := <-freshCh:
+		t.Fatalf("late predecessor touched successor router: event=%+v open=%v", ev, open)
+	default:
+	}
+	select {
+	case ev := <-sub:
+		t.Fatalf("tagged predecessor leaked to successor SSE: %+v", ev)
+	default:
+	}
+
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindTurnStarted, TurnID: "fresh"})
+	_ = sink.Write(context.Background(), runtimeevents.Event{Kind: runtimeevents.KindAgentDelta, TurnID: "fresh", Payload: []byte(`{"content":"fresh"}`)})
+	select {
+	case ev, open := <-freshCh:
+		if !open || ev.Type != llmtypes.EventDelta || ev.Content != "fresh" {
+			t.Fatalf("successor event = %+v open=%v, want fresh delta", ev, open)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("successor did not retain its exact FIFO owner")
 	}
 	bridge.finishPerSessionRouter(sessionID, fresh)
 }

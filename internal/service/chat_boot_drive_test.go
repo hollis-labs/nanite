@@ -168,10 +168,7 @@ func TestRuntimeEventBridge_NoRouterPreservesSSEProjection(t *testing.T) {
 		t.Fatal("Subscribe did not find normalized message stream")
 	}
 	bridge := &agentEventBridge{streams: streams}
-	sink := &runtimeEventBridgeSink{
-		bridge: bridge, sessionID: sessionID, acp: true,
-		source: newRuntimeEventSource(),
-	}
+	sink := newRuntimeEventBridgeSink(bridge, sessionID, true)
 	events := []runtimeevents.Event{
 		{Kind: runtimeevents.KindAgentDelta, TurnID: "turn-no-router", Payload: []byte(`{"content":"hello"}`)},
 		{Kind: runtimeevents.KindTurnCompleted, TurnID: "turn-no-router"},

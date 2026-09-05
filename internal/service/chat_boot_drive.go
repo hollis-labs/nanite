@@ -287,7 +287,14 @@ func (s *chatServiceImpl) driveBootSession(
 			sendReturned: make(chan struct{}),
 		}
 		if !gen.admitRuntimeTurn(ctx, binding, func() bool {
-			return s.agentEventBridge.bindPerSessionRouterExact(sessionID, router)
+			if !s.agentEventBridge.bindPerSessionRouterExact(sessionID, router) {
+				return false
+			}
+			if !sess.AdmitRuntimeTurnOwner(router) {
+				s.agentEventBridge.finishPerSessionRouter(sessionID, router)
+				return false
+			}
+			return true
 		}) {
 			s.agentEventBridge.finishPerSessionRouter(sessionID, router)
 			return turnCh, context.Canceled
@@ -297,6 +304,10 @@ func (s *chatServiceImpl) driveBootSession(
 		// generation token. They still receive exact router ownership here.
 		if !s.agentEventBridge.bindPerSessionRouterExact(sessionID, router) {
 			router.closeOnce()
+			return turnCh, context.Canceled
+		}
+		if !sess.AdmitRuntimeTurnOwner(router) {
+			s.agentEventBridge.finishPerSessionRouter(sessionID, router)
 			return turnCh, context.Canceled
 		}
 	}
@@ -330,28 +341,95 @@ func (s *chatServiceImpl) driveBootSession(
 	go func() {
 		if gen != nil {
 			if !gen.beginRuntimeSend(ctx, binding) {
+				sess.AbandonRuntimeTurnOwner(router)
 				s.agentEventBridge.finishPerSessionRouter(sessionID, router)
 				return
 			}
 			if s.beforeRuntimeSend != nil {
 				s.beforeRuntimeSend()
 			}
-			defer close(binding.sendReturned)
 		}
-		if err := sess.SendInput([]byte(payload)); err != nil {
+		err := sess.SendInput([]byte(payload))
+		if err != nil {
 			slog.Warn("driveBootSession: send input failed",
 				"session_id", sessionID, "err", err)
+			bindingForCleanup := binding
+			if bindingForCleanup == nil {
+				returned := make(chan struct{})
+				close(returned)
+				bindingForCleanup = &runtimeTurnBinding{session: sess, router: router, sendReturned: returned, sendErr: err}
+			}
+			// Establish the unsafe tombstone before publishing EventError: the
+			// consumer may drain and deregister immediately after this send.
+			if gen != nil {
+				s.markGenerationUnsafe(sessionID, gen, gen)
+				s.observeUnsafeRuntimeBoundary(sessionID, gen, bindingForCleanup, nil)
+			}
+			if s.afterFailedRuntimeSendUnsafe != nil {
+				s.afterFailedRuntimeSendUnsafe()
+			}
+			if gen != nil {
+				// Wake cancellation only after retainUnsafe and its exact recovery
+				// observer are visible under the generation lock.
+				gen.completeRuntimeSend(binding, err)
+			}
 			// Report only into the router admitted for this exact turn. It is a
 			// no-op if cancellation/terminal cleanup already closed it.
 			router.send(llmtypes.StreamEvent{
 				Type:  llmtypes.EventError,
 				Error: fmt.Sprintf("driveBootSession: send input: %v", err),
 			})
-			s.agentEventBridge.finishPerSessionRouter(sessionID, router)
+			s.cleanupFailedRuntimeSend(sessionID, gen, bindingForCleanup, err)
+			return
+		}
+		if gen != nil {
+			gen.completeRuntimeSend(binding, nil)
 		}
 	}()
 
 	return turnCh, nil
+}
+
+// cleanupFailedRuntimeSend treats every admitted SendInput error as unsafe
+// until the exact wrapper is terminal and its sink owner is drained. The
+// client may have queued TurnStarted/Failed immediately before returning an
+// error, while lifecycle rejection can return with no normalized turn at all;
+// stopping and waiting the exact wrapper safely covers both shapes.
+func (s *chatServiceImpl) cleanupFailedRuntimeSend(sessionID string, gen *inFlightGen, binding *runtimeTurnBinding, sendErr error) {
+	if binding == nil || binding.session == nil || binding.router == nil {
+		return
+	}
+	s.agentEventBridge.retirePerSessionRouter(sessionID, binding.router)
+
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), runtimeTurnCancelMaxWait)
+	stopErr := binding.session.Stop(cleanupCtx)
+	waitErr := binding.session.Wait(cleanupCtx)
+	terminal := !errors.Is(waitErr, context.Canceled) && !errors.Is(waitErr, context.DeadlineExceeded)
+	if terminal {
+		binding.session.AbandonRuntimeTurnOwner(binding.router)
+		s.agentEventBridge.finishPerSessionRouter(sessionID, binding.router)
+		if gen != nil {
+			s.markGenerationSafe(sessionID, gen)
+		}
+		cleanupCancel()
+		return
+	}
+	cleanupCancel()
+	slog.Warn("driveBootSession: failed SendInput cleanup remains unsafe",
+		"session_id", sessionID, "send_err", sendErr, "stop_err", stopErr, "wait_err", waitErr)
+	if gen == nil {
+		// Production chat turns always carry a generation. Keep the direct-call
+		// path bounded too: shutdown cancels this watcher if the exact wrapper
+		// never reaches terminal.
+		s.startGenerationWatcher("cleanup-failed-runtime-owner", func(ctx context.Context) {
+			select {
+			case <-binding.session.Done():
+				binding.session.AbandonRuntimeTurnOwner(binding.router)
+				s.agentEventBridge.finishPerSessionRouter(sessionID, binding.router)
+			case <-ctx.Done():
+			}
+		})
+	}
 }
 
 // resolveAgentContextForBoot loads agentID's enabled

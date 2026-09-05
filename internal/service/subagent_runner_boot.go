@@ -61,6 +61,7 @@ func drainBootSession(ch <-chan llmtypes.StreamEvent) (summary string, envelope 
 // bridge. Satisfied structurally by *agentEventBridge.
 type bootEventBridge interface {
 	SetPerSessionRouter(sessionID string, ch chan llmtypes.StreamEvent)
+	PrepareRuntimeTurnOwner(sessionID string, ch chan llmtypes.StreamEvent) bool
 }
 
 // agentBooter is the narrow surface BootRunner needs to spawn a Boot'd
@@ -214,7 +215,13 @@ func (r *BootRunner) runBoot(ctx context.Context, run *subagent.Run, agent *stor
 
 	eventsCh := make(chan llmtypes.StreamEvent, 64)
 	if r.bridge != nil {
-		r.bridge.SetPerSessionRouter(childID, eventsCh)
+		// ModeSubagent auto-fires inside Wrapper.Run, before Boot returns its
+		// Session. Hand the exact router through the RuntimeEventSink factory so
+		// the first TurnStarted cannot outrun owner registration.
+		if !r.bridge.PrepareRuntimeTurnOwner(childID, eventsCh) {
+			close(eventsCh)
+			return nil, errors.New("subagent BootRunner: prepare runtime turn owner")
+		}
 	} else {
 		// No bridge wired — the drain would block forever waiting for
 		// EventDone. Synthesize a closed channel up-front so the drain

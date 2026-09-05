@@ -401,6 +401,10 @@ type chatServiceImpl struct {
 	// after a generation has admitted a send but before Session.SendInput is
 	// invoked. Production never sets it.
 	beforeRuntimeSend func()
+	// afterFailedRuntimeSendUnsafe is a focused-test seam immediately after a
+	// failed SendInput publishes its unsafe tombstone and before EventError can
+	// let the consumer finish/deregister. Production never sets it.
+	afterFailedRuntimeSendUnsafe func()
 }
 
 func (s *chatServiceImpl) runtimeSessions() *runtimeagent.SessionManager {
@@ -424,11 +428,17 @@ type inFlightGen struct {
 	done         chan struct{}
 	cancelIssued chan struct{}
 	cancelOnce   sync.Once
+	safeOnce     sync.Once
+	watchOnce    sync.Once
+	releaseOnce  sync.Once
+	safeBoundary chan struct{}
 	turnMu       sync.Mutex
 	turn         *runtimeTurnBinding
 	predecessor  *inFlightGen
+	unsafeRoot   *inFlightGen
 	cancelAsked  bool
 	cancelSafe   bool
+	retainUnsafe bool
 }
 
 // runtimeTurnBinding is captured at the same admission boundary that publishes
@@ -441,6 +451,7 @@ type runtimeTurnBinding struct {
 	sendReturned chan struct{}
 	sendDecided  bool
 	sendStarted  bool
+	sendErr      error
 }
 
 type inFlightGenContextKey struct{}
@@ -495,12 +506,32 @@ func (g *inFlightGen) beginRuntimeSend(ctx context.Context, binding *runtimeTurn
 	return true
 }
 
+func (g *inFlightGen) completeRuntimeSend(binding *runtimeTurnBinding, err error) {
+	if g == nil || binding == nil {
+		return
+	}
+	g.turnMu.Lock()
+	binding.sendErr = err
+	close(binding.sendReturned)
+	g.turnMu.Unlock()
+}
+
+func (g *inFlightGen) runtimeSendError(binding *runtimeTurnBinding) error {
+	if g == nil || binding == nil {
+		return nil
+	}
+	g.turnMu.Lock()
+	defer g.turnMu.Unlock()
+	return binding.sendErr
+}
+
 func newInFlightGen(msgID string, cancel context.CancelFunc) *inFlightGen {
 	return &inFlightGen{
 		msgID:        msgID,
 		cancel:       cancel,
 		done:         make(chan struct{}),
 		cancelIssued: make(chan struct{}),
+		safeBoundary: make(chan struct{}),
 	}
 }
 
@@ -644,8 +675,9 @@ func (s *chatServiceImpl) deregisterGeneration(sessionID string, gen *inFlightGe
 	// it gone; deregistration never acts on a stale cancelAsked snapshot.
 	gen.turnMu.Lock()
 	cancelAsked := gen.cancelAsked
+	retainUnsafe := gen.retainUnsafe
 	barrier := gen.cancelIssued
-	if !cancelAsked {
+	if !cancelAsked && !retainUnsafe {
 		delete(s.activeGen, sessionID)
 	}
 	gen.turnMu.Unlock()
@@ -656,7 +688,11 @@ func (s *chatServiceImpl) deregisterGeneration(sessionID string, gen *inFlightGe
 	<-barrier
 	s.activeGenMu.Lock()
 	if cur := s.activeGen[sessionID]; cur == gen {
-		delete(s.activeGen, sessionID)
+		gen.turnMu.Lock()
+		if !gen.retainUnsafe {
+			delete(s.activeGen, sessionID)
+		}
+		gen.turnMu.Unlock()
 	}
 	s.activeGenMu.Unlock()
 }
@@ -738,10 +774,157 @@ func generationBoundarySafe(ctx context.Context, predecessor *inFlightGen) bool 
 	if !waitClosed(ctx, predecessor.cancelIssued) || !waitClosed(ctx, predecessor.done) {
 		return false
 	}
-	predecessor.turnMu.Lock()
-	safe := predecessor.cancelSafe
-	predecessor.turnMu.Unlock()
-	return safe
+	return generationResolvedSafe(predecessor)
+}
+
+func generationResolvedSafe(gen *inFlightGen) bool {
+	if gen == nil {
+		return true
+	}
+	gen.turnMu.Lock()
+	defer gen.turnMu.Unlock()
+	// cancelSafe is set only after this generation's complete composed
+	// boundary has resolved. unsafeRoot is an observation dependency, not a
+	// shortcut: the generation may also have its own unresolved runtime turn.
+	return gen.cancelSafe
+}
+
+func generationUnsafeRoot(gen *inFlightGen) *inFlightGen {
+	if gen == nil {
+		return nil
+	}
+	gen.turnMu.Lock()
+	root := gen.unsafeRoot
+	safe := gen.cancelSafe
+	gen.turnMu.Unlock()
+	if safe {
+		return nil
+	}
+	if root == nil {
+		return gen
+	}
+	return root
+}
+
+func (s *chatServiceImpl) startGenerationWatcher(label string, fn func(context.Context)) {
+	if s.lifecycle != nil {
+		s.lifecycle.Go(label, fn)
+		return
+	}
+	go fn(context.Background())
+}
+
+func (s *chatServiceImpl) markGenerationSafe(sessionID string, gen *inFlightGen) {
+	if gen == nil {
+		return
+	}
+	s.activeGenMu.Lock()
+	gen.turnMu.Lock()
+	gen.cancelSafe = true
+	gen.retainUnsafe = false
+	gen.safeOnce.Do(func() { close(gen.safeBoundary) })
+	gen.turnMu.Unlock()
+	s.activeGenMu.Unlock()
+
+	// Do not clear a safe tombstone until its generation goroutine returned;
+	// a successor registered sooner must still inherit the ordinary done gate.
+	gen.releaseOnce.Do(func() {
+		s.startGenerationWatcher("release-safe-generation", func(ctx context.Context) {
+			if !waitClosed(ctx, gen.done) {
+				return
+			}
+			s.activeGenMu.Lock()
+			if s.activeGen[sessionID] == gen {
+				gen.turnMu.Lock()
+				if gen.cancelSafe && !gen.retainUnsafe {
+					delete(s.activeGen, sessionID)
+				}
+				gen.turnMu.Unlock()
+			}
+			s.activeGenMu.Unlock()
+		})
+	})
+}
+
+func (s *chatServiceImpl) markGenerationUnsafe(sessionID string, gen, root *inFlightGen) {
+	if gen == nil {
+		return
+	}
+	if root == nil {
+		root = gen
+	}
+	s.activeGenMu.Lock()
+	gen.turnMu.Lock()
+	gen.cancelSafe = false
+	gen.retainUnsafe = true
+	gen.unsafeRoot = root
+	gen.turnMu.Unlock()
+	s.activeGenMu.Unlock()
+
+	// Observation is attached separately: a generation can be unsafe because
+	// of both its own runtime boundary and an inherited predecessor. One shared
+	// watcher composes both conditions instead of allowing the first one to
+	// mark the generation safe prematurely.
+}
+
+func (s *chatServiceImpl) observeUnsafePredecessor(sessionID string, gen, root *inFlightGen) {
+	if gen == nil || root == nil || root == gen {
+		return
+	}
+	gen.watchOnce.Do(func() {
+		s.startGenerationWatcher("inherit-safe-generation", func(ctx context.Context) {
+			if !waitClosed(ctx, root.safeBoundary) {
+				return
+			}
+			s.markGenerationSafe(sessionID, gen)
+		})
+	})
+}
+
+func (s *chatServiceImpl) retainUnsafePredecessor(sessionID string, gen, predecessor *inFlightGen) {
+	if gen == nil || predecessor == nil || generationResolvedSafe(predecessor) {
+		return
+	}
+	root := generationUnsafeRoot(predecessor)
+	s.markGenerationUnsafe(sessionID, gen, root)
+	s.observeUnsafePredecessor(sessionID, gen, root)
+}
+
+// observeUnsafeRuntimeBoundary keeps an unsafe takeover recoverable without
+// weakening it. The root becomes safe only after the exact admitted SendInput
+// returned and either its router terminal was processed or Wrapper.Run ended
+// (whose sink delivery is synchronous); until then every descendant inherits
+// the tombstone.
+func (s *chatServiceImpl) observeUnsafeRuntimeBoundary(sessionID string, gen *inFlightGen, binding *runtimeTurnBinding, predecessor *inFlightGen) {
+	if gen == nil || binding == nil || binding.session == nil {
+		return
+	}
+	gen.watchOnce.Do(func() {
+		s.startGenerationWatcher("recover-unsafe-runtime-boundary", func(ctx context.Context) {
+			if !waitClosed(ctx, binding.sendReturned) {
+				return
+			}
+			select {
+			case <-binding.router.terminalDrained:
+			case <-binding.session.Done():
+				binding.session.AbandonRuntimeTurnOwner(binding.router)
+				if s.agentEventBridge != nil {
+					s.agentEventBridge.finishPerSessionRouter(sessionID, binding.router)
+				} else {
+					binding.router.markTerminalDrained()
+				}
+			case <-ctx.Done():
+				return
+			}
+			if predecessor != nil && !generationResolvedSafe(predecessor) {
+				root := generationUnsafeRoot(predecessor)
+				if root == nil || !waitClosed(ctx, root.safeBoundary) {
+					return
+				}
+			}
+			s.markGenerationSafe(sessionID, gen)
+		})
+	})
 }
 
 func (s *chatServiceImpl) waitRuntimeRouterDrain(ctx context.Context, router *sessionRouter) bool {
@@ -773,6 +956,7 @@ func (s *chatServiceImpl) finishClaimedCancellation(sessionID string, gen *inFli
 			if !sendStarted {
 				// Cancellation claimed admission before SendInput. No provider
 				// terminal can exist, so exact release is the drain boundary.
+				binding.session.AbandonRuntimeTurnOwner(binding.router)
 				if s.agentEventBridge != nil {
 					s.agentEventBridge.finishPerSessionRouter(sessionID, binding.router)
 				} else {
@@ -784,20 +968,20 @@ func (s *chatServiceImpl) finishClaimedCancellation(sessionID string, gen *inFli
 			} else {
 				sess := binding.session
 				turnCtx, turnCancel := context.WithTimeout(ownerCtx, runtimeTurnCancelMaxWait)
-				cancelable, startErr := sess.WaitTurnCancelable(turnCtx, binding.sendReturned)
 				var cancelErr error
-				if startErr == nil && cancelable {
-					cancelErr = s.runtimeSessions().CancelSession(turnCtx, sess)
-				}
-				switch {
-				case startErr == nil && !cancelable:
-					turnSafe = waitClosed(turnCtx, binding.sendReturned) && s.waitRuntimeRouterDrain(turnCtx, binding.router)
-				case startErr == nil && cancelErr == nil:
-					turnSafe = sess.WaitTurnTerminal(turnCtx) == nil &&
-						waitClosed(turnCtx, binding.sendReturned) &&
-						s.waitRuntimeRouterDrain(turnCtx, binding.router)
-				default:
-					turnSafe = false
+				var sendErr error
+				turnSafe = false
+				if sess.SupportsTurnCancellation() && waitClosed(turnCtx, binding.sendReturned) {
+					// ACP SendInput returns only after the adapter's Prompt write is
+					// acknowledged. Processing can become visible before client.Prompt
+					// is invoked, so it is not a sufficient cancellation boundary.
+					sendErr = gen.runtimeSendError(binding)
+					if sendErr == nil {
+						cancelErr = s.runtimeSessions().CancelSession(turnCtx, sess)
+						turnSafe = cancelErr == nil &&
+							sess.WaitTurnTerminal(turnCtx) == nil &&
+							s.waitRuntimeRouterDrain(turnCtx, binding.router)
+					}
 				}
 				turnCancel()
 
@@ -813,6 +997,7 @@ func (s *chatServiceImpl) finishClaimedCancellation(sessionID string, gen *inFli
 						!errors.Is(waitErr, context.DeadlineExceeded) &&
 						waitClosed(stopCtx, binding.sendReturned)
 					if turnSafe {
+						sess.AbandonRuntimeTurnOwner(binding.router)
 						if s.agentEventBridge != nil {
 							s.agentEventBridge.finishPerSessionRouter(sessionID, binding.router)
 						} else {
@@ -820,15 +1005,30 @@ func (s *chatServiceImpl) finishClaimedCancellation(sessionID string, gen *inFli
 						}
 					} else if !errors.Is(stopErr, context.Canceled) && !errors.Is(stopErr, context.DeadlineExceeded) {
 						slog.Warn("chat-service: cancel runtime turn could not establish terminal boundary",
-							"session_id", sessionID, "start_err", startErr, "cancel_err", cancelErr, "stop_err", stopErr, "wait_err", waitErr)
+							"session_id", sessionID, "send_err", sendErr, "cancel_err", cancelErr, "stop_err", stopErr, "wait_err", waitErr)
 					}
 					stopCancel()
 				}
 			}
 		}
-		gen.turnMu.Lock()
-		gen.cancelSafe = predecessorSafe && turnSafe
-		gen.turnMu.Unlock()
+		overallSafe := predecessorSafe && turnSafe
+		if overallSafe {
+			s.markGenerationSafe(sessionID, gen)
+			return
+		}
+		root := gen
+		if !predecessorSafe {
+			root = generationUnsafeRoot(predecessor)
+			if root == nil {
+				root = gen
+			}
+		}
+		s.markGenerationUnsafe(sessionID, gen, root)
+		if !turnSafe && binding != nil && sendStarted {
+			s.observeUnsafeRuntimeBoundary(sessionID, gen, binding, predecessor)
+		} else if !predecessorSafe {
+			s.observeUnsafePredecessor(sessionID, gen, root)
+		}
 	}
 	if s.lifecycle != nil {
 		s.lifecycle.Go("cancel-runtime-turn", request)
@@ -942,6 +1142,7 @@ func (s *chatServiceImpl) runGeneration(name, sessionID, assistantMsgID, userCon
 		// report unsupported cancellation, so this naturally waits for their
 		// turn to finish instead of pretending the process was interrupted.
 		if !waitForPredecessor(genCtx, bgCtx, predecessor) {
+			s.retainUnsafePredecessor(sessionID, current, predecessor)
 			close(ch)
 			return
 		}
@@ -985,9 +1186,7 @@ func waitForPredecessor(genCtx, ownerCtx context.Context, predecessor *inFlightG
 			return false
 		}
 	}
-	predecessor.turnMu.Lock()
-	safe := predecessor.cancelSafe
-	predecessor.turnMu.Unlock()
+	safe := generationResolvedSafe(predecessor)
 	if predecessor.cancelIssued != nil && !safe {
 		return false
 	}

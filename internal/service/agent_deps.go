@@ -214,10 +214,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		Store:      runtimeStore,
 		PathGrants: cfg.PathGrants,
 		RuntimeEventSink: func(sessionID string, isACP bool) runtimeevents.Sink {
-			return &runtimeEventBridgeSink{
-				bridge: bridge, sessionID: sessionID, acp: isACP,
-				source: newRuntimeEventSource(),
-			}
+			return newRuntimeEventBridgeSink(bridge, sessionID, isACP)
 		},
 		TypedEventCallback:  bridge.typedCallback,
 		Permissions:         cfg.Permissions,
@@ -715,10 +712,10 @@ func (agentTelemetry) RecordPTYRestart(sessionID string, attempt int, prevExit *
 // normalized sink (and legacy fanout) falls back to the SSE-broadcast path
 // used by spawned agents and background tasks.
 type agentEventBridge struct {
-	streams     *StreamManager
-	seq         atomic.Uint64
-	routers     sync.Map // sessionID -> *sessionRouter
-	turnRouters sync.Map // sessionID + normalized turnID -> *sessionRouter
+	streams       *StreamManager
+	seq           atomic.Uint64
+	routers       sync.Map // sessionID -> *sessionRouter
+	preRunRouters sync.Map // sessionID -> *sessionRouter, consumed by sink factory
 }
 
 // sessionRouter wraps a per-turn turnCh with a close-once guard so bridge
@@ -739,16 +736,8 @@ type sessionRouter struct {
 	ch     chan llmtypes.StreamEvent
 	closed bool
 
-	routeMu sync.Mutex
-	turnID  string
-
 	terminalOnce    sync.Once
 	terminalDrained chan struct{}
-}
-
-type sessionTurnKey struct {
-	sessionID string
-	turnID    string
 }
 
 // runtimeEventBridgeSink keeps normalized turn identity attached until the
@@ -760,46 +749,106 @@ type runtimeEventBridgeSink struct {
 	bridge    *agentEventBridge
 	sessionID string
 	acp       bool
-	source    *runtimeEventSource
+	pending   []*sessionRouter
+	turns     map[string]*sessionRouter
+	untagged  *sessionRouter
+	hadRouter bool
+	retired   map[string]struct{}
+	retireOrd []string
 }
 
-type runtimeEventSource struct {
-	mu            sync.Mutex
-	terminalTurns map[string]struct{}
-	terminalOrder []string
+const (
+	retainedTerminalTurnIDs = 64
+	maxPendingRuntimeTurns  = 4096
+)
+
+func newRuntimeEventBridgeSink(bridge *agentEventBridge, sessionID string, isACP bool) *runtimeEventBridgeSink {
+	sink := &runtimeEventBridgeSink{
+		bridge: bridge, sessionID: sessionID, acp: isACP,
+		turns: make(map[string]*sessionRouter), retired: make(map[string]struct{}),
+	}
+	// Auto-fire modes can emit their first TurnStarted inside Wrapper.Run,
+	// before Boot returns a Session on which the caller could register. Their
+	// owner is therefore handed across the RuntimeEventSink factory boundary.
+	if bridge != nil {
+		if prepared, ok := bridge.preRunRouters.LoadAndDelete(sessionID); ok {
+			_ = sink.AdmitRuntimeTurnOwner(prepared.(*sessionRouter))
+		}
+	}
+	return sink
 }
 
-const retainedTerminalTurnIDs = 64
-
-func newRuntimeEventSource() *runtimeEventSource {
-	return &runtimeEventSource{terminalTurns: make(map[string]struct{})}
-}
-
-func (s *runtimeEventSource) accepts(ev runtimeevents.Event) bool {
-	if s == nil || ev.Kind != runtimeevents.KindTurnStarted || ev.TurnID == "" {
-		return true
+// AdmitRuntimeTurnOwner queues the exact router before Session.SendInput may
+// start. TurnStarted consumes this FIFO rather than consulting the bridge's
+// mutable session slot, so a late predecessor start still claims its retired
+// token instead of a successor. The hard cap converts pathological missing
+// starts into a safe admission failure rather than unbounded state.
+func (s *runtimeEventBridgeSink) AdmitRuntimeTurnOwner(owner any) bool {
+	router, ok := owner.(*sessionRouter)
+	if !ok || router == nil {
+		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, terminal := s.terminalTurns[ev.TurnID]
-	return !terminal
+	if len(s.pending) >= maxPendingRuntimeTurns {
+		return false
+	}
+	s.pending = append(s.pending, router)
+	s.hadRouter = true
+	return true
 }
 
-func (s *runtimeEventSource) observe(ev runtimeevents.Event) {
-	if s == nil || ev.TurnID == "" || (ev.Kind != runtimeevents.KindTurnCompleted && ev.Kind != runtimeevents.KindTurnFailed) {
+func (s *runtimeEventBridgeSink) AbandonRuntimeTurnOwner(owner any) {
+	router, ok := owner.(*sessionRouter)
+	if !ok || router == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, exists := s.terminalTurns[ev.TurnID]; exists {
+	for i, pending := range s.pending {
+		if pending != router {
+			continue
+		}
+		copy(s.pending[i:], s.pending[i+1:])
+		s.pending[len(s.pending)-1] = nil
+		s.pending = s.pending[:len(s.pending)-1]
+		break
+	}
+	for turnID, current := range s.turns {
+		if current == router {
+			delete(s.turns, turnID)
+			s.rememberRetired(turnID)
+		}
+	}
+	if s.untagged == router {
+		s.untagged = nil
+	}
+}
+
+func (s *runtimeEventBridgeSink) popPending() *sessionRouter {
+	if len(s.pending) == 0 {
+		return nil
+	}
+	router := s.pending[0]
+	copy(s.pending, s.pending[1:])
+	s.pending[len(s.pending)-1] = nil
+	s.pending = s.pending[:len(s.pending)-1]
+	return router
+}
+
+func (s *runtimeEventBridgeSink) rememberRetired(turnID string) {
+	if turnID == "" {
 		return
 	}
-	s.terminalTurns[ev.TurnID] = struct{}{}
-	s.terminalOrder = append(s.terminalOrder, ev.TurnID)
-	if len(s.terminalOrder) > retainedTerminalTurnIDs {
-		oldest := s.terminalOrder[0]
-		s.terminalOrder = s.terminalOrder[1:]
-		delete(s.terminalTurns, oldest)
+	if _, exists := s.retired[turnID]; exists {
+		return
+	}
+	s.retired[turnID] = struct{}{}
+	s.retireOrd = append(s.retireOrd, turnID)
+	if len(s.retireOrd) > retainedTerminalTurnIDs {
+		oldest := s.retireOrd[0]
+		s.retireOrd = s.retireOrd[1:]
+		delete(s.retired, oldest)
 	}
 }
 
@@ -811,11 +860,7 @@ func (s *runtimeEventBridgeSink) Write(_ context.Context, ev runtimeevents.Event
 	if s.bridge == nil {
 		return nil
 	}
-	if !s.source.accepts(ev) {
-		return nil
-	}
-	s.bridge.routeNormalizedEvent(s.sessionID, s.acp, ev)
-	s.source.observe(ev)
+	s.routeNormalizedEvent(ev)
 	return nil
 }
 
@@ -857,28 +902,6 @@ func (r *sessionRouter) closeOnce() {
 		r.closed = true
 		close(r.ch)
 	}
-}
-
-func (r *sessionRouter) bindTurnID(turnID string) bool {
-	if r == nil || turnID == "" {
-		return false
-	}
-	r.routeMu.Lock()
-	defer r.routeMu.Unlock()
-	if r.turnID != "" && r.turnID != turnID {
-		return false
-	}
-	r.turnID = turnID
-	return true
-}
-
-func (r *sessionRouter) normalizedTurnID() string {
-	if r == nil {
-		return ""
-	}
-	r.routeMu.Lock()
-	defer r.routeMu.Unlock()
-	return r.turnID
 }
 
 // markTerminalDrained acknowledges that the bridge has processed the exact
@@ -942,31 +965,21 @@ func (b *agentEventBridge) finishPerSessionRouter(sessionID string, owner *sessi
 	if b == nil || owner == nil {
 		return
 	}
-	b.routers.CompareAndDelete(sessionID, owner)
-	if turnID := owner.normalizedTurnID(); turnID != "" {
-		b.turnRouters.CompareAndDelete(sessionTurnKey{sessionID: sessionID, turnID: turnID}, owner)
-	}
-	owner.closeOnce()
+	b.retirePerSessionRouter(sessionID, owner)
 	owner.markTerminalDrained()
 }
 
-func (b *agentEventBridge) routerForNormalizedEvent(sessionID string, ev runtimeevents.Event) *sessionRouter {
-	if b == nil {
-		return nil
+// retirePerSessionRouter ends caller-visible/global ownership without
+// claiming the normalized terminal has crossed the per-runtime sink. A
+// SendInput error can race an already-queued TurnStarted/Failed pair; its FIFO
+// owner remains pending and cancellation safety still waits the real terminal
+// or exact Wrapper.Run completion.
+func (b *agentEventBridge) retirePerSessionRouter(sessionID string, owner *sessionRouter) {
+	if b == nil || owner == nil {
+		return
 	}
-	if ev.TurnID != "" {
-		if v, ok := b.turnRouters.Load(sessionTurnKey{sessionID: sessionID, turnID: ev.TurnID}); ok {
-			return v.(*sessionRouter)
-		}
-		// A tagged event must never fall back to the mutable session slot: it
-		// belongs to a turn that either was never admitted or has already
-		// drained, and routing it to the current turn would cross generations.
-		return nil
-	}
-	if v, ok := b.routers.Load(sessionID); ok {
-		return v.(*sessionRouter)
-	}
-	return nil
+	b.routers.CompareAndDelete(sessionID, owner)
+	owner.closeOnce()
 }
 
 func (b *agentEventBridge) deliverRuntimeStream(sessionID string, router *sessionRouter, ev llmtypes.StreamEvent) {
@@ -983,18 +996,58 @@ func (b *agentEventBridge) deliverRuntimeStream(sessionID string, router *sessio
 	}
 }
 
-func (b *agentEventBridge) routeNormalizedEvent(sessionID string, isACP bool, ev runtimeevents.Event) {
+func (s *runtimeEventBridgeSink) routeNormalizedEvent(ev runtimeevents.Event) {
 	if ev.Kind == runtimeevents.KindTurnStarted {
-		if v, ok := b.routers.Load(sessionID); ok {
-			router := v.(*sessionRouter)
-			if router.bindTurnID(ev.TurnID) {
-				b.turnRouters.Store(sessionTurnKey{sessionID: sessionID, turnID: ev.TurnID}, router)
+		if ev.TurnID != "" {
+			if _, duplicate := s.turns[ev.TurnID]; duplicate {
+				return
 			}
+			if _, retired := s.retired[ev.TurnID]; retired {
+				return
+			}
+		}
+		router := s.popPending()
+		if router == nil {
+			return
+		}
+		if ev.TurnID != "" {
+			s.turns[ev.TurnID] = router
+		} else {
+			s.untagged = router
 		}
 		return
 	}
+	if ev.Kind != runtimeevents.KindAgentDelta && ev.Kind != runtimeevents.KindTurnCompleted && ev.Kind != runtimeevents.KindTurnFailed {
+		return
+	}
 
-	router := b.routerForNormalizedEvent(sessionID, ev)
+	var router *sessionRouter
+	fallback := false
+	if ev.TurnID != "" {
+		router = s.turns[ev.TurnID]
+		if router == nil {
+			if _, retired := s.retired[ev.TurnID]; retired {
+				return
+			}
+			// Only a runtime source that has never admitted a chat router is a
+			// genuine background/no-router source. Once a router has existed,
+			// unmatched tagged events are stale and must not reach successor SSE.
+			fallback = !s.hadRouter
+		}
+	} else {
+		router = s.untagged
+		if router == nil && len(s.pending) > 0 {
+			// Native normalized streams do not guarantee TurnStarted. Their first
+			// projected event claims the exact FIFO owner instead.
+			router = s.popPending()
+			s.untagged = router
+		}
+		fallback = router == nil && !s.hadRouter
+	}
+	if router == nil && !fallback {
+		return
+	}
+
 	terminal := false
 	switch ev.Kind {
 	case runtimeevents.KindAgentDelta:
@@ -1012,11 +1065,11 @@ func (b *agentEventBridge) routeNormalizedEvent(sessionID string, isACP bool, ev
 			if thinking.Thinking == "" {
 				thinking.Thinking = payload.Content
 			}
-			b.deliverRuntimeStream(sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventThinking, ThinkingBlock: &thinking})
+			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventThinking, ThinkingBlock: &thinking})
 		} else if payload.Phase == "thought" {
-			b.deliverRuntimeStream(sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventThinking, ThinkingBlock: &llmtypes.ThinkingBlock{Thinking: payload.Content}})
+			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventThinking, ThinkingBlock: &llmtypes.ThinkingBlock{Thinking: payload.Content}})
 		} else {
-			b.deliverRuntimeStream(sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: payload.Content})
+			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: payload.Content})
 		}
 	case runtimeevents.KindTurnCompleted:
 		var payload struct {
@@ -1024,12 +1077,12 @@ func (b *agentEventBridge) routeNormalizedEvent(sessionID string, isACP bool, ev
 		}
 		_ = json.Unmarshal(ev.Payload, &payload)
 		if payload.Usage != nil {
-			b.deliverRuntimeStream(sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: payload.Usage})
+			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: payload.Usage})
 		}
 		// ACP carries usage and completion in one normalized event; native
 		// emits its usage-bearing event followed by an empty completion.
-		if isACP || payload.Usage == nil {
-			b.deliverRuntimeStream(sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+		if s.acp || payload.Usage == nil {
+			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventDone})
 			terminal = true
 		}
 	case runtimeevents.KindTurnFailed:
@@ -1037,7 +1090,7 @@ func (b *agentEventBridge) routeNormalizedEvent(sessionID string, isACP bool, ev
 			Error string `json:"error"`
 		}
 		_ = json.Unmarshal(ev.Payload, &payload)
-		b.deliverRuntimeStream(sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: payload.Error})
+		s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: payload.Error})
 		terminal = true
 	default:
 		// The canonical sink receives every normalized kind. Only the three
@@ -1045,7 +1098,13 @@ func (b *agentEventBridge) routeNormalizedEvent(sessionID string, isACP bool, ev
 		// lifecycle, policy, permission, raw, and future kinds stay internal.
 	}
 	if terminal && router != nil {
-		b.finishPerSessionRouter(sessionID, router)
+		if ev.TurnID != "" {
+			delete(s.turns, ev.TurnID)
+			s.rememberRetired(ev.TurnID)
+		} else if s.untagged == router {
+			s.untagged = nil
+		}
+		s.bridge.finishPerSessionRouter(s.sessionID, router)
 	}
 }
 
@@ -1071,12 +1130,32 @@ func (b *agentEventBridge) nextEventID() uint64 {
 // exact-token-owned. The bridge also closes on EventDone or EventError.
 func (b *agentEventBridge) SetPerSessionRouter(sessionID string, ch chan llmtypes.StreamEvent) {
 	if ch == nil {
+		b.preRunRouters.Delete(sessionID)
 		if v, ok := b.routers.LoadAndDelete(sessionID); ok {
 			b.finishPerSessionRouter(sessionID, v.(*sessionRouter))
 		}
 		return
 	}
 	b.bindPerSessionRouter(sessionID, newSessionRouter(ch))
+}
+
+// PrepareRuntimeTurnOwner binds an exact router and leaves a one-shot token
+// for BuildAgentDependencies' RuntimeEventSink factory. BootRunner calls this
+// before runtimeagent.Boot, so ModeSubagent's auto-fired first turn has an
+// owner before Wrapper.Run can emit it.
+func (b *agentEventBridge) PrepareRuntimeTurnOwner(sessionID string, ch chan llmtypes.StreamEvent) bool {
+	if b == nil || ch == nil {
+		return false
+	}
+	router := newSessionRouter(ch)
+	if !b.bindPerSessionRouterExact(sessionID, router) {
+		return false
+	}
+	if _, loaded := b.preRunRouters.LoadOrStore(sessionID, router); loaded {
+		b.finishPerSessionRouter(sessionID, router)
+		return false
+	}
+	return true
 }
 
 // fanout returns the per-session StreamEvent channel. Closes naturally when

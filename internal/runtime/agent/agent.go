@@ -242,6 +242,10 @@ type Session struct {
 	//
 	wr    *wrapper.Wrapper
 	isACP bool
+	// eventSink is the exact per-runtime canonical sink Boot handed Wrapper.
+	// Service-owned sinks may implement the private turn-owner registrar used
+	// to associate an admitted chat router with this runtime source.
+	eventSink runtimeevents.Sink
 
 	// runDone closes once the background goroutine Boot started observes
 	// wr.Run(runCtx) return (clean exit or error alike) — safe for any
@@ -579,6 +583,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		hadLineage:   hadLineage,
 		wr:           wr,
 		isACP:        isACP,
+		eventSink:    canonicalSink,
 		runDone:      make(chan struct{}),
 		runCancel:    runCancel,
 	}

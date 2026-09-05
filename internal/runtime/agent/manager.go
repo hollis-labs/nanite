@@ -177,33 +177,54 @@ func (s *Session) WaitTurnTerminal(ctx context.Context) error {
 	}
 }
 
-// WaitTurnCancelable waits until an admitted SendInput has either reached
-// ACP Processing (where CancelTurn is meaningful) or returned without ever
-// becoming cancelable. Closing sendReturned is owned by the exact SendInput
-// invocation. Native adapters have no Processing snapshot; callers stop the
-// exact wrapper and still wait sendReturned before declaring takeover safe.
-func (s *Session) WaitTurnCancelable(ctx context.Context, sendReturned <-chan struct{}) (bool, error) {
-	if s == nil || s.wr == nil {
-		return false, errors.New("agent.Session.WaitTurnCancelable: session not initialized")
+// SupportsTurnCancellation reports the wrapper's honest protocol boundary.
+// ACP exposes CancelTurn after SendInput acknowledges that Prompt was written;
+// native adapters require exact Stop+Wait takeover instead.
+func (s *Session) SupportsTurnCancellation() bool {
+	return s != nil && s.isACP
+}
+
+type runtimeTurnOwnerRegistrar interface {
+	AdmitRuntimeTurnOwner(any) bool
+	AbandonRuntimeTurnOwner(any)
+}
+
+// AdmitRuntimeTurnOwner associates an opaque service-owned router with this
+// exact runtime's canonical event source. Sinks that do not own routing need
+// no registration and preserve the legacy path.
+func (s *Session) AdmitRuntimeTurnOwner(owner any) bool {
+	if s == nil || s.eventSink == nil {
+		return true
 	}
-	if !s.isACP {
-		return true, nil
+	registrar, ok := s.eventSink.(runtimeTurnOwnerRegistrar)
+	if !ok {
+		return true
 	}
-	ticker := time.NewTicker(time.Millisecond)
-	defer ticker.Stop()
-	for {
-		snapshot, ok := s.wr.ACPSnapshot()
-		if ok && snapshot.State == acp.StateProcessing {
-			return true, nil
-		}
-		select {
-		case <-sendReturned:
-			return false, nil
-		case <-ticker.C:
-		case <-ctx.Done():
-			return false, ctx.Err()
-		}
+	return registrar.AdmitRuntimeTurnOwner(owner)
+}
+
+// AbandonRuntimeTurnOwner removes an admitted owner when SendInput was
+// synchronously prevented or after the exact wrapper reached terminal. Once
+// SendInput starts, callers must otherwise retain the token so late normalized
+// events after a returned error keep exact ownership.
+func (s *Session) AbandonRuntimeTurnOwner(owner any) {
+	if s == nil || s.eventSink == nil {
+		return
 	}
+	registrar, ok := s.eventSink.(runtimeTurnOwnerRegistrar)
+	if ok {
+		registrar.AbandonRuntimeTurnOwner(owner)
+	}
+}
+
+// Done closes after Wrapper.Run and synchronous normalized sink delivery have
+// both returned. It is used only to recover a previously unsafe takeover
+// tombstone when a stopped wrapper eventually reaches an exact terminal.
+func (s *Session) Done() <-chan struct{} {
+	if s == nil {
+		return nil
+	}
+	return s.runDone
 }
 
 // ProviderSessionID returns wrapper's current provider-assigned identity.

@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -540,7 +542,7 @@ func scanAgentOwnership(repositoryFS fs.FS, root string, allowed map[agentOwners
 			return err
 		}
 		fileSet := token.NewFileSet()
-		file, err := parser.ParseFile(fileSet, path, data, 0)
+		file, err := parser.ParseFile(fileSet, path, data, parser.SkipObjectResolution)
 		if err != nil {
 			return err
 		}
@@ -597,7 +599,7 @@ func inspectAgentOwnership(fileSet *token.FileSet, path string, file *ast.File, 
 		}
 	}
 
-	clientTaint := collectDirectACPClientTaint(file, aliases)
+	clientTaint := collectDirectACPClientTaint(fileSet, file, aliases)
 
 	ast.Inspect(file, func(node ast.Node) bool {
 		switch value := node.(type) {
@@ -660,28 +662,40 @@ var directACPClientLifecycleMethods = map[string]bool{
 }
 
 type directACPClientAlias struct {
-	target *ast.Object
+	target types.Object
 	source ast.Expr
 }
 
 type directACPClientTaint struct {
 	aliases            map[string]string
-	objects            map[*ast.Object]bool
-	objectTypes        map[*ast.Object]*ast.Object
-	directClientFields map[*ast.Object]map[string]bool
+	objects            map[types.Object]bool
+	objectTypes        map[types.Object]types.Object
+	directClientFields map[types.Object]map[string]bool
+	typeInfo           *types.Info
 }
 
-// collectDirectACPClientTaint follows local bindings by ast.Object identity,
+// collectDirectACPClientTaint follows local bindings by go/types object identity,
 // rather than identifier spelling, so a client variable in one lexical scope
 // cannot taint an unrelated variable with the same name. Alias edges are
 // resolved to a fixed point, making declaration and assignment order
 // irrelevant to this structural guard.
-func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *directACPClientTaint {
+func collectDirectACPClientTaint(fileSet *token.FileSet, file *ast.File, aliases map[string]string) *directACPClientTaint {
+	typeInfo := &types.Info{
+		Defs: make(map[*ast.Ident]types.Object),
+		Uses: make(map[*ast.Ident]types.Object),
+	}
+	typeConfig := &types.Config{
+		Importer: importer.Default(),
+		Error:    func(error) {},
+	}
+	_, _ = typeConfig.Check(file.Name.Name, fileSet, []*ast.File{file}, typeInfo)
+
 	taint := &directACPClientTaint{
 		aliases:            aliases,
-		objects:            make(map[*ast.Object]bool),
-		objectTypes:        make(map[*ast.Object]*ast.Object),
-		directClientFields: make(map[*ast.Object]map[string]bool),
+		objects:            make(map[types.Object]bool),
+		objectTypes:        make(map[types.Object]types.Object),
+		directClientFields: make(map[types.Object]map[string]bool),
+		typeInfo:           typeInfo,
 	}
 	var edges []directACPClientAlias
 
@@ -689,18 +703,19 @@ func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *dir
 		switch value := node.(type) {
 		case *ast.TypeSpec:
 			structure, ok := value.Type.(*ast.StructType)
-			if !ok || value.Name.Obj == nil {
+			typeObject := typeInfo.Defs[value.Name]
+			if !ok || typeObject == nil {
 				break
 			}
 			for _, field := range structure.Fields.List {
 				if !isDirectACPClientType(field.Type, aliases) {
 					continue
 				}
-				if taint.directClientFields[value.Name.Obj] == nil {
-					taint.directClientFields[value.Name.Obj] = make(map[string]bool)
+				if taint.directClientFields[typeObject] == nil {
+					taint.directClientFields[typeObject] = make(map[string]bool)
 				}
 				for _, name := range field.Names {
-					taint.directClientFields[value.Name.Obj][name.Name] = true
+					taint.directClientFields[typeObject][name.Name] = true
 				}
 			}
 		case *ast.ValueSpec:
@@ -708,17 +723,18 @@ func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *dir
 				if isDirectACPClientType(value.Type, aliases) {
 					taint.mark(name)
 				}
-				if typeObject := localNamedTypeObject(value.Type); typeObject != nil && name.Obj != nil {
-					taint.objectTypes[name.Obj] = typeObject
+				if target, typeObject := typeInfo.Defs[name], taint.localNamedTypeObject(value.Type); target != nil && typeObject != nil {
+					taint.objectTypes[target] = typeObject
 				}
 			}
 			for index, expression := range value.Values {
 				if index >= len(value.Names) {
 					continue
 				}
-				edges = append(edges, directACPClientAlias{target: value.Names[index].Obj, source: expression})
-				if typeObject := localCompositeTypeObject(expression); typeObject != nil && value.Names[index].Obj != nil {
-					taint.objectTypes[value.Names[index].Obj] = typeObject
+				target := typeInfo.Defs[value.Names[index]]
+				edges = append(edges, directACPClientAlias{target: target, source: expression})
+				if typeObject := taint.localCompositeTypeObject(expression); typeObject != nil && target != nil {
+					taint.objectTypes[target] = typeObject
 				}
 			}
 		case *ast.Field:
@@ -726,8 +742,8 @@ func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *dir
 				if isDirectACPClientType(value.Type, aliases) {
 					taint.mark(name)
 				}
-				if typeObject := localNamedTypeObject(value.Type); typeObject != nil && name.Obj != nil {
-					taint.objectTypes[name.Obj] = typeObject
+				if target, typeObject := typeInfo.Defs[name], taint.localNamedTypeObject(value.Type); target != nil && typeObject != nil {
+					taint.objectTypes[target] = typeObject
 				}
 			}
 		case *ast.AssignStmt:
@@ -739,9 +755,10 @@ func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *dir
 				if !ok {
 					continue
 				}
-				edges = append(edges, directACPClientAlias{target: name.Obj, source: expression})
-				if typeObject := localCompositeTypeObject(expression); typeObject != nil && name.Obj != nil {
-					taint.objectTypes[name.Obj] = typeObject
+				target := typeInfo.ObjectOf(name)
+				edges = append(edges, directACPClientAlias{target: target, source: expression})
+				if typeObject := taint.localCompositeTypeObject(expression); typeObject != nil && target != nil {
+					taint.objectTypes[target] = typeObject
 				}
 			}
 		}
@@ -762,8 +779,10 @@ func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *dir
 }
 
 func (t *directACPClientTaint) mark(name *ast.Ident) {
-	if name != nil && name.Obj != nil {
-		t.objects[name.Obj] = true
+	if name != nil {
+		if object := t.typeInfo.ObjectOf(name); object != nil {
+			t.objects[object] = true
+		}
 	}
 }
 
@@ -776,13 +795,13 @@ func (t *directACPClientTaint) contains(expression ast.Expr) bool {
 	case *ast.UnaryExpr:
 		return t.contains(value.X)
 	case *ast.Ident:
-		return value.Obj != nil && t.objects[value.Obj]
+		return t.objects[t.typeInfo.ObjectOf(value)]
 	case *ast.SelectorExpr:
 		receiver, ok := value.X.(*ast.Ident)
-		if !ok || receiver.Obj == nil {
+		if !ok {
 			return false
 		}
-		typeObject := t.objectTypes[receiver.Obj]
+		typeObject := t.objectTypes[t.typeInfo.ObjectOf(receiver)]
 		return typeObject != nil && t.directClientFields[typeObject][value.Sel.Name]
 	case *ast.CallExpr:
 		return isDirectACPClientConstructor(value, t.aliases)
@@ -791,27 +810,27 @@ func (t *directACPClientTaint) contains(expression ast.Expr) bool {
 	}
 }
 
-func localNamedTypeObject(expression ast.Expr) *ast.Object {
+func (t *directACPClientTaint) localNamedTypeObject(expression ast.Expr) types.Object {
 	switch value := expression.(type) {
 	case *ast.Ident:
-		return value.Obj
+		return t.typeInfo.ObjectOf(value)
 	case *ast.ParenExpr:
-		return localNamedTypeObject(value.X)
+		return t.localNamedTypeObject(value.X)
 	case *ast.StarExpr:
-		return localNamedTypeObject(value.X)
+		return t.localNamedTypeObject(value.X)
 	default:
 		return nil
 	}
 }
 
-func localCompositeTypeObject(expression ast.Expr) *ast.Object {
+func (t *directACPClientTaint) localCompositeTypeObject(expression ast.Expr) types.Object {
 	switch value := expression.(type) {
 	case *ast.CompositeLit:
-		return localNamedTypeObject(value.Type)
+		return t.localNamedTypeObject(value.Type)
 	case *ast.UnaryExpr:
-		return localCompositeTypeObject(value.X)
+		return t.localCompositeTypeObject(value.X)
 	case *ast.ParenExpr:
-		return localCompositeTypeObject(value.X)
+		return t.localCompositeTypeObject(value.X)
 	default:
 		return nil
 	}

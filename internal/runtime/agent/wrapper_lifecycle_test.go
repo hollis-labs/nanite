@@ -313,7 +313,7 @@ echo '{"type":"turn.completed","turn_id":"t1"}'
 `
 
 // TestBoot_WrapperLifecycle_Codex_EnvParity is this task's own regression
-// test for the environment contract now owned by wrapper v0.9.0. Without
+// test for the environment contract now owned by go-agent-wrapper. Without
 // the explicit ChildEnvironment replacement, a
 // wrapper.Wrapper.Run-driven Codex session would silently drop
 // codexLayout.AmendEnv's CODEX_HOME redirect and fall back to the

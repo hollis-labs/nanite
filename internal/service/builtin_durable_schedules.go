@@ -45,24 +45,15 @@ OKF export directory from current wiki_pages rows.`,
 	}
 }
 
-// provisionBuiltinDurableSchedules persists required builtin schedules only
-// when their durable instance is first provisioned. Existing rows are the
-// authority: matching by profile and semantic name preserves both the former
-// managed_file row and any operator-customized replacement without an upsert.
+// provisionBuiltinDurableSchedules repairs required builtin schedules whenever
+// a Loom instance is created or reconciled. Existing rows are the authority:
+// the store's atomic semantic-name guard preserves both the former managed_file
+// row and any operator-customized replacement without an upsert.
 func (s *durableAgentService) provisionBuiltinDurableSchedules(ctx context.Context, inst *store.DurableAgentInstance) error {
 	if inst == nil || inst.Slug != loomCuratorDurableSlug {
 		return nil
 	}
-	existing, err := s.store.ListAgentSchedules(ctx, inst.ProfileID)
-	if err != nil {
-		return fmt.Errorf("list schedules for builtin provisioning: %w", err)
-	}
-	for _, schedule := range existing {
-		if schedule.Name == loomLintExportName {
-			return nil
-		}
-	}
-	if err := s.store.InsertAgentSchedule(ctx, loomLintExportSchedule(inst.ProfileID, time.Now().UTC())); err != nil {
+	if _, err := s.store.InsertAgentScheduleIfNameMissing(ctx, loomLintExportSchedule(inst.ProfileID, time.Now().UTC())); err != nil {
 		return fmt.Errorf("provision builtin schedule %s: %w", loomLintExportName, err)
 	}
 	return nil

@@ -126,8 +126,73 @@ func scanAgentSchedule(scanner interface{ Scan(...any) error }, s *AgentSchedule
 
 // InsertAgentSchedule upserts an agent_schedules row by ID.
 func (s *Store) InsertAgentSchedule(ctx context.Context, row AgentSchedule) error {
-	if err := ValidateAgentSchedule(row); err != nil {
+	row, err := prepareAgentSchedule(row)
+	if err != nil {
 		return fmt.Errorf("insert agent_schedules: %w", err)
+	}
+	_, err = s.DB.ExecContext(ctx,
+		`INSERT OR REPLACE INTO agent_schedules
+		    (id, agent_id, session_id, name, schedule_kind, schedule_spec,
+		     body, priority, status, expires_at, fired_count, last_fired_at,
+		     created_at, created_by, max_retries, on_fail, next_run,
+		     job_type, job_payload)
+		 VALUES (?, ?, ?, ?, ?, ?,
+		         ?, ?, ?, ?, ?, ?,
+		         COALESCE(NULLIF(?, ''), datetime('now')),
+		         ?, ?, ?, ?, ?, ?)`,
+		agentScheduleInsertArgs(row)...,
+	)
+	if err != nil {
+		return fmt.Errorf("insert agent_schedules: %w", err)
+	}
+	return nil
+}
+
+// InsertAgentScheduleIfNameMissing inserts row only when the agent has no
+// schedule with the same semantic name. The decision and insert are one
+// SQLite statement, so concurrent builtin reconciliation cannot overwrite an
+// operator/deployed row or create duplicate builtin rows after separate
+// list-then-insert checks both observe an absence.
+//
+// The bool reports whether this call inserted the row. A false result is an
+// intentional no-op: either the semantic name already exists or row.ID is
+// already occupied. Both cases preserve the existing authoritative row.
+func (s *Store) InsertAgentScheduleIfNameMissing(ctx context.Context, row AgentSchedule) (bool, error) {
+	row, err := prepareAgentSchedule(row)
+	if err != nil {
+		return false, fmt.Errorf("insert missing agent_schedules: %w", err)
+	}
+	args := agentScheduleInsertArgs(row)
+	args = append(args, row.AgentID, row.Name)
+	result, err := s.DB.ExecContext(ctx,
+		`INSERT INTO agent_schedules
+		    (id, agent_id, session_id, name, schedule_kind, schedule_spec,
+		     body, priority, status, expires_at, fired_count, last_fired_at,
+		     created_at, created_by, max_retries, on_fail, next_run,
+		     job_type, job_payload)
+		 SELECT ?, ?, ?, ?, ?, ?,
+		        ?, ?, ?, ?, ?, ?,
+		        COALESCE(NULLIF(?, ''), datetime('now')),
+		        ?, ?, ?, ?, ?, ?
+		 WHERE NOT EXISTS (
+		     SELECT 1 FROM agent_schedules WHERE agent_id = ? AND name = ?
+		 )
+		 ON CONFLICT(id) DO NOTHING`,
+		args...,
+	)
+	if err != nil {
+		return false, fmt.Errorf("insert missing agent_schedules: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("insert missing agent_schedules rows affected: %w", err)
+	}
+	return rows == 1, nil
+}
+
+func prepareAgentSchedule(row AgentSchedule) (AgentSchedule, error) {
+	if err := ValidateAgentSchedule(row); err != nil {
+		return AgentSchedule{}, err
 	}
 	if row.Status == "" {
 		row.Status = ScheduleStatusActive
@@ -158,16 +223,11 @@ func (s *Store) InsertAgentSchedule(ctx context.Context, row AgentSchedule) erro
 	if row.JobPayload == "" {
 		row.JobPayload = "{}"
 	}
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT OR REPLACE INTO agent_schedules
-		    (id, agent_id, session_id, name, schedule_kind, schedule_spec,
-		     body, priority, status, expires_at, fired_count, last_fired_at,
-		     created_at, created_by, max_retries, on_fail, next_run,
-		     job_type, job_payload)
-		 VALUES (?, ?, ?, ?, ?, ?,
-		         ?, ?, ?, ?, ?, ?,
-		         COALESCE(NULLIF(?, ''), datetime('now')),
-		         ?, ?, ?, ?, ?, ?)`,
+	return row, nil
+}
+
+func agentScheduleInsertArgs(row AgentSchedule) []any {
+	return []any{
 		row.ID, row.AgentID, nullIfEmpty(row.SessionID), row.Name,
 		row.ScheduleKind, row.ScheduleSpec,
 		row.Body, row.Priority, row.Status, nullIfEmpty(row.ExpiresAt),
@@ -175,11 +235,7 @@ func (s *Store) InsertAgentSchedule(ctx context.Context, row AgentSchedule) erro
 		row.CreatedAt,
 		row.CreatedBy, row.MaxRetries, row.OnFail, nullIfEmpty(row.NextRun),
 		row.JobType, row.JobPayload,
-	)
-	if err != nil {
-		return fmt.Errorf("insert agent_schedules: %w", err)
 	}
-	return nil
 }
 
 // ValidateAgentSchedule is the shared domain rule for every producer of an

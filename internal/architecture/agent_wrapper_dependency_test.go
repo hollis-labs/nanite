@@ -345,6 +345,35 @@ func use(ctx context.Context, client unrelated) {
 	}
 }
 
+func TestAgentOwnershipGuardDoesNotMergeShadowedHolderTypes(t *testing.T) {
+	const productionPath = "internal/runtime/agent/shadowed.go"
+	files := fstest.MapFS{productionPath: {Data: []byte(`package agent
+import (
+    "context"
+    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+)
+type promptLike struct{}
+func (promptLike) Prompt(context.Context, string) error { return nil }
+func forbidden(seed protocol.Client) {
+    type holder struct { client protocol.Client }
+    value := holder{client: seed}
+    _ = value
+}
+func unrelated(ctx context.Context) {
+    type holder struct { client promptLike }
+    value := holder{}
+    alias := value.client
+    _ = alias.Prompt(ctx, "not an ACP client")
+}`)}}
+	violations, err := scanAgentOwnership(files, "internal/runtime/agent", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsViolation(violations, "direct ACP client lifecycle Prompt") {
+		t.Fatalf("shadowed holder declaration inherited another type's field taint:\n- %s", strings.Join(violations, "\n- "))
+	}
+}
+
 func TestAgentOwnershipGuardRejectsAllowanceOveruse(t *testing.T) {
 	const productionPath = "internal/runtime/agent/agent.go"
 	symbol := ownershipSymbol(productionPath, agentWrapperModule+"/wrapper", "New")
@@ -638,8 +667,8 @@ type directACPClientAlias struct {
 type directACPClientTaint struct {
 	aliases            map[string]string
 	objects            map[*ast.Object]bool
-	objectTypes        map[*ast.Object]string
-	directClientFields map[string]map[string]bool
+	objectTypes        map[*ast.Object]*ast.Object
+	directClientFields map[*ast.Object]map[string]bool
 }
 
 // collectDirectACPClientTaint follows local bindings by ast.Object identity,
@@ -651,8 +680,8 @@ func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *dir
 	taint := &directACPClientTaint{
 		aliases:            aliases,
 		objects:            make(map[*ast.Object]bool),
-		objectTypes:        make(map[*ast.Object]string),
-		directClientFields: make(map[string]map[string]bool),
+		objectTypes:        make(map[*ast.Object]*ast.Object),
+		directClientFields: make(map[*ast.Object]map[string]bool),
 	}
 	var edges []directACPClientAlias
 
@@ -660,18 +689,18 @@ func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *dir
 		switch value := node.(type) {
 		case *ast.TypeSpec:
 			structure, ok := value.Type.(*ast.StructType)
-			if !ok {
+			if !ok || value.Name.Obj == nil {
 				break
 			}
 			for _, field := range structure.Fields.List {
 				if !isDirectACPClientType(field.Type, aliases) {
 					continue
 				}
-				if taint.directClientFields[value.Name.Name] == nil {
-					taint.directClientFields[value.Name.Name] = make(map[string]bool)
+				if taint.directClientFields[value.Name.Obj] == nil {
+					taint.directClientFields[value.Name.Obj] = make(map[string]bool)
 				}
 				for _, name := range field.Names {
-					taint.directClientFields[value.Name.Name][name.Name] = true
+					taint.directClientFields[value.Name.Obj][name.Name] = true
 				}
 			}
 		case *ast.ValueSpec:
@@ -679,8 +708,8 @@ func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *dir
 				if isDirectACPClientType(value.Type, aliases) {
 					taint.mark(name)
 				}
-				if typeName := localNamedType(value.Type); typeName != "" && name.Obj != nil {
-					taint.objectTypes[name.Obj] = typeName
+				if typeObject := localNamedTypeObject(value.Type); typeObject != nil && name.Obj != nil {
+					taint.objectTypes[name.Obj] = typeObject
 				}
 			}
 			for index, expression := range value.Values {
@@ -688,8 +717,8 @@ func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *dir
 					continue
 				}
 				edges = append(edges, directACPClientAlias{target: value.Names[index].Obj, source: expression})
-				if typeName := localCompositeType(expression); typeName != "" && value.Names[index].Obj != nil {
-					taint.objectTypes[value.Names[index].Obj] = typeName
+				if typeObject := localCompositeTypeObject(expression); typeObject != nil && value.Names[index].Obj != nil {
+					taint.objectTypes[value.Names[index].Obj] = typeObject
 				}
 			}
 		case *ast.Field:
@@ -697,8 +726,8 @@ func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *dir
 				if isDirectACPClientType(value.Type, aliases) {
 					taint.mark(name)
 				}
-				if typeName := localNamedType(value.Type); typeName != "" && name.Obj != nil {
-					taint.objectTypes[name.Obj] = typeName
+				if typeObject := localNamedTypeObject(value.Type); typeObject != nil && name.Obj != nil {
+					taint.objectTypes[name.Obj] = typeObject
 				}
 			}
 		case *ast.AssignStmt:
@@ -711,8 +740,8 @@ func collectDirectACPClientTaint(file *ast.File, aliases map[string]string) *dir
 					continue
 				}
 				edges = append(edges, directACPClientAlias{target: name.Obj, source: expression})
-				if typeName := localCompositeType(expression); typeName != "" && name.Obj != nil {
-					taint.objectTypes[name.Obj] = typeName
+				if typeObject := localCompositeTypeObject(expression); typeObject != nil && name.Obj != nil {
+					taint.objectTypes[name.Obj] = typeObject
 				}
 			}
 		}
@@ -753,8 +782,8 @@ func (t *directACPClientTaint) contains(expression ast.Expr) bool {
 		if !ok || receiver.Obj == nil {
 			return false
 		}
-		typeName := t.objectTypes[receiver.Obj]
-		return typeName != "" && t.directClientFields[typeName][value.Sel.Name]
+		typeObject := t.objectTypes[receiver.Obj]
+		return typeObject != nil && t.directClientFields[typeObject][value.Sel.Name]
 	case *ast.CallExpr:
 		return isDirectACPClientConstructor(value, t.aliases)
 	default:
@@ -762,29 +791,29 @@ func (t *directACPClientTaint) contains(expression ast.Expr) bool {
 	}
 }
 
-func localNamedType(expression ast.Expr) string {
+func localNamedTypeObject(expression ast.Expr) *ast.Object {
 	switch value := expression.(type) {
 	case *ast.Ident:
-		return value.Name
+		return value.Obj
 	case *ast.ParenExpr:
-		return localNamedType(value.X)
+		return localNamedTypeObject(value.X)
 	case *ast.StarExpr:
-		return localNamedType(value.X)
+		return localNamedTypeObject(value.X)
 	default:
-		return ""
+		return nil
 	}
 }
 
-func localCompositeType(expression ast.Expr) string {
+func localCompositeTypeObject(expression ast.Expr) *ast.Object {
 	switch value := expression.(type) {
 	case *ast.CompositeLit:
-		return localNamedType(value.Type)
+		return localNamedTypeObject(value.Type)
 	case *ast.UnaryExpr:
-		return localCompositeType(value.X)
+		return localCompositeTypeObject(value.X)
 	case *ast.ParenExpr:
-		return localCompositeType(value.X)
+		return localCompositeTypeObject(value.X)
 	default:
-		return ""
+		return nil
 	}
 }
 

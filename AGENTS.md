@@ -1,178 +1,79 @@
-# AGENTS.md — Nanite
+# Nanite
 
-## What is this and why
+Nanite is a CLI agent framework and plugin host: a Go backend with an embedded
+React + shadcn SPA, shipping the `nanite`, `nanite-agent` and `nanite-eval`
+binaries. It boots agent sessions into a project, executes tools directly, and
+extends through hot-loaded subprocess MCP plugins. It is a single-user desktop
+application, not a multi-tenant service, and a peer of Torque rather than a
+layer beneath it.
 
-Nanite is a CLI agent framework and plugin host: an agent runtime that boots
-agent sessions into any project with the right context, executes directly
-(tools, CLI, PTY, subprocess plugins) the way Claude Code does, and extends via
-hot-loadable subprocess MCP plugins. It is an agent runtime, not just a chat
-shell — out of the box a fast minimal chat experience, and with plugins a
-programmable environment for AI-powered systems and interfaces. Nanite ships as
-a Go backend with an embedded React + shadcn frontend, plus the `nanite` and
-`nanite-agent` binaries. It is a single-user desktop app; any "enterprise
-readiness" material elsewhere in the repo is speculative research only.
+## Start Here
 
-Nanite composes as a peer with Torque (durable/queued/scheduled work): Nanite
-can submit to Torque for durable tasks, and Torque can spawn Nanite agents as
-executors. Neither is subordinate to the other.
+- `README.md` is the only outward-facing overview; everything else is internal.
+- `cmd/nanite/` is the server and CLI, `cmd/nanite-agent/` installs the agent
+  framework, `cmd/nanite-eval/` is the eval harness.
+- `internal/chat/` orchestrates a turn; `internal/runtime/agent/` builds an
+  agent's boot content and resolves its dynamic context at launch.
+- `internal/plugin/` is the plugin host: install state machine, catalog fetch,
+  Ed25519 signature verification.
+- `internal/workspace/walkup.go` decides which instruction files Nanite reads
+  from a project, and in what order.
+- `docs/architecture/` holds the three current subsystem documents.
+- `ui/src/generated/` is generator output — regenerate it, never hand-edit it.
 
-## Where to start
-
-- `cmd/nanite/` — main entry point (the `nanite` binary; `nanite serve`)
-- `cmd/nanite-agent/` — agent framework CLI (extracts roles/skills/commands via `nanite-agent init`)
-- `cmd/nanite-eval/` — eval harness entry point
-- `internal/brand/` — app identity constants (single source of truth for rebranding)
-- `internal/api/` — HTTP API handlers
-- `internal/chat/` — chat engine: orchestration, context, delegation, envelopes
-- `internal/dispatch/` — three-role harness (Chat / Worker / Planner) + ScopeTier classifier
-- `internal/mcp/`, `internal/toolclient/` — MCP client integration and tool-broker runtime adapter
-- `internal/plugin/` — subprocess MCP plugin host (install state machine, catalog, signing)
-- `internal/provider/` — LLM provider abstractions (Anthropic, OpenAI, Ollama, PTY bridge)
-- `internal/store/` — SQLite persistence layer (also `nanite.db` migrations)
-- `internal/context/` — Context Broker + slot system (read `internal/context/INVARIANTS.md` first)
-- `ui/src/` — React + shadcn frontend
-- `docs/` — architecture, plugin guides, ADRs; start at `docs/architecture/ARCHITECTURE.md`
-- `adr/` and `docs/decisions/` — architectural decision records
-- `README.md`, `CLAUDE.md` — project overview and build/deploy conventions
-
-## Key domain concepts
-
-- **Agent framework** — roles (`~/.nanite/roles/` domain/stack/meta), skills,
-  commands, hooks; embedded in `nanite-agent`, extracted via `nanite-agent init`.
-- **Plugin host** — subprocess MCP plugins with manifest v1, hot load/unload,
-  install state machine, catalog fetch + Ed25519 signature verification, SSE
-  lifecycle stream. Catalog: `plugins.nanite.hollislabs.dev/catalog.yaml`.
-- **Plugin SDK** — published `plugin-sdk` module (yaml-authoritative, wire-type
-  contracts) for Go plugin authors.
-- **Three-role harness** — Chat / Worker / Planner roles, selected by a
-  ScopeTier classifier; `nanite_execute_task` self-tool drives delegation.
-- **Envelopes** — structured UI cards injected into chat messages; manifest is
-  source of truth (`config/envelopes.yaml`), with Go + generated TypeScript
-  sides kept in sync. See `CLAUDE.md` "Envelope System" and `docs/envelopes.md`.
-- **Context Broker / slot system** — six load-bearing invariants documented in
-  `internal/context/INVARIANTS.md`, enforced by `internal/service/slot_invariants_test.go`.
-- **Tool broker** — Opencode-style MCP internalization; uniform tool registry;
-  `<concept>_<verb>` naming with provider prefix only on real collision;
-  `nanite_*` namespace reserved for first-party self-tools.
-- **Boot profiles** — operator-registered catalog YAML that surfaces extra rows
-  in the chat composer; selecting one spins up a headless CLI agent session.
-- **Signing** — Ed25519 catalog + per-plugin signatures; the `devmode` build
-  tag gates the dev bypass so production always verifies.
-
-## Common operations
-
-First time in a fresh clone — install the git hooks. `lefthook.yml` is tracked,
-but a tracked config installs nothing; without this step none of the pre-commit
-or pre-push checks exist.
+## Commands
 
 ```bash
-lefthook install
-find .git/hooks -type f ! -name '*.sample'   # verify: expect pre-commit, pre-push
+lefthook install                  # once per clone — a tracked lefthook.yml installs nothing
+go build ./cmd/nanite/            # compile check; writes ./nanite
+./nanite serve -dev               # DB resolves via go-apppaths; `nanite path` prints it
+go test ./...                     # no -race — the suite pre-push runs
+./scripts/check.sh                # the landing check: format, vet, scoped lint, tests
+make build                        # generate envelopes + build UI + build binary
+make check-envelopes              # generated envelope artifacts vs. the go-envelopes module
 ```
 
-A worktree of an already-installed clone is covered — `core.hooksPath` is an
-absolute path into the parent clone's `.git/hooks`, which every worktree shares
-(`git config --get core.hooksPath`).
+Run `./scripts/check.sh` when a feature lands, not on every commit — pre-commit
+is formatting only, scoped to the staged diff. Its header explains the test
+tiers and why its lint stage measures from the merge base with `origin/main`.
+`make test` is the full `-race` suite and belongs to the nightly gate; a change
+touching goroutines, channels, `context` cancellation, mutexes, atomics or
+shutdown ordering needs `-race -count=20` on the package you touched as well.
 
-**pre-commit is formatting only**, and every command is scoped to the staged
-diff: `go-format` (gofmt + goimports), `migration-purity` (no `VALUES` clause in
-`internal/store/migrations/*.sql`), and `frontend-lint` (biome, `skip: true` —
-`CW-20260816-0087`). Nothing at commit time can fail for a reason outside the
-change in front of you, which is what keeps `--no-verify` — all-or-nothing —
-from being the natural escape.
+## Boundaries
 
-**pre-push** runs three commands on every push to `main` (`only: - ref: main`
-on each), in this execution order: `migration-number`, `quality-ratchet-test`
-(`python3 scripts/quality-ratchet_test.py`), `go-test` (`go test ./...`). The
-branch is the only thing that scopes them — there is no file filter, so they run
-whatever the push contains, `go.mod`-, migration-`.sql`- and docs-only pushes
-included. A WIP-branch push reports `(skip) by condition` for all three.
-`go-test` is the no-`-race` suite, not Tier 3.
+Agent profiles and durable instances are database-backed. There is no project
+agent catalog — no `.nanite/`, no `config/agents/`, no file that defines a
+runtime agent, and `Boot <agent>` is not a resolution mechanism here. The
+profiles under `internal/agent/builtin/profiles/` are first-run seeds.
 
-**Whole-repo analysis lives in `./scripts/check.sh`** — see "Test and lint"
-below.
+`TASKS/`, `adr/`, `docs/engineering/` and `docs/audits/` were archived out of
+this repo at `b58db1fa` for public release. Hundreds of Go comments, script
+headers and `Makefile` targets still cite paths beneath them. Those paths do
+not resolve and are not coming back; a claim is not verified because a comment
+cites one.
 
-Build (production — no `devmode` tag, signature verification unconditional):
+The Context Broker's six slot invariants live in
+`internal/context/INVARIANTS.md`, enforced by
+`internal/service/slot_invariants_test.go`. Change both together or neither.
 
-```bash
-make build          # generate-envelopes + build-ui + go build -o nanite ./cmd/nanite
-make build-dev      # adds devmode tag (signing bypass) — never ship this
-make install        # go install ./cmd/nanite to ~/go/bin (used by MCP and Cerberus)
-```
+Migrations carry schema, not seed rows: no `VALUES` clause in
+`internal/store/migrations/*.sql` — seed data belongs in
+`internal/store/seed.go`, while `UPDATE`/`DELETE` backfills and the
+`INSERT ... SELECT` rebuild idiom are allowed. A duplicate migration number is
+this repo's one unrecoverable failure, so `migration-number` runs on every push
+to `main` with no file filter. Do not add one — a filter here fails open and
+prints as a benign skip.
 
-Run locally:
+The `devmode` build tag disables plugin signature verification. `make build`
+must never set it; `make build-dev` exists for that and must never ship.
 
-```bash
-go build ./cmd/nanite/
-./nanite serve -port 8090 -db ./nanite.db -dev
-make run            # build then ./nanite serve --port 8090
-```
+The envelope catalog belongs to the released `go-envelopes` module, not to this
+repo — `config/envelopes.yaml` no longer exists. New core types are released
+there first; this repo adds the React component under
+`ui/src/components/chat/envelopes/` and regenerates.
 
-Dev loop (two terminals): `air` for the backend, `cd ui && npm run dev` for the
-frontend.
-
-Test and lint:
-
-```bash
-./scripts/check.sh  # the landing check — run this when a feature lands
-make test           # go test -race ./...
-make lint           # go vet + golangci-lint + staticcheck + errcheck + govulncheck
-make vuln           # govulncheck only
-make eval           # interaction-quality eval suite (eval build tag)
-```
-
-`./scripts/check.sh` takes no arguments and runs four stages, naming every one
-that failed: `format` (gofmt + goimports over every Go file), `vet`
-(`go vet ./...`), `lint` (`golangci-lint` scoped to what your work added,
-measured from the merge base with `origin/main`), and `test` (`go test ./...` — Tier 1
-of `docs/engineering/testing-workflow.md` §3). Run it when a feature lands,
-before pushing a branch you care about, and before dispatching the full-repo
-quality gate — not on every commit.
-
-The lint stage is scoped on purpose: whole-repo `golangci-lint run` exits
-non-zero on a large body of pre-existing findings, and that body is the nightly
-gate's business, where it runs with `--issues-exit-code=0` against a ratcheting
-baseline (`scripts/quality-ratchet.py`). Override the diff base with
-`CHECK_LINT_BASE=<rev>`.
-
-The base is the last **pushed** commit, not your branch point — the two coincide
-only while `main` is fully pushed. When local `main` is ahead, the stage lints a
-superset of your branch's own diff. It over-reports, never under-reports; see
-`scripts/check.sh`'s header.
-
-If your change touched goroutines, channels, `context` cancellation, mutexes,
-atomics, or shutdown ordering, also run Tier 2 (`-race -count=20` on the package
-you touched). Tier 3 (full suite under `-race`) is the nightly gate's; Tier 4
-flake hunting is deliberate and manual. Neither belongs on a hook or in the
-landing check.
-
-Deploy via Cerberus (the running service uses a separate artifact from a local
-`go build` — resource id is `nanite-api-service`, not `nanite-api`):
-
-```bash
-cerberus_resource_deploy nanite-api-service   # build + sync artifact
-cerberus_resource_reload nanite-api-service   # explicit cutover — restart launchd
-cerberus_resource_status nanite-api-service   # verify new launchd_pid
-cerberus_resource_logs   nanite-api-service --lines 50 --stream stderr
-```
-
-Adding a core envelope type: edit `config/envelopes.yaml`, add the React
-component under `ui/src/components/chat/envelopes/`, run `npm run generate:plugins`,
-verify the `data` shape on both streaming (SSE) and persisted (reload) paths.
-
-## Where to look for more
-
-- Architecture: `docs/architecture/ARCHITECTURE.md` and the subsystem docs in
-  `docs/architecture/` (plugin system, envelope pipeline, tool broker, classifier).
-- ADRs: `adr/` (portfolio-level decisions, ADR-001…) and `docs/decisions/`
-  (recent local ADRs — models-catalog sync, MCP internalization, broker).
-- Plugin authoring: `docs/plugin-authoring-guide.md`, `docs/plugin-yaml-reference.md`,
-  `docs/plugin-sdk-reference.md`, `docs/plugin-catalog-guide.md`.
-- Roadmap / phase planning: no single `docs/roadmap.md`; see
-  `docs/hardening-phase-plan.md`, `docs/post-mvp-plan.md`, and the
-  `planning/nanite-release-prep/` tree. Live state truth lives in the Torque
-  portfolio summary + sprints (via the `mux` MCP), not in repo files.
-- Agent config for this repo: `.nanite/config.yaml` (agents `nanite-backend`,
-  `nanite-frontend`, `nanite-plugin-dev`, `nanite-planner`, `nanite-reviewer`);
-  boot one with e.g. `Boot nanite-plugin-dev`.
-- Knowledge file: `~/dev/agent-os/knowledge/projects/nanite.md`.
+`go build` produces `./nanite`, which is not the binary the running service
+executes. Deployment goes through the Cerberus resource `nanite-api-service`:
+`deploy` syncs the artifact, `reload` is the cutover, and deploy alone can
+leave the previous process running on the old bytes.

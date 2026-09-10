@@ -138,14 +138,42 @@ type BootDirHook struct {
 }
 
 // DefaultBootDirHooks is the hook set Nanite plants when a caller does
-// not supply one. Deliberately EMPTY.
+// not supply one. EMPTY, and that is now a decided policy rather than a
+// placeholder: CW-20260910-0016, ruled by Chrispian 2026-09-09 —
+// **Nanite plants no hooks by default and exposes the mechanism.**
 //
-// CW-20260910-0015 builds the mechanism; CW-20260910-0016 decides the
-// policy, and they are separate tasks precisely so this file cannot ship
-// an opinion. "Nanite plants no hooks by default and exposes the
-// mechanism" is a legitimate outcome of that decision — Nanite is not a
-// personal catalog, and a hook planted here fires for EVERY agent Nanite
-// boots, including ones a user imported for their own purposes.
+// Do not fill this in without revisiting that ruling. Four independent
+// grounds, any one of which is sufficient:
+//
+//  1. Nanite is not a personal catalog. The candidate gate set
+//     (agent-setup's docs/gate-inventory.md §2) is five gates aimed at
+//     one operator's workflow, and three of the five are unusable without
+//     Torque — which Nanite does not know its user has. A hook planted
+//     here fires for EVERY agent Nanite boots, including ones imported
+//     for someone else's purposes.
+//
+//  2. **Boot dirs are headless, and this is the ground that generalizes.**
+//     CLI dispatch spawns with no TTY — which is exactly why
+//     bootdir_provider_config.go plants acceptEdits for claude and
+//     approval_policy=never for codex, a config that can surface an
+//     approval prompt DEADLOCKS (the headless-codex hang was a live bug).
+//     So a hard gate here is not a guardrail, it is that hang again; and
+//     a soft gate that "presents and proceeds" presents to nobody. The
+//     only shape that survives is one speaking to the AGENT at exit 2
+//     rather than to an operator.
+//
+//  3. Only claude has verified wiring (see this file's header). A default
+//     set would fire for one provider in three while reading as coverage.
+//
+//  4. Tesseract anti_rigidity_doctrine (hard gates only for a genuine
+//     security issue) and audit_mitigations_nudge_only_zero_new_gates
+//     (31 mitigations, not one a new gate). None of the five carries a
+//     security justification; they are workflow discipline.
+//
+// The gates themselves are not wrong — they belong in the personal
+// catalog that owns that workflow, where they already work. What Nanite
+// owes is the mechanism, which is this file, reachable through
+// SetupParams.Hooks.
 var DefaultBootDirHooks []BootDirHook
 
 // hookScriptMode is the mode for a planted hook script. It must be

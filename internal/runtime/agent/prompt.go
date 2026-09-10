@@ -57,7 +57,7 @@ func resolveBootPrompt(profile *store.AgentProfile, opts Options) string {
 		base = composeSystemPrompt(opts.Role, profile, opts.Mode)
 	}
 	base = appendDynamicContext(base, opts.DynamicContext)
-	return withMandatoryPostCompactionReread(base)
+	return withCLINarration(withMandatoryPostCompactionReread(base))
 }
 
 // ResolveSystemPrompt is the exported entry point for recomputing a
@@ -83,7 +83,7 @@ func ResolveSystemPrompt(role string, profile *store.AgentProfile, mode Mode, bo
 		base = composeSystemPrompt(role, profile, mode)
 	}
 	base = appendDynamicContext(base, dynamicContext)
-	return withMandatoryPostCompactionReread(base)
+	return withCLINarration(withMandatoryPostCompactionReread(base))
 }
 
 // appendDynamicContext appends each non-empty block in blocks (keyed by
@@ -165,6 +165,47 @@ func withMandatoryPostCompactionReread(prompt string) string {
 		return mandatoryPostCompactionRereadInstruction
 	}
 	return prompt + "\n\n" + mandatoryPostCompactionRereadInstruction
+}
+
+// cliNarrationInstruction is the narration rule for CLI-launched agents.
+//
+// CW-20260519-0068 introduced it for the silent multi-minute turn problem
+// (session c256, turn 6b55d90a: 14+ minutes, 4 subagent dispatches, zero
+// chat output). It originally lived in internal/chat's universal-rules
+// block, which reaches every dispatch surface.
+//
+// CW-20260910-0011 moved it here, and the move is the point. That fix has
+// two halves, and the harness-level half already covers the GUI/API
+// surface structurally: subagent.Service.startHeartbeat emits a periodic
+// "still running" ping to the parent's SSE stream. Keeping the prose in
+// the universal block asked every agent on every dispatch to remember to
+// do something a mechanism already does — the intervention agent-setup's
+// docs/gate-inventory.md §4 finds does not work, and the one it ranks
+// below both structural fixes and mechanically-fired gates.
+//
+// The CLI surface is the exception, and the reason is structural rather
+// than preferential: Nanite's own iteration loop sits at iter 0 for CLI
+// providers and cannot observe their in-process tool calls
+// (internal/service/chat_boot_drive.go), so no heartbeat is possible and
+// the model's own narration text is the only signal that reaches the
+// operator. Prose is the ONLY intervention available on this surface,
+// which is exactly when it earns its place.
+//
+// Rides the same unconditional append point as
+// mandatoryPostCompactionRereadInstruction, so every CLI-launched agent
+// carries it regardless of whether its base content came from the
+// role/profile/mode composition, a boot-profile catalog's
+// BootPromptOverride, or a resolver's live-fetched data.
+const cliNarrationInstruction = `Narrate long waits. Before a subagent dispatch or a slow tool call, say in one line what you are doing; report the outcome when it returns. On a long silent stretch, add a brief "still working on X" update — your narration is the only progress signal this session's operator receives.`
+
+// withCLINarration appends cliNarrationInstruction to prompt,
+// unconditionally, for the same reasons and through the same single
+// append point as withMandatoryPostCompactionReread.
+func withCLINarration(prompt string) string {
+	if strings.TrimSpace(prompt) == "" {
+		return cliNarrationInstruction
+	}
+	return prompt + "\n\n" + cliNarrationInstruction
 }
 
 // roleFraming returns the role-specific prefix for the system prompt. Empty

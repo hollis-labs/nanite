@@ -84,22 +84,28 @@
 // discipline that closes the c160 turn-18 "parent narrates fake success"
 // failure class.
 //
-// The Narration subsection was added by CW-20260519-0068 (silent
-// multi-minute turn problem: session c256, turn 6b55d90a ran 14+ minutes
-// across 4 subagent dispatches with zero chat output). This is the
-// prompt-level half of the fix; the harness-level half is the periodic
-// "still running" ping subagent.Service.startHeartbeat emits to the
-// parent's SSE stream while a subagent's runner call is in flight
-// (internal/subagent/service.go). Landing the rule here — rather than in
-// roleFraming/modeFraming (internal/runtime/agent/prompt.go) — means it
-// reaches every dispatch surface uniformly: GUI/API turns via the Context
-// Broker's SlotUniversal, and CLI-launched turns via the same slot
-// assembly feeding CLAUDE.md regeneration (see
-// docs/architecture/chat-system/05-external-agent-execution.md). The CLI
-// blind spot (nanite's own iteration loop sits at iter 0 for CLI
-// providers and cannot observe in-process tool calls, chat_boot_drive.go)
-// is exactly the case this rule targets: the LLM's own narration text is
-// the only signal available for that surface.
+// The Narration subsection USED to live here (added by CW-20260519-0068
+// for the silent multi-minute turn problem: session c256, turn 6b55d90a
+// ran 14+ minutes across 4 subagent dispatches with zero chat output).
+// CW-20260910-0011 moved it out, to
+// internal/runtime/agent/prompt.go's cliNarrationInstruction.
+//
+// The original rationale for putting it here was that SlotUniversal
+// reaches every dispatch surface uniformly. That is true, and it is
+// exactly why it no longer belongs here: the harness-level half of the
+// CW-20260519-0068 fix — the periodic "still running" ping
+// subagent.Service.startHeartbeat emits to the parent's SSE stream —
+// already covers the GUI/API surface structurally. Asking every agent on
+// every dispatch to remember to narrate is prose duplicating a mechanism
+// that already fires, which is the intervention agent-setup's
+// gate-inventory §4 finds does not work.
+//
+// What the heartbeat does NOT cover is the CLI blind spot: Nanite's own
+// iteration loop sits at iter 0 for CLI providers and cannot observe
+// in-process tool calls (chat_boot_drive.go), so the model's own
+// narration text is the only signal available there. That surface, and
+// only that surface, still needs the rule — so it now rides the CLI boot
+// prompt instead of the universal block.
 package chat
 
 // universalRulesBlock is the content shared by every agent (chat, worker,
@@ -149,11 +155,11 @@ const universalRulesBlock = `## Universal rules (apply to every agent)
 - **Use what tools return.** Tool output is the source of truth. If you need data you do not have, call a tool.
 - **Distinguish real from synthesized.** For demos, sketches, or tests you can synthesize sample data — but say so. For real questions, ground in tool output.
 - **Ask before fabricating.** When data is incomplete, conflicting, or too sparse, one short clarifying question beats a polished reply over thin data.
-- **Count, do not estimate.** When you have the data, count it; paginate if needed. Say "estimate" only when you genuinely cannot count.
+- **Count when you have the data.** Count it; paginate if needed. Say "estimate" only when you genuinely cannot count.
 
 ### Refusal
 
-- **Acknowledge honestly when you fail.** Do not paper over with confident framing. A clear "I could not access X" beats a polished reply over no data.
+- **Acknowledge honestly when you fail.** A clear "I could not access X" beats a polished reply over no data.
 - **Refuse rather than fabricate.** If you cannot access the data, file, or path needed, return an explicit failure: state what you tried, what was blocked, what would unblock you. Do not synthesize from training data — as a subagent, your reply is treated as authoritative by the parent.
 - **Partial is better than fabricated.** If tools succeed but return less than you need, say so. A partial answer with a clear gap beats a complete-looking answer over thin data.
 - **Acknowledge subagent failure.** When a subagent_spawn envelope reports ` + "`success: false`" + `, acknowledge with error.message and error.kind. Do not narrate success or fabricate outcomes — the success flag is the source of truth, and a non-empty result body on a failed envelope is still a failure.
@@ -161,11 +167,7 @@ const universalRulesBlock = `## Universal rules (apply to every agent)
 ### Verification
 
 - For destructive or externally-visible actions (deletes, pushes, posts, emails), confirm with the user first.
-- When you delegate to a subagent or peer, treat the reply as a draft to verify — not as authoritative. The peer has the same training-data risk you do.
-
-### Narration
-
-- **Narrate long waits.** Before subagent_spawn or a slow tool call, say in one line what you are doing; report the outcome when it returns. On a long silent stretch, add a brief "still working on X" update.`
+- When you delegate to a subagent or peer, treat the reply as a draft to verify — not as authoritative. The peer has the same training-data risk you do.`
 
 // UniversalRulesBlock returns the universal rules content emitted at the
 // head of every dispatch via SlotUniversal (position 0 in SlotOrder).

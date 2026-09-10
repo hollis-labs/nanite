@@ -49,7 +49,7 @@ func TestResolveBootPrompt_Override(t *testing.T) {
 func TestResolveBootPrompt_FallthroughComposes(t *testing.T) {
 	profile := &store.AgentProfile{SystemPrompt: "base prompt"}
 	got := resolveBootPrompt(profile, Options{Role: "", Mode: ModeLongLived})
-	want := "base prompt\n\n" + mandatoryPostCompactionRereadInstruction
+	want := "base prompt\n\n" + mandatoryPostCompactionRereadInstruction + "\n\n" + cliNarrationInstruction
 	if got != want {
 		t.Fatalf("resolveBootPrompt fallthrough = %q, want %q", got, want)
 	}
@@ -66,7 +66,7 @@ func TestBootPrompt_ClaudeLayout_HonorsOverride(t *testing.T) {
 	got := claudeLayout{}.BootPrompt(
 		&store.AgentProfile{SystemPrompt: "base"},
 		Options{BootPromptOverride: "from-spec"})
-	want := "from-spec\n\n" + mandatoryPostCompactionRereadInstruction
+	want := "from-spec\n\n" + mandatoryPostCompactionRereadInstruction + "\n\n" + cliNarrationInstruction
 	if got != want {
 		t.Fatalf("claudeLayout.BootPrompt = %q, want %q", got, want)
 	}
@@ -78,7 +78,7 @@ func TestBootPrompt_CodexLayout_HonorsOverride(t *testing.T) {
 	got := codexLayout{}.BootPrompt(
 		&store.AgentProfile{SystemPrompt: "base"},
 		Options{BootPromptOverride: "from-spec"})
-	want := "from-spec\n\n" + mandatoryPostCompactionRereadInstruction
+	want := "from-spec\n\n" + mandatoryPostCompactionRereadInstruction + "\n\n" + cliNarrationInstruction
 	if got != want {
 		t.Fatalf("codexLayout.BootPrompt = %q, want %q", got, want)
 	}
@@ -90,7 +90,7 @@ func TestBootPrompt_OpencodeLayout_HonorsOverride(t *testing.T) {
 	got := opencodeLayout{}.BootPrompt(
 		&store.AgentProfile{SystemPrompt: "base"},
 		Options{BootPromptOverride: "from-spec"})
-	want := "from-spec\n\n" + mandatoryPostCompactionRereadInstruction
+	want := "from-spec\n\n" + mandatoryPostCompactionRereadInstruction + "\n\n" + cliNarrationInstruction
 	if got != want {
 		t.Fatalf("opencodeLayout.BootPrompt = %q, want %q", got, want)
 	}

@@ -51,8 +51,8 @@ type claudePlanter struct{}
 
 var _ plant.Planter = claudePlanter{}
 
-func (claudePlanter) Plant(_ context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
-	return plantSpec(bootDir, spec, plantConfig{
+func (claudePlanter) Plant(ctx context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
+	return plantSpec(ctx, bootDir, spec, plantConfig{
 		provider:             "claude",
 		providerSettingsPath: ".claude/settings.json",
 	})
@@ -107,7 +107,7 @@ func (l claudeLayout) Setup(params SetupParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := l.Populate(bootDir, params); err != nil {
+	if _, err := l.Populate(bootDir, params); err != nil {
 		// On any post-mkdir failure, clean up the partial boot dir so
 		// callers don't leak $TMPDIR entries.
 		_ = os.RemoveAll(bootDir)
@@ -129,16 +129,15 @@ func (l claudeLayout) Setup(params SetupParams) (string, error) {
 // by this migration, so claudePlanter.Plant is called with
 // context.Background() here — this is a synchronous filesystem write
 // with no cancellation point today.
-func (claudeLayout) Populate(bootDir string, params SetupParams) error {
+func (claudeLayout) Populate(bootDir string, params SetupParams) (plant.Result, error) {
 	if params.AgentProfile == nil {
-		return fmt.Errorf("agent: claudeLayout.Populate: AgentProfile is required")
+		return plant.Result{}, fmt.Errorf("agent: claudeLayout.Populate: AgentProfile is required")
 	}
 	spec, err := claudePlantSpec(params)
 	if err != nil {
-		return err
+		return plant.Result{}, err
 	}
-	_, err = claudePlanter{}.Plant(context.Background(), bootDir, spec)
-	return err
+	return claudePlanter{}.Plant(context.Background(), bootDir, spec)
 }
 
 // RegenerateSystemPromptSlot rewrites only CLAUDE.md, leaving the rest

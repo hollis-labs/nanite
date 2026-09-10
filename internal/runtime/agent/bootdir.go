@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -21,12 +22,21 @@ type Layout interface {
 	Setup(params SetupParams) (string, error)
 
 	// Populate writes the per-provider files into an existing boot dir.
-	// Idempotent — every Atomic*WriteFile call replaces the prior file
-	// without reading prior state. Used by recovery.BootDirOps.Repopulate
-	// to rewrite a partially-truncated sandbox dir without re-rolling the
-	// $TMPDIR path. The caller is responsible for owning bootDir's
-	// lifecycle (cleanup on terminal-failure remains with Setup).
-	Populate(bootDir string, params SetupParams) error
+	// Idempotent — the shared materialization engine reconciles against
+	// its own manifest, so an unchanged tree is reported unchanged rather
+	// than rewritten. Used by recovery.BootDirOps.Repopulate to rewrite a
+	// partially-truncated sandbox dir without re-rolling the $TMPDIR path.
+	// The caller is responsible for owning bootDir's lifecycle (cleanup
+	// on terminal-failure remains with Setup).
+	//
+	// CW-20260910-0020: returns the plant.Result so callers can reach
+	// Result.Handle — the shared engine's manifest, ownership and
+	// per-entry change data — instead of that data being discarded at the
+	// planting boundary, which was the original intent behind
+	// CW-20260910-0006. RegenerateSystemPromptSlot deliberately does NOT
+	// return one: it rewrites a single known slot as targeted watchdog
+	// remediation, and no caller has a use for a one-entry manifest.
+	Populate(bootDir string, params SetupParams) (plant.Result, error)
 
 	// RegenerateSystemPromptSlot rewrites only the system-prompt-bearing
 	// file in bootDir (CLAUDE.md for claude, AGENTS.md for codex,
@@ -322,8 +332,8 @@ func (u unsupportedLayout) Setup(SetupParams) (string, error) {
 	return "", fmt.Errorf("agent: bootdir for provider %q is not yet implemented (awaiting go-providers BootDirSpec coverage)", u.name)
 }
 
-func (u unsupportedLayout) Populate(string, SetupParams) error {
-	return fmt.Errorf("agent: bootdir Populate for provider %q is not yet implemented", u.name)
+func (u unsupportedLayout) Populate(string, SetupParams) (plant.Result, error) {
+	return plant.Result{}, fmt.Errorf("agent: bootdir Populate for provider %q is not yet implemented", u.name)
 }
 
 func (u unsupportedLayout) RegenerateSystemPromptSlot(string, SetupParams) error {

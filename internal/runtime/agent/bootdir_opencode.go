@@ -45,8 +45,8 @@ type opencodePlanter struct{}
 
 var _ plant.Planter = opencodePlanter{}
 
-func (opencodePlanter) Plant(_ context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
-	return plantSpec(bootDir, spec, plantConfig{provider: "opencode"})
+func (opencodePlanter) Plant(ctx context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
+	return plantSpec(ctx, bootDir, spec, plantConfig{provider: "opencode"})
 }
 
 // opencodeAgentMD renders the agents/<slug>.md system-prompt body.
@@ -140,7 +140,7 @@ func (l opencodeLayout) Setup(params SetupParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := l.Populate(bootDir, params); err != nil {
+	if _, err := l.Populate(bootDir, params); err != nil {
 		_ = os.RemoveAll(bootDir)
 		return "", err
 	}
@@ -152,16 +152,15 @@ func (l opencodeLayout) Setup(params SetupParams) (string, error) {
 // Layout.Populate has no context.Context parameter (see bootdir.go
 // and claudeLayout.Populate's comment for why opencodePlanter.Plant is
 // called with context.Background() here).
-func (opencodeLayout) Populate(bootDir string, params SetupParams) error {
+func (opencodeLayout) Populate(bootDir string, params SetupParams) (plant.Result, error) {
 	if params.AgentProfile == nil {
-		return fmt.Errorf("agent: opencodeLayout.Populate: AgentProfile is required")
+		return plant.Result{}, fmt.Errorf("agent: opencodeLayout.Populate: AgentProfile is required")
 	}
 	spec, err := opencodePlantSpec(params)
 	if err != nil {
-		return err
+		return plant.Result{}, err
 	}
-	_, err = opencodePlanter{}.Plant(context.Background(), bootDir, spec)
-	return err
+	return opencodePlanter{}.Plant(context.Background(), bootDir, spec)
 }
 
 // RegenerateSystemPromptSlot rewrites only agents/<slug>.md, leaving the

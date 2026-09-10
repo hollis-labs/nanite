@@ -51,8 +51,8 @@ type codexPlanter struct{}
 
 var _ plant.Planter = codexPlanter{}
 
-func (codexPlanter) Plant(_ context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
-	return plantSpec(bootDir, spec, plantConfig{
+func (codexPlanter) Plant(ctx context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
+	return plantSpec(ctx, bootDir, spec, plantConfig{
 		provider:             "codex",
 		providerSettingsPath: "config.toml",
 		providerSettingsMode: codexConfigFileMode,
@@ -131,7 +131,7 @@ func (l codexLayout) Setup(params SetupParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := l.Populate(bootDir, params); err != nil {
+	if _, err := l.Populate(bootDir, params); err != nil {
 		_ = os.RemoveAll(bootDir)
 		return "", err
 	}
@@ -143,16 +143,15 @@ func (l codexLayout) Setup(params SetupParams) (string, error) {
 // Layout.Populate has no context.Context parameter (see bootdir.go
 // and claudeLayout.Populate's comment for why codexPlanter.Plant is
 // called with context.Background() here).
-func (codexLayout) Populate(bootDir string, params SetupParams) error {
+func (codexLayout) Populate(bootDir string, params SetupParams) (plant.Result, error) {
 	if params.AgentProfile == nil {
-		return fmt.Errorf("agent: codexLayout.Populate: AgentProfile is required")
+		return plant.Result{}, fmt.Errorf("agent: codexLayout.Populate: AgentProfile is required")
 	}
 	spec, err := codexPlantSpec(params)
 	if err != nil {
-		return err
+		return plant.Result{}, err
 	}
-	_, err = codexPlanter{}.Plant(context.Background(), bootDir, spec)
-	return err
+	return codexPlanter{}.Plant(context.Background(), bootDir, spec)
 }
 
 // RegenerateSystemPromptSlot rewrites only AGENTS.md, leaving the rest

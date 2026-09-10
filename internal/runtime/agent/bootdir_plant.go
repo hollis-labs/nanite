@@ -1,14 +1,14 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/hollis-labs/agentkit/agentlaunch"
+	"github.com/hollis-labs/agentkit/artifact"
 	"github.com/hollis-labs/go-agent-wrapper/plant"
-	"github.com/hollis-labs/nanite/internal/fsutil"
 )
 
 // bootdir_plant.go is the convergence point onto go-agent-wrapper's
@@ -48,9 +48,50 @@ import (
 // .sandbox/ docs); plant.Planter only supplies the destination-agnostic
 // Spec vocabulary (Files/MCPConfig/ProviderSettings/Hooks/RecoveryPrompt)
 // and a Result reporting shape. Nanite's own claudePlanter/codexPlanter/
-// opencodePlanter decide where each Spec field lands, reusing the same
-// writePlantedFile primitive (path-safety gate + atomic write) the prior
-// InjectionSpec-based mechanism used.
+// opencodePlanter decide where each Spec field lands.
+//
+// # The write mechanics: agentkit's shared materialization engine
+//
+// CW-20260910-0020: the actual bytes-to-disk step is no longer a
+// hand-rolled per-file loop. bootDirArtifactTree below converts the
+// app-level plant.Spec into an agentkit artifact.Tree — carrying Nanite's
+// OWN per-provider destinations and modes, from plantConfig — and
+// plantSpec hands that tree to plant.SharedPlanter, which routes it
+// through agentlaunch.MaterializeArtifacts into agentkit's shared
+// materialize.Engine. That engine owns the atomic temp-file + rename
+// write (via os.Root, so the write cannot escape the boot dir) and
+// returns a materialize.Handle carrying the manifest and per-entry
+// change data, which Layout.Populate now surfaces to its caller.
+//
+// Building Spec.Artifacts here is deliberate and is the whole point:
+// SharedPlanter ALSO accepts the legacy Spec.Files/MCPConfig/
+// ProviderSettings fields, but converts them on its own fixed
+// conventions — Files 0644, MCPConfig 0600, ProviderSettings to its own
+// providerSettingsPath(provider), Hooks 0700. Nanite's destinations and
+// modes differ (codex's config.toml/auth.json at 0600, opencode's
+// hand-rolled descriptors riding Files rather than ProviderSettings), so
+// leaning on that legacy conversion would silently relocate files and
+// change modes. Nothing in this package populates the legacy fields on
+// the Spec it hands to SharedPlanter.
+//
+// # The ownership rule this buys, and the trap it creates
+//
+// The shared engine tracks what it owns in a manifest it writes into the
+// boot dir at .agentkit/materialize-manifest.json. Reconcile (the
+// operation Nanite uses — see plantSpec) classifies a desired path that
+// EXISTS ON DISK but is ABSENT FROM THE MANIFEST as an ownership
+// conflict, and refuses the whole plant before writing anything. The
+// ConflictOverwrite policy does NOT rescue that case; it is only
+// consulted for paths the manifest already knows.
+//
+// Consequence, and it is load-bearing: once the engine owns a boot dir,
+// EVERY writer into that dir must go through the engine. A file dropped
+// in by a direct os.WriteFile becomes a landmine for the next plant that
+// wants to own its path. This is why PlantAgentSkillFiles (skill_plant.go),
+// which plants newly-granted skills into a LIVE session's boot dir, was
+// migrated onto this same path in CW-20260910-0020 rather than left on a
+// direct write loop — a mid-session skill planted outside the manifest
+// would have made the next crash-recovery Repopulate fail outright.
 //
 // # What did NOT move onto Planter
 //
@@ -74,24 +115,106 @@ import (
 // post-mkdir failure, and agent.Boot's deferred cleanup removes it on any
 // later failure (the pre-Start leak guard).
 
-// writePlantedFile validates relPath through the shared bootdir
-// path-safety gate, creates any intermediate directories, and atomically
-// writes content. mode 0 falls back to 0o644.
-func writePlantedFile(bootDir, relPath, content string, mode os.FileMode) error {
-	if err := agentlaunch.ValidateBootDirRelPath(relPath); err != nil {
-		return fmt.Errorf("agent: bootdir plant %q: %w", relPath, err)
+// plantedFileMode is the mode a planted file gets when neither
+// plantConfig.fileModeOverrides nor plantConfig.providerSettingsMode
+// names one. Matches the pre-CW-20260910-0020 writePlantedFile default.
+const plantedFileMode os.FileMode = 0o644
+
+// mcpConfigFileMode is the mode for the planted ".mcp.json" descriptor.
+// Deliberately 0o644 — the mode Nanite has always written it at — and
+// deliberately NOT go-agent-wrapper's legacy MCPConfig convention of
+// 0o600. The boot dir itself is 0o700 (makeBootDir's os.MkdirTemp), so
+// the descriptor is not readable outside the owning user regardless.
+// Tightening it is a security-posture decision on its own merits, not a
+// side effect this migration gets to make silently.
+const mcpConfigFileMode os.FileMode = 0o644
+
+// bootDirOwnershipGroup is the materialization ownership group every
+// Nanite-planted boot-dir entry carries. A single group is correct here:
+// Nanite never uses materialize.Selection to plant a subset by group,
+// and never sets ReconcilePolicy.RemoveOwned, so the group exists to
+// mark "Nanite planted this" rather than to partition the tree.
+//
+// Per-entry EntryIDs are derived from the destination path, which is
+// what makes a boot-time plant and a later mid-session re-plant of the
+// same path agree on ownership instead of colliding.
+const bootDirOwnershipGroup = "nanite:bootdir"
+
+// bootDirArtifactTree converts an app-level plant.Spec into the agentkit
+// artifact.Tree the shared materialization engine consumes, applying
+// cfg's per-provider destinations and modes.
+//
+// Every destination path still passes through
+// agentlaunch.ValidateBootDirRelPath, exactly as the prior
+// writePlantedFile primitive did. That gate is NOT redundant with the
+// engine's own artifact.ValidateRelPath: ValidateRelPath rejects
+// absolute paths and traversal, but ValidateBootDirRelPath ALSO enforces
+// a reserved-prefix denylist (".git/", ".ssh/", ".gnupg/", ".aws/" and
+// their bare forms) that artifact does not carry. Dropping this call and
+// leaning on the engine would silently retire that denylist.
+func bootDirArtifactTree(spec plant.Spec, cfg plantConfig) (artifact.Tree, error) {
+	var entries []artifact.Entry
+
+	add := func(relPath string, content []byte, mode os.FileMode, entryID string) error {
+		if err := agentlaunch.ValidateBootDirRelPath(relPath); err != nil {
+			return fmt.Errorf("agent: bootdir plant %q: %w", relPath, err)
+		}
+		if mode == 0 {
+			mode = plantedFileMode
+		}
+		// make+copy, NOT append([]byte(nil), content...): appending zero
+		// elements to a nil slice yields nil, and artifact.Entry.Validate
+		// rejects a file entry whose Bytes is nil. An empty planted file
+		// is legitimate here (boot.md when the caller supplies no kickoff
+		// content), so it must arrive as an empty-but-non-nil slice.
+		body := make([]byte, len(content))
+		copy(body, content)
+		entries = append(entries, artifact.Entry{
+			Path:  relPath,
+			Kind:  artifact.EntryFile,
+			Mode:  mode,
+			Bytes: body,
+			Ownership: artifact.Ownership{
+				EntryID: "nanite:" + entryID,
+				GroupID: bootDirOwnershipGroup,
+			},
+			Provenance: artifact.Provenance{Source: "nanite.bootdir." + cfg.provider},
+		})
+		return nil
 	}
-	if mode == 0 {
-		mode = 0o644
+
+	// Sorted so tree construction is deterministic on its own terms.
+	// artifact.Normalize sorts again downstream; this keeps the
+	// pre-normalize tree reproducible for debugging and provenance.
+	relPaths := make([]string, 0, len(spec.Files))
+	for relPath := range spec.Files {
+		relPaths = append(relPaths, relPath)
 	}
-	path := filepath.Join(bootDir, filepath.FromSlash(relPath))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("agent: bootdir plant %q: mkdir: %w", relPath, err)
+	sort.Strings(relPaths)
+	for _, relPath := range relPaths {
+		if err := add(relPath, spec.Files[relPath], cfg.fileModeOverrides[relPath], "file:"+relPath); err != nil {
+			return artifact.Tree{}, err
+		}
 	}
-	if err := fsutil.AtomicWriteFile(path, []byte(content), mode); err != nil {
-		return fmt.Errorf("agent: bootdir plant %q: %w", relPath, err)
+
+	if len(spec.MCPConfig) > 0 {
+		if err := add(".mcp.json", spec.MCPConfig, mcpConfigFileMode, "mcp"); err != nil {
+			return artifact.Tree{}, err
+		}
 	}
-	return nil
+
+	if cfg.providerSettingsPath != "" {
+		if content, ok := spec.ProviderSettings[cfg.provider]; ok {
+			if err := add(cfg.providerSettingsPath, content, cfg.providerSettingsMode, "provider-settings:"+cfg.provider); err != nil {
+				return artifact.Tree{}, err
+			}
+		}
+	}
+
+	return artifact.Tree{
+		Entries:    entries,
+		Provenance: artifact.Provenance{Source: "nanite.bootdir." + cfg.provider},
+	}, nil
 }
 
 // plantConfig is the per-provider destination knowledge a Nanite
@@ -122,10 +245,40 @@ type plantConfig struct {
 }
 
 // plantSpec is the shared write routine every per-provider Planter
-// (claudePlanter/codexPlanter/opencodePlanter) delegates to. It writes
-// spec.Files (sorted for deterministic Result.PlantedFiles order), then
-// spec.MCPConfig (the ".mcp.json" shortcut), then
-// spec.ProviderSettings[cfg.provider] at cfg.providerSettingsPath.
+// (claudePlanter/codexPlanter/opencodePlanter) delegates to. It converts
+// spec into an artifact.Tree carrying Nanite's own destinations and
+// modes (bootDirArtifactTree), then hands that tree to
+// plant.SharedPlanter for the actual write.
+//
+// # Why the default (reconcile) operation is the right one, verified
+//
+// SharedPlanter leaves Spec.Operation empty, which
+// agentlaunch.MaterializeArtifacts resolves to
+// materialize.OperationReconcile. That is the only operation that works
+// against Nanite's boot-dir lifecycle, and it satisfies both Layout
+// requirements — verified empirically against this exact call path in
+// CW-20260910-0020, not inferred:
+//
+//   - Setup plants into a dir makeBootDir ALREADY created (os.MkdirTemp).
+//     OperationCreate would fail with ErrTargetExists; it stages into a
+//     sibling dir and renames, so it requires the target to be absent.
+//   - Populate re-plants against an existing, possibly partially-
+//     truncated dir for crash recovery. Reconcile overwrites the stale
+//     content correctly.
+//   - RegenerateSystemPromptSlot plants a ONE-ENTRY tree and must leave
+//     the rest of the dir alone. Reconcile carries forward every manifest
+//     entry not named in the desired tree, so .mcp.json and .sandbox/
+//     survive.
+//   - Re-planting an unchanged tree is a no-op (reported Unchanged, not
+//     rewritten), which preserves Populate's documented idempotence.
+//
+// Note this works because of agentlaunch.MaterializeArtifacts, NOT
+// materialize.Engine alone: that intermediate layer MkdirAlls the target,
+// synthesizes a bootstrap manifest from the desired tree when the boot
+// dir has none yet, and defaults the conflict policy to
+// ConflictOverwrite. Calling materialize.Engine directly with reconcile
+// returns ErrMissingManifest on a fresh dir. It is a narrow ledge; do not
+// re-point this at the engine without re-establishing those three.
 //
 // spec.Hooks and spec.RecoveryPrompt have no Nanite plant target yet —
 // nothing in this codebase populates either field today (see the
@@ -133,8 +286,9 @@ type plantConfig struct {
 // can only mean a future caller expected behavior this Planter doesn't
 // implement. Rejected loudly rather than silently dropped, matching the
 // "unsupported kind" guard the prior InjectionSpec-based mechanism used
-// for non-raw NativeFiles.
-func plantSpec(bootDir string, spec plant.Spec, cfg plantConfig) (plant.Result, error) {
+// for non-raw NativeFiles. (CW-20260910-0015 builds the Hooks target and
+// lifts the first of these guards.)
+func plantSpec(ctx context.Context, bootDir string, spec plant.Spec, cfg plantConfig) (plant.Result, error) {
 	if len(spec.Hooks) > 0 {
 		return plant.Result{}, fmt.Errorf("agent: bootdir Planter(%s): hooks are not yet supported", cfg.provider)
 	}
@@ -142,39 +296,19 @@ func plantSpec(bootDir string, spec plant.Spec, cfg plantConfig) (plant.Result, 
 		return plant.Result{}, fmt.Errorf("agent: bootdir Planter(%s): RecoveryPrompt is not yet supported", cfg.provider)
 	}
 
-	var planted []string
-
-	keys := make([]string, 0, len(spec.Files))
-	for relPath := range spec.Files {
-		keys = append(keys, relPath)
+	tree, err := bootDirArtifactTree(spec, cfg)
+	if err != nil {
+		return plant.Result{}, err
 	}
-	sort.Strings(keys)
-	for _, relPath := range keys {
-		mode := cfg.fileModeOverrides[relPath]
-		if err := writePlantedFile(bootDir, relPath, string(spec.Files[relPath]), mode); err != nil {
-			return plant.Result{}, err
-		}
-		planted = append(planted, filepath.Join(bootDir, filepath.FromSlash(relPath)))
+	if len(tree.Entries) == 0 {
+		return plant.Result{}, nil
 	}
 
-	if len(spec.MCPConfig) > 0 {
-		if err := writePlantedFile(bootDir, ".mcp.json", string(spec.MCPConfig), 0); err != nil {
-			return plant.Result{}, err
-		}
-		planted = append(planted, filepath.Join(bootDir, ".mcp.json"))
+	result, err := plant.SharedPlanter{}.Plant(ctx, bootDir, plant.Spec{Artifacts: tree})
+	if err != nil {
+		return result, fmt.Errorf("agent: bootdir Planter(%s): %w", cfg.provider, err)
 	}
-
-	if cfg.providerSettingsPath != "" {
-		if content, ok := spec.ProviderSettings[cfg.provider]; ok {
-			if err := writePlantedFile(bootDir, cfg.providerSettingsPath, string(content), cfg.providerSettingsMode); err != nil {
-				return plant.Result{}, err
-			}
-			planted = append(planted, filepath.Join(bootDir, filepath.FromSlash(cfg.providerSettingsPath)))
-		}
-	}
-
-	sort.Strings(planted)
-	return plant.Result{PlantedFiles: planted}, nil
+	return result, nil
 }
 
 // sandboxFiles returns the Nanite app-extra .sandbox/ files as

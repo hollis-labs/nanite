@@ -201,7 +201,12 @@ type Container struct {
 	RunStore            *workflowapi.RunStore
 	WorkflowBroadcaster *workflowapi.Broadcaster
 
-	// AdapterRegistry holds registered CLIAgentAdapters for discovery and sandbox ops.
+	// AdapterRegistry holds the registered CLIAgentAdapters. Two directions,
+	// one set: sandbox population and project-root sync (the export
+	// direction), and CLIAgentAdapter.Import (the format readers behind
+	// `nanite agent install` and POST /api/agents/install). It is NOT a
+	// discovery input — CW-20260910-0012 cut that tier; see
+	// internal/agent/discovery.go.
 	AdapterRegistry *agent.AdapterRegistry
 
 	// ProviderCatalog is the registry-backed provider/model dropdown
@@ -365,6 +370,19 @@ type ContainerConfig struct {
 	DevToolsAllowedPaths []string
 }
 
+// NewImportAdapterRegistry builds an AdapterRegistry for the IMPORT
+// direction: the format readers behind `nanite agent install` and its REST
+// twin (internal/agentimport.RegistryParser).
+//
+// Same adapters, same priority ordering as newRuntimeAdapterRegistry below —
+// they are one set of format adapters, reached from two directions. This
+// constructor is exported and separately named so the import call sites read
+// as what they are (an operator-invoked read of a named path) rather than
+// borrowing a helper whose name says "runtime". Nothing at boot calls it.
+func NewImportAdapterRegistry() *agent.AdapterRegistry {
+	return newRuntimeAdapterRegistry()
+}
+
 func newRuntimeAdapterRegistry() *agent.AdapterRegistry {
 	reg := agent.NewAdapterRegistry()
 	reg.Register(adapterclaude.New().Adapter())
@@ -420,19 +438,18 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// will be wired when the plugin host supports adapter registration.
 	adapterRegistry := newRuntimeAdapterRegistry()
 
-	// Discover agent definitions from the remaining tiers (CLI --agent flag,
-	// currently unreachable, plus adapter-discovered). As of
-	// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md every
-	// registered CLIAgentAdapter (including nanite-native, the last one
-	// that used to produce real results here) has a no-op Discover() — see
-	// internal/agent/discovery.go's DiscoverOptions.Adapters doc comment
-	// for why adapterRegistry is still passed through (it's also used below
-	// for PopulateAllSandboxes/SyncAllProjectRoots). The project/user/plugin
-	// directory-scan tiers were cut in full by TASKS/phase-1/08 — no
-	// PluginsDir/HomeDir wiring is needed anymore.
+	// Discover agent definitions from the one remaining tier: the CLI
+	// --agent flag, itself unreachable in production today. The
+	// project/user/plugin directory scans were cut in full by
+	// TASKS/phase-1/08, and CW-20260910-0012 cut the adapter tier too --
+	// CLIAgentAdapter.Discover became Import(path), an explicit
+	// operator-initiated read that boot must not call. adapterRegistry is
+	// no longer a discovery input; it is still built above because
+	// PopulateAllSandboxes / SyncAllProjectRoots (the opposite, export
+	// direction) remain live, and because internal/agentimport drives
+	// Import through it from the CLI and REST triggers.
 	agentDefs, err := agent.Discover(agent.DiscoverOptions{
 		WorkingDir: workingDir,
-		Adapters:   adapterRegistry,
 	})
 	if err != nil {
 		slog.Warn("service container: agent discovery", "err", err)

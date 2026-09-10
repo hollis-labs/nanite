@@ -29,6 +29,29 @@ func (c ManageClass) CopyToManagedAllowed() bool {
 	return c == ManageClassPlugin || c == ManageClassExternal
 }
 
+// Describe renders the class as a noun phrase for an operator-facing refusal,
+// so a message says what kind of thing is in the way rather than echoing an
+// enum value.
+//
+// It lives here, beside the vocabulary it describes, because three callers
+// need the same wording — the import pipeline, AgentConfigService's write
+// refusals, and the CLI's pre-flight check — and three hand-synced copies of
+// a phrase is how they stop agreeing.
+func (c ManageClass) Describe() string {
+	switch c {
+	case ManageClassInternal:
+		return "an embedded internal harness profile"
+	case ManageClassManaged:
+		return "an operator-managed profile"
+	case ManageClassPlugin:
+		return "a plugin-provided profile"
+	case ManageClassExternal:
+		return "an imported profile with external provenance"
+	default:
+		return "a " + string(c) + " profile"
+	}
+}
+
 // Classification is stateless because ownership is stored in the profile's
 // Source provenance, not inferred from a path on disk.
 type Classification struct{}

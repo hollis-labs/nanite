@@ -7,29 +7,13 @@ import (
 	"testing"
 )
 
-// TestDiscover_Noop guards Phase 0 item 16 (external-format agent import cut):
-// even when a legitimate .claude/agents/*.md file is present, Discover must
-// no longer import it as a Nanite agent.
-func TestDiscover_Noop(t *testing.T) {
-	dir := t.TempDir()
-	agentsDir := filepath.Join(dir, ".claude", "agents")
-	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	content := "---\nname: Helper\nslug: helper\n---\nPrompt for helper.\n"
-	if err := os.WriteFile(filepath.Join(agentsDir, "helper.md"), []byte(content), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	a := New().Adapter()
-	defs, err := a.Discover(dir)
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	if defs != nil {
-		t.Errorf("Discover should be a no-op (external-format import cut), got %v", defs)
-	}
-}
+// TASKS/phase-0/16's TestDiscover_Noop lived here and asserted that a real
+// .claude/agents/*.md file was NOT imported. CW-20260910-0012 deliberately
+// reverses that for this adapter alone -- it is the one format shipped across
+// the re-armed Import seam, so the mechanism is proven rather than asserted.
+// The affirmative coverage lives in import_test.go. What phase-0/16 actually
+// forbade is unchanged and still enforced elsewhere: nothing reads these
+// files at boot. internal/agent/discovery.go has no adapter tier at all now.
 
 func TestSyncProjectRoot_EmptyAgentsWritesPlaceholder(t *testing.T) {
 	dir := t.TempDir()

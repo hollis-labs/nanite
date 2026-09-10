@@ -164,6 +164,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/agents/{id}", a.handleUpdateAgent)
 	mux.HandleFunc("DELETE /api/agents/{id}", a.handleDeleteAgent)
 	mux.HandleFunc("POST /api/agents/{id}/copy-to-managed", a.handleCopyAgentToManaged)
+	// CW-20260910-0013: agent import/sync — the REST twin of
+	// `nanite agent install` / `nanite agent sync`, mirroring the skills
+	// pair below. See internal/api/agent_import.go's header.
+	mux.HandleFunc("POST /api/agents/install", a.handleInstallAgent)
+	mux.HandleFunc("POST /api/agents/{slug}/sync", a.handleSyncAgent)
 	mux.HandleFunc("GET /api/agents/{id}/known-tools", a.handleListAgentKnownTools)
 	mux.HandleFunc("POST /api/agents/{id}/known-tools", a.handleCreateAgentKnownTool)
 	mux.HandleFunc("GET /api/agents/{id}/known-tools/{toolName}", a.handleGetAgentKnownTool)

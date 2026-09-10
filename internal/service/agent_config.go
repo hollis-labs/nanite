@@ -32,6 +32,29 @@ var (
 	ErrManagedSlugExists   = errors.New("a managed agent with this slug already exists")
 )
 
+// notManagedError wraps ErrAgentNotManaged with what is actually in the way
+// and, when one exists, the way out.
+//
+// The sentinel alone ("agent is not an editable database config") tells a
+// caller that a write was refused but not what to do instead, which is how a
+// read-only boundary reads as a dead end. internal/api's writeNotManaged has
+// said the useful thing for a while — this puts the same information behind
+// the service call, so a CLI, a self-tool or a test sees it too.
+//
+// Every caller matches with errors.Is, so enriching the message is safe.
+func notManagedError(p *store.AgentProfile, class agent.ManageClass, verb string) error {
+	slug := ""
+	if p != nil {
+		slug = p.Slug
+	}
+	if class.CopyToManagedAllowed() {
+		return fmt.Errorf("%w: %q is %s and read-only in place; copy it to the managed layer (CopyToManaged) and %s the copy",
+			ErrAgentNotManaged, slug, class.Describe(), verb)
+	}
+	return fmt.Errorf("%w: %q is %s, which Nanite manages; there is no copy-to-managed path for it",
+		ErrAgentNotManaged, slug, class.Describe())
+}
+
 // AgentConfigResult retains Revision for wire compatibility. It is always
 // empty now that the database, rather than a file-content hash, is canonical.
 type AgentConfigResult struct {
@@ -98,8 +121,8 @@ func (s *AgentConfigService) Update(existing, updated *store.AgentProfile, proce
 	if existing == nil || updated == nil {
 		return nil, fmt.Errorf("existing and updated profiles are required")
 	}
-	if !s.Classify(existing).Editable() {
-		return nil, ErrAgentNotManaged
+	if class := s.Classify(existing); !class.Editable() {
+		return nil, notManagedError(existing, class, "update")
 	}
 	if strings.TrimSpace(updated.Slug) == "" {
 		updated.Slug = existing.Slug
@@ -129,8 +152,8 @@ func (s *AgentConfigService) Delete(profile *store.AgentProfile) error {
 	if profile == nil {
 		return fmt.Errorf("profile is required")
 	}
-	if !s.Classify(profile).Editable() {
-		return ErrAgentNotManaged
+	if class := s.Classify(profile); !class.Editable() {
+		return notManagedError(profile, class, "delete")
 	}
 	if err := s.store.DeleteAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile.Slug); err != nil {
 		return fmt.Errorf("delete agent: %w", err)
@@ -150,7 +173,7 @@ func (s *AgentConfigService) CopyToManaged(source *store.AgentProfile, procedure
 		return nil, ErrAgentAlreadyManaged
 	}
 	if !class.CopyToManagedAllowed() {
-		return nil, ErrAgentNotManaged
+		return nil, notManagedError(source, class, "copy")
 	}
 	if procedures == nil {
 		rows, err := s.store.ListAgentProcedures(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, source.ID)

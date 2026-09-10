@@ -1,12 +1,5 @@
 package agent
 
-import (
-	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
-)
-
 // DiscoverOptions configures agent discovery.
 //
 // TASKS/phase-1/08 ("Kill the file-reingest-on-boot pattern, in full"): files
@@ -30,30 +23,30 @@ type DiscoverOptions struct {
 	// investigation.
 	CLIAgentPath string
 
-	// WorkingDir is the project root passed through to adapter-based
-	// discovery (e.g. the nanite-native adapter's .nanite/config.yaml
-	// agents: block). No directory-scan tier of its own reads it directly
-	// anymore.
+	// WorkingDir was the project root passed through to adapter-based
+	// discovery. Nothing reads it now that the adapter tier is gone; it is
+	// retained only so callers (internal/service/container.go) keep
+	// compiling unchanged, and is a candidate for removal alongside
+	// CLIAgentPath whenever that dead tier is finally cut.
 	WorkingDir string
 
-	// Adapters is an optional AdapterRegistry for adapter-based discovery.
-	// External-ecosystem-format adapters (claude/codex/gemini/opencode)
-	// already have a no-op Discover() as of Phase 0's cut of external agent
-	// import (TASKS/phase-0/16). The nanite-native adapter's own Discover
-	// (.nanite/config.yaml's agents: block -> agent_profiles, the last
-	// remaining producer at this tier) was also cut to a no-op by
-	// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md — see
-	// docs/engineering/architecture/01-agent-construction.md's "What's cut"
-	// ("Files as agent storage, except builtin/seed content"). As of that
-	// task, every currently-registered CLIAgentAdapter.Discover() returns
-	// (nil, nil); this tier contributes nothing to agentDefs in practice.
-	// The loop below is left in place as a live extension point for the
-	// CLIAgentAdapter interface (a future plugin-provided adapter could
-	// still return real Definitions) and because the same AdapterRegistry
-	// instance is also used for the unrelated, still-live
-	// PopulateAllSandboxes/SyncAllProjectRoots directions — see
-	// internal/service/container.go's newRuntimeAdapterRegistry.
-	Adapters *AdapterRegistry
+	// The adapter tier that used to live here is gone (CW-20260910-0012).
+	//
+	// It survived TASKS/phase-0/16 and phase-2/06 as an always-empty loop,
+	// kept "as a live extension point... a future plugin-provided adapter
+	// could still return real Definitions." That future caller has now
+	// arrived, and it is NOT this function: CLIAgentAdapter.Discover became
+	// Import(path), an explicit operator-initiated read driven by
+	// `nanite agent install` (internal/agentimport). Calling it from here
+	// would hand every adapter a working directory nobody named, on every
+	// boot — which is exactly the directory-scan tier phase-1/08 removed,
+	// rebuilt under a new method name.
+	//
+	// The AdapterRegistry itself is very much alive; it is simply not a
+	// discovery input anymore. internal/service/container.go still builds
+	// one for the unrelated PopulateAllSandboxes / SyncAllProjectRoots
+	// directions, and internal/agentimport's RegistryParser drives Import
+	// from the CLI and REST triggers.
 }
 
 // Discover returns parsed Definitions from every remaining discovery source
@@ -83,52 +76,19 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 		add(def)
 	}
 
-	// Priority 2+: adapter-discovered agents. As of
-	// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md every
-	// registered CLIAgentAdapter's Discover() (including nanite-native's,
-	// the last one that used to produce real results here) returns
-	// (nil, nil) — this tier is currently always empty in practice. See
-	// DiscoverOptions.Adapters' doc comment above for why the loop stays.
-	if opts.Adapters != nil {
-		adapterDefs, err := opts.Adapters.DiscoverAll(opts.WorkingDir)
-		if err != nil {
-			slog.Warn("agent: adapter discovery failed", "err", err)
-		} else {
-			for i := range adapterDefs {
-				add(&adapterDefs[i])
-			}
-		}
-	}
+	// There is no second tier. See DiscoverOptions' comment on the removed
+	// adapter tier: registration is import, and import is not discovery.
 
 	return defs, nil
 }
 
-// discoverDir reads all *.md files from a directory, parses them, and sets
-// Source. Returns nil on missing or unreadable directories.
+// discoverDir -- a directory walk that read every *.md in a directory and
+// stamped a Source on each -- is deleted (CW-20260910-0012). Its last caller
+// was the adapter tier above; the project/user/plugin tiers that used to call
+// it went with TASKS/phase-1/08.
 //
-// Retained for adapter-discovery tests that simulate a directory-scan tier
-// (see discovery_test.go's testDirAdapter) — no tier in Discover() itself
-// calls this directly anymore; the project/user/plugin directory scans that
-// used to call it were removed by TASKS/phase-1/08.
-func discoverDir(dir, source string) []*Definition {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil // silent skip
-	}
-
-	var defs []*Definition
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
-		def, err := ParseMDFile(path)
-		if err != nil {
-			slog.Warn("agent: skipping", "path", path, "err", err)
-			continue
-		}
-		def.Source = source
-		defs = append(defs, def)
-	}
-	return defs
-}
+// Nothing in internal/agent walks a directory anymore. That is the property
+// worth keeping: the package that defines what an agent IS no longer contains
+// the machinery for finding agents lying around on disk. Reading a directory
+// of definitions is a format question, and it now lives with the format --
+// see adapter-claude's Import.

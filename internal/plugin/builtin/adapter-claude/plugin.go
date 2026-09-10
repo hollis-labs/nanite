@@ -1,5 +1,6 @@
 // Package adapterclaude implements the Claude Code adapter plugin.
-// Discovers agents from .claude/agents/*.md and syncs the project-root
+// Imports agents from Claude subagent files (import.go — an explicit,
+// operator-initiated read, never a boot-time scan) and syncs the project-root
 // CLAUDE.md with a managed section listing available agents. Sandbox
 // content (CLAUDE.md, .sandbox/agent-context.md, .sandbox/envelope-schema.md,
 // .mcp.json) is now planted by the agent runtime via
@@ -47,7 +48,7 @@ func New() *Plugin {
 			ID:          "adapter-claude",
 			Name:        "Claude Code Adapter",
 			Version:     "0.1.0",
-			Description: "Discovers .claude/agents/*.md and syncs project-root CLAUDE.md",
+			Description: "Imports .claude/agents/*.md subagents and syncs project-root CLAUDE.md",
 			Manifest:    loadManifest,
 		}),
 	}
@@ -73,22 +74,12 @@ var _ agent.CLIAgentAdapter = (*Adapter)(nil)
 // Name returns the adapter identifier.
 func (a *Adapter) Name() string { return "claude" }
 
-// Priority returns the discovery order. Lower = checked first.
+// Priority returns the import order. Lower = offered a path first.
 func (a *Adapter) Priority() int { return 60 }
 
-// Discover is a no-op. External-format agent import (scanning
-// .claude/agents/*.md and parsing each as a Nanite agent.Definition) was cut
-// in Phase 0 item 16 — see TASKS.md, docs/architecture-decision-log-2026-08-17.md
-// §4/§6, and docs/engineering/architecture/01-agent-construction.md's "What's
-// cut" section: Nanite agents are defined in Nanite's own schema, with no
-// replacement for importing external CLI-agent config formats.
-//
-// The signature stays so the agent.CLIAgentAdapter interface contract holds
-// (mirroring the precedent set by PopulateSandbox above). SyncProjectRoot
-// below (the opposite, export direction) is unaffected and remains live.
-func (a *Adapter) Discover(_ string) ([]agent.Definition, error) {
-	return nil, nil
-}
+// Import lives in import.go — CW-20260910-0012's re-arming of the adapter
+// seam, and the one format shipped across it so the mechanism is proven
+// rather than asserted.
 
 // PopulateSandbox is a no-op since Phase 4c.6 (CW-20260508-0002): claude
 // sandbox content is planted by the agent runtime via

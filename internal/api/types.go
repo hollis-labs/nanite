@@ -680,6 +680,50 @@ type InstallSkillResponse struct {
 	Reused  bool        `json:"reused"`
 }
 
+// ImportAgentRequest is the body for POST /api/agents/install and
+// POST /api/agents/{slug}/sync (CW-20260910-0013 — the REST trigger for
+// CW-20260910-0009's internal/agentimport.Importer pipeline).
+//
+// Path-only, like InstallSkillRequest: import reads a path the operator names
+// on this machine. Adapter is the optional format override, matching the
+// CLI's `--adapter` flag; empty tries Nanite's own format first, then each
+// registered format adapter in priority order.
+type ImportAgentRequest struct {
+	Path    string `json:"path"`
+	Adapter string `json:"adapter,omitempty"`
+}
+
+// ImportAgentOutcome is what happened to one parsed definition. A path may
+// expand to several — a directory of definitions, or a planted boot directory
+// — so the response reports per definition rather than collapsing to one
+// status.
+type ImportAgentOutcome struct {
+	Slug   string `json:"slug"`
+	Name   string `json:"name,omitempty"`
+	Action string `json:"action"` // created | synced | skipped
+	// Reason explains a skipped outcome in prose. Empty otherwise.
+	Reason string `json:"reason,omitempty"`
+	// BlockedBy names the ManageClass of the profile already holding this
+	// slug, for a skipped outcome, and CopyToManaged whether that class
+	// offers a copy path — the same two fields AgentProfileView carries, so
+	// a client reads ownership the same way everywhere.
+	BlockedBy     string `json:"blocked_by,omitempty"`
+	CopyToManaged bool   `json:"copy_to_managed,omitempty"`
+	// Agent is the resulting profile view for a created or synced outcome,
+	// carrying manage_class/editable/copy_to_managed like any other agent
+	// response. nil for a skipped outcome.
+	Agent *AgentProfileView `json:"agent,omitempty"`
+}
+
+// ImportAgentResponse is the shared success shape for install and sync.
+type ImportAgentResponse struct {
+	Path     string               `json:"path"`
+	Created  int                  `json:"created"`
+	Synced   int                  `json:"synced"`
+	Skipped  int                  `json:"skipped"`
+	Outcomes []ImportAgentOutcome `json:"outcomes"`
+}
+
 // TASKS/skills/12: the remaining REST surface docs/engineering/
 // architecture/20-skills.md's "API surface" section names beyond
 // install/sync (task 05) -- grant/revoke, grants/policy view, and

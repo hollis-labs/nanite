@@ -1293,3 +1293,27 @@ func (s *Store) SetSessionStatusByAgentID(ctx context.Context, agentID, status s
 	}
 	return n, nil
 }
+
+// SetAgentDefaultTrustTier writes agent_profiles.default_trust_tier for one
+// profile — H1's per-profile trust default, and since migration 108 dropped
+// workspace_role_trust, the whole of base-tier resolution. See ResolveTrust
+// in trust.go for how it is read.
+//
+// It exists so callers outside this package can set the tier without reaching
+// for s.DB directly. The two in-tree callers that predate it
+// (service.upsertAgentDef and AgentConfigService.Create) still issue their own
+// UPDATE keyed on slug/id respectively; converting them is a separate change,
+// not a drive-by.
+func (s *Store) SetAgentDefaultTrustTier(ctx context.Context, agentID, tier string) error {
+	switch tier {
+	case "trusted", "normal", "untrusted":
+	default:
+		return fmt.Errorf("set agent trust tier: invalid tier %q", tier)
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`UPDATE agent_profiles SET default_trust_tier = ? WHERE id = ?`, tier, agentID,
+	); err != nil {
+		return fmt.Errorf("set agent trust tier for %s: %w", agentID, err)
+	}
+	return nil
+}

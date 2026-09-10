@@ -7,10 +7,12 @@ import (
 	"testing"
 )
 
-// TestDiscover_Noop guards Phase 0 item 16 (external-format agent import cut):
-// even when a legitimate OPENCODE.md file is present, Discover must no longer
-// import it as a Nanite agent.
-func TestDiscover_Noop(t *testing.T) {
+// TestImport_NotThisFormat guards the scope fence CW-20260910-0012 kept:
+// re-arming the adapter seam as Import(path) shipped exactly ONE format
+// (adapter-claude), so this adapter still declines every path. (nil, nil) is
+// the interface's "not my format" answer, which lets a registry try the next
+// adapter -- it is not an error and not a half-built stub.
+func TestImport_NotThisFormat(t *testing.T) {
 	dir := t.TempDir()
 	content := "# Opencode Agent\n\nSome system prompt.\n"
 	if err := os.WriteFile(filepath.Join(dir, "OPENCODE.md"), []byte(content), 0o644); err != nil {
@@ -18,12 +20,12 @@ func TestDiscover_Noop(t *testing.T) {
 	}
 
 	a := New().Adapter()
-	defs, err := a.Discover(dir)
+	defs, err := a.Import(dir)
 	if err != nil {
-		t.Fatalf("Discover: %v", err)
+		t.Fatalf("Import: %v", err)
 	}
 	if defs != nil {
-		t.Errorf("Discover should be a no-op (external-format import cut), got %v", defs)
+		t.Errorf("Import should decline this path (only adapter-claude ships a format), got %v", defs)
 	}
 }
 

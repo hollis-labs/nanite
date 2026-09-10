@@ -129,24 +129,24 @@ func TestAdapterPriority(t *testing.T) {
 	}
 }
 
-func TestDiscoverNoConfig(t *testing.T) {
+func TestImportNoConfig(t *testing.T) {
 	p := New()
-	defs, err := p.Adapter().Discover(t.TempDir())
+	defs, err := p.Adapter().Import(t.TempDir())
 	if err != nil {
-		t.Fatalf("Discover: %v", err)
+		t.Fatalf("Import: %v", err)
 	}
 	if len(defs) != 0 {
 		t.Errorf("expected 0 definitions for empty dir, got %d", len(defs))
 	}
 }
 
-// TestDiscover_Noop guards TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md:
-// even when a real .nanite/config.yaml agents: block is present (the exact
-// shape Discover used to compose into agent.Definitions for the
-// AutoIngestAgents pipeline), Discover must no longer produce anything.
-// Mirrors the precedent set by adapter-claude/codex/gemini/opencode's own
-// TestDiscover_Noop (TASKS/phase-0/16-cut-external-agent-import.md).
-func TestDiscover_Noop(t *testing.T) {
+// TestImport_NoProjectAgentCatalog guards TASKS/phase-2/06-cut-nanite-native-
+// adapter-agent-sync.md across the CW-20260910-0012 rename: even when a real
+// .nanite/config.yaml agents: block is present (the exact shape the former
+// Discover used to compose into agent.Definitions for the AutoIngestAgents
+// pipeline), Import must still produce nothing. There is no project agent
+// catalog in Nanite, so there is nothing here for an import to read.
+func TestImport_NoProjectAgentCatalog(t *testing.T) {
 	dir := t.TempDir()
 	naniteDir := filepath.Join(dir, ".nanite")
 	if err := os.MkdirAll(naniteDir, 0o755); err != nil {
@@ -165,12 +165,12 @@ agents:
 	}
 
 	a := New().Adapter()
-	defs, err := a.Discover(dir)
+	defs, err := a.Import(dir)
 	if err != nil {
-		t.Fatalf("Discover: %v", err)
+		t.Fatalf("Import: %v", err)
 	}
 	if defs != nil {
-		t.Errorf("Discover should be a no-op (agent_profiles sync cut), got %v", defs)
+		t.Errorf("Import should produce nothing (agent_profiles sync cut; no project agent catalog), got %v", defs)
 	}
 }
 

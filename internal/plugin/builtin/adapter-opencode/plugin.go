@@ -77,17 +77,20 @@ func (a *Adapter) Name() string { return "opencode" }
 // Priority returns the discovery order. Lower = checked first.
 func (a *Adapter) Priority() int { return 70 }
 
-// Discover is a no-op. External-format agent import (reading OPENCODE.md and
-// synthesizing a Nanite agent.Definition from it) was cut in Phase 0 item 16
-// — see TASKS.md, docs/architecture-decision-log-2026-08-17.md §4/§6, and
-// docs/engineering/architecture/01-agent-construction.md's "What's cut"
-// section: Nanite agents are defined in Nanite's own schema, with no
-// replacement for importing external CLI-agent config formats.
+// Import is not implemented for this adapter. Reading OPENCODE.md and
+// synthesizing a Nanite agent.Definition from it was cut in Phase 0 item 16,
+// and CW-20260910-0012 did not restore it: that task re-armed the seam and
+// shipped ONE format across it (adapter-claude) so the mechanism is proven
+// rather than asserted, deliberately leaving the remaining formats for
+// whoever actually needs them.
 //
-// The signature stays so the agent.CLIAgentAdapter interface contract holds.
+// (nil, nil) is the interface's "this path is not my format" answer, so an
+// AdapterRegistry simply moves on to the next adapter. It is not an error and
+// not a stub that will silently half-import something.
+//
 // PopulateSandbox and SyncProjectRoot below (the opposite, export direction)
 // are unaffected and remain live.
-func (a *Adapter) Discover(_ string) ([]agent.Definition, error) {
+func (a *Adapter) Import(_ string) ([]agent.Definition, error) {
 	return nil, nil
 }
 

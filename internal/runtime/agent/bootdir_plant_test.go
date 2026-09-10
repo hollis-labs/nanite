@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/agentkit/artifact"
 	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -350,5 +351,170 @@ func TestPlantSpec_RejectsUnownedDestination(t *testing.T) {
 	}, cfg)
 	if err == nil {
 		t.Fatal("expected an ownership conflict for the unowned destination")
+	}
+}
+
+// TestPlantSpec_ArtifactsPlantDirectoriesAndModes covers what the flat
+// Files map structurally cannot express: an explicit directory, and a
+// per-entry mode. This is CW-20260910-0010's primitive, and the shape
+// CW-20260910-0015 needs for hook scripts (0700, under hooks/<provider>/).
+func TestPlantSpec_ArtifactsPlantDirectoriesAndModes(t *testing.T) {
+	bootDir := t.TempDir()
+	tree := artifact.Tree{Entries: []artifact.Entry{
+		{Path: "hooks/claude", Kind: artifact.EntryDirectory, Mode: 0o700},
+		{Path: "hooks/claude/pre-tool-use.sh", Kind: artifact.EntryFile, Mode: 0o700, Bytes: []byte("#!/usr/bin/env bash\nexit 0\n")},
+	}}
+	result, err := plantSpec(context.Background(), bootDir, plant.Spec{Artifacts: tree}, plantConfig{provider: "claude"})
+	if err != nil {
+		t.Fatalf("plantSpec with Artifacts: %v", err)
+	}
+	if result.Handle == nil {
+		t.Fatal("expected a materialization handle")
+	}
+
+	dir, err := os.Stat(filepath.Join(bootDir, "hooks/claude"))
+	if err != nil {
+		t.Fatalf("stat hooks/claude: %v", err)
+	}
+	if !dir.IsDir() {
+		t.Error("hooks/claude is not a directory")
+	}
+	if perm := dir.Mode().Perm(); perm != 0o700 {
+		t.Errorf("hooks/claude mode = %o, want 0700", perm)
+	}
+
+	script, err := os.Stat(filepath.Join(bootDir, "hooks/claude/pre-tool-use.sh"))
+	if err != nil {
+		t.Fatalf("stat hook script: %v", err)
+	}
+	if perm := script.Mode().Perm(); perm != 0o700 {
+		t.Errorf("hook script mode = %o, want 0700 (must be executable)", perm)
+	}
+}
+
+// TestPlantSpec_ArtifactsAndFilesCoexist verifies the tree path is
+// additive: a caller can supply Artifacts entries alongside the legacy
+// Files/MCPConfig/ProviderSettings fields in one plant.
+func TestPlantSpec_ArtifactsAndFilesCoexist(t *testing.T) {
+	bootDir := t.TempDir()
+	_, err := plantSpec(context.Background(), bootDir, plant.Spec{
+		Files:     map[string][]byte{"CLAUDE.md": []byte("prompt")},
+		MCPConfig: []byte(`{"mcpServers":{}}`),
+		Artifacts: artifact.Tree{Entries: []artifact.Entry{
+			{Path: "hooks/claude/stop.sh", Kind: artifact.EntryFile, Mode: 0o700, Bytes: []byte("exit 0\n")},
+		}},
+	}, plantConfig{provider: "claude"})
+	if err != nil {
+		t.Fatalf("plantSpec: %v", err)
+	}
+	for _, p := range []string{"CLAUDE.md", ".mcp.json", "hooks/claude/stop.sh"} {
+		if _, err := os.Stat(filepath.Join(bootDir, filepath.FromSlash(p))); err != nil {
+			t.Errorf("missing %s: %v", p, err)
+		}
+	}
+}
+
+// TestPlantSpec_ArtifactsRespectPathGate pins that a caller-built tree is
+// not a way around agentlaunch.ValidateBootDirRelPath. artifact's own
+// validation would accept ".ssh/authorized_keys" — it carries no
+// reserved-prefix denylist — so this has to be checked on the Artifacts
+// path explicitly, not just on Files.
+func TestPlantSpec_ArtifactsRespectPathGate(t *testing.T) {
+	bootDir := t.TempDir()
+	_, err := plantSpec(context.Background(), bootDir, plant.Spec{
+		Artifacts: artifact.Tree{Entries: []artifact.Entry{
+			{Path: ".ssh/authorized_keys", Kind: artifact.EntryFile, Mode: 0o600, Bytes: []byte("ssh-rsa AAAA")},
+		}},
+	}, plantConfig{provider: "claude"})
+	if err == nil {
+		t.Fatal("expected the reserved-prefix gate to reject a caller-built tree entry")
+	}
+	if _, statErr := os.Stat(filepath.Join(bootDir, ".ssh/authorized_keys")); statErr == nil {
+		t.Error("the entry was planted despite the gate")
+	}
+}
+
+// TestBootDirTreeFromDir_PlantsDirectoryTree exercises the on-disk source
+// adapter end to end: walk a real directory, prefix it, plant it.
+func TestBootDirTreeFromDir_PlantsDirectoryTree(t *testing.T) {
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "nested"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// 0o700 deliberately: this test exists to prove an EXECUTABLE source
+	// mode survives the walk and the plant, which is what CW-20260910-0015's
+	// hook scripts depend on. A 0o600 fixture could not show that.
+	if err := os.WriteFile(filepath.Join(src, "top.sh"), []byte("top\n"), 0o700); err != nil { //nolint:gosec // see above — an executable fixture is the point
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "nested", "inner.md"), []byte("inner\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := bootDirTreeFromDir(context.Background(), src, "hooks/claude", "nanite:hooks")
+	if err != nil {
+		t.Fatalf("bootDirTreeFromDir: %v", err)
+	}
+	var sawDir bool
+	for _, e := range tree.Entries {
+		if e.Kind == artifact.EntryDirectory && e.Path == "hooks/claude/nested" {
+			sawDir = true
+		}
+		if e.Ownership.GroupID != "nanite:hooks" {
+			t.Errorf("entry %s has group %q, want nanite:hooks", e.Path, e.Ownership.GroupID)
+		}
+	}
+	if !sawDir {
+		t.Error("expected an explicit directory entry for the nested dir")
+	}
+
+	bootDir := t.TempDir()
+	if _, plantErr := plantSpec(context.Background(), bootDir, plant.Spec{Artifacts: tree}, plantConfig{provider: "claude"}); plantErr != nil {
+		t.Fatalf("plant the resolved tree: %v", plantErr)
+	}
+	top, err := os.Stat(filepath.Join(bootDir, "hooks/claude/top.sh"))
+	if err != nil {
+		t.Fatalf("stat planted top.sh: %v", err)
+	}
+	if perm := top.Mode().Perm(); perm != 0o700 {
+		t.Errorf("top.sh mode = %o, want 0700 — source modes must survive the walk", perm)
+	}
+	body, err := os.ReadFile(filepath.Join(bootDir, "hooks/claude/nested/inner.md")) //nolint:gosec // reads a file this test just planted into t.TempDir()
+	if err != nil || string(body) != "inner\n" {
+		t.Errorf("nested/inner.md = %q (err %v), want %q", body, err, "inner\n")
+	}
+}
+
+// TestBootDirTreeFromDir_RejectsSymlink pins the resolver's default
+// symlink policy. A boot dir is planted for a child agent to read;
+// importing a symlink by value would copy content from outside the source
+// root into it. Reject is the default and this asserts Nanite keeps it.
+func TestBootDirTreeFromDir_RejectsSymlink(t *testing.T) {
+	src := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(src, "link.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := bootDirTreeFromDir(context.Background(), src, "hooks/claude", ""); err == nil {
+		t.Fatal("expected the symlink to be rejected")
+	}
+}
+
+// TestBootDirTreeFromDir_EnforcesLimits verifies the entry bound is live,
+// so a mistaken source path cannot fill the boot dir.
+func TestBootDirTreeFromDir_EnforcesLimits(t *testing.T) {
+	src := t.TempDir()
+	deep := src
+	for i := 0; i < bootDirSourceLimits.MaxDepth+2; i++ {
+		deep = filepath.Join(deep, "d")
+	}
+	if err := os.MkdirAll(deep, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bootDirTreeFromDir(context.Background(), src, "hooks/claude", ""); err == nil {
+		t.Fatal("expected the depth limit to reject an over-deep source tree")
 	}
 }

@@ -155,6 +155,35 @@ const bootDirOwnershipGroup = "nanite:bootdir"
 func bootDirArtifactTree(spec plant.Spec, cfg plantConfig) (artifact.Tree, error) {
 	var entries []artifact.Entry
 
+	// CW-20260910-0010: caller-supplied tree entries come first. This is
+	// the path for anything the flat Files map cannot express — a
+	// DIRECTORY as a directory, or a per-entry mode. Spec.Files is
+	// map[relPath][]byte: it has nowhere to put either, which is why the
+	// hook target (CW-20260910-0015, hook scripts at 0700 under
+	// hooks/<provider>/) and imported-agent resource dirs
+	// (CW-20260910-0012) need this rather than another Files entry.
+	//
+	// Ownership and provenance default to the same conventions the legacy
+	// fields get, so a caller only sets them to say something different.
+	// The path gate applies here exactly as it does everywhere else — a
+	// caller-built tree is not a way around ValidateBootDirRelPath.
+	for _, entry := range spec.Artifacts.Entries {
+		if err := agentlaunch.ValidateBootDirRelPath(entry.Path); err != nil {
+			return artifact.Tree{}, fmt.Errorf("agent: bootdir plant %q: %w", entry.Path, err)
+		}
+		planted := entry
+		if planted.Ownership.EntryID == "" {
+			planted.Ownership.EntryID = "nanite:artifact:" + planted.Path
+		}
+		if planted.Ownership.GroupID == "" {
+			planted.Ownership.GroupID = bootDirOwnershipGroup
+		}
+		if planted.Provenance.Source == "" {
+			planted.Provenance.Source = "nanite.bootdir." + cfg.provider
+		}
+		entries = append(entries, planted)
+	}
+
 	add := func(relPath string, content []byte, mode os.FileMode, entryID string) error {
 		if err := agentlaunch.ValidateBootDirRelPath(relPath); err != nil {
 			return fmt.Errorf("agent: bootdir plant %q: %w", relPath, err)
@@ -215,6 +244,61 @@ func bootDirArtifactTree(spec plant.Spec, cfg plantConfig) (artifact.Tree, error
 		Entries:    entries,
 		Provenance: artifact.Provenance{Source: "nanite.bootdir." + cfg.provider},
 	}, nil
+}
+
+// bootDirSourceLimits bounds a filesystem tree import. Deliberately
+// conservative: a boot dir is an ephemeral per-session sandbox, not a
+// place to stage a large tree, and an unbounded walk here would turn a
+// mistaken source path into an OOM or a full $TMPDIR.
+var bootDirSourceLimits = artifact.SourceLimits{
+	MaxEntries: 2000,
+	MaxBytes:   32 << 20, // 32 MiB
+	MaxDepth:   16,
+}
+
+// bootDirTreeFromDir builds an artifact.Tree from an on-disk directory,
+// destined for destPrefix inside the boot dir. This is CW-20260910-0010's
+// "plant a directory as a directory" primitive.
+//
+// It is a thin adapter over agentkit's own resolver rather than a
+// hand-rolled walk, because agentkit/artifact already ships the hardened
+// version of exactly this: explicit EntryDirectory entries carrying their
+// source modes, per-entry ValidateRelPath, content digests, the
+// MaxEntries/MaxBytes/MaxDepth bounds above, and a symlink policy that
+// defaults to reject and — under import-by-value — verifies the target
+// resolves inside an allowed root and is a regular file. Re-implementing
+// that Nanite-side would duplicate security-relevant code for no gain.
+//
+// Symlink policy is left at the resolver's default (reject). A boot dir
+// is planted for a child agent process to read; importing a symlink by
+// value would silently copy content from outside srcDir into it, and
+// preserving the link would point the child at a path Nanite has not
+// vetted. A caller that genuinely needs either should say so explicitly,
+// at which point the decision is reviewable.
+//
+// The returned tree is passed to plantSpec as Spec.Artifacts, where every
+// path is re-checked against ValidateBootDirRelPath — artifact's own
+// validation does not carry the reserved-prefix denylist.
+func bootDirTreeFromDir(ctx context.Context, srcDir, destPrefix, ownershipGroup string) (artifact.Tree, error) {
+	if srcDir == "" {
+		return artifact.Tree{}, fmt.Errorf("agent: bootdir tree from dir: empty source directory")
+	}
+	if ownershipGroup == "" {
+		ownershipGroup = bootDirOwnershipGroup
+	}
+	tree, err := artifact.NewResolver(artifact.ResolverOptions{}).ResolveArtifacts(ctx, artifact.SourceRequest{
+		Source: artifact.Source{
+			Kind:       artifact.SourceFilesystemTree,
+			Filesystem: &artifact.FilesystemSource{Root: srcDir},
+		},
+		DestinationPrefix: destPrefix,
+		Limits:            bootDirSourceLimits,
+		OwnershipGroup:    ownershipGroup,
+	})
+	if err != nil {
+		return artifact.Tree{}, fmt.Errorf("agent: bootdir tree from dir %q: %w", srcDir, err)
+	}
+	return tree, nil
 }
 
 // plantConfig is the per-provider destination knowledge a Nanite

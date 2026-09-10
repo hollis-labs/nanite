@@ -16,12 +16,12 @@ require (
 require (
 	github.com/anthropics/anthropic-sdk-go v1.45.0
 	github.com/google/jsonschema-go v0.4.2
-	github.com/hollis-labs/agentkit v0.5.0
+	github.com/hollis-labs/agentkit v0.6.1
 	github.com/hollis-labs/go-envelopes v0.4.0
 	github.com/hollis-labs/go-modelsdev v0.2.0
 	github.com/hollis-labs/go-otel v0.1.0
-	github.com/hollis-labs/go-providers v0.24.0
-	github.com/hollis-labs/go-sandbox v0.2.1
+	github.com/hollis-labs/go-providers v0.26.0
+	github.com/hollis-labs/go-sandbox v0.3.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/openai/openai-go v1.12.0
@@ -39,7 +39,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/hollis-labs/go-harness-filters v0.1.1 // indirect
 	github.com/hollis-labs/go-queue v0.1.0 // indirect
-	github.com/hollis-labs/go-runner v0.5.0 // indirect
+	github.com/hollis-labs/go-runner v0.7.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
@@ -75,7 +75,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
-	github.com/hollis-labs/plugin-sdk v0.3.0
+	github.com/hollis-labs/plugin-sdk v0.3.1
 	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/mattn/go-isatty v0.0.23
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -94,12 +94,12 @@ require (
 )
 
 require (
-	github.com/hollis-labs/go-agent-wrapper v0.9.1
+	github.com/hollis-labs/go-agent-wrapper v0.10.1
 	github.com/hollis-labs/go-apppaths v0.1.0
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-llm-contracts v0.3.0
 	github.com/hollis-labs/go-llm-types v0.3.0
-	github.com/hollis-labs/go-messaging v0.4.0
+	github.com/hollis-labs/go-messaging v0.5.1
 	github.com/hollis-labs/go-runtime-events v0.1.2
 	github.com/hollis-labs/go-scheduler v0.2.0
 	github.com/hollis-labs/go-sqlite v0.1.0

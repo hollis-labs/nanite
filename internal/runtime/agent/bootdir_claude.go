@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/hollis-labs/agentkit/artifact"
 	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -64,8 +65,26 @@ func (claudePlanter) Plant(ctx context.Context, bootDir string, spec plant.Spec)
 // .claude/settings.json rides as ProviderSettings["claude"] — its content
 // is sourced from go-providers (claudeProviderConfigContent), not
 // hand-rolled; .mcp.json rides as Spec.MCPConfig.
-func claudePlantSpec(params SetupParams) (plant.Spec, error) {
-	settings, err := claudeProviderConfigContent(params.CLIWritableRoots)
+//
+// CW-20260910-0015: hook scripts ride Spec.Artifacts rather than Files,
+// because they need a mode (0700, executable) and their own directory —
+// neither of which the flat Files map can carry. Their DECLARATION is
+// merged into the settings document in the same call, since a planted
+// hook script that nothing declares never runs.
+//
+// bootDir is a parameter for exactly that reason: the declaration names
+// the script by absolute path, so the spec cannot be built before the
+// destination is known. It is unused when params.Hooks is empty.
+func claudePlantSpec(bootDir string, params SetupParams) (plant.Spec, error) {
+	hookSettings, err := claudeHookSettings(bootDir, params.Hooks)
+	if err != nil {
+		return plant.Spec{}, err
+	}
+	settings, err := claudeProviderConfigContent(params.CLIWritableRoots, hookSettings)
+	if err != nil {
+		return plant.Spec{}, err
+	}
+	hookEntries, err := hookArtifactEntries("claude", params.Hooks)
 	if err != nil {
 		return plant.Spec{}, err
 	}
@@ -99,6 +118,7 @@ func claudePlantSpec(params SetupParams) (plant.Spec, error) {
 		Files:            files,
 		MCPConfig:        mcp,
 		ProviderSettings: map[string][]byte{"claude": []byte(settings)},
+		Artifacts:        artifact.Tree{Entries: hookEntries},
 	}, nil
 }
 
@@ -133,7 +153,7 @@ func (claudeLayout) Populate(bootDir string, params SetupParams) (plant.Result, 
 	if params.AgentProfile == nil {
 		return plant.Result{}, fmt.Errorf("agent: claudeLayout.Populate: AgentProfile is required")
 	}
-	spec, err := claudePlantSpec(params)
+	spec, err := claudePlantSpec(bootDir, params)
 	if err != nil {
 		return plant.Result{}, err
 	}

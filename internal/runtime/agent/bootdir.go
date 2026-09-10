@@ -128,6 +128,13 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		BootContent:  composeBootContent(opts),
 		ProjectDir:   opts.Workdir,
 		MCPConfig:    mcp,
+		// CW-20260910-0015: the boot-dir hook set. DefaultBootDirHooks is
+		// empty, so this plants nothing today — the point of wiring it
+		// here anyway is that the mechanism is REACHABLE from the real
+		// boot path rather than only from tests. CW-20260910-0016 decides
+		// what, if anything, that slice should contain; when it does, no
+		// plumbing has to change.
+		Hooks: DefaultBootDirHooks,
 	}
 	if deps != nil {
 		params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID)
@@ -255,6 +262,23 @@ type SetupParams struct {
 	// (internal/skillvendor.Store.ReadFiles) for skill_plant.go. nil
 	// disables skill planting, same as a nil Skills.
 	SkillVendor SkillVendorReader
+
+	// Hooks is the hook set planted into the boot dir and declared in the
+	// provider's settings so the harness actually runs it
+	// (CW-20260910-0015, bootdir_hooks.go). Empty — the zero value and
+	// the DefaultBootDirHooks default — plants nothing and leaves the
+	// planted settings byte-identical to a no-hook boot.
+	//
+	// A hook is a MECHANICALLY TRIGGERED steer, which is the whole reason
+	// the field exists: agent-setup's gate inventory §4 finds that prose
+	// an agent has to remember does not work, while something that fires
+	// at the event does. Which hooks Nanite ships by default, if any, is
+	// CW-20260910-0016 — not a decision this field makes.
+	//
+	// Only claude has verified wiring. Supplying hooks for codex or
+	// opencode is an error rather than a silent no-op; see
+	// bootdir_hooks.go's header for why.
+	Hooks []BootDirHook
 }
 
 // bootdirLayoutFor returns the Layout for the named provider. Unsupported

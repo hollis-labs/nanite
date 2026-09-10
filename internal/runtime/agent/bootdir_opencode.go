@@ -93,6 +93,14 @@ func opencodeJSON(slug string) (string, error) {
 // opencodePlantSpec assembles the full opencode bootdir file-set as a
 // plant.Spec.
 func opencodePlantSpec(params SetupParams) (plant.Spec, error) {
+	// CW-20260910-0015: opencode's extension point is a JS plugin entry,
+	// not a command hook declared in a settings file — a different
+	// mechanism entirely, which go-providers' capability matrix records
+	// as FeatureHooks: unsupported. See bootdir_hooks.go's header.
+	if len(params.Hooks) > 0 {
+		return plant.Spec{}, hooksUnsupportedError("opencode",
+			"opencode extends through JS plugin entry points, not command hooks")
+	}
 	slug := agentSlug(params)
 
 	agentsJSONBody, err := opencodeAgentsJSON(params, slug)

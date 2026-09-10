@@ -96,6 +96,19 @@ func codexAgentsMD(params SetupParams) string {
 // mechanism" outcome 20-skills.md's own Context anticipates, not an
 // oversight.
 func codexPlantSpec(params SetupParams) (plant.Spec, error) {
+	// CW-20260910-0015: codex has no verified hook wiring in Nanite.
+	// go-providers' capability matrix reports FeatureHooks as
+	// "explicit-effect" for codex — the provider is understood to have
+	// the feature, but that package does not project it and Nanite has no
+	// confirmed config shape for declaring one. Planting the scripts
+	// anyway would produce executables nothing runs, which is the exact
+	// failure bootdir_hooks.go exists to prevent. An error, not a silent
+	// drop: a caller that asked for a gate should be told it did not get
+	// one. See bootdir_hooks.go's header.
+	if len(params.Hooks) > 0 {
+		return plant.Spec{}, hooksUnsupportedError("codex",
+			"no verified declaration mechanism; go-providers reports hooks as explicit-effect but Nanite has not confirmed the config shape")
+	}
 	configTOML, err := codexConfigTOMLContent(params.CLIWritableRoots)
 	if err != nil {
 		return plant.Spec{}, err

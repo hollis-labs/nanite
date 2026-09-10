@@ -364,17 +364,26 @@ type plantConfig struct {
 // returns ErrMissingManifest on a fresh dir. It is a narrow ledge; do not
 // re-point this at the engine without re-establishing those three.
 //
-// spec.Hooks and spec.RecoveryPrompt have no Nanite plant target yet —
-// nothing in this codebase populates either field today (see the
-// claude/codex/opencode PlantSpec builders), so a non-empty value here
-// can only mean a future caller expected behavior this Planter doesn't
-// implement. Rejected loudly rather than silently dropped, matching the
+// spec.Hooks stays rejected, and after CW-20260910-0015 that is an
+// informed decision rather than a gap. Nanite DOES plant hooks — see
+// bootdir_hooks.go — but not through this field, because plant.Hook
+// carries only {Provider, Name, Payload}: no event, no matcher. A hook
+// script written without a declaration never runs, so honoring
+// spec.Hooks here would plant executables nothing executes. Nanite's own
+// BootDirHook carries the declaration, and rides Spec.Artifacts for the
+// script plus the provider's settings document for the wiring.
+//
+// spec.RecoveryPrompt likewise has no Nanite plant target; nothing in
+// this codebase populates it.
+//
+// Both are rejected loudly rather than silently dropped, matching the
 // "unsupported kind" guard the prior InjectionSpec-based mechanism used
-// for non-raw NativeFiles. (CW-20260910-0015 builds the Hooks target and
-// lifts the first of these guards.)
+// for non-raw NativeFiles.
 func plantSpec(ctx context.Context, bootDir string, spec plant.Spec, cfg plantConfig) (plant.Result, error) {
 	if len(spec.Hooks) > 0 {
-		return plant.Result{}, fmt.Errorf("agent: bootdir Planter(%s): hooks are not yet supported", cfg.provider)
+		return plant.Result{}, fmt.Errorf(
+			"agent: bootdir Planter(%s): plant.Spec.Hooks is not the hook path here — it carries no event or matcher, so its payloads would plant as executables nothing declares; use SetupParams.Hooks (bootdir_hooks.go)",
+			cfg.provider)
 	}
 	if spec.RecoveryPrompt != "" {
 		return plant.Result{}, fmt.Errorf("agent: bootdir Planter(%s): RecoveryPrompt is not yet supported", cfg.provider)

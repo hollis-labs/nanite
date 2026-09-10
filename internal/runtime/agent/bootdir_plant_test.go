@@ -146,7 +146,7 @@ func TestClaudePlantSpec_Shape(t *testing.T) {
 			DBPath:     "/tmp/x.db",
 		},
 	}
-	spec, err := claudePlantSpec(params)
+	spec, err := claudePlantSpec(t.TempDir(), params)
 	if err != nil {
 		t.Fatalf("claudePlantSpec: %v", err)
 	}

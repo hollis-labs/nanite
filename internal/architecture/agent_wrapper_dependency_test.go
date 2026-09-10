@@ -107,6 +107,11 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 	//     boundary. That raises plant.Result in bootdir.go and in each
 	//     provider layout. Result is a reporting DTO — it carries what was
 	//     written, not a handle to a process or an ACP session.
+	// CW-20260910-0015 raised plant.Spec once per provider: the hook guard
+	// and the two unwired-provider guards each return an empty plant.Spec
+	// alongside their error. Still DTO construction — the hook mechanism
+	// itself deliberately does NOT route through plant.Spec.Hooks (see
+	// bootdir_plant.go's plantSpec).
 	//  2. plantSpec delegates the WRITE to plant.SharedPlanter, which routes
 	//     the artifact tree through agentkit's shared materialization
 	//     engine. SharedPlanter is a file-writing helper over
@@ -116,13 +121,13 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 	//     wrapper's legacy per-field conventions.
 	ownershipSymbol("internal/runtime/agent/bootdir.go", agentWrapperModule+"/plant", "Result"):              ownershipAllowance(3, "Layout.Populate surfaces the materialization result"),
 	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", agentWrapperModule+"/plant", "Planter"):      ownershipAllowance(1, "Claude boot-content planter conformance"),
-	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", agentWrapperModule+"/plant", "Spec"):         ownershipAllowance(7, "Compile Claude boot-content DTOs"),
+	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", agentWrapperModule+"/plant", "Spec"):         ownershipAllowance(9, "Compile Claude boot-content DTOs"),
 	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", agentWrapperModule+"/plant", "Result"):       ownershipAllowance(4, "Return planted-content metadata"),
 	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", agentWrapperModule+"/plant", "Planter"):       ownershipAllowance(1, "Codex boot-content planter conformance"),
-	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", agentWrapperModule+"/plant", "Spec"):          ownershipAllowance(7, "Compile Codex boot-content DTOs"),
+	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", agentWrapperModule+"/plant", "Spec"):          ownershipAllowance(8, "Compile Codex boot-content DTOs"),
 	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", agentWrapperModule+"/plant", "Result"):        ownershipAllowance(4, "Return planted-content metadata"),
 	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", agentWrapperModule+"/plant", "Planter"):    ownershipAllowance(1, "OpenCode boot-content planter conformance"),
-	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", agentWrapperModule+"/plant", "Spec"):       ownershipAllowance(8, "Compile OpenCode boot-content DTOs"),
+	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", agentWrapperModule+"/plant", "Spec"):       ownershipAllowance(9, "Compile OpenCode boot-content DTOs"),
 	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", agentWrapperModule+"/plant", "Result"):     ownershipAllowance(4, "Return planted-content metadata"),
 	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", agentWrapperModule+"/plant", "Spec"):          ownershipAllowance(3, "Consume the destination-agnostic planting DTO"),
 	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", agentWrapperModule+"/plant", "Result"):        ownershipAllowance(5, "Return exact planting outcomes"),

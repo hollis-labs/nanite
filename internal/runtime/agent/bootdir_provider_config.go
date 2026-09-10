@@ -171,11 +171,27 @@ const claudeDefaultPermissionMode = "acceptEdits"
 //
 // PlantContext.BootDir is left empty so the render stays pure (no
 // ~/.claude.json trust seed — see file header).
-func claudeProviderConfigContent(additionalDirectories []string) (string, error) {
+// CW-20260910-0015: hookSettings, when non-empty, is merged in as the
+// document's "hooks" key. This goes through ClaudeAdapter.SettingsDocument
+// rather than the BootDirSpec render because that accessor exists for
+// exactly this — its own doc says "a document because merging is the
+// point," and specifies that MarshalIndent with two spaces plus a
+// trailing newline reproduces the planted file byte for byte. So this
+// does not cross the boundary above: go-providers still owns the
+// document's schema and renders every key it owns, and a nil hookSettings
+// yields the identical bytes the render path produced.
+func claudeProviderConfigContent(additionalDirectories []string, hookSettings map[string]any) (string, error) {
 	adapter := provider.NewClaudeAdapter()
 	adapter.PermissionMode = claudeDefaultPermissionMode
 	adapter.AdditionalDirectories = additionalDirectories
-	return renderProviderConfigFile(adapter, ".claude/settings.json", provider.PlantContext{})
+	if len(hookSettings) == 0 {
+		return renderProviderConfigFile(adapter, ".claude/settings.json", provider.PlantContext{})
+	}
+	doc, err := adapter.SettingsDocument()
+	if err != nil {
+		return "", fmt.Errorf("agent: claude settings document: %w", err)
+	}
+	return mergeClaudeSettingsHooks(doc, hookSettings)
 }
 
 // renderProviderConfigFile obtains the named PlantedFile from a

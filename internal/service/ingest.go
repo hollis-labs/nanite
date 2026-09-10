@@ -114,6 +114,42 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools m
 	return count
 }
 
+// sourceTransitionSyncs decides whether a boot pass may content-sync an
+// already-ingested row whose stored provenance differs from the incoming
+// seed's.
+//
+// The base rule is TASKS/phase-1/08's: a row already ingested under its
+// current source is frozen, and only a genuine provenance transition (the
+// historical builtin -> internal reclassification, CW-20260512-0111) still
+// syncs once.
+//
+// The carve-out below is the guard that rule needs now that agents can also
+// arrive by explicit import (CW-20260910-0009, internal/agentimport). An
+// imported row carries external provenance, which never matches a
+// compiled-in seed's "internal" — so the transition rule alone would treat
+// every boot as a legitimate one-time reclassification and overwrite it.
+// Probed 2026-09-10: importing under a slug a compiled-in seed also uses
+// (`reviewer`, `planner`, `worker`, `researcher` and `backend` are all real
+// seed slugs) let the very next boot replace the imported content and flip
+// source back to "internal", silently.
+//
+// A boot pass may never transition a row AWAY from external provenance. That
+// is not what the carve-out was for: builtin -> internal is a rename of
+// Nanite's own seeds, while external -> internal would be Nanite claiming
+// ownership of something an operator deliberately imported. agentimport
+// holds the same boundary in the other direction, refusing to write over a
+// slug already held by an internal, managed or plugin profile — between them
+// the two directions of the collision are closed.
+func sourceTransitionSyncs(existingSource, incomingSource string) bool {
+	if existingSource == incomingSource {
+		return false
+	}
+	if agentpkg.NewClassification().Classify(existingSource) == agentpkg.ManageClassExternal {
+		return false
+	}
+	return true
+}
+
 // unknownDeclaredTools returns every entry in def.RoleTools and def.Tools
 // that is not a key in knownTools, deduplicated, in first-seen order.
 func unknownDeclaredTools(def *agentpkg.Definition, knownTools map[string]bool) []string {
@@ -236,7 +272,7 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 		// sync so a DB-side edit (however it landed) survives the next
 		// restart. sourceChanged (below) carves out the one legitimate
 		// exception: a genuine provenance transition still syncs once.
-		if existing.Source != profile.Source {
+		if sourceTransitionSyncs(existing.Source, profile.Source) {
 			if err := st.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile); err != nil {
 				return fmt.Errorf("update: %w", err)
 			}
@@ -248,7 +284,7 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 	// should also run. It mirrors the UpdateAgent gate above so a frozen
 	// boot-time reingest doesn't re-stomp a GUI/API customization to either
 	// child table either.
-	freshContent := existing == nil || existing.Source != profile.Source
+	freshContent := existing == nil || sourceTransitionSyncs(existing.Source, profile.Source)
 
 	// Apply H1 trust tier. Always reconcile — if an import was promoted to trusted
 	// and then its source changes, a later seed

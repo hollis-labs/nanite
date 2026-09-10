@@ -18,7 +18,8 @@ layer beneath it.
   Ed25519 signature verification.
 - `internal/workspace/walkup.go` decides which instruction files Nanite reads
   from a project, and in what order.
-- `docs/architecture/` holds the three current subsystem documents.
+- `docs/architecture/` holds one current document per subsystem;
+  `ls docs/architecture/` is the index.
 - `ui/src/generated/` is generator output — regenerate it, never hand-edit it.
 
 ## Commands

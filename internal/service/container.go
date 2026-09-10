@@ -201,7 +201,12 @@ type Container struct {
 	RunStore            *workflowapi.RunStore
 	WorkflowBroadcaster *workflowapi.Broadcaster
 
-	// AdapterRegistry holds registered CLIAgentAdapters for discovery and sandbox ops.
+	// AdapterRegistry holds the registered CLIAgentAdapters. Two directions,
+	// one set: sandbox population and project-root sync (the export
+	// direction), and CLIAgentAdapter.Import (the format readers behind
+	// `nanite agent install` and POST /api/agents/install). It is NOT a
+	// discovery input — CW-20260910-0012 cut that tier; see
+	// internal/agent/discovery.go.
 	AdapterRegistry *agent.AdapterRegistry
 
 	// ProviderCatalog is the registry-backed provider/model dropdown

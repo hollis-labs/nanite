@@ -9,17 +9,17 @@ import (
 
 // stubAdapter is a minimal CLIAgentAdapter for testing.
 type stubAdapter struct {
-	name     string
-	priority int
-	defs     []Definition
-	discErr  error
+	name      string
+	priority  int
+	defs      []Definition
+	importErr error
 }
 
 func (s *stubAdapter) Name() string  { return s.name }
 func (s *stubAdapter) Priority() int { return s.priority }
-func (s *stubAdapter) Discover(projectDir string) ([]Definition, error) {
-	if s.discErr != nil {
-		return nil, s.discErr
+func (s *stubAdapter) Import(path string) ([]Definition, error) {
+	if s.importErr != nil {
+		return nil, s.importErr
 	}
 	return s.defs, nil
 }
@@ -47,10 +47,17 @@ func TestRegistry_PriorityOrdering(t *testing.T) {
 	}
 }
 
-func TestRegistry_DiscoverAllDeduplication(t *testing.T) {
+// TestRegistry_ImportAllFirstNonEmptyWins pins CW-20260910-0012's change to
+// the aggregate semantics. DiscoverAll used to merge every adapter's results
+// and dedup across them; ImportAll takes the FIRST non-empty result and stops.
+//
+// The reason is that a path has one format. Under the old merge, two adapters
+// both claiming the same path produced a roster assembled from two readings
+// of it — one of which was necessarily a guess.
+func TestRegistry_ImportAllFirstNonEmptyWins(t *testing.T) {
 	reg := NewAdapterRegistry()
 
-	// First adapter (lower priority) defines "agent-x".
+	// Lower priority, and it claims the path.
 	reg.Register(&stubAdapter{
 		name:     "first",
 		priority: 10,
@@ -59,7 +66,7 @@ func TestRegistry_DiscoverAllDeduplication(t *testing.T) {
 			{Slug: "agent-y", Name: "First Y", Source: "first"},
 		},
 	})
-	// Second adapter also defines "agent-x" — should be deduplicated.
+	// Also claims it. Never consulted, because "first" already answered.
 	reg.Register(&stubAdapter{
 		name:     "second",
 		priority: 20,
@@ -69,34 +76,91 @@ func TestRegistry_DiscoverAllDeduplication(t *testing.T) {
 		},
 	})
 
-	defs, err := reg.DiscoverAll("/tmp/project")
+	name, defs, err := reg.ImportAll("/tmp/project")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	if len(defs) != 3 {
-		t.Fatalf("expected 3 definitions (dedup agent-x), got %d", len(defs))
+	if name != "first" {
+		t.Errorf("winning adapter = %q, want %q", name, "first")
 	}
-
-	// agent-x should come from "first" adapter (lower priority wins).
+	if len(defs) != 2 {
+		t.Fatalf("expected only the winning adapter's 2 definitions, got %d: %+v", len(defs), defs)
+	}
 	for _, d := range defs {
-		if d.Slug == "agent-x" && d.Source != "first" {
-			t.Errorf("agent-x should come from 'first', got source=%q", d.Source)
+		if d.Source != "first" {
+			t.Errorf("definition %q came from %q; results must not be merged across adapters", d.Slug, d.Source)
 		}
 	}
 }
 
-func TestRegistry_DiscoverAllError(t *testing.T) {
+// TestRegistry_ImportAllSkipsAdaptersThatDecline — (nil, nil) means "not my
+// format," so the registry moves on rather than returning nothing.
+func TestRegistry_ImportAllSkipsAdaptersThatDecline(t *testing.T) {
+	reg := NewAdapterRegistry()
+	reg.Register(&stubAdapter{name: "declines", priority: 10})
+	reg.Register(&stubAdapter{
+		name:     "claims",
+		priority: 20,
+		defs:     []Definition{{Slug: "agent-x", Source: "claims"}},
+	})
+
+	name, defs, err := reg.ImportAll("/tmp/project")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "claims" || len(defs) != 1 {
+		t.Errorf("winner = %q with %d defs, want %q with 1", name, len(defs), "claims")
+	}
+}
+
+// TestRegistry_ImportAllDedupWithinWinner — dedup-by-slug survives the change,
+// now scoped to the winning adapter's own result.
+func TestRegistry_ImportAllDedupWithinWinner(t *testing.T) {
+	reg := NewAdapterRegistry()
+	reg.Register(&stubAdapter{
+		name:     "dupes",
+		priority: 10,
+		defs: []Definition{
+			{Slug: "agent-x", Name: "kept"},
+			{Slug: "agent-x", Name: "dropped"},
+			{Slug: "agent-y", Name: "kept too"},
+		},
+	})
+
+	_, defs, err := reg.ImportAll("/tmp/dir")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(defs) != 2 {
+		t.Fatalf("expected 2 after dedup, got %d", len(defs))
+	}
+	if defs[0].Name != "kept" {
+		t.Errorf("first slug wins: got %q", defs[0].Name)
+	}
+}
+
+// TestRegistry_ImportAllNoAdapterClaims returns an empty winner name rather
+// than an error — nothing recognized the path, which the caller reports.
+func TestRegistry_ImportAllNoAdapterClaims(t *testing.T) {
+	reg := NewAdapterRegistry()
+	reg.Register(&stubAdapter{name: "declines", priority: 10})
+
+	name, defs, err := reg.ImportAll("/tmp/project")
+	if err != nil || name != "" || defs != nil {
+		t.Errorf("got (%q, %v, %v), want (\"\", nil, nil)", name, defs, err)
+	}
+}
+
+func TestRegistry_ImportAllError(t *testing.T) {
 	reg := NewAdapterRegistry()
 
 	reg.Register(&stubAdapter{
-		name:     "broken",
-		priority: 10,
-		discErr:  fmt.Errorf("discovery failed"),
+		name:      "broken",
+		priority:  10,
+		importErr: fmt.Errorf("import failed"),
 	})
 
-	_, err := reg.DiscoverAll("/tmp/project")
-	if err == nil {
+	if _, _, err := reg.ImportAll("/tmp/project"); err == nil {
 		t.Fatal("expected error from broken adapter")
 	}
 }
@@ -141,9 +205,9 @@ type fakeAdapter struct {
 	synced   *bool
 }
 
-func (f *fakeAdapter) Name() string                            { return f.name }
-func (f *fakeAdapter) Priority() int                           { return f.priority }
-func (f *fakeAdapter) Discover(_ string) ([]Definition, error) { return nil, nil }
+func (f *fakeAdapter) Name() string                          { return f.name }
+func (f *fakeAdapter) Priority() int                         { return f.priority }
+func (f *fakeAdapter) Import(_ string) ([]Definition, error) { return nil, nil }
 func (f *fakeAdapter) PopulateSandbox(_ string, _ store.AgentProfile, _ SandboxContext) error {
 	return nil
 }

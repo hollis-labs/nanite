@@ -89,8 +89,10 @@ func TestImport_CreatesExternalRowWithProvenance(t *testing.T) {
 	if row.ImportedAt == "" {
 		t.Error("ImportedAt must record when the import happened")
 	}
-	if row.OriginSystem != DefaultOriginSystem {
-		t.Errorf("OriginSystem = %q, want %q", row.OriginSystem, DefaultOriginSystem)
+	// origin_system records the ecosystem the definition was authored in;
+	// `source` records how the row came to exist. Two different questions.
+	if row.OriginSystem != NativeOriginSystem {
+		t.Errorf("OriginSystem = %q, want %q", row.OriginSystem, NativeOriginSystem)
 	}
 	if got := agent.NewClassification().Classify(row.Source); got != agent.ManageClassExternal {
 		t.Errorf("stored row classifies as %q, want external", got)
@@ -320,8 +322,11 @@ func TestImport_EmptyPathAndUnrecognizedPath(t *testing.T) {
 	// that into ErrNoDefinitions rather than pretending it imported nothing
 	// successfully. Directory expansion belongs to a format adapter.
 	_, err := imp.Import(context.Background(), Source{Path: t.TempDir()})
-	if err == nil || !strings.Contains(err.Error(), "no agent definitions found") {
+	if !errors.Is(err, ErrNoDefinitions) {
 		t.Errorf("err = %v, want ErrNoDefinitions for a directory NativeParser does not claim", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "is a directory") {
+		t.Errorf("err = %v, want the decline reason carried through so the operator is not left guessing", err)
 	}
 }
 

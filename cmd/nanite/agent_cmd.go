@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 
@@ -43,19 +44,27 @@ func cmdAgent(args []string) {
 		os.Exit(1)
 	}
 
-	switch args[0] {
+	sub, rest := args[0], args[1:]
+	fs := flag.NewFlagSet("agent "+sub, flag.ExitOnError)
+	adapterFlag := fs.String("adapter", "", "force a specific format adapter (e.g. claude) instead of trying each in priority order")
+	if err := fs.Parse(rest); err != nil {
+		os.Exit(1)
+	}
+	positional := fs.Args()
+
+	switch sub {
 	case "install":
-		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "usage: %s agent install <path>\n", brand.BinaryName)
+		if len(positional) < 1 {
+			fmt.Fprintf(os.Stderr, "usage: %s agent install [--adapter <name>] <path>\n", brand.BinaryName)
 			os.Exit(1)
 		}
-		agentInstallCmd(args[1])
+		agentInstallCmd(positional[0], *adapterFlag)
 	case "sync":
-		if len(args) < 3 {
-			fmt.Fprintf(os.Stderr, "usage: %s agent sync <slug> <path>\n", brand.BinaryName)
+		if len(positional) < 2 {
+			fmt.Fprintf(os.Stderr, "usage: %s agent sync [--adapter <name>] <slug> <path>\n", brand.BinaryName)
 			os.Exit(1)
 		}
-		agentSyncCmd(args[1], args[2])
+		agentSyncCmd(positional[0], positional[1], *adapterFlag)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown agent command: %s\n", args[0])
 		agentUsage()
@@ -68,12 +77,14 @@ func agentUsage() {
 	fmt.Fprintln(os.Stderr, "commands:")
 	fmt.Fprintln(os.Stderr, "  install <path>        import an agent definition from a local path")
 	fmt.Fprintln(os.Stderr, "  sync <slug> <path>    re-run import for an already-imported agent")
+	fmt.Fprintln(os.Stderr, "flags:")
+	fmt.Fprintln(os.Stderr, "  --adapter <name>      force a format adapter instead of trying each in priority order")
 }
 
 // openAgentImporter opens the shared DB and returns a fresh Importer plus the
 // store handle for the caller to close. A fresh Importer per invocation
 // matches skill_cmd.go's openSkillInstaller.
-func openAgentImporter() (*agentimport.Importer, *store.Store) {
+func openAgentImporter(adapterName string) (*agentimport.Importer, *store.Store) {
 	dbPath := resolveDBPath()
 	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
@@ -83,9 +94,31 @@ func openAgentImporter() (*agentimport.Importer, *store.Store) {
 
 	return &agentimport.Importer{
 		Store:        s,
+		Parse:        agentImportParser(adapterName),
 		SeedChildren: service.SeedImportedAgentChildren(s),
 		Emit:         printAgentImportEvents(),
 	}, s
+}
+
+// agentImportParser builds the format chain: Nanite's own format first
+// because a definition authored for Nanite is the ordinary case, then the
+// registered format adapters in priority order (CW-20260910-0012's re-armed
+// seam). `--adapter <name>` skips the chain and names one, for when the guess
+// would be wrong.
+//
+// This is the import direction of the same AdapterRegistry
+// internal/service/container.go builds for sandbox population and
+// project-root sync. It is constructed here, at an operator-invoked entry
+// point, and never at boot.
+func agentImportParser(adapterName string) agentimport.Parser {
+	registry := service.NewImportAdapterRegistry()
+	if adapterName != "" {
+		return agentimport.RegistryParser{Registry: registry, Adapter: adapterName}
+	}
+	return agentimport.ChainParser{Parsers: []agentimport.Parser{
+		agentimport.NativeParser{},
+		agentimport.RegistryParser{Registry: registry},
+	}}
 }
 
 // printAgentImportEvents mirrors skill_cmd.go's printSkillInstallEvents:
@@ -109,8 +142,8 @@ func printAgentImportEvents() agentimport.EventFunc {
 // — this is the "directory argument is sugar, not a tier" contract: N single
 // imports and a report of what landed and what did not, with nothing
 // remembered about the directory afterwards.
-func agentInstallCmd(path string) {
-	importer, s := openAgentImporter()
+func agentInstallCmd(path, adapterName string) {
+	importer, s := openAgentImporter(adapterName)
 	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
 	result, err := importer.Import(context.Background(), agentimport.Source{Path: path})
@@ -137,8 +170,8 @@ func agentInstallCmd(path string) {
 // this slug" mistake before anything is written. It also requires the
 // existing row to be one import owns: syncing over an operator-managed or
 // internal profile is refused here for the same reason install refuses it.
-func agentSyncCmd(slug, path string) {
-	importer, s := openAgentImporter()
+func agentSyncCmd(slug, path, adapterName string) {
+	importer, s := openAgentImporter(adapterName)
 	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
 	ctx := context.Background()
@@ -160,7 +193,9 @@ func agentSyncCmd(slug, path string) {
 
 	// Parse before importing so a mismatched sync target is rejected without
 	// writing anything — the same pre-flight ordering handleSyncSkill uses.
-	defs, err := agentimport.NativeParser{}.Parse(path)
+	// The same parser the import will use, so the two cannot disagree about
+	// what the source declares.
+	defs, err := agentImportParser(adapterName).Parse(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s agent sync: parse: %v\n", brand.BinaryName, err)
 		os.Exit(1)

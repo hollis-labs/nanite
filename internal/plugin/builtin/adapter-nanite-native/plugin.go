@@ -183,26 +183,27 @@ func (a *Adapter) Name() string { return "nanite-native" }
 // Priority returns the discovery order. Lower = checked first.
 func (a *Adapter) Priority() int { return 50 }
 
-// Discover is a no-op. This adapter used to re-parse .nanite/config.yaml's
-// agents: block independently of Load (above) and feed the results into the
-// (gated) AutoIngestAgents/upsertAgentDef pipeline via
-// internal/agent/discovery.go's adapter-discovery tier — a second, parallel
-// .nanite/config.yaml -> agent_profiles write path alongside Load's direct
-// sync. Both paths are cut together by
-// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md, closing the
-// carve-out left open by TASKS/phase-0/16-cut-external-agent-import.md
-// (which cut the same Discover method on the four external-format adapters
-// — adapter-claude/codex/gemini/opencode — but explicitly kept this
-// adapter's Discover alive at the time because nothing else fed the
-// adapter-discovery tier). See
-// docs/engineering/architecture/01-agent-construction.md's "What's cut"
-// section: "Files as agent storage, except builtin/seed content."
+// Import is not implemented for this adapter, and its absence is the point.
 //
-// The signature stays so the agent.CLIAgentAdapter interface contract holds
-// (mirroring the precedent set by the four external-format adapters).
-// PopulateSandbox below (the opposite, DB/config -> disposable-sandbox-file
-// direction) is unaffected and remains live.
-func (a *Adapter) Discover(_ string) ([]agent.Definition, error) {
+// The method it replaces (Discover) used to re-parse .nanite/config.yaml's
+// agents: block independently of Load (above) and feed the results into the
+// AutoIngestAgents/upsertAgentDef pipeline via internal/agent/discovery.go's
+// adapter tier — a second, parallel .nanite/config.yaml -> agent_profiles
+// write path alongside Load's direct sync. Both were cut together by
+// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md, closing the
+// carve-out TASKS/phase-0/16-cut-external-agent-import.md had left open.
+//
+// CW-20260910-0012 re-armed the seam as an explicit, operator-initiated
+// Import(path) and did NOT restore this adapter's behavior with it. There is
+// no project agent catalog in Nanite — no .nanite/agents/, no
+// config/agents/, no file that defines a runtime agent — so there is nothing
+// here for an import to read. A Nanite-format definition file names its own
+// path and is imported by internal/agentimport.NativeParser directly.
+//
+// (nil, nil) is the interface's "this path is not my format" answer, so an
+// AdapterRegistry moves on. PopulateSandbox below (the opposite, DB/config ->
+// disposable-sandbox-file direction) is unaffected and remains live.
+func (a *Adapter) Import(_ string) ([]agent.Definition, error) {
 	return nil, nil
 }
 

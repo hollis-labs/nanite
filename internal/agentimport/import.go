@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -290,12 +291,19 @@ func (i *Importer) Import(ctx context.Context, src Source) (Result, error) {
 
 	i.transition("", StateParsing, "parsing: "+src.Path)
 	defs, parseErr := parser.Parse(src.Path)
-	err = parseErr
-	if err != nil {
-		return Result{}, i.fail("", StateParsing, fmt.Errorf("parse %s: %w", src.Path, err))
+	if parseErr != nil {
+		// Every reader declining is "nothing here to import" (with the
+		// reasons attached), not "this is broken" — keep the two distinct
+		// so a caller can tell a wrong path from a wrong file.
+		if errors.Is(parseErr, ErrNotThisFormat) {
+			return Result{}, i.fail("", StateParsing,
+				fmt.Errorf("%w: %s — %s", ErrNoDefinitions, src.Path, unwrapDecline(parseErr)))
+		}
+		return Result{}, i.fail("", StateParsing, fmt.Errorf("parse %s: %w", src.Path, parseErr))
 	}
 	if len(defs) == 0 {
-		return Result{}, i.fail("", StateParsing, fmt.Errorf("%w: %s", ErrNoDefinitions, src.Path))
+		return Result{}, i.fail("", StateParsing,
+			fmt.Errorf("%w: %s (tried: %s)", ErrNoDefinitions, src.Path, parserName(parser)))
 	}
 
 	result := Result{Path: src.Path}
@@ -343,17 +351,26 @@ func DescribeClass(c agent.ManageClass) string {
 // write performs the create-or-sync decision for one definition, holding the
 // ownership boundary on the way in.
 func (i *Importer) write(ctx context.Context, def *agent.Definition) (Outcome, error) {
-	// Provenance is stamped here, not taken from the parser: a format
-	// adapter describes an agent, it does not get to declare that agent
-	// operator-owned. The one-way rule means none of this is ever written
-	// back to def's source file.
+	// Two different questions, two different columns.
+	//
+	// A parser sets Definition.Source to the ecosystem it read FROM
+	// ("nanite", "claude") — that is provenance, and it lands in
+	// origin_system. The stored `source` column answers a different
+	// question: how this row came to exist, and therefore who owns it. Only
+	// the pipeline answers that, and its answer is always the same. A format
+	// adapter describes an agent; it does not get to declare that agent
+	// operator-owned.
+	origin := i.originSystem()
+	if named := strings.TrimSpace(def.Source); named != "" && named != SourceProvenance {
+		origin = named
+	}
 	def.Source = SourceProvenance
 
 	profile := def.ToProfile()
 	profile.Source = SourceProvenance
 	profile.SourceRef = def.SourceRef
 	profile.ImportedAt = i.now()
-	profile.OriginSystem = i.originSystem()
+	profile.OriginSystem = origin
 	profile.Format = "markdown"
 
 	// A hardcoded model in an imported definition is the same mistake

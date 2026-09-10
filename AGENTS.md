@@ -57,13 +57,21 @@ The Context Broker's six slot invariants live in
 `internal/context/INVARIANTS.md`, enforced by
 `internal/service/slot_invariants_test.go`. Change both together or neither.
 
-Migrations carry schema, not seed rows: no `VALUES` clause in
-`internal/store/migrations/*.sql` — seed data belongs in
-`internal/store/seed.go`, while `UPDATE`/`DELETE` backfills and the
-`INSERT ... SELECT` rebuild idiom are allowed. A duplicate migration number is
-this repo's one unrecoverable failure, so `migration-number` runs on every push
-to `main` with no file filter. Do not add one — a filter here fails open and
-prints as a benign skip.
+Migrations carry schema, not application data: no `VALUES` clause in
+`internal/store/migrations/*.sql` for rows the application owns — those belong
+in `internal/store/seed.go`. `UPDATE`/`DELETE` backfills and the
+`INSERT ... SELECT` rebuild idiom are allowed, and so is seeding a closed
+vocabulary that is a foreign-key target: `reflex_action_kinds`,
+`reflex_action_categories`, `reflex_provenance_tiers`,
+`selftool_reaction_kinds`. Those rows are the schema's own enum, which SQLite
+has no type for, and they must exist in the same transaction as the constraint
+that references them — `store.New` runs every migration before `main.go` calls
+`Seed`, so a rebuild inserting `action_kind = 'resume_loop_run'` would fail its
+foreign key against a vocabulary row `seed.go` has not written yet.
+
+A duplicate migration number is this repo's one unrecoverable failure, so
+`migration-number` runs on every push to `main` with no file filter. Do not
+add one — a filter here fails open and prints as a benign skip.
 
 The `devmode` build tag disables plugin signature verification. `make build`
 must never set it; `make build-dev` exists for that and must never ship.

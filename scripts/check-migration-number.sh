@@ -157,7 +157,9 @@ fail_ref() {
   echo "  ${REMOTE}/${BRANCH}'s tree. Without that tree it cannot tell a fresh"
   echo "  number from a collision or from a back-fill into a burned hole, so it"
   echo "  fails closed rather than passing you silently."
-  echo "  See docs/engineering/tracking-integrity.md check 9."
+  echo "  The rule it enforces: a migration number must be strictly greater"
+  echo "  than the highest in use on ${REMOTE}/${BRANCH}, and must collide with"
+  echo "  none already there."
   echo
   echo "  Fix:    ${2}"
   echo "  Bypass: only after checking by hand that no migration number in this"
@@ -222,7 +224,9 @@ reject_unparsable() {
   echo "       prefix. This is a hard error and never a skip: a path this guard"
   echo "       cannot read is a path it cannot clear, and silently ignoring one"
   echo "       is how a back-fill gets through."
-  echo "       Rule: docs/engineering/tracking-integrity.md check 9."
+  echo "       Rule: a migration number must be strictly greater than the"
+  echo "       highest in use on the shared branch, and collide with none"
+  echo "       already there."
 }
 
 # ── 1. Local groundwork — no network, so an offline push still works ──────
@@ -511,6 +515,6 @@ echo "  The second is the quieter and the worse one. Holes are permanently"
 echo "  burned: the next free number is one past the highest, never the lowest"
 echo "  unused integer."
 echo
-echo "  Rule: docs/engineering/tracking-integrity.md — \"Migration numbers: the"
-echo "  claiming rule\" and check 9."
+echo "  Rule: a migration number must be strictly greater than the highest in"
+echo "  use on the shared branch, and collide with none already there."
 exit 1

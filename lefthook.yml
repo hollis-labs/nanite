@@ -179,9 +179,11 @@ pre-push:
   commands:
 
     migration-number:
-      # The mechanical form of `docs/engineering/tracking-integrity.md`
-      # **check 9**. Rejects a migration whose number collides with one already
-      # on the remote's `main`, or which sits at or below the remote's highest
+      # The mechanical form of the tracking-integrity rule on claimed
+      # identifiers: every claim either already exists or is strictly greater
+      # than the highest in use on the shared branch, and no two claims
+      # collide. Rejects a migration whose number collides with one already on
+      # the remote's `main`, or which sits at or below the remote's highest
       # — a back-fill into a burned hole. Logic and its full rationale live in
       # `scripts/check-migration-number.sh`; only the placement is decided here.
       #

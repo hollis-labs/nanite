@@ -6,9 +6,9 @@
     {
       "output": "docs/tesseract-v0.9-contract.md",
       "module": "github.com/hollis-labs/tesseract",
-      "version": "v0.9.0",
+      "version": "v0.10.0",
       "path": "docs/guides/tesseract-adoption-and-v0.9-migration.md",
-      "source_url": "https://github.com/hollis-labs/tesseract/blob/v0.9.0/docs/guides/tesseract-adoption-and-v0.9-migration.md"
+      "source_url": "https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/guides/tesseract-adoption-and-v0.9-migration.md"
     }
   ],
   "files": {
@@ -45,7 +45,7 @@
     "docs/ref-tokf-filter/SKILL.md": "15d7173500efb6c3d9fecd6f1bfa1afe067e4c0d1fe5e489aec0ee0cbe9fa526",
     "docs/ref-tokf-filter/references/examples.toml": "d423458845fd29f90625c2e3f65478ce912df23811351a1a9551c18c5aa0e222",
     "docs/ref-tokf-filter/references/step-reference.md": "32de2af0a7d4386fa5f2c5790f0922292ff964bd6ba0f2450507e564fa9f1c7c",
-    "docs/tesseract-v0.9-contract.md": "ee7811ffddd5b52c8129b743b39bda5fea49e6edaa179d5a8272b744baca6187",
+    "docs/tesseract-v0.9-contract.md": "f2e62c596ca9543df979add5149393a0e2c5517f794af081cff9512333330457",
     "roles/domain/auditor.md": "1343c3611f59895af66feb1edad961372c80a5e07ca7370fb264d1adec46d787",
     "roles/domain/backend.md": "01798d52cc1deab17db23c3109b84a3e8c8c8c10cb99a8f41d1b298e71aca76d",
     "roles/domain/code-review.md": "da63758adac6c417e41e729d977e27ed13c555deee794ac60f04f099b693d62e",

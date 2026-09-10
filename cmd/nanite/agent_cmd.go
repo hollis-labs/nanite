@@ -187,7 +187,7 @@ func agentSyncCmd(slug, path, adapterName string) {
 	}
 	if class := agentpkg.NewClassification().Classify(existing.Source); class != agentpkg.ManageClassExternal {
 		fmt.Fprintf(os.Stderr, "%s agent sync: agent %q is %s (source=%q), not an imported one — import never overwrites it\n",
-			brand.BinaryName, slug, agentimport.DescribeClass(class), existing.Source)
+			brand.BinaryName, slug, class.Describe(), existing.Source)
 		os.Exit(1)
 	}
 

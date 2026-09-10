@@ -328,26 +328,6 @@ func (i *Importer) Import(ctx context.Context, src Source) (Result, error) {
 	return result, nil
 }
 
-// DescribeClass renders a ManageClass as a noun phrase for an operator-facing
-// refusal, so a message says what kind of thing is in the way rather than
-// echoing an enum value. Exported so the CLI's own pre-flight refusal reads
-// identically to the pipeline's rather than keeping a second copy of the
-// wording in sync by hand.
-func DescribeClass(c agent.ManageClass) string {
-	switch c {
-	case agent.ManageClassInternal:
-		return "an embedded internal harness profile"
-	case agent.ManageClassManaged:
-		return "an operator-managed profile"
-	case agent.ManageClassPlugin:
-		return "a plugin-provided profile"
-	case agent.ManageClassExternal:
-		return "an imported profile"
-	default:
-		return "a " + string(c) + " profile"
-	}
-}
-
 // write performs the create-or-sync decision for one definition, holding the
 // ownership boundary on the way in.
 func (i *Importer) write(ctx context.Context, def *agent.Definition) (Outcome, error) {
@@ -421,9 +401,9 @@ func (i *Importer) write(ctx context.Context, def *agent.Definition) (Outcome, e
 			Name:      def.Name,
 			Action:    ActionSkipped,
 			BlockedBy: class,
-			Err:       fmt.Errorf("%w: slug %q is held by %s", ErrSlugNotImportable, def.Slug, DescribeClass(class)),
+			Err:       fmt.Errorf("%w: slug %q is held by %s", ErrSlugNotImportable, def.Slug, class.Describe()),
 			Reason: fmt.Sprintf("slug %q is already held by %s (source=%q) — import never overwrites a profile it does not own",
-				def.Slug, DescribeClass(class), existing.Source),
+				def.Slug, class.Describe(), existing.Source),
 		}, nil
 	}
 

@@ -273,7 +273,7 @@ func TestImport_RefusesSlugItDoesNotOwn(t *testing.T) {
 			if !errors.Is(out.Err, ErrSlugNotImportable) {
 				t.Errorf("Err = %v, want it to wrap ErrSlugNotImportable so a caller can classify it", out.Err)
 			}
-			if !strings.Contains(out.Reason, DescribeClass(tc.wantClass)) {
+			if !strings.Contains(out.Reason, tc.wantClass.Describe()) {
 				t.Errorf("reason %q does not say what is in the way", out.Reason)
 			}
 

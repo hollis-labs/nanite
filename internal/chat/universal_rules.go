@@ -117,11 +117,36 @@ package chat
 // chat-role-harness body — it explicitly tells subagents and worker-role
 // agents to return a failure result rather than synthesize analysis when
 // the data isn't reachable. This is the c160 regression target.
+//
+// CW-20260910-0011: the Grounding block's "Use what tools return" bullet
+// previously enumerated three specific wrong behaviors — reword IDs,
+// extrapolate list rows past what was retrieved, relabel filtered
+// subsets. They were removed, and the rule now carries only what the
+// agent MAY do: tool output is authoritative, and calling a tool is the
+// move when data is missing.
+//
+// The reason is a measured finding, not style. agent-setup's
+// docs/gate-inventory.md §4 records that naming a failure mode to an
+// agent biases toward it, with unusually direct evidence: "an agent
+// reached for the exact probe shape it had named as a failure mode in a
+// brief it had sent minutes earlier." Its conclusion — "the thing that
+// fails is the reflex, not the knowledge" — ranks structural fixes and
+// mechanically-fired gates above prose, and finds prose is the
+// intervention that does not work.
+//
+// Three enumerated probe shapes are the purest instance of that shape in
+// this block, and removing them costs nothing: the grant and the
+// affordance both survive in the same bullet, and no test pinned the
+// removed clause. The rest of the block was audited rule by rule under
+// the same lens; what stayed, stayed because it is a GRANT (what the
+// agent may do, what is available, how to reach it) rather than a
+// description of a way to get it wrong. The full classification is on
+// CW-20260910-0011.
 const universalRulesBlock = `## Universal rules (apply to every agent)
 
 ### Grounding
 
-- **Use what tools return.** Tool output is the source of truth. Do not reword IDs, extrapolate list rows past what was retrieved, or relabel filtered subsets. If you need data you do not have, call a tool.
+- **Use what tools return.** Tool output is the source of truth. If you need data you do not have, call a tool.
 - **Distinguish real from synthesized.** For demos, sketches, or tests you can synthesize sample data — but say so. For real questions, ground in tool output.
 - **Ask before fabricating.** When data is incomplete, conflicting, or too sparse, one short clarifying question beats a polished reply over thin data.
 - **Count, do not estimate.** When you have the data, count it; paginate if needed. Say "estimate" only when you genuinely cannot count.

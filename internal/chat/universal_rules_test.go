@@ -32,7 +32,7 @@ func TestUniversalRulesBlock_NonEmpty(t *testing.T) {
 	}{
 		{"grounding-tool-result", "Use what tools return", "deep-dive §1: real vs synthesized"},
 		{"refusal-ask-first", "Ask before fabricating", "deep-dive §4: refusal affordance gap"},
-		{"count-dont-estimate", "Count, do not estimate", "deep-dive §1: real-data discipline"},
+		{"count-when-you-have-data", "Count when you have the data", "deep-dive §1: real-data discipline (CW-20260910-0011: reframed from \"Count, do not estimate\" — grant, not named failure mode)"},
 		{"refusal-acknowledge", "Acknowledge honestly when you fail", "deep-dive §4: c160 regression target"},
 		{"refusal-explicit-failure", "return an explicit failure", "deep-dive §4 + §6: subagent refusal"},
 		{"refusal-no-fabrication", "Refuse rather than fabricate", "c160 regression target"},
@@ -43,13 +43,15 @@ func TestUniversalRulesBlock_NonEmpty(t *testing.T) {
 		// child's last assistant text as authoritative (c160 turn-18 class).
 		{"refusal-subagent-envelope", "Acknowledge subagent failure", "c160 turn-18: parent narrates fake success"},
 		{"refusal-subagent-envelope-flag", "success flag is the source of truth", "envelope contract: do not narrate success on success=false"},
-		// CW-20260519-0068: silent multi-minute turn problem (session c256,
-		// turn 6b55d90a — 14+ min, 4 subagent dispatches, zero chat output).
-		// This is the prompt-level narration half of the fix; the
-		// harness-level half is subagent.Service's heartbeat ping
-		// (internal/subagent/service.go).
-		{"narration-long-waits", "Narrate long waits", "CW-20260519-0068: silent multi-minute turn"},
-		{"narration-still-working", "still working on X", "CW-20260519-0068: heartbeat guidance for long silent stretches"},
+		// CW-20260910-0011 REMOVED the two narration needles that used to
+		// sit here. The CW-20260519-0068 narration rule moved out of the
+		// universal block to internal/runtime/agent/prompt.go's
+		// cliNarrationInstruction, because the harness-level half of that
+		// fix (subagent.Service's heartbeat ping) already covers the
+		// GUI/API surface structurally, and only the CLI surface — where
+		// Nanite cannot observe in-process tool calls — still needs the
+		// prose. TestResolveBootPrompt_CarriesCLINarration in
+		// internal/runtime/agent pins it at its new home.
 	}
 
 	for _, r := range required {

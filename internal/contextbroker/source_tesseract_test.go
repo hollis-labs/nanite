@@ -51,10 +51,13 @@ func TestTesseractSourceUsesContextPlanExecuteContract(t *testing.T) {
 	if caller.server != "tesseract" || caller.tool != "context_plan" {
 		t.Fatalf("call = %s/%s", caller.server, caller.tool)
 	}
+	// max_items / max_tokens_estimate, not the pre-v0.10.0 budget_items /
+	// budget_tokens — Tesseract refuses the retired names on context_plan
+	// rather than ignoring them.
 	wantArgs := map[string]any{
 		"execute": true, "intent": "resume_task",
-		"summary":      "resume migration tesseract scope nanite",
-		"budget_items": 2, "budget_tokens": 128,
+		"summary":   "resume migration tesseract scope nanite",
+		"max_items": 2, "max_tokens_estimate": 128,
 	}
 	if !reflect.DeepEqual(caller.input, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", caller.input, wantArgs)

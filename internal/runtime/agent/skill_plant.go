@@ -13,11 +13,11 @@ package agent
 //
 // # Reuse, not reimplementation
 //
-// bootdir_plant.go's writePlantedFile/plantSpec is the existing, already-
-// production primitive for "build a map[relPath][]byte, then write it
-// atomically through the shared path-safety gate" — this file only builds
-// that map for a skill's vendored file tree; it never touches the
-// filesystem itself and never bypasses writePlantedFile's
+// bootdir_plant.go's plantSpec is the existing, already-production
+// primitive for "build a map[relPath][]byte, then write it through the
+// shared path-safety gate and the shared materialization engine" — this
+// file only builds that map for a skill's vendored file tree; it never
+// touches the filesystem itself and never bypasses plantSpec's
 // agentlaunch.ValidateBootDirRelPath gate.
 //
 // # Why this package can't import internal/skill
@@ -104,7 +104,7 @@ package agent
 // path.Join(".claude/skills", "../..") == "." would otherwise land a
 // vendored file at the exact boot-dir key claudePlantSpec uses for the
 // agent's own real system prompt, silently overwriting it with zero
-// error. ValidateBootDirRelPath (the primitive writePlantedFile calls)
+// error. ValidateBootDirRelPath (the gate bootDirArtifactTree applies)
 // can't catch this downstream: by the time it inspects the already-
 // path.Clean'd result, no ".." segments remain in it to reject.
 //
@@ -126,13 +126,16 @@ package agent
 //
 // # Additive-only; no removal-on-revoke (documented scope boundary)
 //
-// Every write in this codebase's boot-dir mechanism (writePlantedFile,
-// Populate, plantSpec) is additive/idempotent-by-overwrite — none of them
-// ever delete a previously-planted file that's no longer needed. This file
-// follows the same convention: a skill that stops being plantable
-// (ungranted, or a stale re-approval) simply stops being included in a
-// future plant/replant call's map — its previously-planted files are left
-// on disk in the boot dir rather than actively removed. This is a real,
+// Every write in this codebase's boot-dir mechanism (Populate, plantSpec)
+// is additive/idempotent-by-overwrite — none of them ever delete a
+// previously-planted file that's no longer needed. Nanite never sets
+// materialize.ReconcilePolicy.RemoveOwned, which is what keeps that true
+// now that the shared engine — which CAN prune owned entries — does the
+// writing. This file follows the same convention: a skill that stops
+// being plantable (ungranted, or a stale re-approval) simply stops being
+// included in a future plant/replant call's map, and its previously
+// planted files are left on disk in the boot dir rather than actively
+// removed. This is a real,
 // deliberate scope boundary (not a Done-means gap): this task's own
 // Done-means only requires that an unapproved/stale skill "is not
 // planted" (verified as "the current plant/replant call omits it," which
@@ -152,6 +155,7 @@ import (
 	"log/slog"
 	"path"
 
+	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -259,9 +263,9 @@ func ResolvePlantableSkills(ctx context.Context, grants SkillGrantStore, catalog
 // returned map.
 //
 // Every relPath this produces still passes through the shared
-// writePlantedFile path-safety gate at the point each provider's Planter
-// actually writes it (plantSpec/claudePlantSpec etc.) — this function only
-// builds the map; it never touches the filesystem itself.
+// ValidateBootDirRelPath path-safety gate at the point each provider's
+// Planter actually writes it (plantSpec/claudePlantSpec etc.) — this
+// function only builds the map; it never touches the filesystem itself.
 func SkillPlantFiles(ctx context.Context, skills []PlantableSkill, vendor SkillVendorReader, destPrefixes func(slug string) ([]string, bool)) (map[string][]byte, error) {
 	if vendor == nil || len(skills) == 0 {
 		return nil, nil
@@ -433,10 +437,24 @@ func PlantAgentSkillFiles(ctx context.Context, deps *Dependencies, bootDir, prov
 	if err != nil {
 		return err
 	}
-	for relPath, content := range files {
-		if err := writePlantedFile(bootDir, relPath, string(content), 0); err != nil {
-			return err
-		}
+	// CW-20260910-0020: planted through the same plantSpec path the
+	// provider Planters use, NOT a direct write loop. This is a
+	// correctness requirement, not tidiness: the shared materialization
+	// engine refuses any desired path that exists on disk but is absent
+	// from its manifest ("destination path is unowned"), and refuses the
+	// whole plant rather than that one entry. A skill written here
+	// outside the manifest would therefore make the NEXT full
+	// Populate — i.e. crash-recovery Repopulate, which plants the skill
+	// set again as part of the provider's own Spec.Files — fail outright.
+	//
+	// Routing through plantSpec keeps the EntryID convention identical
+	// ("nanite:file:<relPath>") whether a skill was planted at boot or
+	// granted mid-session, so the two agree on ownership instead of
+	// colliding. plantConfig carries only the provider name: skills have
+	// no ProviderSettings destination and no mode overrides, so every
+	// entry lands at the default file mode, exactly as before.
+	if _, err := plantSpec(ctx, bootDir, plant.Spec{Files: files}, plantConfig{provider: providerName}); err != nil {
+		return err
 	}
 	return nil
 }

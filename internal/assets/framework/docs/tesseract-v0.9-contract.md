@@ -1,9 +1,14 @@
 <!-- Generated dependency snapshot; DO NOT EDIT. -->
-<!-- Upstream-owned source: github.com/hollis-labs/tesseract@v0.9.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
-<!-- Stable source URL: https://github.com/hollis-labs/tesseract/blob/v0.9.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
+<!-- Upstream-owned source: github.com/hollis-labs/tesseract@v0.10.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
+<!-- Stable source URL: https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
 <!-- Relative upstream links are rewritten to tag-pinned URLs. -->
 
 # Tesseract v0.9 adoption and migration guide
+
+> Version-specific historical guide. It documents the v0.8-to-v0.9 cutover and
+> is not the install or upgrade guide for the current preview. Use
+> [Quick start](https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/QUICKSTART.md) and [Operations](https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/OPERATIONS.md) for current
+> guidance.
 
 This guide is for applications and agents adopting Tesseract `v0.9.0`, especially consumers upgrading from `v0.8.x`. It covers the supported Go and MCP contracts, the breaking migration, and the operating rules that keep stored context trustworthy.
 
@@ -26,7 +31,10 @@ Tesseract has three public information domains. Pick the domain before picking a
 | `memory` | Decisions, feedback, outcomes, observations, and other time-situated agent memory | `memory_write` | Tesseract's append-only memory revisions |
 | `knowledge` | Durable summaries of documents, packages, investigations, playbooks, and other referenced material | `knowledge_write` | The stored body is durable; the external pointer identifies its provenance and may become stale |
 
-`playbook` is a knowledge `kind`, not a fourth domain. Tasks, issues, epics, sprints, dependencies, and execution state belong in Torque. Tesseract can preserve the durable reasoning behind that work, but it must not become a second task tracker.
+`playbook` is a knowledge `kind`, not a fourth domain. Tasks, issues, epics,
+sprints, dependencies, and execution state belong in an external task tracker.
+Tesseract can preserve the durable reasoning behind that work, but it must not
+become a second task tracker.
 
 Memory and knowledge share the revision engine but remain distinct policy domains. Context has its own record store. On keyed MCP reads, `domain` is required and acts as a filter: asking for `domain=memory` never returns a knowledge revision just because the namespace and key match.
 
@@ -141,7 +149,7 @@ func main() {
 }
 ```
 
-The complete compile-checked version lives at [`../../examples/adoption-go/main.go`](https://github.com/hollis-labs/tesseract/blob/v0.9.0/examples/adoption-go/main.go).
+The complete compile-checked version lives at [`../../examples/adoption-go/main.go`](https://github.com/hollis-labs/tesseract/blob/v0.10.0/examples/adoption-go/main.go).
 
 That example intentionally uses a disposable temporary root. An embedded production
 consumer must resolve a stable absolute `RootDir` (or explicit `DBPath` and
@@ -182,7 +190,7 @@ Run the stdio server from the same resolved layout as the daemon:
 }
 ```
 
-Begin discovery with `tesseract_skills` and then `tesseract_skills {"name":"start-here"}`. This progressive help is shipped by the `tesseract mcp` binary. The authoritative catalog is [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.9.0/docs/MCP_TOOLS.md).
+Begin discovery with `tesseract_skills` and then `tesseract_skills {"name":"start-here"}`. This progressive help is shipped by the `tesseract mcp` binary. The authoritative catalog is [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/MCP_TOOLS.md).
 
 The current domain writes are `context_write`, `memory_write`, and `knowledge_write`. The collapsed reads and revision operations are:
 
@@ -331,11 +339,12 @@ Run `tesseract path` to resolve the authoritative locations. Defaults follow XDG
 - [ ] Parse recall envelopes and nullable scores; default recall to summary projection and hydrate chosen revisions on demand. For memory/knowledge history, keep bare-array decoding when no paging knob is passed and decode `{results,manifest}` when `limit`, `cursor`, or a budget is passed; context history always uses its context budget envelope.
 - [ ] Preserve `manifest.next_cursor`, budgets, and query settings across pages; handle cursor validation errors by restarting the read.
 - [ ] Wire recall -> use -> `tesseract_touch` for summary-only hits that affected the result; account for `tesseract_get_revision` already reinforcing hydrated hits.
-- [ ] Use typed writable memory namespaces; keep tasks in Torque and reasoning in Tesseract.
+- [ ] Use typed writable memory namespaces; keep tasks in the task tracker and
+      durable reasoning in Tesseract.
 - [ ] Ensure memory writes carry no knowledge facets; ensure knowledge writes carry a canonical kind, source, and complete pointer.
 - [ ] Treat terminal deprecated recall separately from timeline history when deduplicating.
 - [ ] Configure one embedder/model intentionally; test lexical fallback and explicit semantic-unavailable behavior.
 - [ ] Rename the process/binary and coordinate XDG data migration before restart; delete `CONTEXTD_ROOT` from runtime configuration.
 - [ ] Run Nanite's generated assets/contracts after the dependency update and verify no generated file restores a retired name.
 
-For the complete per-tool schema, HTTP peers, scopes, and current examples, use [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.9.0/docs/MCP_TOOLS.md). For first-run daemon configuration, use [`../QUICKSTART.md`](https://github.com/hollis-labs/tesseract/blob/v0.9.0/docs/QUICKSTART.md).
+For the complete per-tool schema, HTTP peers, scopes, and current examples, use [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/MCP_TOOLS.md). For first-run daemon configuration, use [`../QUICKSTART.md`](https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/QUICKSTART.md).

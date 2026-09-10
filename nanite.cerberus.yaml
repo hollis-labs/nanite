@@ -1,0 +1,51 @@
+kind: cerberus-project/v1
+owner: nanite
+namespace: local
+project:
+  id: nanite
+  name: Nanite
+resources:
+  - id: nanite-api-service
+    name: Nanite API Service
+    type: process
+    project: nanite
+    connector: local
+    config:
+      build_strategy:
+        kind: make_standard
+      command:
+        - ./nanite
+        - serve
+      dir: /Users/chrispian/dev/hollis-labs/apps/nanite
+      env_file: .env
+      mode: os_service
+      port: 8090
+      run_from: artifact
+      supervisor: launchd
+      url: http://127.0.0.1:8090
+    tags:
+      - api
+      - go
+      - launchd
+      - v2
+  - id: nanite-frontend
+    name: Nanite Frontend
+    type: process
+    project: nanite
+    connector: local
+    config:
+      command:
+        - npm
+        - run
+        - dev
+      dir: /Users/chrispian/dev/hollis-labs/apps/nanite/ui
+      mode: dev_session
+      port: 5176
+      run_from: workspace
+      url: http://localhost:5176
+    tags:
+      - gui
+      - frontend
+      - vite
+      - v2
+registry_urn: msg://agent/agent-mux/prj_w723b9pvp3

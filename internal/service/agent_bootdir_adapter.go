@@ -119,7 +119,7 @@ func (a *agentBootDirAdapter) Repopulate(ctx context.Context, sessionID string) 
 	if err != nil {
 		return fmt.Errorf("agent_bootdir_adapter.Repopulate: resolve params: %w", err)
 	}
-	if err := layout.Populate(entry.bootDir, params); err != nil {
+	if _, err := layout.Populate(entry.bootDir, params); err != nil {
 		return fmt.Errorf("agent_bootdir_adapter.Repopulate: populate %s: %w", entry.bootDir, err)
 	}
 	return nil

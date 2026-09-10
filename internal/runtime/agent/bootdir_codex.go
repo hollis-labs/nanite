@@ -51,8 +51,8 @@ type codexPlanter struct{}
 
 var _ plant.Planter = codexPlanter{}
 
-func (codexPlanter) Plant(_ context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
-	return plantSpec(bootDir, spec, plantConfig{
+func (codexPlanter) Plant(ctx context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
+	return plantSpec(ctx, bootDir, spec, plantConfig{
 		provider:             "codex",
 		providerSettingsPath: "config.toml",
 		providerSettingsMode: codexConfigFileMode,
@@ -96,6 +96,19 @@ func codexAgentsMD(params SetupParams) string {
 // mechanism" outcome 20-skills.md's own Context anticipates, not an
 // oversight.
 func codexPlantSpec(params SetupParams) (plant.Spec, error) {
+	// CW-20260910-0015: codex has no verified hook wiring in Nanite.
+	// go-providers' capability matrix reports FeatureHooks as
+	// "explicit-effect" for codex — the provider is understood to have
+	// the feature, but that package does not project it and Nanite has no
+	// confirmed config shape for declaring one. Planting the scripts
+	// anyway would produce executables nothing runs, which is the exact
+	// failure bootdir_hooks.go exists to prevent. An error, not a silent
+	// drop: a caller that asked for a gate should be told it did not get
+	// one. See bootdir_hooks.go's header.
+	if len(params.Hooks) > 0 {
+		return plant.Spec{}, hooksUnsupportedError("codex",
+			"no verified declaration mechanism; go-providers reports hooks as explicit-effect but Nanite has not confirmed the config shape")
+	}
 	configTOML, err := codexConfigTOMLContent(params.CLIWritableRoots)
 	if err != nil {
 		return plant.Spec{}, err
@@ -131,7 +144,7 @@ func (l codexLayout) Setup(params SetupParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := l.Populate(bootDir, params); err != nil {
+	if _, err := l.Populate(bootDir, params); err != nil {
 		_ = os.RemoveAll(bootDir)
 		return "", err
 	}
@@ -143,16 +156,15 @@ func (l codexLayout) Setup(params SetupParams) (string, error) {
 // Layout.Populate has no context.Context parameter (see bootdir.go
 // and claudeLayout.Populate's comment for why codexPlanter.Plant is
 // called with context.Background() here).
-func (codexLayout) Populate(bootDir string, params SetupParams) error {
+func (codexLayout) Populate(bootDir string, params SetupParams) (plant.Result, error) {
 	if params.AgentProfile == nil {
-		return fmt.Errorf("agent: codexLayout.Populate: AgentProfile is required")
+		return plant.Result{}, fmt.Errorf("agent: codexLayout.Populate: AgentProfile is required")
 	}
 	spec, err := codexPlantSpec(params)
 	if err != nil {
-		return err
+		return plant.Result{}, err
 	}
-	_, err = codexPlanter{}.Plant(context.Background(), bootDir, spec)
-	return err
+	return codexPlanter{}.Plant(context.Background(), bootDir, spec)
 }
 
 // RegenerateSystemPromptSlot rewrites only AGENTS.md, leaving the rest

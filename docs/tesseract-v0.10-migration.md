@@ -1,9 +1,45 @@
-# Tesseract v0.9 migration
+# Tesseract v0.10 migration
 
-Nanite consumes the immutable `github.com/hollis-labs/tesseract` `v0.9.0`
+Nanite consumes the immutable `github.com/hollis-labs/tesseract` `v0.10.0`
 release. The tag resolves to commit
-`764c5bca270a75653076615a92fa697c07bfe91c`; do not add a `replace` directive,
+`90dbe0cac065e6ed21305a5e13e5f16543c69206`; do not add a `replace` directive,
 branch pin, or pseudo-version.
+
+## What v0.10.0 changed for Nanite
+
+v0.10.0 is public-preview hardening. Its breaking changes are concentrated in
+the `tesseract serve` HTTP daemon — loopback-by-default bind, token required on
+reads, `admin` scope enforced, unknown JSON fields rejected, 10 MiB body cap.
+**Nanite runs neither of those surfaces**: it uses the embedded
+`*tesseract.Tesseract` and, optionally, the `tesseract mcp` stdio server. None
+of the daemon changes reach it.
+
+One change did reach Nanite, and it is invisible to the compiler:
+
+- **`context_plan`'s assembly budget was renamed.** `budget_items` →
+  `max_items`, `budget_tokens` → `max_tokens_estimate`, with the token default
+  raised 4000 → 8000 to match `context_pack` and `POST /v1/context/packet`.
+  Tesseract **refuses** the retired names rather than ignoring them, precisely
+  because an ignored name would have silently doubled the caller's token
+  budget. `internal/contextbroker/source_tesseract.go` sent both old names and
+  was updated; `TestTesseractSourceUsesContextPlanExecuteContract` asserts the
+  new spelling.
+
+  `budget_tokens` still exists on `tesseract_recall`, `tesseract_history` and
+  `tesseract_get`, where it is a different knob — the response serialization
+  ceiling, not an assembly budget. It is unchanged there. Do not "fix" those
+  call sites to match.
+
+No MCP tool was renamed in v0.10.0, so persisted agent configuration and
+operator allowlists carrying the names in the table below remain correct.
+Nothing in v0.10.0 is a data migration: existing stores are tightened in place
+on the next open, and backups taken by earlier versions remain restorable
+(v0.10.0 writes the new directory-based v2 backup format, which — unlike v1 —
+actually contains the memory and knowledge tables).
+
+The OpenTelemetry rename in v0.10.0 (`FE_OTEL_REDACT_PROMPTS` →
+`HOLLIS_OTEL_REDACT_PROMPTS`, `fe.*` span names → `hollis.*`) does not affect
+Nanite, which references neither spelling.
 
 ## Runtime contract
 
@@ -54,7 +90,7 @@ The optional managed process is configured under `tesseract`; Nanite launches
 the released `tesseract mcp` stdio server and makes it the sole store owner for
 that process. The default server name is `tesseract` and the trust tier is
 `plugin_stdio`. `NANITE_TESSERACT_TOKEN` overrides the YAML token. Tesseract
-v0.9 does not expose an HTTP MCP endpoint; use Nanite's generic persisted MCP
+does not expose an HTTP MCP endpoint; use Nanite's generic persisted MCP
 server configuration if an operator-supplied bridge is intentionally present.
 
 ```yaml

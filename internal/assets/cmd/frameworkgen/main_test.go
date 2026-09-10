@@ -102,9 +102,9 @@ func TestGeneratedGuideUsesUpstreamOwnedStableLinks(t *testing.T) {
 		t.Fatal("generated guide retains a relative upstream link")
 	}
 	for _, stable := range []string{
-		"https://github.com/hollis-labs/tesseract/blob/v0.9.0/examples/adoption-go/main.go",
-		"https://github.com/hollis-labs/tesseract/blob/v0.9.0/docs/MCP_TOOLS.md",
-		"https://github.com/hollis-labs/tesseract/blob/v0.9.0/docs/QUICKSTART.md",
+		"https://github.com/hollis-labs/tesseract/blob/v0.10.0/examples/adoption-go/main.go",
+		"https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/MCP_TOOLS.md",
+		"https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/QUICKSTART.md",
 	} {
 		if !strings.Contains(text, stable) {
 			t.Errorf("generated guide is missing stable upstream link %s", stable)

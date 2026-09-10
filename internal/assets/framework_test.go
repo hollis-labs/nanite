@@ -109,10 +109,10 @@ func TestCurrentManifestMatchesEmbeddedFramework(t *testing.T) {
 		t.Fatalf("manifest generated inputs = %+v, want one Tesseract guide input", set.current.GeneratedInputs)
 	}
 	input := set.current.GeneratedInputs[0]
-	if input.Module != "github.com/hollis-labs/tesseract" || input.Version != "v0.9.0" ||
+	if input.Module != "github.com/hollis-labs/tesseract" || input.Version != "v0.10.0" ||
 		input.Output != "docs/tesseract-v0.9-contract.md" ||
 		input.Path != "docs/guides/tesseract-adoption-and-v0.9-migration.md" ||
-		input.SourceURL != "https://github.com/hollis-labs/tesseract/blob/v0.9.0/docs/guides/tesseract-adoption-and-v0.9-migration.md" {
+		input.SourceURL != "https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/guides/tesseract-adoption-and-v0.9-migration.md" {
 		t.Fatalf("manifest generated input provenance is inaccurate: %+v", input)
 	}
 	seen := make(map[string]bool)
@@ -179,7 +179,7 @@ func TestFrameworkAssetsPinTesseractV09Semantics(t *testing.T) {
 			"~/.config/tesseract",
 		},
 		"docs/tesseract-v0.9-contract.md": {
-			"github.com/hollis-labs/tesseract@v0.9.0",
+			"github.com/hollis-labs/tesseract@v0.10.0",
 			"There are no compatibility aliases",
 		},
 	}

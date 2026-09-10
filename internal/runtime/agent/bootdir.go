@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -21,12 +22,21 @@ type Layout interface {
 	Setup(params SetupParams) (string, error)
 
 	// Populate writes the per-provider files into an existing boot dir.
-	// Idempotent — every Atomic*WriteFile call replaces the prior file
-	// without reading prior state. Used by recovery.BootDirOps.Repopulate
-	// to rewrite a partially-truncated sandbox dir without re-rolling the
-	// $TMPDIR path. The caller is responsible for owning bootDir's
-	// lifecycle (cleanup on terminal-failure remains with Setup).
-	Populate(bootDir string, params SetupParams) error
+	// Idempotent — the shared materialization engine reconciles against
+	// its own manifest, so an unchanged tree is reported unchanged rather
+	// than rewritten. Used by recovery.BootDirOps.Repopulate to rewrite a
+	// partially-truncated sandbox dir without re-rolling the $TMPDIR path.
+	// The caller is responsible for owning bootDir's lifecycle (cleanup
+	// on terminal-failure remains with Setup).
+	//
+	// CW-20260910-0020: returns the plant.Result so callers can reach
+	// Result.Handle — the shared engine's manifest, ownership and
+	// per-entry change data — instead of that data being discarded at the
+	// planting boundary, which was the original intent behind
+	// CW-20260910-0006. RegenerateSystemPromptSlot deliberately does NOT
+	// return one: it rewrites a single known slot as targeted watchdog
+	// remediation, and no caller has a use for a one-entry manifest.
+	Populate(bootDir string, params SetupParams) (plant.Result, error)
 
 	// RegenerateSystemPromptSlot rewrites only the system-prompt-bearing
 	// file in bootDir (CLAUDE.md for claude, AGENTS.md for codex,
@@ -118,6 +128,13 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		BootContent:  composeBootContent(opts),
 		ProjectDir:   opts.Workdir,
 		MCPConfig:    mcp,
+		// CW-20260910-0015: the boot-dir hook set. DefaultBootDirHooks is
+		// empty, so this plants nothing today — the point of wiring it
+		// here anyway is that the mechanism is REACHABLE from the real
+		// boot path rather than only from tests. CW-20260910-0016 decides
+		// what, if anything, that slice should contain; when it does, no
+		// plumbing has to change.
+		Hooks: DefaultBootDirHooks,
 	}
 	if deps != nil {
 		params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID)
@@ -245,6 +262,23 @@ type SetupParams struct {
 	// (internal/skillvendor.Store.ReadFiles) for skill_plant.go. nil
 	// disables skill planting, same as a nil Skills.
 	SkillVendor SkillVendorReader
+
+	// Hooks is the hook set planted into the boot dir and declared in the
+	// provider's settings so the harness actually runs it
+	// (CW-20260910-0015, bootdir_hooks.go). Empty — the zero value and
+	// the DefaultBootDirHooks default — plants nothing and leaves the
+	// planted settings byte-identical to a no-hook boot.
+	//
+	// A hook is a MECHANICALLY TRIGGERED steer, which is the whole reason
+	// the field exists: agent-setup's gate inventory §4 finds that prose
+	// an agent has to remember does not work, while something that fires
+	// at the event does. Which hooks Nanite ships by default, if any, is
+	// CW-20260910-0016 — not a decision this field makes.
+	//
+	// Only claude has verified wiring. Supplying hooks for codex or
+	// opencode is an error rather than a silent no-op; see
+	// bootdir_hooks.go's header for why.
+	Hooks []BootDirHook
 }
 
 // bootdirLayoutFor returns the Layout for the named provider. Unsupported
@@ -322,8 +356,8 @@ func (u unsupportedLayout) Setup(SetupParams) (string, error) {
 	return "", fmt.Errorf("agent: bootdir for provider %q is not yet implemented (awaiting go-providers BootDirSpec coverage)", u.name)
 }
 
-func (u unsupportedLayout) Populate(string, SetupParams) error {
-	return fmt.Errorf("agent: bootdir Populate for provider %q is not yet implemented", u.name)
+func (u unsupportedLayout) Populate(string, SetupParams) (plant.Result, error) {
+	return plant.Result{}, fmt.Errorf("agent: bootdir Populate for provider %q is not yet implemented", u.name)
 }
 
 func (u unsupportedLayout) RegenerateSystemPromptSlot(string, SetupParams) error {

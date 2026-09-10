@@ -197,10 +197,9 @@ def compare_counts(label: str, baseline: dict[str, int], actual: Counter[str]) -
         # Stats.lines and a clean exit.  (Not the whole Stats block: it also
         # carries `found`, which equals len(Issues) and therefore moved with
         # the drop.  That is exactly why 04b step 3 keys its floor on
-        # files/lines and not on counts.)  See
-        # `docs/engineering/runbooks/full-repo-quality-gate.md`, "What this
-        # gate guarantees", for the size of that drop and how often it was
-        # seen -- deliberately not restated here.
+        # files/lines and not on counts.)  The observed drop was 17 findings
+        # as a strict subset, seen once in 12 runs; re-derive from the gate's
+        # own uploaded reports rather than trusting that figure here.
         #
         # A repeat run is what tells the two cases apart, so the advisory asks
         # for one instead of singling out a linter: it costs a real improvement
@@ -249,11 +248,10 @@ def golangci_scan_error(report: dict[str, Any]) -> str:
     own `shell: bash` (which GitHub runs as `bash -e`) already aborts the step.
     This check is not that backstop.  It defends the *comparator*, which is
     handed a report path and cannot see how the report was produced -- a stale
-    file, a hand-assembled one, or a caller that dropped the exit code, such as
-    the local reproduction procedure in
-    docs/engineering/runbooks/full-repo-quality-gate.md, which does not check
-    it.  A report carrying a scan error proves nothing about the counts inside
-    it, whatever the producer's exit code was.
+    file, a hand-assembled one, or a caller that dropped the exit code -- a
+    hand-run local reproduction of the lint step typically does not check it.
+    A report carrying a scan error proves nothing about the counts inside it,
+    whatever the producer's exit code was.
     """
     section = report.get("Report")
     if not isinstance(section, dict):

@@ -47,8 +47,8 @@ clean:
 	rm -f nanite
 	rm -rf ui/dist
 
-# Run Go tests with the race detector — Tier 3 of docs/engineering/testing-workflow.md
-# §3, ~9 min, what the nightly full-repo quality gate runs. The pre-push hook and
+# Run Go tests with the race detector — Tier 3: the full suite under `-race`,
+# ~9 min, what the nightly full-repo quality gate runs. The pre-push hook and
 # ./scripts/check.sh both run the no-`-race` suite instead; this is not that.
 test:
 	go test -race ./...

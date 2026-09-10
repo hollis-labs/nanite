@@ -241,7 +241,7 @@ else
 fi
 
 # ── 4. test ───────────────────────────────────────────────────────────────
-begin "test — go test ./...  (Tier 1, testing-workflow.md §3)"
+begin "test — go test ./...  (Tier 1: feature done, before commit)"
 go test ./...
 finish "test" $?
 

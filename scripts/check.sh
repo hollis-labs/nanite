@@ -10,10 +10,10 @@
 # No arguments. Runs every stage, then names each stage that failed.
 #
 # ── Which tier is this? ───────────────────────────────────────────────────
-# The test stage is **Tier 1** of `docs/engineering/testing-workflow.md` §3 —
-# "feature done, before commit", budgeted there at ~1-2 min.
+# The test stage is **Tier 1** — "feature done, before commit" — budgeted at
+# ~1-2 min.
 #
-# That section's Tier 1 form is `go test -race -count=1` over the changed
+# Tier 1's canonical form is `go test -race -count=1` over the changed
 # packages plus their dependents. This script runs the whole-repo, no-`-race`
 # form (`go test ./...`) instead, because a landing script has to run with no
 # arguments and cannot know which packages you changed. Wider in scope, no

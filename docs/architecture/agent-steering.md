@@ -17,7 +17,8 @@ mechanically.
 Three paths reach the decision layer, and they see different things.
 
 **Predicate evaluation** is the general path. A `StateCollector`
-(`internal/agent/reflexes/state.go`, wired with `Window: 5` at `engine.go:56`)
+(`internal/agent/reflexes/state.go`, wired with `Window: 5` by `NewEngine` in
+`internal/agent/reflexes/engine.go`)
 assembles a `State` from committed rows: the last five assistant messages with
 their token and tool-call counts, recent user messages, unread mail count, a
 50-row slice of `event_log`, and the session tick. Predicates in
@@ -27,18 +28,18 @@ Because it reads committed rows, this path is **lagged by design — it cannot s
 the turn it is running inside**. Two `State` fields, `ScopeTier` and
 `ExecutionPattern`, cannot be built by the collector at all; a caller that needs
 the live classification builds `State` by hand instead
-(`internal/service/chat_reflex_dispatch.go:275-284`).
+(`attemptReflexDispatch`, `internal/service/chat_reflex_dispatch.go`).
 
 **Self-tool invocation** is the direct path. When an agent calls a
 harness-reactive self-tool, that call *is* the trigger — there is no predicate to
 evaluate. It enters `reactions.Fire`
-(`internal/selftools/reactions/engine.go:137`). One tool uses it today,
+(`internal/selftools/reactions/engine.go`). One tool uses it today,
 `task_update_report`.
 
 **Planted hooks are not a sense path yet.** Nanite can plant a hook into a boot
 directory it owns — the script and the settings declaration that makes it fire
 (`internal/runtime/agent/bootdir_hooks.go`, `claude` only). But
-`DefaultBootDirHooks` is empty by decision (`:177`), and nothing a hook observes
+`DefaultBootDirHooks` is empty by decision, and nothing a hook observes
 reaches `event_log`; every writer there is host-internal. A planted hook is an
 actuator today, not a sense organ. Event-triggered reflexes do work — they fire
 on Nanite's own events.
@@ -69,7 +70,7 @@ passes only `resume_loop_run`, because a WAIT-parked `LoopRun` has no live chat
 turn for a per-turn pass to ride on.
 
 **Scoping is a union, not an override.** `ListAgentReflexesForAgent`
-(`internal/store/agent_reflexes.go:378`) returns class-scoped and agent-scoped
+(`internal/store/agent_reflexes.go`) returns class-scoped and agent-scoped
 rows together in one priority-ordered list. Nothing dedupes by name and nothing
 shadows: an agent-level `inject_reminder` does not replace a class-level one —
 both fire into the same reminder block. What narrows the set is scoping plus
@@ -100,7 +101,8 @@ independently.
 Steering prefers the soft form. `force_tool_choice` renders as "prefer calling
 the `X` tool next" and must opt in via `enforce: true` or `mode: "hard"` to
 become imperative — and even the hard form is prose in a reminder, not a
-provider-level constraint (`internal/service/chat_reflexes.go:56-95`).
+provider-level constraint (`formatReflexReminder` and `reflexForceIsHard`,
+`internal/service/chat_reflexes.go`).
 
 That is deliberate. If every step needs a hard gate, what you have is not an
 open agentic session, it is an agent workflow. The alternative is the

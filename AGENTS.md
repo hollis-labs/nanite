@@ -11,6 +11,12 @@ layer beneath it.
 
 - `docs/documentation-doctrine.md` governs what a file here may contain and who
   it is for. Audience follows location — read it before adding or moving one.
+  It is the local counterpart to the portfolio documents in
+  `~/dev/projects/agent-setup/docs/`, which carry how we approach recurring
+  problems with the reasoning attached — `lenses.md` keyed on the situation you
+  are in, `_owned-subjects-index.md` on the subject you are about to write.
+  Those own the general shape; this file and the doctrine own what is true
+  *here*.
 - `cmd/nanite/` is the server and CLI, `cmd/nanite-agent/` installs the agent
   framework, `cmd/nanite-eval/` is the eval harness.
 - `internal/chat/` orchestrates a turn; `internal/runtime/agent/` builds an

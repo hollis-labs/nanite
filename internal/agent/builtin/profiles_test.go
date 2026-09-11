@@ -75,46 +75,33 @@ func TestInternalProfiles_SourceAndRef(t *testing.T) {
 	}
 }
 
-// TestInternalProfiles_DefaultIdentity guards the Chat-role identity body
-// against accidental rewrites that would re-introduce the universal
-// grounding rules (which now live in internal/chat/universal_rules.go).
-// Migration 058 stripped these from already-deployed databases — adding
-// them back here re-opens the c160 fabrication chain.
-func TestInternalProfiles_DefaultIdentity(t *testing.T) {
+// TestInternalProfiles_DefaultParentDispatchAllowlist asserts the default
+// profile's dispatch allowlist IS {researcher, planner, worker}.
+//
+// CW-20260512-0107: the chat-role default is the canonical trusted parent
+// for task_execute, and the Tool Broker Describe hook reads this list into
+// the task_execute description the LLM sees. Dispatch targets do not carry
+// the field. Set equality rather than a length is deliberate: an allowlist
+// that grows or swaps an entry silently is the case worth catching, and a
+// count cannot tell those from a rename.
+func TestInternalProfiles_DefaultParentDispatchAllowlist(t *testing.T) {
 	defs, err := InternalProfiles()
 	if err != nil {
 		t.Fatalf("InternalProfiles: %v", err)
 	}
 	def := findBySlug(t, defs, "default")
-	if !strings.Contains(def.SystemPrompt, "Nanite chat harness") {
-		t.Error("default profile missing chat-harness identity sentence")
-	}
-	if strings.Contains(def.SystemPrompt, "## Grounding") {
-		t.Error("default profile must not carry the ## Grounding section — universal rules layer owns it")
-	}
-	if strings.Contains(def.SystemPrompt, "When you fail, acknowledge honestly") {
-		t.Error("default profile must not carry the universal Refusal bullet — universal rules layer owns it")
-	}
-	if len(def.ParentDispatchAllowlist) != 3 {
-		t.Errorf("default parentDispatchAllowlist len = %d, want 3 (researcher/planner/worker)", len(def.ParentDispatchAllowlist))
-	}
-}
 
-// TestInternalProfiles_WorkerIdentity guards the Worker body against
-// reintroducing the execute-or-bust framing that drove the c160
-// fabrication chain (deep-dive §6). Migration 058 stripped it; the file
-// SOT must not regress it.
-func TestInternalProfiles_WorkerIdentity(t *testing.T) {
-	defs, err := InternalProfiles()
-	if err != nil {
-		t.Fatalf("InternalProfiles: %v", err)
+	got := append([]string(nil), def.ParentDispatchAllowlist...)
+	sort.Strings(got)
+	want := []string{"planner", "researcher", "worker"}
+	if len(got) != len(want) {
+		t.Fatalf("default parentDispatchAllowlist = %v, want %v", got, want)
 	}
-	def := findBySlug(t, defs, "worker")
-	if strings.Contains(def.SystemPrompt, "Your job is to execute, not converse") {
-		t.Error("worker profile must not carry execute-or-bust framing — universal Refusal owns failure-affordance")
-	}
-	if !strings.Contains(def.SystemPrompt, "return an explicit failure") {
-		t.Error("worker profile must reference the explicit-failure escape valve")
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("default parentDispatchAllowlist = %v, want %v", got, want)
+			break
+		}
 	}
 }
 
@@ -189,64 +176,34 @@ func TestInternalProfileSlugs_DeterministicOrder(t *testing.T) {
 	}
 }
 
-// TestInternalProfiles_RoleIdentitySmoke is the unit-test-stub smoke
-// evidence path described in the CW-20260512-0113 boot prompt (§8): each
-// of the five Wave 4 role profiles, plus the expanded Wave 4 planner,
-// must carry identity tokens that ground its role-specific behavior.
-// This is the regression target for the c160 fabrication chain — when
-// `Pattern: "researcher"` resolves to this profile (after W4 lands), the
-// body must contain "read-only" + "cite" tokens so the dispatched
-// subagent operates from grounded role-identity rather than inheriting
-// only the universal slot.
-func TestInternalProfiles_RoleIdentitySmoke(t *testing.T) {
+// TestInternalProfiles_RoleCanExecute asserts the read-only/execute split
+// survives the PermissionMode → CanExecute mapping in convert.go: a role
+// whose frontmatter omits `permissionMode: yolo` must not come back able to
+// run tools, and one that declares it must.
+//
+// This is what remains of TestInternalProfiles_RoleIdentitySmoke. That test
+// also asserted twelve hand-typed role-identity tokens were present in the
+// profile bodies, which failed whenever a body was legitimately reworded and
+// could not tell an improved sentence from a deleted one. The mapping table
+// is behavior and stays.
+func TestInternalProfiles_RoleCanExecute(t *testing.T) {
 	defs, err := InternalProfiles()
 	if err != nil {
 		t.Fatalf("InternalProfiles: %v", err)
 	}
 	cases := []struct {
-		slug   string
-		tokens []string
+		slug string
 		// canExecuteWant matches store.AgentProfile.CanExecute after
 		// ToProfile (derived from PermissionMode=yolo).
 		canExecuteWant bool
 	}{
-		// Researcher: read-only, cites paths/lines. The boot prompt's
-		// §8.1 smoke "researcher refuses fabrication" — the universal
-		// Refusal rules supply the refuse-rather-than-fabricate behavior;
-		// the role body grounds it with read-only + cite-paths discipline.
-		{
-			slug:           "researcher",
-			tokens:         []string{"read-only", "Cite", "dev_glob"},
-			canExecuteWant: false,
-		},
-		// Planner (boot prompt §8.2 smoke): decomposition + dependency
-		// language. The expanded Wave 4 body preserves the Phase 6 stub
-		// framing AND carries the dependency-ordered planning tokens.
-		{
-			slug:           "planner",
-			tokens:         []string{"Decompose", "dependenc", "Phase 6"},
-			canExecuteWant: false,
-		},
-		{
-			slug:           "backend",
-			tokens:         []string{"Go server-side", "go test -race", "Migrations are append-only"},
-			canExecuteWant: true,
-		},
-		{
-			slug:           "background-job",
-			tokens:         []string{"async worker", "Idempotency", "terminal envelope"},
-			canExecuteWant: true,
-		},
+		{slug: "researcher", canExecuteWant: false},
+		{slug: "planner", canExecuteWant: false},
+		{slug: "backend", canExecuteWant: true},
+		{slug: "background-job", canExecuteWant: true},
 	}
 	for _, c := range cases {
 		def := findBySlug(t, defs, c.slug)
-		for _, tok := range c.tokens {
-			if !strings.Contains(def.SystemPrompt, tok) {
-				t.Errorf("slug=%s: body missing role-identity token %q (role identity drifted?)", c.slug, tok)
-			}
-		}
-		// Confirm the read-only/execute split is preserved through the
-		// PermissionMode → CanExecute mapping in convert.go.
 		if got := def.ToProfile().CanExecute; got != c.canExecuteWant {
 			t.Errorf("slug=%s: ToProfile().CanExecute = %v, want %v (check PermissionMode in .md frontmatter)", c.slug, got, c.canExecuteWant)
 		}

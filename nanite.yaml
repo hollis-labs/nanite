@@ -1,4 +1,4 @@
-# Project-level nanite configuration (internal/config.Config). Merges over the
+# Project-level nanite configuration (internal/config.RuntimeConfig). Merges over the
 # user-level ~/.config/nanite/config.yaml — see internal/config/config.go for
 # the full schema and merge semantics. Every key is optional; an empty file and
 # a missing file mean the same thing.

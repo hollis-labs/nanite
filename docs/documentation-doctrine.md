@@ -61,11 +61,30 @@ something is unfinished when it shipped is exactly as wrong as one claiming
 completion that never landed, and neither announces itself.
 
 State belongs in the tracker. Durable decisions belong in the knowledge store.
-Files carry what is true by construction.
+Files carry what is true by construction — and where nothing makes a claim true
+by construction, the honest form is prose that describes intent, not a mechanism
+that freezes the sentence.
 
 A sentence like *"this document should always reflect the current state of the
 system"* is itself the defect: it stores an intention where a fact is expected
 and nothing enforces it.
+
+**This is a rule about what to write, not a thing to enforce mechanically.** It
+binds the author of a sentence, and it stops there. A document that has drifted
+since it was written is behaving as documents behave; that is not a defect to be
+caught, and a check that pins file content so it cannot drift has converted an
+authoring habit into a tax on editing. `what-a-check-may-assert.md`, among the
+portfolio documents in `~/dev/projects/agent-setup/docs/`, carries that boundary
+and the shapes it rules out.
+
+**Where load-bearing content is reconciled with reality: a release gate.**
+Configuration the system reads to operate stays aligned as a matter of course,
+because a wrong value there is a bug. `README`, `CHANGELOG`, `docs/*` and design
+prose get read as a set before a version bump, a tag or a publication — which is
+the moment somebody is already reading them, and the moment git history makes
+what changed obvious. Development is when direction reverses; asking the inner
+loop to keep the whole corpus true is asking it to pay for a reconciliation
+nobody is reading yet.
 
 ## Prefer a materialized fact to a paragraph — and make sure the fact is checkable
 

@@ -1,6 +1,14 @@
 # Nanite application configuration.
 # Loaded at startup from config/nanite.yaml. Tunables that don't belong in
 # user-facing settings or environment variables go here.
+#
+# NOT RELATED TO the nanite.yaml at the repo root, despite the identical
+# basename. That one is project config for the person running Nanite
+# (internal/config.RuntimeConfig, merging over ~/.config/nanite/config.yaml); this one
+# is checked-in application tunables (internal/config.TunablesConfig, read by
+# LoadAppConfig in internal/config/appconfig.go). Different type, different
+# loader, different schema — neither overrides the other and they are never
+# merged, so there is no precedence between them to work out.
 
 http:
   # Host only: ASCII hostname, raw IPv4, or raw unbracketed IPv6; do not add a

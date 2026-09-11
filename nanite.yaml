@@ -1,12 +1,17 @@
-# Project-level nanite configuration (internal/config.Config). Merges over
-# the user-level ~/.config/nanite/config.yaml — see internal/config/config.go
-# for the full schema and merge semantics.
+# Project-level nanite configuration (internal/config.RuntimeConfig). Merges over the
+# user-level ~/.config/nanite/config.yaml — see internal/config/config.go for
+# the full schema and merge semantics. Every key is optional; an empty file and
+# a missing file mean the same thing.
+#
+# NOT RELATED TO config/nanite.yaml, despite the identical basename. That file
+# is checked-in application tunables (internal/config.TunablesConfig, read by
+# LoadAppConfig in internal/config/appconfig.go); this one is project config
+# for the person running Nanite. Different type, different loader, different
+# schema — neither overrides the other and they are never merged, so there is
+# no precedence between them to work out.
 
-# CW-20260815-0008: point this workspace's local/dev server at the shipped
-# Worker -> Reviewer -> Gate example so agentworkflow.Registry actually
-# loads worker-reviewer-gate.yaml at startup (see docs/architecture/
-# agent-roles-design.md, "The Worker -> Reviewer -> Gate workflow"). Unset
-# elsewhere by design ("no catalog -> no behavior change" convention) —
-# this is an opt-in local/dev activation only, not a change to the global
-# default.
-workflow_definitions_path: examples/workflow-definitions
+# Uncomment to point the server at the shipped Worker -> Reviewer -> Gate
+# example so agentworkflow.Registry loads it at startup. Left off by default:
+# a workflow catalog is opt-in, and the convention is "no catalog -> no
+# behavior change".
+# workflow_definitions_path: examples/workflow-definitions

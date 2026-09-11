@@ -1,7 +1,6 @@
 # Worker → Reviewer → Gate
 #
-# The core dogfooding shape from docs/architecture/agent-roles-design.md
-# ("The Worker → Reviewer → Gate workflow"): a Worker step (llm), checked
+# The core dogfooding shape: a Worker step (llm), checked
 # by an independent Reviewer via the verify: {mode: agent} modifier
 # (a nested, capability-restricted LLM call — not the same session, not
 # the same context), followed by a gate step for final human approval

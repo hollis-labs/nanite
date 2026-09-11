@@ -1,9 +1,9 @@
 # Example Workflow Definitions
 
 A real, loadable `WorkflowDefinition` catalog `agentworkflow.Registry` can
-load at startup — proves the Worker → Reviewer → Gate shape from
-`docs/architecture/agent-roles-design.md` ("The Worker → Reviewer → Gate
-workflow") as a shipped definition, not just a Go test fixture.
+load at startup — the Worker → Reviewer → Gate shape as a shipped definition
+rather than a Go test fixture: a Worker step produces work, an independent
+Reviewer checks it, and a Gate decides whether it proceeds.
 
 ## Layout
 

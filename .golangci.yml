@@ -173,13 +173,41 @@ linters:
       #
       # Rule 1: AtomicWriteFile — applies to agent, install service, and
       # adapter plugins. Silence the "AtomicWriteFile" message everywhere
-      # else.
+      # else. Checked for the same gap as Rule 2 (CW-20260910-0089):
+      # internal/api/ contains no os.WriteFile at all, so its absence from this
+      # list costs nothing.
       - text: 'AtomicWriteFile'
         linters: [forbidigo]
         path-except: '(internal/agent/|internal/service/install/|internal/plugin/builtin/adapter-)'
       # Rule 2: ResolveUnder (filepath.Join) — applies to sandbox, mcp,
       # install, and the PCC/skill files hardened by GO-SEC-003. Silence
       # everywhere else.
+      #
+      # internal/api/ is deliberately NOT in this list, and that is an answer
+      # rather than an oversight (CW-20260910-0089). It handles request-supplied
+      # input, so its absence is the first thing to query; audited against main:
+      #
+      #   36 non-test filepath.Join calls in internal/api/
+      #   23 join an already-confined root with a string literal ("plugin.yaml")
+      #   12 have a dynamic segment
+      #    0 take a request-supplied segment
+      #
+      # The confinement happens at the boundary instead, which is why the joins
+      # downstream are inert. Request-supplied plugin names go through
+      # resolvePluginTarget (plugins.go) = ValidatePluginID + ResolveUnder, used
+      # at 10 sites; the one request-supplied *file* path, {file...} on
+      # GET /api/plugins/{name}/ui/{file...}, is passed to
+      # pathsafe.ResolveUnder(baseDir, file) explicitly. The remaining dynamic
+      # segments are catalog entry names (validated by install.ValidatePluginID
+      # before use — see catalog.go, which records that AD-04 explicitly says not
+      # to add a second ResolveUnder there), os.ReadDir entry names, archive
+      # extract-dir listings, and one manifest value used only for an os.Stat
+      # mtime cache-buster.
+      #
+      # Enforcing here would flag 36 correct call sites and buy nothing: the
+      # traversal surface is already closed one layer up. REVISIT THE MOMENT a
+      # request-supplied segment reaches a bare filepath.Join in this package —
+      # that is the condition, not a date.
       - text: 'ResolveUnder'
         linters: [forbidigo]
         path-except: '(internal/sandbox/|internal/mcp/|internal/service/install/|internal/contextbroker/source_pcc\.go|internal/skill/parser\.go)'

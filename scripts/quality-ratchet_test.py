@@ -1080,7 +1080,7 @@ class QualityRatchetTest(unittest.TestCase):
                 "packages",
                 "--package-list",
                 str(package_list),
-                "--expected",
+                "--min",
                 str(expected),
             ],
             check=False,
@@ -1088,28 +1088,42 @@ class QualityRatchetTest(unittest.TestCase):
             text=True,
         )
 
-    def test_packages_accepts_the_expected_count(self) -> None:
+    def test_packages_accepts_a_set_exactly_at_the_floor(self) -> None:
         result = self.run_packages(["./cmd/nanite", "./internal/api", "./internal/store"])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("3 matches the committed expectation", result.stdout)
+        self.assertIn("examined 3, exactly at the floor", result.stdout)
 
     def test_packages_rejects_a_shrunken_package_set(self) -> None:
         result = self.run_packages(["./cmd/nanite", "./internal/api"])
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("found 2, expected 3", result.stderr)
+        self.assertIn("examined 2, floor is 3", result.stderr)
 
     def test_packages_rejects_a_single_surviving_package(self) -> None:
         # The shape `test -s` waved through: one byte of output is enough.
         result = self.run_packages(["./cmd/nanite"])
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("found 1, expected 3", result.stderr)
+        self.assertIn("examined 1, floor is 3", result.stderr)
 
-    def test_packages_rejects_a_grown_package_set(self) -> None:
+    def test_packages_accepts_a_grown_package_set(self) -> None:
+        # The floor is not an equality.  An exact-count assertion fails on every
+        # legitimate package addition, and a gate that cries wolf on ordinary
+        # work is one people learn to ignore -- which is how this assertion came
+        # to fail eight consecutive scheduled runs while performing no checks.
         result = self.run_packages(
             ["./cmd/nanite", "./internal/api", "./internal/store", "./internal/chat"]
         )
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("found 4, expected 3", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("examined 4, floor is 3 (1 above)", result.stdout)
+
+    def test_packages_reports_what_it_examined_on_every_outcome(self) -> None:
+        # "examined N" must appear whether the run passes or fails, so a gate
+        # that scanned nothing cannot read like a gate that found nothing.
+        grown = self.run_packages(["./cmd/nanite", "./internal/api", "./x", "./y"])
+        exact = self.run_packages(["./cmd/nanite", "./internal/api", "./internal/store"])
+        shrunk = self.run_packages(["./cmd/nanite"])
+        self.assertIn("examined 4", grown.stdout)
+        self.assertIn("examined 3", exact.stdout)
+        self.assertIn("examined 1", shrunk.stderr)
 
     def test_packages_rejects_blank_padding(self) -> None:
         result = self.run_packages(["./cmd/nanite", "", "./internal/api", ""])
@@ -1141,10 +1155,10 @@ class QualityRatchetTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("cannot read package list", result.stderr)
 
-    def test_packages_rejects_a_nonpositive_expectation(self) -> None:
+    def test_packages_rejects_a_nonpositive_floor(self) -> None:
         result = self.run_packages(["./cmd/nanite"], expected=0)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("must be a positive package count", result.stderr)
+        self.assertIn("--min must be a positive package count", result.stderr)
 
     # ------------------------------------------------------------------
     # scripts/gosec-repeat-run.sh -- the stderr capture and its assertion.

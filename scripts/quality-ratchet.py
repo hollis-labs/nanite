@@ -893,17 +893,26 @@ def gosec_command(
     return 1 if cardinality_failed or comparison_failed else 0
 
 
-def packages_command(package_list_path: Path, expected: int) -> int:
-    """Assert the discovered package list is the shape the gate was calibrated on.
+def packages_command(package_list_path: Path, minimum: int) -> int:
+    """Assert the discovered package list still covers what the gate was calibrated on.
 
     Every scanning step in the workflow -- lint, govulncheck, gosec, deadcode
     and the race suite -- is handed this one file.  Only lint and gosec have a
     comparator behind them, so if the list silently shrinks the other three
     scan less and report success with nothing to catch them.  `test -s` only
     proved the file held one byte.
+
+    This is a FLOOR, not an equality.  Packages disappearing is the hazard; a
+    package being added is ordinary work.  An equality check fails on every
+    legitimate addition, and a gate that cries wolf on ordinary work is a gate
+    people learn to ignore -- which is exactly what happened here, for eight
+    consecutive scheduled runs, while the gate performed none of its checks.
+
+    Raise the floor when you want tighter loss detection, not because the count
+    went up.
     """
-    if expected <= 0:
-        raise SystemExit("--expected must be a positive package count")
+    if minimum <= 0:
+        raise SystemExit("--min must be a positive package count")
     try:
         text = package_list_path.read_text(encoding="utf-8")
     except OSError as error:
@@ -933,16 +942,26 @@ def packages_command(package_list_path: Path, expected: int) -> int:
             "inflate the count while leaving real packages unscanned"
         )
 
-    if len(entries) != expected:
+    if len(entries) < minimum:
         print(
-            f"tracked Go packages: found {len(entries)}, expected {expected}. "
-            "Re-derive with the 'Discover tracked Go packages' step and update "
-            "--expected in .github/workflows/full-repo-quality.yml only after "
-            "confirming this is a real package addition or removal.",
+            f"tracked Go packages: examined {len(entries)}, floor is {minimum}. "
+            "Packages have left the scan set, so every step downstream of this "
+            "one is scanning less than the gate was calibrated on -- and only "
+            "lint and gosec would notice. Re-derive with the 'Discover tracked "
+            "Go packages' step and lower --min in "
+            ".github/workflows/full-repo-quality.yml only after confirming the "
+            "packages were deliberately removed.",
             file=sys.stderr,
         )
         return 1
-    print(f"tracked Go packages: {len(entries)} matches the committed expectation")
+    if len(entries) > minimum:
+        print(
+            f"tracked Go packages: examined {len(entries)}, floor is {minimum} "
+            f"({len(entries) - minimum} above). Growth is ordinary; the floor "
+            "only needs raising to tighten loss detection."
+        )
+        return 0
+    print(f"tracked Go packages: examined {len(entries)}, exactly at the floor")
     return 0
 
 
@@ -972,7 +991,7 @@ def parser() -> argparse.ArgumentParser:
             subparser.add_argument("--repeat-report", type=Path, required=True)
     packages = subparsers.add_parser("packages")
     packages.add_argument("--package-list", type=Path, required=True)
-    packages.add_argument("--expected", type=int, required=True)
+    packages.add_argument("--min", dest="minimum", type=int, required=True)
     return result
 
 
@@ -981,7 +1000,7 @@ def main() -> int:
     if arguments.command == "platform":
         return platform_command(arguments.baseline, arguments.runner)
     if arguments.command == "packages":
-        return packages_command(arguments.package_list, arguments.expected)
+        return packages_command(arguments.package_list, arguments.minimum)
     if arguments.command == "lint":
         return lint_command(
             arguments.baseline,

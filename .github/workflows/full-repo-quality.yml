@@ -63,17 +63,28 @@ jobs:
       # shrinks, govulncheck, deadcode and the race suite scan less and still
       # report success. `test -s` only proved the file held one byte.
       #
-      # 109 re-derived 2026-08-24 by running the step above and counting it.
-      # Note `go list ./...` alone answers a different question -- it returns
-      # 110 in a checkout that has run `npm install`, the extra being
-      # ui/node_modules/flatted/golang/pkg/flatted, a stray Go package vendored
-      # inside npm which the git-tracked filter above removes.
-      - name: Assert the discovered package list matches the committed shape
+      # This is a FLOOR, not an equality. Packages leaving the scan set is the
+      # hazard; packages being added is ordinary work. The equality this
+      # replaced failed on every legitimate addition, and did so on eight
+      # consecutive scheduled runs -- each dying here in well under two minutes
+      # against a healthy run's fifteen, so the gate performed none of the
+      # checks below while still being counted on as protection.
+      #
+      # Raise the floor to tighten loss detection, never merely because the
+      # count went up.
+      #
+      # The floor is keyed on the TRACKED list the step above writes, which is
+      # the same list every scanner below is handed. `go list ./...` answers a
+      # different question and must not be substituted: in a checkout that has
+      # run `npm install` it additionally returns
+      # ui/node_modules/flatted/golang/pkg/flatted, a Go package vendored inside
+      # npm that the git-tracked filter above removes.
+      - name: Assert the discovered package list still covers the repository
         shell: bash
         run: |
           python3 scripts/quality-ratchet.py packages \
             --package-list "$RUNNER_TEMP/tracked-go-packages.txt" \
-            --expected 109
+            --min 115
 
       - name: Install pinned quality tools
         shell: bash
@@ -94,10 +105,10 @@ jobs:
             packages+=("$package")
           done < "$RUNNER_TEMP/tracked-go-packages.txt"
           golangci-lint linters \
-            --config docs/audits/2026-08-21-go-quality/audit-golangci.yml \
+            --config .github/quality/audit-golangci.yml \
             --json > "$RUNNER_TEMP/audit-linters.json"
           golangci-lint run \
-            --config docs/audits/2026-08-21-go-quality/audit-golangci.yml \
+            --config .github/quality/audit-golangci.yml \
             --issues-exit-code=0 \
             --max-issues-per-linter=0 \
             --max-same-issues=0 \
@@ -167,6 +178,58 @@ jobs:
             packages+=("$package")
           done < "$RUNNER_TEMP/tracked-go-packages.txt"
           go test -race -count=1 "${packages[@]}"
+
+      # WHAT THIS STEP IS FOR. A gate that examined nothing prints the same
+      # bytes as a gate that found nothing. This one died in its first assertion
+      # on eight consecutive scheduled runs, and every one of them looked like
+      # an ordinary red X -- the only visible tell was the duration, under two
+      # minutes against a healthy fifteen, which nobody reads.
+      #
+      # So this reports COVERAGE, not findings: for each scanner, whether it
+      # produced evidence at all. `if: always()` is load-bearing -- the whole
+      # value is in what it says when an earlier step failed, where every
+      # scanner below that step reads DID NOT RUN. A summary that only appeared
+      # on success would describe exactly the runs that need no explaining.
+      - name: Report what this run actually examined
+        if: always()
+        shell: bash
+        run: |
+          package_file="$RUNNER_TEMP/tracked-go-packages.txt"
+          if [ -s "$package_file" ]; then
+            packages=$(grep -c . "$package_file")
+          else
+            packages=0
+          fi
+
+          {
+            echo "## Coverage"
+            echo
+            echo "Whether each scanner produced evidence — not what it found."
+            echo
+            echo "| Stage | Examined |"
+            echo "|---|---|"
+            echo "| tracked Go packages discovered | ${packages} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          report_row() {
+            if [ -s "$2" ]; then
+              echo "| $1 | ${packages} packages |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| $1 | **DID NOT RUN** |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+          report_row "lint ratchet"  "$RUNNER_TEMP/audit-lint.json"
+          report_row "gosec"         "$RUNNER_TEMP/gosec.json"
+          report_row "gosec repeat"  "$RUNNER_TEMP/gosec-repeat.json"
+          report_row "dead code"     "$RUNNER_TEMP/deadcode.txt"
+
+          if [ "$packages" -eq 0 ]; then
+            {
+              echo
+              echo "**This run examined no packages at all.** Every result above"
+              echo "is the absence of a scan, not the absence of findings."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload quality reports
         if: always()

@@ -20,21 +20,21 @@ Launch an Agent with this prompt:
 You are a status reporter. Run the following queries and return ONLY a compact summary table. Do not include raw API output.
 
 1. Check active sprints:
-   - Use mcp__clockwork__clockwork_sprint_list with project_id=PRJ-20260417-0001, limit=5
-   - For each active sprint, use mcp__clockwork__clockwork_task_list with parent_id=<sprint_id> to get task counts by status
+   - Use mcp__torque__torque_sprint_list with the resolved project_id, limit=5 (resolve it with torque_project_list; do not assume one)
+   - For each active sprint, use mcp__torque__torque_task_list with parent_id=<sprint_id> to get task counts by status
 
 2. Check service health:
-   - curl -sf -o /dev/null -w "%{http_code}" http://127.0.0.1:8085/v1/tasks --max-time 2 (Clockwork)
+   - curl -sf -o /dev/null -w "%{http_code}" http://127.0.0.1:8085/v1/tasks --max-time 2 (Torque)
    - curl -sf -o /dev/null -w "%{http_code}" http://127.0.0.1:8089/v1/health/readiness --max-time 2 (Tesseract; use the configured deployment address if overridden)
    - curl -sf -o /dev/null -w "%{http_code}" http://127.0.0.1:8095/ --max-time 2 (Hadron)
 
 3. Check for any tasks in "doing" status (stuck work):
-   - Use mcp__clockwork__clockwork_task_list with status=doing, limit=5
+   - Use mcp__torque__torque_task_list with status=doing, limit=5
 
 Return this EXACT format and nothing else:
 
 === QSTATUS ===
-Services: Clockwork [UP/DOWN] | Tesseract [UP/DOWN] | Hadron [UP/DOWN]
+Services: Torque [UP/DOWN] | Tesseract [UP/DOWN] | Hadron [UP/DOWN]
 
 Active Sprints:
   <sprint-code>: <todo>t/<doing>d/<done>✓ of <total> [active/planned]

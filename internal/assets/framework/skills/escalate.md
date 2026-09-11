@@ -10,11 +10,11 @@ Convert a blocker into an explicit repair task so the system continues operating
 
 ## Procedure
 
-1. **Identify active task.** Check Clockwork for the current "doing" task (`mcp__clockwork__clockwork_task_list status=doing`), or accept explicit `--task <CW-ID>`.
+1. **Identify active task.** Check Torque for the current "doing" task (`mcp__torque__torque_task_list status=doing`), or accept explicit `--task <CW-ID>`.
 
-2. **Transition task to blocked.** Use `mcp__clockwork__clockwork_task_transition` to set status to "blocked". Use `mcp__clockwork__clockwork_task_update` to add the blocker reason to the description, or `mcp__clockwork__clockwork_comment_add` for a threaded note.
+2. **Transition task to blocked.** Use `mcp__torque__torque_task_transition` to set status to "blocked". Use `mcp__torque__torque_task_update` to add the blocker reason to the description, or `mcp__torque__torque_comment_add` for a threaded note.
 
-3. **Create repair task.** Use `mcp__clockwork__clockwork_task_create`:
+3. **Create repair task.** Use `mcp__torque__torque_task_create`:
    - Title: `Repair: <short blocker summary>`
    - Priority: A (repair tasks always high priority)
    - Tags: repair, escalation
@@ -28,7 +28,7 @@ Convert a blocker into an explicit repair task so the system continues operating
 
 ## Output
 
-- Clockwork: blocked task + new repair task
+- Torque: blocked task + new repair task
 - ADR (if architectural decision needed)
 - Console: BLOCKED signal
 

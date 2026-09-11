@@ -111,15 +111,15 @@ Do not auto-invoke `/boot-prompt` — that skill is manual by design. Only invok
 
 If no substantive work happened (empty SESSION list, no commits, no plan advances), skip the boot-prompt check. Trivial sessions don't need handoffs.
 
-### 4. Reconcile plans — Clockwork (authoritative) + local files (legacy)
+### 4. Reconcile plans — Torque (authoritative) + local files (legacy)
 
-**Plans now live in Clockwork.** Local plan files (`plan.md`, `docs/plans/*.md`, etc.) are legacy and should be migrated. Check Clockwork first; fall back to local files for any that haven't been migrated yet.
+**Plans now live in Torque.** Local plan files (`plan.md`, `docs/plans/*.md`, etc.) are legacy and should be migrated. Check Torque first; fall back to local files for any that haven't been migrated yet.
 
-**4a. Clockwork plan reconciliation (authoritative).**
+**4a. Torque plan reconciliation (authoritative).**
 
-Search Clockwork for tasks/sprints worked on this session. Cross-reference against commit messages, tool-call history, and task IDs mentioned in the session.
+Search Torque for tasks/sprints worked on this session. Cross-reference against commit messages, tool-call history, and task IDs mentioned in the session.
 
-For any Clockwork task the session advanced:
+For any Torque task the session advanced:
 - If status is still `todo` or `doing` after completion → surface via the three-option template (same shape as Step 5 below; defer to Step 5b for actual transitions — avoid double-surfacing the same task).
 - If status is correct but no comment records the work → note in Step 11b (the `#end-session` comment will cover it).
 
@@ -134,36 +134,36 @@ If plan files exist at any of:
 AND the session referenced or advanced tasks in those files, diff the checkbox state against the session's task history.
 
 - If checkboxes are stale → surface via the three-option template.
-- If the project uses Clockwork, also surface: *"Hey, this plan file could be migrated to Clockwork — want me to: A) migrate tasks to Clockwork now, B) leave the file as-is, C) add a follow-up task?"*
+- If the project uses Torque, also surface: *"Hey, this plan file could be migrated to Torque — want me to: A) migrate tasks to Torque now, B) leave the file as-is, C) add a follow-up task?"*
 
-**Convention for new work:** agents MUST create plans in Clockwork, not as plan files. Use `mcp__clockwork__clockwork_task_create` or the sprint tools. Local plan files are read-only legacy — do not create new ones.
+**Convention for new work:** agents MUST create plans in Torque, not as plan files. Use `mcp__torque__torque_task_create` or the sprint tools. Local plan files are read-only legacy — do not create new ones.
 
-### 5. Reconcile against task tracker — Clockwork
+### 5. Reconcile against task tracker — Torque
 
-**Clockwork is the task system of record.** Use `mcp__clockwork__*` tools.
+**Torque is the task system of record.** Use `mcp__torque__*` tools.
 
-**During the session (not just at close):** agents should add progress comments to Clockwork tasks as milestones complete. This makes step 5 cheaper — the task already has context.
+**During the session (not just at close):** agents should add progress comments to Torque tasks as milestones complete. This makes step 5 cheaper — the task already has context.
 
-> **Legacy fallback:** a small number of pre-migration projects still hold tickets in the legacy Engine tracker. If the session cited a `TASK-20YYMMDD-NNN`-style ID and Clockwork has no match, swap `mcp__clockwork__clockwork_*` for `mcp__engine__engine_*` (read-only — never auto-transition). Do not reach for Engine by default; Clockwork first, every time.
+> **Legacy fallback:** a small number of pre-migration projects still hold tickets in the legacy Engine tracker. If the session cited a `TASK-20YYMMDD-NNN`-style ID and Torque has no match, swap `mcp__torque__torque_*` for `mcp__engine__engine_*` (read-only — never auto-transition). Do not reach for Engine by default; Torque first, every time.
 
 ---
 
 **5a. Reverse lookup — session-cited tickets.**
 
-Grep tracking files and commit messages for Clockwork IDs:
+Grep tracking files and commit messages for Torque IDs:
 
 ```bash
 grep -rnE "CW-20[0-9]{6}-[0-9]{4}" <tracking files this session touched>
 ```
 
 For each `CW-` ID found:
-- Fetch via `mcp__clockwork__clockwork_task_get id=<id>`.
+- Fetch via `mcp__torque__torque_task_get id=<id>`.
 - If status is `todo` or `doing` and session work matches → surface via the three-option template (see below).
 
 **5b. Forward lookup — in-progress tasks possibly advanced.**
 
 ```
-mcp__clockwork__clockwork_task_list status=doing
+mcp__torque__torque_task_list status=doing
 ```
 (no project_id filter available yet — scan returned tasks for title/description matches against session work)
 
@@ -172,19 +172,19 @@ For each task returned that plausibly matches session work:
 > Hey, noticed **CW-XXXX** (`<title>`) is still `doing`, but this session committed {N} files / advanced {plan-name} / closed related work. Want me to: A) transition it now (I'll ask which status), B) capture a reconciliation note to NANITE, C) add a follow-up task?
 
 On option A:
-- `mcp__clockwork__clockwork_task_transition id=<id> status=<chosen>`
+- `mcp__torque__torque_task_transition id=<id> status=<chosen>`
 
 After transition, if session work warrants a summary comment, offer (not assume) to add one:
-- `mcp__clockwork__clockwork_comment_add task_id=<id> body=<summary>`
+- `mcp__torque__torque_comment_add task_id=<id> body=<summary>`
 
 **5c. Sprint / Epic check.** If any task transitioned to `done`, check whether sibling tasks are also done:
-- `mcp__clockwork__clockwork_task_list parent_id=<sprint_id>`
+- `mcp__torque__torque_task_list parent_id=<sprint_id>`
 
 If all siblings are done or paused, offer to transition the sprint/epic. Never silently decide.
 
-**Backlog verification:** if the session created tasks or logged to Clockwork mid-flight, verify those calls completed in tool-call history. Silent failures → surface via three-option template.
+**Backlog verification:** if the session created tasks or logged to Torque mid-flight, verify those calls completed in tool-call history. Silent failures → surface via three-option template.
 
-**Tracker unreachable:** note in wrap-up report under `Clockwork: unreachable — reconciliation skipped`. Continue checklist. Do not retry aggressively.
+**Tracker unreachable:** note in wrap-up report under `Torque: unreachable — reconciliation skipped`. Continue checklist. Do not retry aggressively.
 
 ### 6. Check stale agent context files
 
@@ -328,7 +328,7 @@ mcp__tesseract__knowledge_write
 - end: <RFC3339 now>
 - branch@head: <branch>@<short-sha>
 - workspace_mode: <strict|multi-session>
-- clockwork_comment_id: <id from Step 11b, if written>
+- torque_comment_id: <id from Step 11b, if written>
 
 ## segments
 - <short chunk description — big topic shifts, each ~1 line>
@@ -337,8 +337,8 @@ mcp__tesseract__knowledge_write
 ## artifacts
 - commits: <list of short-sha + subject>
 - files_authored: <list of session-authored paths>
-- plan_advances: <list of Clockwork task IDs completed>
-- tickets_touched: <list of Clockwork IDs with transitions (and any read-only legacy Engine IDs cited)>
+- plan_advances: <list of Torque task IDs completed>
+- tickets_touched: <list of Torque IDs with transitions (and any read-only legacy Engine IDs cited)>
 - prs: <list of PR numbers/urls>
 - adrs: <list of new ADR paths>
 - tesseract_captures: <list of revision_id values from Step 10 captures>
@@ -387,14 +387,14 @@ in the structured sections above.>
 
 ---
 
-### 11b. Post session-close comment to Clockwork
+### 11b. Post session-close comment to Torque
 
-After Step 11, post a comment to every Clockwork task that was substantially worked on this session. This is the **work journal entry** — prose, human-readable, tied to the task.
+After Step 11, post a comment to every Torque task that was substantially worked on this session. This is the **work journal entry** — prose, human-readable, tied to the task.
 
-**For each Clockwork task worked this session:**
+**For each Torque task worked this session:**
 
 ```
-mcp__clockwork__clockwork_comment_add
+mcp__torque__torque_comment_add
   task_id = <CW-task-id>
   body = <see format below>
 ```
@@ -412,20 +412,20 @@ mcp__clockwork__clockwork_comment_add
 **Flags:** <any structural risk, blocker, or "watch for this" — optional>
 ```
 
-**The `#end-session` tag** marks this as the canonical session narrative for this task. The boot generator and any future tooling can query Clockwork comments filtered by `#end-session` to get the work log entry for a given task.
+**The `#end-session` tag** marks this as the canonical session narrative for this task. The boot generator and any future tooling can query Torque comments filtered by `#end-session` to get the work log entry for a given task.
 
 **Agents may also add comments mid-session** (not just at close) to capture milestone completions, decisions, or blockers as they happen. These intermediate comments don't need `#end-session` — just write natural prose. Example: *"Finished P8 CompactionContract disclosure prompt (commit abc1234). Handoff stash ID now wires into boot disclosure block. Next: chat_search MCP tool."*
 
 **Skip 11b when:**
-- The session was trivial (no Clockwork tasks were advanced).
-- No Clockwork tasks are identifiable for the session.
-- Note in the wrap-up report: `Clockwork comment: skipped (no tasks advanced)`.
+- The session was trivial (no Torque tasks were advanced).
+- No Torque tasks are identifiable for the session.
+- Note in the wrap-up report: `Torque comment: skipped (no tasks advanced)`.
 
-**Why both Tesseract and Clockwork:**
+**Why both Tesseract and Torque:**
 - **Tesseract session_close** = structured compiler input for the boot generator; scope-filtered by agent identity; drives §2/§3/§7 of the next boot prompt.
-- **Clockwork comment** = task-scoped work narrative; searchable by task/ticket; audit trail visible in the Clockwork UI; extractable for task-level review.
+- **Torque comment** = task-scoped work narrative; searchable by task/ticket; audit trail visible in the Torque UI; extractable for task-level review.
 
-They're complementary, not redundant. The `clockwork_comment_id` in the Tesseract record links the two.
+They're complementary, not redundant. The `torque_comment_id` in the Tesseract record links the two.
 
 ## Output contract
 
@@ -443,12 +443,12 @@ Surfaced to user (awaiting decision):
   • {file-or-topic} — {A/B/C pending}
 
 Boot-prompt: {updated this session | stale, flagged | n/a}
-Plans: {Clockwork reconciled | local files (legacy): <path> | n/a}
-Clockwork tasks: {reconciled | {N} surfaced | unreachable | n/a}
+Plans: {Torque reconciled | local files (legacy): <path> | n/a}
+Torque tasks: {reconciled | {N} surfaced | unreachable | n/a}
 Agent context: {current | stale: <path> | n/a}
 Markers resolved: {N markers → destinations | none found | n/a}
 Session-close packet: {written <knowledge-id> scope:<scope_key> | skipped (trivial) | fallback <path> | unreachable}
-Clockwork comment: {posted #end-session on <CW-IDs> | skipped (no tasks advanced) | unreachable}
+Torque comment: {posted #end-session on <CW-IDs> | skipped (no tasks advanced) | unreachable}
 
 Nothing outstanding. / {N} items awaiting user decision.
 ```
@@ -482,9 +482,9 @@ All clean. Nothing to commit, nothing to surface.
 - NEVER skip Step 11 for substantive sessions. The session-close record is the compiler input; its absence breaks continuity for the next boot. Only skip on trivial sessions (no commits, no plan advances, no captures).
 - ALWAYS include `scope:<scope_key>` tag on session-close records. Records without scope tags won't be found by the boot generator.
 - ALWAYS write the `narrative` field in Step 11 — this is the prose §7 content written while context is hot. Don't leave it empty.
-- ALWAYS post the `#end-session` Clockwork comment (Step 11b) for substantive sessions that advanced Clockwork tasks. The comment is the task-scoped work journal entry.
-- NEW PLANS go in Clockwork. Do NOT create new plan files on disk. Migrate existing local plan files to Clockwork when the opportunity arises (surface via three-option template in Step 4b).
-- Mid-session Clockwork comments are encouraged (not just at close) — capture milestone completions, decisions, blockers as prose comments on the task.
+- ALWAYS post the `#end-session` Torque comment (Step 11b) for substantive sessions that advanced Torque tasks. The comment is the task-scoped work journal entry.
+- NEW PLANS go in Torque. Do NOT create new plan files on disk. Migrate existing local plan files to Torque when the opportunity arises (surface via three-option template in Step 4b).
+- Mid-session Torque comments are encouraged (not just at close) — capture milestone completions, decisions, blockers as prose comments on the task.
 - If the workspace isn't a git repo, skip steps 1–2 and 7, and note the limitation in the report.
 - If the checklist reveals a gap the skill doesn't cover, STOP and surface it via the three-option template rather than improvise.
 

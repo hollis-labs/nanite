@@ -28,7 +28,7 @@ For each service, run via Bash:
 Services:
   | Service | URL | Endpoint |
   |---------|-----|----------|
-  | Clockwork GUI | http://127.0.0.1:8085 | /v1/tasks |
+  | Torque GUI | http://127.0.0.1:8085 | /v1/tasks |
   | Tesseract | http://127.0.0.1:8089 | /v1/health/readiness |
   | Hadron | http://127.0.0.1:8095 | /v1/health |
 
@@ -38,7 +38,7 @@ Also check Cerberus daemon:
 Return this EXACT format and nothing else:
 
 === QHEALTH ===
-Clockwork [UP/DOWN]  <http_code>  <latency>ms
+Torque [UP/DOWN]  <http_code>  <latency>ms
 Tesseract [UP/DOWN]  <http_code>  <latency>ms
 Hadron    [UP/DOWN]  <http_code>  <latency>ms
 Cerberus  [UP/DOWN]  <N> services managed, <M> running

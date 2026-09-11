@@ -1,6 +1,6 @@
 # Nanite Agent Framework — Design Guide
 
-Reference document for the Nanite agent framework (previously known as agentrc). This document should always reflect the current state of the system. When the framework changes, the nanite-agent-manager role is responsible for updating this doc.
+Reference document for the Nanite agent framework (previously known as agentrc).
 
 ## Core Principles
 
@@ -185,7 +185,7 @@ The global config (`~/.nanite/config.yaml`) defines `default_skills` and `defaul
 
 ```yaml
 default_skills: [fast-triage, end-of-session, escalate, doc-search, doc-note]
-default_tools:  [clockwork, tesseract, hadron, cerberus]
+default_tools:  [torque, tesseract, hadron, cerberus]
 ```
 
 **default_skills** — Skills every agent gets regardless of its `skills:` array. Agent-specific skills are additive; they never replace defaults. A skill belongs here when every agent benefits from having it (e.g., structured user input, session handoff, blocker escalation).
@@ -358,13 +358,13 @@ The global config lists monorepos and individual modules as first-class project 
 | suds-v2 | — |
 | fragmentsengine.com | — |
 | agent-workspaces | — |
-| clockwork-manifold | Clockwork Manifold — task orchestration and execution engine |
-| fragments-engine | Monorepo root (legacy, superseded by clockwork-manifold) |
-| engine | Legacy task/sprint/project core (read-only history; superseded by clockwork-manifold) |
+| torque | Torque — task orchestration and execution engine |
+| fragments-engine | Monorepo root (legacy, superseded by torque) |
+| engine | Legacy task/sprint/project core (read-only history; superseded by torque) |
 | tesseract | Tesseract v0.9 — context, memory, and knowledge runtime |
 | libs | Shared libraries (MCP, OTel, plugin, toolbroker) |
 
-Historical task modules remain listed only for read-only reference. New task/sprint/project work happens in `clockwork-manifold`.
+Historical task modules remain listed only for read-only reference. New task/sprint/project work happens in `torque`.
 
 Project-level config at `<project>/.nanite/config.yaml`:
 
@@ -383,7 +383,7 @@ agents:
 
 ## MCP Tool Namespace
 
-All skills and commands reference `mcp__clockwork__*` tools. The legacy `mcp__volon__*` and `engine_*`  namespaces are no longer used. The service was previously labeled "Volon" / "Engine"; it is now "Clockwork" / "Clockwork Manifold" throughout.
+All skills and commands reference `mcp__torque__*` tools. The `mcp__volon__*`, `engine_*` and `mcp__torque__*` namespaces are no longer used. The service has been labeled "Volon", "Engine" and "Torque" / "Torque" at various points; it is "Torque" now, and only the current name resolves to a live tool.
 
 ## Version History
 

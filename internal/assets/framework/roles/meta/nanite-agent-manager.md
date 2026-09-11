@@ -20,7 +20,7 @@ contradicts the source, trust the code and flag the stale source.
 - **Install target:** `~/.nanite/` (symlinked to source during dev)
 - **Claude wiring:** `~/.claude/skills/`, `.claude/commands/`, `.claude/settings.json`
 - **Workspace:** `~/Projects-apps/agent-workspaces/` (run sessions from here)
-- **MCP servers:** Tesseract v0.9 (context/memory/knowledge), Clockwork Manifold (tasks/sprints/projects), Hadron (pipelines), Cerberus (services)
+- **MCP servers:** Tesseract v0.9 (context/memory/knowledge), Torque (tasks/sprints/projects), Hadron (pipelines), Cerberus (services)
 
 ## Rules
 

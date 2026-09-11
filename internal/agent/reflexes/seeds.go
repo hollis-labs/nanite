@@ -151,6 +151,15 @@ func BaseSeeds() []BaseReflexSeed {
 		// a reminder so the agent picks them up next turn. Maps to
 		// inject_reminder for now; the live wake-from-sleep wiring
 		// lands when session status='sleeping' is plumbed through.
+		//
+		// Both bodies name message_ack as well as message_inbox, and
+		// that is load-bearing rather than helpful detail. The trigger
+		// reads `status = 'unread'` in agent_messages (state.go
+		// mailUnreadCount); message_inbox does not mark, which is what
+		// makes it safe to call repeatedly and also means reading can
+		// never decrement the count. A body naming only the read
+		// prescribes an action that cannot satisfy its own trigger, so
+		// the reflex re-fires every tick forever (CW-20260911-0075).
 		{
 			ClassTag:    "process",
 			Name:        "wake_on_mail",
@@ -161,7 +170,7 @@ func BaseSeeds() []BaseReflexSeed {
 			},
 			ActionKind: "inject_reminder",
 			ActionSpec: map[string]interface{}{
-				"body":    "Mail in the inbox — call mux_message_inbox to triage before continuing.",
+				"body":    "Mail in the inbox — call message_inbox to read it, then message_ack each message you handled before continuing. Reading does not clear the unread count; the ack is what stops this reminder.",
 				"urgency": "info",
 			},
 		},
@@ -255,7 +264,7 @@ func BaseSeeds() []BaseReflexSeed {
 			},
 			ActionKind: "inject_reminder",
 			ActionSpec: map[string]interface{}{
-				"body":    "Mail in the inbox — call mux_message_inbox to triage.",
+				"body":    "Mail in the inbox — call message_inbox to read it, then message_ack each message you handled. Reading does not clear the unread count; the ack is what stops this reminder.",
 				"urgency": "info",
 			},
 		},

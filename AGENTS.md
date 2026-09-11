@@ -9,7 +9,8 @@ layer beneath it.
 
 ## Start Here
 
-- `README.md` is the only outward-facing overview; everything else is internal.
+- `docs/documentation-doctrine.md` governs what a file here may contain and who
+  it is for. Audience follows location — read it before adding or moving one.
 - `cmd/nanite/` is the server and CLI, `cmd/nanite-agent/` installs the agent
   framework, `cmd/nanite-eval/` is the eval harness.
 - `internal/chat/` orchestrates a turn; `internal/runtime/agent/` builds an
@@ -54,7 +55,7 @@ headers and `Makefile` targets still cite paths beneath them. Those paths do
 not resolve and are not coming back; a claim is not verified because a comment
 cites one.
 
-The Context Broker's six slot invariants live in
+The Context Broker's slot invariants live in
 `internal/context/INVARIANTS.md`, enforced by
 `internal/service/slot_invariants_test.go`. Change both together or neither.
 

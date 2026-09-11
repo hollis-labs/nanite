@@ -7,6 +7,27 @@ extends through hot-loaded subprocess MCP plugins. It is a single-user desktop
 application, not a multi-tenant service, and a peer of Torque rather than a
 layer beneath it.
 
+## Where Nanite is
+
+Not released, not deployed, no consumers. The next milestone is a public repo
+and building in the open. Chrispian decides when that happens — there are no
+criteria to meet and no date.
+
+So **release readiness is a direction, not a phase.** Security, testing and
+release prep are ordinary work competing on merit with features, bug fixes and
+everything else, sequenced by Chrispian's direction each session. A
+`public-release` tag names the subject, never the urgency, and a board sorted
+by it is not a plan.
+
+The reasoning is `~/dev/projects/agent-setup/docs/what-a-check-may-assert.md`,
+*Tighten at the first real consumer*: until someone outside the project can be
+broken by a regression, the cost of a regression is one session noticing.
+
+**Where this stops.** This is not licence to skip verification. Data integrity,
+security boundaries, and anything that can silently lose work still get the
+real treatment — what changes is what gets *scheduled*, not how carefully it is
+done once it is.
+
 ## Start Here
 
 - `docs/documentation-doctrine.md` governs what a file here may contain and who

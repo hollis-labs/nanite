@@ -11,8 +11,6 @@
 # confirming the reduction reproduces before the baseline moves. That
 # confirmation existed only as a human remembering to do it, and a discipline
 # with no mechanism behind it decays. This is the mechanism.
-# See docs/engineering/runbooks/full-repo-quality-gate.md and
-# TASKS/gate-integrity/04-gosec-determinism-and-coverage-floor.md.
 #
 # The second run is cheap relative to what it protects: the single gosec step
 # took 13s in run 32878651576, in a job whose race suite alone took 7m54s.

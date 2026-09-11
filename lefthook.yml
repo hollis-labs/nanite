@@ -20,10 +20,10 @@
 # never be able to disable every check at once.
 #
 # Whole-repo analysis lives in `scripts/check.sh`, the landing check —
-# `go vet ./...`, scoped `golangci-lint`, and `go test ./...` (Tier 1 of
-# `docs/engineering/testing-workflow.md` §3). Run it when a feature lands,
-# before pushing a branch you care about, and before dispatching the full-repo
-# quality gate. Not on every commit.
+# `go vet ./...`, scoped `golangci-lint`, and `go test ./...` (Tier 1 —
+# "feature done, before commit", budgeted at ~1-2 min). Run it when a feature
+# lands, before pushing a branch you care about, and before dispatching the
+# full-repo quality gate. Not on every commit.
 #
 # Cost, measured on nanite @ 9591c1a6 (2026-08-24) across three real
 # `git commit` attempts with one staged .go file, reading lefthook's own

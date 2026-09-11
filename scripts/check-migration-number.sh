@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # scripts/check-migration-number.sh — the migration-number guard.
 #
-# This is the mechanical form of `docs/engineering/tracking-integrity.md`
-# **check 9** ("Migration-number claims resolve, and none sits at or below the
-# highest on disk"). That section documents the rule; this script enforces it.
-# Change one and change the other.
+# This is the mechanical form of the tracking-integrity rule on claimed
+# identifiers: a migration number must be strictly greater than the highest in
+# use on the shared branch, and must collide with none already there. The rule
+# is stated wherever that discipline is written down; this script enforces it.
 #
 # ── Why this is the one unrecoverable failure class ───────────────────────
 # `internal/store/store.go` builds goose without `WithAllowOutofOrder`, so
@@ -87,7 +87,8 @@
 # the ref-gate design working as specified and is not a bug in this script —
 # but it is the same "reads as a benign, correct skip" shape that the no-`glob`
 # ruling exists to prevent, arriving through the branch condition instead. It is
-# an accepted, documented gap. See docs/engineering/tracking-integrity.md.
+# an accepted, documented gap: the guard covers pushes made from `main`, and
+# a push that renames a branch onto `main` is outside what a ref gate can see.
 #
 # ── Offline pushes that add no migration are not blocked ─────────────────
 # The local groundwork in section 1 runs first, and an empty added-set exits 0

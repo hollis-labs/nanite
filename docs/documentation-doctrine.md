@@ -25,10 +25,23 @@ A file in the wrong directory is moved, not annotated. Location is checkable at
 a glance and survives editing; a declared audience is one more claim that can
 go stale while the file sits still.
 
-The repo root is the front door, so it is the surface that must read as
-user-facing. `README.md` is where this goes wrong most easily: its Quick Start
-opens on `lefthook install` and `go build`, which is developer onboarding
-standing in the user's doorway.
+**The conventional root files are placed by name, not by audience.** `README`,
+`LICENSE`, `CHANGELOG`, `CONTRIBUTING`, `SECURITY`, `CODE_OF_CONDUCT` and the
+like live at the root because the ecosystem fixed both the name and the place —
+tooling looks for them there, and so does anyone arriving from another
+repository. `CONTRIBUTING.md` is developer-facing and sits at the root anyway;
+that is the convention working, not the rule breaking.
+
+This is a closed set, and it is the one place a filename carries the audience
+instead of the directory. It stays closed for the same reason the rest of the
+rule exists: a project-invented file at the root is just a file in the wrong
+place with a confident name.
+
+`README.md` is the front door, and it is where this goes wrong most easily: its
+Quick Start opens on `lefthook install` and `go build`, which is developer
+onboarding standing in the user's doorway. A conventional file being at the root
+says where the ecosystem expects to find it; it does not license the *contents*
+of the front door to drift developer-ward.
 
 Operators — people running Nanite in a deployment without changing it — are
 **DEVELOPER** here. The word appears in `README.md`, routing readers to the

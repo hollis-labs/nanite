@@ -1,6 +1,7 @@
 # Project-level nanite configuration (internal/config.Config). Merges over the
 # user-level ~/.config/nanite/config.yaml — see internal/config/config.go for
-# the full schema and merge semantics.
+# the full schema and merge semantics. Every key is optional; an empty file and
+# a missing file mean the same thing.
 #
 # NOT RELATED TO config/nanite.yaml, despite the identical basename. That file
 # is checked-in application tunables (internal/config.TunablesConfig, read by
@@ -9,9 +10,8 @@
 # schema — neither overrides the other and they are never merged, so there is
 # no precedence between them to work out.
 
-# Points this workspace's local/dev server at the shipped
-# Worker -> Reviewer -> Gate example so agentworkflow.Registry loads
-# worker-reviewer-gate.yaml at startup. Unset elsewhere by design
-# ("no catalog -> no behavior change") — an opt-in local/dev activation, not a
-# change to the global default.
-workflow_definitions_path: examples/workflow-definitions
+# Uncomment to point the server at the shipped Worker -> Reviewer -> Gate
+# example so agentworkflow.Registry loads it at startup. Left off by default:
+# a workflow catalog is opt-in, and the convention is "no catalog -> no
+# behavior change".
+# workflow_definitions_path: examples/workflow-definitions

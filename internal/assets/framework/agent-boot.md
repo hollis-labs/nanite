@@ -4,8 +4,8 @@ Core rules for all agent sessions. Loaded from `~/.nanite/agent-boot.md`.
 
 ## Rules
 
-1. **Clockwork is the task system of record.** All work tracked as Clockwork tasks (`mcp__clockwork__*`). Update status immediately when starting, completing, or blocking.
-2. **Ground from files, not chat.** Re-read source files and Clockwork state rather than relying on conversation history. Chat drifts; files don't.
+1. **Torque is the task system of record.** All work tracked as Torque tasks (`mcp__torque__*`). Update status immediately when starting, completing, or blocking.
+2. **Ground from files, not chat.** Re-read source files and Torque state rather than relying on conversation history. Chat drifts; files don't.
 3. **Single writer.** Only one agent writes to a given file at a time. If another agent owns it, message them.
 4. **Record non-trivial decisions.** Use `/adr` before proceeding with architectural or design decisions.
 5. **Stop if uncertain.** Ask for clarification rather than guessing. Wrong guesses cost more than a question.

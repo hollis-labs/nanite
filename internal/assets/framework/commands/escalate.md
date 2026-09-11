@@ -1,5 +1,5 @@
-Invoke the escalate skill. Convert a blocker into an explicit repair task in Clockwork.
+Invoke the escalate skill. Convert a blocker into an explicit repair task in Torque.
 
 $ARGUMENTS
 
-If no arguments provided, check for the current "doing" task in Clockwork and ask what the blocker is.
+If no arguments provided, check for the current "doing" task in Torque and ask what the blocker is.

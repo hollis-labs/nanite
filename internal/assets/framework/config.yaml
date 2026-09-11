@@ -58,7 +58,7 @@ roles:
 # Agent-specific skills/tools are additive — they never replace defaults.
 
 default_skills: [fast-triage, end-of-session, escalate, doc-search, doc-note]
-default_tools:  [clockwork, tesseract, hadron, cerberus]
+default_tools:  [torque, tesseract, hadron, cerberus]
 
 # ─── Docs ────────────────────────────────────────────────
 # Framework reference doc. nanite-agent-manager role keeps this current.
@@ -89,18 +89,18 @@ docs:
 # Used by agents to resolve project roots and load context.
 
 projects:
-  # Fragments Engine (legacy monorepo — superseded by Clockwork Manifold for task/sprint/project
+  # Fragments Engine (legacy monorepo — superseded by Torque for task/sprint/project
   # management. Repo retained as read-only history; do not boot for new work. Historical modules
   # libs were extracted into standalone repos elsewhere in ~/Projects-apps.)
   fragments-engine:
     root: ~/Projects-apps/fragments-engine
     type: monorepo
-    description: Legacy platform monorepo (superseded by clockwork-manifold)
+    description: Legacy platform monorepo (superseded by torque)
     modules:
       engine: { path: engine, lang: go }
 
   # Individual project entries (standalone repos)
-  engine:         { root: ~/Projects-apps/fragments-engine/engine, lang: go, description: "Legacy task/sprint/project core — superseded by clockwork-manifold; read-only history" }
+  engine:         { root: ~/Projects-apps/fragments-engine/engine, lang: go, description: "Legacy task/sprint/project core — superseded by torque; read-only history" }
   tesseract:      { root: ~/dev/hollis-labs/apps/tesseract, lang: go, description: "Tesseract v0.9 — context, memory, and knowledge runtime" }
 
   # Shared Go libraries monorepo (formerly fragments-engine/libs)
@@ -125,7 +125,7 @@ projects:
   nexus:     { root: ~/Projects-apps/nexus, lang: go, description: Agent discovery and routing }
 
   # Apps
-  clockwork-manifold: { root: ~/Projects-apps/clockwork-manifold, lang: go, description: "Clockwork Manifold — task orchestration and execution engine" }
+  torque: { root: ~/Projects-apps/torque, lang: go, description: "Torque — task orchestration and execution engine" }
   sigil:     { root: ~/Projects-apps/sigil, lang: go, description: UI generation engine }
   lnklst:    { root: ~/Projects-apps/lnklst, lang: go, description: Link list app }
   suds-v2:   { root: ~/Projects-apps/suds-v2, lang: typescript, description: MUD game (Next.js) }

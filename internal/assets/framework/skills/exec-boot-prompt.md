@@ -23,7 +23,7 @@ If any of these are missing, stop and ask the user to produce them first (usuall
 ## Procedure
 
 1. **Gather inputs** from the current session context:
-   - Project slug (e.g., `clockwork-manifold`, `nanite`)
+   - Project slug (e.g., `torque`, `nanite`)
    - Feature / session name (e.g., `task-model-mvp`, `phase-3-s4b-trust-boundary`)
    - Spec file path (absolute, in project repo)
    - Plan file path (absolute, in project repo)
@@ -94,17 +94,17 @@ If any of these are missing, stop and ask the user to produce them first (usuall
 
 ## Out of scope / deferred (don't scope-creep)
 
-**Filed backlog tasks in Clockwork** (`project_id=<project>`):
+**Filed backlog tasks in Torque** (`project_id=<project>`):
 - **CW-XXX** — <title>
 - ...
 
 **Not captured** (KB GAPs): <list with pointers to the KB>
 
-If you hit one of these, capture a Clockwork backlog task immediately and keep moving.
+If you hit one of these, capture a Torque backlog task immediately and keep moving.
 
 ## Backlog discipline
 
-- Clockwork source of truth: `mcp__clockwork__clockwork_task_list project_id=<project> tags=backlog`
+- Torque source of truth: `mcp__torque__torque_task_list project_id=<project> tags=backlog`
 - Set `project_id` explicitly on capture; tag `backlog`
 - Grep tracking dirs for CW-IDs before session close; reconcile
 
@@ -190,6 +190,6 @@ Two-root contract: code → work_root, tracking → tracking_root.
 
 ## Example
 
-See `agent-workspaces/boot/clockwork-manifold/boot-prompt-task-model-mvp.md` (2026-04-16) for a worked example produced via this skill.
+See `agent-workspaces/boot/torque/boot-prompt-task-model-mvp.md` (2026-04-16) for a worked example produced via this skill.
 
 Also: `agent-workspaces/boot/nanite/boot-prompt-s4b.md` and `boot-prompt-s7.md` — reference examples (not produced via this skill; pre-date it — but match the shape the skill codifies).

@@ -29,10 +29,10 @@ Prevent wasted effort by:
 3. **Be opinionated.** Don't present five options and ask. Present your recommended approach with rationale, and note alternatives briefly. The user decides.
 4. **Size work honestly.** If something is complex, say so. Don't hide complexity behind vague task descriptions. Break large items into steps small enough to be individually completable.
 5. **Sequence by dependency, not preference.** Order work by what blocks what, not by what's most interesting. Call out the critical path.
-6. **Check against reality.** Before planning new work, check Clockwork (`mcp__clockwork__clockwork_task_list`, `mcp__clockwork__clockwork_sprint_list`) for existing tasks, sprints, and active work. Don't propose what's already in progress.
+6. **Check against reality.** Before planning new work, check Torque (`mcp__torque__torque_task_list`, `mcp__torque__torque_sprint_list`) for existing tasks, sprints, and active work. Don't propose what's already in progress.
 7. **Write it down.** Plans are persisted, not left in chat. Pick the right store:
    - **Nanite `nanite_plan_create`** — in-session or per-project work that needs step-by-step tracking and user approval via a `list-card` + `confirmation-card` pair sharing the returned `plan_id`. Default for nanite-local work.
-   - **Clockwork tasks/sprints** (`mcp__clockwork__*`) — portfolio-wide work tracked across projects, or anything that outlives local sessions and needs cross-agent visibility.
+   - **Torque tasks/sprints** (`mcp__torque__*`) — portfolio-wide work tracked across projects, or anything that outlives local sessions and needs cross-agent visibility.
    - **Tesseract knowledge** — durable strategy reasoning or referenced roadmap documents that outlive any single plan; use a canonical knowledge kind and a namespace under `user/{user}/knowledge/...`.
    See `~/.nanite/docs/nanite-planner.md` for the full decision rule and sub-agent handoff pattern.
 8. **Memory + knowledge.** Recall with `mcp__tesseract__tesseract_recall` using summary projection, then hydrate selected revisions. Persist time-situated reasoning with `memory_write` in a writable typed namespace and durable documents with `knowledge_write`. Tasks remain in Torque.
@@ -84,6 +84,6 @@ Prevent wasted effort by:
 ## What NOT to do
 
 - Don't write code, not even pseudocode unless specifically asked
-- Don't create Clockwork tasks without user approval. For a Nanite plan, create it as `proposed`, then emit the live `list-card` + `confirmation-card` pair with the returned `plan_id`; wait for the confirmation response before execution.
+- Don't create Torque tasks without user approval. For a Nanite plan, create it as `proposed`, then emit the live `list-card` + `confirmation-card` pair with the returned `plan_id`; wait for the confirmation response before execution.
 - Don't plan in isolation — check what's already been decided in ADRs and Tesseract memory/knowledge
 - Don't scope-creep. If the user asks for a plan for X, plan X. Don't add Y and Z because they'd be nice.

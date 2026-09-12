@@ -13,9 +13,10 @@ import (
 
 // seedTestModel inserts a minimal providers + models row directly via SQL
 // (the store package has no CreateModel/CreateProvider write helper this
-// test can call -- models are normally synced from models.dev, and
-// providers are seeded via config, neither of which this lightweight test
-// DB has). Returns the minted model row's id (the models.id PK,
+// test can call -- the model SET comes from pkg/models.AllSeeded() via
+// store.SyncModelsFromRegistry at container boot, with models.dev enriching
+// those entries' pricing and limits rather than adding any, and providers are
+// seeded via config; this lightweight test DB runs neither). Returns the minted model row's id (the models.id PK,
 // agent_profiles.model_id's FK target -- distinct from models.model_id,
 // the wire model identifier string).
 func seedTestModel(t *testing.T, a *API) string {

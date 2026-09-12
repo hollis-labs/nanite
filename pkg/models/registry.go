@@ -122,6 +122,44 @@ var ProviderDefaults = map[string]ProviderCapabilityDefaults{
 // Spot-check against audit 06 before editing pricing or model IDs.
 var allModels = []Model{
 	// --- Anthropic ---
+	// Current Anthropic models. IDs, pricing, context and output limits are
+	// DERIVED from the models.dev catalog rather than typed: SyncModelsFromRegistry
+	// iterates AllSeeded(), and models.dev enriches entries it already names but
+	// never adds one, so a wrong identifier here reaches a user as a provider
+	// error at the first token (CW-20260912-0107).
+	{
+		// models.dev 2026-07-24; catalog fetched 2026-09-12.
+		ID: "claude-opus-5", ModelID: "claude-opus-5",
+		DisplayName: "Claude Opus 5", Provider: "anthropic",
+		ContextWindow: 1000000, MaxOutput: 128000,
+		InputPricePerM: 5.0, OutputPricePerM: 25.0,
+		Capabilities: Capabilities{
+			SupportsToolCalling: true, SupportsStreaming: true,
+			SupportsVision: true, SupportsSystemPromptCaching: true,
+		},
+	},
+	{
+		// models.dev 2026-06-29; catalog fetched 2026-09-12.
+		ID: "claude-sonnet-5", ModelID: "claude-sonnet-5",
+		DisplayName: "Claude Sonnet 5", Provider: "anthropic",
+		ContextWindow: 1000000, MaxOutput: 128000,
+		InputPricePerM: 2.0, OutputPricePerM: 10.0,
+		Capabilities: Capabilities{
+			SupportsToolCalling: true, SupportsStreaming: true,
+			SupportsVision: true, SupportsSystemPromptCaching: true,
+		},
+	},
+	{
+		// models.dev 2026-09-01; catalog fetched 2026-09-12.
+		ID: "claude-fable-5-1", ModelID: "claude-fable-5-1",
+		DisplayName: "Claude Fable 5.1", Provider: "anthropic",
+		ContextWindow: 1000000, MaxOutput: 128000,
+		InputPricePerM: 10.0, OutputPricePerM: 50.0,
+		Capabilities: Capabilities{
+			SupportsToolCalling: true, SupportsStreaming: true,
+			SupportsVision: true, SupportsSystemPromptCaching: true,
+		},
+	},
 	{
 		// claude-sonnet-4-20250514 was retired by Anthropic sometime after
 		// 2026-04-11 (see docs/audits/2026-04-11-tokens-and-model-hardcoding/
@@ -162,6 +200,42 @@ var allModels = []Model{
 	},
 
 	// --- OpenAI ---
+	// Current OpenAI models, derived the same way. Realtime, image and
+	// embedding surfaces are excluded: the catalog filter is text in AND text
+	// out AND tool_call, which is what chat needs.
+	{
+		// models.dev 2026-09-04; catalog fetched 2026-09-12.
+		ID: "gpt-6-astra", ModelID: "gpt-6-astra",
+		DisplayName: "GPT-6 Astra", Provider: "openai",
+		ContextWindow: 1050000, MaxOutput: 128000,
+		InputPricePerM: 10.0, OutputPricePerM: 50.0,
+		Capabilities: Capabilities{
+			SupportsToolCalling: true, SupportsStreaming: true,
+			SupportsVision: true, SupportsSystemPromptCaching: true,
+		},
+	},
+	{
+		// models.dev 2026-07-09; catalog fetched 2026-09-12.
+		ID: "gpt-5-6", ModelID: "gpt-5.6",
+		DisplayName: "GPT-5.6", Provider: "openai",
+		ContextWindow: 1050000, MaxOutput: 128000,
+		InputPricePerM: 4.0, OutputPricePerM: 20.0,
+		Capabilities: Capabilities{
+			SupportsToolCalling: true, SupportsStreaming: true,
+			SupportsVision: true, SupportsSystemPromptCaching: true,
+		},
+	},
+	{
+		// models.dev 2026-07-09; catalog fetched 2026-09-12.
+		ID: "gpt-5-6-luna", ModelID: "gpt-5.6-luna",
+		DisplayName: "GPT-5.6 Luna", Provider: "openai",
+		ContextWindow: 1050000, MaxOutput: 128000,
+		InputPricePerM: 0.2, OutputPricePerM: 1.2,
+		Capabilities: Capabilities{
+			SupportsToolCalling: true, SupportsStreaming: true,
+			SupportsVision: true, SupportsSystemPromptCaching: true,
+		},
+	},
 	{
 		ID: "gpt-4o", ModelID: "gpt-4o", DisplayName: "GPT-4o",
 		Provider: "openai", ContextWindow: 128000, MaxOutput: 16384,

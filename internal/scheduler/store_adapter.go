@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"sync"
 	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
@@ -17,23 +18,44 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// errNoDurableAgentInstance and errAmbiguousDurableAgentInstance are the two
-// ways resolveDurableAgentInstanceID can fail to produce a single,
-// unambiguous durable_agent_instances.id for a durable_agent_wake row's
-// agent_id (an agent_profiles.id). Both are treated as "skip this row, log
-// it, keep the tick moving" by ListDueSchedules -- see that method's doc
+// These are the ways resolveDurableAgentInstanceID can fail to produce a
+// single, unambiguous durable_agent_instances.id for a durable_agent_wake
+// row's agent_id (an agent_profiles.id). All are treated as "skip this row,
+// log it, keep the tick moving" by ListDueSchedules -- see that method's doc
 // comment.
+//
+// errArchivedDurableAgentInstance is split out from errNoDurableAgentInstance
+// because the two read completely differently to whoever is diagnosing one.
+// The resolver lists with includeArchived=false, so an archived row is
+// invisible to it and reports as an absence -- which sent two separate
+// investigations to the wrong table before the status was found
+// (CW-20260911-0095). An absence is a missing record; an archived row is a
+// schedule that outlived its target, which is terminal rather than transient.
 var (
 	errNoDurableAgentInstance        = errors.New("no durable_agent_instances row for this agent_profiles.id")
+	errArchivedDurableAgentInstance  = errors.New("the only durable_agent_instances row for this agent_profiles.id is archived; the schedule has outlived its wake target and will never resolve")
 	errAmbiguousDurableAgentInstance = errors.New("multiple durable_agent_instances rows share this agent_profiles.id; cannot resolve an unambiguous wake target")
 )
 
 // StoreAdapter implements gosched.Store over Nanite's agent_schedules
 // table. Logger is required, matching internal/agent/reflexes.Executor's
 // own "Logger *slog.Logger // Required." convention in this codebase.
+//
+// One adapter is constructed per process (cmd/nanite/main.go), which is what
+// makes warnedSchedules a viable dedup rather than a leak: it is bounded by
+// the number of distinct unconvertible schedule rows, not by tick count.
 type StoreAdapter struct {
 	Store  *store.Store
 	Logger *slog.Logger
+
+	// warnedSchedules holds the agent_schedules.id values already warned
+	// about by logConversionSkip. A row that cannot convert is usually also
+	// permanently due -- conversion fails before firing, so nothing advances
+	// next_run -- which means the due query returns it on every tick and the
+	// warning repeats at tick frequency forever. One such row wrote 231MB of
+	// identical lines over three weeks (CW-20260911-0095). The signal is in
+	// the first occurrence; the rest is volume.
+	warnedSchedules sync.Map
 }
 
 const (
@@ -69,8 +91,7 @@ func (a *StoreAdapter) ListDueSchedules(ctx context.Context, now time.Time, limi
 	for _, row := range rows {
 		sched, convErr := a.toSchedule(row)
 		if convErr != nil {
-			a.Logger.Warn("scheduler: skipping agent_schedules row that could not convert to gosched.Schedule",
-				"schedule_id", row.ID, "agent_id", row.AgentID, "job_type", row.JobType, "error", convErr)
+			a.logConversionSkip(row.ID, row.AgentID, row.JobType, convErr)
 			continue
 		}
 		out = append(out, sched)
@@ -265,12 +286,63 @@ func (a *StoreAdapter) resolveDurableAgentInstanceID(profileID string) (string, 
 	}
 	switch matches {
 	case 0:
+		// The listing above excludes archived rows, so "no match" is
+		// ambiguous between a genuinely missing record and one that was
+		// archived out from under a still-active schedule. Look again
+		// including archived before reporting an absence -- the second
+		// case is the common one and the one the message has to name.
+		if a.profileHasArchivedInstance(profileID) {
+			return "", errArchivedDurableAgentInstance
+		}
 		return "", errNoDurableAgentInstance
 	case 1:
 		return matchID, nil
 	default:
 		return "", errAmbiguousDurableAgentInstance
 	}
+}
+
+// profileHasArchivedInstance reports whether profileID has a
+// durable_agent_instances row that is invisible to the includeArchived=false
+// listing. Failure to list is reported as "no" so a lookup error degrades to
+// the pre-existing message rather than asserting an archived row exists.
+func (a *StoreAdapter) profileHasArchivedInstance(profileID string) bool {
+	all, err := a.Store.ListDurableAgentInstances(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, true)
+	if err != nil {
+		return false
+	}
+	for _, inst := range all {
+		if inst.ProfileID == profileID {
+			return true
+		}
+	}
+	return false
+}
+
+// logConversionSkip reports an agent_schedules row that could not convert,
+// at Warn the first time this process sees that schedule_id and at Debug
+// afterwards.
+//
+// The demotion is the point, and it is deliberately not a rate limit. An
+// unconvertible row is usually permanently due, so the alternative is the
+// identical line at tick frequency for as long as the row exists -- which is
+// not a louder signal, it is the same signal plus a log nobody can read. The
+// first occurrence carries everything: the id, the reason, and the fact that
+// it will not repeat. Anything that changes about the row changes its
+// conversion result, which puts it back on the non-skip path.
+//
+// Scoped per process rather than persisted: a restart re-warns once, which is
+// correct, because a restart is also when someone is most likely to be reading.
+func (a *StoreAdapter) logConversionSkip(scheduleID, agentID, jobType string, convErr error) {
+	const msg = "scheduler: skipping agent_schedules row that could not convert to gosched.Schedule"
+	if _, seen := a.warnedSchedules.LoadOrStore(scheduleID, struct{}{}); seen {
+		a.Logger.Debug(msg,
+			"schedule_id", scheduleID, "agent_id", agentID, "job_type", jobType, "error", convErr)
+		return
+	}
+	a.Logger.Warn(msg,
+		"schedule_id", scheduleID, "agent_id", agentID, "job_type", jobType, "error", convErr,
+		"note", "further occurrences for this schedule_id log at debug until restart")
 }
 
 // CreateFire atomically materializes a stable durable fire and advances the

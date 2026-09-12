@@ -55,21 +55,17 @@ func newTestServer(t *testing.T, cfg config.HTTPConfig) *Server {
 	return s
 }
 
-// testChain assembles the same middleware order as ListenAndServe for
-// httptest-backed scenarios. Keeping this in the test file (rather than
-// exporting a helper from server.go) avoids widening the package API.
+// testChain is the production middleware stack. It delegates to handlerChain
+// rather than restating it: this was a third copy that claimed to assemble
+// "the same middleware order as ListenAndServe", which meant a test could pass
+// against a stack the server does not actually run. apiCacheMiddleware is the
+// case in point — it would have been absent here and present in production.
+//
+// The original reason for the copy was to avoid widening the package API.
+// handlerChain is unexported and in this package, so there is nothing to
+// widen.
 func (s *Server) testChain() http.Handler {
-	return s.recoverMiddleware(
-		s.loggingMiddleware(
-			s.corsMiddleware(
-				basicAuthMiddleware(
-					callerIdentityMiddleware(
-						s.bodyLimitMiddleware(s.mux),
-					),
-				),
-			),
-		),
-	)
+	return s.handlerChain()
 }
 
 // TestHTTPServerTimeouts_ReadHeader asserts that a client which stops sending
@@ -132,6 +128,128 @@ func TestHTTPServerTimeouts_ReadHeader(t *testing.T) {
 	}
 	if elapsed < 500*time.Millisecond {
 		t.Fatalf("server acted suspiciously fast (%v) — expected ~1s from ReadHeaderTimeout", elapsed)
+	}
+}
+
+// TestAPICachePolicy pins the /api/ default alongside the SPA policies, so the
+// two layers' answers live next to each other. The API layer had no answer at
+// all until CW-20260912-0070: a browser cached an empty
+// /api/start-surface/capabilities and kept serving it after the endpoint was
+// fixed, with no way for the fix to reach it short of a hard refresh.
+func TestAPICachePolicy(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "json endpoint", path: "/api/start-surface/capabilities", want: "no-store"},
+		{name: "agents", path: "/api/agents", want: "no-store"},
+		{name: "health", path: "/api/health", want: "no-store"},
+		// An SSE route still gets the default here; the handler overrides it.
+		// TestAPICacheMiddleware_HandlerOverridesTheDefault covers that.
+		{name: "sse route still defaulted", path: "/api/messages/stream", want: "no-store"},
+		// Not /api/: the SPA layer owns these and has its own policies.
+		{name: "spa root", path: "/", want: ""},
+		{name: "spa asset", path: "/assets/index-abc123.js", want: ""},
+		{name: "near miss", path: "/apifoo", want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := apiCachePolicyFor(tc.path); got != tc.want {
+				t.Fatalf("apiCachePolicyFor(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAPICacheMiddleware_SetsNoStore proves the header actually reaches a
+// response through the middleware, not just that the policy function agrees.
+func TestAPICacheMiddleware_SetsNoStore(t *testing.T) {
+	srv := &Server{}
+	h := srv.apiCacheMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+	if got := rr.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", got)
+	}
+
+	// A non-API path must be left entirely alone, so the SPA policies are not
+	// overwritten by this middleware.
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/assets/index-abc123.js", nil))
+	if got := rr.Header().Get("Cache-Control"); got != "" {
+		t.Errorf("non-API Cache-Control = %q, want unset", got)
+	}
+}
+
+// TestAPICacheMiddleware_HandlerOverridesTheDefault is the property that makes
+// this a default rather than an exclusion list. The five SSE handlers set
+// `no-cache` for streaming reasons and must keep winning, with nothing here
+// naming them — so a sixth needs no coordination.
+func TestAPICacheMiddleware_HandlerOverridesTheDefault(t *testing.T) {
+	srv := &Server{}
+	h := srv.apiCacheMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Exactly what the SSE handlers do.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/messages/stream", nil))
+	if got := rr.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("Cache-Control = %q, want the handler's no-cache to win over the "+
+			"no-store default — otherwise this is an exclusion list and the five SSE "+
+			"handlers would need naming here", got)
+	}
+}
+
+// TestAPICacheHeaderReachesResponseThroughTheRealChain is the test the other
+// two could not be. Both of my isolation tests survived deliberate breakage:
+//
+//   - Removing apiCacheMiddleware from handlerChain failed NOTHING, because
+//     nothing asserted it was wired. Wiring is the only thing that makes the
+//     fix real.
+//   - Moving the header write to AFTER next.ServeHTTP failed nothing either,
+//     because httptest.NewRecorder accepts header writes after WriteHeader and
+//     still reports them. A recorder cannot see the ordering that makes this a
+//     default rather than an override.
+//
+// A real server can see both: it flushes headers on the first write, so a late
+// Set is lost, and it runs the actual handlerChain.
+func TestAPICacheHeaderReachesResponseThroughTheRealChain(t *testing.T) {
+	srv := newTestServer(t, config.HTTPConfig{})
+
+	// An SSE-shaped route, registered the way the five real ones behave.
+	srv.mux.HandleFunc("GET /api/fake-stream", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(": hi\n\n"))
+	})
+
+	ts := httptest.NewServer(srv.testChain())
+	defer ts.Close()
+
+	for _, tc := range []struct {
+		name, path, want string
+	}{
+		{"json endpoint gets the default", "/api/ping", "no-store"},
+		{"sse handler overrides it", "/api/fake-stream", "no-cache"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Get(ts.URL + tc.path)
+			if err != nil {
+				t.Fatalf("GET %s: %v", tc.path, err)
+			}
+			defer resp.Body.Close()
+			if got := resp.Header.Get("Cache-Control"); got != tc.want {
+				t.Errorf("GET %s Cache-Control = %q, want %q", tc.path, got, tc.want)
+			}
+		})
 	}
 }
 

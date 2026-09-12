@@ -160,18 +160,37 @@ func (s *Server) SetPluginsDir(dir string) {
 // Basic Auth disabled, those header values are trusted without credential
 // verification as part of the loopback-default tradeoff; see
 // caller_identity.go for the G-6.3 header contract.
-func (s *Server) ListenAndServe() error {
-	handler := s.recoverMiddleware(
+// handlerChain builds the middleware stack wrapping the mux.
+//
+// It exists as one function because it was previously written out twice, in
+// ListenAndServe and newHTTPServer, byte-identically. Two copies of a
+// middleware chain is the same defect class as a per-handler cache header: a
+// middleware added to one and not the other silently does not apply on that
+// path, and nothing reports it. Adding apiCacheMiddleware is what surfaced it —
+// there was no single center to add it to.
+//
+// Order is outermost-first. apiCacheMiddleware sits adjacent to the mux so its
+// header is set immediately before the handler runs and a handler that sets its
+// own Cache-Control still wins; see api_cache.go for why that is a default
+// rather than an override.
+func (s *Server) handlerChain() http.Handler {
+	return s.recoverMiddleware(
 		s.loggingMiddleware(
 			s.corsMiddleware(
 				basicAuthMiddleware(
 					callerIdentityMiddleware(
-						s.bodyLimitMiddleware(s.mux),
+						s.apiCacheMiddleware(
+							s.bodyLimitMiddleware(s.mux),
+						),
 					),
 				),
 			),
 		),
 	)
+}
+
+func (s *Server) ListenAndServe() error {
+	handler := s.handlerChain()
 	addr := s.listenAddress()
 	s.logStartupPosture(addr)
 
@@ -208,17 +227,7 @@ func (s *Server) logStartupPosture(addr string) {
 // newHTTPServer is exposed to tests so they can spin up an httptest server
 // configured with the same timeouts / body caps as production.
 func (s *Server) newHTTPServer(addr string) *http.Server {
-	handler := s.recoverMiddleware(
-		s.loggingMiddleware(
-			s.corsMiddleware(
-				basicAuthMiddleware(
-					callerIdentityMiddleware(
-						s.bodyLimitMiddleware(s.mux),
-					),
-				),
-			),
-		),
-	)
+	handler := s.handlerChain()
 	return &http.Server{
 		Addr:              addr,
 		Handler:           handler,

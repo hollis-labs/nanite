@@ -716,8 +716,6 @@ export interface AgentProfile {
   role_skills?: string;
   context_policy?: string;
   durable?: boolean;
-  urn?: string;
-  urn_aliases?: string;
   activation_mode?: string;
   class?: string;
   default_state?: string;

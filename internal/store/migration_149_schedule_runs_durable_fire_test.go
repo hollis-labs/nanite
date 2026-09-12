@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pressly/goose/v3"
 )
 
@@ -26,9 +27,33 @@ func TestMigration149MapsExistingOpenRunsIntoRecoverableDurableFires(t *testing.
 	}
 
 	agent := makeTestAgent(t, s, "migration-149")
-	instance := &DurableAgentInstance{Name: "migration instance", Slug: "migration-149-inst", ProfileID: agent.ID}
-	if err := s.CreateDurableAgentInstance(ctx, instance); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
+
+	// Insert the durable instance with raw SQL rather than
+	// CreateDurableAgentInstance. The schema is rolled back to 148 here, and
+	// the Go writer targets the CURRENT shape — so every column added after
+	// 148 breaks this fixture, which is how migration 159's
+	// durable_agent_instances.urn first surfaced. Naming only the columns this
+	// test needs keeps it independent of columns added later. The
+	// CHECK-constrained values reuse the same constants applyDurableAgentInstanceDefaults
+	// applies, so the fixture cannot drift from the vocabulary it must satisfy.
+	instance := &DurableAgentInstance{
+		ID:        uuid.New().String(),
+		Name:      "migration instance",
+		Slug:      "migration-149-inst",
+		ProfileID: agent.ID,
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO durable_agent_instances
+		     (id, name, slug, profile_id, lifecycle_class, provider, model,
+		      runtime_kind, launch_source_type, launch_source_id, work_root,
+		      status, current_session_id, failure_reason, metadata_json,
+		      created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, '', '', 'api', ?, '', '', ?, '', '', '{}',
+		         '2026-09-04T00:00:00Z', '2026-09-04T00:00:00Z')`,
+		instance.ID, instance.Name, instance.Slug, instance.ProfileID,
+		DurableAgentClassAdvisor, DurableAgentLaunchDurableAdvisor,
+		DurableAgentStatusSleeping); err != nil {
+		t.Fatalf("insert durable_agent_instances fixture at schema 148: %v", err)
 	}
 	if err := s.InsertAgentSchedule(ctx, AgentSchedule{
 		ID: "migration-149-wake", AgentID: agent.ID, Name: "wake", Body: "hello",

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/hollis-labs/nanite/internal/a2a"
 )
 
 const (
@@ -74,24 +76,33 @@ var ErrDurableAgentInstanceNotFound = errors.New("durable agent instance not fou
 // provider/model/runtime and launch-source fields are captured at creation and
 // intentionally not updated by the metadata update path.
 type DurableAgentInstance struct {
-	ID               string     `json:"id"`
-	Name             string     `json:"name"`
-	Slug             string     `json:"slug"`
-	ProfileID        string     `json:"profile_id"`
-	LifecycleClass   string     `json:"lifecycle_class"`
-	Provider         string     `json:"provider"`
-	Model            string     `json:"model"`
-	RuntimeKind      string     `json:"runtime_kind"`
-	LaunchSourceType string     `json:"launch_source_type"`
-	LaunchSourceID   string     `json:"launch_source_id"`
-	WorkRoot         string     `json:"work_root"`
-	Status           string     `json:"status"`
-	CurrentSessionID string     `json:"current_session_id"`
-	FailureReason    string     `json:"failure_reason"`
-	MetadataJSON     string     `json:"metadata_json"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
-	ArchivedAt       *time.Time `json:"archived_at,omitempty"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Slug             string `json:"slug"`
+	ProfileID        string `json:"profile_id"`
+	LifecycleClass   string `json:"lifecycle_class"`
+	Provider         string `json:"provider"`
+	Model            string `json:"model"`
+	RuntimeKind      string `json:"runtime_kind"`
+	LaunchSourceType string `json:"launch_source_type"`
+	LaunchSourceID   string `json:"launch_source_id"`
+	WorkRoot         string `json:"work_root"`
+	Status           string `json:"status"`
+	CurrentSessionID string `json:"current_session_id"`
+	// URN is this instance's durable actor address, minted once at creation
+	// and never re-derived (migration 159, CW-20260912-0017). The actor is
+	// the INSTANCE, not the profile: two instances of one profile are two
+	// correspondents, which the architecture states as "sharing a definition
+	// does not share identity". Persisting rather than recomputing is the
+	// contract in Tether's messaging-integration.md §1 — an app that
+	// re-derives on boot orphans every message addressed to the old value.
+	// SyncDurableAgentInstanceConfig deliberately does not update it.
+	URN           string     `json:"urn"`
+	FailureReason string     `json:"failure_reason"`
+	MetadataJSON  string     `json:"metadata_json"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	ArchivedAt    *time.Time `json:"archived_at,omitempty"`
 }
 
 type DurableAgentInstanceUpdate struct {
@@ -135,7 +146,7 @@ type DurableAgentEvent struct {
 
 const durableAgentInstanceColumns = `id, name, slug, profile_id, lifecycle_class, provider, model,
     runtime_kind, launch_source_type, launch_source_id, work_root, status, current_session_id,
-    failure_reason, metadata_json,
+    failure_reason, metadata_json, urn,
     created_at, updated_at, archived_at`
 
 const durableAgentEventColumns = `id, instance_id, event_type, status_before, status_after,
@@ -164,11 +175,11 @@ func (s *Store) CreateDurableAgentInstance(ctx context.Context, inst *DurableAge
 
 	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO durable_agent_instances (`+durableAgentInstanceColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		inst.ID, inst.Name, inst.Slug, inst.ProfileID, inst.LifecycleClass,
 		inst.Provider, inst.Model, inst.RuntimeKind, inst.LaunchSourceType,
 		inst.LaunchSourceID, inst.WorkRoot, inst.Status, inst.CurrentSessionID,
-		inst.FailureReason, inst.MetadataJSON,
+		inst.FailureReason, inst.MetadataJSON, inst.URN,
 		inst.CreatedAt.UTC().Format(time.RFC3339Nano),
 		inst.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		formatOptionalTime(inst.ArchivedAt),
@@ -322,7 +333,7 @@ func (s *Store) SyncDurableAgentInstanceConfig(ctx context.Context, inst *Durabl
 	archiveTime := formatOptionalTime(inst.ArchivedAt)
 	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO durable_agent_instances (`+durableAgentInstanceColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(slug) DO UPDATE SET
 		     name = excluded.name,
 		     profile_id = excluded.profile_id,
@@ -351,7 +362,7 @@ func (s *Store) SyncDurableAgentInstanceConfig(ctx context.Context, inst *Durabl
 		inst.ID, inst.Name, inst.Slug, inst.ProfileID, inst.LifecycleClass,
 		inst.Provider, inst.Model, inst.RuntimeKind, inst.LaunchSourceType,
 		inst.LaunchSourceID, inst.WorkRoot, inst.Status, inst.CurrentSessionID,
-		inst.FailureReason, inst.MetadataJSON,
+		inst.FailureReason, inst.MetadataJSON, inst.URN,
 		inst.CreatedAt.UTC().Format(time.RFC3339Nano),
 		inst.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		archiveTime,
@@ -650,6 +661,14 @@ func applyDurableAgentInstanceDefaults(inst *DurableAgentInstance) {
 	if inst.ID == "" {
 		inst.ID = uuid.New().String()
 	}
+	// Mint the actor URN once. a2a.GenerateAgentURN is the canonical
+	// generator and puts it under the `nanite` authority; the retired
+	// store-side mirror wrote Tether's `agent-mux` instead
+	// (CW-20260912-0017). A caller that supplies a URN keeps it, so a
+	// restore or a deliberate re-home is not overwritten here.
+	if inst.URN == "" {
+		inst.URN = a2a.GenerateAgentURN()
+	}
 	if inst.LifecycleClass == "" {
 		inst.LifecycleClass = DurableAgentClassAdvisor
 	}
@@ -750,7 +769,7 @@ func scanDurableAgentInstance(scanner interface{ Scan(...any) error }, inst *Dur
 		&inst.ID, &inst.Name, &inst.Slug, &inst.ProfileID, &inst.LifecycleClass,
 		&inst.Provider, &inst.Model, &inst.RuntimeKind, &inst.LaunchSourceType,
 		&inst.LaunchSourceID, &inst.WorkRoot, &inst.Status, &inst.CurrentSessionID,
-		&inst.FailureReason, &inst.MetadataJSON,
+		&inst.FailureReason, &inst.MetadataJSON, &inst.URN,
 		&created, &updated, &archived,
 	); err != nil {
 		return err

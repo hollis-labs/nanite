@@ -2,10 +2,7 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base32"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,28 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/a2a"
 )
-
-// urnPrefix mirrors agent.URNPrefix without an import cycle on the
-// internal/agent package (which already depends on internal/store). The
-// canonical helper lives at internal/agent/urn.go; this is the
-// store-side mirror used by CreateAgent/UpdateAgent URN minting. FU-28.
-const urnPrefix = "msg://agent/agent-mux/"
-
-// generateAgentURN mirrors agent.GenerateAgentURN to avoid an import
-// cycle. FU-28.
-func generateAgentURN() string {
-	var raw [8]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		panic("store: rand.Read failed: " + err.Error())
-	}
-	enc := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw[:])
-	return urnPrefix + "agt_" + strings.ToLower(enc[:10])
-}
-
-// slugAliasURN mirrors agent.SlugAliasURN to avoid an import cycle. FU-28.
-func slugAliasURN(slug string) string {
-	return urnPrefix + slug
-}
 
 // AgentProfile represents an agent profile record.
 type AgentProfile struct {
@@ -150,15 +125,12 @@ type AgentProfile struct {
 	// Default false matches the column default in migration 069.
 	Durable bool `json:"durable"`
 
-	// FU-28 multi-agent foundation. URN is the opaque agt_<n> identity;
-	// URNAliases preserves legacy slug-form URNs for routing. Class is
+	// Class is
 	// one of advisor/process/template/harness; ActivationMode is singleton
 	// or instance; DefaultState is sleeping or active. Defaults track
 	// migration 070. Enum-shape fields are enforced at the Go layer (see
 	// validateAgentMultiAgentFields) since SQLite ALTER TABLE ADD COLUMN
 	// can't carry an idempotent CHECK after the column exists.
-	URN            string `json:"urn"`
-	URNAliases     string `json:"urn_aliases"`
 	ActivationMode string `json:"activation_mode"`
 	Class          string `json:"class"`
 	DefaultState   string `json:"default_state"`
@@ -285,8 +257,9 @@ func validateAgentMultiAgentFields(a *AgentProfile) error {
 }
 
 // applyMultiAgentDefaults applies the FU-28 column defaults (activation_mode,
-// class, default_state, urn_aliases, runtime_kind) and mints a URN if none
-// is set. When minting, the slug-form URN is pushed into urn_aliases so
+// class, default_state, runtime_kind). It no longer mints a URN — see the
+// LegacyURN field comment and migration 159. Historically it minted one and
+// pushed a slug-form alias so
 // legacy routing keeps resolving. FU-28; runtime_kind + the class-aware
 // activation_mode default added by migration 117 (Phase 1 item 02).
 //
@@ -308,34 +281,12 @@ func applyMultiAgentDefaults(a *AgentProfile) {
 	if a.RuntimeKind == "" {
 		a.RuntimeKind = inferRuntimeKind(a.DefaultProvider)
 	}
-	if a.URNAliases == "" {
-		a.URNAliases = "[]"
-	}
-	if a.URN == "" {
-		a.URN = generateAgentURN()
-		// Push the slug-form alias so legacy resolvers continue to
-		// route msg://agent/agent-mux/<slug> against this row. Only
-		// inject when we just minted the URN (preserving operator
-		// intent on rows that already have one set).
-		if a.Slug != "" {
-			alias := slugAliasURN(a.Slug)
-			var existing []string
-			_ = json.Unmarshal([]byte(a.URNAliases), &existing)
-			seen := false
-			for _, e := range existing {
-				if e == alias {
-					seen = true
-					break
-				}
-			}
-			if !seen {
-				existing = append(existing, alias)
-				if b, err := json.Marshal(existing); err == nil {
-					a.URNAliases = string(b)
-				}
-			}
-		}
-	}
+	// No URN is minted here, and none is modeled. A profile is a definition,
+	// not a recipient — actor identity lives on durable_agent_instances.urn
+	// (migration 159, CW-20260912-0017). agent_profiles.legacy_urn and
+	// legacy_urn_aliases still hold what the retired minter wrote, as history
+	// for reconciling against Tether; no Go code reads or writes them, and
+	// re-adding a reader would re-create the address this migration removed.
 }
 
 // DefaultActivationModeForClass returns the activation_mode value a newly
@@ -367,9 +318,15 @@ func DefaultActivationModeForClass(class string) string {
 // inferRuntimeKind mirrors chat.IsCLIProvider's exact classification
 // (name == "pty" OR has prefix "pty-" OR has prefix "sub-" => cli, else
 // api) without importing internal/chat -- internal/chat already imports
-// internal/store, so the reverse import would cycle. Same "mirror without
-// an import cycle" convention this file already uses for
-// urnPrefix/generateAgentURN (see their doc comments above). Kept in
+// internal/store, so the reverse import would cycle.
+//
+// This once cited urnPrefix/generateAgentURN in this file as precedent for
+// the same convention. Do not restore that citation: those were deleted by
+// CW-20260912-0017, and their stated cycle was not real -- the canonical
+// helper lived in internal/a2a, which this file already imports. The mirror
+// drifted into another product's authority and minted every agent URN wrong
+// for the life of the feature. Verify the cycle before mirroring; the claim
+// above is about a different import pair and still holds. Kept in
 // lockstep with chat.IsCLIProvider and this migration's SQL backfill
 // (117_agent_profiles_composition_columns.sql) by hand; chat/engine.go's
 // own doc comment lists every other site that same classification must not
@@ -394,7 +351,6 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
         COALESCE(role_skills,'[]'),
         COALESCE(context_policy,'{}'),
         COALESCE(durable,0),
-        COALESCE(urn,''), COALESCE(urn_aliases,'[]'),
         COALESCE(activation_mode,'singleton'), COALESCE(class,'advisor'),
         COALESCE(default_state,'sleeping'),
         COALESCE(consumer_id,''),
@@ -417,7 +373,6 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.RoleSkills,
 		&a.ContextPolicy,
 		&a.Durable,
-		&a.URN, &a.URNAliases,
 		&a.ActivationMode, &a.Class,
 		&a.DefaultState,
 		&a.ConsumerID,
@@ -560,13 +515,12 @@ func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
 		                              role_skills,
 		                              context_policy,
 		                              durable,
-		                              urn, urn_aliases,
 		                              activation_mode, class, default_state,
 		                              consumer_id,
 		                              role_id, model_id, runtime_kind,
 		                              protocol, transport,
 		                              plugin_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
@@ -580,7 +534,6 @@ func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
 		a.RoleSkills,
 		a.ContextPolicy,
 		a.Durable,
-		a.URN, a.URNAliases,
 		a.ActivationMode, a.Class, a.DefaultState,
 		nullIfEmpty(a.ConsumerID),
 		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
@@ -738,7 +691,6 @@ func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
 		        role_skills = ?,
 		        context_policy = ?,
 		        durable = ?,
-		        urn = ?, urn_aliases = ?,
 		        activation_mode = ?, class = ?, default_state = ?,
 		        consumer_id = ?,
 		        role_id = ?, model_id = ?, runtime_kind = ?,
@@ -757,7 +709,6 @@ func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
 		a.RoleSkills,
 		a.ContextPolicy,
 		a.Durable,
-		a.URN, a.URNAliases,
 		a.ActivationMode, a.Class, a.DefaultState,
 		nullIfEmpty(a.ConsumerID),
 		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
@@ -1092,63 +1043,9 @@ func (s *Store) UpsertAgentBySlug(ctx context.Context, a *AgentProfile) error {
 	a.Version = existing.Version
 	// Preserve the existing URN + alias list so URN identity is stable
 	// across re-ingest. FU-28.
-	if a.URN == "" {
-		a.URN = existing.URN
-	}
-	if a.URNAliases == "" || a.URNAliases == "[]" {
-		a.URNAliases = existing.URNAliases
-	}
 	return s.UpdateAgent(ctx, a)
 }
 
-// GetAgentByURN resolves an URN against agent_profiles, checking both
-// the primary urn column AND the urn_aliases JSON array. Returns
-// (agent, true) on hit, (nil, false) on miss. FU-28.
-func (s *Store) GetAgentByURN(ctx context.Context, urn string) (*AgentProfile, bool, error) {
-	if urn == "" {
-		return nil, false, nil
-	}
-	// First try the primary urn column (indexed by migration 070).
-	var a AgentProfile
-	row := s.DB.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE urn = ?`, urn)
-	if err := scanAgent(row, &a); err == nil {
-		return &a, true, nil
-	}
-	// Fall back to alias lookup. The urn_aliases column is a JSON array
-	// of strings; SQLite's LIKE pattern matches the quoted form.
-	pattern := `%"` + urn + `"%`
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE urn_aliases LIKE ?`, pattern)
-	if err != nil {
-		return nil, false, fmt.Errorf("get agent by urn alias %s: %w", urn, err)
-	}
-	defer closeRows(rows)
-	for rows.Next() {
-		var cand AgentProfile
-		if err := scanAgent(rows, &cand); err != nil {
-			return nil, false, fmt.Errorf("scan agent by urn alias: %w", err)
-		}
-		// Confirm the candidate's alias list literally contains the URN
-		// (LIKE pattern can false-positive on overlapping substrings).
-		var aliases []string
-		if err := json.Unmarshal([]byte(cand.URNAliases), &aliases); err != nil {
-			continue
-		}
-		for _, alias := range aliases {
-			if alias == urn {
-				return &cand, true, nil
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, false, fmt.Errorf("get agent by urn alias rows: %w", err)
-	}
-	return nil, false, nil
-}
-
-// ListAgentsFilter applies optional class / activation_mode / status / tag
-// filters. Empty string means no filter on that axis. tagsAny: empty
-// slice means no tag filter; non-empty matches rows that carry ANY of
-// the supplied tags. Returns sorted by slug ASC. FU-28.
 func (s *Store) ListAgentsFilter(ctx context.Context, class, activationMode, status string, tagsAny []string) ([]AgentProfile, error) {
 	var clauses []string
 	var args []any
@@ -1236,8 +1133,6 @@ func (s *Store) CloneAgent(ctx context.Context, srcID, newSlug, newName string) 
 	clone.ID = ""
 	clone.Slug = newSlug
 	clone.Name = newName
-	clone.URN = ""        // mint fresh
-	clone.URNAliases = "" // reset; CreateAgent will inject slug alias
 	clone.Version = 1
 	clone.AgentHash = ""
 	// Reset ingestion provenance so the clone isn't confused with a

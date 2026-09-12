@@ -5,15 +5,19 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"regexp"
 	"strings"
 	"testing"
 )
 
 // TestCreateAgent_FU28Defaults pins the FU-28 default application: any
-// new agent must land with class='advisor', activation_mode='singleton',
-// default_state='sleeping', a freshly-minted URN matching the spec
-// pattern, and a urn_aliases JSON array containing the slug-form alias.
+// new agent must land with class='advisor', activation_mode='singleton'
+// and default_state='sleeping'.
+//
+// The URN half of this test is INVERTED as of migration 159
+// (CW-20260912-0017). It used to require a freshly-minted profile URN and a
+// slug-form alias; a profile is a definition rather than a recipient, so it
+// must now mint neither. Actor identity moved to durable_agent_instances.urn
+// and is covered by TestCreateDurableAgentInstance_MintsNaniteActorURN.
 func TestCreateAgent_FU28Defaults(t *testing.T) {
 	s := newTestStore(t)
 	a := &AgentProfile{Name: "FU28 Default", Slug: "fu28-default", SystemPrompt: "x"}
@@ -29,34 +33,34 @@ func TestCreateAgent_FU28Defaults(t *testing.T) {
 	if a.DefaultState != "sleeping" {
 		t.Errorf("DefaultState = %q, want 'sleeping'", a.DefaultState)
 	}
-	urnRE := regexp.MustCompile(`^msg://agent/agent-mux/agt_[a-z2-7]{10}$`)
-	if !urnRE.MatchString(a.URN) {
-		t.Errorf("URN = %q, want match %s", a.URN, urnRE.String())
+	// No profile URN is minted any more, in either authority. Read straight
+	// from SQL: the retired columns have no Go representation by design, and
+	// asserting through a struct field would mean re-adding the modeling
+	// this migration removed. Asserting emptiness rather than a pattern is
+	// also deliberate — a pattern check would still pass if some future code
+	// minted into `nanite`, and the point is that a profile has no address.
+	var legacyURN, legacyAliases string
+	if err := s.DB.QueryRowContext(context.Background(),
+		`SELECT COALESCE(legacy_urn,''), COALESCE(legacy_urn_aliases,'[]')
+		   FROM agent_profiles WHERE id = ?`, a.ID).Scan(&legacyURN, &legacyAliases); err != nil {
+		t.Fatalf("read retired URN columns: %v", err)
 	}
-	// urn_aliases must include the slug-form URN.
+	if legacyURN != "" {
+		t.Errorf("legacy_urn = %q, want empty — CreateAgent must not mint a profile URN "+
+			"(migration 159: a profile is a definition, not a recipient)", legacyURN)
+	}
 	var aliases []string
-	if err := json.Unmarshal([]byte(a.URNAliases), &aliases); err != nil {
-		t.Fatalf("URNAliases not valid JSON: %v (%s)", err, a.URNAliases)
+	if err := json.Unmarshal([]byte(legacyAliases), &aliases); err != nil {
+		t.Fatalf("legacy_urn_aliases not valid JSON: %v (%s)", err, legacyAliases)
 	}
-	expectedAlias := "msg://agent/agent-mux/fu28-default"
-	found := false
-	for _, x := range aliases {
-		if x == expectedAlias {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("URNAliases %q does not contain slug-form alias %q", a.URNAliases, expectedAlias)
+	if len(aliases) != 0 {
+		t.Errorf("legacy_urn_aliases = %q, want empty — the slug-form alias existed to keep "+
+			"msg://agent/agent-mux/<slug> routable, and nothing routes on it", legacyAliases)
 	}
 
-	// Round-trip via GetAgent to confirm the DB row was populated.
-	got, err := s.GetAgent(context.Background(), a.ID)
-	if err != nil {
+	// Round-trip via GetAgent to confirm the row still reads.
+	if _, err := s.GetAgent(context.Background(), a.ID); err != nil {
 		t.Fatalf("GetAgent: %v", err)
-	}
-	if got.URN != a.URN {
-		t.Errorf("round-trip URN mismatch: got %q, want %q", got.URN, a.URN)
 	}
 }
 
@@ -69,42 +73,6 @@ func TestCreateAgent_FU28InvalidEnum(t *testing.T) {
 	err := s.CreateAgent(context.Background(), a)
 	if err == nil || !strings.Contains(err.Error(), "class") {
 		t.Fatalf("expected class validation error, got: %v", err)
-	}
-}
-
-// TestGetAgentByURN covers both primary URN lookup and alias lookup.
-func TestGetAgentByURN(t *testing.T) {
-	s := newTestStore(t)
-	a := &AgentProfile{Name: "URN", Slug: "urn-lookup", SystemPrompt: "x"}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	// Primary URN lookup.
-	got, ok, err := s.GetAgentByURN(context.Background(), a.URN)
-	if err != nil {
-		t.Fatalf("GetAgentByURN(primary): %v", err)
-	}
-	if !ok || got == nil || got.ID != a.ID {
-		t.Fatalf("primary URN lookup miss for %q", a.URN)
-	}
-
-	// Slug-alias lookup.
-	got, ok, err = s.GetAgentByURN(context.Background(), "msg://agent/agent-mux/urn-lookup")
-	if err != nil {
-		t.Fatalf("GetAgentByURN(alias): %v", err)
-	}
-	if !ok || got == nil || got.ID != a.ID {
-		t.Fatalf("alias URN lookup miss")
-	}
-
-	// Miss returns (nil, false, nil).
-	got, ok, err = s.GetAgentByURN(context.Background(), "msg://agent/agent-mux/nope")
-	if err != nil {
-		t.Fatalf("GetAgentByURN(miss): %v", err)
-	}
-	if ok || got != nil {
-		t.Errorf("expected miss for unknown URN, got hit")
 	}
 }
 
@@ -224,8 +192,18 @@ func TestCloneAgent(t *testing.T) {
 	if cloned.ID == src.ID {
 		t.Errorf("clone retained source ID")
 	}
-	if cloned.URN == src.URN {
-		t.Errorf("clone retained source URN")
+	// Previously: a clone had to get a freshly-minted URN distinct from its
+	// source. Nothing mints a profile URN now, and the columns are not
+	// modeled, so a clone cannot carry an address forward by construction.
+	// Asserted at the row instead.
+	var clonedLegacyURN string
+	if err := s.DB.QueryRowContext(context.Background(),
+		`SELECT COALESCE(legacy_urn,'') FROM agent_profiles WHERE id = ?`,
+		cloned.ID).Scan(&clonedLegacyURN); err != nil {
+		t.Fatalf("read cloned legacy_urn: %v", err)
+	}
+	if clonedLegacyURN != "" {
+		t.Errorf("clone carried a legacy profile URN forward: %q", clonedLegacyURN)
 	}
 	if cloned.Version != 1 {
 		t.Errorf("clone version = %d, want 1", cloned.Version)

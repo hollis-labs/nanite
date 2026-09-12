@@ -495,8 +495,6 @@ func builderProfileToStoreAgent(input AgentBuilderProfileInput, existing *store.
 		agent.ImportedAt = existing.ImportedAt
 		agent.OriginSystem = existing.OriginSystem
 		agent.Format = existing.Format
-		agent.URN = existing.URN
-		agent.URNAliases = existing.URNAliases
 	}
 	return agent
 }

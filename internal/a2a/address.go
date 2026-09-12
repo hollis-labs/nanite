@@ -63,8 +63,9 @@ func ParseURN(s string) (Address, error) {
 // GenerateAgentURN creates a new random agent URN with Nanite authority.
 // Format: msg://agent/nanite/agt_<10-char-base32>
 //
-// This is the canonical agent URN generator for Nanite, replacing the
-// duplicate logic in internal/store/agents.go (generateAgentURN).
+// This is the canonical agent URN generator for Nanite. It replaced a
+// duplicate in internal/store/agents.go, which was deleted by
+// CW-20260912-0017 along with the profile URN it minted.
 func GenerateAgentURN() string {
 	var raw [8]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -84,8 +85,8 @@ func GenerateAgentURN() string {
 // SlugAliasURN constructs an agent URN from a human-readable slug.
 // Format: msg://agent/nanite/<slug>
 //
-// This is the canonical slug-based URN generator for Nanite, replacing
-// the duplicate logic in internal/store/agents.go (slugAliasURN).
+// This is the canonical slug-based URN generator for Nanite. It replaced a
+// duplicate in internal/store/agents.go, deleted by CW-20260912-0017.
 func SlugAliasURN(slug string) string {
 	addr := Address{
 		Kind:      KindAgent,

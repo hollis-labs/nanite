@@ -194,8 +194,6 @@ func (s *AgentConfigService) CopyToManaged(source *store.AgentProfile, procedure
 	clone.ConsumerID = ""
 	clone.RoleID = ""
 	clone.ModelID = ""
-	clone.URN = ""
-	clone.URNAliases = ""
 	clone.CreatedAt = ""
 	clone.UpdatedAt = ""
 	clone.ImportedAt = ""

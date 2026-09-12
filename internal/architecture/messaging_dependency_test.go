@@ -17,11 +17,11 @@ import (
 
 const (
 	messagingModule       = "github.com/hollis-labs/go-messaging"
-	messagingVersion      = "v0.5.1"
+	messagingVersion      = "v0.5.2"
 	mailboxImport         = messagingModule + "/mailbox"
 	legacyMessagingImport = "github.com/hollis-labs/nanite/internal/messaging"
-	messagingModuleSum    = "h1:qmOYQ8ycC5rxr/BSTGGkbtS9dNlBUQpQFo8cVV7IXTI="
-	messagingGoModSum     = "h1:9KGpsIirex9jgJ9SXwW/PO6vcEl9xCZNguAjEFXlsSw="
+	messagingModuleSum    = "h1:sMVnZRE1BAm/AN+36Zri5Bdd4SzF+EmCqULL627ztXA="
+	messagingGoModSum     = "h1:hSEDlxOWkgZQAxlqFDfKvQ1hSHNZ8zrwee+0rAKuvXc="
 )
 
 func TestMessagingDependencyBoundary(t *testing.T) {

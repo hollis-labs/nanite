@@ -56,6 +56,9 @@ func TestSeededValuesAgreeWithCatalog(t *testing.T) {
 
 	checked, skipped := 0, 0
 	for _, m := range AllSeeded() {
+		// Provider FIRST, then model id. The two levels are load-bearing —
+		// see loadCatalogForTest. A lookup by model id alone finds a
+		// reseller's copy with different limits.
 		prov, ok := catalog[m.Provider]
 		if !ok {
 			skipped++
@@ -103,6 +106,46 @@ type catalogModel struct {
 
 // loadCatalogForTest returns provider -> modelID -> entry, or nil after
 // calling t.Skip when the on-disk cache is not present.
+//
+// # The two levels are load-bearing. Do not flatten this to modelID -> entry.
+//
+// A model id is not unique in the catalog: resellers republish the same id
+// under their own provider with THEIR OWN limits, so an id names a row only
+// once a provider has been chosen. Measured against the cache on 2026-09-12:
+//
+//	claude-sonnet-5   18 providers, 3 distinct output limits, 64000..1000000
+//	gpt-5.6            2 providers, 2 distinct contexts,     372000..1050000
+//
+// The command, so the numbers above can be rechecked rather than trusted.
+// One line on purpose: a wrapped one picks up the comment's leading
+// whitespace when it is pasted, and python rejects it.
+//
+//	jq -r '.data.Providers|to_entries[]|select(.value.models["claude-sonnet-5"])|"\(.key)\t\(.value.models["claude-sonnet-5"].limit.output)"' ~/Library/Caches/go-modelsdev/catalog.json | sort -k2 -n
+//
+// It prints 18 rows, abacus and venice at 64000 through llmgateway at
+// 1000000, with anthropic — the only one Nanite should be compared against —
+// in the middle at 128000.
+//
+// This is not hypothetical. The review of the branch that added these models
+// reported two of them as wrong; the reviewer had matched on model id alone
+// and taken the first hit, comparing Nanite's anthropic and openai rows
+// against a reseller's. Both of the "wrong" values they reported — output
+// 64000 and context 372000 — are real numbers from the ranges above. It cost
+// a blocked merge.
+//
+// Flattening this map was tried, to see what it would actually do rather than
+// to guess. Over 20 runs: 3 passed, 17 failed, and the failures named a
+// DIFFERENT model almost every run — 11 distinct assertions across the 20,
+// including the reviewer's exact two (claude-sonnet-5 MaxOutput "catalog says
+// 64000", gpt-5.6 ContextWindow "catalog says 372000"). Go randomizes map
+// iteration, so whichever provider is written last into the flat map wins,
+// and that changes per run.
+//
+// That failure mode is worse than a steady red. An intermittent failure that
+// accuses a different model each time reads as "the catalog is unstable" or
+// "this test is flaky" — which gets it retried, quarantined or deleted, not
+// investigated. It is also occasionally green, so it cannot be relied on to
+// stay broken long enough to be diagnosed.
 func loadCatalogForTest(t *testing.T) map[string]map[string]catalogModel {
 	t.Helper()
 	base, err := os.UserCacheDir()

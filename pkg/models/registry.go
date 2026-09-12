@@ -169,7 +169,7 @@ var allModels = []Model{
 		// end-to-end through this app against a real Anthropic key the same day.
 		ID: "claude-sonnet", ModelID: "claude-sonnet-4-5-20250929",
 		DisplayName: "Claude Sonnet 4.5", Provider: "anthropic",
-		ContextWindow: 200000, MaxOutput: 16000,
+		ContextWindow: 1000000, MaxOutput: 64000,
 		InputPricePerM: 3.0, OutputPricePerM: 15.0,
 		Capabilities: Capabilities{
 			SupportsToolCalling: true, SupportsStreaming: true,
@@ -191,7 +191,7 @@ var allModels = []Model{
 		// Anthropic docs. Left as-is pending confirmation.
 		ID: "claude-haiku", ModelID: "claude-haiku-4-5-20251001",
 		DisplayName: "Claude Haiku 4.5", Provider: "anthropic",
-		ContextWindow: 200000, MaxOutput: 8192,
+		ContextWindow: 200000, MaxOutput: 64000,
 		InputPricePerM: 1.0, OutputPricePerM: 5.0,
 		Capabilities: Capabilities{
 			SupportsToolCalling: true, SupportsStreaming: true,

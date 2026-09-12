@@ -26,25 +26,48 @@ func TestSyncModelsFromRegistry_UpsertsRealRows(t *testing.T) {
 
 	const wireModelID = "claude-sonnet-4-5-20250929"
 
-	// Baseline: the seeded row should already exist with static registry
-	// values (200000 context window per pkg/models/registry.go).
+	// Baseline: the seeded row should already exist carrying the STATIC
+	// registry value, whatever that currently is.
+	//
+	// This used to hardcode 200000. That coupled this test to one model's
+	// static number, so correcting that number to match models.dev broke a
+	// test about something else — and worse, the corrected value happened to
+	// equal the overlay value below, which would have made the whole test
+	// vacuous while still passing if the constant had simply been bumped.
+	//
+	// The static values are now checked for correctness by
+	// pkg/models.TestSeededValuesAgreeWithCatalog. This test owns a different
+	// question — that a catalog refresh BEATS the static value — so it derives
+	// the baseline and picks an overlay value guaranteed to differ from it.
+	staticModel, ok := models.ByModelID(wireModelID)
+	if !ok {
+		t.Fatalf("%s is not in the static registry", wireModelID)
+	}
+	staticContext := staticModel.ContextWindow
+
 	var baselineContext int
 	if err := s.DB.QueryRow(
 		`SELECT context_window FROM models WHERE model_id = ?`, wireModelID,
 	).Scan(&baselineContext); err != nil {
 		t.Fatalf("query baseline model row: %v", err)
 	}
-	if baselineContext != 200000 {
-		t.Fatalf("baseline context_window = %d, want 200000 (static registry default)", baselineContext)
+	if baselineContext != staticContext {
+		t.Fatalf("baseline context_window = %d, want the static registry value %d",
+			baselineContext, staticContext)
 	}
+
+	// Distinct from the static value by construction, so "the overlay won" is
+	// observable rather than coincidental.
+	overlayContext := staticContext + 111000
+	overlayMaxOutput := staticModel.MaxOutput + 7000
 
 	// Simulate a models.dev refresh that enriches this model beyond the
 	// static registry defaults (context window bump, revised pricing) —
 	// the same shape internal/service/container.go's syncCatalogToRegistry
 	// builds from a live modelsdev.Client.List().
 	models.SyncFromCatalog(models.CatalogInput{
-		ContextWindows:  map[string]int{wireModelID: 1000000},
-		MaxOutputTokens: map[string]int{wireModelID: 64000},
+		ContextWindows:  map[string]int{wireModelID: overlayContext},
+		MaxOutputTokens: map[string]int{wireModelID: overlayMaxOutput},
 		InputPricing:    map[string]float64{wireModelID: 2.5},
 		OutputPricing:   map[string]float64{wireModelID: 12.0},
 	})
@@ -73,11 +96,12 @@ func TestSyncModelsFromRegistry_UpsertsRealRows(t *testing.T) {
 		t.Fatalf("query synced model row: %v", err)
 	}
 
-	if contextWindow != 1000000 {
-		t.Errorf("context_window = %d, want 1000000 (catalog-refreshed value)", contextWindow)
+	if contextWindow != overlayContext {
+		t.Errorf("context_window = %d, want %d (catalog-refreshed value, not the static %d)",
+			contextWindow, overlayContext, staticContext)
 	}
-	if maxOutput != 64000 {
-		t.Errorf("max_output = %d, want 64000 (catalog-refreshed value)", maxOutput)
+	if maxOutput != overlayMaxOutput {
+		t.Errorf("max_output = %d, want %d (catalog-refreshed value)", maxOutput, overlayMaxOutput)
 	}
 	if !isEnabled {
 		t.Errorf("is_enabled = false, want true")

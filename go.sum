@@ -89,6 +89,8 @@ github.com/hollis-labs/go-scheduler v0.2.0 h1:WkvePh4+7Y+xtjy0WH2HX27oaFIWAloC14
 github.com/hollis-labs/go-scheduler v0.2.0/go.mod h1:1LXp3YFPE5CPh0hwHgoBRDLoUUR6jieS+Pzg2bzXyIE=
 github.com/hollis-labs/go-sqlite v0.1.0 h1:0AQrOxfwHLSCCzuNo7h1LVoJXA2qJC6iZbS3uL5W6JE=
 github.com/hollis-labs/go-sqlite v0.1.0/go.mod h1:T1kbCABjw1annDB+7cwNoPyqL+WDfdmHn8xtKfuZ5LQ=
+github.com/hollis-labs/go-tether-client v0.3.0 h1:GEkMKGJS/S5JA9OXwA23I/HcXSFXeN0rq90C3+JkbCY=
+github.com/hollis-labs/go-tether-client v0.3.0/go.mod h1:kVsADpv8/nJa3yd2LfwP11RrsZI53KGUB1VixKfG62g=
 github.com/hollis-labs/go-workflow v0.1.0 h1:Rose0BcdHySd3RT2+HTuAzD/dELPsEREKmosg+3SySg=
 github.com/hollis-labs/go-workflow v0.1.0/go.mod h1:LfBd90u0l4/CBtIaxJPl7RLRm9JYS3XcOyYju8aNfBg=
 github.com/hollis-labs/plugin-sdk v0.3.1 h1:gLj3CWyRfYWgvMfTwOInuiGovFaQ0zNkSoQB+I3WuWg=

@@ -1,3 +1,4 @@
+import type { TranscriptPosition } from "@/lib/transcript-position";
 import type {
   ChatError,
   PendingApproval,
@@ -20,6 +21,8 @@ export interface ChatSessionState {
   streamingNarration: string;
   streamingFinal: string;
   streamingThinking: string;
+  streamMessageId: string | null;
+  streamCursor: number;
 
   // Status / banners
   statusMessage: string | null;
@@ -47,6 +50,7 @@ export interface ChatSessionState {
 
   // Composer
   composerDraft: string;
+  transcriptPosition: TranscriptPosition | null;
 
   // Already session-keyed; folded into the slice for shape consistency
   toolCalls: ToolCall[];
@@ -68,6 +72,8 @@ export function emptyChatSessionState(now: number = Date.now()): ChatSessionStat
     streamingNarration: "",
     streamingFinal: "",
     streamingThinking: "",
+    streamMessageId: null,
+    streamCursor: 0,
     statusMessage: null,
     circuitOpen: false,
     sessionTakeover: false,
@@ -79,6 +85,7 @@ export function emptyChatSessionState(now: number = Date.now()): ChatSessionStat
     activeModel: DEFAULT_ACTIVE_MODEL,
     activeEffort: DEFAULT_ACTIVE_EFFORT,
     composerDraft: "",
+    transcriptPosition: null,
     toolCalls: [],
     pluginEnvelopes: [],
     toolCallsLastActivity: now,

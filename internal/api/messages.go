@@ -161,7 +161,9 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 	//   1. ?from=<uint64> query param — explicit, app-controlled.
 	//   2. Last-Event-ID header — sent automatically by browser EventSource
 	//      on auto-reconnect after a network blip, per the SSE spec.
-	// Query param takes precedence when both are present (explicit override).
+	// Use the newer cursor when both are present: an explicit initial cursor
+	// remains in the URL across browser auto-reconnects, while Last-Event-ID
+	// advances as the browser receives subsequent events.
 	// Missing/zero from either means "give me everything the ring buffer
 	// still holds". Reject malformed ?from= with 400 so frontend bugs
 	// surface instead of being silently coerced to zero.
@@ -181,8 +183,9 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 			return
 		}
 		fromEventID = n
-	} else if raw := r.Header.Get("Last-Event-ID"); raw != "" {
-		if n, err := strconv.ParseUint(raw, 10, 64); err == nil {
+	}
+	if raw := r.Header.Get("Last-Event-ID"); raw != "" {
+		if n, err := strconv.ParseUint(raw, 10, 64); err == nil && n > fromEventID {
 			fromEventID = n
 		}
 		// Malformed Last-Event-ID is silently treated as zero — it comes
@@ -224,10 +227,13 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 			}
 		}
 	}
-	ch, _, ok := a.Services.Streams.Subscribe(messageID, fromEventID)
+	ch, sseDone, ok := a.Services.Streams.SubscribeSSE(messageID, fromEventID)
 	if !ok {
 		a.errorResp(w, http.StatusNotFound, "stream not found")
 		return
+	}
+	if sessionID, found := a.Services.Streams.GetSessionForMessage(messageID); found {
+		defer a.Services.Streams.UnregisterSSE(sessionID, sseDone)
 	}
 
 	flusher, ok := w.(http.Flusher)
@@ -243,17 +249,11 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 	clearSSEWriteDeadline(w)
 	flusher.Flush()
 
-	// Register this SSE connection for session-level deduplication.
-	// If another tab already has an active SSE connection for this session,
-	// it will receive a session_takeover event and be closed.
-	//
-	// Note: when streamClosed=true the generation has already finished; we
-	// still drain the replay channel so the client can pick up missed final
-	// events before falling back to /api/sessions/{id}/messages.
-	var sseDone <-chan struct{}
-	if sessionID, found := a.Services.Streams.GetSessionForMessage(messageID); found {
-		sseDone = a.Services.Streams.RegisterSSE(sessionID)
-		defer a.Services.Streams.UnregisterSSE(sessionID, sseDone)
+	writeTakeover := func() {
+		evt := chat.StreamEvent{Type: "session_takeover", Content: "This session is now active in another tab"}
+		data, _ := json.Marshal(evt)
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
+		flusher.Flush()
 	}
 
 	ctx := r.Context()
@@ -263,13 +263,17 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 			return
 		case <-sseDone:
 			// Another tab opened an SSE connection for this session — send takeover event and close.
-			evt := chat.StreamEvent{Type: "session_takeover", Content: "This session is now active in another tab"}
-			data, _ := json.Marshal(evt)
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
-			flusher.Flush()
+			writeTakeover()
 			return
 		case evt, ok := <-ch:
 			if !ok {
+				// Both channels may be ready after replacement. A takeover
+				// must reach the old browser even when select chooses EOF.
+				select {
+				case <-sseDone:
+					writeTakeover()
+				default:
+				}
 				return
 			}
 			data, _ := json.Marshal(evt)

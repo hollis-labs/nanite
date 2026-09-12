@@ -643,6 +643,7 @@ export interface InterruptedTurn {
 
 export interface SessionWithMessages extends Session {
   messages: Message[];
+  active_message_id?: string | null;
   /** Present only when the backend detected an interrupted in-flight turn. */
   interrupted_turn?: InterruptedTurn | null;
 }

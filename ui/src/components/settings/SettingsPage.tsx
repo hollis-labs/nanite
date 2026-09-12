@@ -174,6 +174,9 @@ export default function SettingsPage() {
 
   useEffect(() => {
     setSettingsSectionCallback((section) => setActiveSection(section));
+    // A hidden page has no effects; apply deep-link navigation on reveal.
+    const section = getInitialSettingsSection();
+    if (section) setActiveSection(section);
     return () => setSettingsSectionCallback(null);
   }, []);
 

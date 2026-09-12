@@ -133,9 +133,10 @@ func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	messages = injectEnvelopePriorResponses(messages, lookup)
 
 	a.jsonResp(w, http.StatusOK, map[string]any{
-		"session":          sess,
-		"messages":         messages,
-		"interrupted_turn": a.detectInterruptedTurn(id, sess),
+		"session":           sess,
+		"messages":          messages,
+		"interrupted_turn":  a.detectInterruptedTurn(id, sess),
+		"active_message_id": a.Services.Streams.ActiveMessageForSession(id),
 	})
 }
 

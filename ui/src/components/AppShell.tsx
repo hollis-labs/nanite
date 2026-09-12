@@ -1,4 +1,4 @@
-import { Suspense, useState, useCallback, useRef, useEffect } from 'react'
+import { Activity, Suspense, useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { NavRail } from './NavRail'
@@ -33,6 +33,10 @@ export function AppShell() {
   const focusRef = useRef<(() => void) | null>(null)
   const queryClient = useQueryClient()
   const currentPage = useLayoutStore((s) => s.currentPage)
+  const [visitedPages, setVisitedPages] = useState(() => new Set(['chat', currentPage]))
+  if (!visitedPages.has(currentPage)) {
+    setVisitedPages(new Set([...visitedPages, currentPage]))
+  }
 
   // Listen for plugin-modal events
   useEffect(() => {
@@ -92,7 +96,8 @@ export function AppShell() {
   const inboxAgentId = primarySessionAgent?.agent_id || 'file-default'
 
   const focusComposer = useCallback(() => {
-    focusRef.current?.()
+    useLayoutStore.getState().setCurrentPage('chat')
+    requestAnimationFrame(() => focusRef.current?.())
   }, [])
 
   const handleEditorReady = useCallback((focus: () => void) => {
@@ -120,8 +125,8 @@ export function AppShell() {
 
   const pluginNavItems = usePluginSlots('nav-rail')
 
-  const renderPluginPage = () => {
-    const entry = pluginNavItems.find((e) => e.id === currentPage)
+  const renderPluginPage = (page: string) => {
+    const entry = pluginNavItems.find((e) => e.id === page)
     if (!entry?.component) return null
     const PluginComponent = getSlotComponent(entry.component)
     if (!PluginComponent) return null
@@ -132,20 +137,28 @@ export function AppShell() {
     )
   }
 
-  const isPluginPage = currentPage !== 'chat' && currentPage !== 'settings'
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg">
       {currentPage !== 'chat' && <NavRail />}
-      {currentPage === 'chat' && <LeftSidebar />}
-      {currentPage === 'chat' ? (
-        <ChatMain onEditorReady={handleEditorReady} />
-      ) : currentPage === 'settings' ? (
-        <SettingsPage />
-      ) : isPluginPage ? (
-        renderPluginPage()
-      ) : null}
-      {currentPage === 'chat' && <RightRailV2 inboxAgentId={inboxAgentId} />}
+      <Activity mode={currentPage === 'chat' ? 'visible' : 'hidden'}>
+        <LeftSidebar />
+      </Activity>
+      {/* The chat controller stays active; only its view effects are paused. */}
+      <ChatMain active={currentPage === 'chat'} onEditorReady={handleEditorReady} />
+      {visitedPages.has('settings') && (
+        <Activity mode={currentPage === 'settings' ? 'visible' : 'hidden'}>
+          <SettingsPage />
+        </Activity>
+      )}
+      {pluginNavItems.filter((entry) => visitedPages.has(entry.id)).map((entry) => (
+        <Activity key={entry.id} mode={currentPage === entry.id ? 'visible' : 'hidden'}>
+          {renderPluginPage(entry.id)}
+        </Activity>
+      ))}
+      <Activity mode={currentPage === 'chat' ? 'visible' : 'hidden'}>
+        <RightRailV2 inboxAgentId={inboxAgentId} />
+      </Activity>
       <MemoryModal />
       <CommandPalette
         open={commandPaletteOpen}

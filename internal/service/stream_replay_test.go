@@ -8,6 +8,21 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
+func TestActiveMessageSkipsCompletedReplayWindow(t *testing.T) {
+	sm := NewStreamManager()
+	old := sm.CreateStream("completed", "session")
+	close(old)
+	waitUntil(t, time.Second, func() bool { return sm.ActiveMessageForSession("session") == "" })
+	current := sm.CreateStream("active", "session")
+	defer close(current)
+	if got := sm.ActiveMessageForSession("session"); got != "active" {
+		t.Fatalf("active message = %q", got)
+	}
+	if got := sm.ActiveMessageForSession("other-session"); got != "" {
+		t.Fatalf("leaked another session's message: %q", got)
+	}
+}
+
 // waitUntil polls cond with a short backoff until it returns true or the
 // deadline elapses. Replaces fixed time.Sleep in tests that need to
 // observe the pump goroutine catching up. PR #66 review #3.

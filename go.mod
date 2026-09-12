@@ -111,6 +111,7 @@ require (
 	github.com/hollis-labs/go-runtime-events v0.1.2
 	github.com/hollis-labs/go-scheduler v0.2.0
 	github.com/hollis-labs/go-sqlite v0.1.0
+	github.com/hollis-labs/go-tether-client v0.3.0
 	github.com/hollis-labs/go-workflow v0.1.0
 	github.com/hollis-labs/tesseract v0.10.0
 	github.com/pressly/goose/v3 v3.28.0

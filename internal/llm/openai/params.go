@@ -3,6 +3,7 @@ package openai
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
@@ -45,8 +46,72 @@ func buildChatParams(req llmtypes.ChatRequest) (sdk.ChatCompletionNewParams, err
 	}
 	if tools := translateTools(req.Tools); len(tools) > 0 {
 		params.Tools = tools
+		// CW-20260912-0107. Chat-completions refuses function tools
+		// alongside an active reasoning effort, and these models apply
+		// one by default when the field is absent. Only meaningful with
+		// tools present, so it is set here rather than beside Model.
+		if modelDefaultsToReasoning(req.Model) {
+			params.ReasoningEffort = reasoningEffortNone
+		}
 	}
 	return params, nil
+}
+
+// reasoningEffortNone disables reasoning for a reasoning-capable model.
+// openai-go v1.12.0 predates the value — shared.go defines only low,
+// medium and high — but ReasoningEffort is a defined string type, so this
+// is an ordinary value of it rather than a cast around a missing feature.
+const reasoningEffortNone sdk.ReasoningEffort = "none"
+
+// modelDefaultsToReasoning reports whether OpenAI applies a non-none
+// reasoning effort to this model when the request omits reasoning_effort.
+//
+// CW-20260912-0107: every tool-bearing turn against gpt-5.6, gpt-5.6-luna
+// and gpt-6-astra returned 400, with the provider naming the remedy:
+//
+//	Function tools with reasoning_effort are not supported for gpt-5.6 in
+//	/v1/chat/completions. To use function tools, use /v1/responses or set
+//	reasoning_effort to 'none'.
+//
+// buildChatParams never sent the field, so the model's own default applied.
+// gpt-4o has no reasoning default, which is why it kept working and served
+// as the control.
+//
+// Deliberately conservative, because the two ways to be wrong are not
+// symmetric. Missing a reasoning model reproduces exactly the error above:
+// loud, and no worse than the state before this function existed. Matching
+// a model with no reasoning support sends it a parameter it rejects and
+// breaks a path that works today. So match only what is known to reason.
+//
+// This is a name predicate because models.Model carries no reasoning
+// capability to consult. CW-20260912-0108 (models.dev as the floor) is
+// where that flag belongs; delete this once it exists.
+func modelDefaultsToReasoning(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+
+	// o-series: o1, o3-mini, o4-mini. An "o" followed by a digit.
+	if len(m) >= 2 && m[0] == 'o' && m[1] >= '0' && m[1] <= '9' {
+		return true
+	}
+
+	// gpt-N for N >= 5. Read the major version rather than listing names,
+	// so gpt-7 needs no edit here. gpt-4o parses as 4 and is excluded.
+	rest, ok := strings.CutPrefix(m, "gpt-")
+	if !ok {
+		return false
+	}
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return false
+	}
+	major, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		return false
+	}
+	return major >= 5
 }
 
 // translateMessage converts a single nanite ChatMessage into one or more SDK

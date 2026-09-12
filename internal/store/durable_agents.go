@@ -235,6 +235,57 @@ func (s *Store) GetDurableAgentInstanceBySlug(ctx context.Context, slug string) 
 // finding: a Team Slot's launch-time "durable" resolution is independent
 // of that unrelated migration-061-eject-survival flag) -- this is a plain
 // profile_id lookup, no durable-candidate filtering of any kind.
+// GetDurableAgentInstanceByURN resolves a durable actor address to its
+// instance. This is the entry point for an inbound Tether delivery: Tether
+// addresses the actor, the actor IS the instance (migration 159), and this is
+// the only lookup that crosses from their addressing into ours.
+//
+// An empty urn never matches. Every instance created before migration 159 was
+// backfilled, so an empty value means a caller passed one rather than that a
+// row lacks an address, and returning the first empty-URN row would be a
+// silent mis-delivery.
+func (s *Store) GetDurableAgentInstanceByURN(ctx context.Context, urn string) (*DurableAgentInstance, error) {
+	if urn == "" {
+		return nil, ErrDurableAgentInstanceNotFound
+	}
+	var inst DurableAgentInstance
+	err := scanDurableAgentInstance(s.DB.QueryRowContext(ctx,
+		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances WHERE urn = ?`, urn,
+	), &inst)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrDurableAgentInstanceNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get durable_agent_instances by urn %s: %w", urn, err)
+	}
+	return &inst, nil
+}
+
+// CountInstancesSharingMailboxSlot reports how many non-archived instances of
+// profileID are currently bound to sessionID.
+//
+// It exists for the collision guard in internal/tetherbridge. Nanite's mailbox
+// slot is (to_session_id, to_agent_id) where to_agent_id is a PROFILE id, so
+// two instances of one profile bound to the same session would resolve to one
+// slot and silently interleave. Nothing in the schema prevents that today —
+// there is no unique index on current_session_id — so the bridge asks before
+// it writes.
+func (s *Store) CountInstancesSharingMailboxSlot(ctx context.Context, profileID, sessionID string) (int, error) {
+	if profileID == "" || sessionID == "" {
+		return 0, nil
+	}
+	var n int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM durable_agent_instances
+		  WHERE profile_id = ? AND current_session_id = ? AND status != ?`,
+		profileID, sessionID, DurableAgentStatusArchived,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count instances sharing mailbox slot (%s, %s): %w", profileID, sessionID, err)
+	}
+	return n, nil
+}
+
 func (s *Store) GetDurableAgentInstanceByProfileID(ctx context.Context, profileID string) (*DurableAgentInstance, error) {
 	var inst DurableAgentInstance
 	err := scanDurableAgentInstance(s.DB.QueryRowContext(ctx,

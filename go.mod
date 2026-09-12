@@ -107,7 +107,7 @@ require (
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-llm-contracts v0.3.0
 	github.com/hollis-labs/go-llm-types v0.3.0
-	github.com/hollis-labs/go-messaging v0.5.1
+	github.com/hollis-labs/go-messaging v0.5.2
 	github.com/hollis-labs/go-runtime-events v0.1.2
 	github.com/hollis-labs/go-scheduler v0.2.0
 	github.com/hollis-labs/go-sqlite v0.1.0

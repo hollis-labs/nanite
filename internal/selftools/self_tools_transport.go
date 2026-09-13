@@ -175,7 +175,7 @@ type SelfToolsTransport struct {
 	// tool_list and tool_describe. When set, these discovery
 	// primitives resolve every registered MCP tool — self, memory,
 	// dev, general, plugin — rather than only the in-process self
-	// tools. *mcp.Manager satisfies this via GetAllToolsUnfiltered.
+	// tools. ToolClient supplies the built-in and MCP inventories together.
 	// Nil-safe — when unwired, tool_list falls back to
 	// selfToolDefinitions() (the legacy SP6 behavior).
 	Inventory ToolInventoryLookup

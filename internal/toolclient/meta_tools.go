@@ -121,11 +121,11 @@ func (tb *ToolClient) HandleRequestTools(input map[string]any) ([]llmtypes.ToolD
 func FetchToolResultMetaTool() llmtypes.ToolDefinition {
 	return llmtypes.ToolDefinition{
 		Name: "fetch_tool_result",
-		Description: "Retrieve a byte slice of a cached large tool result that was truncated in context.\n\n" +
-			"**When to use:** When a previous tool result showed a truncation notice with a `tool_result://<ULID>` pointer at the footer, call this with that ULID to read more of the content. Useful for paging through large file listings, long API responses, or any tool output that exceeded the context cap.\n\n" +
-			"**When NOT to use:** Do NOT pass a file path as the id — this tool reads from the in-memory result cache, not the filesystem. Do NOT guess an id; the id MUST come verbatim from a `tool_result://<ULID>` footer in the current session. Do NOT use `cache://` or any other URI scheme — the id is a bare ULID string (e.g. \"01HZ3G9MXKQ7D5FVWNTJ4BSEP6\").\n\n" +
-			"**Output shape:** Raw bytes from the cached result, returned as text. If offset + length exceeds the cache size, only available bytes are returned. Returns an error if the ULID is not found in the cache.\n\n" +
-			"**Chaining:** Pair with search_tool_result when you want to find a specific pattern instead of reading sequentially.",
+		Description: "Read a page of a cached result from this chat session. Use the bare ID from a tool_result:// pointer when a preview is incomplete. " +
+			"Omit json_pointer to read the original response; use an RFC 6901 pointer such as /data/comments/3 or /stdout to select a JSON value. Strings are returned as decoded text. " +
+			"Offsets address UTF-8 bytes in the selected value, not the preview. Returns actual start/end offsets, total bytes, has_more and next_offset. " +
+			"Follow next_offset with the same id and json_pointer until you have the evidence needed. The default and maximum page size use the current model's result budget. " +
+			"IDs are session-scoped cache IDs, not file paths or permanent resource identifiers.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -133,13 +133,16 @@ func FetchToolResultMetaTool() llmtypes.ToolDefinition {
 					"type":        "string",
 					"description": "The cached result ULID, taken verbatim from a `tool_result://<ULID>` footer in this session. NOT a file path, NOT a cache:// URI — a bare ULID string only.",
 				},
+				"json_pointer": map[string]any{
+					"type": "string", "description": "Optional RFC 6901 pointer into the original JSON, e.g. /stdout or /data/comments/3/content. Empty/omitted reads the original result. Escape ~ as ~0 and / as ~1 within a key.",
+				},
 				"offset": map[string]any{
 					"type":        "integer",
 					"description": "Byte offset to start reading from (default: 0). Use to page through large results.",
 				},
 				"length": map[string]any{
 					"type":        "integer",
-					"description": "Number of bytes to read (default: 65536). Capped at the cache ceiling for the originating MCP trust tier.",
+					"description": "Requested bytes. Defaults to, and is capped by, the current model-aware result budget.",
 				},
 			},
 			"required": []any{"id"},
@@ -155,11 +158,11 @@ func FetchToolResultMetaTool() llmtypes.ToolDefinition {
 func SearchToolResultMetaTool() llmtypes.ToolDefinition {
 	return llmtypes.ToolDefinition{
 		Name: "search_tool_result",
-		Description: "Regex-search a cached large tool result and return matching lines with context (like grep -C 2).\n\n" +
-			"**When to use:** When a previous tool result was truncated and you need to find a specific pattern (function name, error string, field key) without reading the entire cache sequentially. More efficient than fetch_tool_result + manual scanning for targeted lookups.\n\n" +
-			"**When NOT to use:** Do NOT pass a file path as the id — this tool searches the in-memory result cache, not the filesystem. The id MUST be a bare ULID from a `tool_result://<ULID>` footer in this session. Do NOT use for full-text grep of source files — use dev_grep for filesystem searches.\n\n" +
-			"**Output shape:** Up to max_matches blocks, each showing the matching line with 2 lines of surrounding context (configurable). Returns \"no matches\" if the pattern is not found. Returns an error if the ULID is not found in the cache.\n\n" +
-			"**Chaining:** Use fetch_tool_result after search to read the surrounding region at a known offset. Use dev_grep for filesystem search instead.",
+		Description: "Search cached result text for RE2 regex matches in this session. Use the bare ID from a tool_result:// pointer. " +
+			"Optional json_pointer selects a JSON value, decoding strings such as /stdout; otherwise search the original response. " +
+			"Returns matching lines with bounded surrounding context and byte coordinates usable by fetch_tool_result with the same json_pointer. " +
+			"has_more and next_offset report whether further matching lines were omitted. Continue with offset=next_offset. " +
+			"A preview or limited search is not evidence that the whole result has been read. Use filesystem tools for source files.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -171,9 +174,15 @@ func SearchToolResultMetaTool() llmtypes.ToolDefinition {
 					"type":        "string",
 					"description": "RE2 regex pattern to search for. Case-sensitive by default. Use (?i) prefix for case-insensitive.",
 				},
+				"json_pointer": map[string]any{
+					"type": "string", "description": "Optional RFC 6901 pointer selecting the same value as fetch_tool_result. Strings are decoded before searching.",
+				},
+				"offset": map[string]any{
+					"type": "integer", "description": "Non-negative byte offset in the selected value; use next_offset to continue a limited search.",
+				},
 				"max_matches": map[string]any{
 					"type":        "integer",
-					"description": "Maximum number of match blocks to return (default: 20). Each block includes the matching line plus 2 lines of context.",
+					"description": "Maximum matching lines (default 20, capped at 100). Context also obeys the current model-aware result budget; has_more reports further matches.",
 				},
 			},
 			"required": []any{"id", "pattern"},

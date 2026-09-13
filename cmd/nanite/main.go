@@ -1296,6 +1296,7 @@ func initMCP(s *store.Store, cfg *config.RuntimeConfig, appCfg *config.TunablesC
 		toolclient.FetchToolResultMetaTool(),
 		toolclient.SearchToolResultMetaTool(),
 	})
+	selfTools.Inventory = tb
 
 	return mcpManager, tb, selfTools
 }

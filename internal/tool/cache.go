@@ -14,21 +14,8 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// DefaultSoftTruncBytes is the default byte threshold above which tool results
-// are truncated for the LLM and the full body is cached. The LLM-visible slice
-// is also capped at this size; anything longer gets replaced with the slice
-// plus a `tool_result://<id>` pointer footer the LLM can fetch via
-// `fetch_tool_result` / `search_tool_result` when it actually needs more.
-//
-// CW-20260419-0004 Part 1: lowered from 64 KiB → 2 KiB. At 64 KiB nothing in
-// practical use ever hit the cache path — every tool result fell through to
-// `truncate.Output`'s 4 KiB fallback and accumulated in the conversation
-// slot. The c9 UAT died at ~45 K tokens with 13 tool calls × ~4 KiB each.
-// At 2 KiB, most tool results (clockwork_task_list, dev_read, etc.) become
-// pointers and the conversation slot stays tiny; tiny results (health
-// checks, small lookups) still pass through untouched. Once
-// CW-20260419-0001 ships a settings UI, this becomes a user-tunable knob
-// with this value as the safe default.
+// DefaultSoftTruncBytes is the fallback for callers without a model budget.
+// Chat supplies the shared model-aware budget through PresentResult.
 const DefaultSoftTruncBytes = 2 * 1024 // 2 KiB
 
 // DefaultHardCapBytes is the maximum body size stored in the cache. Results
@@ -81,67 +68,63 @@ func NewResultCache(db *sql.DB, cfg ResultCacheConfig) *ResultCache {
 	}
 }
 
-// StoreResult persists a tool result and returns the LLM-visible string.
-// If the result is under the soft truncation threshold, the original body is
-// returned unchanged (no cache entry). Otherwise, the result is cached and a
-// truncated view with a pointer footer is returned.
-func (c *ResultCache) StoreResult(sessionID, toolCallID, toolName, body string) (visible string, cached bool, err error) {
-	bodyLen := len(body)
+// ResultView records the reading view and its relationship to the original.
+type ResultView struct {
+	Content       string
+	CacheID       string
+	Format        string
+	OriginalBytes int
+	BudgetBytes   int
+	Cached        bool
+}
 
-	// Under soft threshold — return as-is, no cache entry.
-	if bodyLen <= c.softTruncBytes {
-		return body, false, nil
+// StoreResult uses the fallback budget for callers without a model budget.
+// A result that fits is returned unchanged, without creating a cache entry.
+func (c *ResultCache) StoreResult(sessionID, toolCallID, toolName, body string) (string, bool, error) {
+	view, err := c.PresentResult(sessionID, toolCallID, toolName, body, c.softTruncBytes)
+	return view.Content, view.Cached, err
+}
+
+// PresentResult stores the original output before constructing a reading view.
+// Budget applies to preview content; the small recovery notice is additional.
+func (c *ResultCache) PresentResult(sessionID, toolCallID, toolName, body string, budget int) (ResultView, error) {
+	if budget <= 0 {
+		budget = c.softTruncBytes
+	}
+	budget = min(budget, c.hardCapBytes)
+	view := ResultView{Content: body, Format: "complete", OriginalBytes: len(body), BudgetBytes: budget}
+	if len(body) <= budget {
+		return view, nil
 	}
 
 	id := newULID()
 	now := time.Now().UTC()
 	expiresAt := now.Add(time.Duration(c.cacheTTLSeconds) * time.Second)
-
-	var storeBody sql.NullString
-	wasTruncated := 1
-
-	if bodyLen <= c.hardCapBytes {
-		storeBody = sql.NullString{String: body, Valid: true}
+	var stored sql.NullString
+	if len(body) <= c.hardCapBytes {
+		stored = sql.NullString{String: body, Valid: true}
 	}
-	// Over hard cap: body=NULL, metadata only.
-
-	_, err = c.db.Exec(
+	_, err := c.db.Exec(
 		`INSERT INTO tool_result_cache (id, session_id, tool_name, tool_call_id, created_at, expires_at, byte_size, was_truncated, body)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, sessionID, toolName, toolCallID,
-		now.Format(time.RFC3339), expiresAt.Format(time.RFC3339),
-		bodyLen, wasTruncated, storeBody,
-	)
+   VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+		id, sessionID, toolName, toolCallID, now.Format(time.RFC3339), expiresAt.Format(time.RFC3339), len(body), stored)
 	if err != nil {
-		return body, false, fmt.Errorf("cache store: %w", err)
+		return view, fmt.Errorf("cache store: %w", err)
 	}
 
-	// Build truncated view + pointer.
-	// truncateAtBoundary walks back from the soft threshold to find the
-	// nearest line boundary (\n), then further back to a valid UTF-8 rune
-	// start so the LLM-visible preview is never mid-line or mid-character.
-	cutAt := truncateAtBoundary(body, c.softTruncBytes)
-	truncated := body[:cutAt]
-	var footer string
-	if storeBody.Valid {
-		footer = fmt.Sprintf(
-			"\n\n[TRUNCATED — full result cached as tool_result://%s (total_size=%d bytes, expires_at=%s). "+
-				"Use fetch_tool_result({\"id\": \"%s\"}) or search_tool_result({\"id\": \"%s\", \"pattern\": \"...\"}) to retrieve more.]",
-			id, bodyLen, expiresAt.Format(time.RFC3339), id, id,
-		)
+	preview, format := previewResult(body, budget)
+	view.CacheID, view.Cached, view.Format = id, true, format
+	view.Content = "[PARTIAL PREVIEW — not a complete read. Omitted content must be retrieved before making claims about it.]\n" + preview
+	if stored.Valid {
+		view.Content += fmt.Sprintf("\n\n[TRUNCATED — full result cached as tool_result://%s (total_size=%d bytes, expires_at=%s). "+
+			"Use fetch_tool_result({\"id\":\"%s\"}) for pages, optionally with json_pointer to select a field (for example /stdout). "+
+			"Use search_tool_result({\"id\":\"%s\",\"pattern\":\"...\"}) for matching regions. Preview labels are JSON pointers; fetch offsets address the selected text.]",
+			id, len(body), expiresAt.Format(time.RFC3339), id, id)
 	} else {
-		footer = fmt.Sprintf(
-			"\n\n[TRUNCATED — result too large (%d bytes, exceeds hard cap %d). "+
-				"Only metadata was cached (tool_result://%s). The full body is not available for retrieval.]",
-			bodyLen, c.hardCapBytes, id,
-		)
+		view.Content += fmt.Sprintf("\n\n[TRUNCATED — result exceeded the %d-byte storage cap. Only metadata was cached as tool_result://%s; full content is unavailable. Narrow the source query.]", c.hardCapBytes, id)
 	}
-	visible = truncated + footer
-
-	slog.Info("tool-cache: result stored",
-		"id", id, "tool", toolName, "byte_size", bodyLen,
-		"soft_truncate", c.softTruncBytes, "hard_cap", c.hardCapBytes)
-	return visible, true, nil
+	slog.Info("tool-cache: result stored", "id", id, "tool", toolName, "byte_size", len(body), "preview_budget", budget, "format", format)
+	return view, nil
 }
 
 // Fetch retrieves a slice of the cached body. sessionID scopes the lookup
@@ -181,9 +164,9 @@ func (c *ResultCache) Fetch(sessionID, id string, offset, length int) (slice str
 	if offset >= len(content) {
 		return "", byteSize, nil
 	}
-	end := offset + length
-	if end > len(content) || length <= 0 {
-		end = len(content)
+	end := len(content)
+	if length > 0 && length < len(content)-offset {
+		end = offset + length
 	}
 
 	return content[offset:end], byteSize, nil

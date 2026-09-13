@@ -1,5 +1,9 @@
 package service
 
+func isResultCacheTool(name string) bool {
+	return name == "fetch_tool_result" || name == "search_tool_result"
+}
+
 // isCacheExemptTool reports whether name is a tool whose output should bypass
 // the result-cache soft truncation. These are agent-discovery and
 // cache-navigation primitives whose value is providing actionable inline

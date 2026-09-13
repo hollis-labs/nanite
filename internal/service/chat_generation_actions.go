@@ -24,6 +24,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
+	"github.com/hollis-labs/nanite/internal/truncate"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -57,6 +58,7 @@ func (s *chatServiceImpl) settleToolTurn(
 ) settleToolTurnResult {
 	agentID := setup.agentID
 	model := setup.model
+	run.loop.resultBudget = truncate.BudgetForModel(model)
 	selection := setup.selection
 	prov := setup.provider
 	// --- Build assistant message with tool_use blocks ---
@@ -1887,8 +1889,6 @@ func (s *chatServiceImpl) prepareTurn(
 	fctx := pluginpkg.FilterContext{SessionID: sessionID, AgentID: agentID}
 	tools = applyToolSelectionFilter(s.pluginHost, tools, fctx)
 
-	normalizeToolInputSchemas(tools)
-
 	// Phase 0 item 21 ("Cut Modes, in full") deleted the B1 (CW-20260428-0009)
 	// + F1 (CW-20260429-0001) session-mode tool_overrides block that used to
 	// live here — it resolved session.CurrentModeID -> s.store.GetMode and
@@ -1928,6 +1928,15 @@ func (s *chatServiceImpl) prepareTurn(
 				"hyst_pinned", len(newState.PromotedAt))
 		}
 	}
+
+	// Cache navigation is a local, session-scoped harness capability. Keep its
+	// schemas even when ordinary tools were pruned or deferred by lazy loading.
+	if s.resultCache != nil {
+		tools = unionToolsByName([]llmtypes.ToolDefinition{
+			toolclient.FetchToolResultMetaTool(), toolclient.SearchToolResultMetaTool(),
+		}, tools)
+	}
+	normalizeToolInputSchemas(tools)
 
 	// Build the dynamic per-turn system prefix from tool selection. This text
 	// is sent verbatim in ChatRequest.SystemPrompt (it leads the slot blocks

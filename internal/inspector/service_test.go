@@ -4,6 +4,22 @@ import (
 	"testing"
 )
 
+func TestToolCallVisibleResultSnapshotIsolation(t *testing.T) {
+	svc := NewService()
+	visible := "partial source"
+	svc.RecordToolCall("session", "turn", ToolCallRecord{Result: "full source", VisibleResult: &visible})
+	visible = "mutated by producer"
+	first := svc.Snapshot("session", "turn")
+	if first.ToolCalls[0].VisibleResult == nil || *first.ToolCalls[0].VisibleResult != "partial source" {
+		t.Fatal("recorded view retained the producer's mutable pointer")
+	}
+	*first.ToolCalls[0].VisibleResult = "mutated by reader"
+	next := svc.RecentSnapshots("session", 1)
+	if *next[0].ToolCalls[0].VisibleResult != "partial source" {
+		t.Fatal("reading a snapshot mutated the stored view")
+	}
+}
+
 // TestServiceRecordAndSnapshot verifies that Record* calls are readable via
 // Snapshot and RecentSnapshots.
 func TestServiceRecordAndSnapshot(t *testing.T) {

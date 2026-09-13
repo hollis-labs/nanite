@@ -1548,6 +1548,12 @@ export interface InspectorToolCallRecord {
   name: string;
   arguments: string;
   result: string;
+  visible_result?: string;
+  cache_id?: string;
+  preview_format?: string;
+  original_bytes?: number;
+  visible_bytes?: number;
+  budget_bytes?: number;
   is_error: boolean;
   latency_ms: number;
   cache_state: string;

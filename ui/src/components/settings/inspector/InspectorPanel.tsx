@@ -232,6 +232,7 @@ function ToolCallList({ calls }: { calls: InspectorToolCallRecord[] }) {
             {call.is_error ? <TrafficDot color="red" /> : <TrafficDot color="green" />}
             <span className="font-mono font-semibold text-fg">{call.name}</span>
             <span className="text-fg-muted text-[10px]">{call.latency_ms}ms</span>
+            <span className="text-fg-muted text-[10px]">{call.cache_state}</span>
             <span className="ml-auto text-[10px] text-fg-muted">{expanded.has(i) ? "▲" : "▼"}</span>
           </button>
           {expanded.has(i) && (
@@ -243,12 +244,24 @@ function ToolCallList({ calls }: { calls: InspectorToolCallRecord[] }) {
                 </pre>
               </div>
               <div>
-                <span className="text-[9px] uppercase text-fg-muted font-medium">Result</span>
+                <span className="text-[9px] uppercase text-fg-muted font-medium">
+                  {call.visible_result === undefined ? "Original result (delivery view not recorded)" : "Model-visible result"}
+                </span>
                 <pre className="text-[10px] font-mono text-fg-muted mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap">
-                  {call.result.slice(0, 1000)}
-                  {call.result.length > 1000 ? "…" : ""}
+                  {call.visible_result ?? call.result}
                 </pre>
               </div>
+              {call.cache_id && (
+                <p className="font-mono text-fg-muted">
+                  {call.cache_id} · {call.preview_format} · original {call.original_bytes} bytes · visible {call.visible_bytes} bytes · preview budget {call.budget_bytes} bytes
+                </p>
+              )}
+              {call.visible_result !== undefined && call.visible_result !== call.result && (
+                <details>
+                  <summary className="cursor-pointer text-fg-muted">Original result</summary>
+                  <pre className="text-[10px] font-mono text-fg-muted mt-0.5 max-h-64 overflow-auto whitespace-pre-wrap">{call.result}</pre>
+                </details>
+              )}
             </div>
           )}
         </div>

@@ -121,6 +121,12 @@ func copySnapshot(s *TurnSnapshot) *TurnSnapshot {
 	c.LLMMessages = append([]LLMMessageRecord(nil), s.LLMMessages...)
 	c.BrokerDecisions = append([]BrokerDecision(nil), s.BrokerDecisions...)
 	c.ToolCalls = append([]ToolCallRecord(nil), s.ToolCalls...)
+	for i := range c.ToolCalls {
+		if c.ToolCalls[i].VisibleResult != nil {
+			visible := *c.ToolCalls[i].VisibleResult
+			c.ToolCalls[i].VisibleResult = &visible
+		}
+	}
 	c.MemoryHits = append([]MemoryRecord(nil), s.MemoryHits...)
 	if s.Reminders != nil {
 		rc := *s.Reminders
@@ -198,6 +204,10 @@ func (s *Service) RecordBrokerDecision(sessionID, turnID string, d BrokerDecisio
 
 // RecordToolCall appends one tool-call record to the turn.
 func (s *Service) RecordToolCall(sessionID, turnID string, call ToolCallRecord) {
+	if call.VisibleResult != nil {
+		visible := *call.VisibleResult
+		call.VisibleResult = &visible
+	}
 	sb := s.getOrCreate(sessionID)
 	sb.upsert(turnID, func(snap *TurnSnapshot) {
 		snap.SessionID = sessionID

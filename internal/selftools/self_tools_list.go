@@ -67,9 +67,8 @@ func naniteToolListDefinition() mcp.Tool {
 }
 
 // ToolInventoryLookup is the narrow registry surface tool_list
-// uses to enumerate every tool registered with the MCP manager,
-// regardless of which server it lives on. *mcp.Manager satisfies this
-// via GetAllToolsUnfiltered; tests can substitute a stub.
+// uses to enumerate built-in and MCP tools. The production ToolClient supplies
+// both; a manager or a stub may supply an inventory during startup or in tests.
 //
 // This is the cross-server complement to ToolSchemaLookup (which
 // resolves a single tool's input schema by name). Both interfaces stay

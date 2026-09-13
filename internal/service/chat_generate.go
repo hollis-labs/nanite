@@ -98,7 +98,7 @@ Parameter shape:
 
 Workflow:
 - **Discover before read.** Use dev_glob or dev_grep first if you aren't already sure the path exists. Running dev_read on a speculative path wastes a tool call.
-- **Cache pointer pattern.** When a tool result ends with a footer like ` + "`[TRUNCATED — full result cached as tool_result://<ULID> ...]`" + `, don't re-invoke the source tool to get more. Call ` + "`fetch_tool_result`" + ` with the ULID to retrieve slices, or ` + "`search_tool_result`" + ` to regex-match across the full cached body.
+- **Cache pointer pattern.** When a tool result ends with a footer like ` + "`[TRUNCATED — full result cached as tool_result://<ULID> ...]`" + `, treat the preview as incomplete evidence. Read relevant omitted sections before claiming a complete review or current-state conclusion. Don't re-invoke the source tool to get more. Call ` + "`fetch_tool_result`" + ` with the ULID to retrieve slices, or ` + "`search_tool_result`" + ` to regex-match across the full cached body. Use json_pointer to select JSON fields (including /stdout for Python output); follow has_more/next_offset for paging. Read large source collections in bounded sections rather than concatenating entire corpora.
 - **Parallelize independent calls.** If two lookups don't depend on each other, request them in the same assistant turn — the harness executes tool blocks in parallel.
 - **Stop when done.** Extra tool calls don't add trust; they just dilute the grounding.
 

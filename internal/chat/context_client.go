@@ -808,7 +808,15 @@ func EnforceTokenBudget(
 
 	// Step 2: Reduce tool count — drop from end until under budget or 1 tool left.
 	for len(tools) > 1 && total > ceiling {
-		tools = tools[:len(tools)-1]
+		remove := len(tools) - 1
+		for remove >= 0 && (tools[remove].Name == "fetch_tool_result" || tools[remove].Name == "search_tool_result") {
+			remove--
+		}
+		if remove < 0 {
+			break // Cache pointers must remain resolvable; reduce history next.
+		}
+		kept := append([]llmtypes.ToolDefinition(nil), tools[:remove]...)
+		tools = append(kept, tools[remove+1:]...)
 		toolTokens = EstimateToolDefTokens(tools)
 		total = systemTokens + msgTokens + toolTokens
 	}
@@ -920,8 +928,12 @@ func pruneToolResultsInMemory(messages []llmtypes.ChatMessage) []llmtypes.ChatMe
 		copy(newBlocks, m.ContentBlocks)
 		for j := range newBlocks {
 			b := &newBlocks[j]
-			if b.Type == "tool_result" && len(b.Content) > 200 {
-				b.Content = fmt.Sprintf("[pruned: tool result, %d chars]", len(b.Content))
+			if b.Type == "tool_result" && len(b.Content) > 200 && !strings.HasPrefix(b.Content, "[pruned:") {
+				footer := ""
+				if at := strings.LastIndex(b.Content, "\n\n[TRUNCATED —"); at >= 0 {
+					footer = b.Content[at:]
+				}
+				b.Content = fmt.Sprintf("[pruned: tool result, %d chars]%s", len(b.Content), footer)
 				pruned++
 			}
 		}

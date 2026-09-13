@@ -481,7 +481,9 @@ func (tb *ToolClient) HandleRequestToolsForAgent(ctx context.Context, agentID st
 	permitted := make([]llmtypes.ToolDefinition, 0, len(merged))
 	var denied []string
 	for _, t := range merged {
-		if tb.isToolGrantedToAgent(ctx, agentID, t.Name) {
+		// Chat owns these session-scoped readers and always supplies their
+		// schemas. A redundant request_tools call must agree with that surface.
+		if t.Name == "fetch_tool_result" || t.Name == "search_tool_result" || tb.isToolGrantedToAgent(ctx, agentID, t.Name) {
 			permitted = append(permitted, t)
 			continue
 		}
@@ -603,6 +605,19 @@ func (tb *ToolClient) ListTools() []llmtypes.ToolDefinition {
 		all = append(all, tb.MCPManager.GetAllTools()...)
 	}
 
+	return all
+}
+
+// GetAllToolsUnfiltered supplies discovery with the same built-in catalog as
+// execution, plus the MCP inventory. Discovery does not grant execution rights.
+func (tb *ToolClient) GetAllToolsUnfiltered() []llmtypes.ToolDefinition {
+	var all []llmtypes.ToolDefinition
+	if tb.Builtins != nil {
+		all = append(all, tb.Builtins.GetBuiltins()...)
+	}
+	if tb.MCPManager != nil {
+		all = append(all, tb.MCPManager.GetAllToolsUnfiltered()...)
+	}
 	return all
 }
 

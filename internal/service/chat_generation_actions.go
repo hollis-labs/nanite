@@ -983,12 +983,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 		if s.suppressSurfaceIfSubagentCaused(sessionID, "provider_stream_error", run.fullContent.String()) {
 			return requestProviderIterationResult{directive: generationTerminate}
 		}
-		errDetails := map[string]interface{}{"raw": err.Error(), "model": model, "tools": len(run.tools)}
-		ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(err), "Provider streaming failed", errDetails)
-		ch <- chat.ErrorEvent(chat.ClassifyError(err), "Provider streaming failed", errDetails)
-		// Suppression already checked at line above; use the pre-classified
-		// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
-		s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+		s.surfaceProviderFailure(ctx, ch, sessionID, assistantMsgID, agentID, run.fullContent.String(), model, providerName, agent.Slug, err, map[string]interface{}{"tools": len(run.tools)})
 		return requestProviderIterationResult{directive: generationTerminate}
 	}
 
@@ -1195,11 +1190,7 @@ streamLoop:
 			if s.suppressSurfaceIfSubagentCaused(sessionID, "midstream_provider_error", run.fullContent.String()) {
 				return consumeProviderIterationResult{directive: generationTerminate}
 			}
-			ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
-			ch <- chat.ErrorEvent(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
-			// Suppression already checked at line above; use the pre-classified
-			// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
-			s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+			s.surfaceProviderFailure(ctx, ch, sessionID, assistantMsgID, agentID, run.fullContent.String(), model, providerName, agent.Slug, fmt.Errorf("%s", evt.Error), nil)
 			return consumeProviderIterationResult{directive: generationTerminate}
 
 		case "session_id":

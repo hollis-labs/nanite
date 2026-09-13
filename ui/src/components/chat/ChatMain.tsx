@@ -65,6 +65,7 @@ export function ChatMain({ active = true, onEditorReady }: ChatMainProps) {
             isStreaming={isStreaming}
             streamingContent={streamingContent}
             onSendMessage={sendMessage}
+            onRetry={() => void retryStream()}
             onLoadOlder={loadOlderMessages}
             hasOlderMessages={hasOlderMessages}
             loadingOlder={loadingOlder}

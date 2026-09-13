@@ -1,10 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, Bot, Info, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranscriptScroll } from "@/hooks/useTranscriptScroll";
 import { api } from "@/lib/api";
 import { shouldRenderStandalonePluginEnvelope } from "@/lib/envelope-lane";
+import { messageProviderFailure } from "@/lib/provider-failure";
 import type { Message } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import {
@@ -61,6 +62,7 @@ interface ChatTranscriptProps {
   isStreaming: boolean;
   streamingContent: string;
   onSendMessage?: (content: string) => void;
+  onRetry?: () => void;
   onLoadOlder?: () => void;
   hasOlderMessages?: boolean;
   loadingOlder?: boolean;
@@ -74,6 +76,7 @@ export function ChatTranscript({
   isStreaming,
   streamingContent,
   onSendMessage,
+  onRetry,
   onLoadOlder,
   hasOlderMessages,
   loadingOlder,
@@ -85,8 +88,13 @@ export function ChatTranscript({
   const chatErrors = useChatErrors();
   const dismissChatError = useChatStore((s) => s.dismissChatError);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const modelUpdatePending = useIsMutating({ mutationKey: ["chat-model", sessionId ?? activeSessionId] }) > 0;
   const pluginEnvelopes = usePluginEnvelopes(activeSessionId);
   const queryClient = useQueryClient();
+  const [dismissedFailures, setDismissedFailures] = useState<Set<string>>(() => new Set());
+  const chooseModel = () => window.dispatchEvent(new CustomEvent("open-chat-model-picker", {
+    detail: { sessionId: sessionId ?? activeSessionId },
+  }));
 
   // F4 (CW-20260419-0029) — narration strip + collapse-pill.
   // F3 (CW-20260420-0023) — thinking strip.
@@ -300,6 +308,8 @@ export function ChatTranscript({
         )}
 
         {messages.map((msg, idx) => {
+          const failure = messageProviderFailure(msg);
+          const canRecover = idx === messages.length - 1;
           let showCompactionDivider = false;
           if (idx > 0) {
             try {
@@ -311,15 +321,22 @@ export function ChatTranscript({
             }
           }
           return (
-            <div key={msg.id}>
+            <div key={msg.id} {...(failure ? { "data-message-id": msg.id } : {})}>
               {showCompactionDivider && <CompactionDivider />}
-              <ChatMessage
+              {(!failure || failure.partial) && <ChatMessage
                 message={msg}
                 isBookmarked={bookmarkedMessageIds.has(msg.id)}
                 onToggleBookmark={handleToggleBookmark}
                 {...(onSendMessage && { onSendMessage })}
                 userMessageCount={userMessageCount}
-              />
+              />}
+              {failure && !dismissedFailures.has(msg.id) && <ErrorBanner
+                error={failure.error}
+                onDismiss={(id) => setDismissedFailures((previous) => new Set([...previous, id]))}
+                onRetry={canRecover ? onRetry : undefined}
+                onChooseModel={canRecover ? chooseModel : undefined}
+                busy={isStreaming || modelUpdatePending}
+              />}
             </div>
           );
         })}
@@ -398,12 +415,16 @@ export function ChatTranscript({
         )}
 
         {chatErrors
-          .filter((e) => !e.dismissed)
+          .filter((e) => !e.dismissed && (!e.details?.message_id || !messages.some((msg) =>
+            messageProviderFailure(msg)?.error.id === e.details?.message_id)))
           .map((error) => (
             <ErrorBanner
               key={error.id}
               error={error}
               onDismiss={(id) => activeSessionId && dismissChatError(activeSessionId, id)}
+              onRetry={onRetry}
+              onChooseModel={chooseModel}
+              busy={isStreaming || modelUpdatePending}
             />
           ))}
 

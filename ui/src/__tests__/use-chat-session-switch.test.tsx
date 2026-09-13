@@ -10,6 +10,7 @@ const {
   mockGetMessagesAround,
   mockCancelChatStream,
   mockGetSession,
+  mockRetryStream,
 } = vi.hoisted(() => ({
   mockSendMessage: vi.fn(),
   mockGetMessagePage: vi.fn(),
@@ -17,6 +18,7 @@ const {
   mockGetMessagesAround: vi.fn(),
   mockCancelChatStream: vi.fn(),
   mockGetSession: vi.fn(),
+  mockRetryStream: vi.fn(),
 }));
 
 vi.hoisted(() => {
@@ -46,11 +48,13 @@ vi.mock("@/lib/api", () => ({
     getMessagesAround: mockGetMessagesAround,
     cancelChatStream: mockCancelChatStream,
     getSession: mockGetSession,
+    retryStream: mockRetryStream,
   },
 }));
 
 import { useChat } from "@/hooks/useChat";
 import { useChatStore } from "@/stores/useChatStore";
+import { messageProviderFailure } from "@/lib/provider-failure";
 
 const SESSION_A = "sess-a";
 const SESSION_B = "sess-b";
@@ -133,6 +137,7 @@ beforeEach(() => {
   mockGetSessionPluginEnvelopes.mockResolvedValue([]);
   mockGetMessagesAround.mockResolvedValue({ messages: [], total: 0, has_more: false });
   mockCancelChatStream.mockResolvedValue(undefined);
+  mockRetryStream.mockResolvedValue({ message_id: "retry-message" });
   mockGetSession.mockImplementation(async (sessionId: string) => ({
     id: sessionId,
     messages: [],
@@ -235,6 +240,36 @@ describe("stream recovery", () => {
     expect(stream.closed).toBe(true);
     expect(latestHook?.sessionTakeover).toBe(true);
     expect(latestHook?.isStreaming).toBe(false);
+  });
+
+  it("keeps provider recovery choices across reload and retries only on request", async () => {
+    const view = renderHarness(SESSION_A);
+    await flushAsync();
+    await act(async () => { await latestHook?.sendMessage("Review the inbox"); });
+    const failure = {
+      code: "provider_error",
+      message: "The provider rejected the request settings. Choose another model.",
+      details: { source: "nanite", message_id: ASSISTANT_ID, request_rejected: true, model: "gpt-6-astra" },
+      timestamp: "2026-09-12T23:53:20Z",
+    };
+    act(() => lastStream().emit("error", { event_id: 1, structured_error: failure }));
+    const failedMessage = latestHook?.messages.at(-1);
+    if (!failedMessage) throw new Error("No failure message");
+    expect(messageProviderFailure(failedMessage)?.error.message).toBe(failure.message);
+    expect(latestHook?.isStreaming).toBe(false);
+    expect(mockRetryStream).not.toHaveBeenCalled();
+    view.unmount();
+    useChatStore.setState({ sessions: new Map() });
+    mockGetMessagePage.mockResolvedValue({ messages: [failedMessage], total: 1, has_more: false });
+    renderHarness(SESSION_A);
+    await flushAsync();
+    const restored = latestHook?.messages.at(-1);
+    expect(restored && messageProviderFailure(restored)?.error.message).toBe(failure.message);
+    expect(mockRetryStream).not.toHaveBeenCalled();
+    await act(async () => { await latestHook?.retryStream(); });
+    expect(mockRetryStream).toHaveBeenCalledWith(SESSION_A);
+    expect(lastStream().url).toBe("/api/stream/retry-message");
+    expect(latestHook?.isStreaming).toBe(true);
   });
 
   it("ignores a delayed mount response after a switch to another session", async () => {

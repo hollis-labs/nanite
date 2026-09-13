@@ -718,6 +718,7 @@ export function useChat(sessionId: string | null) {
         if (!e.data) return;
         markStreamActivity();
         if (!recordEventId(e.data as string)) return;
+        let providerFailure: StreamEvent["structured_error"] | undefined;
         // Custom SSE error event from the backend (has data).
         if (e.data) {
           try {
@@ -726,6 +727,7 @@ export function useChat(sessionId: string | null) {
             // Handle structured error from backend
             if (data.structured_error) {
               const se = data.structured_error;
+              if (se.details?.source === "nanite") providerFailure = se;
               store().addChatError(
                 sessionId,
                 makeChatError(se.code, se.message, se.details, se.timestamp),
@@ -741,20 +743,20 @@ export function useChat(sessionId: string | null) {
           }
         }
         // Finalize the stream with whatever we have.
-        const errorMsg: Message | undefined = accumulated
+        const errorMsg: Message | undefined = accumulated || providerFailure
           ? {
               id: message_id,
               session_id: sessionId,
               agent_id: "",
               role: "assistant",
-              content: accumulated,
+              content: accumulated || providerFailure?.message || "",
               envelope: null,
-              metadata: JSON.stringify({ had_error: true }),
+              metadata: JSON.stringify({ had_error: true, provider_error: providerFailure, partial_output: !!accumulated }),
               created_at: new Date().toISOString(),
             }
           : undefined;
         if (errorMsg) {
-          setMessages((prev) => [...prev, errorMsg]);
+          setMessages((prev) => [...prev.filter((msg) => msg.id !== errorMsg.id), errorMsg]);
         }
 
         // Persist error state so it survives page refresh.
@@ -867,8 +869,18 @@ export function useChat(sessionId: string | null) {
   }, [sessionId]);
 
   const retryStream = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId || sendPendingRef.current || queryClient.isMutating({ mutationKey: ["chat-model", sessionId] })) return;
     const generation = generationRef.current;
+    sendPendingRef.current = true;
+    const closeStream = () => {
+      eventSourceRef.current?.close();
+      eventSourceRef.current = null;
+    };
+    closeStream();
+    currentMessageIdRef.current = null;
+    store().clearStreaming(sessionId);
+    store().setStreaming(sessionId, true);
+    store().clearChatErrors(sessionId);
     store().setCircuitOpen(sessionId, false);
     store().clearToolCalls(sessionId);
     store().clearToolWarnings(sessionId);
@@ -877,18 +889,18 @@ export function useChat(sessionId: string | null) {
       const { message_id } = await api.retryStream(sessionId);
 
       if (generation !== generationRef.current) return;
+      sendPendingRef.current = false;
       connectStream(message_id);
     } catch (err) {
       if (generation !== generationRef.current) return;
+      sendPendingRef.current = false;
       console.error("Retry failed:", err);
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
+      closeStream();
       store().clearStreaming(sessionId);
+      store().addChatError(sessionId, makeChatError("internal_error", "Nanite could not restart the request. Your conversation is saved; please try again.", { raw: String(err) }));
       currentMessageIdRef.current = null;
     }
-  }, [connectStream, sessionId]);
+  }, [connectStream, queryClient, sessionId]);
 
   // CW-20260518-0084: manual dismissal of the interrupted-turn banner. The
   // banner also clears automatically when the user sends a new message

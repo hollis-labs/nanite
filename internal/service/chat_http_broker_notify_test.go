@@ -404,6 +404,7 @@ func TestClassifyHTTPStreamError(t *testing.T) {
 		{"net.DNSError → transport", dnsErr, causeHTTPStreamTransport, "transport"},
 		{"rate-budget sentinel → rate_budget", llmcontracts.ErrRequestExceedsRateBudget, causeHTTPStreamRateBudget, "rate_budget"},
 		{"429 substring → rate_limit", errors.New("got status 429 from provider"), causeHTTPStreamRateBudget, "rate_limit"},
+		{"rejected effort → user action", errors.New("openai: Bad Request 400 unsupported_value: reasoning_effort"), broker.CauseHTTPRequestRejected, "request_rejected"},
 		{"401 substring → auth", errors.New("401 unauthorized"), causeHTTPStreamHTTPStatus, "auth"},
 		{"500 substring → http_5xx", errors.New("provider returned 500 internal server error"), causeHTTPStreamHTTPStatus, "http_5xx"},
 		{"timeout substring → timeout", errors.New("read timed out after 30s"), causeHTTPStreamTimeout, "timeout"},

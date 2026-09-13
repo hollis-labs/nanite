@@ -18,9 +18,12 @@ const ERROR_CONFIG: Record<
 interface ErrorBannerProps {
   error: ChatError
   onDismiss: (id: string) => void
+  onRetry?: () => void
+  onChooseModel?: () => void
+  busy?: boolean
 }
 
-export function ErrorBanner({ error, onDismiss }: ErrorBannerProps) {
+export function ErrorBanner({ error, onDismiss, onRetry, onChooseModel, busy = false }: ErrorBannerProps) {
   const [showModal, setShowModal] = useState(false)
 
   if (error.dismissed) return null
@@ -32,7 +35,7 @@ export function ErrorBanner({ error, onDismiss }: ErrorBannerProps) {
       <Envelope accent={config.tone}>
         <EnvelopeHeader
           icon={config.icon}
-          label={config.label}
+          label={error.details?.source === 'nanite' ? 'Nanite · Request paused' : config.label}
           tone={config.tone}
           action={
             <div className="flex items-center gap-1">
@@ -57,6 +60,18 @@ export function ErrorBanner({ error, onDismiss }: ErrorBannerProps) {
         />
         <div className="px-4 py-3">
           <p className="text-[13px] leading-relaxed text-fg">{error.message}</p>
+          {(onRetry || onChooseModel) && (
+            <div className="mt-3 space-y-2">
+              <p className="text-xs text-fg-muted">How would you like to continue?</p>
+              <div className="flex flex-wrap gap-2">
+                {onChooseModel && <button type="button" disabled={busy} onClick={onChooseModel}
+                  className="rounded-md border border-border-subtle px-3 py-1.5 text-xs disabled:opacity-50">Choose another model</button>}
+                {onRetry && <button type="button" disabled={busy} onClick={onRetry}
+                  className="rounded-md border border-border-subtle px-3 py-1.5 text-xs disabled:opacity-50">Retry request</button>}
+              </div>
+              <p className="text-xs text-fg-muted">Choosing a model does not resend your request. Use Retry when you’re ready.</p>
+            </div>
+          )}
         </div>
       </Envelope>
 

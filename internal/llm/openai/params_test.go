@@ -6,15 +6,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
-// CW-20260912-0107. All three newly-seeded OpenAI models returned 400 on
-// every tool-bearing turn while gpt-4o kept working. The provider named
-// both the cause and the remedy: chat-completions refuses function tools
-// alongside an active reasoning effort, and these models apply one by
-// default when reasoning_effort is absent.
-//
-// The regression guard here is the gpt-4o case. Setting the field
-// unconditionally would fix the three new models by breaking the one
-// OpenAI path that already worked.
+// Chat Completions compatibility stays explicit while reasoning turns use Responses.
 
 func toolReq(model string) llmtypes.ChatRequest {
 	return llmtypes.ChatRequest{
@@ -42,9 +34,9 @@ func TestBuildChatParams_ReasoningEffortOnlyForReasoningModelsWithTools(t *testi
 			why:  "the model reasons by default and tools would 400 without this",
 		},
 		{
-			name: "gpt-6-astra with tools is disabled",
+			name: "Astra is never sent unsupported none",
 			req:  toolReq("gpt-6-astra"),
-			want: "none",
+			want: "",
 		},
 		{
 			name: "gpt-5.6-luna with tools is disabled",
@@ -81,15 +73,15 @@ func TestBuildChatParams_ReasoningEffortOnlyForReasoningModelsWithTools(t *testi
 	}
 }
 
-func TestModelDefaultsToReasoning(t *testing.T) {
+func TestModelSupportsReasoning(t *testing.T) {
 	cases := map[string]bool{
 		// Reasoning models — seeded 2026-09-12.
 		"gpt-5.6":      true,
 		"gpt-5.6-luna": true,
 		"gpt-6-astra":  true,
-		// Major version is read, not matched by name, so this needs no edit.
-		"gpt-7":  true,
-		"gpt-10": true,
+		// Do not infer capabilities for future major versions.
+		"gpt-7":  false,
+		"gpt-10": false,
 		// o-series.
 		"o1":      true,
 		"o3-mini": true,
@@ -107,8 +99,8 @@ func TestModelDefaultsToReasoning(t *testing.T) {
 		"gpt-":            false,
 	}
 	for model, want := range cases {
-		if got := modelDefaultsToReasoning(model); got != want {
-			t.Errorf("modelDefaultsToReasoning(%q) = %v, want %v", model, got, want)
+		if got := modelSupportsReasoning(model); got != want {
+			t.Errorf("modelSupportsReasoning(%q) = %v, want %v", model, got, want)
 		}
 	}
 }

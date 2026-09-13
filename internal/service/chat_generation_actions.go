@@ -61,6 +61,9 @@ func (s *chatServiceImpl) settleToolTurn(
 	prov := setup.provider
 	// --- Build assistant message with tool_use blocks ---
 	var assistantBlocks []llmtypes.ContentBlock
+	if run.providerOutput != nil {
+		assistantBlocks = append(assistantBlocks, *run.providerOutput)
+	}
 	// F3 (CW-20260420-0023): thinking blocks MUST precede text and tool_use
 	// blocks in the assistant message. Anthropic verifies signatures on round-trip;
 	// preserve Thinking and Signature verbatim.
@@ -88,6 +91,7 @@ func (s *chatServiceImpl) settleToolTurn(
 	})
 	// Reset per-iteration thinking accumulator so next iteration starts fresh.
 	run.thinkingBlocks = run.thinkingBlocks[:0]
+	run.providerOutput = nil
 
 	// --- Execute tools (pre-check → parallel/serial → post-process) ---
 
@@ -414,6 +418,7 @@ type runState struct {
 	finalUsage       *chat.Usage
 	breakdown        *chat.TokenBreakdown
 	thinkingBlocks   []llmtypes.ThinkingBlock
+	providerOutput   *llmtypes.ContentBlock
 	startCancel      context.CancelFunc
 }
 
@@ -1203,11 +1208,23 @@ streamLoop:
 			// observes and discards (vs falling into the default).
 			_ = evt.SessionID
 
+		case "openai_response_output":
+			// Opaque Responses items are replayed only within this tool loop.
+			// They contain encrypted reasoning and must never become UI deltas.
+			run.providerOutput = &llmtypes.ContentBlock{Type: "openai_response_output", Text: evt.Content}
+
 		case "thinking":
 			// F3 (CW-20260420-0023): interleaved thinking block. Persist
 			// signed block for round-trip; emit to FE as PhaseThinking.
 			if evt.ThinkingBlock != nil {
-				run.thinkingBlocks = append(run.thinkingBlocks, *evt.ThinkingBlock)
+				last := len(run.thinkingBlocks) - 1
+				if last >= 0 && evt.ThinkingBlock.Signature == "" && run.thinkingBlocks[last].Signature == "" {
+					// Responses summaries arrive as unsigned deltas. Keep their
+					// persisted text contiguous while rendering each delta live.
+					run.thinkingBlocks[last].Thinking += evt.ThinkingBlock.Thinking
+				} else {
+					run.thinkingBlocks = append(run.thinkingBlocks, *evt.ThinkingBlock)
+				}
 				stopDiag := diagWatchChSend(ctx, "streamLoop.thinking", ch, sessionID, assistantMsgID, run.loop.iteration, "delta")
 				ch <- chat.StreamEvent{Type: "delta", Content: evt.ThinkingBlock.Thinking, Phase: chat.PhaseThinking}
 				stopDiag()

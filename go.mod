@@ -24,7 +24,6 @@ require (
 	github.com/hollis-labs/go-sandbox v0.3.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/oklog/ulid/v2 v2.1.2
-	github.com/openai/openai-go v1.12.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 )
@@ -114,5 +113,6 @@ require (
 	github.com/hollis-labs/go-tether-client v0.3.0
 	github.com/hollis-labs/go-workflow v0.1.0
 	github.com/hollis-labs/tesseract v0.10.0
+	github.com/openai/openai-go/v3 v3.61.0
 	github.com/pressly/goose/v3 v3.28.0
 )

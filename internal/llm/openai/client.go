@@ -19,8 +19,8 @@ import (
 
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	sdk "github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
+	sdk "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 )
 
 // Client wraps openai-go and implements llmcontracts.Provider for the
@@ -87,6 +87,9 @@ func (c *Client) Capabilities() llmtypes.ProviderCapabilities {
 // message text concatenated from the first choice. Tool calls are not
 // surfaced through Complete — use StreamChat for tool-using turns.
 func (c *Client) Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error) {
+	if useResponses(ctx, req) {
+		return c.completeResponse(ctx, req)
+	}
 	params, err := buildChatParams(req)
 	if err != nil {
 		return "", err

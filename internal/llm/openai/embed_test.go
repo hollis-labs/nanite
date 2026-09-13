@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/v3/option"
 )
 
 func newTestEmbedder(t *testing.T, handler http.HandlerFunc) *Embedder {

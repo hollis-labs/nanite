@@ -16,7 +16,7 @@ import { LayoutMenu } from "./LayoutMenu";
 
 // F1 (CW-20260420-0014) — Effort levels for the per-turn budget + reasoning dial.
 const EFFORT_LEVELS = [
-  { value: "low", label: "Low", title: "Effort: Low — 0.5× token budget, reasoning off" },
+  { value: "low", label: "Low", title: "Effort: Low — 0.5× token budget, minimum supported reasoning" },
   { value: "normal", label: "Norm", title: "Effort: Normal — 1.0× token budget (default)" },
   { value: "high", label: "High", title: "Effort: High — 2.0× token budget, reasoning on" },
   { value: "max", label: "Max", title: "Effort: Max — 4.0× token budget, intensive reasoning" },

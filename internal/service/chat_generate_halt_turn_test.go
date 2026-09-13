@@ -109,7 +109,7 @@ func (haltTestTools) SelectForAgent(context.Context, string, string, string, str
 func (haltTestTools) Execute(context.Context, string, string, map[string]any) (*ToolResult, error) {
 	panic("haltTestTools: Execute not implemented")
 }
-func (haltTestTools) HandleRequestTools(context.Context, map[string]any) ([]llmtypes.ToolDefinition, string, error) {
+func (haltTestTools) HandleRequestTools(context.Context, string, map[string]any) ([]llmtypes.ToolDefinition, string, error) {
 	panic("haltTestTools: HandleRequestTools not implemented")
 }
 func (haltTestTools) ListSummaries() []toolclient.ToolSummary { return nil }

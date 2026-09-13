@@ -98,7 +98,7 @@ Parameter shape:
 
 Workflow:
 - **Discover before read.** Use dev_glob or dev_grep first if you aren't already sure the path exists. Running dev_read on a speculative path wastes a tool call.
-- **Cache pointer pattern.** When a tool result ends with a footer like ` + "`[TRUNCATED — full result cached as tool_result://<ULID> ...]`" + `, don't re-invoke the source tool to get more. Call ` + "`fetch_tool_result`" + ` with the ULID to retrieve slices, or ` + "`search_tool_result`" + ` to regex-match across the full cached body.
+- **Cache pointer pattern.** When a tool result ends with a footer like ` + "`[TRUNCATED — full result cached as tool_result://<ULID> ...]`" + `, treat the preview as incomplete evidence. Read relevant omitted sections before claiming a complete review or current-state conclusion. Don't re-invoke the source tool to get more. Call ` + "`fetch_tool_result`" + ` with the ULID to retrieve slices, or ` + "`search_tool_result`" + ` to regex-match across the full cached body. Use json_pointer to select JSON fields (including /stdout for Python output); follow has_more/next_offset for paging. Read large source collections in bounded sections rather than concatenating entire corpora.
 - **Parallelize independent calls.** If two lookups don't depend on each other, request them in the same assistant turn — the harness executes tool blocks in parallel.
 - **Stop when done.** Extra tool calls don't add trust; they just dilute the grounding.
 
@@ -1040,6 +1040,7 @@ func classifyModeFromAgentTags(agent *store.AgentProfile) string {
 //     table this used to also write to — see persistBrokerCallEx).
 func (s *chatServiceImpl) handleRequestTools(
 	ctx context.Context,
+	agentID string,
 	tu llmtypes.ToolUseBlock,
 	ch chan chat.StreamEvent,
 	tools []llmtypes.ToolDefinition,
@@ -1052,7 +1053,7 @@ func (s *chatServiceImpl) handleRequestTools(
 	sessionID string,
 	reflectionFired *bool,
 	inspectorTurnID string, // I1 (CW-20260426-0004): "" when inspector is disabled
-) ([]llmtypes.ContentBlock, []chat.ToolCallRef) {
+) ([]llmtypes.ContentBlock, []chat.ToolCallRef, []llmtypes.ToolDefinition) {
 	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
 	*totalCalls++
 
@@ -1098,7 +1099,7 @@ func (s *chatServiceImpl) handleRequestTools(
 			Type: "tool_result", ToolUseID: tu.ID, Content: reflection,
 		})
 		toolCallRefs = append(toolCallRefs, chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
-		return resultBlocks, toolCallRefs
+		return resultBlocks, toolCallRefs, tools
 	}
 
 	// Hard cap. CW-20260419-0012: friendlier halt message that actually
@@ -1125,10 +1126,19 @@ func (s *chatServiceImpl) handleRequestTools(
 			Type: "tool_result", ToolUseID: tu.ID, Content: rtResult,
 		})
 		toolCallRefs = append(toolCallRefs, chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
-		return resultBlocks, toolCallRefs
+		return resultBlocks, toolCallRefs, tools
 	}
 
-	newTools, rtResult, _ := s.tools.HandleRequestTools(ctx, tu.Input)
+	newTools, rtResult, err := s.tools.HandleRequestTools(ctx, agentID, tu.Input)
+	if err != nil {
+		message := fmt.Sprintf("Tool discovery failed: %v", err)
+		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: message, IsError: true}
+		resultBlocks = append(resultBlocks, llmtypes.ContentBlock{
+			Type: "tool_result", ToolUseID: tu.ID, Content: message, IsError: true,
+		})
+		toolCallRefs = append(toolCallRefs, chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "error"})
+		return resultBlocks, toolCallRefs, tools
+	}
 
 	var loaded []string
 	for _, nt := range newTools {
@@ -1161,7 +1171,7 @@ func (s *chatServiceImpl) handleRequestTools(
 	})
 	toolCallRefs = append(toolCallRefs, chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
 
-	return resultBlocks, toolCallRefs
+	return resultBlocks, toolCallRefs, tools
 }
 
 // sortedKeys returns the keys of a map[string]bool in alphabetical order.

@@ -1,4 +1,9 @@
 import { create } from "zustand";
+import {
+  readTranscriptPosition,
+  type TranscriptPosition,
+  writeTranscriptPosition,
+} from "@/lib/transcript-position";
 import type {
   ActiveStreamInfo,
   ChatError,
@@ -47,6 +52,7 @@ interface ChatStore {
 
   // ── Streaming writers ──
   setStreaming: (sessionID: string, streaming: boolean) => void;
+  setStreamCursor: (sessionID: string, messageId: string, cursor: number) => void;
   appendStreamContent: (sessionID: string, content: string) => void;
   appendStreamNarration: (sessionID: string, content: string) => void;
   appendStreamFinal: (sessionID: string, content: string) => void;
@@ -99,6 +105,8 @@ interface ChatStore {
   // ── Composer ──
   setComposerDraft: (sessionID: string, draft: string) => void;
   clearComposerDraft: (sessionID: string) => void;
+  getTranscriptPosition: (sessionID: string) => TranscriptPosition | null;
+  saveTranscriptPosition: (sessionID: string, position: TranscriptPosition) => void;
 
   // ── Genuinely cross-session state (stays global) ──
   /** Tool-call display preference. User-level pref with optional per-session override (localStorage-backed). */
@@ -178,8 +186,16 @@ function applyToSession(
   return next;
 }
 
-export const useChatStore = create<ChatStore>((set) => ({
+export const useChatStore = create<ChatStore>((set, get) => ({
   sessions: new Map(),
+  getTranscriptPosition: (sessionID) =>
+    get().sessions.get(sessionID)?.transcriptPosition ?? readTranscriptPosition(sessionID),
+  saveTranscriptPosition: (sessionID, position) => {
+    writeTranscriptPosition(sessionID, position);
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { transcriptPosition: position }),
+    }));
+  },
 
   // ── Lifecycle ──
   ensureSession: (sessionID) =>
@@ -206,11 +222,20 @@ export const useChatStore = create<ChatStore>((set) => ({
         streamingNarration: "",
         streamingFinal: "",
         streamingThinking: "",
+        streamMessageId: null,
+        streamCursor: 0,
         statusMessage: null,
       }),
     })),
 
   // ── Streaming writers ──
+  setStreamCursor: (sessionID, messageId, cursor) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, {
+        streamMessageId: messageId,
+        streamCursor: cursor,
+      }),
+    })),
   setStreaming: (sessionID, streaming) =>
     set((state) => ({
       // CW-20260518-0084: starting a fresh turn is the "send-to-resume" action
@@ -485,8 +510,12 @@ export const useChatStore = create<ChatStore>((set) => ({
   },
   loadToolCallDisplayMode: (sessionID) => {
     if (!sessionID) return;
-    const sessionMode = safeLocalStorageGet(`nanite:tcMode:${sessionID}`) as ToolCallDisplayMode | null;
-    const globalMode = safeLocalStorageGet("nanite:toolCallDisplayMode") as ToolCallDisplayMode | null;
+    const sessionMode = safeLocalStorageGet(
+      `nanite:tcMode:${sessionID}`,
+    ) as ToolCallDisplayMode | null;
+    const globalMode = safeLocalStorageGet(
+      "nanite:toolCallDisplayMode",
+    ) as ToolCallDisplayMode | null;
     set({ toolCallDisplayMode: sessionMode || globalMode || "minimal" });
   },
   saveToolCallDisplayMode: (sessionID, mode) => {

@@ -372,6 +372,7 @@ export const api = {
       // CW-20260518-0084: carry the interrupted-turn signal through the
       // flatten so consumers can detect a restart-killed in-flight turn.
       interrupted_turn: raw.interrupted_turn ?? null,
+      active_message_id: raw.active_message_id ?? null,
     };
   },
 

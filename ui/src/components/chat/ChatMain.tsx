@@ -1,7 +1,8 @@
 import { Key, MessageSquare, Puzzle, Settings } from "lucide-react";
-import { TaskThreadPanel } from "@/components/messaging/TaskThreadPanel";
+import { Activity } from "react";
 import { ChatPrimaryDrawer } from "@/components/drawers/ChatPrimaryDrawer";
 import { ChatWorkingDrawer } from "@/components/drawers/ChatWorkingDrawer";
+import { TaskThreadPanel } from "@/components/messaging/TaskThreadPanel";
 import { useChat } from "@/hooks/useChat";
 import { useTaskContext } from "@/hooks/useTaskContext";
 import { useAppStore } from "@/stores/useAppStore";
@@ -11,15 +12,18 @@ import { ChatHeader } from "./ChatHeader";
 import { ChatTranscript } from "./ChatTranscript";
 
 interface ChatMainProps {
+  active?: boolean;
   onEditorReady?: (focus: () => void) => void;
 }
 
-export function ChatMain({ onEditorReady }: ChatMainProps) {
+export function ChatMain({ active = true, onEditorReady }: ChatMainProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const taskThreadOpen = useLayoutStore((s) => s.taskThreadOpen);
   const toggleTaskThread = useLayoutStore((s) => s.toggleTaskThread);
   const {
     messages,
+    messagesReady,
+    oldestOffset,
     isStreaming,
     streamingContent,
     statusMessage,
@@ -39,50 +43,61 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
   const { isTaskSession, taskId } = useTaskContext();
 
   if (!activeSessionId) {
-    return <WelcomeScreen />;
+    return (
+      <Activity mode={active ? "visible" : "hidden"}>
+        <WelcomeScreen />
+      </Activity>
+    );
   }
 
   return (
-    <div className="flex-1 flex min-w-0">
-      <main className="flex-1 flex flex-col min-w-0 bg-bg relative">
-        <ChatHeader />
-        <ChatPrimaryDrawer />
-        <ChatTranscript
-          messages={messages}
-          isStreaming={isStreaming}
-          streamingContent={streamingContent}
-          onSendMessage={sendMessage}
-          onLoadOlder={loadOlderMessages}
-          hasOlderMessages={hasOlderMessages}
-          loadingOlder={loadingOlder}
-        />
-        {statusMessage && !sessionTakeover && !circuitOpen && (
-          <div className="max-w-3xl w-full mx-auto px-4 py-1.5 text-xs text-warning animate-pulse">
-            {statusMessage}
-          </div>
-        )}
-        <ChatWorkingDrawer
-          sessionTakeover={sessionTakeover}
-          circuitOpen={circuitOpen}
-          interruptedTurn={interruptedTurn}
-          onRetry={() => void retryStream()}
-          onDismissCircuit={dismissCircuit}
-          onDismissInterruptedTurn={dismissInterruptedTurn}
-        />
-        <div className="max-w-3xl w-full mx-auto px-4 pb-1 shrink-0 relative">
-          <ChatComposer
-            onSend={sendMessage}
+    <Activity mode={active ? "visible" : "hidden"}>
+      <div className="flex-1 flex min-w-0">
+        <main className="flex-1 flex flex-col min-w-0 bg-bg relative">
+          <ChatHeader />
+          <ChatPrimaryDrawer />
+          <ChatTranscript
+            key={activeSessionId}
+            sessionId={activeSessionId}
+            messagesReady={messagesReady}
+            oldestOffset={oldestOffset}
+            messages={messages}
             isStreaming={isStreaming}
-            onStop={stopStreaming}
-            onEditorReady={onEditorReady}
-            reloadMessages={loadMessages}
+            streamingContent={streamingContent}
+            onSendMessage={sendMessage}
+            onRetry={() => void retryStream()}
+            onLoadOlder={loadOlderMessages}
+            hasOlderMessages={hasOlderMessages}
+            loadingOlder={loadingOlder}
           />
-        </div>
-      </main>
-      {isTaskSession && taskId && (
-        <TaskThreadPanel taskId={taskId} open={taskThreadOpen} onToggle={toggleTaskThread} />
-      )}
-    </div>
+          {statusMessage && !sessionTakeover && !circuitOpen && (
+            <div className="max-w-3xl w-full mx-auto px-4 py-1.5 text-xs text-warning animate-pulse">
+              {statusMessage}
+            </div>
+          )}
+          <ChatWorkingDrawer
+            sessionTakeover={sessionTakeover}
+            circuitOpen={circuitOpen}
+            interruptedTurn={interruptedTurn}
+            onRetry={() => void retryStream()}
+            onDismissCircuit={dismissCircuit}
+            onDismissInterruptedTurn={dismissInterruptedTurn}
+          />
+          <div className="max-w-3xl w-full mx-auto px-4 pb-1 shrink-0 relative">
+            <ChatComposer
+              onSend={sendMessage}
+              isStreaming={isStreaming}
+              onStop={stopStreaming}
+              onEditorReady={onEditorReady}
+              reloadMessages={loadMessages}
+            />
+          </div>
+        </main>
+        {isTaskSession && taskId && (
+          <TaskThreadPanel taskId={taskId} open={taskThreadOpen} onToggle={toggleTaskThread} />
+        )}
+      </div>
+    </Activity>
   );
 }
 

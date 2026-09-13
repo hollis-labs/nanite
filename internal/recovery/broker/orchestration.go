@@ -196,9 +196,13 @@ func (b *Broker) runTransientRetry(ev *FailureEvent, c Classification, started t
 // classification, hard cap exhaustion, remediation failure, dispatch
 // failure.
 func (b *Broker) escalatePermanent(ev *FailureEvent, c Classification, started time.Time) {
-	env := b.RenderUserMessage(ev, c, ActionPermanentFailure)
-	if err := b.emitEnvelope(ev.SessionID, env); err != nil {
-		b.logger().Warn("recovery: permanent envelope emit failed", "session_id", ev.SessionID, "err", err)
+	// HTTP request rejections already have a durable chat explanation and
+	// continuation controls. Record the outcome without a second error card.
+	if ev.Exit == nil || ev.Exit.Cause != CauseHTTPRequestRejected {
+		env := b.RenderUserMessage(ev, c, ActionPermanentFailure)
+		if err := b.emitEnvelope(ev.SessionID, env); err != nil {
+			b.logger().Warn("recovery: permanent envelope emit failed", "session_id", ev.SessionID, "err", err)
+		}
 	}
 	b.recordOutcome(ev, c, ActionPermanentFailure, OutcomePermanent, started)
 	// Permanent escalation marks the end of recovery for this session;

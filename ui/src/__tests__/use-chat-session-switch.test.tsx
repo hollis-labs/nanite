@@ -10,6 +10,7 @@ const {
   mockGetMessagesAround,
   mockCancelChatStream,
   mockGetSession,
+  mockRetryStream,
 } = vi.hoisted(() => ({
   mockSendMessage: vi.fn(),
   mockGetMessagePage: vi.fn(),
@@ -17,6 +18,7 @@ const {
   mockGetMessagesAround: vi.fn(),
   mockCancelChatStream: vi.fn(),
   mockGetSession: vi.fn(),
+  mockRetryStream: vi.fn(),
 }));
 
 vi.hoisted(() => {
@@ -46,11 +48,13 @@ vi.mock("@/lib/api", () => ({
     getMessagesAround: mockGetMessagesAround,
     cancelChatStream: mockCancelChatStream,
     getSession: mockGetSession,
+    retryStream: mockRetryStream,
   },
 }));
 
 import { useChat } from "@/hooks/useChat";
 import { useChatStore } from "@/stores/useChatStore";
+import { messageProviderFailure } from "@/lib/provider-failure";
 
 const SESSION_A = "sess-a";
 const SESSION_B = "sess-b";
@@ -67,12 +71,25 @@ class FakeEventSource {
     FakeEventSource.instances.push(this);
   }
 
-  addEventListener() {}
+  listeners = new Map<string, (event: MessageEvent) => void>();
+  onerror: (() => void) | null = null;
+  addEventListener(type: string, listener: (event: MessageEvent) => void) {
+    this.listeners.set(type, listener);
+  }
+  emit(type: string, data: unknown) {
+    this.listeners.get(type)?.({ data: JSON.stringify(data) } as MessageEvent);
+  }
   removeEventListener() {}
 
   close() {
     this.closed = true;
   }
+}
+
+function lastStream() {
+  const stream = FakeEventSource.instances.at(-1);
+  if (!stream) throw new Error("No stream was opened");
+  return stream;
 }
 
 let latestHook: ReturnType<typeof useChat> | null = null;
@@ -112,11 +129,15 @@ beforeEach(() => {
     cliActiveSessions: new Map(),
   });
 
-  mockSendMessage.mockResolvedValue({ message_id: ASSISTANT_ID, stream_url: `/api/stream/${ASSISTANT_ID}` });
+  mockSendMessage.mockResolvedValue({
+    message_id: ASSISTANT_ID,
+    stream_url: `/api/stream/${ASSISTANT_ID}`,
+  });
   mockGetMessagePage.mockResolvedValue({ messages: [], total: 0, has_more: false });
   mockGetSessionPluginEnvelopes.mockResolvedValue([]);
   mockGetMessagesAround.mockResolvedValue({ messages: [], total: 0, has_more: false });
   mockCancelChatStream.mockResolvedValue(undefined);
+  mockRetryStream.mockResolvedValue({ message_id: "retry-message" });
   mockGetSession.mockImplementation(async (sessionId: string) => ({
     id: sessionId,
     messages: [],
@@ -146,5 +167,128 @@ describe("useChat session switching", () => {
     await flushAsync();
 
     expect(FakeEventSource.instances[0]?.closed).toBe(true);
+  });
+});
+
+describe("stream recovery", () => {
+  it("reattaches after leaving mid-turn, retaining content and skipping duplicate events", async () => {
+    const view = renderHarness(SESSION_A);
+    await flushAsync();
+    await act(async () => {
+      await latestHook?.sendMessage("hello");
+    });
+    const first = lastStream();
+    act(() => first.emit("delta", { event_id: 1, content: "Hello " }));
+    view.rerender(<HookHarness sessionId={SESSION_B} />);
+    await flushAsync();
+    expect(first.closed).toBe(true);
+    mockGetSession.mockImplementation(async (id: string) => ({
+      id,
+      messages: [],
+      active_message_id: id === SESSION_A ? ASSISTANT_ID : null,
+    }));
+    view.rerender(<HookHarness sessionId={SESSION_A} />);
+    await flushAsync();
+    const resumed = lastStream();
+    expect(resumed.url).toBe(`/api/stream/${ASSISTANT_ID}?from=1`);
+    act(() => {
+      resumed.emit("delta", { event_id: 1, content: "Hello " });
+      resumed.emit("delta", { event_id: 2, content: "again" });
+      resumed.emit("tool_call", { event_id: 3, tool_id: "tool-a", tool: "lookup" });
+      resumed.emit("tool_result", { event_id: 4, tool_id: "tool-a", summary: "found" });
+    });
+    expect(latestHook?.streamingContent).toBe("Hello again");
+    expect(useChatStore.getState().sessions.get(SESSION_A)?.toolCalls).toEqual([
+      expect.objectContaining({ id: "tool-a", status: "done", summary: "found" }),
+    ]);
+  });
+
+  it("discovers an in-flight turn on a fresh mount and finalizes from the persisted full answer", async () => {
+    mockGetSession.mockResolvedValue({ active_message_id: ASSISTANT_ID, messages: [] });
+    renderHarness(SESSION_A);
+    await flushAsync();
+    const stream = lastStream();
+    expect(stream.url).toBe(`/api/stream/${ASSISTANT_ID}`);
+    const complete = {
+      id: ASSISTANT_ID,
+      session_id: SESSION_A,
+      role: "assistant",
+      content: "Full answer including the evicted prefix",
+      created_at: "2026-09-12T01:00:00Z",
+    };
+    mockGetMessagePage.mockResolvedValue({ messages: [complete], total: 1, has_more: false });
+    await act(async () => {
+      stream.emit("delta", { event_id: 300, content: "only the tail" });
+      stream.emit("stream_end", { event_id: 301 });
+    });
+    expect(latestHook?.messages).toEqual([complete]);
+    expect(latestHook?.isStreaming).toBe(false);
+  });
+
+  it("keeps native transport errors reconnectable and stops on an explicit takeover", async () => {
+    mockGetSession.mockResolvedValue({ active_message_id: ASSISTANT_ID, messages: [] });
+    renderHarness(SESSION_A);
+    await flushAsync();
+    const stream = lastStream();
+    await act(async () => {
+      stream.listeners.get("error")?.({} as MessageEvent);
+      stream.onerror?.();
+    });
+    expect(stream.closed).toBe(false);
+    expect(latestHook?.isStreaming).toBe(true);
+    act(() => stream.emit("session_takeover", {}));
+    expect(stream.closed).toBe(true);
+    expect(latestHook?.sessionTakeover).toBe(true);
+    expect(latestHook?.isStreaming).toBe(false);
+  });
+
+  it("keeps provider recovery choices across reload and retries only on request", async () => {
+    const view = renderHarness(SESSION_A);
+    await flushAsync();
+    await act(async () => { await latestHook?.sendMessage("Review the inbox"); });
+    const failure = {
+      code: "provider_error",
+      message: "The provider rejected the request settings. Choose another model.",
+      details: { source: "nanite", message_id: ASSISTANT_ID, request_rejected: true, model: "gpt-6-astra" },
+      timestamp: "2026-09-12T23:53:20Z",
+    };
+    act(() => lastStream().emit("error", { event_id: 1, structured_error: failure }));
+    const failedMessage = latestHook?.messages.at(-1);
+    if (!failedMessage) throw new Error("No failure message");
+    expect(messageProviderFailure(failedMessage)?.error.message).toBe(failure.message);
+    expect(latestHook?.isStreaming).toBe(false);
+    expect(mockRetryStream).not.toHaveBeenCalled();
+    view.unmount();
+    useChatStore.setState({ sessions: new Map() });
+    mockGetMessagePage.mockResolvedValue({ messages: [failedMessage], total: 1, has_more: false });
+    renderHarness(SESSION_A);
+    await flushAsync();
+    const restored = latestHook?.messages.at(-1);
+    expect(restored && messageProviderFailure(restored)?.error.message).toBe(failure.message);
+    expect(mockRetryStream).not.toHaveBeenCalled();
+    await act(async () => { await latestHook?.retryStream(); });
+    expect(mockRetryStream).toHaveBeenCalledWith(SESSION_A);
+    expect(lastStream().url).toBe("/api/stream/retry-message");
+    expect(latestHook?.isStreaming).toBe(true);
+  });
+
+  it("ignores a delayed mount response after a switch to another session", async () => {
+    let resolvePage!: (page: unknown) => void;
+    mockGetMessagePage.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePage = resolve;
+        }),
+    );
+    mockGetSession.mockImplementation(async (id: string) => ({ messages: [], active_message_id: id === SESSION_A ? ASSISTANT_ID : null }));
+    const view = renderHarness(SESSION_A);
+    view.rerender(<HookHarness sessionId={SESSION_B} />);
+    await flushAsync();
+    await act(async () =>
+      resolvePage({ messages: [{ id: "old", session_id: SESSION_A }], total: 1, has_more: false }),
+    );
+    expect(latestHook?.messages).toEqual([]);
+    expect(latestHook?.messagesReady).toBe(true);
+    expect(FakeEventSource.instances).toEqual([]);
   });
 });

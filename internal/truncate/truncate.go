@@ -77,6 +77,12 @@ func computeDynamicMaxChars(modelID string) (effective int, windowTokens int) {
 	return proposed, windowTokens
 }
 
+// BudgetForModel is the shared preview and default retrieval-page budget.
+func BudgetForModel(modelID string) int {
+	budget, _ := computeDynamicMaxChars(modelID)
+	return budget
+}
+
 // OutputOption configures Output behavior.
 type OutputOption func(*outputConfig)
 

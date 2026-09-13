@@ -643,6 +643,7 @@ export interface InterruptedTurn {
 
 export interface SessionWithMessages extends Session {
   messages: Message[];
+  active_message_id?: string | null;
   /** Present only when the backend detected an interrupted in-flight turn. */
   interrupted_turn?: InterruptedTurn | null;
 }
@@ -1547,6 +1548,12 @@ export interface InspectorToolCallRecord {
   name: string;
   arguments: string;
   result: string;
+  visible_result?: string;
+  cache_id?: string;
+  preview_format?: string;
+  original_bytes?: number;
+  visible_bytes?: number;
+  budget_bytes?: number;
   is_error: boolean;
   latency_ms: number;
   cache_state: string;

@@ -173,7 +173,14 @@ takes `mode *store.AgentMode` / `sessionMode *store.Mode` parameters).
 
 ## INV5 — Pointer / stash determinism
 
-**Invariant.** When a slot's content exceeds its per-slot budget, the
+**Invariant.** Agent instructions (`SlotAgent`) always ship inline,
+including when they exceed their per-slot budget; final context-window
+assembly must not truncate them either. An agent must receive
+its role and boot instructions before it can use tools to orient itself.
+`TestSlotInvariants_AgentInstructionsInline` verifies this through slot
+assembly and the model-facing slot blocks across dispatch types.
+
+For other slots, when content exceeds its per-slot budget, the
 broker substitutes a deterministic pointer envelope
 (`<ref:artifact_id=ART-..., tokens=N, available via dev_read>`) and
 stashes the original content. Same `(SessionID, SlotName, Content)`

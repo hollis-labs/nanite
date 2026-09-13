@@ -61,7 +61,7 @@ type ToolService interface {
 	// HandleRequestTools processes a request_tools meta-tool call for
 	// progressive discovery. Returns newly-discovered tool definitions and
 	// a human-readable summary string.
-	HandleRequestTools(ctx context.Context, input map[string]any) ([]llmtypes.ToolDefinition, string, error)
+	HandleRequestTools(ctx context.Context, agentID string, input map[string]any) ([]llmtypes.ToolDefinition, string, error)
 
 	// ListSummaries returns lightweight name+description pairs for all
 	// registered tools (no full schemas).
@@ -676,12 +676,34 @@ func wrapWithRepairNote(toolOutput string, rec *recoverpkg.RecoverableError, ori
 }
 
 // HandleRequestTools implements ToolService.
-func (s *toolServiceImpl) HandleRequestTools(_ context.Context, input map[string]any) ([]llmtypes.ToolDefinition, string, error) {
+func (s *toolServiceImpl) HandleRequestTools(ctx context.Context, agentID string, input map[string]any) ([]llmtypes.ToolDefinition, string, error) {
 	if s.toolClient == nil {
 		return nil, "No tool client configured.", fmt.Errorf("no tool client configured")
 	}
-	tools, summary := s.toolClient.HandleRequestTools(input)
-	return tools, summary, nil
+	tools, summary := s.toolClient.HandleRequestToolsForAgent(ctx, agentID, input)
+	caller := describer.CallerAgent{ID: agentID}
+	if s.agents != nil {
+		agent, err := s.agents.GetAgent(ctx, agentID)
+		if err != nil {
+			return nil, "Cannot resolve the calling agent for tool discovery.", err
+		}
+		if agent != nil {
+			caller.Slug = agent.Slug
+			caller.DispatchAllowlist = parseParentDispatchAllowlist(agent.ParentDispatchAllowlist)
+			if agent.Slug == chatRoleAgentSlug {
+				filtered := applyChatSurfaceFilter(tools, dispatch.DefaultChatToolSurface())
+				if len(filtered) != len(tools) {
+					names := make([]string, 0, len(filtered))
+					for _, tool := range filtered {
+						names = append(names, tool.Name)
+					}
+					summary = fmt.Sprintf("Loaded tools: %s. Tools excluded from this agent's chat surface were not loaded.", strings.Join(names, ", "))
+				}
+				tools = filtered
+			}
+		}
+	}
+	return s.toolClient.RenderDescriptions(ctx, tools, caller), summary, nil
 }
 
 // ListSummaries implements ToolService.

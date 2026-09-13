@@ -6,6 +6,10 @@ import (
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 )
 
+// CauseHTTPRequestRejected is supplied by the HTTP chat path after surfacing
+// a request/configuration failure. Retrying the unchanged request cannot help.
+const CauseHTTPRequestRejected = "http_request_rejected"
+
 // Classify decides the broker's response to a FailureEvent. Pure: same
 // input always produces same output. Per-session state (e.g. "is this
 // the second occurrence?") flows via FailureEvent.Attempt — populated
@@ -14,19 +18,20 @@ import (
 // Rule precedence (top wins):
 //
 //  1. Nil event or nil exit          → Permanent (defensive — caller bug)
-//  2. Cause idle_timeout             → Transient (no remediation)
-//  3. Cause watchdog_kill            → ConfigPermissions, RegenerateCLAUDEMD
-//  4. Cause oom_kill                 → Transient (single retry)
-//  5. Cause restart_exhausted        → Permanent
-//  6. Cause resource_limit           → Permanent (won't help to retry the same workload)
-//  7. Code 127 (command not found)   → Permanent
-//  8. SandboxDirState.Missing        → ConfigPermissions, RepopulateSandbox
-//  9. MCPTransport.Down              → ConfigPermissions, RefreshMCPTransport
-//  10. Stderr ~ 401/403/unauthorized → ConfigPermissions, RefreshCredentials
-//  11. Signal 11 (SEGV)              → Transient (single retry)
-//  12. Signal 9 + SessionAge < 5s    → Permanent (likely missing binary / immediate config error)
-//  13. Signal 9 + SessionAge >= 5s   → Transient
-//  14. Default Code != 0:
+//  2. Cause http_request_rejected    → Permanent (request must change)
+//  3. Cause idle_timeout             → Transient (no remediation)
+//  4. Cause watchdog_kill            → ConfigPermissions, RegenerateCLAUDEMD
+//  5. Cause oom_kill                 → Transient (single retry)
+//  6. Cause restart_exhausted        → Permanent
+//  7. Cause resource_limit           → Permanent (won't help to retry the same workload)
+//  8. Code 127 (command not found)   → Permanent
+//  9. SandboxDirState.Missing        → ConfigPermissions, RepopulateSandbox
+//  10. MCPTransport.Down              → ConfigPermissions, RefreshMCPTransport
+//  11. Stderr ~ 401/403/unauthorized → ConfigPermissions, RefreshCredentials
+//  12. Signal 11 (SEGV)              → Transient (single retry)
+//  13. Signal 9 + SessionAge < 5s    → Permanent (likely missing binary / immediate config error)
+//  14. Signal 9 + SessionAge >= 5s   → Transient
+//  15. Default Code != 0:
 //     Attempt == 1                → Transient
 //     Attempt >= 2                → Permanent (avoid retry loops on
 //     unclassified failures)
@@ -48,6 +53,12 @@ func Classify(ev *FailureEvent) Classification {
 	// Cause-based: lib-supervisor-triggered terminations carry the
 	// most authoritative classification signal, so they evaluate first.
 	switch xe.Cause {
+	case CauseHTTPRequestRejected:
+		return Classification{
+			Class:       ClassPermanent,
+			Reason:      "provider rejected the request; change its settings or model before retrying",
+			Remediation: RemediationNone,
+		}
 	case agentsessions.CauseIdleTimeout:
 		return Classification{
 			Class:       ClassTransient,

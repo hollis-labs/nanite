@@ -21,6 +21,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/truncate"
 )
 
@@ -87,8 +88,17 @@ func (s *chatServiceImpl) preCheckTools(
 		}
 
 		// Handle request_tools meta-tool.
-		if tu.Name == "request_tools" && selection != nil && selection.Progressive {
+		if tu.Name == "request_tools" {
 			plan.status = toolPlanMeta
+			plans = append(plans, plan)
+			continue
+		}
+		// These only read cached output from this session. They cannot acquire
+		// new authority or invoke an upstream, and must remain usable when the
+		// harness has replaced an allowed result with a cache pointer.
+		if isResultCacheTool(tu.Name) {
+			plan.status = toolPlanReady
+			plan.concurrent = true
 			plans = append(plans, plan)
 			continue
 		}
@@ -450,8 +460,12 @@ func (s *chatServiceImpl) executeSingleTool(
 	start := time.Now()
 
 	// Handle result-cache meta-tools locally (no MCP routing).
-	if tu.Name == "fetch_tool_result" || tu.Name == "search_tool_result" {
-		return s.handleResultCacheMetaTool(tu, sessionID, ch, mu, start)
+	if isResultCacheTool(tu.Name) {
+		budget := truncate.BudgetForModel("")
+		if ls != nil && ls.resultBudget > 0 {
+			budget = ls.resultBudget
+		}
+		return s.handleResultCacheMetaTool(tu, sessionID, ch, mu, start, budget)
 	}
 
 	// Handle P4 scratchpad tools locally (pure loopState access — no MCP routing).
@@ -558,20 +572,6 @@ func (s *chatServiceImpl) executeSingleTool(
 	}
 
 	duration := time.Since(start)
-
-	// I1 (CW-20260426-0004): record tool call to inspector (additive, non-blocking).
-	if s.inspector != nil && ls != nil && ls.inspectorTurnID != "" {
-		argsJSON, _ := json.Marshal(tu.Input)
-		s.inspector.RecordToolCall(sessionID, ls.inspectorTurnID, inspectsvc.ToolCallRecord{
-			ToolID:     tu.ID,
-			Name:       tu.Name,
-			Arguments:  string(argsJSON),
-			Result:     resultText,
-			IsError:    toolIsError,
-			LatencyMs:  duration.Milliseconds(),
-			CacheState: "n/a",
-		})
-	}
 
 	// I2 (CW-20260420-0029): fingerprint-based loop detection.
 	// Non-blocking: Record acquires its own mutex and returns immediately.
@@ -695,7 +695,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// the same value on repeated reads (the scratchpad contents haven't changed),
 		// and blocking it would deny the agent its own working memory.
 		var resultText string
-		if isScratchpadTool(tu.Name) {
+		if isScratchpadTool(tu.Name) || isResultCacheTool(tu.Name) {
 			resultText = r.rawOutput
 		} else {
 			resultText = s.detectStuckLoop(tu.Name, r.rawOutput, ls.lastToolResults, ls.toolRepeatCount, ls.blockedTools)
@@ -714,14 +714,18 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// soft cap in c114 (6813 bytes), forcing the agent through
 		// fetch/search and burning all 10 turns before it could emit a
 		// card.
+		view := tool.ResultView{BudgetBytes: truncate.BudgetForModel(modelID), Format: "complete"}
 		wasCached := false
+		wasPresented := false
 		if s.resultCache != nil && !r.isError && !isScratchpadTool(tu.Name) && !isCacheExemptTool(tu.Name) {
-			visible, cached, err := s.resultCache.StoreResult(sessionID, tu.ID, tu.Name, resultText)
+			presented, err := s.resultCache.PresentResult(sessionID, tu.ID, tu.Name, resultText, view.BudgetBytes)
 			if err != nil {
 				slog.Warn("chat-service: result cache store error", "tool", tu.Name, "err", err)
-			} else if cached {
-				resultText = visible
-				wasCached = true
+			} else {
+				view = presented
+				resultText = view.Content
+				wasCached = view.Cached
+				wasPresented = true
 			}
 		}
 
@@ -738,7 +742,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// !r.isError gate above); this matches that contract for the
 		// truncate path.
 		var tr truncate.Result
-		if wasCached || isScratchpadTool(tu.Name) || isCacheExemptTool(tu.Name) || r.isError {
+		if wasPresented || isScratchpadTool(tu.Name) || isCacheExemptTool(tu.Name) || r.isError {
 			// Scratchpad results are bounded by the 64 KiB turn cap enforced in
 			// loopState.scratchpadWrite — no caching or disk truncation needed.
 			// Errors pass through verbatim (load-bearing for agent recovery).
@@ -777,6 +781,26 @@ func (s *chatServiceImpl) postProcessToolResults(
 			s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "tool_truncated", "context",
 				tu.Name, fmt.Sprintf(`{"original_len":%d,"truncated_len":%d,"output_path":%q}`,
 					tr.OriginalLen, len(tr.Content), tr.OutputPath))
+		}
+
+		// Record both the original output and the exact post-processing view.
+		// Cache-navigation calls pass here too, making recovery visible.
+		if s.inspector != nil && ls.inspectorTurnID != "" {
+			argsJSON, _ := json.Marshal(tu.Input)
+			cacheState := "inline"
+			if wasCached {
+				cacheState = "cached"
+			}
+			if isResultCacheTool(tu.Name) {
+				cacheState = "retrieval"
+			}
+			s.inspector.RecordToolCall(sessionID, ls.inspectorTurnID, inspectsvc.ToolCallRecord{
+				ToolID: tu.ID, Name: tu.Name, Arguments: string(argsJSON),
+				Result: r.rawOutput, VisibleResult: &tr.Content, IsError: r.isError,
+				LatencyMs: r.duration.Milliseconds(), CacheState: cacheState,
+				CacheID: view.CacheID, PreviewFormat: view.Format,
+				OriginalBytes: len(r.rawOutput), VisibleBytes: len(tr.Content), BudgetBytes: view.BudgetBytes,
+			})
 		}
 
 		// Build final result block with truncated content.
@@ -885,6 +909,7 @@ func (s *chatServiceImpl) handleResultCacheMetaTool(
 	ch chan chat.StreamEvent,
 	mu *sync.Mutex,
 	start time.Time,
+	budget int,
 ) toolExecResult {
 	// Broadcast tool pending.
 	if mu != nil {
@@ -902,17 +927,12 @@ func (s *chatServiceImpl) handleResultCacheMetaTool(
 		resultText = "Error: result cache not available"
 		isError = true
 	} else if tu.Name == "fetch_tool_result" {
-		resultText, isError = s.handleFetchToolResult(sessionID, tu.Input)
+		resultText, isError = s.handleFetchToolResult(sessionID, tu.Input, budget)
 	} else {
-		resultText, isError = s.handleSearchToolResult(sessionID, tu.Input)
+		resultText, isError = s.handleSearchToolResult(sessionID, tu.Input, budget)
 	}
 
 	duration := time.Since(start)
-	summary := resultText
-	if len(summary) > 500 {
-		summary = summary[:500] + "... (truncated)"
-	}
-	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: summary, IsError: isError}
 
 	return toolExecResult{
 		resultBlock: llmtypes.ContentBlock{
@@ -925,52 +945,75 @@ func (s *chatServiceImpl) handleResultCacheMetaTool(
 	}
 }
 
-func (s *chatServiceImpl) handleFetchToolResult(sessionID string, input map[string]any) (string, bool) {
+func (s *chatServiceImpl) handleFetchToolResult(sessionID string, input map[string]any, budget int) (string, bool) {
 	id, _ := input["id"].(string)
 	if id == "" {
 		return "Error: 'id' is required", true
 	}
-	offset := 0
-	if v, ok := input["offset"].(float64); ok {
-		offset = int(v)
+	pointer, _ := input["json_pointer"].(string)
+	offset, err := cacheInt(input, "offset", 0)
+	if err != nil {
+		return "Error: " + err.Error(), true
 	}
-	length := 65536
-	if v, ok := input["length"].(float64); ok && v > 0 {
-		length = int(v)
+	length, err := cacheInt(input, "length", budget)
+	if err != nil {
+		return "Error: " + err.Error(), true
 	}
-
-	slice, totalSize, err := s.resultCache.Fetch(sessionID, id, offset, length)
+	page, err := s.resultCache.ReadPage(sessionID, id, pointer, offset, length, budget)
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err), true
 	}
-	header := fmt.Sprintf("[Cached result %s — showing bytes %d-%d of %d total]\n\n",
-		id, offset, offset+len(slice), totalSize)
-	return header + slice, false
+	header := fmt.Sprintf("[Cached result %s; json_pointer=%q; bytes %d..%d of %d (end-exclusive); has_more=%t; next_offset=%d]\n\n",
+		id, pointer, page.Offset, page.End, page.TotalBytes, page.HasMore, page.End)
+	return header + page.Content, false
 }
 
-func (s *chatServiceImpl) handleSearchToolResult(sessionID string, input map[string]any) (string, bool) {
+func (s *chatServiceImpl) handleSearchToolResult(sessionID string, input map[string]any, budget int) (string, bool) {
 	id, _ := input["id"].(string)
 	pattern, _ := input["pattern"].(string)
 	if id == "" || pattern == "" {
 		return "Error: 'id' and 'pattern' are required", true
 	}
-	maxMatches := 20
-	if v, ok := input["max_matches"].(float64); ok && v > 0 {
-		maxMatches = int(v)
+	pointer, _ := input["json_pointer"].(string)
+	offset, err := cacheInt(input, "offset", 0)
+	if err != nil {
+		return "Error: " + err.Error(), true
 	}
-
-	matches, err := s.resultCache.Search(sessionID, id, pattern, maxMatches)
+	maximum, err := cacheInt(input, "max_matches", 20)
+	if err != nil {
+		return "Error: " + err.Error(), true
+	}
+	page, err := s.resultCache.SearchPage(sessionID, id, pointer, pattern, offset, maximum, budget)
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err), true
 	}
-	if len(matches) == 0 {
-		return fmt.Sprintf("No matches found for pattern %q in cached result %s", pattern, id), false
+	var out strings.Builder
+	fmt.Fprintf(&out, "[Cached result %s; json_pointer=%q; matching lines=%d; total_bytes=%d; has_more=%t; next_offset=%d]\n", id, pointer, len(page.Matches), page.TotalBytes, page.HasMore, page.NextOffset)
+	for _, m := range page.Matches {
+		fmt.Fprintf(&out, "\n--- Line %d; match bytes %d..%d; context bytes %d..%d; context_truncated=%t ---\n%s\n", m.Line, m.MatchOffset, m.MatchEnd, m.ContextOffset, m.ContextEnd, m.ContextTruncated, m.Context)
 	}
+	if len(page.Matches) == 0 {
+		out.WriteString("No matching lines.\n")
+	}
+	return out.String(), false
+}
 
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Found %d match(es) for %q in cached result %s:\n\n", len(matches), pattern, id))
-	for i, m := range matches {
-		sb.WriteString(fmt.Sprintf("--- Match %d (line %d) ---\n%s\n\n", i+1, m.LineStart, m.Context))
+func cacheInt(input map[string]any, key string, fallback int) (int, error) {
+	value, exists := input[key]
+	if !exists || value == nil {
+		return fallback, nil
 	}
-	return sb.String(), false
+	var number float64
+	switch v := value.(type) {
+	case float64:
+		number = v
+	case int:
+		number = float64(v)
+	default:
+		return 0, fmt.Errorf("%s must be a non-negative integer", key)
+	}
+	if number < 0 || number > float64(1<<30) || number != float64(int(number)) {
+		return 0, fmt.Errorf("%s must be a non-negative integer no greater than 1073741824", key)
+	}
+	return int(number), nil
 }

@@ -111,12 +111,18 @@ type ToolCallRecord struct {
 	// Arguments is the raw JSON of the input map.
 	Arguments string `json:"arguments"`
 	// Result is the full tool output text.
-	Result string `json:"result"`
+	Result        string  `json:"result"`
+	VisibleResult *string `json:"visible_result,omitempty"`
+	CacheID       string  `json:"cache_id,omitempty"`
+	PreviewFormat string  `json:"preview_format,omitempty"`
+	OriginalBytes int     `json:"original_bytes,omitempty"`
+	VisibleBytes  int     `json:"visible_bytes,omitempty"`
+	BudgetBytes   int     `json:"budget_bytes,omitempty"`
 	// IsError is true when the tool returned an error result.
 	IsError bool `json:"is_error"`
 	// LatencyMs is the wall-clock time for the tool call in milliseconds.
 	LatencyMs int64 `json:"latency_ms"`
-	// CacheState is "hit", "miss", or "n/a".
+	// CacheState is inline, cached, retrieval, or n/a for older producers.
 	CacheState string `json:"cache_state"`
 }
 

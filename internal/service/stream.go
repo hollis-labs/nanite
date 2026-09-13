@@ -15,13 +15,14 @@ import (
 // StreamManager owns the concurrent state for message streams, SSE
 // connections, and presence. Extracted from Engine's 6 sync.Map fields.
 type StreamManager struct {
-	streams        sync.Map // messageID -> *messageStream (CW-20260418-0100)
-	msgToSession   sync.Map // messageID -> sessionID
-	sessionToMsgs  sync.Map // sessionID -> *sessionStreams (reverse index for session-scoped delivery)
-	sessionSSE     sync.Map // sessionID -> *sseConn
-	presenceClient sync.Map // clientID -> chan chat.PresenceEvent
-	activePresence sync.Map // sessionID -> chat.PresenceEvent
-	cliThrottle    sync.Map // sessionID -> time.Time
+	sseMu          sync.Mutex // serialize session takeover with subscriber replacement
+	streams        sync.Map   // messageID -> *messageStream (CW-20260418-0100)
+	msgToSession   sync.Map   // messageID -> sessionID
+	sessionToMsgs  sync.Map   // sessionID -> *sessionStreams (reverse index for session-scoped delivery)
+	sessionSSE     sync.Map   // sessionID -> *sseConn
+	presenceClient sync.Map   // clientID -> chan chat.PresenceEvent
+	activePresence sync.Map   // sessionID -> chat.PresenceEvent
+	cliThrottle    sync.Map   // sessionID -> time.Time
 
 	// CLIActiveThrottleInterval controls the minimum gap between cli_active
 	// presence events for the same session. Zero means use the default (5s).
@@ -315,6 +316,22 @@ func (sm *StreamManager) Subscribe(messageID string, fromEventID uint64) (<-chan
 	return ch, closed, true
 }
 
+// SubscribeSSE replaces a browser connection and its subscriber together.
+// Mark the old connection taken over before closing its event channel, so an
+// automatic reconnect cannot mistake a deliberate takeover for a network drop.
+func (sm *StreamManager) SubscribeSSE(messageID string, fromEventID uint64) (<-chan chat.StreamEvent, <-chan struct{}, bool) {
+	sm.sseMu.Lock()
+	defer sm.sseMu.Unlock()
+	val, ok := sm.streams.Load(messageID)
+	if !ok {
+		return nil, nil, false
+	}
+	ms := val.(*messageStream)
+	done := sm.RegisterSSE(ms.sessionID)
+	ch, _ := ms.subscribe(fromEventID)
+	return ch, done, true
+}
+
 // GetStream returns a subscription to the event stream for a given message
 // ID, starting from EventID 0. Any events currently in the ring buffer are
 // replayed before live events begin — equivalent to Subscribe(messageID, 0).
@@ -375,6 +392,30 @@ func (sm *StreamManager) GetSessionForMessage(messageID string) (string, bool) {
 		return "", false
 	}
 	return val.(string), true
+}
+
+// ActiveMessageForSession finds a turn that can still produce events. Closed
+// streams retained for replay must not mask a newer, in-flight turn.
+func (sm *StreamManager) ActiveMessageForSession(sessionID string) string {
+	val, ok := sm.sessionToMsgs.Load(sessionID)
+	if !ok {
+		return ""
+	}
+	ss := val.(*sessionStreams)
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	for id := range ss.ids {
+		if value, found := sm.streams.Load(id); found {
+			ms := value.(*messageStream)
+			ms.mu.Lock()
+			closed := ms.closed
+			ms.mu.Unlock()
+			if !closed {
+				return id
+			}
+		}
+	}
+	return ""
 }
 
 // HasLiveStreamForSession reports whether the process is currently holding an

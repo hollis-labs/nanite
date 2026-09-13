@@ -6,7 +6,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/llm/toolargs"
-	sdk "github.com/openai/openai-go"
+	sdk "github.com/openai/openai-go/v3"
 )
 
 // StreamChat opens a streaming chat completion against the OpenAI API and
@@ -23,6 +23,9 @@ import (
 //
 // The channel is closed after the terminator event.
 func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	if useResponses(ctx, req) {
+		return c.streamResponse(ctx, req)
+	}
 	params, err := buildChatParams(req)
 	if err != nil {
 		return nil, err
@@ -36,6 +39,7 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 	out := make(chan llmtypes.StreamEvent, 16)
 	go func() {
 		defer close(out)
+		defer func() { _ = stream.Close() }()
 		var (
 			stopReason   string
 			lastUsage    *llmtypes.Usage

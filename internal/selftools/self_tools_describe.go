@@ -62,7 +62,7 @@ func naniteToolDescribeDefinition() mcp.Tool {
 		Name: "tool_describe",
 		Description: "Return a tool's contract on demand: description, input schema, golden examples, and related tools/skills.\n\n" +
 			"**When to use:** When you're unsure about a tool's input shape, when you've never rendered a particular envelope `type` for `card_show`, or after a call fails with a schema-validation error. Cheap (registry + embed lookup, no LLM call) — prefer it to failing-and-retrying.\n\n" +
-			"**When NOT to use:** Skip this when you have already called the tool successfully in the same session, or when the tool is from a third-party MCP server (this only describes built-in self-server tools at v1).\n\n" +
+			"**Catalog:** Describes built-in and connected MCP tools from the same registry as tool_list. This is schema discovery, not a permission grant; use request_tools to load a tool for this turn.\n\n" +
 			"**Output shape:** {name, description, input_schema, examples: [{title, args, result?, notes?}], related_tools?: [string], related_skills?: [string]}.\n\n" +
 			"**Unknown tool name:** Returns a structured error with `closest_matches` (Levenshtein) so you can correct typos in one round-trip.",
 		InputSchema: map[string]any{
@@ -181,16 +181,15 @@ func (st *SelfToolsTransport) callToolDescribe(ctx context.Context, args map[str
 		return mcp.ErrorResult("name is required"), nil
 	}
 
-	// selfToolDefinitions() already includes tool_describe (see
-	// internal/mcp/self_tools.go), so a self-introspective call falls
-	// through the normal lookup path — no need to append it here.
-	defs := selfToolDefinitions()
+	// Use the same live catalog as tool_list, including connected MCP
+	// tools. Local definitions are the fallback when no manager is wired.
+	defs := st.gatherInventory(ctx)
 
-	var match *mcp.Tool
+	var match *inventoryEntry
 	names := make([]string, 0, len(defs))
 	for i := range defs {
-		names = append(names, defs[i].Name)
-		if defs[i].Name == name {
+		names = append(names, defs[i].name)
+		if defs[i].name == name {
 			match = &defs[i]
 		}
 	}
@@ -201,25 +200,25 @@ func (st *SelfToolsTransport) callToolDescribe(ctx context.Context, args map[str
 			"error":           "tool_not_found",
 			"name":            name,
 			"closest_matches": closest,
-			"hint":            "Pick one of closest_matches and re-call tool_describe with that exact name. If none match, the tool is not on the v1 self-tool surface (this tool does not describe plugin-shipped or third-party MCP tools).",
+			"hint":            "Check closest_matches or browse tool_list with a filter. This name is not in the current tool registry; its MCP server may not be connected.",
 		}
 		out, _ := json.Marshal(payload)
 		return mcp.ErrorResult(string(out)), nil
 	}
 
-	examples, err := loadGoldenExamples(match.Name)
+	examples, err := loadGoldenExamples(match.name)
 	if err != nil {
 		// Malformed example file is a server-side bug — surface it loudly
 		// but still return the rest of the contract so the caller is
 		// not stuck without a schema.
-		return mcp.ErrorResult(fmt.Sprintf("describe %s: %v", match.Name, err)), nil
+		return mcp.ErrorResult(fmt.Sprintf("describe %s: %v", match.name, err)), nil
 	}
 
-	rels := describeRelations[match.Name]
+	rels := describeRelations[match.name]
 	out := map[string]any{
-		"name":         match.Name,
-		"description":  match.Description,
-		"input_schema": match.InputSchema,
+		"name":         match.name,
+		"description":  match.description,
+		"input_schema": match.inputSchema,
 	}
 	if examples != nil {
 		out["examples"] = examples
@@ -246,7 +245,7 @@ func (st *SelfToolsTransport) callToolDescribe(ctx context.Context, args map[str
 	// back to learnings.DefaultUserID inside RecallByToolName, so
 	// single-user dogfood Just Works.
 	userID := strArg(args, "user_id", "")
-	if hints := st.RecallToolLearnings(ctx, userID, match.Name); len(hints) > 0 {
+	if hints := st.RecallToolLearnings(ctx, userID, match.name); len(hints) > 0 {
 		surfaced := make([]map[string]any, 0, len(hints))
 		for _, h := range hints {
 			surfaced = append(surfaced, map[string]any{
@@ -259,7 +258,7 @@ func (st *SelfToolsTransport) callToolDescribe(ctx context.Context, args map[str
 
 	body, err := json.Marshal(out)
 	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("describe %s: marshal: %v", match.Name, err)), nil
+		return mcp.ErrorResult(fmt.Sprintf("describe %s: marshal: %v", match.name, err)), nil
 	}
 	return mcp.TextResult(string(body)), nil
 }

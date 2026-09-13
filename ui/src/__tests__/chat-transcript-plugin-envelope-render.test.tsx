@@ -148,6 +148,17 @@ afterEach(() => {
   });
 });
 
+it("keeps errors without an assistant message ID visible beside ordinary messages", () => {
+  const message = "Nanite could not save the model change. Your previous model is still selected.";
+  useChatStore.getState().addChatError(SESSION_ID, {
+    id: "model-save-error", code: "internal_error", message,
+    timestamp: new Date().toISOString(), details: { raw: "update failed" },
+  });
+
+  const { getByText } = renderTranscript();
+  expect(getByText(message)).toBeTruthy();
+});
+
 describe("ChatTranscript — plugin_envelope inline render", () => {
   it("renders inline when render_target is unset (the 5-producer casualty path)", () => {
     // Wire shape matches what `useChat`'s plugin_envelope SSE handler

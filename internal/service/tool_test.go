@@ -56,7 +56,7 @@ func TestToolService_ListSummaries_NilClient(t *testing.T) {
 
 func TestToolService_HandleRequestTools_NilClient(t *testing.T) {
 	svc := NewToolService(nil, nil, nil)
-	_, _, err := svc.HandleRequestTools(context.Background(), nil)
+	_, _, err := svc.HandleRequestTools(context.Background(), "agent-1", nil)
 	if err == nil {
 		t.Error("expected error when tool client is nil")
 	}

@@ -6,10 +6,35 @@ import (
 	"strings"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
+
+func TestHandleRequestToolsForAgent_CacheNavigationRemainsAvailable(t *testing.T) {
+	s := newStoreForPermTest(t)
+	ctx := context.Background()
+	agent := &store.AgentProfile{Name: "Cache reader", Slug: "cache-reader", SystemPrompt: "test"}
+	if err := s.CreateAgent(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	tb := New(nil, s, DefaultConfig())
+	tb.Builtins.RegisterBuiltins("test", []llmtypes.ToolDefinition{
+		FetchToolResultMetaTool(), SearchToolResultMetaTool(),
+		{Name: "ordinary_source", Description: "An upstream source without a grant"},
+	})
+	permitted, summary := tb.HandleRequestToolsForAgent(ctx, agent.ID, map[string]any{
+		"tool_names": []any{"fetch_tool_result", "search_tool_result", "ordinary_source"},
+	})
+	seen := map[string]bool{}
+	for _, def := range permitted {
+		seen[def.Name] = true
+	}
+	if !seen["fetch_tool_result"] || !seen["search_tool_result"] || seen["ordinary_source"] {
+		t.Fatalf("cache schema discovery disagrees with chat execution rights: %v (%s)", seen, summary)
+	}
+}
 
 // TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md
 // replaced the legacy tool_permissions/CheckPermission execution-time

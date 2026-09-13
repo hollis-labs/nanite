@@ -214,6 +214,23 @@ func TestOnSessionExitHTTPProviderTransientRetry(t *testing.T) {
 	}
 }
 
+func TestRejectedHTTPRequestDoesNotRetry(t *testing.T) {
+	retry := &fakeHTTPRetry{}
+	store := &fakeStore{}
+	envelopes := newFakeEnvelope()
+	b := NewBroker(Dependencies{HTTPRetry: retry, Store: store, Envelope: envelopes})
+	b.OnSessionExit("rejected", &agentsessions.ExitError{Code: -1, Cause: CauseHTTPRequestRejected}, map[string]any{MetaKeyProvider: "openai"})
+	if retry.calls() != 0 {
+		t.Fatal("retried an unchanged invalid request")
+	}
+	if len(store.breadcrumbs) != 1 || store.breadcrumbs[0].Outcome != OutcomePermanent {
+		t.Fatalf("missing terminal recovery record: %+v", store.breadcrumbs)
+	}
+	if len(envelopes.get("rejected")) != 0 {
+		t.Fatal("duplicated the existing chat recovery explanation")
+	}
+}
+
 // TestOnSessionExitHTTPProviderExhaustsToPermanent drives repeated
 // HTTP-provider failures past the broker hard cap and confirms the same
 // escalation discipline the CLI path already has: bounded attempts, then

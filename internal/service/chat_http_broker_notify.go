@@ -10,6 +10,7 @@ import (
 
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 )
@@ -19,7 +20,8 @@ import (
 //
 // These are *nanite-side* causes — the lib's agentsessions.Cause* set is
 // CLI-supervisor-driven (idle_timeout, watchdog_kill, etc.) and doesn't
-// model HTTP streaming. The classifier doesn't branch on these directly;
+// model HTTP streaming. Rejected requests use broker.CauseHTTPRequestRejected
+// and are permanent immediately. The other causes are not branched on directly;
 // they fall through to the default Code != 0 path (Transient on first
 // attempt, Permanent on the second). The breadcrumb still gets the
 // authoritative cause string so postmortem queries can pivot off
@@ -233,26 +235,27 @@ func (s *chatServiceImpl) notifyRecoveryBrokerForHTTPStreamError(
 // in sync when adding branches):
 //
 //  1. nil error                                    → http_stream / unknown
-//  2. errors.Is(context.DeadlineExceeded|Canceled) → http_stream_timeout / timeout
-//  3. errors.Is(llmcontracts.ErrRequestExceedsRateBudget)
+//  2. rejected request/settings → http_request_rejected / request_rejected
+//  3. errors.Is(context.DeadlineExceeded|Canceled) → http_stream_timeout / timeout
+//  4. errors.Is(llmcontracts.ErrRequestExceedsRateBudget)
 //     → http_stream_rate_budget / rate_budget
-//  4. errors.As(net.Error) && Timeout()            → http_stream_timeout / timeout
-//  5. errors.As(*net.DNSError)                     → http_stream_transport / transport
-//  6. errors.As(*net.OpError)                      → http_stream_transport / transport
-//  7. errors.As(*url.Error)                        → http_stream_transport / transport
-//  8. substring "429" / "rate limit"               → http_stream_rate_budget / rate_limit
-//  9. substring "401" / "403" / "unauthorized"     → http_stream_http_status / auth
+//  5. errors.As(net.Error) && Timeout()            → http_stream_timeout / timeout
+//  6. errors.As(*net.DNSError)                     → http_stream_transport / transport
+//  7. errors.As(*net.OpError)                      → http_stream_transport / transport
+//  8. errors.As(*url.Error)                        → http_stream_transport / transport
+//  9. substring "429" / "rate limit"               → http_stream_rate_budget / rate_limit
+//  10. substring "401" / "403" / "unauthorized"     → http_stream_http_status / auth
 //     (cause is http_status so the
 //     classifier's StderrTail rule
 //     fires off the threaded message)
-//  10. substring "5xx" / "server error" / "internal server error" /
+//  11. substring "5xx" / "server error" / "internal server error" /
 //     " 500 " / " 502 " / " 503 " / " 504 "        → http_stream_http_status / http_5xx
-//  11. substring "timeout" / "timed out"            → http_stream_timeout / timeout
-//  12. substring "connection reset" / "connection refused" /
+//  12. substring "timeout" / "timed out"            → http_stream_timeout / timeout
+//  13. substring "connection reset" / "connection refused" /
 //     "broken pipe" / "no such host" / "eof"       → http_stream_transport / transport
-//  13. default                                      → http_stream / unknown
+//  14. default                                      → http_stream / unknown
 //
-// NB: the 429/rate-limit substring rule (step 8) runs BEFORE the
+// NB: the 429/rate-limit substring rule (step 9) runs BEFORE the
 // auth/http_5xx substring checks — provider rate-limit error strings
 // frequently include other status digits as context (e.g. "rate
 // limited; retry-after: 5; status=429"), so the rate-limit rule must
@@ -261,6 +264,9 @@ func (s *chatServiceImpl) notifyRecoveryBrokerForHTTPStreamError(
 func classifyHTTPStreamError(err error) (cause, errorClass string) {
 	if err == nil {
 		return causeHTTPStream, "unknown"
+	}
+	if chat.IsProviderRequestRejected(err) {
+		return broker.CauseHTTPRequestRejected, "request_rejected"
 	}
 
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {

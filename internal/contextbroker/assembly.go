@@ -32,6 +32,8 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+
+	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 )
 
 // SlotAction is the per-slot decision made by the assembly decider.
@@ -201,7 +203,8 @@ type AssemblyInput struct {
 //
 //  1. Empty content → ActionSkip (ReasonTag=skipped_no_content). No
 //     stash entry — there's nothing to stash.
-//  2. Content over the per-slot budget → stash to artifact store, then
+//  2. Agent instructions always ship inline. For other slots, content
+//     over the per-slot budget → stash to artifact store, then
 //     ActionPointer with `<ref:artifact_id=ART-..., tokens=N,
 //     available via dev_read>`. The original content also lands in
 //     plan.Stash[name] for in-process recovery (the artifact store is
@@ -261,6 +264,13 @@ func DecideAssembly(ctx context.Context, input AssemblyInput) AssemblyPlan {
 		tokens := EstimateTokens(content)
 
 		switch {
+		case name == ctxpkg.SlotAgent:
+			// The agent needs its instructions to orient and use discovery.
+			// Replacing them with a retrieval task removes that bootstrap.
+			decisions = append(decisions, SlotDecision{
+				SlotName: name, Content: content, Action: ActionShip, ReasonTag: "agent_instructions",
+			})
+
 		case budget > 0 && tokens > budget:
 			// Oversized — attempt to stash. Atomicity: stash MUST succeed
 			// before we emit a pointer. On failure, fall back to inline

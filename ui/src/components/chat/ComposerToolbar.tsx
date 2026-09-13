@@ -1,3 +1,4 @@
+import { useMutation } from "@tanstack/react-query";
 import { ArrowBigUp, ChevronDown, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -15,7 +16,7 @@ import { LayoutMenu } from "./LayoutMenu";
 
 // F1 (CW-20260420-0014) — Effort levels for the per-turn budget + reasoning dial.
 const EFFORT_LEVELS = [
-  { value: "low", label: "Low", title: "Effort: Low — 0.5× token budget, reasoning off" },
+  { value: "low", label: "Low", title: "Effort: Low — 0.5× token budget, minimum supported reasoning" },
   { value: "normal", label: "Norm", title: "Effort: Normal — 1.0× token budget (default)" },
   { value: "high", label: "High", title: "Effort: High — 2.0× token budget, reasoning on" },
   { value: "max", label: "Max", title: "Effort: Max — 4.0× token budget, intensive reasoning" },
@@ -88,6 +89,18 @@ export function ComposerToolbar({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const modelRef = useRef<HTMLDivElement>(null);
   const [dropdownPos, setDropdownPos] = useState<{ left: number; bottom: number } | null>(null);
+
+  useEffect(() => {
+    const open = (event: Event) => {
+      if ((event as CustomEvent<{ sessionId: string }>).detail?.sessionId !== activeSessionId || !buttonRef.current) return;
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPos({ left: rect.left, bottom: window.innerHeight - rect.top + 4 });
+      setModelOpen(true);
+      buttonRef.current.focus();
+    };
+    window.addEventListener("open-chat-model-picker", open);
+    return () => window.removeEventListener("open-chat-model-picker", open);
+  }, [activeSessionId]);
 
   const { data: models } = useModels();
   const { data: providers } = useProviders();
@@ -171,23 +184,27 @@ export function ComposerToolbar({
     return () => document.removeEventListener("mousedown", onDown);
   }, [modelOpen]);
 
-  const handleModelSelect = useCallback(
-    async (modelId: string) => {
-      setModelOpen(false);
-      if (!activeSessionId) return;
-      setActiveModel(activeSessionId, modelId);
-      try {
-        const selected = allModels.find((m) => m.id === modelId);
-        await api.updateSession(activeSessionId, {
-          model: modelId,
-          provider: selected?.provider || "anthropic",
-        } as never);
-      } catch (err) {
-        console.error("Failed to update model:", err);
-      }
+  const modelUpdate = useMutation({
+    mutationKey: ["chat-model", activeSessionId],
+    mutationFn: async ({ sessionId, modelId }: { sessionId: string; modelId: string }) => {
+      const selected = allModels.find((m) => m.id === modelId);
+      await api.updateSession(sessionId, {
+        model: modelId,
+        provider: selected?.provider || "anthropic",
+      });
     },
-    [activeSessionId, setActiveModel, allModels],
-  );
+    onSuccess: (_, { sessionId, modelId }) => setActiveModel(sessionId, modelId),
+    onError: (err, { sessionId }) => useChatStore.getState().addChatError(sessionId, {
+      id: crypto.randomUUID(), code: "internal_error", timestamp: new Date().toISOString(),
+      message: "Nanite could not save the model change. Your previous model is still selected; please choose again.",
+      details: { raw: String(err) },
+    }),
+  });
+  const handleModelSelect = (modelId: string) => {
+    if (!activeSessionId || modelUpdate.isPending) return;
+    setModelOpen(false);
+    modelUpdate.mutate({ sessionId: activeSessionId, modelId });
+  };
 
   const shellTitle =
     shellMode === "yolo"

@@ -101,7 +101,7 @@ func (f *characterizationTools) Execute(_ context.Context, _ string, name string
 	f.mu.Unlock()
 	return &ToolResult{Output: fmt.Sprintf("%s-result:%v", name, input["value"])}, nil
 }
-func (f *characterizationTools) HandleRequestTools(context.Context, map[string]any) ([]llmtypes.ToolDefinition, string, error) {
+func (f *characterizationTools) HandleRequestTools(context.Context, string, map[string]any) ([]llmtypes.ToolDefinition, string, error) {
 	panic("characterizationTools.HandleRequestTools: unexpected call")
 }
 func (f *characterizationTools) ListSummaries() []toolclient.ToolSummary { return nil }

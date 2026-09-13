@@ -158,6 +158,7 @@ type iterationLimits struct {
 
 // loopState consolidates all mutable state for the generateResponse loop.
 type loopState struct {
+	resultBudget int // Shared model-aware result-preview and retrieval-page budget.
 	// Tool execution tracking.
 	lastToolResults  map[string]string
 	toolRepeatCount  map[string]int

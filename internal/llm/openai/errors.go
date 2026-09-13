@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	sdk "github.com/openai/openai-go"
+	sdk "github.com/openai/openai-go/v3"
 )
 
 // errEmptyResponse is returned when the API replies 200 with no usable

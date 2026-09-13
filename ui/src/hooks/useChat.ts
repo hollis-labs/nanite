@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { shouldRenderStandalonePluginEnvelope } from "@/lib/envelope-lane";
 import { applyEnvelopePanelEffects, applyPanelSignal } from "@/lib/panel-signal";
@@ -95,6 +95,8 @@ function clearPersistedErrorState(sessionId: string) {
   }
 }
 
+const store = () => useChatStore.getState();
+
 export function useChat(sessionId: string | null) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [paginationState, setPaginationState] = useState<{
@@ -105,12 +107,19 @@ export function useChat(sessionId: string | null) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastStreamActivityAtRef = useRef(0);
   const reconcileInFlightRef = useRef(false);
+  const generationRef = useRef(0);
+  const sendPendingRef = useRef(false);
+  const connectStreamRef = useRef<(id: string) => void>(() => {});
+  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: session identity starts a new async generation.
+  useLayoutEffect(() => {
+    generationRef.current++;
+    return () => {
+      generationRef.current++;
+    };
+  }, [sessionId]);
 
-  // CW-20260418-0100: ring-buffer cursor for SSE reconnect. The backend
-  // stamps every stream event with a monotonic event_id; we track the
-  // highest we've seen so a future reconnect path can resume from
-  // `?from=<lastEventId>` instead of the heavier /retry path. The current
-  // message id is captured alongside so the reconnect URL is correct.
+  // Cursor and accumulated content are retained together in the session slice.
   const lastEventIdRef = useRef<number>(0);
   const currentMessageIdRef = useRef<string | null>(null);
 
@@ -124,27 +133,24 @@ export function useChat(sessionId: string | null) {
   const sessionTakeover = useSessionTakeover(sessionId);
   const interruptedTurn = useInterruptedTurn(sessionId);
 
-  // Store actions are stable — read via getState() inside callbacks to avoid
-  // bloating dependency arrays. This helper gives typed access to all actions.
-  const store = () => useChatStore.getState();
-
-  // recordEventId advances the reconnect cursor. Called from every SSE
-  // handler that receives a `(e: MessageEvent)` payload — PR #66 review #2:
-  // non-delta events also carry event_ids from the ring buffer, and missing
-  // them causes tool_call/tool_result replays on reconnect to look like
-  // duplicates. Non-event_id-carrying events (synthetic, pre-ring-buffer)
-  // are ignored by the try/catch — the cursor only tracks events the
-  // server could replay.
-  const recordEventId = useCallback((raw: string) => {
-    try {
-      const evt = JSON.parse(raw) as { event_id?: number };
-      if (evt.event_id && evt.event_id > lastEventIdRef.current) {
-        lastEventIdRef.current = evt.event_id;
+  const recordEventId = useCallback(
+    (raw: string) => {
+      try {
+        const evt = JSON.parse(raw) as { event_id?: number };
+        if (evt.event_id) {
+          if (evt.event_id <= lastEventIdRef.current) return false;
+          lastEventIdRef.current = evt.event_id;
+          if (sessionId && currentMessageIdRef.current) {
+            store().setStreamCursor(sessionId, currentMessageIdRef.current, evt.event_id);
+          }
+        }
+      } catch {
+        // Native transport errors carry no data and do not move the cursor.
       }
-    } catch {
-      // ignore — malformed events are already handled by the real handler
-    }
-  }, []);
+      return true;
+    },
+    [sessionId],
+  );
 
   const markStreamActivity = useCallback(() => {
     lastStreamActivityAtRef.current = Date.now();
@@ -164,8 +170,12 @@ export function useChat(sessionId: string | null) {
       };
     }
 
-    const lastOffset = Math.max(0, firstPage.total - PAGE_SIZE);
-    const lastPage = await api.getMessagePage(sessionId, PAGE_SIZE, lastOffset);
+    const saved = store().getTranscriptPosition(sessionId);
+    const lastOffset = Math.min(
+      Math.max(0, firstPage.total - PAGE_SIZE),
+      saved?.oldestOffset ?? Infinity,
+    );
+    const lastPage = await api.getMessagePage(sessionId, firstPage.total - lastOffset, lastOffset);
     return {
       messages: lastPage.messages ?? [],
       total: lastPage.total,
@@ -177,9 +187,15 @@ export function useChat(sessionId: string | null) {
     async (assistantMessageID: string) => {
       if (!sessionId || reconcileInFlightRef.current) return;
 
+      const generation = generationRef.current;
       reconcileInFlightRef.current = true;
       try {
         const latest = await loadLatestMessages();
+        if (
+          generation !== generationRef.current ||
+          currentMessageIdRef.current !== assistantMessageID
+        )
+          return;
         if (!latest.messages.some((msg) => msg.id === assistantMessageID)) {
           // The assistant message never landed. Two cases:
           //   - The turn is genuinely still generating somewhere — leave the
@@ -191,6 +207,11 @@ export function useChat(sessionId: string | null) {
           //     endless spinner and surface the interrupted indicator.
           try {
             const session = await api.getSession(sessionId);
+            if (
+              generation !== generationRef.current ||
+              currentMessageIdRef.current !== assistantMessageID
+            )
+              return;
             if (session.interrupted_turn?.interrupted === true) {
               store().setInterruptedTurn(sessionId, true);
               store().clearStreaming(sessionId);
@@ -208,22 +229,34 @@ export function useChat(sessionId: string | null) {
 
         setMessages((prev) => {
           const merged = new Map<string, Message>();
-          for (const msg of prev) merged.set(msg.id, msg);
+          for (const msg of prev)
+            if (msg.session_id === sessionId && !msg.id.startsWith("temp-"))
+              merged.set(msg.id, msg);
           for (const msg of latest.messages) merged.set(msg.id, msg);
-          return Array.from(merged.values()).sort((a, b) => a.created_at.localeCompare(b.created_at));
+          return Array.from(merged.values()).sort((a, b) =>
+            a.created_at.localeCompare(b.created_at),
+          );
         });
         setPaginationState({ total: latest.total, oldestOffset: latest.oldestOffset });
 
-        const standaloneEnvelopes = await api.getSessionPluginEnvelopes(sessionId);
-        store().setPluginEnvelopes(
-          sessionId,
-          standaloneEnvelopes.map((envelope, index) => ({
-            id: `rehydrated-${envelope.id ?? index}`,
-            pluginId: "",
-            envelope,
-            receivedAt: Date.now(),
-          })),
-        );
+        const standaloneEnvelopes = await api
+          .getSessionPluginEnvelopes(sessionId)
+          .catch(() => null);
+        if (
+          generation !== generationRef.current ||
+          currentMessageIdRef.current !== assistantMessageID
+        )
+          return;
+        if (standaloneEnvelopes)
+          store().setPluginEnvelopes(
+            sessionId,
+            standaloneEnvelopes.map((envelope, index) => ({
+              id: `rehydrated-${envelope.id ?? index}`,
+              pluginId: "",
+              envelope,
+              receivedAt: Date.now(),
+            })),
+          );
 
         store().clearStreaming(sessionId);
         store().clearChatErrors(sessionId);
@@ -239,7 +272,7 @@ export function useChat(sessionId: string | null) {
       } catch (err) {
         console.warn("[useChat] stalled-stream reconcile failed:", err);
       } finally {
-        reconcileInFlightRef.current = false;
+        if (generation === generationRef.current) reconcileInFlightRef.current = false;
       }
     },
     [loadLatestMessages, queryClient, sessionId],
@@ -251,40 +284,49 @@ export function useChat(sessionId: string | null) {
       setPaginationState(null);
       return;
     }
+    const generation = generationRef.current;
     try {
-      const latest = await loadLatestMessages();
-
-      // Clear any leftover banner errors from the previous session.
-      store().clearChatErrors(sessionId);
-      setMessages(latest.messages);
+      const [latest, session, envelopes] = await Promise.all([
+        loadLatestMessages(),
+        api.getSession(sessionId).catch(() => null),
+        api.getSessionPluginEnvelopes(sessionId).catch(() => null),
+      ]);
+      if (generation !== generationRef.current) return;
+      const live = !!eventSourceRef.current || sendPendingRef.current;
+      setMessages((previous) => {
+        const merged = new Map<string, Message>();
+        // Preserve a turn started while the history request was pending.
+        if (live)
+          for (const msg of previous) if (msg.session_id === sessionId) merged.set(msg.id, msg);
+        for (const msg of latest.messages) merged.set(msg.id, msg);
+        // The turn may finish between the history fetch and the session probe.
+        if (!live && !session?.active_message_id) {
+          for (const msg of session?.messages ?? []) merged.set(msg.id, msg);
+        }
+        return [...merged.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
+      });
+      setLoadedSessionId(sessionId);
       setPaginationState({ total: latest.total, oldestOffset: latest.oldestOffset });
-
-      // CW-20260518-0084: on (re)load, ask the backend whether this session
-      // has an in-flight turn whose agent is gone — e.g. a deploy/reload
-      // killed it mid-generation. The session GET reports `interrupted_turn`
-      // when the last persisted message is an unanswered user turn and no
-      // live stream exists. We only raise the indicator when the FE is not
-      // itself actively streaming this session (a live stream is the genuine
-      // in-flight case, not an interruption).
-      try {
-        const session = await api.getSession(sessionId);
-        const interrupted = session.interrupted_turn?.interrupted === true;
-        const streamingNow = useChatStore.getState().sessions.get(sessionId)?.isStreaming === true;
-        store().setInterruptedTurn(sessionId, interrupted && !streamingNow);
-      } catch (err) {
-        console.warn("[useChat] interrupted-turn probe failed:", err);
+      if (!live && envelopes) {
+        store().setPluginEnvelopes(
+          sessionId,
+          envelopes.map((envelope, index) => ({
+            id: `rehydrated-${envelope.id ?? index}`,
+            pluginId: "",
+            envelope,
+            receivedAt: Date.now(),
+          })),
+        );
       }
-
-      const standaloneEnvelopes = await api.getSessionPluginEnvelopes(sessionId);
-      store().setPluginEnvelopes(
-        sessionId,
-        standaloneEnvelopes.map((envelope, index) => ({
-          id: `rehydrated-${envelope.id ?? index}`,
-          pluginId: "",
-          envelope,
-          receivedAt: Date.now(),
-        })),
-      );
+      if (session && !live) {
+        store().clearChatErrors(sessionId);
+        if (session.active_message_id) connectStreamRef.current(session.active_message_id);
+        else store().clearStreaming(sessionId);
+        store().setInterruptedTurn(
+          sessionId,
+          session.interrupted_turn?.interrupted === true && !session.active_message_id,
+        );
+      }
     } catch (err) {
       console.error("Failed to load messages:", err);
     }
@@ -292,17 +334,19 @@ export function useChat(sessionId: string | null) {
 
   const loadOlderMessages = useCallback(async () => {
     if (!sessionId || !paginationState || paginationState.oldestOffset <= 0 || loadingOlder) return;
+    const generation = generationRef.current;
     setLoadingOlder(true);
     try {
       const newOffset = Math.max(0, paginationState.oldestOffset - PAGE_SIZE);
       const count = paginationState.oldestOffset - newOffset;
       const page = await api.getMessagePage(sessionId, count, newOffset);
+      if (generation !== generationRef.current) return;
       setMessages((prev) => [...(page.messages ?? []), ...prev]);
       setPaginationState((p) => (p ? { ...p, oldestOffset: newOffset } : null));
     } catch (err) {
       console.error("Failed to load older messages:", err);
     } finally {
-      setLoadingOlder(false);
+      if (generation === generationRef.current) setLoadingOlder(false);
     }
   }, [sessionId, paginationState, loadingOlder]);
 
@@ -310,15 +354,18 @@ export function useChat(sessionId: string | null) {
 
   // Jump to a specific message (for search results). Loads a window around it.
   const jumpToMessage = useCallback(async (targetSessionId: string, messageId: string) => {
-    if (!targetSessionId) return;
+    if (!targetSessionId || targetSessionId !== sessionId) return;
+    const generation = generationRef.current;
     try {
       const page = await api.getMessagesAround(targetSessionId, messageId);
+      if (generation !== generationRef.current) return;
+      setLoadedSessionId(targetSessionId);
       setMessages(page.messages ?? []);
       setPaginationState({ total: page.total, oldestOffset: 0 }); // approximate
     } catch (err) {
       console.error("Failed to jump to message:", err);
     }
-  }, []);
+  }, [sessionId]);
 
   // Load messages when sessionId changes.
   //
@@ -333,6 +380,7 @@ export function useChat(sessionId: string | null) {
     if (!skipLoad) {
       void loadMessages();
     }
+    setLoadingOlder(false);
     // Session-switch side effects — always run regardless of jump state.
     if (sessionId) {
       store().ensureSession(sessionId);
@@ -358,14 +406,10 @@ export function useChat(sessionId: string | null) {
         eventSourceRef.current = null;
       }
       currentMessageIdRef.current = null;
-      // Closing the EventSource on session switch / unmount stops delivery of
-      // this session's stream events — including the terminal 'done'. Without
-      // reconciling, the session strands in a "Thinking…" indicator after
-      // navigation. Clear its streaming state (the FE is no longer listening;
-      // returning re-establishes the stream and re-sets the flag if still live).
-      if (sessionId) {
-        store().clearStreaming(sessionId);
-      }
+      // Keep partial content and its cursor together for a later attachment.
+      if (sessionId) store().setStreaming(sessionId, false);
+      reconcileInFlightRef.current = false;
+      sendPendingRef.current = false;
     };
   }, [sessionId]);
 
@@ -392,9 +436,13 @@ export function useChat(sessionId: string | null) {
     let canceled = false;
     (async () => {
       try {
-        const page = await api.getMessagesAround(sessionId, pendingJump.messageId);
+        const [page, session] = await Promise.all([
+          api.getMessagesAround(sessionId, pendingJump.messageId),
+          api.getSession(sessionId).catch(() => null),
+        ]);
         if (canceled) return;
         setMessages(page.messages ?? []);
+        setLoadedSessionId(sessionId);
         // Explicitly set paginationState to null — the messages-around endpoint
         // returns a window from the middle of the session, and we don't know
         // its oldest offset. Setting oldestOffset: 0 would lie about being at
@@ -404,6 +452,9 @@ export function useChat(sessionId: string | null) {
         // pagination story.
         setPaginationState(null);
         useChatStore.getState().setScrollToMessageId(pendingJump.messageId);
+        if (session?.active_message_id && !eventSourceRef.current && !sendPendingRef.current) {
+          connectStreamRef.current(session.active_message_id);
+        }
       } catch (err) {
         console.error("Failed to load messages around jump target:", err);
       }
@@ -425,10 +476,321 @@ export function useChat(sessionId: string | null) {
     };
   }, [pendingJump, sessionId]);
 
+  const connectStream = useCallback(
+    (message_id: string) => {
+      if (!sessionId) return;
+      eventSourceRef.current?.close();
+      const saved = store().sessions.get(sessionId);
+      const resume = saved?.streamMessageId === message_id;
+      if (!resume) {
+        store().clearStreaming(sessionId);
+        store().clearToolCalls(sessionId);
+        store().clearToolWarnings(sessionId);
+        store().clearPendingApprovals(sessionId);
+      }
+      currentMessageIdRef.current = message_id;
+      lastEventIdRef.current = resume ? saved.streamCursor : 0;
+      store().setSessionTakeover(sessionId, false);
+      store().setStreamCursor(sessionId, message_id, lastEventIdRef.current);
+      store().setStreaming(sessionId, true);
+      markStreamActivity();
+      const cursor = lastEventIdRef.current;
+      const es = new EventSource(`/api/stream/${message_id}${cursor ? `?from=${cursor}` : ""}`);
+      eventSourceRef.current = es;
+      let accumulated = resume ? saved.streamingFinal : "";
+      const listen = (type: string, handler: (event: MessageEvent) => void) => {
+        es.addEventListener(type, (event) => {
+          if (eventSourceRef.current === es) handler(event as MessageEvent);
+        });
+      };
+
+      listen(SSE.DELTA, (e: MessageEvent) => {
+        markStreamActivity();
+        if (!recordEventId(e.data as string)) return;
+        const data: StreamEvent = JSON.parse(e.data as string);
+        if (data.content) {
+          // F4 (CW-20260419-0029) + F3 (CW-20260420-0023): route by phase.
+          // "narration" → thinking strip (not accumulated as the answer).
+          // "thinking"  → thinking strip (F3 interleaved thinking block).
+          // "final"     → answer bubble (accumulated for persistence).
+          // No phase (pre-F4 or legacy streams) → treat as final (old behavior).
+          if (data.phase === "narration") {
+            store().appendStreamNarration(sessionId, data.content);
+          } else if (data.phase === "thinking") {
+            // F3: interleaved thinking block content — shown in "Working…" strip,
+            // not accumulated into the answer bubble.
+            store().appendStreamThinking(sessionId, data.content);
+          } else {
+            // "final" or absent — goes into the answer accumulator.
+            accumulated += data.content;
+            store().appendStreamFinal(sessionId, data.content);
+          }
+          // Clear any transient status message when content starts flowing.
+          store().setStatusMessage(sessionId, null);
+        }
+      });
+
+      listen(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
+        markStreamActivity();
+        if (!recordEventId(e.data as string)) return;
+        const data: StreamEvent = JSON.parse(e.data as string);
+        if (data.content != null) {
+          accumulated = data.content;
+          store().replaceStreamContent(sessionId, data.content);
+          store().setStatusMessage(sessionId, null);
+        }
+      });
+
+      listen(SSE.TOOL_CALL, (e: MessageEvent) => {
+        markStreamActivity();
+        if (!recordEventId(e.data as string)) return;
+        const data = JSON.parse(e.data as string) as StreamEvent & {
+          tool_id?: string;
+          detail?: string;
+        };
+        if (data.tool) {
+          store().addToolCall(sessionId, {
+            id: data.tool_id || data.message_id || `tc-${Date.now()}`,
+            tool: data.tool,
+            status: "running",
+            detail: data.detail,
+          });
+
+          // UI-trigger tools: open frontend modals/panels when the agent calls them.
+          if (data.tool === "nanite_open_sprint_planning") {
+            window.dispatchEvent(
+              new CustomEvent("plugin-action", { detail: { id: "sprint-planning" } }),
+            );
+          }
+        }
+      });
+
+      listen(SSE.TOOL_RESULT, (e: MessageEvent) => {
+        markStreamActivity();
+        if (!recordEventId(e.data as string)) return;
+        const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
+        const toolId = data.tool_id || data.message_id;
+        if (toolId) {
+          store().updateToolCall(sessionId, toolId, {
+            status: data.error ? "error" : "done",
+            summary: (data.summary ?? data.error ?? "") as string,
+          });
+        }
+      });
+
+      listen(SSE.TOOL_WARNING, (e: MessageEvent) => {
+        markStreamActivity();
+        if (!recordEventId(e.data as string)) return;
+        const data: StreamEvent = JSON.parse(e.data as string);
+        if (data.data) {
+          try {
+            const warning = JSON.parse(data.data) as ToolWarning;
+            store().addToolWarning(sessionId, warning);
+            // Set persistent text-only mode when agent has no MCP tools
+            if (warning.level === "critical" && warning.error.includes("no MCP tools")) {
+              store().setTextOnlyMode(sessionId, true);
+            }
+          } catch {
+            console.warn("[useChat] Failed to parse tool_warning data:", data.data);
+          }
+        }
+      });
+
+      listen(SSE.PLUGIN_ENVELOPE, (e: MessageEvent) => {
+        markStreamActivity();
+        if (!recordEventId(e.data as string)) return;
+        try {
+          const evt: StreamEvent = JSON.parse(e.data as string);
+          if (!evt.envelope) return;
+          const envelope = JSON.parse(evt.envelope) as Envelope;
+          const item: PluginEnvelopeItem = {
+            id: `penv-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
+            pluginId: evt.plugin_id ?? "",
+            envelope,
+            receivedAt: Date.now(),
+          };
+          if (shouldRenderStandalonePluginEnvelope(envelope)) {
+            store().addPluginEnvelope(sessionId, item);
+          }
+          // J8 v1 — declarative drawer routing. When the envelope carries a
+          // target field, route the open/render through the layout store with
+          // source='agent' so the dismiss machine gates correctly.
+          applyEnvelopePanelEffects(envelope, sessionId);
+          if (import.meta.env?.DEV) {
+            console.debug("[useChat] plugin_envelope", item);
+          }
+        } catch (err) {
+          console.warn("[useChat] Failed to parse plugin_envelope event:", e.data, err);
+        }
+      });
+
+      listen(SSE.PANEL_SIGNAL, (e: MessageEvent) => {
+        markStreamActivity();
+        if (!recordEventId(e.data as string)) return;
+        try {
+          const evt: StreamEvent = JSON.parse(e.data as string);
+          if (!evt.envelope) return;
+          const sig = JSON.parse(evt.envelope) as {
+            action: "open" | "close" | "mode";
+            panel_id?: string;
+            mode?: string;
+            source?: "agent" | "user";
+          };
+          applyPanelSignal(sig, sessionId);
+          if (import.meta.env?.DEV) {
+            console.debug("[useChat] panel_signal", sig);
+          }
+        } catch (err) {
+          console.warn("[useChat] Failed to parse panel_signal event:", e.data, err);
+        }
+      });
+
+      listen(SSE.APPROVAL_REQUEST, (e: MessageEvent) => {
+        markStreamActivity();
+        if (!recordEventId(e.data as string)) return;
+        try {
+          const evt: StreamEvent = JSON.parse(e.data as string);
+          if (evt.data) {
+            const approval = JSON.parse(evt.data) as ApprovalRequest;
+            store().addPendingApproval(sessionId, {
+              ...approval,
+              receivedAt: Date.now(),
+            });
+          }
+        } catch (err) {
+          console.warn("[useChat] Failed to parse approval_request event:", e.data, err);
+        }
+      });
+
+      listen(SSE.STATUS, (e: MessageEvent) => {
+        markStreamActivity();
+        if (!recordEventId(e.data as string)) return;
+        const data: StreamEvent = JSON.parse(e.data as string);
+        if (data.content) {
+          store().setStatusMessage(sessionId, data.content);
+        }
+      });
+
+      listen(SSE.CIRCUIT_OPEN, (e: MessageEvent) => {
+        if (!recordEventId(e.data as string)) return;
+        markStreamActivity();
+        store().setCircuitOpen(sessionId, true);
+        // Do NOT close the EventSource — keep it open for potential retry.
+      });
+
+      listen(SSE.SESSION_TAKEOVER, () => {
+        markStreamActivity();
+        // Another tab opened this session — stop streaming and show banner.
+        console.warn("[useChat] Session takeover — another tab is now active");
+        store().setSessionTakeover(sessionId, true);
+        // Save partial content if any.
+        if (accumulated) {
+          const partialMsg: Message = {
+            id: message_id,
+            session_id: sessionId,
+            agent_id: "",
+            role: "assistant",
+            content: accumulated,
+            envelope: null,
+            metadata: "{}",
+            created_at: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, partialMsg]);
+        }
+        store().clearStreaming(sessionId);
+        currentMessageIdRef.current = null;
+        es.close();
+        eventSourceRef.current = null;
+        // Do NOT reconnect — that would cause a takeover loop.
+      });
+
+      listen(SSE.STREAM_END, (e: MessageEvent) => {
+        markStreamActivity();
+        if (!recordEventId(e.data as string)) return;
+        es.close();
+        if (eventSourceRef.current === es) eventSourceRef.current = null;
+        // A bounded replay may omit older deltas. Fetch the persisted answer
+        // rather than treating the replay window as a complete message.
+        void reconcileStreamingState(message_id);
+      });
+
+      listen(SSE.ERROR, (e: MessageEvent) => {
+        if (!e.data) return;
+        markStreamActivity();
+        if (!recordEventId(e.data as string)) return;
+        let providerFailure: StreamEvent["structured_error"] | undefined;
+        // Custom SSE error event from the backend (has data).
+        if (e.data) {
+          try {
+            const data: StreamEvent = JSON.parse(e.data as string);
+
+            // Handle structured error from backend
+            if (data.structured_error) {
+              const se = data.structured_error;
+              if (se.details?.source === "nanite") providerFailure = se;
+              store().addChatError(
+                sessionId,
+                makeChatError(se.code, se.message, se.details, se.timestamp),
+              );
+            } else {
+              // Fallback for unstructured errors (no envelope from backend)
+              const errMsg = data.error || "Unknown streaming error";
+              console.error("Stream error from backend:", errMsg);
+              store().addChatError(sessionId, makeChatError("internal_error", errMsg));
+            }
+          } catch {
+            console.error("Stream error (unparseable):", e.data);
+          }
+        }
+        // Finalize the stream with whatever we have.
+        const errorMsg: Message | undefined = accumulated || providerFailure
+          ? {
+              id: message_id,
+              session_id: sessionId,
+              agent_id: "",
+              role: "assistant",
+              content: accumulated || providerFailure?.message || "",
+              envelope: null,
+              metadata: JSON.stringify({ had_error: true, provider_error: providerFailure, partial_output: !!accumulated }),
+              created_at: new Date().toISOString(),
+            }
+          : undefined;
+        if (errorMsg) {
+          setMessages((prev) => [...prev.filter((msg) => msg.id !== errorMsg.id), errorMsg]);
+        }
+
+        // Persist error state so it survives page refresh.
+        const slice = useChatStore.getState().sessions.get(sessionId);
+        persistErrorState(sessionId, {
+          errors: slice?.chatErrors ?? [],
+          toolCalls: slice?.toolCalls ?? [],
+          errorMessage: errorMsg,
+        });
+
+        store().clearStreaming(sessionId);
+        currentMessageIdRef.current = null;
+        es.close();
+        eventSourceRef.current = null;
+      });
+
+      // Leave transport failures reconnectable. Persisted-message reconciliation
+      // covers a completed/evicted stream or a restarted backend.
+      es.onerror = () => {
+        if (eventSourceRef.current === es) void reconcileStreamingState(message_id);
+      };
+    },
+    [markStreamActivity, recordEventId, reconcileStreamingState, sessionId],
+  );
+  useLayoutEffect(() => {
+    connectStreamRef.current = connectStream;
+  }, [connectStream]);
+
   const sendMessage = useCallback(
     async (content: string) => {
       if (!sessionId || !content.trim()) return;
 
+      const generation = generationRef.current;
+      sendPendingRef.current = true;
       // Reset takeover state — user is actively using this tab now.
       store().setSessionTakeover(sessionId, false);
 
@@ -445,6 +807,7 @@ export function useChat(sessionId: string | null) {
       };
       setMessages((prev) => [...prev, tempUserMsg]);
       store().ensureSession(sessionId);
+      store().clearStreaming(sessionId);
       store().setStreaming(sessionId, true);
       store().clearToolCalls(sessionId);
       store().clearToolWarnings(sessionId);
@@ -471,336 +834,18 @@ export function useChat(sessionId: string | null) {
           ...(activeEffort && activeEffort !== "normal" ? { effort: activeEffort } : {}),
         });
 
-        // Connect to SSE stream
-        // CW-20260418-0100: track the message id + reset cursor so a
-        // future reconnect path can re-subscribe with ?from=<lastEventId>.
-        currentMessageIdRef.current = message_id;
-        lastEventIdRef.current = 0;
-        markStreamActivity();
-        const es = new EventSource(`/api/stream/${message_id}`);
-        eventSourceRef.current = es;
-        let accumulated = "";
-
-        es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
-          markStreamActivity();
-          recordEventId(e.data as string);
-          const data: StreamEvent = JSON.parse(e.data as string);
-          if (data.content) {
-            // F4 (CW-20260419-0029) + F3 (CW-20260420-0023): route by phase.
-            // "narration" → thinking strip (not accumulated as the answer).
-            // "thinking"  → thinking strip (F3 interleaved thinking block).
-            // "final"     → answer bubble (accumulated for persistence).
-            // No phase (pre-F4 or legacy streams) → treat as final (old behavior).
-            if (data.phase === "narration") {
-              store().appendStreamNarration(sessionId, data.content);
-            } else if (data.phase === "thinking") {
-              // F3: interleaved thinking block content — shown in "Working…" strip,
-              // not accumulated into the answer bubble.
-              store().appendStreamThinking(sessionId, data.content);
-            } else {
-              // "final" or absent — goes into the answer accumulator.
-              accumulated += data.content;
-              store().appendStreamFinal(sessionId, data.content);
-            }
-            // Clear any transient status message when content starts flowing.
-            store().setStatusMessage(sessionId, null);
-          }
-        });
-
-        es.addEventListener(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
-          markStreamActivity();
-          recordEventId(e.data as string);
-          const data: StreamEvent = JSON.parse(e.data as string);
-          if (data.content != null) {
-            accumulated = data.content;
-            store().replaceStreamContent(sessionId, data.content);
-            store().setStatusMessage(sessionId, null);
-          }
-        });
-
-        es.addEventListener(SSE.TOOL_CALL, (e: MessageEvent) => {
-          markStreamActivity();
-          recordEventId(e.data as string);
-          const data = JSON.parse(e.data as string) as StreamEvent & {
-            tool_id?: string;
-            detail?: string;
-          };
-          if (data.tool) {
-            store().addToolCall(sessionId, {
-              id: data.tool_id || data.message_id || `tc-${Date.now()}`,
-              tool: data.tool,
-              status: "running",
-              detail: data.detail,
-            });
-
-            // UI-trigger tools: open frontend modals/panels when the agent calls them.
-            if (data.tool === "nanite_open_sprint_planning") {
-              window.dispatchEvent(
-                new CustomEvent("plugin-action", { detail: { id: "sprint-planning" } }),
-              );
-            }
-          }
-        });
-
-        es.addEventListener(SSE.TOOL_RESULT, (e: MessageEvent) => {
-          markStreamActivity();
-          recordEventId(e.data as string);
-          const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
-          const toolId = data.tool_id || data.message_id;
-          if (toolId) {
-            store().updateToolCall(sessionId, toolId, {
-              status: data.error ? "error" : "done",
-              summary: (data.summary ?? data.error ?? "") as string,
-            });
-          }
-        });
-
-        es.addEventListener(SSE.TOOL_WARNING, (e: MessageEvent) => {
-          markStreamActivity();
-          recordEventId(e.data as string);
-          const data: StreamEvent = JSON.parse(e.data as string);
-          if (data.data) {
-            try {
-              const warning = JSON.parse(data.data) as ToolWarning;
-              store().addToolWarning(sessionId, warning);
-              // Set persistent text-only mode when agent has no MCP tools
-              if (warning.level === "critical" && warning.error.includes("no MCP tools")) {
-                store().setTextOnlyMode(sessionId, true);
-              }
-            } catch {
-              console.warn("[useChat] Failed to parse tool_warning data:", data.data);
-            }
-          }
-        });
-
-        es.addEventListener(SSE.PLUGIN_ENVELOPE, (e: MessageEvent) => {
-          markStreamActivity();
-          recordEventId(e.data as string);
-          try {
-            const evt: StreamEvent = JSON.parse(e.data as string);
-            if (!evt.envelope) return;
-            const envelope = JSON.parse(evt.envelope) as Envelope;
-            const item: PluginEnvelopeItem = {
-              id: `penv-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
-              pluginId: evt.plugin_id ?? "",
-              envelope,
-              receivedAt: Date.now(),
-            };
-            if (shouldRenderStandalonePluginEnvelope(envelope)) {
-              store().addPluginEnvelope(sessionId, item);
-            }
-            // J8 v1 — declarative drawer routing. When the envelope carries a
-            // target field, route the open/render through the layout store with
-            // source='agent' so the dismiss machine gates correctly.
-            applyEnvelopePanelEffects(envelope, sessionId);
-            if (import.meta.env?.DEV) {
-              console.debug("[useChat] plugin_envelope", item);
-            }
-          } catch (err) {
-            console.warn("[useChat] Failed to parse plugin_envelope event:", e.data, err);
-          }
-        });
-
-        es.addEventListener(SSE.PANEL_SIGNAL, (e: MessageEvent) => {
-          markStreamActivity();
-          recordEventId(e.data as string);
-          try {
-            const evt: StreamEvent = JSON.parse(e.data as string);
-            if (!evt.envelope) return;
-            const sig = JSON.parse(evt.envelope) as {
-              action: "open" | "close" | "mode";
-              panel_id?: string;
-              mode?: string;
-              source?: "agent" | "user";
-            };
-            applyPanelSignal(sig, sessionId);
-            if (import.meta.env?.DEV) {
-              console.debug("[useChat] panel_signal", sig);
-            }
-          } catch (err) {
-            console.warn("[useChat] Failed to parse panel_signal event:", e.data, err);
-          }
-        });
-
-        es.addEventListener(SSE.APPROVAL_REQUEST, (e: MessageEvent) => {
-          markStreamActivity();
-          recordEventId(e.data as string);
-          try {
-            const evt: StreamEvent = JSON.parse(e.data as string);
-            if (evt.data) {
-              const approval = JSON.parse(evt.data) as ApprovalRequest;
-              store().addPendingApproval(sessionId, {
-                ...approval,
-                receivedAt: Date.now(),
-              });
-            }
-          } catch (err) {
-            console.warn("[useChat] Failed to parse approval_request event:", e.data, err);
-          }
-        });
-
-        es.addEventListener(SSE.STATUS, (e: MessageEvent) => {
-          markStreamActivity();
-          recordEventId(e.data as string);
-          const data: StreamEvent = JSON.parse(e.data as string);
-          if (data.content) {
-            store().setStatusMessage(sessionId, data.content);
-          }
-        });
-
-        es.addEventListener(SSE.CIRCUIT_OPEN, () => {
-          markStreamActivity();
-          store().setCircuitOpen(sessionId, true);
-          // Do NOT close the EventSource — keep it open for potential retry.
-        });
-
-        es.addEventListener(SSE.SESSION_TAKEOVER, () => {
-          markStreamActivity();
-          // Another tab opened this session — stop streaming and show banner.
-          console.warn("[useChat] Session takeover — another tab is now active");
-          store().setSessionTakeover(sessionId, true);
-          // Save partial content if any.
-          if (accumulated) {
-            const partialMsg: Message = {
-              id: message_id,
-              session_id: sessionId,
-              agent_id: "",
-              role: "assistant",
-              content: accumulated,
-              envelope: null,
-              metadata: "{}",
-              created_at: new Date().toISOString(),
-            };
-            setMessages((prev) => [...prev, partialMsg]);
-          }
-          store().clearStreaming(sessionId);
-          currentMessageIdRef.current = null;
-          es.close();
-          eventSourceRef.current = null;
-          // Do NOT reconnect — that would cause a takeover loop.
-        });
-
-        es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
-          markStreamActivity();
-          recordEventId(e.data as string);
-          const data: StreamEvent = JSON.parse(e.data as string);
-          // Add the complete assistant message
-          // Parse envelope from stream_end event if present.
-          let envelope: string | null = null;
-          if (data.envelope) {
-            envelope =
-              typeof data.envelope === "string" ? data.envelope : JSON.stringify(data.envelope);
-          }
-          const assistantMsg: Message = {
-            id: message_id,
-            session_id: sessionId,
-            agent_id: data.agent_id || "",
-            role: "assistant",
-            content: accumulated,
-            envelope,
-            metadata: JSON.stringify(data.usage || {}),
-            created_at: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, assistantMsg]);
-          store().clearStreaming(sessionId);
-          store().clearChatErrors(sessionId);
-          clearPersistedErrorState(sessionId);
-          currentMessageIdRef.current = null;
-          es.close();
-          eventSourceRef.current = null;
-
-          // Refresh widgets that depend on session usage data
-          void queryClient.invalidateQueries({ queryKey: ["session-usage", sessionId] });
-          void queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
-        });
-
-        es.addEventListener(SSE.ERROR, (e: MessageEvent) => {
-          markStreamActivity();
-          recordEventId(e.data as string);
-          // Custom SSE error event from the backend (has data).
-          if (e.data) {
-            try {
-              const data: StreamEvent = JSON.parse(e.data as string);
-
-              // Handle structured error from backend
-              if (data.structured_error) {
-                const se = data.structured_error;
-                store().addChatError(
-                  sessionId,
-                  makeChatError(se.code, se.message, se.details, se.timestamp),
-                );
-              } else {
-                // Fallback for unstructured errors (no envelope from backend)
-                const errMsg = data.error || "Unknown streaming error";
-                console.error("Stream error from backend:", errMsg);
-                store().addChatError(sessionId, makeChatError("internal_error", errMsg));
-              }
-            } catch {
-              console.error("Stream error (unparseable):", e.data);
-            }
-          }
-          // Finalize the stream with whatever we have.
-          const errorMsg: Message | undefined = accumulated
-            ? {
-                id: message_id,
-                session_id: sessionId,
-                agent_id: "",
-                role: "assistant",
-                content: accumulated,
-                envelope: null,
-                metadata: JSON.stringify({ had_error: true }),
-                created_at: new Date().toISOString(),
-              }
-            : undefined;
-          if (errorMsg) {
-            setMessages((prev) => [...prev, errorMsg]);
-          }
-
-          // Persist error state so it survives page refresh.
-          const slice = useChatStore.getState().sessions.get(sessionId);
-          persistErrorState(sessionId, {
-            errors: slice?.chatErrors ?? [],
-            toolCalls: slice?.toolCalls ?? [],
-            errorMessage: errorMsg,
-          });
-
-          store().clearStreaming(sessionId);
-          currentMessageIdRef.current = null;
-          es.close();
-          eventSourceRef.current = null;
-        });
-
-        // Handle native EventSource connection errors (no data).
-        es.onerror = () => {
-          // Only handle if the custom error listener above didn't already fire.
-          if (eventSourceRef.current) {
-            console.error("SSE connection lost");
-            if (accumulated) {
-              const assistantMsg: Message = {
-                id: message_id,
-                session_id: sessionId,
-                agent_id: "",
-                role: "assistant",
-                content: accumulated,
-                envelope: null,
-                metadata: "{}",
-                created_at: new Date().toISOString(),
-              };
-              setMessages((prev) => [...prev, assistantMsg]);
-            }
-            store().clearStreaming(sessionId);
-            currentMessageIdRef.current = null;
-            es.close();
-            eventSourceRef.current = null;
-          }
-        };
+        if (generation !== generationRef.current) return;
+        sendPendingRef.current = false;
+        connectStream(message_id);
       } catch (err) {
+        if (generation !== generationRef.current) return;
+        sendPendingRef.current = false;
         console.error("Send failed:", err);
         store().clearStreaming(sessionId);
         currentMessageIdRef.current = null;
       }
     },
-    [markStreamActivity, queryClient, sessionId],
+    [connectStream, sessionId],
   );
 
   const stopStreaming = useCallback(() => {
@@ -824,7 +869,18 @@ export function useChat(sessionId: string | null) {
   }, [sessionId]);
 
   const retryStream = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId || sendPendingRef.current || queryClient.isMutating({ mutationKey: ["chat-model", sessionId] })) return;
+    const generation = generationRef.current;
+    sendPendingRef.current = true;
+    const closeStream = () => {
+      eventSourceRef.current?.close();
+      eventSourceRef.current = null;
+    };
+    closeStream();
+    currentMessageIdRef.current = null;
+    store().clearStreaming(sessionId);
+    store().setStreaming(sessionId, true);
+    store().clearChatErrors(sessionId);
     store().setCircuitOpen(sessionId, false);
     store().clearToolCalls(sessionId);
     store().clearToolWarnings(sessionId);
@@ -832,128 +888,19 @@ export function useChat(sessionId: string | null) {
     try {
       const { message_id } = await api.retryStream(sessionId);
 
-      // Close old event source if still open.
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-
-      // Open a new SSE connection for the retry.
-      // CW-20260418-0100: fresh message id ⇒ reset cursor.
-      currentMessageIdRef.current = message_id;
-      lastEventIdRef.current = 0;
-      markStreamActivity();
-      const es = new EventSource(`/api/stream/${message_id}`);
-      eventSourceRef.current = es;
-      store().setStreaming(sessionId, true);
-
-      es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
-        markStreamActivity();
-        recordEventId(e.data as string);
-        const data: StreamEvent = JSON.parse(e.data as string);
-        if (data.content) {
-          store().appendStreamContent(sessionId, data.content);
-          store().setStatusMessage(sessionId, null);
-        }
-      });
-
-      es.addEventListener(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
-        markStreamActivity();
-        recordEventId(e.data as string);
-        const data: StreamEvent = JSON.parse(e.data as string);
-        if (data.content != null) {
-          store().replaceStreamContent(sessionId, data.content);
-          store().setStatusMessage(sessionId, null);
-        }
-      });
-
-      // J8 v1 (CW-20260426-0006) — a retried turn can still call
-      // panel_open / panel_close / signal_mode. Without this listener the
-      // panel_signal SSE event emitted during the retry is silently dropped
-      // and the panel never opens (the same class of cross-stream gap as
-      // CW-20260516-0044). Mirror the primary stream handler's parsing.
-      es.addEventListener(SSE.PANEL_SIGNAL, (e: MessageEvent) => {
-        markStreamActivity();
-        recordEventId(e.data as string);
-        try {
-          const evt: StreamEvent = JSON.parse(e.data as string);
-          if (!evt.envelope) return;
-          const sig = JSON.parse(evt.envelope) as {
-            action: "open" | "close" | "mode";
-            panel_id?: string;
-            mode?: string;
-            source?: "agent" | "user";
-          };
-          applyPanelSignal(sig, sessionId);
-          if (import.meta.env?.DEV) {
-            console.debug("[useChat] panel_signal (retry)", sig);
-          }
-        } catch (err) {
-          console.warn("[useChat] Failed to parse panel_signal event:", e.data, err);
-        }
-      });
-
-      es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
-        markStreamActivity();
-        recordEventId(e.data as string);
-        const data: StreamEvent = JSON.parse(e.data as string);
-        const slice = useChatStore.getState().sessions.get(sessionId);
-        const assistantMsg: Message = {
-          id: message_id,
-          session_id: sessionId,
-          agent_id: data.agent_id || "",
-          role: "assistant",
-          content: slice?.streamingContent ?? "",
-          envelope: null,
-          metadata: JSON.stringify(data.usage || {}),
-          created_at: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-        store().clearStreaming(sessionId);
-        currentMessageIdRef.current = null;
-        es.close();
-        eventSourceRef.current = null;
-      });
-
-      es.addEventListener(SSE.CIRCUIT_OPEN, () => {
-        markStreamActivity();
-        store().setCircuitOpen(sessionId, true);
-      });
-
-      es.addEventListener(SSE.SESSION_TAKEOVER, () => {
-        markStreamActivity();
-        console.warn("[useChat] Session takeover during retry — another tab is now active");
-        store().setSessionTakeover(sessionId, true);
-        store().clearStreaming(sessionId);
-        currentMessageIdRef.current = null;
-        es.close();
-        eventSourceRef.current = null;
-      });
-
-      es.addEventListener(SSE.ERROR, () => {
-        store().clearStreaming(sessionId);
-        currentMessageIdRef.current = null;
-        es.close();
-        eventSourceRef.current = null;
-      });
-
-      es.onerror = () => {
-        if (eventSourceRef.current) {
-          store().clearStreaming(sessionId);
-          currentMessageIdRef.current = null;
-          es.close();
-          eventSourceRef.current = null;
-        }
-      };
+      if (generation !== generationRef.current) return;
+      sendPendingRef.current = false;
+      connectStream(message_id);
     } catch (err) {
+      if (generation !== generationRef.current) return;
+      sendPendingRef.current = false;
       console.error("Retry failed:", err);
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
+      closeStream();
       store().clearStreaming(sessionId);
+      store().addChatError(sessionId, makeChatError("internal_error", "Nanite could not restart the request. Your conversation is saved; please try again.", { raw: String(err) }));
       currentMessageIdRef.current = null;
     }
-  }, [markStreamActivity, sessionId]);
+  }, [connectStream, queryClient, sessionId]);
 
   // CW-20260518-0084: manual dismissal of the interrupted-turn banner. The
   // banner also clears automatically when the user sends a new message
@@ -991,7 +938,9 @@ export function useChat(sessionId: string | null) {
   }, [sessionId]);
 
   return {
-    messages,
+    messages: loadedSessionId === sessionId ? messages : [],
+    messagesReady: loadedSessionId === sessionId,
+    oldestOffset: paginationState?.oldestOffset ?? 0,
     isStreaming,
     streamingContent,
     statusMessage,

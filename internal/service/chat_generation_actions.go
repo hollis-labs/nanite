@@ -24,6 +24,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
+	"github.com/hollis-labs/nanite/internal/truncate"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -57,10 +58,14 @@ func (s *chatServiceImpl) settleToolTurn(
 ) settleToolTurnResult {
 	agentID := setup.agentID
 	model := setup.model
+	run.loop.resultBudget = truncate.BudgetForModel(model)
 	selection := setup.selection
 	prov := setup.provider
 	// --- Build assistant message with tool_use blocks ---
 	var assistantBlocks []llmtypes.ContentBlock
+	if run.providerOutput != nil {
+		assistantBlocks = append(assistantBlocks, *run.providerOutput)
+	}
 	// F3 (CW-20260420-0023): thinking blocks MUST precede text and tool_use
 	// blocks in the assistant message. Anthropic verifies signatures on round-trip;
 	// preserve Thinking and Signature verbatim.
@@ -88,6 +93,7 @@ func (s *chatServiceImpl) settleToolTurn(
 	})
 	// Reset per-iteration thinking accumulator so next iteration starts fresh.
 	run.thinkingBlocks = run.thinkingBlocks[:0]
+	run.providerOutput = nil
 
 	// --- Execute tools (pre-check → parallel/serial → post-process) ---
 
@@ -95,9 +101,9 @@ func (s *chatServiceImpl) settleToolTurn(
 	var resultBlocks []llmtypes.ContentBlock
 	var regularTools []llmtypes.ToolUseBlock
 	for _, tu := range turn.toolUseBlocks {
-		if tu.Name == "request_tools" && selection.Progressive {
-			resultBlocks, run.loop.toolCallRefs = s.handleRequestTools(
-				ctx, tu, ch, run.tools, run.loop.loadedTools,
+		if tu.Name == "request_tools" {
+			resultBlocks, run.loop.toolCallRefs, run.tools = s.handleRequestTools(
+				ctx, agentID, tu, ch, run.tools, run.loop.loadedTools,
 				&run.loop.consecutiveEmptyRequests, &run.loop.totalRequestToolsCalls, run.loop.maxRequestToolsCalls,
 				resultBlocks, run.loop.toolCallRefs,
 				sessionID, &run.loop.reflectionFired,
@@ -414,6 +420,7 @@ type runState struct {
 	finalUsage       *chat.Usage
 	breakdown        *chat.TokenBreakdown
 	thinkingBlocks   []llmtypes.ThinkingBlock
+	providerOutput   *llmtypes.ContentBlock
 	startCancel      context.CancelFunc
 }
 
@@ -983,12 +990,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 		if s.suppressSurfaceIfSubagentCaused(sessionID, "provider_stream_error", run.fullContent.String()) {
 			return requestProviderIterationResult{directive: generationTerminate}
 		}
-		errDetails := map[string]interface{}{"raw": err.Error(), "model": model, "tools": len(run.tools)}
-		ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(err), "Provider streaming failed", errDetails)
-		ch <- chat.ErrorEvent(chat.ClassifyError(err), "Provider streaming failed", errDetails)
-		// Suppression already checked at line above; use the pre-classified
-		// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
-		s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+		s.surfaceProviderFailure(ctx, ch, sessionID, assistantMsgID, agentID, run.fullContent.String(), model, providerName, agent.Slug, err, map[string]interface{}{"tools": len(run.tools)})
 		return requestProviderIterationResult{directive: generationTerminate}
 	}
 
@@ -1195,11 +1197,7 @@ streamLoop:
 			if s.suppressSurfaceIfSubagentCaused(sessionID, "midstream_provider_error", run.fullContent.String()) {
 				return consumeProviderIterationResult{directive: generationTerminate}
 			}
-			ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
-			ch <- chat.ErrorEvent(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
-			// Suppression already checked at line above; use the pre-classified
-			// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
-			s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+			s.surfaceProviderFailure(ctx, ch, sessionID, assistantMsgID, agentID, run.fullContent.String(), model, providerName, agent.Slug, fmt.Errorf("%s", evt.Error), nil)
 			return consumeProviderIterationResult{directive: generationTerminate}
 
 		case "session_id":
@@ -1212,11 +1210,23 @@ streamLoop:
 			// observes and discards (vs falling into the default).
 			_ = evt.SessionID
 
+		case "openai_response_output":
+			// Opaque Responses items are replayed only within this tool loop.
+			// They contain encrypted reasoning and must never become UI deltas.
+			run.providerOutput = &llmtypes.ContentBlock{Type: "openai_response_output", Text: evt.Content}
+
 		case "thinking":
 			// F3 (CW-20260420-0023): interleaved thinking block. Persist
 			// signed block for round-trip; emit to FE as PhaseThinking.
 			if evt.ThinkingBlock != nil {
-				run.thinkingBlocks = append(run.thinkingBlocks, *evt.ThinkingBlock)
+				last := len(run.thinkingBlocks) - 1
+				if last >= 0 && evt.ThinkingBlock.Signature == "" && run.thinkingBlocks[last].Signature == "" {
+					// Responses summaries arrive as unsigned deltas. Keep their
+					// persisted text contiguous while rendering each delta live.
+					run.thinkingBlocks[last].Thinking += evt.ThinkingBlock.Thinking
+				} else {
+					run.thinkingBlocks = append(run.thinkingBlocks, *evt.ThinkingBlock)
+				}
 				stopDiag := diagWatchChSend(ctx, "streamLoop.thinking", ch, sessionID, assistantMsgID, run.loop.iteration, "delta")
 				ch <- chat.StreamEvent{Type: "delta", Content: evt.ThinkingBlock.Thinking, Phase: chat.PhaseThinking}
 				stopDiag()
@@ -1879,8 +1889,6 @@ func (s *chatServiceImpl) prepareTurn(
 	fctx := pluginpkg.FilterContext{SessionID: sessionID, AgentID: agentID}
 	tools = applyToolSelectionFilter(s.pluginHost, tools, fctx)
 
-	normalizeToolInputSchemas(tools)
-
 	// Phase 0 item 21 ("Cut Modes, in full") deleted the B1 (CW-20260428-0009)
 	// + F1 (CW-20260429-0001) session-mode tool_overrides block that used to
 	// live here — it resolved session.CurrentModeID -> s.store.GetMode and
@@ -1920,6 +1928,15 @@ func (s *chatServiceImpl) prepareTurn(
 				"hyst_pinned", len(newState.PromotedAt))
 		}
 	}
+
+	// Cache navigation is a local, session-scoped harness capability. Keep its
+	// schemas even when ordinary tools were pruned or deferred by lazy loading.
+	if s.resultCache != nil {
+		tools = unionToolsByName([]llmtypes.ToolDefinition{
+			toolclient.FetchToolResultMetaTool(), toolclient.SearchToolResultMetaTool(),
+		}, tools)
+	}
+	normalizeToolInputSchemas(tools)
 
 	// Build the dynamic per-turn system prefix from tool selection. This text
 	// is sent verbatim in ChatRequest.SystemPrompt (it leads the slot blocks

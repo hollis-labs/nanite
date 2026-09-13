@@ -45,7 +45,7 @@ func (f *fakeWorkflowToolService) Execute(ctx context.Context, agentID, toolName
 	return &ToolResult{Output: "ok:" + toolName}, nil
 }
 
-func (f *fakeWorkflowToolService) HandleRequestTools(_ context.Context, _ map[string]any) ([]llmtypes.ToolDefinition, string, error) {
+func (f *fakeWorkflowToolService) HandleRequestTools(_ context.Context, _ string, _ map[string]any) ([]llmtypes.ToolDefinition, string, error) {
 	return nil, "", nil
 }
 

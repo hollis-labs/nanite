@@ -1,9 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, Bot, Info, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useTranscriptScroll } from "@/hooks/useTranscriptScroll";
 import { api } from "@/lib/api";
 import { shouldRenderStandalonePluginEnvelope } from "@/lib/envelope-lane";
+import { messageProviderFailure } from "@/lib/provider-failure";
 import type { Message } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import {
@@ -53,26 +55,32 @@ import { ToolWarningBanner } from "./ToolWarningBanner";
  */
 
 interface ChatTranscriptProps {
+  sessionId?: string;
+  messagesReady?: boolean;
+  oldestOffset?: number;
   messages: Message[];
   isStreaming: boolean;
   streamingContent: string;
   onSendMessage?: (content: string) => void;
+  onRetry?: () => void;
   onLoadOlder?: () => void;
   hasOlderMessages?: boolean;
   loadingOlder?: boolean;
 }
 
 export function ChatTranscript({
+  sessionId,
+  messagesReady = true,
+  oldestOffset = 0,
   messages,
   isStreaming,
   streamingContent,
   onSendMessage,
+  onRetry,
   onLoadOlder,
   hasOlderMessages,
   loadingOlder,
 }: ChatTranscriptProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const toolWarnings = useToolWarnings();
   const textOnlyMode = useTextOnlyMode();
   const scrollToMessageId = useChatStore((s) => s.scrollToMessageId);
@@ -80,8 +88,13 @@ export function ChatTranscript({
   const chatErrors = useChatErrors();
   const dismissChatError = useChatStore((s) => s.dismissChatError);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const modelUpdatePending = useIsMutating({ mutationKey: ["chat-model", sessionId ?? activeSessionId] }) > 0;
   const pluginEnvelopes = usePluginEnvelopes(activeSessionId);
   const queryClient = useQueryClient();
+  const [dismissedFailures, setDismissedFailures] = useState<Set<string>>(() => new Set());
+  const chooseModel = () => window.dispatchEvent(new CustomEvent("open-chat-model-picker", {
+    detail: { sessionId: sessionId ?? activeSessionId },
+  }));
 
   // F4 (CW-20260419-0029) — narration strip + collapse-pill.
   // F3 (CW-20260420-0023) — thinking strip.
@@ -89,8 +102,14 @@ export function ChatTranscript({
   const streamingFinal = useStreamingFinal();
   const streamingThinking = useStreamingThinking();
 
-  const [isAtBottom, setIsAtBottom] = useState(true);
-  const [userHasScrolled, setUserHasScrolled] = useState(false);
+  const { scrollRef, bottomRef, userHasScrolled, scrollToBottom, detach } = useTranscriptScroll(
+    sessionId ?? activeSessionId,
+    messagesReady && (messages.length > 0 || isStreaming),
+    oldestOffset,
+    `${messages.length}:${streamingContent}:${toolWarnings.length}:${chatErrors.length}`,
+    !!scrollToMessageId,
+    messages.at(-1)?.id.startsWith("temp-") ? messages.at(-1)!.id : null,
+  );
 
   const [streamStalled, setStreamStalled] = useState(false);
   const lastContentRef = useRef(streamingContent);
@@ -116,40 +135,10 @@ export function ChatTranscript({
     }
   }, [isStreaming, streamingContent]);
 
-  const checkScrollPosition = useCallback(() => {
-    const scrollElement = scrollRef.current;
-    if (!scrollElement) return;
-    const { scrollTop, scrollHeight, clientHeight } = scrollElement;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-    if (distanceFromBottom > 100) {
-      setIsAtBottom(false);
-      setUserHasScrolled(true);
-    } else if (distanceFromBottom < 50) {
-      setIsAtBottom(true);
-      setUserHasScrolled(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const scrollElement = scrollRef.current;
-    if (!scrollElement) return;
-    scrollElement.addEventListener("scroll", checkScrollPosition);
-    return () => scrollElement.removeEventListener("scroll", checkScrollPosition);
-  }, [checkScrollPosition]);
-
-  useLayoutEffect(() => {
-    checkScrollPosition();
-  }, [
-    messages.length,
-    streamingContent,
-    toolWarnings.length,
-    chatErrors.length,
-    checkScrollPosition,
-  ]);
-
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const prevMessagesLengthRef = useRef(messages.length);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scrollRef is a stable viewport ref returned by the scroll hook.
   useEffect(() => {
     const el = topSentinelRef.current;
     if (!el || !hasOlderMessages || !onLoadOlder) return;
@@ -157,7 +146,7 @@ export function ChatTranscript({
       ([entry]) => {
         if (entry?.isIntersecting && !loadingOlder) onLoadOlder();
       },
-      { rootMargin: "200px" },
+      { root: scrollRef.current, rootMargin: "200px" },
     );
     observer.observe(el);
     return () => observer.disconnect();
@@ -193,13 +182,7 @@ export function ChatTranscript({
     [activeSessionId, toggleBookmarkMutation],
   );
 
-  const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    setIsAtBottom(true);
-    setUserHasScrolled(false);
-  }, []);
-
-  const suppressAutoScrollRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the stable viewport ref is read when the jump runs.
   useEffect(() => {
     if (!scrollToMessageId) return;
     const HIGHLIGHT_CLASSES = [
@@ -233,11 +216,10 @@ export function ChatTranscript({
         else giveUp();
         return;
       }
-      suppressAutoScrollRef.current = true;
+      detach();
       target.scrollIntoView({ behavior: "smooth", block: "center" });
       target.classList.add(...HIGHLIGHT_CLASSES);
-      setIsAtBottom(false);
-      setUserHasScrolled(true);
+
       removeTimer = setTimeout(() => {
         target?.classList.remove(...HIGHLIGHT_CLASSES);
         setScrollToMessageId(null);
@@ -251,28 +233,13 @@ export function ChatTranscript({
       if (removeTimer !== null) clearTimeout(removeTimer);
       target?.classList.remove(...HIGHLIGHT_CLASSES);
     };
-  }, [scrollToMessageId, setScrollToMessageId]);
-
-  useEffect(() => {
-    if (suppressAutoScrollRef.current) {
-      suppressAutoScrollRef.current = false;
-      return;
-    }
-    if (isAtBottom && !userHasScrolled) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [
-    messages.length,
-    streamingContent,
-    toolWarnings.length,
-    chatErrors.length,
-    isAtBottom,
-    userHasScrolled,
-  ]);
+  }, [scrollToMessageId, setScrollToMessageId, detach]);
 
   const userMessageCount = messages.filter((m) => m.role === "user").length;
 
   /* ─────────────────── Empty state ─────────────────── */
+  if (!messagesReady) return <div className="flex-1" role="status" aria-label="Loading conversation" />;
+
   if (messages.length === 0 && !isStreaming) {
     return (
       <div className="flex flex-1 items-center justify-center px-6">
@@ -341,6 +308,8 @@ export function ChatTranscript({
         )}
 
         {messages.map((msg, idx) => {
+          const failure = messageProviderFailure(msg);
+          const canRecover = idx === messages.length - 1;
           let showCompactionDivider = false;
           if (idx > 0) {
             try {
@@ -352,15 +321,22 @@ export function ChatTranscript({
             }
           }
           return (
-            <div key={msg.id}>
+            <div key={msg.id} {...(failure ? { "data-message-id": msg.id } : {})}>
               {showCompactionDivider && <CompactionDivider />}
-              <ChatMessage
+              {(!failure || failure.partial) && <ChatMessage
                 message={msg}
                 isBookmarked={bookmarkedMessageIds.has(msg.id)}
                 onToggleBookmark={handleToggleBookmark}
                 {...(onSendMessage && { onSendMessage })}
                 userMessageCount={userMessageCount}
-              />
+              />}
+              {failure && !dismissedFailures.has(msg.id) && <ErrorBanner
+                error={failure.error}
+                onDismiss={(id) => setDismissedFailures((previous) => new Set([...previous, id]))}
+                onRetry={canRecover ? onRetry : undefined}
+                onChooseModel={canRecover ? chooseModel : undefined}
+                busy={isStreaming || modelUpdatePending}
+              />}
             </div>
           );
         })}
@@ -400,9 +376,7 @@ export function ChatTranscript({
         {/* Streaming message — F4 (CW-20260419-0029) narration strip + answer bubble */}
         {isStreaming && (
           <div className="flex gap-3">
-            <div
-              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-mode-default/10 text-mode-default"
-            >
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-mode-default/10 text-mode-default">
               <Bot className="h-4 w-4" />
             </div>
             <div className="min-w-0 flex-1">
@@ -441,12 +415,16 @@ export function ChatTranscript({
         )}
 
         {chatErrors
-          .filter((e) => !e.dismissed)
+          .filter((e) => !e.dismissed && (!e.details?.message_id || !messages.some((msg) =>
+            messageProviderFailure(msg)?.error.id === e.details?.message_id)))
           .map((error) => (
             <ErrorBanner
               key={error.id}
               error={error}
               onDismiss={(id) => activeSessionId && dismissChatError(activeSessionId, id)}
+              onRetry={onRetry}
+              onChooseModel={chooseModel}
+              busy={isStreaming || modelUpdatePending}
             />
           ))}
 
@@ -454,8 +432,9 @@ export function ChatTranscript({
       </div>
 
       {/* Scroll-to-bottom FAB — quieter than the original primary-fill */}
-      {userHasScrolled && !isAtBottom && (
+      {userHasScrolled && (
         <button
+          type="button"
           onClick={scrollToBottom}
           className="absolute bottom-4 right-4 flex h-9 w-9 items-center justify-center rounded-[10px] border border-border-subtle bg-bg-elevated text-fg-secondary shadow-lg transition-all duration-200 hover:scale-105 hover:text-fg"
           aria-label="Scroll to bottom"

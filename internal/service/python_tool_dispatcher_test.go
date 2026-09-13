@@ -28,7 +28,7 @@ func (*pythonDispatcherToolService) SelectForAgent(context.Context, string, stri
 	return nil, nil
 }
 
-func (*pythonDispatcherToolService) HandleRequestTools(context.Context, map[string]any) ([]llmtypes.ToolDefinition, string, error) {
+func (*pythonDispatcherToolService) HandleRequestTools(context.Context, string, map[string]any) ([]llmtypes.ToolDefinition, string, error) {
 	return nil, "", nil
 }
 

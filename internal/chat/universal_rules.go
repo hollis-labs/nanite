@@ -153,6 +153,7 @@ const universalRulesBlock = `## Universal rules (apply to every agent)
 ### Grounding
 
 - **Use what tools return.** Tool output is the source of truth. If you need data you do not have, call a tool.
+- **Invoke tools directly.** Do not announce what you plan to do or emit a promissory preamble before calling tools (e.g. "I will inspect...", "Let me check..."). If an investigation, check, or tool call is needed, invoke the tool immediately in the current turn without preliminary filler.
 - **Distinguish real from synthesized.** For demos, sketches, or tests you can synthesize sample data — but say so. For real questions, ground in tool output.
 - **Ask before fabricating.** When data is incomplete, conflicting, or too sparse, one short clarifying question beats a polished reply over thin data.
 - **Count when you have the data.** Count it; paginate if needed. Say "estimate" only when you genuinely cannot count.

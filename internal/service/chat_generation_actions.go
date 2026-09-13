@@ -1352,8 +1352,58 @@ streamLoop:
 
 	attempt.close()
 
-	// If no tool use, we are done.
+	// If no tool use, check whether this was an unfulfilled promissory preamble
+	// on iteration 0 that can be self-healed before concluding the turn.
 	if stopReason != "tool_use" || len(toolUseBlocks) == 0 {
+		turnText := turnContent.String()
+		if !chat.IsCLIProvider(providerName) &&
+			run.loop.iteration == 0 &&
+			run.loop.preambleNudgeCount == 0 &&
+			len(run.tools) > 0 &&
+			len(run.loop.toolCallRefs) == 0 &&
+			chat.IsPromissoryPreamble(turnText) {
+
+			run.loop.preambleNudgeCount++
+			slog.Info("chat-service: promissory preamble detected without tool calls; injecting self-healing nudge",
+				"session_id", sessionID, "iter", run.loop.iteration, "text_len", len(turnText))
+			s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "preamble_stall_recovery", "recovery",
+				"Injected self-healing nudge after promissory preamble ended turn without tool calls",
+				fmt.Sprintf(`{"model":%q,"iteration":%d,"text_len":%d}`, model, run.loop.iteration, len(turnText)))
+
+			// Clear final content in UI and convert preamble text to narration/thinking
+			ch <- chat.StreamEvent{Type: "replace_content", Content: ""}
+			if turnText != "" {
+				ch <- chat.StreamEvent{Type: "delta", Phase: "narration", Content: turnText + "\n"}
+				run.narrationContent.WriteString(turnText)
+				run.narrationContent.WriteString("\n")
+			}
+			run.finalContent.Reset()
+
+			// Reset per-iteration thinking accumulator so next iteration starts fresh.
+			run.thinkingBlocks = run.thinkingBlocks[:0]
+			run.providerOutput = nil
+
+			// Append assistant turn with the promissory preamble text
+			run.chatMessages = append(run.chatMessages, llmtypes.ChatMessage{
+				Role: "assistant",
+				ContentBlocks: []llmtypes.ContentBlock{
+					{Type: "text", Text: turnText},
+				},
+			})
+
+			// Append synthetic recovery nudge as user message
+			run.chatMessages = append(run.chatMessages, llmtypes.ChatMessage{
+				Role: "user",
+				ContentBlocks: []llmtypes.ContentBlock{
+					{Type: "text", Text: chat.PromissoryPreambleRecoveryNudge},
+				},
+			})
+
+			run.loop.touchActivity()
+			run.loop.continueWith(ContinuePreambleNudge, "promissory preamble nudge")
+			return consumeProviderIterationResult{directive: generationContinueIteration}
+		}
+
 		if stopReason == "max_tokens" {
 			run.loop.wasTruncated = true
 			slog.Warn("chat-service: response truncated by max_tokens", "iter", run.loop.iteration)

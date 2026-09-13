@@ -16,13 +16,14 @@ import (
 type ContinueSite string
 
 const (
-	ContinueToolResults  ContinueSite = "CONTINUE_TOOL_RESULTS"
-	ContinueCompaction   ContinueSite = "CONTINUE_COMPACTION"
-	ContinueRecovery     ContinueSite = "CONTINUE_RECOVERY"
-	ContinuePermission   ContinueSite = "CONTINUE_PERMISSION"
-	ContinueAgentReturn  ContinueSite = "CONTINUE_AGENT_RETURN"
-	ContinueHookModified ContinueSite = "CONTINUE_HOOK_MODIFIED"
-	ContinueModeChange   ContinueSite = "CONTINUE_MODE_CHANGE"
+	ContinueToolResults   ContinueSite = "CONTINUE_TOOL_RESULTS"
+	ContinueCompaction    ContinueSite = "CONTINUE_COMPACTION"
+	ContinueRecovery      ContinueSite = "CONTINUE_RECOVERY"
+	ContinuePermission    ContinueSite = "CONTINUE_PERMISSION"
+	ContinueAgentReturn   ContinueSite = "CONTINUE_AGENT_RETURN"
+	ContinueHookModified  ContinueSite = "CONTINUE_HOOK_MODIFIED"
+	ContinueModeChange    ContinueSite = "CONTINUE_MODE_CHANGE"
+	ContinuePreambleNudge ContinueSite = "CONTINUE_PREAMBLE_NUDGE"
 )
 
 // Default iteration limits.
@@ -179,6 +180,7 @@ type loopState struct {
 	limits              iterationLimits
 	consecutiveFailures int
 	toolCallCounts      map[string]int
+	preambleNudgeCount  int
 
 	// CW-20260417-0485: track the last tool failure so the
 	// chat-loop-terminated envelope can carry the triggering error.

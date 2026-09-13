@@ -74,7 +74,7 @@ func describeTaskExecute(_ context.Context, caller describer.CallerAgent) string
 // referenced from BOTH the registration-time naniteToolListDefinition()
 // AND the per-call describeToolList Describer below. Single source of
 // truth: any edit lands in both surfaces automatically.
-const toolListBaseDescription = "Lists registered self-tools by name and one-line summary. Returns the full inventory regardless of caller — actual reachability for any specific tool is governed by agent permissions, the dev-mode gate, and project/session policy, not by this output.\n\n" +
+const toolListBaseDescription = "Lists registered built-in and connected MCP tools by name and one-line summary. Returns the full inventory regardless of caller — actual reachability for any specific tool is governed by agent permissions, the dev-mode gate, and project/session policy, not by this output.\n\n" +
 	"**Contract:** input `{filter?: string}` (optional case-insensitive substring matched against BOTH name and summary). Output `{tools: [{name, summary}], count}`.\n\n" +
 	"**When to use:** Browse the catalog when you're not sure which tool to reach for, or confirm a tool name exists before calling it. Use `tool_describe` next for the full schema of a specific tool, and `request_tools` to load a tool for use in the current turn.\n\n" +
 	"**Example:** `tool_list({filter:\"reminder\"}) → {tools:[{name:\"reminder_set\", summary:\"Schedule a reminder for the user at a specific time.\"}], count:1}`.\n\n" +
@@ -93,7 +93,7 @@ func describeToolList(_ context.Context, caller describer.CallerAgent) string {
 	}
 	return toolListBaseDescription +
 		"\n\n**Caller context:** you are agent `" + caller.Slug +
-		"` — the inventory below is the full registry; use `tool_describe` to confirm reachability before relying on a specific tool."
+		"` — the inventory below is the full registry; use `tool_describe` for its schema and `request_tools` to load it subject to your grants."
 }
 
 // skillListBaseDescription is the canonical description for skill_list,

@@ -140,11 +140,13 @@ func (cw *ContextWindow) Assemble() []SlotBlock {
 			continue
 		}
 
-		// Enforce per-slot budget ceiling for static slots. LazyLoad is a
+		// Agent instructions must survive final assembly intact, just as
+		// they survive the broker's stash decision. Enforce the per-slot
+		// budget ceiling for other slots. LazyLoad is a
 		// pointer-sized payload by definition; ceiling is checked against
 		// the underlying full content (which the consumer would have to
 		// load to materialize), not the pointer.
-		if s.MaxTokens > 0 && s.TokenCount > s.MaxTokens {
+		if name != SlotAgent && s.MaxTokens > 0 && s.TokenCount > s.MaxTokens {
 			cw.truncateSlot(s)
 		}
 

@@ -31,7 +31,7 @@ func (s *loopTestToolStub) SelectForAgent(_ context.Context, _, _, _, _ string, 
 func (s *loopTestToolStub) Execute(_ context.Context, _, _ string, _ map[string]any) (*ToolResult, error) {
 	return &ToolResult{Output: s.output}, nil
 }
-func (*loopTestToolStub) HandleRequestTools(_ context.Context, _ map[string]any) ([]llmtypes.ToolDefinition, string, error) {
+func (*loopTestToolStub) HandleRequestTools(_ context.Context, _ string, _ map[string]any) ([]llmtypes.ToolDefinition, string, error) {
 	return nil, "no tools", nil
 }
 func (*loopTestToolStub) ListSummaries() []toolclient.ToolSummary { return nil }

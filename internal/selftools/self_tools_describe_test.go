@@ -6,8 +6,37 @@ import (
 	"strings"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/envelope"
 )
+
+func TestNaniteToolDescribe_ConnectedMCPTool(t *testing.T) {
+	st := newSelfTools(t)
+	st.Inventory = &stubInventoryLookup{tools: []llmtypes.ToolDefinition{{
+		Name: "torque_project_list", Description: "List projects from the connected tracker.",
+		InputSchema: map[string]any{
+			"type": "object", "properties": map[string]any{"status": map[string]any{"type": "string"}},
+		},
+	}}}
+	res, err := st.CallTool(context.Background(), "tool_describe", map[string]any{"name": "torque_project_list"})
+	if err != nil || res.IsError {
+		t.Fatalf("describe connected tool: result=%+v err=%v", res, err)
+	}
+	var out struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InputSchema struct {
+			Properties map[string]any `json:"properties"`
+		} `json:"input_schema"`
+		Examples []any `json:"examples"`
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Name != "torque_project_list" || out.Description != "List projects from the connected tracker." || out.InputSchema.Properties["status"] == nil || out.Examples == nil {
+		t.Fatalf("connected tool contract was lost: %+v", out)
+	}
+}
 
 // TestNaniteToolDescribe_RegistrationAndSelfDescribe verifies the self-tool
 // is registered in selfToolDefinitions() and can describe itself by name.

@@ -87,7 +87,7 @@ func (s *chatServiceImpl) preCheckTools(
 		}
 
 		// Handle request_tools meta-tool.
-		if tu.Name == "request_tools" && selection != nil && selection.Progressive {
+		if tu.Name == "request_tools" {
 			plan.status = toolPlanMeta
 			plans = append(plans, plan)
 			continue

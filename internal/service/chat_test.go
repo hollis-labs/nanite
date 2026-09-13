@@ -83,7 +83,7 @@ func (s *stubToolService) SelectForAgent(_ context.Context, _, _, _, _ string, _
 func (s *stubToolService) Execute(_ context.Context, _, _ string, _ map[string]any) (*ToolResult, error) {
 	return &ToolResult{Output: "ok"}, nil
 }
-func (s *stubToolService) HandleRequestTools(_ context.Context, _ map[string]any) ([]llmtypes.ToolDefinition, string, error) {
+func (s *stubToolService) HandleRequestTools(_ context.Context, _ string, _ map[string]any) ([]llmtypes.ToolDefinition, string, error) {
 	return nil, "No tools", nil
 }
 func (s *stubToolService) ListSummaries() []toolclient.ToolSummary { return nil }

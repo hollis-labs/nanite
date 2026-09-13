@@ -134,6 +134,32 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 	}
 }
 
+func TestSlotInvariants_AgentInstructionsInline(t *testing.T) {
+	for _, flavor := range dispatchFlavors() {
+		t.Run(flavor.Name, func(t *testing.T) {
+			f := newInvariantsFixture(t)
+			// A real stasher is essential: an unwired stasher falls back to
+			// inline content and would hide the lost-instructions regression.
+			f.svc = NewContextService(ContextServiceConfig{Client: f.client, SlotStasher: &fakeArtifactStasher{}})
+			f.agent.SystemPrompt = "You are the portfolio assistant.\n" + strings.Repeat("Keep the operator's instructions available throughout this session.\n", 200)
+			res := f.assembleWithCaller(t, flavor.Caller)
+			decision := findSlotDecision(res.Plan.Decisions, ctxpkg.SlotAgent)
+			if decision.Action != contextbroker.ActionShip || !strings.Contains(decision.Content, f.agent.SystemPrompt) {
+				t.Fatal("agent instructions were replaced or removed during assembly")
+			}
+			if !strings.Contains(res.SystemPrompt, f.agent.SystemPrompt) {
+				t.Fatal("model-facing system prompt lost the agent instructions")
+			}
+			for _, block := range res.Window.Assemble() {
+				if block.SlotName == ctxpkg.SlotAgent && strings.Contains(block.Content, f.agent.SystemPrompt) {
+					return
+				}
+			}
+			t.Fatal("model-facing slot blocks lost the agent instructions")
+		})
+	}
+}
+
 // assembleWithCaller runs AssembleSlots with the given CallerType
 // stamped onto ctx via dispatcher.WithCallerType. The slot decider does
 // not read the CallerType (it is metadata on ctx that flows to the

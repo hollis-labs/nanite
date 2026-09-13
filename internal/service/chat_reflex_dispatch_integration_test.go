@@ -59,7 +59,7 @@ func (f *recordingReflexDispatchToolService) Execute(_ context.Context, agentID,
 func (f *recordingReflexDispatchToolService) SelectForAgent(context.Context, string, string, string, string, int) (*ToolSelection, error) {
 	return nil, nil
 }
-func (f *recordingReflexDispatchToolService) HandleRequestTools(context.Context, map[string]any) ([]llmtypes.ToolDefinition, string, error) {
+func (f *recordingReflexDispatchToolService) HandleRequestTools(context.Context, string, map[string]any) ([]llmtypes.ToolDefinition, string, error) {
 	return nil, "", nil
 }
 func (f *recordingReflexDispatchToolService) ListSummaries() []toolclient.ToolSummary { return nil }

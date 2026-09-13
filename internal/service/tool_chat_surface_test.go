@@ -52,6 +52,29 @@ func TestApplyChatSurfaceFilter_EmptyInputSafe(t *testing.T) {
 	}
 }
 
+func TestHandleRequestTools_PreservesChatSurface(t *testing.T) {
+	tc := toolclient.New(nil, nil, nil)
+	tc.Builtins.RegisterBuiltins("fixture", []llmtypes.ToolDefinition{
+		{Name: "tool_validate", Description: "Validate tool inputs."},
+		{Name: "dev_read", Description: "Read a file."},
+	})
+	reader := newStubReader()
+	reader.addAgent(&store.AgentProfile{ID: "chat-agent", Slug: chatRoleAgentSlug, Status: "active"})
+	svc := NewToolService(tc, nil, reader)
+	loaded, _, err := svc.HandleRequestTools(context.Background(), "chat-agent", map[string]any{
+		"tool_names": []any{"tool_validate", "dev_read"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsToolNamed(loaded, "tool_validate") {
+		t.Fatal("discovery bypassed the chat surface exclusion")
+	}
+	if !containsToolNamed(loaded, "dev_read") {
+		t.Fatal("discovery lost the permitted file-read tool")
+	}
+}
+
 // TestSelectForAgent_ChatRoleStripsLensPrimitives confirms the slug-keyed
 // branch in SelectForAgent: an agent with slug "default" (chat-role) must
 // not see the four lens primitives in its tool selection.

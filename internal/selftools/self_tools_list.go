@@ -167,17 +167,16 @@ func safeTruncate(s string, n int) string {
 	return s[:n]
 }
 
-// inventoryEntry is the {name, description} pair callToolList iterates
-// over after merging the cross-server inventory with the local self-
-// tool definitions. Keeping this minimal lets the same loop run over
-// either source (Manager-fed or selfToolDefinitions-fed).
+// inventoryEntry is a tool contract shared by list and describe after
+// merging the cross-server inventory with local self-tool definitions.
 type inventoryEntry struct {
 	name        string
 	description string
+	inputSchema map[string]any
 }
 
 // gatherInventory returns the deduplicated set of tools to consider for
-// tool_list, sourced from the cross-server MCP inventory when
+// tool_list and tool_describe, sourced from the cross-server MCP inventory when
 // available and falling back to the in-process self-tools when not.
 //
 // Output is the full inventory regardless of caller. Per-agent reach
@@ -194,7 +193,7 @@ func (st *SelfToolsTransport) gatherInventory(_ context.Context) []inventoryEntr
 	seen := make(map[string]struct{})
 	var out []inventoryEntry
 
-	add := func(name, desc string) {
+	add := func(name, desc string, schema map[string]any) {
 		if name == "" {
 			return
 		}
@@ -202,7 +201,7 @@ func (st *SelfToolsTransport) gatherInventory(_ context.Context) []inventoryEntr
 			return
 		}
 		seen[name] = struct{}{}
-		out = append(out, inventoryEntry{name: name, description: desc})
+		out = append(out, inventoryEntry{name: name, description: desc, inputSchema: schema})
 	}
 
 	// Primary source: the MCP manager's full inventory across every
@@ -211,7 +210,7 @@ func (st *SelfToolsTransport) gatherInventory(_ context.Context) []inventoryEntr
 	// name and its description.
 	if st.Inventory != nil {
 		for _, t := range st.Inventory.GetAllToolsUnfiltered() {
-			add(t.Name, t.Description)
+			add(t.Name, t.Description, t.InputSchema)
 		}
 	}
 
@@ -221,7 +220,7 @@ func (st *SelfToolsTransport) gatherInventory(_ context.Context) []inventoryEntr
 	// surface is visible even on the rare path where DiscoverTools
 	// hasn't run yet (early init, manager-less unit tests).
 	for _, d := range selfToolDefinitions() {
-		add(d.Name, d.Description)
+		add(d.Name, d.Description, d.InputSchema)
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })

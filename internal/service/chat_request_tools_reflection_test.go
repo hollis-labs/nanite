@@ -60,8 +60,8 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 
 	// First call → cap is tripped (totalCalls=5+1>3) and reflectionFired
 	// is false → reflection prompt.
-	resultBlocks, refs := s.handleRequestTools(
-		context.Background(), tu, ch, nil, loadedTools,
+	resultBlocks, refs, _ := s.handleRequestTools(
+		context.Background(), "agent-1", tu, ch, nil, loadedTools,
 		&consecutiveEmpty, &totalCalls, maxCalls,
 		nil, nil,
 		sessionID, &reflectionFired,
@@ -96,8 +96,8 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 	// Second call → reflection already fired; cap still tripped → hard halt.
 	tu2 := tu
 	tu2.ID = "call_2"
-	resultBlocks2, refs2 := s.handleRequestTools(
-		context.Background(), tu2, ch, nil, loadedTools,
+	resultBlocks2, refs2, _ := s.handleRequestTools(
+		context.Background(), "agent-1", tu2, ch, nil, loadedTools,
 		&consecutiveEmpty, &totalCalls, maxCalls,
 		nil, nil,
 		sessionID, &reflectionFired,
@@ -139,8 +139,8 @@ func TestHandleRequestTools_LogsLoadedOutcome(t *testing.T) {
 
 	// stubToolService.HandleRequestTools returns nil tools + summary "" — the
 	// outcome should be "empty".
-	_, _ = s.handleRequestTools(
-		context.Background(), tu, ch, nil, loadedTools,
+	_, _, _ = s.handleRequestTools(
+		context.Background(), "agent-1", tu, ch, nil, loadedTools,
 		&consecutiveEmpty, &totalCalls, maxCalls,
 		nil, nil,
 		sessionID, &reflectionFired,

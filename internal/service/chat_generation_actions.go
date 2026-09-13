@@ -99,9 +99,9 @@ func (s *chatServiceImpl) settleToolTurn(
 	var resultBlocks []llmtypes.ContentBlock
 	var regularTools []llmtypes.ToolUseBlock
 	for _, tu := range turn.toolUseBlocks {
-		if tu.Name == "request_tools" && selection.Progressive {
-			resultBlocks, run.loop.toolCallRefs = s.handleRequestTools(
-				ctx, tu, ch, run.tools, run.loop.loadedTools,
+		if tu.Name == "request_tools" {
+			resultBlocks, run.loop.toolCallRefs, run.tools = s.handleRequestTools(
+				ctx, agentID, tu, ch, run.tools, run.loop.loadedTools,
 				&run.loop.consecutiveEmptyRequests, &run.loop.totalRequestToolsCalls, run.loop.maxRequestToolsCalls,
 				resultBlocks, run.loop.toolCallRefs,
 				sessionID, &run.loop.reflectionFired,

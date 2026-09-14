@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/pathsafe"
 )
 
 // skipIfNoOSSandbox skips a test on Linux when bwrap is unavailable and the
@@ -425,7 +427,13 @@ func TestDevGrep_MatchOnFirstLine_NoPanic(t *testing.T) {
 	// after the first match). The pre-context loop must not execute the modulo
 	// before checking ringLen == 0, or it panics with divide-by-zero.
 	dt, dir := tempDevTools(t)
-	os.WriteFile(filepath.Join(dir, "first.txt"), []byte("MATCH\nsecond line\nthird line\n"), 0o644)
+	firstPath, err := pathsafe.ResolveUnder(dir, "first.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(firstPath, []byte("MATCH\nsecond line\nthird line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := dt.CallTool(context.Background(), "dev_grep", map[string]any{
 		"pattern":   "MATCH",

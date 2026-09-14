@@ -430,7 +430,7 @@ func TestInstaller_NoArchiveInFinalDir(t *testing.T) {
 	}
 
 	// Create the fake archive file where the handle says it is.
-	if err := os.MkdirAll(filepath.Dir(src.handle.Path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(src.handle.Path), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(src.handle.Path, []byte("fake archive"), 0o600); err != nil {
@@ -454,8 +454,8 @@ func TestInstaller_NoArchiveInFinalDir(t *testing.T) {
 	}
 
 	// Verify the final directory was created.
-	if _, err := os.Stat(finalDir); err != nil {
-		t.Fatalf("final dir does not exist: %v", err)
+	if _, statErr := os.Stat(finalDir); statErr != nil {
+		t.Fatalf("final dir does not exist: %v", statErr)
 	}
 
 	// Walk the final directory and ensure no .tar.gz files are present.

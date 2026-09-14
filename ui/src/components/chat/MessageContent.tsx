@@ -78,13 +78,13 @@ function CodeBlock({ className, children }: { className?: string; children: Reac
   }
 
   return (
-    <div className="group relative my-3 rounded-sm overflow-hidden border border-border">
+    <div className="group relative my-3 rounded-sm overflow-hidden border border-border max-w-full min-w-0">
       {lang && (
         <div className="flex items-center justify-between px-3 py-1.5 bg-bg-elevated border-b border-border">
           <span className="text-xs text-fg-muted">{lang}</span>
         </div>
       )}
-      <pre className="bg-bg p-4 overflow-x-auto">
+      <pre className="bg-bg p-4 overflow-x-auto max-w-full">
         <code
           className="text-sm leading-relaxed"
           dangerouslySetInnerHTML={{ __html: highlighted }}
@@ -105,7 +105,7 @@ export function MessageContent({ content, role }: { content: string; role: 'user
       }
       return (
         <code
-          className="px-1.5 py-0.5 rounded bg-surface text-fg text-sm font-mono"
+          className="px-1.5 py-0.5 rounded bg-surface text-fg text-sm font-mono break-all"
           {...props}
         >
           {children}
@@ -126,7 +126,7 @@ export function MessageContent({ content, role }: { content: string; role: 'user
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-primary hover:text-primary-hover underline underline-offset-2"
+          className="text-primary hover:text-primary-hover underline underline-offset-2 break-all"
           {...props}
         >
           {children}
@@ -135,7 +135,7 @@ export function MessageContent({ content, role }: { content: string; role: 'user
     },
     table({ children, ...props }) {
       return (
-        <div className="overflow-x-auto my-3">
+        <div className="overflow-x-auto my-3 max-w-full">
           <table className="w-full text-sm border-collapse border border-border-subtle" {...props}>
             {children}
           </table>
@@ -147,14 +147,14 @@ export function MessageContent({ content, role }: { content: string; role: 'user
     },
     th({ children, ...props }) {
       return (
-        <th className="px-3 py-2 text-left text-xs font-medium text-fg-secondary border border-border-subtle" {...props}>
+        <th className="px-3 py-2 text-left text-xs font-medium text-fg-secondary border border-border-subtle break-words [overflow-wrap:anywhere]" {...props}>
           {children}
         </th>
       )
     },
     td({ children, ...props }) {
       return (
-        <td className="px-3 py-2 text-sm text-fg-secondary border border-border-subtle" {...props}>
+        <td className="px-3 py-2 text-sm text-fg-secondary border border-border-subtle break-words [overflow-wrap:anywhere]" {...props}>
           {children}
         </td>
       )
@@ -165,7 +165,7 @@ export function MessageContent({ content, role }: { content: string; role: 'user
     blockquote({ children, ...props }) {
       return (
         <blockquote
-          className="border-l-2 border-primary/50 bg-bg-elevated/50 pl-4 py-2 my-3 text-fg-secondary italic"
+          className="border-l-2 border-primary/50 bg-bg-elevated/50 pl-4 py-2 my-3 text-fg-secondary italic break-words [overflow-wrap:anywhere]"
           {...props}
         >
           {children}
@@ -173,34 +173,34 @@ export function MessageContent({ content, role }: { content: string; role: 'user
       )
     },
     h1({ children, ...props }) {
-      return <h1 className="text-xl font-bold text-fg mt-6 mb-3" {...props}>{children}</h1>
+      return <h1 className="text-xl font-bold text-fg mt-6 mb-3 break-words [overflow-wrap:anywhere]" {...props}>{children}</h1>
     },
     h2({ children, ...props }) {
-      return <h2 className="text-lg font-semibold text-fg mt-5 mb-2" {...props}>{children}</h2>
+      return <h2 className="text-lg font-semibold text-fg mt-5 mb-2 break-words [overflow-wrap:anywhere]" {...props}>{children}</h2>
     },
     h3({ children, ...props }) {
-      return <h3 className="text-base font-semibold text-fg mt-4 mb-2" {...props}>{children}</h3>
+      return <h3 className="text-base font-semibold text-fg mt-4 mb-2 break-words [overflow-wrap:anywhere]" {...props}>{children}</h3>
     },
     h4({ children, ...props }) {
-      return <h4 className="text-sm font-semibold text-fg mt-3 mb-1" {...props}>{children}</h4>
+      return <h4 className="text-sm font-semibold text-fg mt-3 mb-1 break-words [overflow-wrap:anywhere]" {...props}>{children}</h4>
     },
     h5({ children, ...props }) {
-      return <h5 className="text-sm font-medium text-fg-secondary mt-3 mb-1" {...props}>{children}</h5>
+      return <h5 className="text-sm font-medium text-fg-secondary mt-3 mb-1 break-words [overflow-wrap:anywhere]" {...props}>{children}</h5>
     },
     h6({ children, ...props }) {
-      return <h6 className="text-xs font-medium text-fg-secondary mt-3 mb-1 uppercase tracking-wider" {...props}>{children}</h6>
+      return <h6 className="text-xs font-medium text-fg-secondary mt-3 mb-1 uppercase tracking-wider break-words [overflow-wrap:anywhere]" {...props}>{children}</h6>
     },
     ul({ children, ...props }) {
-      return <ul className="list-disc list-outside pl-5 my-2 space-y-1 text-fg-secondary" {...props}>{children}</ul>
+      return <ul className="list-disc list-outside pl-5 my-2 space-y-1 text-fg-secondary break-words [overflow-wrap:anywhere]" {...props}>{children}</ul>
     },
     ol({ children, ...props }) {
-      return <ol className="list-decimal list-outside pl-5 my-2 space-y-1 text-fg-secondary" {...props}>{children}</ol>
+      return <ol className="list-decimal list-outside pl-5 my-2 space-y-1 text-fg-secondary break-words [overflow-wrap:anywhere]" {...props}>{children}</ol>
     },
     li({ children, ...props }) {
-      return <li className="text-sm leading-relaxed [&>p]:inline" {...props}>{children}</li>
+      return <li className="text-sm leading-relaxed [&>p]:inline break-words [overflow-wrap:anywhere]" {...props}>{children}</li>
     },
     p({ children, ...props }) {
-      return <p className="my-2 leading-relaxed" {...props}>{children}</p>
+      return <p className="my-2 leading-relaxed break-words [overflow-wrap:anywhere]" {...props}>{children}</p>
     },
     hr() {
       return <hr className="my-4 border-border-subtle" />
@@ -237,14 +237,14 @@ export function MessageContent({ content, role }: { content: string; role: 'user
 
   if (role === 'user') {
     return (
-      <div className="text-sm text-fg leading-relaxed whitespace-pre-wrap">
+      <div className="text-sm text-fg leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
         {displayContent}
       </div>
     )
   }
 
   return (
-    <div className="text-sm text-fg leading-relaxed prose-dark">
+    <div className="text-sm text-fg leading-relaxed prose-dark break-words [overflow-wrap:anywhere] min-w-0 max-w-full">
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
         {displayContent}
       </ReactMarkdown>

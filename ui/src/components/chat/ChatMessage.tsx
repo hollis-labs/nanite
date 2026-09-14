@@ -336,7 +336,7 @@ export function ChatMessage({
                 : `Agent worked through ${narrationStepCount} step${narrationStepCount !== 1 ? "s" : ""}`}
             </button>
             {narrationExpanded && (
-              <div className="mt-1.5 rounded-[6px] border border-border-subtle bg-surface px-3 py-2.5 text-[12px] leading-relaxed text-fg-muted whitespace-pre-wrap">
+              <div className="mt-1.5 rounded-[6px] border border-border-subtle bg-surface px-3 py-2.5 text-[12px] leading-relaxed text-fg-muted whitespace-pre-wrap break-words [overflow-wrap:anywhere] min-w-0">
                 {/* F3: thinking blocks rendered with a "thinking" badge, italicized */}
                 {thinkingBlocks &&
                   thinkingBlocks.map((tb, idx) => (
@@ -344,18 +344,18 @@ export function ChatMessage({
                       <span className="inline-block mb-1 font-mono text-[10px] uppercase tracking-wide text-fg-faint border border-border-subtle rounded px-1 py-0.5">
                         thinking
                       </span>
-                      <p className="text-fg-muted/80 italic">{tb.thinking}</p>
+                      <p className="text-fg-muted/80 italic break-words [overflow-wrap:anywhere]">{tb.thinking}</p>
                     </div>
                   ))}
-                {narrationThinking && <div>{narrationThinking}</div>}
+                {narrationThinking && <div className="break-words [overflow-wrap:anywhere]">{narrationThinking}</div>}
               </div>
             )}
           </div>
         )}
         {
           <div
-            className={`${
-              isUser ? "bg-surface rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%]" : "max-w-full"
+            className={`min-w-0 ${
+              isUser ? "bg-surface rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%]" : "max-w-full w-full"
             }`}
           >
             <MessageContent content={displayText} role={message.role} />

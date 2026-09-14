@@ -271,8 +271,8 @@ export function ChatTranscript({
   }
 
   return (
-    <ScrollArea className="relative flex-1 no-scrollbar px-4 py-6" ref={scrollRef}>
-      <div className="mx-auto max-w-3xl space-y-5">
+    <ScrollArea className="relative flex-1 overflow-x-hidden overscroll-x-none no-scrollbar px-4 py-6" ref={scrollRef}>
+      <div className="mx-auto max-w-3xl w-full min-w-0 space-y-5">
         {/* Sentinel for loading older messages */}
         {hasOlderMessages && (
           <div ref={topSentinelRef} className="flex items-center justify-center py-2">
@@ -386,18 +386,18 @@ export function ChatTranscript({
 
               {/* Working strip — live while narration or thinking is arriving; shows ThinkingIndicator when nothing yet */}
               {streamingNarration || streamingThinking ? (
-                <div className="mb-2 rounded-[6px] border border-border-subtle bg-surface px-3 py-2">
+                <div className="mb-2 rounded-[6px] border border-border-subtle bg-surface px-3 py-2 min-w-0">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-fg-faint mb-1">
                     Working…
                   </div>
                   {/* F3: thinking content shown with italic muted styling to distinguish from narration */}
                   {streamingThinking && (
-                    <div className="text-[12px] leading-relaxed text-fg-muted/70 italic line-clamp-2 mb-1">
+                    <div className="text-[12px] leading-relaxed text-fg-muted/70 italic line-clamp-2 mb-1 break-words [overflow-wrap:anywhere]">
                       {streamingThinking}
                     </div>
                   )}
                   {streamingNarration && (
-                    <div className="text-[12px] leading-relaxed text-fg-muted line-clamp-3">
+                    <div className="text-[12px] leading-relaxed text-fg-muted line-clamp-3 break-words [overflow-wrap:anywhere]">
                       {streamingNarration}
                     </div>
                   )}
@@ -408,7 +408,11 @@ export function ChatTranscript({
               ) : null}
 
               {/* Final answer area — renders as it arrives */}
-              {streamingFinal && <MessageContent content={streamingFinal} role="assistant" />}
+              {streamingFinal && (
+                <div className="min-w-0 max-w-full w-full">
+                  <MessageContent content={streamingFinal} role="assistant" />
+                </div>
+              )}
               {streamStalled && <ThinkingIndicator />}
             </div>
           </div>

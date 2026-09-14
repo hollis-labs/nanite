@@ -52,8 +52,8 @@ export function ChatMain({ active = true, onEditorReady }: ChatMainProps) {
 
   return (
     <Activity mode={active ? "visible" : "hidden"}>
-      <div className="flex-1 flex min-w-0">
-        <main className="flex-1 flex flex-col min-w-0 bg-bg relative">
+      <div className="flex-1 flex min-w-0 overflow-hidden">
+        <main className="flex-1 flex flex-col min-w-0 bg-bg relative overflow-hidden">
           <ChatHeader />
           <ChatPrimaryDrawer />
           <ChatTranscript

@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,14 +21,13 @@ type DiscoveredPlugin struct {
 	Manifest    *PluginManifest
 	Dir         string
 	Constructor PluginConstructor // nil for subprocess plugins
-	// MigratedFromDisabled is true when this plugin's plugin.yaml was found
-	// under its legacy renamed name (plugin.yaml.disabled, left by the now-
-	// retired file-rename disable mechanism) and restored to plugin.yaml by
-	// this discovery pass. LoadDiscovered uses this to seed the DB-backed
+	// MigratedFromDisabled is true when this plugin was found under its legacy
+	// renamed manifest (plugin.yaml.disabled, left by the retired file-rename
+	// disable mechanism). LoadDiscovered uses this to seed the DB-backed
 	// `plugins` state table with enabled=false instead of the normal
 	// first-sight default of enabled=true, so a plugin an operator had
 	// explicitly disabled under the old mechanism doesn't silently come
-	// back enabled after this migration (see TASKS/phase-5/02's Work Log).
+	// back enabled after this migration.
 	MigratedFromDisabled bool
 }
 
@@ -60,34 +60,30 @@ func DiscoverPlugins(pluginsDir string) ([]DiscoveredPlugin, error) {
 		migrated := false
 
 		if _, err := os.Stat(manifestPath); err != nil {
-			// Phase 5 item 02: the old disable mechanism renamed plugin.yaml
-			// to plugin.yaml.disabled; that rename is now retired, but a
-			// database from before this change may still have a directory
-			// stuck in that state. Restore it in place — file presence no
-			// longer carries any enable/disable meaning, only the DB
-			// `plugins` table does — so the plugin becomes discoverable
-			// again (LoadDiscovered seeds the DB row as disabled for it,
-			// preserving the pre-migration state instead of silently
-			// re-enabling it).
+			// A plugin directory may have plugin.yaml.disabled left by the
+			// retired file-rename disable mechanism. Read it in place without
+			// modifying the filesystem so discovery remains purely read-only.
+			// LoadDiscovered seeds the DB row as disabled for it, preserving
+			// the pre-migration state instead of silently re-enabling it.
 			legacyDisabled := filepath.Join(dir, "plugin.yaml.disabled")
 			if _, legacyErr := os.Stat(legacyDisabled); legacyErr != nil {
 				continue // truly no plugin.yaml — skip
 			}
-			if err := os.Rename(legacyDisabled, manifestPath); err != nil {
-				return nil, fmt.Errorf("migrate legacy disabled manifest %s: %w", legacyDisabled, err)
-			}
+			manifestPath = legacyDisabled
 			migrated = true
 		}
 
 		manifest, err := ParseManifest(manifestPath)
 		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", manifestPath, err)
+			slog.Warn("plugin: skipping directory with invalid manifest", "dir", dir, "err", err)
+			continue
 		}
 
 		// Subprocess plugins don't need a compiled-in constructor.
 		if manifest.Runtime == "subprocess" {
 			if manifest.Entrypoint == "" {
-				return nil, fmt.Errorf("plugin %q: runtime is subprocess but no entrypoint specified", manifest.Identifier())
+				slog.Warn("plugin: skipping subprocess plugin with no entrypoint", "dir", dir, "id", manifest.Identifier())
+				continue
 			}
 			discovered = append(discovered, DiscoveredPlugin{
 				Manifest:             manifest,

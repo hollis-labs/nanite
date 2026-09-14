@@ -93,8 +93,8 @@ github.com/hollis-labs/go-tether-client v0.3.0 h1:GEkMKGJS/S5JA9OXwA23I/HcXSFXeN
 github.com/hollis-labs/go-tether-client v0.3.0/go.mod h1:kVsADpv8/nJa3yd2LfwP11RrsZI53KGUB1VixKfG62g=
 github.com/hollis-labs/go-workflow v0.1.0 h1:Rose0BcdHySd3RT2+HTuAzD/dELPsEREKmosg+3SySg=
 github.com/hollis-labs/go-workflow v0.1.0/go.mod h1:LfBd90u0l4/CBtIaxJPl7RLRm9JYS3XcOyYju8aNfBg=
-github.com/hollis-labs/plugin-sdk v0.3.1 h1:gLj3CWyRfYWgvMfTwOInuiGovFaQ0zNkSoQB+I3WuWg=
-github.com/hollis-labs/plugin-sdk v0.3.1/go.mod h1:+FcTow9tco3OoINjc5LSCkm8RZzWSLNG1tTCzLSQuHs=
+github.com/hollis-labs/plugin-sdk v0.3.2-0.20260911214956-189243000161 h1:A9BQAGadU6l8vYcIruQFVMTWWTYNkGJMDsl1/SYo50o=
+github.com/hollis-labs/plugin-sdk v0.3.2-0.20260911214956-189243000161/go.mod h1:+FcTow9tco3OoINjc5LSCkm8RZzWSLNG1tTCzLSQuHs=
 github.com/hollis-labs/tesseract v0.10.0 h1:KpuwV5ZR2QeA5WwvcOP0D1nY87L+TJO4qjJdMjJ4kQ8=
 github.com/hollis-labs/tesseract v0.10.0/go.mod h1:cWm1MnBZVTTGiASyMwVOv9XKMak5MnlC+3czdBBibfU=
 github.com/invopop/jsonschema v0.14.0 h1:MHQqLhvpNUZfw+hM3AZDYK7jxO8FZoQeQM77g8iyZjg=

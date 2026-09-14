@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -220,6 +223,18 @@ func (i *Installer) Install(ctx context.Context, src Source) (string, error) {
 	if err := i.Extractor.Extract(ctx, handle, stagingDir, i.Emit); err != nil {
 		rolledBack = true
 		return "", i.fail(pluginID, StateExtracting, fmt.Errorf("extract: %w", err))
+	}
+
+	// Clean up the downloaded archive after successful extraction. For
+	// archive handles, the archive was downloaded to a temp directory and
+	// should be removed to avoid leaking disk space.
+	if isArchive && handle.Path != "" {
+		archiveDir := filepath.Dir(handle.Path)
+		// Only remove if it looks like our temp directory to avoid
+		// accidentally removing user data in case of future refactoring.
+		if strings.Contains(archiveDir, "nanite-plugin-download-") {
+			_ = os.RemoveAll(archiveDir)
+		}
 	}
 
 	// Validating.

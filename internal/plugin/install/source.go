@@ -1,6 +1,9 @@
 package install
 
-import "context"
+import (
+	"context"
+	"os"
+)
 
 // CatalogArchiveSource implements Source by downloading a signed archive
 // from a catalog entry over HTTP. Shared by cmd/nanite's CLI catalog
@@ -33,8 +36,17 @@ func (s *CatalogArchiveSource) Download(ctx context.Context, stagingDir string, 
 	if downloader == nil {
 		downloader = &HTTPDownloader{}
 	}
-	path, err := downloader.Download(ctx, s.ArchiveURL, stagingDir, s.ID, emit)
+	// Download to a temp directory outside the staging tree to prevent the
+	// archive from being committed into the final plugin directory. This
+	// restores pre-convergence behavior where the archive was isolated from
+	// the extraction target.
+	tempDir, err := os.MkdirTemp("", "nanite-plugin-download-")
 	if err != nil {
+		return Handle{}, err
+	}
+	path, err := downloader.Download(ctx, s.ArchiveURL, tempDir, s.ID, emit)
+	if err != nil {
+		_ = os.RemoveAll(tempDir)
 		return Handle{}, err
 	}
 	return Handle{

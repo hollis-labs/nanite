@@ -22,7 +22,11 @@ func startSleepTransport(t *testing.T) *StdioTransport {
 	// `sleep 300` consumes no stdin and never writes stdout — exactly the
 	// shape of an MCP server that hangs.
 	// Allowlist PATH so buildSubprocessEnv doesn't refuse to start.
-	return NewStdioTransport("sleep", []string{"300"}, nil, []string{"PATH"})
+	tr := NewStdioTransport("sleep", []string{"300"}, nil, []string{"PATH"})
+	// It never answers initialize either, so keep the handshake deadline short
+	// rather than making every test using this wait out the real one.
+	tr.handshakeTimeout = 200 * time.Millisecond
+	return tr
 }
 
 func TestStdioTransport_ReapsOnTimeout(t *testing.T) {
@@ -75,9 +79,12 @@ func TestStdioTransport_KillAndReapLockedIdempotent(t *testing.T) {
 	defer tr.Close()
 
 	tr.mu.Lock()
-	if err := tr.start(); err != nil {
+	// A process that never answers initialize is not a usable MCP server, so
+	// start() fails — and reaps on the way out. The idempotency guard below is
+	// what stops a second reap from panicking on that already-reaped process.
+	if err := tr.start(); err == nil {
 		tr.mu.Unlock()
-		t.Fatalf("start: %v", err)
+		t.Fatal("start on a non-MCP command should fail the handshake")
 	}
 	tr.killAndReapLocked()
 	// Second call must not panic or block — idempotency guard.

@@ -18,7 +18,7 @@ func TestRestartStdioTransports_ReapsRunningSubprocess(t *testing.T) {
 	}
 
 	mgr := NewManager()
-	tr := NewStdioTransport("sleep", []string{"300"}, nil, []string{"PATH"})
+	tr := newHandshakingStubTransport(t)
 	if err := mgr.AddServer("test-stdio", tr, TierBuiltin); err != nil {
 		t.Fatalf("AddServer: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestRestartStdioTransports_Idempotent(t *testing.T) {
 	}
 
 	mgr := NewManager()
-	tr := NewStdioTransport("sleep", []string{"300"}, nil, []string{"PATH"})
+	tr := newHandshakingStubTransport(t)
 	if err := mgr.AddServer("test-stdio", tr, TierBuiltin); err != nil {
 		t.Fatalf("AddServer: %v", err)
 	}

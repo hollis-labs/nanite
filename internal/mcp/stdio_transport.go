@@ -40,6 +40,13 @@ type StdioTransport struct {
 	mu               sync.Mutex // serializes requests
 	started          bool
 	maxResponseBytes int // 0 means use the package-default maxStdioResponseBytes
+	// protocolVersion the server reported at initialize; diagnostics only.
+	serverProtocolVersion string
+	// handshakeTimeout bounds the initialize exchange. A command that is not
+	// an MCP server never answers, and start() must fail rather than hold a
+	// discovery open — so this is deliberately far shorter than the per-call
+	// timeout. Overridable for tests.
+	handshakeTimeout time.Duration
 }
 
 // NewStdioTransport creates a new stdio-based MCP transport.
@@ -118,8 +125,128 @@ func (t *StdioTransport) start() error {
 		return fmt.Errorf("start %s: %w", t.command, err)
 	}
 
+	// MCP requires initialize -> initialized before any other request. Without
+	// it a spec-compliant server (anything on the official Python/TS SDK)
+	// rejects the very first call with -32602 Invalid request parameters, which
+	// surfaces as "failed to discover tools" and looks like a config problem.
+	//
+	// Done here, with t.mu held and BEFORE t.started is set, so a concurrent
+	// call() cannot slip a request in front of the handshake.
+	if err := t.handshakeLocked(); err != nil {
+		// started is still false here, so killAndReapLocked would no-op and
+		// leak the process we just spawned.
+		t.reapProcessLocked()
+		return fmt.Errorf("mcp handshake with %s: %w", t.command, err)
+	}
+
 	t.started = true
 	return nil
+}
+
+// defaultHandshakeTimeout bounds initialize. Well under the 30s per-call
+// timeout: a real server answers in milliseconds, and the common failure is a
+// command that is not an MCP server at all, where waiting longer only delays a
+// certain failure.
+const defaultHandshakeTimeout = 10 * time.Second
+
+// mcpProtocolVersion is the version we advertise in initialize. The server
+// echoes back the version it actually speaks, which we keep for diagnostics.
+const mcpProtocolVersion = "2024-11-05"
+
+// handshakeLocked performs the MCP initialize handshake on a freshly started
+// subprocess. Caller must hold t.mu and must not have set t.started yet.
+func (t *StdioTransport) handshakeLocked() error {
+	req := JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      t.nextID.Add(1),
+		Method:  "initialize",
+		Params: map[string]any{
+			"protocolVersion": mcpProtocolVersion,
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "nanite", "version": "dev"},
+		},
+	}
+	if err := t.writeMessageLocked(req); err != nil {
+		return err
+	}
+
+	timeout := t.handshakeTimeout
+	if timeout <= 0 {
+		timeout = defaultHandshakeTimeout
+	}
+	line, err := t.readLineWithTimeoutLocked(timeout)
+	if err != nil {
+		return err
+	}
+	var resp JSONRPCResponse
+	if err := json.Unmarshal(line, &resp); err != nil {
+		return fmt.Errorf("decode initialize response: %w", err)
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("initialize: JSON-RPC error %d: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result struct {
+		ProtocolVersion string `json:"protocolVersion"`
+		ServerInfo      struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"serverInfo"`
+	}
+	// A server that answers without a parseable result is still usable; the
+	// handshake itself is what matters, so this is diagnostics only.
+	_ = json.Unmarshal(resp.Result, &result)
+	t.serverProtocolVersion = result.ProtocolVersion
+	slog.Info("mcp: stdio handshake complete",
+		"command", t.command,
+		"server_name", result.ServerInfo.Name,
+		"server_version", result.ServerInfo.Version,
+		"protocol_version", result.ProtocolVersion,
+	)
+
+	// A notification: no id, and no response to wait for.
+	return t.writeMessageLocked(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/initialized",
+	})
+}
+
+// writeMessageLocked marshals and writes one newline-delimited JSON-RPC
+// message. Caller must hold t.mu.
+func (t *StdioTransport) writeMessageLocked(msg any) error {
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal message: %w", err)
+	}
+	payload = append(payload, '\n')
+	if _, err := t.stdin.Write(payload); err != nil {
+		return fmt.Errorf("write to stdin: %w", err)
+	}
+	return nil
+}
+
+// readLineWithTimeoutLocked reads one bounded response line, giving up after
+// the deadline rather than blocking a start() forever on a silent subprocess.
+func (t *StdioTransport) readLineWithTimeoutLocked(timeout time.Duration) ([]byte, error) {
+	type readResult struct {
+		line []byte
+		err  error
+	}
+	ch := make(chan readResult, 1)
+	maxBytes := t.effectiveMaxResponseBytesLocked()
+	safego.Go(context.Background(), "mcp.stdio.transport.handshake.read", func() {
+		line, err := readLineBounded(t.stdout, maxBytes)
+		ch <- readResult{line, err}
+	})
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			return nil, fmt.Errorf("read from stdout: %w", res.err)
+		}
+		return res.line, nil
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("timeout after %s", timeout)
+	}
 }
 
 // buildSubprocessEnv computes the env slice to hand to exec.Cmd based on
@@ -330,6 +457,15 @@ func (t *StdioTransport) killAndReapLocked() {
 	if !t.started {
 		return
 	}
+	t.reapProcessLocked()
+	t.started = false
+}
+
+// reapProcessLocked closes stdin, kills the subprocess and waits on it,
+// without consulting t.started. Split out because the handshake runs before
+// started is set: a failure there still spawned a process, and reaping it has
+// to not depend on a flag that is deliberately not set yet.
+func (t *StdioTransport) reapProcessLocked() {
 	if t.stdin != nil {
 		_ = t.stdin.Close()
 	}
@@ -337,7 +473,6 @@ func (t *StdioTransport) killAndReapLocked() {
 		_ = t.cmd.Process.Kill()
 		_ = t.cmd.Wait()
 	}
-	t.started = false
 }
 
 // Close stops the subprocess.

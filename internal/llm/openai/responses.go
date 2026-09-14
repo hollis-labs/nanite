@@ -45,7 +45,9 @@ func responseFailure(response responses.Response) error {
 func responseUsage(response responses.Response, stopReason string) *llmtypes.Usage {
 	return &llmtypes.Usage{
 		InputTokens: int(response.Usage.InputTokens), OutputTokens: int(response.Usage.OutputTokens),
-		CacheReadTokens: int(response.Usage.InputTokensDetails.CachedTokens), StopReason: stopReason,
+		CacheReadTokens:     int(response.Usage.InputTokensDetails.CachedTokens),
+		CacheCreationTokens: int(response.Usage.InputTokensDetails.CacheWriteTokens),
+		StopReason:          stopReason,
 	}
 }
 

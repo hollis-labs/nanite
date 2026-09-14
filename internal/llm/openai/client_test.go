@@ -273,3 +273,78 @@ func TestCapabilities_HasReasonableDefaults(t *testing.T) {
 		t.Error("DefaultEmbeddingModel should be set")
 	}
 }
+
+func TestStreamChat_PromptTokensDetailsCachedTokens(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		usageJSON         string
+		wantInput         int
+		wantOutput        int
+		wantCacheRead     int
+		wantCacheCreation int
+	}{
+		{
+			name:              "zero_cache_without_details",
+			usageJSON:         `{"prompt_tokens":100,"completion_tokens":25,"total_tokens":125}`,
+			wantInput:         100,
+			wantOutput:        25,
+			wantCacheRead:     0,
+			wantCacheCreation: 0,
+		},
+		{
+			name:              "nonzero_cache_read_and_write",
+			usageJSON:         `{"prompt_tokens":100,"completion_tokens":25,"total_tokens":125,"prompt_tokens_details":{"cached_tokens":60,"cache_write_tokens":20}}`,
+			wantInput:         100,
+			wantOutput:        25,
+			wantCacheRead:     60,
+			wantCacheCreation: 20,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				flusher, _ := w.(http.Flusher)
+				write := func(s string) {
+					_, _ = io.WriteString(w, "data: "+s+"\n\n")
+					if flusher != nil {
+						flusher.Flush()
+					}
+				}
+				write(`{"id":"x","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":""}]}`)
+				write(`{"id":"x","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)
+				write(`{"id":"x","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":[],"usage":` + tc.usageJSON + `}`)
+				write(`[DONE]`)
+			})
+
+			ch, err := c.StreamChat(context.Background(), llmtypes.ChatRequest{
+				Model:    "gpt-test",
+				Messages: []llmtypes.ChatMessage{{Role: "user", Content: "hi"}},
+			})
+			if err != nil {
+				t.Fatalf("StreamChat: %v", err)
+			}
+
+			var usage *llmtypes.Usage
+			for ev := range ch {
+				if ev.Type == llmtypes.EventUsage {
+					usage = ev.Usage
+				}
+			}
+			if usage == nil {
+				t.Fatal("missing usage event")
+			}
+			if usage.InputTokens != tc.wantInput {
+				t.Errorf("InputTokens = %d, want %d", usage.InputTokens, tc.wantInput)
+			}
+			if usage.OutputTokens != tc.wantOutput {
+				t.Errorf("OutputTokens = %d, want %d", usage.OutputTokens, tc.wantOutput)
+			}
+			if usage.CacheReadTokens != tc.wantCacheRead {
+				t.Errorf("CacheReadTokens = %d, want %d", usage.CacheReadTokens, tc.wantCacheRead)
+			}
+			if usage.CacheCreationTokens != tc.wantCacheCreation {
+				t.Errorf("CacheCreationTokens = %d, want %d", usage.CacheCreationTokens, tc.wantCacheCreation)
+			}
+		})
+	}
+}

@@ -112,14 +112,13 @@ func TestCachePlan_NonPriorityFirstSlotStopsRun(t *testing.T) {
 }
 
 // TestCachePlan_OverBudgetDropsRecentMessages: 1 system + 1 tools + 3 rm +
-// 2 slot markers (universal + system) = 7 wanted, cap = 4. Drop all 3 rm
-// (->4), then no more drops needed. Slot markers survive (higher priority
-// than recent_message).
-func TestCachePlan_OverBudgetDropsRecentMessagesFirst(t *testing.T) {
+// TestCachePlan_OverBudgetDropsExcessRecentMessages: 2 slot markers (universal + system) +
+// 3 rm = 5 wanted, cap = 4. Drops the 1 excess rm (3 -> 2). Both slot markers and
+// 2 recent messages survive.
+func TestCachePlan_OverBudgetDropsExcessRecentMessages(t *testing.T) {
 	c := New()
 	c.SetCacheHints([]llmcontracts.CacheHint{
 		{Position: "system"},
-		{Position: "tools"},
 		{Position: "recent_message", Index: 0},
 		{Position: "recent_message", Index: 1},
 		{Position: "recent_message", Index: 2},
@@ -131,38 +130,27 @@ func TestCachePlan_OverBudgetDropsRecentMessagesFirst(t *testing.T) {
 		},
 	}
 	plan := c.planCacheMarkers(req)
-	if !plan.System || !plan.Tools {
-		t.Errorf("System/Tools must not drop")
+	if !plan.System {
+		t.Errorf("System must not drop")
 	}
 	if len(plan.SlotMarkers) != 2 {
 		t.Errorf("SlotMarkers=%v, want [universal, system] preserved", plan.SlotMarkers)
 	}
-	if plan.RecentMessages != 0 {
-		t.Errorf("RecentMessages=%d, want 0 (all 3 dropped to fit cap)", plan.RecentMessages)
+	if plan.RecentMessages != 2 {
+		t.Errorf("RecentMessages=%d, want 2 (excess 1 dropped to fit cap)", plan.RecentMessages)
 	}
 	total := plan.RecentMessages + len(plan.SlotMarkers)
-	if plan.System {
-		total++
-	}
-	if plan.Tools {
-		total++
-	}
 	if total > maxCacheControlMarkers {
 		t.Errorf("total markers %d > cap %d", total, maxCacheControlMarkers)
 	}
 }
 
-// TestCachePlan_DropsSlotMarkersFromTail (CW-20260512-0109 W3 contract):
-// when even after dropping recent_messages we're still over budget, slot
-// markers drop from the TAIL — SlotUniversal at position 0 is the LAST
-// marker to go.
+// TestCachePlan_DropsSlotMarkersFromTail: when tools are present alongside slot
+// blocks and 2 recent messages, total demand = 2 slots + 1 tools + 2 rm = 5.
+// Slot markers drop from the TAIL (system yields because tools already caches it)
+// so SlotUniversal (position 0 anchor) + Tools + 2 RecentMessages fit within cap 4.
 func TestCachePlan_DropsSlotMarkersFromTail(t *testing.T) {
 	c := New()
-	// Contrive an over-budget case: system + tools + 2 rm + 2 slot markers
-	// = 6. Drop both rm (->4). Still fits at 4 — slot markers survive.
-	// To force slot-marker drop, we need MORE non-rm markers; today's hint
-	// system can't produce that without adding hints. Manually exercise
-	// the drop logic by constructing a synthetic plan.
 	c.SetCacheHints([]llmcontracts.CacheHint{
 		{Position: "system"},
 		{Position: "tools"},
@@ -170,25 +158,24 @@ func TestCachePlan_DropsSlotMarkersFromTail(t *testing.T) {
 		{Position: "recent_message", Index: 1},
 	})
 	req := llmtypes.ChatRequest{
+		Tools: []llmtypes.ToolDefinition{
+			{Name: "dev_read"},
+		},
 		SlotBlocks: []llmtypes.SlotBlock{
 			{Name: ctxpkg.SlotUniversal, Content: "uni", Changed: false},
 			{Name: ctxpkg.SlotSystem, Content: "sys", Changed: false},
 		},
 	}
 	plan := c.planCacheMarkers(req)
-	// Expect: System + Tools + 0 rm + 2 slot markers = 4 — fits.
-	if plan.RecentMessages != 0 {
-		t.Errorf("RecentMessages=%d, want 0 (dropped to fit cap)", plan.RecentMessages)
+	// Expect: SlotUniversal (1) + Tools (1) + 2 rm = 4 — fits.
+	if plan.RecentMessages != 2 {
+		t.Errorf("RecentMessages=%d, want 2 (preserved)", plan.RecentMessages)
 	}
-	if len(plan.SlotMarkers) != 2 {
-		// Fatal: the next assertion indexes plan.SlotMarkers[0] and would
-		// panic on an empty slice, obscuring the real failure.
-		t.Fatalf("SlotMarkers=%v, want both preserved at exactly cap", plan.SlotMarkers)
+	if len(plan.SlotMarkers) != 1 || plan.SlotMarkers[0] != ctxpkg.SlotUniversal {
+		t.Fatalf("SlotMarkers=%v, want [universal] (tail slot dropped, Universal anchor preserved)", plan.SlotMarkers)
 	}
-	// SlotUniversal must always be first (codified priority).
-	if plan.SlotMarkers[0] != ctxpkg.SlotUniversal {
-		t.Errorf("SlotMarkers[0]=%q, want %q (Universal-first priority)",
-			plan.SlotMarkers[0], ctxpkg.SlotUniversal)
+	if !plan.Tools {
+		t.Errorf("Tools must be true")
 	}
 }
 

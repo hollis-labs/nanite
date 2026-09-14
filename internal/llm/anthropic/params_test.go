@@ -447,3 +447,51 @@ func TestResolveMaxTokens_FallsBack(t *testing.T) {
 		t.Fatalf("expected default max tokens, got %d", got)
 	}
 }
+
+func TestBuildMessageParams_EndToEnd_SlotsAndToolsPreserveRecentMessages(t *testing.T) {
+	c := New()
+	req := llmtypes.ChatRequest{
+		Model: "claude-sonnet-4-20250514",
+		SlotBlocks: []llmtypes.SlotBlock{
+			{Name: ctxpkg.SlotUniversal, Content: "universal rules", Changed: false},
+			{Name: ctxpkg.SlotSystem, Content: "system persona", Changed: false},
+		},
+		Tools: []llmtypes.ToolDefinition{
+			{Name: "dev_read", Description: "read file"},
+		},
+		Messages: []llmtypes.ChatMessage{
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "calling tool"},
+			{Role: "user", Content: "tool result output"},
+		},
+		CacheHints: llmcontracts.DefaultCacheStrategy(),
+	}
+
+	params := c.buildMessageParams(req, "claude-sonnet-4-20250514", false, llmcontracts.ReasoningConfig{})
+	data, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("failed to marshal params: %v", err)
+	}
+	markerCount := strings.Count(string(data), `"cache_control":{`)
+	if markerCount != 4 { // Universal (1) + Tools (1) + 2 user messages (2) = 4
+		t.Fatalf("expected exactly 4 cache markers on wire, got %d: %s", markerCount, data)
+	}
+
+	// Verify Universal has cache_control
+	universalData, _ := json.Marshal(params.System[0])
+	if !strings.Contains(string(universalData), "cache_control") {
+		t.Fatalf("Universal slot missing cache_control: %s", universalData)
+	}
+
+	// Verify Tool has cache_control
+	toolData, _ := json.Marshal(params.Tools[0])
+	if !strings.Contains(string(toolData), "cache_control") {
+		t.Fatalf("Tool missing cache_control: %s", toolData)
+	}
+
+	// Verify last user message has cache_control
+	lastMsgData, _ := json.Marshal(params.Messages[2])
+	if !strings.Contains(string(lastMsgData), "cache_control") {
+		t.Fatalf("last message missing cache_control: %s", lastMsgData)
+	}
+}

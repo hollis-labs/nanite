@@ -111,26 +111,45 @@ func planCacheMarkersWithHints(req llmtypes.ChatRequest, hints []llmcontracts.Ca
 	if plan.System {
 		plan.SlotMarkers = collectStablePrefixSlots(req.SlotBlocks)
 	}
-	// Enforce cap by dropping in reverse priority.
-	total := plan.RecentMessages
-	if plan.System {
-		total++
+
+	// Tools only consume a wire-level cache marker if tools are configured on the request.
+	toolsTakesMarker := plan.Tools && len(req.Tools) > 0
+
+	// Static prefix budget: cap static markers at 2 so that up to 2 markers
+	// remain available for RecentMessages (Anthropic 4-marker total cap).
+	//
+	// When both SlotMarkers and Tools are present, the last Tool marker
+	// already caches everything preceding it (including SlotSystem, SlotAgent,
+	// SlotRules, etc.). Preserving SlotUniversal (anchor 0) and Tools gives 2
+	// static markers; dropping SlotSystem frees a marker for RecentMessages.
+	if toolsTakesMarker && len(plan.SlotMarkers) > 1 && plan.RecentMessages > 0 {
+		plan.SlotMarkers = plan.SlotMarkers[:1]
 	}
-	if plan.Tools {
-		total++
+
+	// Calculate static marker count on wire:
+	// - System prompt: 1 marker (either from plan.SlotMarkers, or plan.System if no slot markers emit)
+	// - Tools: 1 marker (if toolsTakesMarker)
+	staticCount := len(plan.SlotMarkers)
+	if staticCount == 0 && plan.System {
+		staticCount = 1
 	}
-	total += len(plan.SlotMarkers)
+	if toolsTakesMarker {
+		staticCount++
+	}
+
+	total := plan.RecentMessages + staticCount
+
+	// Drop extra recent messages beyond cap if still over budget (e.g. > 2 requested):
 	for total > maxCacheControlMarkers && plan.RecentMessages > 0 {
 		plan.RecentMessages--
 		total--
 	}
-	// Drop slot markers from the TAIL — SlotUniversal (position 0) is
-	// the last marker to go, preserving the Universal-first priority.
+	// Drop slot markers from TAIL if still over budget (SlotUniversal is last to go):
 	for total > maxCacheControlMarkers && len(plan.SlotMarkers) > 0 {
 		plan.SlotMarkers = plan.SlotMarkers[:len(plan.SlotMarkers)-1]
 		total--
 	}
-	// System + Tools alone is <= 2, never need to drop those.
+
 	return plan
 }
 

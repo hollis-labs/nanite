@@ -359,3 +359,92 @@ func TestAssembleSlots_S3b_ClassifierErrorStillRenders(t *testing.T) {
 		t.Fatalf("fail-open must hydrate all; got %v", r.ToolCache.Next)
 	}
 }
+
+func TestAssembleSlots_S3b_HydrationMode_Full_ForcesS3a(t *testing.T) {
+	cls := &scriptedClassifier{
+		result: intent.Result{Hydrate: true, Source: intent.SourceRules},
+	}
+	svc, s := newStubbedContextService(t, cls, nil, true /* cacheEnabled */)
+	// Set tools.hydration_mode = "full" in ExtSettings
+	if err := s.UpdateUserSettings(context.Background(), &store.UserSettings{
+		ToolCacheEnabled: true,
+		ExtSettings: map[string]any{
+			"tools.hydration_mode": "full",
+		},
+	}); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	sess, agent := seedSession(t, s, "run the tests")
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, tools3(), "", 200000, "")
+	if err != nil {
+		t.Fatalf("AssembleSlots: %v", err)
+	}
+	if r.ToolCache != nil {
+		t.Fatalf("tools.hydration_mode=full should disable S3b toolCache outcome; got %+v", r.ToolCache)
+	}
+	if cls.calls != 0 {
+		t.Fatalf("classifier must not be invoked when mode is full; calls=%d", cls.calls)
+	}
+	// Tools slot must contain raw JSON definitions.
+	slot := r.Window.Slot("tools")
+	var defs []llmtypes.ToolDefinition
+	if err := json.Unmarshal([]byte(slot.Content), &defs); err != nil {
+		t.Fatalf("tools slot should be JSON: %v", err)
+	}
+	if len(defs) != 3 {
+		t.Fatalf("expected 3 tools, got %d", len(defs))
+	}
+}
+
+func TestAssembleSlots_S3b_HydrationMode_Pointer_KeepsSummaryWithoutClassifier(t *testing.T) {
+	cls := &scriptedClassifier{
+		result: intent.Result{Hydrate: true, Source: intent.SourceRules},
+	}
+	svc, s := newStubbedContextService(t, cls, nil, true /* cacheEnabled */)
+	// Set tool_hydration_mode = "pointer" in ExtSettings
+	if err := s.UpdateUserSettings(context.Background(), &store.UserSettings{
+		ToolCacheEnabled: true,
+		ExtSettings: map[string]any{
+			"tool_hydration_mode": "pointer",
+		},
+	}); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	sess, agent := seedSession(t, s, "run the tests")
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, tools3(), "", 200000, "")
+	if err != nil {
+		t.Fatalf("AssembleSlots: %v", err)
+	}
+	if cls.calls != 0 {
+		t.Fatalf("pointer mode should bypass classifier when not overridden; calls=%d", cls.calls)
+	}
+	if r.ToolCache == nil || r.ToolCache.Next != StatePointer {
+		t.Fatalf("expected StatePointer outcome; got %+v", r.ToolCache)
+	}
+	content := r.Window.Slot("tools").Content
+	if !strings.Contains(content, "pointer") {
+		t.Fatalf("pointer mode must keep pointer summary; got %q", content)
+	}
+}
+
+func TestAssembleSlots_S3b_HydrationMode_EnvOverride(t *testing.T) {
+	t.Setenv("NANITE_TOOL_HYDRATION_MODE", "full")
+	cls := &scriptedClassifier{
+		result: intent.Result{Hydrate: true, Source: intent.SourceRules},
+	}
+	svc, s := newStubbedContextService(t, cls, nil, true /* cacheEnabled */)
+	sess, agent := seedSession(t, s, "run the tests")
+
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, tools3(), "", 200000, "")
+	if err != nil {
+		t.Fatalf("AssembleSlots: %v", err)
+	}
+	if r.ToolCache != nil {
+		t.Fatalf("NANITE_TOOL_HYDRATION_MODE=full should bypass S3b; got %+v", r.ToolCache)
+	}
+	if cls.calls != 0 {
+		t.Fatalf("classifier must not be invoked; calls=%d", cls.calls)
+	}
+}

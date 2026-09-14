@@ -11,7 +11,7 @@ const ScrollArea = React.forwardRef<HTMLDivElement, ScrollAreaProps>(
       <div
         ref={ref}
         className={cn(
-          "relative overflow-y-auto chat-scroll",
+          "relative overflow-y-auto overflow-x-hidden overscroll-x-none chat-scroll",
           className
         )}
         {...props}

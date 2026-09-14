@@ -129,7 +129,7 @@ func extractAgentsFromConfig(path string) ([]store.AgentProfile, error) {
 func snapshotAdapterTargetsForRefresh(projectDir string, ts time.Time) (string, error) {
 	// Determine whether any adapter target actually has a managed section;
 	// if none do, skip the backup entirely.
-	any := false
+	hasManaged := false
 	for _, name := range adapterTargetFiles {
 		data, err := os.ReadFile(filepath.Join(projectDir, name))
 		if errors.Is(err, fs.ErrNotExist) {
@@ -139,11 +139,11 @@ func snapshotAdapterTargetsForRefresh(projectDir string, ts time.Time) (string, 
 			return "", fmt.Errorf("read %s for refresh snapshot: %w", name, err)
 		}
 		if containsManagedMarker(data) {
-			any = true
+			hasManaged = true
 			break
 		}
 	}
-	if !any {
+	if !hasManaged {
 		return "", nil
 	}
 

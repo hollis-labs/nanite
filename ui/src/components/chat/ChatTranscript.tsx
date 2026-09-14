@@ -16,8 +16,10 @@ import {
   useStreamingNarration,
   useStreamingThinking,
   useTextOnlyMode,
+  useToolCalls,
   useToolWarnings,
 } from "@/stores/useChatStore";
+import { cn } from "@/lib/utils";
 import { ChatMessage } from "./ChatMessage";
 import { CompactionDivider } from "./CompactionDivider";
 import { ErrorBanner } from "./ErrorBanner";
@@ -95,6 +97,15 @@ export function ChatTranscript({
   const chooseModel = () => window.dispatchEvent(new CustomEvent("open-chat-model-picker", {
     detail: { sessionId: sessionId ?? activeSessionId },
   }));
+
+  const currentSessionId = sessionId ?? activeSessionId;
+  const toolCalls = useToolCalls(currentSessionId);
+  const pendingTools = useChatStore((s) => s.pendingTools);
+  const pendingTool = currentSessionId ? pendingTools.get(currentSessionId) : undefined;
+  const runningToolCalls = useMemo(
+    () => toolCalls.filter((tc) => tc.status === "running"),
+    [toolCalls],
+  );
 
   // F4 (CW-20260419-0029) — narration strip + collapse-pill.
   // F3 (CW-20260420-0023) — thinking strip.
@@ -380,12 +391,20 @@ export function ChatTranscript({
               <Bot className="h-4 w-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
-                Nanite
+              <div className="mb-1 flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+                <span>Nanite</span>
+                <span className="inline-flex items-center gap-1.5 text-primary text-[10px] font-normal normal-case">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                  {runningToolCalls.length > 0
+                    ? runningToolCalls.some((t) => t.tool.includes("subagent"))
+                      ? "running subagent…"
+                      : "running tools…"
+                    : "generating…"}
+                </span>
               </div>
 
-              {/* Working strip — live while narration or thinking is arriving; shows ThinkingIndicator when nothing yet */}
-              {streamingNarration || streamingThinking ? (
+              {/* Working strip — live while narration or thinking is arriving */}
+              {(streamingNarration || streamingThinking) && (
                 <div className="mb-2 rounded-[6px] border border-border-subtle bg-surface px-3 py-2 min-w-0">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-fg-faint mb-1">
                     Working…
@@ -402,10 +421,7 @@ export function ChatTranscript({
                     </div>
                   )}
                 </div>
-              ) : !streamingFinal ? (
-                // No narration/thinking and no final text yet — show the baseline thinking dots
-                <ThinkingIndicator />
-              ) : null}
+              )}
 
               {/* Final answer area — renders as it arrives */}
               {streamingFinal && (
@@ -413,7 +429,61 @@ export function ChatTranscript({
                   <MessageContent content={streamingFinal} role="assistant" />
                 </div>
               )}
-              {streamStalled && <ThinkingIndicator />}
+
+              {/* Active / awaited child work (tools / subagents) */}
+              {runningToolCalls.length > 0 && (
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {runningToolCalls.map((tc) => {
+                    const isSubagent = tc.tool.includes("subagent");
+                    return (
+                      <div
+                        key={tc.id}
+                        className={cn(
+                          "flex items-center gap-2 rounded-[6px] border px-3 py-2 text-[12px] min-w-0",
+                          isSubagent
+                            ? "border-primary/30 bg-primary/5 text-fg-secondary"
+                            : "border-border-subtle bg-surface text-fg-muted",
+                        )}
+                      >
+                        <Loader2 className={cn("h-3.5 w-3.5 animate-spin shrink-0", isSubagent ? "text-primary" : "text-warning")} />
+                        <span className={cn("font-mono text-[10px] uppercase font-semibold shrink-0", isSubagent ? "text-primary" : "text-fg-secondary")}>
+                          {isSubagent ? "Subagent" : "Tool"}
+                        </span>
+                        <code className="font-mono text-[11px] text-fg shrink-0">
+                          {tc.tool}
+                        </code>
+                        {tc.detail && (
+                          <span className="text-[11px] text-fg-muted truncate font-mono min-w-0" title={tc.detail}>
+                            {tc.detail}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Presence fallback when pendingTool is set but runningToolCalls is empty */}
+              {runningToolCalls.length === 0 && pendingTool && (
+                <div className="mt-2 flex items-center gap-2 rounded-[6px] border border-border-subtle bg-surface px-3 py-2 text-[12px] text-fg-muted min-w-0">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-warning shrink-0" />
+                  <span className="font-mono text-[10px] uppercase font-semibold text-fg-secondary shrink-0">
+                    {pendingTool.toolName.includes("subagent") ? "Subagent" : "Tool"}
+                  </span>
+                  <code className="font-mono text-[11px] text-fg shrink-0">
+                    {pendingTool.toolName}
+                  </code>
+                </div>
+              )}
+
+              {/* Baseline thinking dots when no child work card is active */}
+              {runningToolCalls.length === 0 && !pendingTool && (
+                <div className={streamingFinal ? "mt-2" : ""}>
+                  <ThinkingIndicator />
+                </div>
+              )}
+
+              {streamStalled && runningToolCalls.length > 0 && <ThinkingIndicator />}
             </div>
           </div>
         )}

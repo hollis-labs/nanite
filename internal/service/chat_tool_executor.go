@@ -898,6 +898,18 @@ func toolCallDetail(toolName string, input map[string]any) string {
 		detail = get("url")
 	case strings.HasSuffix(toolName, "web_search"):
 		detail = get("query")
+	case strings.HasSuffix(toolName, "subagent_spawn"):
+		role := get("role")
+		prompt := get("prompt")
+		if role != "" && prompt != "" {
+			detail = role + ": " + prompt
+		} else if role != "" {
+			detail = role
+		} else {
+			detail = prompt
+		}
+	case strings.HasSuffix(toolName, "python_run"):
+		detail = get("code", "script")
 	}
 
 	if detail == "" {

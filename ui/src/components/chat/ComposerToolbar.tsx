@@ -1,17 +1,13 @@
-import { useMutation } from "@tanstack/react-query";
-import { ArrowBigUp, ChevronDown, Square } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { ArrowBigUp, Square } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
-import { useModels, useProviders } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
 import { resolveIcon } from "@/lib/icons";
 import type { UISlotEntry } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
-import { useActiveEffort, useActiveModel, useChatStore } from "@/stores/useChatStore";
+import { useActiveEffort, useChatStore } from "@/stores/useChatStore";
 import { ComposerPlusMenu } from "./ComposerPlusMenu";
-import { StatusPill } from "./envelopes/primitives";
 import { LayoutMenu } from "./LayoutMenu";
 
 // F1 (CW-20260420-0014) — Effort levels for the per-turn budget + reasoning dial.
@@ -23,20 +19,6 @@ const EFFORT_LEVELS = [
 ] as const;
 
 type EffortValue = (typeof EFFORT_LEVELS)[number]["value"];
-
-const PROVIDER_ICONS: Record<string, string> = {
-  anthropic: "A",
-  openai: "O",
-  gemini: "G",
-  mistral: "M",
-  "azure-openai": "Az",
-  pty: "C",
-  "pty-claude": "C",
-  "pty-codex": "Cx",
-  "pty-gemini": "G",
-  "pty-copilot": "Cp",
-  "pty-aider": "Ai",
-};
 
 interface ComposerToolbarProps {
   hasContent: boolean;
@@ -78,32 +60,10 @@ export function ComposerToolbar({
     return () => window.removeEventListener("toggle-layout-menu", onToggle);
   }, []);
 
-  const activeModel = useActiveModel();
-  const setActiveModel = useChatStore((s) => s.setActiveModel);
   // F1 (CW-20260420-0014): per-session effort dial.
   const activeEffort = useActiveEffort() as EffortValue;
   const setActiveEffort = useChatStore((s) => s.setActiveEffort);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
-  const [modelOpen, setModelOpen] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const modelRef = useRef<HTMLDivElement>(null);
-  const [dropdownPos, setDropdownPos] = useState<{ left: number; bottom: number } | null>(null);
-
-  useEffect(() => {
-    const open = (event: Event) => {
-      if ((event as CustomEvent<{ sessionId: string }>).detail?.sessionId !== activeSessionId || !buttonRef.current) return;
-      const rect = buttonRef.current.getBoundingClientRect();
-      setDropdownPos({ left: rect.left, bottom: window.innerHeight - rect.top + 4 });
-      setModelOpen(true);
-      buttonRef.current.focus();
-    };
-    window.addEventListener("open-chat-model-picker", open);
-    return () => window.removeEventListener("open-chat-model-picker", open);
-  }, [activeSessionId]);
-
-  const { data: models } = useModels();
-  const { data: providers } = useProviders();
   const pluginButtons = usePluginSlots("composer-toolbar");
 
   const handlePluginAction = useCallback(
@@ -129,82 +89,6 @@ export function ComposerToolbar({
     },
     [activeSessionId],
   );
-
-  const groupedModels = useMemo(() => {
-    if (!models || !providers) return [];
-    const providerMap = new Map(providers.map((p) => [p.id, p]));
-    const groups = new Map<
-      string,
-      {
-        id: string;
-        name: string;
-        icon: string;
-        isPty: boolean;
-        models: { id: string; label: string; provider: string; isPty: boolean }[];
-      }
-    >();
-    for (const m of models) {
-      if (!m.is_enabled) continue;
-      const providerInfo = providerMap.get(m.provider_id);
-      if (providerInfo && !providerInfo.is_enabled) continue;
-      const providerType = m.provider_type || "anthropic";
-      const isPty = providerType.startsWith("pty");
-      if (!groups.has(m.provider_id)) {
-        groups.set(m.provider_id, {
-          id: providerType,
-          name: providerInfo?.name || providerType,
-          icon: PROVIDER_ICONS[providerType] || providerType.charAt(0).toUpperCase(),
-          isPty,
-          models: [],
-        });
-      }
-      groups
-        .get(m.provider_id)!
-        .models.push({ id: m.model_id, label: m.display_name, provider: providerType, isPty });
-    }
-    return Array.from(groups.values());
-  }, [models, providers]);
-
-  const allModels = useMemo(() => groupedModels.flatMap((g) => g.models), [groupedModels]);
-  const currentModel = allModels.find((m) => m.id === activeModel);
-
-  useEffect(() => {
-    if (!modelOpen) return;
-    function onDown(e: MouseEvent) {
-      const t = e.target as Node;
-      if (
-        modelRef.current &&
-        !modelRef.current.contains(t) &&
-        (!dropdownRef.current || !dropdownRef.current.contains(t))
-      ) {
-        setModelOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [modelOpen]);
-
-  const modelUpdate = useMutation({
-    mutationKey: ["chat-model", activeSessionId],
-    mutationFn: async ({ sessionId, modelId }: { sessionId: string; modelId: string }) => {
-      const selected = allModels.find((m) => m.id === modelId);
-      await api.updateSession(sessionId, {
-        model: modelId,
-        provider: selected?.provider || "anthropic",
-      });
-    },
-    onSuccess: (_, { sessionId, modelId }) => setActiveModel(sessionId, modelId),
-    onError: (err, { sessionId }) => useChatStore.getState().addChatError(sessionId, {
-      id: crypto.randomUUID(), code: "internal_error", timestamp: new Date().toISOString(),
-      message: "Nanite could not save the model change. Your previous model is still selected; please choose again.",
-      details: { raw: String(err) },
-    }),
-  });
-  const handleModelSelect = (modelId: string) => {
-    if (!activeSessionId || modelUpdate.isPending) return;
-    setModelOpen(false);
-    modelUpdate.mutate({ sessionId: activeSessionId, modelId });
-  };
 
   const shellTitle =
     shellMode === "yolo"
@@ -290,71 +174,6 @@ export function ComposerToolbar({
           </button>
         </Tooltip>
 
-        <span className="h-4 w-px bg-divider" />
-
-        {/* Model picker */}
-        <div ref={modelRef}>
-          <button
-            ref={buttonRef}
-            type="button"
-            onClick={() => {
-              if (!modelOpen && buttonRef.current) {
-                const rect = buttonRef.current.getBoundingClientRect();
-                setDropdownPos({ left: rect.left, bottom: window.innerHeight - rect.top + 4 });
-              }
-              setModelOpen((o) => !o);
-            }}
-            className="flex items-center gap-1 rounded-[6px] px-1.5 py-0.5 font-mono text-[11px] text-fg-muted transition-colors hover:bg-surface hover:text-fg"
-          >
-            <span className="max-w-[180px] truncate">
-              {currentModel?.label || activeModel || "Model"}
-            </span>
-            <ChevronDown size={10} />
-          </button>
-
-          {modelOpen &&
-            dropdownPos &&
-            createPortal(
-              <div
-                ref={dropdownRef}
-                className="provider-scroll fixed z-[9999] max-h-80 w-64 overflow-y-auto rounded-[10px] border border-border-subtle bg-bg-elevated py-1 shadow-2xl"
-                style={{ left: dropdownPos.left, bottom: dropdownPos.bottom }}
-              >
-                {groupedModels.length === 0 ? (
-                  <div className="px-3 py-2 text-xs text-fg-muted">Loading models…</div>
-                ) : (
-                  groupedModels.map((group) => (
-                    <div key={group.id}>
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
-                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] bg-surface text-[10px] font-bold text-fg-secondary">
-                          {group.icon}
-                        </span>
-                        <span className="truncate">{group.name}</span>
-                        <StatusPill tone={group.isPty ? "info" : "primary"} className="ml-auto">
-                          {group.isPty ? "PTY" : "API"}
-                        </StatusPill>
-                      </div>
-                      {group.models.map((model) => (
-                        <button
-                          key={model.id}
-                          type="button"
-                          onClick={() => void handleModelSelect(model.id)}
-                          className={`flex w-full items-center gap-1.5 py-1.5 pl-8 pr-3 text-left text-xs transition-colors ${
-                            model.id === activeModel
-                              ? "bg-surface text-fg"
-                              : "text-fg-secondary hover:bg-surface hover:text-fg"
-                          }`}
-                        >
-                          <span className="flex-1 truncate">{model.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ))
-                )}
-              </div>,
-              document.body,
-            )}
-        </div>
       </div>
 
       {/* ── Right: send / stop ── */}

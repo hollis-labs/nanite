@@ -61,8 +61,10 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 			// Capture usage when present (final chunk under include_usage).
 			if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 || chunk.Usage.TotalTokens > 0 {
 				lastUsage = &llmtypes.Usage{
-					InputTokens:  int(chunk.Usage.PromptTokens),
-					OutputTokens: int(chunk.Usage.CompletionTokens),
+					InputTokens:         int(chunk.Usage.PromptTokens),
+					OutputTokens:        int(chunk.Usage.CompletionTokens),
+					CacheReadTokens:     int(chunk.Usage.PromptTokensDetails.CachedTokens),
+					CacheCreationTokens: int(chunk.Usage.PromptTokensDetails.CacheWriteTokens),
 				}
 			}
 			for _, choice := range chunk.Choices {

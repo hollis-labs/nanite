@@ -1359,7 +1359,15 @@ func IntArg(args map[string]any, key string, def int) int {
 		return def
 	}
 	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case int32:
+		return int(n)
 	case float64:
+		return int(n)
+	case float32:
 		return int(n)
 	case json.Number:
 		i, err := n.Int64()

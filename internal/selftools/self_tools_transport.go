@@ -2072,5 +2072,9 @@ func (st *SelfToolsTransport) callRunPython(ctx context.Context, args map[string
 	if jsonErr != nil {
 		return mcp.ErrorResult(fmt.Sprintf("python sandbox: marshal result: %v", jsonErr)), nil
 	}
-	return mcp.TextResult(string(out)), nil
+	res := mcp.TextResult(string(out))
+	if result != nil && result.Error != "" {
+		res.IsError = true
+	}
+	return res, nil
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -328,22 +329,55 @@ func slotSourceMap(sources *chat.SlotSources, toolsContent string) map[string]st
 	}
 }
 
-// toolCacheActive returns true when every S3b dep is wired and the user has
-// not disabled the feature.
+// toolHydrationMode resolves the active hydration mode for the Tools slot.
+// Supported modes:
+//   - "full": Always fully hydrate all tool definitions (S3a behavior, no pointer stashing).
+//   - "auto": Progressive hydration via intent classification (S3b behavior, default).
+//   - "pointer": Keep compact pointer-summary without hydrating schemas unless explicitly overridden.
+func (s *contextServiceImpl) toolHydrationMode() string {
+	if env := os.Getenv("NANITE_TOOL_HYDRATION_MODE"); env != "" {
+		switch strings.ToLower(strings.TrimSpace(env)) {
+		case "full":
+			return "full"
+		case "pointer":
+			return "pointer"
+		case "auto":
+			return "auto"
+		}
+	}
+	if s.settingsFunc != nil {
+		if us := s.settingsFunc(); us != nil {
+			if us.ExtSettings != nil {
+				for _, key := range []string{"tools.hydration_mode", "tool_hydration_mode"} {
+					if v, ok := us.ExtSettings[key]; ok {
+						if str, ok := v.(string); ok {
+							switch strings.ToLower(strings.TrimSpace(str)) {
+							case "full":
+								return "full"
+							case "pointer":
+								return "pointer"
+							case "auto":
+								return "auto"
+							}
+						}
+					}
+				}
+			}
+			if !us.ToolCacheEnabled {
+				return "full"
+			}
+		}
+	}
+	return "auto"
+}
+
+// toolCacheActive returns true when every S3b dep is wired and the resolved
+// hydration mode is not "full".
 func (s *contextServiceImpl) toolCacheActive() bool {
 	if s.stashManager == nil || s.classifier == nil {
 		return false
 	}
-	if s.settingsFunc == nil {
-		// Deps are wired but caller didn't give us a settings reader — treat
-		// as enabled (defaults in migration 012 say enabled=true).
-		return true
-	}
-	us := s.settingsFunc()
-	if us == nil {
-		return true
-	}
-	return us.ToolCacheEnabled
+	return s.toolHydrationMode() != "full"
 }
 
 // buildToolsSlot produces the content for the Tools slot plus (when the S3b
@@ -366,16 +400,27 @@ func (s *contextServiceImpl) buildToolsSlot(ctx context.Context, session *store.
 		override = s.overrides.Get(sessionID)
 	}
 
-	input := intent.Input{
-		UserTurn:            lastUserTurn(msgs),
-		AvailableCategories: st.CategoriesList(),
-		ToolNames:           toolNames(tools),
-		Override:            override,
-	}
+	mode := s.toolHydrationMode()
+	var result intent.Result
+	var latency int64
+	if mode == "pointer" && override != intent.OverrideOn {
+		result = intent.Result{
+			Hydrate:   false,
+			Source:    intent.SourceRules,
+			Reasoning: "hydration_mode pointer",
+		}
+	} else {
+		input := intent.Input{
+			UserTurn:            lastUserTurn(msgs),
+			AvailableCategories: st.CategoriesList(),
+			ToolNames:           toolNames(tools),
+			Override:            override,
+		}
 
-	start := nowFunc()
-	result, _ := s.classifier.Classify(ctx, input)
-	latency := nowFunc().Sub(start).Milliseconds()
+		start := nowFunc()
+		result, _ = s.classifier.Classify(ctx, input)
+		latency = nowFunc().Sub(start).Milliseconds()
+	}
 
 	content, next, cats := renderToolsSlot(st, result)
 

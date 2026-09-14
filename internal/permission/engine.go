@@ -77,10 +77,17 @@ func NewEngine(mode Mode, rules *RuleSet) *Engine {
 		rules = &RuleSet{}
 	}
 	return &Engine{
-		mode:            mode,
-		rules:           rules,
-		sessionGrants:   make(map[string]map[string]Decision),
-		approvalTimeout: 60 * time.Second,
+		mode:          mode,
+		rules:         rules,
+		sessionGrants: make(map[string]map[string]Decision),
+		// A human reading a tool call, deciding, and clicking needs longer than
+		// a minute — especially for something with a real-world consequence
+		// like "this goes to your manager". 60s denied legitimate approvals
+		// routinely, and the second-order effect is worse than the delay: once
+		// people learn the gate rejects them for thinking too long, they reach
+		// for session-scope approvals or yolo mode, and the gate stops meaning
+		// anything. Deny-on-timeout stays; the window just has to be humane.
+		approvalTimeout: 5 * time.Minute,
 	}
 }
 

@@ -850,10 +850,10 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 					preStart = lineNo - ctxLines
 				}
 				for j := preStart; j < lineNo; j++ {
-					idx := (j - ringStart) % ringLen
 					if ringLen == 0 {
 						break
 					}
+					idx := (j - ringStart) % ringLen
 					fmt.Fprintf(&sb, " %4d\t%s\n", j, ring[idx])
 				}
 				fmt.Fprintf(&sb, ">%4d\t%s\n", lineNo, line)

@@ -419,6 +419,50 @@ func TestDevGrep_Basic(t *testing.T) {
 	}
 }
 
+func TestDevGrep_MatchOnFirstLine_NoPanic(t *testing.T) {
+	// Regression test for the divide-by-zero bug (CW-20260824-0002).
+	// When a match occurs on line 1, ringLen is still 0 (the ring only grows
+	// after the first match). The pre-context loop must not execute the modulo
+	// before checking ringLen == 0, or it panics with divide-by-zero.
+	dt, dir := tempDevTools(t)
+	os.WriteFile(filepath.Join(dir, "first.txt"), []byte("MATCH\nsecond line\nthird line\n"), 0o644)
+
+	result, err := dt.CallTool(context.Background(), "dev_grep", map[string]any{
+		"pattern":   "MATCH",
+		"directory": dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error (possible panic): %s", result.Content[0].Text)
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "MATCH") {
+		t.Errorf("expected match on line 1, got: %s", text)
+	}
+	// Pre-context should be empty — nothing before line 1.
+	// The output format is "--- filename:lineNo ---\n>lineNo\tline\n"
+	// There should be no lines with leading space (pre-context marker) before the ">1".
+	lines := strings.Split(text, "\n")
+	foundMatch := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, ">   1\t") {
+			foundMatch = true
+			// Any line before this with a leading space would be pre-context.
+			for j := 0; j < i; j++ {
+				if strings.HasPrefix(lines[j], " ") && strings.Contains(lines[j], "\t") {
+					t.Errorf("unexpected pre-context before line 1: %s", lines[j])
+				}
+			}
+			break
+		}
+	}
+	if !foundMatch {
+		t.Errorf("did not find match marker for line 1 in output: %s", text)
+	}
+}
+
 func TestDevGrep_SkipsSymlinkOutsideAllowedDirectory(t *testing.T) {
 	dt, dir := tempDevTools(t)
 	outsideDir := t.TempDir()

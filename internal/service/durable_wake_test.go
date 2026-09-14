@@ -21,6 +21,15 @@ func (s *expiryStatusFailingStore) UpdateAgentScheduleStatus(context.Context, st
 	return s.err
 }
 
+type bumpFailingStore struct {
+	*store.Store
+	err error
+}
+
+func (s *bumpFailingStore) BumpAgentScheduleFireCount(context.Context, string, time.Time) error {
+	return s.err
+}
+
 func TestDurableWakeListDueAndDryRun(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Wake Agent", Slug: "wake-agent", SystemPrompt: "x"}
@@ -496,5 +505,131 @@ func TestDurableWakeTemplateClassRewakeableWhileActive(t *testing.T) {
 	}
 	if result.Skipped {
 		t.Fatalf("template-class wake with activation_mode=fresh-per-wake skipped while instance was already active: %+v", result)
+	}
+}
+
+// TestDurableWakeBumpFailureLoggedAndDoesNotBlockOneShotExpiry is the
+// regression test for CW-20260824-0004: BumpAgentScheduleFireCount failures
+// were silently dropped (no log), and the error gated one-shot expiry — a
+// one-shot schedule that fired successfully but whose counter failed to
+// increment stayed armed and could fire again forever. This test confirms:
+// 1. Bump failures are logged with schedule_id and schedule_kind
+// 2. One-shot schedules expire even when bump fails
+// 3. Recurring schedules are unaffected (no expiry attempted)
+func TestDurableWakeBumpFailureLoggedAndDoesNotBlockOneShotExpiry(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	ctx := context.Background()
+	profile := &store.AgentProfile{Name: "Bump Fail Agent", Slug: "bump-fail-agent", SystemPrompt: "x", Class: "process", ActivationMode: "fresh-per-wake"}
+	if err := st.CreateAgent(ctx, profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	seedSession := &store.Session{Provider: "anthropic", Model: "model-a"}
+	if err := st.CreateSession(ctx, seedSession); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	inst := &store.DurableAgentInstance{
+		Name:             "Bump Fail Instance",
+		Slug:             "bump-fail-instance",
+		ProfileID:        profile.ID,
+		LifecycleClass:   store.DurableAgentClassProcess,
+		Provider:         "anthropic",
+		Model:            "model-a",
+		RuntimeKind:      "api",
+		CurrentSessionID: seedSession.ID,
+	}
+	if err := st.CreateDurableAgentInstance(ctx, inst); err != nil {
+		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	}
+	if err := st.AttachDurableAgentInstanceSession(ctx, inst.ID, seedSession.ID, store.DurableAgentSessionRelationWake); err != nil {
+		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
+	}
+
+	// Create one-shot and cron schedules
+	oneShotID := "sched-bump-fail-oneshot"
+	cronID := "sched-bump-fail-cron"
+	if err := st.InsertAgentSchedule(ctx, store.AgentSchedule{
+		ID:           oneShotID,
+		AgentID:      profile.ID,
+		Name:         "one-shot bump fail",
+		ScheduleKind: store.ScheduleKindOneShot,
+		Body:         "wake",
+		Status:       store.ScheduleStatusActive,
+		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+		NextRun:      time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("InsertAgentSchedule one-shot: %v", err)
+	}
+	if err := st.InsertAgentSchedule(ctx, store.AgentSchedule{
+		ID:           cronID,
+		AgentID:      profile.ID,
+		Name:         "cron bump fail",
+		ScheduleKind: store.ScheduleKindCron,
+		ScheduleSpec: "0 0 * * *",
+		Body:         "wake",
+		Status:       store.ScheduleStatusActive,
+		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+		NextRun:      time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("InsertAgentSchedule cron: %v", err)
+	}
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	bumpErr := errors.New("bump counter unavailable")
+	failingStore := &bumpFailingStore{Store: st, err: bumpErr}
+	wakeSvc := NewDurableAgentWakeService(failingStore, NewDurableAgentService(failingStore))
+	run, err := wakeSvc.RunDue(ctx, DurableAgentWakeRunRequest{Now: time.Now().UTC()})
+	if err != nil {
+		t.Fatalf("RunDue returned bump failure instead of preserving best-effort success: %v", err)
+	}
+	if len(run.Results) != 2 {
+		t.Fatalf("RunDue results len = %d, want 2", len(run.Results))
+	}
+
+	// Verify one-shot schedule was expired despite bump failure
+	oneShotSchedule, err := st.GetAgentSchedule(ctx, oneShotID)
+	if err != nil {
+		t.Fatalf("GetAgentSchedule one-shot: %v", err)
+	}
+	if oneShotSchedule.Status != store.ScheduleStatusExpired {
+		t.Errorf("one-shot Status = %q, want expired (bump failure must not block expiry)", oneShotSchedule.Status)
+	}
+	// FiredCount will be 0 because the bump failed, but expiry still happened
+	if oneShotSchedule.FiredCount != 0 {
+		t.Errorf("one-shot FiredCount = %d, want 0 (bump failed)", oneShotSchedule.FiredCount)
+	}
+
+	// Verify cron schedule was not expired (cron schedules never expire)
+	cronSchedule, err := st.GetAgentSchedule(ctx, cronID)
+	if err != nil {
+		t.Fatalf("GetAgentSchedule cron: %v", err)
+	}
+	if cronSchedule.Status != store.ScheduleStatusActive {
+		t.Errorf("cron Status = %q, want active (cron schedules don't expire)", cronSchedule.Status)
+	}
+
+	// Verify bump failures were logged for both schedules
+	logOutput := logs.String()
+	for _, scheduleID := range []string{oneShotID, cronID} {
+		for _, want := range []string{
+			`"msg":"durable wake: failed to bump schedule fire count"`,
+			`"schedule_id":"` + scheduleID + `"`,
+			`"instance_id":"` + inst.ID + `"`,
+			`"err":"` + bumpErr.Error() + `"`,
+		} {
+			if !strings.Contains(logOutput, want) {
+				t.Errorf("bump failure log for schedule %s missing %q from %s", scheduleID, want, logOutput)
+			}
+		}
+	}
+	// Verify schedule_kind is logged (should appear twice, once for each schedule)
+	if strings.Count(logOutput, `"schedule_kind":"one_shot"`) < 1 {
+		t.Errorf("bump failure log missing schedule_kind for one-shot")
+	}
+	if strings.Count(logOutput, `"schedule_kind":"cron"`) < 1 {
+		t.Errorf("bump failure log missing schedule_kind for cron")
 	}
 }

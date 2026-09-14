@@ -230,7 +230,18 @@ func (s *durableWakeService) RunDue(ctx context.Context, req DurableAgentWakeRun
 		if err != nil {
 			continue
 		}
-		if err := s.store.BumpAgentScheduleFireCount(ctx, item.Schedule.ID, now); err == nil && item.Schedule.ScheduleKind == store.ScheduleKindOneShot {
+		err = s.store.BumpAgentScheduleFireCount(ctx, item.Schedule.ID, now)
+		if err != nil {
+			slog.Warn("durable wake: failed to bump schedule fire count",
+				"schedule_id", item.Schedule.ID,
+				"schedule_kind", item.Schedule.ScheduleKind,
+				"instance_id", item.InstanceID,
+				"err", err,
+			)
+		}
+		// For one-shot schedules, expiry must proceed even if the counter bump failed.
+		// The counter is bookkeeping; expiry is correctness.
+		if item.Schedule.ScheduleKind == store.ScheduleKindOneShot {
 			if err := s.store.UpdateAgentScheduleStatus(ctx, item.Schedule.ID, store.ScheduleStatusExpired); err != nil {
 				slog.Warn("durable wake: failed to expire one-shot schedule",
 					"schedule_id", item.Schedule.ID,

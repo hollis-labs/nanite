@@ -164,3 +164,63 @@ func TestExecutorLoop_NilInspector_SlogOnly(t *testing.T) {
 	}
 	// No panic = pass.
 }
+
+func TestToolCallDetail_SubagentAndPython(t *testing.T) {
+	tests := []struct {
+		name     string
+		tool     string
+		input    map[string]any
+		expected string
+	}{
+		{
+			name: "subagent with role and prompt",
+			tool: "subagent_spawn",
+			input: map[string]any{
+				"role":   "reviewer",
+				"prompt": "inspect the inbox items",
+			},
+			expected: "reviewer: inspect the inbox items",
+		},
+		{
+			name: "subagent with role only",
+			tool: "subagent_spawn",
+			input: map[string]any{
+				"role": "reviewer",
+			},
+			expected: "reviewer",
+		},
+		{
+			name: "subagent with prompt only",
+			tool: "subagent_spawn",
+			input: map[string]any{
+				"prompt": "inspect the inbox items",
+			},
+			expected: "inspect the inbox items",
+		},
+		{
+			name: "python_run with code",
+			tool: "python_run",
+			input: map[string]any{
+				"code": "print('hello')",
+			},
+			expected: "print('hello')",
+		},
+		{
+			name: "dev_read with path",
+			tool: "dev_read",
+			input: map[string]any{
+				"path": "src/main.go",
+			},
+			expected: "src/main.go",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := toolCallDetail(tc.tool, tc.input)
+			if got != tc.expected {
+				t.Errorf("toolCallDetail(%q, %v) = %q, want %q", tc.tool, tc.input, got, tc.expected)
+			}
+		})
+	}
+}

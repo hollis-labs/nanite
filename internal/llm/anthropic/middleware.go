@@ -10,10 +10,15 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 )
 
-// Anthropic rate-limit response headers — match the names parsed by the
-// deleted hand-rolled adapter so behavior is preserved across the
-// migration. Header names, not credentials — gosec G101 false-positive.
+// Anthropic rate-limit response headers — prefers the canonical
+// "anthropic-ratelimit-*" names emitted by the Anthropic API, falling back to
+// the legacy/proxy "x-ratelimit-*" aliases.
+// Header names, not credentials — gosec G101 false-positive.
 const (
+	headerAnthropicRateLimitInputTokens          = "anthropic-ratelimit-input-tokens-limit"
+	headerAnthropicRateLimitRemainingInputTokens = "anthropic-ratelimit-input-tokens-remaining"
+	headerAnthropicRateLimitResetInputTokens     = "anthropic-ratelimit-input-tokens-reset"
+
 	headerRateLimitInputTokens          = "x-ratelimit-limit-input-tokens"     //nolint:gosec // header name
 	headerRateLimitRemainingInputTokens = "x-ratelimit-remaining-input-tokens" //nolint:gosec // header name
 	headerRateLimitResetInputTokens     = "x-ratelimit-reset-input-tokens"     //nolint:gosec // header name
@@ -82,7 +87,10 @@ func rateAwareMiddleware(rt *llmcontracts.TokenRateTracker, cb *llmcontracts.Cir
 // calibration or a real tier transition); same-value re-calibrations are
 // silent so the log signal stays meaningful.
 func calibrateRateTracker(rt *llmcontracts.TokenRateTracker, resp *http.Response, calibrated *atomic.Bool) {
-	limitStr := resp.Header.Get(headerRateLimitInputTokens)
+	limitStr := resp.Header.Get(headerAnthropicRateLimitInputTokens)
+	if limitStr == "" {
+		limitStr = resp.Header.Get(headerRateLimitInputTokens)
+	}
 	if limitStr == "" {
 		return
 	}
@@ -102,10 +110,17 @@ func calibrateRateTracker(rt *llmcontracts.TokenRateTracker, resp *http.Response
 	rt.UpdateLimit(newLimit)
 
 	remainingTPM := 0
-	if v, perr := strconv.Atoi(resp.Header.Get(headerRateLimitRemainingInputTokens)); perr == nil {
+	remStr := resp.Header.Get(headerAnthropicRateLimitRemainingInputTokens)
+	if remStr == "" {
+		remStr = resp.Header.Get(headerRateLimitRemainingInputTokens)
+	}
+	if v, perr := strconv.Atoi(remStr); perr == nil {
 		remainingTPM = v
 	}
-	resetAt := resp.Header.Get(headerRateLimitResetInputTokens)
+	resetAt := resp.Header.Get(headerAnthropicRateLimitResetInputTokens)
+	if resetAt == "" {
+		resetAt = resp.Header.Get(headerRateLimitResetInputTokens)
+	}
 	slog.Info("provider: rate limit calibrated",
 		"provider", "anthropic",
 		"old_limit_tpm", oldLimit,

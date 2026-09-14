@@ -215,6 +215,8 @@ generationLoop:
 		case generationRetryIteration:
 			run.loop.iteration-- // the retry isn't a fresh turn
 			continue
+		case generationContinueIteration:
+			continue
 		case generationFinishRun:
 			break generationLoop
 		case generationTerminate:

@@ -31,6 +31,7 @@ func TestUniversalRulesBlock_NonEmpty(t *testing.T) {
 		purpose string
 	}{
 		{"grounding-tool-result", "Use what tools return", "deep-dive §1: real vs synthesized"},
+		{"grounding-invoke-directly", "Invoke tools directly", "negative constraint against promissory preambles (CW-20260913-0037)"},
 		{"refusal-ask-first", "Ask before fabricating", "deep-dive §4: refusal affordance gap"},
 		{"count-when-you-have-data", "Count when you have the data", "deep-dive §1: real-data discipline (CW-20260910-0011: reframed from \"Count, do not estimate\" — grant, not named failure mode)"},
 		{"refusal-acknowledge", "Acknowledge honestly when you fail", "deep-dive §4: c160 regression target"},
@@ -130,6 +131,7 @@ func TestAssembleSlotSources_UniversalRulesInSlotUniversal(t *testing.T) {
 	// block being included).
 	requiredClauses := []string{
 		"Use what tools return",
+		"Invoke tools directly",
 		"Refuse rather than fabricate",
 		"Acknowledge honestly when you fail",
 		"return an explicit failure",

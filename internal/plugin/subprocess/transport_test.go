@@ -1,6 +1,7 @@
 package subprocess
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,9 +13,9 @@ import (
 // mockPlugin reads JSON-RPC requests from r and writes responses to w.
 // It handles the core protocol methods for testing.
 func mockPlugin(r io.Reader, w io.Writer, handlers map[string]func(json.RawMessage) (any, *RPCError)) {
-	transport := NewTransport(r, w)
+	reader := bufio.NewReader(r)
 	for {
-		line, err := transport.r.ReadBytes('\n')
+		line, err := reader.ReadBytes('\n')
 		if err != nil {
 			return
 		}
@@ -196,4 +197,57 @@ func TestTransport_Notify(t *testing.T) {
 	}
 
 	pluginInW.Close()
+}
+
+func TestTransport_CallTimeoutDoesNotKillConnection(t *testing.T) {
+	pluginInR, pluginInW := io.Pipe()
+	pluginOutR, pluginOutW := io.Pipe()
+
+	handlers := map[string]func(json.RawMessage) (any, *RPCError){
+		"slow/method": func(_ json.RawMessage) (any, *RPCError) {
+			// Delay longer than caller timeout to simulate a slow plugin.
+			time.Sleep(150 * time.Millisecond)
+			return map[string]string{"status": "late"}, nil
+		},
+		"fast/method": func(_ json.RawMessage) (any, *RPCError) {
+			return map[string]string{"status": "fast"}, nil
+		},
+	}
+
+	go mockPlugin(pluginInR, pluginOutW, handlers)
+
+	transport := NewTransport(pluginOutR, pluginInW)
+	defer transport.Close()
+
+	// Call 1: Times out quickly (50ms).
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel1()
+
+	_, err := transport.Call(ctx1, "slow/method", nil)
+	if err == nil {
+		t.Fatal("expected timeout error on slow/method, got nil")
+	}
+
+	// CW-20260914-0006: Under the old transport, the timeout above closed the
+	// underlying reader pipe, killing the transport and causing every subsequent
+	// call to fail with io.ErrClosedPipe. With ID-correlated dispatch, the connection
+	// remains completely healthy.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+
+	resp, err := transport.Call(ctx2, "fast/method", nil)
+	if err != nil {
+		t.Fatalf("subsequent call failed after previous call timeout: %v", err)
+	}
+
+	var result map[string]string
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal fast response: %v", err)
+	}
+	if result["status"] != "fast" {
+		t.Errorf("expected status 'fast', got %q", result["status"])
+	}
+
+	pluginInW.Close()
+	pluginOutW.Close()
 }

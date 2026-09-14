@@ -83,7 +83,9 @@ export function StartSurfaceDialog({
   const capabilities = useQuery({
     queryKey: ["start-surface-capabilities"],
     queryFn: () => api.getStartSurfaceCapabilities(),
-    enabled: open,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
   });
 
   const caps = capabilities.data;
@@ -102,7 +104,8 @@ export function StartSurfaceDialog({
   useEffect(() => {
     if (!open || !prefill) return;
     if (prefill.path) setPath(prefill.path);
-    if (prefill.provider) setProvider(prefill.provider);
+    if (prefill.provider)
+      setProvider(resolveProviderId(chatProviders, prefill.provider));
     if (prefill.model) setModel(prefill.model);
     if (prefill.agent_id) {
       setAgentId(prefill.agent_id);
@@ -113,15 +116,15 @@ export function StartSurfaceDialog({
       setPath("durable");
     }
     if (prefill.durable_prompt) setDurablePrompt(prefill.durable_prompt);
-  }, [open, prefill]);
+  }, [open, prefill, chatProviders]);
 
   useEffect(() => {
     if (!caps) return;
     const profiles = caps.profiles ?? [];
     const durableAgents = caps.durable_agents ?? [];
     const recipes = caps.recipes ?? [];
-    setProvider(
-      (current) => current || prefill?.provider || defaultProvider || chatProviders[0]?.id || "",
+    setProvider((current) =>
+      resolveProviderId(chatProviders, current || prefill?.provider || defaultProvider),
     );
     setAgentId((current) => current || prefill?.agent_id || defaultAgent || profiles[0]?.id || "");
     setDurableAgentId(
@@ -137,7 +140,9 @@ export function StartSurfaceDialog({
     const recipe = selectedRecipe(caps, recipeId);
     if (!recipe) return;
     setRecipeInputValues(initialRecipeInputValues(recipe));
-    setRecipeProvider((current) => current || recipe.provider || recipeProviders[0]?.id || "");
+    setRecipeProvider((current) =>
+      resolveProviderId(recipeProviders, current || recipe.provider),
+    );
     setRecipeRuntimeKind(
       (current) => current || String(recipe.runtime_kind || recipeRuntimeKinds[0]?.value || ""),
     );
@@ -171,7 +176,6 @@ export function StartSurfaceDialog({
 
   const complete = (sessionId?: string) => {
     void queryClient.invalidateQueries({ queryKey: ["sessions"] });
-    void queryClient.invalidateQueries({ queryKey: ["start-surface-capabilities"] });
     if (sessionId) onSessionStarted(sessionId);
     onOpenChange(false);
   };
@@ -311,9 +315,9 @@ export function StartSurfaceDialog({
           </div>
 
           <div className="no-scrollbar min-h-0 min-w-0 overflow-y-auto px-5 py-4">
-            {capabilities.isLoading ? (
+            {capabilities.isLoading && !caps ? (
               <div className="text-[12px] text-fg-muted">Loading start options...</div>
-            ) : capabilities.isError ? (
+            ) : capabilities.isError && !caps ? (
               <InlineError message="Could not load start options." />
             ) : (
               <>
@@ -979,8 +983,28 @@ function filterChatProviders(caps?: StartSurfaceCapabilitiesResponse): ProviderC
   return caps?.providers ?? [];
 }
 
-function filterModelsForProvider(models: ModelRecord[], provider: string): ModelRecord[] {
-  return models.filter((model) => model.provider_id === provider);
+function resolveProviderId(
+  providers: ProviderConfig[] | undefined | null,
+  target?: string | null,
+): string {
+  if (!providers || providers.length === 0) return "";
+  if (target) {
+    const byId = providers.find((p) => p.id === target);
+    if (byId) return byId.id;
+    const byType = providers.find((p) => p.provider_type === target);
+    if (byType) return byType.id;
+  }
+  return providers[0]?.id || "";
+}
+
+function filterModelsForProvider(
+  models: ModelRecord[] | undefined | null,
+  provider: string,
+): ModelRecord[] {
+  if (!models || !provider) return [];
+  return models.filter(
+    (model) => model.provider_id === provider || model.provider_type === provider,
+  );
 }
 
 function selectedRecipe(caps: StartSurfaceCapabilitiesResponse | undefined, id: string) {

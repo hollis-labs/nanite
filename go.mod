@@ -82,7 +82,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
-	github.com/hollis-labs/plugin-sdk v0.3.1
+	github.com/hollis-labs/plugin-sdk v0.3.2-0.20260911214956-189243000161
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/mattn/go-isatty v0.0.24
 	github.com/ncruces/go-strftime v1.0.0 // indirect

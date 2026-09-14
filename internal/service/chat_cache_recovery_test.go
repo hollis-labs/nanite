@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/selftools"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -36,6 +38,70 @@ func TestChatCacheRecovery_CompleteResultBypassesLegacyLineLimit(t *testing.T) {
 		ls, ch, "session", "agent", "message", "")
 	if len(blocks) != 1 || blocks[0].Content != body {
 		t.Fatal("complete result that fits the byte budget was truncated by its line count")
+	}
+}
+
+func TestChatCacheRecovery_TurnCeilingStepsDownBudget(t *testing.T) {
+	ctx := context.Background()
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "ceiling.db"))
+	if err != nil {
+		t.Fatalf("storetest.New: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close(ctx) })
+
+	svc := makeErrorHonestyService()
+	svc.resultCache = tool.NewResultCache(st.DB, tool.ResultCacheConfig{})
+
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	ls.turnResultCeiling = 1000 // 1000 bytes ceiling
+
+	ch := make(chan chat.StreamEvent, 32)
+
+	// Call 1: 600 bytes. Cumulative = 600 (< 1000). Budget = default (~4000). Result fits completely.
+	body1 := strings.Repeat("A", 600)
+	tu1 := llmtypes.ToolUseBlock{ID: "call1", Name: "portfolio_source", Input: map[string]any{}}
+	blocks1, _ := svc.postProcessToolResults(ctx,
+		[]toolPlan{{tu: tu1, status: toolPlanReady}},
+		[]toolExecResult{{rawOutput: body1, ref: chat.ToolCallRef{ID: tu1.ID, Name: tu1.Name}}},
+		ls, ch, "session-1", "agent-1", "msg-1", "")
+	if len(blocks1) != 1 || blocks1[0].Content != body1 {
+		t.Fatalf("call 1 should fit completely under default budget, got len %d", len(blocks1[0].Content))
+	}
+	if ls.cumulativeToolBytes != 600 {
+		t.Fatalf("expected cumulativeToolBytes = 600, got %d", ls.cumulativeToolBytes)
+	}
+
+	// Call 2: 600 bytes. Cumulative was 600 (< 1000), so budget is still ~4000. Result fits completely.
+	// After call 2, cumulative = 1200 (> 1000).
+	body2 := strings.Repeat("B", 600)
+	tu2 := llmtypes.ToolUseBlock{ID: "call2", Name: "portfolio_source", Input: map[string]any{}}
+	blocks2, _ := svc.postProcessToolResults(ctx,
+		[]toolPlan{{tu: tu2, status: toolPlanReady}},
+		[]toolExecResult{{rawOutput: body2, ref: chat.ToolCallRef{ID: tu2.ID, Name: tu2.Name}}},
+		ls, ch, "session-1", "agent-1", "msg-2", "")
+	if len(blocks2) != 1 || blocks2[0].Content != body2 {
+		t.Fatalf("call 2 should fit completely under default budget, got len %d", len(blocks2[0].Content))
+	}
+	if ls.cumulativeToolBytes != 1200 {
+		t.Fatalf("expected cumulativeToolBytes = 1200, got %d", ls.cumulativeToolBytes)
+	}
+
+	// Call 3: 600 bytes. Cumulative is 1200 (> 1000), so budget steps down to CompactPreviewBudgetBytes (512).
+	// Since body3 (600) > 512, it must be cached and truncated with a partial preview.
+	body3 := strings.Repeat("C", 600)
+	tu3 := llmtypes.ToolUseBlock{ID: "call3", Name: "portfolio_source", Input: map[string]any{}}
+	blocks3, _ := svc.postProcessToolResults(ctx,
+		[]toolPlan{{tu: tu3, status: toolPlanReady}},
+		[]toolExecResult{{rawOutput: body3, ref: chat.ToolCallRef{ID: tu3.ID, Name: tu3.Name}}},
+		ls, ch, "session-1", "agent-1", "msg-3", "")
+	if len(blocks3) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks3))
+	}
+	if !strings.Contains(blocks3[0].Content, "[PARTIAL PREVIEW") {
+		t.Fatalf("call 3 should have stepped down to compact preview, got: %s", blocks3[0].Content)
+	}
+	if !strings.Contains(blocks3[0].Content, "tool_result://") {
+		t.Fatalf("call 3 should have cached pointer, got: %s", blocks3[0].Content)
 	}
 }
 

@@ -273,9 +273,23 @@ func (s *chatServiceImpl) initializeRun(
 	// inactivity-timeout window. A subagent dispatch uses the
 	// Torque-parity liveness window (subagentIdleTimeoutSeconds) — the
 	// fixed 300s wall-clock deadline that used to bound subagent runs
-	// has been removed, so the chat loop's idle-timeout terminator is
-	// now the governing liveness signal.
 	ls := newLoopState(constraints, toolNames, debugMode, dispatcher.CallerTypeFromContext(ctx))
+	if s.store != nil {
+		if us, err := s.store.GetUserSettings(ctx); err == nil && us != nil && us.ExtSettings != nil {
+			if v, ok := us.ExtSettings["tool_turn_ceiling_bytes"]; ok {
+				switch val := v.(type) {
+				case float64:
+					if val >= 0 {
+						ls.turnResultCeiling = int(val)
+					}
+				case int:
+					if val >= 0 {
+						ls.turnResultCeiling = val
+					}
+				}
+			}
+		}
+	}
 	// P3 (CW-20260420-0013): pre-loop classification. Downstream consumers
 	// read via loopState.Classification().
 	classifyAndAttach(ls, sessionID, userContent, toolNames)

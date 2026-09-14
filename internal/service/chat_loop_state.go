@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -157,17 +159,28 @@ type iterationLimits struct {
 	defaultPerToolCap int
 }
 
+// DefaultTurnResultCeilingBytes is the cumulative byte threshold of delivered tool
+// outputs across iterations of a single user turn. Exceeding this ceiling causes
+// subsequent tool calls in the same turn to step down from the model-aware
+// preview budget to CompactPreviewBudgetBytes, protecting against runaway loop token bloat.
+const (
+	DefaultTurnResultCeilingBytes = 24 * 1024 // 24 KiB cumulative per turn
+	CompactPreviewBudgetBytes     = 512       // 512 bytes preview when ceiling exceeded
+)
+
 // loopState consolidates all mutable state for the generateResponse loop.
 type loopState struct {
 	resultBudget int // Shared model-aware result-preview and retrieval-page budget.
 	// Tool execution tracking.
-	lastToolResults  map[string]string
-	toolRepeatCount  map[string]int
-	blockedTools     map[string]bool
-	toolCallRefs     []chat.ToolCallRef
-	pendingEnvelopes []string
-	wasTruncated     bool
-	directReturn     string
+	lastToolResults     map[string]string
+	toolRepeatCount     map[string]int
+	blockedTools        map[string]bool
+	toolCallRefs        []chat.ToolCallRef
+	pendingEnvelopes    []string
+	wasTruncated        bool
+	directReturn        string
+	cumulativeToolBytes int
+	turnResultCeiling   int
 
 	// Iteration control.
 	//
@@ -303,6 +316,13 @@ func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode b
 		lastActivity:         time.Now(),
 		debugMode:            debugMode,
 		scratchpad:           make(map[string]any),
+		turnResultCeiling:    DefaultTurnResultCeilingBytes,
+	}
+
+	if env := os.Getenv("NANITE_TOOL_TURN_CEILING_BYTES"); env != "" {
+		if v, err := strconv.Atoi(env); err == nil && v >= 0 {
+			ls.turnResultCeiling = v
+		}
 	}
 
 	// Populate loadedTools from initial tool set.

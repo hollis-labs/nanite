@@ -714,7 +714,17 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// soft cap in c114 (6813 bytes), forcing the agent through
 		// fetch/search and burning all 10 turns before it could emit a
 		// card.
-		view := tool.ResultView{BudgetBytes: truncate.BudgetForModel(modelID), Format: "complete"}
+		budget := truncate.BudgetForModel(modelID)
+		if ls.turnResultCeiling > 0 && ls.cumulativeToolBytes > ls.turnResultCeiling {
+			budget = CompactPreviewBudgetBytes
+			slog.Info("chat-service: turn tool output ceiling exceeded, using compact preview",
+				"tool", tu.Name,
+				"cumulative_bytes", ls.cumulativeToolBytes,
+				"ceiling", ls.turnResultCeiling,
+				"compact_budget", CompactPreviewBudgetBytes,
+			)
+		}
+		view := tool.ResultView{BudgetBytes: budget, Format: "complete"}
 		wasCached := false
 		wasPresented := false
 		if s.resultCache != nil && !r.isError && !isScratchpadTool(tu.Name) && !isCacheExemptTool(tu.Name) {
@@ -756,6 +766,8 @@ func (s *chatServiceImpl) postProcessToolResults(
 			// case — behavior identical to truncate.Output.
 			tr = truncate.OutputForModel(resultText, tu.Name, modelID, truncate.WithDelegationHint(canDelegate))
 		}
+
+		ls.cumulativeToolBytes += len(tr.Content)
 
 		// Emit tool_result to client.
 		summary := resultText

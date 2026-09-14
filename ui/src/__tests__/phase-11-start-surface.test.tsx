@@ -236,6 +236,76 @@ describe("Phase 11 Start surface", () => {
     });
   });
 
+  it("resolves default provider type to provider id and populates dependent models", async () => {
+    mockCapabilities({
+      ...capabilities(),
+      providers: [
+        {
+          id: "anthropic-001",
+          name: "Anthropic",
+          provider_type: "anthropic",
+          is_enabled: true,
+          settings: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+      models: [
+        {
+          id: "model-1",
+          provider_id: "anthropic-001",
+          model_id: "claude-sonnet-4-5-20250929",
+          display_name: "Claude Sonnet 3.5",
+          context_window: 200000,
+          max_output: 8192,
+          supports_tools: true,
+          supports_vision: true,
+          is_enabled: true,
+          pricing: "",
+          sort_order: 0,
+          provider_type: "anthropic",
+        },
+      ],
+    });
+    const createSession = vi
+      .spyOn(api, "createSession")
+      .mockResolvedValue(session("session-chat-resolved"));
+    const onSessionStarted = vi.fn();
+
+    renderWithClient(
+      <StartSurfaceDialog
+        open
+        onOpenChange={() => undefined}
+        projectId="project-1"
+        defaultProvider="anthropic"
+        defaultModel="claude-sonnet-4-5-20250929"
+        defaultAgent="profile-1"
+        onSessionStarted={onSessionStarted}
+      />,
+    );
+
+    await screen.findByText("Chat with a model");
+
+    const providerSelect = screen.getByRole("combobox", { name: "Provider" }) as HTMLSelectElement;
+    expect(providerSelect.value).toBe("anthropic-001");
+
+    const modelSelect = screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement;
+    expect(modelSelect.disabled).toBe(false);
+    expect(modelSelect.value).toBe("claude-sonnet-4-5-20250929");
+
+    fireEvent.click(screen.getByRole("button", { name: /start chat/i }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith({
+        project_id: "project-1",
+        provider: "anthropic-001",
+        model: "claude-sonnet-4-5-20250929",
+        agent_id: "profile-1",
+      });
+      expect(onSessionStarted).toHaveBeenCalledWith("session-chat-resolved");
+    });
+  });
+
   it("handles nullable capability arrays from empty backend lists", async () => {
     mockCapabilities({
       ...capabilities(),

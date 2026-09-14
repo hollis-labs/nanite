@@ -529,6 +529,28 @@ func (m *Manager) LookupToolInputSchema(uniformName string) (map[string]any, boo
 	return entry.tool.InputSchema, true
 }
 
+// ToolBehavior returns the MCP behavior hints a server declared for a tool,
+// given its uniform agent-facing name. ok=false when the name is not a
+// registered MCP tool, or when the server declared no annotations at all —
+// callers must treat that as "unknown", not as "safe".
+func (m *Manager) ToolBehavior(uniformName string) (readOnly, destructive, ok bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, found := m.uniformIndex[uniformName]
+	if !found || len(entry.tool.Annotations) == 0 {
+		return false, false, false
+	}
+	boolHint := func(key string) bool {
+		v, present := entry.tool.Annotations[key]
+		if !present {
+			return false
+		}
+		b, isBool := v.(bool)
+		return isBool && b
+	}
+	return boolHint("readOnlyHint"), boolHint("destructiveHint"), true
+}
+
 // ToolAttribution returns the originating MCP server and the tool's
 // original name on that server, given a uniform agent-facing name.
 // Returns ok=false when the name is not a registered MCP tool. Used by

@@ -738,6 +738,19 @@ func (s *toolServiceImpl) ListSummaries() []toolclient.ToolSummary {
 func (s *toolServiceImpl) GetToolMeta(ctx context.Context, toolName string) (ToolMetaInfo, bool) {
 	meta := ToolMetaInfo{}
 
+	// What the server declared beats what its tool name looks like. The
+	// heuristics below are a fallback for tools that annotate nothing; they
+	// cannot classify a third-party tool they have never seen, and the way
+	// they fail is by calling an unrecognized write "not destructive", which
+	// the permission engine then allows without asking.
+	if s.mcpManager != nil {
+		if readOnly, destructive, ok := s.mcpManager.ToolBehavior(toolName); ok {
+			meta.IsReadOnly = readOnly
+			meta.IsDestructive = destructive
+			return meta, true
+		}
+	}
+
 	// Read-only tools.
 	switch {
 	case strings.HasSuffix(toolName, "_read") || strings.HasSuffix(toolName, "_glob") ||

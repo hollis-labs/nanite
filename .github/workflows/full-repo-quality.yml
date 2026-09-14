@@ -179,6 +179,18 @@ jobs:
           done < "$RUNNER_TEMP/tracked-go-packages.txt"
           go test -race -count=1 "${packages[@]}"
 
+      - name: Report bare goroutine usage (safego adoption sweep)
+        shell: bash
+        run: |
+          set -o pipefail
+          grep -rn --include='*.go' --exclude='*_test.go' -E '^\s+go [A-Za-z_][A-Za-z0-9_.]*\(' \
+            internal/plugin internal/worker internal/mcp internal/service \
+            internal/server internal/api internal/memory \
+            internal/sandbox internal/permission internal/secrets \
+            internal/pathsafe internal/fsutil \
+            2>/dev/null | grep -v 'safego\.Go' | grep -v 'safego\.Call' \
+            | tee "$RUNNER_TEMP/lint-goroutines.txt" || echo "(no bare goroutines in target packages)" | tee "$RUNNER_TEMP/lint-goroutines.txt"
+
       # WHAT THIS STEP IS FOR. A gate that examined nothing prints the same
       # bytes as a gate that found nothing. This one died in its first assertion
       # on eight consecutive scheduled runs, and every one of them looked like
@@ -222,6 +234,7 @@ jobs:
           report_row "gosec"         "$RUNNER_TEMP/gosec.json"
           report_row "gosec repeat"  "$RUNNER_TEMP/gosec-repeat.json"
           report_row "dead code"     "$RUNNER_TEMP/deadcode.txt"
+          report_row "safego sweep"  "$RUNNER_TEMP/lint-goroutines.txt"
 
           if [ "$packages" -eq 0 ]; then
             {
@@ -245,6 +258,7 @@ jobs:
             ${{ runner.temp }}/gosec-stderr.txt
             ${{ runner.temp }}/gosec-repeat-stderr.txt
             ${{ runner.temp }}/deadcode.txt
+            ${{ runner.temp }}/lint-goroutines.txt
           if-no-files-found: ignore
           retention-days: 14
 

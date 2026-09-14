@@ -3,6 +3,9 @@ package install
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -402,4 +405,76 @@ func equalStates(a, b []State) bool {
 		}
 	}
 	return true
+}
+
+// TestInstaller_NoArchiveInFinalDir verifies that the downloaded .tar.gz
+// archive is NOT present in the final plugin directory after installation.
+// This is a regression test for the bug where archives were left in every
+// installed plugin directory because staging was the install directory
+// pre-rename.
+func TestInstaller_NoArchiveInFinalDir(t *testing.T) {
+	root := t.TempDir()
+	stg := &DirStaging{
+		StagingRoot: filepath.Join(root, "staging"),
+		PluginsRoot: filepath.Join(root, "plugins"),
+	}
+
+	// Use a fake source that simulates downloading an archive by creating
+	// a .tar.gz file in a temp directory (mimicking the new behavior).
+	src := &fakeSource{
+		id: "test-plugin",
+		handle: Handle{
+			Kind: "archive",
+			Path: filepath.Join(root, "download-temp", "plugin.tar.gz"),
+		},
+	}
+
+	// Create the fake archive file where the handle says it is.
+	if err := os.MkdirAll(filepath.Dir(src.handle.Path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src.handle.Path, []byte("fake archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Extractor that creates a valid plugin structure.
+	ext := &fakeExtractor{}
+
+	i := &Installer{
+		Verifier:  &fakeVerifier{},
+		Extractor: ext,
+		Validator: &fakeValidator{},
+		Loader:    &fakeLoader{},
+		Staging:   stg,
+	}
+
+	finalDir, err := i.Install(context.Background(), src)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	// Verify the final directory was created.
+	if _, statErr := os.Stat(finalDir); statErr != nil {
+		t.Fatalf("final dir does not exist: %v", statErr)
+	}
+
+	// Walk the final directory and ensure no .tar.gz files are present.
+	var foundArchives []string
+	err = filepath.Walk(finalDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(path, ".tar.gz") {
+			foundArchives = append(foundArchives, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk final dir: %v", err)
+	}
+
+	if len(foundArchives) > 0 {
+		t.Errorf("found %d .tar.gz file(s) in final plugin directory %q: %v",
+			len(foundArchives), finalDir, foundArchives)
+	}
 }

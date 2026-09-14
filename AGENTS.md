@@ -102,6 +102,19 @@ A duplicate migration number is this repo's one unrecoverable failure, so
 `migration-number` runs on every push to `main` with no file filter. Do not
 add one — a filter here fails open and prints as a benign skip.
 
+**Before a migration renames or removes a column, verify nothing already
+selects it.** A rename or removal breaks every running process the moment the
+migration applies — they hold compiled-in queries naming the old column, which
+instantly fail with `no such column` against the altered schema. An `ADD
+COLUMN` does not break running processes because queries name columns
+explicitly and a column nobody selects is invisible to an already-open
+connection. Check this before merge: `strings <deployed-artifact> | grep
+<old-column-name>` — nonzero hits mean a live process selects it, and the
+migration will break running instances on apply. Coordinate the deployment: new
+binary deployed and service restarted *before* any post-migration process
+applies the schema change. This is the generalizable lesson from migration 159's
+`urn` → `legacy_urn` rename (`CW-20260912-0043`).
+
 The `devmode` build tag disables plugin signature verification. `make build`
 must never set it; `make build-dev` exists for that and must never ship.
 

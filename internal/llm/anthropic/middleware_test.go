@@ -56,6 +56,37 @@ func TestRateAwareMiddleware_HeaderCalibration(t *testing.T) {
 	}
 }
 
+func TestRateAwareMiddleware_AnthropicCanonicalHeaderCalibration(t *testing.T) {
+	rt := llmcontracts.NewTokenRateTracker(50000)
+	cb := llmcontracts.NewCircuitBreaker(3)
+	var calibrated atomic.Bool
+
+	mw := rateAwareMiddleware(rt, cb, &calibrated)
+
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-input-tokens-limit", "160000")
+	headers.Set("anthropic-ratelimit-input-tokens-remaining", "150000")
+	headers.Set("anthropic-ratelimit-input-tokens-reset", "2026-05-09T18:00:00Z")
+
+	req := &http.Request{Header: http.Header{}}
+	resp, err := mw(req, func(*http.Request) (*http.Response, error) {
+		return stubResponse(http.StatusOK, headers, ""), nil
+	})
+	if err != nil {
+		t.Fatalf("middleware returned err: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d want 200", resp.StatusCode)
+	}
+	if !calibrated.Load() {
+		t.Fatal("calibrated flag not set after canonical header read")
+	}
+	_, limit := rt.Remaining()
+	if limit != 160000 {
+		t.Fatalf("limit=%d want 160000", limit)
+	}
+}
+
 func TestRateAwareMiddleware_429RecordsBreakerFailure(t *testing.T) {
 	rt := llmcontracts.NewTokenRateTracker(50000)
 	cb := llmcontracts.NewCircuitBreaker(2) // trip after 2 consecutive

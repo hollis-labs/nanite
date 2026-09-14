@@ -339,8 +339,18 @@ func RunPythonSandbox(
 	cmdErr := cmd.Wait()
 	<-pumpDone
 
-	// Determine if we timed out.
+	// Determine if we timed out (either Go wall-clock context deadline or Python CPU rlimit signal).
 	timedOut := runCtx.Err() == context.DeadlineExceeded
+	if !timedOut && cmdErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(cmdErr, &exitErr) {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+				if status.Signal() == syscall.SIGXCPU {
+					timedOut = true
+				}
+			}
+		}
+	}
 
 	// Build the structured result.
 	result := &PythonRunResult{
@@ -541,6 +551,7 @@ func naniteRunPythonToolDefinition() mcp.Tool {
 **When NOT to use:**
 - General computation without tool calls (use scratchpad/think instead).
 - File I/O, network access, or long-running background tasks.
+- Unbounded directory scans: recursive file tree walks (such as Path.rglob across wide trees like ~ or ~/dev) hit the execution timeout (default 10s). For wide filesystem searches, use native tools (find_by_name, grep_search). If traversing files in Python, keep scans strictly bounded to specific leaf directories or limit traversal depth/count.
 
 **tool_call(name, args) helper:**
 Every call goes through the full permission engine — no security hole is opened.

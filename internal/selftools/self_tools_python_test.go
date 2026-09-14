@@ -589,3 +589,58 @@ func TestRunPythonSandbox_CapsClamped(t *testing.T) {
 		t.Errorf("result = %q, want capped", s)
 	}
 }
+
+func TestSelfToolsTransport_RunPython_TimeoutPreservesIsError(t *testing.T) {
+	skipIfNoPython3(t)
+
+	st := newSelfTools(t)
+	st.PythonDispatcher = newStubDispatcher()
+	st.PythonPermChecker = allowAllPermChecker{}
+
+	callResult, err := st.CallTool(context.Background(), "python_run", map[string]any{
+		"code":               "while True: pass",
+		"time_limit_seconds": 1,
+		"session_id":         "test-sess-timeout",
+	})
+	if err != nil {
+		t.Fatalf("CallTool error: %v", err)
+	}
+	if !callResult.IsError {
+		t.Fatalf("expected IsError=true on timeout, got false. Content: %s", callResult.Content[0].Text)
+	}
+
+	var pyResult PythonRunResult
+	if err := json.Unmarshal([]byte(callResult.Content[0].Text), &pyResult); err != nil {
+		t.Fatalf("unmarshal result: %v\nraw: %s", err, callResult.Content[0].Text)
+	}
+	if !strings.Contains(pyResult.Error, "timed out") && !strings.Contains(pyResult.Error, "signal") {
+		t.Errorf("expected timeout in error, got %q", pyResult.Error)
+	}
+}
+
+func TestSelfToolsTransport_RunPython_RuntimeErrorPreservesIsError(t *testing.T) {
+	skipIfNoPython3(t)
+
+	st := newSelfTools(t)
+	st.PythonDispatcher = newStubDispatcher()
+	st.PythonPermChecker = allowAllPermChecker{}
+
+	callResult, err := st.CallTool(context.Background(), "python_run", map[string]any{
+		"code":       "1 / 0",
+		"session_id": "test-sess-error",
+	})
+	if err != nil {
+		t.Fatalf("CallTool error: %v", err)
+	}
+	if !callResult.IsError {
+		t.Fatalf("expected IsError=true on runtime error, got false. Content: %s", callResult.Content[0].Text)
+	}
+
+	var pyResult PythonRunResult
+	if err := json.Unmarshal([]byte(callResult.Content[0].Text), &pyResult); err != nil {
+		t.Fatalf("unmarshal result: %v\nraw: %s", err, callResult.Content[0].Text)
+	}
+	if !strings.Contains(pyResult.Error, "ZeroDivisionError") {
+		t.Errorf("expected ZeroDivisionError in error, got %q", pyResult.Error)
+	}
+}

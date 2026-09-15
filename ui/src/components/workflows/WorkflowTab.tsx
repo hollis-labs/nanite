@@ -10,6 +10,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useWorkflowEvents, useWorkflowRuns } from "@/hooks/useWorkflows";
+import { useLayoutStore } from "@/stores/useLayoutStore";
 import { WorkflowRunCard } from "./WorkflowRunCard";
 import { WorkflowRunDetail } from "./WorkflowRunDetail";
 
@@ -18,12 +19,13 @@ type Filter = "all" | "active";
 export function WorkflowTab() {
   const [filter, setFilter] = useState<Filter>("active");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const currentPage = useLayoutStore((s) => s.currentPage);
 
   const queryFilter = filter === "active" ? { status: "running" } : undefined;
   const { data: runs = [], isLoading } = useWorkflowRuns(queryFilter);
 
-  // Subscribe to SSE events for live invalidation
-  useWorkflowEvents();
+  // Subscribe to SSE events for live invalidation only when on the workflows page
+  useWorkflowEvents(currentPage === "workflows");
 
   if (selectedRunId) {
     return <WorkflowRunDetail runId={selectedRunId} onBack={() => setSelectedRunId(null)} />;

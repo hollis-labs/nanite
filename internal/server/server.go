@@ -91,6 +91,9 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 	if pluginHost != nil {
 		pluginHost.SetRouter(mux)
 	}
+	if a != nil && pluginHost != nil {
+		a.SetPluginHost(pluginHost)
+	}
 
 	srv.routes()
 	return srv, nil

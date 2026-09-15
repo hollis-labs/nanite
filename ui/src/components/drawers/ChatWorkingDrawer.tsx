@@ -103,10 +103,11 @@ export function ChatWorkingDrawer({
   const queryClient = useQueryClient()
   const { data: settings } = useSettings()
   const developerMode = settings?.developer_mode ?? false
-  // This subscription is mounted for the active session even while the
-  // drawer is closed or another tab is selected. Runtime activity therefore
-  // remains independent of the currently active message EventSource.
-  const runtimeFeed = useHostRuntimeFeed(activeSessionId)
+  // Lazy subscription: only connect when the drawer is open and the runtime tab is active.
+  // When the drawer is closed or another tab (Scratchpad, Terminal, Artifacts) is viewed,
+  // we do not consume an HTTP/1.1 socket connection.
+  const isRuntimeActive = drawer.open && drawer.activeTab === 'runtime'
+  const runtimeFeed = useHostRuntimeFeed(isRuntimeActive ? activeSessionId : null)
 
   // Reactive: when a new envelope arrives in panelEnvelopes['bottom_chat_drawer'],
   // append it as a DynamicCardTab and clear the inbox slot.

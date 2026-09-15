@@ -59,6 +59,7 @@ export function dispatchPresenceEvent(evt: PresenceEvent, h: PresenceHandlers): 
     case 'work_changed':
       h.queryClient.invalidateQueries({ queryKey: ['todos'] })
       h.queryClient.invalidateQueries({ queryKey: ['plans'] })
+      h.queryClient.invalidateQueries({ queryKey: ['workflow-runs'] })
       break
   }
 }

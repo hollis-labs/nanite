@@ -1501,7 +1501,7 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 			continue
 		}
 		switch cfg.TransportType {
-		case "stdio":
+		case store.TransportStdio:
 			var args []string
 			if cfg.Args != "" && cfg.Args != "[]" {
 				if err := json.Unmarshal([]byte(cfg.Args), &args); err != nil {
@@ -1529,9 +1529,10 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 			if err := m.AddStdioServer(cfg.Name, cfg.Command, args, envVars, envAllowlist, mcp.TrustTier(cfg.TrustTier)); err != nil {
 				slog.Warn("mcp: failed to register persisted stdio server", "name", cfg.Name, "err", err)
 			}
-		case "sse":
-			if err := m.AddHTTPServerFromConfig(cfg.Name, cfg.URL, cfg.Headers, mcp.TrustTier(cfg.TrustTier)); err != nil {
-				slog.Warn("mcp: failed to register persisted http server", "name", cfg.Name, "err", err)
+		case store.TransportSSE, store.TransportStreamable:
+			if err := m.AddRemoteServerFromConfig(cfg.Name, cfg.TransportType, cfg.URL, cfg.Headers, mcp.TrustTier(cfg.TrustTier)); err != nil {
+				slog.Warn("mcp: failed to register persisted remote server",
+					"name", cfg.Name, "transport", cfg.TransportType, "err", err)
 			}
 		default:
 			slog.Warn("mcp: unknown transport type, skipping", "transport", cfg.TransportType, "server", cfg.Name)

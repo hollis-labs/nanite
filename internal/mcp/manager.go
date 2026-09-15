@@ -249,6 +249,58 @@ func ParseHeaderJSON(raw string) (map[string]string, error) {
 	return out, nil
 }
 
+// AddRemoteServerFromConfig registers a remote MCP server from its stored
+// config, picking the transport from transportType.
+//
+// This is THE entry point for both registration paths — cmd/nanite/main.go at
+// startup and API.registerMCPTransport on create/update. They shared
+// AddHTTPServerFromConfig for exactly this reason and must keep sharing one
+// call: two paths that each decide which transport a stored row means is how
+// AddHTTPServerWithHeaders came to sit uncalled for months.
+//
+// store.TransportSSE is the real HTTP+SSE client, which is the only transport
+// that reaches an identity-scoped tool behind ContextForge — its /sse path
+// forwards X-Forwarded-User-Email upstream and its /mcp path strips it.
+// store.TransportStreamable is the JSON-RPC POST client, which is what /mcp
+// speaks. An unrecognized value is an error rather than a silent default: a
+// row nobody can register is visible, a row registered against the wrong
+// protocol is not.
+func (m *Manager) AddRemoteServerFromConfig(name, transportType, url, headerJSON string, tier TrustTier) error {
+	switch transportType {
+	case store.TransportSSE:
+		return m.AddSSEServerFromConfig(name, url, headerJSON, tier)
+	case store.TransportStreamable:
+		return m.AddHTTPServerFromConfig(name, url, headerJSON, tier)
+	default:
+		return fmt.Errorf("mcp: %q: unknown remote transport type %q", name, transportType)
+	}
+}
+
+// AddSSEServerFromConfig registers an HTTP+SSE MCP server, with static headers
+// when the stored config carries any. Headers are not optional here the way
+// they are for HTTP: the reason to reach for this transport at all is that it
+// is the one that carries them.
+//
+// Header values are NOT logged — only their key set — so a Bearer token and a
+// forwarded user identity don't leak into structured logs.
+func (m *Manager) AddSSEServerFromConfig(name, url, headerJSON string, tier TrustTier) error {
+	headers, err := ParseHeaderJSON(headerJSON)
+	if err != nil {
+		slog.Warn("mcp: ignoring unusable headers", "name", name, "err", err)
+	}
+	if err := m.AddServer(name, NewSSETransport(url, headers), tier); err != nil {
+		return err
+	}
+	headerKeys := make([]string, 0, len(headers))
+	for k := range headers {
+		headerKeys = append(headerKeys, k)
+	}
+	sort.Strings(headerKeys)
+	slog.Info("mcp: server using SSE transport",
+		"name", name, "url", url, "tier", string(tier), "header_keys", headerKeys)
+	return nil
+}
+
 // AddHTTPServerFromConfig registers an HTTP MCP server, with static headers
 // when the stored config carries any. One call site for both cases so the
 // startup path and the API path cannot drift — the reason authenticated

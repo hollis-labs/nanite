@@ -113,10 +113,10 @@ func (a *API) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cfg.TransportType == "" {
-		cfg.TransportType = "stdio"
+		cfg.TransportType = store.TransportStdio
 	}
-	if cfg.TransportType != "stdio" && cfg.TransportType != "sse" {
-		a.errorResp(w, http.StatusBadRequest, "transport_type must be 'stdio' or 'sse'")
+	if !validTransportType(cfg.TransportType) {
+		a.errorResp(w, http.StatusBadRequest, transportTypeError)
 		return
 	}
 
@@ -179,8 +179,8 @@ func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 	if cfg.TransportType == "" {
 		cfg.TransportType = existing.TransportType
 	}
-	if cfg.TransportType != "stdio" && cfg.TransportType != "sse" {
-		a.errorResp(w, http.StatusBadRequest, "transport_type must be 'stdio' or 'sse'")
+	if !validTransportType(cfg.TransportType) {
+		a.errorResp(w, http.StatusBadRequest, transportTypeError)
 		return
 	}
 
@@ -274,6 +274,21 @@ func (a *API) handleExportMCPServers(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data) // The response is already committed; a client disconnect has no recovery response path.
 }
 
+// transportTypeError is the 400 body for an unrecognized transport_type. It
+// names all three because "sse" and "streamable" are easy to pick wrongly:
+// "sse" is the 2024-11-05 HTTP+SSE transport, "streamable" is JSON-RPC over
+// POST — which is what a ContextForge /mcp URL speaks.
+const transportTypeError = "transport_type must be 'stdio', 'sse', or 'streamable'"
+
+func validTransportType(t string) bool {
+	switch t {
+	case store.TransportStdio, store.TransportSSE, store.TransportStreamable:
+		return true
+	default:
+		return false
+	}
+}
+
 // registerMCPTransport registers the transport for a server config with the MCP manager.
 func (a *API) registerMCPTransport(cfg *store.MCPServerConfig) {
 	if a.Services.MCP == nil || !cfg.Enabled {
@@ -281,16 +296,18 @@ func (a *API) registerMCPTransport(cfg *store.MCPServerConfig) {
 	}
 
 	switch cfg.TransportType {
-	case "stdio":
+	case store.TransportStdio:
 		args := decodeMCPStringSlice(cfg.Args, cfg.Name, "args")
 		env := decodeMCPStringSlice(cfg.Env, cfg.Name, "env")
 		envAllowlist := decodeMCPStringSlice(cfg.EnvAllowlist, cfg.Name, "env_allowlist")
 		if err := a.Services.MCP.AddStdioServer(cfg.Name, cfg.Command, args, env, envAllowlist, mcp.TrustTier(cfg.TrustTier)); err != nil {
 			slog.Warn("api: failed to register stdio MCP server", "name", cfg.Name, "err", err)
 		}
-	case "sse":
-		if err := a.Services.MCP.AddHTTPServerFromConfig(cfg.Name, cfg.URL, cfg.Headers, mcp.TrustTier(cfg.TrustTier)); err != nil {
-			slog.Warn("api: failed to register http MCP server", "name", cfg.Name, "err", err)
+	default:
+		if err := a.Services.MCP.AddRemoteServerFromConfig(cfg.Name, cfg.TransportType, cfg.URL, cfg.Headers, mcp.TrustTier(cfg.TrustTier)); err != nil {
+			// #nosec G706 -- name, transport, and err are structured operational diagnostics, not a formatted log message.
+			slog.Warn("api: failed to register remote MCP server",
+				"name", cfg.Name, "transport", cfg.TransportType, "err", err)
 		}
 	}
 }

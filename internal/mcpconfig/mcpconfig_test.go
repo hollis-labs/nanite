@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
@@ -86,8 +87,13 @@ func TestToStoreConfigs(t *testing.T) {
 	if configs[0].Name != "alpha" {
 		t.Errorf("first config name = %q, want alpha", configs[0].Name)
 	}
-	if configs[0].TransportType != "sse" {
-		t.Errorf("alpha transport = %q, want sse", configs[0].TransportType)
+	// A bare URL with no "type" is JSON-RPC over POST, which is what this
+	// importer has always produced. Post-161 that transport is named
+	// "streamable"; "sse" now means the HTTP+SSE transport, and reading a
+	// typeless entry as SSE would point the client at a protocol the URL
+	// does not speak.
+	if configs[0].TransportType != store.TransportStreamable {
+		t.Errorf("alpha transport = %q, want %q", configs[0].TransportType, store.TransportStreamable)
 	}
 	if configs[0].URL != "http://localhost:3000" {
 		t.Errorf("alpha url = %q", configs[0].URL)
@@ -265,5 +271,57 @@ func TestMarshal_Format(t *testing.T) {
 	var check ClaudeCodeConfig
 	if err := json.Unmarshal(read, &check); err != nil {
 		t.Fatalf("re-parse: %v", err)
+	}
+}
+
+// Export then re-import has to preserve which remote transport a server uses.
+// Before "sse" and "streamable" were two different things there was nothing to
+// lose here; now a round trip that forgot the distinction would quietly point
+// an SSE server's URL at a JSON-RPC POST client.
+func TestRemoteTransportSurvivesExportImportRoundTrip(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := storetest.New(t, context.Background(), dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close(context.Background())
+
+	want := map[string]string{
+		"gateway-sse":        store.TransportSSE,
+		"gateway-streamable": store.TransportStreamable,
+	}
+	for name, transport := range want {
+		cfg := store.MCPServerConfig{
+			Name:          name,
+			TransportType: transport,
+			URL:           "http://gateway.invalid/servers/x",
+			Enabled:       true,
+		}
+		if createErr := s.CreateMCPServer(context.Background(), &cfg); createErr != nil {
+			t.Fatalf("create %s: %v", name, createErr)
+		}
+	}
+
+	exported, err := Export(s)
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	data, err := Marshal(exported)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	parsed, err := Parse(data)
+	if err != nil {
+		t.Fatalf("re-parse exported config: %v", err)
+	}
+	for _, sc := range ToStoreConfigs(parsed) {
+		if sc.TransportType != want[sc.Name] {
+			t.Errorf("%s came back as %q, want %q — the round trip changed its protocol",
+				sc.Name, sc.TransportType, want[sc.Name])
+		}
+		if sc.URL == "" {
+			t.Errorf("%s lost its url in the round trip", sc.Name)
+		}
 	}
 }

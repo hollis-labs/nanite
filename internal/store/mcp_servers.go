@@ -19,15 +19,33 @@ const (
 	TrustTierThirdPartyHTTP = "third_party_http"
 )
 
+// Transport-type values for MCPServerConfig.TransportType.
+//
+// TransportSSE and TransportStreamable are BOTH remote HTTP transports and the
+// distinction is which wire protocol the URL speaks, not whether it is
+// "streaming": TransportSSE is the 2024-11-05 HTTP+SSE transport (a long-lived
+// GET plus POSTs to an announced endpoint), TransportStreamable is plain
+// JSON-RPC over POST.
+//
+// Until migration 161, "sse" named the POST client — the field had been a
+// misnomer since it was written. It now means what it says, and migration 161
+// rewrites the rows that relied on the old meaning to "streamable".
+const (
+	TransportStdio      = "stdio"
+	TransportSSE        = "sse"
+	TransportStreamable = "streamable"
+)
+
 // MCPServerConfig represents a persisted MCP server configuration.
 type MCPServerConfig struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	TransportType string `json:"transport_type"` // "stdio" or "sse"
-	Command       string `json:"command"`        // for stdio
-	URL           string `json:"url"`            // for sse/http
-	Args          string `json:"args"`           // JSON array of strings
-	Env           string `json:"env"`            // JSON array of "KEY=VALUE" strings
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// TransportType is one of the Transport* constants.
+	TransportType string `json:"transport_type"`
+	Command       string `json:"command"` // for stdio
+	URL           string `json:"url"`     // for sse/streamable
+	Args          string `json:"args"`    // JSON array of strings
+	Env           string `json:"env"`     // JSON array of "KEY=VALUE" strings
 	Enabled       bool   `json:"enabled"`
 	// TrustTier is one of TrustTier* constants. Persisted rows are by
 	// definition user/catalog-sourced, so the default is third_party_http

@@ -20,6 +20,13 @@ type ClaudeCodeConfig struct {
 
 // ServerEntry represents a single MCP server in the .mcp.json format.
 type ServerEntry struct {
+	// Type is the .mcp.json transport discriminator: "stdio", "sse", or
+	// "http". It only has to be read for a URL entry, where "sse" and "http"
+	// are two different wire protocols — without it an exported SSE server
+	// would come back from a re-import as a JSON-RPC POST client, pointed at
+	// an endpoint that does not speak it.
+	Type string `json:"type,omitempty"`
+
 	// stdio transport
 	Command string   `json:"command,omitempty"`
 	Args    []string `json:"args,omitempty"`
@@ -59,10 +66,17 @@ func ToStoreConfigs(cfg *ClaudeCodeConfig) []store.MCPServerConfig {
 		}
 
 		if entry.URL != "" {
-			sc.TransportType = "sse"
+			// A URL entry with no type is JSON-RPC over POST. That is what
+			// this importer has always produced, and .mcp.json's own default
+			// for a bare URL: only an explicit "sse" asks for the 2024-11-05
+			// HTTP+SSE transport.
+			sc.TransportType = store.TransportStreamable
+			if entry.Type == store.TransportSSE {
+				sc.TransportType = store.TransportSSE
+			}
 			sc.URL = entry.URL
 		} else {
-			sc.TransportType = "stdio"
+			sc.TransportType = store.TransportStdio
 			sc.Command = entry.Command
 		}
 
@@ -137,7 +151,11 @@ func Export(s *store.Store) (*ClaudeCodeConfig, error) {
 		entry := ServerEntry{}
 
 		switch sc.TransportType {
-		case "sse":
+		case store.TransportSSE:
+			entry.Type = store.TransportSSE
+			entry.URL = sc.URL
+		case store.TransportStreamable:
+			entry.Type = "http" // .mcp.json's name for JSON-RPC over POST
 			entry.URL = sc.URL
 		default: // stdio
 			entry.Command = sc.Command

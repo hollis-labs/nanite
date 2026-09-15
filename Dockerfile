@@ -47,7 +47,13 @@ RUN apk add --no-cache ca-certificates tzdata
 RUN adduser -D -u 1000 nanite
 WORKDIR /app
 COPY --from=build /app/nanite .
-RUN mkdir -p /data && chown nanite:nanite /data
+# /data holds the database (absolute, from ENTRYPOINT). /app/data holds
+# everything the app addresses *relatively* — appconfig defaults
+# Artifacts.StorageDir to "data/artifacts" and VendorStorageDir to
+# "data/skills/vendor", both resolved against WORKDIR. Without this the
+# artifact store cannot be created, startup fails, and (before the fix in
+# main.go) the container restarted forever with no error printed.
+RUN mkdir -p /data /app/data && chown -R nanite:nanite /data /app/data
 USER nanite
 EXPOSE 8090
 ENTRYPOINT ["./nanite", "serve", "-db", "/data/nanite.db"]

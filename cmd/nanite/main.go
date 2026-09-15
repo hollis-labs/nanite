@@ -93,6 +93,12 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		if err := cmdServe(os.Args[2:]); err != nil {
+			// Print it. Discarding this made a startup failure look like a
+			// clean exit: the log ended mid-boot on an ordinary INFO line and
+			// the container restarted forever with exit=1 and no reason
+			// anywhere. The error already carries the context (it is wrapped
+			// all the way down); it just never reached anyone.
+			fmt.Fprintf(os.Stderr, "%s serve: %v\n", brand.BinaryName, err)
 			os.Exit(1)
 		}
 	case "chat":

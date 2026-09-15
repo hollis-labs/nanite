@@ -109,6 +109,19 @@ func (a *API) handleStartSurfaceCapabilities(w http.ResponseWriter, r *http.Requ
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// A disabled agent is hidden from the chat picker and the chat header
+	// (both filter on this), so the launcher showing it is an inconsistency
+	// rather than a feature: the same agent appears in one list and not
+	// another. Filtered here so "disabled" means the same thing everywhere a
+	// person chooses an agent.
+	active := profiles[:0]
+	for _, p := range profiles {
+		if p.Status != "disabled" {
+			active = append(active, p)
+		}
+	}
+	profiles = active
 	providers, err := a.providersForStartSurface()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())

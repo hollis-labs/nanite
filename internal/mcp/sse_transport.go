@@ -464,8 +464,14 @@ func (rt *sseRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	if err != nil || resp == nil || resp.Body == nil {
 		return resp, err
 	}
-	if rt.maxEvent != nil && isEventStream(resp.Header.Get("Content-Type")) {
-		resp.Body = &eventCapReader{inner: resp.Body, max: rt.maxEvent()}
+	if isEventStream(resp.Header.Get("Content-Type")) {
+		if rt.maxEvent != nil {
+			resp.Body = &eventCapReader{inner: resp.Body, max: rt.maxEvent()}
+		}
+		// See sse_sanitize.go: drops the keepalive events ContextForge sends
+		// (which the SDK would hand to the JSON-RPC decoder) and repairs an
+		// endpoint URL that names a host:port we did not connect to.
+		resp.Body = newSSESanitizeReader(resp.Body, out.URL)
 	}
 	return resp, nil
 }

@@ -818,7 +818,18 @@ func (s *toolServiceImpl) discoverAgentMCPTools(
 	for _, srv := range servers {
 		srvTools, err := s.mcpManager.DiscoverServerTools(ctx, srv)
 		if err != nil {
+			// Say so. An agent scoped to an MCP server that fails discovery
+			// here gets an empty tool list and no explanation anywhere — the
+			// model then reports "I can't access that tool", which reads as a
+			// permissions or configuration problem and is neither. Costing a
+			// silent continue one WARN is a good trade.
+			slog.Warn("mcp: agent-scoped tool discovery failed — the agent will see none of this server's tools",
+				"server", srv, "err", err)
 			continue
+		}
+		if len(srvTools) == 0 {
+			slog.Warn("mcp: agent-scoped server advertised no tools",
+				"server", srv)
 		}
 		for _, t := range srvTools {
 			// Use the canonical uniform name (no `mcp__server__` prefix).

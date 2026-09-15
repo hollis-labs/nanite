@@ -144,7 +144,7 @@ func visibleProviderRows(providers []store.ProviderConfig) []store.ProviderConfi
 }
 
 func visibleModelRows(models []store.Model) []store.Model {
-	// NANITE_VISIBLE_MODELS narrows the model list by model id. The catalogue
+	// NANITE_VISIBLE_MODELS narrows the model list by model id. The catalog
 	// is compiled into the binary while a gateway serves whatever it serves,
 	// so the two disagree by default and the picker offers models that 404.
 	allowed := allowedFromEnv("NANITE_VISIBLE_MODELS")

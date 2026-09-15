@@ -78,15 +78,41 @@ func (r *sseSanitizeReader) Read(p []byte) (int, error) {
 func (r *sseSanitizeReader) drainBlocks() {
 	for {
 		data := r.partial.Bytes()
-		idx := bytes.Index(data, []byte("\n\n"))
+		// A block ends at a blank line, which is "\n\n" with LF endings and
+		// "\r\n\r\n" with CRLF. Searching only for "\n\n" finds nothing in
+		// "\r\n\r\n" — the bytes are \r \n \r \n — so a CRLF server's stream
+		// is buffered forever and the client hangs waiting for a reply that
+		// already arrived. ContextForge sends CRLF.
+		idx, width := blockEnd(data)
 		if idx < 0 {
 			return
 		}
-		block := string(data[:idx+2])
-		r.partial.Next(idx + 2)
+		block := string(data[:idx+width])
+		r.partial.Next(idx + width)
 		if out, keep := r.sanitizeBlock(block); keep {
 			r.pending.WriteString(out)
 		}
+	}
+}
+
+// blockEnd finds the first blank-line terminator, returning its offset and
+// length so both CRLF and LF streams are handled. Returns -1 when the buffer
+// holds no complete block yet.
+func blockEnd(data []byte) (int, int) {
+	crlf := bytes.Index(data, []byte("\r\n\r\n"))
+	lf := bytes.Index(data, []byte("\n\n"))
+	switch {
+	case crlf < 0 && lf < 0:
+		return -1, 0
+	case crlf < 0:
+		return lf, 2
+	case lf < 0:
+		return crlf, 4
+	case crlf <= lf:
+		return crlf, 4
+	default:
+		// An LF-terminated block earlier in the buffer than any CRLF one.
+		return lf, 2
 	}
 }
 
@@ -94,6 +120,7 @@ func (r *sseSanitizeReader) drainBlocks() {
 func (r *sseSanitizeReader) sanitizeBlock(block string) (string, bool) {
 	name := ""
 	for _, line := range strings.Split(block, "\n") {
+		line = strings.TrimRight(line, "\r")
 		if v, ok := strings.CutPrefix(line, "event:"); ok {
 			name = strings.TrimSpace(v)
 			break
@@ -121,9 +148,15 @@ func (r *sseSanitizeReader) repairEndpoint(block string) string {
 	}
 	lines := strings.Split(block, "\n")
 	for i, line := range lines {
-		v, ok := strings.CutPrefix(line, "data:")
+		bare := strings.TrimRight(line, "\r")
+		v, ok := strings.CutPrefix(bare, "data:")
 		if !ok {
 			continue
+		}
+		// Preserve the line ending the server used.
+		eol := ""
+		if strings.HasSuffix(line, "\r") {
+			eol = "\r"
 		}
 		raw := strings.TrimSpace(v)
 		parsed, err := url.Parse(raw)
@@ -136,7 +169,7 @@ func (r *sseSanitizeReader) repairEndpoint(block string) string {
 		}
 		parsed.Scheme = r.authority.Scheme
 		parsed.Host = r.authority.Host
-		lines[i] = "data: " + parsed.String()
+		lines[i] = "data: " + parsed.String() + eol
 		return strings.Join(lines, "\n")
 	}
 	return block

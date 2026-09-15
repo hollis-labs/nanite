@@ -122,3 +122,48 @@ func mustURL(t *testing.T, s string) *url.URL {
 	}
 	return u
 }
+
+// ContextForge terminates blocks with CRLF. Searching only for "\n\n" finds
+// nothing in "\r\n\r\n" — the bytes are \r \n \r \n — so the reader buffered
+// the whole stream and the client hung waiting for a reply that had already
+// arrived. This is the regression that cost a deploy cycle to find.
+const cfStreamCRLF = "event: endpoint\r\n" +
+	"data: http://contextforge-gateway/servers/abc/message?session_id=s1\r\n" +
+	"retry: 5000\r\n\r\n" +
+	"event: keepalive\r\ndata: {}\r\nretry: 5000\r\n\r\n" +
+	"event: message\r\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\r\n\r\n"
+
+func TestSanitize_handlesCRLFStreams(t *testing.T) {
+	got := sanitize(t, cfStreamCRLF, "http://contextforge-gateway:4444/servers/abc/sse")
+	if strings.Contains(got, "keepalive") {
+		t.Fatalf("keepalive survived:\n%q", got)
+	}
+	if !strings.Contains(got, `"jsonrpc":"2.0"`) {
+		t.Fatalf("the message never came through — the exact hang:\n%q", got)
+	}
+	if !strings.Contains(got, "http://contextforge-gateway:4444/servers/abc/message?session_id=s1") {
+		t.Fatalf("endpoint not repaired on a CRLF stream:\n%q", got)
+	}
+}
+
+func TestSanitize_CRLFSplitReads(t *testing.T) {
+	r := newSSESanitizeReader(nopCloser{&slowReader{s: cfStreamCRLF, n: 5}},
+		mustURL(t, "http://contextforge-gateway:4444/servers/abc/sse"))
+	out, err := io.ReadAll(r)
+	if err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("read: %v", err)
+	}
+	got := string(out)
+	if strings.Contains(got, "keepalive") || strings.Count(got, `"jsonrpc":"2.0"`) != 1 {
+		t.Fatalf("CRLF split reads mishandled:\n%q", got)
+	}
+}
+
+func TestSanitize_preservesCRLFOnARepairedEndpoint(t *testing.T) {
+	// The SDK's scanner is tolerant, but rewriting a line must not silently
+	// convert the server's line endings mid-stream.
+	got := sanitize(t, cfStreamCRLF, "http://contextforge-gateway:4444/servers/abc/sse")
+	if !strings.Contains(got, "?session_id=s1\r\n") {
+		t.Fatalf("line ending not preserved on the rewritten data line:\n%q", got)
+	}
+}

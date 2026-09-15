@@ -1,0 +1,41 @@
+-- +goose Up
+-- 160_mcp_server_auth_headers.sql
+--
+-- Adds per-server static request headers to mcp_servers, so an HTTP MCP server
+-- that requires authentication can be configured at all.
+--
+-- ## Why
+--
+-- AddHTTPServer(name, url, tier) sends no headers, and MCPServerConfig has
+-- nowhere to put any. Every gateway-fronted MCP server in real deployments
+-- wants an Authorization header — IBM ContextForge, for one, returns 401
+-- without a bearer token — so the persisted-server path could reach only
+-- unauthenticated servers. mcp.Manager has had AddHTTPServerWithHeaders since
+-- the Tesseract scaffold; it simply had no caller, because nothing could
+-- persist the headers to pass it.
+--
+-- ## Shape
+--
+-- A JSON object of header name -> value, e.g.
+--
+--   {"Authorization": "Bearer eyJhbGciOi..."}
+--
+-- An object rather than the JSON array used by args/env: headers are keyed and
+-- last-wins, and "KEY=VALUE" strings would have to be re-split on a character
+-- that is legal inside a header value.
+--
+-- ## Note on secrets
+--
+-- This column holds credentials. The database is already the store of record
+-- for stdio server `env`, which has the same property, so this introduces no
+-- new class of secret — but both are plaintext at rest, and anything that
+-- dumps mcp_servers now dumps tokens. Redaction belongs at the API boundary.
+ALTER TABLE mcp_servers ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';
+
+-- +goose Down
+-- A real drop, not a blanking. The migration tests roll up, down and up again,
+-- so a Down that leaves the column in place makes the second Up fail with
+-- "duplicate column name" — and the same would happen to anyone rolling back
+-- and forward on a real database. DROP COLUMN is used throughout these
+-- migrations, so the SQLite this ships against supports it.
+ALTER TABLE mcp_servers DROP COLUMN headers;

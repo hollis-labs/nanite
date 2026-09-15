@@ -1507,7 +1507,7 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 				slog.Warn("mcp: failed to register persisted stdio server", "name", cfg.Name, "err", err)
 			}
 		case "sse":
-			if err := m.AddHTTPServer(cfg.Name, cfg.URL, mcp.TrustTier(cfg.TrustTier)); err != nil {
+			if err := m.AddHTTPServerFromConfig(cfg.Name, cfg.URL, cfg.Headers, mcp.TrustTier(cfg.TrustTier)); err != nil {
 				slog.Warn("mcp: failed to register persisted http server", "name", cfg.Name, "err", err)
 			}
 		default:

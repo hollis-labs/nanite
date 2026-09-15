@@ -38,12 +38,17 @@ type MCPServerConfig struct {
 	// transport may inherit when spawning the subprocess. Empty array
 	// means nothing is inherited.
 	EnvAllowlist string `json:"env_allowlist"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	// Headers is a JSON object of static request headers sent with every
+	// HTTP request to this server, e.g. {"Authorization": "Bearer ..."}.
+	// Ignored by the stdio transport. Holds credentials: redact at the API
+	// boundary, never in the store, which is the record of truth.
+	Headers   string `json:"headers"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 const mcpServerColumns = `id, name, transport_type, command, url, args, env, enabled,
-	trust_tier, env_allowlist, created_at, updated_at`
+	trust_tier, env_allowlist, headers, created_at, updated_at`
 
 // ListMCPServers returns all MCP server configs ordered by name.
 func (s *Store) ListMCPServers(ctx context.Context) ([]MCPServerConfig, error) {
@@ -60,7 +65,7 @@ func (s *Store) ListMCPServers(ctx context.Context) ([]MCPServerConfig, error) {
 		var cfg MCPServerConfig
 		if err := rows.Scan(&cfg.ID, &cfg.Name, &cfg.TransportType, &cfg.Command, &cfg.URL,
 			&cfg.Args, &cfg.Env, &cfg.Enabled,
-			&cfg.TrustTier, &cfg.EnvAllowlist,
+			&cfg.TrustTier, &cfg.EnvAllowlist, &cfg.Headers,
 			&cfg.CreatedAt, &cfg.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan mcp server: %w", err)
 		}
@@ -76,7 +81,7 @@ func (s *Store) GetMCPServer(ctx context.Context, name string) (*MCPServerConfig
 		`SELECT `+mcpServerColumns+` FROM mcp_servers WHERE name = ?`, name,
 	).Scan(&cfg.ID, &cfg.Name, &cfg.TransportType, &cfg.Command, &cfg.URL,
 		&cfg.Args, &cfg.Env, &cfg.Enabled,
-		&cfg.TrustTier, &cfg.EnvAllowlist,
+		&cfg.TrustTier, &cfg.EnvAllowlist, &cfg.Headers,
 		&cfg.CreatedAt, &cfg.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -105,13 +110,16 @@ func (s *Store) CreateMCPServer(ctx context.Context, cfg *MCPServerConfig) error
 	if cfg.EnvAllowlist == "" {
 		cfg.EnvAllowlist = "[]"
 	}
+	if cfg.Headers == "" {
+		cfg.Headers = "{}"
+	}
 
 	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO mcp_servers (`+mcpServerColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		cfg.ID, cfg.Name, cfg.TransportType, cfg.Command, cfg.URL,
 		cfg.Args, cfg.Env, cfg.Enabled,
-		cfg.TrustTier, cfg.EnvAllowlist,
+		cfg.TrustTier, cfg.EnvAllowlist, cfg.Headers,
 		now, now,
 	)
 	if err != nil {
@@ -130,13 +138,16 @@ func (s *Store) UpdateMCPServer(ctx context.Context, cfg *MCPServerConfig) error
 	if cfg.EnvAllowlist == "" {
 		cfg.EnvAllowlist = "[]"
 	}
+	if cfg.Headers == "" {
+		cfg.Headers = "{}"
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE mcp_servers SET transport_type = ?, command = ?, url = ?, args = ?, env = ?,
-			enabled = ?, trust_tier = ?, env_allowlist = ?, updated_at = ?
+			enabled = ?, trust_tier = ?, env_allowlist = ?, headers = ?, updated_at = ?
 		 WHERE name = ?`,
 		cfg.TransportType, cfg.Command, cfg.URL, cfg.Args, cfg.Env, cfg.Enabled,
-		cfg.TrustTier, cfg.EnvAllowlist, now, cfg.Name,
+		cfg.TrustTier, cfg.EnvAllowlist, cfg.Headers, now, cfg.Name,
 	)
 	if err != nil {
 		return fmt.Errorf("update mcp server: %w", err)

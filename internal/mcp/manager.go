@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -209,6 +210,59 @@ func (m *Manager) AddHTTPServer(name, url string, tier TrustTier) error {
 	}
 	slog.Info("mcp: server using HTTP transport", "name", name, "url", url, "tier", string(tier))
 	return nil
+}
+
+// ParseHeaderJSON turns a persisted headers column into a header map.
+//
+// The stored form is a JSON object of name -> value. Empty, "{}", and
+// malformed all yield a nil map: a server with unreadable headers should
+// register without them and fail loudly at the first request, rather than fail
+// to register at all and vanish from the tool surface with no explanation.
+// The error is returned so the caller can log it.
+//
+// Names and values are rejected if they contain CR or LF. Go's http client
+// would reject them too, but doing it here means a bad row is refused at
+// registration rather than on every call, and a header value is exactly the
+// place a smuggled newline would matter.
+func ParseHeaderJSON(raw string) (map[string]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" {
+		return nil, nil
+	}
+	var parsed map[string]string
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return nil, fmt.Errorf("parse headers: %w", err)
+	}
+	out := make(map[string]string, len(parsed))
+	for k, v := range parsed {
+		if k == "" {
+			continue
+		}
+		if strings.ContainsAny(k, "\r\n") || strings.ContainsAny(v, "\r\n") {
+			return nil, fmt.Errorf("parse headers: %q contains a line break", k)
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// AddHTTPServerFromConfig registers an HTTP MCP server, with static headers
+// when the stored config carries any. One call site for both cases so the
+// startup path and the API path cannot drift — the reason authenticated
+// servers were unreachable in the first place was that AddHTTPServerWithHeaders
+// existed and nothing called it.
+func (m *Manager) AddHTTPServerFromConfig(name, url, headerJSON string, tier TrustTier) error {
+	headers, err := ParseHeaderJSON(headerJSON)
+	if err != nil {
+		slog.Warn("mcp: ignoring unusable headers", "name", name, "err", err)
+	}
+	if len(headers) == 0 {
+		return m.AddHTTPServer(name, url, tier)
+	}
+	return m.AddHTTPServerWithHeaders(name, url, headers, tier)
 }
 
 // AddHTTPServerWithHeaders registers an HTTP-based MCP server that requires

@@ -17,7 +17,7 @@ import (
 // visibleAgentSlugs reads NANITE_AGENT_SLUGS — a comma-separated allowlist that
 // narrows what GET /api/agents returns.
 //
-// Unset means unchanged behaviour: every agent is listed. Set, only those slugs
+// Unset means unchanged behavior: every agent is listed. Set, only those slugs
 // are, which is how a demo shows two agents instead of eleven without deleting
 // anything. It filters the LISTING only — dispatch, the runtime and every other
 // caller read the store directly and are untouched, so a hidden agent still

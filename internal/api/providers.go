@@ -104,7 +104,7 @@ func (a *API) handleListModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // allowedFromEnv reads a comma-separated allowlist. Unset or empty means "no
-// restriction", so the default behaviour is unchanged and a typo that empties
+// restriction", so the default behavior is unchanged and a typo that empties
 // the list shows everything rather than nothing — the safer direction for a
 // list someone picks from.
 func allowedFromEnv(name string) map[string]bool {

@@ -1002,8 +1002,22 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 	registry := provider.NewRegistry()
 	catalog := providercatalog.New()
 
-	resolveKey := func(providerID string) string {
-		return secrets.Get(secrets.ProviderKeyName(providerID))
+	// Keychain first, then environment. A container has no OS keyring — the
+	// secret-service lookup fails with `exec: "dbus-launch": executable file
+	// not found in $PATH` — so a keychain-only lookup registers no providers
+	// at all, and chat is dead with only a WARN to say so. The environment is
+	// how a container is configured; refusing to read it makes Nanite
+	// unrunnable anywhere but a desktop.
+	resolveKey := func(providerID, envKey string) (string, string) {
+		if k := strings.TrimSpace(secrets.Get(secrets.ProviderKeyName(providerID))); k != "" {
+			return k, "keychain"
+		}
+		if envKey != "" {
+			if k := strings.TrimSpace(os.Getenv(envKey)); k != "" {
+				return k, "environment"
+			}
+		}
+		return "", ""
 	}
 
 	// CW-20260526-0001: apiProvSpec carries the catalog metadata
@@ -1013,11 +1027,14 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 	// (b) seededProviders + (c) AllSeeded.
 	type apiProvSpec struct {
 		name, displayName, provID string
-		create                    func() llmcontracts.Provider
-		setKey                    func(llmcontracts.Provider, string)
+		// envKey is the conventional environment variable for this provider,
+		// used when the keychain has nothing — see resolveKey.
+		envKey string
+		create func() llmcontracts.Provider
+		setKey func(llmcontracts.Provider, string)
 	}
 	apiProviders := []apiProvSpec{
-		{"anthropic", "Anthropic", "anthropic-001",
+		{"anthropic", "Anthropic", "anthropic-001", "ANTHROPIC_API_KEY",
 			func() llmcontracts.Provider {
 				ap := nllmanthropic.New()
 				if v := os.Getenv("NANITE_PROVIDER_RATE_BUDGET_TPM"); v != "" {
@@ -1030,7 +1047,7 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 				return ap
 			},
 			func(p llmcontracts.Provider, k string) { p.(*nllmanthropic.Client).SetAPIKey(k) }},
-		{"openai", "OpenAI", "openai-001",
+		{"openai", "OpenAI", "openai-001", "OPENAI_API_KEY",
 			// CW-20260508-0012: SDK-backed wrapper (replaces deleted
 			// go-providers HTTP openai client). Implements
 			// llmcontracts.Provider; no rate-budget plumbing per spike
@@ -1042,7 +1059,7 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 
 	var registeredAPI, missingAPI []string
 	for _, spec := range apiProviders {
-		key := resolveKey(spec.provID)
+		key, source := resolveKey(spec.provID, spec.envKey)
 		if key != "" {
 			p := spec.create()
 			spec.setKey(p, key)
@@ -1052,7 +1069,7 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 				DisplayName: spec.displayName,
 				RowID:       spec.provID,
 			})
-			slog.Info("provider registered (key from keychain)", "provider", spec.name)
+			slog.Info("provider registered", "provider", spec.name, "key_source", source)
 			registeredAPI = append(registeredAPI, spec.name)
 		} else {
 			missingAPI = append(missingAPI, spec.name)

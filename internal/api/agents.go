@@ -4,6 +4,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agentvalidation"
@@ -11,6 +13,31 @@ import (
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// visibleAgentSlugs reads NANITE_AGENT_SLUGS — a comma-separated allowlist that
+// narrows what GET /api/agents returns.
+//
+// Unset means unchanged behaviour: every agent is listed. Set, only those slugs
+// are, which is how a demo shows two agents instead of eleven without deleting
+// anything. It filters the LISTING only — dispatch, the runtime and every other
+// caller read the store directly and are untouched, so a hidden agent still
+// works if something addresses it by slug.
+func visibleAgentSlugs() map[string]bool {
+	raw := strings.TrimSpace(os.Getenv("NANITE_AGENT_SLUGS"))
+	if raw == "" {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, s := range strings.Split(raw, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out[s] = true
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	agents, err := a.Services.Agents.List(r.Context())
@@ -23,10 +50,16 @@ func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	// consumers (chat picker, roster, command palette) get the full list so
 	// the canonical Chat/Planner/Worker agents remain selectable.
 	manageableOnly := r.URL.Query().Get("manageable") == "1" || r.URL.Query().Get("manageable") == "true"
+	// Optional operator allowlist — see visibleAgentSlugs. Listing only; every
+	// other path reads the store directly.
+	visible := visibleAgentSlugs()
 	views := make([]AgentProfileView, 0, len(agents))
 	for i := range agents {
 		view := a.agentView(agents[i])
 		if manageableOnly && view.ManageClass == string(agentpkg.ManageClassInternal) {
+			continue
+		}
+		if visible != nil && !visible[agents[i].Slug] {
 			continue
 		}
 		views = append(views, view)

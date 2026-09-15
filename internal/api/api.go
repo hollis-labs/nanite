@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/hollis-labs/nanite/internal/loop"
+	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/workflowcompat"
@@ -57,6 +58,8 @@ type API struct {
 	// from request JSON or an unverified header. A nil authenticator fails
 	// callback and approval requests closed.
 	workflowResponderAuthenticator func(*http.Request) (string, bool)
+	// pluginHost powers the unified /api/events multiplexer with plugin lifecycle events.
+	pluginHost *naniteplugin.Host
 }
 
 // New creates a new API instance from a service container.
@@ -68,6 +71,11 @@ func New(svc *service.Container) *API {
 		embedderSelectDeps: deps,
 		agentBuilder:       deterministicAgentBuilderAdvisor{},
 	}
+}
+
+// SetPluginHost sets the plugin host instance for multiplexed event streaming.
+func (a *API) SetPluginHost(host *naniteplugin.Host) {
+	a.pluginHost = host
 }
 
 // SetSelfTools wires the fully-wired in-process self-tools transport that
@@ -153,6 +161,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Presence SSE stream (one per browser tab)
 	mux.HandleFunc("GET /api/presence", a.handlePresenceStream)
+
+	// Unified SSE stream multiplexing presence, plugin lifecycle events, and work updates (one per browser tab)
+	mux.HandleFunc("GET /api/events", a.handleUnifiedEvents)
 
 	// Retry (circuit breaker reset + re-generate)
 	mux.HandleFunc("POST /api/sessions/{id}/retry", a.handleRetryStream)

@@ -110,6 +110,7 @@ export function useChat(sessionId: string | null) {
   const generationRef = useRef(0);
   const sendPendingRef = useRef(false);
   const connectStreamRef = useRef<(id: string) => void>(() => {});
+  const flushDeltasRef = useRef<() => void>(() => {});
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: session identity starts a new async generation.
   useLayoutEffect(() => {
@@ -401,6 +402,7 @@ export function useChat(sessionId: string | null) {
 
   useEffect(() => {
     return () => {
+      flushDeltasRef.current();
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
@@ -498,6 +500,58 @@ export function useChat(sessionId: string | null) {
       const es = new EventSource(`/api/stream/${message_id}${cursor ? `?from=${cursor}` : ""}`);
       eventSourceRef.current = es;
       let accumulated = resume ? saved.streamingFinal : "";
+      let pendingNarration = "";
+      let pendingThinking = "";
+      let pendingFinal = "";
+      let rafId: number | null = null;
+      let maxTimerId: ReturnType<typeof setTimeout> | null = null;
+
+      const flushDeltas = () => {
+        if (rafId !== null) {
+          if (typeof cancelAnimationFrame !== "undefined") cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        if (maxTimerId !== null) {
+          clearTimeout(maxTimerId);
+          maxTimerId = null;
+        }
+        if (!sessionId) return;
+        if (!pendingNarration && !pendingThinking && !pendingFinal) return;
+
+        const toNarration = pendingNarration;
+        const toThinking = pendingThinking;
+        const toFinal = pendingFinal;
+        pendingNarration = "";
+        pendingThinking = "";
+        pendingFinal = "";
+
+        if (toNarration) store().appendStreamNarration(sessionId, toNarration);
+        if (toThinking) store().appendStreamThinking(sessionId, toThinking);
+        if (toFinal) store().appendStreamFinal(sessionId, toFinal);
+        store().setStatusMessage(sessionId, null);
+      };
+
+      const scheduleFlush = () => {
+        if (typeof requestAnimationFrame === "undefined") {
+          flushDeltas();
+          return;
+        }
+        if (rafId === null) {
+          rafId = requestAnimationFrame(() => {
+            rafId = null;
+            flushDeltas();
+          });
+        }
+        if (maxTimerId === null) {
+          maxTimerId = setTimeout(() => {
+            maxTimerId = null;
+            flushDeltas();
+          }, 50);
+        }
+      };
+
+      flushDeltasRef.current = flushDeltas;
+
       const listen = (type: string, handler: (event: MessageEvent) => void) => {
         es.addEventListener(type, (event) => {
           if (eventSourceRef.current === es) handler(event as MessageEvent);
@@ -515,23 +569,23 @@ export function useChat(sessionId: string | null) {
           // "final"     → answer bubble (accumulated for persistence).
           // No phase (pre-F4 or legacy streams) → treat as final (old behavior).
           if (data.phase === "narration") {
-            store().appendStreamNarration(sessionId, data.content);
+            pendingNarration += data.content;
           } else if (data.phase === "thinking") {
             // F3: interleaved thinking block content — shown in "Working…" strip,
             // not accumulated into the answer bubble.
-            store().appendStreamThinking(sessionId, data.content);
+            pendingThinking += data.content;
           } else {
             // "final" or absent — goes into the answer accumulator.
             accumulated += data.content;
-            store().appendStreamFinal(sessionId, data.content);
+            pendingFinal += data.content;
           }
-          // Clear any transient status message when content starts flowing.
-          store().setStatusMessage(sessionId, null);
+          scheduleFlush();
         }
       });
 
       listen(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
         markStreamActivity();
+        flushDeltas();
         if (!recordEventId(e.data as string)) return;
         const data: StreamEvent = JSON.parse(e.data as string);
         if (data.content != null) {
@@ -543,6 +597,7 @@ export function useChat(sessionId: string | null) {
 
       listen(SSE.TOOL_CALL, (e: MessageEvent) => {
         markStreamActivity();
+        flushDeltas();
         if (!recordEventId(e.data as string)) return;
         const data = JSON.parse(e.data as string) as StreamEvent & {
           tool_id?: string;
@@ -567,6 +622,7 @@ export function useChat(sessionId: string | null) {
 
       listen(SSE.TOOL_RESULT, (e: MessageEvent) => {
         markStreamActivity();
+        flushDeltas();
         if (!recordEventId(e.data as string)) return;
         const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
         const toolId = data.tool_id || data.message_id;
@@ -680,6 +736,7 @@ export function useChat(sessionId: string | null) {
 
       listen(SSE.SESSION_TAKEOVER, () => {
         markStreamActivity();
+        flushDeltas();
         // Another tab opened this session — stop streaming and show banner.
         console.warn("[useChat] Session takeover — another tab is now active");
         store().setSessionTakeover(sessionId, true);
@@ -706,6 +763,7 @@ export function useChat(sessionId: string | null) {
 
       listen(SSE.STREAM_END, (e: MessageEvent) => {
         markStreamActivity();
+        flushDeltas();
         if (!recordEventId(e.data as string)) return;
         es.close();
         if (eventSourceRef.current === es) eventSourceRef.current = null;
@@ -717,6 +775,7 @@ export function useChat(sessionId: string | null) {
       listen(SSE.ERROR, (e: MessageEvent) => {
         if (!e.data) return;
         markStreamActivity();
+        flushDeltas();
         if (!recordEventId(e.data as string)) return;
         let providerFailure: StreamEvent["structured_error"] | undefined;
         // Custom SSE error event from the backend (has data).
@@ -776,6 +835,7 @@ export function useChat(sessionId: string | null) {
       // Leave transport failures reconnectable. Persisted-message reconciliation
       // covers a completed/evicted stream or a restarted backend.
       es.onerror = () => {
+        flushDeltas();
         if (eventSourceRef.current === es) void reconcileStreamingState(message_id);
       };
     },

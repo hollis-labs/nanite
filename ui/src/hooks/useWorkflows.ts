@@ -47,11 +47,12 @@ export function useCancelWorkflowRun() {
   });
 }
 
-export function useWorkflowEvents() {
+export function useWorkflowEvents(enabled = true) {
   const queryClient = useQueryClient();
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
+    if (!enabled || typeof EventSource === "undefined") return;
     const es = new EventSource("/api/workflows/events");
     esRef.current = es;
 
@@ -80,5 +81,5 @@ export function useWorkflowEvents() {
       es.close();
       esRef.current = null;
     };
-  }, [queryClient]);
+  }, [queryClient, enabled]);
 }

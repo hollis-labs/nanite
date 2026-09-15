@@ -16,10 +16,9 @@ import { api } from '@/lib/api'
 import SettingsPage from './settings/SettingsPage'
 import { MemoryModal } from './memory/MemoryModal'
 import { useToolRefresh } from '@/hooks/useToolRefresh'
-import { usePresence } from '@/hooks/usePresence'
+import { useUnifiedEvents } from '@/hooks/useUnifiedEvents'
 import { useHashRoute } from '@/hooks/useHashRoute'
 import { usePluginRegistry } from '@/hooks/usePluginRegistry'
-import { usePluginEvents } from '@/hooks/usePluginEvents'
 import { installPluginDevHelpers } from '@/lib/plugin-loader'
 
 // J.3: dev-only window helpers (__nanite_reloadPlugin, __nanite_pluginRegistry).
@@ -67,16 +66,15 @@ export function AppShell() {
   // Global tool refresh on session switch — runs even when ToolDashboard isn't mounted
   useToolRefresh()
 
-  // Global presence SSE — one connection per browser tab
-  usePresence()
+  // Unified SSE connection (/api/events) — one persistent connection per browser tab
+  // multiplexing presence, work updates, and plugin lifecycle events.
+  useUnifiedEvents()
 
   // Sync navigation state with URL hash
   useHashRoute()
 
-  // Plugin registry: fetch + reconcile into dynamic registry, and invalidate
-  // the query whenever a plugin lifecycle event fires.
+  // Plugin registry: fetch + reconcile into dynamic registry
   usePluginRegistry()
-  usePluginEvents()
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions'],

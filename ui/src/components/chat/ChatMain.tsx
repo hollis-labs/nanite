@@ -5,6 +5,7 @@ import { ChatPrimaryDrawer } from "@/components/drawers/ChatPrimaryDrawer";
 import { ChatWorkingDrawer } from "@/components/drawers/ChatWorkingDrawer";
 import { TaskThreadPanel } from "@/components/messaging/TaskThreadPanel";
 import { useChat } from "@/hooks/useChat";
+import { useSettings } from "@/hooks/useSettings";
 import { useTaskContext } from "@/hooks/useTaskContext";
 import { api } from "@/lib/api";
 import { useAppStore } from "@/stores/useAppStore";
@@ -158,6 +159,7 @@ function agentTags(raw: string | undefined): string[] {
 function AgentLaunchCards({ onStarted, fallback }: { onStarted: () => void; fallback: ReactNode }) {
   const configVersion = useAppStore((s) => s.configVersion);
   const queryClient = useQueryClient();
+  const { data: userSettings } = useSettings();
   const [error, setError] = useState<string | null>(null);
 
   const { data: agents = [], isLoading } = useQuery({
@@ -172,7 +174,18 @@ function AgentLaunchCards({ onStarted, fallback }: { onStarted: () => void; fall
   const launchable = agents.filter((a) => a.status !== "disabled");
 
   const startChat = useMutation({
-    mutationFn: (agentId: string) => api.createSession({ agent_id: agentId }),
+    // Provider and model are sent explicitly, as the Start launcher did.
+    // POST /api/sessions writes them through with no defaulting — only
+    // agent_id has a fallback chain — so omitting them leaves the session
+    // with provider='' and leans on resolveProvider reaching
+    // user_settings.default_provider at turn time. That tier does carry real
+    // traffic, but a launch surface should not depend on it.
+    mutationFn: (agentId: string) =>
+      api.createSession({
+        agent_id: agentId,
+        provider: userSettings?.default_provider || undefined,
+        model: userSettings?.default_model || undefined,
+      }),
     onSuccess: (session) => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       useAppStore.getState().setActiveSession(session.id);

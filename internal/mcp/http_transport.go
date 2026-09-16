@@ -151,6 +151,17 @@ func (t *HTTPTransport) call(ctx context.Context, method string, params any) (*J
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Declare what this client can actually parse. Go sends no Accept header
+	// when none is set, and ContextForge answers that with
+	// `406 Not Acceptable: Client must accept application/json` — so without
+	// this every tools/list against a CF virtual server fails discovery.
+	//
+	// Deliberately NOT `application/json, text/event-stream`, which is what
+	// the streamable-HTTP spec has clients offer: this transport is a plain
+	// JSON-RPC POST client with no SSE decoder, so accepting an event stream
+	// would invite a response it cannot read. SSETransport is the one that
+	// speaks that. A caller-supplied header still overrides this below.
+	req.Header.Set("Accept", "application/json")
 	// Apply optional static headers (e.g. Authorization for Tesseract) supplied at
 	// construction. Set after Content-Type so callers can override it if
 	// needed (rare). The headers map is read-only after construction.

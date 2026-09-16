@@ -11,24 +11,11 @@ import { SourceBadge } from '@/components/agents/SourceBadge'
 import { TagPills } from '@/components/agents/TagPills'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
-import type { SessionAgent } from '@/lib/types'
 import { AgentPicker } from './AgentPicker'
 
 interface AgentRosterProps {
   sessionId: string
   onClose: () => void
-}
-
-const STATUS_COLORS: Record<SessionAgent['status'], string> = {
-  active: 'bg-success',
-  idle: 'bg-warning',
-  offline: 'bg-fg-faint',
-}
-
-const STATUS_LABELS: Record<SessionAgent['status'], string> = {
-  active: 'Active',
-  idle: 'Idle',
-  offline: 'Offline',
 }
 
 export function AgentRoster({ sessionId, onClose }: AgentRosterProps) {
@@ -80,36 +67,32 @@ export function AgentRoster({ sessionId, onClose }: AgentRosterProps) {
             ) : (
               agents.map((agent, idx) => {
                 const profile = allProfiles.find((p) => p.id === agent.agent_id)
+                const displayName = profile?.name ?? agent.agent_id
                 return (
-                  <div key={agent.id}>
+                  <div key={agent.agent_id}>
                     {idx > 0 && <Separator className="my-2" />}
                     <div className="flex items-start gap-3 py-1.5 group">
                       {/* Square avatar with rounded-sm */}
                       <div className="relative size-9 rounded-sm bg-surface flex items-center justify-center shrink-0">
-                        {agent.avatar ? (
-                          <span className="text-base">{agent.avatar}</span>
+                        {profile?.avatar ? (
+                          <span className="text-base">{profile.avatar}</span>
                         ) : (
                           <User className="size-4 text-fg-secondary" />
                         )}
-                        {/* Status dot */}
-                        <span className={`absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-bg-elevated ${STATUS_COLORS[agent.status]}`} />
                       </div>
 
                       {/* Info — mini-card layout matching settings cards */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-sm font-medium text-fg truncate">{agent.name}</span>
-                          {agent.role === 'primary' && (
+                          <span className="text-sm font-medium text-fg truncate">{displayName}</span>
+                          {agent.is_primary && (
                             <Crown className="size-3 text-warning shrink-0" />
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className={`inline-flex items-center gap-1 text-[10px] text-fg-muted`}>
-                            <span className={`size-1.5 rounded-full ${STATUS_COLORS[agent.status]}`} />
-                            {STATUS_LABELS[agent.status]}
+                          <span className="text-[10px] text-fg-muted capitalize">
+                            {agent.is_primary ? 'primary' : 'participant'}
                           </span>
-                          <span className="text-fg-faint text-[10px]">·</span>
-                          <span className="text-[10px] text-fg-muted capitalize">{agent.role}</span>
                           {profile?.source && (
                             <>
                               <span className="text-fg-faint text-[10px]">·</span>
@@ -131,11 +114,11 @@ export function AgentRoster({ sessionId, onClose }: AgentRosterProps) {
                       </div>
 
                       {/* Remove button (only for participants) */}
-                      {agent.role === 'participant' && (
+                      {!agent.is_primary && (
                         <button
                           onClick={() => removeMutation.mutate(agent.agent_id)}
                           className="p-1 rounded text-fg-faint hover:text-primary hover:bg-surface transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                          aria-label={`Remove ${agent.name}`}
+                          aria-label={`Remove ${displayName}`}
                         >
                           <X className="size-3.5" />
                         </button>

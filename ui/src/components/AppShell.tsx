@@ -90,7 +90,7 @@ export function AppShell() {
     enabled: !!activeSessionId,
   })
 
-  const primarySessionAgent = sessionAgents.find((a) => a.role === 'primary')
+  const primarySessionAgent = sessionAgents.find((a) => a.is_primary)
   const inboxAgentId = primarySessionAgent?.agent_id || 'file-default'
 
   const focusComposer = useCallback(() => {

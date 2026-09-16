@@ -1458,15 +1458,18 @@ export interface CLIDetectionResult {
 
 // --- Session Agents ---
 
+/**
+ * A row of the `session_agents` table, exactly as
+ * `internal/store/agents.go` serialises it. It carries no display fields —
+ * name, avatar, description and source come from joining `agent_id` against
+ * the agent profiles from `api.listAgents()`.
+ */
 export interface SessionAgent {
-  id: string;
-  agent_id: string;
   session_id: string;
-  name: string;
-  slug: string;
-  avatar: string;
-  role: "primary" | "participant";
-  status: "active" | "idle" | "offline";
+  agent_id: string;
+  mode: string;
+  joined_at: string;
+  is_primary: boolean;
 }
 
 // --- Permission & Approval ---

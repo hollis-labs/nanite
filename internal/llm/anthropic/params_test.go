@@ -541,3 +541,32 @@ func TestBuildSystemBlocks_MarkerCountMatchesPlannedBudget(t *testing.T) {
 			"the builder must not spend markers the planner did not count", got, want)
 	}
 }
+
+// TestBuildMessages_DropsContentlessMessages is the regression for 400
+// "messages.3.content: Field required".
+//
+// An assistant turn whose whole reply was a ```nanite-envelope fence has the
+// fence lifted out for rendering, which leaves Content empty and no
+// ContentBlocks. That message renders correctly — the card is the point — and
+// then makes the NEXT request invalid, so the error lands a turn after the
+// message that caused it.
+func TestBuildMessages_DropsContentlessMessages(t *testing.T) {
+	c := New()
+	msgs := []llmtypes.ChatMessage{
+		{Role: "user", Content: "what are my balances?"},
+		{Role: "assistant", Content: "here they are"},
+		{Role: "user", Content: "I would like to take some time off"},
+		{Role: "assistant", Content: ""}, // reply was a card, nothing else
+		{Role: "user", Content: "I'd like to request vacation"},
+	}
+	out := c.buildMessages(msgs, cachePlan{})
+
+	if len(out) != 4 {
+		t.Fatalf("len(out)=%d want 4 — the content-less assistant turn should be dropped", len(out))
+	}
+	for i, m := range out {
+		if len(m.Content) == 0 {
+			t.Errorf("message %d has no content; Anthropic rejects the whole request for this", i)
+		}
+	}
+}

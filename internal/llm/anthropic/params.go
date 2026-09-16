@@ -153,6 +153,24 @@ func (c *Client) buildMessages(messages []llmtypes.ChatMessage, plan cachePlan) 
 
 		applyCache := cacheableUserIdx[i]
 		blocks := contentBlocksFromMessage(m, applyCache)
+		if len(blocks) == 0 {
+			// Anthropic requires every message to carry content and rejects
+			// the whole request otherwise — 400 "messages.N.content: Field
+			// required". A message with nothing in it conveys nothing to the
+			// model either, so dropping it loses no information the request
+			// could have carried.
+			//
+			// This is reachable in normal use: an assistant turn whose entire
+			// reply was a ```nanite-envelope fence has that fence lifted out
+			// for rendering, leaving empty text and no content blocks. The
+			// turn looks fine on screen — a card is exactly what was wanted —
+			// and then poisons the NEXT request, so the failure surfaces one
+			// turn after the message that caused it (CW, 2026-09-16).
+			//
+			// Only fully empty messages are dropped, so a tool_use block can
+			// never be orphaned from the tool_result that answers it.
+			continue
+		}
 		out = append(out, sdk.MessageParam{Role: role, Content: blocks})
 	}
 	return out

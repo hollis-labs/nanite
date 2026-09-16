@@ -49,7 +49,21 @@ func (c *Client) buildSystemBlocks(in llmtypes.ChatRequest, plan cachePlan) []sd
 	out := make([]sdk.TextBlockParam, 0, len(in.SlotBlocks)+1)
 	if in.SystemPrompt != "" {
 		block := sdk.TextBlockParam{Text: in.SystemPrompt}
-		if plan.System {
+		// Mark the prefix ONLY when no slot marker will be planted, because
+		// that is exactly what planCacheMarkersWithHints budgeted for:
+		// staticCount is len(plan.SlotMarkers), falling back to 1 when that
+		// is empty. Marking here as well as on the slots spends a marker the
+		// planner never counted, and the request is rejected outright once
+		// the total reaches five — "A maximum of 4 blocks with cache_control
+		// may be provided. Found 5" (CW, 2026-09-16, surfaced the first time
+		// a reflex reminder added a slot to an agent already carrying tools
+		// and a recent-message marker).
+		//
+		// Dropping the marker costs nothing here: with SlotBlocks present
+		// this block is extraSystemPrefix, the dynamic per-turn prefix, and
+		// the stable content lives in the slots. Caching a string that
+		// changes every turn buys no hit and invalidates the offset.
+		if plan.System && len(plan.SlotMarkers) == 0 {
 			block.CacheControl = sdk.NewCacheControlEphemeralParam()
 		}
 		out = append(out, block)

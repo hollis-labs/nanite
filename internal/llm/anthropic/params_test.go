@@ -495,3 +495,49 @@ func TestBuildMessageParams_EndToEnd_SlotsAndToolsPreserveRecentMessages(t *test
 		t.Fatalf("last message missing cache_control: %s", lastMsgData)
 	}
 }
+
+// TestBuildSystemBlocks_MarkerCountMatchesPlannedBudget is the regression for
+// the 400 "A maximum of 4 blocks with cache_control may be provided. Found 5".
+//
+// planCacheMarkersWithHints budgets staticCount as len(plan.SlotMarkers),
+// falling back to 1 only when that is empty — i.e. the prefix block and the
+// slot markers are alternatives, never both. buildSystemBlocks used to mark
+// the prefix whenever plan.System was set, so a request carrying a non-empty
+// extraSystemPrefix alongside two slot markers put three markers on the wire
+// where the planner had counted two. Add tools and one recent message and the
+// request is refused outright.
+//
+// The shape below is the real one: a dynamic per-turn prefix, both stable
+// prefix slots unchanged, and the system hint active.
+func TestBuildSystemBlocks_MarkerCountMatchesPlannedBudget(t *testing.T) {
+	c := New()
+	req := llmtypes.ChatRequest{
+		SystemPrompt: "per-turn prefix that changes every turn",
+		SlotBlocks: []llmtypes.SlotBlock{
+			{Name: ctxpkg.SlotUniversal, Content: "universal", Changed: false},
+			{Name: ctxpkg.SlotSystem, Content: "system", Changed: false},
+		},
+	}
+	plan := planCacheMarkersWithHints(req, []llmcontracts.CacheHint{{Position: "system"}})
+	if len(plan.SlotMarkers) != 2 {
+		t.Fatalf("precondition: SlotMarkers=%v want both stable slots", plan.SlotMarkers)
+	}
+
+	got := 0
+	for _, b := range c.buildSystemBlocks(req, plan) {
+		data, _ := json.Marshal(b)
+		if strings.Contains(string(data), `"cache_control":{`) {
+			got++
+		}
+	}
+
+	// What the planner budgeted for this section.
+	want := len(plan.SlotMarkers)
+	if want == 0 && plan.System {
+		want = 1
+	}
+	if got != want {
+		t.Errorf("cache_control markers on the wire = %d, planner budgeted %d — "+
+			"the builder must not spend markers the planner did not count", got, want)
+	}
+}

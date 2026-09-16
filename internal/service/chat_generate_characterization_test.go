@@ -259,15 +259,14 @@ func newCharacterizationFixture(t *testing.T, steps []characterizationProviderSt
 	streams := NewStreamManager()
 	contextSvc := &characterizationContext{inner: NewContextService(ContextServiceConfig{Client: chat.NewContextClient(st)})}
 	svc := &chatServiceImpl{
-		sessions:                &characterizationSessions{st: st},
-		agents:                  &characterizationAgents{agent: agent},
-		tools:                   toolSvc,
-		streams:                 streams,
-		context:                 contextSvc,
-		providers:               registry,
-		store:                   st,
-		argValidator:            newArgValidator(),
-		embeddingWarnedSessions: make(map[string]struct{}),
+		sessions:     &characterizationSessions{st: st},
+		agents:       &characterizationAgents{agent: agent},
+		tools:        toolSvc,
+		streams:      streams,
+		context:      contextSvc,
+		providers:    registry,
+		store:        st,
+		argValidator: newArgValidator(),
 	}
 	svc.dispatcher = dispatcher.New(newChatRunnerAdapter(svc))
 	return &characterizationFixture{svc: svc, st: st, provider: prov, tools: toolSvc, context: contextSvc, session: sessionID}

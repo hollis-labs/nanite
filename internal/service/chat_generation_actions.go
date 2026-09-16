@@ -1781,11 +1781,6 @@ func (s *chatServiceImpl) prepareTurn(
 		return prepareTurnResult{directive: generationTerminate}
 	}
 
-	// Advisory: warn once per session when the memory embedder isn't active.
-	// Fires regardless of whether memory sources get queried on this turn —
-	// users see the state without having to trigger a recall.
-	s.maybeEmitEmbeddingWarning(sessionID, ch)
-
 	// --- Resolve agent ---
 	agent, err := s.agents.ResolveForSession(ctx, sessionID)
 	if err != nil {

@@ -1058,8 +1058,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Permissions:        permissions,
 		PathGrants:         pathGrants,
 		Tasks:              tasks,
-		EmbeddingStatus:    embeddingStatus,
-		EmbeddingProvider:  embeddingProviderID,
 		ResultCache:        buildResultCache(cfg.Store),
 		ModelCatalog:       modelCatalog,
 		SessionEventWriter: messagingComposition.Events,

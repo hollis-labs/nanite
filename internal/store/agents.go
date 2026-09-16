@@ -107,10 +107,15 @@ type AgentProfile struct {
 	RoleTools string `json:"role_tools"`
 
 	// RoleSkills is a JSON array of skill slugs this agent should be
-	// pre-seeded with at create time. The CreateAgent API handler reads
-	// this field, parses the JSON array, and inserts one agent_known_skills
-	// row per entry with pinned=1, reason='role_seed'. Empty "[]" means no
-	// seed. Added by FU-33 (migration 074).
+	// pre-seeded with at create time. AgentConfigService.Create/Update seed
+	// one agent_known_skills row per entry with pinned=1, reason='role_seed'
+	// (service.seedRoleSkillsFromIngest). Empty "[]" means no seed.
+	//
+	// The seeded row is a CATALOG ENTRY, not a capability grant: it carries
+	// no ApprovedContentHash, so internal/skill/gate.go still refuses
+	// execution until the skill is explicitly approved for this agent. A
+	// slug missing from the skills catalog is skipped with a warning rather
+	// than failing the write. Added by FU-33 (migration 074).
 	RoleSkills string `json:"role_skills"`
 
 	// ContextPolicy is a JSON object describing how this durable agent's

@@ -207,3 +207,102 @@ func TestAgentConfigRejectsReadOnlyInternalUpdate(t *testing.T) {
 		t.Fatalf("Update error = %v, want ErrAgentNotManaged", err)
 	}
 }
+
+// TestAgentConfigCreateSeedsRoleSkillsAsCatalogNotGrant pins the distinction
+// the roleSkills seeder exists to preserve: a seeded skill is discoverable but
+// not yet executable. internal/skill/gate.go refuses a row with no
+// ApprovedContentHash (GrantRequiredError, "never been approved"), so seeding
+// an approval here would turn every declared skill into an ambient capability.
+func TestAgentConfigCreateSeedsRoleSkillsAsCatalogNotGrant(t *testing.T) {
+	svc, st, _ := newAgentConfigTestService(t)
+	ctx := context.Background()
+
+	if err := st.CreateSkill(ctx, &store.Skill{
+		Name: "KB Triage", Slug: "kb-triage",
+		Description: "Search the KB before offering a ticket.",
+		SourceTier:  "user", ContentHash: "skl-test-abc123", Enabled: true,
+	}); err != nil {
+		t.Fatalf("CreateSkill: %v", err)
+	}
+
+	res, err := svc.Create(&store.AgentProfile{
+		Name: "Desk", Slug: "desk", SystemPrompt: "Work the queue.",
+		// "no-such-skill" must be skipped without failing the create.
+		RoleSkills: `["kb-triage","no-such-skill"]`,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	rows, err := st.ListAgentKnownSkills(ctx, res.Profile.ID)
+	if err != nil {
+		t.Fatalf("ListAgentKnownSkills: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d known-skill rows, want 1 (the unknown slug must be skipped): %+v", len(rows), rows)
+	}
+	got := rows[0]
+	if got.SkillName != "kb-triage" {
+		t.Errorf("skill_name = %q, want %q", got.SkillName, "kb-triage")
+	}
+	if !got.Pinned {
+		t.Error("seeded row should be pinned")
+	}
+	if got.Reason != "role_seed" {
+		t.Errorf("reason = %q, want %q", got.Reason, "role_seed")
+	}
+	if got.ApprovedContentHash != "" {
+		t.Errorf("seeded row carries approval %q — roleSkills must seed a catalog entry, never a grant", got.ApprovedContentHash)
+	}
+}
+
+// TestAgentConfigUpdateDoesNotRevokeSkillApproval guards a regression found in
+// dogfooding: the roleSkills seeder runs on every Update, and
+// InsertAgentKnownSkill is INSERT OR REPLACE — so re-seeding an already-granted
+// slug blanked its approval columns. Editing an unrelated field must not
+// silently revoke a skill the operator approved.
+func TestAgentConfigUpdateDoesNotRevokeSkillApproval(t *testing.T) {
+	svc, st, _ := newAgentConfigTestService(t)
+	ctx := context.Background()
+
+	if err := st.CreateSkill(ctx, &store.Skill{
+		Name: "KB Triage", Slug: "kb-triage", Description: "d",
+		SourceTier: "user", ContentHash: "skl-test-abc123", Enabled: true,
+	}); err != nil {
+		t.Fatalf("CreateSkill: %v", err)
+	}
+	res, err := svc.Create(&store.AgentProfile{
+		Name: "Desk", Slug: "desk", SystemPrompt: "Work the queue.",
+		RoleSkills: `["kb-triage"]`,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Approve it, the way the grant API does.
+	if err := st.InsertAgentKnownSkill(ctx, store.AgentKnownSkill{
+		AgentID: res.Profile.ID, SkillName: "kb-triage", Pinned: true,
+		Reason: "role_seed", ApprovedContentHash: "skl-test-abc123",
+		GrantedAt: "2026-09-16T00:00:00Z", GrantedBy: "operator@example.com",
+	}); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	updated := *res.Profile
+	updated.Description = "edited for an unrelated reason"
+	if _, err := svc.Update(res.Profile, &updated, nil, ""); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	got, err := st.GetAgentKnownSkill(ctx, res.Profile.ID, "kb-triage")
+	if err != nil || got == nil {
+		t.Fatalf("GetAgentKnownSkill after update: %v (row=%+v)", err, got)
+	}
+	if got.ApprovedContentHash != "skl-test-abc123" {
+		t.Errorf("approval lost on update: approved_content_hash = %q, want %q",
+			got.ApprovedContentHash, "skl-test-abc123")
+	}
+	if got.GrantedBy != "operator@example.com" {
+		t.Errorf("granted_by lost on update: %q", got.GrantedBy)
+	}
+}

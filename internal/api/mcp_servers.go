@@ -49,6 +49,15 @@ func redactHeaders(servers []store.MCPServerConfig) []store.MCPServerConfig {
 	return out
 }
 
+// redactOne is redactHeaders for a single config, for the create and update
+// responses. Those echo the saved record back, and without this they return
+// the credential the caller just sent in plaintext — which the list endpoint
+// has always refused to do. A create/update response is as much "the UI's
+// copy of this record" as a list response is.
+func redactOne(cfg store.MCPServerConfig) store.MCPServerConfig {
+	return redactHeaders([]store.MCPServerConfig{cfg})[0]
+}
+
 // mergeRedactedHeaders restores values the client sent back redacted.
 //
 // Without this the first save from a UI that loaded the list would overwrite a
@@ -143,7 +152,7 @@ func (a *API) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	a.jsonResp(w, http.StatusCreated, cfg)
+	a.jsonResp(w, http.StatusCreated, redactOne(cfg))
 }
 
 // handleUpdateMCPServer updates an existing MCP server config.
@@ -199,7 +208,7 @@ func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	a.jsonResp(w, http.StatusOK, cfg)
+	a.jsonResp(w, http.StatusOK, redactOne(cfg))
 }
 
 // handleDeleteMCPServer removes an MCP server config and unregisters it.

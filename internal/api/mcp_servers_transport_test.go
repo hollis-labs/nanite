@@ -13,7 +13,7 @@ import (
 
 // The API is the only way a transport_type reaches the database, so what it
 // accepts decides which transports are reachable at all. "streamable" was
-// added by the SSE work: rejecting it here would leave every ContextForge
+// added by the SSE work: rejecting it here would leave every gateway-fronted
 // /mcp URL unconfigurable.
 func TestCreateMCPServerAcceptsEveryRealTransport(t *testing.T) {
 	for _, transport := range []string{store.TransportStdio, store.TransportSSE, store.TransportStreamable} {

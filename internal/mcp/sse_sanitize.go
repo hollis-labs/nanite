@@ -8,23 +8,24 @@ import (
 )
 
 // sseSanitizeReader adapts a server's SSE stream to what the MCP SDK's client
-// assumes, for two things ContextForge does that the SDK does not tolerate.
+// assumes, for two things some SSE-based MCP gateways do that the SDK does
+// not tolerate.
 //
 //  1. Non-message events. The SDK's read loop pushes EVERY event's data at the
 //     JSON-RPC decoder:
 //
 //     for evt := range scanEvents(resp.Body) { s.incoming <- evt.Data }
 //
-//     despite its own doc saying "Reads are SSE 'message' events". ContextForge
-//     emits `event: keepalive` with `data: {}` every few seconds, and `{}` is
-//     not a JSON-RPC message, so the session dies on the first one with
-//     `invalid message version tag ""; expected "2.0"` — during initialize,
-//     which makes it look like a handshake failure rather than a keepalive.
-//     Events other than `endpoint` and `message` are dropped here.
+//     despite its own doc saying "Reads are SSE 'message' events". A gateway
+//     that emits `event: keepalive` with `data: {}` every few seconds sends a
+//     `{}` that is not a JSON-RPC message, so the session dies on the first
+//     one with `invalid message version tag ""; expected "2.0"` — during
+//     initialize, which makes it look like a handshake failure rather than a
+//     keepalive. Events other than `endpoint` and `message` are dropped here.
 //
-//  2. An endpoint URL with no port. ContextForge advertises
-//     `http://contextforge-gateway/servers/<id>/message?session_id=...` —
-//     absolute, and missing the :4444 it is actually served on. The SDK resolves
+//  2. An endpoint URL with no port. A gateway can advertise
+//     `http://gateway-host/servers/<id>/message?session_id=...` — absolute,
+//     and missing the port it is actually served on. The SDK resolves
 //     it with url.Parse against the SSE URL, and an absolute URL wins outright,
 //     so every subsequent POST would go to port 80. The authority is rewritten
 //     to the one we connected to; the path and query are the server's to choose.
@@ -82,7 +83,7 @@ func (r *sseSanitizeReader) drainBlocks() {
 		// "\r\n\r\n" with CRLF. Searching only for "\n\n" finds nothing in
 		// "\r\n\r\n" — the bytes are \r \n \r \n — so a CRLF server's stream
 		// is buffered forever and the client hangs waiting for a reply that
-		// already arrived. ContextForge sends CRLF.
+		// already arrived. Some gateways send CRLF.
 		idx, width := blockEnd(data)
 		if idx < 0 {
 			return

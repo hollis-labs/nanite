@@ -8,9 +8,9 @@
 --
 -- AddHTTPServer(name, url, tier) sends no headers, and MCPServerConfig has
 -- nowhere to put any. Every gateway-fronted MCP server in real deployments
--- wants an Authorization header — IBM ContextForge, for one, returns 401
--- without a bearer token — so the persisted-server path could reach only
--- unauthenticated servers. mcp.Manager has had AddHTTPServerWithHeaders since
+-- wants an Authorization header — some return 401 without a bearer token —
+-- so the persisted-server path could reach only unauthenticated servers.
+-- mcp.Manager has had AddHTTPServerWithHeaders since
 -- the Tesseract scaffold; it simply had no caller, because nothing could
 -- persist the headers to pass it.
 --

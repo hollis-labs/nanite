@@ -11,7 +11,7 @@ func TestVisibleAgentSlugs(t *testing.T) {
 		{"unset means every agent is listed", "", nil},
 		{"whitespace only is also no filter", "   ", nil},
 		{"commas with nothing between them are no filter", " , , ", nil},
-		{"one slug", "workday-ess-copy", []string{"workday-ess-copy"}},
+		{"one slug", "hr-agent-clone", []string{"hr-agent-clone"}},
 		{"several, with spacing", " a , b ,c ", []string{"a", "b", "c"}},
 	}
 	for _, tc := range cases {

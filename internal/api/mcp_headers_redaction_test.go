@@ -10,8 +10,8 @@ import (
 
 func TestRedactHeaders_keepsKeysAndDropsValues(t *testing.T) {
 	in := []store.MCPServerConfig{{
-		Name:    "workday",
-		Headers: `{"Authorization":"Bearer supersecret","X-Tenant":"adtran"}`,
+		Name:    "hr-server",
+		Headers: `{"Authorization":"Bearer supersecret","X-Tenant":"acme-corp"}`,
 	}}
 	out := redactHeaders(in)
 
@@ -42,7 +42,7 @@ func TestRedactHeaders_hidesUnparseableValuesToo(t *testing.T) {
 }
 
 func TestMergeRedactedHeaders_restoresUnchangedSecrets(t *testing.T) {
-	stored := `{"Authorization":"Bearer supersecret","X-Tenant":"adtran"}`
+	stored := `{"Authorization":"Bearer supersecret","X-Tenant":"acme-corp"}`
 	// What a UI sends back after loading the redacted list and editing nothing.
 	incoming := `{"Authorization":"` + RedactedHeaderValue + `","X-Tenant":"` + RedactedHeaderValue + `"}`
 
@@ -55,7 +55,7 @@ func TestMergeRedactedHeaders_restoresUnchangedSecrets(t *testing.T) {
 	if got["Authorization"] != "Bearer supersecret" {
 		t.Fatalf("token was not restored: %q", got["Authorization"])
 	}
-	if got["X-Tenant"] != "adtran" {
+	if got["X-Tenant"] != "acme-corp" {
 		t.Fatalf("second header was not restored: %q", got["X-Tenant"])
 	}
 }

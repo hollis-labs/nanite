@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// ContextForge answers a request that does not explicitly accept JSON with
-// `406 Not Acceptable: Client must accept application/json`. Go sends no
+// Some MCP gateways answer a request that does not explicitly accept JSON
+// with `406 Not Acceptable: Client must accept application/json`. Go sends no
 // Accept header unless one is set, so before this header was added every
-// tools/list against a CF virtual server failed discovery — the server was
+// tools/list against a gateway-fronted server failed discovery — the server was
 // registered, authenticated and reachable, and published no tools.
 func TestHTTPTransport_SendsAcceptJSON(t *testing.T) {
 	var got string

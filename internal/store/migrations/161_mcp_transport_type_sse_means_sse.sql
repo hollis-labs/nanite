@@ -9,9 +9,9 @@
 -- 'sse' never built an SSE client. Both registration paths — main.go at
 -- startup and API.registerMCPTransport — mapped it to HTTPTransport, a plain
 -- JSON-RPC POST client, so the field had been a misnomer since it was written.
--- Nanite now has a real HTTP+SSE client, because ContextForge forwards
--- identity headers (X-Forwarded-User-Email) to upstream servers only on its
--- /sse path and strips them on /mcp: without SSE, an identity-scoped tool
+-- Nanite now has a real HTTP+SSE client, because some MCP gateways forward
+-- identity headers (X-Forwarded-User-Email) to upstream servers only on their
+-- /sse path and strip them on /mcp: without SSE, an identity-scoped tool
 -- cannot be reached at all. 'sse' now names that client and 'streamable' names
 -- the POST client.
 --

@@ -198,7 +198,7 @@ func TestSSETransportSurfacesToolErrorAsResult(t *testing.T) {
 	}
 }
 
-// The whole reason this transport exists: ContextForge forwards identity
+// The whole reason this transport exists: some gateways forward identity
 // headers upstream only over /sse, so they have to be on every request — the
 // long-lived GET and the message POSTs alike.
 func TestSSETransportSendsConfiguredHeadersOnEveryRequest(t *testing.T) {

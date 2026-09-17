@@ -286,7 +286,7 @@ func (a *API) handleExportMCPServers(w http.ResponseWriter, r *http.Request) {
 // transportTypeError is the 400 body for an unrecognized transport_type. It
 // names all three because "sse" and "streamable" are easy to pick wrongly:
 // "sse" is the 2024-11-05 HTTP+SSE transport, "streamable" is JSON-RPC over
-// POST — which is what a ContextForge /mcp URL speaks.
+// POST — which is what a gateway-fronted /mcp URL speaks.
 const transportTypeError = "transport_type must be 'stdio', 'sse', or 'streamable'"
 
 func validTransportType(t string) bool {

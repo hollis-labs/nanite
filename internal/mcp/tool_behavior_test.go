@@ -22,7 +22,7 @@ func addToolForTest(t *testing.T, m *Manager, server, name string, ann map[strin
 
 func TestToolBehaviorReportsDeclaredWrite(t *testing.T) {
 	m := NewManager()
-	addToolForTest(t, m, "workday", "request_time_off", map[string]any{
+	addToolForTest(t, m, "hr-server", "request_time_off", map[string]any{
 		"readOnlyHint": false, "destructiveHint": true,
 	})
 
@@ -40,7 +40,7 @@ func TestToolBehaviorReportsDeclaredWrite(t *testing.T) {
 
 func TestToolBehaviorReportsDeclaredRead(t *testing.T) {
 	m := NewManager()
-	addToolForTest(t, m, "workday", "get_time_off_balances", map[string]any{
+	addToolForTest(t, m, "hr-server", "get_time_off_balances", map[string]any{
 		"readOnlyHint": true, "destructiveHint": false,
 	})
 
@@ -54,7 +54,7 @@ func TestToolBehaviorUnknownWhenNothingDeclared(t *testing.T) {
 	// A server that annotates nothing must read as "unknown", never as "safe":
 	// the caller has to keep its own fallback rather than be told read-only.
 	m := NewManager()
-	addToolForTest(t, m, "workday", "mystery_tool", nil)
+	addToolForTest(t, m, "hr-server", "mystery_tool", nil)
 
 	if _, _, ok := m.ToolBehavior("mystery_tool"); ok {
 		t.Error("absent annotations must report ok=false, not a confident false/false")
@@ -71,7 +71,7 @@ func TestToolBehaviorUnknownForUnregisteredName(t *testing.T) {
 func TestToolBehaviorIgnoresNonBooleanHints(t *testing.T) {
 	// A server sending "true" as a string must not be read as true.
 	m := NewManager()
-	addToolForTest(t, m, "workday", "odd_tool", map[string]any{"readOnlyHint": "true"})
+	addToolForTest(t, m, "hr-server", "odd_tool", map[string]any{"readOnlyHint": "true"})
 
 	readOnly, _, ok := m.ToolBehavior("odd_tool")
 	if !ok {

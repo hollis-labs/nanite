@@ -22,12 +22,12 @@ function renderWithClient(node: React.ReactNode) {
 function agent(overrides: Partial<AgentProfile> = {}): AgentProfile {
   return {
     id: "agent-1",
-    name: "ESS Agent",
-    slug: "ess",
+    name: "Helper Agent",
+    slug: "helper",
     avatar: "🧑‍💼",
     icon: "",
     system_prompt: "",
-    description: "Answers your own Workday questions — time off and training.",
+    description: "Answers your own benefits questions — time off and training.",
     modes: "",
     default_model: "",
     mcp_servers: "",
@@ -41,7 +41,7 @@ function agent(overrides: Partial<AgentProfile> = {}): AgentProfile {
     tools: "",
     directories: "",
     constraints: "",
-    tags: '["workday","hr"]',
+    tags: '["hr","benefits"]',
     status: "active",
     source: "managed",
     source_ref: "",
@@ -76,8 +76,8 @@ describe("welcome screen agent launch", () => {
       agent(),
       agent({
         id: "agent-2",
-        name: "ESS Agent — cards",
-        slug: "ess-cards",
+        name: "Helper Agent — cards",
+        slug: "helper-cards",
         description: "The same answers, rendered as cards.",
         tags: '["envelopes"]',
       }),
@@ -85,24 +85,24 @@ describe("welcome screen agent launch", () => {
 
     renderWithClient(<WelcomeScreen />);
 
-    expect(await screen.findByText("ESS Agent")).toBeTruthy();
-    expect(screen.getByText("ESS Agent — cards")).toBeTruthy();
+    expect(await screen.findByText("Helper Agent")).toBeTruthy();
+    expect(screen.getByText("Helper Agent — cards")).toBeTruthy();
     expect(
-      screen.getByText("Answers your own Workday questions — time off and training."),
+      screen.getByText("Answers your own benefits questions — time off and training."),
     ).toBeTruthy();
-    expect(screen.getByText("workday")).toBeTruthy();
+    expect(screen.getByText("hr")).toBeTruthy();
   });
 
   it("starts a session bound to the agent that was clicked", async () => {
     vi.spyOn(api, "listAgents").mockResolvedValue([
       agent(),
-      agent({ id: "agent-2", name: "Arek ESS", slug: "ess-arek" }),
+      agent({ id: "agent-2", name: "Backup Agent", slug: "helper-2" }),
     ]);
     const create = vi.spyOn(api, "createSession").mockResolvedValue(session("sess-new"));
 
     renderWithClient(<WelcomeScreen />);
 
-    fireEvent.click(await screen.findByText("Arek ESS"));
+    fireEvent.click(await screen.findByText("Backup Agent"));
 
     await waitFor(() => {
       // The agent must ride on the create call — a session started without one
@@ -122,7 +122,7 @@ describe("welcome screen agent launch", () => {
 
     renderWithClient(<WelcomeScreen />);
 
-    expect(await screen.findByText("ESS Agent")).toBeTruthy();
+    expect(await screen.findByText("Helper Agent")).toBeTruthy();
     expect(screen.queryByText("Retired Agent")).toBeNull();
   });
 
@@ -156,7 +156,7 @@ describe("welcome screen agent launch", () => {
 
     renderWithClient(<WelcomeScreen />);
 
-    fireEvent.click(await screen.findByText("ESS Agent"));
+    fireEvent.click(await screen.findByText("Helper Agent"));
 
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(screen.getByText(/Failed to create session/)).toBeTruthy();

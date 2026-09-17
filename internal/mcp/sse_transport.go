@@ -51,10 +51,10 @@ const maxSSEEventBytes = 10 * 1024 * 1024
 // endpoint the server announces for client->server ones.
 //
 // It exists because that is the only transport that carries per-request
-// identity headers end to end in the deployment this was written for.
-// ContextForge forwards headers such as X-Forwarded-User-Email to upstream
-// servers on its /sse path and strips them on /mcp, so an identity-scoped tool
-// reached over /mcp cannot tell who is asking. HTTPTransport — which
+// identity headers end to end in the deployment this was written for. Some
+// MCP gateways forward headers such as X-Forwarded-User-Email to upstream
+// servers on their /sse path and strip them on /mcp, so an identity-scoped
+// tool reached over /mcp cannot tell who is asking. HTTPTransport — which
 // transport_type "sse" used to build, despite the name — speaks /mcp.
 //
 // The MCP handshake (initialize, notifications/initialized, session id,
@@ -468,7 +468,7 @@ func (rt *sseRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 		if rt.maxEvent != nil {
 			resp.Body = &eventCapReader{inner: resp.Body, max: rt.maxEvent()}
 		}
-		// See sse_sanitize.go: drops the keepalive events ContextForge sends
+		// See sse_sanitize.go: drops keepalive events some gateways send
 		// (which the SDK would hand to the JSON-RPC decoder) and repairs an
 		// endpoint URL that names a host:port we did not connect to.
 		resp.Body = newSSESanitizeReader(resp.Body, out.URL)

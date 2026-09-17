@@ -259,8 +259,8 @@ func ParseHeaderJSON(raw string) (map[string]string, error) {
 // AddHTTPServerWithHeaders came to sit uncalled for months.
 //
 // store.TransportSSE is the real HTTP+SSE client, which is the only transport
-// that reaches an identity-scoped tool behind ContextForge — its /sse path
-// forwards X-Forwarded-User-Email upstream and its /mcp path strips it.
+// that reaches an identity-scoped tool behind some MCP gateways — their /sse
+// path forwards X-Forwarded-User-Email upstream and their /mcp path strips it.
 // store.TransportStreamable is the JSON-RPC POST client, which is what /mcp
 // speaks. An unrecognized value is an error rather than a silent default: a
 // row nobody can register is visible, a row registered against the wrong

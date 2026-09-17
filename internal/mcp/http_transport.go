@@ -152,9 +152,9 @@ func (t *HTTPTransport) call(ctx context.Context, method string, params any) (*J
 	}
 	req.Header.Set("Content-Type", "application/json")
 	// Declare what this client can actually parse. Go sends no Accept header
-	// when none is set, and ContextForge answers that with
+	// when none is set, and some MCP gateways answer that with
 	// `406 Not Acceptable: Client must accept application/json` — so without
-	// this every tools/list against a CF virtual server fails discovery.
+	// this every tools/list against a gateway-fronted server fails discovery.
 	//
 	// Deliberately NOT `application/json, text/event-stream`, which is what
 	// the streamable-HTTP spec has clients offer: this transport is a plain

@@ -228,8 +228,14 @@ if [ "${MCP_CONFIG_SENTINEL+x}" = x ]; then
 else
   printf 'sentinel=<unset>\n' >> "${0}.capture"
 fi
+# Answer the MCP handshake before anything else: initialize, then consume the
+# initialized notification, then the real request. A stub that skips this no
+# longer resembles a server the client can talk to.
+IFS= read -r initialize
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"test-mcp","version":"0"}}}'
+IFS= read -r initialized
 IFS= read -r request
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}'
 `
 			if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 				t.Fatalf("write MCP test server: %v", err)

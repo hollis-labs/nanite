@@ -115,7 +115,7 @@ export function ChatHeader() {
     queryFn: () => api.listAgents(),
   });
 
-  const primaryAgent = sessionAgents.find((a) => a.role === "primary");
+  const primaryAgent = sessionAgents.find((a) => a.is_primary);
   const primaryAgentProfile = allAgents.find((a) => a.id === primaryAgent?.agent_id);
   const activeAgentName = primaryAgentProfile?.name || "Nanite";
   const agentCount = sessionAgents.length;

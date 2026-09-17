@@ -1,0 +1,44 @@
+-- +goose Up
+-- 161_mcp_transport_type_sse_means_sse.sql
+--
+-- Repoints existing remote MCP servers at the transport they are actually
+-- talking to, now that transport_type = 'sse' has started to mean SSE.
+--
+-- ## Why
+--
+-- 'sse' never built an SSE client. Both registration paths — main.go at
+-- startup and API.registerMCPTransport — mapped it to HTTPTransport, a plain
+-- JSON-RPC POST client, so the field had been a misnomer since it was written.
+-- Nanite now has a real HTTP+SSE client, because some MCP gateways forward
+-- identity headers (X-Forwarded-User-Email) to upstream servers only on their
+-- /sse path and strip them on /mcp: without SSE, an identity-scoped tool
+-- cannot be reached at all. 'sse' now names that client and 'streamable' names
+-- the POST client.
+--
+-- ## What this does to existing rows
+--
+-- Every stored 'sse' row was registered as a POST client and, if it works
+-- today, points at an endpoint that speaks JSON-RPC over POST. Leaving those
+-- rows alone would silently re-point them at a protocol their URL does not
+-- speak, and the failure would look like a broken server rather than a
+-- renamed field. Rewriting them to 'streamable' preserves exactly the
+-- behavior they have now.
+--
+-- This deployment has no such rows, which is why the rename is affordable at
+-- all — but a migration that assumes an empty table is a migration that breaks
+-- the first database it meets that isn't.
+--
+-- Anyone who wants the new SSE client sets transport_type back to 'sse'
+-- deliberately, against a URL that ends in /sse.
+--
+-- Rows are data the application owns, so this is an UPDATE backfill, not a
+-- VALUES clause: nothing is inserted and no vocabulary is seeded here.
+UPDATE mcp_servers SET transport_type = 'streamable' WHERE transport_type = 'sse';
+
+-- +goose Down
+-- Restores the single pre-161 spelling for remote servers. This is lossy in
+-- one direction only: a server created as 'sse' AFTER this migration — a real
+-- SSE server — rolls back to a name that the pre-161 code reads as "POST
+-- client", which is what that code would have done with it anyway, since it
+-- had no SSE client to offer. There is no third value to preserve.
+UPDATE mcp_servers SET transport_type = 'sse' WHERE transport_type = 'streamable';

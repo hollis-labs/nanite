@@ -361,6 +361,56 @@ func seedRoleToolsFromIngest(ctx context.Context, st *store.Store, agentID strin
 	}
 }
 
+// seedRoleSkillsFromIngest seeds agent_known_skills from a def's roleSkills,
+// the skills counterpart to seedRoleToolsFromIngest above.
+//
+// It deliberately seeds a CATALOG ENTRY, not a capability grant. The row is
+// pinned with reason='role_seed' and carries NO ApprovedContentHash, so the
+// skill shows up in the agent's known-skills catalog while skill execution
+// stays refused until someone approves it explicitly (the grant API, which
+// binds an approval to the skill's current content hash).
+//
+// That split is the whole point, and it is why this does not simply mirror
+// roleTools: internal/skill/gate.go treats an unapproved row as no grant at
+// all (GrantRequiredError's "grant row exists but has never been approved"),
+// on the stated principle that a skill is never an ambient capability. Seeding
+// an approval here would hand every API-created agent silent execution rights
+// over whatever content the catalog happens to hold.
+//
+// A slug with no matching skills row is skipped with a warning rather than
+// failing the create — same tolerant behavior roleTools has for a name that
+// is not yet in known_tools.
+func seedRoleSkillsFromIngest(ctx context.Context, st *store.Store, agentID string, skills []string) {
+	for _, slug := range skills {
+		if slug == "" {
+			continue
+		}
+		known, err := st.GetSkillBySlug(ctx, slug)
+		if err != nil || known == nil {
+			slog.Warn("service: seed role skill — no such skill in catalog; skipped",
+				"agent_id", agentID, "skill", slug, "err", err)
+			continue
+		}
+		// Never overwrite an existing row. InsertAgentKnownSkill is INSERT OR
+		// REPLACE, and this seeder runs again on every agent Update — re-seeding
+		// a slug already present would blank its approval columns, silently
+		// revoking a granted skill because someone edited an unrelated field.
+		// Seeding is for declarations that are not there yet; approval state is
+		// owned by the grant API.
+		if existing, gerr := st.GetAgentKnownSkill(ctx, agentID, known.Slug); gerr == nil && existing != nil {
+			continue
+		}
+		if err := st.InsertAgentKnownSkill(ctx, store.AgentKnownSkill{
+			AgentID:   agentID,
+			SkillName: known.Slug,
+			Pinned:    true,
+			Reason:    "role_seed",
+		}); err != nil {
+			slog.Warn("service: seed role skill", "agent_id", agentID, "skill", slug, "err", err)
+		}
+	}
+}
+
 func seedProcedures(ctx context.Context, st *store.Store, agentID string, procs []agentpkg.ProcedureDefinition) {
 	for _, p := range procs {
 		if p.Name == "" {

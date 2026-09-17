@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/providercatalog"
@@ -102,10 +103,39 @@ func (a *API) handleListModels(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, models)
 }
 
+// allowedFromEnv reads a comma-separated allowlist. Unset or empty means "no
+// restriction", so the default behavior is unchanged and a typo that empties
+// the list shows everything rather than nothing — the safer direction for a
+// list someone picks from.
+func allowedFromEnv(name string) map[string]bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, s := range strings.Split(raw, ",") {
+		if s = strings.ToLower(strings.TrimSpace(s)); s != "" {
+			out[s] = true
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func visibleProviderRows(providers []store.ProviderConfig) []store.ProviderConfig {
+	// NANITE_VISIBLE_PROVIDERS narrows what a person can pick — by provider
+	// type, e.g. "openai". Nanite seeds providers it has no key for, and a
+	// picker offering a provider that cannot answer is a demo failure waiting
+	// for someone to choose it.
+	allowed := allowedFromEnv("NANITE_VISIBLE_PROVIDERS")
 	out := providers[:0]
 	for _, p := range providers {
 		if isHiddenPTYProviderType(p.ProviderType) {
+			continue
+		}
+		if allowed != nil && !allowed[strings.ToLower(p.ProviderType)] {
 			continue
 		}
 		out = append(out, p)
@@ -114,9 +144,16 @@ func visibleProviderRows(providers []store.ProviderConfig) []store.ProviderConfi
 }
 
 func visibleModelRows(models []store.Model) []store.Model {
+	// NANITE_VISIBLE_MODELS narrows the model list by model id. The catalog
+	// is compiled into the binary while a gateway serves whatever it serves,
+	// so the two disagree by default and the picker offers models that 404.
+	allowed := allowedFromEnv("NANITE_VISIBLE_MODELS")
 	out := models[:0]
 	for _, m := range models {
 		if isHiddenPTYProviderType(m.ProviderType) {
+			continue
+		}
+		if allowed != nil && !allowed[strings.ToLower(m.ModelID)] {
 			continue
 		}
 		out = append(out, m)

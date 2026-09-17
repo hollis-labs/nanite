@@ -738,6 +738,19 @@ func (s *toolServiceImpl) ListSummaries() []toolclient.ToolSummary {
 func (s *toolServiceImpl) GetToolMeta(ctx context.Context, toolName string) (ToolMetaInfo, bool) {
 	meta := ToolMetaInfo{}
 
+	// What the server declared beats what its tool name looks like. The
+	// heuristics below are a fallback for tools that annotate nothing; they
+	// cannot classify a third-party tool they have never seen, and the way
+	// they fail is by calling an unrecognized write "not destructive", which
+	// the permission engine then allows without asking.
+	if s.mcpManager != nil {
+		if readOnly, destructive, ok := s.mcpManager.ToolBehavior(toolName); ok {
+			meta.IsReadOnly = readOnly
+			meta.IsDestructive = destructive
+			return meta, true
+		}
+	}
+
 	// Read-only tools.
 	switch {
 	case strings.HasSuffix(toolName, "_read") || strings.HasSuffix(toolName, "_glob") ||
@@ -805,7 +818,18 @@ func (s *toolServiceImpl) discoverAgentMCPTools(
 	for _, srv := range servers {
 		srvTools, err := s.mcpManager.DiscoverServerTools(ctx, srv)
 		if err != nil {
+			// Say so. An agent scoped to an MCP server that fails discovery
+			// here gets an empty tool list and no explanation anywhere — the
+			// model then reports "I can't access that tool", which reads as a
+			// permissions or configuration problem and is neither. Costing a
+			// silent continue one WARN is a good trade.
+			slog.Warn("mcp: agent-scoped tool discovery failed — the agent will see none of this server's tools",
+				"server", srv, "err", err)
 			continue
+		}
+		if len(srvTools) == 0 {
+			slog.Warn("mcp: agent-scoped server advertised no tools",
+				"server", srv)
 		}
 		for _, t := range srvTools {
 			// Use the canonical uniform name (no `mcp__server__` prefix).

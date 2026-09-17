@@ -12,7 +12,92 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// handleListMCPServers returns all persisted MCP server configs.
+// RedactedHeaderValue replaces a stored header value on the way out.
+//
+// The key survives so the UI can show that an Authorization header exists
+// without showing the token, and a client that sends this value back on an
+// update is understood to mean "leave it alone" — see mergeRedactedHeaders.
+const RedactedHeaderValue = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+
+// redactHeaders blanks header values for a response. Headers hold credentials
+// — a bearer token for a gateway, most often — and this endpoint feeds the UI,
+// so the values must not travel with it.
+//
+// Operates on a copy: the caller's configs are also what the register path
+// reads, and redacting in place would register servers with a token of bullets.
+func redactHeaders(servers []store.MCPServerConfig) []store.MCPServerConfig {
+	out := make([]store.MCPServerConfig, len(servers))
+	copy(out, servers)
+	for i := range out {
+		parsed, err := mcp.ParseHeaderJSON(out[i].Headers)
+		if err != nil || len(parsed) == 0 {
+			// Unparseable is not shown either: it may still hold a secret.
+			out[i].Headers = "{}"
+			continue
+		}
+		masked := make(map[string]string, len(parsed))
+		for k := range parsed {
+			masked[k] = RedactedHeaderValue
+		}
+		encoded, err := json.Marshal(masked)
+		if err != nil {
+			out[i].Headers = "{}"
+			continue
+		}
+		out[i].Headers = string(encoded)
+	}
+	return out
+}
+
+// redactOne is redactHeaders for a single config, for the create and update
+// responses. Those echo the saved record back, and without this they return
+// the credential the caller just sent in plaintext — which the list endpoint
+// has always refused to do. A create/update response is as much "the UI's
+// copy of this record" as a list response is.
+func redactOne(cfg store.MCPServerConfig) store.MCPServerConfig {
+	return redactHeaders([]store.MCPServerConfig{cfg})[0]
+}
+
+// mergeRedactedHeaders restores values the client sent back redacted.
+//
+// Without this the first save from a UI that loaded the list would overwrite a
+// working token with a row of bullets, and the server would start returning
+// 401s with nothing in the audit trail to explain why. A redacted value means
+// "unchanged"; any other value, including an empty one, is a deliberate edit.
+func mergeRedactedHeaders(incoming, stored string) string {
+	in, err := mcp.ParseHeaderJSON(incoming)
+	if err != nil || len(in) == 0 {
+		return incoming
+	}
+	old, err := mcp.ParseHeaderJSON(stored)
+	if err != nil || len(old) == 0 {
+		return incoming
+	}
+	changed := false
+	for k, v := range in {
+		if v != RedactedHeaderValue {
+			continue
+		}
+		if prev, ok := old[k]; ok {
+			in[k] = prev
+			changed = true
+		} else {
+			delete(in, k)
+			changed = true
+		}
+	}
+	if !changed {
+		return incoming
+	}
+	encoded, err := json.Marshal(in)
+	if err != nil {
+		return incoming
+	}
+	return string(encoded)
+}
+
+// handleListMCPServers returns all persisted MCP server configs, with header
+// values redacted.
 // GET /api/mcp-servers
 func (a *API) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
 	servers, err := a.Services.Store.ListMCPServers(r.Context())
@@ -20,7 +105,7 @@ func (a *API) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, servers)
+	a.jsonResp(w, http.StatusOK, redactHeaders(servers))
 }
 
 // handleCreateMCPServer adds a new MCP server config and registers it.
@@ -37,10 +122,10 @@ func (a *API) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cfg.TransportType == "" {
-		cfg.TransportType = "stdio"
+		cfg.TransportType = store.TransportStdio
 	}
-	if cfg.TransportType != "stdio" && cfg.TransportType != "sse" {
-		a.errorResp(w, http.StatusBadRequest, "transport_type must be 'stdio' or 'sse'")
+	if !validTransportType(cfg.TransportType) {
+		a.errorResp(w, http.StatusBadRequest, transportTypeError)
 		return
 	}
 
@@ -67,7 +152,7 @@ func (a *API) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	a.jsonResp(w, http.StatusCreated, cfg)
+	a.jsonResp(w, http.StatusCreated, redactOne(cfg))
 }
 
 // handleUpdateMCPServer updates an existing MCP server config.
@@ -95,11 +180,16 @@ func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 	cfg.Name = name
 	cfg.ID = existing.ID
 
+	// A value the client sends back still redacted means "unchanged", not
+	// "set it to bullets". Without this a save from a UI that loaded the
+	// redacted list would quietly replace a working token.
+	cfg.Headers = mergeRedactedHeaders(cfg.Headers, existing.Headers)
+
 	if cfg.TransportType == "" {
 		cfg.TransportType = existing.TransportType
 	}
-	if cfg.TransportType != "stdio" && cfg.TransportType != "sse" {
-		a.errorResp(w, http.StatusBadRequest, "transport_type must be 'stdio' or 'sse'")
+	if !validTransportType(cfg.TransportType) {
+		a.errorResp(w, http.StatusBadRequest, transportTypeError)
 		return
 	}
 
@@ -118,7 +208,7 @@ func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	a.jsonResp(w, http.StatusOK, cfg)
+	a.jsonResp(w, http.StatusOK, redactOne(cfg))
 }
 
 // handleDeleteMCPServer removes an MCP server config and unregisters it.
@@ -193,6 +283,21 @@ func (a *API) handleExportMCPServers(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data) // The response is already committed; a client disconnect has no recovery response path.
 }
 
+// transportTypeError is the 400 body for an unrecognized transport_type. It
+// names all three because "sse" and "streamable" are easy to pick wrongly:
+// "sse" is the 2024-11-05 HTTP+SSE transport, "streamable" is JSON-RPC over
+// POST — which is what a gateway-fronted /mcp URL speaks.
+const transportTypeError = "transport_type must be 'stdio', 'sse', or 'streamable'"
+
+func validTransportType(t string) bool {
+	switch t {
+	case store.TransportStdio, store.TransportSSE, store.TransportStreamable:
+		return true
+	default:
+		return false
+	}
+}
+
 // registerMCPTransport registers the transport for a server config with the MCP manager.
 func (a *API) registerMCPTransport(cfg *store.MCPServerConfig) {
 	if a.Services.MCP == nil || !cfg.Enabled {
@@ -200,16 +305,18 @@ func (a *API) registerMCPTransport(cfg *store.MCPServerConfig) {
 	}
 
 	switch cfg.TransportType {
-	case "stdio":
+	case store.TransportStdio:
 		args := decodeMCPStringSlice(cfg.Args, cfg.Name, "args")
 		env := decodeMCPStringSlice(cfg.Env, cfg.Name, "env")
 		envAllowlist := decodeMCPStringSlice(cfg.EnvAllowlist, cfg.Name, "env_allowlist")
 		if err := a.Services.MCP.AddStdioServer(cfg.Name, cfg.Command, args, env, envAllowlist, mcp.TrustTier(cfg.TrustTier)); err != nil {
 			slog.Warn("api: failed to register stdio MCP server", "name", cfg.Name, "err", err)
 		}
-	case "sse":
-		if err := a.Services.MCP.AddHTTPServer(cfg.Name, cfg.URL, mcp.TrustTier(cfg.TrustTier)); err != nil {
-			slog.Warn("api: failed to register http MCP server", "name", cfg.Name, "err", err)
+	default:
+		if err := a.Services.MCP.AddRemoteServerFromConfig(cfg.Name, cfg.TransportType, cfg.URL, cfg.Headers, mcp.TrustTier(cfg.TrustTier)); err != nil {
+			// #nosec G706 -- name, transport, and err are structured operational diagnostics, not a formatted log message.
+			slog.Warn("api: failed to register remote MCP server",
+				"name", cfg.Name, "transport", cfg.TransportType, "err", err)
 		}
 	}
 }

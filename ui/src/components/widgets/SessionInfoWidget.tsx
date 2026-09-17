@@ -32,6 +32,7 @@ function formatRelativeTime(dateStr: string): string {
 
 export function SessionInfoWidget() {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const configVersion = useAppStore((s) => s.configVersion)
 
   const { data: session } = useQuery({
     queryKey: ['session', activeSessionId],
@@ -48,6 +49,13 @@ export function SessionInfoWidget() {
     queryKey: ['session-agents', activeSessionId],
     queryFn: () => api.listSessionAgents(activeSessionId!),
     enabled: !!activeSessionId,
+  })
+
+  // session_agents carries ids, not display fields — the name comes from the
+  // agent profile it points at.
+  const { data: agentProfiles = [] } = useQuery({
+    queryKey: ['agents', configVersion],
+    queryFn: () => api.listAgents(),
   })
 
   if (!activeSessionId) {
@@ -76,7 +84,8 @@ export function SessionInfoWidget() {
   const projectName = session.project_id
     ? projects.find((p) => p.id === session.project_id)?.name
     : null
-  const primaryAgent = sessionAgents.find((a) => a.role === 'primary')
+  const primaryAgent = sessionAgents.find((a) => a.is_primary)
+  const primaryAgentName = agentProfiles.find((p) => p.id === primaryAgent?.agent_id)?.name
 
   const shortCode = `#${session.short_code}`
 
@@ -84,7 +93,7 @@ export function SessionInfoWidget() {
     { label: 'Title',         value: session.custom_name || session.title || 'Untitled' },
     { label: 'Short Code',    value: <ShortCodeValue code={shortCode} /> },
     ...(projectName ? [{ label: 'Project', value: projectName }] : []),
-    ...(primaryAgent ? [{ label: 'Agent', value: primaryAgent.name }] : []),
+    ...(primaryAgentName ? [{ label: 'Agent', value: primaryAgentName }] : []),
     { label: 'Provider',      value: session.provider || '—' },
     { label: 'Model',         value: session.model || '—' },
     { label: 'Messages',      value: String(session.message_count) },

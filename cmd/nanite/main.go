@@ -93,6 +93,12 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		if err := cmdServe(os.Args[2:]); err != nil {
+			// Print it. Discarding this made a startup failure look like a
+			// clean exit: the log ended mid-boot on an ordinary INFO line and
+			// the container restarted forever with exit=1 and no reason
+			// anywhere. The error already carries the context (it is wrapped
+			// all the way down); it just never reached anyone.
+			fmt.Fprintf(os.Stderr, "%s serve: %v\n", brand.BinaryName, err)
 			os.Exit(1)
 		}
 	case "chat":
@@ -1002,8 +1008,22 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 	registry := provider.NewRegistry()
 	catalog := providercatalog.New()
 
-	resolveKey := func(providerID string) string {
-		return secrets.Get(secrets.ProviderKeyName(providerID))
+	// Keychain first, then environment. A container has no OS keyring — the
+	// secret-service lookup fails with `exec: "dbus-launch": executable file
+	// not found in $PATH` — so a keychain-only lookup registers no providers
+	// at all, and chat is dead with only a WARN to say so. The environment is
+	// how a container is configured; refusing to read it makes Nanite
+	// unrunnable anywhere but a desktop.
+	resolveKey := func(providerID, envKey string) (string, string) {
+		if k := strings.TrimSpace(secrets.Get(secrets.ProviderKeyName(providerID))); k != "" {
+			return k, "keychain"
+		}
+		if envKey != "" {
+			if k := strings.TrimSpace(os.Getenv(envKey)); k != "" {
+				return k, "environment"
+			}
+		}
+		return "", ""
 	}
 
 	// CW-20260526-0001: apiProvSpec carries the catalog metadata
@@ -1013,11 +1033,14 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 	// (b) seededProviders + (c) AllSeeded.
 	type apiProvSpec struct {
 		name, displayName, provID string
-		create                    func() llmcontracts.Provider
-		setKey                    func(llmcontracts.Provider, string)
+		// envKey is the conventional environment variable for this provider,
+		// used when the keychain has nothing — see resolveKey.
+		envKey string
+		create func() llmcontracts.Provider
+		setKey func(llmcontracts.Provider, string)
 	}
 	apiProviders := []apiProvSpec{
-		{"anthropic", "Anthropic", "anthropic-001",
+		{"anthropic", "Anthropic", "anthropic-001", "ANTHROPIC_API_KEY",
 			func() llmcontracts.Provider {
 				ap := nllmanthropic.New()
 				if v := os.Getenv("NANITE_PROVIDER_RATE_BUDGET_TPM"); v != "" {
@@ -1030,7 +1053,7 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 				return ap
 			},
 			func(p llmcontracts.Provider, k string) { p.(*nllmanthropic.Client).SetAPIKey(k) }},
-		{"openai", "OpenAI", "openai-001",
+		{"openai", "OpenAI", "openai-001", "OPENAI_API_KEY",
 			// CW-20260508-0012: SDK-backed wrapper (replaces deleted
 			// go-providers HTTP openai client). Implements
 			// llmcontracts.Provider; no rate-budget plumbing per spike
@@ -1042,7 +1065,7 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 
 	var registeredAPI, missingAPI []string
 	for _, spec := range apiProviders {
-		key := resolveKey(spec.provID)
+		key, source := resolveKey(spec.provID, spec.envKey)
 		if key != "" {
 			p := spec.create()
 			spec.setKey(p, key)
@@ -1052,7 +1075,7 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 				DisplayName: spec.displayName,
 				RowID:       spec.provID,
 			})
-			slog.Info("provider registered (key from keychain)", "provider", spec.name)
+			slog.Info("provider registered", "provider", spec.name, "key_source", source)
 			registeredAPI = append(registeredAPI, spec.name)
 		} else {
 			missingAPI = append(missingAPI, spec.name)
@@ -1478,7 +1501,7 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 			continue
 		}
 		switch cfg.TransportType {
-		case "stdio":
+		case store.TransportStdio:
 			var args []string
 			if cfg.Args != "" && cfg.Args != "[]" {
 				if err := json.Unmarshal([]byte(cfg.Args), &args); err != nil {
@@ -1506,9 +1529,10 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 			if err := m.AddStdioServer(cfg.Name, cfg.Command, args, envVars, envAllowlist, mcp.TrustTier(cfg.TrustTier)); err != nil {
 				slog.Warn("mcp: failed to register persisted stdio server", "name", cfg.Name, "err", err)
 			}
-		case "sse":
-			if err := m.AddHTTPServer(cfg.Name, cfg.URL, mcp.TrustTier(cfg.TrustTier)); err != nil {
-				slog.Warn("mcp: failed to register persisted http server", "name", cfg.Name, "err", err)
+		case store.TransportSSE, store.TransportStreamable:
+			if err := m.AddRemoteServerFromConfig(cfg.Name, cfg.TransportType, cfg.URL, cfg.Headers, mcp.TrustTier(cfg.TrustTier)); err != nil {
+				slog.Warn("mcp: failed to register persisted remote server",
+					"name", cfg.Name, "transport", cfg.TransportType, "err", err)
 			}
 		default:
 			slog.Warn("mcp: unknown transport type, skipping", "transport", cfg.TransportType, "server", cfg.Name)

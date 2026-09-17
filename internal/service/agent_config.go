@@ -108,7 +108,8 @@ func (s *AgentConfigService) Create(profile *store.AgentProfile, procedures []ag
 		`UPDATE agent_profiles SET default_trust_tier = 'untrusted' WHERE id = ?`, profile.ID); err != nil {
 		return nil, fmt.Errorf("set operator agent trust tier: %w", err)
 	}
-	seedRoleToolsFromIngest(context.Background(), s.store, profile.ID, roleToolNames(profile.RoleTools))
+	seedRoleToolsFromIngest(context.Background(), s.store, profile.ID, jsonNameList(profile.RoleTools))
+	seedRoleSkillsFromIngest(context.Background(), s.store, profile.ID, jsonNameList(profile.RoleSkills))
 	seedProcedures(context.Background(), s.store, profile.ID, procedures)
 	return s.result(profile.Slug, "created")
 }
@@ -141,7 +142,8 @@ func (s *AgentConfigService) Update(existing, updated *store.AgentProfile, proce
 	if err := s.store.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, updated); err != nil {
 		return nil, err
 	}
-	seedRoleToolsFromIngest(context.Background(), s.store, updated.ID, roleToolNames(updated.RoleTools))
+	seedRoleToolsFromIngest(context.Background(), s.store, updated.ID, jsonNameList(updated.RoleTools))
+	seedRoleSkillsFromIngest(context.Background(), s.store, updated.ID, jsonNameList(updated.RoleSkills))
 	if len(procedures) > 0 {
 		seedProcedures(context.Background(), s.store, updated.ID, procedures)
 	}
@@ -232,7 +234,7 @@ func (s *AgentConfigService) uniqueManagedSlug(base string) string {
 	}
 }
 
-func roleToolNames(raw string) []string {
+func jsonNameList(raw string) []string {
 	var names []string
 	if json.Unmarshal([]byte(raw), &names) != nil {
 		return nil

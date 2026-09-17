@@ -49,7 +49,21 @@ func (c *Client) buildSystemBlocks(in llmtypes.ChatRequest, plan cachePlan) []sd
 	out := make([]sdk.TextBlockParam, 0, len(in.SlotBlocks)+1)
 	if in.SystemPrompt != "" {
 		block := sdk.TextBlockParam{Text: in.SystemPrompt}
-		if plan.System {
+		// Mark the prefix ONLY when no slot marker will be planted, because
+		// that is exactly what planCacheMarkersWithHints budgeted for:
+		// staticCount is len(plan.SlotMarkers), falling back to 1 when that
+		// is empty. Marking here as well as on the slots spends a marker the
+		// planner never counted, and the request is rejected outright once
+		// the total reaches five — "A maximum of 4 blocks with cache_control
+		// may be provided. Found 5" (CW, 2026-09-16, surfaced the first time
+		// a reflex reminder added a slot to an agent already carrying tools
+		// and a recent-message marker).
+		//
+		// Dropping the marker costs nothing here: with SlotBlocks present
+		// this block is extraSystemPrefix, the dynamic per-turn prefix, and
+		// the stable content lives in the slots. Caching a string that
+		// changes every turn buys no hit and invalidates the offset.
+		if plan.System && len(plan.SlotMarkers) == 0 {
 			block.CacheControl = sdk.NewCacheControlEphemeralParam()
 		}
 		out = append(out, block)
@@ -139,6 +153,24 @@ func (c *Client) buildMessages(messages []llmtypes.ChatMessage, plan cachePlan) 
 
 		applyCache := cacheableUserIdx[i]
 		blocks := contentBlocksFromMessage(m, applyCache)
+		if len(blocks) == 0 {
+			// Anthropic requires every message to carry content and rejects
+			// the whole request otherwise — 400 "messages.N.content: Field
+			// required". A message with nothing in it conveys nothing to the
+			// model either, so dropping it loses no information the request
+			// could have carried.
+			//
+			// This is reachable in normal use: an assistant turn whose entire
+			// reply was a ```nanite-envelope fence has that fence lifted out
+			// for rendering, leaving empty text and no content blocks. The
+			// turn looks fine on screen — a card is exactly what was wanted —
+			// and then poisons the NEXT request, so the failure surfaces one
+			// turn after the message that caused it (CW, 2026-09-16).
+			//
+			// Only fully empty messages are dropped, so a tool_use block can
+			// never be orphaned from the tool_result that answers it.
+			continue
+		}
 		out = append(out, sdk.MessageParam{Role: role, Content: blocks})
 	}
 	return out

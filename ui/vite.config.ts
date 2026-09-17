@@ -139,10 +139,13 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5176,
+    port: Number(process.env.NANITE_UI_PORT) || 5176,
     proxy: {
       '/api': {
-        target: 'http://localhost:8090',
+        // Points at `nanite serve`. Overridable because 8090 is a popular
+        // port — a container from an unrelated project holding it should not
+        // mean editing a tracked file to run the dev server.
+        target: `http://localhost:${process.env.NANITE_API_PORT || 8090}`,
         changeOrigin: true,
       },
     },

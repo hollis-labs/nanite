@@ -26,7 +26,7 @@ func putJSON(t *testing.T, mux *http.ServeMux, path string, body any) *httptest.
 // echoed the saved record back verbatim, so the very request that sets a
 // bearer token got it returned in plaintext — into a browser's network log,
 // a proxy, or a terminal scrollback. Same record, same secret, same boundary.
-const plaintextToken = "pfl_pat_notarealtokenbutlongenough"
+const plaintextToken = "pfl_pat_notarealtokenbutlongenough" // #nosec G101 -- fake token, not a credential
 
 func TestCreateAndUpdateResponsesRedactHeaders(t *testing.T) {
 	_, mux := newTestAPI(t)

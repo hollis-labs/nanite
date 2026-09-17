@@ -280,7 +280,7 @@ func TestAgentConfigUpdateDoesNotRevokeSkillApproval(t *testing.T) {
 	}
 
 	// Approve it, the way the grant API does.
-	if err := st.InsertAgentKnownSkill(ctx, store.AgentKnownSkill{
+	if err = st.InsertAgentKnownSkill(ctx, store.AgentKnownSkill{
 		AgentID: res.Profile.ID, SkillName: "kb-triage", Pinned: true,
 		Reason: "role_seed", ApprovedContentHash: "skl-test-abc123",
 		GrantedAt: "2026-09-16T00:00:00Z", GrantedBy: "operator@example.com",
@@ -290,7 +290,7 @@ func TestAgentConfigUpdateDoesNotRevokeSkillApproval(t *testing.T) {
 
 	updated := *res.Profile
 	updated.Description = "edited for an unrelated reason"
-	if _, err := svc.Update(res.Profile, &updated, nil, ""); err != nil {
+	if _, err = svc.Update(res.Profile, &updated, nil, ""); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 

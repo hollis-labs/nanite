@@ -71,6 +71,10 @@ func TestCmdServeRejectsInvalidBindBeforeInitializers(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "data"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	// resolveDBPathWith now requires an explicit DB location (no silent
+	// default) — this test cares about bind-address validation ordering,
+	// not DB resolution, so give it one.
+	t.Setenv("NANITE_WORKSPACE", "serve-bind-validation-test")
 
 	var logs bytes.Buffer
 	previousLogger := slog.Default()

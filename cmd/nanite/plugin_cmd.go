@@ -151,25 +151,44 @@ func resolveDBPath() string {
 	return resolveDBPathWith("")
 }
 
-// resolveDBPathWith resolves the main database path, honoring (in precedence
-// order):
+// resolveDBPathWith resolves the main database path. There is no silent
+// default — the caller must supply one of, in precedence order:
 //
 //  1. the explicit --db flag value (flagDB), when non-empty;
 //  2. the NANITE_DB legacy env var — a compat alias kept so existing shell
 //     profiles / scripts / the rollback plan do not silently break;
-//  3. go-apppaths native resolution, which itself honors NANITE_DB_PATH and
-//     NANITE_WORKSPACE before falling back to the XDG default
-//     ~/.local/share/nanite/workspaces/default/main.db.
+//  3. NANITE_DB_PATH or NANITE_WORKSPACE, read natively by go-apppaths.
 //
 // NANITE_DB vs NANITE_DB_PATH: go-apppaths reads <APP>_DB_PATH natively, i.e.
 // NANITE_DB_PATH. The legacy var was NANITE_DB; it is mapped here through
 // WithDBOverride so both work. NANITE_DB_PATH is the canonical going-forward
 // name; NANITE_DB is the deprecated alias.
 //
-// On a resolution error the process exits — a daemon that cannot resolve its
-// DB path must not silently open one at the wrong location (the data-loss
-// failure mode this migration removes).
+// A caller supplying none of the above gets a suggested path (the same one
+// go-apppaths would silently have picked) printed to stderr, then exits.
+// Falling back to a shared "default" workspace when nobody asked for one is
+// exactly the kind of silent, ambiguous resolution CW-20260517-0061 already
+// refused to let a *broken* resolution do; this closes the same gap for a
+// *missing* one — two unrelated launches with no override must not land on
+// the same DB file by accident.
 func resolveDBPathWith(flagDB string) string {
+	explicit := flagDB != "" ||
+		os.Getenv(brand.Env("DB")) != "" ||
+		os.Getenv(brand.Env("DB_PATH")) != "" ||
+		os.Getenv(brand.Env("WORKSPACE")) != ""
+
+	if !explicit {
+		hint := "~/.local/share/nanite/workspaces/<name>/main.db"
+		if suggested, sErr := config.ResolveLayout(); sErr == nil {
+			hint = suggested.MainDB()
+		}
+		fmt.Fprintf(os.Stderr,
+			"%s: no database location given — pass -db <path>, or set NANITE_WORKSPACE=<name> or NANITE_DB_PATH=<path>.\nSuggested: %s\n",
+			brand.BinaryName, hint,
+		)
+		os.Exit(1)
+	}
+
 	var opts []paths.Option
 	switch {
 	case flagDB != "":

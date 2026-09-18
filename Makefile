@@ -92,7 +92,7 @@ eval:
 
 # Run with default settings
 run: build
-	./nanite serve --port 8090
+	NANITE_WORKSPACE=dev ./nanite serve --port 8090
 
 # Build distributable macOS release archives + checksums, for the
 # hollis-labs/homebrew-tap Formula/nanite.rb. VERSION is the git tag the

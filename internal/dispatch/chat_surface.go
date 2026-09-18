@@ -42,7 +42,9 @@ type ChatToolSurface struct {
 //
 // The exclusion list is intentionally small and mirrors B1 §3 ("Lens
 // placement") + B6's measurement reduction (~7,467 chars / ~1,867 tokens
-// removed from the chat agent's per-turn prefix).
+// removed from the chat agent's per-turn prefix, as measured at B6 —
+// card_show's own description has since been trimmed (CW-20260918-0042),
+// so the live number is smaller; the exclusion itself is unaffected).
 func DefaultChatToolSurface() *ChatToolSurface {
 	return &ChatToolSurface{
 		ExcludedTools: map[string]struct{}{

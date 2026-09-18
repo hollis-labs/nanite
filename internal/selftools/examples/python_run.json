@@ -7,5 +7,12 @@
       "memory_limit_mb": 256
     },
     "notes": "Worker/Planner-only — NOT on the Chat-agent surface. Tool calls from inside the sandbox route through the permission engine."
+  },
+  {
+    "title": "Paginate a list tool via tool_call() and aggregate the result",
+    "args": {
+      "code": "total = 0\nfor offset in range(0, 500, 50):\n    page = tool_call(\"some_list_tool\", {\"limit\": 50, \"offset\": offset})\n    items = page.get(\"items\", [])\n    total += len(items)\n    if len(items) < 50:\n        break\nresult = {\"count\": total}"
+    },
+    "notes": "tool_call(name, args) routes through the full permission engine (no security hole opened), returns a dict, and raises RuntimeError on denial or error. Set `result` in the script namespace to control what's returned to the LLM — this is the canonical shape for a pagination loop or multi-entity join that would otherwise take N separate tool calls."
   }
 ]

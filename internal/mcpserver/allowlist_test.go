@@ -24,11 +24,14 @@ func newAllowlistedTestServer(t *testing.T, allowlist []string) *Server {
 	return New(s, "test-session", nil, "", "", allowlist)
 }
 
-// connectClient wires srv (this package's Server, wrapping an *mcp.Server)
-// to a real mcp.Client over an in-memory transport pair and returns a live
-// ClientSession — driving genuine ListTools/CallTool JSON-RPC requests
-// through the same dispatch path a real workflow-runner subprocess would
-// use, not just inspecting what got registered.
+// connectClient wires srv (this package's Server, wrapping a
+// go-mcp/server.Server, itself wrapping an *mcp.Server) to a real mcp.Client
+// over an in-memory transport pair and returns a live ClientSession —
+// driving genuine ListTools/CallTool JSON-RPC requests through the same
+// dispatch path a real workflow-runner subprocess would use, not just
+// inspecting what got registered. SDKServer() is go-mcp/server's escape
+// hatch for exactly this: session-level plumbing it deliberately doesn't
+// wrap.
 func connectClient(t *testing.T, srv *Server) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
@@ -36,7 +39,7 @@ func connectClient(t *testing.T, srv *Server) *mcp.ClientSession {
 	mcpSrv := srv.buildMCPServer()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 
-	serverSession, err := mcpSrv.Connect(ctx, serverTransport, nil)
+	serverSession, err := mcpSrv.SDKServer().Connect(ctx, serverTransport, nil)
 	if err != nil {
 		t.Fatalf("server Connect: %v", err)
 	}

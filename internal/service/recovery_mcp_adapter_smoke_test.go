@@ -28,15 +28,14 @@ import (
 func TestRecoveryMCPAdapter_RealManager_NotWiredErrorClosed(t *testing.T) {
 	mgr := mcp.NewManager()
 
-	// Register a real stdio transport so RestartStdioTransports has
-	// something to iterate. We don't start the subprocess (no actual
-	// JSON-RPC call is issued) — Close on an unstarted transport is a
-	// no-op. The `sleep` shape mirrors the harness used by
-	// stdio_transport_leak_test.go.
+	// Register a real stdio server so RestartStdioTransports has something
+	// to iterate. We never issue an actual call, so the underlying
+	// go-mcp/client connection is never dialed — Invalidate on a
+	// never-connected server is a no-op. The `sleep` shape mirrors the
+	// harness used by go-mcp/client's own stdio leak-regression tests.
 	if _, err := exec.LookPath("sleep"); err == nil {
-		tr := mcp.NewStdioTransport("sleep", []string{"300"}, nil, []string{"PATH"})
-		if err := mgr.AddServer("test-stdio", tr, mcp.TierBuiltin); err != nil {
-			t.Fatalf("AddServer: %v", err)
+		if err := mgr.AddStdioServer("test-stdio", "sleep", []string{"300"}, nil, []string{"PATH"}, mcp.TierBuiltin); err != nil {
+			t.Fatalf("AddStdioServer: %v", err)
 		}
 	}
 

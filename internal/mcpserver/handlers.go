@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -43,17 +42,4 @@ func convertEnvelopeMarkers(text string) string {
 	return chat.ReplaceEnvelopeMarkers(text, func(payload string) string {
 		return "\n\n```nanite-envelope\n" + payload + "\n```"
 	})
-}
-
-// mustMarshalSchema marshals a tool input schema to JSON bytes.
-// Falls back to an empty object on error.
-func mustMarshalSchema(schema map[string]any) []byte {
-	if schema == nil {
-		return []byte(`{"type":"object","properties":{}}`)
-	}
-	data, err := json.Marshal(schema)
-	if err != nil {
-		return []byte(`{"type":"object","properties":{}}`)
-	}
-	return data
 }

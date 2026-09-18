@@ -3,83 +3,73 @@ package mcp
 import (
 	"context"
 	"errors"
-	"os/exec"
+	"os"
 	"testing"
 	"time"
 )
 
-// TestRestartStdioTransports_ReapsRunningSubprocess drives a real
-// `sleep` subprocess registered as a stdio MCP transport and verifies
-// RestartStdioTransports reaps it. After the call the transport's
-// started flag is cleared so the next call() lazily respawns.
-func TestRestartStdioTransports_ReapsRunningSubprocess(t *testing.T) {
-	if _, err := exec.LookPath("sleep"); err != nil {
-		t.Skipf("sleep not on PATH: %v", err)
+// registerFixtureStdioServer registers a stdio server backed by this test
+// binary re-exec'd as a real MCP server (see stdio_fixture_test.go) --
+// real enough to prove a connect-restart-respawn cycle works end to end
+// through Manager's own wiring, without needing a hand-rolled protocol
+// simulation.
+func registerFixtureStdioServer(t *testing.T, mgr *Manager, name string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
 	}
+	if err := mgr.AddStdioServer(name, exe, nil, []string{runAsFixtureServerEnv + "=1"}, []string{"PATH"}, TierBuiltin); err != nil {
+		t.Fatalf("AddStdioServer: %v", err)
+	}
+}
 
+// TestRestartStdioTransports_RespawnsAfterRestart drives a real stdio
+// subprocess through a full connect → restart → reconnect cycle: reaping
+// the wedged process and reconnecting on the next call is now
+// go-mcp/client's own tested responsibility (see its stdio_test.go); what's
+// under test here is that Manager's RestartStdioTransports correctly finds
+// and invalidates the registered server, and that the next call through
+// Manager's own API transparently respawns.
+func TestRestartStdioTransports_RespawnsAfterRestart(t *testing.T) {
 	mgr := NewManager()
-	tr := newHandshakingStubTransport(t)
-	if err := mgr.AddServer("test-stdio", tr, TierBuiltin); err != nil {
-		t.Fatalf("AddServer: %v", err)
-	}
+	t.Cleanup(mgr.Close)
+	registerFixtureStdioServer(t, mgr, "test-stdio")
 
-	// Force the subprocess to start by calling start() under lock —
-	// we don't want to actually issue a JSON-RPC call (no real server)
-	// and ListTools would block on the read.
-	tr.mu.Lock()
-	if err := tr.start(); err != nil {
-		tr.mu.Unlock()
-		t.Fatalf("start: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := mgr.DiscoverServerTools(ctx, "test-stdio"); err != nil {
+		t.Fatalf("initial DiscoverServerTools: %v", err)
 	}
-	if !tr.started {
-		tr.mu.Unlock()
-		t.Fatal("transport did not mark as started after start()")
-	}
-	tr.mu.Unlock()
 
 	if err := mgr.RestartStdioTransports(context.Background()); err != nil {
 		t.Fatalf("RestartStdioTransports: %v", err)
 	}
 
-	tr.mu.Lock()
-	defer tr.mu.Unlock()
-	if tr.started {
-		t.Fatal("transport still marked started after RestartStdioTransports")
-	}
-	if tr.cmd == nil || tr.cmd.ProcessState == nil {
-		t.Fatal("subprocess was not waited on — ProcessState nil; would leak")
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel2()
+	if _, err := mgr.DiscoverServerTools(ctx2, "test-stdio"); err != nil {
+		t.Fatalf("DiscoverServerTools after restart: %v", err)
 	}
 }
 
-// TestRestartStdioTransports_Idempotent ensures back-to-back calls do
-// not panic or block. Cycles a started subprocess, then calls Restart a
-// second time on the (already-reaped) transport — Close inside the
-// manager is a no-op when !started, so the second call must succeed
-// quietly.
+// TestRestartStdioTransports_Idempotent ensures back-to-back calls do not
+// panic or block, cycling a connected subprocess twice in a row.
 func TestRestartStdioTransports_Idempotent(t *testing.T) {
-	if _, err := exec.LookPath("sleep"); err != nil {
-		t.Skipf("sleep not on PATH: %v", err)
-	}
-
 	mgr := NewManager()
-	tr := newHandshakingStubTransport(t)
-	if err := mgr.AddServer("test-stdio", tr, TierBuiltin); err != nil {
-		t.Fatalf("AddServer: %v", err)
-	}
+	t.Cleanup(mgr.Close)
+	registerFixtureStdioServer(t, mgr, "test-stdio")
 
-	tr.mu.Lock()
-	if err := tr.start(); err != nil {
-		tr.mu.Unlock()
-		t.Fatalf("start: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := mgr.DiscoverServerTools(ctx, "test-stdio"); err != nil {
+		t.Fatalf("initial DiscoverServerTools: %v", err)
 	}
-	tr.mu.Unlock()
 
 	if err := mgr.RestartStdioTransports(context.Background()); err != nil {
 		t.Fatalf("first RestartStdioTransports: %v", err)
 	}
 
-	// Second call must not panic / block / error — *StdioTransport.Close
-	// is idempotent via killAndReapLocked when !started.
 	done := make(chan error, 1)
 	go func() {
 		done <- mgr.RestartStdioTransports(context.Background())

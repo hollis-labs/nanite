@@ -5,40 +5,50 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	gmcpclient "github.com/hollis-labs/go-mcp/client"
 )
 
-// TestStdioTransport_EnvAllowlist_FailsWithoutPath confirms the start-time
-// loud-fail behavior (S4b D6): if the allowlist omits PATH, buildSubprocessEnv
-// must return an error rather than silently launching with an empty PATH and
-// producing an opaque `exec: "…": file not found` later.
-func TestStdioTransport_EnvAllowlist_FailsWithoutPath(t *testing.T) {
-	tr := NewStdioTransport("echo", nil, nil, []string{"HOME", "USER"})
-	if _, err := tr.buildSubprocessEnv(); err == nil {
+// buildStdioEnv resolves and flattens a stdio server's env exactly the way
+// AddStdioServer + naniteCommandEnv do at connect time, without needing a
+// real go-mcp/client.Pool -- the resolve/flatten/PATH-check pipeline is the
+// thing under test, not the dial itself.
+func buildStdioEnv(t *testing.T, command string, env []string, envAllowlist []string) ([]string, error) {
+	t.Helper()
+	cfg := gmcpclient.ServerConfig{
+		Command: command,
+		Env:     resolveStdioEnv(env, envAllowlist),
+	}
+	return naniteCommandEnv(cfg)
+}
+
+// TestStdioEnv_FailsWithoutPath confirms the connect-time loud-fail behavior
+// (S4b D6): if the allowlist omits PATH, naniteCommandEnv must return an
+// error rather than silently launching with an empty PATH and producing an
+// opaque `exec: "…": file not found` later.
+func TestStdioEnv_FailsWithoutPath(t *testing.T) {
+	if _, err := buildStdioEnv(t, "echo", nil, []string{"HOME", "USER"}); err == nil {
 		t.Fatal("expected error when PATH not in allowlist, got nil")
 	} else if !strings.Contains(err.Error(), "PATH") {
 		t.Errorf("error should mention PATH: %v", err)
 	}
 }
 
-// TestStdioTransport_EnvAllowlist_FiltersHostEnv verifies that only the
-// allowlisted keys are inherited from the host, and that MCPServerConfig.Env
-// (trusted user-declared entries) passes through as-is regardless of the
-// allowlist. Closes finding 10.
-func TestStdioTransport_EnvAllowlist_FiltersHostEnv(t *testing.T) {
+// TestStdioEnv_FiltersHostEnv verifies that only the allowlisted keys are
+// inherited from the host, and that MCPServerConfig.Env (trusted
+// user-declared entries) passes through as-is regardless of the allowlist.
+// Closes finding 10.
+func TestStdioEnv_FiltersHostEnv(t *testing.T) {
 	// Set two host env vars: one allowlisted, one not.
 	t.Setenv("NANITE_TEST_ALLOWLISTED", "yes")
 	t.Setenv("NANITE_TEST_SECRET", "SHOULD_NOT_APPEAR")
 
-	tr := NewStdioTransport(
-		"/bin/echo",
-		nil,
+	env, err := buildStdioEnv(t, "/bin/echo",
 		[]string{"NANITE_EXPLICIT=on"}, // trusted user-declared
 		[]string{"PATH", "NANITE_TEST_ALLOWLISTED"},
 	)
-
-	env, err := tr.buildSubprocessEnv()
 	if err != nil {
-		t.Fatalf("buildSubprocessEnv: %v", err)
+		t.Fatalf("buildStdioEnv: %v", err)
 	}
 
 	// Expected contents:
@@ -63,21 +73,19 @@ func TestStdioTransport_EnvAllowlist_FiltersHostEnv(t *testing.T) {
 	}
 }
 
-// TestStdioTransport_EnvAllowlist_EmptyDefaultOverridable proves the zero-value
-// allowlist (nil/empty) fails closed — no keys inherited, PATH missing →
-// start-time error. Users must explicitly opt into inheritance.
-func TestStdioTransport_EnvAllowlist_EmptyDefaultOverridable(t *testing.T) {
-	tr := NewStdioTransport("whatever", nil, nil, nil)
-	if _, err := tr.buildSubprocessEnv(); err == nil {
+// TestStdioEnv_EmptyDefaultFailsClosed proves the zero-value allowlist
+// (nil/empty) fails closed — no keys inherited, PATH missing → error.
+// Users must explicitly opt into inheritance.
+func TestStdioEnv_EmptyDefaultFailsClosed(t *testing.T) {
+	if _, err := buildStdioEnv(t, "whatever", nil, nil); err == nil {
 		t.Fatal("expected PATH-missing error with nil allowlist")
 	}
 
 	// Overriding with ["PATH"] only should succeed and yield exactly one
 	// inherited entry (PATH) + no user-declared env.
-	tr2 := NewStdioTransport("whatever", nil, nil, []string{"PATH"})
-	env, err := tr2.buildSubprocessEnv()
+	env, err := buildStdioEnv(t, "whatever", nil, []string{"PATH"})
 	if err != nil {
-		t.Fatalf("buildSubprocessEnv: %v", err)
+		t.Fatalf("buildStdioEnv: %v", err)
 	}
 	pathVal, ok := os.LookupEnv("PATH")
 	if !ok {
@@ -91,14 +99,13 @@ func TestStdioTransport_EnvAllowlist_EmptyDefaultOverridable(t *testing.T) {
 	}
 }
 
-// TestStdioTransport_EnvAllowlist_PathQualifiedCommand covers the Copilot
-// review finding: an absolute- or relative-path command does not need PATH
-// from either the allowlist or the user-declared env, because exec.LookPath
-// is bypassed when the command contains a path separator.
-func TestStdioTransport_EnvAllowlist_PathQualifiedCommand(t *testing.T) {
+// TestStdioEnv_PathQualifiedCommand covers the Copilot review finding: an
+// absolute- or relative-path command does not need PATH from either the
+// allowlist or the user-declared env, because exec.LookPath is bypassed
+// when the command contains a path separator.
+func TestStdioEnv_PathQualifiedCommand(t *testing.T) {
 	for _, cmd := range []string{"/bin/echo", "./local-mcp", "../parent-mcp"} {
-		tr := NewStdioTransport(cmd, nil, nil, nil)
-		env, err := tr.buildSubprocessEnv()
+		env, err := buildStdioEnv(t, cmd, nil, nil)
 		if err != nil {
 			t.Errorf("path-qualified %q: unexpected error: %v", cmd, err)
 			continue
@@ -109,20 +116,17 @@ func TestStdioTransport_EnvAllowlist_PathQualifiedCommand(t *testing.T) {
 	}
 }
 
-// TestStdioTransport_EnvAllowlist_ExplicitPathInEnv covers the Copilot
-// finding's other branch: an operator who wants to pin a custom PATH for a
-// specific server can do so via MCPServerConfig.Env, and buildSubprocessEnv
-// must accept that without also requiring PATH in the allowlist.
-func TestStdioTransport_EnvAllowlist_ExplicitPathInEnv(t *testing.T) {
-	tr := NewStdioTransport(
-		"bare-server",
-		nil,
+// TestStdioEnv_ExplicitPathInEnv covers the Copilot finding's other branch:
+// an operator who wants to pin a custom PATH for a specific server can do so
+// via MCPServerConfig.Env, and naniteCommandEnv must accept that without
+// also requiring PATH in the allowlist.
+func TestStdioEnv_ExplicitPathInEnv(t *testing.T) {
+	env, err := buildStdioEnv(t, "bare-server",
 		[]string{"PATH=/usr/local/sbin:/usr/local/bin"},
 		nil, // no allowlist at all
 	)
-	env, err := tr.buildSubprocessEnv()
 	if err != nil {
-		t.Fatalf("buildSubprocessEnv: %v", err)
+		t.Fatalf("buildStdioEnv: %v", err)
 	}
 	if !hasKeyValue(env, "PATH", "/usr/local/sbin:/usr/local/bin") {
 		t.Errorf("explicit PATH missing from env: %v", env)

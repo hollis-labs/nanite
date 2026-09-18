@@ -476,10 +476,10 @@ type mcpTransportRestarter interface {
 // MCP subprocess from scratch. This adapter handles only the host-side
 // stdio transports the manager itself spawned.
 //
-// Idempotency: relies on *mcp.StdioTransport.Close being a no-op when
-// the subprocess is already reaped. Back-to-back RestartTransport calls
-// during a still-restarting state cycle the second-call's no-op closes
-// without panicking.
+// Idempotency: relies on go-mcp/client.Client.Close (reached via
+// Pool.Invalidate) being a no-op when no connection is open. Back-to-back
+// RestartTransport calls during a still-restarting state cycle the
+// second call's no-op closes without panicking.
 //
 // Bounded by ctx — RestartStdioTransports returns ctx.Err() between
 // transports so the broker's 10s remediation timeout is honored.

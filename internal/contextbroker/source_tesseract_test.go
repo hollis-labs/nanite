@@ -2,12 +2,14 @@ package contextbroker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
+	"fmt"
 	"net/http/httptest"
 	"reflect"
 	"testing"
+
+	gmcpserver "github.com/hollis-labs/go-mcp/server"
+	gmcphttp "github.com/hollis-labs/go-mcp/transport/http"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 )
@@ -110,41 +112,33 @@ func TestTesseractSourcePropagatesCancellation(t *testing.T) {
 }
 
 func TestTesseractSourceThroughDiscoveredManagerRegistry(t *testing.T) {
+	// Manager.AddHTTPServer now dials a real MCP streamable-HTTP session
+	// (initialize included) rather than firing bare JSON-RPC POSTs the way
+	// the former hand-rolled HTTPTransport did, so the fixture on the other
+	// end needs to be a real MCP server too -- go-mcp/server plus
+	// go-mcp/transport/http, not a hand-decoded JSON-RPC switch. This also
+	// exercises real client/server interop between the two halves of the
+	// CW-20260917-0017 migration, not just Nanite's client side in
+	// isolation.
 	var sawContextPlan bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request mcp.JSONRPCRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			http.Error(w, "bad JSON", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		switch request.Method {
-		case "tools/list":
-			payload, _ := json.Marshal(map[string]any{"tools": []map[string]any{{
-				"name": "context_plan", "description": "Plan or execute a Tesseract context fetch.",
-				"inputSchema": map[string]any{"type": "object"},
-			}}})
-			_ = json.NewEncoder(w).Encode(mcp.JSONRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: payload})
-		case "tools/call":
-			var params struct {
-				Name      string         `json:"name"`
-				Arguments map[string]any `json:"arguments"`
-			}
-			raw, _ := json.Marshal(request.Params)
-			_ = json.Unmarshal(raw, &params)
-			if params.Name != "context_plan" || params.Arguments["execute"] != true {
-				http.Error(w, "wrong call", http.StatusBadRequest)
-				return
+	fixture := gmcpserver.NewServer("tesseract-fixture", "0.0.0")
+	fixture.RegisterTool(gmcpserver.Tool{
+		Name:        "context_plan",
+		Description: "Plan or execute a Tesseract context fetch.",
+		InputSchema: gmcpserver.ObjectSchema(map[string]any{
+			"execute": map[string]any{"type": "boolean"},
+		}),
+		ReadOnlyHint:   true,
+		IdempotentHint: true,
+		Handler: func(_ context.Context, args map[string]any) (any, error) {
+			if args["execute"] != true {
+				return nil, fmt.Errorf("wrong call")
 			}
 			sawContextPlan = true
-			result, _ := json.Marshal(map[string]any{"content": []map[string]any{{
-				"type": "text", "text": `{"items":[{"namespace":"user/demo","key":"decision","payload":{"summary":"current"}}],"manifest":{"items_returned":1},"rationale":"test"}`,
-			}}, "isError": false})
-			_ = json.NewEncoder(w).Encode(mcp.JSONRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: result})
-		default:
-			http.Error(w, "unknown method", http.StatusBadRequest)
-		}
-	}))
+			return `{"items":[{"namespace":"user/demo","key":"decision","payload":{"summary":"current"}}],"manifest":{"items_returned":1},"rationale":"test"}`, nil
+		},
+	})
+	server := httptest.NewServer(gmcphttp.NewHandler(fixture, gmcphttp.HandlerOptions{}))
 	defer server.Close()
 
 	manager := mcp.NewManager()

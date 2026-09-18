@@ -9,14 +9,17 @@ import (
 	"strings"
 	"sync"
 
+	gmcpclient "github.com/hollis-labs/go-mcp/client"
 	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/version"
 )
 
 // MCPTransport is the interface for MCP server connections (stdio or HTTP).
@@ -58,6 +61,14 @@ type Manager struct {
 	discoveryWarnings      []DiscoveryWarning      // tools rejected during discovery
 	LoadChecker            ToolLoadChecker         // optional loadType filter
 	mu                     sync.RWMutex
+
+	// pool is the shared go-mcp/client connection pool backing every
+	// stdio/http/sse server this manager registers (AddStdioServer,
+	// AddHTTPServer*, AddSSEServerFromConfig). remoteTransport (see
+	// remote_transport.go) is the MCPTransport adapter wrapping it. Plugin
+	// servers (AddPluginServer) and builtins bypass the pool entirely —
+	// they never held an external MCP connection to begin with.
+	pool *gmcpclient.Pool
 }
 
 // toolEntry associates a tool with its originating server and the
@@ -76,6 +87,25 @@ func NewManager() *Manager {
 		firstPartyBuiltinNames: make(map[string]bool),
 		pluginServers:          make(map[string][]string),
 		uniformIndex:           make(map[string]*toolEntry),
+		pool: gmcpclient.NewPool(
+			gmcpclient.WithIdentity(brand.ID, version.Version),
+			// This adapter retries ListTools itself (remote_transport.go)
+			// and deliberately never retries CallTool — a connection error
+			// cannot distinguish "the request never arrived" from "the
+			// reply did not come back", the same reasoning the former SSE
+			// transport already applied. Disabling the Pool's own retry
+			// keeps that policy uniform across stdio/http/sse instead of
+			// applying it to CallTool only for the kinds that used to have
+			// hand-rolled retry logic.
+			gmcpclient.WithRetries(0),
+			// Nanite's env-allowlist discipline: nothing from nanite's own
+			// process environment is inherited except what AddStdioServer
+			// resolved into ServerConfig.Env ahead of time (see
+			// resolveStdioEnv) — the package default (inherit everything)
+			// would otherwise leak nanite's own credentials to a plugin
+			// subprocess.
+			gmcpclient.WithCommandEnv(naniteCommandEnv),
+		),
 	}
 }
 
@@ -201,15 +231,59 @@ func (m *Manager) RemoveServer(name string) {
 	slog.Info("mcp: removed server", "name", name)
 }
 
+// httpCallTimeoutSeconds matches the former HTTPTransport's hardcoded
+// http.Client.Timeout: a whole-request safety net for a caller that
+// supplies no context deadline of its own. remoteTransport additionally
+// respects a caller's own longer deadline in full where the old
+// client.Timeout did not (see defaultCallTimeout in remote_transport.go).
+const httpCallTimeoutSeconds = 60
+
 // AddHTTPServer registers an HTTP-based MCP server with the given trust tier.
 // Propagates any error from AddServer (empty name, nil transport, duplicate
 // registration).
 func (m *Manager) AddHTTPServer(name, url string, tier TrustTier) error {
-	if err := m.AddServer(name, NewHTTPTransport(url), tier); err != nil {
+	if err := m.registerRemoteServer(name, gmcpclient.ServerConfig{
+		Transport:      gmcpclient.TransportHTTP,
+		URL:            url,
+		TimeoutSeconds: httpCallTimeoutSeconds,
+	}, tier); err != nil {
 		return err
 	}
 	slog.Info("mcp: server using HTTP transport", "name", name, "url", url, "tier", string(tier))
 	return nil
+}
+
+// registerRemoteServer registers cfg with the shared pool and wraps it in a
+// remoteTransport, rolling the pool registration back if AddServer rejects
+// it (empty name, nil transport is never nil here, or a duplicate name).
+func (m *Manager) registerRemoteServer(name string, cfg gmcpclient.ServerConfig, tier TrustTier) error {
+	if err := m.pool.Register(name, cfg); err != nil {
+		return err
+	}
+	kind, _ := normalizeStoredTransport(cfg.Transport)
+	if err := m.AddServer(name, newRemoteTransport(m.pool, name, kind), tier); err != nil {
+		_ = m.pool.Deregister(name)
+		return err
+	}
+	return nil
+}
+
+// normalizeStoredTransport maps a gmcpclient.ServerConfig.Transport value
+// onto the Transport* constant remoteTransport keys its call-timeout
+// default on. cfg.Transport is always one this package itself set (from
+// store.Transport*/gmcpclient.Transport* constants), so the error return is
+// defensive, not reachable in practice.
+func normalizeStoredTransport(transport string) (string, bool) {
+	switch transport {
+	case gmcpclient.TransportStdio:
+		return gmcpclient.TransportStdio, true
+	case gmcpclient.TransportHTTP:
+		return gmcpclient.TransportHTTP, true
+	case gmcpclient.TransportSSE:
+		return gmcpclient.TransportSSE, true
+	default:
+		return gmcpclient.TransportHTTP, false
+	}
 }
 
 // ParseHeaderJSON turns a persisted headers column into a header map.
@@ -288,7 +362,15 @@ func (m *Manager) AddSSEServerFromConfig(name, url, headerJSON string, tier Trus
 	if err != nil {
 		slog.Warn("mcp: ignoring unusable headers", "name", name, "err", err)
 	}
-	if err := m.AddServer(name, NewSSETransport(url, headers), tier); err != nil {
+	if err := m.registerRemoteServer(name, gmcpclient.ServerConfig{
+		Transport: gmcpclient.TransportSSE,
+		URL:       url,
+		Headers:   headers,
+		// No TimeoutSeconds: the former SSETransport deliberately left the
+		// underlying http.Client.Timeout unset because the stream is
+		// long-lived by design, relying on per-call context deadlines
+		// instead (see defaultCallTimeout in remote_transport.go).
+	}, tier); err != nil {
 		return err
 	}
 	headerKeys := make([]string, 0, len(headers))
@@ -324,7 +406,12 @@ func (m *Manager) AddHTTPServerFromConfig(name, url, headerJSON string, tier Tru
 // Header values are NOT logged — only their key set — so a Bearer token doesn't
 // leak into structured logs. CW-20260501-0005 sub-ticket 2.
 func (m *Manager) AddHTTPServerWithHeaders(name, url string, headers map[string]string, tier TrustTier) error {
-	if err := m.AddServer(name, NewHTTPTransportWithHeaders(url, headers), tier); err != nil {
+	if err := m.registerRemoteServer(name, gmcpclient.ServerConfig{
+		Transport:      gmcpclient.TransportHTTP,
+		URL:            url,
+		Headers:        headers,
+		TimeoutSeconds: httpCallTimeoutSeconds,
+	}, tier); err != nil {
 		return err
 	}
 	headerKeys := make([]string, 0, len(headers))
@@ -344,7 +431,17 @@ func (m *Manager) AddHTTPServerWithHeaders(name, url string, headers map[string]
 // fails at start-time otherwise. Propagates any error from AddServer
 // (empty name, nil transport, duplicate registration).
 func (m *Manager) AddStdioServer(name, command string, args []string, env []string, envAllowlist []string, tier TrustTier) error {
-	if err := m.AddServer(name, NewStdioTransport(command, args, env, envAllowlist), tier); err != nil {
+	if err := m.registerRemoteServer(name, gmcpclient.ServerConfig{
+		Transport: gmcpclient.TransportStdio,
+		Command:   command,
+		Args:      args,
+		// Fully resolved here (allowlisted host vars + declared env) so
+		// the pool's shared naniteCommandEnv callback (see NewManager)
+		// needs no per-server allowlist context of its own — see
+		// resolveStdioEnv's doc comment for why a map is also strictly
+		// more deterministic here than the former "KEY=VALUE" slice.
+		Env: resolveStdioEnv(env, envAllowlist),
+	}, tier); err != nil {
 		return err
 	}
 	slog.Info("mcp: server using stdio transport",
@@ -1174,21 +1271,22 @@ func (m *Manager) GetDiscoveryWarnings() []DiscoveryWarning {
 	return out
 }
 
-// RestartStdioTransports closes every stdio MCP subprocess registered on
-// the manager. Each transport's start() is lazy, so the next ListTools /
-// CallTool against a closed transport reaps the (already-dead) process and
-// spawns a fresh subprocess in its place. Non-stdio transports (HTTP,
-// plugin, builtin) are skipped — only stdio subprocesses can wedge in a
-// way restart-via-respawn fixes.
+// RestartStdioTransports invalidates every stdio MCP server's connection
+// registered on the manager, without deregistering them. The pool's
+// dial-on-first-use is lazy, so the next ListTools / CallTool against an
+// invalidated server reaps the (already-dead) process and spawns a fresh
+// subprocess in its place. Non-stdio transports (HTTP, plugin, builtin) are
+// skipped — only stdio subprocesses can wedge in a way restart-via-respawn
+// fixes.
 //
-// Idempotent: the underlying *StdioTransport.Close => killAndReapLocked
-// is no-op when !started, so repeated calls during a still-restarting
-// state are safe.
+// Idempotent: Client.Close (which Pool.Invalidate calls) is a no-op when no
+// connection is open, so repeated calls during a still-restarting state are
+// safe.
 //
 // Bounded by ctx — returns ctx.Err() promptly when the caller's deadline
 // fires (e.g. the broker's 10s remediation timeout). Mirrors the locking
-// shape of Close: snapshot under lock, release before calling per-
-// transport Close to avoid deadlocking concurrent ExecuteTool callers.
+// shape of Close: snapshot under lock, release before calling per-server
+// Restart to avoid deadlocking concurrent ExecuteTool callers.
 //
 // Returns nil on success even when zero stdio transports are registered
 // (a vacuously-successful restart for non-stdio-only deployments).
@@ -1200,12 +1298,12 @@ func (m *Manager) RestartStdioTransports(ctx context.Context) error {
 	m.mu.Lock()
 	type namedStdio struct {
 		name      string
-		transport *StdioTransport
+		transport *remoteTransport
 	}
 	snapshot := make([]namedStdio, 0, len(m.servers))
 	for name, t := range m.servers {
-		if st, ok := t.(*StdioTransport); ok {
-			snapshot = append(snapshot, namedStdio{name: name, transport: st})
+		if rt, ok := t.(*remoteTransport); ok && rt.isStdio() {
+			snapshot = append(snapshot, namedStdio{name: name, transport: rt})
 		}
 	}
 	m.mu.Unlock()
@@ -1214,12 +1312,7 @@ func (m *Manager) RestartStdioTransports(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := ns.transport.Close(); err != nil {
-			// Close logs internally; callers care about ctx errors more
-			// than per-transport reap failures (the next start() will
-			// surface a real spawn failure if the subprocess is broken).
-			slog.Warn("mcp: restart stdio transport close error", "server", ns.name, "err", err)
-		}
+		ns.transport.Restart()
 	}
 	return nil
 }

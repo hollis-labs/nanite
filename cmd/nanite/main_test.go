@@ -232,14 +232,24 @@ if [ "${MCP_CONFIG_SENTINEL+x}" = x ]; then
 else
   printf 'sentinel=<unset>\n' >> "${0}.capture"
 fi
-# Answer the MCP handshake before anything else: initialize, then consume the
-# initialized notification, then the real request. A stub that skips this no
-# longer resembles a server the client can talk to.
+# Answer the MCP handshake before anything else. The real SDK client tries
+# the SEP-2575 stateless "server/discover" RPC first and only falls back to
+# the legacy initialize/initialized dance on any error from it -- so the
+# first request answered here is a rejection of that, not initialize
+# itself, or the client hangs waiting for a DiscoverResult this stub never
+# sends (exactly what happened here before this comment: a client this
+# stub can't talk to is not a real regression check). Request ids aren't
+# assumed to be 1/2 -- they're echoed back from whatever the client sent.
+reply_id() {
+  printf '%s' "$1" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p'
+}
+IFS= read -r discover
+printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$(reply_id "$discover")"
 IFS= read -r initialize
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"test-mcp","version":"0"}}}'
+printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"test-mcp","version":"0"}}}\n' "$(reply_id "$initialize")"
 IFS= read -r initialized
 IFS= read -r request
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}'
+printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}\n' "$(reply_id "$request")"
 `
 			if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 				t.Fatalf("write MCP test server: %v", err)

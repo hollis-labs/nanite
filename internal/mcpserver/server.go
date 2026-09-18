@@ -2,12 +2,11 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 
-	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	gmcpserver "github.com/hollis-labs/go-mcp/server"
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
@@ -30,10 +29,10 @@ type Server struct {
 	// every tool either transport reports is registered. Enforcement
 	// happens at registration time (registerTransportTools skips
 	// disallowed tools entirely rather than registering-then-hiding),
-	// so a disallowed name is never added to the underlying *mcp.Server
-	// — a CallTool for it fails at the MCP SDK's own dispatch layer
-	// ("unknown tool"), not via an application-level check we could get
-	// wrong (CW-20260814-0006).
+	// so a disallowed name is never added to the underlying go-mcp/server
+	// registry — a CallTool for it fails at the MCP SDK's own dispatch
+	// layer ("unknown tool"), not via an application-level check we could
+	// get wrong (CW-20260814-0006).
 	toolAllowlist map[string]struct{}
 }
 
@@ -105,25 +104,23 @@ func buildToolAllowlist(names []string) map[string]struct{} {
 func (s *Server) Run(ctx context.Context) error {
 	srv := s.buildMCPServer()
 	slog.Info("mcpserver: starting stdio server", "session_id", s.sessionID)
-	return srv.Run(ctx, &mcp.StdioTransport{})
+	return srv.Run(ctx)
 }
 
-// buildMCPServer assembles the underlying MCP SDK server with tools
+// buildMCPServer assembles the underlying go-mcp/server server with tools
 // registered per registerTools, without binding it to any transport.
-// Factored out of Run so tests can connect it over an in-memory
-// transport (mcp.NewInMemoryTransports) and drive real ListTools/CallTool
-// requests instead of only inspecting what got registered.
-func (s *Server) buildMCPServer() *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{
-		Name:    brand.ID,
-		Version: version.Version,
-	}, nil)
+// Factored out of Run so tests can connect it over an in-memory transport
+// (via SDKServer().Connect / mcp.NewInMemoryTransports) and drive real
+// ListTools/CallTool requests instead of only inspecting what got
+// registered.
+func (s *Server) buildMCPServer() *gmcpserver.Server {
+	srv := gmcpserver.NewServer(brand.ID, version.Version)
 	s.registerTools(srv)
 	return srv
 }
 
 // registerTools adds self-service and developer tool definitions to the MCP server.
-func (s *Server) registerTools(srv *mcp.Server) {
+func (s *Server) registerTools(srv *gmcpserver.Server) {
 	s.registerTransportTools(srv, "self", s.self)
 	s.registerTransportTools(srv, "dev", s.dev)
 }
@@ -143,7 +140,7 @@ func (s *Server) toolAllowed(name string) bool {
 	return ok
 }
 
-func (s *Server) registerTransportTools(srv *mcp.Server, label string, t toolTransport) {
+func (s *Server) registerTransportTools(srv *gmcpserver.Server, label string, t toolTransport) {
 	tools, err := t.ListTools(context.Background())
 	if err != nil {
 		slog.Error("mcpserver: failed to list tools", "transport", label, "err", err)
@@ -153,7 +150,7 @@ func (s *Server) registerTransportTools(srv *mcp.Server, label string, t toolTra
 	skipped := 0
 	for _, td := range tools {
 		if !s.toolAllowed(td.Name) {
-			// Deliberately never reaches srv.AddTool: the MCP SDK's own
+			// Deliberately never reaches srv.RegisterTool: the MCP SDK's own
 			// callTool rejects a request for a name it never registered
 			// ("unknown tool %q") before it can reach this transport's
 			// CallTool. Skipping registration IS the dispatch gate, not
@@ -161,82 +158,71 @@ func (s *Server) registerTransportTools(srv *mcp.Server, label string, t toolTra
 			skipped++
 			continue
 		}
-		tool := buildMCPTool(td)
-		name := td.Name
-		srv.AddTool(tool, s.makeTransportHandler(t, name))
+		srv.RegisterTool(buildTool(td, s.makeTransportHandler(t, td.Name)))
 		registered++
 	}
 	slog.Info("mcpserver: registered tools", "transport", label, "count", registered, "skipped", skipped)
 }
 
-// buildMCPTool converts a Nanite Tool definition to an official SDK Tool.
-func buildMCPTool(t condmcp.Tool) *mcp.Tool {
-	tool := &mcp.Tool{
+// buildTool converts a Nanite Tool definition, and its dispatch handler,
+// into a go-mcp/server registration. Annotations come from the per-name
+// table in annotations.go — see its package doc for why an unaudited name
+// defaults to "assume it's dangerous" rather than "assume it's safe".
+func buildTool(t condmcp.Tool, handler gmcpserver.ToolHandler) gmcpserver.Tool {
+	schema := t.InputSchema
+	if schema == nil {
+		schema = gmcpserver.EmptyObjectSchema()
+	}
+	a := annotationsFor(t.Name)
+	return gmcpserver.Tool{
 		Name:        t.Name,
 		Description: t.Description,
+		InputSchema: schema,
+		Handler:     handler,
+
+		ReadOnlyHint:    a.ReadOnlyHint,
+		DestructiveHint: a.DestructiveHint,
+		IdempotentHint:  a.IdempotentHint,
+		OpenWorldHint:   a.OpenWorldHint,
 	}
-	raw := mustMarshalSchema(t.InputSchema)
-	var schema *jsonschema.Schema
-	if err := json.Unmarshal(raw, &schema); err != nil {
-		slog.Warn("mcpserver: failed to unmarshal tool input schema, using fallback", "tool", t.Name, "err", err)
-		if fallbackErr := json.Unmarshal([]byte(`{"type":"object","properties":{}}`), &schema); fallbackErr != nil {
-			slog.Error("mcpserver: failed to unmarshal fallback schema", "tool", t.Name, "err", fallbackErr)
-			schema = &jsonschema.Schema{}
-		}
-	}
-	if schema == nil {
-		schema = &jsonschema.Schema{}
-	}
-	tool.InputSchema = schema
-	return tool
 }
 
 // makeHandler returns a tool handler that delegates to the self transport.
-func (s *Server) makeHandler(name string) mcp.ToolHandler {
+func (s *Server) makeHandler(name string) gmcpserver.ToolHandler {
 	return s.makeTransportHandler(s.self, name)
 }
 
-// makeTransportHandler returns a tool handler that delegates to the given transport.
-func (s *Server) makeTransportHandler(t toolTransport, name string) mcp.ToolHandler {
-	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := map[string]any{}
-		if len(req.Params.Arguments) > 0 {
-			if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-				return newErrorResult(err), nil
-			}
-		}
+// makeTransportHandler returns a tool handler that delegates to the given
+// transport. go-mcp/server's ToolHandler contract already decodes the raw
+// wire arguments into args before calling this (a malformed-JSON call never
+// reaches here at all — it's rejected as a protocol-level JSON-RPC error by
+// go-mcp/server itself, not folded into a tool result the way the prior
+// hand-rolled SDK wiring did), so this only has to bridge condmcp's
+// Tool/ToolResult shape onto go-mcp/server's (any, error) contract.
+//
+// result.IsError (set via errorResult() in every self/dev tool handler)
+// must propagate onto the wire result — otherwise a caller reading
+// CallToolResult.IsError (e.g. a real MCP client, not just this repo's own
+// tests which read the text body) can never distinguish a handler-reported
+// failure from a success. Found via CW-20260813-0011's end-to-end
+// verification: workflow_verify_step's pass/fail is exactly this flag, so a
+// caller silently seeing IsError=false on every failure defeats the tool's
+// purpose. Returning an error here is how that happens: go-mcp/server's own
+// ToolHandler contract reports any returned error as IsError=true content,
+// so converting a result.IsError=true response into a Go error reproduces
+// the same wire shape without this package needing its own
+// CallToolResult-building or SetError/GetError bookkeeping (unused anywhere
+// in this codebase, and not offered by go-mcp/server's simplified surface).
+func (s *Server) makeTransportHandler(t toolTransport, name string) gmcpserver.ToolHandler {
+	return func(ctx context.Context, args map[string]any) (any, error) {
 		result, err := t.CallTool(ctx, name, args)
 		if err != nil {
-			return newErrorResult(err), nil
+			return nil, err
 		}
-		text := extractText(result)
-		text = convertEnvelopeMarkers(text)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: text}},
-			// result.IsError (set via errorResult() in every self/dev tool
-			// handler) must propagate onto the wire result — otherwise a
-			// caller reading CallToolResult.IsError (e.g. a real MCP
-			// client, not just this repo's own tests which read the text
-			// body) can never distinguish a handler-reported failure from
-			// a success. Found via CW-20260813-0011's end-to-end
-			// verification: workflow_verify_step's pass/fail is exactly
-			// this flag, so a caller silently seeing IsError=false on
-			// every failure defeats the tool's purpose.
-			IsError: result != nil && result.IsError,
-		}, nil
+		text := convertEnvelopeMarkers(extractText(result))
+		if result != nil && result.IsError {
+			return nil, errors.New(text)
+		}
+		return text, nil
 	}
-}
-
-// newErrorResult builds a CallToolResult flagged as an error, carrying
-// the given error's message as its content. The error value is also
-// preserved on the result via SetError so server-side middleware can
-// observe the original type/unwrap chain via GetError(). Matches the
-// prior mark3labs NewToolResultError wire semantics (isError:true +
-// text content).
-func newErrorResult(err error) *mcp.CallToolResult {
-	r := &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
-	}
-	r.SetError(err)
-	return r
 }

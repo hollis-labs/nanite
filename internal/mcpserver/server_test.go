@@ -91,26 +91,6 @@ func TestConvertEnvelopeMarkers_MalformedMarkerHaltsLoop(t *testing.T) {
 	}
 }
 
-func TestMustMarshalSchema(t *testing.T) {
-	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"name": map[string]any{"type": "string"},
-		},
-	}
-	data := mustMarshalSchema(schema)
-	if len(data) == 0 {
-		t.Error("expected non-empty schema bytes")
-	}
-}
-
-func TestMustMarshalSchema_Nil(t *testing.T) {
-	data := mustMarshalSchema(nil)
-	if string(data) != `{"type":"object","properties":{}}` {
-		t.Errorf("expected fallback schema, got %s", string(data))
-	}
-}
-
 func countOccurrences(s, substr string) int {
 	count := 0
 	for i := 0; i+len(substr) <= len(s); i++ {

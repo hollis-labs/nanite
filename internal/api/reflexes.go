@@ -73,13 +73,14 @@ func (a *API) handleCreateAgentReflex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name          string `json:"name"`
-		TriggerKind   string `json:"trigger_kind"`
-		TriggerSpec   string `json:"trigger_spec"`
-		ActionKind    string `json:"action_kind"`
-		ActionSpec    string `json:"action_spec"`
-		Priority      int64  `json:"priority"`
-		OptOutAllowed *bool  `json:"opt_out_allowed"`
+		Name                      string `json:"name"`
+		TriggerKind               string `json:"trigger_kind"`
+		TriggerSpec               string `json:"trigger_spec"`
+		ActionKind                string `json:"action_kind"`
+		ActionSpec                string `json:"action_spec"`
+		Priority                  int64  `json:"priority"`
+		OptOutAllowed             *bool  `json:"opt_out_allowed"`
+		RecurrenceOverrideSeconds *int64 `json:"recurrence_override_seconds"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
@@ -99,15 +100,16 @@ func (a *API) handleCreateAgentReflex(w http.ResponseWriter, r *http.Request) {
 		optOutAllowed = *req.OptOutAllowed
 	}
 	row := store.AgentReflex{
-		AgentID:       agent.ID,
-		Name:          req.Name,
-		TriggerKind:   req.TriggerKind,
-		TriggerSpec:   req.TriggerSpec,
-		ActionKind:    req.ActionKind,
-		ActionSpec:    req.ActionSpec,
-		Priority:      req.Priority,
-		CreatedBy:     "operator",
-		OptOutAllowed: optOutAllowed,
+		AgentID:                   agent.ID,
+		Name:                      req.Name,
+		TriggerKind:               req.TriggerKind,
+		TriggerSpec:               req.TriggerSpec,
+		ActionKind:                req.ActionKind,
+		ActionSpec:                req.ActionSpec,
+		Priority:                  req.Priority,
+		CreatedBy:                 "operator",
+		OptOutAllowed:             optOutAllowed,
+		RecurrenceOverrideSeconds: req.RecurrenceOverrideSeconds,
 	}
 	if errs := a.validateReflexDefinition(r.Context(), row); len(errs) > 0 {
 		a.jsonResp(w, http.StatusBadRequest, map[string]any{"valid": false, "errors": errs})
@@ -156,6 +158,16 @@ func (a *API) handlePatchAgentReflex(w http.ResponseWriter, r *http.Request) {
 		FiredCount    *int64  `json:"fired_count"`
 		LastFiredAt   *string `json:"last_fired_at"`
 		OptOutAllowed *bool   `json:"opt_out_allowed"`
+		// RecurrenceOverrideSeconds: nil (field omitted) leaves the
+		// existing override untouched; 0 clears it back to "inherit the
+		// kind/system default"; a positive value sets an explicit
+		// override. Mirrors the ttl_seconds=0-means-unset convention
+		// already in use for agent_known_skills/agent_known_tools rows —
+		// a recurrence of exactly zero seconds is never a meaningful
+		// override, so it's free to serve as the "clear" sentinel instead
+		// of needing a second field to disambiguate "not sent" from
+		// "explicitly nulled."
+		RecurrenceOverrideSeconds *int64 `json:"recurrence_override_seconds"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
@@ -191,6 +203,13 @@ func (a *API) handlePatchAgentReflex(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.OptOutAllowed != nil {
 		updated.OptOutAllowed = *req.OptOutAllowed
+	}
+	if req.RecurrenceOverrideSeconds != nil {
+		if *req.RecurrenceOverrideSeconds == 0 {
+			updated.RecurrenceOverrideSeconds = nil
+		} else {
+			updated.RecurrenceOverrideSeconds = req.RecurrenceOverrideSeconds
+		}
 	}
 	if errs := a.validateReflexDefinition(r.Context(), updated); len(errs) > 0 {
 		a.jsonResp(w, http.StatusBadRequest, map[string]any{"valid": false, "errors": errs})

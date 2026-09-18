@@ -20,7 +20,10 @@ import type {
   AgentProcedure,
   AgentProcedureUpsertRequest,
   AgentReflexRow,
+  AgentSkillGrantRequest,
+  AgentSkillGrantView,
   AgentStateScope,
+  AgentToolItem,
   ApprovalDecision,
   ApprovalScope,
   Artifact,
@@ -57,6 +60,7 @@ import type {
   FragmentsSprint,
   FragmentsTask,
   GlobalUsageSummary,
+  GrantAgentToolRequest,
   HarnessCapabilitiesResponse,
   HarnessCancelResponse,
   HarnessCreateSessionRequest,
@@ -2121,6 +2125,100 @@ export const api = {
     });
     if (!res.ok)
       throw new Error(`Failed to remove skill from agent: ${res.status}`);
+  },
+
+  // Agent skill grant/approval — the real capability gate. Distinct from
+  // assignSkillToAgent/removeSkillFromAgent above, which only manage bare
+  // (agent_id, skill_name) row existence. See docs/adding-an-agent.md
+  // "Skills: a catalog entry is not a grant."
+  getAgentSkillGrant: async (
+    agentId: string,
+    slug: string,
+  ): Promise<AgentSkillGrantView> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(slug)}/grant`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get agent skill grant: ${res.status}`);
+    return res.json();
+  },
+
+  grantAgentSkill: async (
+    agentId: string,
+    slug: string,
+    data: AgentSkillGrantRequest,
+  ): Promise<AgentKnownSkill> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(slug)}/grant`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok) {
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to grant agent skill: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  revokeAgentSkillGrant: async (
+    agentId: string,
+    slug: string,
+  ): Promise<{ status: string }> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(slug)}/grant`,
+      { method: "DELETE" },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to revoke agent skill grant: ${res.status}`);
+    return res.json();
+  },
+
+  // Agent tool grants (agent_tools) — the real, sole tool-execution gate.
+  // See docs/adding-an-agent.md "Tools: a grant, not a declaration."
+  listAgentTools: async (agentId: string): Promise<AgentToolItem[]> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/tools`,
+    );
+    if (!res.ok) throw new Error(`Failed to list agent tools: ${res.status}`);
+    return res.json();
+  },
+
+  grantAgentTool: async (
+    agentId: string,
+    data: GrantAgentToolRequest,
+  ): Promise<{ tool_names: string[] }> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/tools`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok) {
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to grant agent tool: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  revokeAgentTool: async (
+    agentId: string,
+    toolId: string,
+  ): Promise<{ status: string }> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/tools/${encodeURIComponent(toolId)}`,
+      { method: "DELETE" },
+    );
+    if (!res.ok) throw new Error(`Failed to revoke agent tool: ${res.status}`);
+    return res.json();
   },
 
   // Engine Backlog

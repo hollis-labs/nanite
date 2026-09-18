@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft,
   Copy,
@@ -7,6 +8,7 @@ import {
   FolderOpen,
   Lock,
   Plus,
+  Server,
   Settings,
   Trash2,
   User,
@@ -31,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import { DynamicIcon, IconPicker } from "@/components/ui/icon-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TagInput } from "@/components/ui/tag-input";
+import { api } from "@/lib/api";
 import type {
   AgentProfile,
   Project,
@@ -91,7 +94,13 @@ export function AgentDetailView({
   const [editField, setEditField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [showMcpPicker, setShowMcpPicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const mcpServersQuery = useQuery({
+    queryKey: ["mcp-servers"],
+    queryFn: api.listMCPServers,
+  });
 
   // Editability is driven entirely by the backend `editable` flag (true only
   // for manage_class === "managed"). Default to editable when the flag is
@@ -217,6 +226,27 @@ export function AgentDetailView({
   const parseTags = (): string[] => {
     try { return JSON.parse(agent.tags || "[]"); }
     catch { return []; }
+  };
+
+  // agent.mcp_servers is a JSON array of registered MCP server *names*
+  // (docs/adding-an-agent.md's worked example: `["helix-desk"]"), not
+  // inline server definitions — those live once in the mcp-servers
+  // registry (Settings → MCP) and are referenced here by name.
+  const parseMcpServerNames = (): string[] => {
+    try {
+      const parsed = JSON.parse(agent.mcp_servers || "[]");
+      return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === "string") : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const addMcpServer = (name: string) => {
+    updateField("mcp_servers", JSON.stringify([...parseMcpServerNames(), name]));
+  };
+
+  const removeMcpServer = (name: string) => {
+    updateField("mcp_servers", JSON.stringify(parseMcpServerNames().filter((n) => n !== name)));
   };
 
   // ─── Render ───────────────────────────────────────────────────────
@@ -442,7 +472,6 @@ export function AgentDetailView({
             availableSkills={availableSkills}
             onAssignSkill={onAssignSkill}
             onRemoveSkill={onRemoveSkill}
-            onUpdateAgent={onUpdateAgent}
           />
         </TabsContent>
 
@@ -475,6 +504,95 @@ export function AgentDetailView({
               />
             </div>
           </Card>
+
+          {/* MCP Servers — attaches by name to a server registered under
+              Settings → MCP; this list does not define server configs
+              itself (see parseMcpServerNames' doc comment above). */}
+          {(() => {
+            const assignedNames = parseMcpServerNames();
+            const allServers = mcpServersQuery.data ?? [];
+            const assignedServers = allServers.filter((s) => assignedNames.includes(s.name));
+            const unknownNames = assignedNames.filter((n) => !allServers.some((s) => s.name === n));
+            const availableServers = allServers.filter((s) => !assignedNames.includes(s.name));
+            return (
+              <Card>
+                <CardHeader>
+                  <Server className="w-4 h-4" />
+                  <span>MCP Servers ({assignedNames.length})</span>
+                  <div className="flex-1" />
+                  <Button
+                    onClick={() => setShowMcpPicker((v) => !v)}
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 gap-1 text-[11px] text-fg-muted hover:text-fg"
+                    disabled={isReadOnly || availableServers.length === 0}
+                  >
+                    <Plus className="w-3 h-3" />
+                    Add
+                  </Button>
+                </CardHeader>
+                <div className="px-4 pb-4 space-y-1.5">
+                  {assignedNames.length === 0 && !showMcpPicker && (
+                    <p className="text-xs text-fg-muted py-2">No MCP servers attached</p>
+                  )}
+                  {assignedServers.map((server) => (
+                    <div key={server.name} className="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface/40 transition-colors">
+                      <Server className="w-3.5 h-3.5 text-fg-muted shrink-0" />
+                      <span className="text-xs font-medium text-fg flex-1 truncate">{server.name}</span>
+                      <span className="text-[10px] text-fg-faint truncate max-w-[40%]">
+                        {server.transport_type}
+                        {server.enabled ? "" : " · disabled"}
+                      </span>
+                      <button
+                        onClick={() => removeMcpServer(server.name)}
+                        disabled={isReadOnly}
+                        className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all disabled:opacity-0 disabled:cursor-not-allowed"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                  {unknownNames.map((name) => (
+                    <div key={name} className="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface/40 transition-colors">
+                      <Server className="w-3.5 h-3.5 text-fg-muted shrink-0" />
+                      <span className="text-xs font-medium text-fg flex-1 truncate">{name}</span>
+                      <span
+                        className="text-[10px] text-danger truncate"
+                        title="No server registered under this name in Settings → MCP"
+                      >
+                        not registered
+                      </span>
+                      <button
+                        onClick={() => removeMcpServer(name)}
+                        disabled={isReadOnly}
+                        className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all disabled:opacity-0 disabled:cursor-not-allowed"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+
+                  {showMcpPicker && availableServers.length > 0 && (
+                    <PickerList
+                      title="Available MCP Servers"
+                      items={availableServers}
+                      renderItem={(s) => (
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <Server className="w-3.5 h-3.5 text-fg-muted shrink-0" />
+                          <span className="text-xs text-fg truncate">{s.name}</span>
+                        </div>
+                      )}
+                      onSelect={(s) => {
+                        addMcpServer(s.name);
+                        setShowMcpPicker(false);
+                      }}
+                      onClose={() => setShowMcpPicker(false)}
+                    />
+                  )}
+                </div>
+              </Card>
+            );
+          })()}
 
           {/* Projects */}
           <Card>

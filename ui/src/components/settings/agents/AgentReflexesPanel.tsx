@@ -45,6 +45,9 @@ type EditorState = {
   action_spec: string;
   priority: string;
   status: AgentReflexStatus;
+  opt_out_allowed: boolean;
+  /** Empty string means "inherit the kind/system default." */
+  recurrence_override_seconds: string;
   session_id: string;
   synthetic_state: string;
 };
@@ -57,6 +60,8 @@ const EMPTY_EDITOR: EditorState = {
   action_spec: '{"body":"Ground yourself before responding.","urgency":"warn"}',
   priority: "50",
   status: "active",
+  opt_out_allowed: true,
+  recurrence_override_seconds: "",
   session_id: "",
   synthetic_state: "",
 };
@@ -154,6 +159,17 @@ export function AgentReflexesPanel({
   const submitEditor = () => {
     if (!editor) return;
     const priority = Number.parseInt(editor.priority, 10);
+    // Empty means "inherit" — patching an existing reflex sends the 0
+    // clear-sentinel (see the PATCH API's own doc comment on this field);
+    // creating a new one just omits the key so it decodes as nil.
+    const recurrenceInput = editor.recurrence_override_seconds.trim();
+    const recurrenceParsed = recurrenceInput ? Number.parseInt(recurrenceInput, 10) : undefined;
+    const recurrenceOverrideSeconds =
+      recurrenceInput && !Number.isNaN(recurrenceParsed)
+        ? recurrenceParsed
+        : editor.id
+          ? 0
+          : undefined;
     const payload = {
       name: editor.name.trim(),
       trigger_kind: editor.trigger_kind,
@@ -162,6 +178,8 @@ export function AgentReflexesPanel({
       action_spec: editor.action_spec.trim(),
       priority: Number.isNaN(priority) ? 0 : priority,
       status: editor.status,
+      opt_out_allowed: editor.opt_out_allowed,
+      recurrence_override_seconds: recurrenceOverrideSeconds,
     };
     setLocalError(null);
     if (editor.id) {
@@ -222,6 +240,9 @@ export function AgentReflexesPanel({
       action_spec: row.action_spec,
       priority: String(row.priority),
       status: row.status,
+      opt_out_allowed: row.opt_out_allowed,
+      recurrence_override_seconds:
+        row.recurrence_override_seconds != null ? String(row.recurrence_override_seconds) : "",
       session_id: "",
       synthetic_state: "",
     });
@@ -361,6 +382,33 @@ export function AgentReflexesPanel({
                   </option>
                 ))}
               </select>
+            </Field>
+            <Field label="Recurrence Override (seconds)">
+              <Input
+                value={editor.recurrence_override_seconds}
+                onChange={(event) =>
+                  setEditor({ ...editor, recurrence_override_seconds: event.target.value })
+                }
+                inputMode="numeric"
+                placeholder="Inherit kind/system default"
+              />
+            </Field>
+            <Field label="Agent May Opt Out">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={editor.opt_out_allowed}
+                onClick={() => setEditor({ ...editor, opt_out_allowed: !editor.opt_out_allowed })}
+                className={`relative h-9 w-16 shrink-0 rounded-md border border-input transition-colors ${
+                  editor.opt_out_allowed ? "bg-toggle-on" : "bg-transparent"
+                }`}
+              >
+                <span
+                  className={`inline-block h-6 w-6 rounded-sm bg-white shadow-sm transition-transform ${
+                    editor.opt_out_allowed ? "translate-x-[34px]" : "translate-x-[4px]"
+                  }`}
+                />
+              </button>
             </Field>
           </div>
 

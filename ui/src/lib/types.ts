@@ -828,6 +828,51 @@ export interface AgentBuilderProfileInput {
   durable?: boolean;
 }
 
+// --- Agent tool grants (agent_tools — the real, sole tool-execution gate;
+// see docs/adding-an-agent.md "Tools: a grant, not a declaration") ---
+
+export interface AgentToolItem {
+  /** known_tools row ID, or "" if the tool hasn't synced into the catalog
+   *  yet (SyncKnownTools runs at boot — see docs/adding-an-agent.md). An
+   *  empty id cannot be granted until a restart. */
+  id: string;
+  name: string;
+  description: string;
+  allowed: boolean;
+}
+
+export interface GrantAgentToolRequest {
+  tool_id: string;
+  granted_via?: string;
+}
+
+// --- Agent skill grants (agent_known_skills' grant-state columns — the
+// real approval gate; see docs/adding-an-agent.md "Skills: a catalog entry
+// is not a grant") ---
+
+export interface SkillCapabilities {
+  fs?: unknown;
+  network?: unknown;
+  subprocess_spawn?: boolean;
+}
+
+export interface AgentSkillGrantView {
+  agent_id: string;
+  skill_slug: string;
+  status: "approved" | "grant_required" | "reapproval_required";
+  message?: string;
+  approved_content_hash?: string;
+  current_content_hash: string;
+  granted_at?: string;
+  granted_by?: string;
+  capabilities?: SkillCapabilities;
+}
+
+export interface AgentSkillGrantRequest {
+  granted_by: string;
+  capabilities?: SkillCapabilities;
+}
+
 export interface AgentBuilderCapabilitiesInput {
   assigned_skill_ids?: string[];
   assigned_skill_slugs?: string[];
@@ -1006,6 +1051,13 @@ export interface AgentReflexRowBase {
   last_fired_at: string;
   created_at: string;
   created_by: string;
+  opt_out_allowed: boolean;
+  /** FK-backed authority tier (system/operator/plugin) — server-derived
+   *  from created_by, never client-settable (migration 124). */
+  provenance_tier: "system" | "operator" | "plugin" | string;
+  /** Per-reflex recurrence cascade override, in seconds. null inherits
+   *  the action kind's (then the system's) default (migration 124). */
+  recurrence_override_seconds: number | null;
 }
 
 export interface InheritedAgentReflexRow extends AgentReflexRowBase {
@@ -1043,6 +1095,8 @@ export interface CreateAgentReflexRequest {
   action_kind: AgentReflexActionKind;
   action_spec: string;
   priority: number;
+  opt_out_allowed?: boolean;
+  recurrence_override_seconds?: number;
 }
 
 export interface PatchAgentReflexRequest {
@@ -1055,6 +1109,10 @@ export interface PatchAgentReflexRequest {
   priority?: number;
   fired_count?: number;
   last_fired_at?: string;
+  opt_out_allowed?: boolean;
+  /** 0 clears the override back to "inherit" — see the API's own doc
+   *  comment on this field for why 0 is safe to use as the sentinel. */
+  recurrence_override_seconds?: number;
 }
 
 export interface ValidateReflexRequest {

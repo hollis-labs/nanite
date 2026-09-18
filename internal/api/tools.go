@@ -122,6 +122,14 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 	allTools := a.Services.ToolClient.ListTools()
 
 	type toolItem struct {
+		// ID is the known_tools row ID a caller must pass as
+		// GrantAgentToolRequest.ToolID to actually grant this tool --
+		// resolved by name below and left empty when the tool hasn't been
+		// synced into known_tools yet (SyncKnownTools runs at boot; see
+		// docs/adding-an-agent.md's "known_tools learns MCP tools only at
+		// boot" note). A UI should treat an empty ID as "not grantable
+		// until a restart."
+		ID          string `json:"id"`
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		Allowed     bool   `json:"allowed"`
@@ -131,10 +139,16 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 
 	granted := make(map[string]bool)
 	always := make(map[string]bool)
+	knownIDs := make(map[string]string)
 	if a.Services.Store != nil {
 		if names, err := a.Services.Store.ListAgentToolNames(r.Context(), agentID); err == nil {
 			for _, n := range names {
 				granted[n] = true
+			}
+		}
+		if rows, err := a.Services.Store.ListKnownTools(r.Context()); err == nil {
+			for _, kt := range rows {
+				knownIDs[kt.Name] = kt.ID
 			}
 		}
 		// known_tools.always_included escape hatch (request_tools/
@@ -151,6 +165,7 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, t := range allTools {
 		items = append(items, toolItem{
+			ID:          knownIDs[t.Name],
 			Name:        t.Name,
 			Description: t.Description,
 			Allowed:     granted[t.Name] || always[t.Name],

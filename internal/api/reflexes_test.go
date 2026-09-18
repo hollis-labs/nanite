@@ -53,6 +53,72 @@ func TestReflexesAPI_CreatePatchDeleteAgentReflex(t *testing.T) {
 	}
 }
 
+// TestReflexesAPI_RecurrenceOverrideSecondsSetPatchClear pins the create/
+// patch wiring added for migration 124's cascade knob
+// (agent_reflexes.recurrence_override_seconds): a positive value sets an
+// explicit override at create time, PATCH with a different positive value
+// changes it, and PATCH with 0 clears it back to nil ("inherit the
+// kind/system default") -- the documented sentinel, since a zero-second
+// recurrence is never a meaningful override.
+func TestReflexesAPI_RecurrenceOverrideSecondsSetPatchClear(t *testing.T) {
+	a, mux := newTestAPI(t)
+	agent := &store.AgentProfile{Name: "Recurrence Agent", Slug: "recurrence-agent", SystemPrompt: "x", Class: "advisor"}
+	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	body := bytes.NewBufferString(`{
+		"name":"recurring-reflex",
+		"trigger_kind":"predicate",
+		"trigger_spec":"{\"kind\":\"tool_calls_window\",\"window\":2,\"op\":\"=\",\"value\":0}",
+		"action_kind":"inject_reminder",
+		"action_spec":"{\"body\":\"ground\"}",
+		"priority":5,
+		"recurrence_override_seconds":300
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/reflexes", body)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create reflex = %d body=%s", w.Code, w.Body.String())
+	}
+	var created store.AgentReflex
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	if created.RecurrenceOverrideSeconds == nil || *created.RecurrenceOverrideSeconds != 300 {
+		t.Fatalf("expected recurrence_override_seconds=300 after create, got %v", created.RecurrenceOverrideSeconds)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/agents/"+agent.ID+"/reflexes/"+created.ID, bytes.NewBufferString(`{"recurrence_override_seconds":600}`))
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("patch reflex = %d body=%s", w.Code, w.Body.String())
+	}
+	var patched store.AgentReflex
+	if err := json.NewDecoder(w.Body).Decode(&patched); err != nil {
+		t.Fatalf("decode patched: %v", err)
+	}
+	if patched.RecurrenceOverrideSeconds == nil || *patched.RecurrenceOverrideSeconds != 600 {
+		t.Fatalf("expected recurrence_override_seconds=600 after patch, got %v", patched.RecurrenceOverrideSeconds)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/agents/"+agent.ID+"/reflexes/"+created.ID, bytes.NewBufferString(`{"recurrence_override_seconds":0}`))
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("patch reflex (clear) = %d body=%s", w.Code, w.Body.String())
+	}
+	var cleared store.AgentReflex
+	if err := json.NewDecoder(w.Body).Decode(&cleared); err != nil {
+		t.Fatalf("decode cleared: %v", err)
+	}
+	if cleared.RecurrenceOverrideSeconds != nil {
+		t.Fatalf("expected recurrence_override_seconds=nil after patching 0 (clear sentinel), got %v", *cleared.RecurrenceOverrideSeconds)
+	}
+}
+
 // TestReflexesAPI_ListWorksForInternalBuiltinAgent replaces the pre-
 // TASKS/adhoc/01-eliminate-file-based-agent-runtime.md
 // TestReflexesAPI_ListSupportsFileBackedAgent, which asserted

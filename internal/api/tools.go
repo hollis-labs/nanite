@@ -133,6 +133,17 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		Allowed     bool   `json:"allowed"`
+		// Source is "mcp" when the tool resolves through the MCP manager
+		// (a registered third-party server or a plugin-registered
+		// MCP-shaped server) and "builtin" otherwise, derived from
+		// Manager.ToolAttribution's ok result below.
+		Source string `json:"source"`
+		// MCPServer is the registered MCP server name this tool resolves
+		// to (Manager.ToolAttribution), e.g. "Agent Mux" -- empty for
+		// builtin tools. Lets a caller filter/group by real server
+		// identity instead of guessing from a name prefix
+		// (CW-20260918-0020).
+		MCPServer string `json:"mcp_server,omitempty"`
 	}
 
 	items := make([]toolItem, 0, len(allTools))
@@ -164,12 +175,20 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, t := range allTools {
-		items = append(items, toolItem{
+		item := toolItem{
 			ID:          knownIDs[t.Name],
 			Name:        t.Name,
 			Description: t.Description,
 			Allowed:     granted[t.Name] || always[t.Name],
-		})
+			Source:      "builtin",
+		}
+		if a.Services.MCP != nil {
+			if server, _, ok := a.Services.MCP.ToolAttribution(t.Name); ok {
+				item.Source = "mcp"
+				item.MCPServer = server
+			}
+		}
+		items = append(items, item)
 	}
 
 	a.jsonResp(w, http.StatusOK, items)

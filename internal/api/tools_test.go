@@ -166,3 +166,81 @@ func TestHandleListAgentTools_ResolvesKnownToolID(t *testing.T) {
 		t.Errorf("expected dev_unsynced (never synced into known_tools) to report id=\"\", got %q", byName["dev_unsynced"])
 	}
 }
+
+// fakeMCPServerTransport is a minimal mcp.MCPTransport for wiring a fake MCP
+// server into the manager's uniformIndex via DiscoverTools, so
+// Manager.ToolAttribution resolves real (server, ok) pairs without a real
+// subprocess/HTTP connection.
+type fakeMCPServerTransport struct {
+	tools []mcp.Tool
+}
+
+func (f *fakeMCPServerTransport) ListTools(context.Context) ([]mcp.Tool, error) {
+	return f.tools, nil
+}
+
+func (f *fakeMCPServerTransport) CallTool(context.Context, string, map[string]any) (*mcp.ToolResult, error) {
+	return nil, nil
+}
+
+// TestHandleListAgentTools_ReportsMCPServerOrigin is the Done-means test for
+// CW-20260918-0020: a tool resolved from a registered MCP server reports
+// source:"mcp" and mcp_server:"<the server's name>" so a caller (e.g.
+// Tachyon's Agent Ops plugin) can filter by real server identity instead of
+// a name-prefix heuristic; a builtin tool with no MCP registration reports
+// source:"builtin" and no mcp_server.
+func TestHandleListAgentTools_ReportsMCPServerOrigin(t *testing.T) {
+	a, mux := newTestAPI(t)
+	ctx := context.Background()
+
+	mgr := mcp.NewManager()
+	if err := mgr.AddServer("Agent Mux", &fakeMCPServerTransport{
+		tools: []mcp.Tool{{Name: "mux_search", Description: "Search via Agent Mux"}},
+	}, mcp.TierThirdPartyHTTP); err != nil {
+		t.Fatalf("AddServer: %v", err)
+	}
+	if err := mgr.DiscoverTools(ctx); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
+
+	tc := toolclient.New(mgr, a.Services.Store, nil)
+	tc.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
+		{Name: "dev_read", Description: "Read a file"},
+	})
+	a.Services.ToolClient = tc
+	a.Services.MCP = mgr
+
+	agent := createTestAgentForGrant(t, mux, "list-tools-origin-agent", nil)
+
+	req := httptest.NewRequest("GET", "/api/agents/"+agent.ID+"/tools", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/agents/{id}/tools: expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	var items []struct {
+		Name      string `json:"name"`
+		Source    string `json:"source"`
+		MCPServer string `json:"mcp_server"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&items); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	byName := make(map[string]struct {
+		Source    string
+		MCPServer string
+	}, len(items))
+	for _, it := range items {
+		byName[it.Name] = struct {
+			Source    string
+			MCPServer string
+		}{it.Source, it.MCPServer}
+	}
+	if got := byName["mux_search"]; got.Source != "mcp" || got.MCPServer != "Agent Mux" {
+		t.Errorf("expected mux_search source=mcp mcp_server=%q, got source=%q mcp_server=%q", "Agent Mux", got.Source, got.MCPServer)
+	}
+	if got := byName["dev_read"]; got.Source != "builtin" || got.MCPServer != "" {
+		t.Errorf("expected dev_read source=builtin mcp_server=\"\", got source=%q mcp_server=%q", got.Source, got.MCPServer)
+	}
+}

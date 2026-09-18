@@ -1,4 +1,4 @@
-.PHONY: build build-dev install dev clean test lint vuln generate-envelopes eval
+.PHONY: build build-dev install dev clean test lint vuln generate-envelopes eval package-release
 
 # Build React SPA then embed in Go binary. Production build: NO build tags —
 # the `devmode` tag MUST NOT be set here. internal/plugin/devmode compiles to
@@ -93,3 +93,28 @@ eval:
 # Run with default settings
 run: build
 	./nanite serve --port 8090
+
+# Build distributable macOS release archives + checksums, for the
+# hollis-labs/homebrew-tap Formula/nanite.rb. VERSION is the git tag the
+# release workflow is packaging (e.g. v0.4.0) — passed in, never guessed here.
+# Only injects GitSHA via ldflags, matching the mechanism documented in
+# internal/version/version.go; internal/version.Version stays a hand-bumped
+# literal per the release skill's own checklist.
+VERSION ?= dev
+RELEASE_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+RELEASE_LDFLAGS := -s -w -X github.com/hollis-labs/nanite/internal/version.GitSHA=$(RELEASE_COMMIT)
+
+package-release: generate-envelopes build-ui
+	mkdir -p dist
+	for target in darwin/amd64 darwin/arm64; do \
+		os=$${target%/*}; \
+		arch=$${target#*/}; \
+		stage="dist/nanite_$(VERSION)_$${os}_$${arch}"; \
+		archive="dist/nanite_$(VERSION)_$${os}_$${arch}.tar.gz"; \
+		rm -rf "$$stage" "$$archive"; \
+		mkdir -p "$$stage"; \
+		CGO_ENABLED=0 GOOS="$$os" GOARCH="$$arch" go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o "$$stage/nanite" ./cmd/nanite; \
+		cp README.md LICENSE "$$stage/"; \
+		tar -C dist -czf "$$archive" "$$(basename "$$stage")"; \
+	done
+	cd dist && shasum -a 256 nanite_$(VERSION)_*.tar.gz > checksums.txt

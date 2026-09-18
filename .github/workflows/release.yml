@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to verify and package
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: apps/nanite
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out Nanite
+        uses: actions/checkout@v4
+        with:
+          path: apps/nanite
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/nanite/go.mod
+          cache: true
+          cache-dependency-path: apps/nanite/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/nanite/ui/package-lock.json
+
+      - name: Install UI dependencies
+        run: cd ui && npm ci
+
+      - name: Run the landing check
+        run: ./scripts/check.sh
+
+  package:
+    runs-on: macos-15
+    timeout-minutes: 30
+    needs: verify
+    steps:
+      - name: Check out Nanite
+        uses: actions/checkout@v4
+        with:
+          path: apps/nanite
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/nanite/go.mod
+          cache: true
+          cache-dependency-path: apps/nanite/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/nanite/ui/package-lock.json
+
+      - name: Install UI dependencies
+        run: cd ui && npm ci
+
+      - name: Build release archives
+        run: make package-release VERSION="${RELEASE_TAG}"
+
+      - name: Stage GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Nanite ${{ env.RELEASE_TAG }}
+          draft: true
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
+          files: |
+            apps/nanite/dist/nanite_*.tar.gz
+            apps/nanite/dist/checksums.txt
+
+      - name: Publish immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --verify-tag
+
+  # This job does NOT update hollis-labs/homebrew-tap — Formula/nanite.rb
+  # (like Formula/hadron.rb and Formula/git-sandbox.rb today) is hand-updated
+  # per release: new version, urls, and the shasum of each tarball from
+  # dist/checksums.txt above.

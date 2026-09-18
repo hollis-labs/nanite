@@ -47,11 +47,9 @@ const apiNoStore = "no-store"
 //
 // # What this does not touch
 //
-// The SPA layer, which got this right independently: setSPACacheHeaders
-// (spa.go) has three deliberate policies — revalidate index.html so a rebuilt
-// asset manifest takes effect, cache content-hashed assets hard — pinned by
-// TestSetSPACacheHeaders. This middleware is scoped to /api/ and leaves them
-// alone. The same reasoning was simply never applied one layer over.
+// This middleware is scoped to /api/ and has no opinion on anything else.
+// Nanite is a headless API; whatever serves a UI against it owns its own
+// caching policy.
 func (s *Server) apiCacheMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if apiCachePolicyFor(r.URL.Path) != "" {

@@ -2,6 +2,8 @@
 
 Envelopes are structured cards embedded in chat messages. Core envelope definitions are owned by the pinned [`github.com/hollis-labs/go-envelopes`](https://github.com/hollis-labs/go-envelopes) module: its `manifest/envelopes.yaml`, `manifest/envelopes.schema.json`, and `manifest/schemas/` tree are the upstream source of truth. Nanite consumes the released module's public catalog and TypeScript exporter selected by `go.mod`; it does not locate module-cache files, require a sibling checkout, or maintain a second local core manifest.
 
+Nanite is headless: this repo owns the wire format and the Go-side envelope parser. The React renderers and their generated TypeScript live in the separate [`flux`](https://github.com/hollis-labs/flux) repo, which consumes the same released `go-envelopes` module independently.
+
 ## Wire format
 
 Agents emit JSON in a `nanite-envelope` fence:
@@ -25,10 +27,10 @@ Agents emit JSON in a `nanite-envelope` fence:
 ## Add a core envelope
 
 1. Add the definition and schema to the go-envelopes module's `manifest/envelopes.yaml` and `manifest/schemas/`, validate it against `manifest/envelopes.schema.json`, then release that module.
-2. Bump Nanite's pinned `github.com/hollis-labs/go-envelopes` version.
-3. Add the React component under `ui/src/components/chat/envelopes/` and keep its data props aligned with the released schema. Put the normal `component`, `export`, and `props` mapping in the upstream manifest; use `CORE_OVERRIDES` only for an intentional Nanite-only deviation.
-4. Run `make generate-envelopes`; `scripts/generate-envelope-types.mjs` invokes `github.com/hollis-labs/go-envelopes/cmd/envelopes-export` for module-owned TypeScript. Run `npm run generate:plugins` from `ui/`; `scripts/generate-plugin-imports.mjs` uses the same public exporter for catalog/import metadata and owns `ui/src/generated/plugin-envelopes.ts`.
-5. Run `make check-envelopes`, then exercise the live SSE streaming and persisted-message reload paths.
+2. Bump Nanite's pinned `github.com/hollis-labs/go-envelopes` version, and do the same in `flux`'s `go.mod`.
+3. In `flux`, add the React component under `src/components/chat/envelopes/` and keep its data props aligned with the released schema. Put the normal `component`, `export`, and `props` mapping in the upstream manifest; use `CORE_OVERRIDES` only for an intentional deviation.
+4. In `flux`, run `npm run generate:envelopes`; `scripts/generate-envelope-types.mjs` invokes `github.com/hollis-labs/go-envelopes/cmd/envelopes-export` for module-owned TypeScript. Run `npm run generate:plugins`; `scripts/generate-plugin-imports.mjs` uses the same public exporter for catalog/import metadata and owns `src/generated/plugin-envelopes.ts`.
+5. In `flux`, run `npm run check:envelopes`; here in Nanite run `./scripts/check.sh`. Then exercise the live SSE streaming and persisted-message reload paths.
 
 Never hand-edit generated registries. The manifest and component are authored inputs; generators own derived files.
 
@@ -46,13 +48,13 @@ Keep interactions narrow. An envelope should submit a clear user intent back thr
 | Core manifest schema | go-envelopes `manifest/envelopes.schema.json` |
 | Released catalog and type exporter | `github.com/hollis-labs/go-envelopes/cmd/envelopes-export` |
 | Envelope parser | `internal/chat/envelope.go` |
-| React renderers | `ui/src/components/chat/envelopes/` |
-| Message rendering | `ui/src/components/chat/ChatMessage.tsx` |
-| Exporter adapter | `scripts/lib/envelope-catalog.mjs` |
-| Core type generator | `scripts/generate-envelope-types.mjs` (`make generate-envelopes`) |
-| Renderer registry generator | `scripts/generate-plugin-imports.mjs` (`ui/package.json` `generate:plugins`) |
-| Generated core data types | `ui/src/generated/envelope-types.generated.ts` |
-| Generated renderer registry | `ui/src/generated/plugin-envelopes.ts` |
+| React renderers | `flux` repo: `src/components/chat/envelopes/` |
+| Message rendering | `flux` repo: `src/components/chat/ChatMessage.tsx` |
+| Exporter adapter | `flux` repo: `scripts/lib/envelope-catalog.mjs` |
+| Core type generator | `flux` repo: `scripts/generate-envelope-types.mjs` (`npm run generate:envelopes`) |
+| Renderer registry generator | `flux` repo: `scripts/generate-plugin-imports.mjs` (`npm run generate:plugins`) |
+| Generated core data types | `flux` repo: `src/generated/envelope-types.generated.ts` |
+| Generated renderer registry | `flux` repo: `src/generated/plugin-envelopes.ts` |
 
 ## Verification
 

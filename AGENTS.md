@@ -48,7 +48,6 @@ done once it is.
   from a project, and in what order.
 - `docs/architecture/` holds one current document per subsystem;
   `ls docs/architecture/` is the index.
-- `ui/src/generated/` is generator output — regenerate it, never hand-edit it.
 
 ## Commands
 
@@ -120,8 +119,8 @@ must never set it; `make build-dev` exists for that and must never ship.
 
 The envelope catalog belongs to the released `go-envelopes` module, not to this
 repo — `config/envelopes.yaml` no longer exists. New core types are released
-there first; this repo adds the React component under
-`ui/src/components/chat/envelopes/` and regenerates.
+there first; the GUI (the separate `flux` repo) adds the React component under
+`src/components/chat/envelopes/` and regenerates.
 
 `go build` produces `./nanite`, which is not the binary the running service
 executes. Deployment goes through the Cerberus resource `nanite-api-service`:

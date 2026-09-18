@@ -329,17 +329,17 @@ func TestEmbeddedEnvelopeReferencesDescribeCurrentWorkflow(t *testing.T) {
 	if _, err := envelopes.LoadCore(context.Background()); err != nil {
 		t.Fatalf("load documented module-owned core envelope manifest: %v", err)
 	}
-	localPaths := []string{
+	// The React renderers and their generators live in the separate `flux`
+	// repo (Nanite is headless), so this only checks that Nanite's embedded
+	// docs describe that split accurately — not that flux's paths exist
+	// locally here.
+	fluxPaths := []string{
 		"scripts/lib/envelope-catalog.mjs",
 		"scripts/generate-plugin-imports.mjs",
 		"scripts/generate-envelope-types.mjs",
-		"ui/src/generated/plugin-envelopes.ts",
-	}
-	documentedGeneratedPaths := []string{"ui/src/generated/envelope-types.generated.ts"}
-	for _, localPath := range localPaths {
-		if _, err := os.Stat(filepath.Join("..", "..", filepath.FromSlash(localPath))); err != nil {
-			t.Fatalf("documented local envelope path %s does not exist: %v", localPath, err)
-		}
+		"src/generated/plugin-envelopes.ts",
+		"src/generated/envelope-types.generated.ts",
+		"src/components/chat/envelopes",
 	}
 	for _, docPath := range []string{
 		"docs/ref-envelope-component.md",
@@ -350,16 +350,17 @@ func TestEmbeddedEnvelopeReferencesDescribeCurrentWorkflow(t *testing.T) {
 			t.Fatalf("read embedded framework doc %s: %v", docPath, err)
 		}
 		text := string(data)
-		for _, forbidden := range []string{"config/envelopes.yaml", "../../libs/go-envelopes"} {
+		for _, forbidden := range []string{"config/envelopes.yaml", "../../libs/go-envelopes", "ui/src/generated", "ui/src/components", "make generate-envelopes", "make check-envelopes"} {
 			if strings.Contains(text, forbidden) {
 				t.Errorf("%s retains obsolete envelope workflow path %q", docPath, forbidden)
 			}
 		}
-		requiredPaths := append(append([]string{
+		requiredPaths := append([]string{
 			"github.com/hollis-labs/go-envelopes",
 			"github.com/hollis-labs/go-envelopes/cmd/envelopes-export",
 			"manifest/envelopes.yaml",
-		}, localPaths...), documentedGeneratedPaths...)
+			"flux",
+		}, fluxPaths...)
 		for _, required := range requiredPaths {
 			if !strings.Contains(text, required) {
 				t.Errorf("%s does not document current envelope workflow path %q", docPath, required)

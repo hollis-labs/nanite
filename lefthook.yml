@@ -144,37 +144,6 @@ pre-commit:
           exit 1
         fi
 
-    # ── Frontend parallel group (optional) ────────────────────────────
-    # Runs only when a ui/, web/, or frontend/ directory exists.
-    # Safe to leave in Go-only repos — skip conditions prevent errors.
-
-    frontend-lint:
-      # DISABLED 2026-08-24 — this command does not work in this repo, and was
-      # only ever inert because no hooks were installed. Now that they are, it
-      # had to be either fixed or switched off honestly; fixing it is tracked
-      # as CW-20260816-0087 and is not this task's scope.
-      #
-      # Measured from the repo root, which is where lefthook runs it:
-      #   npx --no-install biome --version        -> 0.3.3   (an unrelated
-      #                                              package; the project's is
-      #                                              Biome 2.4.7, resolvable
-      #                                              only from ui/)
-      #   ui/node_modules/.bin/biome check <clean tracked file>   -> exit 1
-      #   ...           same, plus --config-path ui               -> exit 1
-      # So the original line silently runs the WRONG binary, and the obvious
-      # repairs still fail on a known-clean file. biome's config lives at
-      # ui/biome.json and it resolves paths against its own cwd, so a working
-      # version has to run from ui/ with ui-relative paths — real work, not a
-      # flag. A hook that greenlights a commit by invoking an unrelated program
-      # is the exact "looks like a gate, is not" state this file was activated
-      # to end, so it stays off until it genuinely works.
-      #
-      # ui/package.json's own scripts remain the real check in the meantime.
-      skip: true
-      glob: "*.{ts,tsx,js,jsx}"
-      skip_empty: true
-      run: npx biome check --no-errors-on-unmatched {staged_files}
-
 pre-push:
   commands:
 

@@ -59,7 +59,6 @@ reason it carries no filter is written in the script's own header.
 
 ## Things that surprise people
 
-- **`ui/src/generated/` is generator output.** Regenerate it; never hand-edit.
 - **`go build` does not produce the binary the running service executes.** The
   deployment boundary is in `AGENTS.md`, and the failure mode — a deploy that
   leaves the old process running — is quiet.

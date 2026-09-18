@@ -1,10 +1,10 @@
-.PHONY: build build-dev install dev clean test lint vuln generate-envelopes eval package-release
+.PHONY: build build-dev install dev clean test lint vuln eval package-release
 
-# Build React SPA then embed in Go binary. Production build: NO build tags —
-# the `devmode` tag MUST NOT be set here. internal/plugin/devmode compiles to
-# HostDevSigningBypass=false, which is what keeps catalog + per-plugin
-# signature verification unconditional in release binaries.
-build: generate-envelopes build-ui
+# Production build: NO build tags — the `devmode` tag MUST NOT be set here.
+# internal/plugin/devmode compiles to HostDevSigningBypass=false, which is
+# what keeps catalog + per-plugin signature verification unconditional in
+# release binaries.
+build:
 	go build -o nanite ./cmd/nanite
 
 # Developer build with signing bypass enabled. Adds the `devmode` build tag so
@@ -13,39 +13,23 @@ build: generate-envelopes build-ui
 #   - Per-plugin signatures are skipped iff user_settings.allow_unsigned_plugins
 #     is true.
 # Never ship this binary to users.
-build-dev: generate-envelopes build-ui
+build-dev:
 	go build -tags devmode -o nanite ./cmd/nanite
 
 # Install to ~/go/bin/ (used by MCP and Cerberus)
-install: generate-envelopes build-ui
+install:
 	go install ./cmd/nanite
-
-# Generate TypeScript types from the released go-envelopes module selected by
-# go.mod. The module-owned exporter resolves embedded schemas and metadata.
-generate-envelopes:
-	node scripts/generate-envelope-types.mjs
-
-# Check that generated envelope types are not stale (CI use)
-check-envelopes:
-	node scripts/generate-envelope-types.mjs --check
-	node scripts/generate-plugin-imports.mjs --check
-
-build-ui:
-	cd ui && npm run build
-	rm -rf internal/server/ui_dist
-	mkdir -p internal/server/ui_dist
-	cp -R ui/dist/. internal/server/ui_dist/
 
 # Development
 dev:
-	@echo "Run in two terminals:"
-	@echo "  Terminal 1: air"
-	@echo "  Terminal 2: cd ui && npm run dev"
+	@echo "Run: air"
+	@echo "Nanite is headless — the GUI lives in the separate flux repo, which"
+	@echo "talks to this server's API; -dev serves a placeholder shell at / until"
+	@echo "then."
 
 # Clean build artifacts
 clean:
 	rm -f nanite
-	rm -rf ui/dist
 
 # Run Go tests with the race detector — Tier 3: the full suite under `-race`,
 # ~9 min, what the nightly full-repo quality gate runs. The pre-push hook and
@@ -104,7 +88,7 @@ VERSION ?= dev
 RELEASE_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 RELEASE_LDFLAGS := -s -w -X github.com/hollis-labs/nanite/internal/version.GitSHA=$(RELEASE_COMMIT)
 
-package-release: generate-envelopes build-ui
+package-release:
 	mkdir -p dist
 	for target in darwin/amd64 darwin/arm64; do \
 		os=$${target%/*}; \

@@ -62,7 +62,12 @@ func TestReleasedEnvelopeCatalogAndTypeScriptAreDeterministic(t *testing.T) {
 	}
 }
 
-func TestEnvelopeGenerationHasNoSiblingTreeOrEmbeddedSchemaCoupling(t *testing.T) {
+// TestEnvelopeConsumptionHasNoEmbeddedSchemaCoupling guards Nanite's own
+// side of the split: the GUI, its generators, and their generated output now
+// live in the separate `flux` repo (Nanite is headless), so this only checks
+// what remains here — the go.mod pin and internal/envelope's use of the
+// public go-envelopes API.
+func TestEnvelopeConsumptionHasNoEmbeddedSchemaCoupling(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve current test path")
@@ -77,37 +82,6 @@ func TestEnvelopeGenerationHasNoSiblingTreeOrEmbeddedSchemaCoupling(t *testing.T
 	}
 	if strings.Contains(string(goMod), "replace github.com/hollis-labs/go-envelopes") {
 		t.Fatal("go.mod replaces go-envelopes instead of consuming the released module")
-	}
-	generationFiles := []string{
-		"Makefile",
-		"scripts/generate-envelope-types.mjs",
-		"scripts/generate-plugin-imports.mjs",
-		"scripts/lib/envelope-catalog.mjs",
-	}
-	combined := strings.Builder{}
-	for _, relative := range generationFiles {
-		// #nosec G304 -- relative comes from the fixed repository file list above.
-		data, readErr := os.ReadFile(filepath.Join(root, relative))
-		if readErr != nil {
-			t.Fatalf("read %s: %v", relative, readErr)
-		}
-		combined.Write(data)
-	}
-	source := combined.String()
-	for _, forbidden := range []string{"libs/go-envelopes", "--manifest-dir", "go-envelopes/manifest"} {
-		if strings.Contains(source, forbidden) {
-			t.Errorf("generation files retain forbidden coupling %q", forbidden)
-		}
-	}
-	if !strings.Contains(source, "github.com/hollis-labs/go-envelopes") || !strings.Contains(source, "/cmd/envelopes-export") {
-		t.Fatal("generation files do not invoke the module-owned exporter")
-	}
-	generatedRegistry, err := os.ReadFile(filepath.Join(root, "ui", "src", "generated", "plugin-envelopes.ts"))
-	if err != nil {
-		t.Fatalf("read generated plugin registry: %v", err)
-	}
-	if !strings.Contains(string(generatedRegistry), "Source: github.com/hollis-labs/go-envelopes@v0.4.0; manifest sha256:") {
-		t.Fatal("generated plugin registry does not identify the reviewed module release and manifest")
 	}
 
 	productionFiles, err := filepath.Glob(filepath.Join(root, "internal", "envelope", "*.go"))

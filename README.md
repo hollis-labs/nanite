@@ -107,12 +107,12 @@ go build ./cmd/nanite/
 ./nanite serve -port 8090 -db ./nanite.db -dev
 ```
 
-Nanite's built UI includes first-run setup for when no provider is configured
-yet: one click to use `claude`/`codex` if either is found on `PATH`,
-otherwise an Anthropic/OpenAI API key (kept in the OS keychain) with a model
-picker. Skip it and configure a provider later from Settings if you'd
-rather. (`-dev` above serves a placeholder shell for the UI — run `cd ui &&
-npm run dev` in a second terminal to see it live.)
+Nanite is headless: this repo is the API and CLI. The GUI — first-run setup
+(one click to use `claude`/`codex` if either is found on `PATH`, otherwise an
+Anthropic/OpenAI API key with a model picker), Settings, and the chat
+surface — lives in the separate [`flux`](https://github.com/hollis-labs/flux)
+repo, which talks to this server's API. Without it, `-dev` above just serves
+a placeholder shell at `/`.
 
 `lefthook.yml` is tracked, but a tracked config installs no git hooks by
 itself. Skip `lefthook install` and the pre-commit format/migration checks

@@ -257,9 +257,6 @@ func (s *Server) routes() {
 	if s.api != nil {
 		s.api.RegisterRoutes(s.mux)
 	}
-
-	// SPA fallback — must be last
-	s.mux.HandleFunc("/", s.handleSPA)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

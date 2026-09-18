@@ -131,8 +131,7 @@ func TestHTTPServerTimeouts_ReadHeader(t *testing.T) {
 	}
 }
 
-// TestAPICachePolicy pins the /api/ default alongside the SPA policies, so the
-// two layers' answers live next to each other. The API layer had no answer at
+// TestAPICachePolicy pins the /api/ default. The API layer had no answer at
 // all until CW-20260912-0070: a browser cached an empty
 // /api/start-surface/capabilities and kept serving it after the endpoint was
 // fixed, with no way for the fix to reach it short of a hard refresh.
@@ -148,9 +147,9 @@ func TestAPICachePolicy(t *testing.T) {
 		// An SSE route still gets the default here; the handler overrides it.
 		// TestAPICacheMiddleware_HandlerOverridesTheDefault covers that.
 		{name: "sse route still defaulted", path: "/api/messages/stream", want: "no-store"},
-		// Not /api/: the SPA layer owns these and has its own policies.
-		{name: "spa root", path: "/", want: ""},
-		{name: "spa asset", path: "/assets/index-abc123.js", want: ""},
+		// Not /api/: this middleware has no opinion on them.
+		{name: "non-api root", path: "/", want: ""},
+		{name: "non-api asset", path: "/assets/index-abc123.js", want: ""},
 		{name: "near miss", path: "/apifoo", want: ""},
 	}
 	for _, tc := range cases {
@@ -176,8 +175,7 @@ func TestAPICacheMiddleware_SetsNoStore(t *testing.T) {
 		t.Errorf("Cache-Control = %q, want no-store", got)
 	}
 
-	// A non-API path must be left entirely alone, so the SPA policies are not
-	// overwritten by this middleware.
+	// A non-API path must be left entirely alone by this middleware.
 	rr = httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/assets/index-abc123.js", nil))
 	if got := rr.Header().Get("Cache-Control"); got != "" {
@@ -248,29 +246,6 @@ func TestAPICacheHeaderReachesResponseThroughTheRealChain(t *testing.T) {
 			defer resp.Body.Close()
 			if got := resp.Header.Get("Cache-Control"); got != tc.want {
 				t.Errorf("GET %s Cache-Control = %q, want %q", tc.path, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestSetSPACacheHeaders(t *testing.T) {
-	cases := []struct {
-		name string
-		path string
-		want string
-	}{
-		{name: "root html", path: "", want: "no-cache"},
-		{name: "index html", path: "index.html", want: "no-cache"},
-		{name: "spa route fallback", path: "chat/session-1", want: "no-cache"},
-		{name: "hashed asset", path: "assets/index-CHntKhwO.css", want: "public, max-age=31536000, immutable"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			rr := httptest.NewRecorder()
-			setSPACacheHeaders(rr, tc.path)
-			if got := rr.Header().Get("Cache-Control"); got != tc.want {
-				t.Fatalf("Cache-Control(%q) = %q, want %q", tc.path, got, tc.want)
 			}
 		})
 	}

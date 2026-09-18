@@ -39,16 +39,6 @@ jobs:
           cache: true
           cache-dependency-path: apps/nanite/go.sum
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: apps/nanite/ui/package-lock.json
-
-      - name: Install UI dependencies
-        run: cd ui && npm ci
-
       - name: Run the landing check
         run: ./scripts/check.sh
 
@@ -69,16 +59,6 @@ jobs:
           go-version-file: apps/nanite/go.mod
           cache: true
           cache-dependency-path: apps/nanite/go.sum
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: apps/nanite/ui/package-lock.json
-
-      - name: Install UI dependencies
-        run: cd ui && npm ci
 
       - name: Build release archives
         run: make package-release VERSION="${RELEASE_TAG}"

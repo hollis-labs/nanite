@@ -249,8 +249,70 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}
 	}
 
-	// Cap + token-budget prune, now that agent_tools/permission filtering
-	// and the chat-surface filter are all done (CW-20260815-0011). Applying
+	// Check whether progressive discovery should be used, BEFORE the
+	// MaxSelectedTools cap below (CW-20260918-0047). This must run on the
+	// full agent_tools/permission/chat-surface-filtered candidate set, not
+	// a positionally-truncated one: FinalizeToolSelection's cap is
+	// unranked (plain slice truncation on the broker's candidate order),
+	// so deciding progressive discovery — and collecting which of the
+	// agent's own granted builtin tools survive it — AFTER that cap both
+	// undercounts mcpToolCount (real MCP tools already sit past the cap,
+	// invisible here) and silently drops any granted builtin tool that
+	// sorted past position 15 in that same unranked order, from the
+	// progressive-discovery branch's builtin set too. With
+	// internalization (ADR-002) the agent-facing surface is uniform; we
+	// identify MCP-origin tools by asking the toolclient which names are
+	// NOT registered as builtins. The `mcp__` prefix is no longer emitted
+	// on the agent surface.
+	mcpToolCount := countMCPOriginTools(s.toolClient, allTools)
+	if mcpToolCount > ProgressiveDiscoveryThreshold && s.toolClient != nil {
+		summaries := s.toolClient.ListToolSummaries()
+		catalog := chat.BuildToolCatalog(summaries)
+
+		// Keep builtin tools alongside request_tools meta-tool.
+		builtinTools := []llmtypes.ToolDefinition{toolclient.RequestToolsMetaTool()}
+		for _, t := range allTools {
+			if s.toolClient.IsBuiltinTool(t.Name) {
+				builtinTools = append(builtinTools, t)
+			}
+		}
+
+		// The always_included escape hatch (item 5) must survive
+		// progressive discovery's truncated builtin-only surface too --
+		// union in anything IsBuiltinTool missed above (e.g.
+		// tool_list/tool_describe, which ship via the self MCP server
+		// rather than ToolClient's own builtin registry, so the loop
+		// above never picks them up).
+		always := s.resolveAlwaysIncludedTools(ctx)
+		if dbAgent != nil && dbAgent.Slug == chatRoleAgentSlug {
+			always = applyChatSurfaceFilter(always, dispatch.DefaultChatToolSurface())
+		}
+		builtinTools = unionToolsByName(builtinTools, always)
+
+		if s.toolClient != nil {
+			caller := describer.CallerAgent{
+				ID:                agentID,
+				Slug:              callerSlug,
+				DispatchAllowlist: callerDispatchAllowlist,
+			}
+			builtinTools = s.toolClient.RenderDescriptions(ctx, builtinTools, caller)
+		}
+
+		slog.Info("service/tool: progressive discovery active",
+			"mcp_tools", mcpToolCount, "builtins", len(builtinTools)-1, "catalog_entries", len(summaries))
+
+		return &ToolSelection{
+			Tools:       builtinTools,
+			Catalog:     catalog,
+			Progressive: true,
+		}, nil
+	}
+
+	// Non-progressive path only below this point: the candidate set is
+	// small enough (mcpToolCount <= ProgressiveDiscoveryThreshold) that
+	// the MaxSelectedTools cap + token-budget prune is the right
+	// mechanism, now that agent_tools/permission filtering and the
+	// chat-surface filter are all done (CW-20260815-0011). Applying
 	// MaxSelectedTools any earlier — inside broker selection, before this
 	// point — could truncate out a tool the agent's own grants above
 	// explicitly kept.
@@ -294,45 +356,6 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		slog.Warn("service/tool: 0 tools for agent — proceeding without tools", "agent", agentID)
 	} else {
 		slog.Info("service/tool: selected tools for agent", "count", len(allTools), "agent", agentID)
-	}
-
-	// Check if progressive discovery should be used. With internalization
-	// (ADR-002) the agent-facing surface is uniform; we identify MCP-origin
-	// tools by asking the toolclient which names are NOT registered as
-	// builtins. The `mcp__` prefix is no longer emitted on the agent surface.
-	mcpToolCount := countMCPOriginTools(s.toolClient, allTools)
-	if mcpToolCount > ProgressiveDiscoveryThreshold && s.toolClient != nil {
-		summaries := s.toolClient.ListToolSummaries()
-		catalog := chat.BuildToolCatalog(summaries)
-
-		// Keep builtin tools alongside request_tools meta-tool.
-		builtinTools := []llmtypes.ToolDefinition{toolclient.RequestToolsMetaTool()}
-		for _, t := range allTools {
-			if s.toolClient.IsBuiltinTool(t.Name) {
-				builtinTools = append(builtinTools, t)
-			}
-		}
-
-		// The always_included escape hatch (item 5) must survive
-		// progressive discovery's truncated builtin-only surface too --
-		// union in anything IsBuiltinTool missed above (e.g.
-		// tool_list/tool_describe, which ship via the self MCP server
-		// rather than ToolClient's own builtin registry, so the loop
-		// above never picks them up).
-		always := s.resolveAlwaysIncludedTools(ctx)
-		if dbAgent != nil && dbAgent.Slug == chatRoleAgentSlug {
-			always = applyChatSurfaceFilter(always, dispatch.DefaultChatToolSurface())
-		}
-		builtinTools = unionToolsByName(builtinTools, always)
-
-		slog.Info("service/tool: progressive discovery active",
-			"mcp_tools", mcpToolCount, "builtins", len(builtinTools)-1, "catalog_entries", len(summaries))
-
-		return &ToolSelection{
-			Tools:       builtinTools,
-			Catalog:     catalog,
-			Progressive: true,
-		}, nil
 	}
 
 	return &ToolSelection{Tools: allTools}, nil

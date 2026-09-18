@@ -163,6 +163,117 @@ func TestSelectForAgent_LateAlphabetAllowlistedToolSurvivesCap(t *testing.T) {
 	}
 }
 
+// TestSelectForAgent_ProgressiveDiscoverySeesGrantedBuiltinPastCap is the
+// CW-20260918-0047 regression. FinalizeToolSelection's MaxSelectedTools cap
+// is unranked plain truncation, and it used to run BEFORE the
+// progressive-discovery decision. SelectToolsAsProvider always puts
+// builtins first in the pre-cap candidate order (Start with built-in
+// tools... Append the catalog tools), so with enough builtin tools ahead of
+// it, a granted builtin can itself sit past MaxSelectedTools — and with
+// enough builtins consuming the whole cap, EVERY MCP-origin tool (appended
+// after all builtins) sits past it too. Pre-fix that produces a double
+// failure: mcpToolCount is computed on the post-cap (all-builtin) survivor
+// set, so it undercounts to 0 and progressive discovery never activates at
+// all, even though the agent's real MCP-origin roster is large — and the
+// late builtin is truncated out regardless. This drives enough builtin
+// filler tools to push both the wanted builtin and every MCP tool past the
+// cap, and asserts progressive discovery activates AND the wanted builtin
+// survives.
+func TestSelectForAgent_ProgressiveDiscoverySeesGrantedBuiltinPastCap(t *testing.T) {
+	st := newKnownToolsTestStore(t)
+	ctx := context.Background()
+
+	// Deliberately NOT "dev_"-prefixed: SelectToolsAsProvider skips
+	// dev-category builtins entirely when developer_mode is off (the
+	// default here, no user_settings row), which would hide the tool for a
+	// reason unrelated to this regression.
+	const wantedBuiltin = "general_lookup"
+	const builtinFillerCount = toolclient.MaxSelectedTools + 5 // pushes wantedBuiltin itself past the cap
+	const mcpCount = ProgressiveDiscoveryThreshold + 5         // > threshold; also fully past the cap once builtins alone exceed it
+
+	builtins := make([]llmtypes.ToolDefinition, 0, builtinFillerCount+1)
+	for i := 0; i < builtinFillerCount; i++ {
+		builtins = append(builtins, llmtypes.ToolDefinition{
+			Name:        fmt.Sprintf("general_filler_%03d", i),
+			Description: "filler builtin tool",
+		})
+	}
+	// Registered LAST within the single "general" category slice --
+	// RegisterBuiltins replaces (not appends to) a category wholesale, so
+	// this slice's order is exactly GetBuiltins' order for this category,
+	// and with only one category registered here, GetBuiltins' overall
+	// (map-iteration-across-categories) order reduces to this slice's
+	// order.
+	builtins = append(builtins, llmtypes.ToolDefinition{Name: wantedBuiltin, Description: "Looks something up."})
+
+	mcpTools := make([]llmtypes.ToolDefinition, 0, mcpCount)
+	for i := 0; i < mcpCount; i++ {
+		mcpTools = append(mcpTools, llmtypes.ToolDefinition{
+			Name:        fmt.Sprintf("torque_filler_%03d", i),
+			Description: "filler MCP-origin tool",
+		})
+	}
+
+	tc := toolclient.New(mcp.NewManager(), st, toolclient.DefaultConfig())
+	tc.RegisterTools(mcpTools)
+	tc.Builtins.RegisterBuiltins("general", builtins)
+
+	isBuiltin := func(name string) bool {
+		for _, b := range builtins {
+			if b.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	allForSync := append(append([]llmtypes.ToolDefinition{}, builtins...), mcpTools...)
+	SyncKnownTools(ctx, st, allForSync, isBuiltin)
+
+	agent := &store.AgentProfile{Name: "Orchestrator", Slug: "orchestrator", SystemPrompt: "Test."}
+	if err := st.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	// Grant the full surface (all builtin + MCP filler) -- matching the
+	// real-world shape this bug actually occurs in: an agent with a large
+	// agent_tools roster (production agents carry 234-402 raw grants), not
+	// an agent granted only the one tool under test. Granting only the
+	// wanted tool would make filterToolsByAgentTools itself reduce
+	// allTools to a single tool before progressive discovery is ever
+	// considered, which can't exercise this bug at all.
+	for _, def := range allForSync {
+		known, err := st.GetKnownToolByName(ctx, def.Name)
+		if err != nil {
+			t.Fatalf("GetKnownToolByName(%s): %v", def.Name, err)
+		}
+		if err := st.GrantAgentTool(ctx, agent.ID, known.ID, "explicit"); err != nil {
+			t.Fatalf("GrantAgentTool(%s): %v", def.Name, err)
+		}
+	}
+
+	svc := NewToolService(tc, nil, st)
+	sel, err := svc.SelectForAgent(ctx, "session-1", agent.ID, "look something up", "", 0)
+	if err != nil {
+		t.Fatalf("SelectForAgent: %v", err)
+	}
+
+	if !sel.Progressive {
+		t.Fatalf("expected progressive discovery to activate with %d MCP-origin tools (threshold %d) among %d total grants, got Progressive=false — tools: %v",
+			mcpCount, ProgressiveDiscoveryThreshold, len(allForSync), toolNames(sel.Tools))
+	}
+
+	names := toolNames(sel.Tools)
+	found := false
+	for _, n := range names {
+		if n == wantedBuiltin {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected granted builtin tool %q to survive progressive-discovery selection despite sitting past MaxSelectedTools among builtins alone; got tools: %v",
+			wantedBuiltin, names)
+	}
+}
+
 // TestSelectForAgent_AlwaysIncludedSurvivesZeroGrants is the acceptance
 // test for this task's item 5 / Done-means bullet 3: an agent with a real
 // agent_profiles row and ZERO explicit agent_tools grants (no legacy

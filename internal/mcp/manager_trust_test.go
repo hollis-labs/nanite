@@ -53,10 +53,10 @@ func TestManager_AddServer_ThreadsTierLimitIntoTransport(t *testing.T) {
 }
 
 func TestManager_DiscoverTools_DoesNotTruncateHighToolCount(t *testing.T) {
-	// Third-party advisory threshold is 50. Advertise 60 tools → advisory
-	// warning fires, but ALL 60 are still retained (CW-20260815-0019:
+	// Third-party advisory threshold is 200. Advertise 210 tools → advisory
+	// warning fires, but ALL 210 are still retained (CW-20260815-0019:
 	// discovery-time truncation removed, warning is advisory-only now).
-	tools := make([]Tool, 60)
+	tools := make([]Tool, 210)
 	for i := range tools {
 		tools[i] = Tool{Name: "tool_" + itoa(i), Description: "desc"}
 	}
@@ -70,8 +70,8 @@ func TestManager_DiscoverTools_DoesNotTruncateHighToolCount(t *testing.T) {
 	}
 
 	gotTools := mgr.GetAllTools()
-	if len(gotTools) != 60 {
-		t.Errorf("retained tool count: got %d want 60 (nothing should be truncated)", len(gotTools))
+	if len(gotTools) != 210 {
+		t.Errorf("retained tool count: got %d want 210 (nothing should be truncated)", len(gotTools))
 	}
 
 	warnings := mgr.GetDiscoveryWarnings()
@@ -134,9 +134,9 @@ var torqueCatalogToolNames = []string{
 // because DiscoverTools sliced the (alphabetically sorted) tool list at
 // the tier's MaxToolsPerServer cap, and those four names sorted just past
 // torque_task_delete. Registered at TierThirdPartyHTTP — the strictest
-// tier (advisory threshold 50, well below all 93) — to prove the fix
-// holds even in the worst case: nothing is dropped regardless of tier,
-// and the four originally-missing task tools are back.
+// tier — to prove the fix holds even in the worst case: nothing is
+// dropped regardless of tier or tool count, and the four
+// originally-missing task tools are back.
 func TestManager_DiscoverTools_TorqueCatalogFullyDiscovered(t *testing.T) {
 	tools := make([]Tool, len(torqueCatalogToolNames))
 	for i, name := range torqueCatalogToolNames {
@@ -174,15 +174,11 @@ func TestManager_DiscoverTools_TorqueCatalogFullyDiscovered(t *testing.T) {
 		}
 	}
 
-	var hadWarning bool
-	for _, w := range mgr.GetDiscoveryWarnings() {
-		if w.ServerName == "torque" && w.Reason == WarnToolCountHigh {
-			hadWarning = true
-		}
-	}
-	if !hadWarning {
-		t.Error("expected an advisory tool_count_high warning for a 93-tool server on the third-party tier (threshold 50)")
-	}
+	// The advisory tool_count_high check itself is exercised separately by
+	// TestManager_DiscoverTools_DoesNotTruncateHighToolCount — the
+	// third-party threshold was raised (CW-20260918 limits rebaseline) to
+	// 200, comfortably above this fixture's real 93-tool torque catalog,
+	// so this test no longer also doubles as a warning-fires check.
 }
 
 func TestManager_DiscoverTools_RejectsInvalidToolNames(t *testing.T) {
@@ -190,7 +186,7 @@ func TestManager_DiscoverTools_RejectsInvalidToolNames(t *testing.T) {
 	tools := []Tool{
 		{Name: "good_tool", Description: "ok"},
 		{Name: "bad name with spaces", Description: "rejected"},
-		{Name: strings.Repeat("x", 200), Description: "too long for third-party"},
+		{Name: strings.Repeat("x", 300), Description: "too long for third-party"},
 	}
 	if err := mgr.AddServer("srv", &fakeTieredTransport{tools: tools}, TierThirdPartyHTTP); err != nil {
 		t.Fatalf("AddServer: %v", err)
@@ -237,9 +233,9 @@ func TestManager_ExecuteTool_StripsANSIAndEnforcesTierResultCap(t *testing.T) {
 		t.Errorf("ANSI stripping: got %q want %q", got, "hello")
 	}
 
-	// Exceed the third-party tier result cap (128 KiB) with a plain-text
+	// Exceed the third-party tier result cap (2 MiB) with a plain-text
 	// body; the post-return ValidateResultSize guard must surface an error.
-	big := strings.Repeat("a", 200*1024)
+	big := strings.Repeat("a", 3*1024*1024)
 	ft2 := &fakeTieredTransport{
 		tools:      []Tool{{Name: "tool", Description: "x"}},
 		resultText: big,
@@ -274,7 +270,8 @@ func TestManager_ExecuteToolOnServer_UsesResultProcessingTail(t *testing.T) {
 		t.Errorf("ANSI stripping: got %q want %q", got, "hello")
 	}
 
-	big := strings.Repeat("a", 200*1024)
+	// Exceed the third-party tier result cap (2 MiB).
+	big := strings.Repeat("a", 3*1024*1024)
 	ft2 := &fakeTieredTransport{
 		tools:      []Tool{{Name: "tool", Description: "x"}},
 		resultText: big,

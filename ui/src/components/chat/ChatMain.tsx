@@ -13,6 +13,7 @@ import { useLayoutStore } from "@/stores/useLayoutStore";
 import { ChatComposer } from "./ChatComposer";
 import { ChatHeader } from "./ChatHeader";
 import { ChatTranscript } from "./ChatTranscript";
+import { SetupWizard } from "./SetupWizard";
 
 interface ChatMainProps {
   active?: boolean;
@@ -279,7 +280,32 @@ function AgentLaunchCards({ onStarted, fallback }: { onStarted: () => void; fall
  * The no-session surface. Exported for tests — ChatMain itself pulls in the
  * whole chat runtime, which this does not need.
  */
+const SETUP_WIZARD_DISMISSED_KEY = "nanite:setupWizardDismissed";
+
 export function WelcomeScreen() {
+  const { data: settings } = useSettings();
+  const [wizardDismissed, setWizardDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(SETUP_WIZARD_DISMISSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  // A fresh seed leaves default_provider empty (internal/store/seed.go) — that's
+  // the reliable "nothing usable is configured yet" signal, independent of
+  // whether builtin agent profiles happen to exist (they always do).
+  const needsSetup = settings?.default_provider === "" && !wizardDismissed;
+
+  const handleDismissWizard = () => {
+    try {
+      localStorage.setItem(SETUP_WIZARD_DISMISSED_KEY, "1");
+    } catch {
+      // best-effort — private windows / blocked storage just re-show the wizard next time
+    }
+    setWizardDismissed(true);
+  };
+
   const handleAction = (action: (typeof SETUP_CARDS)[number]["action"]) => {
     if (action === "new-chat") {
       return;
@@ -315,16 +341,24 @@ export function WelcomeScreen() {
     <main className="flex-1 flex flex-col items-center justify-center min-w-0 bg-bg px-8">
       <div className="max-w-lg w-full text-center mb-10">
         <h1 className="text-2xl font-semibold text-fg mb-2">Welcome to Nanite</h1>
-        <p className="text-sm text-fg-muted">Pick an agent to start a conversation with.</p>
+        <p className="text-sm text-fg-muted">
+          {needsSetup
+            ? "Let's get you connected to an agent."
+            : "Pick an agent to start a conversation with."}
+        </p>
       </div>
 
-      <AgentLaunchCards
-        onStarted={() => {
-          useLayoutStore.getState().setCurrentPage("chat");
-          window.location.hash = "#chat";
-        }}
-        fallback={setupCards}
-      />
+      {needsSetup ? (
+        <SetupWizard onDismiss={handleDismissWizard} />
+      ) : (
+        <AgentLaunchCards
+          onStarted={() => {
+            useLayoutStore.getState().setCurrentPage("chat");
+            window.location.hash = "#chat";
+          }}
+          fallback={setupCards}
+        />
+      )}
 
       <p className="text-xs text-fg-faint mt-8">
         Cmd+N new chat &middot; Cmd+B sidebar &middot; Cmd+/ widgets &middot; Cmd+L focus editor

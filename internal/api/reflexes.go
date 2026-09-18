@@ -257,6 +257,61 @@ func (a *API) handleDeleteAgentReflex(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, map[string]any{"id": reflexID, "status": "deleted"})
 }
 
+// handleSetAgentReflexOptOut detaches agent from a class-wide reflex it
+// would otherwise inherit. Rejects reflexes with opt_out_allowed=false, the
+// same way Store.ListAgentReflexesForAgent's own subquery ignores this
+// table entirely for those rows (CW-20260918-0023).
+// POST /api/agents/{id}/reflexes/{reflexId}/opt-out
+func (a *API) handleSetAgentReflexOptOut(w http.ResponseWriter, r *http.Request) {
+	agent, ok := a.requireMutableAgent(w, r)
+	if !ok {
+		return
+	}
+	reflexID := r.PathValue("reflexId")
+	reflex, err := a.Services.Store.GetAgentReflex(r.Context(), reflexID)
+	if err != nil {
+		if errors.Is(err, store.ErrAgentReflexNotFound) {
+			a.errorResp(w, http.StatusNotFound, "reflex not found")
+			return
+		}
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !reflex.OptOutAllowed {
+		a.errorResp(w, http.StatusBadRequest, "reflex does not allow opt-out")
+		return
+	}
+	if err := a.Services.Store.SetAgentReflexOptOut(r.Context(), agent.ID, reflexID); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, map[string]any{"agent_id": agent.ID, "reflex_id": reflexID, "opted_out": true})
+}
+
+// handleClearAgentReflexOptOut re-enables a class-wide reflex previously
+// opted out of via handleSetAgentReflexOptOut.
+// DELETE /api/agents/{id}/reflexes/{reflexId}/opt-out
+func (a *API) handleClearAgentReflexOptOut(w http.ResponseWriter, r *http.Request) {
+	agent, ok := a.requireMutableAgent(w, r)
+	if !ok {
+		return
+	}
+	reflexID := r.PathValue("reflexId")
+	if _, err := a.Services.Store.GetAgentReflex(r.Context(), reflexID); err != nil {
+		if errors.Is(err, store.ErrAgentReflexNotFound) {
+			a.errorResp(w, http.StatusNotFound, "reflex not found")
+			return
+		}
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := a.Services.Store.ClearAgentReflexOptOut(r.Context(), agent.ID, reflexID); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, map[string]any{"agent_id": agent.ID, "reflex_id": reflexID, "opted_out": false})
+}
+
 func (a *API) handleValidateReflex(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TriggerKind string         `json:"trigger_kind"`

@@ -205,6 +205,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/{id}/reflexes", a.handleCreateAgentReflex)
 	mux.HandleFunc("PATCH /api/agents/{id}/reflexes/{reflexId}", a.handlePatchAgentReflex)
 	mux.HandleFunc("DELETE /api/agents/{id}/reflexes/{reflexId}", a.handleDeleteAgentReflex)
+	mux.HandleFunc("POST /api/agents/{id}/reflexes/{reflexId}/opt-out", a.handleSetAgentReflexOptOut)
+	mux.HandleFunc("DELETE /api/agents/{id}/reflexes/{reflexId}/opt-out", a.handleClearAgentReflexOptOut)
 	mux.HandleFunc("POST /api/reflexes/validate", a.handleValidateReflex)
 	mux.HandleFunc("GET /api/pending/reflexes", a.handleListPendingReflexes)
 	mux.HandleFunc("POST /api/pending/reflexes/{id}/approve", a.handleApprovePendingReflex)

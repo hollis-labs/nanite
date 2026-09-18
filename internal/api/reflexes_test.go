@@ -207,6 +207,110 @@ func TestReflexesAPI_PendingReviewAndValidate(t *testing.T) {
 	}
 }
 
+// TestReflexesAPI_OptOutOfClassWideReflex is the Done-means test for
+// CW-20260918-0023: the opt-out store functions (SetAgentReflexOptOut/
+// ClearAgentReflexOptOut) existed with zero callers before this endpoint --
+// this pins the actual write path end to end. Opting out of a class-wide
+// reflex with opt_out_allowed=true removes it from the agent's resolved
+// list; a reflex with opt_out_allowed=false rejects the opt-out with 400;
+// clearing the opt-out restores the reflex to the resolved list.
+func TestReflexesAPI_OptOutOfClassWideReflex(t *testing.T) {
+	a, mux := newTestAPI(t)
+	ctx := context.Background()
+	agent := &store.AgentProfile{Name: "Opt Out Agent", Slug: "opt-out-agent", SystemPrompt: "x", Class: "advisor"}
+	if err := a.Services.Store.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	optable, err := a.Services.Store.InsertAgentReflex(ctx, store.AgentReflex{
+		ClassTag:      "advisor",
+		Name:          "class-wide-optable",
+		TriggerKind:   store.ReflexTriggerPredicate,
+		TriggerSpec:   `{"kind":"tool_calls_window","window":2,"op":"=","value":0}`,
+		ActionKind:    store.ReflexActionInjectReminder,
+		ActionSpec:    `{"body":"ground"}`,
+		CreatedBy:     "system",
+		OptOutAllowed: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertAgentReflex(optable): %v", err)
+	}
+	notOptable, err := a.Services.Store.InsertAgentReflex(ctx, store.AgentReflex{
+		ClassTag:      "advisor",
+		Name:          "class-wide-not-optable",
+		TriggerKind:   store.ReflexTriggerPredicate,
+		TriggerSpec:   `{"kind":"tool_calls_window","window":2,"op":"=","value":0}`,
+		ActionKind:    store.ReflexActionInjectReminder,
+		ActionSpec:    `{"body":"ground"}`,
+		CreatedBy:     "system",
+		OptOutAllowed: false,
+	})
+	if err != nil {
+		t.Fatalf("InsertAgentReflex(notOptable): %v", err)
+	}
+
+	listIncludes := func(id string) bool {
+		req := httptest.NewRequest(http.MethodGet, "/api/agents/"+agent.ID+"/reflexes", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("list reflexes = %d body=%s", w.Code, w.Body.String())
+		}
+		var rows []store.AgentReflex
+		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+			t.Fatalf("decode reflexes: %v", err)
+		}
+		for _, row := range rows {
+			if row.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !listIncludes(optable) {
+		t.Fatalf("expected class-wide optable reflex to be resolved before opt-out")
+	}
+
+	// opt_out_allowed=false rejects the opt-out.
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/reflexes/"+notOptable+"/opt-out", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("opt-out of non-optable reflex = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+
+	// opt_out_allowed=true succeeds and removes it from the resolved list.
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/reflexes/"+optable+"/opt-out", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("opt-out of optable reflex = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if listIncludes(optable) {
+		t.Fatalf("expected class-wide optable reflex to be excluded after opt-out")
+	}
+
+	// Re-opting-out is idempotent.
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/reflexes/"+optable+"/opt-out", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("repeat opt-out = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	// Clearing the opt-out restores it.
+	req = httptest.NewRequest(http.MethodDelete, "/api/agents/"+agent.ID+"/reflexes/"+optable+"/opt-out", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("clear opt-out = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if !listIncludes(optable) {
+		t.Fatalf("expected class-wide optable reflex to be resolved again after clearing opt-out")
+	}
+}
+
 // TestValidateReflexDefinition_ProvenanceTierGate is the regression test for
 // TASKS/reflex-taxonomy/05-provenance-tier-enforcement.md: attempting to
 // declare a halt_session reflex at plugin tier is rejected with a clear

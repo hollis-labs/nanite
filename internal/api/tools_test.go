@@ -116,3 +116,53 @@ func TestHandleListAgentTools_UnknownAgentDeniesAll(t *testing.T) {
 		}
 	}
 }
+
+// TestHandleListAgentTools_ResolvesKnownToolID pins the `id` field this
+// endpoint gained so a UI can grant/revoke directly off its response
+// without a second lookup: a tool synced into known_tools resolves its
+// row ID, and a live-catalog tool that hasn't been synced yet (the
+// "known_tools learns MCP tools only at boot" gap docs/adding-an-agent.md
+// describes) reports id:"" rather than a wrong or panicking lookup.
+func TestHandleListAgentTools_ResolvesKnownToolID(t *testing.T) {
+	a, mux := newTestAPI(t)
+	ctx := context.Background()
+
+	tc := toolclient.New(mcp.NewManager(), a.Services.Store, nil)
+	tc.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
+		{Name: "dev_read", Description: "Read a file"},
+		{Name: "dev_unsynced", Description: "Not yet in known_tools"},
+	})
+	a.Services.ToolClient = tc
+
+	agent := createTestAgentForGrant(t, mux, "list-tools-id-agent", nil)
+
+	toolID, err := a.Services.Store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
+	if err != nil {
+		t.Fatalf("UpsertKnownTool: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/agents/"+agent.ID+"/tools", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/agents/{id}/tools: expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	var items []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&items); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	byName := make(map[string]string, len(items))
+	for _, it := range items {
+		byName[it.Name] = it.ID
+	}
+	if byName["dev_read"] != toolID {
+		t.Errorf("expected dev_read id=%q (its known_tools row), got %q", toolID, byName["dev_read"])
+	}
+	if byName["dev_unsynced"] != "" {
+		t.Errorf("expected dev_unsynced (never synced into known_tools) to report id=\"\", got %q", byName["dev_unsynced"])
+	}
+}

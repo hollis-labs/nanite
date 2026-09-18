@@ -24,11 +24,11 @@ import type {
   AgentProcedure,
   AgentProcedureUpsertRequest,
   AgentProfile,
+  AgentSkillGrantView,
+  AgentToolItem,
   Skill,
   ToolLoadItem,
 } from "@/lib/types";
-import { EditableStringList } from "./editors/EditableStringList";
-import { ToolPermissionsEditor } from "./editors/ToolPermissionsEditor";
 
 type CapabilitiesProps = {
   agent: AgentProfile;
@@ -37,7 +37,6 @@ type CapabilitiesProps = {
   availableSkills: Skill[];
   onAssignSkill: (skillId: string) => void;
   onRemoveSkill: (skillId: string) => void;
-  onUpdateAgent: (data: Partial<AgentProfile>) => void;
 };
 
 type KnownToolEditorState = {
@@ -103,7 +102,6 @@ export function AgentCapabilitiesPanel({
   availableSkills,
   onAssignSkill,
   onRemoveSkill,
-  onUpdateAgent,
 }: CapabilitiesProps) {
   const queryClient = useQueryClient();
   const [showSkillPicker, setShowSkillPicker] = useState(false);
@@ -115,6 +113,22 @@ export function AgentCapabilitiesPanel({
   const [editingProcedure, setEditingProcedure] = useState<string | null>(null);
   const [seedDraft, setSeedDraft] = useState<SeedEditorState | null>(null);
   const [editingSeed, setEditingSeed] = useState<string | null>(null);
+  const [toolSearch, setToolSearch] = useState("");
+
+  const agentToolsQuery = useQuery({
+    queryKey: ["agent-tools", agent.id],
+    queryFn: () => api.listAgentTools(agent.id),
+  });
+  const refreshAgentTools = () =>
+    queryClient.invalidateQueries({ queryKey: ["agent-tools", agent.id] });
+  const grantToolMutation = useMutation({
+    mutationFn: (toolId: string) => api.grantAgentTool(agent.id, { tool_id: toolId }),
+    onSuccess: () => void refreshAgentTools(),
+  });
+  const revokeToolMutation = useMutation({
+    mutationFn: (toolId: string) => api.revokeAgentTool(agent.id, toolId),
+    onSuccess: () => void refreshAgentTools(),
+  });
 
   const knownToolsQuery = useQuery({
     queryKey: ["agent-known-tools", agent.id],
@@ -267,8 +281,10 @@ export function AgentCapabilitiesPanel({
     [allToolsQuery.data],
   );
 
-  const allowlistCount = parseStringArray(agent.tools).length;
-  const permissionSummary = parseToolPermissions(agent.tool_permissions);
+  const grantedToolCount = useMemo(
+    () => (agentToolsQuery.data ?? []).filter((tool) => tool.allowed).length,
+    [agentToolsQuery.data],
+  );
   const knownSkillsCatalog = useMemo(
     () => [...agentSkills, ...availableSkills].reduce<Skill[]>((acc, skill) => {
       if (!acc.some((entry) => entry.id === skill.id)) acc.push(skill);
@@ -300,15 +316,10 @@ export function AgentCapabilitiesPanel({
         ) : null}
         <div className="space-y-1.5">
           {agentSkills.map((skill) => (
-            <InlineRow
+            <AssignedSkillRow
               key={skill.id}
-              label={skill.name}
-              badges={[
-                skill.category || "uncategorized",
-                skill.source || (skill.is_builtin ? "builtin" : "user"),
-              ]}
-              detail={skill.description}
-              actionLabel={`Remove skill ${skill.name}`}
+              agentId={agent.id}
+              skill={skill}
               disabled={isReadOnly}
               onRemove={() => onRemoveSkill(skill.id)}
             />
@@ -350,35 +361,59 @@ export function AgentCapabilitiesPanel({
       </SectionCard>
 
       <SectionCard
-        title="Tools And Permissions"
-        description="Allowlist controls broad tool availability. Permissions define explicit allow and deny patterns. Known tools below bias context toward specific tools."
+        title={`Tool Grants (${grantedToolCount}/${agentToolsQuery.data?.length ?? 0})`}
+        description="agent_tools is the real, sole gate on what this agent can execute — a tool with no grant here reaches the model only through the always-included discovery tools (request_tools, tool_list, tool_describe). Toggle a tool to grant or revoke it immediately."
       >
+        <MutationMessage errors={[grantToolMutation.error, revokeToolMutation.error]} />
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-          <div className="space-y-4">
-            <div className="rounded-lg border border-border-subtle bg-surface/30 p-3">
-              <EditableStringList
-                value={agent.tools}
-                onChange={(value) => onUpdateAgent({ tools: value })}
-                icon={Wrench}
-                label="Tools Allowlist"
-                placeholder="mcp__server__tool_name or glob pattern"
-                emptyText="No allowlist — all discovered tools are eligible"
-                pathStyle={false}
-                disabled={isReadOnly}
-              />
-            </div>
-            <div className="rounded-lg border border-border-subtle bg-surface/30 p-3">
-              <ToolPermissionsEditor
-                value={agent.tool_permissions}
-                onChange={(value) => onUpdateAgent({ tool_permissions: value })}
-                disabled={isReadOnly}
-              />
-            </div>
+          <div className="space-y-2">
+            <Input
+              value={toolSearch}
+              onChange={(e) => setToolSearch(e.target.value)}
+              placeholder="Filter tools by name..."
+              className="h-8 text-xs"
+            />
+            <QueryStateBlock
+              query={agentToolsQuery}
+              empty="No tools discovered yet."
+              render={(rows) => {
+                const filtered = rows
+                  .filter((t) =>
+                    toolSearch.trim()
+                      ? t.name.toLowerCase().includes(toolSearch.trim().toLowerCase())
+                      : true,
+                  )
+                  .sort((a, b) => a.name.localeCompare(b.name));
+                return filtered.length === 0 ? (
+                  <PanelMessage>No tools match &quot;{toolSearch}&quot;.</PanelMessage>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto space-y-0.5 rounded-lg border border-border-subtle bg-surface/20 p-1">
+                    {filtered.map((tool) => (
+                      <ToolGrantRow
+                        key={tool.name}
+                        tool={tool}
+                        disabled={
+                          isReadOnly ||
+                          !tool.id ||
+                          grantToolMutation.isPending ||
+                          revokeToolMutation.isPending
+                        }
+                        onToggle={() => {
+                          if (!tool.id) return;
+                          if (tool.allowed) revokeToolMutation.mutate(tool.id);
+                          else grantToolMutation.mutate(tool.id);
+                        }}
+                      />
+                    ))}
+                  </div>
+                );
+              }}
+            />
           </div>
 
           <div className="rounded-lg border border-border-subtle bg-surface/30 p-3 space-y-3">
             <div className="grid grid-cols-3 gap-2">
-              <MetricCard label="Allowlist" value={String(allowlistCount)} />
+              <MetricCard label="Granted" value={String(grantedToolCount)} />
               <MetricCard
                 label="Discovered"
                 value={allToolsQuery.isLoading ? "…" : String(availableLoadCount)}
@@ -387,12 +422,6 @@ export function AgentCapabilitiesPanel({
                 label="Auto Load"
                 value={allToolsQuery.isLoading ? "…" : String(autoLoadCount)}
               />
-            </div>
-            <div className="space-y-1">
-              <div className="text-[11px] font-medium text-fg-secondary">Permission summary</div>
-              <div className="text-xs text-fg-muted">
-                Allow {permissionSummary.allow} · Deny {permissionSummary.deny}
-              </div>
             </div>
             <div className="space-y-1">
               <div className="text-[11px] font-medium text-fg-secondary">Available tools</div>
@@ -798,47 +827,104 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function InlineRow({
-  label,
-  badges,
-  detail,
+// AssignedSkillRow shows an assigned skill's real execution-grant status —
+// distinct from mere row existence (agentSkills/onRemoveSkill above) — and
+// lets an operator approve or revoke it. See docs/adding-an-agent.md
+// "Skills: a catalog entry is not a grant": a skill can be assigned here
+// yet still hit GrantRequiredError at runtime until it's approved below.
+function skillGrantStatusLabel(status: AgentSkillGrantView["status"] | undefined, isLoading: boolean): string {
+  if (isLoading) return "checking…";
+  switch (status) {
+    case "approved":
+      return "approved";
+    case "reapproval_required":
+      return "needs re-approval";
+    case "grant_required":
+      return "not approved";
+    default:
+      return "unknown";
+  }
+}
+
+function AssignedSkillRow({
+  agentId,
+  skill,
   disabled,
-  actionLabel,
   onRemove,
 }: {
-  label: string;
-  badges: string[];
-  detail?: string;
+  agentId: string;
+  skill: Skill;
   disabled: boolean;
-  actionLabel: string;
   onRemove: () => void;
 }) {
+  const queryClient = useQueryClient();
+  const grantQuery = useQuery({
+    queryKey: ["agent-skill-grant", agentId, skill.slug],
+    queryFn: () => api.getAgentSkillGrant(agentId, skill.slug),
+  });
+  const refreshGrant = () =>
+    queryClient.invalidateQueries({ queryKey: ["agent-skill-grant", agentId, skill.slug] });
+  const grantMutation = useMutation({
+    mutationFn: () => api.grantAgentSkill(agentId, skill.slug, { granted_by: "operator-ui" }),
+    onSuccess: () => void refreshGrant(),
+  });
+  const revokeMutation = useMutation({
+    mutationFn: () => api.revokeAgentSkillGrant(agentId, skill.slug),
+    onSuccess: () => void refreshGrant(),
+  });
+
+  const status = grantQuery.data?.status;
+  const statusClass = status === "approved" ? "text-success" : status ? "text-danger" : "text-fg-muted";
+
   return (
     <div className="group flex items-start gap-3 rounded-md border border-border-subtle bg-surface/20 px-3 py-2">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-medium text-fg">{label}</span>
-          {badges.filter(Boolean).map((badge) => (
-            <span
-              key={badge}
-              className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted"
-            >
-              {badge}
-            </span>
-          ))}
+          <span className="text-xs font-medium text-fg">{skill.name}</span>
+          <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted">
+            {skill.category || "uncategorized"}
+          </span>
+          <span className={`rounded bg-surface px-1.5 py-0.5 text-[10px] ${statusClass}`}>
+            {skillGrantStatusLabel(status, grantQuery.isLoading)}
+          </span>
         </div>
-        {detail ? <div className="mt-1 text-[11px] text-fg-muted">{detail}</div> : null}
+        {skill.description ? <div className="mt-1 text-[11px] text-fg-muted">{skill.description}</div> : null}
+        {grantMutation.error ? <PanelError message={errorMessage(grantMutation.error)} /> : null}
+        {revokeMutation.error ? <PanelError message={errorMessage(revokeMutation.error)} /> : null}
       </div>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100 disabled:opacity-40"
-        aria-label={actionLabel}
-        onClick={onRemove}
-        disabled={disabled}
-      >
-        <X className="w-3.5 h-3.5" />
-      </Button>
+      <div className="flex items-center gap-1 shrink-0">
+        {status === "approved" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-[11px] text-danger hover:text-danger"
+            onClick={() => revokeMutation.mutate()}
+            disabled={disabled || revokeMutation.isPending}
+          >
+            Revoke
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-[11px]"
+            onClick={() => grantMutation.mutate()}
+            disabled={disabled || grantMutation.isPending || grantQuery.isLoading}
+          >
+            Approve
+          </Button>
+        )}
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100 disabled:opacity-40"
+          aria-label={`Remove skill ${skill.name}`}
+          onClick={onRemove}
+          disabled={disabled}
+        >
+          <X className="w-3.5 h-3.5" />
+        </Button>
+      </div>
     </div>
   );
 }
@@ -924,6 +1010,55 @@ function ToolChip({ tool }: { tool: ToolLoadItem }) {
       <span className="font-mono">{tool.name}</span>
       <span className="text-fg-faint">· {tool.load_type}</span>
     </span>
+  );
+}
+
+function ToolGrantRow({
+  tool,
+  disabled,
+  onToggle,
+}: {
+  tool: AgentToolItem;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  const notSynced = !tool.id;
+  return (
+    <div className="group flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-surface/40 transition-colors">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={tool.allowed}
+        aria-label={`${tool.allowed ? "Revoke" : "Grant"} ${tool.name}`}
+        onClick={onToggle}
+        disabled={disabled}
+        className={`relative shrink-0 inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+          tool.allowed ? "bg-toggle-on" : "bg-surface-hover"
+        }`}
+      >
+        <span
+          className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+            tool.allowed ? "translate-x-[18px]" : "translate-x-[3px]"
+          }`}
+        />
+      </button>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-mono text-fg truncate">{tool.name}</span>
+          {notSynced ? (
+            <span
+              className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-fg-faint"
+              title="Not yet synced into the tool catalog — restart Nanite to grant this tool"
+            >
+              needs restart
+            </span>
+          ) : null}
+        </div>
+        {tool.description ? (
+          <div className="text-[11px] text-fg-muted truncate">{tool.description}</div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -1464,17 +1599,6 @@ function parseStringArray(value: string): string[] {
   }
 }
 
-function parseToolPermissions(value: string): { allow: number; deny: number } {
-  try {
-    const parsed = JSON.parse(value || "{}") as { allow?: unknown[]; deny?: unknown[] };
-    return {
-      allow: Array.isArray(parsed.allow) ? parsed.allow.length : 0,
-      deny: Array.isArray(parsed.deny) ? parsed.deny.length : 0,
-    };
-  } catch {
-    return { allow: 0, deny: 0 };
-  }
-}
 
 function buildKnownToolPayload(draft: KnownToolEditorState): AgentKnownToolUpsertRequest {
   return {

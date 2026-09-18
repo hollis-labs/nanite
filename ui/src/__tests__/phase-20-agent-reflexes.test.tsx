@@ -39,6 +39,9 @@ function reflex(overrides: Partial<AgentReflexRow> = {}): AgentReflexRow {
     last_fired_at: "",
     created_at: "2026-05-24T00:00:00Z",
     created_by: "seed",
+    opt_out_allowed: true,
+    provenance_tier: "system",
+    recurrence_override_seconds: null,
     ...overrides,
   };
 }

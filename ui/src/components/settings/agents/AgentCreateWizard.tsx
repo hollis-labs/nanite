@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ArrowRight,
@@ -9,7 +10,9 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DynamicIcon, IconPicker } from "@/components/ui/icon-picker";
+import { api } from "@/lib/api";
 import type { CreateAgentProfileRequest } from "@/lib/types";
+import { CapabilityChecklist } from "./editors/CapabilityChecklist";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -23,8 +26,8 @@ interface AgentCreateWizardProps {
   createdAgentId?: string;
 }
 
-type Step = "identity" | "instructions";
-const STEPS: Step[] = ["identity", "instructions"];
+type Step = "identity" | "instructions" | "capabilities";
+const STEPS: Step[] = ["identity", "instructions", "capabilities"];
 
 // ─── Component ──────────────────────────────────────────────────────
 
@@ -49,6 +52,9 @@ export function AgentCreateWizard({
   const [defaultModelValue, setDefaultModelValue] = useState(defaultModel);
   const [canExecute, setCanExecute] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [mcpServerNames, setMcpServerNames] = useState<Set<string>>(new Set());
+  const [roleToolNames, setRoleToolNames] = useState<Set<string>>(new Set());
+  const [roleSkillSlugs, setRoleSkillSlugs] = useState<Set<string>>(new Set());
 
   // Auto-generate slug from name unless manually edited
   useEffect(() => {
@@ -80,6 +86,7 @@ export function AgentCreateWizard({
   const canProceed = useMemo(() => {
     if (step === "identity") return name.trim().length > 0 && slug.trim().length > 0;
     if (step === "instructions") return systemPrompt.trim().length > 0;
+    if (step === "capabilities") return true;
     return false;
   }, [step, name, slug, systemPrompt]);
 
@@ -95,11 +102,11 @@ export function AgentCreateWizard({
         system_prompt: systemPrompt.trim(),
         default_model: defaultModelValue,
         can_execute: canExecute,
-        mcp_servers: "[]",
-        tool_permissions: "{}",
+        mcp_servers: JSON.stringify(Array.from(mcpServerNames)),
+        role_tools: JSON.stringify(Array.from(roleToolNames)),
+        role_skills: JSON.stringify(Array.from(roleSkillSlugs)),
         modes: "",
         settings: "{}",
-        tools: "[]",
         directories: "[]",
         constraints: "{}",
         tags: "[]",
@@ -110,7 +117,23 @@ export function AgentCreateWizard({
     } else {
       setStep(STEPS[stepIndex + 1]);
     }
-  }, [canProceed, isLastStep, stepIndex, name, slug, avatar, icon, description, systemPrompt, defaultModelValue, canExecute, onSubmit]);
+  }, [
+    canProceed,
+    isLastStep,
+    stepIndex,
+    name,
+    slug,
+    avatar,
+    icon,
+    description,
+    systemPrompt,
+    defaultModelValue,
+    canExecute,
+    mcpServerNames,
+    roleToolNames,
+    roleSkillSlugs,
+    onSubmit,
+  ]);
 
   const handleBack = useCallback(() => {
     if (isFirstStep) {
@@ -142,7 +165,11 @@ export function AgentCreateWizard({
         <div className="flex-1 min-w-0">
           <h2 className="text-xl font-semibold text-fg">New Agent</h2>
           <p className="text-xs text-fg-muted mt-0.5">
-            {step === "identity" ? "Define who this agent is" : "Write the system prompt"}
+            {step === "identity"
+              ? "Define who this agent is"
+              : step === "instructions"
+                ? "Write the system prompt"
+                : "Grant the tools, skills, and MCP servers it needs"}
           </p>
         </div>
       </div>
@@ -191,6 +218,23 @@ export function AgentCreateWizard({
             systemPrompt={systemPrompt}
             onSystemPromptChange={setSystemPrompt}
             promptRef={promptRef}
+          />
+        )}
+
+        {step === "capabilities" && (
+          <CapabilitiesStep
+            mcpServerNames={mcpServerNames}
+            onToggleMcpServer={(name) =>
+              setMcpServerNames((prev) => toggleSet(prev, name))
+            }
+            roleToolNames={roleToolNames}
+            onToggleRoleTool={(name) =>
+              setRoleToolNames((prev) => toggleSet(prev, name))
+            }
+            roleSkillSlugs={roleSkillSlugs}
+            onToggleRoleSkill={(slug) =>
+              setRoleSkillSlugs((prev) => toggleSet(prev, slug))
+            }
           />
         )}
       </div>
@@ -432,9 +476,98 @@ function InstructionsStep({
             className="w-full px-3 py-2.5 bg-bg-elevated border border-border-subtle rounded-lg text-sm text-fg font-mono leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[280px] placeholder:text-fg-faint/50 transition-colors"
           />
           <p className="text-[10px] text-fg-faint">
-            You can refine this later. Advanced config (tools, directories, MCP servers) is available after creation.
+            You can refine this later. Directory scoping and reflexes are available after creation.
           </p>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+// ─── Step 3: Capabilities ───────────────────────────────────────────
+
+function toggleSet(set: Set<string>, key: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
+
+function CapabilitiesStep({
+  mcpServerNames,
+  onToggleMcpServer,
+  roleToolNames,
+  onToggleRoleTool,
+  roleSkillSlugs,
+  onToggleRoleSkill,
+}: {
+  mcpServerNames: Set<string>;
+  onToggleMcpServer: (name: string) => void;
+  roleToolNames: Set<string>;
+  onToggleRoleTool: (name: string) => void;
+  roleSkillSlugs: Set<string>;
+  onToggleRoleSkill: (slug: string) => void;
+}) {
+  const mcpServersQuery = useQuery({
+    queryKey: ["mcp-servers"],
+    queryFn: api.listMCPServers,
+  });
+  const toolsQuery = useQuery({
+    queryKey: ["tools-with-load-type"],
+    queryFn: api.fetchAllToolsWithLoadType,
+  });
+  const skillsQuery = useQuery({
+    queryKey: ["skills"],
+    queryFn: api.listSkills,
+  });
+
+  return (
+    <Card>
+      <div className="p-5 space-y-5">
+        <p className="text-[11px] text-fg-muted">
+          Nothing here is required — an agent with no grants still gets created, just with no
+          tools beyond the built-in discovery set. Skills you pick still need approval afterward
+          (Capabilities tab → Skills) before they can execute; this only makes them discoverable.
+        </p>
+
+        <CapabilityChecklist
+          title="MCP Servers"
+          description="Servers this agent connects to, by name — register new servers under Settings → MCP first."
+          items={mcpServersQuery.data ?? []}
+          isLoading={mcpServersQuery.isLoading}
+          getKey={(s) => s.name}
+          getLabel={(s) => s.name}
+          getDetail={(s) => s.transport_type}
+          selected={mcpServerNames}
+          onToggle={onToggleMcpServer}
+          emptyText="No MCP servers registered yet."
+        />
+
+        <CapabilityChecklist
+          title="Tools"
+          description="Granted immediately on create — this is the real agent_tools gate, not a suggestion."
+          items={toolsQuery.data ?? []}
+          isLoading={toolsQuery.isLoading}
+          getKey={(t) => t.name}
+          getLabel={(t) => t.name}
+          getDetail={(t) => t.description}
+          selected={roleToolNames}
+          onToggle={onToggleRoleTool}
+          emptyText="No tools discovered yet."
+        />
+
+        <CapabilityChecklist
+          title="Skills"
+          description="Made discoverable on create. Approve each one afterward to let the agent actually run it."
+          items={skillsQuery.data ?? []}
+          isLoading={skillsQuery.isLoading}
+          getKey={(s) => s.slug}
+          getLabel={(s) => s.name}
+          getDetail={(s) => s.description}
+          selected={roleSkillSlugs}
+          onToggle={onToggleRoleSkill}
+          emptyText="No skills installed yet."
+        />
       </div>
     </Card>
   );

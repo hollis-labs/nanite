@@ -151,6 +151,13 @@ function mockBaseQueries() {
   vi.spyOn(api, "listAgentProcedures").mockResolvedValue([]);
   vi.spyOn(api, "listAgentKnowledgeSeeds").mockResolvedValue([]);
   vi.spyOn(api, "fetchAllToolsWithLoadType").mockResolvedValue([tool()]);
+  vi.spyOn(api, "listAgentTools").mockResolvedValue([]);
+  vi.spyOn(api, "getAgentSkillGrant").mockResolvedValue({
+    agent_id: "agent-1",
+    skill_slug: "docs-search",
+    status: "grant_required",
+    current_content_hash: "",
+  });
 }
 
 function renderPanel({
@@ -159,14 +166,12 @@ function renderPanel({
   availableSkills = [],
   onAssignSkill = vi.fn(),
   onRemoveSkill = vi.fn(),
-  onUpdateAgent = vi.fn(),
 }: {
   profile?: AgentProfile;
   agentSkills?: Skill[];
   availableSkills?: Skill[];
   onAssignSkill?: ReturnType<typeof vi.fn>;
   onRemoveSkill?: ReturnType<typeof vi.fn>;
-  onUpdateAgent?: ReturnType<typeof vi.fn>;
 } = {}) {
   return {
     ...renderWithClient(
@@ -177,12 +182,10 @@ function renderPanel({
         availableSkills={availableSkills}
         onAssignSkill={onAssignSkill}
         onRemoveSkill={onRemoveSkill}
-        onUpdateAgent={onUpdateAgent}
       />,
     ),
     onAssignSkill,
     onRemoveSkill,
-    onUpdateAgent,
   };
 }
 
@@ -218,6 +221,7 @@ describe("Phase 22 agent capability admin", () => {
     vi.spyOn(api, "listAgentProcedures").mockResolvedValue([]);
     vi.spyOn(api, "listAgentKnowledgeSeeds").mockResolvedValue([]);
     vi.spyOn(api, "fetchAllToolsWithLoadType").mockResolvedValue([tool()]);
+    vi.spyOn(api, "listAgentTools").mockResolvedValue([]);
     const createSpy = vi.spyOn(api, "createAgentKnownTool").mockResolvedValue(knownTool({ tool_name: "mcp__repo__ls" }));
     const updateSpy = vi.spyOn(api, "updateAgentKnownTool").mockResolvedValue(knownTool({ reason: "Updated" }));
     const deleteSpy = vi.spyOn(api, "deleteAgentKnownTool").mockResolvedValue({ status: "ok" });
@@ -411,14 +415,12 @@ describe("Phase 22 agent capability admin", () => {
     vi.spyOn(api, "listAgentKnownTools").mockResolvedValue([knownTool()]);
     vi.spyOn(api, "listAgentKnowledgeSeeds").mockResolvedValue([seed()]);
     const removeSkill = vi.fn();
-    const updateAgent = vi.fn();
 
     renderPanel({
       profile: agent({ source: "internal" }),
       agentSkills: [skill()],
       availableSkills: [skill({ id: "skill-2", name: "Repo Memory" })],
       onRemoveSkill: removeSkill,
-      onUpdateAgent: updateAgent,
     });
 
     expect(await screen.findByRole("button", { name: "Edit mcp__docs__search" })).toBeTruthy();
@@ -430,7 +432,6 @@ describe("Phase 22 agent capability admin", () => {
 
     fireEvent.click(screen.getByLabelText("Remove skill Docs Search"));
     expect(removeSkill).not.toHaveBeenCalled();
-    expect(updateAgent).not.toHaveBeenCalled();
   });
 
   it("shows loading, empty, and error states", async () => {
@@ -439,6 +440,7 @@ describe("Phase 22 agent capability admin", () => {
     vi.spyOn(api, "listAgentProcedures").mockResolvedValue([]);
     vi.spyOn(api, "listAgentKnowledgeSeeds").mockResolvedValue([]);
     vi.spyOn(api, "fetchAllToolsWithLoadType").mockRejectedValue(new Error("tool catalog boom"));
+    vi.spyOn(api, "listAgentTools").mockResolvedValue([]);
 
     renderPanel();
 

@@ -555,21 +555,9 @@ func naniteRunPythonToolDefinition() mcp.Tool {
 
 **tool_call(name, args) helper:**
 Every call goes through the full permission engine — no security hole is opened.
-Returns a dict, raises RuntimeError on denial or error.
-
-Example:
-` + "```python" + `
-total = 0
-for offset in range(0, 500, 50):
-    page = tool_call("some_list_tool", {"limit": 50, "offset": offset})
-    items = page.get("items", [])
-    total += len(items)
-    if len(items) < 50:
-        break
-result = {"count": total}
-` + "```" + `
-
-Set ` + "`result`" + ` in the script namespace to control what is returned to the LLM.
+Returns a dict, raises RuntimeError on denial or error. Set ` + "`result`" + ` in the
+script namespace to control what is returned to the LLM. Call ` + "`tool_describe(name=\"python_run\")`" + `
+for a worked pagination-loop example.
 
 **Output shape:** {result: any, stdout: string, error?: string, tool_calls: [{name, status}]}
 

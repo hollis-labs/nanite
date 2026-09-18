@@ -23,8 +23,32 @@ const (
 )
 
 // Limits holds the per-tier resource ceilings enforced at MCP discovery and
-// tool-execution time. Values are configurable at runtime via UserSettings;
-// these defaults ship in code and act as the conservative baseline.
+// tool-execution time. These are code-level defaults only — there is no
+// live per-agent/per-launch override today (a prior version of this comment
+// claimed "configurable at runtime via UserSettings"; nothing in the
+// codebase implements that, so the claim was aspirational and has been
+// removed rather than left to mislead the next reader).
+//
+// Default posture, and why: a real multi-turn tool-calling harness (Claude,
+// Codex, ...) routinely hands agents thorough, multi-KB tool descriptions
+// and results ranging from a few KB to several MB — neither Anthropic's,
+// OpenAI's, nor the MCP spec's own guidance publishes a hard per-tool byte
+// ceiling, because the actual constraint they manage is total context/token
+// budget, not a fixed per-field size (see Anthropic's Tool Search Tool and
+// this package's own progressive discovery / SelectForAgent.
+// FinalizeToolSelection windowSize pruning, which already do that job).
+// These per-tier ceilings are a DIFFERENT thing: a blast-radius/DoS
+// backstop against a pathological or hostile tool definition/result, not a
+// context-management lever. Conflating the two — using a tiny ceiling to
+// "test agent performance with less context" — silently drops ordinary,
+// well-written tools (e.g. tesseract_recall's real 5.3KB description
+// tripped the old 4KB TierPluginStdio cap the moment Agent Mux was
+// reclassified off TierBuiltin) with no operator-visible signal beyond a
+// discovery-time log line. Defaults below give every tier generous
+// headroom over real observed tool sizes; TrustTier still varies the
+// ceiling for genuine blast-radius reasons (an unauthenticated, unknown
+// third-party server gets the tightest numbers), it just no longer
+// degrades ordinary operation to do it.
 //
 // MaxToolsPerServer is advisory only (CW-20260815-0019): ValidateToolSet
 // still fires a DiscoveryWarning when a server's advertised tool count
@@ -41,41 +65,46 @@ type Limits struct {
 
 // LimitsFor returns the default Limits for the given tier. Unknown tiers
 // fall through to TierThirdPartyHTTP (strictest) per D4 fail-closed.
+//
+// MaxResultBytes across every tier stays at or below the 10 MiB global
+// per-transport hard cap (Manager.AddServer's SetMaxResponseBytes wiring,
+// hotfix PR #42) — that cap is the true outer bound; these tiers only
+// decide how much of it a given trust level gets to use.
 func LimitsFor(tier TrustTier) Limits {
 	switch tier {
 	case TierBuiltin:
 		return Limits{
 			MaxToolNameLen:      256,
-			MaxDescriptionLen:   8 * 1024,
-			MaxInputSchemaBytes: 256 * 1024,
-			MaxResultBytes:      2 * 1024 * 1024,
-			MaxToolsPerServer:   1000,
+			MaxDescriptionLen:   32 * 1024,
+			MaxInputSchemaBytes: 512 * 1024,
+			MaxResultBytes:      10 * 1024 * 1024,
+			MaxToolsPerServer:   2000,
 		}
 	case TierPluginStdio:
 		return Limits{
-			MaxToolNameLen:      128,
-			MaxDescriptionLen:   4 * 1024,
-			MaxInputSchemaBytes: 64 * 1024,
-			MaxResultBytes:      512 * 1024,
-			MaxToolsPerServer:   200,
+			MaxToolNameLen:      256,
+			MaxDescriptionLen:   32 * 1024,
+			MaxInputSchemaBytes: 256 * 1024,
+			MaxResultBytes:      8 * 1024 * 1024,
+			MaxToolsPerServer:   1000,
 		}
 	case TierPluginHTTP:
 		return Limits{
-			MaxToolNameLen:      128,
-			MaxDescriptionLen:   2 * 1024,
-			MaxInputSchemaBytes: 32 * 1024,
-			MaxResultBytes:      256 * 1024,
-			MaxToolsPerServer:   100,
+			MaxToolNameLen:      256,
+			MaxDescriptionLen:   24 * 1024,
+			MaxInputSchemaBytes: 128 * 1024,
+			MaxResultBytes:      4 * 1024 * 1024,
+			MaxToolsPerServer:   500,
 		}
 	case TierThirdPartyHTTP:
 		fallthrough
 	default:
 		return Limits{
-			MaxToolNameLen:      128,
-			MaxDescriptionLen:   2 * 1024,
-			MaxInputSchemaBytes: 16 * 1024,
-			MaxResultBytes:      128 * 1024,
-			MaxToolsPerServer:   50,
+			MaxToolNameLen:      256,
+			MaxDescriptionLen:   16 * 1024,
+			MaxInputSchemaBytes: 64 * 1024,
+			MaxResultBytes:      2 * 1024 * 1024,
+			MaxToolsPerServer:   200,
 		}
 	}
 }

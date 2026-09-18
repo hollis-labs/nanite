@@ -16,11 +16,11 @@ func TestLimitsFor_AllTiers(t *testing.T) {
 		wantResultBytes int
 		wantToolsPerSrv int
 	}{
-		{TierBuiltin, 256, 256 * 1024, 2 * 1024 * 1024, 1000},
-		{TierPluginStdio, 128, 64 * 1024, 512 * 1024, 200},
-		{TierPluginHTTP, 128, 32 * 1024, 256 * 1024, 100},
-		{TierThirdPartyHTTP, 128, 16 * 1024, 128 * 1024, 50},
-		{TrustTier("unknown"), 128, 16 * 1024, 128 * 1024, 50}, // fail-closed
+		{TierBuiltin, 256, 512 * 1024, 10 * 1024 * 1024, 2000},
+		{TierPluginStdio, 256, 256 * 1024, 8 * 1024 * 1024, 1000},
+		{TierPluginHTTP, 256, 128 * 1024, 4 * 1024 * 1024, 500},
+		{TierThirdPartyHTTP, 256, 64 * 1024, 2 * 1024 * 1024, 200},
+		{TrustTier("unknown"), 256, 64 * 1024, 2 * 1024 * 1024, 200}, // fail-closed
 	}
 	for _, c := range cases {
 		got := LimitsFor(c.tier)
@@ -48,16 +48,16 @@ func TestValidateToolMeta_NameAndDescription(t *testing.T) {
 	}{
 		{"empty name", TierBuiltin, Tool{Name: ""}, WarnInvalidToolName},
 		{"bad chars", TierBuiltin, Tool{Name: "tool name"}, WarnInvalidToolName},
-		{"third-party 130 chars over cap", TierThirdPartyHTTP, Tool{Name: strings.Repeat("a", 129)}, WarnInvalidToolName},
+		{"third-party 257 chars over cap", TierThirdPartyHTTP, Tool{Name: strings.Repeat("a", 257)}, WarnInvalidToolName},
 		{"builtin 200 chars under cap", TierBuiltin, Tool{Name: strings.Repeat("a", 200)}, ""},
 		{"valid simple", TierThirdPartyHTTP, Tool{Name: "fetch_url"}, ""},
 		{"description over third-party cap", TierThirdPartyHTTP, Tool{
 			Name:        "tool",
-			Description: strings.Repeat("x", 3*1024),
+			Description: strings.Repeat("x", 17*1024),
 		}, WarnDescriptionTooLong},
 		{"description under builtin cap", TierBuiltin, Tool{
 			Name:        "tool",
-			Description: strings.Repeat("x", 3*1024),
+			Description: strings.Repeat("x", 17*1024),
 		}, ""},
 	}
 	for _, c := range cases {
@@ -85,10 +85,10 @@ func TestValidateToolMeta_NameAndDescription(t *testing.T) {
 
 func TestValidateToolMeta_SchemaSize(t *testing.T) {
 	// Build an InputSchema whose JSON serialization exceeds the third-party
-	// cap (16 KiB) but stays under the builtin cap (256 KiB) so the same
+	// cap (64 KiB) but stays under the builtin cap (512 KiB) so the same
 	// schema validates clean for one tier and fails for another.
 	props := make(map[string]any)
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 2000; i++ {
 		props[strings.Repeat("p", 16)+itoa(i)] = map[string]any{"type": "string"}
 	}
 	schema := map[string]any{
@@ -114,10 +114,10 @@ func TestValidateToolMeta_SchemaSize(t *testing.T) {
 }
 
 func TestValidateToolSet_CountAndDuplicates(t *testing.T) {
-	// 51 distinct tools above the third-party advisory threshold of 50 →
+	// 201 distinct tools above the third-party advisory threshold of 200 →
 	// advisory warning (nothing is capped by ValidateToolSet itself; it
 	// only reports).
-	tools := make([]Tool, 51)
+	tools := make([]Tool, 201)
 	for i := range tools {
 		tools[i] = Tool{Name: "t" + itoa(i)}
 	}
@@ -150,16 +150,16 @@ func TestValidateToolSet_CountAndDuplicates(t *testing.T) {
 }
 
 func TestValidateResultSize(t *testing.T) {
-	// Third-party cap is 128 KiB. 200 KiB should fail; 100 KiB should pass.
-	if err := ValidateResultSize(TierThirdPartyHTTP, 200*1024); err == nil {
-		t.Error("expected error at 200 KiB on third-party")
+	// Third-party cap is 2 MiB. 3 MiB should fail; 1 MiB should pass.
+	if err := ValidateResultSize(TierThirdPartyHTTP, 3*1024*1024); err == nil {
+		t.Error("expected error at 3 MiB on third-party")
 	}
-	if err := ValidateResultSize(TierThirdPartyHTTP, 100*1024); err != nil {
-		t.Errorf("unexpected error at 100 KiB on third-party: %v", err)
+	if err := ValidateResultSize(TierThirdPartyHTTP, 1024*1024); err != nil {
+		t.Errorf("unexpected error at 1 MiB on third-party: %v", err)
 	}
-	// Builtin cap is 2 MiB; the same 200 KiB payload is fine.
-	if err := ValidateResultSize(TierBuiltin, 200*1024); err != nil {
-		t.Errorf("unexpected error at 200 KiB on builtin: %v", err)
+	// Builtin cap is 10 MiB; the same 3 MiB payload is fine.
+	if err := ValidateResultSize(TierBuiltin, 3*1024*1024); err != nil {
+		t.Errorf("unexpected error at 3 MiB on builtin: %v", err)
 	}
 }
 

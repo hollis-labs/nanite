@@ -4,8 +4,18 @@
 # the `devmode` tag MUST NOT be set here. internal/plugin/devmode compiles to
 # HostDevSigningBypass=false, which is what keeps catalog + per-plugin
 # signature verification unconditional in release binaries.
+#
+# GOWORK=off: a shipped/deployed artifact must resolve dependencies from
+# go.mod/go.sum only, never from a developer's ambient portfolio-wide
+# go.work substituting a local sibling-repo checkout. Without this, `make
+# build` silently depends on whatever state a completely unrelated local
+# repo happens to be in — e.g. Cerberus's deploy failed with "no required
+# module provides package github.com/hollis-labs/agentkit/artifact" because
+# go.work pointed agentkit at a local checkout that had already removed
+# that package on its own trunk, while go.mod's pinned agentkit v0.6.1
+# (the real, published dependency) has it fine.
 build: generate-envelopes build-ui
-	go build -o nanite ./cmd/nanite
+	GOWORK=off go build -o nanite ./cmd/nanite
 
 # Developer build with signing bypass enabled. Adds the `devmode` build tag so
 # internal/plugin/devmode.HostDevSigningBypass == true. In this build:
@@ -14,11 +24,11 @@ build: generate-envelopes build-ui
 #     is true.
 # Never ship this binary to users.
 build-dev: generate-envelopes build-ui
-	go build -tags devmode -o nanite ./cmd/nanite
+	GOWORK=off go build -tags devmode -o nanite ./cmd/nanite
 
 # Install to ~/go/bin/ (used by MCP and Cerberus)
 install: generate-envelopes build-ui
-	go install ./cmd/nanite
+	GOWORK=off go install ./cmd/nanite
 
 # Generate TypeScript types from the released go-envelopes module selected by
 # go.mod. The module-owned exporter resolves embedded schemas and metadata.
@@ -113,7 +123,7 @@ package-release: generate-envelopes build-ui
 		archive="dist/nanite_$(VERSION)_$${os}_$${arch}.tar.gz"; \
 		rm -rf "$$stage" "$$archive"; \
 		mkdir -p "$$stage"; \
-		CGO_ENABLED=0 GOOS="$$os" GOARCH="$$arch" go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o "$$stage/nanite" ./cmd/nanite; \
+		CGO_ENABLED=0 GOOS="$$os" GOARCH="$$arch" GOWORK=off go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o "$$stage/nanite" ./cmd/nanite; \
 		cp README.md LICENSE "$$stage/"; \
 		tar -C dist -czf "$$archive" "$$(basename "$$stage")"; \
 	done

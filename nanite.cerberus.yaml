@@ -18,6 +18,8 @@ resources:
       command:
         - ./nanite
         - serve
+        - -db
+        - /Users/chrispian/.local/share/nanite/workspaces/default/main.db
       dir: /Users/chrispian/dev/hollis-labs/apps/nanite
       env_file: .env
       mode: os_service

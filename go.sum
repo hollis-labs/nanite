@@ -53,10 +53,10 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 h1:/Tnpcb2E0Pz/tN9s3bfEY2Q8ePC
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0/go.mod h1:zOBXOsUaBSjKgmH4OGzV1esUpR3oUSCPYVd2cUBjKYY=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
-github.com/hollis-labs/agentkit v0.6.1 h1:AgdBc7rJIwN3r6spGI69L72ylbw78G4BnUOfi0rfDT0=
-github.com/hollis-labs/agentkit v0.6.1/go.mod h1:uhzTQL0shQAh+CTpFakZi1Mxu464Wun2zTzVGCdEU8o=
-github.com/hollis-labs/go-agent-wrapper v0.10.1 h1:VbpjVtdiJmhXnerciRM5Dvg3+Qa8HIMtGe/laFqbvis=
-github.com/hollis-labs/go-agent-wrapper v0.10.1/go.mod h1:8yu3L9IqfRVqX5r//L+FNMUCyqQ/fuHihVLVAJh2V7I=
+github.com/hollis-labs/agentkit v0.6.2-0.20260918204023-04514ae53f45 h1:E3mqZawVYiKxaNwwL83JlFNY5DwvwTaTfhjF24YbyvY=
+github.com/hollis-labs/agentkit v0.6.2-0.20260918204023-04514ae53f45/go.mod h1:/7H8qZhCkY8j8cxClj0B5Oeqsyi7wrsjxyy7wMNshSM=
+github.com/hollis-labs/go-agent-wrapper v0.10.2-0.20260918211027-507ed1cef628 h1:Yy+iZbNcRZuha2Xa+YIAQ214iT9Eg7AsFDUhDiFaOCA=
+github.com/hollis-labs/go-agent-wrapper v0.10.2-0.20260918211027-507ed1cef628/go.mod h1:F9XVYz7c8rwvw7mc0L8pWNYGE06WYSHqMSQB7T1mCEE=
 github.com/hollis-labs/go-apppaths v0.1.0 h1:LJQv483BhOoizLL4qKwsLcCbM0lQoVrNvksJ1thycd4=
 github.com/hollis-labs/go-apppaths v0.1.0/go.mod h1:b3gOdAFgSYY9ZT7VUooAczFdb6o0C2xSGQa7ktcyw30=
 github.com/hollis-labs/go-embed-contracts v0.1.1 h1:PGpgBvFpNwz7dHLRWJ3ewlbOLzsg8rauEpfpcwh3+Lw=
@@ -69,6 +69,8 @@ github.com/hollis-labs/go-llm-contracts v0.3.0 h1:qVKulEixvxf5iJmUMzDfRoL00gfS6/
 github.com/hollis-labs/go-llm-contracts v0.3.0/go.mod h1:VIbzjZk7U+NCYuHdfa++ZwcaYI09om5xVxYTGd6cuw8=
 github.com/hollis-labs/go-llm-types v0.3.0 h1:QR4RX0F1zX0fYBh7sDVxnsFxmQ/vjlvc7bC6FWx+8s0=
 github.com/hollis-labs/go-llm-types v0.3.0/go.mod h1:BP8FMqmTWvi2vQ7dNybTGJ+FFzXS4gMMhAjyTHlNq84=
+github.com/hollis-labs/go-materialize v0.0.0-20260918203624-4190b433a343 h1:A5oItZgQNcXFwibRoOyEMfAZ59W/VLumT8Lh564Vlho=
+github.com/hollis-labs/go-materialize v0.0.0-20260918203624-4190b433a343/go.mod h1:kruujE9juXWTgF3NnDTVw48K5KdikmPCOcaJRF+7n60=
 github.com/hollis-labs/go-mcp v0.5.0 h1:Cnghde1W444SExW0H3VIykOD3kpWPkWvxYOoon0Tvo8=
 github.com/hollis-labs/go-mcp v0.5.0/go.mod h1:sy+7ptjvPxcwu3XDL5EGC6OUlze0iy/hHddLh5T4MZQ=
 github.com/hollis-labs/go-messaging v0.5.2 h1:sMVnZRE1BAm/AN+36Zri5Bdd4SzF+EmCqULL627ztXA=

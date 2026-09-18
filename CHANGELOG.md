@@ -22,6 +22,14 @@ lives in the git log.
   for the ownership boundary and
   [`docs/workflow-operations.md`](docs/workflow-operations.md) for the startup,
   recovery, callback, and rollback procedure.
+- **Boot-dir planting's persisted manifest moves from
+  `.agentkit/materialize-manifest.json` to `.materialize/manifest.json`**
+  (CW-20260918-0036), following agentkit's `artifact`/`materialize`
+  packages moving out to their own
+  [`go-materialize`](https://github.com/hollis-labs/go-materialize)
+  module. A boot directory planted before this upgrade won't be found by
+  `Reconcile`/`Refresh` on first re-plant; the next `Create` writes the
+  manifest at the new path. No change to what gets planted or how.
 
 - **The HTTP server now binds to loopback by default** (GO-RUNTIME-002,
   AD-15). Upgrading a deployment that relied on the previous bind-all default

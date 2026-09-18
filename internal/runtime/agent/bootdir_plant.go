@@ -7,8 +7,8 @@ import (
 	"sort"
 
 	"github.com/hollis-labs/agentkit/agentlaunch"
-	"github.com/hollis-labs/agentkit/artifact"
 	"github.com/hollis-labs/go-agent-wrapper/plant"
+	"github.com/hollis-labs/go-materialize/artifact"
 )
 
 // bootdir_plant.go is the convergence point onto go-agent-wrapper's

@@ -16,7 +16,7 @@ require (
 require (
 	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/google/jsonschema-go v0.4.3 // indirect
-	github.com/hollis-labs/agentkit v0.6.1
+	github.com/hollis-labs/agentkit v0.6.2-0.20260918204023-04514ae53f45
 	github.com/hollis-labs/go-envelopes v0.4.0
 	github.com/hollis-labs/go-modelsdev v0.2.0
 	github.com/hollis-labs/go-otel v0.6.1
@@ -101,11 +101,12 @@ require (
 )
 
 require (
-	github.com/hollis-labs/go-agent-wrapper v0.10.1
+	github.com/hollis-labs/go-agent-wrapper v0.10.2-0.20260918211027-507ed1cef628
 	github.com/hollis-labs/go-apppaths v0.1.0
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-llm-contracts v0.3.0
 	github.com/hollis-labs/go-llm-types v0.3.0
+	github.com/hollis-labs/go-materialize v0.0.0-20260918203624-4190b433a343
 	github.com/hollis-labs/go-mcp v0.5.0
 	github.com/hollis-labs/go-messaging v0.5.2
 	github.com/hollis-labs/go-runtime-events v0.1.2

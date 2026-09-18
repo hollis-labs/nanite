@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/hollis-labs/agentkit/artifact"
 	"github.com/hollis-labs/go-agent-wrapper/plant"
+	"github.com/hollis-labs/go-materialize/artifact"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 

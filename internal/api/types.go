@@ -51,6 +51,12 @@ type SendMessageRequest struct {
 	// Empty string or omitted → "normal". Unknown values are ignored (treated as normal).
 	// See internal/effort for the full mapping (CW-20260420-0014).
 	Effort string `json:"effort,omitempty"`
+	// DeltaMode selects how text deltas reach the stream for this turn:
+	// "phased" (default) holds each iteration's text until its stop reason is
+	// known, then flushes it tagged narration/final; "live" sends each delta as
+	// it arrives, untagged. Unknown values are rejected with 400.
+	// See chat.DeltaMode.
+	DeltaMode string `json:"delta_mode,omitempty"`
 }
 
 type AgentMessageRequest struct {

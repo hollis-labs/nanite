@@ -120,6 +120,10 @@ type characterizationProviderStep struct {
 	events       []llmtypes.StreamEvent
 	err          error
 	beforeReturn func()
+	// hold, when non-nil, keeps the provider stream open after events are sent
+	// until it is closed — the state a real provider is in while it is still
+	// generating.
+	hold <-chan struct{}
 }
 
 type characterizationProvider struct {
@@ -147,7 +151,14 @@ func (p *characterizationProvider) StreamChat(_ context.Context, req llmtypes.Ch
 	for _, event := range step.events {
 		ch <- event
 	}
-	close(ch)
+	if step.hold == nil {
+		close(ch)
+	} else {
+		go func() {
+			<-step.hold
+			close(ch)
+		}()
+	}
 	return ch, nil
 }
 func (p *characterizationProvider) Complete(context.Context, llmtypes.ChatRequest) (string, error) {
@@ -285,12 +296,19 @@ func forceCompactableWindow(result *SlotAssemblyResult) {
 
 func (f *characterizationFixture) run(t *testing.T, messageID string) []chat.StreamEvent {
 	t.Helper()
+	return f.runCtx(context.Background(), t, messageID)
+}
+
+// runCtx is run with a caller-supplied context, for tests that stamp values
+// (e.g. the delta mode) the way runGeneration does before dispatching.
+func (f *characterizationFixture) runCtx(ctx context.Context, t *testing.T, messageID string) []chat.StreamEvent {
+	t.Helper()
 	producer := f.svc.streams.CreateStream(messageID, f.session)
 	consumer, ok := f.svc.streams.GetStream(messageID)
 	if !ok {
 		t.Fatal("GetStream: production stream was not registered")
 	}
-	if err := f.svc.dispatcher.Run(context.Background(), dispatcher.Request{
+	if err := f.svc.dispatcher.Run(ctx, dispatcher.Request{
 		SessionID: f.session, AssistantMsgID: messageID, UserContent: "characterize this turn", CallerType: dispatcher.CallerChat,
 	}, producer); err != nil {
 		t.Fatalf("Dispatcher.Run: %v", err)

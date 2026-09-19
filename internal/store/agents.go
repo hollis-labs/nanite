@@ -200,6 +200,23 @@ type AgentProfile struct {
 	// plugin uninstall/unload correctly removes what it registered. Added
 	// by migration 122.
 	PluginID string `json:"plugin_id"`
+
+	// TetherManaged is the per-agent opt-in for Tether registration.
+	// Default false -- registering an agent in Tether's federation
+	// directory is an explicit, per-agent decision, not ambient behavior.
+	// Added by migration 162.
+	TetherManaged bool `json:"tether_managed"`
+
+	// TetherURN holds this agent's Tether directory URN once one exists
+	// (minted via tether_registry_register -- an ordinary agent tool call,
+	// not something this store package or its callers perform). Empty
+	// until minted, regardless of TetherManaged. See
+	// internal/runtime/agent/tether_identity.go, which plants this value
+	// into a CLI session's boot dir when non-empty, and
+	// docs/adding-an-agent.md's "Materialize, then boot" section for why
+	// minting happens once, upstream of any boot, rather than as part of
+	// this flow. Added by migration 162.
+	TetherURN string `json:"tether_urn"`
 }
 
 // validateAgentMultiAgentFields enforces the enum constraints that
@@ -361,7 +378,8 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
         COALESCE(consumer_id,''),
         COALESCE(role_id,''), COALESCE(model_id,''), COALESCE(runtime_kind,'api'),
         COALESCE(protocol,''), COALESCE(transport,''),
-        COALESCE(plugin_id,'')`
+        COALESCE(plugin_id,''),
+        COALESCE(tether_managed,0), COALESCE(tether_urn,'')`
 
 // scanAgent scans a row into an AgentProfile using the canonical column order.
 func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
@@ -384,6 +402,7 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.RoleID, &a.ModelID, &a.RuntimeKind,
 		&a.Protocol, &a.Transport,
 		&a.PluginID,
+		&a.TetherManaged, &a.TetherURN,
 	)
 }
 
@@ -524,8 +543,9 @@ func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
 		                              consumer_id,
 		                              role_id, model_id, runtime_kind,
 		                              protocol, transport,
-		                              plugin_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                              plugin_id,
+		                              tether_managed, tether_urn)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
@@ -544,6 +564,7 @@ func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
 		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
 		nullIfEmpty(a.Protocol), nullIfEmpty(a.Transport),
 		nullIfEmpty(a.PluginID),
+		a.TetherManaged, a.TetherURN,
 	)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
@@ -700,7 +721,8 @@ func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
 		        consumer_id = ?,
 		        role_id = ?, model_id = ?, runtime_kind = ?,
 		        protocol = ?, transport = ?,
-		        plugin_id = ?
+		        plugin_id = ?,
+		        tether_managed = ?, tether_urn = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
@@ -719,6 +741,7 @@ func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
 		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
 		nullIfEmpty(a.Protocol), nullIfEmpty(a.Transport),
 		nullIfEmpty(a.PluginID),
+		a.TetherManaged, a.TetherURN,
 		a.ID,
 	)
 	if err != nil {
@@ -1145,6 +1168,12 @@ func (s *Store) CloneAgent(ctx context.Context, srcID, newSlug, newName string) 
 	clone.Source = "user"
 	clone.SourceRef = ""
 	clone.ImportedAt = ""
+	// A clone is a distinct agent, not a second holder of the same
+	// external identity -- copying TetherURN verbatim would leave two
+	// profiles claiming one Tether registration. Reset both; the clone
+	// re-registers under its own URN if/when it's flipped tether_managed.
+	clone.TetherManaged = false
+	clone.TetherURN = ""
 	if err := s.CreateAgent(ctx, &clone); err != nil {
 		return nil, fmt.Errorf("clone agent: create: %w", err)
 	}

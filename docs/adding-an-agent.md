@@ -142,6 +142,49 @@ covers the same v1 types as a tool call, and an MCP server can emit the same
 marker in a tool result — that last path is the one to reach for when rendering
 must not depend on the model remembering.
 
+## Materialize, then boot — mint identity before either
+
+A CLI session goes through two phases, in order: **materialize** (a
+`Layout`'s `Setup`/`Populate` writes the boot dir — CLAUDE.md, skills,
+`.mcp.json`, provider settings) then **spawn** (`agent.Boot` starts the
+actual process). This is not incidental ordering — it's the reason the sharp
+edge below is easy to hit and easy to miss.
+
+`Populate` (`claudeLayout.Populate`, `bootdir_claude.go`) is deliberately
+synchronous, local, and takes no `context.Context` — "a synchronous
+filesystem write with no cancellation point today," by its own doc comment.
+It is not the place to call another service. Neither is `agent.Boot` itself:
+it's the one shared entrypoint every CLI session boots through, for every
+agent profile in the system, not just the one you're building — a bug or a
+slow/unreachable dependency added there degrades every other agent, not just
+yours.
+
+**The pattern that avoids this:** mint any external identity (a Tether URN,
+anything else that needs registering with another system) **once, upstream
+of boot entirely** — e.g. at agent-creation time, not per-session and not
+per-launch. By the time materialization runs, the value already exists as
+plain data (on the `AgentProfile` row, or wherever it was minted to); the
+plant step just reads it and writes it out. No client, no network call, no
+new failure mode in the hot path — because there's nothing left to fetch.
+
+Concretely: `SetupParams` already carries both `AgentProfile` (whose
+`Settings` JSON can hold an already-minted identity) and `SessionID` (already
+resolved before boot dir setup starts). `internal/runtime/agent/tether_identity.go`
+(`tetherIdentityFile`) reads `settings.tether_urn` — set once, at
+registration time, via `tether_registry_register` — builds the matching
+session identity locally via `internal/a2a.NewSessionAddress(params.SessionID).URN()`
+(Nanite's own local `msg://` scheme, no daemon call), and returns `nil` when
+`tether_urn` is absent. `claudePlantSpec` (`bootdir_claude.go`) adds the
+result to its `files` map like any other planted file — `.sandbox/tether-identity.md`
+next to `CLAUDE.md`. An agent that was never registered gets nothing extra:
+the gate is on data presence, not a hardcoded agent list.
+
+This is not Nanite-specific: Torque follows the same materialize-then-boot
+sequencing (plant the boot dir, then spawn). It does **not**, however, share
+Nanite's `internal/a2a` package or URN scheme — there is no cross-app
+identity library today, only the same two-phase *pattern*, independently
+implemented. Don't assume shared code because the architecture matches.
+
 ## A worked create
 
 ```bash

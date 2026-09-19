@@ -106,6 +106,14 @@ type CreateAgentRequest struct {
 	ActivationMode          string `json:"activation_mode"`
 	Class                   string `json:"class"`
 	DefaultState            string `json:"default_state"`
+	// TetherManaged is the explicit per-agent opt-in for Tether
+	// registration; default false. TetherURN is settable directly (it is
+	// minted by an ordinary agent tool call to tether_registry_register,
+	// not by this handler) and is what tether_identity.go plants into a
+	// CLI session's boot dir. See docs/adding-an-agent.md, "Materialize,
+	// then boot."
+	TetherManaged bool   `json:"tether_managed"`
+	TetherURN     string `json:"tether_urn"`
 	// RoleID/ConsumerID/ModelID (Phase 5 item 01,
 	// TASKS/phase-5/01-build-assignment-api.md) -- the composition-model
 	// FKs architecture/01-agent-construction.md names (agents.role_id ->
@@ -152,6 +160,8 @@ type UpdateAgentRequest struct {
 	ActivationMode          *string `json:"activation_mode"`
 	Class                   *string `json:"class"`
 	DefaultState            *string `json:"default_state"`
+	TetherManaged           *bool   `json:"tether_managed"`
+	TetherURN               *string `json:"tether_urn"`
 	// RoleID/ConsumerID/ModelID -- see CreateAgentRequest's doc comment.
 	// Pointer semantics match every other field on this partial-update
 	// struct: nil leaves the column untouched, a pointer to "" clears it

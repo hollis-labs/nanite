@@ -97,6 +97,13 @@ func claudePlantSpec(bootDir string, params SetupParams) (plant.Spec, error) {
 		files[relPath] = content
 	}
 
+	// Tether identity: no-op unless params.AgentProfile is registered in
+	// Tether (settings.tether_urn set). See tether_identity.go — pure,
+	// local, no network call.
+	if identity := tetherIdentityFile(params); identity != nil {
+		files[".sandbox/tether-identity.md"] = identity
+	}
+
 	// TASKS/skills/10: plant this agent's plantable skill set at claude's
 	// native .claude/skills/<slug>/ convention. No-op when params carries
 	// no skill wiring (params.Skills / params.SkillVendor nil) or the

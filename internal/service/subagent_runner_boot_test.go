@@ -678,12 +678,14 @@ func TestBootRunner_PersistFailure_AbortsBeforeBoot(t *testing.T) {
 // TestBootRunner_ProviderOverride_RoutesToCLIPath confirms a per-spawn
 // run.Provider override (e.g. caller forces pty-claude) flows through
 // ProviderAdapter resolution and reaches the Boot path even when the
-// agent profile's DefaultProvider would resolve elsewhere.
+// agent profile's DefaultProvider would resolve elsewhere. The parent is a
+// CLI session: an API parent downgrades instead (D-38, see
+// subagent_runner_runtime_test.go).
 func TestBootRunner_ProviderOverride_RoutesToCLIPath(t *testing.T) {
 	bridge := newFakeBridge()
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-p": {ID: "sess-p"},
+			"sess-p": {ID: "sess-p", Provider: "pty-claude"},
 		},
 	}
 	bootCalled := 0

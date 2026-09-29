@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -160,7 +161,82 @@ func (r *BootRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 		return r.legacy.Run(ctx, run)
 	}
 
+	// The spawn resolves to a CLI child. D-38 (CW-20260929-0010): a CLI
+	// child's self-tool calls bypass Nanite's harness, so from an API-driven
+	// parent it boots only when the user or app opted in. The provider arg
+	// and the role's DefaultProvider both come from the model or the role
+	// definition, so neither counts as that opt-in.
+	if r.legacy != nil {
+		if parent, ok := r.apiParent(ctx, run); ok && r.subagentRuntime(ctx, run.ParentSessionID) != store.SubagentRuntimeCLI {
+			return r.runDowngraded(ctx, run, agent, parent)
+		}
+	}
+
 	return r.runBoot(ctx, run, agent)
+}
+
+// apiParent reports whether the spawning session is API-driven — its provider
+// has no CLI adapter — and returns that session. A parent that cannot be
+// loaded counts as not API-driven, which keeps the boot path's existing
+// behavior (createChildSession fails on the same lookup).
+func (r *BootRunner) apiParent(ctx context.Context, run *subagent.Run) (*store.Session, bool) {
+	if r.deps == nil || r.deps.ProviderAdapter == nil || r.store == nil {
+		return nil, false
+	}
+	parent, err := r.store.GetSession(ctx, run.ParentSessionID)
+	if err != nil || parent == nil {
+		return nil, false
+	}
+	return parent, r.deps.ProviderAdapter(parent.Provider) == nil
+}
+
+// subagentRuntimeSource is the slice of *store.Store that resolves the
+// effective subagent runtime. A store without it resolves to the default.
+type subagentRuntimeSource interface {
+	GetUserSettings(ctx context.Context) (*store.UserSettings, error)
+	GetSessionSubagentRuntime(ctx context.Context, sessionID string) (string, error)
+}
+
+// subagentRuntime resolves the effective runtime for subagents spawned from
+// parentSessionID: the session's override, else the app default, else "api".
+// A read error resolves to "api" — the harness-preserving direction.
+func (r *BootRunner) subagentRuntime(ctx context.Context, parentSessionID string) string {
+	src, ok := r.store.(subagentRuntimeSource)
+	if !ok {
+		return store.SubagentRuntimeAPI
+	}
+	if v, err := src.GetSessionSubagentRuntime(ctx, parentSessionID); err != nil {
+		slog.Warn("subagent BootRunner: read session subagent_runtime; using api", "session_id", parentSessionID, "err", err)
+		return store.SubagentRuntimeAPI
+	} else if v != "" {
+		return v
+	}
+	us, err := src.GetUserSettings(ctx)
+	if err != nil {
+		slog.Warn("subagent BootRunner: read user settings subagent_runtime; using api", "err", err)
+		return store.SubagentRuntimeAPI
+	}
+	if us != nil && us.SubagentRuntime != "" {
+		return us.SubagentRuntime
+	}
+	return store.SubagentRuntimeAPI
+}
+
+// runDowngraded runs a spawn that resolved to a CLI child through the chat
+// harness instead, on the parent's provider and model, and says so: a
+// warning in the log and a note ahead of the result the parent reads.
+func (r *BootRunner) runDowngraded(ctx context.Context, run *subagent.Run, agent *store.AgentProfile, parent *store.Session) (*subagent.Result, error) {
+	requested := r.effectiveProvider(agent, run)
+	slog.Warn("subagent BootRunner: CLI subagent request downgraded to API",
+		"run_id", run.ID, "role", run.Role, "requested_provider", requested,
+		"provider", parent.Provider, "model", parent.Model, "parent_session_id", run.ParentSessionID)
+	res, err := r.legacy.Run(withChildRuntimeOverride(ctx, parent.Provider, parent.Model), run)
+	if err != nil || res == nil {
+		return res, err
+	}
+	res.Summary = fmt.Sprintf("[note: this subagent was requested on CLI provider %q, but subagent_runtime is api; it ran on %s/%s through the Nanite harness]\n\n%s",
+		requested, parent.Provider, parent.Model, res.Summary)
+	return res, nil
 }
 
 // resolveRole looks up the role slug. Mirrors ChatRunner.resolveRole —

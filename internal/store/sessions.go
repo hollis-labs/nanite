@@ -1005,3 +1005,41 @@ func nullIfEmpty(val string) interface{} {
 	}
 	return val
 }
+
+// GetSessionSubagentRuntime returns the session's subagent-runtime override
+// ("api" or "cli"), or "" when none is set and the app default applies
+// (D-38, CW-20260929-0010).
+func (s *Store) GetSessionSubagentRuntime(ctx context.Context, sessionID string) (string, error) {
+	var v sql.NullString
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT subagent_runtime FROM sessions WHERE id = ?`, sessionID,
+	).Scan(&v)
+	if err != nil {
+		return "", fmt.Errorf("get session subagent runtime %s: %w", sessionID, err)
+	}
+	return v.String, nil
+}
+
+// SetSessionSubagentRuntime sets the session's subagent-runtime override.
+// "" clears it (back to the app default); otherwise runtime must be "api" or
+// "cli".
+func (s *Store) SetSessionSubagentRuntime(ctx context.Context, sessionID, runtime string) error {
+	if runtime != "" && !ValidSubagentRuntime(runtime) {
+		return fmt.Errorf("set session subagent runtime: unknown runtime %q (must be \"\", \"api\", or \"cli\")", runtime)
+	}
+	var arg any
+	if runtime != "" {
+		arg = runtime
+	}
+	res, err := s.DB.ExecContext(ctx,
+		`UPDATE sessions SET subagent_runtime = ?, updated_at = ? WHERE id = ?`,
+		arg, time.Now().UTC().Format(time.RFC3339), sessionID,
+	)
+	if err != nil {
+		return fmt.Errorf("set session subagent runtime %s: %w", sessionID, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("set session subagent runtime %s: %w", sessionID, sql.ErrNoRows)
+	}
+	return nil
+}

@@ -272,6 +272,7 @@ SQLite (single connection, WAL, goose migrations in `internal/store/migrations`)
 | `execution_metrics` | per message: provider, adapter, model, duration, `stop_reason`, tool_iterations, tool_calls, `debug_snapshots` (tool name, duration, success, parallel) | end of turn |
 | `event_log` | event_type, category, detail, metadata (`tool_call`, `tool_error`, `provider_error`, `provider_stream_stalled`, `max_tokens_truncation`, `preamble_stall_recovery`, …); write errors swallowed | during the turn; no HTTP reader |
 | `tool_result_cache` | over-budget tool output bodies | during the turn; never deleted; body NULL over 1 MiB |
+| `tool_call_arguments` | redacted, budget-bounded tool-call arguments (`byte_size`/`sha256` of the redacted full document; body is a 4 KiB preview) | at execution, one row per executed call; expired rows deleted only by `ResultCache.Purge`, which has no caller |
 | `artifacts` | pointer rows (path from tool input) for write and edit tools | during the turn |
 | `envelope_instances` | approval and elicitation envelopes | during the turn |
 | `subagent_runs` | prompt, inputs, result, error, attempts | during the turn |
@@ -303,7 +304,7 @@ No `role='tool'` rows are written. Sessions are archived, never deleted. No rete
 | Narration vs final | yes, as two fields | narration → `metadata.thinking`; final → `content.text`; per-delta phase not stored | messages endpoint |
 | Reasoning text and signature | partial | Only if thinking was requested (§2.6). Signed blocks reset after every tool iteration; only the last iteration's blocks reach `metadata.thinking_blocks`. History replay is text-only, so stored blocks are not read back. OpenAI reasoning summaries are unsigned. | messages endpoint (`metadata`) |
 | Tool call name, id, status | yes | `content.tool_calls[]`, end of turn; `event_log` at execution (name, result length) | messages endpoint |
-| Tool call input | no durable copy | in-memory inspector, SSE `detail` and `approval_request.input` only | inspector endpoint (memory only) |
+| Tool call input | yes, redacted and bounded | `tool_call_arguments` at execution (secret-named keys and `KEY=value` / bearer text replaced by `[REDACTED]`, then previewed to 4 KiB); raw input only in the in-memory inspector, SSE `detail` and `approval_request.input` | SQL only; no HTTP route |
 | Tool result, full | only over the preview budget | `tool_result_cache.body`, during the turn | model tools `fetch_tool_result` and `search_tool_result`; no HTTP route |
 | Tool result shown to the model | no | in-memory turn state; inspector | inspector endpoint |
 | Usage | yes, end of turn | `token_usage`: cache tokens stored; cost = input × input price + output × output price (cache tokens excluded; unknown model → 0) | `/usage`, `/details`, `/metrics` |
@@ -320,7 +321,7 @@ Inspector `TurnSnapshot` ring (50 turns per session; exists only when `developer
 
 ### 4.5 Tool calls: where inputs and outputs live
 
-Calls: inline `{id, name, status}` refs in the assistant row. Inputs: no durable copy. Outputs: durable only above the preview budget (`tool_result_cache`, no HTTP route). Separate channels, none of which stores both durably:
+Calls: inline `{id, name, status}` refs in the assistant row. Inputs: durable, redacted and capped at 4 KiB (`tool_call_arguments`), executed calls only. Outputs: durable only above the preview budget (`tool_result_cache`, no HTTP route). Separate channels, none of which stores both durably:
 
 | Channel | Carries | Durable |
 |---|---|---|

@@ -32,6 +32,8 @@ type ResultCache struct {
 	softTruncBytes  int
 	hardCapBytes    int
 	cacheTTLSeconds int
+	argBudgetBytes  int
+	argRedactor     ArgumentRedactor
 }
 
 // ResultCacheConfig configures the result cache thresholds. Zero values fall
@@ -40,6 +42,11 @@ type ResultCacheConfig struct {
 	SoftTruncBytes  int
 	HardCapBytes    int
 	CacheTTLSeconds int
+	// ArgumentBudgetBytes bounds each persisted tool-call argument document.
+	ArgumentBudgetBytes int
+	// ArgumentRedactor overrides the default name-pattern policy. This is the
+	// hook a dev-mode profile would replace; nil selects NamePatternRedactor.
+	ArgumentRedactor ArgumentRedactor
 }
 
 // NewResultCache creates a ResultCache backed by the given DB connection.
@@ -60,7 +67,13 @@ func NewResultCache(db *sql.DB, cfg ResultCacheConfig) *ResultCache {
 	if soft > hard {
 		soft = hard
 	}
+	argBudget := cfg.ArgumentBudgetBytes
+	if argBudget <= 0 {
+		argBudget = DefaultArgumentBudgetBytes
+	}
 	return &ResultCache{
+		argBudgetBytes:  argBudget,
+		argRedactor:     cfg.ArgumentRedactor,
 		db:              db,
 		softTruncBytes:  soft,
 		hardCapBytes:    hard,
@@ -253,6 +266,7 @@ func (c *ResultCache) Purge() (int, error) {
 		return 0, fmt.Errorf("cache purge: %w", err)
 	}
 	n, _ := result.RowsAffected()
+	n += c.purgeArguments(now)
 	if n > 0 {
 		slog.Info("tool-cache: purged expired entries", "count", n)
 	}

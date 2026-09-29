@@ -121,7 +121,11 @@ type SlotSources struct {
 	// working_dir up to the nearest .git root. Empty when no
 	// WorkspaceCache / resolver is wired or no instruction files are
 	// found on the walk path.
-	Workspace        string
+	Workspace string
+	// Skills carries the skill listing — name + description per granted
+	// skill, no bodies (CW-20260919-0012, D-37). Sourced from
+	// buildSkillsSlotContent. Was appended to the Agent slot before D-37.
+	Skills           string
 	Session          string                 // session name, mode label
 	Context          string                 // formatted ContextBroker items where Source != "memory"
 	UserContext      string                 // J10 (CW-20260426-0008): user-authored session context prompt + included docs.
@@ -190,8 +194,8 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// intent no longer needs to reach the skill-list call. It's still
 	// derived here for the Context Broker step further down.
 	intent := cb.deriveIntent(session, agent)
-	skillList := buildSkillListForSession(ctx, cb.Store, agent.ID, session.ID)
-	agentPrompt := assembleAgentSlotContent(cb.Store, agent, skillList, session.ID)
+	skillsContent := buildSkillsSlotContent(ctx, cb.Store, agent.ID, session.ID)
+	agentPrompt := assembleAgentSlotContent(cb.Store, agent, session.ID)
 
 	// Rules slot — agent tags + tool allowlist. S4a expands this.
 	rules := buildRulesSlotContent(agent)
@@ -302,6 +306,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		Rules:            rules,
 		Permissions:      permissionsContent,
 		Workspace:        workspaceContent,
+		Skills:           skillsContent,
 		Session:          sessionContent,
 		Context:          contextContent,
 		UserContext:      userContextContent,
@@ -593,7 +598,7 @@ func formatPacketItemsBySource(packet *contextbroker.ContextPacket, memoryOnly b
 }
 
 // assembleAgentSlotContent composes the agent-specific portion of the prompt
-// (agent.SystemPrompt, skill list) without the workspace or think-tool
+// (agent.SystemPrompt) without the workspace or think-tool
 // sections that live in the System slot. Phase 0 item 21 ("Cut Modes, in
 // full") removed the Legacy AgentMode addendum this used to splice in —
 // there is no more per-agent mode to append. Phase 0 item 29 ("Relocate
@@ -604,17 +609,26 @@ func formatPacketItemsBySource(packet *contextbroker.ContextPacket, memoryOnly b
 // When sessionID is non-empty and a fresh CompactionContract event exists for
 // the session, the unified disclosure is appended (P8A, CW-20260420-0025;
 // collapsed to a single hardcoded message by Phase 0 item 29).
-func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, skillList, sessionID string) string {
+func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, sessionID string) string {
 	composed := agent.SystemPrompt
-	if skillList != "" {
-		composed += "\n\nAvailable skills:\n" + skillList
-	}
 	if sessionID != "" {
 		if disclosure := renderCompactionDisclosure(s, sessionID); disclosure != "" {
 			composed += "\n\n" + disclosure
 		}
 	}
 	return composed
+}
+
+// buildSkillsSlotContent renders the SlotSkills payload: a header telling the
+// agent how to use the listing, then one name + description line per granted
+// skill. Empty when the agent has no skills and the catalog has nothing more
+// to point at, so the slot ships as skipped_no_content.
+func buildSkillsSlotContent(ctx context.Context, s *store.Store, agentID, sessionID string) string {
+	list := buildSkillListForSession(ctx, s, agentID, sessionID)
+	if list == "" {
+		return ""
+	}
+	return "Available skills — each line is `slug: when to use it`. Load one with `skill_get(slug)` when its description matches the task; the listing carries no skill content.\n" + list
 }
 
 // buildRulesSlotContent renders the Rules slot from the agent profile. S4a

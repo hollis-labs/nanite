@@ -11,7 +11,7 @@
 //
 // # Invariants
 //
-// Six load-bearing invariants describe what every dispatch flavor
+// Seven load-bearing invariants describe what every dispatch flavor
 // (chat, sync subagent, async subagent, background_agent) sees on the
 // wire. Documented in INVARIANTS.md alongside this package and
 // enforced by `internal/service/slot_invariants_test.go`

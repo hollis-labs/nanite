@@ -310,7 +310,7 @@ func TestAssembleAgentSlotContent_appendsDisclosure(t *testing.T) {
 		SummaryMode: "research",
 	})
 
-	got := assembleAgentSlotContent(s, agent, "", sess.ID)
+	got := assembleAgentSlotContent(s, agent, sess.ID)
 	if !strings.Contains(got, "## Compaction Notice") {
 		t.Errorf("expected unified disclosure in agent slot, got: %q", got)
 	}

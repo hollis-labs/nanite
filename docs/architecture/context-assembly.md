@@ -59,7 +59,7 @@ documented state rather than a bug to fix.
 
 ## The contract, and where it actually lives
 
-`internal/context/INVARIANTS.md` is the contract — six invariants, each stated
+`internal/context/INVARIANTS.md` is the contract — seven invariants, each stated
 with what relies on it and which test pins it. Every one is enforced by
 `internal/service/slot_invariants_test.go`, which also carries
 deliberate-violation tests, so each assertion is shown to catch a real break

@@ -48,7 +48,8 @@ func TestBuildSkillListForSession_LoadHintWhenCatalogHasMore(t *testing.T) {
 	// rendered=2, catalog=5, discoverable=3.
 
 	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
-	if !strings.Contains(got, "Assigned-1") || !strings.Contains(got, "Assigned-2") {
+	// Lines lead with the slug — the identifier skill_get takes.
+	if !strings.Contains(got, "- asn-1: first") || !strings.Contains(got, "- asn-2: second") {
 		t.Errorf("essentials missing from rendered list: %q", got)
 	}
 	if !strings.Contains(got, "3 additional") {
@@ -142,4 +143,43 @@ func nameForIdx(i int) string {
 	tens := byte(a + (i/10)%10)
 	ones := byte(a + i%10)
 	return "sk-" + string([]byte{hundreds, tens, ones})
+}
+
+// D-37 (CW-20260919-0012): a listing line is slug + one bounded line of
+// description, never a body. A multi-line or oversized description is
+// collapsed so a skill can't spend the SlotSkills budget on its own.
+func TestBuildSkillListForSession_DescriptionIsOneBoundedLine(t *testing.T) {
+	s := newTestStoreForChat(t)
+	agent := mustCreateAgent(t, s, "agent-long-desc")
+	long := "Use when writing docs.\n\n## Body\n" + strings.Repeat("word ", 200)
+	sk := mustCreateSkill(t, s, &store.Skill{Name: "Doc Writer", Slug: "doc-writer", Description: long})
+	mustAssignSkill(t, s, agent.ID, sk.ID)
+
+	got := buildSkillsSlotContent(context.Background(), s, agent.ID, "")
+	line := ""
+	for _, l := range strings.Split(got, "\n") {
+		if strings.HasPrefix(l, "- doc-writer: ") {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("no listing line for doc-writer in: %q", got)
+	}
+	if !strings.HasPrefix(line, "- doc-writer: Use when writing docs. ## Body") {
+		t.Errorf("description not collapsed to one line: %q", line)
+	}
+	if n := len([]rune(strings.TrimPrefix(line, "- doc-writer: "))); n > SkillDescriptionMaxRunes {
+		t.Errorf("description %d runes, want <= %d", n, SkillDescriptionMaxRunes)
+	}
+	if !strings.Contains(got, "skill_get(slug)") {
+		t.Errorf("slot header must name skill_get: %q", got)
+	}
+}
+
+func TestBuildSkillsSlotContent_EmptyWhenNothingToList(t *testing.T) {
+	s := newTestStoreForChat(t)
+	agent := mustCreateAgent(t, s, "agent-no-skills")
+	if got := buildSkillsSlotContent(context.Background(), s, agent.ID, ""); got != "" {
+		t.Errorf("want empty slot for agent with no skills and empty catalog, got %q", got)
+	}
 }

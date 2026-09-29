@@ -73,7 +73,20 @@ const (
 	// this dedicated slot (the ticket asks for a `workspace slot`,
 	// distinct from the think-tool + workspace-identity payload that
 	// lives in SlotSystem).
-	SlotWorkspace   = "workspace"
+	SlotWorkspace = "workspace"
+	// SlotSkills carries the agent's skill listing — name + description
+	// only, one line per granted skill (CW-20260919-0012, D-37). Progressive
+	// disclosure per the Agent Skills spec: the description tells the agent
+	// WHEN to load a skill, and skill_get fetches the body on demand. The
+	// fetched body is not part of this slot; it comes back as a tool
+	// result, so the ordinary result cache stores it and leaves a
+	// tool_result:// pointer when it is large.
+	//
+	// Non-compactable — like SlotAgent, the listing is how the agent knows
+	// what it can load; losing it mid-conversation strands the skills.
+	// Per-agent-stable (changes only when a grant changes), so it sits in
+	// the policy-class run ahead of SlotTools.
+	SlotSkills      = "skills"
 	SlotTools       = "tools"
 	SlotSession     = "session"
 	SlotContext     = "context"      // dynamic enrichment (plugins, context broker)
@@ -108,6 +121,7 @@ var SlotOrder = []string{
 	SlotRules,
 	SlotPermissions, // CW-20260512-0118 (SP-20260512-0010 W2): per-session path-access summary.
 	SlotWorkspace,   // CW-20260512-0116 (SP-20260512-0009 W6): AGENTS.md walk-up from working_dir.
+	SlotSkills,      // CW-20260919-0012 (D-37): skill name+description listing.
 	SlotTools,
 	SlotSession,
 	SlotContext,
@@ -143,6 +157,7 @@ func DefaultCompactable() map[string]bool {
 		SlotRules:        false,
 		SlotPermissions:  false, // CW-20260512-0118 — path-access summary survives compaction; constraints stay visible.
 		SlotWorkspace:    false, // CW-20260512-0116 — workspace rules survive compaction; identity-class for the local project.
+		SlotSkills:       false, // CW-20260919-0012 — the skill listing is how the agent knows what it can load; survives compaction.
 		SlotTools:        true,
 		SlotSession:      true,
 		SlotContext:      true,
@@ -213,6 +228,7 @@ func DefaultBudgets() map[string]int {
 		SlotRules:        500,
 		SlotPermissions:  800,  // CW-20260512-0118 — bounded by deny enumeration + provenance tags; per-session stable.
 		SlotWorkspace:    4000, // CW-20260512-0116 — generous; concatenated AGENTS.md/CLAUDE.md/NANITE.md across the walk path. Oversized payloads stash via the assembly decider's per-slot budget check.
+		SlotSkills:       2000, // CW-20260919-0012 — name + one-line description per skill; SkillEssentialCap (25) lines fit with headroom.
 		SlotTools:        0,    // proportional to selected tool count
 		SlotSession:      1000,
 		SlotContext:      0,                    // dynamic

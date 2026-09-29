@@ -28,7 +28,7 @@ func (c *Client) Complete(ctx context.Context, in llmtypes.ChatRequest) (string,
 	}
 	reasoningCfg := llmcontracts.ReasoningConfigFromContext(ctx)
 	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
-	params := c.buildMessageParams(in, model, interleavedThinking, reasoningCfg)
+	params := c.buildMessageParams(nonStreamingRequest(in), model, interleavedThinking, reasoningCfg)
 
 	opts := []option.RequestOption{betaHeaderRequestOption(interleavedThinking)}
 	resp, err := c.sdk.Messages.New(ctx, params, opts...)

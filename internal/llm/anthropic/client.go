@@ -29,12 +29,14 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
-// DefaultMaxTokens is used when ChatRequest.MaxTokens is unset. Mirrors the
-// previous hand-rolled adapter so the streaming and non-streaming paths agree
-// on what "no cap" means.
-const DefaultMaxTokens = 16384
+// DefaultMaxTokens is the max_tokens used when ChatRequest.MaxTokens is unset
+// and the model's real output limit is unknown, and the ceiling for an unset
+// value on the non-streaming Complete path.
+const DefaultMaxTokens = 16384 // fallback when the model's output limit is unknown
 
 // DefaultRateLimitTPM seeds the TokenRateTracker before the first calibrated
 // response. Picked to match the deleted hand-rolled adapter so pre-launch
@@ -313,11 +315,33 @@ func resolveModel(req llmtypes.ChatRequest) (string, error) {
 	return req.Model, nil
 }
 
-// resolveMaxTokens returns the max_tokens to use for a request, falling
-// back to DefaultMaxTokens when the request omits one.
+// resolveMaxTokens returns the max_tokens to use for a request. An explicit
+// value is honored but never exceeds the model's real output limit. When the
+// request omits one it is the model's real output limit (models.MaxOutputFor,
+// which the container keeps in step with the models.dev catalog), falling back
+// to DefaultMaxTokens for a model nothing is known about.
+//
+// This is the streaming resolution. Non-streaming Complete caps the default
+// at DefaultMaxTokens first (see nonStreamingRequest), because the SDK refuses
+// a non-streaming request whose max_tokens implies more than ten minutes.
 func resolveMaxTokens(req llmtypes.ChatRequest) int64 {
+	limit := models.MaxOutputFor(req.Model)
 	if req.MaxTokens > 0 {
+		if limit > 0 && req.MaxTokens > limit {
+			return int64(limit)
+		}
 		return int64(req.MaxTokens)
 	}
+	if limit > 0 {
+		return int64(limit)
+	}
 	return DefaultMaxTokens
+}
+
+// nonStreamingRequest bounds an unset MaxTokens for the non-streaming path.
+func nonStreamingRequest(req llmtypes.ChatRequest) llmtypes.ChatRequest {
+	if req.MaxTokens <= 0 {
+		req.MaxTokens = int(min(resolveMaxTokens(req), DefaultMaxTokens))
+	}
+	return req
 }

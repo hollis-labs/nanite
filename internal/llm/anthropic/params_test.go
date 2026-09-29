@@ -5,8 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/pkg/models"
+
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 )
 
@@ -568,5 +571,54 @@ func TestBuildMessages_DropsContentlessMessages(t *testing.T) {
 		if len(m.Content) == 0 {
 			t.Errorf("message %d has no content; Anthropic rejects the whole request for this", i)
 		}
+	}
+}
+
+// CW-20260929-0012 #1: the model's real output limit replaces the flat cap.
+func TestResolveMaxTokens_UsesModelOutputLimit(t *testing.T) {
+	limit := models.MaxOutputFor("claude-opus-5")
+	if limit <= DefaultMaxTokens {
+		t.Skipf("registry limit %d for claude-opus-5 is not above the fallback", limit)
+	}
+	cases := []struct {
+		name string
+		req  llmtypes.ChatRequest
+		want int64
+	}{
+		{"unset uses the model limit", llmtypes.ChatRequest{Model: "claude-opus-5"}, int64(limit)},
+		{"explicit below the limit is kept", llmtypes.ChatRequest{Model: "claude-opus-5", MaxTokens: 1000}, 1000},
+		{"explicit at the limit is kept", llmtypes.ChatRequest{Model: "claude-opus-5", MaxTokens: limit}, int64(limit)},
+		{"explicit above the limit is clamped", llmtypes.ChatRequest{Model: "claude-opus-5", MaxTokens: limit * 4}, int64(limit)},
+		{"unknown model falls back", llmtypes.ChatRequest{Model: "no-such-model-xyz"}, DefaultMaxTokens},
+		{"unknown model keeps an explicit value", llmtypes.ChatRequest{Model: "no-such-model-xyz", MaxTokens: 99999}, 99999},
+	}
+	for _, tc := range cases {
+		if got := resolveMaxTokens(tc.req); got != tc.want {
+			t.Errorf("%s: got %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+// Non-streaming requests must stay under the SDK's ten-minute rule, so an unset
+// value is capped at the fallback even when the model allows far more.
+func TestNonStreamingRequest_CapsUnsetMaxTokens(t *testing.T) {
+	if got := nonStreamingRequest(llmtypes.ChatRequest{Model: "claude-opus-5"}).MaxTokens; got != DefaultMaxTokens {
+		t.Errorf("unset: got %d, want %d", got, DefaultMaxTokens)
+	}
+	if got := nonStreamingRequest(llmtypes.ChatRequest{Model: "claude-opus-5", MaxTokens: 50}).MaxTokens; got != 50 {
+		t.Errorf("explicit: got %d, want 50", got)
+	}
+	if got := nonStreamingRequest(llmtypes.ChatRequest{Model: "no-such-model-xyz"}).MaxTokens; got != DefaultMaxTokens {
+		t.Errorf("unknown: got %d", got)
+	}
+}
+
+// The value reaches the wire params for the streaming path.
+func TestBuildMessageParams_MaxTokensFollowsModel(t *testing.T) {
+	c := New()
+	in := llmtypes.ChatRequest{Model: "claude-opus-5"}
+	got := c.buildMessageParams(in, "claude-opus-5", false, llmcontracts.ReasoningConfig{}).MaxTokens
+	if want := int64(models.MaxOutputFor("claude-opus-5")); got != want {
+		t.Errorf("params MaxTokens = %d, want %d", got, want)
 	}
 }

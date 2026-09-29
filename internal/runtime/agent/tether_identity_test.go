@@ -77,6 +77,7 @@ func TestClaudeLayout_Setup_PlantsTetherIdentity_WhenRegistered(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(bootDir) })
 
 	identityPath := filepath.Join(bootDir, ".sandbox", "tether-identity.md")
+	// #nosec G304 -- identityPath is an exact path beneath the t.TempDir-derived bootDir.
 	data, err := os.ReadFile(identityPath)
 	if err != nil {
 		t.Fatalf("expected identity file at %s: %v", identityPath, err)

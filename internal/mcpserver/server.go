@@ -63,19 +63,21 @@ func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot,
 		dev = dev.WithArtifactResolver(condmcp.NewStoreArtifactResolver(s), artifactsRoot)
 	}
 
-	var self toolTransport
-	if apiURL != "" {
-		self = newSelfToolProxy(s, apiURL, sessionID)
-	} else {
-		self = selftools.NewSelfToolsTransport(s)
-	}
-
-	return &Server{
-		self:          self,
+	srv := &Server{
 		dev:           dev,
 		sessionID:     sessionID,
 		toolAllowlist: buildToolAllowlist(toolAllowlist),
 	}
+	if apiURL != "" {
+		proxy := newSelfToolProxy(s, apiURL, sessionID)
+		// Only offer the harness to cache results behind a pointer when the
+		// agent can actually follow it.
+		proxy.cacheRetrieval = srv.toolAllowed("fetch_tool_result") && srv.toolAllowed("search_tool_result")
+		srv.self = proxy
+	} else {
+		srv.self = selftools.NewSelfToolsTransport(s)
+	}
+	return srv
 }
 
 // buildToolAllowlist normalizes a raw tool-name list into a lookup set,

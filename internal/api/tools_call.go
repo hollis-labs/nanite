@@ -27,6 +27,11 @@ type selfToolCallRequest struct {
 	Name string `json:"name"`
 	// Args is the tool's argument map.
 	Args map[string]any `json:"args"`
+	// CacheRetrieval is true when the caller exposes fetch_tool_result and
+	// search_tool_result, so an over-budget result may be cached behind a
+	// pointer it can follow. A caller that omits it (an older subprocess, or an
+	// allowlisted workflow runner without those tools) gets results unchanged.
+	CacheRetrieval bool `json:"cache_retrieval,omitempty"`
 }
 
 // handleSelfToolCall dispatches a self-tool through the fully-wired
@@ -76,11 +81,17 @@ func (a *API) handleSelfToolCall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := mcp.WithSessionID(r.Context(), req.SessionID)
+	if navResult, ok := a.serveCacheNavigation(ctx, req); ok {
+		a.persistSelfToolArguments(req)
+		a.jsonResp(w, http.StatusOK, navResult)
+		return
+	}
 	result, err := a.selfTools.CallTool(ctx, req.Name, req.Args)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.persistSelfToolArguments(req)
 
 	// CW-20260517-0041: same-turn card flush for CLI-launched agents.
 	//
@@ -104,6 +115,11 @@ func (a *API) handleSelfToolCall(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+
+	// D-38: bound the CLI-visible result with the same cache + model-aware
+	// budget the chat path uses. After the card flush above, which reads the
+	// original.
+	result = a.presentSelfToolResult(ctx, req, result)
 
 	// A tool-level error (result.IsError) is still a successful dispatch —
 	// return 200 and let the caller surface the error content. Only a

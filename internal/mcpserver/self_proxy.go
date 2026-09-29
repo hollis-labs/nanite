@@ -10,9 +10,11 @@ import (
 	"strings"
 	"time"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 // selfToolProxy is a toolTransport that forwards self-tool calls to a live
@@ -31,6 +33,10 @@ type selfToolProxy struct {
 	sessionID string
 	catalog   []condmcp.Tool
 	client    *http.Client
+	// cacheRetrieval is sent with every forwarded call: true when this
+	// subprocess exposes fetch_tool_result/search_tool_result, so the harness
+	// may cache an over-budget result behind a pointer the agent can follow.
+	cacheRetrieval bool
 }
 
 // newSelfToolProxy builds a proxy transport. The tool catalog is taken from
@@ -39,6 +45,11 @@ type selfToolProxy struct {
 // CallTool forwards over HTTP.
 func newSelfToolProxy(s *store.Store, apiURL, sessionID string) *selfToolProxy {
 	catalog, _ := selftools.NewSelfToolsTransport(s).ListTools(context.Background())
+	// Cache navigation is served by the live harness (it owns the cache), so
+	// it is advertised here rather than by the bare local transport.
+	for _, def := range []llmtypes.ToolDefinition{toolclient.FetchToolResultMetaTool(), toolclient.SearchToolResultMetaTool()} {
+		catalog = append(catalog, condmcp.Tool{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema})
+	}
 	return &selfToolProxy{
 		apiURL:    strings.TrimRight(apiURL, "/"),
 		sessionID: sessionID,
@@ -60,11 +71,15 @@ func (p *selfToolProxy) ListTools(_ context.Context) ([]condmcp.Tool, error) {
 
 // CallTool forwards the call to the live API server and decodes the result.
 func (p *selfToolProxy) CallTool(ctx context.Context, name string, args map[string]any) (*condmcp.ToolResult, error) {
-	body, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"session_id": p.sessionID,
 		"name":       name,
 		"args":       args,
-	})
+	}
+	if p.cacheRetrieval {
+		payload["cache_retrieval"] = true
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("self-tool %q: marshal request: %w", name, err)
 	}

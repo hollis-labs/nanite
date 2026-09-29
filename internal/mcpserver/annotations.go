@@ -47,6 +47,9 @@ var toolAnnotations = map[string]gmcpserver.ToolAnnotations{
 	"tool_validate": {ReadOnlyHint: true, IdempotentHint: true},
 	"whoami":        {ReadOnlyHint: true, IdempotentHint: true},
 	"procedure_get": {ReadOnlyHint: true, IdempotentHint: true},
+	// Read a page / search a session-scoped cached result; no side effects.
+	"fetch_tool_result":  {ReadOnlyHint: true, IdempotentHint: true},
+	"search_tool_result": {ReadOnlyHint: true, IdempotentHint: true},
 
 	// --- skills ---
 	"skill_list": {ReadOnlyHint: true, IdempotentHint: true},

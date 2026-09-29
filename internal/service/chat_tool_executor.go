@@ -662,6 +662,15 @@ func (s *chatServiceImpl) postProcessToolResults(
 		r := results[i]
 		tu := plan.tu
 
+		// D-35: durable, redacted, budget-bounded record of what the tool was
+		// called with. Audit only; never enters the model's context, and a
+		// failure here must not fail the tool call.
+		if s.resultCache != nil {
+			if _, err := s.resultCache.PersistArguments(sessionID, tu.ID, tu.Name, tu.Input); err != nil {
+				slog.Warn("chat-service: tool argument persist error", "tool", tu.Name, "err", err)
+			}
+		}
+
 		// Record tool call outcome.
 		ls.recordToolCall(tu.Name, !r.isError)
 

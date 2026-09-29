@@ -2,7 +2,7 @@ package service
 
 // CW-20260512-0124 (SP-20260512-0011 W4) — Slot system invariants.
 //
-// This file codifies six invariants that emerged from Sprints 1-4 of the
+// This file codifies seven invariants that emerged from Sprints 1-4 of the
 // harness-restoration arc. Each invariant is a check function
 // (`invariantXxx`) that returns an error when the contract breaks, and
 // the parameterized `TestSlotInvariants_AcrossDispatchTypes` runs every
@@ -59,7 +59,7 @@ func dispatchFlavors() []dispatchFlavor {
 	}
 }
 
-// invariantsFixture is the shared session/agent setup the six invariant
+// invariantsFixture is the shared session/agent setup the seven invariant
 // checks operate against. Built fresh per dispatch flavor so each subtest
 // sees identical inputs — only the CallerType-tagged context differs.
 //
@@ -99,6 +99,15 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 	}
 	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	// One granted skill so INV7 has a listing to check.
+	sk := &store.Skill{Name: "Invariant Skill", Slug: "inv-skill", Description: invSkillDescription}
+	if err := s.CreateSkill(context.Background(), sk); err != nil {
+		t.Fatalf("CreateSkill: %v", err)
+	}
+	if err := s.AssignSkillToAgent(context.Background(), agent.ID, sk.ID, ""); err != nil {
+		t.Fatalf("AssignSkillToAgent: %v", err)
 	}
 
 	sess := &store.Session{
@@ -461,6 +470,36 @@ func invariantPermissionVisibility(res *SlotAssemblyResult) error {
 	return nil
 }
 
+// invSkillDescription is the description the fixture's granted skill carries.
+const invSkillDescription = "Use when checking the skills slot invariant."
+
+// invariantSkillsListing — INVARIANT #7 (CW-20260919-0012, D-37).
+//
+// The agent's skills reach the model as a listing in SlotSkills — slug plus
+// description, one line per skill — and nowhere else in the prompt. The
+// listing is non-compactable, and it never carries a skill body: bodies
+// arrive through skill_get as tool results, where the result cache owns them.
+func invariantSkillsListing(res *SlotAssemblyResult) error {
+	idx := indexOfSlot(res.Plan.Decisions, ctxpkg.SlotSkills)
+	if idx < 0 {
+		return fmt.Errorf("SlotSkills missing from plan")
+	}
+	d := res.Plan.Decisions[idx]
+	if want := "- inv-skill: " + invSkillDescription; !strings.Contains(d.Content, want) {
+		return fmt.Errorf("SlotSkills missing listing line %q: %q", want, d.Content)
+	}
+	if !strings.Contains(d.Content, "skill_get") {
+		return fmt.Errorf("SlotSkills does not tell the agent how to load a skill: %q", d.Content)
+	}
+	if ctxpkg.DefaultCompactable()[ctxpkg.SlotSkills] {
+		return fmt.Errorf("SlotSkills is compactable — the listing would vanish mid-conversation")
+	}
+	if a := indexOfSlot(res.Plan.Decisions, ctxpkg.SlotAgent); a >= 0 && strings.Contains(res.Plan.Decisions[a].Content, "inv-skill") {
+		return fmt.Errorf("skill listing leaked into SlotAgent — skills belong only in SlotSkills")
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------
 // TEST DRIVERS
 // ---------------------------------------------------------------
@@ -492,6 +531,9 @@ func TestSlotInvariants_AcrossDispatchTypes(t *testing.T) {
 			}
 			if err := invariantPermissionVisibility(res); err != nil {
 				t.Errorf("INV6 permission visibility (%s): %v", flavor.Name, err)
+			}
+			if err := invariantSkillsListing(res); err != nil {
+				t.Errorf("INV7 skills listing (%s): %v", flavor.Name, err)
 			}
 		})
 	}
@@ -674,4 +716,26 @@ func firstBlockName(res *SlotAssemblyResult) string {
 		return "(no blocks)"
 	}
 	return res.Blocks[0].SlotName
+}
+
+// TestSlotInvariants_DeliberateViolation_SkillsListing proves
+// invariantSkillsListing (INV7) has teeth: a plan that leaves SlotSkills
+// empty, or that pushes the listing back into SlotAgent, must be caught.
+func TestSlotInvariants_DeliberateViolation_SkillsListing(t *testing.T) {
+	listing := "Load with skill_get(slug)\n- inv-skill: " + invSkillDescription
+	cases := map[string]contextbroker.AssemblyPlan{
+		"empty skills slot": {Decisions: []contextbroker.SlotDecision{
+			{SlotName: ctxpkg.SlotAgent, Content: "agent body"},
+			{SlotName: ctxpkg.SlotSkills, Content: ""},
+		}},
+		"listing in agent slot": {Decisions: []contextbroker.SlotDecision{
+			{SlotName: ctxpkg.SlotAgent, Content: "agent body\n" + listing},
+			{SlotName: ctxpkg.SlotSkills, Content: listing},
+		}},
+	}
+	for name, plan := range cases {
+		if err := invariantSkillsListing(&SlotAssemblyResult{Plan: plan}); err == nil {
+			t.Errorf("DELIBERATE VIOLATION NOT CAUGHT (%s): invariantSkillsListing accepted it — assertion has no teeth", name)
+		}
+	}
 }

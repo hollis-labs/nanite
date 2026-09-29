@@ -19,3 +19,15 @@ func TestIsCacheExemptTool(t *testing.T) {
 		}
 	}
 }
+
+// D-37 (CW-20260919-0012): the skill listing carries name + description
+// only, so a loaded skill body must go through the result cache — preview
+// plus a tool_result:// pointer when large. Exempting skill_get would put
+// whole bodies in context.
+func TestSkillGetResultsAreCached(t *testing.T) {
+	for _, name := range []string{"skill_get", "skill_list"} {
+		if isCacheExemptTool(name) {
+			t.Errorf("%s must not be cache-exempt", name)
+		}
+	}
+}

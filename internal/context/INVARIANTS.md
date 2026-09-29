@@ -9,7 +9,7 @@
 > emergent properties of Sprints 1-3 and Sprint 4 W1+W2+W3.
 
 The Context Broker assembles every dispatched LLM turn from named slots
-defined in `internal/context/slot.go` (the `SlotOrder` slice). The six
+defined in `internal/context/slot.go` (the `SlotOrder` slice). The seven
 invariants below describe contracts that hold across ALL agent-flavored
 dispatch types (chat, sync subagent, async subagent, background_agent)
 regardless of CallerType. If a future refactor needs to change one,
@@ -27,7 +27,7 @@ every dispatch flavor. Positions are load-bearing: Anthropic's
 slot count (slots with non-empty content) lands in the 5..N range
 where N == `len(SlotOrder)`; the 5-7 typical range is the working-
 session shape (Universal + System + Agent + Rules + conversation,
-plus optional Permissions/Workspace/Tools).
+plus optional Permissions/Workspace/Skills/Tools).
 
 **Why it matters.** A slot drop or reorder breaks the cacheable prefix
 and produces non-deterministic cache miss patterns. Every dispatch
@@ -86,7 +86,7 @@ a regression that disconnected the universal source) and
 today exactly `[SlotUniversal, SlotSystem]`. Both slots are
 non-compactable (per `ctxpkg.DefaultCompactable`) and ship with
 non-empty content on a well-formed assembly. Per-turn dynamic slots
-(SlotMode, SlotMemory, SlotPermissions, SlotWorkspace, SlotTools,
+(SlotMode, SlotMemory, SlotPermissions, SlotWorkspace, SlotSkills, SlotTools,
 SlotSession, SlotContext, SlotUserContext, SlotHandoff,
 SlotConversation) NEVER carry markers — dynamic-content marker
 placement would invalidate the cache offset.
@@ -246,6 +246,45 @@ inheritance (W3 / CW-20260512-0119) is pinned by
 (human-readable projection); the universal-rules block's refusal hook
 (in `internal/chat/universal_rules.go`) which cites the
 SlotPermissions content.
+
+---
+
+## INV7 — Skills listing: name + description, own slot, no bodies
+
+**Invariant.** An agent's granted skills reach the model as a listing in
+`SlotSkills` and nowhere else in the prompt: one line per skill, the
+slug followed by a one-line description (`- <slug>: <description>`),
+under a header that names `skill_get(slug)` as the way to load one.
+`SlotSkills` is non-compactable. The listing never carries a skill body,
+and `SlotAgent` carries no skill text.
+
+**Why it matters.** This is progressive disclosure per the Agent Skills
+spec (D-37, CW-20260919-0012): the description's job is to tell the
+agent when to load a skill, so the prompt pays for a line per skill, not
+for the skills. A separate slot means the listing is budgeted, inspected
+and compacted like every other slot instead of riding inside the agent
+prompt. It is non-compactable for the same reason `SlotAgent` is —
+losing it mid-conversation strands skills the agent can no longer name.
+Bodies are fetched with `skill_get`, which is not cache-exempt, so a
+large body comes back as a preview plus a `tool_result://` pointer that
+`fetch_tool_result` pages through, the same as any other large result.
+
+**Enforced by.** `invariantSkillsListing` in
+`internal/service/slot_invariants_test.go`, exercised across every
+dispatch flavor by `TestSlotInvariants_AcrossDispatchTypes` and pinned
+with teeth by `TestSlotInvariants_DeliberateViolation_SkillsListing`.
+Line shape and the description bound are pinned by
+`TestBuildSkillListForSession_DescriptionIsOneBoundedLine` in
+`internal/chat/skill_list_loadhint_test.go`. That `skill_get` results go
+through the result cache is pinned by
+`TestSkillGetResultsAreCached` in
+`internal/service/chat_tool_cache_exempt_test.go`.
+
+**Relied on by.** `internal/chat/context_client.go::buildSkillsSlotContent`
+(renderer); `internal/chat/context.go::buildSkillListForSession`
+(per-agent listing, capped at `SkillEssentialCap`);
+`internal/service/context.go::slotSourceMap` (binds the source to the
+slot).
 
 ---
 

@@ -228,7 +228,8 @@ func ThinkToolBlockWithDispatch(ctx context.Context, dispatcher HintDispatcher, 
 const SkillEssentialCap = 25
 
 // buildSkillListForSession is the skill-list renderer for an agent's
-// assigned skills.
+// assigned skills. Its output is the SlotSkills payload (CW-20260919-0012,
+// D-37): name + description only, never a skill body.
 //
 // Phase 0 item 22 (decision log §11): this used to run assigned skills
 // through the Skill Broker (internal/skillbroker.SelectSkills) — a
@@ -273,7 +274,8 @@ func buildSkillListForSession(_ context.Context, s *store.Store, agentID, _ stri
 	// render inline, so this loop is back to plain name/description.
 	var sb strings.Builder
 	for _, sk := range rendered {
-		fmt.Fprintf(&sb, "- %s: %s\n", sk.Name, sk.Description)
+		// The slug is what skill_get takes; the display name may differ.
+		fmt.Fprintf(&sb, "- %s: %s\n", skillListingID(sk), skillListingDescription(sk.Description))
 	}
 
 	if hint := skillCatalogLoadHint(s, len(rendered)); hint != "" {
@@ -285,6 +287,29 @@ func buildSkillListForSession(_ context.Context, s *store.Store, agentID, _ stri
 	}
 
 	return sb.String()
+}
+
+// SkillDescriptionMaxRunes bounds one listing line. The description's job is
+// to say when to load the skill (Agent Skills spec); the body is fetched with
+// skill_get, so a long description only spends SlotSkills budget.
+const SkillDescriptionMaxRunes = 240
+
+// skillListingID is the identifier a listing line leads with — the slug,
+// because skill_get is keyed on it.
+func skillListingID(sk store.Skill) string {
+	if sk.Slug != "" {
+		return sk.Slug
+	}
+	return sk.Name
+}
+
+// skillListingDescription collapses a description to one bounded line.
+func skillListingDescription(desc string) string {
+	line := strings.Join(strings.Fields(desc), " ")
+	if r := []rune(line); len(r) > SkillDescriptionMaxRunes {
+		line = strings.TrimSpace(string(r[:SkillDescriptionMaxRunes-1])) + "…"
+	}
+	return line
 }
 
 // skillCatalogLoadHint returns the discoverability pointer text appended

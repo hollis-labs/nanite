@@ -317,6 +317,7 @@ func slotSourceMap(sources *chat.SlotSources, toolsContent string) map[string]st
 		ctxpkg.SlotRules:       sources.Rules,
 		ctxpkg.SlotPermissions: sources.Permissions,
 		ctxpkg.SlotWorkspace:   sources.Workspace,
+		ctxpkg.SlotSkills:      sources.Skills,
 		ctxpkg.SlotTools:       toolsContent,
 		ctxpkg.SlotSession:     sources.Session,
 		ctxpkg.SlotContext:     sources.Context,

@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"strings"
@@ -561,5 +562,77 @@ func TestPurgeExpired_BothTablesOnlyExpired(t *testing.T) {
 	}
 	if _, err := PurgeExpired(nil); err == nil {
 		t.Error("nil database must be an error")
+	}
+}
+
+// The loop purges at start, again on each tick, and returns promptly when its
+// context is cancelled — no goroutine is left behind.
+func TestRunPurgeLoop_StartTickAndShutdown(t *testing.T) {
+	_, db := setupTestCache(t)
+	db.SetMaxOpenConns(1)
+	insertExpired := func(id string) {
+		t.Helper()
+		past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+		if _, err := db.Exec(`INSERT INTO tool_result_cache (id, session_id, tool_name, tool_call_id, created_at, expires_at, byte_size, was_truncated, body) VALUES (?, 's', 't', 'c', ?, ?, 1, 1, 'b')`, id, past, past); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM tool_result_cache`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	insertExpired("before-start")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		RunPurgeLoop(ctx, db, 20*time.Millisecond)
+	}()
+	waitFor("purge at start", func() bool { return count() == 0 })
+
+	insertExpired("after-start")
+	waitFor("purge on a later tick", func() bool { return count() == 0 })
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunPurgeLoop did not return after context cancel")
+	}
+}
+
+// A failing purge (missing table) is logged and never stops or panics the loop.
+func TestRunPurgeLoop_SurvivesPurgeErrors(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		RunPurgeLoop(ctx, db, 10*time.Millisecond)
+	}()
+	time.Sleep(60 * time.Millisecond) // several failing ticks
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("loop did not stop after errors + cancel")
 	}
 }

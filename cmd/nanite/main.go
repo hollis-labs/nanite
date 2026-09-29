@@ -33,6 +33,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	gosched "github.com/hollis-labs/go-scheduler"
 	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/api"
@@ -1359,22 +1360,7 @@ func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container)
 	// reclaims the space. Same hourly cadence as truncate-cleanup.
 	if container.Store != nil {
 		lc.Go("tool-cache-purge", func(ctx context.Context) {
-			purge := func() {
-				if _, err := tool.PurgeExpired(container.Store.DB); err != nil {
-					slog.Warn("tool-cache purge failed", "err", err)
-				}
-			}
-			purge()
-			ticker := time.NewTicker(1 * time.Hour)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					purge()
-				}
-			}
+			tool.RunPurgeLoop(ctx, container.Store.DB, 1*time.Hour)
 		})
 	}
 

@@ -979,74 +979,9 @@ func (s *chatServiceImpl) handleResultCacheMetaTool(
 }
 
 func (s *chatServiceImpl) handleFetchToolResult(sessionID string, input map[string]any, budget int) (string, bool) {
-	id, _ := input["id"].(string)
-	if id == "" {
-		return "Error: 'id' is required", true
-	}
-	pointer, _ := input["json_pointer"].(string)
-	offset, err := cacheInt(input, "offset", 0)
-	if err != nil {
-		return "Error: " + err.Error(), true
-	}
-	length, err := cacheInt(input, "length", budget)
-	if err != nil {
-		return "Error: " + err.Error(), true
-	}
-	page, err := s.resultCache.ReadPage(sessionID, id, pointer, offset, length, budget)
-	if err != nil {
-		return fmt.Sprintf("Error: %v", err), true
-	}
-	header := fmt.Sprintf("[Cached result %s; json_pointer=%q; bytes %d..%d of %d (end-exclusive); has_more=%t; next_offset=%d]\n\n",
-		id, pointer, page.Offset, page.End, page.TotalBytes, page.HasMore, page.End)
-	return header + page.Content, false
+	return s.resultCache.FetchToolResult(sessionID, input, budget)
 }
 
 func (s *chatServiceImpl) handleSearchToolResult(sessionID string, input map[string]any, budget int) (string, bool) {
-	id, _ := input["id"].(string)
-	pattern, _ := input["pattern"].(string)
-	if id == "" || pattern == "" {
-		return "Error: 'id' and 'pattern' are required", true
-	}
-	pointer, _ := input["json_pointer"].(string)
-	offset, err := cacheInt(input, "offset", 0)
-	if err != nil {
-		return "Error: " + err.Error(), true
-	}
-	maximum, err := cacheInt(input, "max_matches", 20)
-	if err != nil {
-		return "Error: " + err.Error(), true
-	}
-	page, err := s.resultCache.SearchPage(sessionID, id, pointer, pattern, offset, maximum, budget)
-	if err != nil {
-		return fmt.Sprintf("Error: %v", err), true
-	}
-	var out strings.Builder
-	fmt.Fprintf(&out, "[Cached result %s; json_pointer=%q; matching lines=%d; total_bytes=%d; has_more=%t; next_offset=%d]\n", id, pointer, len(page.Matches), page.TotalBytes, page.HasMore, page.NextOffset)
-	for _, m := range page.Matches {
-		fmt.Fprintf(&out, "\n--- Line %d; match bytes %d..%d; context bytes %d..%d; context_truncated=%t ---\n%s\n", m.Line, m.MatchOffset, m.MatchEnd, m.ContextOffset, m.ContextEnd, m.ContextTruncated, m.Context)
-	}
-	if len(page.Matches) == 0 {
-		out.WriteString("No matching lines.\n")
-	}
-	return out.String(), false
-}
-
-func cacheInt(input map[string]any, key string, fallback int) (int, error) {
-	value, exists := input[key]
-	if !exists || value == nil {
-		return fallback, nil
-	}
-	var number float64
-	switch v := value.(type) {
-	case float64:
-		number = v
-	case int:
-		number = float64(v)
-	default:
-		return 0, fmt.Errorf("%s must be a non-negative integer", key)
-	}
-	if number < 0 || number > float64(1<<30) || number != float64(int(number)) {
-		return 0, fmt.Errorf("%s must be a non-negative integer no greater than 1073741824", key)
-	}
-	return int(number), nil
+	return s.resultCache.SearchToolResult(sessionID, input, budget)
 }

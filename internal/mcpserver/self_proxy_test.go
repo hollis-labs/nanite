@@ -107,3 +107,46 @@ func TestSelfToolProxy_ListToolsServesCatalog(t *testing.T) {
 		t.Fatal("ListTools returned an empty catalog")
 	}
 }
+
+// D-38: the proxy advertises the cache-navigation tools (the harness serves
+// them) and tells the harness whether the agent can follow a cache pointer.
+func TestSelfToolProxy_CacheRetrievalFlagAndCatalog(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = map[string]any{}
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_ = json.NewEncoder(w).Encode(map[string]any{"content": []any{}})
+	}))
+	defer srv.Close()
+
+	for _, tc := range []struct {
+		name      string
+		allowlist []string
+		want      bool
+	}{
+		{"unrestricted CLI agent", nil, true},
+		{"allowlist with both cache tools", []string{"whoami", "fetch_tool_result", "search_tool_result"}, true},
+		{"allowlist with one", []string{"whoami", "fetch_tool_result"}, false},
+		{"allowlist without them", []string{"whoami"}, false},
+	} {
+		s := New(newProxyTestStore(t), "sess-1", nil, "", srv.URL, tc.allowlist)
+		got = nil
+		if _, err := s.self.CallTool(context.Background(), "whoami", nil); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		flag, _ := got["cache_retrieval"].(bool)
+		if flag != tc.want {
+			t.Errorf("%s: cache_retrieval = %v, want %v", tc.name, flag, tc.want)
+		}
+	}
+
+	p := newSelfToolProxy(newProxyTestStore(t), srv.URL, "sess-1")
+	tools, _ := p.ListTools(context.Background())
+	seen := map[string]bool{}
+	for _, tl := range tools {
+		seen[tl.Name] = true
+	}
+	if !seen["fetch_tool_result"] || !seen["search_tool_result"] {
+		t.Error("proxy catalog does not advertise the cache-navigation tools")
+	}
+}

@@ -67,8 +67,11 @@ import (
 // Container holds all service instances and shared subsystems. It is the
 // single wiring point — created once in main.go and passed to the API layer.
 type Container struct {
-	Sessions SessionService
-	Agents   AgentService
+	// ResultCache is the session-scoped tool-result cache shared by the chat
+	// loop and the self-tool HTTP proxy (POST /api/tools/call).
+	ResultCache *tool.ResultCache
+	Sessions    SessionService
+	Agents      AgentService
 	// AgentConfig is the shared database write path for operator-managed
 	// profiles (GUI/API/CLI/MCP all route mutations through it).
 	AgentConfig *AgentConfigService
@@ -1038,6 +1041,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		"adapters", len(cliAdapters),
 		"workspaces_root", agentDeps.WorkspacesRoot)
 
+	resultCache := buildResultCache(cfg.Store)
 	chatSvc := NewChatService(ChatServiceConfig{
 		Sessions:           sessions,
 		Agents:             agents,
@@ -1058,7 +1062,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Permissions:        permissions,
 		PathGrants:         pathGrants,
 		Tasks:              tasks,
-		ResultCache:        buildResultCache(cfg.Store),
+		ResultCache:        resultCache,
 		ModelCatalog:       modelCatalog,
 		SessionEventWriter: messagingComposition.Events,
 		SubagentInbox:      messagingSvc,
@@ -1381,6 +1385,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		SkillVendor:         skillVendor,
 		Tools:               tools,
 		Chat:                chatSvc,
+		ResultCache:         resultCache,
 		Context:             ctxService,
 		Streams:             streams,
 		RuntimeFeed:         runtimeFeed,

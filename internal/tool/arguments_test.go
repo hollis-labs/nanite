@@ -124,6 +124,17 @@ func TestNamePatternRedactor_SecretsInsideStrings(t *testing.T) {
 		{"json as text", `{"password":"nestedPW","ok":1}`, []string{"nestedPW"}},
 		{"json array as text", `[{"token":"nestedTOK"}]`, []string{"nestedTOK"}},
 		{"basic auth", `Authorization: Basic dXNlcjpwYXNzd29yZA==`, []string{"dXNlcjpwYXNzd29yZA"}},
+		{"flag space", `curl --token abc123secret https://x`, []string{"abc123secret"}},
+		{"flag equals", `curl --token=abc123secret https://x`, []string{"abc123secret"}},
+		{"flag password", `mytool --password hunter2hunter2 --verbose`, []string{"hunter2hunter2"}},
+		{"flag quoted", `mytool --api-key "abc def ghi"`, []string{"abc def ghi"}},
+		{"flag single dash", `mytool -password hunter2hunter2`, []string{"hunter2hunter2"}},
+		{"url userinfo git", `git clone https://user:s3cretpass@github.com/x/y`, []string{"s3cretpass"}},
+		{"url userinfo psql", `psql postgres://u:pw123@h/db`, []string{"pw123"}},
+		{"curl -u", `curl -u admin:hunter2 https://x`, []string{"hunter2"}},
+		{"curl --user", `curl --user admin:hunter2 https://x`, []string{"hunter2"}},
+		{"curl --user=", `curl --user=admin:hunter2 https://x`, []string{"hunter2"}},
+		{"curl -u quoted", `curl -u "admin:hunter2" https://x`, []string{"hunter2"}},
 	}
 	for _, tc := range cases {
 		out, n := NamePatternRedactor{}.Redact("bash", map[string]any{"command": tc.in})
@@ -141,6 +152,48 @@ func TestNamePatternRedactor_SecretsInsideStrings(t *testing.T) {
 	out, n := NamePatternRedactor{}.Redact("bash", map[string]any{"command": "ls -la /tmp && echo done", "note": "the token count is fine"})
 	if n != 0 {
 		t.Errorf("benign strings redacted (%d): %v", n, out)
+	}
+}
+
+func TestNamePatternRedactor_CommandLineForms(t *testing.T) {
+	// Kept context survives; only the secret is replaced.
+	keep := []struct{ in, want string }{
+		{`curl --token abc123secret https://x`, `curl --token [REDACTED] https://x`},
+		{`curl --token=abc123secret https://x`, `curl --token=[REDACTED] https://x`},
+		{`git clone https://user:s3cretpass@github.com/x/y`, `git clone https://user:[REDACTED]@github.com/x/y`},
+		{`psql postgres://u:pw123@h/db`, `psql postgres://u:[REDACTED]@h/db`},
+		{`curl -u admin:hunter2 https://x`, `curl -u admin:[REDACTED] https://x`},
+		{`curl --user admin:hunter2 https://x`, `curl --user admin:[REDACTED] https://x`},
+	}
+	for _, tc := range keep {
+		out, n := NamePatternRedactor{}.Redact("bash", map[string]any{"command": tc.in})
+		if out["command"] != tc.want || n != 1 {
+			t.Errorf("%q -> %q (n=%d), want %q (n=1)", tc.in, out["command"], n, tc.want)
+		}
+	}
+	untouched := []string{
+		`mytool --max-tokens 5`,
+		`mytool --tokens 5`,
+		`mytool --token --verbose`,
+		`curl https://host:8080/path`,
+		`curl https://host/path?a=b@c`,
+		`git log --author: bob`,
+		`git log --author bob`,
+		`curl -u admin https://x`,
+		`ssh user@host:22`,
+		`export FOO=bar`,
+	}
+	for _, in := range untouched {
+		out, n := NamePatternRedactor{}.Redact("bash", map[string]any{"command": in})
+		if n != 0 || out["command"] != in {
+			t.Errorf("%q changed to %q (n=%d)", in, out["command"], n)
+		}
+	}
+	// Already-covered forms keep working.
+	for _, in := range []string{`export FOO_TOKEN=abc`, `-H "X-Api-Key: abcdef"`, `Authorization: Bearer abcdefghijkl`} {
+		if _, n := (NamePatternRedactor{}).Redact("bash", map[string]any{"command": in}); n != 1 {
+			t.Errorf("%q: n=%d, want 1", in, n)
+		}
 	}
 }
 

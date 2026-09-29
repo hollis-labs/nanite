@@ -21,7 +21,10 @@ type ArgumentRedactor interface {
 // secret, at any nesting depth, whatever the value's type. It is a name-pattern
 // policy: it cannot recognize a secret under an innocuous key (a "value" field
 // paired with a "name": "API_TOKEN" sibling, or a token inside file contents).
-// Over-redaction is the deliberate failure direction.
+// Inside strings it also recognizes NAME=value pairs, Bearer/Basic credentials,
+// secret-named CLI flags (`--token abc`), URL userinfo passwords and
+// `-u user:pass`; `-u user:pass` also catches non-secrets like docker
+// `-u 1000:1000`. Over-redaction is the deliberate failure direction.
 type NamePatternRedactor struct{}
 
 // secretKeyFragments are matched as substrings of the key after it is
@@ -70,7 +73,23 @@ func (NamePatternRedactor) Redact(_ string, args map[string]any) (map[string]any
 var (
 	reSecretAssign = regexp.MustCompile(`(?i)([A-Za-z0-9_.\-]*(?:password|passwd|passphrase|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential)[A-Za-z0-9_.\-]*["']?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s"',;&]+)`)
 	reBearer       = regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=\-]{8,}`)
+
+	// reSecretFlag matches a CLI flag whose name names a secret followed by a
+	// space-separated value (`--token abc`); the `--flag=value` form is
+	// reSecretAssign's. reURLUserinfo matches the password in
+	// scheme://user:password@host. reUserFlag matches curl-style -u/--user
+	// USER:PASSWORD credentials.
+	reSecretFlag  = regexp.MustCompile(`(?i)((?:^|\s)--?[A-Za-z0-9_.\-]*(?:password|passwd|passphrase|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential)[A-Za-z0-9_.\-]*[ \t]+)("[^"]*"|'[^']*'|[^\s"']+)`)
+	reURLUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.\-]*://[^\s/:@"']+:)([^\s/@"']+)(@)`)
+	reUserFlag    = regexp.MustCompile(`((?:^|\s)(?:-u|--user|--proxy-user)(?:[ \t]+|=)["']?[^\s:"']+:)([^\s"']+)`)
 )
+
+// benignFlagNames are secret-looking flag names (normalized like IsSecretKey)
+// that carry a count or a bare noun, not a secret.
+func benignFlag(flag string) bool {
+	k := nonAlnum.ReplaceAllString(strings.ToLower(flag), "")
+	return k == "tokens" || benignKeys[k]
+}
 
 func redactString(s string, count *int) string {
 	if s == "" {
@@ -99,6 +118,28 @@ func redactString(s string, count *int) string {
 	out = reBearer.ReplaceAllStringFunc(out, func(m string) string {
 		*count++
 		return strings.Fields(m)[0] + " " + RedactedPlaceholder
+	})
+	out = reSecretFlag.ReplaceAllStringFunc(out, func(m string) string {
+		sub := reSecretFlag.FindStringSubmatch(m)
+		flag := strings.TrimSpace(sub[1])
+		if strings.HasPrefix(sub[2], "-") || sub[2] == RedactedPlaceholder || benignFlag(flag) {
+			return m
+		}
+		*count++
+		return sub[1] + RedactedPlaceholder
+	})
+	out = reURLUserinfo.ReplaceAllStringFunc(out, func(m string) string {
+		*count++
+		sub := reURLUserinfo.FindStringSubmatch(m)
+		return sub[1] + RedactedPlaceholder + sub[3]
+	})
+	out = reUserFlag.ReplaceAllStringFunc(out, func(m string) string {
+		sub := reUserFlag.FindStringSubmatch(m)
+		if sub[2] == RedactedPlaceholder {
+			return m
+		}
+		*count++
+		return sub[1] + RedactedPlaceholder
 	})
 	return out
 }

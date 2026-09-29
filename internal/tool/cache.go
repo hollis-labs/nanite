@@ -290,7 +290,7 @@ func PurgeExpired(db *sql.DB) (int, error) {
 }
 
 // RunPurgeLoop purges expired rows once immediately and then every interval
-// until ctx is cancelled, at which point it returns. Blocking; the server runs
+// until ctx is canceled, at which point it returns. Blocking; the server runs
 // it on its lifecycle manager. A failed purge is logged and the loop continues.
 func RunPurgeLoop(ctx context.Context, db *sql.DB, interval time.Duration) {
 	purge := func() {

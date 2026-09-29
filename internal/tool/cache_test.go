@@ -566,7 +566,7 @@ func TestPurgeExpired_BothTablesOnlyExpired(t *testing.T) {
 }
 
 // The loop purges at start, again on each tick, and returns promptly when its
-// context is cancelled — no goroutine is left behind.
+// context is canceled — no goroutine is left behind.
 func TestRunPurgeLoop_StartTickAndShutdown(t *testing.T) {
 	_, db := setupTestCache(t)
 	db.SetMaxOpenConns(1)

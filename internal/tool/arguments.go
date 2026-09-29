@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 )
 
@@ -102,15 +101,4 @@ func (c *ResultCache) ListArguments(sessionID string) ([]ArgumentRecord, error) 
 		out = append(out, r)
 	}
 	return out, rows.Err()
-}
-
-// purgeArguments deletes expired argument rows; Purge calls it.
-func (c *ResultCache) purgeArguments(now string) int64 {
-	res, err := c.db.Exec(`DELETE FROM tool_call_arguments WHERE expires_at < ?`, now)
-	if err != nil {
-		slog.Warn("tool-cache: argument purge failed", "err", err)
-		return 0
-	}
-	n, _ := res.RowsAffected()
-	return n
 }

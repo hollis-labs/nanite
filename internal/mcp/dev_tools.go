@@ -14,7 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/truncate"
+
 	llmtypes "github.com/hollis-labs/go-llm-types"
+
 	"github.com/hollis-labs/nanite/internal/pathsafe"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -1345,7 +1348,8 @@ func capOutput(s string, cap int) string {
 	if cap <= 0 || len(s) <= cap {
 		return s
 	}
-	return s[:cap] + fmt.Sprintf("\n[truncated: %d of %d bytes shown]", cap, len(s))
+	shown := truncate.UTF8Head(s, cap)
+	return shown + fmt.Sprintf("\n[truncated: %d of %d bytes shown]", len(shown), len(s))
 }
 
 // IntArg, TextResult, and ErrorResult are shared MCP tool-call helpers used

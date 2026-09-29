@@ -71,6 +71,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/truncate"
 )
 
 // MaxFileBytes caps the size of any single instruction file. Files over
@@ -276,7 +278,7 @@ func readCapped(path string) (string, bool, error) {
 	}
 	truncated := len(data) > MaxFileBytes
 	if truncated {
-		data = data[:MaxFileBytes]
+		data = data[:truncate.UTF8Cut(data, MaxFileBytes)]
 	}
 	return string(data), truncated, nil
 }

@@ -55,6 +55,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/truncate"
 	"github.com/hollis-labs/nanite/internal/version"
@@ -1352,6 +1353,30 @@ func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container)
 			}
 		}
 	})
+
+	// Periodic deletion of expired tool-result cache and tool-argument rows
+	// (CW-20260929-0012 #3). Rows already stop being served at expires_at; this
+	// reclaims the space. Same hourly cadence as truncate-cleanup.
+	if container.Store != nil {
+		lc.Go("tool-cache-purge", func(ctx context.Context) {
+			purge := func() {
+				if _, err := tool.PurgeExpired(container.Store.DB); err != nil {
+					slog.Warn("tool-cache purge failed", "err", err)
+				}
+			}
+			purge()
+			ticker := time.NewTicker(1 * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					purge()
+				}
+			}
+		})
+	}
 
 	// Periodic task snapshot (flush Badger state to SQLite).
 	if container.Tasks != nil {

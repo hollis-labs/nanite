@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/truncate"
+
 	"github.com/hollis-labs/nanite/internal/store/seedcatalog"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/pkg/models"
@@ -394,7 +396,7 @@ func TruncateStr(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return truncate.UTF8Head(s, maxLen) + "..."
 }
 
 // intentStopWords are common words filtered out during intent extraction.

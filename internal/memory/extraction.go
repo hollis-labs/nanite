@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/truncate"
+
 	pluginsdk "github.com/hollis-labs/plugin-sdk"
 
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -325,7 +327,7 @@ func truncateForPrompt(content string, maxLen int) string {
 	if len(content) <= maxLen {
 		return content
 	}
-	return content[:maxLen] + "\n... [truncated]"
+	return truncate.UTF8Head(content, maxLen) + "\n... [truncated]"
 }
 
 // cleanJSONResponse strips markdown code fences and trims whitespace from LLM JSON output.

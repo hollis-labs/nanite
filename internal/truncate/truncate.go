@@ -201,7 +201,7 @@ func outputWithCap(text string, toolName string, maxChars int, modelID string, w
 		if cfg.canDelegate {
 			fallbackHint = "Consider delegating to a research agent to process the full output."
 		}
-		truncated := text[:maxChars] + "\n\n[truncated — " + fallbackHint + "]"
+		truncated := UTF8Head(text, maxChars) + "\n\n[truncated — " + fallbackHint + "]"
 		return Result{
 			Content:     truncated,
 			Truncated:   true,

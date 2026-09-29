@@ -2,6 +2,9 @@ package mcp
 
 import (
 	"context"
+
+	"github.com/hollis-labs/nanite/internal/truncate"
+
 	//nolint:gosec // G501: md5 is exposed as a user-selectable option in the
 	// `hash` MCP tool (algorithm=md5). It is not used for any security
 	// decision inside nanite; callers who opt in are responsible for their
@@ -391,7 +394,7 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 	}
 	truncatedByBody := len(raw) > webFetchBodyCap
 	if truncatedByBody {
-		raw = raw[:webFetchBodyCap]
+		raw = raw[:truncate.UTF8Cut(raw, webFetchBodyCap)]
 	}
 
 	// Detect empty-HTML: a tiny HTML response is almost always a JS-rendered
@@ -431,7 +434,7 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 	displayed := sanitized
 	truncatedByExposed := false
 	if len(displayed) > webFetchExposedCap {
-		displayed = displayed[:webFetchExposedCap]
+		displayed = truncate.UTF8Head(displayed, webFetchExposedCap)
 		truncatedByExposed = true
 	}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
@@ -28,6 +29,9 @@ func setupTestCache(t *testing.T) (*ResultCache, *sql.DB) {
 		body TEXT
 	)`)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(argumentsTableDDL); err != nil {
 		t.Fatal(err)
 	}
 	cache := NewResultCache(db, ResultCacheConfig{
@@ -516,5 +520,46 @@ func TestResultCache_TruncatedTorqueTaskRecovery(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("search_tool_result match context did not include the dependency ID")
+	}
+}
+
+// The background worker purges with only a database in hand; both tables, and
+// only rows whose own expires_at has passed.
+func TestPurgeExpired_BothTablesOnlyExpired(t *testing.T) {
+	cache, db := setupTestCache(t)
+	now := time.Now().UTC()
+	past, future := now.Add(-time.Hour).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339)
+	for id, exp := range map[string]string{"old": past, "live": future} {
+		if _, err := db.Exec(`INSERT INTO tool_result_cache (id, session_id, tool_name, tool_call_id, created_at, expires_at, byte_size, was_truncated, body) VALUES (?, 's', 't', 'c', ?, ?, 1, 1, 'b')`, id, past, exp); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO tool_call_arguments VALUES (?, 's', 'c', 't', ?, ?, 2, 'h', 0, 0, '{}')`, id, past, exp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := PurgeExpired(db); err != nil || n != 2 {
+		t.Fatalf("PurgeExpired = %d, %v; want 2", n, err)
+	}
+	for table, query := range map[string]string{
+		"tool_result_cache":   `SELECT id FROM tool_result_cache`,
+		"tool_call_arguments": `SELECT id FROM tool_call_arguments`,
+	} {
+		var ids []string
+		rows, _ := db.Query(query)
+		for rows.Next() {
+			var id string
+			_ = rows.Scan(&id)
+			ids = append(ids, id)
+		}
+		_ = rows.Close()
+		if len(ids) != 1 || ids[0] != "live" {
+			t.Errorf("%s survivors = %v, want [live]", table, ids)
+		}
+	}
+	if n, err := cache.Purge(); err != nil || n != 0 {
+		t.Errorf("second Purge = %d, %v", n, err)
+	}
+	if _, err := PurgeExpired(nil); err == nil {
+		t.Error("nil database must be an error")
 	}
 }

@@ -82,6 +82,7 @@ func (a *API) handleSelfToolCall(w http.ResponseWriter, r *http.Request) {
 
 	ctx := mcp.WithSessionID(r.Context(), req.SessionID)
 	if navResult, ok := a.serveCacheNavigation(ctx, req); ok {
+		a.persistSelfToolArguments(req)
 		a.jsonResp(w, http.StatusOK, navResult)
 		return
 	}
@@ -90,6 +91,7 @@ func (a *API) handleSelfToolCall(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.persistSelfToolArguments(req)
 
 	// CW-20260517-0041: same-turn card flush for CLI-launched agents.
 	//

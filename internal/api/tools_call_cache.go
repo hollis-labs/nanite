@@ -105,3 +105,17 @@ func (a *API) serveCacheNavigation(ctx context.Context, req selfToolCallRequest)
 	}
 	return &mcp.ToolResult{IsError: isErr, Content: []mcp.ToolContent{{Type: "text", Text: text}}}, true
 }
+
+// persistSelfToolArguments records the call's redacted, bounded arguments the
+// way the chat executor does for its own calls (D-35), so a CLI agent's
+// Nanite-tool calls are auditable too. Only dispatched calls are recorded, and
+// only with a session to attribute them to. A failure is logged and never
+// affects the call.
+func (a *API) persistSelfToolArguments(req selfToolCallRequest) {
+	if req.SessionID == "" || a.Services == nil || a.Services.ResultCache == nil {
+		return
+	}
+	if _, err := a.Services.ResultCache.PersistArguments(req.SessionID, "self-tool:"+req.Name, req.Name, req.Args); err != nil {
+		slog.Warn("tools/call: tool argument persist error", "tool", req.Name, "err", err)
+	}
+}

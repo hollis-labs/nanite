@@ -158,3 +158,65 @@ func TestHandleSelfToolCall_CacheNavigationRoundTrip(t *testing.T) {
 		t.Errorf("sessionless call read the cache: %+v", r)
 	}
 }
+
+// D-35 on the CLI path: dispatched calls are persisted redacted; failures and
+// sessionless calls are not, and persistence never affects the response.
+func TestHandleSelfToolCall_PersistsRedactedArguments(t *testing.T) {
+	a, s := newToolCallTestAPI(t)
+	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
+	mkSession(t, s, "sess-a", "")
+
+	rec := postToolCall(t, a, map[string]any{"session_id": "sess-a", "name": "whoami",
+		"args": map[string]any{"note": "audit me", "api_key": "sk-CLI-PATH-SECRET", "command": "run --token abc123def456"}})
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	got, err := a.Services.ResultCache.ListArguments("sess-a")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("ListArguments = %+v, %v", got, err)
+	}
+	if got[0].ToolName != "whoami" || !strings.Contains(got[0].Body, "audit me") {
+		t.Errorf("record = %+v", got[0])
+	}
+	for _, leak := range []string{"sk-CLI-PATH-SECRET", "abc123def456"} {
+		if strings.Contains(got[0].Body, leak) {
+			t.Errorf("secret %q persisted: %s", leak, got[0].Body)
+		}
+	}
+
+	// Cache-navigation calls are recorded as well.
+	postToolCall(t, a, map[string]any{"session_id": "sess-a", "name": "fetch_tool_result", "args": map[string]any{"id": "nope"}})
+	if got, _ = a.Services.ResultCache.ListArguments("sess-a"); len(got) != 2 {
+		t.Errorf("cache-navigation call not recorded: %d rows", len(got))
+	}
+
+	// No session: nothing to attribute to, nothing stored, call still works.
+	if rec := postToolCall(t, a, map[string]any{"name": "whoami", "args": map[string]any{"a": 1}}); rec.Code != 200 {
+		t.Errorf("sessionless status %d", rec.Code)
+	}
+	var n int
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM tool_call_arguments`).Scan(&n)
+	if n != 2 {
+		t.Errorf("rows = %d, want 2", n)
+	}
+
+	// A persistence failure never fails the call.
+	if _, err := s.DB.Exec(`DROP TABLE tool_call_arguments`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := postToolCall(t, a, map[string]any{"session_id": "sess-a", "name": "whoami"}); rec.Code != 200 {
+		t.Errorf("status %d after persist failure", rec.Code)
+	}
+}
+
+func TestBudgetForCLIRecordedModels(t *testing.T) {
+	// What CLI-launched sessions record in sessions.model (observed in the dev
+	// database): the wrapper id, a boot-profile name, or empty. None is a real
+	// model, so all resolve to the same floor budget.
+	floor := truncate.BudgetForModel("")
+	for _, m := range []string{"claude-cli", "bootprofile:claude-smoke", ""} {
+		if got := truncate.BudgetForModel(m); got != floor {
+			t.Errorf("BudgetForModel(%q) = %d, want floor %d", m, got, floor)
+		}
+	}
+}

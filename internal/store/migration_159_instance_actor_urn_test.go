@@ -30,7 +30,7 @@ func TestMigration159_BackfillsInstanceActorURNs(t *testing.T) {
 	// Two instances against ONE profile — the case the architecture forbids
 	// sharing an identity for, and the case the live database already
 	// contained. They must come out of the migration with different URNs.
-	agent := makeTestAgent(t, s, "mig159-profile")
+	agent := makeTestAgentRawSQL(t, s, "mig159-profile")
 	ids := []string{"mig159-inst-a", "mig159-inst-b"}
 	for _, id := range ids {
 		plantPre159Instance(t, s, id, agent.ID)
@@ -121,7 +121,7 @@ func TestMigration159_PreservesLegacyURNValues(t *testing.T) {
 	if _, err := provider.DownTo(ctx, 158); err != nil {
 		t.Fatalf("goose DownTo 158: %v", err)
 	}
-	agent := makeTestAgent(t, s, "mig159-legacy")
+	agent := makeTestAgentRawSQL(t, s, "mig159-legacy")
 	const oldURN = "msg://agent/agent-mux/agt_abcdefghij"
 	const oldAliases = `["msg://agent/agent-mux/mig159-legacy"]`
 	if _, err := s.DB.ExecContext(ctx,

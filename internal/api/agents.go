@@ -146,6 +146,8 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		ActivationMode:          req.ActivationMode,
 		Class:                   req.Class,
 		DefaultState:            req.DefaultState,
+		TetherManaged:           req.TetherManaged,
+		TetherURN:               req.TetherURN,
 	}
 	// Validate agent config before persisting.
 	if vr := agentvalidation.ValidateAgentConfig(agent); !vr.OK() {
@@ -334,6 +336,12 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.DefaultState != nil {
 		existing.DefaultState = *req.DefaultState
+	}
+	if req.TetherManaged != nil {
+		existing.TetherManaged = *req.TetherManaged
+	}
+	if req.TetherURN != nil {
+		existing.TetherURN = *req.TetherURN
 	}
 
 	// Validate agent config before persisting.

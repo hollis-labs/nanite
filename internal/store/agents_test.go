@@ -3,6 +3,9 @@ package store
 import (
 	"context"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 func makeTestAgent(t *testing.T, s *Store, slug string) *AgentProfile {
@@ -16,6 +19,34 @@ func makeTestAgent(t *testing.T, s *Store, slug string) *AgentProfile {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return a
+}
+
+// makeTestAgentRawSQL inserts an agent_profiles row using only the columns
+// that have existed since the table's original shape (id, name, slug,
+// system_prompt, timestamps) — every other column has carried a DEFAULT
+// since the migration that added it, so SQLite fills them in without this
+// insert naming them.
+//
+// Use this instead of makeTestAgent in any test that has rolled the schema
+// back with goose DownTo: CreateAgent's INSERT always targets the CURRENT
+// column shape, so it fails the moment the live schema is older than the
+// newest migration — this is how migration 159's durable_agent_instances.urn
+// first surfaced this exact fixture problem (see plantPre159Instance below),
+// and migration 162's agent_profiles.tether_managed/tether_urn surfaced it
+// again for agent_profiles itself. Naming only the columns a test needs
+// keeps the fixture independent of columns added later.
+func makeTestAgentRawSQL(t *testing.T, s *Store, slug string) *AgentProfile {
+	t.Helper()
+	id := uuid.New().String()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.DB.ExecContext(context.Background(),
+		`INSERT INTO agent_profiles (id, name, slug, system_prompt, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		id, "Test Agent "+slug, slug, "You are a test agent.", now, now,
+	); err != nil {
+		t.Fatalf("makeTestAgentRawSQL: insert %s: %v", slug, err)
+	}
+	return &AgentProfile{ID: id, Name: "Test Agent " + slug, Slug: slug, SystemPrompt: "You are a test agent.", CreatedAt: now, UpdatedAt: now}
 }
 
 func TestCreateAgent(t *testing.T) {

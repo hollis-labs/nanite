@@ -1077,7 +1077,11 @@ func (s *chatServiceImpl) CancelActiveGeneration(sessionID string) bool {
 // stream channel so the caller's stream-drain unblocks. launchGeneration
 // itself returns void and has already returned to the caller by the
 // time the goroutine runs — dispatcher errors never surface synchronously.
-func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType) {
+//
+// deltaMode is the caller's per-turn choice of how text deltas reach the
+// stream (chat.DeltaMode). It is passed explicitly, like callerType, because
+// genCtx below is deliberately detached from the request context.
+func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, deltaMode chat.DeltaMode) {
 	// Build cancel BEFORE launching so a near-simultaneous retry cannot
 	// register its own cancel before this one — the window would let the
 	// retry cancel itself. context.Background() is deliberate: lifecycle
@@ -1091,14 +1095,14 @@ func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, user
 		s.requestGenerationCancellation(sessionID, prev)
 	}
 
-	s.runGeneration(genCtx, name, sessionID, assistantMsgID, userContent, ch, callerType, cancel, current, prev)
+	s.runGeneration(genCtx, name, sessionID, assistantMsgID, userContent, ch, callerType, deltaMode, cancel, current, prev)
 }
 
 // runGeneration is the shared goroutine body launchGeneration (takeover)
 // and TriggerHarnessTurn's reject-if-busy path both dispatch through —
 // registration in the activeGen map has already happened by the time this
 // is called; this only owns running the turn and cleaning up afterward.
-func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, cancel context.CancelFunc, current, predecessor *inFlightGen) {
+func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, deltaMode chat.DeltaMode, cancel context.CancelFunc, current, predecessor *inFlightGen) {
 	s.lifecycle.Go(name, func(bgCtx context.Context) {
 		// Bridge lifecycle shutdown (bgCtx) into our takeover-ctx so
 		// generateResponse still aborts on process Shutdown.
@@ -1133,6 +1137,10 @@ func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID,
 		// caller's defer doesn't deadlock waiting for a stream that
 		// will never come.
 		dispatchCtx := context.WithValue(genCtx, inFlightGenContextKey{}, current)
+		// The delta mode rides ctx here rather than on dispatcher.Request:
+		// Request is deliberately narrow, and this is a delivery choice, not
+		// something the dispatcher or its CallerType acts on.
+		dispatchCtx = chat.WithDeltaMode(dispatchCtx, deltaMode)
 		if err := s.dispatcher.Run(dispatchCtx, dispatcher.Request{
 			SessionID:      sessionID,
 			AssistantMsgID: assistantMsgID,
@@ -1241,7 +1249,9 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	if ct := dispatcher.CallerTypeFromContext(ctx); ct.Valid() {
 		callerType = ct
 	}
-	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, callerType)
+	// The delta mode arrives the same way: stamped on ctx by the API handler,
+	// absent for durable-agent wakes (which get the phased default).
+	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, callerType, chat.DeltaModeFromContext(ctx))
 
 	return assistantMsgID, nil
 }
@@ -1284,7 +1294,7 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	s.launchGeneration("retryLastMessage.generateResponse", sessionID, assistantMsgID, userContent, ch, dispatcher.CallerChat)
+	s.launchGeneration("retryLastMessage.generateResponse", sessionID, assistantMsgID, userContent, ch, dispatcher.CallerChat, chat.DeltaModePhased)
 
 	return assistantMsgID, nil
 }
@@ -1314,7 +1324,7 @@ func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, t
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, toSessionID)
 
-	s.launchGeneration("sendAgentMessage.generateResponse", toSessionID, assistantMsgID, content, ch, dispatcher.CallerChat)
+	s.launchGeneration("sendAgentMessage.generateResponse", toSessionID, assistantMsgID, content, ch, dispatcher.CallerChat, chat.DeltaModePhased)
 
 	return assistantMsgID, nil
 }
@@ -1385,7 +1395,7 @@ func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, rea
 
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	s.runGeneration(genCtx, "triggerHarnessTurn.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground, cancel, current, nil)
+	s.runGeneration(genCtx, "triggerHarnessTurn.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground, chat.DeltaModePhased, cancel, current, nil)
 
 	if s.sessionEventWriter != nil {
 		payload := fmt.Sprintf(`{"triggered_by":%q,"run_id":%q,"assistant_msg_id":%q}`, reason, runID, assistantMsgID)
@@ -1445,7 +1455,7 @@ func (s *chatServiceImpl) TriggerMessageWake(ctx context.Context, sessionID stri
 
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	s.runGeneration(genCtx, "triggerMessageWake.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground, cancel, current, nil)
+	s.runGeneration(genCtx, "triggerMessageWake.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground, chat.DeltaModePhased, cancel, current, nil)
 
 	if s.sessionEventWriter != nil {
 		payload := fmt.Sprintf(`{"triggered_by":"a2a_message","message_id":%q,"assistant_msg_id":%q}`, msg.ID, assistantMsgID)

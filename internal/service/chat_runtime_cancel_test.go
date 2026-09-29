@@ -614,7 +614,7 @@ func TestRunGeneration_UncanceledGatedExitRetainsUnsafeTombstoneForLaterTakeover
 	b.predecessor = a
 	svc.activeGen[sessionID] = b
 	bStream := make(chan chat.StreamEvent)
-	svc.runGeneration(context.Background(), "unsafe-gated-b", sessionID, "b", "payload", bStream, dispatcher.CallerChat, func() {}, b, a)
+	svc.runGeneration(context.Background(), "unsafe-gated-b", sessionID, "b", "payload", bStream, dispatcher.CallerChat, chat.DeltaModePhased, func() {}, b, a)
 	select {
 	case _, open := <-bStream:
 		if open {
@@ -997,7 +997,7 @@ func TestRunGeneration_CanceledWhileTakeoverGatedClosesUnownedStream(t *testing.
 	genCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	stream := make(chan chat.StreamEvent)
-	svc.runGeneration(genCtx, "gated", "session", "new-message", "payload", stream, dispatcher.CallerChat, func() {}, current, predecessor)
+	svc.runGeneration(genCtx, "gated", "session", "new-message", "payload", stream, dispatcher.CallerChat, chat.DeltaModePhased, func() {}, current, predecessor)
 	select {
 	case <-stream:
 		t.Fatal("canceled generation bypassed predecessor cancellation barrier")

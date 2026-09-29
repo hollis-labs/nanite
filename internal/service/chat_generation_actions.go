@@ -415,6 +415,10 @@ type turnSetup struct {
 	chatMessages       []llmtypes.ChatMessage
 	systemPrompt       string
 	inspectorTurnID    string
+	// deltaMode is the consumer's choice of how provider text deltas reach the
+	// stream, resolved once from ctx at turn start. Zero-value turns (subagents,
+	// background wakes) are phased.
+	deltaMode chat.DeltaMode
 }
 
 type prepareTurnResult struct {
@@ -1043,7 +1047,13 @@ func (s *chatServiceImpl) consumeProviderIteration(
 	// (stopReason=tool_use) flush as PhaseNarration; the final iteration
 	// (stopReason=end_turn) flushes as PhaseFinal. The buffer is small —
 	// typically a handful of short prose fragments per iteration.
+	//
+	// The cost is that the client sees nothing for the whole iteration and then
+	// all of it at once. A consumer that has no use for the phase opts out with
+	// chat.DeltaModeLive: its deltas are sent inline as they arrive, untagged,
+	// so the buffer stays empty and the flush after the stream is a no-op.
 	var iterDeltaBuf []string
+	liveDeltas := setup.deltaMode == chat.DeltaModeLive
 
 	// CW-20260418-0043 diagnostic — track provider stream duration + event count.
 	provStreamStart := time.Now()
@@ -1116,9 +1126,18 @@ streamLoop:
 			}
 			turnContent.WriteString(evt.Content)
 			run.fullContent.WriteString(evt.Content)
-			// Buffer for phase-tagged flush after stopReason is known.
-			// CW-20260418-0043 diagnostic watchdog is deferred to flush site.
-			iterDeltaBuf = append(iterDeltaBuf, evt.Content)
+			if liveDeltas {
+				// CW-20260418-0043 diagnostic — watchdog on the hot delta
+				// send. No-op (returns a nil-op stop func) unless
+				// NANITE_CHAT_LOOP_DIAG=1 so production is zero-cost.
+				stopDiag := diagWatchChSend(ctx, "streamLoop.delta", ch, sessionID, assistantMsgID, run.loop.iteration, "delta")
+				ch <- chat.StreamEvent{Type: "delta", Content: evt.Content}
+				stopDiag()
+			} else {
+				// Buffer for phase-tagged flush after stopReason is known.
+				// CW-20260418-0043 diagnostic watchdog is deferred to flush site.
+				iterDeltaBuf = append(iterDeltaBuf, evt.Content)
+			}
 
 		case "tool_use":
 			if evt.ToolUse != nil {
@@ -2215,6 +2234,7 @@ func (s *chatServiceImpl) prepareTurn(
 			chatMessages:       chatMessages,
 			systemPrompt:       systemPrompt,
 			inspectorTurnID:    inspectorTurnID,
+			deltaMode:          chat.DeltaModeFromContext(ctx),
 		},
 	}
 }

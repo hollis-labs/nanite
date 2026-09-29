@@ -26,7 +26,7 @@ func TestMigration149MapsExistingOpenRunsIntoRecoverableDurableFires(t *testing.
 		t.Fatalf("DownTo(148): %v", err)
 	}
 
-	agent := makeTestAgent(t, s, "migration-149")
+	agent := makeTestAgentRawSQL(t, s, "migration-149")
 
 	// Insert the durable instance with raw SQL rather than
 	// CreateDurableAgentInstance. The schema is rolled back to 148 here, and

@@ -31,6 +31,13 @@ func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := effort.WithContext(r.Context(), e)
 
+	deltaMode, err := chat.ParseDeltaMode(req.DeltaMode)
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ctx = chat.WithDeltaMode(ctx, deltaMode)
+
 	msgID, err := a.Services.Chat.HandleMessage(ctx, req.SessionID, req.Content)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())

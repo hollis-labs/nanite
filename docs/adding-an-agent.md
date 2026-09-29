@@ -142,6 +142,43 @@ covers the same v1 types as a tool call, and an MCP server can emit the same
 marker in a tool result — that last path is the one to reach for when rendering
 must not depend on the model remembering.
 
+## Materialize, then boot — mint identity before either
+
+A CLI session goes through two phases, in order: **materialize** (a
+`Layout`'s `Setup`/`Populate` writes the boot dir — CLAUDE.md, skills,
+`.mcp.json`, provider settings) then **spawn** (`agent.Boot` starts the
+actual process). The ordering is the reason the edge below is easy to hit and
+easy to miss.
+
+`Populate` (`claudeLayout.Populate`, in `bootdir_claude.go`) is synchronous,
+local, and takes no `context.Context` by design: it is a filesystem write with
+no cancellation point, and it is not the place to call another service. Neither
+is `agent.Boot`. It is the shared entrypoint every CLI session boots through,
+for every agent profile, not just the one being built, so a bug or a slow or
+unreachable dependency added there degrades every other agent.
+
+**The pattern that avoids this:** mint any external identity (a Tether URN, or
+anything else that needs registering with another system) **once, upstream of
+boot entirely** — at agent-creation time, not per session and not per launch.
+By the time materialization runs, the value already exists as plain data on the
+`AgentProfile` row; the plant step reads it and writes it out. No client, no
+network call, no new failure mode in the boot path, because nothing is left to
+fetch.
+
+Concretely: `SetupParams` carries both `AgentProfile` and `SessionID`, both
+resolved before boot dir setup starts. `agent_profiles.tether_managed` (default
+false) is the per-agent opt-in and `agent_profiles.tether_urn` holds the minted
+URN; both are ordinary fields on the agent create and update API. Minting is an
+ordinary agent tool call to `tether_registry_register`; the create and update
+endpoints store the URN they are given and do not mint one.
+`tetherIdentityFile`, in `internal/runtime/agent/tether_identity.go`, builds the
+session identity locally with `internal/a2a.NewSessionAddress(params.SessionID).URN()`
+(Nanite's own `msg://` scheme, no daemon call) and returns `nil` when `TetherURN`
+is empty. `claudePlantSpec` adds the result to its `files` map like any other
+planted file: `.sandbox/tether-identity.md`, next to `CLAUDE.md`. An agent with
+no URN gets nothing extra — the gate is data presence, not a list of agent
+names.
+
 ## A worked create
 
 ```bash

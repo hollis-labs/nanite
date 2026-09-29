@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/effort"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -110,6 +111,8 @@ type harnessV1TurnRequest struct {
 	Content   string `json:"content"`
 	CycleKind string `json:"cycle_kind,omitempty"`
 	Effort    string `json:"effort,omitempty"`
+	// DeltaMode is "phased" (default) or "live"; see SendMessageRequest.DeltaMode.
+	DeltaMode string `json:"delta_mode,omitempty"`
 }
 
 type harnessV1TurnResponse struct {
@@ -185,7 +188,7 @@ func (a *API) handleHarnessV1Capabilities(w http.ResponseWriter, r *http.Request
 			},
 		},
 		TurnSendFields: harnessV1FieldSupport{
-			Supported:   []string{"content", "cycle_kind", "effort"},
+			Supported:   []string{"content", "cycle_kind", "effort", "delta_mode"},
 			Unsupported: []string{},
 		},
 		PermissionRequests: harnessV1PermissionSupportInfo(),
@@ -309,6 +312,12 @@ func (a *API) handleHarnessV1SendTurn(w http.ResponseWriter, r *http.Request) {
 		turnEffort = effort.Default
 	}
 	ctx := effort.WithContext(r.Context(), turnEffort)
+	deltaMode, err := chat.ParseDeltaMode(req.DeltaMode)
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ctx = chat.WithDeltaMode(ctx, deltaMode)
 	msgID, err := a.Services.Chat.HandleMessage(ctx, sessionID, req.Content)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())

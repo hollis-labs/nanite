@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -15,6 +16,12 @@ import (
 // run before a response is abandoned as timed out. It keeps a slow handler
 // (a ticket-API call, say) from stalling the request indefinitely.
 const DefaultEnvelopeResponseHandlerTimeout = 5 * time.Second
+
+// envelopeRecordTimeout bounds the writes that record a response's outcome
+// once the handler has returned. They run detached from the request and the
+// handler's deadline, so this is what stops a wedged database from holding
+// the request forever.
+const envelopeRecordTimeout = 5 * time.Second
 
 // EnvelopeResponseStore is the store surface EnvelopeService uses.
 type EnvelopeResponseStore interface {
@@ -72,12 +79,19 @@ func envelopeErr(kind EnvelopeErrorKind, msg string) error {
 	return &EnvelopeError{Kind: kind, Msg: msg}
 }
 
+// envelopeConflict reports an envelope that already has a response. An
+// envelope claimed but not yet given a response has no stored JSON; its
+// PriorResponse is then "null", so the 409 body stays valid JSON.
 func envelopeConflict(inst *store.EnvelopeInstance) error {
+	prior := inst.ResponseJSON
+	if prior == "" {
+		prior = "null"
+	}
 	return &EnvelopeError{
 		Kind:          EnvelopeConflict,
 		Msg:           "envelope already responded",
 		PriorStatus:   inst.ResponseStatus,
-		PriorResponse: inst.ResponseJSON,
+		PriorResponse: prior,
 	}
 }
 
@@ -113,11 +127,12 @@ type RespondInput struct {
 // handler is silent, adds the transcript message. Other failures are
 // EnvelopeInternal with the message the API has always returned.
 //
-// Known limitations, kept as they were (CW-20260930-0241): the failure
+// Once the handler has returned, its outcome is always recorded: the failure
 // status after a handler error or timeout, the stored response and the
-// transcript message are all written under the handler's own timeout, so a
-// timed-out handler leaves the envelope claimed with no response, and a
-// failed re-read after losing the claim race is not checked.
+// transcript message are written under a context detached from the request
+// and from the handler's deadline (bounded by envelopeRecordTimeout). A
+// claimed envelope therefore never stays without a response because the
+// handler used up its time or the caller went away (CW-20260930-0241).
 func (s *EnvelopeService) Respond(ctx context.Context, in RespondInput) (*EnvelopeRespondResult, error) {
 	envelopeID := in.EnvelopeID
 	resp := in.Response
@@ -152,7 +167,10 @@ func (s *EnvelopeService) Respond(ctx context.Context, in RespondInput) (*Envelo
 	// before one of them records a response.
 	if err = s.store.ClaimEnvelopeForResponse(ctx, envelopeID); err != nil {
 		if errors.Is(err, store.ErrEnvelopeAlreadyResponded) {
-			again, _ := s.store.GetEnvelopeInstance(ctx, envelopeID)
+			again, rerr := s.store.GetEnvelopeInstance(ctx, envelopeID)
+			if rerr != nil {
+				return nil, envelopeErr(EnvelopeInternal, rerr.Error())
+			}
 			return nil, envelopeConflict(again)
 		}
 		return nil, envelopeErr(EnvelopeInternal, err.Error())
@@ -164,12 +182,20 @@ func (s *EnvelopeService) Respond(ctx context.Context, in RespondInput) (*Envelo
 	defer cancel()
 
 	result, err := handler.HandleResponse(hctx, *inst, resp)
+
+	// The envelope is claimed and the handler has run; recording the outcome
+	// must not inherit the handler's deadline (already passed after a
+	// timeout) or the request's cancellation, or the envelope is left claimed
+	// with no response for good.
+	wctx, wcancel := context.WithTimeout(context.WithoutCancel(ctx), envelopeRecordTimeout)
+	defer wcancel()
+
 	if err != nil {
 		if errors.Is(hctx.Err(), context.DeadlineExceeded) {
-			_ = s.store.UpdateEnvelopeResponse(hctx, envelopeID, "failed", `{"reason":"handler_timeout"}`)
+			s.recordFailure(wctx, envelopeID, `{"reason":"handler_timeout"}`)
 			return nil, envelopeErr(EnvelopeTimeout, "response handler timed out")
 		}
-		_ = s.store.UpdateEnvelopeResponse(hctx, envelopeID, "failed", `{"reason":"handler_error"}`)
+		s.recordFailure(wctx, envelopeID, `{"reason":"handler_error"}`)
 		return nil, envelopeErr(EnvelopeInternal, "handler: "+err.Error())
 	}
 
@@ -177,7 +203,7 @@ func (s *EnvelopeService) Respond(ctx context.Context, in RespondInput) (*Envelo
 	if err != nil {
 		return nil, envelopeErr(EnvelopeInternal, "marshal response: "+err.Error())
 	}
-	if err := s.store.UpdateEnvelopeResponse(hctx, envelopeID, string(resp.Status), string(respJSON)); err != nil {
+	if err := s.store.UpdateEnvelopeResponse(wctx, envelopeID, string(resp.Status), string(respJSON)); err != nil {
 		return nil, envelopeErr(EnvelopeInternal, err.Error())
 	}
 
@@ -201,10 +227,19 @@ func (s *EnvelopeService) Respond(ctx context.Context, in RespondInput) (*Envelo
 			Role:      chat.RoleEnvelopeResponse,
 			Content:   chat.FormatEnvelopeResponseContent(inst.EnvelopeType, resp.Status, string(payloadJSON)),
 		}
-		if err := s.store.CreateMessage(hctx, msg); err != nil {
+		if err := s.store.CreateMessage(wctx, msg); err != nil {
 			return nil, envelopeErr(EnvelopeInternal, "persist message: "+err.Error())
 		}
 		out.MessageID = msg.ID
 	}
 	return out, nil
+}
+
+// recordFailure stores a failed outcome for a claimed envelope. The caller
+// is already answering with the handler's failure, so a write error is only
+// logged.
+func (s *EnvelopeService) recordFailure(ctx context.Context, envelopeID, reasonJSON string) {
+	if err := s.store.UpdateEnvelopeResponse(ctx, envelopeID, "failed", reasonJSON); err != nil {
+		slog.Warn("envelope: recording failed response", "envelope_id", envelopeID, "err", err)
+	}
 }

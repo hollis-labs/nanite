@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -116,12 +117,12 @@ func TestEnvelopeRespond_LosingTheClaimRaceReturnsTheWinner(t *testing.T) {
 	}
 }
 
-// TestEnvelopeRespond_HandlerTimeoutLeavesEnvelopeStuck_CurrentBehaviour_PendingCW20260930_0241
-// pins that a handler timeout leaves the envelope claimed with no response:
-// the "failed" status is written under the handler's already-expired
-// context, so it never lands, and every later answer gets a 409 with an
-// empty body. CW-20260930-0241 fixes it; whoever lands that flips this test.
-func TestEnvelopeRespond_HandlerTimeoutLeavesEnvelopeStuck_CurrentBehaviour_PendingCW20260930_0241(t *testing.T) {
+// TestEnvelopeRespond_HandlerTimeoutRecordsFailure_CW20260930_0241 pins the
+// fix for CW-20260930-0241: a handler timeout used to leave the envelope
+// claimed with no response (its failure status was written under the
+// handler's expired context), and every later answer got a 409 with an empty
+// body. The failure is now recorded, and a later answer gets it back.
+func TestEnvelopeRespond_HandlerTimeoutRecordsFailure_CW20260930_0241(t *testing.T) {
 	a, mux := newTestAPI(t)
 	a.Services.Envelopes.SetHandlerTimeout(50 * time.Millisecond)
 	sessID := seedSessionForEnvelope(t, a)
@@ -142,11 +143,118 @@ func TestEnvelopeRespond_HandlerTimeoutLeavesEnvelopeStuck_CurrentBehaviour_Pend
 		t.Fatalf("timed out after %s; the configured 50ms handler timeout was not applied", elapsed)
 	}
 	after, err := a.Services.Store.GetEnvelopeInstance(context.Background(), inst.ID)
-	if err != nil || after.ResponseStatus != "handling" || after.ResponseJSON != "" {
-		t.Fatalf("stored after timeout: status=%q json=%q err=%v; if CW-20260930-0241 landed, flip this test", after.ResponseStatus, after.ResponseJSON, err)
+	if err != nil || after.ResponseStatus != "failed" || after.ResponseJSON != `{"reason":"handler_timeout"}` {
+		t.Fatalf("stored after timeout: status=%q json=%q err=%v", after.ResponseStatus, after.ResponseJSON, err)
 	}
-	if w := doPost(mux, path, envelopeRespondBody(t, kind, inst.ID, nil)); w.Code != http.StatusConflict || w.Body.Len() != 0 {
-		t.Fatalf("retry: %d %q; if CW-20260930-0241 landed, flip this test", w.Code, w.Body.String())
+	w := doPost(mux, path, envelopeRespondBody(t, kind, inst.ID, nil))
+	if w.Code != http.StatusConflict || strings.TrimSpace(w.Body.String()) != `{"error":"envelope already responded","response":{"reason":"handler_timeout"},"response_status":"failed"}` {
+		t.Fatalf("retry: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// A handler that finishes after its deadline, ignoring it, still has its
+// successful response recorded.
+func TestEnvelopeRespond_LateHandlerSuccessIsRecorded(t *testing.T) {
+	a, mux := newTestAPI(t)
+	a.Services.Envelopes.SetHandlerTimeout(30 * time.Millisecond)
+	sessID := seedSessionForEnvelope(t, a)
+	const kind = "late-kind"
+	chat.RegisterResponseHandler(kind, chat.HandlerFunc(func(context.Context, store.EnvelopeInstance, chat.ResponseV1) (chat.HandlerResult, error) {
+		time.Sleep(80 * time.Millisecond)
+		return chat.HandlerResult{}, nil
+	}))
+	t.Cleanup(func() { chat.UnregisterResponseHandler(kind) })
+	inst := seedEnvelopeInstance(t, a, sessID, kind)
+	w := doPost(mux, "/api/envelopes/"+inst.ID+"/respond", envelopeRespondBody(t, kind, inst.ID, nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"message_id"`) {
+		t.Fatalf("respond: %d %s", w.Code, w.Body.String())
+	}
+	after, err := a.Services.Store.GetEnvelopeInstance(context.Background(), inst.ID)
+	if err != nil || after.ResponseStatus != "submitted" {
+		t.Fatalf("stored: status=%q err=%v", after.ResponseStatus, err)
+	}
+}
+
+// A caller that goes away while the handler runs does not strand the
+// envelope: the response is still recorded.
+func TestEnvelopeRespond_CallerGoneStillRecords(t *testing.T) {
+	a, _ := newTestAPI(t)
+	sessID := seedSessionForEnvelope(t, a)
+	reqCtx, cancelReq := context.WithCancel(context.Background())
+	defer cancelReq()
+	const kind = "gone-kind"
+	chat.RegisterResponseHandler(kind, chat.HandlerFunc(func(context.Context, store.EnvelopeInstance, chat.ResponseV1) (chat.HandlerResult, error) {
+		cancelReq()
+		return chat.HandlerResult{}, nil
+	}))
+	t.Cleanup(func() { chat.UnregisterResponseHandler(kind) })
+	inst := seedEnvelopeInstance(t, a, sessID, kind)
+	_, err := a.Services.Envelopes.Respond(reqCtx, service.RespondInput{
+		EnvelopeID: inst.ID,
+		Response:   chat.ResponseV1{V: 1, Kind: kind, ID: inst.ID, Status: chat.StatusSubmitted},
+	})
+	if err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+	after, err := a.Services.Store.GetEnvelopeInstance(context.Background(), inst.ID)
+	if err != nil || after.ResponseStatus != "submitted" {
+		t.Fatalf("stored: status=%q err=%v", after.ResponseStatus, err)
+	}
+}
+
+// claimedEnvelopes serves an envelope claimed but given no response yet, as
+// rows stranded before CW-20260930-0241 are.
+type claimedEnvelopes struct{}
+
+func (claimedEnvelopes) GetEnvelopeInstance(context.Context, string) (*store.EnvelopeInstance, error) {
+	now := time.Now()
+	return &store.EnvelopeInstance{ID: "e", SessionID: "s", EnvelopeType: "k", RespondedAt: &now, ResponseStatus: "handling"}, nil
+}
+func (claimedEnvelopes) ClaimEnvelopeForResponse(context.Context, string) error { return nil }
+func (claimedEnvelopes) UpdateEnvelopeResponse(context.Context, string, string, string) error {
+	return nil
+}
+func (claimedEnvelopes) CreateMessage(context.Context, *store.Message) error { return nil }
+
+// A claimed envelope with no stored response answers a 409 with "response":
+// null, not an empty body.
+func TestEnvelopeRespond_ConflictWithoutStoredResponseIsNull(t *testing.T) {
+	a := &API{Services: &service.Container{Envelopes: service.NewEnvelopeService(claimedEnvelopes{})}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/envelopes/{id}/respond", a.handleEnvelopeRespond)
+	w := doPost(mux, "/api/envelopes/e/respond", envelopeRespondBody(t, "k", "e", nil))
+	if w.Code != http.StatusConflict || strings.TrimSpace(w.Body.String()) != `{"error":"envelope already responded","response":null,"response_status":"handling"}` {
+		t.Fatalf("respond: %d %q", w.Code, w.Body.String())
+	}
+}
+
+// rereadFails loses the claim race and then cannot read the envelope back.
+type rereadFails struct{ reads int }
+
+func (f *rereadFails) GetEnvelopeInstance(context.Context, string) (*store.EnvelopeInstance, error) {
+	f.reads++
+	if f.reads > 1 {
+		return nil, errors.New("db down")
+	}
+	return &store.EnvelopeInstance{ID: "e", SessionID: "s", EnvelopeType: "k"}, nil
+}
+func (f *rereadFails) ClaimEnvelopeForResponse(context.Context, string) error {
+	return store.ErrEnvelopeAlreadyResponded
+}
+func (f *rereadFails) UpdateEnvelopeResponse(context.Context, string, string, string) error {
+	return nil
+}
+func (f *rereadFails) CreateMessage(context.Context, *store.Message) error { return nil }
+
+// A failed re-read after losing the claim race is a 500 with its error, not
+// a nil dereference.
+func TestEnvelopeRespond_ClaimRaceRereadErrorIs500(t *testing.T) {
+	a := &API{Services: &service.Container{Envelopes: service.NewEnvelopeService(&rereadFails{})}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/envelopes/{id}/respond", a.handleEnvelopeRespond)
+	w := doPost(mux, "/api/envelopes/e/respond", envelopeRespondBody(t, "k", "e", nil))
+	if w.Code != http.StatusInternalServerError || errorBody(t, w) != "db down" {
+		t.Fatalf("respond: %d %s", w.Code, w.Body.String())
 	}
 }
 

@@ -178,3 +178,26 @@ func TestDefaultEstimator(t *testing.T) {
 		t.Errorf("400 chars should be 100 tokens, got %d", e.Estimate(strings.Repeat("x", 400)))
 	}
 }
+
+// CW-20260929-0012 #2: context_budget_pct drives the total budget.
+func TestNewContextWindowWithBudgetPct(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pct  float64
+		want int
+	}{
+		{"default fraction", BudgetFraction, 80_000},
+		{"user fraction", 0.5, 50_000},
+		{"full window", 1.0, 100_000},
+		{"zero falls back to the default", 0, 80_000},
+		{"negative falls back", -0.3, 80_000},
+		{"over the window falls back", 1.5, 80_000},
+	} {
+		if got := NewContextWindowWithBudgetPct(100_000, tc.pct, nil).TotalBudget; got != tc.want {
+			t.Errorf("%s: TotalBudget = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	if got, want := NewContextWindow(100_000, nil).TotalBudget, NewContextWindowWithBudgetPct(100_000, BudgetFraction, nil).TotalBudget; got != want {
+		t.Errorf("NewContextWindow changed: %d vs %d", got, want)
+	}
+}

@@ -5,8 +5,10 @@ import (
 	"unicode/utf8"
 )
 
-// BudgetFraction is the fraction of the provider context window used as the
-// total slot budget. The remaining 20% is safety margin for the provider.
+// BudgetFraction is the default fraction of the provider context window used
+// as the total slot budget. The remaining 20% is safety margin for the
+// provider. The user setting context_budget_pct overrides it per deployment
+// (NewContextWindowWithBudgetPct).
 const BudgetFraction = 0.80
 
 // DefaultContextWindowSize is the fallback context window when the provider
@@ -20,7 +22,7 @@ type ContextWindow struct {
 	slots     map[string]*Slot
 	estimator TokenEstimator
 
-	// TotalBudget is the usable token budget (provider window × BudgetFraction).
+	// TotalBudget is the usable token budget (provider window × the budget fraction).
 	TotalBudget int
 
 	// PrevHashes stores the cache keys from the previous turn, keyed by slot name.
@@ -33,13 +35,23 @@ type ContextWindow struct {
 // NewContextWindow creates a window with the given provider context window size.
 // Pass 0 to use DefaultContextWindowSize.
 func NewContextWindow(providerWindowSize int, estimator TokenEstimator) *ContextWindow {
+	return NewContextWindowWithBudgetPct(providerWindowSize, BudgetFraction, estimator)
+}
+
+// NewContextWindowWithBudgetPct is NewContextWindow with an explicit budget
+// fraction of the window. A fraction outside (0, 1] is not meaningful and falls
+// back to BudgetFraction rather than producing a zero or over-window budget.
+func NewContextWindowWithBudgetPct(providerWindowSize int, budgetPct float64, estimator TokenEstimator) *ContextWindow {
+	if budgetPct <= 0 || budgetPct > 1 {
+		budgetPct = BudgetFraction
+	}
 	if providerWindowSize <= 0 {
 		providerWindowSize = DefaultContextWindowSize
 	}
 	if estimator == nil {
 		estimator = DefaultEstimator{}
 	}
-	budget := int(float64(providerWindowSize) * BudgetFraction)
+	budget := int(float64(providerWindowSize) * budgetPct)
 
 	budgets := DefaultBudgets()
 	compactable := DefaultCompactable()

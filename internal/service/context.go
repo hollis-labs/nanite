@@ -201,6 +201,18 @@ func NewContextService(cfg ContextServiceConfig) ContextService {
 // sourced is retired in full, and its content (workspace name/description
 // in the System slot) was already unused by the Session slot
 // (buildSessionSlotContent ignored the parameter).
+// contextBudgetPct is the user's context_budget_pct setting, or 0 (which the
+// window treats as "use the default") when settings are not wired.
+func (s *contextServiceImpl) contextBudgetPct() float64 {
+	if s.settingsFunc == nil {
+		return 0
+	}
+	if us := s.settingsFunc(); us != nil {
+		return us.ContextBudgetPct
+	}
+	return 0
+}
+
 func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, tools []llmtypes.ToolDefinition, extraSystemPrefix string, providerWindowSize int, toolsLazyHint string) (*SlotAssemblyResult, error) {
 	sources, err := s.client.AssembleSlotSources(ctx, session, agent)
 	if err != nil {
@@ -248,7 +260,7 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 		Stasher:   s.slotStasher,
 	})
 
-	cw := ctxpkg.NewContextWindow(providerWindowSize, s.estimator)
+	cw := ctxpkg.NewContextWindowWithBudgetPct(providerWindowSize, s.contextBudgetPct(), s.estimator)
 	for _, d := range plan.Decisions {
 		// Empty content is a no-op for SetContent (Assemble drops empty
 		// slots from the wire), so ActionSkip with empty content is

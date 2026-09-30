@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
@@ -61,7 +62,8 @@ func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 	}
 
 	svc, err := service.NewContainer(service.ContainerConfig{
-		Store: s, Providers: provider.NewRegistry(), WorkingDir: root, DisableEmbeddedTesseract: true,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               s, Providers: provider.NewRegistry(), WorkingDir: root, DisableEmbeddedTesseract: true,
 	})
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)

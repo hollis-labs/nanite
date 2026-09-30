@@ -279,6 +279,7 @@ func TestNewContainer_PostReaperFailureStopsReapers(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	beforeSubagent, beforeRuntime := reaperGoroutineCounts(t)
+	beforeCatalog := modelCatalogGoroutineCount(t)
 	_, err = NewContainer(ContainerConfig{
 		Store:                          st,
 		Providers:                      provider.NewRegistry(),
@@ -289,6 +290,16 @@ func TestNewContainer_PostReaperFailureStopsReapers(t *testing.T) {
 		t.Fatalf("NewContainer error = %v, want durable agent recipes failure", err)
 	}
 
+	// No polling for the refresher: catalogDone closes only after Run has
+	// returned, so its frame is gone once NewContainer's wait completes
+	// (CW-20260930-0103).
+	if afterCatalog := modelCatalogGoroutineCount(t); afterCatalog > beforeCatalog {
+		t.Fatalf("model catalog refresher survived failed construction: %d -> %d", beforeCatalog, afterCatalog)
+	}
+
+	// The reapers' Stop returns once the loop's deferred closeDone runs,
+	// which is before the loop frame itself unwinds, so their goroutines
+	// can still be visible for an instant.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		afterSubagent, afterRuntime := reaperGoroutineCounts(t)
@@ -300,6 +311,48 @@ func TestNewContainer_PostReaperFailureStopsReapers(t *testing.T) {
 				beforeSubagent, afterSubagent, beforeRuntime, afterRuntime)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Shutdown must not return while the model catalog refresher is still
+// running: its OnRefresh hook writes the models table, and the process
+// owner closes the store as soon as Shutdown returns (CW-20260930-0103).
+func TestContainer_ShutdownWaitsForModelCatalogRefresher(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	var exited atomic.Bool
+	go func() {
+		defer close(done)
+		<-ctx.Done()
+		// Stand-in for a refresh that finished its fetch as the cancel
+		// landed and is still syncing.
+		time.Sleep(100 * time.Millisecond)
+		exited.Store(true)
+	}()
+	container := &Container{stopModelCatalog: cancel, modelCatalogDone: done}
+
+	container.Shutdown()
+	if !exited.Load() {
+		t.Fatal("Shutdown returned before the model catalog refresher exited")
+	}
+}
+
+// The wait is bounded by the shutdown deadline, like every other subsystem.
+func TestContainer_ShutdownModelCatalogWaitIsBounded(t *testing.T) {
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	container := &Container{stopModelCatalog: cancel, modelCatalogDone: make(chan struct{})}
+
+	returned := make(chan struct{})
+	go func() {
+		container.shutdownWithMaxWait(50 * time.Millisecond)
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown blocked past its deadline on a refresher that never exits")
 	}
 }
 
@@ -508,6 +561,15 @@ func canonicalTestPath(t *testing.T, path string) string {
 		t.Fatalf("canonicalize test path %q: %v", path, err)
 	}
 	return canonical
+}
+
+func modelCatalogGoroutineCount(t *testing.T) int {
+	t.Helper()
+	var stacks bytes.Buffer
+	if err := pprof.Lookup("goroutine").WriteTo(&stacks, 2); err != nil {
+		t.Fatalf("write goroutine profile: %v", err)
+	}
+	return strings.Count(stacks.String(), "go-modelsdev/modelsdev.(*Client).Run")
 }
 
 func reaperGoroutineCounts(t *testing.T) (subagent, runtime int) {

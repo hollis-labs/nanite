@@ -17,10 +17,13 @@ import (
 //
 // The store writes known tools, known skills and knowledge seeds with INSERT
 // OR REPLACE, so an update that omits a column clears it. Each Update method
-// therefore re-reads the current row and carries forward every column the
-// caller's input does not set — usage counters, timestamps and, for known
-// skills, the grant state. Create and Update are read-then-write, not one
-// transaction.
+// therefore copies the current row and then overwrites only the fields its
+// input carries: copy-then-overwrite, not a field-by-field rebuild, so a
+// column added to the table later is carried forward without anyone
+// remembering to list it here. The input types are the complete set of
+// caller-settable fields; everything else — usage counters, timestamps and,
+// for known skills, the grant state — survives the write. Create and Update
+// are read-then-write, not one transaction.
 type AgentCapabilitiesService struct {
 	store *store.Store
 }
@@ -103,25 +106,19 @@ func (s *AgentCapabilitiesService) CreateKnownTool(ctx context.Context, agentID,
 	return s.store.GetAgentKnownTool(ctx, agentID, toolName)
 }
 
-// UpdateKnownTool replaces the settable columns and carries forward
-// activation_count, last_used_at and added_at. It returns
+// UpdateKnownTool overwrites the settable columns of the current row; every
+// other column (activation_count, last_used_at, added_at, ...) is kept. It returns
 // store.ErrAgentKnownToolNotFound when absent.
 func (s *AgentCapabilitiesService) UpdateKnownTool(ctx context.Context, agentID, toolName string, in KnownToolInput) (*store.AgentKnownTool, error) {
 	current, err := s.store.GetAgentKnownTool(ctx, agentID, toolName)
 	if err != nil {
 		return nil, err
 	}
-	row := store.AgentKnownTool{
-		AgentID:         agentID,
-		ToolName:        toolName,
-		Pinned:          in.Pinned,
-		SortOrder:       in.SortOrder,
-		ActivationCount: current.ActivationCount,
-		LastUsedAt:      current.LastUsedAt,
-		AddedAt:         current.AddedAt,
-		TTLSeconds:      in.TTLSeconds,
-		Reason:          in.Reason,
-	}
+	row := *current
+	row.Pinned = in.Pinned
+	row.SortOrder = in.SortOrder
+	row.TTLSeconds = in.TTLSeconds
+	row.Reason = in.Reason
 	if err := s.store.InsertAgentKnownTool(ctx, row); err != nil {
 		return nil, &CapabilityWriteError{Err: err}
 	}
@@ -147,58 +144,44 @@ func (s *AgentCapabilitiesService) GetKnownSkill(ctx context.Context, agentID, s
 // CreateKnownSkill returns ErrCapabilityExists when a row carrying real
 // known-skill data exists. A bare assignment row — one written by the skill
 // assignment endpoint, which shares this (agent_id, skill_name) row space —
-// is upserted instead, keeping its activation_count, last_used_at and
-// added_at (see store.AgentKnownSkill.IsBareAssignment).
+// is upserted instead: the bare row is copied and only the settable fields
+// are overwritten, so its added_at and any other column survive (see
+// store.AgentKnownSkill.IsBareAssignment).
 func (s *AgentCapabilitiesService) CreateKnownSkill(ctx context.Context, agentID, skillName string, in KnownSkillInput) (*store.AgentKnownSkill, error) {
 	existing, err := s.store.GetAgentKnownSkill(ctx, agentID, skillName)
 	if err != nil && !errors.Is(err, store.ErrAgentKnownSkillNotFound) {
 		return nil, err
 	}
-	row := store.AgentKnownSkill{
-		AgentID:    agentID,
-		SkillName:  skillName,
-		Pinned:     in.Pinned,
-		TTLSeconds: in.TTLSeconds,
-		Reason:     in.Reason,
-	}
+	row := store.AgentKnownSkill{AgentID: agentID, SkillName: skillName}
 	if existing != nil {
 		if !existing.IsBareAssignment() {
 			return nil, ErrCapabilityExists
 		}
-		row.ActivationCount = existing.ActivationCount
-		row.LastUsedAt = existing.LastUsedAt
-		row.AddedAt = existing.AddedAt
+		row = *existing
 	}
+	row.Pinned = in.Pinned
+	row.TTLSeconds = in.TTLSeconds
+	row.Reason = in.Reason
 	if err := s.store.InsertAgentKnownSkill(ctx, row); err != nil {
 		return nil, &CapabilityWriteError{Err: err}
 	}
 	return s.store.GetAgentKnownSkill(ctx, agentID, skillName)
 }
 
-// UpdateKnownSkill replaces the settable columns and carries forward
-// activation_count, last_used_at, added_at and the grant state
-// (approved_content_hash, granted_at, granted_by, capabilities_granted), so a
-// field edit can never silently revoke a grant. It returns
+// UpdateKnownSkill overwrites the settable columns of the current row; every
+// other column — usage, added_at and the grant state (approved_content_hash,
+// granted_at, granted_by, capabilities_granted) — is kept, so a field edit
+// can never silently revoke a grant. It returns
 // store.ErrAgentKnownSkillNotFound when absent.
 func (s *AgentCapabilitiesService) UpdateKnownSkill(ctx context.Context, agentID, skillName string, in KnownSkillInput) (*store.AgentKnownSkill, error) {
 	current, err := s.store.GetAgentKnownSkill(ctx, agentID, skillName)
 	if err != nil {
 		return nil, err
 	}
-	row := store.AgentKnownSkill{
-		AgentID:             agentID,
-		SkillName:           skillName,
-		Pinned:              in.Pinned,
-		ActivationCount:     current.ActivationCount,
-		LastUsedAt:          current.LastUsedAt,
-		AddedAt:             current.AddedAt,
-		TTLSeconds:          in.TTLSeconds,
-		Reason:              in.Reason,
-		ApprovedContentHash: current.ApprovedContentHash,
-		GrantedAt:           current.GrantedAt,
-		GrantedBy:           current.GrantedBy,
-		CapabilitiesGranted: current.CapabilitiesGranted,
-	}
+	row := *current
+	row.Pinned = in.Pinned
+	row.TTLSeconds = in.TTLSeconds
+	row.Reason = in.Reason
 	if err := s.store.InsertAgentKnownSkill(ctx, row); err != nil {
 		return nil, &CapabilityWriteError{Err: err}
 	}
@@ -235,8 +218,9 @@ func (s *AgentCapabilitiesService) CreateProcedure(ctx context.Context, agentID,
 	return s.store.GetAgentProcedure(ctx, agentID, name)
 }
 
-// UpdateProcedure replaces body and scope. The store's upsert keeps
-// created_at itself, so nothing is carried forward here. It returns
+// UpdateProcedure replaces body and scope. The store's upsert sets only body,
+// scope and updated_at on conflict, so it keeps created_at itself and the row
+// needs no copy. It returns
 // store.ErrAgentProcedureNotFound when absent.
 func (s *AgentCapabilitiesService) UpdateProcedure(ctx context.Context, agentID, name string, in ProcedureInput) (*store.AgentProcedure, error) {
 	if _, err := s.store.GetAgentProcedure(ctx, agentID, name); err != nil {
@@ -285,23 +269,18 @@ func (s *AgentCapabilitiesService) CreateKnowledgeSeed(ctx context.Context, agen
 	return s.store.GetAgentKnowledgeSeed(ctx, agentID, seedKey)
 }
 
-// UpdateKnowledgeSeed replaces the settable columns and carries forward
-// applied_at and created_at. It returns store.ErrAgentKnowledgeSeedNotFound
+// UpdateKnowledgeSeed overwrites the settable columns of the current row;
+// every other column (applied_at, created_at, ...) is kept. It returns store.ErrAgentKnowledgeSeedNotFound
 // when absent.
 func (s *AgentCapabilitiesService) UpdateKnowledgeSeed(ctx context.Context, agentID, seedKey string, in KnowledgeSeedInput) (*store.AgentKnowledgeSeed, error) {
 	current, err := s.store.GetAgentKnowledgeSeed(ctx, agentID, seedKey)
 	if err != nil {
 		return nil, err
 	}
-	row := store.AgentKnowledgeSeed{
-		AgentID:   agentID,
-		SeedKey:   seedKey,
-		Namespace: in.Namespace,
-		Body:      in.Body,
-		TagsJSON:  in.TagsJSON,
-		AppliedAt: current.AppliedAt,
-		CreatedAt: current.CreatedAt,
-	}
+	row := *current
+	row.Namespace = in.Namespace
+	row.Body = in.Body
+	row.TagsJSON = in.TagsJSON
 	if err := s.store.InsertAgentKnowledgeSeed(ctx, row); err != nil {
 		return nil, &CapabilityWriteError{Err: err}
 	}

@@ -230,9 +230,13 @@ func (s *sessionServiceImpl) UpdateMetadata(ctx context.Context, id, metadataJSO
 	return s.writer.UpdateSessionMetadata(ctx, id, metadataJSON)
 }
 
+// Archive marks the session archived, then closes its live agent runtime
+// through the onArchive hook and emits session-end. The store error comes
+// back unwrapped, like Create's, so an HTTP error body reads as it did when
+// the handler called the store directly.
 func (s *sessionServiceImpl) Archive(ctx context.Context, id string) error {
 	if err := s.writer.ArchiveSession(ctx, id); err != nil {
-		return fmt.Errorf("archive session %s: %w", id, err)
+		return err
 	}
 
 	if s.onArchive != nil {

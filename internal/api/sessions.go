@@ -198,7 +198,9 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.ArchiveSession(r.Context(), id); err != nil {
+	// Archive closes the session's live agent runtime (the onArchive hook)
+	// and emits session-end to activity and plugins.
+	if err := a.Services.Sessions.Archive(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -210,13 +212,6 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 
 	// Broadcast session archived presence so UI updates immediately.
 	a.Services.Streams.BroadcastSessionArchived(id)
-
-	// Emit session ended event (fire-and-forget).
-	if a.Services.Activity != nil {
-		safego.Go(r.Context(), "api.sessions.activity.session-ended", func() {
-			a.Services.Activity.EmitSessionEnded(r.Context(), id)
-		})
-	}
 
 	// Emit plugin event: session archived.
 	if a.Services.Plugins != nil {

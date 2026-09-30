@@ -67,6 +67,14 @@ func (f *characterizationSessions) ListMessagesAround(context.Context, string, s
 func (f *characterizationSessions) DetectInterruptedTurn(context.Context, *store.Session, bool) map[string]any {
 	panic("characterizationSessions.DetectInterruptedTurn: unexpected call")
 }
+func (*characterizationSessions) GetMessage(context.Context, string) (*store.Message, error) {
+	return nil, nil
+}
+
+func (*characterizationSessions) CreateMessage(context.Context, *store.Message) error {
+	return nil
+}
+
 func (*characterizationSessions) EnvelopeLookup(context.Context, []store.Message) map[string]*store.EnvelopeInstance {
 	return nil
 }

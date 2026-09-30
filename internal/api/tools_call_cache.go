@@ -59,10 +59,10 @@ func (r selfToolCallRequest) toolCallID() string {
 // session is unknown or has none. "" makes truncate.BudgetForModel fall back
 // to its floor budget, which is the conservative choice.
 func (a *API) sessionModel(ctx context.Context, sessionID string) string {
-	if sessionID == "" || a.Services == nil || a.Services.Store == nil {
+	if sessionID == "" || a.Services == nil || a.Services.Sessions == nil {
 		return ""
 	}
-	sess, err := a.Services.Store.GetSession(ctx, sessionID)
+	sess, err := a.Services.Sessions.Get(ctx, sessionID)
 	if err != nil || sess == nil {
 		return ""
 	}

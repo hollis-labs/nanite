@@ -2,24 +2,18 @@ package api
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
-	"os"
-	"os/exec"
-	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/sandbox"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/shell"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // handleGetShellMode returns the current shell approval mode for a session.
 func (a *API) handleGetShellMode(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("id")
-	mode := a.sessionShellMode(sessionID)
+	mode := a.Services.Shell.Mode(r.Context(), r.PathValue("id"))
 	a.jsonResp(w, http.StatusOK, map[string]string{"mode": string(mode)})
 }
 
@@ -32,12 +26,12 @@ func (a *API) handleSetShellMode(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if !shell.ValidMode(req.Mode) {
-		a.errorResp(w, http.StatusBadRequest, "mode must be ask, session, or yolo")
-		return
-	}
-
-	if err := a.setSessionMetadataField(sessionID, "shell_mode", req.Mode); err != nil {
+	if err := a.Services.Shell.SetMode(r.Context(), sessionID, req.Mode); err != nil {
+		var ve *service.ShellValidationError
+		if errors.As(err, &ve) {
+			a.errorResp(w, http.StatusBadRequest, ve.Msg)
+			return
+		}
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -46,7 +40,7 @@ func (a *API) handleSetShellMode(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleShellExec executes a shell command in the context of a session and
-// persists the output as a user message visible to the LLM.
+// records it, subject to the session's shell mode (ShellService.Exec).
 func (a *API) handleShellExec(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
@@ -60,98 +54,32 @@ func (a *API) handleShellExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enforce approval modes.
-	mode := a.sessionShellMode(sessionID)
-	if mode == shell.ModeAsk && !req.Approved {
+	res, err := a.Services.Shell.Exec(r.Context(), sessionID, req.Command, req.Approved)
+	if err != nil {
+		var denied *service.ShellDeniedError
+		if errors.As(err, &denied) {
+			a.errorResp(w, http.StatusForbidden, err.Error())
+			return
+		}
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if res.RequiresApproval {
 		a.jsonResp(w, http.StatusOK, map[string]interface{}{
 			"requires_approval": true,
-			"command":           req.Command,
-			"mode":              string(mode),
+			"command":           res.Command,
+			"mode":              string(res.Mode),
 		})
 		return
 	}
 
-	// Resolve working directory from session/project.
-	workDir := a.resolveShellWorkDir(sessionID)
-
-	// Execute via sandbox.UserExec (handles denylist + env filtering).
-	// YOLO mode skips the OS sandbox but keeps denylist + env filter.
-	var output string
-	var exitCode int
-	var timedOut bool
-
-	shPath := resolveShell()
-
-	result, err := sandbox.UserExec(sandbox.UserExecOpts{
-		Command:   shPath,
-		Args:      []string{"-c", req.Command},
-		Dir:       workDir,
-		Sandboxed: mode != shell.ModeYOLO, // OS sandbox for ask+session, not yolo
-	})
-	if err != nil {
-		if strings.Contains(err.Error(), "denied") {
-			a.errorResp(w, http.StatusForbidden, err.Error())
-		} else {
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
-		}
-		return
-	}
-	output = result.Stdout
-	if result.Stderr != "" {
-		output += result.Stderr
-	}
-	exitCode = result.ExitCode
-	timedOut = result.TimedOut
-
-	// AD-01 (TASKS/audit-remediation/ARCHITECT-DECISIONS.md): a user in
-	// YOLO mode has already explicitly opted out of the OS sandbox
-	// (Sandboxed: false above), so result.SandboxIsolated reading false
-	// there is expected, not a degradation signal — UserExec never even
-	// calls applyOSSandbox in that case. It's the Sandboxed: true case
-	// (ask/session modes) where SandboxIsolated=false means the operator
-	// has set NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC=1 and this specific
-	// exec ran without real isolation; that's the case worth flagging in
-	// the message content the LLM/user actually sees.
-	degraded := mode != shell.ModeYOLO && !result.SandboxIsolated
-	if degraded {
-		output = "[sandbox: OS-level isolation NOT applied — running in degraded mode]\n" + output
-	}
-
-	// Build the message content the LLM will see.
-	content := fmt.Sprintf("$ %s\n%s", req.Command, output)
-
-	// Build message metadata.
-	meta := map[string]interface{}{
-		"type": "shell_exec",
-		"shell_exec": map[string]interface{}{
-			"command":          req.Command,
-			"exit_code":        exitCode,
-			"timed_out":        timedOut,
-			"sandbox_isolated": result.SandboxIsolated,
-		},
-	}
-	metaJSON, _ := json.Marshal(meta)
-
-	// Persist as a user message so the LLM sees the command + output.
-	msg := &store.Message{
-		ID:        uuid.New().String(),
-		SessionID: sessionID,
-		Role:      "user",
-		Content:   content,
-		Metadata:  string(metaJSON),
-	}
-	if err := a.Services.Store.CreateMessage(r.Context(), msg); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "persist shell output: "+err.Error())
-		return
-	}
-
 	a.jsonResp(w, http.StatusOK, map[string]interface{}{
-		"message_id":       msg.ID,
-		"command":          req.Command,
-		"output":           output,
-		"exit_code":        exitCode,
-		"timed_out":        timedOut,
-		"sandbox_isolated": result.SandboxIsolated,
+		"message_id":       res.MessageID,
+		"command":          res.Command,
+		"output":           res.Output,
+		"exit_code":        res.ExitCode,
+		"timed_out":        res.TimedOut,
+		"sandbox_isolated": res.SandboxIsolated,
 	})
 }
 
@@ -165,7 +93,7 @@ func (a *API) handleShellCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mode := a.sessionShellMode(sessionID)
+	mode := a.Services.Shell.Mode(r.Context(), sessionID)
 	allowed := true
 	reason := ""
 
@@ -184,7 +112,7 @@ func (a *API) handleShellCheck(w http.ResponseWriter, r *http.Request) {
 // handleShellInfo returns working directory and git info for the shell info drawer.
 func (a *API) handleShellInfo(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	workDir := a.resolveShellWorkDir(sessionID)
+	workDir := a.Services.Shell.WorkDir(r.Context(), sessionID)
 
 	info := map[string]interface{}{
 		"work_dir": workDir,
@@ -213,85 +141,4 @@ func (a *API) handleShellInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusOK, info)
-}
-
-// --- helpers ---
-
-// sessionShellMode reads the shell_mode from session metadata, defaulting to "ask".
-func (a *API) sessionShellMode(sessionID string) shell.Mode {
-	sess, err := a.Services.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
-	if err != nil {
-		return shell.ModeAsk
-	}
-	var meta map[string]interface{}
-	if err := json.Unmarshal([]byte(sess.Metadata), &meta); err != nil {
-		return shell.ModeAsk
-	}
-	if m, ok := meta["shell_mode"].(string); ok && shell.ValidMode(m) {
-		return shell.Mode(m)
-	}
-	return shell.ModeAsk
-}
-
-// setSessionMetadataField merges a single key into the session's metadata JSON.
-func (a *API) setSessionMetadataField(sessionID, key string, value interface{}) error {
-	sess, err := a.Services.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
-	if err != nil {
-		return fmt.Errorf("get session: %w", err)
-	}
-
-	meta := make(map[string]interface{})
-	if sess.Metadata != "" {
-		if decodeErr := json.Unmarshal([]byte(sess.Metadata), &meta); decodeErr != nil {
-			return fmt.Errorf("parse session metadata: %w", decodeErr)
-		}
-	}
-	meta[key] = value
-
-	out, err := json.Marshal(meta)
-	if err != nil {
-		return fmt.Errorf("marshal metadata: %w", err)
-	}
-	return a.Services.Store.UpdateSessionMetadata(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, string(out))
-}
-
-// resolveShellWorkDir determines the working directory for shell commands.
-// Priority: project directory > $HOME. Phase 0 item 20 (retire workspaces):
-// this used to also fall back to the session's workspace settings
-// (workspaces.settings' project_dir) — the in-app `workspaces` table is
-// retired in full.
-func (a *API) resolveShellWorkDir(sessionID string) string {
-	sess, err := a.Services.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
-	if err != nil {
-		return fallbackHomeDir()
-	}
-
-	// Try project directory from session metadata.
-	var meta map[string]interface{}
-	if err := json.Unmarshal([]byte(sess.Metadata), &meta); err == nil {
-		if dir, ok := meta["project_dir"].(string); ok && dir != "" {
-			return dir
-		}
-	}
-
-	return fallbackHomeDir()
-}
-
-func fallbackHomeDir() string {
-	if home, err := os.UserHomeDir(); err == nil {
-		return home
-	}
-	return "/"
-}
-
-// resolveShell returns the path to a POSIX shell for command execution.
-// Priority: $SHELL env var > exec.LookPath("sh") > /bin/sh.
-func resolveShell() string {
-	if s := os.Getenv("SHELL"); s != "" {
-		return s
-	}
-	if p, err := exec.LookPath("sh"); err == nil {
-		return p
-	}
-	return "/bin/sh"
 }

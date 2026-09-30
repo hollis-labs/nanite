@@ -59,6 +59,10 @@ type SessionService interface {
 	Archive(ctx context.Context, id string) error
 	Fork(ctx context.Context, sourceID string, opts ForkOpts) (*store.Session, error)
 	ListMessages(ctx context.Context, sessionID string, limit int) ([]store.Message, error)
+	// GetMessage returns one message.
+	GetMessage(ctx context.Context, id string) (*store.Message, error)
+	// CreateMessage appends a message to a session.
+	CreateMessage(ctx context.Context, msg *store.Message) error
 	Search(ctx context.Context, query string, opts SearchOpts) ([]store.SearchResult, error)
 	// ListMessagesPage returns an offset-paginated page of a session's
 	// messages in chronological order.
@@ -283,6 +287,14 @@ func (s *sessionServiceImpl) Search(ctx context.Context, query string, opts Sear
 		limit = 20
 	}
 	return s.sessions.SearchMessages(ctx, query, opts.ProjectID, limit)
+}
+
+func (s *sessionServiceImpl) GetMessage(ctx context.Context, id string) (*store.Message, error) {
+	return s.sessions.GetMessage(ctx, id)
+}
+
+func (s *sessionServiceImpl) CreateMessage(ctx context.Context, msg *store.Message) error {
+	return s.writer.CreateMessage(ctx, msg)
 }
 
 func (s *sessionServiceImpl) ListMessagesPage(ctx context.Context, sessionID string, limit, offset int) (*store.MessagePage, error) {

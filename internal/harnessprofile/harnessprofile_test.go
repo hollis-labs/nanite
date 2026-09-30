@@ -44,7 +44,7 @@ func TestDefaultProfileIsComputedDefaults(t *testing.T) {
 	res := mustResolve(t, newReg(t, nil), Inputs{})
 	want := Values{
 		IdleTimeout: 900 * time.Second, SubagentIdleTimeout: 300 * time.Second,
-		HardCeiling: 200, ConsecutiveFailCap: 3, RunawayFailCap: 10, PerToolCap: 0,
+		HardCeiling: 200, ConsecutiveFailCap: 3, RunawayFailCap: 10, PerToolCap: 0, MaxConcurrentTools: 8,
 		CompactPreviewBytes: 512, PreviewPct: 0.004, PreviewMinBytes: 4000, PreviewMaxBytes: 32000,
 		ToolOutputPct: 0.03, ToolOutputMinBytes: 24576, ToolOutputMaxBytes: 524288,
 		ToolOutputRemainingShare: 0.25, ToolOutputRemainingFloor: 4096,

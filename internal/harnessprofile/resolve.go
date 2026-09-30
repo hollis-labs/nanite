@@ -103,6 +103,7 @@ func (w *work) setComputed() {
 		IdleTimeout:         DefaultIdleTimeout,
 		SubagentIdleTimeout: DefaultSubagentIdleTimeout,
 		HardCeiling:         DefaultHardCeiling,
+		MaxConcurrentTools:  DefaultMaxConcurrentTools,
 		ConsecutiveFailCap:  DefaultConsecutiveFailCap,
 		RunawayFailCap:      DefaultRunawayFailCap,
 		PerToolCap:          DefaultPerToolCap,
@@ -119,7 +120,7 @@ func (w *work) setComputed() {
 	}
 	for _, k := range []string{
 		"idle_timeout_ms", "subagent_idle_timeout_ms", "hard_ceiling", "consecutive_fail_cap",
-		"runaway_fail_cap", "per_tool_cap", "compact_preview_bytes", "preview_pct",
+		"runaway_fail_cap", "per_tool_cap", "max_concurrent_tools", "compact_preview_bytes", "preview_pct",
 		"preview_min_bytes", "preview_max_bytes", "tool_output_bytes", "tool_output_pct",
 		"tool_output_min_bytes", "tool_output_max_bytes", "tool_output_remaining_share",
 		"tool_output_remaining_floor_bytes",
@@ -143,6 +144,10 @@ func (w *work) apply(l Layer, layer string) {
 	if h.HardCeiling != nil {
 		w.v.HardCeiling = *h.HardCeiling
 		src("hard_ceiling")
+	}
+	if h.MaxConcurrentTools != nil {
+		w.v.MaxConcurrentTools = *h.MaxConcurrentTools
+		src("max_concurrent_tools")
 	}
 	if h.ConsecutiveFailCap != nil {
 		w.v.ConsecutiveFailCap = *h.ConsecutiveFailCap
@@ -241,6 +246,7 @@ func (w *work) clamp() {
 	clampDur("idle_timeout_ms", &w.v.IdleTimeout)
 	clampDur("subagent_idle_timeout_ms", &w.v.SubagentIdleTimeout)
 	clampInt("hard_ceiling", &w.v.HardCeiling, 1, 10000)
+	clampInt("max_concurrent_tools", &w.v.MaxConcurrentTools, 1, 64)
 	clampInt("consecutive_fail_cap", &w.v.ConsecutiveFailCap, 1, 1000)
 	clampInt("runaway_fail_cap", &w.v.RunawayFailCap, 1, 1000)
 	clampInt("per_tool_cap", &w.v.PerToolCap, 0, 100000)
@@ -369,6 +375,7 @@ func envLayers(getenv func(string) (string, bool)) ([]envLayer, error) {
 		{"idle_timeout_ms", i64(func(l *Layer) **int64 { return &l.Limits.IdleTimeoutMs })},
 		{"subagent_idle_timeout_ms", i64(func(l *Layer) **int64 { return &l.Harness.SubagentIdleTimeoutMs })},
 		{"hard_ceiling", num(func(l *Layer) **int { return &l.Harness.HardCeiling })},
+		{"max_concurrent_tools", num(func(l *Layer) **int { return &l.Harness.MaxConcurrentTools })},
 		{"consecutive_fail_cap", num(func(l *Layer) **int { return &l.Harness.ConsecutiveFailCap })},
 		{"runaway_fail_cap", num(func(l *Layer) **int { return &l.Harness.RunawayFailCap })},
 		{"per_tool_cap", num(func(l *Layer) **int { return &l.Harness.PerToolCap })},

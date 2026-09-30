@@ -228,7 +228,10 @@ type chatServiceImpl struct {
 	providers *provider.Registry
 	store     Store
 
-	orchestrator       *chat.Orchestrator
+	orchestrator *chat.Orchestrator
+	// maxConcurrentTools overrides the harness profile's max_concurrent_tools
+	// for tests; 0 defers to the profile.
+	maxConcurrentTools int
 	appConfig          *config.TunablesConfig
 	outputFilter       *filter.Chain
 	commands           *chat.CommandRegistry

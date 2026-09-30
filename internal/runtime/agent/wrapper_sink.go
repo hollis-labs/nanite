@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
@@ -42,6 +43,14 @@ type runtimeEventSink struct {
 	typedCB   provider.EventsCallback
 	acp       bool
 
+	// blockDeltas marks a native runtime whose text deltas are whole
+	// content blocks rather than token chunks (see deltasAreWholeBlocks).
+	// Their blocks carry no boundary, so separateBlocks adds one.
+	blockDeltas bool
+	blockMu     sync.Mutex
+	textInTurn  bool // a text delta has been seen in the current turn
+	textAtBreak bool // that text ended in a newline
+
 	readyOnce sync.Once
 	onReady   func()
 }
@@ -62,6 +71,9 @@ type legacyStreamProjectionOwner interface {
 // silently drop on cancellation, matching Sink.Write's "drop on overflow
 // without erroring" guidance.
 func (s *runtimeEventSink) Write(ctx context.Context, ev runtimeevents.Event) error {
+	if s.blockDeltas {
+		ev = s.separateBlocks(ev)
+	}
 	var canonicalErr error
 	if s.canonical != nil {
 		canonicalErr = s.canonical.Write(ctx, ev)
@@ -96,6 +108,95 @@ func (s *runtimeEventSink) Write(ctx context.Context, ev runtimeevents.Event) er
 		// public transport contract.
 	}
 	return canonicalErr
+}
+
+// newRuntimeEventSink builds the sink for one Boot. Block separation applies
+// to native runtimes only: an ACP session streams token chunks whatever the
+// provider.
+func newRuntimeEventSink(providerName string, isACP bool, canonical runtimeevents.Sink) *runtimeEventSink {
+	return &runtimeEventSink{
+		acp:         isACP,
+		canonical:   canonical,
+		blockDeltas: !isACP && deltasAreWholeBlocks(providerName),
+	}
+}
+
+// deltasAreWholeBlocks reports whether a native (non-ACP) runtime emits each
+// text content block as one whole delta, with nothing marking where one block
+// ends and the next begins (CW-20260930-0113):
+//   - claude (streaming-stdio, no partial messages): one delta per assistant
+//     text content block (go-providers pty_claude.go parseAssistantEvent);
+//   - codex (exec --json): one delta per completed agent_message item
+//     (pty_codex.go item.completed). The parser's legacy item.message path is
+//     token-level; it is assumed dead in current codex, whose exec --json
+//     emits item.* lifecycle events instead.
+//
+// opencode is excluded: each delta is one stdout line with its "\n" already
+// restored. ACP and HTTP providers stream token chunks, which must never be
+// separated.
+//
+// Stopgap until the libs carry block/message ids on deltas
+// (CW-20260930-0228); remove it then.
+func deltasAreWholeBlocks(providerName string) bool {
+	switch normalizeProviderName(providerName) {
+	case "claude", "claude-code", "claudecode", "codex":
+		return true
+	}
+	return false
+}
+
+// separateBlocks puts a paragraph break before a text delta that follows
+// earlier text in the same turn, unless the join is already at a line break.
+// The break is written into the event itself, so every consumer — the
+// canonical sink, the runtime feed, the chat stream, drain paths — sees the
+// same text. Thinking deltas neither receive nor count as text.
+func (s *runtimeEventSink) separateBlocks(ev runtimeevents.Event) runtimeevents.Event {
+	s.blockMu.Lock()
+	defer s.blockMu.Unlock()
+
+	switch ev.Kind {
+	case runtimeevents.KindTurnStarted, runtimeevents.KindTurnCompleted, runtimeevents.KindTurnFailed:
+		s.textInTurn = false
+		return ev
+	case runtimeevents.KindAgentDelta:
+	default:
+		return ev
+	}
+
+	var fields map[string]json.RawMessage
+	if len(ev.Payload) == 0 || json.Unmarshal(ev.Payload, &fields) != nil {
+		return ev
+	}
+	var p deltaPayload
+	_ = json.Unmarshal(ev.Payload, &p)
+	if p.Phase == "thought" || (len(p.Thinking) > 0 && string(p.Thinking) != "false" && string(p.Thinking) != "null") {
+		return ev
+	}
+	if p.Content == "" {
+		return ev
+	}
+
+	content := p.Content
+	if s.textInTurn && !s.textAtBreak && !startsWithSpace(content) {
+		content = "\n\n" + content
+		encoded, err := json.Marshal(content)
+		if err != nil {
+			return ev
+		}
+		fields["content"] = encoded
+		payload, err := json.Marshal(fields)
+		if err != nil {
+			return ev
+		}
+		ev.Payload = payload
+	}
+	s.textInTurn = true
+	s.textAtBreak = strings.HasSuffix(content, "\n")
+	return ev
+}
+
+func startsWithSpace(s string) bool {
+	return s != "" && strings.ContainsRune(" \t\r\n", rune(s[0]))
 }
 
 func (s *runtimeEventSink) signalReady() {
@@ -278,9 +379,35 @@ func (s *runtimeEventSink) handleSubagentSpawn(raw json.RawMessage) {
 
 // turnCompletedPayload mirrors translateStreamEvent's two
 // llmtypes.StreamEvent -> KindTurnCompleted shapes: {"usage": ev.Usage}
-// for EventUsage and a nil/empty payload for EventDone.
+// for EventUsage and a nil/empty payload for EventDone. ACP adapters add a
+// top-level "stop_reason" beside "usage".
 type turnCompletedPayload struct {
-	Usage *llmtypes.Usage `json:"usage"`
+	Usage      *llmtypes.Usage `json:"usage"`
+	StopReason string          `json:"stop_reason"`
+}
+
+// TurnCompletedUsage returns the usage a KindTurnCompleted payload carries,
+// or nil when it carries none. For ACP it folds the adapter's top-level
+// stop_reason into Usage.StopReason — synthesizing an otherwise-empty Usage
+// if need be — because every consumer reads the stop reason from usage and
+// ACP truncation (stop_reason "max_tokens") was otherwise never seen
+// (CW-20260930-0113). Native payloads carry no top-level stop_reason and
+// are returned unchanged. Stopgap until the libs normalize stop reasons into
+// usage (CW-20260930-0228).
+func TurnCompletedUsage(raw json.RawMessage, acp bool) *llmtypes.Usage {
+	var p turnCompletedPayload
+	if len(raw) == 0 || json.Unmarshal(raw, &p) != nil {
+		return nil
+	}
+	if acp && p.StopReason != "" {
+		if p.Usage == nil {
+			p.Usage = &llmtypes.Usage{}
+		}
+		if p.Usage.StopReason == "" {
+			p.Usage.StopReason = p.StopReason
+		}
+	}
+	return p.Usage
 }
 
 func (s *runtimeEventSink) handleTurnCompleted(ctx context.Context, raw json.RawMessage) {
@@ -288,12 +415,12 @@ func (s *runtimeEventSink) handleTurnCompleted(ctx context.Context, raw json.Raw
 		s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventDone})
 		return
 	}
-	var p turnCompletedPayload
-	if err := json.Unmarshal(raw, &p); err != nil || p.Usage == nil {
+	usage := TurnCompletedUsage(raw, s.acp)
+	if usage == nil {
 		s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventDone})
 		return
 	}
-	s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: p.Usage})
+	s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: usage})
 	if s.acp {
 		// ACP reports usage and terminal completion together in one event;
 		// native adapters emit a second empty KindTurnCompleted event.

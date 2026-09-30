@@ -870,3 +870,22 @@ func TestRecoverFromContextOverflow_RateBudgetForcedCompactionSucceeds(t *testin
 		t.Fatalf("compactable context enrichment survived forced compaction: %d bytes", len(slot.Content))
 	}
 }
+
+// CW-20260930-0113: a truncation reported as "length" reaches the chat loop's
+// max_tokens handling and the persisted usage as "max_tokens".
+func TestGenerateResponseCharacterization_LengthStopReasonIsMaxTokens(t *testing.T) {
+	f := newCharacterizationFixture(t, []characterizationProviderStep{{events: []llmtypes.StreamEvent{
+		{Type: "delta", Content: "cut off mid"},
+		{Type: "usage", Usage: &llmtypes.Usage{StopReason: "length", InputTokens: 5, OutputTokens: 4}},
+		{Type: "done"},
+	}}})
+	events := f.run(t, "assistant-length")
+
+	end := findEvent(events, "stream_end")
+	if end == nil || end.Usage == nil {
+		t.Fatalf("no stream_end usage in %v", eventTypes(events))
+	}
+	if end.Usage.StopReason != "max_tokens" {
+		t.Fatalf("stream_end stop reason = %q, want max_tokens", end.Usage.StopReason)
+	}
+}

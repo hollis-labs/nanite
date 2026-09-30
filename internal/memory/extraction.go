@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -19,6 +20,11 @@ import (
 // UtilityCallFunc is a function that makes a lightweight LLM call for extraction.
 // It takes a prompt string and returns the LLM response.
 type UtilityCallFunc func(ctx context.Context, prompt string) (string, error)
+
+// ErrUtilityUnavailable is returned by a UtilityCallFunc whose provider is not
+// registered right now. Extraction skips silently, as it does for a nil
+// UtilityCallFunc, instead of warning on every turn.
+var ErrUtilityUnavailable = errors.New("memory: utility provider not registered")
 
 // Extractor handles memory extraction from chat messages and compaction events.
 // It registers as event hooks on message.received and context.compacted.
@@ -184,6 +190,9 @@ Return a JSON object with these fields:
 Return ONLY the JSON object, no markdown fences or explanation.`, truncateForPrompt(content, 1500))
 
 	result, err := e.utilityCall(ctx, prompt)
+	if errors.Is(err, ErrUtilityUnavailable) {
+		return
+	}
 	if err != nil {
 		slog.Warn("memory: per-turn extraction LLM call failed", "err", err)
 		return
@@ -268,6 +277,9 @@ Return ONLY the JSON array, no markdown fences or explanation.
 Session ID: %s`, tokensSaved, sessionID)
 
 	result, err := e.utilityCall(ctx, prompt)
+	if errors.Is(err, ErrUtilityUnavailable) {
+		return
+	}
 	if err != nil {
 		slog.Warn("memory: post-compact extraction LLM call failed", "err", err)
 		return

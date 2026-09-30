@@ -14,11 +14,14 @@ package openai
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/nanite/internal/llm/keycheck"
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 )
@@ -68,6 +71,22 @@ func (c *Client) SetAPIKey(key string) {
 		option.WithAPIKey(key),
 		option.WithMaxRetries(0),
 	)
+}
+
+// VerifyKey makes the cheapest authenticated call the API has — listing
+// models, which costs no tokens — to check the configured key. A 401 or 403
+// wraps keycheck.ErrRejected; any other failure means the provider could not
+// be reached or answered with an error of its own.
+func (c *Client) VerifyKey(ctx context.Context) error {
+	_, err := c.sdk.Models.List(ctx)
+	if err == nil {
+		return nil
+	}
+	var apiErr *sdk.Error
+	if errors.As(err, &apiErr) && keycheck.Rejected(apiErr.StatusCode) {
+		return fmt.Errorf("%w: %w", keycheck.ErrRejected, err)
+	}
+	return err
 }
 
 // Capabilities reports OpenAI's supported feature set for nanite's chat

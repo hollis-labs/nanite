@@ -398,6 +398,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/providers/{id}", a.handleUpdateProvider)
 	mux.HandleFunc("POST /api/providers/{id}/api-key", a.handleSetProviderAPIKey)
 	mux.HandleFunc("GET /api/providers/{id}/status", a.handleGetProviderStatus)
+	mux.HandleFunc("POST /api/providers/{id}/test", a.handleTestProviderConnection)
 	mux.HandleFunc("GET /api/models", a.handleListModels)
 
 	// Agent-to-agent messaging

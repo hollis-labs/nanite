@@ -29,7 +29,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/worktree"
 
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	gosched "github.com/hollis-labs/go-scheduler"
@@ -41,8 +40,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
-	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
-	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
 	"github.com/hollis-labs/nanite/internal/loop"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
@@ -50,7 +47,6 @@ import (
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/scheduler"
-	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/server"
@@ -1024,77 +1020,23 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 	registry := provider.NewRegistry()
 	catalog := providercatalog.New()
 
-	// Keychain first, then environment. A container has no OS keyring — the
-	// secret-service lookup fails with `exec: "dbus-launch": executable file
-	// not found in $PATH` — so a keychain-only lookup registers no providers
-	// at all, and chat is dead with only a WARN to say so. The environment is
-	// how a container is configured; refusing to read it makes Nanite
-	// unrunnable anywhere but a desktop.
-	resolveKey := func(providerID, envKey string) (string, string) {
-		if k := strings.TrimSpace(secrets.Get(secrets.ProviderKeyName(providerID))); k != "" {
-			return k, "keychain"
-		}
-		if envKey != "" {
-			if k := strings.TrimSpace(os.Getenv(envKey)); k != "" {
-				return k, "environment"
-			}
-		}
-		return "", ""
-	}
-
-	// CW-20260526-0001: apiProvSpec carries the catalog metadata
-	// (displayName, provID) inline with the registry registration so the
-	// dropdown auto-surfaces every successfully-registered provider. A new
-	// API provider is one literal here instead of (a) initProviders +
-	// (b) seededProviders + (c) AllSeeded.
-	type apiProvSpec struct {
-		name, displayName, provID string
-		// envKey is the conventional environment variable for this provider,
-		// used when the keychain has nothing — see resolveKey.
-		envKey string
-		create func() llmcontracts.Provider
-		setKey func(llmcontracts.Provider, string)
-	}
-	apiProviders := []apiProvSpec{
-		{"anthropic", "Anthropic", "anthropic-001", "ANTHROPIC_API_KEY",
-			func() llmcontracts.Provider {
-				ap := nllmanthropic.New()
-				if v := os.Getenv("NANITE_PROVIDER_RATE_BUDGET_TPM"); v != "" {
-					if n, err := strconv.Atoi(v); err == nil && n > 0 {
-						ap.RateTracker.UpdateLimit(n)
-						slog.Info("provider: rate-budget override applied via env",
-							"provider", "anthropic", "tpm", n)
-					}
-				}
-				return ap
-			},
-			func(p llmcontracts.Provider, k string) { p.(*nllmanthropic.Client).SetAPIKey(k) }},
-		{"openai", "OpenAI", "openai-001", "OPENAI_API_KEY",
-			// CW-20260508-0012: SDK-backed wrapper (replaces deleted
-			// go-providers HTTP openai client). Implements
-			// llmcontracts.Provider; no rate-budget plumbing per spike
-			// verdict (parity deferred to followup
-			// followups.nanite.cw_20260508_0012.openai_rate_budget_parity).
-			func() llmcontracts.Provider { return nllmopenai.New("", nil) },
-			func(p llmcontracts.Provider, k string) { p.(*nllmopenai.Client).SetAPIKey(k) }},
-	}
-
+	// The API provider table and its key resolution (keychain first, then
+	// environment) live in internal/service so the provider key endpoints
+	// can build the same adapters at runtime (CW-20260930-0101).
 	var registeredAPI, missingAPI []string
-	for _, spec := range apiProviders {
-		key, source := resolveKey(spec.provID, spec.envKey)
+	for _, spec := range service.APIProviderSpecs() {
+		key, source := service.ResolveAPIKey(spec.ProviderID, spec.EnvKey)
 		if key != "" {
-			p := spec.create()
-			spec.setKey(p, key)
-			registry.Register(spec.name, p)
+			registry.Register(spec.Name, spec.NewProvider(key))
 			catalog.Add(providercatalog.Entry{
-				Name:        spec.name,
-				DisplayName: spec.displayName,
-				RowID:       spec.provID,
+				Name:        spec.Name,
+				DisplayName: spec.DisplayName,
+				RowID:       spec.ProviderID,
 			})
-			slog.Info("provider registered", "provider", spec.name, "key_source", source)
-			registeredAPI = append(registeredAPI, spec.name)
+			slog.Info("provider registered", "provider", spec.Name, "key_source", source)
+			registeredAPI = append(registeredAPI, spec.Name)
 		} else {
-			missingAPI = append(missingAPI, spec.name)
+			missingAPI = append(missingAPI, spec.Name)
 		}
 	}
 

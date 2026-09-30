@@ -1,13 +1,9 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
-	"os"
-	"os/exec"
 	"strings"
 
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/secrets"
 )
 
@@ -43,24 +39,19 @@ func (a *API) handleSetProviderAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keyName := secrets.ProviderKeyName(id)
-	if body.APIKey == "" {
-		secrets.Delete(keyName)
-	} else {
-		if err := secrets.Set(keyName, body.APIKey); err != nil {
-			a.errorResp(w, http.StatusInternalServerError, "failed to store API key in keychain: "+err.Error())
-			return
-		}
+	result, err := a.Services.ProviderConfig.SetAPIKey(r.Context(), id, body.APIKey)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, "failed to store API key in keychain: "+err.Error())
+		return
 	}
 
 	a.jsonResp(w, http.StatusOK, ProviderAPIKeyResponse{
 		ProviderID: id,
-		HasKey:     body.APIKey != "",
+		HasKey:     result.HasKey,
+		KeySource:  result.KeySource,
 	})
 }
 
-// handleGetProviderStatus returns the provider's config plus runtime status:
-// whether it's registered in the provider registry and whether it has an API key.
 func (a *API) handleGetProviderStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
@@ -92,55 +83,28 @@ type CLIDetectionResult struct {
 // handleDetectCLI runs auto-detection for all CLI adapters using the same
 // Detect() logic that the runtime uses at startup.
 func (a *API) handleDetectCLI(w http.ResponseWriter, r *http.Request) {
-	type cliSpec struct {
-		adapter                  provider.CLIAdapter
-		provType, provID, envVar string
+	detected := a.Services.ProviderConfig.DetectCLIs(r.Context())
+	results := make([]CLIDetectionResult, 0, len(detected))
+	for _, d := range detected {
+		results = append(results, cliDetectionToView(d))
 	}
-
-	// CW-20260508-0010: detection list mirrors the production CLIAdapter
-	// slice in cmd/nanite/main.go — claude / codex / opencode only.
-	// gemini/copilot/aider/junie/kiro/qwen were never reached by any
-	// production code path (factory.shouldUsePTY filters to claude shapes;
-	// codex/opencode use the SubprocessBridge path).
-	specs := []cliSpec{
-		{provider.NewClaudeAdapter(), "pty", "pty-001", "CLAUDE_CLI_PATH"},
-		{provider.NewCodexAdapter(), "pty-codex", "pty-codex-001", "CODEX_CLI_PATH"},
-		{provider.NewOpencodeAdapter(), "pty-opencode", "pty-opencode-001", "OPENCODE_CLI_PATH"},
-	}
-
-	results := make([]CLIDetectionResult, 0, len(specs))
-	for _, s := range specs {
-		result := CLIDetectionResult{
-			Name:         s.adapter.Name(),
-			ProviderType: s.provType,
-			EnvVar:       s.envVar,
-		}
-
-		// Check if a custom path is stored in provider settings.
-		if p, err := a.Services.ProviderConfig.Get(r.Context(), s.provID); err == nil && p.Settings != "" && p.Settings != "{}" {
-			var settings map[string]string
-			if json.Unmarshal([]byte(p.Settings), &settings) == nil {
-				if cp, ok := settings["cli_path"]; ok && cp != "" {
-					result.Path = cp
-					result.Detected = isExecutable(cp)
-					results = append(results, result)
-					continue
-				}
-			}
-		}
-
-		// Use the adapter's own Detect() — same logic as runtime registration.
-		if path, ok := s.adapter.Detect(); ok {
-			result.Path = path
-			result.Detected = true
-		}
-		results = append(results, result)
-	}
-
 	a.jsonResp(w, http.StatusOK, results)
 }
 
-// handleGetAllProviderStatuses returns all providers with their runtime status.
+// handleTestProviderConnection checks whether a provider row is usable right
+// now — for an API provider, whether its key is accepted (CW-20260930-0101).
+// Every check outcome is a 200 with ok/status; an unknown id is a 404.
+func (a *API) handleTestProviderConnection(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	result, err := a.Services.ProviderConfig.TestConnection(r.Context(), id)
+	if err != nil {
+		a.errorResp(w, http.StatusNotFound, "provider not found")
+		return
+	}
+	a.jsonResp(w, http.StatusOK, providerCheckToView(result))
+}
+
 func (a *API) handleGetAllProviderStatuses(w http.ResponseWriter, r *http.Request) {
 	providers, err := a.Services.ProviderConfig.List(r.Context())
 	if err != nil {
@@ -167,20 +131,4 @@ func (a *API) handleGetAllProviderStatuses(w http.ResponseWriter, r *http.Reques
 	}
 
 	a.jsonResp(w, http.StatusOK, out)
-}
-
-// isExecutable checks if a file exists and is executable.
-// Works for both absolute paths and PATH-relative binaries.
-func isExecutable(path string) bool {
-	// Absolute or relative path — check the file directly.
-	if strings.Contains(path, "/") || strings.Contains(path, "\\") {
-		info, err := os.Stat(path)
-		if err != nil {
-			return false
-		}
-		return !info.IsDir() && info.Mode()&0111 != 0
-	}
-	// Bare binary name — search PATH.
-	_, err := exec.LookPath(path)
-	return err == nil
 }

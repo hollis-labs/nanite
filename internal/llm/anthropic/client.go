@@ -20,7 +20,9 @@
 package anthropic
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -30,6 +32,7 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
+	"github.com/hollis-labs/nanite/internal/llm/keycheck"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
 
@@ -130,6 +133,22 @@ func New() *Client {
 func (c *Client) SetAPIKey(key string) {
 	c.apiKey = key
 	c.rebuildSDK()
+}
+
+// VerifyKey makes the cheapest authenticated call the API has — listing
+// models, which costs no tokens — to check the configured key. A 401 or 403
+// wraps keycheck.ErrRejected; any other failure means the provider could not
+// be reached or answered with an error of its own.
+func (c *Client) VerifyKey(ctx context.Context) error {
+	_, err := c.sdk.Models.List(ctx, sdk.ModelListParams{Limit: sdk.Int(1)})
+	if err == nil {
+		return nil
+	}
+	var apiErr *sdk.Error
+	if errors.As(err, &apiErr) && keycheck.Rejected(apiErr.StatusCode) {
+		return fmt.Errorf("%w: %w", keycheck.ErrRejected, err)
+	}
+	return err
 }
 
 // rebuildSDK constructs (or re-constructs) the SDK client with the current

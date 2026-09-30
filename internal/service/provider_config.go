@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"sync"
 
+	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -16,10 +18,28 @@ import (
 // because each endpoint shapes them differently (CW-20260930-0083).
 type ProviderConfigService struct {
 	store ProviderStore
+
+	// Seams for TestConnection and SetAPIKey; tests replace them.
+	resolveKey   func(providerID, envKey string) (key, source string)
+	newVerifier  func(spec APIProviderSpec, key string) keyVerifier
+	setSecret    func(key, value string) error
+	deleteSecret func(key string)
+
+	// keyMu serializes SetAPIKey and guards registry/catalog, the live
+	// provider runtime it swaps adapters in (SetProviderRuntime).
+	keyMu    sync.Mutex
+	registry providerRegistry
+	catalog  providerCatalogWriter
 }
 
 func NewProviderConfigService(st ProviderStore) *ProviderConfigService {
-	return &ProviderConfigService{store: st}
+	return &ProviderConfigService{
+		store:        st,
+		resolveKey:   ResolveAPIKey,
+		newVerifier:  defaultKeyVerifier,
+		setSecret:    secrets.Set,
+		deleteSecret: secrets.Delete,
+	}
 }
 
 // List returns every provider row.

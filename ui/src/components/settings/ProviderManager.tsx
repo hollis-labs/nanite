@@ -103,8 +103,13 @@ function APIKeyField({ provider }: { provider: ProviderStatus }) {
       setTestResult('testing')
       setTestError('')
       api.testProviderConnection(provider.id)
-        .then(() => {
-          setTestResult('success')
+        .then((result) => {
+          if (result.ok) {
+            setTestResult('success')
+          } else {
+            setTestResult('error')
+            setTestError(result.message)
+          }
           queryClient.invalidateQueries({ queryKey: ['provider-statuses'] })
         })
         .catch((err: Error) => {
@@ -176,7 +181,7 @@ function APIKeyField({ provider }: { provider: ProviderStatus }) {
           {testResult === 'success' && (
             <div className="flex items-center gap-2 text-sm text-success bg-success-muted px-3 py-2 rounded-md">
               <CircleCheck className="w-4 h-4" />
-              Connected successfully
+              Key accepted
             </div>
           )}
           {testResult === 'error' && (

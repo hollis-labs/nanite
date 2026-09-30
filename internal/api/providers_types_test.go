@@ -38,7 +38,8 @@ func TestModelViewJSON(t *testing.T) {
 
 // TestProviderStatusResponsesMatchOldEncoding pins the three provider
 // status/key responses against the shapes the handlers built before: the
-// local struct embedding store.ProviderConfig, and two map[string]any.
+// local struct embedding store.ProviderConfig, and two map[string]any (the
+// api-key one plus its key_source addition).
 func TestProviderStatusResponsesMatchOldEncoding(t *testing.T) {
 	var p store.ProviderConfig
 	populate(t, &p)
@@ -57,10 +58,15 @@ func TestProviderStatusResponsesMatchOldEncoding(t *testing.T) {
 		detailAfter := ProviderStatusDetailView{Provider: providerConfigToView(&p), HasAPIKey: flags[0], Registered: flags[1]}
 		assertSameJSON(t, "provider status detail", detailAfter, detailBefore)
 
-		keyBefore := map[string]any{"provider_id": p.ID, "has_key": flags[0]}
-		keyAfter := ProviderAPIKeyResponse{ProviderID: p.ID, HasKey: flags[0]}
-		assertSameJSON(t, "provider api key", keyAfter, keyBefore)
+		// CW-20260930-0101 added key_source, an approved wire addition; the
+		// two keys the map carried are otherwise unchanged.
+		for _, source := range []string{"keychain", "environment", ""} {
+			keyBefore := map[string]any{"provider_id": p.ID, "has_key": flags[0], "key_source": source}
+			keyAfter := ProviderAPIKeyResponse{ProviderID: p.ID, HasKey: flags[0], KeySource: source}
+			assertSameJSON(t, "provider api key", keyAfter, keyBefore)
+		}
 	}
+	assertKeys(t, "ProviderAPIKeyResponse", mustJSON(t, ProviderAPIKeyResponse{}), []string{"has_key", "key_source", "provider_id"})
 }
 
 // TestUpdateProviderRequestDecodesLikeStoreUpdate pins that PUT bodies

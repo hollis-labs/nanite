@@ -20,6 +20,17 @@ const (
 	DefaultPreviewPct          = 0.004 // fraction of the model window, in bytes (window tokens x 4)
 	DefaultPreviewMinBytes     = 4000
 	DefaultPreviewMaxBytes     = 32000
+
+	// Tool-output ceiling (D-32): the cumulative bytes of tool output a turn may
+	// deliver at full preview size before results step down to the compact
+	// preview. A model's window scales it; the floor is the value the harness
+	// used before it scaled, so a model with no window information behaves as it
+	// always did.
+	DefaultToolOutputPct            = 0.03
+	DefaultToolOutputMinBytes       = 24 * 1024
+	DefaultToolOutputMaxBytes       = 512 * 1024
+	DefaultToolOutputRemainingShare = 0.25
+	DefaultToolOutputRemainingFloor = 4 * 1024
 )
 
 // Knobs are the host-only harness knobs a profile may state. A nil field means
@@ -34,6 +45,13 @@ type Knobs struct {
 	PreviewPct            *float64 `json:"preview_pct,omitempty" yaml:"preview_pct,omitempty"`
 	PreviewMinBytes       *int     `json:"preview_min_bytes,omitempty" yaml:"preview_min_bytes,omitempty"`
 	PreviewMaxBytes       *int     `json:"preview_max_bytes,omitempty" yaml:"preview_max_bytes,omitempty"`
+	// Tool-output ceiling shaping. limits.tool_output_bytes states the ceiling
+	// outright and replaces the window-scaled value.
+	ToolOutputPct            *float64 `json:"tool_output_pct,omitempty" yaml:"tool_output_pct,omitempty"`
+	ToolOutputMinBytes       *int     `json:"tool_output_min_bytes,omitempty" yaml:"tool_output_min_bytes,omitempty"`
+	ToolOutputMaxBytes       *int     `json:"tool_output_max_bytes,omitempty" yaml:"tool_output_max_bytes,omitempty"`
+	ToolOutputRemainingShare *float64 `json:"tool_output_remaining_share,omitempty" yaml:"tool_output_remaining_share,omitempty"`
+	ToolOutputRemainingFloor *int     `json:"tool_output_remaining_floor_bytes,omitempty" yaml:"tool_output_remaining_floor_bytes,omitempty"`
 }
 
 // Layer is what one configuration layer states: the shared limits shape plus
@@ -55,6 +73,57 @@ type Values struct {
 	PreviewPct          float64
 	PreviewMinBytes     int
 	PreviewMaxBytes     int
+
+	// ToolOutputBytes is the explicit tool-output ceiling when one is stated
+	// (limits.tool_output_bytes); nil means "scale it from the model". Zero
+	// means no cumulative ceiling.
+	ToolOutputBytes          *int64
+	ToolOutputPct            float64
+	ToolOutputMinBytes       int
+	ToolOutputMaxBytes       int
+	ToolOutputRemainingShare float64
+	ToolOutputRemainingFloor int
+}
+
+// TurnCeiling is the cumulative tool-output ceiling for a turn, in bytes; 0
+// means no cumulative ceiling. windowTokens is the model's context window, 0
+// when unknown; remainingTokens is the context still available before the
+// loop's own budget ceiling, negative when unknown.
+//
+// The base is the explicit tool_output_bytes when stated, else a share of the
+// window (tokens x 4) clamped to [min, max]; an unknown window gives the min,
+// which is the value the harness used before the ceiling scaled. The base is
+// then limited to a share of what remains of the context, never below the
+// remaining floor, so a nearly full context cannot be overrun.
+func (v Values) TurnCeiling(windowTokens, remainingTokens int) int {
+	var base int
+	switch {
+	case v.ToolOutputBytes != nil:
+		if *v.ToolOutputBytes == 0 {
+			return 0
+		}
+		base = int(min(*v.ToolOutputBytes, int64(maxToolOutputBytes)))
+	case windowTokens <= 0:
+		base = v.ToolOutputMinBytes
+	default:
+		base = int(float64(windowTokens*4) * v.ToolOutputPct)
+		base = max(v.ToolOutputMinBytes, min(base, v.ToolOutputMaxBytes))
+	}
+	if limit := v.RemainingCap(remainingTokens); limit >= 0 {
+		base = min(base, limit)
+	}
+	return base
+}
+
+// RemainingCap is the most tool output worth delivering given the context that
+// remains: a share of the remaining bytes, never below the remaining floor.
+// Negative when the remaining context is unknown. It also bounds a single
+// result, so one result cannot overrun a nearly full context.
+func (v Values) RemainingCap(remainingTokens int) int {
+	if remainingTokens < 0 {
+		return -1
+	}
+	return max(v.ToolOutputRemainingFloor, int(float64(remainingTokens*4)*v.ToolOutputRemainingShare))
 }
 
 // EffectiveIdleTimeout is the inactivity window for the run: the subagent
@@ -111,7 +180,7 @@ type Effective struct {
 // Effective returns the recorded form of r.
 func (r *Resolved) Effective() Effective {
 	v := r.Values
-	return Effective{
+	eff := Effective{
 		Profile: r.Profile,
 		Digest:  r.Digest,
 		Model:   r.Model,
@@ -126,11 +195,21 @@ func (r *Resolved) Effective() Effective {
 			"preview_pct":              v.PreviewPct,
 			"preview_min_bytes":        v.PreviewMinBytes,
 			"preview_max_bytes":        v.PreviewMaxBytes,
+
+			"tool_output_pct":                   v.ToolOutputPct,
+			"tool_output_min_bytes":             v.ToolOutputMinBytes,
+			"tool_output_max_bytes":             v.ToolOutputMaxBytes,
+			"tool_output_remaining_share":       v.ToolOutputRemainingShare,
+			"tool_output_remaining_floor_bytes": v.ToolOutputRemainingFloor,
 		},
 		Sources:    r.Sources,
 		Limits:     r.Limits,
 		Unenforced: r.Unenforced,
 	}
+	if v.ToolOutputBytes != nil {
+		eff.Values["tool_output_bytes"] = *v.ToolOutputBytes
+	}
+	return eff
 }
 
 // EffectiveJSON is Effective encoded as JSON, for storage.

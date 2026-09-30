@@ -97,9 +97,16 @@ func ResolveHarness(ctx context.Context, reg *harnessprofile.Registry, settings 
 		Launch:  launch,
 	}
 	if settings != nil {
-		if us, usErr := settings.GetUserSettings(ctx); usErr == nil && us != nil && us.ToolPerTurnCap > 0 {
-			perToolCap := us.ToolPerTurnCap
-			in.AppSettings.Harness.PerToolCap = &perToolCap
+		if us, usErr := settings.GetUserSettings(ctx); usErr == nil && us != nil {
+			if us.ToolPerTurnCap > 0 {
+				perToolCap := us.ToolPerTurnCap
+				in.AppSettings.Harness.PerToolCap = &perToolCap
+			}
+			// The tool-output ceiling's original ext setting is an app-settings
+			// layer; 0 still disables the ceiling.
+			if b, ok := extSettingBytes(us.ExtSettings["tool_turn_ceiling_bytes"]); ok {
+				in.AppSettings.Limits.ToolOutputBytes = &b
+			}
 		}
 	}
 	res, err := reg.Resolve(in)
@@ -147,6 +154,33 @@ func applyHarness(ls *loopState, r *harnessprofile.Resolved, subagent bool) {
 	ls.limits.runawayFailCap = v.RunawayFailCap
 	ls.limits.idleTimeout = v.EffectiveIdleTimeout(subagent)
 	ls.limits.defaultPerToolCap = v.PerToolCap
+	ls.remainingTokens = -1
+	ls.refreshTurnCeiling()
+}
+
+// refreshTurnCeiling recomputes the cumulative tool-output ceiling from the
+// profile, the model's window and the context still available. It is called
+// when the profile is applied and again each iteration, after the context budget
+// is enforced.
+func (ls *loopState) refreshTurnCeiling() {
+	if ls == nil || ls.harness == nil {
+		return
+	}
+	ls.turnResultCeiling = ls.harness.Values.TurnCeiling(ls.windowTokens, ls.remainingTokens)
+}
+
+// setRemainingContext records how many tokens of the loop's context ceiling are
+// still free, and refreshes the ceiling. A ceiling of zero or less (unknown
+// window) leaves the remaining context unknown.
+func (ls *loopState) setRemainingContext(ceilingTokens, usedTokens int) {
+	if ls == nil {
+		return
+	}
+	ls.remainingTokens = -1
+	if ceilingTokens > 0 {
+		ls.remainingTokens = max(0, ceilingTokens-usedTokens)
+	}
+	ls.refreshTurnCeiling()
 }
 
 // previewBudget is the model-aware result-preview budget under the run's
@@ -156,7 +190,13 @@ func (ls *loopState) previewBudget(model string) int {
 		return truncate.BudgetForModel(model)
 	}
 	v := ls.harness.Values
-	return truncate.BudgetForModelWith(model, v.PreviewPct, v.PreviewMinBytes, v.PreviewMaxBytes)
+	budget := truncate.BudgetForModelWith(model, v.PreviewPct, v.PreviewMinBytes, v.PreviewMaxBytes)
+	// One result never exceeds what the remaining context can take, whatever the
+	// cumulative ceiling is (or whether one is set at all).
+	if limit := v.RemainingCap(ls.remainingTokens); limit >= 0 && budget > limit {
+		budget = limit
+	}
+	return budget
 }
 
 // compactPreviewBudget is the step-down preview size once a turn's cumulative
@@ -205,4 +245,24 @@ func MergeHarnessSelection(metadata, profile string, overrides map[string]any) (
 	}
 	out, err := json.Marshal(m)
 	return string(out), err
+}
+
+// extSettingBytes reads a non-negative byte count from a user-settings ext
+// value, which arrives as a JSON number (float64) or an int.
+func extSettingBytes(v any) (int64, bool) {
+	switch n := v.(type) {
+	case float64:
+		if n >= 0 {
+			return int64(n), true
+		}
+	case int:
+		if n >= 0 {
+			return int64(n), true
+		}
+	case int64:
+		if n >= 0 {
+			return n, true
+		}
+	}
+	return 0, false
 }

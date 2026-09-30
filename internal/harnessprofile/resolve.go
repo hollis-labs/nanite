@@ -29,8 +29,10 @@ type Inputs struct {
 // Host maximums. A value outside [min, max] is moved to the nearest bound and
 // the change is recorded on its Source.
 const (
-	minDuration = time.Second
-	maxDuration = 24 * time.Hour
+	// maxToolOutputBytes is the host maximum for any tool-output ceiling.
+	maxToolOutputBytes = 64 << 20
+	minDuration        = time.Second
+	maxDuration        = 24 * time.Hour
 )
 
 type work struct {
@@ -108,11 +110,19 @@ func (w *work) setComputed() {
 		PreviewPct:          DefaultPreviewPct,
 		PreviewMinBytes:     DefaultPreviewMinBytes,
 		PreviewMaxBytes:     DefaultPreviewMaxBytes,
+
+		ToolOutputPct:            DefaultToolOutputPct,
+		ToolOutputMinBytes:       DefaultToolOutputMinBytes,
+		ToolOutputMaxBytes:       DefaultToolOutputMaxBytes,
+		ToolOutputRemainingShare: DefaultToolOutputRemainingShare,
+		ToolOutputRemainingFloor: DefaultToolOutputRemainingFloor,
 	}
 	for _, k := range []string{
 		"idle_timeout_ms", "subagent_idle_timeout_ms", "hard_ceiling", "consecutive_fail_cap",
 		"runaway_fail_cap", "per_tool_cap", "compact_preview_bytes", "preview_pct",
-		"preview_min_bytes", "preview_max_bytes",
+		"preview_min_bytes", "preview_max_bytes", "tool_output_bytes", "tool_output_pct",
+		"tool_output_min_bytes", "tool_output_max_bytes", "tool_output_remaining_share",
+		"tool_output_remaining_floor_bytes",
 	} {
 		w.sources[k] = Source{Layer: "computed"}
 	}
@@ -162,6 +172,26 @@ func (w *work) apply(l Layer, layer string) {
 		w.v.PreviewMaxBytes = *h.PreviewMaxBytes
 		src("preview_max_bytes")
 	}
+	if h.ToolOutputPct != nil {
+		w.v.ToolOutputPct = *h.ToolOutputPct
+		src("tool_output_pct")
+	}
+	if h.ToolOutputMinBytes != nil {
+		w.v.ToolOutputMinBytes = *h.ToolOutputMinBytes
+		src("tool_output_min_bytes")
+	}
+	if h.ToolOutputMaxBytes != nil {
+		w.v.ToolOutputMaxBytes = *h.ToolOutputMaxBytes
+		src("tool_output_max_bytes")
+	}
+	if h.ToolOutputRemainingShare != nil {
+		w.v.ToolOutputRemainingShare = *h.ToolOutputRemainingShare
+		src("tool_output_remaining_share")
+	}
+	if h.ToolOutputRemainingFloor != nil {
+		w.v.ToolOutputRemainingFloor = *h.ToolOutputRemainingFloor
+		src("tool_output_remaining_floor_bytes")
+	}
 	// The remaining shared limits are carried, not enforced by the chat loop.
 	if lim.MaxDurationMs != nil {
 		w.limits.MaxDurationMs = lim.MaxDurationMs
@@ -184,7 +214,9 @@ func (w *work) apply(l Layer, layer string) {
 		src("max_retries")
 	}
 	if lim.ToolOutputBytes != nil {
-		w.limits.ToolOutputBytes = lim.ToolOutputBytes
+		v := *lim.ToolOutputBytes
+		w.v.ToolOutputBytes = &v
+		w.limits.ToolOutputBytes = &v
 		src("tool_output_bytes")
 	}
 }
@@ -226,6 +258,26 @@ func (w *work) clamp() {
 		w.markClamped("runaway_fail_cap", strconv.Itoa(w.v.RunawayFailCap))
 		w.v.RunawayFailCap = w.v.ConsecutiveFailCap
 	}
+	if b := w.v.ToolOutputBytes; b != nil && *b != 0 && (*b < 1024 || *b > maxToolOutputBytes) {
+		w.markClamped("tool_output_bytes", strconv.FormatInt(*b, 10))
+		c := max(int64(1024), min(*b, int64(maxToolOutputBytes)))
+		w.v.ToolOutputBytes, w.limits.ToolOutputBytes = &c, &c
+	}
+	clampInt("tool_output_min_bytes", &w.v.ToolOutputMinBytes, 1024, maxToolOutputBytes)
+	clampInt("tool_output_max_bytes", &w.v.ToolOutputMaxBytes, 1024, maxToolOutputBytes)
+	clampInt("tool_output_remaining_floor_bytes", &w.v.ToolOutputRemainingFloor, 256, 1<<20)
+	if w.v.ToolOutputPct < 0.0005 || w.v.ToolOutputPct > 0.5 {
+		w.markClamped("tool_output_pct", strconv.FormatFloat(w.v.ToolOutputPct, 'g', -1, 64))
+		w.v.ToolOutputPct = max(0.0005, min(w.v.ToolOutputPct, 0.5))
+	}
+	if w.v.ToolOutputRemainingShare < 0.01 || w.v.ToolOutputRemainingShare > 1 {
+		w.markClamped("tool_output_remaining_share", strconv.FormatFloat(w.v.ToolOutputRemainingShare, 'g', -1, 64))
+		w.v.ToolOutputRemainingShare = max(0.01, min(w.v.ToolOutputRemainingShare, 1))
+	}
+	if w.v.ToolOutputMaxBytes < w.v.ToolOutputMinBytes {
+		w.markClamped("tool_output_max_bytes", strconv.Itoa(w.v.ToolOutputMaxBytes))
+		w.v.ToolOutputMaxBytes = w.v.ToolOutputMinBytes
+	}
 	if w.v.PreviewMaxBytes < w.v.PreviewMinBytes {
 		w.markClamped("preview_max_bytes", strconv.Itoa(w.v.PreviewMaxBytes))
 		w.v.PreviewMaxBytes = w.v.PreviewMinBytes
@@ -255,9 +307,6 @@ func unenforced(l agentcontracts.Limits) []string {
 	if l.MaxRetries != nil {
 		out = append(out, "max_retries")
 	}
-	if l.ToolOutputBytes != nil {
-		out = append(out, "tool_output_bytes")
-	}
 	return out
 }
 
@@ -268,6 +317,10 @@ type envLayer struct {
 
 // envPrefix names the environment overrides: NANITE_HARNESS_<KNOB>.
 const envPrefix = "NANITE_HARNESS_"
+
+// LegacyToolCeilingEnv is the tool-output ceiling's environment variable from
+// before profiles; it is an alias for NANITE_HARNESS_TOOL_OUTPUT_BYTES.
+const LegacyToolCeilingEnv = "NANITE_TOOL_TURN_CEILING_BYTES"
 
 // envLayers reads the environment overrides. A set but unparsable value is an
 // error, never silently ignored. Layers are returned in a fixed order.
@@ -330,6 +383,37 @@ func envLayers(getenv func(string) (string, bool)) ([]envLayer, error) {
 			l.Harness.PreviewPct = &v
 			return nil
 		}},
+		{"tool_output_bytes", i64(func(l *Layer) **int64 { return &l.Limits.ToolOutputBytes })},
+		{"tool_output_min_bytes", num(func(l *Layer) **int { return &l.Harness.ToolOutputMinBytes })},
+		{"tool_output_max_bytes", num(func(l *Layer) **int { return &l.Harness.ToolOutputMaxBytes })},
+		{"tool_output_remaining_floor_bytes", num(func(l *Layer) **int { return &l.Harness.ToolOutputRemainingFloor })},
+		{"tool_output_pct", func(l *Layer, s string) error {
+			v, err := strconv.ParseFloat(s, 64)
+			if err != nil {
+				return err
+			}
+			l.Harness.ToolOutputPct = &v
+			return nil
+		}},
+		{"tool_output_remaining_share", func(l *Layer, s string) error {
+			v, err := strconv.ParseFloat(s, 64)
+			if err != nil {
+				return err
+			}
+			l.Harness.ToolOutputRemainingShare = &v
+			return nil
+		}},
+	}
+	// The tool-output ceiling's original variable keeps working. It is an
+	// environment layer like the rest and is applied first, so the
+	// NANITE_HARNESS_ name wins when both are set. As before, a value that does
+	// not parse is ignored.
+	if raw, ok := getenv(LegacyToolCeilingEnv); ok {
+		if v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && v >= 0 {
+			var l Layer
+			l.Limits.ToolOutputBytes = &v
+			out = append(out, envLayer{name: LegacyToolCeilingEnv, layer: l})
+		}
 	}
 	for _, st := range steps {
 		if err := add(st.key, st.set); err != nil {

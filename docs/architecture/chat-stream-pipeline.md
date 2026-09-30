@@ -201,7 +201,7 @@ Retry, agent-message, harness-trigger and wake turns are always phased. Unknown 
 - Order per tool: metadata, result cache, blocked/exhausted, permission, plugin hook, execution rules, argument validation.
 - Approvals: `WaitForApproval` blocks the generation goroutine. Default timeout 5 minutes → deny with `TimedOut`. Context cancel → deny recorded as "user denied". Scopes `once` and `session`; `project` returns 400.
 - Execution: concurrency-safe tools run first, one goroutine each (no cap), then the rest serially. All executed `tool_result` events are emitted afterward in plan order (in `postProcessToolResults`), not per tool.
-- Model-visible result is truncated to a per-model budget (4000–32000 B; 512 B once cumulative output passes 24 KiB in a turn); over-budget bodies go to `tool_result_cache`. The subscriber receives `summary` (500 B).
+- Model-visible result is truncated to a per-model budget (4000–32000 B; 512 B once cumulative output passes the turn ceiling; the ceiling scales with the model window and the context still free, 24 KiB when the window is unknown, and no result exceeds what the remaining context can take — see harness-profiles.md); over-budget bodies go to `tool_result_cache`. The subscriber receives `summary` (500 B).
 - Tool input reaches subscribers only via `approval_request.data.input`, `notify_pause.data`, and `detail` (first line, ≤120 B, only for `dev_bash`, read, write, edit, grep, glob, `web_fetch`, web search, `subagent_spawn`, `python_run`).
 - Limits: 200 iterations hard ceiling; 10 consecutive failed calls end the run; idle 900 s (300 s subagent), checked at iteration top; 1 s sleep per iteration after the first.
 

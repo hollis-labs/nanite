@@ -101,6 +101,15 @@ func validateLayer(l Layer) error {
 	if h.PreviewPct != nil && (*h.PreviewPct <= 0 || *h.PreviewPct > 1) {
 		errs = append(errs, errors.New("harness.preview_pct must be in (0, 1]"))
 	}
+	neg("harness.tool_output_min_bytes", h.ToolOutputMinBytes != nil && *h.ToolOutputMinBytes < 0)
+	neg("harness.tool_output_max_bytes", h.ToolOutputMaxBytes != nil && *h.ToolOutputMaxBytes < 0)
+	neg("harness.tool_output_remaining_floor_bytes", h.ToolOutputRemainingFloor != nil && *h.ToolOutputRemainingFloor < 0)
+	if h.ToolOutputPct != nil && (*h.ToolOutputPct <= 0 || *h.ToolOutputPct > 1) {
+		errs = append(errs, errors.New("harness.tool_output_pct must be in (0, 1]"))
+	}
+	if h.ToolOutputRemainingShare != nil && (*h.ToolOutputRemainingShare <= 0 || *h.ToolOutputRemainingShare > 1) {
+		errs = append(errs, errors.New("harness.tool_output_remaining_share must be in (0, 1]"))
+	}
 	return errors.Join(errs...)
 }
 

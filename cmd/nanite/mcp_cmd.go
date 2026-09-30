@@ -42,7 +42,7 @@ func mcpImport(args []string) {
 	}
 	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
-	result, err := mcpconfig.Import(s, data)
+	result, err := mcpconfig.Import(context.Background(), s, data)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: import: %v\n", err)
 		os.Exit(1)
@@ -79,7 +79,7 @@ func mcpExport(args []string) {
 	}
 	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
-	cfg, err := mcpconfig.Export(s)
+	cfg, err := mcpconfig.Export(context.Background(), s)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: export: %v\n", err)
 		os.Exit(1)

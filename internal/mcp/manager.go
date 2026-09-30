@@ -327,7 +327,7 @@ func ParseHeaderJSON(raw string) (map[string]string, error) {
 // config, picking the transport from transportType.
 //
 // This is THE entry point for both registration paths — cmd/nanite/main.go at
-// startup and API.registerMCPTransport on create/update. They shared
+// startup and service.MCPServerService on create/update/import. They shared
 // AddHTTPServerFromConfig for exactly this reason and must keep sharing one
 // call: two paths that each decide which transport a stored row means is how
 // AddHTTPServerWithHeaders came to sit uncalled for months.

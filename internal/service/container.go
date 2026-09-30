@@ -107,6 +107,9 @@ type Container struct {
 	// Settings owns the singleton user_settings row and the rules applied
 	// to its fields.
 	Settings *UserSettingsService
+	// MCPServers owns the persisted MCP server configs, keeps the MCP
+	// manager registered with them, and owns header redaction.
+	MCPServers *MCPServerService
 
 	// Narrow store collaborators for transports that construct a pipeline
 	// object per call (skill gate, materializer, installer, uninstaller,
@@ -1504,6 +1507,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Bookmarks:           NewBookmarkService(cfg.Store),
 		Schedules:           NewScheduleService(cfg.Store),
 		Settings:            NewUserSettingsService(cfg.Store),
+		MCPServers:          newContainerMCPServerService(cfg.Store, cfg.MCP),
 		SkillIndex:          cfg.Store,
 		SkillUninstallIndex: cfg.Store,
 		SkillGrants:         cfg.Store,
@@ -1522,6 +1526,19 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	chatLifecycleCommitted = true
 	runtimeFeedCommitted = true
 	return container, nil
+}
+
+// newContainerMCPServerService wires MCPServerService to the store and, when
+// there is one, the MCP manager. A nil manager leaves registration and
+// discovery unwired rather than holding a typed nil.
+func newContainerMCPServerService(st *store.Store, m *mcp.Manager) *MCPServerService {
+	if m == nil {
+		return NewMCPServerService(st, nil, nil)
+	}
+	return NewMCPServerService(st, m, func(ctx context.Context) error {
+		_, err := m.AutoDiscover(ctx, st)
+		return err
+	})
 }
 
 // DiscoverMCPTools runs MCP tool discovery and syncs discovered tools into

@@ -106,9 +106,20 @@ func ToStoreConfigs(cfg *ClaudeCodeConfig) []store.MCPServerConfig {
 	return out
 }
 
+// ImportStore is the store surface Import writes through.
+type ImportStore interface {
+	GetMCPServer(ctx context.Context, name string) (*store.MCPServerConfig, error)
+	CreateMCPServer(ctx context.Context, cfg *store.MCPServerConfig) error
+}
+
+// ExportStore is the store surface Export reads through.
+type ExportStore interface {
+	ListMCPServers(ctx context.Context) ([]store.MCPServerConfig, error)
+}
+
 // Import parses .mcp.json data and creates DB records, skipping any that
 // already exist by name.
-func Import(s *store.Store, data []byte) (*ImportResult, error) {
+func Import(ctx context.Context, s ImportStore, data []byte) (*ImportResult, error) {
 	cfg, err := Parse(data)
 	if err != nil {
 		return nil, err
@@ -118,7 +129,7 @@ func Import(s *store.Store, data []byte) (*ImportResult, error) {
 	result := &ImportResult{}
 
 	for i := range configs {
-		existing, err := s.GetMCPServer(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, configs[i].Name)
+		existing, err := s.GetMCPServer(ctx, configs[i].Name)
 		if err != nil {
 			return nil, fmt.Errorf("check existing server %q: %w", configs[i].Name, err)
 		}
@@ -126,7 +137,7 @@ func Import(s *store.Store, data []byte) (*ImportResult, error) {
 			result.Skipped = append(result.Skipped, configs[i].Name)
 			continue
 		}
-		if err := s.CreateMCPServer(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, &configs[i]); err != nil {
+		if err := s.CreateMCPServer(ctx, &configs[i]); err != nil {
 			return nil, fmt.Errorf("create server %q: %w", configs[i].Name, err)
 		}
 		result.Created = append(result.Created, configs[i].Name)
@@ -137,8 +148,8 @@ func Import(s *store.Store, data []byte) (*ImportResult, error) {
 
 // Export reads all MCP server configs from the store and returns a
 // ClaudeCodeConfig suitable for writing as .mcp.json.
-func Export(s *store.Store) (*ClaudeCodeConfig, error) {
-	servers, err := s.ListMCPServers(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+func Export(ctx context.Context, s ExportStore) (*ClaudeCodeConfig, error) {
+	servers, err := s.ListMCPServers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("export mcp config: %w", err)
 	}

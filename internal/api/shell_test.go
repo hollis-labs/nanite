@@ -144,9 +144,9 @@ func TestSetSessionMetadataFieldRejectsCorruptMetadataWithoutOverwrite(t *testin
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	err := a.setSessionMetadataField(sess.ID, "shell_mode", "session")
+	err := a.Services.Shell.SetMode(context.Background(), sess.ID, "session")
 	if err == nil || !strings.Contains(err.Error(), "parse session metadata") {
-		t.Fatalf("setSessionMetadataField error = %v, want metadata parse error", err)
+		t.Fatalf("SetMode error = %v, want metadata parse error", err)
 	}
 	got, err := a.Services.Store.GetSession(context.Background(), sess.ID)
 	if err != nil {

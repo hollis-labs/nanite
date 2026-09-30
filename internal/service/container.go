@@ -120,6 +120,8 @@ type Container struct {
 	// Artifacts owns session artifacts and the rules for the files behind
 	// them.
 	Artifacts *ArtifactService
+	// Shell owns the policy for running a user's shell command in a session.
+	Shell *ShellService
 
 	// Narrow store collaborators for transports that construct a pipeline
 	// object per call (skill gate, materializer, installer, uninstaller,
@@ -1548,6 +1550,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Roles:               NewRoleService(cfg.Store),
 		Projects:            NewProjectService(cfg.Store, cfg.Store),
 		DrawerCards:         NewDrawerCardService(cfg.Store),
+		Shell:               NewShellService(cfg.Store),
 		Artifacts: NewArtifactService(cfg.Store, func() string {
 			if cfg.AppConfig != nil {
 				return cfg.AppConfig.Artifacts.StorageDir

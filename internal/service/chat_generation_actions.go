@@ -1456,8 +1456,15 @@ streamLoop:
 			if run.loop.harness != nil {
 				mode = run.loop.harness.Values.WriteClaimGuard
 			}
-			facts := s.writeClaimFactsFor(ctx, sessionID, run.loop)
-			out, decision := writeClaimHook(mode, hooks.StopInput{LastAssistantMessage: turnText}, facts)
+			stop := hooks.StopInput{LastAssistantMessage: turnText}
+			facts := s.writeClaimFactsFor(ctx, sessionID, run.loop, false)
+			out, decision := writeClaimHook(mode, stop, facts)
+			if decision.Reason == wcUnbackedClaim {
+				// Only now is the session's write history worth a query: the
+				// claim may recap earlier work.
+				facts = s.writeClaimFactsFor(ctx, sessionID, run.loop, true)
+				out, decision = writeClaimHook(mode, stop, facts)
+			}
 			if decision.Reason != wcNoClaim && decision.Reason != wcOff {
 				action := "allowed"
 				switch {

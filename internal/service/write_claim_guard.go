@@ -167,11 +167,16 @@ type sessionWriteIDReader interface {
 	SessionWriteResultIDs(ctx context.Context, sessionID string) (map[string]bool, error)
 }
 
-// writeClaimFactsFor gathers the turn's facts.
-func (s *chatServiceImpl) writeClaimFactsFor(ctx context.Context, sessionID string, ls *loopState) writeClaimFacts {
+// writeClaimFactsFor gathers the turn's facts from memory. withHistory adds the
+// ids earlier turns' writes returned, which costs a query; callers ask for it
+// only once a claim has been found and is still unbacked.
+func (s *chatServiceImpl) writeClaimFactsFor(ctx context.Context, sessionID string, ls *loopState, withHistory bool) writeClaimFacts {
 	grounded := map[string]bool{}
 	for id := range ls.wcWriteIDs {
 		grounded[id] = true
+	}
+	if !withHistory {
+		return writeClaimFacts{WroteThisTurn: ls.wcWrote, GroundedIDs: grounded, ToolsRan: ls.wcToolsRan}
 	}
 	if r, ok := s.store.(sessionWriteIDReader); ok {
 		if prior, err := r.SessionWriteResultIDs(ctx, sessionID); err == nil {

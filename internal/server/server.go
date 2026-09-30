@@ -258,8 +258,8 @@ func (s *Server) routes() {
 		s.api.RegisterRoutes(s.mux)
 	}
 
-	// SPA fallback — must be last
-	s.mux.HandleFunc("/", s.handleSPA)
+	// Fallbacks — /api's JSON 404/405, then the SPA — registered last.
+	s.registerFallbacks()
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

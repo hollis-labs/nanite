@@ -131,6 +131,8 @@ type Container struct {
 	Documents *DocumentService
 	// Teams owns team definitions and their validation.
 	Teams *TeamService
+	// Envelopes records users' responses to envelopes.
+	Envelopes *EnvelopeService
 
 	// Narrow store collaborators for transports that construct a pipeline
 	// object per call (skill gate, materializer, installer, uninstaller,
@@ -1586,6 +1588,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Consumers:           NewConsumerService(cfg.Store),
 		Documents:           NewDocumentService(cfg.Store),
 		Teams:               NewTeamService(cfg.Store),
+		Envelopes:           NewEnvelopeService(cfg.Store),
 		Artifacts: NewArtifactService(cfg.Store, func() string {
 			if cfg.AppConfig != nil {
 				return cfg.AppConfig.Artifacts.StorageDir

@@ -32,6 +32,7 @@ import type {
   CatalogBrowseEntry,
   CatalogSource,
   CLIDetectionResult,
+  ProviderTestResult,
   ContextBreakdown,
   CreateAgentReflexRequest,
   CreateAgentProfileRequest,
@@ -1866,20 +1867,18 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to set API key: ${res.status}`);
     return res.json();
   },
-  testProviderConnection: async (id: string): Promise<{ ok: boolean }> => {
+  testProviderConnection: async (id: string): Promise<ProviderTestResult> => {
     const res = await fetch(`${API_BASE}/providers/${id}/test`, {
       method: "POST",
     });
-    // Gracefully handle missing endpoint — if the backend doesn't have a test
-    // route yet, treat a successful key save as sufficient
-    if (res.status === 404) return { ok: true };
-    if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Test failed: ${res.status}` }));
-      throw new Error(err.error || `Connection test failed: ${res.status}`);
+    // Every check outcome is a 200 carrying ok/status/message. Anything else
+    // — an error status, or a body that is not the check result — is a
+    // failure, never an implicit success.
+    const body = await res.json().catch(() => null);
+    if (!res.ok || body === null || typeof body.ok !== "boolean") {
+      throw new Error(body?.error || `Connection test failed: ${res.status}`);
     }
-    return res.json();
+    return body as ProviderTestResult;
   },
   detectCLI: async (): Promise<CLIDetectionResult[]> => {
     const res = await fetch(`${API_BASE}/providers/detect-cli`);

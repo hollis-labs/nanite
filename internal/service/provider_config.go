@@ -16,10 +16,18 @@ import (
 // because each endpoint shapes them differently (CW-20260930-0083).
 type ProviderConfigService struct {
 	store ProviderStore
+
+	// Seams for TestConnection; tests replace them.
+	resolveKey  func(providerID, envKey string) (key, source string)
+	newVerifier func(spec APIProviderSpec, key string) keyVerifier
 }
 
 func NewProviderConfigService(st ProviderStore) *ProviderConfigService {
-	return &ProviderConfigService{store: st}
+	return &ProviderConfigService{
+		store:       st,
+		resolveKey:  ResolveAPIKey,
+		newVerifier: defaultKeyVerifier,
+	}
 }
 
 // List returns every provider row.

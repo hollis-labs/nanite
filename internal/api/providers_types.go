@@ -1,6 +1,9 @@
 package api
 
-import "github.com/hollis-labs/nanite/internal/store"
+import (
+	"github.com/hollis-labs/nanite/internal/service"
+	"github.com/hollis-labs/nanite/internal/store"
+)
 
 // The provider and model wire types are API-owned: their keys match what
 // the store rows emitted when handlers returned them directly.
@@ -118,4 +121,28 @@ func modelsToView(rows []store.Model) []ModelView {
 		})
 	}
 	return out
+}
+
+// ProviderTestResponse is POST /api/providers/{id}/test. Status is one of
+// the service.ProviderCheck* values; OK is true only for "accepted" and
+// "cli_found". Path is set for a CLI provider row only.
+type ProviderTestResponse struct {
+	Message string `json:"message"`
+	OK      bool   `json:"ok"`
+	Path    string `json:"path,omitempty"`
+	Status  string `json:"status"`
+}
+
+func providerCheckToView(r service.ProviderCheckResult) ProviderTestResponse {
+	return ProviderTestResponse{Message: r.Message, OK: r.OK, Path: r.Path, Status: r.Status}
+}
+
+func cliDetectionToView(d service.CLIDetection) CLIDetectionResult {
+	return CLIDetectionResult{
+		Name:         d.Name,
+		ProviderType: d.ProviderType,
+		Detected:     d.Detected,
+		Path:         d.Path,
+		EnvVar:       d.EnvVar,
+	}
 }

@@ -1514,6 +1514,21 @@ export interface CLIDetectionResult {
   env_var: string;
 }
 
+/** POST /api/providers/{id}/test. `ok` is true only for "accepted" and "cli_found". */
+export interface ProviderTestResult {
+  message: string;
+  ok: boolean;
+  path?: string;
+  status:
+    | "accepted"
+    | "rejected"
+    | "unreachable"
+    | "no_key"
+    | "unsupported"
+    | "cli_found"
+    | "cli_not_found";
+}
+
 // --- Session Agents ---
 
 /**

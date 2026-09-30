@@ -114,6 +114,44 @@ chat loop's per-tool cap, turn ceiling or stuck-loop handling.
 Sizes are deliberately not recorded here: they change with every profile, skill
 grant and tool grant. Measure them against a real database when needed.
 
+## When a prompt change takes effect
+
+Nanite has no mechanism that selects a different prompt by model, context
+window, capability or task, and none that swaps a variant in mid-session. That
+is a decision, not an omission: a variant chosen per turn would fragment the
+shared prefix the first sections of this document protect, and a mid-session
+swap would invalidate the cache. Variation is expressed by launching with a
+different profile, not by switching a running session.
+
+What the prompt is derived from is persisted state: the agent definition and
+its grants, the session and its assignment, and the launch profile. Slot order
+is the stable-prefix contract; the content derived into each slot is not
+frozen. That gives three timings, and which one applies depends on the agent
+type:
+
+| Change | API-driven agent | CLI-launched agent |
+|---|---|---|
+| Edit to the agent's stored definition (prompt, tags, tool allowlist) | Next turn: the plan is rebuilt from the database every turn | Next turn, when the System, Agent, Mode or Rules slots hash differently: `CLAUDE.md` and `.sandbox/agent-context.md` are rewritten and the running session is told to re-read them |
+| Skill grant or revoke | Next turn | Next turn: granted skills are re-planted into the boot directory every turn |
+| Session context prompt and included documents | Next turn, by design | Next turn, prefixed to the user message |
+| Change to project instruction files under the working directory | Next turn (the walk-up is re-checked by modification time) | Whenever the CLI itself rereads them |
+| Agent prompt text stored in the database (including one updated by a migration) | Next turn | Next turn, through the same slot-hash re-plant as an edit to the definition |
+| Prompt text compiled into Nanite (the universal rules block, the think-tool block, the fixed instructions appended to a CLI boot prompt) | Next turn on a server running the new binary | Only when `CLAUDE.md` is next written: at boot, or by a re-plant that a slot-hash change happens to trigger. The hash covers slot content, not the compiled-in CLI instructions, so a change to those alone reaches a running CLI session only on relaunch or resume |
+| Resolved dynamic-context blocks, a boot prompt override, the launch profile | Fixed at launch | Fixed at launch. The re-plant reuses the dynamic-context blocks resolved at boot rather than resolving again, and carries no override, so changing these needs a relaunch or resume |
+
+So the rule to hold is narrower than "static per launch": nothing selects or
+swaps prompt variants, and only launch inputs (plus, for a CLI agent, compiled-in
+boot instructions) need a relaunch to change.
+Anything volatile belongs in a per-turn slot, or behind a tool the agent calls
+when it needs it, rather than in launch-time content. A long-running API session
+does not need a relaunch to pick up an improved prompt. A long-running CLI
+session does for compiled-in CLI instructions, for a different launch profile,
+and for freshly resolved dynamic context.
+
+Adding a variant-selection or hot-swap mechanism later is a design change to
+the prefix contract above, and it should start from that contract's
+invariants rather than from the slot content.
+
 ## Verify
 
 ```bash
@@ -121,6 +159,10 @@ grant and tool grant. Measure them against a real database when needed.
 grep -n -A18 'var SlotOrder' internal/context/slot.go
 # what the CLI boot prompt is built from
 grep -n 'func composeSystemPrompt\|func ResolveSystemPrompt\|func withCLINarration' internal/runtime/agent/prompt.go
+# the CLI re-plant: slot-hash check, rewrite of boot-dir files, launch-time blocks
+grep -n 'func (s \*chatServiceImpl) regenerateBootDirSlots\|activeSessionContextBlocks' internal/service/chat_boot_drive.go
+# per-turn plan rebuild on the API path
+grep -n 'AssembleSlots(' internal/service/chat_generate.go
 # the slots a CLI session consumes from the plan
 grep -n 'slotsChangedFor\|composeUserPayload' internal/service/chat_boot_drive.go
 # the universal block has one call site outside its definition and comments;

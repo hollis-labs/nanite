@@ -92,6 +92,8 @@ type Container struct {
 	Loops *LoopService
 	// Bookmarks owns message bookmarks.
 	Bookmarks *BookmarkService
+	// Schedules owns operator CRUD on agent_schedules; Engine fires them.
+	Schedules *ScheduleService
 	Skills    SkillService
 	// SkillVendor is the content-addressed vendored skill store (internal/
 	// skillvendor, TASKS/skills/03) that backs the explicit install/sync
@@ -1459,6 +1461,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Reflexes:            NewReflexService(cfg.Store),
 		Loops:               NewLoopService(cfg.Store),
 		Bookmarks:           NewBookmarkService(cfg.Store),
+		Schedules:           NewScheduleService(cfg.Store),
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,

@@ -56,6 +56,9 @@ func (f *haltTestSessions) List(context.Context, bool) ([]store.Session, error) 
 func (f *haltTestSessions) Update(context.Context, *store.Session) error {
 	panic("haltTestSessions: Update not implemented")
 }
+func (f *haltTestSessions) UpdateMetadata(context.Context, string, string) error {
+	panic("haltTestSessions: UpdateMetadata not implemented")
+}
 func (f *haltTestSessions) Archive(context.Context, string) error {
 	panic("haltTestSessions: Archive not implemented")
 }

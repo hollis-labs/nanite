@@ -25,6 +25,12 @@ func (s *AgentMembershipService) ListSessionAgents(ctx context.Context, sessionI
 	return s.agents.ListSessionAgents(ctx, sessionID)
 }
 
+// GetSessionPrimaryAgent returns the session's primary agent binding. It
+// returns an error when the session has none.
+func (s *AgentMembershipService) GetSessionPrimaryAgent(ctx context.Context, sessionID string) (*store.SessionAgent, error) {
+	return s.agents.GetSessionPrimaryAgent(ctx, sessionID)
+}
+
 // SetSessionAgent binds an agent to a session in the given mode. A session
 // has at most one primary agent: setting a new primary first demotes the
 // current one (keeping its mode), then upserts the new binding. The two

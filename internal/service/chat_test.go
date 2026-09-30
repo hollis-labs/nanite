@@ -31,8 +31,9 @@ func (s *stubSessionService) Get(_ context.Context, id string) (*store.Session, 
 func (s *stubSessionService) List(_ context.Context, _ bool) ([]store.Session, error) {
 	return nil, nil
 }
-func (s *stubSessionService) Update(_ context.Context, _ *store.Session) error { return nil }
-func (s *stubSessionService) Archive(_ context.Context, _ string) error        { return nil }
+func (s *stubSessionService) Update(_ context.Context, _ *store.Session) error    { return nil }
+func (s *stubSessionService) UpdateMetadata(_ context.Context, _, _ string) error { return nil }
+func (s *stubSessionService) Archive(_ context.Context, _ string) error           { return nil }
 func (s *stubSessionService) Fork(_ context.Context, _ string, _ ForkOpts) (*store.Session, error) {
 	return nil, nil
 }

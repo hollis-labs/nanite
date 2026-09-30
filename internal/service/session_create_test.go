@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // sessionStartCounter counts EmitSessionStart calls; every other event is
@@ -92,5 +94,68 @@ func TestSessionCreateReturnsRuntimeErrorUnwrapped(t *testing.T) {
 	// message must arrive without a service prefix.
 	if !strings.HasPrefix(err.Error(), "set session subagent runtime:") {
 		t.Fatalf("error = %q, want the store's message unwrapped", err)
+	}
+}
+
+// resolutionCounter wraps the store's settings and agent reads so a test can
+// assert Create never consulted them.
+type resolutionCounter struct {
+	SettingsStore
+	AgentReader
+	settingsReads int
+	slugReads     int
+}
+
+func (c *resolutionCounter) GetUserSettings(ctx context.Context) (*store.UserSettings, error) {
+	c.settingsReads++
+	return c.SettingsStore.GetUserSettings(ctx)
+}
+
+func (c *resolutionCounter) GetAgentBySlug(ctx context.Context, slug string) (*store.AgentProfile, error) {
+	c.slugReads++
+	return c.AgentReader.GetAgentBySlug(ctx, slug)
+}
+
+func TestSessionCreateSkipAgentBindingResolvesAndBindsNothing(t *testing.T) {
+	ctx := context.Background()
+	st := newConfigTestStore(t)
+	counter := &resolutionCounter{SettingsStore: st, AgentReader: st}
+	svc := NewSessionService(SessionServiceDeps{
+		Sessions:    st,
+		Writer:      st,
+		Agents:      st,
+		AgentReader: counter,
+		Settings:    counter,
+		Runtime:     st,
+	})
+
+	// With no AgentID, Create would normally walk settings -> "default" slug.
+	sess, err := svc.Create(ctx, CreateSessionOpts{
+		SubagentRuntime:  "api",
+		SkipAgentBinding: true,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if counter.settingsReads != 0 || counter.slugReads != 0 {
+		t.Fatalf("Create resolved an agent (settings reads %d, slug reads %d); want none", counter.settingsReads, counter.slugReads)
+	}
+	// With an AgentID, Create would normally bind it; the flag ignores it.
+	withID, err := svc.Create(ctx, CreateSessionOpts{AgentID: "agent-x", SkipAgentBinding: true})
+	if err != nil {
+		t.Fatalf("Create with AgentID: %v", err)
+	}
+	for _, id := range []string{sess.ID, withID.ID} {
+		bound, err := st.ListSessionAgents(ctx, id)
+		if err != nil {
+			t.Fatalf("ListSessionAgents: %v", err)
+		}
+		if len(bound) != 0 {
+			t.Fatalf("session %s agents = %v, want none", id, bound)
+		}
+	}
+	// The runtime write still happens.
+	if rt, err := st.GetSessionSubagentRuntime(ctx, sess.ID); err != nil || rt != "api" {
+		t.Fatalf("subagent runtime = %q, %v; want api", rt, err)
 	}
 }

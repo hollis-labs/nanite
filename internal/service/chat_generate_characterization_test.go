@@ -43,6 +43,9 @@ func (f *characterizationSessions) List(context.Context, bool) ([]store.Session,
 func (f *characterizationSessions) Update(context.Context, *store.Session) error {
 	panic("characterizationSessions.Update: unexpected call")
 }
+func (f *characterizationSessions) UpdateMetadata(context.Context, string, string) error {
+	panic("characterizationSessions.UpdateMetadata: unexpected call")
+}
 func (f *characterizationSessions) Archive(context.Context, string) error {
 	panic("characterizationSessions.Archive: unexpected call")
 }

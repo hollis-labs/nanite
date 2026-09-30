@@ -40,7 +40,7 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 	sessionID := r.PathValue("id")
 
 	// Get messages for the session.
-	messages, err := a.Services.Store.ListMessages(r.Context(), sessionID, 200)
+	messages, err := a.Services.Sessions.ListMessages(r.Context(), sessionID, 200)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -68,13 +68,13 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 	// Get the session's agent and its system prompt.
 	systemPrompt := ""
 	systemTokens := 500 // base estimate
-	if a.Services.Store != nil {
-		session, err := a.Services.Store.GetSession(r.Context(), sessionID)
-		if err == nil && session != nil {
-			agents, err := a.Services.Store.ListSessionAgents(r.Context(), session.ID)
-			if err == nil && len(agents) > 0 {
-				agent, err := a.Services.Store.GetAgent(r.Context(), agents[0].AgentID)
-				if err == nil && agent != nil {
+	if a.Services.Sessions != nil {
+		session, getErr := a.Services.Sessions.Get(r.Context(), sessionID)
+		if getErr == nil && session != nil {
+			agents, listErr := a.Services.AgentMembership.ListSessionAgents(r.Context(), session.ID)
+			if listErr == nil && len(agents) > 0 {
+				agent, agentErr := a.Services.Agents.Get(r.Context(), agents[0].AgentID)
+				if agentErr == nil && agent != nil {
 					systemPrompt = agent.SystemPrompt
 					systemTokens = chat.EstimateTokens(systemPrompt)
 				}

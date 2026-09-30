@@ -67,6 +67,16 @@ func sessionToView(s *store.Session) SessionView {
 	}
 }
 
+// sessionToViewPtr is sessionToView for a response field that holds a
+// pointer: nil stays nil.
+func sessionToViewPtr(s *store.Session) *SessionView {
+	if s == nil {
+		return nil
+	}
+	v := sessionToView(s)
+	return &v
+}
+
 // sessionsToView translates a session list. A nil input stays nil so an
 // empty result serializes the way it did before.
 func sessionsToView(rows []store.Session) []SessionView {

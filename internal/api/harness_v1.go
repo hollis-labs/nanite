@@ -97,7 +97,7 @@ type harnessV1CreateSessionRequest struct {
 }
 
 type harnessV1SessionResponse struct {
-	Session         *store.Session         `json:"session"`
+	Session         *SessionView           `json:"session"`
 	Details         sessionDetailsResponse `json:"details"`
 	StreamTransport string                 `json:"stream_transport"`
 	RouteHints      harnessV1SessionRoutes `json:"route_hints"`
@@ -242,20 +242,18 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 
 	providerID := strings.TrimSpace(req.Provider)
 
-	sess := &store.Session{
-		ProjectID: req.ProjectID,
-		Provider:  providerID,
-		Model:     req.Model,
-	}
-	if err := a.Services.Store.CreateSession(r.Context(), sess); err != nil {
+	// Create binds no agent here: v1 binds only an explicitly requested
+	// agent, below, and fails the request when that binding fails.
+	sess, err := a.Services.Sessions.Create(r.Context(), service.CreateSessionOpts{
+		ProjectID:        req.ProjectID,
+		Provider:         providerID,
+		Model:            req.Model,
+		SubagentRuntime:  req.SubagentRuntime,
+		SkipAgentBinding: true,
+	})
+	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	if req.SubagentRuntime != "" {
-		if err := a.Services.Store.SetSessionSubagentRuntime(r.Context(), sess.ID, req.SubagentRuntime); err != nil {
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
-			return
-		}
 	}
 	if req.AgentID != "" {
 		// CW-20260815-0026: Resolve agent ID/slug to canonical ID before binding.
@@ -271,14 +269,14 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 				return
 			}
 		}
-		if err := a.Services.Store.EnsureSessionAgent(r.Context(), sess.ID, resolvedAgent.ID, "default", true); err != nil {
+		if _, err := a.Services.AgentMembership.SetSessionAgent(r.Context(), sess.ID, resolvedAgent.ID, "default", true); err != nil {
 			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 	if req.Title != "" {
 		sess.Title = req.Title
-		if err := a.Services.Store.UpdateSession(r.Context(), sess); err != nil {
+		if err = a.Services.Sessions.Update(r.Context(), sess); err != nil {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -289,12 +287,12 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 			a.errorResp(w, http.StatusBadRequest, "metadata must be serializable JSON")
 			return
 		}
-		if err := a.Services.Store.UpdateSessionMetadata(r.Context(), sess.ID, string(blob)); err != nil {
+		if err := a.Services.Sessions.UpdateMetadata(r.Context(), sess.ID, string(blob)); err != nil {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
-	details, err := a.sessionDetails(sess.ID)
+	details, err := a.sessionDetails(r.Context(), sess.ID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -308,7 +306,7 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *API) handleHarnessV1GetSession(w http.ResponseWriter, r *http.Request) {
-	details, err := a.sessionDetails(r.PathValue("id"))
+	details, err := a.sessionDetails(r.Context(), r.PathValue("id"))
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "session not found")
 		return
@@ -323,7 +321,7 @@ func (a *API) handleHarnessV1GetSession(w http.ResponseWriter, r *http.Request) 
 
 func (a *API) handleHarnessV1SendTurn(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	if _, err := a.Services.Store.GetSession(r.Context(), sessionID); err != nil {
+	if _, err := a.Services.Sessions.Get(r.Context(), sessionID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "session not found")
 		return
 	}
@@ -367,7 +365,7 @@ func (a *API) handleHarnessV1SendTurn(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleHarnessV1CancelTurn(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	if _, err := a.Services.Store.GetSession(r.Context(), sessionID); err != nil {
+	if _, err := a.Services.Sessions.Get(r.Context(), sessionID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "session not found")
 		return
 	}
@@ -387,7 +385,7 @@ func (a *API) handleHarnessV1CancelTurn(w http.ResponseWriter, r *http.Request) 
 // Slice 5.
 func (a *API) handleHarnessV1RecoverSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	if _, err := a.Services.Store.GetSession(r.Context(), sessionID); err != nil {
+	if _, err := a.Services.Sessions.Get(r.Context(), sessionID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			a.errorResp(w, http.StatusNotFound, "session not found")
 			return

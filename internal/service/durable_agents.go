@@ -110,6 +110,9 @@ type DurableAgentService interface {
 	ListSessions(ctx context.Context, instanceID string) ([]store.DurableAgentInstanceSession, error)
 	ListSessionStates(ctx context.Context, instanceID string) ([]store.DurableAgentInstanceSessionState, error)
 	ListEvents(ctx context.Context, instanceID string, limit int) ([]store.DurableAgentEvent, error)
+	// ListSessionStatesForSession returns the durable-agent attachments of
+	// one session, the session-keyed counterpart of ListSessionStates.
+	ListSessionStatesForSession(ctx context.Context, sessionID string) ([]store.DurableAgentInstanceSessionState, error)
 }
 
 type DurableAgentStore interface {
@@ -124,6 +127,7 @@ type DurableAgentStore interface {
 	AttachDurableAgentInstanceSession(ctx context.Context, instanceID, sessionID, relation string) error
 	ListDurableAgentInstanceSessions(ctx context.Context, instanceID string) ([]store.DurableAgentInstanceSession, error)
 	ListDurableAgentInstanceSessionStates(ctx context.Context, instanceID string) ([]store.DurableAgentInstanceSessionState, error)
+	ListDurableAgentSessionStatesForSession(ctx context.Context, sessionID string) ([]store.DurableAgentInstanceSessionState, error)
 	CreateDurableAgentEvent(ctx context.Context, event *store.DurableAgentEvent) error
 	ListDurableAgentEvents(ctx context.Context, instanceID string, limit int) ([]store.DurableAgentEvent, error)
 	GetAgent(ctx context.Context, id string) (*store.AgentProfile, error)
@@ -206,8 +210,8 @@ func sameDurableAgentCreateState(existing, requested *store.DurableAgentInstance
 	return existing.ArchivedAt.Equal(*requested.ArchivedAt)
 }
 
-func (s *durableAgentService) Get(_ context.Context, id string) (*store.DurableAgentInstance, error) {
-	return s.store.GetDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+func (s *durableAgentService) Get(ctx context.Context, id string) (*store.DurableAgentInstance, error) {
+	return s.store.GetDurableAgentInstance(ctx, id)
 }
 
 func (s *durableAgentService) List(_ context.Context, includeArchived bool) ([]store.DurableAgentInstance, error) {
@@ -685,15 +689,19 @@ func (s *durableAgentService) ListSessions(_ context.Context, instanceID string)
 	return s.store.ListDurableAgentInstanceSessions(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, instanceID)
 }
 
-func (s *durableAgentService) ListSessionStates(_ context.Context, instanceID string) ([]store.DurableAgentInstanceSessionState, error) {
-	return s.store.ListDurableAgentInstanceSessionStates(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, instanceID)
+func (s *durableAgentService) ListSessionStates(ctx context.Context, instanceID string) ([]store.DurableAgentInstanceSessionState, error) {
+	return s.store.ListDurableAgentInstanceSessionStates(ctx, instanceID)
 }
 
-func (s *durableAgentService) ListEvents(_ context.Context, instanceID string, limit int) ([]store.DurableAgentEvent, error) {
-	if _, err := s.store.GetDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, instanceID); err != nil {
+func (s *durableAgentService) ListSessionStatesForSession(ctx context.Context, sessionID string) ([]store.DurableAgentInstanceSessionState, error) {
+	return s.store.ListDurableAgentSessionStatesForSession(ctx, sessionID)
+}
+
+func (s *durableAgentService) ListEvents(ctx context.Context, instanceID string, limit int) ([]store.DurableAgentEvent, error) {
+	if _, err := s.store.GetDurableAgentInstance(ctx, instanceID); err != nil {
 		return nil, err
 	}
-	return s.store.ListDurableAgentEvents(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, instanceID, limit)
+	return s.store.ListDurableAgentEvents(ctx, instanceID, limit)
 }
 
 func (s *durableAgentService) recordEvent(event *store.DurableAgentEvent) {

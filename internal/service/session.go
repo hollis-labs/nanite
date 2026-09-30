@@ -23,6 +23,12 @@ type CreateSessionOpts struct {
 	// SubagentRuntime is "api" or "cli"; empty leaves the column unset.
 	// Callers validate it first (store.ValidSubagentRuntime).
 	SubagentRuntime string
+	// SkipAgentBinding makes Create stop after the insert and runtime write:
+	// no agent resolution, no primary binding, and AgentID is ignored. The
+	// harness v1 create uses it because it binds only an explicitly
+	// requested agent, itself, and answers 400 when that binding fails —
+	// where Create's own binding falls back to a default and is best-effort.
+	SkipAgentBinding bool
 }
 
 // ForkOpts holds the parameters for forking a session.
@@ -45,6 +51,8 @@ type SessionService interface {
 	Get(ctx context.Context, id string) (*store.Session, error)
 	List(ctx context.Context, includeArchived bool) ([]store.Session, error)
 	Update(ctx context.Context, sess *store.Session) error
+	// UpdateMetadata replaces the session's metadata JSON.
+	UpdateMetadata(ctx context.Context, id, metadataJSON string) error
 	Archive(ctx context.Context, id string) error
 	Fork(ctx context.Context, sourceID string, opts ForkOpts) (*store.Session, error)
 	ListMessages(ctx context.Context, sessionID string, limit int) ([]store.Message, error)
@@ -168,6 +176,9 @@ func (s *sessionServiceImpl) Create(ctx context.Context, opts CreateSessionOpts)
 			return nil, err
 		}
 	}
+	if opts.SkipAgentBinding {
+		return sess, nil
+	}
 
 	// Resolve agent: explicit param → user settings default → real
 	// "default" agent row. TASKS/adhoc/01-eliminate-file-based-agent-
@@ -213,6 +224,10 @@ func (s *sessionServiceImpl) List(ctx context.Context, includeArchived bool) ([]
 
 func (s *sessionServiceImpl) Update(ctx context.Context, sess *store.Session) error {
 	return s.writer.UpdateSession(ctx, sess)
+}
+
+func (s *sessionServiceImpl) UpdateMetadata(ctx context.Context, id, metadataJSON string) error {
+	return s.writer.UpdateSessionMetadata(ctx, id, metadataJSON)
 }
 
 func (s *sessionServiceImpl) Archive(ctx context.Context, id string) error {

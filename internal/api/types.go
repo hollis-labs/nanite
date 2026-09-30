@@ -193,13 +193,13 @@ type UpdateAgentRequest struct {
 	Revision string `json:"revision"`
 }
 
-// AgentProfileView is the wire shape of an agent profile, plus the computed
-// management metadata the GUI needs to decide editability. It is API-owned:
-// its keys match what the embedded store.AgentProfile used to emit, so the
-// wire did not change when the embedding was removed, but a new column on
-// the row no longer reaches the wire until it is added here and in
-// agentProfileToView. TestAgentProfileViewJSONKeys pins the key set.
-type AgentProfileView struct {
+// AgentProfileDTO is the wire shape of an agent profile. It is API-owned:
+// its keys match what store.AgentProfile emitted when handlers returned the
+// row directly, so the wire did not change when they stopped, but a new
+// column on the row no longer reaches the wire until it is added here and in
+// agentProfileToDTO. Endpoints that list profiles without management
+// metadata (start surface, session details) use it bare.
+type AgentProfileDTO struct {
 	ID                      string `json:"id"`
 	Name                    string `json:"name"`
 	Slug                    string `json:"slug"`
@@ -249,6 +249,14 @@ type AgentProfileView struct {
 	PluginID                string `json:"plugin_id"`
 	TetherManaged           bool   `json:"tether_managed"`
 	TetherURN               string `json:"tether_urn"`
+}
+
+// AgentProfileView is an agent profile plus the computed management metadata
+// the GUI needs to decide editability. The embedded DTO flattens, so the
+// JSON is the DTO's keys followed by these five. TestAgentProfileViewJSONKeys
+// pins the key set.
+type AgentProfileView struct {
+	AgentProfileDTO
 
 	// ManageClass is one of: managed, internal, plugin, external.
 	ManageClass string `json:"manage_class"`
@@ -278,6 +286,18 @@ type agentViewMeta struct {
 // into the API-owned wire shape.
 func agentProfileToView(p *store.AgentProfile, m agentViewMeta) AgentProfileView {
 	return AgentProfileView{
+		AgentProfileDTO: agentProfileToDTO(p),
+		ManageClass:     m.ManageClass,
+		Editable:        m.Editable,
+		CopyToManaged:   m.CopyToManaged,
+		Revision:        m.Revision,
+		Persisted:       m.Persisted,
+	}
+}
+
+// agentProfileToDTO translates a stored profile into its wire shape.
+func agentProfileToDTO(p *store.AgentProfile) AgentProfileDTO {
+	return AgentProfileDTO{
 		ID:                      p.ID,
 		Name:                    p.Name,
 		Slug:                    p.Slug,
@@ -327,12 +347,19 @@ func agentProfileToView(p *store.AgentProfile, m agentViewMeta) AgentProfileView
 		PluginID:                p.PluginID,
 		TetherManaged:           p.TetherManaged,
 		TetherURN:               p.TetherURN,
-		ManageClass:             m.ManageClass,
-		Editable:                m.Editable,
-		CopyToManaged:           m.CopyToManaged,
-		Revision:                m.Revision,
-		Persisted:               m.Persisted,
 	}
+}
+
+// agentProfilesToDTO translates a profile list. A nil input stays nil.
+func agentProfilesToDTO(rows []store.AgentProfile) []AgentProfileDTO {
+	if rows == nil {
+		return nil
+	}
+	out := make([]AgentProfileDTO, 0, len(rows))
+	for i := range rows {
+		out = append(out, agentProfileToDTO(&rows[i]))
+	}
+	return out
 }
 
 // SessionAgentView is the wire shape of one agent's binding to a session.

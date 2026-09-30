@@ -8,9 +8,9 @@
 // internal/api/team_runs.go -- this task's own instruction to check those
 // files for the current house style (request decode, validation, store
 // call, response encode, error handling) before inventing anything new.
-// Goal CRUD below mirrors teams.go's own CRUD handlers almost verbatim
-// (thin wrappers over task 01's store.Goal CRUD, internal/store/goals.go);
-// the loop-launch/cancel/resolve handlers mirror team_runs.go's
+// Goal CRUD and the loop-run reads below are thin wrappers over
+// service.LoopService (the records side); the loop-launch/cancel/resolve
+// handlers call loop.LoopLauncher (the actions side) and mirror team_runs.go's
 // handleLaunchTeam shape (decode a request DTO, call the real launcher,
 // translate a launcher error to 400/404/409, encode the result).
 //
@@ -42,6 +42,7 @@ import (
 	"net/http"
 
 	"github.com/hollis-labs/nanite/internal/loop"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -204,12 +205,23 @@ func toLoopResultResponse(result loop.LoopResult) loopResultResponse {
 
 // --- Goal CRUD handlers ----------------------------------------------------
 
-// handleCreateGoal creates a new goals row -- task 01's store.CreateGoal,
-// thinly wrapped. Field-level validation (intent required, status enum
-// membership) is left to CreateGoal itself; any error it returns is
-// caller-correctable request-shape input, translated to 400, matching
-// team_runs.go's own "every launcher/store failure is a 400" convention
-// for this kind of thin wrapper.
+// goalError writes the response for a LoopService goal error: not found is
+// 404, a rejected field or write is 400, anything else 500.
+func (a *API) goalError(w http.ResponseWriter, err error) {
+	var writeErr *service.GoalWriteError
+	switch {
+	case errors.Is(err, store.ErrGoalNotFound):
+		a.errorResp(w, http.StatusNotFound, "goal not found")
+	case errors.As(err, &writeErr):
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+	default:
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+// handleCreateGoal creates a new goals row. Field-level validation (intent
+// required, status enum membership) is the store's; any error is
+// caller-correctable input and translates to 400.
 //
 // POST /api/goals
 func (a *API) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
@@ -218,92 +230,65 @@ func (a *API) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-
-	g := &store.Goal{
-		ParentGoalID: req.ParentGoalID,
-		Intent:       req.Intent,
-		Priority:     req.Priority,
-		Scope:        req.Scope,
-		Owner:        req.Owner,
-		Source:       req.Source,
-		Status:       req.Status,
-	}
-	if err := g.SetDesiredState(req.DesiredState); err != nil {
+	g, err := a.Services.Loops.CreateGoal(r.Context(), service.GoalInput{
+		ParentGoalID:       req.ParentGoalID,
+		Intent:             req.Intent,
+		DesiredState:       req.DesiredState,
+		Constraints:        req.Constraints,
+		AcceptanceCriteria: req.AcceptanceCriteria,
+		Invariants:         req.Invariants,
+		Priority:           req.Priority,
+		Scope:              req.Scope,
+		Owner:              req.Owner,
+		Source:             req.Source,
+		Status:             req.Status,
+	})
+	if err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := g.SetConstraints(req.Constraints); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := g.SetAcceptanceCriteria(req.AcceptanceCriteria); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := g.SetInvariants(req.Invariants); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if err := a.Services.Store.CreateGoal(r.Context(), g); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusCreated, g)
+	a.jsonResp(w, http.StatusCreated, goalToView(g))
 }
 
 // handleGetGoal fetches one goals row by id.
 //
 // GET /api/goals/{id}
 func (a *API) handleGetGoal(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	g, err := a.Services.Store.GetGoal(r.Context(), id)
+	g, err := a.Services.Loops.GetGoal(r.Context(), r.PathValue("id"))
 	if err != nil {
-		if errors.Is(err, store.ErrGoalNotFound) {
-			a.errorResp(w, http.StatusNotFound, "goal not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.goalError(w, err)
 		return
 	}
-	a.jsonResp(w, http.StatusOK, g)
+	a.jsonResp(w, http.StatusOK, goalToView(g))
 }
 
 // handleListGoals lists goals rows, optionally filtered by status and/or
-// parent_goal_id -- task 01's store.GoalFilter's own two documented filter
-// fields.
+// parent_goal_id.
 //
 // GET /api/goals
 // GET /api/goals?status={status}
 // GET /api/goals?parent_goal_id={parentGoalID}
 func (a *API) handleListGoals(w http.ResponseWriter, r *http.Request) {
-	filter := store.GoalFilter{
+	rows, err := a.Services.Loops.ListGoals(r.Context(), store.GoalFilter{
 		Status:       r.URL.Query().Get("status"),
 		ParentGoalID: r.URL.Query().Get("parent_goal_id"),
-	}
-	rows, err := a.Services.Store.ListGoals(r.Context(), filter)
+	})
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, rows)
+	a.jsonResp(w, http.StatusOK, goalsToView(rows))
 }
 
-// handlePatchGoal updates an existing goals row -- "definition" columns via
-// store.UpdateGoal, status via store.UpdateGoalStatus. See
-// goalPatchRequest's own doc comment for the status/UpdateGoal split and
-// which fields are deliberately not patchable at all.
+// handlePatchGoal updates an existing goals row; see service.GoalPatch for
+// the definition/status split and which fields are not patchable.
 //
 // PATCH /api/goals/{id}
 func (a *API) handlePatchGoal(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	current, err := a.Services.Store.GetGoal(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, store.ErrGoalNotFound) {
-			a.errorResp(w, http.StatusNotFound, "goal not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	// A missing goal is reported before the body is read.
+	if _, err := a.Services.Loops.GetGoal(r.Context(), id); err != nil {
+		a.goalError(w, err)
 		return
 	}
 
@@ -313,90 +298,24 @@ func (a *API) handlePatchGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated := *current
-	touchedDefinition := false
-
-	if req.ParentGoalID != nil {
-		updated.ParentGoalID = *req.ParentGoalID
-		touchedDefinition = true
-	}
-	if req.Intent != nil {
-		updated.Intent = *req.Intent
-		touchedDefinition = true
-	}
-	if req.DesiredState != nil {
-		if err := updated.SetDesiredState(*req.DesiredState); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		touchedDefinition = true
-	}
-	if req.Constraints != nil {
-		if err := updated.SetConstraints(*req.Constraints); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		touchedDefinition = true
-	}
-	if req.AcceptanceCriteria != nil {
-		if err := updated.SetAcceptanceCriteria(*req.AcceptanceCriteria); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		touchedDefinition = true
-	}
-	if req.Invariants != nil {
-		if err := updated.SetInvariants(*req.Invariants); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		touchedDefinition = true
-	}
-	if req.Priority != nil {
-		updated.Priority = *req.Priority
-		touchedDefinition = true
-	}
-	if req.Scope != nil {
-		updated.Scope = *req.Scope
-		touchedDefinition = true
-	}
-	if req.Owner != nil {
-		updated.Owner = *req.Owner
-		touchedDefinition = true
-	}
-	if req.Source != nil {
-		updated.Source = *req.Source
-		touchedDefinition = true
-	}
-
-	if touchedDefinition {
-		if err := a.Services.Store.UpdateGoal(r.Context(), &updated); err != nil {
-			if errors.Is(err, store.ErrGoalNotFound) {
-				a.errorResp(w, http.StatusNotFound, "goal not found")
-				return
-			}
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-
-	if req.Status != nil {
-		if err := a.Services.Store.UpdateGoalStatus(r.Context(), id, *req.Status); err != nil {
-			if errors.Is(err, store.ErrGoalNotFound) {
-				a.errorResp(w, http.StatusNotFound, "goal not found")
-				return
-			}
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-
-	saved, err := a.Services.Store.GetGoal(r.Context(), id)
+	saved, err := a.Services.Loops.PatchGoal(r.Context(), id, service.GoalPatch{
+		ParentGoalID:       req.ParentGoalID,
+		Intent:             req.Intent,
+		DesiredState:       req.DesiredState,
+		Constraints:        req.Constraints,
+		AcceptanceCriteria: req.AcceptanceCriteria,
+		Invariants:         req.Invariants,
+		Priority:           req.Priority,
+		Scope:              req.Scope,
+		Owner:              req.Owner,
+		Source:             req.Source,
+		Status:             req.Status,
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.goalError(w, err)
 		return
 	}
-	a.jsonResp(w, http.StatusOK, saved)
+	a.jsonResp(w, http.StatusOK, goalToView(saved))
 }
 
 // handleDeleteGoal removes a goals row.
@@ -404,47 +323,29 @@ func (a *API) handlePatchGoal(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/goals/{id}
 func (a *API) handleDeleteGoal(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.DeleteGoal(r.Context(), id); err != nil {
-		if errors.Is(err, store.ErrGoalNotFound) {
-			a.errorResp(w, http.StatusNotFound, "goal not found")
-			return
-		}
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+	if err := a.Services.Loops.DeleteGoal(r.Context(), id); err != nil {
+		a.goalError(w, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
 }
 
-// handleListGoalEvidence lists goal_evidence rows for a goal -- task 02's
-// store.ListGoalEvidence, thinly wrapped. Confirms the goal itself exists
-// first (a plain GetGoal call) so a typo'd id 404s clearly rather than
-// silently returning an empty list -- ListGoalEvidence itself has no way to
-// distinguish "goal exists, no evidence yet" from "no such goal."
+// handleListGoalEvidence lists goal_evidence rows for a goal; an unknown
+// goal is 404 rather than an empty list.
 //
 // GET /api/goals/{id}/evidence
 // GET /api/goals/{id}/evidence?loop_run_id={loopRunID}
 // GET /api/goals/{id}/evidence?evidence_type={evidenceType}
 func (a *API) handleListGoalEvidence(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if _, err := a.Services.Store.GetGoal(r.Context(), id); err != nil {
-		if errors.Is(err, store.ErrGoalNotFound) {
-			a.errorResp(w, http.StatusNotFound, "goal not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	filter := store.GoalEvidenceFilter{
+	rows, err := a.Services.Loops.ListGoalEvidence(r.Context(), r.PathValue("id"), store.GoalEvidenceFilter{
 		LoopRunID:    r.URL.Query().Get("loop_run_id"),
 		EvidenceType: r.URL.Query().Get("evidence_type"),
-	}
-	rows, err := a.Services.Store.ListGoalEvidence(r.Context(), id, filter)
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.goalError(w, err)
 		return
 	}
-	a.jsonResp(w, http.StatusOK, rows)
+	a.jsonResp(w, http.StatusOK, goalEvidenceToView(rows))
 }
 
 // --- Loop trigger-surface handlers -----------------------------------------
@@ -504,8 +405,7 @@ func (a *API) handleLaunchLoop(w http.ResponseWriter, r *http.Request) {
 //
 // GET /api/loops/{id}
 func (a *API) handleGetLoop(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	lr, err := a.Services.Store.GetLoopRun(r.Context(), id)
+	lr, err := a.Services.Loops.GetLoopRun(r.Context(), r.PathValue("id"))
 	if err != nil {
 		if errors.Is(err, store.ErrLoopRunNotFound) {
 			a.errorResp(w, http.StatusNotFound, "loop run not found")
@@ -514,7 +414,7 @@ func (a *API) handleGetLoop(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, lr)
+	a.jsonResp(w, http.StatusOK, loopRunToView(lr))
 }
 
 // handleListLoops lists loop_runs rows, optionally filtered by goal_id
@@ -530,12 +430,12 @@ func (a *API) handleListLoops(w http.ResponseWriter, r *http.Request) {
 	if status := r.URL.Query().Get("status"); status != "" {
 		filter.Statuses = []string{status}
 	}
-	rows, err := a.Services.Store.ListLoopRuns(r.Context(), filter)
+	rows, err := a.Services.Loops.ListLoopRuns(r.Context(), filter)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, rows)
+	a.jsonResp(w, http.StatusOK, loopRunsToView(rows))
 }
 
 // handleCancelLoop is an operator-initiated hard stop -- LoopLauncher.Cancel,
@@ -556,12 +456,12 @@ func (a *API) handleCancelLoop(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	lr, err := a.Services.Store.GetLoopRun(r.Context(), id)
+	lr, err := a.Services.Loops.GetLoopRun(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, lr)
+	a.jsonResp(w, http.StatusOK, loopRunToView(lr))
 }
 
 // handleResolveLoopEscalation is the "Human resolution of
@@ -623,16 +523,13 @@ func decodeOptionalEscalationOverride(r *http.Request) (*loop.EscalationOverride
 	return &body, nil
 }
 
-// handleListLoopIterations lists loop_run_iterations rows for a LoopRun --
-// task 04's store.ListLoopRunIterations, thinly wrapped. Confirms the
-// LoopRun itself exists first, mirroring handleListGoalEvidence's own
-// existence-check convention for the identical reason (ListLoopRunIterations
-// can't itself distinguish "no iterations yet" from "no such loop run").
+// handleListLoopIterations lists loop_run_iterations rows for a LoopRun; an
+// unknown loop run is 404 rather than an empty list.
 //
 // GET /api/loops/{id}/iterations
 func (a *API) handleListLoopIterations(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if _, err := a.Services.Store.GetLoopRun(r.Context(), id); err != nil {
+	rows, err := a.Services.Loops.ListLoopRunIterations(r.Context(), r.PathValue("id"))
+	if err != nil {
 		if errors.Is(err, store.ErrLoopRunNotFound) {
 			a.errorResp(w, http.StatusNotFound, "loop run not found")
 			return
@@ -640,11 +537,5 @@ func (a *API) handleListLoopIterations(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	rows, err := a.Services.Store.ListLoopRunIterations(r.Context(), id)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusOK, rows)
+	a.jsonResp(w, http.StatusOK, loopRunIterationsToView(rows))
 }

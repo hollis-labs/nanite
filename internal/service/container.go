@@ -83,8 +83,21 @@ type Container struct {
 	AgentConfig *AgentConfigService
 	// AgentMembership owns session <-> agent and agent <-> project bindings.
 	AgentMembership *AgentMembershipService
-	Skills          SkillService
-	Usage           *UsageService // token usage, execution metrics, utility calls
+	// AgentCapabilities owns per-row CRUD on an agent's known tools, known
+	// skills, procedures and knowledge seeds.
+	AgentCapabilities *AgentCapabilitiesService
+	// Reflexes owns reflex definitions, opt-outs and the pending-reflex
+	// review queue; ReflexEngine runs them.
+	Reflexes *ReflexService
+	// Loops owns goal CRUD, goal evidence and loop-run reads; launching and
+	// resolving loop runs is loop.LoopLauncher's, wired into the API.
+	Loops *LoopService
+	// Bookmarks owns message bookmarks.
+	Bookmarks *BookmarkService
+	// Schedules owns operator CRUD on agent_schedules; Engine fires them.
+	Schedules *ScheduleService
+	Skills    SkillService
+	Usage     *UsageService // token usage, execution metrics, utility calls
 	// ProviderConfig reads and writes provider and model configuration rows.
 	ProviderConfig *ProviderConfigService
 	// SkillVendor is the content-addressed vendored skill store (internal/
@@ -1458,6 +1471,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentMembership:     agentMembership,
 		Usage:               usage,
 		ProviderConfig:      providerConfig,
+		AgentCapabilities:   NewAgentCapabilitiesService(cfg.Store),
+		Reflexes:            NewReflexService(cfg.Store),
+		Loops:               NewLoopService(cfg.Store),
+		Bookmarks:           NewBookmarkService(cfg.Store),
+		Schedules:           NewScheduleService(cfg.Store),
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,

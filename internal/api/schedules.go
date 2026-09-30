@@ -35,8 +35,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/oklog/ulid/v2"
-
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -74,8 +73,8 @@ type scheduleCreateRequest struct {
 }
 
 // schedulePatchRequest is PATCH /api/schedules/{id}'s request body -- see
-// this file's "Patchable fields" doc comment on handlePatchSchedule for
-// which fields are (and are deliberately not) represented here.
+// service.SchedulePatch for which fields are (and are deliberately not)
+// represented here.
 type schedulePatchRequest struct {
 	Name         *string `json:"name"`
 	SessionID    *string `json:"session_id"`
@@ -113,51 +112,51 @@ type scheduleEngineStatusResponse struct {
 
 // --- Handlers --------------------------------------------------------------
 
+// scheduleError writes the response for a ScheduleService error: not found
+// is 404, a rejected row or write is 400, anything else 500.
+func (a *API) scheduleError(w http.ResponseWriter, err error) {
+	var writeErr *service.ScheduleWriteError
+	switch {
+	case errors.Is(err, store.ErrAgentScheduleNotFound):
+		a.errorResp(w, http.StatusNotFound, "schedule not found")
+	case errors.As(err, &writeErr):
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+	default:
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
 // handleListSchedules lists agent_schedules rows, optionally scoped to one
-// agent -- mirroring store.ListAgentSchedules' own agent_id scoping.
+// agent.
 //
 // GET /api/schedules
 // GET /api/schedules?agent_id={agentID}
 func (a *API) handleListSchedules(w http.ResponseWriter, r *http.Request) {
-	agentID := r.URL.Query().Get("agent_id")
-	var (
-		rows []store.AgentSchedule
-		err  error
-	)
-	if agentID != "" {
-		rows, err = a.Services.Store.ListAgentSchedules(r.Context(), agentID)
-	} else {
-		rows, err = a.Services.Store.ListAllAgentSchedules(r.Context())
-	}
+	rows, err := a.Services.Schedules.List(r.Context(), r.URL.Query().Get("agent_id"))
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, rows)
+	a.jsonResp(w, http.StatusOK, agentSchedulesToView(rows))
 }
 
 // handleGetSchedule fetches one agent_schedules row by id.
 //
 // GET /api/schedules/{id}
 func (a *API) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	row, err := a.Services.Store.GetAgentSchedule(r.Context(), id)
+	row, err := a.Services.Schedules.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
-		if errors.Is(err, store.ErrAgentScheduleNotFound) {
-			a.errorResp(w, http.StatusNotFound, "schedule not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.scheduleError(w, err)
 		return
 	}
-	a.jsonResp(w, http.StatusOK, row)
+	a.jsonResp(w, http.StatusOK, agentScheduleToView(row))
 }
 
-// handleCreateSchedule creates a new agent_schedules row.
+// handleCreateSchedule creates a new agent_schedules row; the service
+// assigns its id and first next_run.
 //
 // POST /api/schedules
-// Request: scheduleCreateRequest. Response: the created store.AgentSchedule
-// (201 Created).
+// Request: scheduleCreateRequest. Response: the created schedule (201).
 func (a *API) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 	var req scheduleCreateRequest
 	if err := a.decode(r, &req); err != nil {
@@ -174,7 +173,6 @@ func (a *API) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row := store.AgentSchedule{
-		ID:           "sched-" + ulid.Make().String(),
 		AgentID:      req.AgentID,
 		SessionID:    req.SessionID,
 		Name:         req.Name,
@@ -191,96 +189,26 @@ func (a *API) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 	if req.MaxRetries != nil {
 		row.MaxRetries = *req.MaxRetries
 	}
-	if err := store.ValidateAgentSchedule(row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
 
-	// next_run must be computed at insert time, not left NULL -- an
-	// inserted row with no next_run would never be picked up by
-	// go-scheduler's ListDueSchedules, silently defeating the whole point
-	// of this endpoint (the same finding TASKS/scheduling/
-	// 05-engine-wiring-and-full-replace.md's Work Log made about
-	// managed_durable_configs.go's own insert path, which is why
-	// ComputeAgentScheduleNextRun was factored out for exactly this kind
-	// of new-row-mid-process caller).
-	next := store.ComputeAgentScheduleNextRun(row.ScheduleKind, row.ScheduleSpec, time.Now())
-	if !next.IsZero() {
-		row.NextRun = next.UTC().Format(time.RFC3339)
-	}
-
-	if err := a.Services.Store.InsertAgentSchedule(r.Context(), row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	created, err := a.Services.Store.GetAgentSchedule(r.Context(), row.ID)
+	created, err := a.Services.Schedules.Create(r.Context(), row)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.scheduleError(w, err)
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, created)
+	a.jsonResp(w, http.StatusCreated, agentScheduleToView(created))
 }
 
-// handlePatchSchedule updates an existing agent_schedules row.
+// handlePatchSchedule updates an existing agent_schedules row. Which fields
+// are patchable, and when next_run is recomputed, is service.SchedulePatch's
+// and ScheduleService.Patch's to say.
 //
 // PATCH /api/schedules/{id}
-// Request: schedulePatchRequest. Response: the updated store.AgentSchedule.
-//
-// Patchable-fields call (this task's step 4): name, session_id,
-// schedule_spec, body, priority, status, expires_at, max_retries, on_fail,
-// job_payload are patchable in place. agent_id, schedule_kind, and
-// job_type are deliberately NOT represented in schedulePatchRequest at
-// all -- the same "immutable field simply isn't in the patch struct"
-// convention TASKS/reflex-taxonomy/05-provenance-tier-enforcement.md set
-// for agent_reflexes.provenance_tier (an unknown JSON field is silently
-// ignored by json.Decode, not rejected, matching that precedent exactly).
-// Rationale per field:
-//   - agent_id: changing ownership of a schedule is a delete-and-recreate
-//     operation, not an edit, matching handlePatchAgentReflex/
-//     handleDeleteAgentReflex's own "cannot patch a different-agent
-//     resource through this endpoint" boundary for the adjacent resource.
-//   - schedule_kind: cron vs. one_shot changes next_run's entire
-//     interpretation (an empty CronExpr vs. a real one --
-//     internal/scheduler/store_adapter.go's toSchedule) and would need to
-//     be paired with a schedule_spec change atomically to stay coherent;
-//     safer to require delete+recreate than to let the two drift out of
-//     sync mid-PATCH.
-//   - job_type: job_payload's valid shape is entirely determined by
-//     job_type (runner_adapter.go's four Payload structs are not
-//     interchangeable). Allowing job_type to change without also
-//     replacing job_payload in the same request would produce a row that
-//     passes this handler's validation but fails only later, at dispatch
-//     time inside RunnerAdapter.Enqueue -- a worse failure mode (silent
-//     until the next firing) than rejecting the whole "change what kind
-//     of job this is" operation up front and requiring delete+recreate.
-//
-// job_payload IS patchable on its own (unlike job_type) since a same-type
-// payload update (e.g. tweaking a command_run's args) is a legitimate
-// in-place edit that doesn't change the row's dispatch contract.
-//
-// next_run, id, fired_count, last_fired_at, created_at, created_by are
-// engine/bookkeeping-owned and not exposed for direct PATCH at all --
-// next_run is instead recomputed as a side effect (see below) whenever a
-// patch could invalidate the previously-computed value, rather than being
-// directly settable (a caller-supplied next_run could violate the CAS
-// claim's own invariants if it doesn't match what ComputeAgentScheduleNextRun
-// would produce for the row's actual kind/spec).
-//
-// next_run recomputation: triggered when schedule_spec changes (a cron
-// row's next-fire time must reflect the new expression), or when status
-// transitions into "active" from a non-active state (reactivating a
-// paused/expired row with a stale or NULL next_run would otherwise either
-// never fire again or misfire immediately on whatever next_run happened to
-// be left over).
+// Request: schedulePatchRequest. Response: the updated schedule.
 func (a *API) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	current, err := a.Services.Store.GetAgentSchedule(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, store.ErrAgentScheduleNotFound) {
-			a.errorResp(w, http.StatusNotFound, "schedule not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	// A missing schedule is reported before the body is read.
+	if _, err := a.Services.Schedules.Get(r.Context(), id); err != nil {
+		a.scheduleError(w, err)
 		return
 	}
 
@@ -290,80 +218,23 @@ func (a *API) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated := *current
-	recomputeNextRun := false
-
-	if req.Name != nil {
-		updated.Name = *req.Name
-	}
-	if req.SessionID != nil {
-		updated.SessionID = *req.SessionID
-	}
-	if req.ScheduleSpec != nil {
-		updated.ScheduleSpec = *req.ScheduleSpec
-		recomputeNextRun = true
-	}
-	if req.Body != nil {
-		updated.Body = *req.Body
-	}
-	if req.Priority != nil {
-		updated.Priority = *req.Priority
-	}
-	if req.Status != nil {
-		if *req.Status == "" {
-			a.errorResp(w, http.StatusBadRequest, "status must not be empty")
-			return
-		}
-		if *req.Status == store.ScheduleStatusActive && current.Status != store.ScheduleStatusActive {
-			recomputeNextRun = true
-		}
-		updated.Status = *req.Status
-	}
-	if req.ExpiresAt != nil {
-		updated.ExpiresAt = *req.ExpiresAt
-	}
-	if req.MaxRetries != nil {
-		updated.MaxRetries = *req.MaxRetries
-	}
-	if req.OnFail != nil {
-		if *req.OnFail == "" {
-			a.errorResp(w, http.StatusBadRequest, "on_fail must not be empty")
-			return
-		}
-		updated.OnFail = *req.OnFail
-	}
-	if req.JobPayload != nil {
-		updated.JobPayload = *req.JobPayload
-	}
-	if err := store.ValidateAgentSchedule(updated); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if recomputeNextRun {
-		next := store.ComputeAgentScheduleNextRun(updated.ScheduleKind, updated.ScheduleSpec, time.Now())
-		if !next.IsZero() {
-			updated.NextRun = next.UTC().Format(time.RFC3339)
-		}
-	}
-
-	// InsertAgentSchedule is an INSERT OR REPLACE upsert keyed on id --
-	// the same call managed_durable_configs.go already uses to update an
-	// existing row on resync, so reusing it here for PATCH is an
-	// already-exercised path, not a new upsert-via-replace pattern. Since
-	// `updated` starts as a full copy of `current` and only the patched
-	// fields are overridden above, every untouched column round-trips
-	// unchanged.
-	if err := a.Services.Store.InsertAgentSchedule(r.Context(), updated); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	saved, err := a.Services.Store.GetAgentSchedule(r.Context(), id)
+	saved, err := a.Services.Schedules.Patch(r.Context(), id, service.SchedulePatch{
+		Name:         req.Name,
+		SessionID:    req.SessionID,
+		ScheduleSpec: req.ScheduleSpec,
+		Body:         req.Body,
+		Priority:     req.Priority,
+		Status:       req.Status,
+		ExpiresAt:    req.ExpiresAt,
+		MaxRetries:   req.MaxRetries,
+		OnFail:       req.OnFail,
+		JobPayload:   req.JobPayload,
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.scheduleError(w, err)
 		return
 	}
-	a.jsonResp(w, http.StatusOK, saved)
+	a.jsonResp(w, http.StatusOK, agentScheduleToView(saved))
 }
 
 // handleDeleteSchedule removes an agent_schedules row.
@@ -371,12 +242,8 @@ func (a *API) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/schedules/{id}
 func (a *API) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.DeleteAgentSchedule(r.Context(), id); err != nil {
-		if errors.Is(err, store.ErrAgentScheduleNotFound) {
-			a.errorResp(w, http.StatusNotFound, "schedule not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	if err := a.Services.Schedules.Delete(r.Context(), id); err != nil {
+		a.scheduleError(w, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})

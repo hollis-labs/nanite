@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/skillinstall"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -55,7 +55,7 @@ func (a *API) handleListSkills(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, skills)
+	a.jsonResp(w, http.StatusOK, skillsToView(skills))
 }
 
 func (a *API) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +88,7 @@ func (a *API) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, sk)
+	a.jsonResp(w, http.StatusCreated, skillToView(sk))
 }
 
 // resolveSkillRef resolves ref against the skill index, trying it first as
@@ -127,7 +127,7 @@ func (a *API) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusNotFound, "skill not found: "+ref)
 		return
 	}
-	a.jsonResp(w, http.StatusOK, sk)
+	a.jsonResp(w, http.StatusOK, skillToView(sk))
 }
 
 func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +184,7 @@ func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, existing)
+	a.jsonResp(w, http.StatusOK, skillToView(existing))
 }
 
 // handleDeleteSkill implements DELETE /api/skills/{slug} -- task 12's real
@@ -230,19 +230,19 @@ func (a *API) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"status":         "deleted",
-		"skill":          result.Skill,
+		"skill":          skillToView(&result.Skill),
 		"vendor_deleted": result.VendorDeleted,
 	})
 }
 
 func (a *API) handleListAgentSkills(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
-	skills, err := a.Services.Store.ListAgentSkills(r.Context(), agentID)
+	skills, err := a.Services.AgentCapabilities.ListAssignedSkills(r.Context(), agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, skills)
+	a.jsonResp(w, http.StatusOK, skillsToView(skills))
 }
 
 func (a *API) handleAssignAgentSkill(w http.ResponseWriter, r *http.Request) {
@@ -258,44 +258,29 @@ func (a *API) handleAssignAgentSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify agent exists as a real agent_profiles DB row directly against
-	// the store (a.Services.Agents.Get is equivalent post-TASKS/adhoc/01-
-	// eliminate-file-based-agent-runtime.md -- it is a plain DB passthrough
-	// now too -- but this direct call is kept as the explicit, load-bearing
-	// check: AssignSkillToAgent now writes through agent_known_skills
-	// (TASKS/skills/02 -- the old, now-dropped per-agent skill join table
-	// used to carry this FK instead), which carries the same real FK to
-	// agent_profiles(id), so the existence check here must match what the
-	// FK actually enforces, independent of whatever AgentService does).
-	if _, err := a.Services.Store.GetAgent(r.Context(), agentID); err != nil {
+	// AssignSkill checks the agent (as a real agent_profiles row — the
+	// check that matches agent_known_skills' foreign key; see its doc
+	// comment), then the skill, then assigns.
+	skills, err := a.Services.AgentCapabilities.AssignSkill(r.Context(), agentID, req.SkillID, req.Config)
+	switch {
+	case errors.Is(err, service.ErrAgentNotFound):
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
-	}
-	// Verify skill exists.
-	sk, err := a.Services.Skills.Get(r.Context(), req.SkillID)
-	if err != nil || sk == nil {
+	case errors.Is(err, service.ErrSkillNotFound):
 		a.errorResp(w, http.StatusNotFound, "skill not found")
 		return
-	}
-
-	if err := a.Services.Store.AssignSkillToAgent(r.Context(), agentID, req.SkillID, req.Config); err != nil {
+	case err != nil:
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	skills, err := a.Services.Store.ListAgentSkills(r.Context(), agentID)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusCreated, skills)
+	a.jsonResp(w, http.StatusCreated, skillsToView(skills))
 }
 
 func (a *API) handleRemoveAgentSkill(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 	skillID := r.PathValue("skillId")
 
-	if err := a.Services.Store.RemoveSkillFromAgent(r.Context(), agentID, skillID); err != nil {
+	if err := a.Services.AgentCapabilities.RemoveSkill(r.Context(), agentID, skillID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -361,7 +346,7 @@ func (a *API) runSkillInstall(ctx context.Context, path string) (skillinstall.Re
 }
 
 func toInstallSkillResponse(r skillinstall.Result) InstallSkillResponse {
-	return InstallSkillResponse{Skill: r.Skill, Address: r.Address, Reused: r.Reused}
+	return InstallSkillResponse{Skill: skillToView(&r.Skill), Address: r.Address, Reused: r.Reused}
 }
 
 // handleInstallSkill implements POST /api/skills/install: install (or
@@ -410,7 +395,7 @@ func (a *API) handleSyncSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := r.PathValue("slug")
 
-	existing, err := a.Services.Store.GetSkillBySlug(r.Context(), slug)
+	existing, err := a.Services.Skills.GetBySlug(r.Context(), slug)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -513,8 +498,8 @@ func (a *API) handleSyncSkill(w http.ResponseWriter, r *http.Request) {
 // telemetry/panel fields on the same agent_known_skills row (pinned,
 // activation_count, last_used_at, added_at, ttl_seconds, reason — whether
 // set by AssignSkillToAgent's bare assignment or the known-skills Panel)
-// are carried forward unchanged, mirroring handleUpdateAgentKnownSkill's
-// own "never silently wipe the other surface's data" convention.
+// are carried forward unchanged: AgentCapabilitiesService.GrantSkill copies
+// the row and overwrites only the grant state.
 func (a *API) handleGrantAgentSkill(w http.ResponseWriter, r *http.Request) {
 	agent, ok := a.requireMutableAgent(w, r)
 	if !ok {
@@ -522,7 +507,7 @@ func (a *API) handleGrantAgentSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := r.PathValue("slug")
 
-	sk, err := a.Services.Store.GetSkillBySlug(r.Context(), slug)
+	sk, err := a.Services.Skills.GetBySlug(r.Context(), slug)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -557,38 +542,16 @@ func (a *API) handleGrantAgentSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	current, err := a.Services.Store.GetAgentKnownSkill(r.Context(), agent.ID, sk.Slug)
-	if err != nil && !errors.Is(err, store.ErrAgentKnownSkillNotFound) {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	row := store.AgentKnownSkill{
-		AgentID:             agent.ID,
-		SkillName:           sk.Slug,
+	updated, err := a.Services.AgentCapabilities.GrantSkill(r.Context(), agent.ID, sk.Slug, service.SkillGrant{
 		ApprovedContentHash: sk.ContentHash,
-		GrantedAt:           time.Now().UTC().Format(time.RFC3339),
 		GrantedBy:           req.GrantedBy,
 		CapabilitiesGranted: string(capsJSON),
-	}
-	if current != nil {
-		row.Pinned = current.Pinned
-		row.ActivationCount = current.ActivationCount
-		row.LastUsedAt = current.LastUsedAt
-		row.AddedAt = current.AddedAt
-		row.TTLSeconds = current.TTLSeconds
-		row.Reason = current.Reason
-	}
-	if err := a.Services.Store.InsertAgentKnownSkill(r.Context(), row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	updated, err := a.Services.Store.GetAgentKnownSkill(r.Context(), agent.ID, sk.Slug)
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, nil, "", "")
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, updated)
+	a.jsonResp(w, http.StatusCreated, knownSkillToView(updated))
 }
 
 // handleRevokeAgentSkillGrant implements
@@ -607,28 +570,8 @@ func (a *API) handleRevokeAgentSkillGrant(w http.ResponseWriter, r *http.Request
 	}
 	slug := r.PathValue("slug")
 
-	current, err := a.Services.Store.GetAgentKnownSkill(r.Context(), agent.ID, slug)
-	if err != nil {
-		if errors.Is(err, store.ErrAgentKnownSkillNotFound) {
-			a.errorResp(w, http.StatusNotFound, "no grant exists for this agent/skill")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if current.ApprovedContentHash == "" && current.GrantedAt == "" &&
-		current.GrantedBy == "" && current.CapabilitiesGranted == "" {
-		a.errorResp(w, http.StatusNotFound, "no grant exists for this agent/skill")
-		return
-	}
-
-	row := *current
-	row.ApprovedContentHash = ""
-	row.GrantedAt = ""
-	row.GrantedBy = ""
-	row.CapabilitiesGranted = ""
-	if err := a.Services.Store.InsertAgentKnownSkill(r.Context(), row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+	if err := a.Services.AgentCapabilities.RevokeSkillGrant(r.Context(), agent.ID, slug); err != nil {
+		a.capabilityError(w, err, service.ErrNoSkillGrant, "no grant exists for this agent/skill", "")
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "revoked"})
@@ -649,7 +592,7 @@ func (a *API) handleGetAgentSkillGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := r.PathValue("slug")
 
-	sk, err := a.Services.Store.GetSkillBySlug(r.Context(), slug)
+	sk, err := a.Services.Skills.GetBySlug(r.Context(), slug)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -665,7 +608,7 @@ func (a *API) handleGetAgentSkillGrant(w http.ResponseWriter, r *http.Request) {
 		CurrentContentHash: sk.ContentHash,
 	}
 
-	row, err := a.Services.Store.GetAgentKnownSkill(r.Context(), agent.ID, sk.Slug)
+	row, err := a.Services.AgentCapabilities.GetKnownSkill(r.Context(), agent.ID, sk.Slug)
 	if err != nil && !errors.Is(err, store.ErrAgentKnownSkillNotFound) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -762,7 +705,7 @@ func (a *API) handlePreviewSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sk, err := a.Services.Store.GetSkillBySlug(r.Context(), slug)
+	sk, err := a.Services.Skills.GetBySlug(r.Context(), slug)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

@@ -16,6 +16,10 @@ import (
 // agent profiles. SourceRef is retained on existing rows as historical
 // provenance only; this service never reads, writes, renames, or deletes the
 // referenced path.
+//
+// Procedures written here are the bulk seed that accompanies a profile write
+// (Create, Update, CopyToManaged). Editing a single procedure row, and every
+// other per-row capability edit, belongs to AgentCapabilitiesService.
 type AgentConfigService struct {
 	store          *store.Store
 	classification agent.Classification

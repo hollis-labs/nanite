@@ -224,7 +224,7 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 		return nil, fmt.Errorf("unsupported mode %q", req.Mode)
 	}
 
-	normalized, baseAgent, errors := a.normalizeAgentBuilderProfile(req)
+	normalized, baseAgent, errors := a.normalizeAgentBuilderProfile(ctx, req)
 	warnings := draftWarningsForProfile(normalized)
 	unsupported := unsupportedAgentBuilderFields(req)
 
@@ -278,7 +278,7 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 	}, nil
 }
 
-func (a *API) normalizeAgentBuilderProfile(req AgentBuilderDryRunRequest) (AgentBuilderProfileInput, *store.AgentProfile, []string) {
+func (a *API) normalizeAgentBuilderProfile(ctx context.Context, req AgentBuilderDryRunRequest) (AgentBuilderProfileInput, *store.AgentProfile, []string) {
 	errors := make([]string, 0, 6)
 	input := req.Profile
 	var existing *store.AgentProfile
@@ -288,7 +288,7 @@ func (a *API) normalizeAgentBuilderProfile(req AgentBuilderDryRunRequest) (Agent
 		if strings.TrimSpace(input.ID) == "" {
 			errors = append(errors, "profile.id is required for update_profile dry-run")
 		} else {
-			existing, err = a.Services.Store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, input.ID)
+			existing, err = a.Services.Agents.Get(ctx, input.ID)
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("profile %q not found", input.ID))
 			} else if existing.Source == "internal" {

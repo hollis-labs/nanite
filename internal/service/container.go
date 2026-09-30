@@ -122,6 +122,15 @@ type Container struct {
 	Artifacts *ArtifactService
 	// Shell owns the policy for running a user's shell command in a session.
 	Shell *ShellService
+	// Pins owns pinned-content rows; Reminders owns reminder rows.
+	Pins      *PinService
+	Reminders *ReminderService
+	// Consumers owns consumer rows; Documents owns a session's context
+	// documents and context prompt.
+	Consumers *ConsumerService
+	Documents *DocumentService
+	// Teams owns team definitions and their validation.
+	Teams *TeamService
 
 	// Narrow store collaborators for transports that construct a pipeline
 	// object per call (skill gate, materializer, installer, uninstaller,
@@ -1551,6 +1560,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Projects:            NewProjectService(cfg.Store, cfg.Store),
 		DrawerCards:         NewDrawerCardService(cfg.Store),
 		Shell:               NewShellService(cfg.Store),
+		Pins:                NewPinService(cfg.Store),
+		Reminders:           NewReminderService(cfg.Store),
+		Consumers:           NewConsumerService(cfg.Store),
+		Documents:           NewDocumentService(cfg.Store),
+		Teams:               NewTeamService(cfg.Store),
 		Artifacts: NewArtifactService(cfg.Store, func() string {
 			if cfg.AppConfig != nil {
 				return cfg.AppConfig.Artifacts.StorageDir

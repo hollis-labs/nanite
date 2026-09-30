@@ -187,6 +187,13 @@ func (s *ReflexService) Patch(ctx context.Context, agentID, reflexID string, p R
 
 // DeleteOwned deletes the agent's own reflex. Errors are those of GetOwned,
 // or the store's delete error.
+// Delete removes a reflex by id without an ownership check. It is for
+// internal cleanup of reflexes the caller itself installed, such as a team
+// run's partially installed routing.
+func (s *ReflexService) Delete(ctx context.Context, reflexID string) error {
+	return s.store.DeleteAgentReflex(ctx, reflexID)
+}
+
 func (s *ReflexService) DeleteOwned(ctx context.Context, agentID, reflexID string) error {
 	if _, err := s.GetOwned(ctx, agentID, reflexID); err != nil {
 		return err

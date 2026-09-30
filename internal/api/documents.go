@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -31,7 +32,7 @@ type SetSessionContextPromptRequest struct {
 // handleListDocuments — GET /api/sessions/{id}/documents
 func (a *API) handleListDocuments(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	docs, err := a.Services.Store.ListDocuments(r.Context(), sessionID)
+	docs, err := a.Services.Documents.List(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to list documents: "+err.Error())
 		return
@@ -39,7 +40,7 @@ func (a *API) handleListDocuments(w http.ResponseWriter, r *http.Request) {
 	if docs == nil {
 		docs = []store.Document{}
 	}
-	a.jsonResp(w, http.StatusOK, docs)
+	a.jsonResp(w, http.StatusOK, documentsToView(docs))
 }
 
 // handleCreateDocument — POST /api/sessions/{id}/documents
@@ -64,22 +65,22 @@ func (a *API) handleCreateDocument(w http.ResponseWriter, r *http.Request) {
 		Included:    req.Included,
 		FullContent: req.FullContent,
 	}
-	if err := a.Services.Store.CreateDocument(r.Context(), doc); err != nil {
+	if err := a.Services.Documents.Create(r.Context(), doc); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to create document: "+err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, doc)
+	a.jsonResp(w, http.StatusCreated, documentToView(doc))
 }
 
 // handleGetDocument — GET /api/documents/{id}
 func (a *API) handleGetDocument(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	doc, err := a.Services.Store.GetDocument(r.Context(), id)
+	doc, err := a.Services.Documents.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "document not found")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, doc)
+	a.jsonResp(w, http.StatusOK, documentToView(doc))
 }
 
 // handleUpdateDocument — PUT /api/documents/{id}
@@ -91,39 +92,24 @@ func (a *API) handleUpdateDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doc, err := a.Services.Store.GetDocument(r.Context(), id)
+	doc, err := a.Services.Documents.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "document not found")
 		return
 	}
 
-	included := doc.Included
-	fullContent := doc.FullContent
-	summary := doc.Summary
-	if req.Included != nil {
-		included = *req.Included
-	}
-	if req.FullContent != nil {
-		fullContent = *req.FullContent
-	}
-	if req.Summary != nil {
-		summary = *req.Summary
-	}
-
-	if err := a.Services.Store.UpdateDocumentToggles(r.Context(), id, included, fullContent, summary); err != nil {
+	patch := service.DocumentPatch{Included: req.Included, FullContent: req.FullContent, Summary: req.Summary}
+	if err := a.Services.Documents.UpdateToggles(r.Context(), doc, patch); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to update document: "+err.Error())
 		return
 	}
-	doc.Included = included
-	doc.FullContent = fullContent
-	doc.Summary = summary
-	a.jsonResp(w, http.StatusOK, doc)
+	a.jsonResp(w, http.StatusOK, documentToView(doc))
 }
 
 // handleDeleteDocument — DELETE /api/documents/{id}
 func (a *API) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.DeleteDocument(r.Context(), id); err != nil {
+	if err := a.Services.Documents.Delete(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to delete document: "+err.Error())
 		return
 	}
@@ -133,7 +119,7 @@ func (a *API) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 // handleGetSessionContextPrompt — GET /api/sessions/{id}/context-prompt
 func (a *API) handleGetSessionContextPrompt(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	prompt, err := a.Services.Store.GetSessionContextPrompt(r.Context(), sessionID)
+	prompt, err := a.Services.Documents.ContextPrompt(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to get context prompt: "+err.Error())
 		return
@@ -149,7 +135,7 @@ func (a *API) handleSetSessionContextPrompt(w http.ResponseWriter, r *http.Reque
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if err := a.Services.Store.SetSessionContextPrompt(r.Context(), sessionID, req.Prompt); err != nil {
+	if err := a.Services.Documents.SetContextPrompt(r.Context(), sessionID, req.Prompt); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to set context prompt: "+err.Error())
 		return
 	}

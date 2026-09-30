@@ -96,6 +96,9 @@ type DurableAgentRuntimeController interface {
 type DurableAgentService interface {
 	Create(ctx context.Context, inst *store.DurableAgentInstance) error
 	Get(ctx context.Context, id string) (*store.DurableAgentInstance, error)
+	// GetBySlug returns the instance with this slug, or
+	// store.ErrDurableAgentInstanceNotFound.
+	GetBySlug(ctx context.Context, slug string) (*store.DurableAgentInstance, error)
 	List(ctx context.Context, includeArchived bool) ([]store.DurableAgentInstance, error)
 	Update(ctx context.Context, id string, upd store.DurableAgentInstanceUpdate) (*store.DurableAgentInstance, error)
 	Archive(ctx context.Context, id string) (*store.DurableAgentInstance, error)
@@ -212,6 +215,10 @@ func sameDurableAgentCreateState(existing, requested *store.DurableAgentInstance
 
 func (s *durableAgentService) Get(ctx context.Context, id string) (*store.DurableAgentInstance, error) {
 	return s.store.GetDurableAgentInstance(ctx, id)
+}
+
+func (s *durableAgentService) GetBySlug(ctx context.Context, slug string) (*store.DurableAgentInstance, error) {
+	return s.store.GetDurableAgentInstanceBySlug(ctx, slug)
 }
 
 func (s *durableAgentService) List(_ context.Context, includeArchived bool) ([]store.DurableAgentInstance, error) {

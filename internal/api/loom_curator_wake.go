@@ -93,7 +93,7 @@ func (a *API) handleLoomCuratorWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug(r.Context(), loomCuratorInstanceSlug)
+	inst, err := a.Services.DurableAgents.GetBySlug(r.Context(), loomCuratorInstanceSlug)
 	if err != nil {
 		if errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
 			a.errorResp(w, http.StatusServiceUnavailable,

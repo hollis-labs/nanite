@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -196,6 +197,11 @@ func cmdServeWithInitializers(
 	// both observe the same settings. A missing or malformed config
 	// falls back to safe defaults rather than aborting startup.
 	appCfg, appCfgErr := config.LoadAppConfig("config/" + brand.ConfigFileName + ".yaml")
+	if errors.Is(appCfgErr, config.ErrInvalidHarnessConfig) {
+		// A typo in what the operator declared must not silently fall back.
+		slog.Error("invalid app config", "err", appCfgErr)
+		return fmt.Errorf("invalid app config: %w", appCfgErr)
+	}
 	if appCfgErr != nil {
 		appCfg = config.DefaultAppConfig()
 	}

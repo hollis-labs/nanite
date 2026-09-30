@@ -1,12 +1,17 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // TunablesConfig holds checked-in application tunables loaded from config/nanite.yaml.
@@ -30,6 +35,40 @@ type HarnessConfig struct {
 	// ProfilesDir is a directory of user profile files. Empty means the
 	// "profiles" directory under the config directory.
 	ProfilesDir string `yaml:"profiles_dir"`
+	// CLIModels declares, per CLI kind ("claude", "codex", "opencode",
+	// "copilot", "pi"), the model that CLI runs when the session does not name a
+	// real one. Nanite never chooses a CLI's model and cannot observe it, so this
+	// is what the operator says, used only to size tool-result budgets for
+	// CLI-launched sessions. A kind not listed is sized at the floor. Each model
+	// must be a real model in the built-in registry.
+	CLIModels map[string]string `yaml:"cli_models"`
+}
+
+// ErrInvalidHarnessConfig is wrapped by the error LoadAppConfig returns when
+// the harness section names something that does not exist. Callers treat it as
+// fatal rather than falling back to defaults, so a typo cannot go unnoticed.
+var ErrInvalidHarnessConfig = errors.New("invalid harness config")
+
+// KnownCLIKinds are the CLI kinds harness.cli_models may name.
+var KnownCLIKinds = []string{"claude", "codex", "copilot", "opencode", "pi"}
+
+// Validate checks the harness section.
+func (h HarnessConfig) Validate() error {
+	var problems []string
+	for kind, model := range h.CLIModels {
+		if !slices.Contains(KnownCLIKinds, kind) {
+			problems = append(problems, fmt.Sprintf("cli_models: unknown CLI kind %q (known: %s)", kind, strings.Join(KnownCLIKinds, ", ")))
+			continue
+		}
+		if !models.IsRealModel(model) {
+			problems = append(problems, fmt.Sprintf("cli_models[%s]: %q is not a real model in the registry", kind, model))
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	return fmt.Errorf("%w: %s", ErrInvalidHarnessConfig, strings.Join(problems, "; "))
 }
 
 // RecipesConfig controls durable-agent recipe catalog loading.
@@ -255,6 +294,9 @@ func LoadAppConfig(path string) (*TunablesConfig, error) {
 		return nil, fmt.Errorf("validate app config: %w", err)
 	}
 	cfg.HTTP.BindAddress = bindAddress
+	if err := cfg.Harness.Validate(); err != nil {
+		return nil, fmt.Errorf("validate app config: %w", err)
+	}
 
 	return cfg, nil
 }

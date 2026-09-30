@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -209,15 +210,86 @@ func TestHandleSelfToolCall_PersistsRedactedArguments(t *testing.T) {
 	}
 }
 
-func TestBudgetForCLIRecordedModels(t *testing.T) {
-	// What CLI-launched sessions record in sessions.model (observed in the dev
-	// database): the wrapper id, a boot-profile name, or empty. None is a real
-	// model, so all resolve to the same floor budget.
+// What a CLI-launched session's tool-result budget is sized against, in order:
+// a real model on the session, then the operator's harness.cli_models entry for
+// that kind of CLI, then the floor. sessions.model for these sessions holds the
+// wrapper's pseudo-model (observed in the dev database as "claude-cli" or
+// empty), which is never a real model.
+func TestCLISessionSizingModelOrder(t *testing.T) {
+	a, s := newToolCallTestAPI(t)
+	if a.Services.AppConfig == nil {
+		a.Services.AppConfig = config.DefaultAppConfig()
+	}
 	floor := truncate.BudgetForModel("")
 	for _, m := range []string{"claude-cli", "bootprofile:claude-smoke", ""} {
 		if got := truncate.BudgetForModel(m); got != floor {
-			t.Errorf("BudgetForModel(%q) = %d, want floor %d", m, got, floor)
+			t.Fatalf("BudgetForModel(%q) = %d, want the floor %d", m, got, floor)
 		}
+	}
+	mk := func(id, provider, model string) {
+		t.Helper()
+		if err := s.CreateSession(context.Background(), &store.Session{ID: id, Provider: provider, Model: model, Status: "active"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("cli-claude", "pty", "claude-cli")  // the observed shape
+	mk("cli-pty-claude", "pty-claude", "") // observed: empty model
+	mk("cli-codex", "pty-codex", "codex-cli")
+	mk("cli-gemini", "pty-gemini", "gemini-cli")  // a kind the operator did not declare
+	mk("cli-real", "pty-claude", "claude-opus-5") // a session that does name a real model
+	mk("cli-legacy", "bootprofile:claude-smoke", "bootprofile:claude-smoke")
+	mk("api-real", "anthropic", "claude-opus-5")
+	mk("api-unknown", "anthropic", "some-future-model") // API sessions are unchanged
+	mk("api-empty", "", "")
+
+	// Nothing declared: every CLI session is sized at the floor.
+	for _, id := range []string{"cli-claude", "cli-pty-claude", "cli-codex", "cli-gemini"} {
+		if got := a.sessionModel(context.Background(), id); got != "" {
+			t.Errorf("no config, %s: sizing model %q, want \"\" (floor)", id, got)
+		}
+	}
+	// A legacy encoded provider is not a CLI provider; its model string is not a
+	// real model, so it is sized at the floor whatever is declared.
+	if got := truncate.BudgetForModel(a.sessionModel(context.Background(), "cli-legacy")); got != floor {
+		t.Errorf("legacy encoded session budget = %d, want the floor %d", got, floor)
+	}
+	// A CLI session that names a real model uses it, config or not.
+	if got := a.sessionModel(context.Background(), "cli-real"); got != "claude-opus-5" {
+		t.Errorf("cli-real = %q", got)
+	}
+
+	a.Services.AppConfig.Harness.CLIModels = map[string]string{"claude": "claude-opus-5", "codex": "claude-sonnet-5"}
+	for id, want := range map[string]string{
+		"cli-claude": "claude-opus-5", "cli-pty-claude": "claude-opus-5", // pty and pty-claude are the same kind
+		"cli-codex":  "claude-sonnet-5",
+		"cli-gemini": "", // undeclared kind: floor
+		"cli-real":   "claude-opus-5",
+	} {
+		if got := a.sessionModel(context.Background(), id); got != want {
+			t.Errorf("declared, %s: sizing model %q, want %q", id, got, want)
+		}
+	}
+	// API sessions are exactly as before, whatever is declared.
+	for id, want := range map[string]string{"api-real": "claude-opus-5", "api-unknown": "some-future-model", "api-empty": ""} {
+		if got := a.sessionModel(context.Background(), id); got != want {
+			t.Errorf("%s = %q, want %q", id, got, want)
+		}
+	}
+	// And the effect the declaration exists for: a 1M-window model's budget
+	// instead of the floor.
+	if truncate.BudgetForModel("claude-opus-5") <= floor {
+		t.Skip("registry gives claude-opus-5 no larger budget than the floor here")
+	}
+	big := strings.Repeat("x\n", 7_500) // 15 KB: over the floor, under the scaled budget
+	req := selfToolCallRequest{SessionID: "cli-claude", Name: "todo_list", CacheRetrieval: true}
+	res := a.presentSelfToolResult(context.Background(), req, textResult(big))
+	if res.Content[0].Text != big {
+		t.Errorf("declared model did not scale the budget: result was cut to %d bytes", len(res.Content[0].Text))
+	}
+	a.Services.AppConfig.Harness.CLIModels = nil
+	res = a.presentSelfToolResult(context.Background(), req, textResult(big))
+	if res.Content[0].Text == big {
+		t.Error("with nothing declared the same result must be cut at the floor")
 	}
 }
 

@@ -49,3 +49,14 @@ skills:
   # by content address, immutable once written. See
   # docs/engineering/architecture/20-skills.md.
   vendor_storage_dir: data/skills/vendor
+
+harness:
+  # The model each kind of CLI (claude, codex, copilot, opencode, pi) runs, as
+  # you know it. Nanite does not choose a CLI's model and cannot observe it; this
+  # is used only to size tool-result budgets for CLI-launched sessions (a
+  # 1M-window model gets a larger preview than the 4 KB floor). A kind not listed
+  # is sized at the floor. Each value must be a real model in the built-in
+  # registry; a typo stops startup. Example:
+  #
+  # cli_models:
+  #   claude: claude-opus-5

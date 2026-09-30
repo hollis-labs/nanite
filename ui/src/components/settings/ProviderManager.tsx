@@ -181,7 +181,7 @@ function APIKeyField({ provider }: { provider: ProviderStatus }) {
           {testResult === 'success' && (
             <div className="flex items-center gap-2 text-sm text-success bg-success-muted px-3 py-2 rounded-md">
               <CircleCheck className="w-4 h-4" />
-              Key accepted — restart Nanite to use it
+              Key accepted
             </div>
           )}
           {testResult === 'error' && (

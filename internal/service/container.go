@@ -622,6 +622,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	agentMembership := NewAgentMembershipService(cfg.Store, cfg.Store)
 	usage := NewUsageService(cfg.Store, cfg.Store)
 	providerConfig := NewProviderConfigService(cfg.Store)
+	// Saving an API key swaps the registered adapter live (CW-20260930-0101).
+	// providercatalog.Catalog is nil-receiver safe, so a nil ProviderCatalog
+	// (tests that don't wire one) is fine here.
+	if cfg.Providers != nil {
+		providerConfig.SetProviderRuntime(cfg.Providers, cfg.ProviderCatalog)
+	}
 
 	// agent_permissions.go (newFileAgentPermissionResolver) and
 	// ToolClient.PermissionResolver/GetPermissions/CheckPermission/
@@ -1423,15 +1429,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		}
 
 		var utilityCall memory.UtilityCallFunc
-		if prov, ok := cfg.Providers.Get(utilityProvider); ok {
-			utilityCall = func(ctx context.Context, prompt string) (string, error) {
-				msgs := []llmtypes.ChatMessage{{Role: "user", Content: prompt}}
-				return prov.Complete(ctx, llmtypes.ChatRequest{
-					SystemPrompt: "You are a memory extraction assistant. Follow instructions precisely.",
-					Messages:     msgs,
-					Model:        utilityModel,
-				})
-			}
+		if cfg.Providers != nil && utilityProvider != "" {
+			utilityCall = newUtilityCall(cfg.Providers, utilityProvider, utilityModel)
 		}
 
 		extractor := memory.NewExtractor(memorySvc, utilityCall)
@@ -1889,4 +1888,25 @@ func recoveryBrokerOrNil(deps *runtimeagent.Dependencies) *broker.Broker {
 	}
 	broker, _ := deps.Recovery.(*broker.Broker)
 	return broker
+}
+
+// newUtilityCall returns the memory extractor's LLM call. The provider is
+// looked up per call rather than captured at boot: saving a key in settings
+// replaces the registered adapter at runtime, and a provider with no key at
+// boot may gain one (CW-20260930-0101). While it is not registered the call
+// returns memory.ErrUtilityUnavailable, which extraction skips silently —
+// what a nil call did before.
+func newUtilityCall(reg *provider.Registry, providerName, model string) memory.UtilityCallFunc {
+	return func(ctx context.Context, prompt string) (string, error) {
+		prov, ok := reg.Get(providerName)
+		if !ok {
+			return "", memory.ErrUtilityUnavailable
+		}
+		msgs := []llmtypes.ChatMessage{{Role: "user", Content: prompt}}
+		return prov.Complete(ctx, llmtypes.ChatRequest{
+			SystemPrompt: "You are a memory extraction assistant. Follow instructions precisely.",
+			Messages:     msgs,
+			Model:        model,
+		})
+	}
 }

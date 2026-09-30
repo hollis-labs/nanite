@@ -66,6 +66,27 @@ func (c *Catalog) Add(e Entry) {
 	c.entries = append(c.entries, e)
 }
 
+// Remove drops the entry named name, reporting whether it was present.
+// Entries after it keep their relative order; a later Add of the same name
+// appends it at the end. Nil-receiver safe, like Add.
+func (c *Catalog) Remove(name string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	idx, ok := c.byName[name]
+	if !ok {
+		return false
+	}
+	c.entries = append(c.entries[:idx], c.entries[idx+1:]...)
+	delete(c.byName, name)
+	for i := idx; i < len(c.entries); i++ {
+		c.byName[c.entries[i].Name] = i
+	}
+	return true
+}
+
 // List returns a snapshot of the catalog in registration order. Safe
 // to call concurrently with Add.
 func (c *Catalog) List() []Entry {

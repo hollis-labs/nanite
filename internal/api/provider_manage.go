@@ -39,24 +39,19 @@ func (a *API) handleSetProviderAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keyName := secrets.ProviderKeyName(id)
-	if body.APIKey == "" {
-		secrets.Delete(keyName)
-	} else {
-		if err := secrets.Set(keyName, body.APIKey); err != nil {
-			a.errorResp(w, http.StatusInternalServerError, "failed to store API key in keychain: "+err.Error())
-			return
-		}
+	result, err := a.Services.ProviderConfig.SetAPIKey(r.Context(), id, body.APIKey)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, "failed to store API key in keychain: "+err.Error())
+		return
 	}
 
 	a.jsonResp(w, http.StatusOK, ProviderAPIKeyResponse{
 		ProviderID: id,
-		HasKey:     body.APIKey != "",
+		HasKey:     result.HasKey,
+		KeySource:  result.KeySource,
 	})
 }
 
-// handleGetProviderStatus returns the provider's config plus runtime status:
-// whether it's registered in the provider registry and whether it has an API key.
 func (a *API) handleGetProviderStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 

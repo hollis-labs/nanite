@@ -89,3 +89,53 @@ func TestCatalog_AddSkipsEmptyName(t *testing.T) {
 		t.Errorf("List after empty-name Add: got %d entries, want 0", len(got))
 	}
 }
+
+// TestCatalog_Remove — a provider whose key is cleared leaves the dropdown
+// (CW-20260930-0101). Entries after it keep their order and stay reachable
+// by name; a later Add of the same name appends it at the end.
+func TestCatalog_Remove(t *testing.T) {
+	c := New()
+	for _, n := range []string{"a", "b", "c"} {
+		c.Add(Entry{Name: n, RowID: n + "-001"})
+	}
+
+	if !c.Remove("b") {
+		t.Fatal("Remove(b) = false, want true")
+	}
+	if c.Remove("b") {
+		t.Fatal("second Remove(b) = true, want false")
+	}
+	if got := names(c.List()); got != "a,c" {
+		t.Fatalf("after Remove(b): %s, want a,c", got)
+	}
+	if e, ok := c.Get("c"); !ok || e.RowID != "c-001" {
+		t.Fatalf("Get(c) after removing an earlier entry = %+v, %v", e, ok)
+	}
+	if _, ok := c.Get("b"); ok {
+		t.Fatal("Get(b) still finds a removed entry")
+	}
+
+	c.Add(Entry{Name: "b", RowID: "b-002"})
+	if got := names(c.List()); got != "a,c,b" {
+		t.Fatalf("re-Add(b): %s, want a,c,b", got)
+	}
+	if e, _ := c.Get("b"); e.RowID != "b-002" {
+		t.Fatalf("Get(b) after re-Add = %+v", e)
+	}
+
+	var nilCat *Catalog
+	if nilCat.Remove("a") {
+		t.Fatal("nil catalog Remove = true")
+	}
+}
+
+func names(es []Entry) string {
+	out := ""
+	for i, e := range es {
+		if i > 0 {
+			out += ","
+		}
+		out += e.Name
+	}
+	return out
+}

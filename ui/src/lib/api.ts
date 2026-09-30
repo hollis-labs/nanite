@@ -1858,7 +1858,12 @@ export const api = {
   setProviderAPIKey: async (
     id: string,
     apiKey: string,
-  ): Promise<{ provider_id: string; has_key: boolean }> => {
+  ): Promise<{
+    provider_id: string;
+    has_key: boolean;
+    /** Where the key the provider now runs on comes from; "" when it has none. */
+    key_source: "keychain" | "environment" | "";
+  }> => {
     const res = await fetch(`${API_BASE}/providers/${id}/api-key`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

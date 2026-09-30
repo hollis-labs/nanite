@@ -65,9 +65,13 @@ type ProviderStatusDetailView struct {
 
 // ProviderAPIKeyResponse is POST /api/providers/{id}/api-key. Its fields are
 // in alphabetical key order so it encodes byte-for-byte like the
-// map[string]any it replaced.
+// map[string]any it replaced. KeySource (CW-20260930-0101) is where the key
+// the provider now runs on comes from — "keychain", "environment", or "" —
+// so clearing a keychain key while an env key is set is not reported as the
+// provider having no key.
 type ProviderAPIKeyResponse struct {
 	HasKey     bool   `json:"has_key"`
+	KeySource  string `json:"key_source"`
 	ProviderID string `json:"provider_id"`
 }
 

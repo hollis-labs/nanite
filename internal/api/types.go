@@ -698,9 +698,9 @@ type InstallSkillRequest struct {
 // InstallSkillResponse is the shared success shape for install and sync --
 // the resulting index row plus the vendored-store address it now points at.
 type InstallSkillResponse struct {
-	Skill   store.Skill `json:"skill"`
-	Address string      `json:"address"`
-	Reused  bool        `json:"reused"`
+	Skill   SkillView `json:"skill"`
+	Address string    `json:"address"`
+	Reused  bool      `json:"reused"`
 }
 
 // ImportAgentRequest is the body for POST /api/agents/install and

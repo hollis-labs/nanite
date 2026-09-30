@@ -3,13 +3,17 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // AgentCapabilitiesService owns per-row CRUD on an agent's capability tables:
 // known tools, known skills, procedures and knowledge seeds. It is the single
-// write path transports use for those rows.
+// write path transports use for those rows. Known-skill rows are also where
+// skill assignment and skill grants live, so assigning, removing, granting
+// and revoking a skill are methods here too; SkillService stays the skills
+// index.
 //
 // It shares agent_procedures with AgentConfigService, which bulk-seeds
 // procedures when a profile is created, updated or copied to managed. That
@@ -34,6 +38,17 @@ func NewAgentCapabilitiesService(st *store.Store) *AgentCapabilitiesService {
 
 // ErrCapabilityExists reports a create for a row that already exists.
 var ErrCapabilityExists = errors.New("capability already exists")
+
+// ErrAgentNotFound and ErrSkillNotFound report a missing agent or skill for
+// AssignSkill.
+var (
+	ErrAgentNotFound = errors.New("agent not found")
+	ErrSkillNotFound = errors.New("skill not found")
+)
+
+// ErrNoSkillGrant reports a revoke for an agent/skill pair with no grant:
+// either no known-skill row, or a row with no grant state.
+var ErrNoSkillGrant = errors.New("no grant exists for this agent/skill")
 
 // CapabilityWriteError wraps a store write rejection, as distinct from a
 // failure to read the row back afterwards. Its message is the store's own.
@@ -191,6 +206,97 @@ func (s *AgentCapabilitiesService) UpdateKnownSkill(ctx context.Context, agentID
 // DeleteKnownSkill returns store.ErrAgentKnownSkillNotFound when absent.
 func (s *AgentCapabilitiesService) DeleteKnownSkill(ctx context.Context, agentID, skillName string) error {
 	return s.store.DeleteAgentKnownSkill(ctx, agentID, skillName)
+}
+
+// ── skill assignment and grants ──
+
+// ListAssignedSkills returns the skills-index rows assigned to an agent.
+func (s *AgentCapabilitiesService) ListAssignedSkills(ctx context.Context, agentID string) ([]store.Skill, error) {
+	return s.store.ListAgentSkills(ctx, agentID)
+}
+
+// AssignSkill assigns a skill to an agent and returns the agent's assigned
+// skills afterwards. It returns ErrAgentNotFound, then ErrSkillNotFound, in
+// that order; a failed skill lookup is reported as not found.
+//
+// The agent check reads agent_profiles directly rather than through
+// AgentService: AssignSkillToAgent writes an agent_known_skills row, which
+// carries a real foreign key to agent_profiles(id), so the existence check
+// must match what that key enforces, independent of AgentService.
+func (s *AgentCapabilitiesService) AssignSkill(ctx context.Context, agentID, skillID, config string) ([]store.Skill, error) {
+	if _, err := s.store.GetAgent(ctx, agentID); err != nil {
+		return nil, ErrAgentNotFound
+	}
+	if sk, err := s.store.GetSkill(ctx, skillID); err != nil || sk == nil {
+		return nil, ErrSkillNotFound
+	}
+	if err := s.store.AssignSkillToAgent(ctx, agentID, skillID, config); err != nil {
+		return nil, err
+	}
+	return s.store.ListAgentSkills(ctx, agentID)
+}
+
+// RemoveSkill removes a skill assignment. The store deletes a bare
+// assignment row and keeps a row that carries known-skill data.
+func (s *AgentCapabilitiesService) RemoveSkill(ctx context.Context, agentID, skillID string) error {
+	return s.store.RemoveSkillFromAgent(ctx, agentID, skillID)
+}
+
+// SkillGrant is the grant state GrantSkill writes. ApprovedContentHash is
+// the skill's current vendored content hash, never a caller-supplied value.
+type SkillGrant struct {
+	ApprovedContentHash string
+	GrantedBy           string
+	CapabilitiesGranted string
+}
+
+// GrantSkill records a grant for skillSlug on the agent's known-skill row,
+// creating the row if there is none. It copies an existing row and
+// overwrites only the grant state (with GrantedAt set to now), so the row's
+// pin, usage and every other column survive.
+func (s *AgentCapabilitiesService) GrantSkill(ctx context.Context, agentID, skillSlug string, g SkillGrant) (*store.AgentKnownSkill, error) {
+	current, err := s.store.GetAgentKnownSkill(ctx, agentID, skillSlug)
+	if err != nil && !errors.Is(err, store.ErrAgentKnownSkillNotFound) {
+		return nil, err
+	}
+	row := store.AgentKnownSkill{AgentID: agentID, SkillName: skillSlug}
+	if current != nil {
+		row = *current
+	}
+	row.ApprovedContentHash = g.ApprovedContentHash
+	row.GrantedAt = time.Now().UTC().Format(time.RFC3339)
+	row.GrantedBy = g.GrantedBy
+	row.CapabilitiesGranted = g.CapabilitiesGranted
+	if err := s.store.InsertAgentKnownSkill(ctx, row); err != nil {
+		return nil, &CapabilityWriteError{Err: err}
+	}
+	return s.store.GetAgentKnownSkill(ctx, agentID, skillSlug)
+}
+
+// RevokeSkillGrant clears only the grant state on the agent's known-skill
+// row; revoking a grant is not a reason to forget the row's pin or usage. It
+// returns ErrNoSkillGrant when there is no row or the row has no grant.
+func (s *AgentCapabilitiesService) RevokeSkillGrant(ctx context.Context, agentID, skillSlug string) error {
+	current, err := s.store.GetAgentKnownSkill(ctx, agentID, skillSlug)
+	if err != nil {
+		if errors.Is(err, store.ErrAgentKnownSkillNotFound) {
+			return ErrNoSkillGrant
+		}
+		return err
+	}
+	if current.ApprovedContentHash == "" && current.GrantedAt == "" &&
+		current.GrantedBy == "" && current.CapabilitiesGranted == "" {
+		return ErrNoSkillGrant
+	}
+	row := *current
+	row.ApprovedContentHash = ""
+	row.GrantedAt = ""
+	row.GrantedBy = ""
+	row.CapabilitiesGranted = ""
+	if err := s.store.InsertAgentKnownSkill(ctx, row); err != nil {
+		return &CapabilityWriteError{Err: err}
+	}
+	return nil
 }
 
 // ── procedures ──

@@ -204,3 +204,133 @@ func TestAgentCapabilitiesWriteErrorKeepsStoreMessage(t *testing.T) {
 		t.Fatalf("Error() = %q, want the store's own %q", err.Error(), writeErr.Err.Error())
 	}
 }
+
+func seedCapabilitySkill(t *testing.T, st *store.Store, slug string) *store.Skill {
+	t.Helper()
+	sk := &store.Skill{Name: slug, Slug: slug, Enabled: true}
+	if err := st.CreateSkill(context.Background(), sk); err != nil {
+		t.Fatalf("CreateSkill: %v", err)
+	}
+	return sk
+}
+
+func TestAgentCapabilitiesGrantSkillPreservesRowAndSetsGrant(t *testing.T) {
+	ctx := context.Background()
+	svc, st, agentID := newCapabilitiesTestService(t)
+
+	seeded := store.AgentKnownSkill{
+		AgentID:         agentID,
+		SkillName:       "grantable",
+		Pinned:          true,
+		ActivationCount: 3,
+		LastUsedAt:      "2026-09-01 10:00:00",
+		AddedAt:         "2026-08-01 09:00:00",
+		TTLSeconds:      120,
+		Reason:          "panel pin",
+	}
+	if err := st.InsertAgentKnownSkill(ctx, seeded); err != nil {
+		t.Fatalf("InsertAgentKnownSkill: %v", err)
+	}
+
+	got, err := svc.GrantSkill(ctx, agentID, "grantable", SkillGrant{
+		ApprovedContentHash: "skl-vendor-abc",
+		GrantedBy:           "operator-ui",
+		CapabilitiesGranted: `{"network":false}`,
+	})
+	if err != nil {
+		t.Fatalf("GrantSkill: %v", err)
+	}
+	if got.ApprovedContentHash != "skl-vendor-abc" || got.GrantedBy != "operator-ui" ||
+		got.CapabilitiesGranted != `{"network":false}` || got.GrantedAt == "" {
+		t.Fatalf("grant state not written: %+v", got)
+	}
+	if got.Pinned != seeded.Pinned || got.ActivationCount != seeded.ActivationCount ||
+		got.LastUsedAt != seeded.LastUsedAt || got.AddedAt != seeded.AddedAt ||
+		got.TTLSeconds != seeded.TTLSeconds || got.Reason != seeded.Reason {
+		t.Fatalf("row columns lost:\n got  %+v\n want %+v", got, seeded)
+	}
+}
+
+func TestAgentCapabilitiesGrantSkillCreatesMissingRow(t *testing.T) {
+	ctx := context.Background()
+	svc, _, agentID := newCapabilitiesTestService(t)
+
+	got, err := svc.GrantSkill(ctx, agentID, "fresh", SkillGrant{ApprovedContentHash: "h", GrantedBy: "op", CapabilitiesGranted: "{}"})
+	if err != nil {
+		t.Fatalf("GrantSkill: %v", err)
+	}
+	if got.SkillName != "fresh" || got.ApprovedContentHash != "h" {
+		t.Fatalf("row = %+v", got)
+	}
+}
+
+func TestAgentCapabilitiesRevokeSkillGrantClearsOnlyGrant(t *testing.T) {
+	ctx := context.Background()
+	svc, st, agentID := newCapabilitiesTestService(t)
+
+	seeded := store.AgentKnownSkill{
+		AgentID:             agentID,
+		SkillName:           "revocable",
+		Pinned:              true,
+		ActivationCount:     2,
+		AddedAt:             "2026-08-01 09:00:00",
+		Reason:              "keep me",
+		ApprovedContentHash: "h",
+		GrantedAt:           "2026-08-02 09:00:00",
+		GrantedBy:           "op",
+		CapabilitiesGranted: "{}",
+	}
+	if err := st.InsertAgentKnownSkill(ctx, seeded); err != nil {
+		t.Fatalf("InsertAgentKnownSkill: %v", err)
+	}
+	if err := svc.RevokeSkillGrant(ctx, agentID, "revocable"); err != nil {
+		t.Fatalf("RevokeSkillGrant: %v", err)
+	}
+	got, err := st.GetAgentKnownSkill(ctx, agentID, "revocable")
+	if err != nil {
+		t.Fatalf("GetAgentKnownSkill: %v", err)
+	}
+	if got.ApprovedContentHash != "" || got.GrantedAt != "" || got.GrantedBy != "" || got.CapabilitiesGranted != "" {
+		t.Fatalf("grant state not cleared: %+v", got)
+	}
+	if !got.Pinned || got.ActivationCount != 2 || got.AddedAt != seeded.AddedAt || got.Reason != "keep me" {
+		t.Fatalf("row columns lost: %+v", got)
+	}
+
+	// Revoking again: the row exists but carries no grant.
+	if err := svc.RevokeSkillGrant(ctx, agentID, "revocable"); !errors.Is(err, ErrNoSkillGrant) {
+		t.Fatalf("second revoke err = %v, want ErrNoSkillGrant", err)
+	}
+	// No row at all.
+	if err := svc.RevokeSkillGrant(ctx, agentID, "never-known"); !errors.Is(err, ErrNoSkillGrant) {
+		t.Fatalf("missing-row revoke err = %v, want ErrNoSkillGrant", err)
+	}
+}
+
+func TestAgentCapabilitiesAssignSkillChecksAgentThenSkill(t *testing.T) {
+	ctx := context.Background()
+	svc, st, agentID := newCapabilitiesTestService(t)
+	sk := seedCapabilitySkill(t, st, "assignable")
+
+	// Both missing: the agent is reported first.
+	if _, err := svc.AssignSkill(ctx, "no-such-agent", "no-such-skill", ""); !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("missing agent err = %v, want ErrAgentNotFound", err)
+	}
+	if _, err := svc.AssignSkill(ctx, agentID, "no-such-skill", ""); !errors.Is(err, ErrSkillNotFound) {
+		t.Fatalf("missing skill err = %v, want ErrSkillNotFound", err)
+	}
+
+	skills, err := svc.AssignSkill(ctx, agentID, sk.ID, "")
+	if err != nil {
+		t.Fatalf("AssignSkill: %v", err)
+	}
+	if len(skills) != 1 || skills[0].Slug != "assignable" {
+		t.Fatalf("assigned skills = %+v", skills)
+	}
+	if err := svc.RemoveSkill(ctx, agentID, sk.ID); err != nil {
+		t.Fatalf("RemoveSkill: %v", err)
+	}
+	if left, err := svc.ListAssignedSkills(ctx, agentID); err != nil || len(left) != 0 {
+		t.Fatalf("after remove: %v, %+v", err, left)
+	}
+}

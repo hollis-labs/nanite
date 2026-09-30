@@ -216,11 +216,13 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 	}
 
 	if len(req.Metadata) > 0 {
-		if blob, err := json.Marshal(req.Metadata); err == nil {
-			if err := service.ValidateHarnessSelection(a.Services.HarnessProfiles, string(blob)); err != nil {
-				a.errorResp(w, http.StatusBadRequest, err.Error())
-				return
-			}
+		blob, err := json.Marshal(req.Metadata)
+		if err == nil {
+			err = service.ValidateHarnessSelection(a.Services.HarnessProfiles, string(blob))
+		}
+		if err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
+			return
 		}
 	}
 

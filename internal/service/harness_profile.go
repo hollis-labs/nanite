@@ -169,9 +169,9 @@ func (ls *loopState) compactPreviewBudget() int {
 }
 
 // ValidateHarnessSelection checks the profile name and overrides carried in a
-// session's metadata against reg (nil means the built-ins), so a session is
-// rejected at creation instead of failing every turn. Overrides are validated
-// by resolving them.
+// session's metadata, and the harness environment overrides, against reg (nil
+// means the built-ins), so a session is rejected at creation instead of failing
+// every turn. Overrides are validated by resolving them.
 func ValidateHarnessSelection(reg *harnessprofile.Registry, metadata string) error {
 	profile, overrides, err := SessionHarnessSelection(metadata)
 	if err != nil {
@@ -183,7 +183,10 @@ func ValidateHarnessSelection(reg *harnessprofile.Registry, metadata string) err
 	if reg == nil {
 		reg = builtinOnlyRegistry()
 	}
-	_, err = reg.Resolve(harnessprofile.Inputs{Profile: profile, Launch: overrides, Getenv: func(string) (string, bool) { return "", false }})
+	// The process environment is resolved too: a NANITE_HARNESS_* value that
+	// does not parse fails every turn, so it is refused here rather than
+	// discovered on the first message.
+	_, err = reg.Resolve(harnessprofile.Inputs{Profile: profile, Launch: overrides})
 	return err
 }
 

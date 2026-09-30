@@ -74,7 +74,9 @@ Lowest to highest:
 7. environment overrides, `NANITE_HARNESS_<KNOB>`,
 8. host maximum clamps, applied to every value last.
 
-A profile that states a knob outranks the user setting for it; one that does not
+A per-model block on a base profile outranks a child profile's plain value,
+because model blocks are applied after the whole chain's plain values. A profile
+that states a knob outranks the user setting for it; one that does not
 leaves the setting in force. A clamp is recorded on the value it changed, with
 what was asked for, and the value keeps the source of the layer that asked.
 

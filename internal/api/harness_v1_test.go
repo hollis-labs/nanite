@@ -455,3 +455,39 @@ func containsString(values []string, target string) bool {
 	}
 	return false
 }
+
+// The v1 route refuses a session that names an unknown harness profile, an
+// invalid override or a bad NANITE_HARNESS_* value at creation, end to end
+// through the mux, and creates nothing.
+func TestHarnessV1CreateSessionRejectsBadHarnessSelection(t *testing.T) {
+	a, mux := newTestAPI(t)
+	post := func(meta map[string]any) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(harnessV1CreateSessionRequest{Metadata: meta})
+		req := httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	before, _ := a.Services.Store.ListSessions(context.Background())
+
+	if w := post(map[string]any{"harness_profile": "does-not-exist"}); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "unknown harness profile") {
+		t.Errorf("unknown profile = %d %s", w.Code, w.Body.String())
+	}
+	if w := post(map[string]any{"harness_overrides": map[string]any{"harness": map[string]any{"hard_ceiling": -2}}}); w.Code != http.StatusBadRequest {
+		t.Errorf("invalid override = %d %s", w.Code, w.Body.String())
+	}
+	t.Setenv("NANITE_HARNESS_HARD_CEILING", "lots")
+	if w := post(map[string]any{"harness_profile": "dev"}); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "NANITE_HARNESS_HARD_CEILING") {
+		t.Errorf("bad env = %d %s", w.Code, w.Body.String())
+	}
+	after, _ := a.Services.Store.ListSessions(context.Background())
+	if len(after) != len(before) {
+		t.Errorf("a refused create left %d new session(s)", len(after)-len(before))
+	}
+
+	t.Setenv("NANITE_HARNESS_HARD_CEILING", "")
+	if w := post(map[string]any{"harness_profile": "dev"}); w.Code >= 300 {
+		t.Errorf("valid selection = %d %s", w.Code, w.Body.String())
+	}
+}

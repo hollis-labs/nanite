@@ -55,3 +55,30 @@ func TestGenerateResponse_DefaultProfileIsRecordedToo(t *testing.T) {
 		t.Fatalf("default recording: %v %+v", err, rows)
 	}
 }
+
+// A stored selection that no longer resolves ends the turn with the reason, and
+// nothing is generated or recorded — never a silent fall back to a default.
+func TestPrepareTurn_BadHarnessProfileTerminatesWithReason(t *testing.T) {
+	ctx := context.Background()
+	f := newCharacterizationFixture(t, []characterizationProviderStep{{events: doneEvents("must not be reached")}})
+	if err := f.st.UpdateSessionMetadata(ctx, f.session, `{"harness_profile":"vanished"}`); err != nil {
+		t.Fatal(err)
+	}
+	events := f.run(t, "bad-profile-turn")
+
+	var sawError bool
+	for _, e := range events {
+		if e.Type == "error" && strings.Contains(e.Error, "unknown harness profile") {
+			sawError = true
+		}
+		if e.Type == "stream_end" || e.Type == "delta" {
+			t.Errorf("turn proceeded past a bad profile: %+v", e)
+		}
+	}
+	if !sawError {
+		t.Fatalf("no error event naming the profile; events: %+v", events)
+	}
+	if rows, err := f.st.GetSessionExecutionMetrics(ctx, f.session); err != nil || len(rows) != 0 {
+		t.Errorf("metrics recorded for a refused turn: %v %d", err, len(rows))
+	}
+}

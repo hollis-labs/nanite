@@ -73,9 +73,16 @@ preview. It is a function of the model, not a constant:
   free below the loop's own context ceiling, never below
   `tool_output_remaining_floor_bytes`. A nearly full context therefore gets a
   ceiling below the minimum. An explicit value gets this limit too.
+- **Within one iteration.** Every result an iteration delivers is taken out of
+  the remaining context before the next is sized, so the results of one
+  multi-tool iteration are bounded together, not each against the same
+  pre-iteration figure. The next iteration replaces the estimate with a
+  measurement, and an iteration with no measurement leaves the remaining context
+  unknown rather than stale.
 - **Per-result cap.** A single result is bounded by the preview budget whatever
   the ceiling is, and by the same remaining-context cap, so one result cannot
-  overrun a nearly full context. The remaining-context cap still applies when
+  overrun a nearly full context. The step-down compact preview is limited the
+  same way. The remaining-context cap still applies when
   the cumulative ceiling is disabled with `0`; only the cumulative step-down is
   turned off.
 - **Legacy names.** `NANITE_TOOL_TURN_CEILING_BYTES` is an environment layer

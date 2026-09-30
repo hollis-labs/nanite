@@ -169,6 +169,28 @@ func (ls *loopState) refreshTurnCeiling() {
 	ls.turnResultCeiling = ls.harness.Values.TurnCeiling(ls.windowTokens, ls.remainingTokens)
 }
 
+// setRemainingFromBreakdown measures the remaining context from the iteration's
+// token breakdown. With no breakdown there is no measurement, and the remaining
+// context is unknown rather than whatever an earlier iteration left behind.
+func (ls *loopState) setRemainingFromBreakdown(b *chat.TokenBreakdown) {
+	if b == nil {
+		ls.setRemainingContext(0, 0)
+		return
+	}
+	ls.setRemainingContext(b.Ceiling, b.Total)
+}
+
+// consumeRemainingContext takes the bytes just delivered to the model out of
+// the remaining context, and refreshes the ceiling. The next iteration's
+// setRemainingContext replaces the estimate with a measurement.
+func (ls *loopState) consumeRemainingContext(deliveredBytes int) {
+	if ls == nil || ls.remainingTokens < 0 || deliveredBytes <= 0 {
+		return
+	}
+	ls.remainingTokens = max(0, ls.remainingTokens-(deliveredBytes+3)/4)
+	ls.refreshTurnCeiling()
+}
+
 // setRemainingContext records how many tokens of the loop's context ceiling are
 // still free, and refreshes the ceiling. A ceiling of zero or less (unknown
 // window) leaves the remaining context unknown.
@@ -205,7 +227,14 @@ func (ls *loopState) compactPreviewBudget() int {
 	if ls == nil || ls.harness == nil {
 		return CompactPreviewBudgetBytes
 	}
-	return ls.harness.Values.CompactPreviewBytes
+	v := ls.harness.Values
+	compact := v.CompactPreviewBytes
+	// The step-down size is a result too: a configured compact preview larger
+	// than the context can take is limited like any other.
+	if limit := v.RemainingCap(ls.remainingTokens); limit >= 0 && compact > limit {
+		compact = limit
+	}
+	return compact
 }
 
 // ValidateHarnessSelection checks the profile name and overrides carried in a

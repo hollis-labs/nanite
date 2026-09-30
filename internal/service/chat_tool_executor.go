@@ -850,6 +850,11 @@ func (s *chatServiceImpl) postProcessToolResults(
 		}
 
 		ls.cumulativeToolBytes += len(tr.Content)
+		// What this result occupies is no longer free, so the results after it
+		// in the same iteration are sized against what is left. Without this
+		// every parallel result in an iteration sees the same pre-iteration
+		// figure, and nothing bounds their sum until the next budget check.
+		ls.consumeRemainingContext(len(tr.Content))
 
 		// Emit tool_result to client.
 		summary := resultText

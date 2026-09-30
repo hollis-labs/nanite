@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,6 +11,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/tool"
@@ -177,5 +180,160 @@ func TestLegacyCeilingSettingAndEnvPrecedence(t *testing.T) {
 	res, _ = svc.resolveHarness(ctx, &store.Session{}, chat.AgentConstraints{}, "")
 	if res.Values.ToolOutputBytes == nil || *res.Values.ToolOutputBytes != 0 || res.Values.TurnCeiling(200_000, -1) != 0 {
 		t.Errorf("zero setting: %v", res.Values.ToolOutputBytes)
+	}
+}
+
+// ---- review notes from the first ceiling PR ----------------------------------
+
+func bigResult(tag string) string { return strings.Repeat(tag+" a row of a large tool result\n", 4000) }
+
+// Several results delivered in one iteration are bounded together: each is sized
+// against what the earlier ones left, not against the same pre-iteration figure.
+func TestParallelResultsInOneIterationAreBoundedInSum(t *testing.T) {
+	ctx := context.Background()
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "sum.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close(ctx) })
+	svc := makeErrorHonestyService()
+	svc.resultCache = tool.NewResultCache(st.DB, tool.ResultCacheConfig{})
+
+	ls := loopWithProfile(t, &store.Session{}, 1_000_000)
+	const remainingTokens = 8_000 // 32,000 bytes of context left
+	ls.setRemainingContext(800_000, 800_000-remainingTokens)
+
+	const n = 8
+	var plans []toolPlan
+	var results []toolExecResult
+	for i := 0; i < n; i++ {
+		tu := llmtypes.ToolUseBlock{ID: fmt.Sprintf("p%d", i), Name: "portfolio_source", Input: map[string]any{}}
+		plans = append(plans, toolPlan{tu: tu, status: toolPlanReady})
+		results = append(results, toolExecResult{rawOutput: bigResult(fmt.Sprint(i)), ref: chat.ToolCallRef{ID: tu.ID, Name: tu.Name}})
+	}
+	blocks, _ := svc.postProcessToolResults(ctx, plans, results, ls, make(chan chat.StreamEvent, 64), "s", "agent", "msg", "claude-opus-5")
+	if len(blocks) != n {
+		t.Fatalf("blocks = %d", len(blocks))
+	}
+	sum := 0
+	for _, b := range blocks {
+		sum += len(b.Content)
+	}
+	// Each block carries a recovery notice on top of its preview budget.
+	if limit := remainingTokens*4 + n*1500; sum > limit {
+		t.Errorf("iteration delivered %d bytes, want at most %d (remaining context %d B)", sum, limit, remainingTokens*4)
+	}
+	if first, last := len(blocks[0].Content), len(blocks[n-1].Content); last >= first {
+		t.Errorf("later results were not sized against what earlier ones used: first %d, last %d", first, last)
+	}
+	if ls.remainingTokens >= remainingTokens {
+		t.Errorf("delivered results were not taken out of the remaining context: %d", ls.remainingTokens)
+	}
+}
+
+// consumeRemainingContext only spends a known remainder, never below zero, and
+// lowers the ceiling with it.
+func TestConsumeRemainingContext(t *testing.T) {
+	ls := loopWithProfile(t, &store.Session{}, 1_000_000)
+	ls.consumeRemainingContext(10_000) // remaining unknown: nothing to spend
+	if ls.remainingTokens != -1 {
+		t.Errorf("unknown remaining changed: %d", ls.remainingTokens)
+	}
+	ls.setRemainingContext(800_000, 799_000) // 1,000 tokens free
+	ls.consumeRemainingContext(2_000)        // 500 tokens
+	if ls.remainingTokens != 500 {
+		t.Errorf("remaining = %d, want 500", ls.remainingTokens)
+	}
+	ls.consumeRemainingContext(1_000_000)
+	if ls.remainingTokens != 0 || ls.turnResultCeiling != 4096 {
+		t.Errorf("exhausted: remaining %d ceiling %d, want 0 and the 4096 floor", ls.remainingTokens, ls.turnResultCeiling)
+	}
+}
+
+// A missing breakdown makes the remaining context unknown again instead of
+// keeping an earlier iteration's figure.
+func TestNilBreakdownResetsRemainingContext(t *testing.T) {
+	ls := loopWithProfile(t, &store.Session{}, 1_000_000)
+	ls.setRemainingFromBreakdown(&chat.TokenBreakdown{Ceiling: 800_000, Total: 795_000})
+	if ls.remainingTokens != 5_000 || ls.turnResultCeiling >= 120_000 {
+		t.Fatalf("measured: remaining %d ceiling %d", ls.remainingTokens, ls.turnResultCeiling)
+	}
+	ls.setRemainingFromBreakdown(nil)
+	if ls.remainingTokens != -1 || ls.turnResultCeiling != 120_000 {
+		t.Errorf("after a nil breakdown: remaining %d ceiling %d, want unknown and the unrestricted 120000", ls.remainingTokens, ls.turnResultCeiling)
+	}
+	// A breakdown without a ceiling (unknown window) is also "unknown".
+	ls.setRemainingFromBreakdown(&chat.TokenBreakdown{Ceiling: 0, Total: 5_000})
+	if ls.remainingTokens != -1 {
+		t.Errorf("ceiling 0: remaining %d", ls.remainingTokens)
+	}
+}
+
+// The step-down preview is a result too: a configured compact size larger than
+// the context can take is limited to the remaining cap.
+func TestCompactPreviewIsClampedToTheRemainingCap(t *testing.T) {
+	sess := &store.Session{Metadata: `{"harness_overrides":{"harness":{"compact_preview_bytes":16000}}}`}
+	ls := loopWithProfile(t, sess, 1_000_000)
+	if got := ls.compactPreviewBudget(); got != 16_000 {
+		t.Fatalf("unrestricted compact preview = %d", got)
+	}
+	ls.setRemainingContext(800_000, 797_000) // 3,000 tokens free -> the 4096 floor
+	if got := ls.compactPreviewBudget(); got != 4096 {
+		t.Errorf("compact preview with a near-full context = %d, want 4096", got)
+	}
+	ls.setRemainingContext(800_000, 792_000) // 8,000 tokens -> 8,000 B cap
+	if got := ls.compactPreviewBudget(); got != 8_000 {
+		t.Errorf("compact preview = %d, want the 8000 remaining cap", got)
+	}
+	// The default 512 is already below any cap and is left alone.
+	def := loopWithProfile(t, &store.Session{}, 1_000_000)
+	def.setRemainingContext(800_000, 797_000)
+	if got := def.compactPreviewBudget(); got != 512 {
+		t.Errorf("default compact preview = %d", got)
+	}
+}
+
+// The ext user setting is the lowest layer: a profile that states the ceiling
+// outranks it, and with no such profile the setting applies.
+func TestCeilingSettingIsBelowTheProfile(t *testing.T) {
+	ctx := context.Background()
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "prec.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close(ctx) })
+	if _, execErr := st.DB.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); execErr != nil {
+		t.Fatal(execErr)
+	}
+	us, usErr := st.GetUserSettings(ctx)
+	if usErr != nil {
+		t.Fatal(usErr)
+	}
+	us.ExtSettings = map[string]any{"tool_turn_ceiling_bytes": float64(30000)}
+	if updErr := st.UpdateUserSettings(ctx, us); updErr != nil {
+		t.Fatal(updErr)
+	}
+	dir := t.TempDir()
+	if wErr := os.WriteFile(filepath.Join(dir, "capped.yaml"), []byte("name: capped\nlimits: {tool_output_bytes: 40000}\n"), 0o600); wErr != nil {
+		t.Fatal(wErr)
+	}
+	reg, err := harnessprofile.NewRegistry(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &chatServiceImpl{store: st, harnessProfiles: reg}
+
+	res, err := svc.resolveHarness(ctx, &store.Session{}, chat.AgentConstraints{}, "")
+	if err != nil || *res.Values.ToolOutputBytes != 30000 || res.Sources["tool_output_bytes"].Layer != "app-settings" {
+		t.Fatalf("setting alone: %v %v %+v", err, res.Values.ToolOutputBytes, res.Sources["tool_output_bytes"])
+	}
+	res, err = svc.resolveHarness(ctx, &store.Session{Metadata: `{"harness_profile":"capped"}`}, chat.AgentConstraints{}, "")
+	if err != nil || *res.Values.ToolOutputBytes != 40000 || res.Sources["tool_output_bytes"].Layer != "profile:capped" {
+		t.Errorf("a profile that states the ceiling must outrank the setting: %v %v %+v", err, res.Values.ToolOutputBytes, res.Sources["tool_output_bytes"])
+	}
+	// A profile that does not state it leaves the setting in force.
+	res, _ = svc.resolveHarness(ctx, &store.Session{Metadata: `{"harness_profile":"dev"}`}, chat.AgentConstraints{}, "")
+	if *res.Values.ToolOutputBytes != 30000 {
+		t.Errorf("a profile silent on the ceiling displaced the setting: %d", *res.Values.ToolOutputBytes)
 	}
 }

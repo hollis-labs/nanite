@@ -177,12 +177,12 @@ func TestMCPServers_EnvReturnedUnredacted_CurrentBehaviour_PendingCW20260930_011
 	}
 }
 
-// TestMCPServers_UIShapedPutWipesHeadersTrustTierAllowlist_CurrentBehaviour_PendingCW20260930_0116
-// pins that PUT replaces the whole record: the settings UI's payload
+// TestMCPServers_UIShapedPutPreservesHeadersTrustTierAllowlist_CW20260930_0116
+// pins the fix for CW-20260930-0116: the settings UI's PUT payload
 // (ToolDashboard formToPayload) omits headers, trust_tier and env_allowlist,
-// so saving from it resets all three to their defaults and drops a stored
-// credential. CW-20260930-0116 decides the fix; whoever lands it flips this.
-func TestMCPServers_UIShapedPutWipesHeadersTrustTierAllowlist_CurrentBehaviour_PendingCW20260930_0116(t *testing.T) {
+// and saving from it used to reset all three, dropping a stored credential.
+// Omitted fields now keep their stored values.
+func TestMCPServers_UIShapedPutPreservesHeadersTrustTierAllowlist_CW20260930_0116(t *testing.T) {
 	a, mux := newTestAPI(t)
 	create := `{"name":"remote","transport_type":"streamable","url":"http://127.0.0.1:1/mcp",` +
 		`"headers":"{\"Authorization\":\"Bearer ` + mcpHeaderSecret + `\"}","trust_tier":"first_party","env_allowlist":"[\"HOME\"]"}`
@@ -197,9 +197,149 @@ func TestMCPServers_UIShapedPutWipesHeadersTrustTierAllowlist_CurrentBehaviour_P
 	if err != nil || row == nil {
 		t.Fatalf("GetMCPServer: %v %v", row, err)
 	}
-	if row.Headers != "{}" || row.TrustTier != store.TrustTierThirdPartyHTTP || row.EnvAllowlist != "[]" {
-		t.Fatalf("stored after UI-shaped PUT: headers=%q trust_tier=%q env_allowlist=%q; if CW-20260930-0116 landed, flip this test",
+	if row.Headers != `{"Authorization":"Bearer `+mcpHeaderSecret+`"}` || row.TrustTier != "first_party" || row.EnvAllowlist != `["HOME"]` {
+		t.Fatalf("stored after UI-shaped PUT: headers=%q trust_tier=%q env_allowlist=%q, want all three kept",
 			row.Headers, row.TrustTier, row.EnvAllowlist)
+	}
+}
+
+// mcpFullServer creates a stdio server with every settable field set, and
+// returns the stored row.
+func mcpFullServer(t *testing.T, a *API, mux http.Handler) *store.MCPServerConfig {
+	t.Helper()
+	create := `{"name":"full","transport_type":"stdio","command":"run","url":"http://127.0.0.1:1/x",` +
+		`"args":"[\"-v\"]","env":"[\"K=V\"]","trust_tier":"first_party","env_allowlist":"[\"HOME\"]",` +
+		`"headers":"{\"Authorization\":\"Bearer ` + mcpHeaderSecret + `\"}"}`
+	if w := mcpDo(mux, "POST", "/api/mcp-servers", create); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	row, err := a.Services.Store.GetMCPServer(context.Background(), "full")
+	if err != nil || row == nil {
+		t.Fatalf("GetMCPServer: %v %v", row, err)
+	}
+	return row
+}
+
+// Each settable field, when the PUT omits it (or sends null), keeps its
+// stored value. The table sends every other field so each row isolates one.
+func TestMCPServers_PutOmittedFieldKeepsStoredValue(t *testing.T) {
+	sent := map[string]string{
+		"transport_type": `"stdio"`,
+		"command":        `"run2"`,
+		"url":            `"http://127.0.0.1:2/x"`,
+		"args":           `"[\"-q\"]"`,
+		"env":            `"[\"K=W\"]"`,
+		"enabled":        `false`,
+		"trust_tier":     `"third_party_http"`,
+		"env_allowlist":  `"[\"PATH\"]"`,
+		"headers":        `"{\"Authorization\":\"Bearer other\"}"`,
+	}
+	field := func(r *store.MCPServerConfig, name string) any {
+		switch name {
+		case "transport_type":
+			return r.TransportType
+		case "command":
+			return r.Command
+		case "url":
+			return r.URL
+		case "args":
+			return r.Args
+		case "env":
+			return r.Env
+		case "enabled":
+			return r.Enabled
+		case "trust_tier":
+			return r.TrustTier
+		case "env_allowlist":
+			return r.EnvAllowlist
+		case "headers":
+			return r.Headers
+		}
+		t.Fatalf("unknown field %s", name)
+		return nil
+	}
+	for omitted := range sent {
+		for _, mode := range []string{"omitted", "null"} {
+			t.Run(omitted+"/"+mode, func(t *testing.T) {
+				a, mux := newTestAPI(t)
+				before := mcpFullServer(t, a, mux)
+				var parts []string
+				for k, v := range sent {
+					if k == omitted {
+						if mode == "null" {
+							parts = append(parts, `"`+k+`":null`)
+						}
+						continue
+					}
+					parts = append(parts, `"`+k+`":`+v)
+				}
+				if w := mcpDo(mux, "PUT", "/api/mcp-servers/full", "{"+strings.Join(parts, ",")+"}"); w.Code != http.StatusOK {
+					t.Fatalf("update: %d %s", w.Code, w.Body.String())
+				}
+				after, err := a.Services.Store.GetMCPServer(context.Background(), "full")
+				if err != nil || after == nil {
+					t.Fatalf("GetMCPServer: %v %v", after, err)
+				}
+				if got, want := field(after, omitted), field(before, omitted); got != want {
+					t.Fatalf("%s %s: stored %v, want the kept %v", omitted, mode, got, want)
+				}
+			})
+		}
+	}
+}
+
+// Sending a field explicitly empty still clears it; the store applies its
+// defaults where it has one.
+func TestMCPServers_PutExplicitEmptyClears(t *testing.T) {
+	a, mux := newTestAPI(t)
+	mcpFullServer(t, a, mux)
+	body := `{"command":"","url":"","args":"","env":"","enabled":false,"trust_tier":"","env_allowlist":"","headers":"{}"}`
+	if w := mcpDo(mux, "PUT", "/api/mcp-servers/full", body); w.Code != http.StatusOK {
+		t.Fatalf("update: %d %s", w.Code, w.Body.String())
+	}
+	row, err := a.Services.Store.GetMCPServer(context.Background(), "full")
+	if err != nil || row == nil {
+		t.Fatalf("GetMCPServer: %v %v", row, err)
+	}
+	got := []any{row.Command, row.URL, row.Args, row.Env, row.Enabled, row.TrustTier, row.EnvAllowlist, row.Headers, row.TransportType}
+	want := []any{"", "", "", "", false, store.TrustTierThirdPartyHTTP, "[]", "{}", store.TransportStdio}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("after explicit clears got %v, want %v", got, want)
+	}
+
+	// "headers":"" clears too.
+	mcpDo(mux, "PUT", "/api/mcp-servers/full", `{"headers":"{\"A\":\"b\"}"}`)
+	mcpDo(mux, "PUT", "/api/mcp-servers/full", `{"headers":""}`)
+	if row, _ = a.Services.Store.GetMCPServer(context.Background(), "full"); row.Headers != "{}" {
+		t.Fatalf(`headers after "headers":"" = %q, want {}`, row.Headers)
+	}
+}
+
+// The PUT response is the stored row: carried values, the stored created_at,
+// and headers still redacted.
+func TestMCPServers_PutResponseIsTheStoredRow(t *testing.T) {
+	a, mux := newTestAPI(t)
+	before := mcpFullServer(t, a, mux)
+	w := mcpDo(mux, "PUT", "/api/mcp-servers/full", `{"command":"run2","created_at":"client-sent"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update: %d %s", w.Code, w.Body.String())
+	}
+	var got MCPServerView
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	after, err := a.Services.Store.GetMCPServer(context.Background(), "full")
+	if err != nil || after == nil {
+		t.Fatalf("GetMCPServer: %v %v", after, err)
+	}
+	if want := mcpServerToView(after); got != want {
+		t.Fatalf("response is not the stored row\n got: %+v\nwant: %+v", got, want)
+	}
+	if got.CreatedAt != before.CreatedAt || got.Command != "run2" || got.URL != before.URL || !got.Enabled {
+		t.Fatalf("response = %+v, want stored created_at %q, the new command and carried url/enabled", got, before.CreatedAt)
+	}
+	if strings.Contains(w.Body.String(), mcpHeaderSecret) || got.Headers != `{"Authorization":"`+service.RedactedHeaderValue+`"}` {
+		t.Fatalf("response headers not redacted: %s", w.Body.String())
 	}
 }
 

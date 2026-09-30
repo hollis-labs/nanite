@@ -123,33 +123,77 @@ func (s *MCPServerService) Create(ctx context.Context, cfg *store.MCPServerConfi
 	return nil
 }
 
-// Update replaces the stored config for cfg.Name with cfg, then removes and
-// re-registers the server's transport and runs discovery. existing is the
-// stored row the caller already read. Header values sent back as the
-// redaction placeholder keep their stored values (MergeRedactedHeaders), and
-// an empty transport keeps the stored one; an unknown transport is a
-// *MCPServerValidationError. Every other field is replaced as sent. Store
-// errors come back unwrapped.
-func (s *MCPServerService) Update(ctx context.Context, existing *store.MCPServerConfig, cfg *store.MCPServerConfig) error {
-	cfg.Headers = MergeRedactedHeaders(cfg.Headers, existing.Headers)
+// MCPServerPatch is an update to a stored MCP server config. A nil field is
+// absent and keeps the stored value; a non-nil field replaces it, and an
+// empty string there is an explicit clear (the store then applies its own
+// default for trust_tier, env_allowlist and headers). Name, ID and the
+// timestamps are not patchable.
+type MCPServerPatch struct {
+	TransportType *string
+	Command       *string
+	URL           *string
+	Args          *string
+	Env           *string
+	Enabled       *bool
+	TrustTier     *string
+	EnvAllowlist  *string
+	Headers       *string
+}
 
-	if cfg.TransportType == "" {
-		cfg.TransportType = existing.TransportType
+// Update applies patch to the stored row existing, stores the result, then
+// removes and re-registers the server's transport and runs discovery. It
+// returns the stored row.
+//
+// The row is copied and then overwritten field by field, so every field the
+// patch leaves nil — including any column added later — keeps its stored
+// value. Headers that are present have their redaction placeholders restored
+// from the stored values (MergeRedactedHeaders). A present but empty
+// transport keeps the stored one; an unknown transport is a
+// *MCPServerValidationError. Store errors come back unwrapped.
+func (s *MCPServerService) Update(ctx context.Context, existing *store.MCPServerConfig, patch MCPServerPatch) (*store.MCPServerConfig, error) {
+	row := *existing
+	if patch.TransportType != nil && *patch.TransportType != "" {
+		row.TransportType = *patch.TransportType
 	}
-	if !ValidTransportType(cfg.TransportType) {
-		return &MCPServerValidationError{Msg: TransportTypeError}
+	if patch.Command != nil {
+		row.Command = *patch.Command
+	}
+	if patch.URL != nil {
+		row.URL = *patch.URL
+	}
+	if patch.Args != nil {
+		row.Args = *patch.Args
+	}
+	if patch.Env != nil {
+		row.Env = *patch.Env
+	}
+	if patch.Enabled != nil {
+		row.Enabled = *patch.Enabled
+	}
+	if patch.TrustTier != nil {
+		row.TrustTier = *patch.TrustTier
+	}
+	if patch.EnvAllowlist != nil {
+		row.EnvAllowlist = *patch.EnvAllowlist
+	}
+	if patch.Headers != nil {
+		row.Headers = MergeRedactedHeaders(*patch.Headers, existing.Headers)
 	}
 
-	if err := s.store.UpdateMCPServer(ctx, cfg); err != nil {
-		return err
+	if !ValidTransportType(row.TransportType) {
+		return nil, &MCPServerValidationError{Msg: TransportTypeError}
+	}
+
+	if err := s.store.UpdateMCPServer(ctx, &row); err != nil {
+		return nil, err
 	}
 
 	if s.registrar != nil {
-		s.registrar.RemoveServer(cfg.Name)
-		s.register(cfg)
-		s.runDiscovery("update", "server", cfg.Name)
+		s.registrar.RemoveServer(row.Name)
+		s.register(&row)
+		s.runDiscovery("update", "server", row.Name)
 	}
-	return nil
+	return &row, nil
 }
 
 // Delete removes the stored config and unregisters the server. The store's

@@ -50,3 +50,35 @@ func mcpServersToView(servers []store.MCPServerConfig) []MCPServerView {
 	}
 	return out
 }
+
+// UpdateMCPServerRequest is the body of PUT /api/mcp-servers/{name}. A field
+// the body omits keeps its stored value; a field it sends replaces it, and an
+// empty string clears it. An explicit JSON null decodes the same as omitted
+// and also keeps the stored value. Header values sent back as the redaction
+// placeholder keep their stored values. name, id, created_at and updated_at
+// are not settable here and are ignored if sent.
+type UpdateMCPServerRequest struct {
+	TransportType *string `json:"transport_type"`
+	Command       *string `json:"command"`
+	URL           *string `json:"url"`
+	Args          *string `json:"args"`
+	Env           *string `json:"env"`
+	Enabled       *bool   `json:"enabled"`
+	TrustTier     *string `json:"trust_tier"`
+	EnvAllowlist  *string `json:"env_allowlist"`
+	Headers       *string `json:"headers"`
+}
+
+func (r UpdateMCPServerRequest) toPatch() service.MCPServerPatch {
+	return service.MCPServerPatch{
+		TransportType: r.TransportType,
+		Command:       r.Command,
+		URL:           r.URL,
+		Args:          r.Args,
+		Env:           r.Env,
+		Enabled:       r.Enabled,
+		TrustTier:     r.TrustTier,
+		EnvAllowlist:  r.EnvAllowlist,
+		Headers:       r.Headers,
+	}
+}

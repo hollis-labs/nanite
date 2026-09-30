@@ -47,7 +47,9 @@ func (a *API) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusCreated, mcpServerToView(&cfg))
 }
 
-// handleUpdateMCPServer updates an existing MCP server config.
+// handleUpdateMCPServer updates an existing MCP server config. Fields the
+// body omits keep their stored values (UpdateMCPServerRequest); the response
+// is the stored row, headers redacted.
 // PUT /api/mcp-servers/{name}
 func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -62,17 +64,14 @@ func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var cfg store.MCPServerConfig
-	if err := a.decode(r, &cfg); err != nil {
+	var req UpdateMCPServerRequest
+	if err = a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	// Preserve the name from the URL path.
-	cfg.Name = name
-	cfg.ID = existing.ID
-
-	if err := a.Services.MCPServers.Update(r.Context(), existing, &cfg); err != nil {
+	row, err := a.Services.MCPServers.Update(r.Context(), existing, req.toPatch())
+	if err != nil {
 		var ve *service.MCPServerValidationError
 		if errors.As(err, &ve) {
 			a.errorResp(w, http.StatusBadRequest, ve.Msg)
@@ -82,7 +81,7 @@ func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.jsonResp(w, http.StatusOK, mcpServerToView(&cfg))
+	a.jsonResp(w, http.StatusOK, mcpServerToView(row))
 }
 
 // handleDeleteMCPServer removes an MCP server config and unregisters it.

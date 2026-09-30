@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -148,26 +149,39 @@ func TestMCPServerService_UpdateSequencing(t *testing.T) {
 
 	// Placeholder header and empty transport: the registrar gets the stored
 	// token, and the transport stays sse.
-	cfg := &store.MCPServerConfig{Name: "remote", Enabled: true, Headers: `{"Authorization":"` + RedactedHeaderValue + `"}`}
-	if err := svc.Update(ctx, &existing, cfg); err != nil {
+	placeholder := `{"Authorization":"` + RedactedHeaderValue + `"}`
+	empty := ""
+	row, err := svc.Update(ctx, &existing, MCPServerPatch{TransportType: &empty, Headers: &placeholder})
+	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	assertEvents(t, f, "store.update remote", "remove remote", "add remote", "discover")
-	if cfg.TransportType != store.TransportSSE {
-		t.Fatalf("transport = %q, want the stored sse", cfg.TransportType)
+	if row.TransportType != store.TransportSSE {
+		t.Fatalf("transport = %q, want the stored sse", row.TransportType)
 	}
 	if !strings.Contains(f.remote["remote"], "real-token") || !strings.Contains(f.rows["remote"].Headers, "real-token") {
 		t.Fatalf("stored token not carried forward: registered %q, stored %q", f.remote["remote"], f.rows["remote"].Headers)
 	}
 
+	// Omitted headers: the registrar still gets the stored token.
+	if _, err := svc.Update(ctx, &existing, MCPServerPatch{}); err != nil {
+		t.Fatalf("Update with no headers: %v", err)
+	}
+	assertEvents(t, f, "store.update remote", "remove remote", "add remote", "discover")
+	if !strings.Contains(f.remote["remote"], "real-token") {
+		t.Fatalf("registered headers after an update without headers = %q, want the stored token", f.remote["remote"])
+	}
+
 	// Disabled: removed, not re-added, discovery still runs.
-	if err := svc.Update(ctx, &existing, &store.MCPServerConfig{Name: "remote"}); err != nil {
+	off := false
+	if _, err := svc.Update(ctx, &existing, MCPServerPatch{Enabled: &off}); err != nil {
 		t.Fatalf("Update disabled: %v", err)
 	}
 	assertEvents(t, f, "store.update remote", "remove remote", "discover")
 
 	var ve *MCPServerValidationError
-	if err := svc.Update(ctx, &existing, &store.MCPServerConfig{Name: "remote", TransportType: "grpc"}); !errors.As(err, &ve) || ve.Msg != TransportTypeError {
+	grpc := "grpc"
+	if _, err := svc.Update(ctx, &existing, MCPServerPatch{TransportType: &grpc}); !errors.As(err, &ve) || ve.Msg != TransportTypeError {
 		t.Fatalf("bad transport err = %v", err)
 	}
 	assertEvents(t, f)
@@ -218,7 +232,8 @@ func TestMCPServerService_NoManager(t *testing.T) {
 	if err := svc.Create(ctx, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if err := svc.Update(ctx, cfg, &store.MCPServerConfig{Name: "x", Enabled: true}); err != nil {
+	on := true
+	if _, err := svc.Update(ctx, cfg, MCPServerPatch{Enabled: &on}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	if _, err := svc.Import(ctx, []byte(`{"mcpServers":{"y":{"command":"z"}}}`)); err != nil {
@@ -236,5 +251,39 @@ func TestNewContainerMCPServerService_NilManager(t *testing.T) {
 	svc := newContainerMCPServerService(nil, nil)
 	if svc.registrar != nil || svc.discover != nil {
 		t.Fatalf("registrar = %v, discover set = %v; want both unset", svc.registrar, svc.discover != nil)
+	}
+}
+
+// An empty patch leaves every field of the stored row as it was. The row is
+// reflection-populated, so a column added to MCPServerConfig later is
+// covered without editing this test.
+func TestMCPServerService_EmptyPatchKeepsEveryField(t *testing.T) {
+	var existing store.MCPServerConfig
+	rv := reflect.ValueOf(&existing).Elem()
+	for i := 0; i < rv.NumField(); i++ {
+		f := rv.Field(i)
+		switch f.Kind() {
+		case reflect.String:
+			f.SetString(fmt.Sprintf("value-%d", i))
+		case reflect.Bool:
+			f.SetBool(true)
+		default:
+			t.Fatalf("store.MCPServerConfig.%s has kind %s; teach this test about it", rv.Type().Field(i).Name, f.Kind())
+		}
+	}
+	existing.TransportType = store.TransportSSE
+	existing.Headers = `{"Authorization":"Bearer real-token"}`
+
+	f := newMCPFakes()
+	f.rows[existing.Name] = existing
+	row, err := NewMCPServerService(f, nil, nil).Update(context.Background(), &existing, MCPServerPatch{})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !reflect.DeepEqual(*row, existing) {
+		t.Fatalf("empty patch changed the row\n got: %+v\nwant: %+v", *row, existing)
+	}
+	if stored := f.rows[existing.Name]; !reflect.DeepEqual(stored, existing) {
+		t.Fatalf("empty patch changed the stored row\n got: %+v\nwant: %+v", stored, existing)
 	}
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/config"
+	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	pluginsdk "github.com/hollis-labs/plugin-sdk"
@@ -281,6 +282,7 @@ func TestNewContainer_PostReaperFailureStopsReapers(t *testing.T) {
 	beforeSubagent, beforeRuntime := reaperGoroutineCounts(t)
 	beforeCatalog := modelCatalogGoroutineCount(t)
 	_, err = NewContainer(ContainerConfig{
+		ModelCatalogOptions:            modelsdevtest.Options(t),
 		Store:                          st,
 		Providers:                      provider.NewRegistry(),
 		WorkingDir:                     root,
@@ -379,9 +381,10 @@ func TestNewContainer_TesseractDBIsPackageTempIsolated(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	container, err := NewContainer(ContainerConfig{
-		Store:      st,
-		Providers:  provider.NewRegistry(),
-		WorkingDir: root,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               st,
+		Providers:           provider.NewRegistry(),
+		WorkingDir:          root,
 	})
 	if err != nil {
 		t.Fatalf("NewContainer: %v", err)
@@ -429,7 +432,8 @@ func TestNewContainer_ExternalTesseractDoesNotOpenEmbeddedOwner(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	container, err := NewContainer(ContainerConfig{
-		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               st, Providers: provider.NewRegistry(), WorkingDir: root,
 		DisableEmbeddedTesseract: true,
 	})
 	if err != nil {
@@ -481,7 +485,8 @@ func TestNewContainer_MissingLegacySourceWithJournalDisablesEmbeddedTesseract(t 
 	}
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 	container, err := NewContainer(ContainerConfig{
-		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               st, Providers: provider.NewRegistry(), WorkingDir: root,
 	})
 	if err != nil {
 		t.Fatalf("NewContainer: %v", err)
@@ -522,7 +527,8 @@ func TestNewContainer_EmptyUnjournaledTargetDBDisablesEmbeddedTesseract(t *testi
 	}
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 	container, err := NewContainer(ContainerConfig{
-		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               st, Providers: provider.NewRegistry(), WorkingDir: root,
 	})
 	if err != nil {
 		t.Fatalf("NewContainer: %v", err)

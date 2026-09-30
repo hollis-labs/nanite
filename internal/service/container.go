@@ -431,6 +431,12 @@ type ContainerConfig struct {
 	// back to the DB-only shape so tests without explicit wiring work.
 	ProviderCatalog *providercatalog.Catalog
 
+	// ModelCatalogOptions are appended to the models.dev client's options,
+	// after the container's own WithOnRefresh (which must not be replaced).
+	// nil fetches the live catalog. Tests pass modelsdevtest.Options so a
+	// container boot never reaches the network; cmdServe passes WithURL when
+	// NANITE_MODELSDEV_URL is set (CW-20260930-0105).
+	ModelCatalogOptions []modelsdev.Option
 	// DurableAgentRecipeCatalogPaths is the ordered set of local recipe
 	// catalog files or directories loaded at startup. Configured recipes
 	// override built-ins by ID; duplicate configured IDs are rejected.
@@ -998,9 +1004,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// table (store.SyncModelsFromRegistry) so agents.model_id has a real,
 	// current row to FK against — see Phase 1 #06.
 	catalogCtx, stopCatalog := context.WithCancel(context.Background())
-	modelCatalog := modelsdev.New(modelsdev.WithOnRefresh(func(c *modelsdev.Client) {
+	modelCatalogOptions := append([]modelsdev.Option{modelsdev.WithOnRefresh(func(c *modelsdev.Client) {
 		syncCatalogToRegistry(c, cfg.Store)
-	}))
+	})}, cfg.ModelCatalogOptions...)
+	modelCatalog := modelsdev.New(modelCatalogOptions...)
 	// Sync from disk cache immediately (warm cache path) so the registry is
 	// enriched before accepting traffic even when no network fetch is needed.
 	syncCatalogToRegistry(modelCatalog, cfg.Store)

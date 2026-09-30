@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service"
@@ -33,8 +34,9 @@ func newToolCallTestAPI(t *testing.T) (*API, *store.Store) {
 	t.Cleanup(func() { s.Close(context.Background()) })
 
 	svc, err := service.NewContainer(service.ContainerConfig{
-		Store:     s,
-		Providers: provider.NewRegistry(),
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               s,
+		Providers:           provider.NewRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)

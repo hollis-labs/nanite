@@ -47,7 +47,7 @@ func (a *API) handleCreateDurableAgent(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, err := a.Services.Store.GetAgent(r.Context(), inst.ProfileID); err != nil {
+	if _, err := a.Services.Agents.Get(r.Context(), inst.ProfileID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			a.errorResp(w, http.StatusBadRequest, fmt.Sprintf("agent profile %s not found in agent_profiles; create or import it through the agent API first", inst.ProfileID))
 			return

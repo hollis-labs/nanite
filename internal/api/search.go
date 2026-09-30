@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -25,7 +26,7 @@ func (a *API) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	results, err := a.Services.Store.SearchMessages(r.Context(), query, projectID, limit)
+	results, err := a.Services.Sessions.Search(r.Context(), query, service.SearchOpts{ProjectID: projectID, Limit: limit})
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -33,5 +34,5 @@ func (a *API) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	if results == nil {
 		results = []store.SearchResult{}
 	}
-	a.jsonResp(w, http.StatusOK, results)
+	a.jsonResp(w, http.StatusOK, searchResultsToView(results))
 }

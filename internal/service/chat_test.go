@@ -52,6 +52,14 @@ func (s *stubSessionService) ListMessagesAround(_ context.Context, _, _ string, 
 func (s *stubSessionService) DetectInterruptedTurn(_ context.Context, _ *store.Session, _ bool) map[string]any {
 	return nil
 }
+func (*stubSessionService) GetMessage(context.Context, string) (*store.Message, error) {
+	return nil, nil
+}
+
+func (*stubSessionService) CreateMessage(context.Context, *store.Message) error {
+	return nil
+}
+
 func (*stubSessionService) EnvelopeLookup(context.Context, []store.Message) map[string]*store.EnvelopeInstance {
 	return nil
 }

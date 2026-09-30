@@ -117,6 +117,9 @@ type Container struct {
 	Projects *ProjectService
 	// DrawerCards owns a session's pinned bottom-drawer cards.
 	DrawerCards *DrawerCardService
+	// Artifacts owns session artifacts and the rules for the files behind
+	// them.
+	Artifacts *ArtifactService
 
 	// Narrow store collaborators for transports that construct a pipeline
 	// object per call (skill gate, materializer, installer, uninstaller,
@@ -1545,6 +1548,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Roles:               NewRoleService(cfg.Store),
 		Projects:            NewProjectService(cfg.Store, cfg.Store),
 		DrawerCards:         NewDrawerCardService(cfg.Store),
+		Artifacts: NewArtifactService(cfg.Store, func() string {
+			if cfg.AppConfig != nil {
+				return cfg.AppConfig.Artifacts.StorageDir
+			}
+			return ""
+		}),
 		SkillIndex:          cfg.Store,
 		SkillUninstallIndex: cfg.Store,
 		SkillGrants:         cfg.Store,

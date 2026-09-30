@@ -15,10 +15,6 @@ import (
 // API holds dependencies for HTTP handlers.
 type API struct {
 	Services *service.Container
-	// createArtifactTemp creates an upload staging file in the destination
-	// directory. Tests replace it to exercise final-close failures without
-	// relying on filesystem-specific behavior.
-	createArtifactTemp artifactTempFileFactory
 	// embedderSelectDeps is injected for embedding_status computation. Defaults
 	// to service.DefaultEmbedderSelectDeps. Tests override via
 	// SetEmbedderSelectDeps.
@@ -67,7 +63,6 @@ func New(svc *service.Container) *API {
 	deps := service.DefaultEmbedderSelectDeps()
 	return &API{
 		Services:           svc,
-		createArtifactTemp: defaultArtifactTempFile,
 		embedderSelectDeps: deps,
 		agentBuilder:       deterministicAgentBuilderAdvisor{},
 	}

@@ -17,6 +17,41 @@ import (
 // and runaway detection protect Nanite's own model-driving loop; the CLI
 // already runs its own.
 
+// maxCallIDLen bounds a caller-supplied call id.
+const maxCallIDLen = 128
+
+// notCallIDRune reports whether r is outside the characters a call id may use.
+func notCallIDRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return false
+	}
+	return r != '-' && r != '_' && r != '.' && r != ':'
+}
+
+// selfToolCallID is the id a forwarded call is recorded under: the caller's own
+// when it is a short run of ID characters, otherwise a fresh ULID. Callers are
+// other processes on this machine, but the value ends up in a stored row, so it
+// is checked rather than trusted.
+func selfToolCallID(supplied string) string {
+	if n := len(supplied); n > 0 && n <= maxCallIDLen && strings.IndexFunc(supplied, notCallIDRune) < 0 {
+		return supplied
+	}
+	return tool.NewCallID()
+}
+
+// toolCallID is the tool_call_id stored for this call: "self-tool:<name>:<id>",
+// unique per call. The argument row and any cached-result row of one call carry
+// the same value. A request that did not go through handleSelfToolCall gets a
+// fresh id.
+func (r selfToolCallRequest) toolCallID() string {
+	id := r.callID
+	if id == "" {
+		id = tool.NewCallID()
+	}
+	return "self-tool:" + r.Name + ":" + id
+}
+
 // sessionModel returns the model recorded on the session, or "" when the
 // session is unknown or has none. "" makes truncate.BudgetForModel fall back
 // to its floor budget, which is the conservative choice.
@@ -69,7 +104,7 @@ func (a *API) presentSelfToolResult(ctx context.Context, req selfToolCallRequest
 	if len(body) <= budget {
 		return result
 	}
-	view, err := a.Services.ResultCache.PresentResult(req.SessionID, "self-tool:"+req.Name, req.Name, body, budget)
+	view, err := a.Services.ResultCache.PresentResult(req.SessionID, req.toolCallID(), req.Name, body, budget)
 	if err != nil {
 		slog.Warn("tools/call: result cache store error", "tool", req.Name, "err", err)
 		return result
@@ -115,7 +150,7 @@ func (a *API) persistSelfToolArguments(req selfToolCallRequest) {
 	if req.SessionID == "" || a.Services == nil || a.Services.ResultCache == nil {
 		return
 	}
-	if _, err := a.Services.ResultCache.PersistArguments(req.SessionID, "self-tool:"+req.Name, req.Name, req.Args); err != nil {
+	if _, err := a.Services.ResultCache.PersistArguments(req.SessionID, req.toolCallID(), req.Name, req.Args); err != nil {
 		slog.Warn("tools/call: tool argument persist error", "tool", req.Name, "err", err)
 	}
 }

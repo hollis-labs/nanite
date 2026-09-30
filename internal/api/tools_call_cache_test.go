@@ -220,3 +220,85 @@ func TestBudgetForCLIRecordedModels(t *testing.T) {
 		}
 	}
 }
+
+// CW-20260929-0021: the stored tool_call_id is unique per call, not per tool.
+func TestHandleSelfToolCall_ToolCallIDIsPerCall(t *testing.T) {
+	a, s := newToolCallTestAPI(t)
+	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
+	mkSession(t, s, "sess-a", "")
+
+	for i := 0; i < 3; i++ {
+		if rec := postToolCall(t, a, map[string]any{"session_id": "sess-a", "name": "whoami"}); rec.Code != 200 {
+			t.Fatalf("status %d", rec.Code)
+		}
+	}
+	got, err := a.Services.ResultCache.ListArguments("sess-a")
+	if err != nil || len(got) != 3 {
+		t.Fatalf("ListArguments = %d rows, %v", len(got), err)
+	}
+	shape := regexp.MustCompile(`^self-tool:whoami:[0-9A-Z]{26}$`)
+	seen := map[string]bool{}
+	for _, r := range got {
+		if !shape.MatchString(r.ToolCallID) {
+			t.Errorf("tool_call_id = %q, want self-tool:whoami:<ulid>", r.ToolCallID)
+		}
+		if seen[r.ToolCallID] {
+			t.Errorf("tool_call_id %q repeated across calls", r.ToolCallID)
+		}
+		seen[r.ToolCallID] = true
+	}
+}
+
+// A caller's own call id is carried when it is well formed, and replaced when
+// it is not.
+func TestHandleSelfToolCall_CallerCallID(t *testing.T) {
+	a, s := newToolCallTestAPI(t)
+	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
+	mkSession(t, s, "sess-a", "")
+
+	postToolCall(t, a, map[string]any{"session_id": "sess-a", "name": "whoami", "call_id": "toolu_01AbC-9.x:y"})
+	for _, bad := range []string{"has space", "semi;colon", strings.Repeat("a", maxCallIDLen+1), "new\nline"} {
+		postToolCall(t, a, map[string]any{"session_id": "sess-a", "name": "whoami", "call_id": bad})
+	}
+	got, err := a.Services.ResultCache.ListArguments("sess-a")
+	if err != nil || len(got) != 5 {
+		t.Fatalf("ListArguments = %d rows, %v", len(got), err)
+	}
+	var carried int
+	for _, r := range got {
+		if r.ToolCallID == "self-tool:whoami:toolu_01AbC-9.x:y" {
+			carried++
+			continue
+		}
+		if !regexp.MustCompile(`^self-tool:whoami:[0-9A-Z]{26}$`).MatchString(r.ToolCallID) {
+			t.Errorf("malformed call_id was stored as %q", r.ToolCallID)
+		}
+	}
+	if carried != 1 {
+		t.Errorf("well-formed call_id carried %d times, want 1", carried)
+	}
+}
+
+// One call's argument row and its cached-result row carry the same id, so the
+// two can be matched.
+func TestSelfToolCall_ArgumentAndResultRowsShareID(t *testing.T) {
+	a, s := newToolCallTestAPI(t)
+	mkSession(t, s, "sess-a", "")
+	req := cacheReq("sess-a")
+	req.callID = selfToolCallID("")
+	req.Args = map[string]any{"q": "x"}
+
+	a.persistSelfToolArguments(req)
+	a.presentSelfToolResult(context.Background(), req, textResult(strings.Repeat("row\n", truncate.BudgetForModel(""))))
+
+	var argID, resID string
+	if err := s.DB.QueryRow(`SELECT tool_call_id FROM tool_call_arguments WHERE session_id = 'sess-a'`).Scan(&argID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.QueryRow(`SELECT tool_call_id FROM tool_result_cache WHERE session_id = 'sess-a'`).Scan(&resID); err != nil {
+		t.Fatal(err)
+	}
+	if argID != resID || argID != "self-tool:todo_list:"+req.callID {
+		t.Errorf("argument row %q, result row %q; want both self-tool:todo_list:%s", argID, resID, req.callID)
+	}
+}

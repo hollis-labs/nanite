@@ -32,6 +32,13 @@ type selfToolCallRequest struct {
 	// pointer it can follow. A caller that omits it (an older subprocess, or an
 	// allowlisted workflow runner without those tools) gets results unchanged.
 	CacheRetrieval bool `json:"cache_retrieval,omitempty"`
+	// CallID optionally carries the caller's own id for this call (for example
+	// the CLI's tool-use id), so a stored argument or cached-result row can be
+	// matched to it. Absent or malformed, the handler generates one.
+	CallID string `json:"call_id,omitempty"`
+	// callID is the id this call is recorded under, fixed once per request by
+	// handleSelfToolCall so the argument row and any cached-result row agree.
+	callID string
 }
 
 // handleSelfToolCall dispatches a self-tool through the fully-wired
@@ -80,6 +87,7 @@ func (a *API) handleSelfToolCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.callID = selfToolCallID(req.CallID)
 	ctx := mcp.WithSessionID(r.Context(), req.SessionID)
 	if navResult, ok := a.serveCacheNavigation(ctx, req); ok {
 		a.persistSelfToolArguments(req)

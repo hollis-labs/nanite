@@ -6,60 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
-
-func TestValidateProjectRepoPathPolicy(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("UserHomeDir: %v", err)
-	}
-	homeChild, err := os.MkdirTemp(home, ".nanite-repo-policy-")
-	if err != nil {
-		t.Fatalf("MkdirTemp under home: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(homeChild) })
-
-	if _, err := validateProjectRepoPath(""); err != nil {
-		t.Fatalf("empty repo_path should remain allowed: %v", err)
-	}
-	if _, err := validateProjectRepoPath(homeChild); err != nil {
-		t.Fatalf("home subdirectory should be allowed: %v", err)
-	}
-	for name, path := range map[string]string{
-		"filesystem-root": string(filepath.Separator),
-		"home-itself":     home,
-		"missing":         filepath.Join(t.TempDir(), "missing"),
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got, err := validateProjectRepoPath(path); err == nil {
-				t.Fatalf("validateProjectRepoPath(%q) = %q, want rejection", path, got)
-			}
-		})
-	}
-
-	file := filepath.Join(t.TempDir(), "not-a-directory")
-	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if _, err := validateProjectRepoPath(file); err == nil {
-		t.Fatal("regular file accepted as repo_path")
-	}
-
-	if runtime.GOOS != "windows" {
-		for _, path := range []string{"/etc", "/usr", "/var", "/System"} {
-			if got, err := validateProjectRepoPath(path); err == nil {
-				t.Fatalf("validateProjectRepoPath(%q) = %q, want system-tree rejection", path, got)
-			}
-		}
-	}
-}
 
 func TestProjectsAPIRejectsUnsafeRepoPathOnCreate(t *testing.T) {
 	_, mux := newTestAPI(t)

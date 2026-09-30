@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"os"
@@ -47,7 +46,7 @@ func (a *API) handleAutocompleteFiles(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("session_id")
 
 	// Resolve the root directory to walk.
-	root := resolveRoot(a, sessionID)
+	root := a.Services.Projects.AutocompleteRoot(r.Context(), sessionID)
 	if root == "" {
 		a.jsonResp(w, http.StatusOK, []fileResult{})
 		return
@@ -131,41 +130,6 @@ func (a *API) handleAutocompleteFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusOK, results)
-}
-
-// resolveRoot determines the filesystem root for file autocomplete.
-// Priority: session's project repo_path → cwd. No longer workspace-scoped
-// (Phase 0 item 20, retire workspaces — there has only ever been one
-// workspace in practice).
-func resolveRoot(a *API, sessionID string) string {
-	if sessionID != "" {
-		// Look up session → project with repo_path.
-		session, err := a.Services.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
-		if err == nil && session != nil {
-			// If session has a project_id, use that project's repo_path.
-			if session.ProjectID != "" {
-				if p, err := a.Services.Store.GetProject(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, session.ProjectID); err == nil && p != nil && p.RepoPath != "" {
-					return p.RepoPath
-				}
-			}
-			// Otherwise, try the first project with a repo_path.
-			projects, err := a.Services.Store.ListProjects(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
-			if err == nil {
-				for _, p := range projects {
-					if p.RepoPath != "" {
-						return p.RepoPath
-					}
-				}
-			}
-		}
-	}
-
-	// Fallback: cwd (where nanite was launched).
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	return cwd
 }
 
 // fuzzyMatch checks if all characters in pattern appear in str in order.

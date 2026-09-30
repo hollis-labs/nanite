@@ -81,7 +81,10 @@ type Container struct {
 	// AgentConfig is the shared database write path for operator-managed
 	// profiles (GUI/API/CLI/MCP all route mutations through it).
 	AgentConfig *AgentConfigService
-	Skills      SkillService
+	// AgentCapabilities owns per-row CRUD on an agent's known tools, known
+	// skills, procedures and knowledge seeds.
+	AgentCapabilities *AgentCapabilitiesService
+	Skills            SkillService
 	// SkillVendor is the content-addressed vendored skill store (internal/
 	// skillvendor, TASKS/skills/03) that backs the explicit install/sync
 	// pipeline (internal/skillinstall, TASKS/skills/04/05 --
@@ -1444,6 +1447,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AppConfig:           cfg.AppConfig,
 		WorkingDir:          workingDir,
 		AgentConfig:         agentConfig,
+		AgentCapabilities:   NewAgentCapabilitiesService(cfg.Store),
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,

@@ -505,3 +505,51 @@ func TestHarnessV1CreateSessionRejectsBadHarnessSelection(t *testing.T) {
 		t.Errorf("valid selection = %d %s", w.Code, w.Body.String())
 	}
 }
+
+// CW-20260930-0003: v1 session create takes the per-session subagent_runtime
+// override, stores it, refuses a bad value, and advertises the field.
+func TestHarnessV1CreateSession_SubagentRuntime(t *testing.T) {
+	a, mux := newTestAPI(t)
+	post := func(runtime string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(harnessV1CreateSessionRequest{Provider: "anthropic", Model: "m", SubagentRuntime: runtime})
+		req := httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+
+	w := post("cli")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create = %d body=%s", w.Code, w.Body.String())
+	}
+	var created harnessV1SessionResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := a.Services.Store.GetSessionSubagentRuntime(context.Background(), created.Session.ID); err != nil || got != "cli" {
+		t.Errorf("stored override = %q, %v; want cli", got, err)
+	}
+
+	w = post("")
+	var plain harnessV1SessionResponse
+	_ = json.NewDecoder(w.Body).Decode(&plain)
+	if got, _ := a.Services.Store.GetSessionSubagentRuntime(context.Background(), plain.Session.ID); got != "" {
+		t.Errorf("no field sent, override = %q, want unset", got)
+	}
+
+	if bad := post("browser"); bad.Code != http.StatusBadRequest {
+		t.Errorf("bad value = %d, want 400", bad.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/harness/v1/capabilities", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	var caps harnessV1CapabilitiesResponse
+	if err := json.NewDecoder(w.Body).Decode(&caps); err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(caps.SessionCreateFields.Supported, "subagent_runtime") {
+		t.Errorf("supported fields = %+v", caps.SessionCreateFields)
+	}
+}

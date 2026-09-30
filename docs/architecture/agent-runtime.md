@@ -53,13 +53,25 @@ chat harness gets all of it. From an API-driven parent — one whose provider ha
 no CLI adapter — a subagent therefore runs through the harness unless the user
 or app opted into CLI subagents.
 
-The opt-in is `subagent_runtime` (`api` or `cli`): the session's own override
-first, then the app default in user settings, then `api`. A model-supplied
-`provider` argument and a role's `DefaultProvider` never count as the opt-in.
-When either names a CLI provider without it, the child runs on the parent's
-provider and model, the log records a warning, and the result the parent reads
-opens with a note saying so. A CLI-driven parent keeps booting CLI children.
-The parent's dispatch interface is the same either way.
+The opt-in is `subagent_runtime` (`api` or `cli`): the override on the **root**
+session of the spawn tree, then the app default in user settings, then `api`.
+The root, not the immediate parent, so the choice made where the tree started
+holds at every depth: a CLI opt-in on the root reaches a grandchild spawned by
+an API child, and an API root keeps API under a CLI app default. Session create
+accepts the override on both `POST /api/sessions` and the harness v1 create. A
+model-supplied `provider` argument and a role's `DefaultProvider` never count as
+the opt-in. When either names a CLI provider without it, the child runs on the
+parent's provider and model, the log records a warning, and the result the
+parent reads opens with a note saying so. A parent session with no provider of
+its own falls back to the app's default provider and model; if there is none, or
+it is itself a CLI provider, the spawn fails saying so rather than running with
+an empty provider. A CLI-driven parent keeps booting CLI children. The parent's
+dispatch interface is the same either way.
+
+`subagent_runtime` says how a *child* of an API-driven parent runs. It is
+separate from an agent's `runtime_kind`, which says how that agent's own session
+runs; the subagent path routes by the child's provider and does not read the
+role's `runtime_kind`.
 
 This is an interim home for the setting; it moves onto the launch-assignment
 limits once those exist.

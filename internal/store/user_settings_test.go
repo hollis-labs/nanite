@@ -414,3 +414,42 @@ func TestSubagentRuntime_SettingsAndSessionOverride(t *testing.T) {
 		t.Error("missing session accepted")
 	}
 }
+
+// GetSession hydrates the root of a subagent tree at any depth; the runtime
+// resolution reads the root's override through it.
+func TestGetSession_RootSessionID_ThroughGrandchild(t *testing.T) {
+	ctx := context.Background()
+	s := newSeededStore(t)
+	for _, id := range []string{"root", "child", "grandchild"} {
+		if err := s.CreateSession(ctx, &Session{ID: id, Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	edge := func(runID, parent, child string) {
+		_, err := s.DB.ExecContext(ctx,
+			`INSERT INTO subagent_runs (id, parent_session_id, child_session_id, role, prompt, mode, status,
+			   inputs_json, result_json, error, timeout_seconds, created_at, started_at, completed_at,
+			   parent_agent_id, envelope_instance_id, approved_at, approved_by, rejected_at, rejection_reason, provider)
+			 VALUES (?, ?, ?, 'r', 'p', 'sync', 'completed', '{}', '', '', 300,
+			   '2026-09-30T00:00:00Z', '', '', '', '', '', '', '', '', '')`, runID, parent, child)
+		if err != nil {
+			t.Fatalf("insert run %s: %v", runID, err)
+		}
+	}
+	edge("run-1", "root", "child")
+	edge("run-2", "child", "grandchild")
+
+	for _, tc := range []struct{ id, wantRoot string }{{"root", ""}, {"child", "root"}, {"grandchild", "root"}} {
+		sess, err := s.GetSession(ctx, tc.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		if sess.RootSessionID != nil {
+			got = *sess.RootSessionID
+		}
+		if got != tc.wantRoot {
+			t.Errorf("session %s: root = %q, want %q", tc.id, got, tc.wantRoot)
+		}
+	}
+}

@@ -90,6 +90,10 @@ type harnessV1CreateSessionRequest struct {
 	RuntimeKind    string         `json:"runtime_kind,omitempty"`
 	WorkRoot       string         `json:"work_root,omitempty"`
 	DurableAgentID string         `json:"durable_agent_id,omitempty"`
+	// SubagentRuntime overrides the app's subagent_runtime for subagents spawned
+	// from this session ("api" or "cli"); empty leaves the app default. It is not
+	// runtime_kind: that says how this session runs, this says how its subagents do.
+	SubagentRuntime string `json:"subagent_runtime,omitempty"`
 }
 
 type harnessV1SessionResponse struct {
@@ -179,6 +183,7 @@ func (a *API) handleHarnessV1Capabilities(w http.ResponseWriter, r *http.Request
 				"agent_id",
 				"title",
 				"metadata",
+				"subagent_runtime",
 			},
 			Unsupported: []string{
 				"runtime_kind",
@@ -230,6 +235,11 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if req.SubagentRuntime != "" && !store.ValidSubagentRuntime(req.SubagentRuntime) {
+		a.errorResp(w, http.StatusBadRequest, "subagent_runtime must be \"api\" or \"cli\"")
+		return
+	}
+
 	providerID := strings.TrimSpace(req.Provider)
 
 	sess := &store.Session{
@@ -240,6 +250,12 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 	if err := a.Services.Store.CreateSession(r.Context(), sess); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if req.SubagentRuntime != "" {
+		if err := a.Services.Store.SetSessionSubagentRuntime(r.Context(), sess.ID, req.SubagentRuntime); err != nil {
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	if req.AgentID != "" {
 		// CW-20260815-0026: Resolve agent ID/slug to canonical ID before binding.

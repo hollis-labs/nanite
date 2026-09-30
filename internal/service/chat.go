@@ -228,7 +228,10 @@ type chatServiceImpl struct {
 	providers *provider.Registry
 	store     Store
 
-	orchestrator       *chat.Orchestrator
+	orchestrator *chat.Orchestrator
+	// maxConcurrentTools bounds concurrent tool calls per turn; 0 means
+	// DefaultMaxConcurrentTools.
+	maxConcurrentTools int
 	appConfig          *config.TunablesConfig
 	outputFilter       *filter.Chain
 	commands           *chat.CommandRegistry

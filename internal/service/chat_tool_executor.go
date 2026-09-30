@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
@@ -421,20 +422,18 @@ func (s *chatServiceImpl) executeToolBatch(
 		}
 	}
 
-	// Execute concurrent-safe tools in parallel.
+	// Execute concurrent-safe tools in parallel, at most
+	// toolConcurrencyLimit() at a time.
 	if len(concurrent) > 0 {
-		var wg sync.WaitGroup
 		var mu sync.Mutex // protects ch sends ordering (presence events)
-		for _, ip := range concurrent {
-			wg.Add(1)
-			ipc := ip
-			safego.Go(ctx, "service.chat.executeSingleTool.concurrent", func() {
-				defer wg.Done()
-				result := s.executeSingleTool(ctx, ipc.plan.tu, ls, agentID, sessionID, ch, &mu)
-				results[ipc.planIdx] = result
+		runBounded(ctx, len(concurrent), s.toolConcurrencyLimit(),
+			func(i int) {
+				ip := concurrent[i]
+				results[ip.planIdx] = s.executeSingleTool(ctx, ip.plan.tu, ls, agentID, sessionID, ch, &mu)
+			},
+			func(i int) {
+				results[concurrent[i].planIdx] = canceledBeforeStartResult(concurrent[i].plan.tu)
 			})
-		}
-		wg.Wait()
 	}
 
 	// Execute serial tools one at a time.
@@ -444,6 +443,77 @@ func (s *chatServiceImpl) executeToolBatch(
 	}
 
 	return results
+}
+
+// DefaultMaxConcurrentTools bounds how many concurrent-safe tool calls of one
+// multi-tool-call turn run at once. Before this, a turn that emitted N calls
+// started N goroutines, each holding an MCP request, a DB write path and a
+// stream send. The value is a plain default (chatServiceImpl.maxConcurrentTools
+// overrides it) so a launch profile can adopt it later.
+const DefaultMaxConcurrentTools = 8
+
+// toolConcurrencyLimit is the effective per-turn concurrent tool-call bound.
+func (s *chatServiceImpl) toolConcurrencyLimit() int {
+	if s.maxConcurrentTools > 0 {
+		return s.maxConcurrentTools
+	}
+	return DefaultMaxConcurrentTools
+}
+
+// runBounded calls run(i) for every i in [0,n) on at most limit goroutines,
+// starting items in index order, and returns when all have finished. Results
+// are the caller's to store by index, so ordering is unaffected by which
+// worker ran what.
+//
+// Cancellation: an item that has not started when ctx is done is not run;
+// skipped(i) is called instead so the caller can fill its result slot (a
+// missing tool_result would leave a dangling tool_use). Items already running
+// are not interrupted here — run sees the same ctx and finishes as it always
+// has — and runBounded still waits for them, so nothing outlives the call.
+// A panic in run(i) is recovered and confined to that item.
+func runBounded(ctx context.Context, n, limit int, run, skipped func(i int)) {
+	if n <= 0 {
+		return
+	}
+	if limit <= 0 || limit > n {
+		limit = n
+	}
+	var (
+		next atomic.Int64
+		wg   sync.WaitGroup
+	)
+	for w := 0; w < limit; w++ {
+		wg.Add(1)
+		safego.Go(ctx, "service.chat.executeSingleTool.concurrent", func() {
+			defer wg.Done()
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= n {
+					return
+				}
+				if ctx.Err() != nil {
+					skipped(i)
+					continue
+				}
+				safego.Call(ctx, "service.chat.executeSingleTool.item", func() { run(i) })
+			}
+		})
+	}
+	wg.Wait()
+}
+
+// canceledBeforeStartResult is the tool_result for a call that never started
+// because the turn was canceled while it waited for a concurrency slot. It
+// has the same shape as the notify-pause cancellation so the model's
+// tool_use/tool_result pairing stays intact.
+func canceledBeforeStartResult(tu llmtypes.ToolUseBlock) toolExecResult {
+	msg := fmt.Sprintf("Tool %q canceled before it started.", tu.Name)
+	return toolExecResult{
+		resultBlock: llmtypes.ContentBlock{Type: "tool_result", ToolUseID: tu.ID, Content: msg, IsError: true},
+		ref:         chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "canceled", ErrorReason: msg},
+		isError:     true,
+		rawOutput:   msg,
+	}
 }
 
 // executeSingleTool runs a single tool call and returns the result. If mu is

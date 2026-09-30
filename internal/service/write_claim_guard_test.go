@@ -124,6 +124,87 @@ func TestIsWriteCapable(t *testing.T) {
 	}
 }
 
+// metaTable serves fixed ToolMetaInfo per name, standing in for declared and
+// heuristic metadata.
+type metaTable struct {
+	characterizationTools
+	meta map[string]ToolMetaInfo
+}
+
+func (m *metaTable) GetToolMeta(_ context.Context, name string) (ToolMetaInfo, bool) {
+	mi, ok := m.meta[name]
+	return mi, ok
+}
+
+// Representative names per verb class, not the catalog: the classifier is a
+// fallback for tools that declare nothing, and the cases here pin its rules.
+func TestIsWriteCapableNameHeuristic(t *testing.T) {
+	svc := &chatServiceImpl{}
+	ctx := context.Background()
+	for name, want := range map[string]bool{
+		// writers with no CRUD verb, one or two per token class
+		"handoff_stash": true, "handoff_approve": true, "subagent_spawn": true, "builder_step": true,
+		"context_pin": true, "install_home": true, "mux_message_notify": true, "mux_message_consume": true,
+		"mux_message_mark_read": true, "tether_group_mark_read": true, "tether_group_leave": true,
+		"torque_session_checkpoint": true, "torque_task_checkpoint_emit": true, "torque_task_subtodo_done": true,
+		"cerberus_docker_up": true, "cerberus_docker_down": true, "cerberus_resource_reload": true,
+		"loom_compile_request": true, "tangent_session_advance": true, "tangent_surface_open": true,
+		"tangent_hitl_withdraw": true, "mux_session_resize": true, "reanalyze_fragment_attachments": true,
+		// whole-name writers
+		"mux_call": true, "message_resolve": true,
+		// a trailing noun that is also a read word must not hide the verb
+		"context_status_set": true, "torque_collection_inbox_add": true,
+		// a read verb wins over a write token
+		"cerberus_get_dns_record_set": false, "preview_ingest": false, "validate_ingest": false,
+		"loom_compile_job_get": false, "loom_compile_job_list": false, "torque_task_checkpoint_get": false,
+		"torque_task_checkpoint_list": false, "tangent_interaction_list_kinds": false,
+		// readers, and lookups that share a word with a writer
+		"torque_task_get": false, "torque_task_list": false, "tesseract_recall": false, "tesseract_history": false,
+		"tesseract_ref_resolve": false, "tangent_interaction_resolve_definition": false,
+		"tether_group_read": false, "tether_registry_lookup": false, "mux_message_inbox": false,
+		"mux_message_thread": false, "mux_message_trace": false, "cerberus_resource_status": false,
+		"context_estimate": false, "tangent_health_report": false, "mux_ai_chat": false, "mux_ai_embeddings": false,
+	} {
+		if got := svc.isWriteCapable(ctx, name); got != want {
+			t.Errorf("isWriteCapable(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// Declared hints beat the name in both directions; an absent hint is not a
+// declaration and falls through to the name.
+func TestIsWriteCapableDeclaredHintsWin(t *testing.T) {
+	svc := &chatServiceImpl{tools: &metaTable{meta: map[string]ToolMetaInfo{
+		"sync_records":     {ReadOnlyDeclared: true},                   // write-looking name, declared read
+		"quietly_changes":  {WriteDeclared: true},                      // no verb, declared write
+		"drop_table_x":     {IsDestructive: true, WriteDeclared: true}, // declared destructive
+		"kb_write_preview": {ReadOnlyDeclared: true},                   // declared read beats write verb
+		"post_thing":       {},                                         // annotations without hints: name decides
+		"mystery_op":       {},                                         // nothing declared, nothing in the name
+	}}}
+	ctx := context.Background()
+	for name, want := range map[string]bool{
+		"sync_records": false, "quietly_changes": true, "drop_table_x": true,
+		"kb_write_preview": false, "post_thing": true, "mystery_op": false,
+	} {
+		if got := svc.isWriteCapable(ctx, name); got != want {
+			t.Errorf("isWriteCapable(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestMarkReadIsNotHeuristicallyReadOnly(t *testing.T) {
+	svc := &toolServiceImpl{}
+	for name, want := range map[string]bool{
+		"mux_message_mark_read": false, "tether_group_mark_read": false, "kb_read": true, "tether_group_read": true,
+	} {
+		meta, _ := svc.GetToolMeta(context.Background(), name)
+		if meta.IsReadOnly != want {
+			t.Errorf("GetToolMeta(%q).IsReadOnly = %v, want %v", name, meta.IsReadOnly, want)
+		}
+	}
+}
+
 type destructiveStub struct {
 	metaStub
 	destructive map[string]bool

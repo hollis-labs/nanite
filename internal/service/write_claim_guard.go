@@ -67,7 +67,33 @@ var writeVerbs = map[string]bool{
 	"dispatch": true, "launch": true, "start": true, "stop": true, "resume": true, "cancel": true,
 	"respond": true, "submit": true, "enqueue": true, "acknowledge": true, "ack": true,
 	"mark": true, "reorder": true, "bulk": true, "tag": true,
+	// State changes that do not read as CRUD: messaging and lifecycle, handoffs,
+	// approvals, sessions and checkpoints, installs, jobs, and UI surfaces.
+	"notify": true, "consume": true, "spawn": true, "pin": true, "unpin": true, "request": true,
+	"emit": true, "checkpoint": true, "up": true, "down": true, "reload": true, "advance": true,
+	"open": true, "step": true, "job": true, "stash": true, "approve": true, "reject": true,
+	"ensure": true, "embed": true, "compile": true, "withdraw": true, "supersede": true,
+	"leave": true, "done": true, "resize": true, "reanalyze": true, "install": true,
+	"wizard": true, "triage": true, "feedback": true, "draft": true,
 }
+
+// readVerbs are name tokens that make a tool a reader even when another token
+// is a write verb: cerberus_get_dns_record_set names a record set it fetches,
+// preview_ingest is a dry run, validate_ingest only checks. Only verbs that
+// collide with a write token are listed. "status", "inbox" and "read" are left
+// out on purpose: context_status_set and torque_collection_inbox_add write, and
+// mux_message_mark_read is a write whose last token is "read".
+var readVerbs = map[string]bool{
+	"get": true, "list": true, "search": true, "preview": true, "validate": true,
+	"describe": true, "inspect": true, "query": true, "lookup": true, "history": true,
+	"show": true, "view": true, "recall": true, "estimate": true, "thread": true, "trace": true,
+}
+
+// writeToolNames are whole names that classify as writers although no single
+// token can: message_resolve settles a message, while resolve in
+// tesseract_ref_resolve is a lookup; mux_call forwards to any tool and so may
+// wrap a write.
+var writeToolNames = map[string]bool{"message_resolve": true, "mux_call": true}
 
 // nameTokens splits a tool name on separators and camel-case boundaries into
 // lowercase tokens: "torque_task_transition" -> [torque task transition],
@@ -101,8 +127,9 @@ func nameTokens(name string) []string {
 }
 
 // isWriteCapable reports whether a successful call to name counts as a write.
-// Order of evidence: never-write tools, then the tool's own read-only
-// declaration, then a destructive declaration, then a write verb in its name.
+// Order of evidence: never-write tools, then the tool's declared hints
+// (readOnlyHint=true is a read; readOnlyHint=false or destructiveHint=true is a
+// write), then the name heuristics: a read verb in the name, a write verb.
 // A tool with none of these is treated as not writing, so a computing or
 // unclassified tool cannot silence the guard or ground an id.
 func (s *chatServiceImpl) isWriteCapable(ctx context.Context, name string) bool {
@@ -113,18 +140,33 @@ func (s *chatServiceImpl) isWriteCapable(ctx context.Context, name string) bool 
 	if s.tools != nil {
 		meta, _ = s.tools.GetToolMeta(ctx, name)
 	}
+	// What a server declared beats what the name looks like. Absent hints are
+	// not declarations: they fall through to the name.
+	if meta.ReadOnlyDeclared {
+		return false
+	}
+	if meta.WriteDeclared {
+		return true
+	}
 	if meta.IsReadOnly {
 		return false
 	}
 	if meta.IsDestructive {
 		return true
 	}
+	if writeToolNames[name] {
+		return true
+	}
+	write := false
 	for _, tok := range nameTokens(name) {
+		if readVerbs[tok] {
+			return false
+		}
 		if writeVerbs[tok] {
-			return true
+			write = true
 		}
 	}
-	return false
+	return write
 }
 
 // writeClaimFacts is what the turn actually did.

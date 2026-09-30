@@ -100,6 +100,9 @@ type Container struct {
 	Usage     *UsageService // token usage, execution metrics, utility calls
 	// ProviderConfig reads and writes provider and model configuration rows.
 	ProviderConfig *ProviderConfigService
+	// Settings owns the singleton user_settings row and the rules applied
+	// to its fields.
+	Settings *UserSettingsService
 	// SkillVendor is the content-addressed vendored skill store (internal/
 	// skillvendor, TASKS/skills/03) that backs the explicit install/sync
 	// pipeline (internal/skillinstall, TASKS/skills/04/05 --
@@ -1476,6 +1479,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Loops:               NewLoopService(cfg.Store),
 		Bookmarks:           NewBookmarkService(cfg.Store),
 		Schedules:           NewScheduleService(cfg.Store),
+		Settings:            NewUserSettingsService(cfg.Store),
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,

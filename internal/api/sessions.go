@@ -333,7 +333,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	settings, _ := a.Services.Store.GetUserSettings(ctx)
+	settings, _ := a.Services.Settings.Get(ctx)
 	windowSize := 0
 	if settings != nil {
 		windowSize = settings.ContextWindowTokens

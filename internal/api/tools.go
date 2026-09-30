@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/service"
 )
 
 // handleListTools returns all registered tools.
@@ -151,13 +152,13 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 	granted := make(map[string]bool)
 	always := make(map[string]bool)
 	knownIDs := make(map[string]string)
-	if a.Services.Store != nil {
-		if names, err := a.Services.Store.ListAgentToolNames(r.Context(), agentID); err == nil {
+	if caps := a.Services.AgentCapabilities; caps != nil {
+		if names, err := caps.ListGrantedToolNames(r.Context(), agentID); err == nil {
 			for _, n := range names {
 				granted[n] = true
 			}
 		}
-		if rows, err := a.Services.Store.ListKnownTools(r.Context()); err == nil {
+		if rows, err := caps.ListToolCatalog(r.Context()); err == nil {
 			for _, kt := range rows {
 				knownIDs[kt.Name] = kt.ID
 			}
@@ -166,11 +167,9 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 		// tool_list/tool_describe) -- must read as allowed regardless of
 		// agent_tools grant membership, mirroring
 		// resolveAlwaysIncludedTools/enforceExecutionRulesViaAgentTools.
-		if rows, err := a.Services.Store.ListAlwaysIncludedKnownTools(r.Context()); err == nil {
-			for _, kt := range rows {
-				if kt.Status == "available" {
-					always[kt.Name] = true
-				}
+		if names, err := caps.ListAlwaysAllowedToolNames(r.Context()); err == nil {
+			for _, n := range names {
+				always[n] = true
 			}
 		}
 	}
@@ -197,13 +196,12 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 // handleGetToolLoadPreferences returns the user's tool load type overrides.
 // GET /api/tools/load-preferences
 func (a *API) handleGetToolLoadPreferences(w http.ResponseWriter, r *http.Request) {
-	settings, err := a.Services.Store.GetUserSettings(r.Context())
+	prefs, err := a.Services.Settings.ToolLoadPreferences(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	prefs := settings.ToolLoadPreferences
 	if prefs == nil {
 		prefs = make(map[string]string)
 	}
@@ -222,38 +220,17 @@ func (a *API) handleUpdateToolLoadPreferences(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Validate values.
-	for tool, lt := range updates {
-		if lt != "" && lt != string(pluginpkg.LoadTypeAuto) && lt != string(pluginpkg.LoadTypeOptIn) {
-			a.errorResp(w, http.StatusBadRequest, "invalid load_type for tool "+tool+": must be \"auto\", \"opt-in\", or \"\" (remove)")
+	prefs, err := a.Services.Settings.UpdateToolLoadPreferences(r.Context(), updates)
+	if err != nil {
+		if service.IsSettingsValidation(err) {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}
-	}
-
-	settings, err := a.Services.Store.GetUserSettings(r.Context())
-	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	if settings.ToolLoadPreferences == nil {
-		settings.ToolLoadPreferences = make(map[string]string)
-	}
-
-	for tool, lt := range updates {
-		if lt == "" {
-			delete(settings.ToolLoadPreferences, tool)
-		} else {
-			settings.ToolLoadPreferences[tool] = lt
-		}
-	}
-
-	if err := a.Services.Store.UpdateUserSettings(r.Context(), settings); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	a.jsonResp(w, http.StatusOK, settings.ToolLoadPreferences)
+	a.jsonResp(w, http.StatusOK, prefs)
 }
 
 // handleListToolsWithLoadType returns all discovered tools with their resolved loadType.
@@ -268,14 +245,14 @@ func (a *API) handleListToolsWithLoadType(w http.ResponseWriter, r *http.Request
 	allTools := a.Services.MCP.GetAllToolsUnfiltered()
 
 	// Build the user-level override layer.
-	settings, err := a.Services.Store.GetUserSettings(r.Context())
+	prefs, err := a.Services.Settings.ToolLoadPreferences(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	userOverrides := make(map[string]pluginpkg.LoadType, len(settings.ToolLoadPreferences))
-	for k, v := range settings.ToolLoadPreferences {
+	userOverrides := make(map[string]pluginpkg.LoadType, len(prefs))
+	for k, v := range prefs {
 		userOverrides[k] = pluginpkg.LoadType(v)
 	}
 	resolver := pluginpkg.NewLoadTypeResolver(

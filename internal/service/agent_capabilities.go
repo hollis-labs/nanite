@@ -145,6 +145,55 @@ func (s *AgentCapabilitiesService) DeleteKnownTool(ctx context.Context, agentID,
 	return s.store.DeleteAgentKnownTool(ctx, agentID, toolName)
 }
 
+// ── tool grants ──
+//
+// agent_tools grants a known_tools catalog row to an agent. It is a different
+// table from agent_known_tools above, and together with the always-included
+// escape hatch it is the gate on which tools an agent may call.
+
+// ListToolCatalog returns every known_tools catalog row.
+func (s *AgentCapabilitiesService) ListToolCatalog(ctx context.Context) ([]store.KnownTool, error) {
+	return s.store.ListKnownTools(ctx)
+}
+
+// GetCatalogTool returns one known_tools row by ID, or
+// store.ErrKnownToolNotFound.
+func (s *AgentCapabilitiesService) GetCatalogTool(ctx context.Context, toolID string) (*store.KnownTool, error) {
+	return s.store.GetKnownTool(ctx, toolID)
+}
+
+// ListGrantedToolNames returns the names of the tools granted to an agent.
+func (s *AgentCapabilitiesService) ListGrantedToolNames(ctx context.Context, agentID string) ([]string, error) {
+	return s.store.ListAgentToolNames(ctx, agentID)
+}
+
+// ListAlwaysAllowedToolNames returns the always-included tools an agent may
+// call without a grant. A row counts only while its status is "available".
+func (s *AgentCapabilitiesService) ListAlwaysAllowedToolNames(ctx context.Context) ([]string, error) {
+	rows, err := s.store.ListAlwaysIncludedKnownTools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(rows))
+	for _, kt := range rows {
+		if kt.Status == "available" {
+			names = append(names, kt.Name)
+		}
+	}
+	return names, nil
+}
+
+// GrantTool grants a known_tools row to an agent. An empty grantedVia is
+// recorded as "explicit"; store.GrantAgentTool applies that default.
+func (s *AgentCapabilitiesService) GrantTool(ctx context.Context, agentID, toolID, grantedVia string) error {
+	return s.store.GrantAgentTool(ctx, agentID, toolID, grantedVia)
+}
+
+// RevokeTool removes an agent's grant of a known_tools row.
+func (s *AgentCapabilitiesService) RevokeTool(ctx context.Context, agentID, toolID string) error {
+	return s.store.RevokeAgentTool(ctx, agentID, toolID)
+}
+
 // ── known skills ──
 
 func (s *AgentCapabilitiesService) ListKnownSkills(ctx context.Context, agentID string) ([]store.AgentKnownSkill, error) {

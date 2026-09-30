@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/service"
@@ -15,31 +14,14 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// devModeEnabled returns true when either the NANITE_DEVMODE env var is set
-// to a truthy value (1/true/yes/on) or the user_settings.developer_mode flag
-// is enabled. E1 (CW-20260428-0016) gates the inline-edit affordances on
-// internal skills behind this check.
+// devModeEnabled reports UserSettingsService.DevModeEnabled: NANITE_DEVMODE
+// or user_settings.developer_mode. E1 (CW-20260428-0016) gates the
+// inline-edit affordances on internal skills behind this check.
 func (a *API) devModeEnabled(r *http.Request) bool {
-	if envDevModeOn() {
-		return true
+	if a.Services.Settings == nil {
+		return service.EnvDevModeOn()
 	}
-	if a.Services.Store == nil {
-		return false
-	}
-	us, err := a.Services.Store.GetUserSettings(r.Context())
-	if err != nil || us == nil {
-		return false
-	}
-	return us.DeveloperMode
-}
-
-func envDevModeOn() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("NANITE_DEVMODE")))
-	switch v {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
+	return a.Services.Settings.DevModeEnabled(r.Context())
 }
 
 func (a *API) handleListSkills(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +275,7 @@ func (a *API) handleRemoveAgentSkill(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleGetDevMode(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"dev_mode": a.devModeEnabled(r),
-		"env_flag": envDevModeOn(),
+		"env_flag": service.EnvDevModeOn(),
 	})
 }
 

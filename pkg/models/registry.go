@@ -560,8 +560,19 @@ func ProviderHasPrefix(modelID string) (string, bool) {
 // CLI happens to run.
 func IsRealModel(id string) bool {
 	m, ok := ByModelID(id)
-	if !ok {
-		return false
-	}
-	return m.Provider != "pty" && !strings.HasPrefix(m.Provider, "pty-") && !strings.HasPrefix(m.Provider, "sub-")
+	return ok && !isCLIProvider(m.Provider)
+}
+
+// IsCLIWrapperModel reports whether id is one of the pseudo-models a CLI wrapper
+// is registered under ("claude-cli", "codex-cli", ...). Unlike IsRealModel it is
+// false for an unknown string: a name the registry has never heard of is not
+// necessarily wrong (a newer model may only arrive with the models.dev catalog),
+// but a wrapper pseudo-model can never be the model a CLI runs.
+func IsCLIWrapperModel(id string) bool {
+	m, ok := ByModelID(id)
+	return ok && isCLIProvider(m.Provider)
+}
+
+func isCLIProvider(provider string) bool {
+	return provider == "pty" || strings.HasPrefix(provider, "pty-") || strings.HasPrefix(provider, "sub-")
 }

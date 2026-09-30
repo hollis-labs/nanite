@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"regexp"
 	"strings"
 	"testing"
@@ -10,8 +12,10 @@ import (
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/selftools"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/truncate"
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 func textResult(s string) *mcp.ToolResult {
@@ -269,6 +273,18 @@ func TestCLISessionSizingModelOrder(t *testing.T) {
 			t.Errorf("declared, %s: sizing model %q, want %q", id, got, want)
 		}
 	}
+	// A declared name the registry does not know sizes at the floor, and says so
+	// once; the same name resolves once the catalog has synced it.
+	a.Services.AppConfig.Harness.CLIModels = map[string]string{"claude": "future-model-not-yet-in-any-catalog"}
+	if got := a.sessionModel(context.Background(), "cli-claude"); got != "" {
+		t.Errorf("unresolvable declared model: sizing model %q, want the floor", got)
+	}
+	models.SyncFromCatalog(models.CatalogInput{ContextWindows: map[string]int{"future-model-not-yet-in-any-catalog": 1_000_000}})
+	t.Cleanup(func() { models.SyncFromCatalog(models.CatalogInput{}) })
+	if got := a.sessionModel(context.Background(), "cli-claude"); got != "future-model-not-yet-in-any-catalog" {
+		t.Errorf("after the catalog synced it: %q", got)
+	}
+	a.Services.AppConfig.Harness.CLIModels = map[string]string{"claude": "claude-opus-5", "codex": "claude-sonnet-5"}
 	// API sessions are exactly as before, whatever is declared.
 	for id, want := range map[string]string{"api-real": "claude-opus-5", "api-unknown": "some-future-model", "api-empty": ""} {
 		if got := a.sessionModel(context.Background(), id); got != want {
@@ -372,5 +388,25 @@ func TestSelfToolCall_ArgumentAndResultRowsShareID(t *testing.T) {
 	}
 	if argID != resID || argID != "self-tool:todo_list:"+req.callID {
 		t.Errorf("argument row %q, result row %q; want both self-tool:todo_list:%s", argID, resID, req.callID)
+	}
+}
+
+// An unresolvable declared model warns once, naming the key and value.
+func TestUnresolvedCLIModelWarnsOnce(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	unresolvedCLIModelWarned.Delete("claude=warn-once-model")
+
+	a := &API{Services: &service.Container{AppConfig: &config.TunablesConfig{Harness: config.HarnessConfig{CLIModels: map[string]string{"claude": "warn-once-model"}}}}}
+	for i := 0; i < 3; i++ {
+		if got := a.cliSizingModel("pty-claude", "claude-cli"); got != "" {
+			t.Fatalf("sizing model = %q, want the floor", got)
+		}
+	}
+	out := buf.String()
+	if strings.Count(out, "level=WARN") != 1 || !strings.Contains(out, "harness.cli_models.claude") || !strings.Contains(out, "warn-once-model") || !strings.Contains(out, "level=WARN") {
+		t.Errorf("want exactly one warning naming key and value, got:\n%s", out)
 	}
 }

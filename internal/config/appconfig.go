@@ -39,8 +39,11 @@ type HarnessConfig struct {
 	// "copilot", "pi"), the model that CLI runs when the session does not name a
 	// real one. Nanite never chooses a CLI's model and cannot observe it, so this
 	// is what the operator says, used only to size tool-result budgets for
-	// CLI-launched sessions. A kind not listed is sized at the floor. Each model
-	// must be a real model in the built-in registry.
+	// CLI-launched sessions. A kind not listed is sized at the floor. A model
+	// that is a CLI wrapper pseudo-model (claude-cli) or empty is refused at
+	// load; a name the built-in registry does not know is resolved when it is
+	// used, after the model catalog has synced, and sized at the floor with one
+	// warning if it still does not resolve.
 	CLIModels map[string]string `yaml:"cli_models"`
 }
 
@@ -60,8 +63,11 @@ func (h HarnessConfig) Validate() error {
 			problems = append(problems, fmt.Sprintf("cli_models: unknown CLI kind %q (known: %s)", kind, strings.Join(KnownCLIKinds, ", ")))
 			continue
 		}
-		if !models.IsRealModel(model) {
-			problems = append(problems, fmt.Sprintf("cli_models[%s]: %q is not a real model in the registry", kind, model))
+		switch {
+		case strings.TrimSpace(model) == "":
+			problems = append(problems, fmt.Sprintf("cli_models[%s]: the model is empty", kind))
+		case models.IsCLIWrapperModel(model):
+			problems = append(problems, fmt.Sprintf("cli_models[%s]: %q is a CLI wrapper, not a model", kind, model))
 		}
 	}
 	if len(problems) == 0 {

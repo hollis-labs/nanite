@@ -421,6 +421,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
               variant="ghost"
               size="sm"
               onClick={handleExport}
+              title="Secret values are replaced; use `nanite mcp export` for a complete file"
               className="gap-1.5 text-xs text-fg-secondary hover:text-fg"
             >
               <Download className="w-3.5 h-3.5" />
@@ -984,7 +985,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 rows={3}
                 className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary font-mono text-sm"
               />
-              <p className="text-xs text-fg-muted mt-1">One KEY=VALUE per line.</p>
+              <p className="text-xs text-fg-muted mt-1">One KEY=VALUE per line. A value shown as •••••••• keeps the saved value.</p>
             </div>
 
             {/* Error */}

@@ -287,3 +287,21 @@ func TestMCPServerService_EmptyPatchKeepsEveryField(t *testing.T) {
 		t.Fatalf("empty patch changed the stored row\n got: %+v\nwant: %+v", stored, existing)
 	}
 }
+
+// The service's export hides every env value; mcpconfig.Export, the CLI's
+// path, keeps them.
+func TestMCPServerService_ExportRedactsEnv(t *testing.T) {
+	f := newMCPFakes()
+	f.rows["s"] = store.MCPServerConfig{Name: "s", TransportType: store.TransportStdio, Command: "x", Env: `["TOKEN=real","DEBUG=1"]`}
+	cfg, err := f.service().Export(context.Background())
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	want := map[string]string{"TOKEN": RedactedHeaderValue, "DEBUG": RedactedHeaderValue}
+	if got := cfg.MCPServers["s"].Env; !reflect.DeepEqual(got, want) {
+		t.Fatalf("exported env = %v, want %v", got, want)
+	}
+	if f.rows["s"].Env != `["TOKEN=real","DEBUG=1"]` {
+		t.Fatalf("export changed the stored env: %s", f.rows["s"].Env)
+	}
+}

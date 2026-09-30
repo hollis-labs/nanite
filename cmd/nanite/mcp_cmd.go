@@ -8,6 +8,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/mcpconfig"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -42,7 +43,7 @@ func mcpImport(args []string) {
 	}
 	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
-	result, err := mcpconfig.Import(context.Background(), s, data)
+	result, err := mcpconfig.Import(context.Background(), s, data, service.DropRedactedPlaceholders)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: import: %v\n", err)
 		os.Exit(1)

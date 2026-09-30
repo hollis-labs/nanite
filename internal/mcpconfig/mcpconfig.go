@@ -118,8 +118,9 @@ type ExportStore interface {
 }
 
 // Import parses .mcp.json data and creates DB records, skipping any that
-// already exist by name.
-func Import(ctx context.Context, s ImportStore, data []byte) (*ImportResult, error) {
+// already exist by name. prepare, when non-nil, is applied to each new record
+// before it is created.
+func Import(ctx context.Context, s ImportStore, data []byte, prepare func(*store.MCPServerConfig)) (*ImportResult, error) {
 	cfg, err := Parse(data)
 	if err != nil {
 		return nil, err
@@ -136,6 +137,9 @@ func Import(ctx context.Context, s ImportStore, data []byte) (*ImportResult, err
 		if existing != nil {
 			result.Skipped = append(result.Skipped, configs[i].Name)
 			continue
+		}
+		if prepare != nil {
+			prepare(&configs[i])
 		}
 		if err := s.CreateMCPServer(ctx, &configs[i]); err != nil {
 			return nil, fmt.Errorf("create server %q: %w", configs[i].Name, err)

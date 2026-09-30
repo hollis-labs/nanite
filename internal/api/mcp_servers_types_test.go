@@ -22,14 +22,34 @@ var mcpServerViewKeys = []string{
 	"trust_tier", "env_allowlist", "headers", "created_at", "updated_at",
 }
 
+// mcpEnvRedacted is the redacted env each test row's env must show, written
+// out by hand rather than computed, so the view is checked against an
+// independent answer.
+var mcpEnvRedacted = func() map[string]string {
+	p := service.RedactedHeaderValue
+	return map[string]string{
+		"":                       "",
+		"[]":                     "[]",
+		"not json":               "[]",
+		`["A=1","BARE","C=x=y"]`: `["A=` + p + `","` + p + `","C=` + p + `"]`,
+		`["GITHUB_TOKEN=ghp_x"]`: `["GITHUB_TOKEN=` + p + `"]`,
+	}
+}()
+
 // legacyRedactedMCPJSON is what the list, create and update endpoints wrote
 // before MCPServerView: a copy of the store row with its headers redacted by
-// the old api-local redactHeaders, marshaled as is.
+// the old api-local redactHeaders, marshaled as is. Env, which that path
+// returned as stored, is replaced by its expected redaction (CW-20260930-0117).
 func legacyRedactedMCPJSON(t *testing.T, rows []store.MCPServerConfig) []byte {
 	t.Helper()
 	out := make([]store.MCPServerConfig, len(rows))
 	copy(out, rows)
 	for i := range out {
+		want, ok := mcpEnvRedacted[out[i].Env]
+		if !ok {
+			t.Fatalf("no expected redaction for env %q; add it to mcpEnvRedacted", out[i].Env)
+		}
+		out[i].Env = want
 		parsed, err := mcp.ParseHeaderJSON(out[i].Headers)
 		if err != nil || len(parsed) == 0 {
 			out[i].Headers = "{}"
@@ -65,6 +85,7 @@ func populatedMCPServerConfig(t *testing.T) store.MCPServerConfig {
 		}
 	}
 	cfg.Headers = `{"Authorization":"Bearer secret-token","X-Tenant":"<acme & co>"}`
+	cfg.Env = `["A=1","BARE","C=x=y"]`
 	return cfg
 }
 
@@ -84,6 +105,9 @@ func TestMCPServerViewJSON(t *testing.T) {
 		"zero":                {{}},
 		"unparseable headers": {{Name: "x", Headers: `{"Authorization":"Bearer oops`}},
 		"empty headers":       {{Name: "x", Headers: "{}"}},
+		"unparseable env":     {{Name: "x", Env: "not json"}},
+		"empty env":           {{Name: "x", Env: "[]"}},
+		"env secret":          {{Name: "x", Env: `["GITHUB_TOKEN=ghp_x"]`}},
 		"empty list":          {},
 		"two rows":            {full, {Name: "y", Headers: `{"A":"b"}`}},
 	} {
@@ -158,21 +182,25 @@ func TestMCPServers_NoReadEndpointReturnsAHeaderValue(t *testing.T) {
 	}
 }
 
-// TestMCPServers_EnvReturnedUnredacted_CurrentBehaviour_PendingCW20260930_0117
-// pins that env values, unlike header values, are returned in plaintext by
-// list, create, update and export. CW-20260930-0117 decides whether they
-// should be; whoever changes that flips this test.
-func TestMCPServers_EnvReturnedUnredacted_CurrentBehaviour_PendingCW20260930_0117(t *testing.T) {
+// TestMCPServers_EnvRedacted_CW20260930_0117 pins the fix for
+// CW-20260930-0117: env values, like header values, no longer leave through
+// list, create, update or the HTTP export. The variable names stay visible.
+func TestMCPServers_EnvRedacted_CW20260930_0117(t *testing.T) {
 	_, mux := newTestAPI(t)
-	for _, c := range []struct{ name, method, path, body string }{
-		{"create", "POST", "/api/mcp-servers", mcpSecretServerBody("envprobe")},
-		{"list", "GET", "/api/mcp-servers", ""},
-		{"update", "PUT", "/api/mcp-servers/envprobe", mcpSecretServerBody("envprobe")},
-		{"export", "GET", "/api/mcp-servers/export", ""},
+	inList := `GITHUB_TOKEN=` + service.RedactedHeaderValue
+	for _, c := range []struct{ name, method, path, body, shows string }{
+		{"create", "POST", "/api/mcp-servers", mcpSecretServerBody("envprobe"), inList},
+		{"list", "GET", "/api/mcp-servers", "", inList},
+		{"update", "PUT", "/api/mcp-servers/envprobe", mcpSecretServerBody("envprobe"), inList},
+		{"export", "GET", "/api/mcp-servers/export", "", `"GITHUB_TOKEN": "` + service.RedactedHeaderValue + `"`},
 	} {
 		w := mcpDo(mux, c.method, c.path, c.body)
-		if !strings.Contains(w.Body.String(), mcpEnvSecret) {
-			t.Errorf("%s: env value no longer returned; if CW-20260930-0117 landed, flip this test: %s", c.name, w.Body.String())
+		body := w.Body.String()
+		if strings.Contains(body, mcpEnvSecret) {
+			t.Errorf("%s response carries the env value: %s", c.name, body)
+		}
+		if !strings.Contains(body, c.shows) {
+			t.Errorf("%s response does not show the redacted variable (want %s): %s", c.name, c.shows, body)
 		}
 	}
 }
@@ -430,5 +458,117 @@ func TestMCPServers_UpdateLoadFailureBeforeDecode(t *testing.T) {
 	w := mcpDo(mux, "PUT", "/api/mcp-servers/x", `not json`)
 	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "db down") {
 		t.Fatalf("PUT with failing load: %d %s, want 500 db down", w.Code, w.Body.String())
+	}
+}
+
+// recordingRegistrar records the env and headers each registration got.
+type recordingRegistrar struct {
+	env     map[string][]string
+	headers map[string]string
+}
+
+func (r *recordingRegistrar) AddStdioServer(name, _ string, _, env, _ []string, _ mcp.TrustTier) error {
+	r.env[name] = env
+	return nil
+}
+
+func (r *recordingRegistrar) AddRemoteServerFromConfig(name, _, _, headerJSON string, _ mcp.TrustTier) error {
+	r.headers[name] = headerJSON
+	return nil
+}
+
+func (r *recordingRegistrar) RemoveServer(string) {}
+
+// A UI save sends the env it loaded, placeholders included, with one entry
+// edited. The stored token survives, the edit lands, and the running server
+// is registered with the real token.
+func TestMCPServers_UIShapedPutKeepsRedactedEnvAndRegistersRealToken(t *testing.T) {
+	base, _ := newTestAPI(t)
+	reg := &recordingRegistrar{env: map[string][]string{}, headers: map[string]string{}}
+	a := &API{Services: &service.Container{MCPServers: service.NewMCPServerService(base.Services.Store, reg, nil)}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/mcp-servers", a.handleCreateMCPServer)
+	mux.HandleFunc("PUT /api/mcp-servers/{name}", a.handleUpdateMCPServer)
+
+	create := `{"name":"stdio","command":"true","env":"[\"GITHUB_TOKEN=` + mcpEnvSecret + `\",\"DEBUG=1\"]"}`
+	if w := mcpDo(mux, "POST", "/api/mcp-servers", create); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	ph := service.RedactedHeaderValue
+	ui := `{"name":"stdio","transport_type":"stdio","command":"true","url":"","args":"[]",` +
+		`"env":"[\"GITHUB_TOKEN=` + ph + `\",\"DEBUG=2\"]","enabled":true}`
+	w := mcpDo(mux, "PUT", "/api/mcp-servers/stdio", ui)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update: %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), mcpEnvSecret) {
+		t.Fatalf("update response carries the env value: %s", w.Body.String())
+	}
+
+	row, err := base.Services.Store.GetMCPServer(context.Background(), "stdio")
+	if err != nil || row == nil {
+		t.Fatalf("GetMCPServer: %v %v", row, err)
+	}
+	if want := `["GITHUB_TOKEN=` + mcpEnvSecret + `","DEBUG=2"]`; row.Env != want {
+		t.Fatalf("stored env = %s, want %s", row.Env, want)
+	}
+	if want := []string{"GITHUB_TOKEN=" + mcpEnvSecret, "DEBUG=2"}; !reflect.DeepEqual(reg.env["stdio"], want) {
+		t.Fatalf("registered env = %q, want %q", reg.env["stdio"], want)
+	}
+}
+
+// With nothing stored to restore from, create and import drop placeholders
+// instead of storing bullets as a value.
+func TestMCPServers_CreateAndImportDropPlaceholders(t *testing.T) {
+	a, mux := newTestAPI(t)
+	ph := service.RedactedHeaderValue
+	create := `{"name":"c","transport_type":"streamable","url":"http://127.0.0.1:1/mcp",` +
+		`"env":"[\"TOKEN=` + ph + `\",\"` + ph + `\",\"KEEP=1\"]",` +
+		`"headers":"{\"Authorization\":\"` + ph + `\",\"X-Keep\":\"1\"}"}`
+	if w := mcpDo(mux, "POST", "/api/mcp-servers", create); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	imp := `{"mcpServers":{"i":{"command":"true","env":{"TOKEN":"` + ph + `","KEEP":"1"}}}}`
+	if w := mcpDo(mux, "POST", "/api/mcp-servers/import", imp); w.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", w.Code, w.Body.String())
+	}
+	ctx := context.Background()
+	c, _ := a.Services.Store.GetMCPServer(ctx, "c")
+	i, _ := a.Services.Store.GetMCPServer(ctx, "i")
+	if c == nil || i == nil {
+		t.Fatalf("rows missing: c=%v i=%v", c, i)
+	}
+	for name, v := range map[string]string{"c env": c.Env, "c headers": c.Headers, "i env": i.Env} {
+		if strings.Contains(v, ph) {
+			t.Errorf("%s stored a placeholder: %s", name, v)
+		}
+	}
+	if c.Env != `["KEEP=1"]` || c.Headers != `{"X-Keep":"1"}` || i.Env != `["KEEP=1"]` {
+		t.Fatalf("stored c.env=%s c.headers=%s i.env=%s", c.Env, c.Headers, i.Env)
+	}
+}
+
+// The HTTP export is redacted, so re-importing it recreates the server's
+// shape but stores no bullets: the redacted variables are simply absent.
+func TestMCPServers_RedactedExportReimportsWithoutBullets(t *testing.T) {
+	_, mux := newTestAPI(t)
+	if w := mcpDo(mux, "POST", "/api/mcp-servers", mcpSecretServerBody("round")); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	exported := mcpDo(mux, "GET", "/api/mcp-servers/export", "").Body.String()
+	if strings.Contains(exported, mcpEnvSecret) {
+		t.Fatalf("export carries the env value: %s", exported)
+	}
+
+	b, mux2 := newTestAPI(t)
+	if w := mcpDo(mux2, "POST", "/api/mcp-servers/import", exported); w.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", w.Code, w.Body.String())
+	}
+	row, err := b.Services.Store.GetMCPServer(context.Background(), "round")
+	if err != nil || row == nil {
+		t.Fatalf("GetMCPServer: %v %v", row, err)
+	}
+	if row.Env != "[]" || row.Command != "true" {
+		t.Fatalf("re-imported row env=%s command=%s, want no env and the command kept", row.Env, row.Command)
 	}
 }

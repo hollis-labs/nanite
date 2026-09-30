@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/mcp"
@@ -423,10 +424,10 @@ func (s *chatServiceImpl) executeToolBatch(
 	}
 
 	// Execute concurrent-safe tools in parallel, at most
-	// toolConcurrencyLimit() at a time.
+	// toolConcurrencyLimit(ls) at a time.
 	if len(concurrent) > 0 {
 		var mu sync.Mutex // protects ch sends ordering (presence events)
-		runBounded(ctx, len(concurrent), s.toolConcurrencyLimit(),
+		runBounded(ctx, len(concurrent), s.toolConcurrencyLimit(ls),
 			func(i int) {
 				ip := concurrent[i]
 				results[ip.planIdx] = s.executeSingleTool(ctx, ip.plan.tu, ls, agentID, sessionID, ch, &mu)
@@ -445,19 +446,20 @@ func (s *chatServiceImpl) executeToolBatch(
 	return results
 }
 
-// DefaultMaxConcurrentTools bounds how many concurrent-safe tool calls of one
-// multi-tool-call turn run at once. Before this, a turn that emitted N calls
-// started N goroutines, each holding an MCP request, a DB write path and a
-// stream send. The value is a plain default (chatServiceImpl.maxConcurrentTools
-// overrides it) so a launch profile can adopt it later.
-const DefaultMaxConcurrentTools = 8
-
 // toolConcurrencyLimit is the effective per-turn concurrent tool-call bound.
-func (s *chatServiceImpl) toolConcurrencyLimit() int {
+// Before it existed, a turn that emitted N calls started N goroutines, each
+// holding an MCP request, a DB write path and a stream send. The run's harness
+// profile states it (max_concurrent_tools); chatServiceImpl.maxConcurrentTools
+// overrides that for tests, and a run with no resolved profile gets the
+// computed default.
+func (s *chatServiceImpl) toolConcurrencyLimit(ls *loopState) int {
 	if s.maxConcurrentTools > 0 {
 		return s.maxConcurrentTools
 	}
-	return DefaultMaxConcurrentTools
+	if ls != nil && ls.harness != nil && ls.harness.Values.MaxConcurrentTools > 0 {
+		return ls.harness.Values.MaxConcurrentTools
+	}
+	return harnessprofile.DefaultMaxConcurrentTools
 }
 
 // runBounded calls run(i) for every i in [0,n) on at most limit goroutines,

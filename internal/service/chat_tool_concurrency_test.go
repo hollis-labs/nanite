@@ -13,6 +13,8 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/harnessprofile"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // peakGauge tracks how many callers are inside enter/leave at once.
@@ -276,5 +278,54 @@ func TestExecuteToolBatch_CancellationFillsQueuedResults(t *testing.T) {
 	}
 	if ok != limit || canceled != n-limit {
 		t.Errorf("ok=%d canceled=%d, want %d and %d", ok, canceled, limit, n-limit)
+	}
+}
+
+// The bound comes from the run's harness profile; the service field overrides
+// it for tests, and a run with no resolved profile gets the computed default.
+func TestToolConcurrencyLimit_Sources(t *testing.T) {
+	s := &chatServiceImpl{}
+	if got := s.toolConcurrencyLimit(nil); got != harnessprofile.DefaultMaxConcurrentTools {
+		t.Errorf("no loop state: %d, want the default %d", got, harnessprofile.DefaultMaxConcurrentTools)
+	}
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	if got := s.toolConcurrencyLimit(ls); got != harnessprofile.DefaultMaxConcurrentTools {
+		t.Errorf("no profile: %d, want the default", got)
+	}
+
+	res, err := harnessSvc(t).resolveHarness(context.Background(), &store.Session{}, chat.AgentConstraints{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	three := 3
+	res.Values.MaxConcurrentTools = three
+	applyHarness(ls, res, false)
+	if got := s.toolConcurrencyLimit(ls); got != 3 {
+		t.Errorf("profile value: %d, want 3", got)
+	}
+	s.maxConcurrentTools = 5
+	if got := s.toolConcurrencyLimit(ls); got != 5 {
+		t.Errorf("service override: %d, want 5", got)
+	}
+}
+
+// The real path: a session whose launch override says 2 never has more than 2
+// calls inside ToolService.Execute.
+func TestExecuteToolBatch_HonorsProfileLimit(t *testing.T) {
+	res, err := harnessSvc(t).resolveHarness(context.Background(), &store.Session{}, chat.AgentConstraints{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Values.MaxConcurrentTools = 2
+	tools := &countingToolService{hold: 5 * time.Millisecond}
+	svc := &chatServiceImpl{streams: NewStreamManager(), tools: tools, store: &e2eStore{}}
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	applyHarness(ls, res, false)
+	ch, stop := drainBatchStream(t)
+	defer stop()
+
+	svc.executeToolBatch(context.Background(), concurrentPlans(12), ls, "agent", ch, "sess")
+	if p := tools.gauge.peak.Load(); p > 2 {
+		t.Errorf("peak = %d, want <= 2 (the profile's max_concurrent_tools)", p)
 	}
 }

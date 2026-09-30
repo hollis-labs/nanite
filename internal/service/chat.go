@@ -229,8 +229,8 @@ type chatServiceImpl struct {
 	store     Store
 
 	orchestrator *chat.Orchestrator
-	// maxConcurrentTools bounds concurrent tool calls per turn; 0 means
-	// DefaultMaxConcurrentTools.
+	// maxConcurrentTools overrides the harness profile's max_concurrent_tools
+	// for tests; 0 defers to the profile.
 	maxConcurrentTools int
 	appConfig          *config.TunablesConfig
 	outputFilter       *filter.Chain

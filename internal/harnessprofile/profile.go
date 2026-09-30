@@ -92,6 +92,7 @@ func validateLayer(l Layer) error {
 	neg("limits.tool_output_bytes", lim.ToolOutputBytes != nil && *lim.ToolOutputBytes < 0)
 	neg("harness.subagent_idle_timeout_ms", h.SubagentIdleTimeoutMs != nil && *h.SubagentIdleTimeoutMs < 0)
 	neg("harness.hard_ceiling", h.HardCeiling != nil && *h.HardCeiling < 0)
+	neg("harness.max_concurrent_tools", h.MaxConcurrentTools != nil && *h.MaxConcurrentTools < 0)
 	neg("harness.consecutive_fail_cap", h.ConsecutiveFailCap != nil && *h.ConsecutiveFailCap < 0)
 	neg("harness.runaway_fail_cap", h.RunawayFailCap != nil && *h.RunawayFailCap < 0)
 	neg("harness.per_tool_cap", h.PerToolCap != nil && *h.PerToolCap < 0)

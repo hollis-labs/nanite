@@ -31,6 +31,11 @@ const (
 	DefaultToolOutputMaxBytes       = 512 * 1024
 	DefaultToolOutputRemainingShare = 0.25
 	DefaultToolOutputRemainingFloor = 4 * 1024
+
+	// DefaultMaxConcurrentTools bounds how many concurrent-safe tool calls of
+	// one multi-tool-call turn run at once (CW-20260929-0012). Before it, a turn
+	// that emitted N calls ran N at once.
+	DefaultMaxConcurrentTools = 8
 )
 
 // Knobs are the host-only harness knobs a profile may state. A nil field means
@@ -41,6 +46,7 @@ type Knobs struct {
 	ConsecutiveFailCap    *int     `json:"consecutive_fail_cap,omitempty" yaml:"consecutive_fail_cap,omitempty"`
 	RunawayFailCap        *int     `json:"runaway_fail_cap,omitempty" yaml:"runaway_fail_cap,omitempty"`
 	PerToolCap            *int     `json:"per_tool_cap,omitempty" yaml:"per_tool_cap,omitempty"`
+	MaxConcurrentTools    *int     `json:"max_concurrent_tools,omitempty" yaml:"max_concurrent_tools,omitempty"`
 	CompactPreviewBytes   *int     `json:"compact_preview_bytes,omitempty" yaml:"compact_preview_bytes,omitempty"`
 	PreviewPct            *float64 `json:"preview_pct,omitempty" yaml:"preview_pct,omitempty"`
 	PreviewMinBytes       *int     `json:"preview_min_bytes,omitempty" yaml:"preview_min_bytes,omitempty"`
@@ -69,6 +75,7 @@ type Values struct {
 	ConsecutiveFailCap  int
 	RunawayFailCap      int
 	PerToolCap          int
+	MaxConcurrentTools  int
 	CompactPreviewBytes int
 	PreviewPct          float64
 	PreviewMinBytes     int
@@ -191,6 +198,7 @@ func (r *Resolved) Effective() Effective {
 			"consecutive_fail_cap":     v.ConsecutiveFailCap,
 			"runaway_fail_cap":         v.RunawayFailCap,
 			"per_tool_cap":             v.PerToolCap,
+			"max_concurrent_tools":     v.MaxConcurrentTools,
 			"compact_preview_bytes":    v.CompactPreviewBytes,
 			"preview_pct":              v.PreviewPct,
 			"preview_min_bytes":        v.PreviewMinBytes,

@@ -39,8 +39,14 @@ did before profiles existed. A parity test pins that.
 
 Enforced by the chat loop: `limits.idle_timeout_ms`,
 `harness.subagent_idle_timeout_ms`, `hard_ceiling`, `consecutive_fail_cap`,
-`runaway_fail_cap`, `per_tool_cap`, `compact_preview_bytes`, `preview_pct`,
-`preview_min_bytes`, `preview_max_bytes`.
+`runaway_fail_cap`, `per_tool_cap`, `max_concurrent_tools`,
+`compact_preview_bytes`, `preview_pct`, `preview_min_bytes`, `preview_max_bytes`.
+
+`max_concurrent_tools` bounds how many of a turn's concurrent-safe tool calls
+run at once (default 8, clamped to 1..64; the env override is
+`NANITE_HARNESS_MAX_CONCURRENT_TOOLS`). Results keep their plan order. A call
+still queued when the turn is canceled is not started and gets a canceled
+result for its own tool call id; calls already running finish as they would have.
 
 The tool-output ceiling: `limits.tool_output_bytes` and the shaping knobs
 `tool_output_pct`, `tool_output_min_bytes`, `tool_output_max_bytes`,

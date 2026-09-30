@@ -334,3 +334,28 @@ func (s *Store) RemoveSkillFromAgent(ctx context.Context, agentID, skillID strin
 	}
 	return nil
 }
+
+// ListDanglingSkillGrants returns the slugs the agent is granted that have no
+// row in skills. ListAgentSkills joins on skills, so such a grant is invisible
+// to the agent; this is how that gets noticed.
+func (s *Store) ListDanglingSkillGrants(ctx context.Context, agentID string) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT aks.skill_name
+		   FROM agent_known_skills aks
+		  WHERE aks.agent_id = ?
+		    AND aks.skill_name NOT IN (SELECT slug FROM skills)
+		  ORDER BY aks.skill_name`, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("list dangling skill grants: %w", err)
+	}
+	defer closeRows(rows)
+	var out []string
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, fmt.Errorf("scan dangling skill grant: %w", err)
+		}
+		out = append(out, slug)
+	}
+	return out, rows.Err()
+}

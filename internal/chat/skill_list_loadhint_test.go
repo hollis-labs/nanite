@@ -2,7 +2,9 @@ package chat
 
 import (
 	"context"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -182,4 +184,51 @@ func TestBuildSkillsSlotContent_EmptyWhenNothingToList(t *testing.T) {
 	if got := buildSkillsSlotContent(context.Background(), s, agent.ID, ""); got != "" {
 		t.Errorf("want empty slot for agent with no skills and empty catalog, got %q", got)
 	}
+}
+
+// CW-20260929-0019: a granted skill with no catalog row is invisible to the
+// agent, and that is logged, once per (agent, slug).
+func TestBuildSkillListForSession_WarnsOnceOnDanglingGrant(t *testing.T) {
+	s := newTestStoreForChat(t)
+	agent := mustCreateAgent(t, s, "agent-dangling")
+	installed := mustCreateSkill(t, s, &store.Skill{Name: "Real", Slug: "real", Description: "d"})
+	mustAssignSkill(t, s, agent.ID, installed.ID)
+	if _, err := s.DB.Exec(`INSERT INTO agent_known_skills (agent_id, skill_name) VALUES (?, 'ghost-skill')`, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	sink := &syncBuf{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(sink, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	for i := 0; i < 3; i++ {
+		got := buildSkillListForSession(context.Background(), s, agent.ID, "")
+		if !strings.Contains(got, "- real:") || strings.Contains(got, "ghost-skill") {
+			t.Fatalf("listing = %q", got)
+		}
+	}
+	if n := strings.Count(sink.String(), "ghost-skill"); n != 1 {
+		t.Errorf("warning logged %d times over 3 turns, want once: %s", n, sink.String())
+	}
+	if !strings.Contains(sink.String(), agent.ID) {
+		t.Errorf("warning does not name the agent: %s", sink.String())
+	}
+}
+
+type syncBuf struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *syncBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

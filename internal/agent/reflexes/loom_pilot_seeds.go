@@ -32,7 +32,7 @@ type AgentReflexSeed struct {
 }
 
 // nanitewikiTopicPattern anchors check_before_answer's text match to
-// Nanite's own recurring subsystem vocabulary (see CLAUDE.md: envelope
+// Nanite's own recurring subsystem vocabulary (see AGENTS.md: envelope
 // system, boot-profile CLI harness, MCP trust tiers, durable agents /
 // agent_profiles, the slot system, the reflex engine itself, Loom /
 // the wiki). Deliberately not a bare "nanite" match — Weaver's entire

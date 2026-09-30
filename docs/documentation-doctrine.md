@@ -19,7 +19,7 @@ A file's directory says which audience it serves:
 |---|---|---|
 | Repository root | **USER** | someone running Nanite |
 | `docs/` | **DEVELOPER** | someone changing Nanite |
-| `AGENTS.md`, `CLAUDE.md`, `.claude/` | **AGENT** | an agent working in this repo |
+| `AGENTS.md`, `.claude/` | **AGENT** | an agent working in this repo |
 
 A file in the wrong directory is moved, not annotated. Location is checkable at
 a glance and survives editing; a declared audience is one more claim that can

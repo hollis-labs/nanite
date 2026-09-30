@@ -15,6 +15,7 @@
 package models
 
 import (
+	"strings"
 	"sync"
 )
 
@@ -551,4 +552,27 @@ func ProviderHasPrefix(modelID string) (string, bool) {
 	ensureBuilt()
 	_ = modelID
 	return "", false
+}
+
+// IsRealModel reports whether id names a model a provider actually serves, as
+// opposed to an unknown string or the pseudo-model a CLI wrapper is registered
+// under ("claude-cli", "codex-cli", ...), which stands for whatever model that
+// CLI happens to run.
+func IsRealModel(id string) bool {
+	m, ok := ByModelID(id)
+	return ok && !isCLIProvider(m.Provider)
+}
+
+// IsCLIWrapperModel reports whether id is one of the pseudo-models a CLI wrapper
+// is registered under ("claude-cli", "codex-cli", ...). Unlike IsRealModel it is
+// false for an unknown string: a name the registry has never heard of is not
+// necessarily wrong (a newer model may only arrive with the models.dev catalog),
+// but a wrapper pseudo-model can never be the model a CLI runs.
+func IsCLIWrapperModel(id string) bool {
+	m, ok := ByModelID(id)
+	return ok && isCLIProvider(m.Provider)
+}
+
+func isCLIProvider(provider string) bool {
+	return provider == "pty" || strings.HasPrefix(provider, "pty-") || strings.HasPrefix(provider, "sub-")
 }

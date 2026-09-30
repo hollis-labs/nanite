@@ -199,6 +199,27 @@ rows and is served in order by an index on the session, event type and id, so a
 long session does not slow the check; it runs only when a claim is otherwise
 unbacked.
 
+## CLI-launched sessions
+
+A CLI-launched agent's Nanite-tool results are cached and bounded by the
+self-tool proxy, sized against a model. Nanite does not choose a CLI's model and
+cannot observe it (the CLI wrapper does not report it), so `sessions.model` for
+these sessions holds the wrapper's pseudo-model, never the model actually run,
+and Nanite does not write a guess there. The proxy sizes against, in order: a
+real model on the session; the model declared for that kind of CLI in
+`harness.cli_models` in the app config (`claude`, `codex`, `copilot`, `opencode`,
+`pi`); otherwise the floor. Only a large-window model changes the result, since a
+200K window already gets the floor from the formula. Two mistakes are
+unambiguous and stop startup with the problem named: a key that is not a known
+CLI kind, and a value that is empty or a CLI wrapper pseudo-model such as
+`claude-cli`. A model name the built-in registry does not know is not refused: a
+newer model may only be known to the models.dev catalog, which has not synced
+when the config is read. It is resolved when it is used, and one that still does
+not resolve is sized at the floor with a single warning naming the key and value.
+API sessions are unaffected. This is declared, not observed:
+reading the model from the CLI's own init event would need the wrapper to expose
+it.
+
 ## Recording and diagnostics
 
 Each turn's `execution_metrics` row records the profile name, the profile

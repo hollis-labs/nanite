@@ -4,10 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/truncate"
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // CW-20260929-0011 / D-38: a CLI-launched agent's self-tool calls reach the
@@ -63,7 +66,51 @@ func (a *API) sessionModel(ctx context.Context, sessionID string) string {
 	if err != nil || sess == nil {
 		return ""
 	}
-	return sess.Model
+	if !chat.IsCLIProvider(sess.Provider) {
+		return sess.Model
+	}
+	return a.cliSizingModel(sess.Provider, sess.Model)
+}
+
+// cliSizingModel is the model a CLI-launched session's tool-result budget is
+// sized against. Nanite does not choose a CLI's model and cannot observe it, so
+// sessions.model for these sessions holds the wrapper's pseudo-model
+// ("claude-cli"), never the model actually run. In order: a session that does
+// name a real model; the model the operator declared for that kind of CLI
+// (harness.cli_models); otherwise "", which sizes at the floor. Nothing here
+// writes a guess back to the session.
+func (a *API) cliSizingModel(provider, sessionModel string) string {
+	if models.IsRealModel(sessionModel) {
+		return sessionModel
+	}
+	if a.Services == nil || a.Services.AppConfig == nil {
+		return ""
+	}
+	kind := chat.NormalizeCLIProvider(provider)
+	declared := a.Services.AppConfig.Harness.CLIModels[kind]
+	if declared == "" {
+		return ""
+	}
+	// Resolved here, at use, so a model that only the models.dev catalog knows
+	// counts once the catalog has synced. One that never resolves is sized at
+	// the floor, and the operator hears about it once.
+	if models.IsRealModel(declared) {
+		return declared
+	}
+	warnUnresolvedCLIModel(kind, declared)
+	return ""
+}
+
+var unresolvedCLIModelWarned sync.Map
+
+// warnUnresolvedCLIModel logs, once per key and value, that a declared CLI model
+// is not one the registry or the synced catalog knows.
+func warnUnresolvedCLIModel(kind, model string) {
+	if _, seen := unresolvedCLIModelWarned.LoadOrStore(kind+"="+model, struct{}{}); seen {
+		return
+	}
+	slog.Warn("harness.cli_models names a model the registry and catalog do not know; sizing at the floor",
+		"key", "harness.cli_models."+kind, "value", model)
 }
 
 // cacheableSelfToolCall reports whether a forwarded call's result may be

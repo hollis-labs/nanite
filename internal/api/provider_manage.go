@@ -9,29 +9,28 @@ import (
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/secrets"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func (a *API) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	var update store.ProviderUpdate
-	if err := a.decode(r, &update); err != nil {
+	var req UpdateProviderRequest
+	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 
-	if err := a.Services.Store.UpdateProvider(r.Context(), id, update); err != nil {
+	if err := a.Services.ProviderConfig.Update(r.Context(), id, req.toStore()); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to update provider: "+err.Error())
 		return
 	}
 
-	p, err := a.Services.Store.GetProvider(r.Context(), id)
+	p, err := a.Services.ProviderConfig.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "provider not found")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, p)
+	a.jsonResp(w, http.StatusOK, providerConfigToView(p))
 }
 
 // handleSetProviderAPIKey accepts {"api_key": "sk-..."} and stores it in the OS keychain.
@@ -54,9 +53,9 @@ func (a *API) handleSetProviderAPIKey(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	a.jsonResp(w, http.StatusOK, map[string]any{
-		"provider_id": id,
-		"has_key":     body.APIKey != "",
+	a.jsonResp(w, http.StatusOK, ProviderAPIKeyResponse{
+		ProviderID: id,
+		HasKey:     body.APIKey != "",
 	})
 }
 
@@ -65,7 +64,7 @@ func (a *API) handleSetProviderAPIKey(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleGetProviderStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	p, err := a.Services.Store.GetProvider(r.Context(), id)
+	p, err := a.Services.ProviderConfig.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "provider not found")
 		return
@@ -74,10 +73,10 @@ func (a *API) handleGetProviderStatus(w http.ResponseWriter, r *http.Request) {
 	hasKey := secrets.Has(secrets.ProviderKeyName(id))
 	registered := a.Services.Providers != nil && a.Services.Providers.Has(p.ProviderType)
 
-	a.jsonResp(w, http.StatusOK, map[string]any{
-		"provider":    p,
-		"has_api_key": hasKey,
-		"registered":  registered,
+	a.jsonResp(w, http.StatusOK, ProviderStatusDetailView{
+		Provider:   providerConfigToView(p),
+		HasAPIKey:  hasKey,
+		Registered: registered,
 	})
 }
 
@@ -118,7 +117,7 @@ func (a *API) handleDetectCLI(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Check if a custom path is stored in provider settings.
-		if p, err := a.Services.Store.GetProvider(r.Context(), s.provID); err == nil && p.Settings != "" && p.Settings != "{}" {
+		if p, err := a.Services.ProviderConfig.Get(r.Context(), s.provID); err == nil && p.Settings != "" && p.Settings != "{}" {
 			var settings map[string]string
 			if json.Unmarshal([]byte(p.Settings), &settings) == nil {
 				if cp, ok := settings["cli_path"]; ok && cp != "" {
@@ -143,20 +142,14 @@ func (a *API) handleDetectCLI(w http.ResponseWriter, r *http.Request) {
 
 // handleGetAllProviderStatuses returns all providers with their runtime status.
 func (a *API) handleGetAllProviderStatuses(w http.ResponseWriter, r *http.Request) {
-	providers, err := a.Services.Store.ListProviders(r.Context())
+	providers, err := a.Services.ProviderConfig.List(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	providers = visibleProviderRows(providers)
 
-	type providerStatus struct {
-		store.ProviderConfig
-		HasAPIKey  bool `json:"has_api_key"`
-		Registered bool `json:"registered"`
-	}
-
-	out := make([]providerStatus, 0, len(providers))
+	out := make([]ProviderStatusView, 0, len(providers))
 	for _, p := range providers {
 		hasKey := secrets.Has(secrets.ProviderKeyName(p.ID))
 		registered := a.Services.Providers != nil && a.Services.Providers.Has(p.ProviderType)
@@ -166,10 +159,10 @@ func (a *API) handleGetAllProviderStatuses(w http.ResponseWriter, r *http.Reques
 			registered = a.Services.Providers != nil && (a.Services.Providers.Has(p.ProviderType) || a.Services.Providers.Has("sub-"+strings.TrimPrefix(p.ProviderType, "pty-")))
 		}
 
-		out = append(out, providerStatus{
-			ProviderConfig: p,
-			HasAPIKey:      hasKey,
-			Registered:     registered,
+		out = append(out, ProviderStatusView{
+			ProviderConfigView: providerConfigToView(&p),
+			HasAPIKey:          hasKey,
+			Registered:         registered,
 		})
 	}
 

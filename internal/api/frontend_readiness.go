@@ -24,8 +24,8 @@ type startSurfaceCapabilities struct {
 	Recipes             []service.DurableAgentRecipe `json:"recipes"`
 	DurableAgents       []store.DurableAgentInstance `json:"durable_agents"`
 	Profiles            []AgentProfileDTO            `json:"profiles"`
-	Providers           []store.ProviderConfig       `json:"providers"`
-	Models              []store.Model                `json:"models"`
+	Providers           []ProviderConfigView         `json:"providers"`
+	Models              []ModelView                  `json:"models"`
 	WorkRootHints       []workRootHint               `json:"work_root_hints"`
 }
 
@@ -122,12 +122,12 @@ func (a *API) handleStartSurfaceCapabilities(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	profiles = active
-	providers, err := a.providersForStartSurface()
+	providers, err := a.providersForStartSurface(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	models, err := a.modelsForStartSurface()
+	models, err := a.modelsForStartSurface(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -145,8 +145,8 @@ func (a *API) handleStartSurfaceCapabilities(w http.ResponseWriter, r *http.Requ
 		Recipes:             nonNilSlice(recipes),
 		DurableAgents:       nonNilSlice(durableAgents),
 		Profiles:            nonNilSlice(agentProfilesToDTO(profiles)),
-		Providers:           nonNilSlice(providers),
-		Models:              nonNilSlice(models),
+		Providers:           nonNilSlice(providerConfigsToView(providers)),
+		Models:              nonNilSlice(modelsToView(models)),
 		WorkRootHints:       []workRootHint{{ID: "operator-provided", Label: "Operator provided", Description: "Frontend should prompt for a project or working directory when the recipe/start path needs one."}},
 	})
 }
@@ -330,16 +330,16 @@ func laterTimestamp(current, candidate string) string {
 	return current
 }
 
-func (a *API) providersForStartSurface() ([]store.ProviderConfig, error) {
-	providers, err := a.Services.Store.ListProviders(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+func (a *API) providersForStartSurface(ctx context.Context) ([]store.ProviderConfig, error) {
+	providers, err := a.Services.ProviderConfig.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return visibleProviderRows(providers), nil
 }
 
-func (a *API) modelsForStartSurface() ([]store.Model, error) {
-	models, err := a.Services.Store.ListModels(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+func (a *API) modelsForStartSurface(ctx context.Context) ([]store.Model, error) {
+	models, err := a.Services.ProviderConfig.ListModels(ctx)
 	if err != nil {
 		return nil, err
 	}

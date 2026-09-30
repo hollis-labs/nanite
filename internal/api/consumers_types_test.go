@@ -142,7 +142,7 @@ func TestStartSurfaceCapabilitiesMatchesStoreEncoding(t *testing.T) {
 	}
 	after := startSurfaceCapabilities{
 		SchemaVersion: 1, RuntimeKinds: runtimeKindOptions(), LifecycleClasses: lifecycleClassOptions(),
-		DurableAgents: durable, Profiles: agentProfilesToDTO(profiles), Providers: providers, Models: models,
+		DurableAgents: durable, Profiles: agentProfilesToDTO(profiles), Providers: providerConfigsToView(providers), Models: modelsToView(models),
 		Recipes: []service.DurableAgentRecipe{},
 	}
 	if got, want := mustJSON(t, after), mustJSON(t, before); string(got) != string(want) {

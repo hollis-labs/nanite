@@ -30,7 +30,7 @@ import (
 // the response degrades to the DB-only shape, keeping the test suite
 // stable.
 func (a *API) handleListProviders(w http.ResponseWriter, r *http.Request) {
-	dbProviders, err := a.Services.Store.ListProviders(r.Context())
+	dbProviders, err := a.Services.ProviderConfig.List(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -39,7 +39,7 @@ func (a *API) handleListProviders(w http.ResponseWriter, r *http.Request) {
 
 	providers := mergeCatalogAndDBProviders(a.Services.ProviderCatalog, dbProviders)
 
-	a.jsonResp(w, http.StatusOK, providers)
+	a.jsonResp(w, http.StatusOK, providerConfigsToView(providers))
 }
 
 // mergeCatalogAndDBProviders is the hybrid merge: catalog wins over DB
@@ -93,14 +93,14 @@ func catalogProviderRow(e providercatalog.Entry) store.ProviderConfig {
 // retire-boot-profile-catalog.md removed a second source that used to
 // live here — one synthesized model row per boot-profile catalog entry.
 func (a *API) handleListModels(w http.ResponseWriter, r *http.Request) {
-	models, err := a.Services.Store.ListModels(r.Context())
+	models, err := a.Services.ProviderConfig.ListModels(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	models = visibleModelRows(models)
 
-	a.jsonResp(w, http.StatusOK, models)
+	a.jsonResp(w, http.StatusOK, modelsToView(models))
 }
 
 // allowedFromEnv reads a comma-separated allowlist. Unset or empty means "no

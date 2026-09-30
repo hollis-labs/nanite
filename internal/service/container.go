@@ -85,6 +85,8 @@ type Container struct {
 	AgentMembership *AgentMembershipService
 	Skills          SkillService
 	Usage           *UsageService // token usage, execution metrics, utility calls
+	// ProviderConfig reads and writes provider and model configuration rows.
+	ProviderConfig *ProviderConfigService
 	// SkillVendor is the content-addressed vendored skill store (internal/
 	// skillvendor, TASKS/skills/03) that backs the explicit install/sync
 	// pipeline (internal/skillinstall, TASKS/skills/04/05 --
@@ -572,6 +574,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, nil)
 	agentMembership := NewAgentMembershipService(cfg.Store, cfg.Store)
 	usage := NewUsageService(cfg.Store, cfg.Store)
+	providerConfig := NewProviderConfigService(cfg.Store)
 
 	// agent_permissions.go (newFileAgentPermissionResolver) and
 	// ToolClient.PermissionResolver/GetPermissions/CheckPermission/
@@ -1454,6 +1457,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentConfig:         agentConfig,
 		AgentMembership:     agentMembership,
 		Usage:               usage,
+		ProviderConfig:      providerConfig,
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,

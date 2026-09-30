@@ -57,3 +57,80 @@ func TestCreateSession_HarnessProfileSelection(t *testing.T) {
 		t.Errorf("plain create: %d", rec.Code)
 	}
 }
+
+// With no profile selected the default profile still resolves the process
+// environment, so a bad NANITE_HARNESS_* value is refused at creation and no
+// session is left behind; a good or absent value still creates.
+func TestCreateSession_BadEnvNoSelection(t *testing.T) {
+	a, s := newToolCallTestAPI(t)
+	before, _ := s.ListSessions(t.Context())
+
+	t.Setenv("NANITE_HARNESS_HARD_CEILING", "lots")
+	rec := postCreateSession(t, a, map[string]any{})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "NANITE_HARNESS_HARD_CEILING") {
+		t.Errorf("bad env, no selection: %d %s", rec.Code, rec.Body.String())
+	}
+	after, _ := s.ListSessions(t.Context())
+	if len(after) != len(before) {
+		t.Errorf("refused create left %d new session(s)", len(after)-len(before))
+	}
+
+	t.Setenv("NANITE_HARNESS_HARD_CEILING", "12")
+	if rec := postCreateSession(t, a, map[string]any{}); rec.Code >= 300 {
+		t.Errorf("good env: %d %s", rec.Code, rec.Body.String())
+	}
+	t.Setenv("NANITE_HARNESS_HARD_CEILING", "")
+	if rec := postCreateSession(t, a, map[string]any{}); rec.Code >= 300 {
+		t.Errorf("no env: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The endpoint reports what the session's next turn would run under, with the
+// source of each value, honoring the session's selection and ?model=.
+func TestSessionHarnessProfileEndpoint(t *testing.T) {
+	a, s := newToolCallTestAPI(t)
+	rec := postCreateSession(t, a, map[string]any{"harness_profile": "conservative", "model": "claude-opus-5"})
+	var sess store.Session
+	if err := json.Unmarshal(rec.Body.Bytes(), &sess); err != nil || sess.ID == "" {
+		t.Fatalf("create: %v %s", err, rec.Body.String())
+	}
+	get := func(target string) (*httptest.ResponseRecorder, map[string]any) {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.SetPathValue("id", sess.ID)
+		w := httptest.NewRecorder()
+		a.handleGetSessionHarnessProfile(w, req)
+		var out map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w, out
+	}
+	w, out := get("/api/sessions/" + sess.ID + "/harness-profile")
+	if w.Code != http.StatusOK || out["profile"] != "conservative" || out["model"] != "claude-opus-5" {
+		t.Fatalf("response: %d %s", w.Code, w.Body.String())
+	}
+	values, _ := out["values"].(map[string]any)
+	sources, _ := out["sources"].(map[string]any)
+	hc, _ := sources["hard_ceiling"].(map[string]any)
+	if values["hard_ceiling"].(float64) != 100 || hc["layer"] != "profile:conservative" {
+		t.Errorf("hard_ceiling = %v from %v", values["hard_ceiling"], hc)
+	}
+	if !strings.HasPrefix(out["digest"].(string), "sha256:") {
+		t.Errorf("digest = %v", out["digest"])
+	}
+	if _, out = get("/api/sessions/" + sess.ID + "/harness-profile?model=gpt-5"); out["model"] != "gpt-5" {
+		t.Errorf("?model= ignored: %v", out["model"])
+	}
+	// A stored selection that no longer resolves is reported, not hidden.
+	if err := s.UpdateSessionMetadata(t.Context(), sess.ID, `{"harness_profile":"gone"}`); err != nil {
+		t.Fatal(err)
+	}
+	if w, _ = get("/api/sessions/" + sess.ID + "/harness-profile"); w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "unknown harness profile") {
+		t.Errorf("stale selection: %d %s", w.Code, w.Body.String())
+	}
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.SetPathValue("id", "no-such-session")
+	nf := httptest.NewRecorder()
+	a.handleGetSessionHarnessProfile(nf, req)
+	if nf.Code != http.StatusNotFound {
+		t.Errorf("missing session: %d", nf.Code)
+	}
+}

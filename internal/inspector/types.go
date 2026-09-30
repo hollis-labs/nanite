@@ -5,7 +5,10 @@
 // session_id. Nothing is persisted to SQLite; this is debug-mode only.
 package inspector
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // TurnSnapshot is the per-turn aggregate surfaced by the inspector.
 // Producers call Service.Record* to fill it; consumers read via Snapshot().
@@ -39,6 +42,19 @@ type TurnSnapshot struct {
 	// Reminders shows the reminder activity for this turn (J11, CW-20260426-0009).
 	// Nil until the reminder engine wires up its producer.
 	Reminders *RemindersRecord `json:"reminders,omitempty"`
+
+	// Harness is the harness profile the turn ran under (D-33): name, digest
+	// and the resolved values with the layer that supplied each. Nil for a turn
+	// that resolved none.
+	Harness *HarnessRecord `json:"harness,omitempty"`
+}
+
+// HarnessRecord is the harness profile a turn ran under.
+type HarnessRecord struct {
+	Profile string `json:"profile"`
+	Digest  string `json:"digest"`
+	// Effective is the recorded resolution, as stored in execution_metrics.
+	Effective json.RawMessage `json:"effective"`
 }
 
 // SlotSnapshot describes one context window slot.

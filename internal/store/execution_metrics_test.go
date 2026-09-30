@@ -213,3 +213,32 @@ func TestExecutionMetrics_PTYAdapter(t *testing.T) {
 		t.Errorf("expected provider=pty-claude, got %s", metrics[0].Provider)
 	}
 }
+
+// The harness profile a turn ran under round-trips through the recording and
+// read paths, and a row written without one reads back empty.
+func TestExecutionMetrics_HarnessProfileRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	with := &ExecutionMetrics{SessionID: "s", MessageID: "m1", Model: "x", ProfileName: "conservative", ProfileDigest: "sha256:abc", EffectiveLimitsJSON: `{"values":{"hard_ceiling":100}}`}
+	without := &ExecutionMetrics{SessionID: "s", MessageID: "m2", Model: "x"}
+	for _, m := range []*ExecutionMetrics{with, without} {
+		if err := s.RecordExecutionMetrics(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := s.GetSessionExecutionMetrics(ctx, "s")
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("rows = %d, %v", len(rows), err)
+	}
+	byMsg := map[string]ExecutionMetrics{rows[0].MessageID: rows[0], rows[1].MessageID: rows[1]}
+	if g := byMsg["m1"]; g.ProfileName != "conservative" || g.ProfileDigest != "sha256:abc" || g.EffectiveLimitsJSON != `{"values":{"hard_ceiling":100}}` {
+		t.Errorf("recorded row = %+v", g)
+	}
+	if g := byMsg["m2"]; g.ProfileName != "" || g.ProfileDigest != "" || g.EffectiveLimitsJSON != "" {
+		t.Errorf("row without a profile = %+v", g)
+	}
+	recent, err := s.GetRecentExecutionMetrics(ctx, 10)
+	if err != nil || len(recent) != 2 {
+		t.Errorf("recent = %d, %v", len(recent), err)
+	}
+}

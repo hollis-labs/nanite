@@ -309,6 +309,15 @@ func (s *chatServiceImpl) initializeRun(
 	if s.inspector != nil && inspectorTurnID != "" {
 		classifiedTier, _ := ls.Classification()
 		s.inspector.RecordScopeTier(sessionID, inspectorTurnID, classifiedTier.String())
+		if setup.harness != nil {
+			rec := inspectsvc.HarnessRecord{Profile: setup.harness.Profile, Digest: setup.harness.Digest}
+			// An empty RawMessage is invalid JSON and would break the
+			// snapshot's marshaling, so the field is left unset on failure.
+			if eff := setup.harness.EffectiveJSON(); eff != "" {
+				rec.Effective = json.RawMessage(eff)
+			}
+			s.inspector.RecordHarness(sessionID, inspectorTurnID, rec)
+		}
 	}
 
 	// Phase 4 item 02
@@ -1738,6 +1747,9 @@ func (s *chatServiceImpl) finalizeRun(
 		DurationMs:      time.Since(lifecycle.startTime).Milliseconds(),
 		ContextMessages: len(run.chatMessages), ToolIterations: run.loop.iteration,
 		ToolCalls: len(run.loop.toolCallRefs),
+	}
+	if h := run.loop.harness; h != nil {
+		metrics.ProfileName, metrics.ProfileDigest, metrics.EffectiveLimitsJSON = h.Profile, h.Digest, h.EffectiveJSON()
 	}
 	if run.breakdown != nil {
 		metrics.ContextTokens = run.breakdown.Total

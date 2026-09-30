@@ -66,7 +66,23 @@ func SessionHarnessSelection(metadata string) (profile string, overrides harness
 // resolveHarness resolves the harness profile for one turn. An unknown or
 // invalid profile is an error; it is never silently replaced by a default.
 func (s *chatServiceImpl) resolveHarness(ctx context.Context, session *store.Session, constraints chat.AgentConstraints, model string) (*harnessprofile.Resolved, error) {
-	reg := s.harnessProfiles
+	var settings harnessSettings
+	if s.store != nil {
+		settings = s.store
+	}
+	return ResolveHarness(ctx, s.harnessProfiles, settings, session, constraints, model)
+}
+
+// harnessSettings is the slice of the store the resolution reads.
+type harnessSettings interface {
+	GetUserSettings(ctx context.Context) (*store.UserSettings, error)
+}
+
+// ResolveHarness resolves the harness profile a session's next turn would run
+// under: the session's selection, the agent's constraints, the user settings
+// and the model. reg nil means the built-ins; settings nil means no app layer.
+// The chat loop and the diagnostics endpoint both resolve through here.
+func ResolveHarness(ctx context.Context, reg *harnessprofile.Registry, settings harnessSettings, session *store.Session, constraints chat.AgentConstraints, model string) (*harnessprofile.Resolved, error) {
 	if reg == nil {
 		reg = builtinOnlyRegistry()
 	}
@@ -80,8 +96,8 @@ func (s *chatServiceImpl) resolveHarness(ctx context.Context, session *store.Ses
 		Agent:   agentLayer(constraints),
 		Launch:  launch,
 	}
-	if s.store != nil {
-		if us, usErr := s.store.GetUserSettings(ctx); usErr == nil && us != nil && us.ToolPerTurnCap > 0 {
+	if settings != nil {
+		if us, usErr := settings.GetUserSettings(ctx); usErr == nil && us != nil && us.ToolPerTurnCap > 0 {
 			perToolCap := us.ToolPerTurnCap
 			in.AppSettings.Harness.PerToolCap = &perToolCap
 		}
@@ -153,21 +169,22 @@ func (ls *loopState) compactPreviewBudget() int {
 }
 
 // ValidateHarnessSelection checks the profile name and overrides carried in a
-// session's metadata against reg (nil means the built-ins), so a session is
-// rejected at creation instead of failing every turn. Overrides are validated
-// by resolving them.
+// session's metadata, and the harness environment overrides, against reg (nil
+// means the built-ins), so a session is rejected at creation instead of failing
+// every turn. Overrides are validated by resolving them. With nothing selected
+// the default profile is still resolved, so a bad environment value is caught.
 func ValidateHarnessSelection(reg *harnessprofile.Registry, metadata string) error {
 	profile, overrides, err := SessionHarnessSelection(metadata)
 	if err != nil {
 		return err
 	}
-	if profile == "" && overrides == (harnessprofile.Layer{}) {
-		return nil
-	}
 	if reg == nil {
 		reg = builtinOnlyRegistry()
 	}
-	_, err = reg.Resolve(harnessprofile.Inputs{Profile: profile, Launch: overrides, Getenv: func(string) (string, bool) { return "", false }})
+	// The process environment is resolved too: a NANITE_HARNESS_* value that
+	// does not parse fails every turn, so it is refused here rather than
+	// discovered on the first message.
+	_, err = reg.Resolve(harnessprofile.Inputs{Profile: profile, Launch: overrides})
 	return err
 }
 

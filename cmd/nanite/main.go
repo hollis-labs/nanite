@@ -15,8 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/harnessprofile"
-
 	"github.com/hollis-labs/go-envelopes"
 
 	"github.com/hollis-labs/nanite/internal/brand"
@@ -90,7 +88,7 @@ func loadServeRuntimeConfig(load serveRuntimeConfigLoader) (*config.RuntimeConfi
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, chat, plugin, mcp, skill, agent, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, chat, plugin, mcp, skill, profile, agent, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 
@@ -113,6 +111,8 @@ func main() {
 		cmdMCP(os.Args[2:])
 	case "skill":
 		cmdSkill(os.Args[2:])
+	case "profile":
+		cmdProfile(os.Args[2:])
 	case "agent":
 		cmdAgent(os.Args[2:])
 	case "install":
@@ -469,15 +469,7 @@ func cmdServeWithInitializers(
 		tesseractServerName = "tesseract"
 	}
 	externalTesseract := strings.TrimSpace(cfg.Tesseract.Command) != "" || mcpManager.HasServer(tesseractServerName)
-	harnessProfileName := appCfg.Harness.Profile
-	if env := strings.TrimSpace(os.Getenv("NANITE_HARNESS_PROFILE")); env != "" {
-		harnessProfileName = env
-	}
-	harnessProfilesDir := appCfg.Harness.ProfilesDir
-	if harnessProfilesDir == "" {
-		harnessProfilesDir = filepath.Join(serveLayout.ConfigDir(), "profiles")
-	}
-	harnessProfiles, err := harnessprofile.NewRegistry(harnessProfilesDir, harnessProfileName)
+	harnessProfiles, err := buildHarnessRegistry(appCfg, serveLayout.ConfigDir())
 	if err != nil {
 		slog.Error("load harness profiles", "err", err)
 		os.Exit(1)

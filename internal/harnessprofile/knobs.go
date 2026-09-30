@@ -1,6 +1,7 @@
 package harnessprofile
 
 import (
+	"encoding/json"
 	"time"
 
 	agentcontracts "github.com/hollis-labs/agent-contracts-leaf"
@@ -92,4 +93,51 @@ type Resolved struct {
 	// recorded so a run's stated bounds are visible, and listed in Unenforced.
 	Limits     agentcontracts.Limits `json:"limits"`
 	Unenforced []string              `json:"unenforced,omitempty"`
+}
+
+// Effective is the recorded, self-describing form of a resolution: every
+// enforced value under its knob name (durations in milliseconds), where each
+// value came from, and the carried limits the loop does not yet enforce.
+type Effective struct {
+	Profile    string                `json:"profile"`
+	Digest     string                `json:"digest"`
+	Model      string                `json:"model,omitempty"`
+	Values     map[string]any        `json:"values"`
+	Sources    map[string]Source     `json:"sources"`
+	Limits     agentcontracts.Limits `json:"limits"`
+	Unenforced []string              `json:"unenforced,omitempty"`
+}
+
+// Effective returns the recorded form of r.
+func (r *Resolved) Effective() Effective {
+	v := r.Values
+	return Effective{
+		Profile: r.Profile,
+		Digest:  r.Digest,
+		Model:   r.Model,
+		Values: map[string]any{
+			"idle_timeout_ms":          v.IdleTimeout.Milliseconds(),
+			"subagent_idle_timeout_ms": v.SubagentIdleTimeout.Milliseconds(),
+			"hard_ceiling":             v.HardCeiling,
+			"consecutive_fail_cap":     v.ConsecutiveFailCap,
+			"runaway_fail_cap":         v.RunawayFailCap,
+			"per_tool_cap":             v.PerToolCap,
+			"compact_preview_bytes":    v.CompactPreviewBytes,
+			"preview_pct":              v.PreviewPct,
+			"preview_min_bytes":        v.PreviewMinBytes,
+			"preview_max_bytes":        v.PreviewMaxBytes,
+		},
+		Sources:    r.Sources,
+		Limits:     r.Limits,
+		Unenforced: r.Unenforced,
+	}
+}
+
+// EffectiveJSON is Effective encoded as JSON, for storage.
+func (r *Resolved) EffectiveJSON() string {
+	raw, err := json.Marshal(r.Effective())
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }

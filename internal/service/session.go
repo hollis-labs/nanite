@@ -1,8 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -69,6 +72,9 @@ type SessionService interface {
 	// ListPendingEnvelopes returns the session's unanswered action-required
 	// plugin envelopes, for the GUI to rehydrate after a reload.
 	ListPendingEnvelopes(ctx context.Context, sessionID string) ([]chat.Envelope, error)
+	// EnvelopeLookup returns the envelope instances the messages' envelopes
+	// name, keyed by envelope ID.
+	EnvelopeLookup(ctx context.Context, messages []store.Message) map[string]*store.EnvelopeInstance
 }
 
 // SessionEventLog is the event_log write DetectInterruptedTurn needs.
@@ -86,6 +92,11 @@ type SessionEnvelopeReader interface {
 	ListEnvelopeInstancesBySession(ctx context.Context, sessionID string) ([]store.EnvelopeInstance, error)
 }
 
+// EnvelopeInstanceGetter fetches one envelope instance by ID.
+type EnvelopeInstanceGetter interface {
+	GetEnvelopeInstance(ctx context.Context, id string) (*store.EnvelopeInstance, error)
+}
+
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
 	sessions SessionReader
@@ -99,10 +110,11 @@ type sessionServiceImpl struct {
 	// here was never caught at write time).
 	agentReader AgentReader
 	settings    SettingsStore
-	events      EventEmitter          // may be nil
-	runtime     SessionRuntimeWriter  // may be nil; required when Create sets a runtime
-	eventLog    SessionEventLog       // may be nil
-	envelopes   SessionEnvelopeReader // may be nil
+	events      EventEmitter           // may be nil
+	runtime     SessionRuntimeWriter   // may be nil; required when Create sets a runtime
+	eventLog    SessionEventLog        // may be nil
+	envelopes   SessionEnvelopeReader  // may be nil
+	instances   EnvelopeInstanceGetter // may be nil
 
 	// onArchive is a best-effort hook fired after the writer.ArchiveSession
 	// succeeds. Phase 4c.8 (CW-20260508-0002): the chat service uses this
@@ -134,6 +146,8 @@ type SessionServiceDeps struct {
 	EventLog SessionEventLog
 	// Envelopes backs ListPendingEnvelopes. Optional.
 	Envelopes SessionEnvelopeReader
+	// EnvelopeInstances backs EnvelopeLookup. Optional.
+	EnvelopeInstances EnvelopeInstanceGetter
 }
 
 // NewSessionService creates a new SessionService.
@@ -148,6 +162,7 @@ func NewSessionService(deps SessionServiceDeps) SessionService {
 		runtime:     deps.Runtime,
 		eventLog:    deps.EventLog,
 		envelopes:   deps.Envelopes,
+		instances:   deps.EnvelopeInstances,
 	}
 }
 
@@ -409,4 +424,67 @@ func (s *sessionServiceImpl) ListPendingEnvelopes(ctx context.Context, sessionID
 		})
 	}
 	return out, nil
+}
+
+// EnvelopeLookup fetches the EnvelopeInstance for every envelope ID named in
+// the messages and returns them keyed by ID. A message's Envelope field may
+// hold one envelope object or a JSON array of them; one that does not parse
+// is skipped. A missing instance is skipped silently, and any other fetch
+// error is logged and skipped, so the lookup is best-effort and never fails.
+//
+// Fetches run under the caller's ctx. Once the caller's request is canceled
+// the remaining fetches fail and are skipped, which can only matter to a
+// client that has already gone. With no EnvelopeInstances dependency the
+// lookup is empty.
+func (s *sessionServiceImpl) EnvelopeLookup(ctx context.Context, messages []store.Message) map[string]*store.EnvelopeInstance {
+	lookup := make(map[string]*store.EnvelopeInstance)
+	if s.instances == nil {
+		return lookup
+	}
+
+	fetchID := func(id string) {
+		if id == "" || lookup[id] != nil {
+			return
+		}
+		inst, err := s.instances.GetEnvelopeInstance(ctx, id)
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				slog.Warn("session: EnvelopeLookup: GetEnvelopeInstance failed",
+					"envelope_id", id, "err", err)
+			}
+			return
+		}
+		lookup[id] = inst
+	}
+
+	for _, msg := range messages {
+		if msg.Envelope == "" {
+			continue
+		}
+		raw := json.RawMessage(msg.Envelope)
+		trimmed := bytes.TrimLeft(raw, " \t\r\n")
+		if len(trimmed) == 0 {
+			continue
+		}
+		if trimmed[0] == '[' {
+			var arr []struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(raw, &arr); err != nil {
+				continue
+			}
+			for _, e := range arr {
+				fetchID(e.ID)
+			}
+		} else {
+			var env struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(raw, &env); err != nil {
+				continue
+			}
+			fetchID(env.ID)
+		}
+	}
+	return lookup
 }

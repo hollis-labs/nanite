@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/service"
@@ -15,31 +14,14 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// devModeEnabled returns true when either the NANITE_DEVMODE env var is set
-// to a truthy value (1/true/yes/on) or the user_settings.developer_mode flag
-// is enabled. E1 (CW-20260428-0016) gates the inline-edit affordances on
-// internal skills behind this check.
+// devModeEnabled reports UserSettingsService.DevModeEnabled: NANITE_DEVMODE
+// or user_settings.developer_mode. E1 (CW-20260428-0016) gates the
+// inline-edit affordances on internal skills behind this check.
 func (a *API) devModeEnabled(r *http.Request) bool {
-	if envDevModeOn() {
-		return true
+	if a.Services.Settings == nil {
+		return service.EnvDevModeOn()
 	}
-	if a.Services.Store == nil {
-		return false
-	}
-	us, err := a.Services.Store.GetUserSettings(r.Context())
-	if err != nil || us == nil {
-		return false
-	}
-	return us.DeveloperMode
-}
-
-func envDevModeOn() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("NANITE_DEVMODE")))
-	switch v {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
+	return a.Services.Settings.DevModeEnabled(r.Context())
 }
 
 func (a *API) handleListSkills(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +204,7 @@ func (a *API) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	if a.Services.SkillVendor != nil {
 		vendor = a.Services.SkillVendor
 	}
-	u := &skillinstall.Uninstaller{Vendor: vendor, Index: a.Services.Store}
+	u := &skillinstall.Uninstaller{Vendor: vendor, Index: a.Services.SkillUninstallIndex}
 	result, err := u.Uninstall(sk)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "skill uninstall failed: "+err.Error())
@@ -293,7 +275,7 @@ func (a *API) handleRemoveAgentSkill(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleGetDevMode(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"dev_mode": a.devModeEnabled(r),
-		"env_flag": envDevModeOn(),
+		"env_flag": service.EnvDevModeOn(),
 	})
 }
 
@@ -325,7 +307,7 @@ func (a *API) runSkillInstall(ctx context.Context, path string) (skillinstall.Re
 	var lastState skillinstall.State
 	installer := &skillinstall.Installer{
 		Vendor: a.Services.SkillVendor,
-		Index:  a.Services.Store,
+		Index:  a.Services.SkillIndex,
 		Emit: func(e skillinstall.Event) {
 			if e.Err == nil {
 				lastState = e.State
@@ -619,7 +601,7 @@ func (a *API) handleGetAgentSkillGrant(w http.ResponseWriter, r *http.Request) {
 		view.GrantedBy = row.GrantedBy
 	}
 
-	gate := skill.NewGate(a.Services.Store, a.Services.Store)
+	gate := skill.NewGate(a.Services.SkillIndex, a.Services.SkillGrants)
 	_, authErr := gate.Authorize(r.Context(), sk.Slug, agent.ID)
 	switch {
 	case authErr == nil:
@@ -727,7 +709,7 @@ func (a *API) handlePreviewSkill(w http.ResponseWriter, r *http.Request) {
 	// Step 1: the same unconditional, top-level grant check skill_get
 	// performs — see this handler's own doc comment for why preview does
 	// not bypass this.
-	gate := skill.NewGate(a.Services.Store, a.Services.Store)
+	gate := skill.NewGate(a.Services.SkillIndex, a.Services.SkillGrants)
 	if _, err := gate.Authorize(r.Context(), slug, req.AgentID); err != nil {
 		status := http.StatusForbidden
 		var reapproval *skill.ReapprovalRequiredError
@@ -750,8 +732,8 @@ func (a *API) handlePreviewSkill(w http.ResponseWriter, r *http.Request) {
 	// for LoadRootDefinition, the one piece those two callers literally
 	// share rather than duplicate.
 	deps := skill.MaterializerDeps{
-		Resolvers: a.Services.Store,
-		Index:     a.Services.Store,
+		Resolvers: a.Services.SkillResolvers,
+		Index:     a.Services.SkillIndex,
 		Vendor:    a.Services.SkillVendor,
 		Subagent:  a.Services.Subagent,
 	}

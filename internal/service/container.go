@@ -27,9 +27,11 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
+	"github.com/hollis-labs/nanite/internal/agentimport"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
+	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/coordination"
 	"github.com/hollis-labs/nanite/internal/elicitation"
@@ -52,6 +54,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/recovery/orphansweep"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
+	"github.com/hollis-labs/nanite/internal/skill"
+	"github.com/hollis-labs/nanite/internal/skillinstall"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
@@ -100,6 +104,28 @@ type Container struct {
 	Usage     *UsageService // token usage, execution metrics, utility calls
 	// ProviderConfig reads and writes provider and model configuration rows.
 	ProviderConfig *ProviderConfigService
+	// Settings owns the singleton user_settings row and the rules applied
+	// to its fields.
+	Settings *UserSettingsService
+
+	// Narrow store collaborators for transports that construct a pipeline
+	// object per call (skill gate, materializer, installer, uninstaller,
+	// agent importer) or hand a store to a helper. Each is typed as the
+	// consumer package's own interface and wired from cfg.Store, so a
+	// transport never names the raw store handle to build one.
+	// internal/selftools cannot import this package; SelfToolsTransport
+	// carries the same skill fields.
+	SkillIndex          skillinstall.IndexStore
+	SkillUninstallIndex skillinstall.UninstallIndexStore
+	SkillGrants         skill.AgentKnownSkillStore
+	SkillResolvers      skill.AgentContextResolverStore
+	AgentImportProfiles agentimport.ProfileStore
+	AgentImportSeeder   agentimport.ChildSeeder
+	// ProviderDefaults resolves default providers and models, for
+	// BuildSummarizer.
+	ProviderDefaults DefaultResolver
+	// CompactionEvents records compaction events for a compaction pipeline.
+	CompactionEvents ctxpkg.CompactionEventWriter
 	// SkillVendor is the content-addressed vendored skill store (internal/
 	// skillvendor, TASKS/skills/03) that backs the explicit install/sync
 	// pipeline (internal/skillinstall, TASKS/skills/04/05 --
@@ -455,15 +481,16 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// --- Domain services (Wave 1) ---
 
 	sessions := NewSessionService(SessionServiceDeps{
-		Sessions:    cfg.Store,
-		Writer:      cfg.Store,
-		Agents:      cfg.Store,
-		AgentReader: cfg.Store,
-		Settings:    cfg.Store,
-		Events:      events,
-		Runtime:     cfg.Store,
-		EventLog:    cfg.Store,
-		Envelopes:   cfg.Store,
+		Sessions:          cfg.Store,
+		Writer:            cfg.Store,
+		Agents:            cfg.Store,
+		AgentReader:       cfg.Store,
+		Settings:          cfg.Store,
+		Events:            events,
+		Runtime:           cfg.Store,
+		EventLog:          cfg.Store,
+		Envelopes:         cfg.Store,
+		EnvelopeInstances: cfg.Store,
 	})
 
 	// Adapter registry — adapters self-register via plugin loading.
@@ -1476,6 +1503,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Loops:               NewLoopService(cfg.Store),
 		Bookmarks:           NewBookmarkService(cfg.Store),
 		Schedules:           NewScheduleService(cfg.Store),
+		Settings:            NewUserSettingsService(cfg.Store),
+		SkillIndex:          cfg.Store,
+		SkillUninstallIndex: cfg.Store,
+		SkillGrants:         cfg.Store,
+		SkillResolvers:      cfg.Store,
+		AgentImportProfiles: cfg.Store,
+		AgentImportSeeder:   SeedImportedAgentChildren(cfg.Store),
+		ProviderDefaults:    cfg.Store,
+		CompactionEvents:    NewCompactionEventWriter(cfg.Store),
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,
@@ -1486,6 +1522,18 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	chatLifecycleCommitted = true
 	runtimeFeedCommitted = true
 	return container, nil
+}
+
+// DiscoverMCPTools runs MCP tool discovery and syncs discovered tools into
+// the skills table. The caller checks MCP for nil first.
+func (c *Container) DiscoverMCPTools(ctx context.Context) (*mcp.DiscoveryDiff, error) {
+	return c.MCP.AutoDiscover(ctx, c.Store)
+}
+
+// ResolveSessionHarness resolves the harness profile a session runs under,
+// against the container's harness registry and the user settings.
+func (c *Container) ResolveSessionHarness(ctx context.Context, sess *store.Session, constraints chat.AgentConstraints, model string) (*harnessprofile.Resolved, error) {
+	return ResolveHarness(ctx, c.HarnessProfiles, c.Store, sess, constraints, model)
 }
 
 // RefreshUtilitySettings updates the utility provider/model on the running

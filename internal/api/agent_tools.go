@@ -49,7 +49,7 @@ func (a *API) handleGrantAgentTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tool, err := a.Services.Store.GetKnownTool(r.Context(), req.ToolID)
+	tool, err := a.Services.AgentCapabilities.GetCatalogTool(r.Context(), req.ToolID)
 	if err != nil {
 		if errors.Is(err, store.ErrKnownToolNotFound) {
 			a.errorResp(w, http.StatusNotFound, "known tool not found")
@@ -70,16 +70,12 @@ func (a *API) handleGrantAgentTool(w http.ResponseWriter, r *http.Request) {
 	// at every layer, including CallTool -- so there is no deeper mechanism
 	// left for a stale deny_list to veto, and this pre-flight check is
 	// removed along with it.
-	grantedVia := req.GrantedVia
-	if grantedVia == "" {
-		grantedVia = "explicit"
-	}
-	if err := a.Services.Store.GrantAgentTool(r.Context(), agent.ID, tool.ID, grantedVia); err != nil {
+	if err = a.Services.AgentCapabilities.GrantTool(r.Context(), agent.ID, tool.ID, req.GrantedVia); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	names, err := a.Services.Store.ListAgentToolNames(r.Context(), agent.ID)
+	names, err := a.Services.AgentCapabilities.ListGrantedToolNames(r.Context(), agent.ID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -99,7 +95,7 @@ func (a *API) handleRevokeAgentTool(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "toolId is required")
 		return
 	}
-	if err := a.Services.Store.RevokeAgentTool(r.Context(), agent.ID, toolID); err != nil {
+	if err := a.Services.AgentCapabilities.RevokeTool(r.Context(), agent.ID, toolID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

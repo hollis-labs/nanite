@@ -7,28 +7,28 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/service"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := a.Services.Store.GetUserSettings(r.Context())
+	settings, err := a.Services.Settings.Get(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load settings")
 		return
 	}
-	// Marshal into a generic map so we can append the computed embedding_status
-	// without duplicating every persisted field in a wrapper struct.
-	raw, err := json.Marshal(settings)
-	if err != nil {
+	a.writeSettings(w, r, settings)
+}
+
+// writeSettings answers with the settings row plus the computed
+// embedding_status. Encoding is checked before the status line is written so
+// a failure still reports as a 500.
+func (a *API) writeSettings(w http.ResponseWriter, r *http.Request, settings *store.UserSettings) {
+	view := userSettingsToView(settings, a.computeEmbeddingStatus(r.Context(), settings.EmbeddingMode, settings.EmbeddingProvider, settings.EmbeddingModel))
+	if _, err := json.Marshal(view); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to encode settings")
 		return
 	}
-	out := map[string]any{}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "failed to decode settings")
-		return
-	}
-	out["embedding_status"] = a.computeEmbeddingStatus(r.Context(), settings.EmbeddingMode, settings.EmbeddingProvider, settings.EmbeddingModel)
-	a.jsonResp(w, http.StatusOK, out)
+	a.jsonResp(w, http.StatusOK, view)
 }
 
 // computeEmbeddingStatus re-runs the selection helper at response time so the
@@ -62,7 +62,7 @@ func (a *API) handleEmbeddingProviders(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Read existing settings first for partial merge.
-	existing, err := a.Services.Store.GetUserSettings(r.Context())
+	existing, err := a.Services.Settings.Get(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load current settings")
 		return
@@ -141,11 +141,8 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'tool_stream_behavior'")
 			return
 		}
-		switch existing.ToolStreamBehavior {
-		case "streaming", "persist", "hidden":
-			// valid
-		default:
-			a.errorResp(w, http.StatusBadRequest, "tool_stream_behavior must be one of: streaming, persist, hidden")
+		if err := service.ValidateToolStreamBehavior(existing.ToolStreamBehavior); err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -154,11 +151,8 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'tool_drawer_retention'")
 			return
 		}
-		switch existing.ToolDrawerRetention {
-		case -1, 5, 15, 30, 60:
-			// valid
-		default:
-			a.errorResp(w, http.StatusBadRequest, "tool_drawer_retention must be one of: -1, 5, 15, 30, 60")
+		if err := service.ValidateToolDrawerRetention(existing.ToolDrawerRetention); err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -167,8 +161,8 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'embedding_provider'")
 			return
 		}
-		if existing.EmbeddingProvider != "" && !service.IsSupportedEmbeddingProvider(existing.EmbeddingProvider) {
-			a.errorResp(w, http.StatusBadRequest, "embedding_provider must be one of: openai")
+		if err := service.ValidateEmbeddingProvider(existing.EmbeddingProvider); err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -183,11 +177,8 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'embedding_mode'")
 			return
 		}
-		switch existing.EmbeddingMode {
-		case "", "disabled", "explicit":
-			// valid
-		default:
-			a.errorResp(w, http.StatusBadRequest, "embedding_mode must be 'disabled' or 'explicit'")
+		if err := service.ValidateEmbeddingMode(existing.EmbeddingMode); err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -216,7 +207,7 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Services.Store.UpdateUserSettings(r.Context(), existing); err != nil {
+	if err := a.Services.Settings.Update(r.Context(), existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to update settings")
 		return
 	}
@@ -237,18 +228,7 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Return the updated settings with the computed embedding_status attached,
 	// mirroring the GET shape so the UI can refresh from the PUT response.
-	raw2, err := json.Marshal(existing)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "failed to encode settings")
-		return
-	}
-	out := map[string]any{}
-	if err := json.Unmarshal(raw2, &out); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "failed to decode settings")
-		return
-	}
-	out["embedding_status"] = a.computeEmbeddingStatus(r.Context(), existing.EmbeddingMode, existing.EmbeddingProvider, existing.EmbeddingModel)
-	a.jsonResp(w, http.StatusOK, out)
+	a.writeSettings(w, r, existing)
 }
 
 // Phase 0 item 21 ("Cut Modes, in full") removed handleGetModeAutoSwitch and

@@ -52,6 +52,10 @@ func (s *stubSessionService) ListMessagesAround(_ context.Context, _, _ string, 
 func (s *stubSessionService) DetectInterruptedTurn(_ context.Context, _ *store.Session, _ bool) map[string]any {
 	return nil
 }
+func (*stubSessionService) EnvelopeLookup(context.Context, []store.Message) map[string]*store.EnvelopeInstance {
+	return nil
+}
+
 func (s *stubSessionService) ListPendingEnvelopes(_ context.Context, _ string) ([]chat.Envelope, error) {
 	return nil, nil
 }

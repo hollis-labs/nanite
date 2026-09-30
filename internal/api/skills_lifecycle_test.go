@@ -229,7 +229,8 @@ func TestSkillDelete_RESTAndSelfTool_SameEndState(t *testing.T) {
 		t.Fatalf("REST delete: expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	transport := &selftools.SelfToolsTransport{Store: a.Services.Store, SkillVendor: a.Services.SkillVendor}
+	transport := selftools.NewSelfToolsTransport(a.Services.Store)
+	transport.SkillVendor = a.Services.SkillVendor
 	toolResult, err := transport.CallTool(context.Background(), "skill_delete", map[string]any{"slug": toolInstalled.Skill.Slug})
 	if err != nil {
 		t.Fatalf("CallTool(skill_delete): %v", err)

@@ -10,7 +10,6 @@ import (
 
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agentimport"
-	"github.com/hollis-labs/nanite/internal/service"
 )
 
 // CW-20260910-0013: the REST twin of `nanite agent install` / `nanite agent
@@ -48,9 +47,9 @@ import (
 func (a *API) runAgentImport(ctx context.Context, path, adapter string) (agentimport.Result, int, error) {
 	var lastState agentimport.State
 	importer := &agentimport.Importer{
-		Store:        a.Services.Store,
+		Store:        a.Services.AgentImportProfiles,
 		Parse:        a.agentImportParser(adapter),
-		SeedChildren: service.SeedImportedAgentChildren(a.Services.Store),
+		SeedChildren: a.Services.AgentImportSeeder,
 		Emit: func(e agentimport.Event) {
 			if e.Err == nil {
 				lastState = e.State
@@ -177,7 +176,7 @@ func (a *API) handleInstallAgent(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleSyncAgent(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 
-	existing, err := a.Services.Store.GetAgentBySlug(r.Context(), slug)
+	existing, err := a.Services.AgentImportProfiles.GetAgentBySlug(r.Context(), slug)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

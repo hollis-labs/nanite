@@ -26,6 +26,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service/install"
+	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/skillinstall"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -52,6 +53,15 @@ type SelfToolsTransport struct {
 	// post-construction from main.go; nil-safe (skill_get returns a clear
 	// errorResult when unwired). TASKS/skills/11.
 	SkillVendor *skillvendor.Store
+	// Skill catalog, grant and resolver lookups for the skill gate,
+	// materializer and uninstaller, typed as those packages' own narrow
+	// interfaces. NewSelfToolsTransport sets each to its store; they
+	// mirror service.Container's fields of the same names, which this
+	// package cannot import.
+	SkillIndex          skillinstall.IndexStore
+	SkillUninstallIndex skillinstall.UninstallIndexStore
+	SkillGrants         skill.AgentKnownSkillStore
+	SkillResolvers      skill.AgentContextResolverStore
 	// Background is the P9 background-job dispatch service. Set post-
 	// construction from the container; nil-safe (callers receive an
 	// errorResult for the nanite_background_* tools when unset).
@@ -225,14 +235,18 @@ type SelfToolsTransport struct {
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
 func NewSelfToolsTransport(s *store.Store) *SelfToolsTransport {
 	return &SelfToolsTransport{
-		Store:             s,
-		BuilderRegistry:   builders.DefaultRegistry(s),
-		BuilderSessions:   builders.NewSessionManager(),
-		MessagingTools:    NewMessagingTools(nil, nil),
-		WorkTrackingTools: NewWorkTrackingTools(nil, s, nil),
-		AgentProfileTools: NewAgentProfileTools(s, nil),
-		PresentationTools: NewPresentationTools(nil, nil, nil),
-		RememberCounters:  newRememberSessionCounters(),
+		Store:               s,
+		SkillIndex:          s,
+		SkillUninstallIndex: s,
+		SkillGrants:         s,
+		SkillResolvers:      s,
+		BuilderRegistry:     builders.DefaultRegistry(s),
+		BuilderSessions:     builders.NewSessionManager(),
+		MessagingTools:      NewMessagingTools(nil, nil),
+		WorkTrackingTools:   NewWorkTrackingTools(nil, s, nil),
+		AgentProfileTools:   NewAgentProfileTools(s, nil),
+		PresentationTools:   NewPresentationTools(nil, nil, nil),
+		RememberCounters:    newRememberSessionCounters(),
 	}
 }
 
@@ -487,7 +501,7 @@ func (st *SelfToolsTransport) callDeleteSkill(args map[string]any) (*mcp.ToolRes
 		return mcp.ErrorResult("slug or id is required"), nil
 	}
 
-	sk, err := st.Store.GetSkillBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, ref)
+	sk, err := st.SkillIndex.GetSkillBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, ref)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil
 	}
@@ -511,7 +525,7 @@ func (st *SelfToolsTransport) callDeleteSkill(args map[string]any) (*mcp.ToolRes
 	if st.SkillVendor != nil {
 		vendor = st.SkillVendor
 	}
-	u := &skillinstall.Uninstaller{Vendor: vendor, Index: st.Store}
+	u := &skillinstall.Uninstaller{Vendor: vendor, Index: st.SkillUninstallIndex}
 	result, err := u.Uninstall(sk)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil

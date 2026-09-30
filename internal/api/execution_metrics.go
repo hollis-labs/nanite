@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/service"
 )
 
 func (a *API) handleGetSessionExecutionMetrics(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +82,7 @@ func (a *API) handleGetSessionHarnessProfile(w http.ResponseWriter, r *http.Requ
 	if model == "" {
 		model = agentModel
 	}
-	res, err := service.ResolveHarness(r.Context(), a.Services.HarnessProfiles, a.Services.Store, sess, constraints, model)
+	res, err := a.Services.ResolveSessionHarness(r.Context(), sess, constraints, model)
 	if err != nil {
 		a.errorResp(w, http.StatusUnprocessableEntity, err.Error())
 		return

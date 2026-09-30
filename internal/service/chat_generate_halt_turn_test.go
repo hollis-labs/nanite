@@ -80,6 +80,10 @@ func (f *haltTestSessions) ListMessagesAround(context.Context, string, string, i
 func (f *haltTestSessions) DetectInterruptedTurn(context.Context, *store.Session, bool) map[string]any {
 	panic("haltTestSessions: DetectInterruptedTurn not implemented")
 }
+func (*haltTestSessions) EnvelopeLookup(context.Context, []store.Message) map[string]*store.EnvelopeInstance {
+	return nil
+}
+
 func (f *haltTestSessions) ListPendingEnvelopes(context.Context, string) ([]chat.Envelope, error) {
 	panic("haltTestSessions: ListPendingEnvelopes not implemented")
 }

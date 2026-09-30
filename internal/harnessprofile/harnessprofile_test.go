@@ -46,6 +46,8 @@ func TestDefaultProfileIsComputedDefaults(t *testing.T) {
 		IdleTimeout: 900 * time.Second, SubagentIdleTimeout: 300 * time.Second,
 		HardCeiling: 200, ConsecutiveFailCap: 3, RunawayFailCap: 10, PerToolCap: 0,
 		CompactPreviewBytes: 512, PreviewPct: 0.004, PreviewMinBytes: 4000, PreviewMaxBytes: 32000,
+		ToolOutputPct: 0.03, ToolOutputMinBytes: 24576, ToolOutputMaxBytes: 524288,
+		ToolOutputRemainingShare: 0.25, ToolOutputRemainingFloor: 4096,
 	}
 	if res.Values != want {
 		t.Errorf("values = %+v\nwant     %+v", res.Values, want)
@@ -188,10 +190,12 @@ func TestUnenforcedLimitsAreCarriedAndListed(t *testing.T) {
 	if res.Limits.MaxDurationMs == nil || *res.Limits.MaxDurationMs != 60000 || res.Limits.TokenBudget == nil {
 		t.Fatalf("limits = %+v", res.Limits)
 	}
-	if strings.Join(res.Unenforced, ",") != "max_duration_ms,token_budget,tool_output_bytes" {
+	if strings.Join(res.Unenforced, ",") != "max_duration_ms,token_budget" {
 		t.Errorf("unenforced = %v", res.Unenforced)
 	}
-	if res.Limits.ToolOutputBytes == nil || *res.Limits.ToolOutputBytes != 65536 || res.Sources["tool_output_bytes"].Layer != "profile:budgeted" {
+	// tool_output_bytes is enforced (the tool-output ceiling), so it is not
+	// listed as unenforced, and it reaches the resolved values.
+	if res.Limits.ToolOutputBytes == nil || *res.Limits.ToolOutputBytes != 65536 || res.Values.ToolOutputBytes == nil || *res.Values.ToolOutputBytes != 65536 || res.Sources["tool_output_bytes"].Layer != "profile:budgeted" {
 		t.Errorf("tool_output_bytes = %+v %+v", res.Limits.ToolOutputBytes, res.Sources["tool_output_bytes"])
 	}
 	if res.Sources["max_duration_ms"].Layer != "profile:budgeted" {

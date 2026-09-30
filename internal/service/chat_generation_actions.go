@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
+	"github.com/hollis-labs/nanite/pkg/models"
 
 	"github.com/google/uuid"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
@@ -280,23 +281,14 @@ func (s *chatServiceImpl) initializeRun(
 	// D-33: the resolved harness profile owns the loop limits from here. The
 	// per-agent constraints and the per-tool-cap user setting were folded into
 	// the resolution as layers in prepareTurn.
-	applyHarness(ls, setup.harness, callerType == dispatcher.CallerSubagent)
-	if s.store != nil {
-		if us, err := s.store.GetUserSettings(ctx); err == nil && us != nil && us.ExtSettings != nil {
-			if v, ok := us.ExtSettings["tool_turn_ceiling_bytes"]; ok {
-				switch val := v.(type) {
-				case float64:
-					if val >= 0 {
-						ls.turnResultCeiling = int(val)
-					}
-				case int:
-					if val >= 0 {
-						ls.turnResultCeiling = val
-					}
-				}
-			}
-		}
+	// The window scales the tool-output ceiling. The configured or catalog
+	// window when there is one, else the model registry's; an unknown model
+	// resolves to the registry default, whose ceiling is the historical 24 KiB.
+	ls.windowTokens = s.contextWindowSize(setup.providerName, model)
+	if ls.windowTokens <= 0 {
+		ls.windowTokens = models.ContextWindowFor(model)
 	}
+	applyHarness(ls, setup.harness, callerType == dispatcher.CallerSubagent)
 	// P3 (CW-20260420-0013): pre-loop classification. Downstream consumers
 	// read via loopState.Classification().
 	classifyAndAttach(ls, sessionID, userContent, toolNames)
@@ -617,6 +609,11 @@ func (s *chatServiceImpl) requestProviderIteration(
 	}
 	budgetCeiling = effort.ApplyToCeiling(budgetCeiling, run.loop.Effort())
 	run.chatMessages, run.tools, run.breakdown, budgetErr = chat.EnforceTokenBudget(run.systemPrompt, run.chatMessages, run.tools, budgetCeiling)
+	// D-32: the tool-output ceiling and the per-result cap follow what remains
+	// of the context, re-evaluated every iteration.
+	if run.breakdown != nil {
+		run.loop.setRemainingContext(run.breakdown.Ceiling, run.breakdown.Total)
+	}
 	if budgetErr != nil {
 		slog.Warn("chat-service: token budget enforcement refused", "err", budgetErr)
 		if s.events != nil {

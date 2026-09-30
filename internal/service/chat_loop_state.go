@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"strconv"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
@@ -176,6 +174,11 @@ type loopState struct {
 	// harness is the resolved harness profile for this run; nil only in tests
 	// that build a loopState directly, which then use the compiled-in defaults.
 	harness *harnessprofile.Resolved
+	// windowTokens is the model's context window, 0 when unknown, and
+	// remainingTokens the context still free below the loop's own ceiling, -1
+	// when unknown. They feed the tool-output ceiling and the per-result cap.
+	windowTokens    int
+	remainingTokens int
 	// Tool execution tracking.
 	lastToolResults     map[string]string
 	toolRepeatCount     map[string]int
@@ -322,12 +325,7 @@ func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode b
 		debugMode:            debugMode,
 		scratchpad:           make(map[string]any),
 		turnResultCeiling:    DefaultTurnResultCeilingBytes,
-	}
-
-	if env := os.Getenv("NANITE_TOOL_TURN_CEILING_BYTES"); env != "" {
-		if v, err := strconv.Atoi(env); err == nil && v >= 0 {
-			ls.turnResultCeiling = v
-		}
+		remainingTokens:      -1,
 	}
 
 	// Populate loadedTools from initial tool set.

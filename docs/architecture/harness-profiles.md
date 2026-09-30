@@ -42,10 +42,40 @@ Enforced by the chat loop: `limits.idle_timeout_ms`,
 `runaway_fail_cap`, `per_tool_cap`, `compact_preview_bytes`, `preview_pct`,
 `preview_min_bytes`, `preview_max_bytes`.
 
+The tool-output ceiling: `limits.tool_output_bytes` and the shaping knobs
+`tool_output_pct`, `tool_output_min_bytes`, `tool_output_max_bytes`,
+`tool_output_remaining_share` and `tool_output_remaining_floor_bytes`.
+
 Carried and recorded but not yet enforced, and listed as such on the resolved
 profile: the rest of `limits` (`max_duration_ms`, `cost_budget`, `token_budget`,
-`max_turns`, `max_retries`, `tool_output_bytes`). The tool-output ceiling reads
-`tool_output_bytes` once it consumes it.
+`max_turns`, `max_retries`).
+
+## The tool-output ceiling
+
+The ceiling is the cumulative bytes of tool output a turn may deliver at full
+preview size. Once a turn passes it, later results step down to the compact
+preview. It is a function of the model, not a constant:
+
+- **Base.** `limits.tool_output_bytes` when stated, in any layer, replaces the
+  scaled value. Otherwise it is `tool_output_pct` of the model's window in bytes
+  (window tokens times four), clamped to `[tool_output_min_bytes,
+  tool_output_max_bytes]`. The minimum is the value the harness used before it
+  scaled, so a window of 200K tokens or less, or a model with no window
+  information, gets exactly that. `0` means no cumulative ceiling.
+- **Remaining context.** Every iteration, after the context budget is enforced,
+  the ceiling is also limited to `tool_output_remaining_share` of the bytes still
+  free below the loop's own context ceiling, never below
+  `tool_output_remaining_floor_bytes`. A nearly full context therefore gets a
+  ceiling below the minimum. An explicit value gets this limit too.
+- **Per-result cap.** A single result is bounded by the preview budget whatever
+  the ceiling is, and by the same remaining-context cap, so one result cannot
+  overrun a nearly full context. The remaining-context cap still applies when
+  the cumulative ceiling is disabled with `0`; only the cumulative step-down is
+  turned off.
+- **Legacy names.** `NANITE_TOOL_TURN_CEILING_BYTES` is an environment layer
+  alias for `NANITE_HARNESS_TOOL_OUTPUT_BYTES`, which wins when both are set, and
+  the `tool_turn_ceiling_bytes` extended user setting is an app-settings layer.
+  Both keep their `0` meaning.
 
 ## Selecting a profile
 

@@ -613,9 +613,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 	run.chatMessages, run.tools, run.breakdown, budgetErr = chat.EnforceTokenBudget(run.systemPrompt, run.chatMessages, run.tools, budgetCeiling)
 	// D-32: the tool-output ceiling and the per-result cap follow what remains
 	// of the context, re-evaluated every iteration.
-	if run.breakdown != nil {
-		run.loop.setRemainingContext(run.breakdown.Ceiling, run.breakdown.Total)
-	}
+	run.loop.setRemainingFromBreakdown(run.breakdown)
 	if budgetErr != nil {
 		slog.Warn("chat-service: token budget enforcement refused", "err", budgetErr)
 		if s.events != nil {

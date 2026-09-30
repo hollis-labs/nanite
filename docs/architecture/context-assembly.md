@@ -73,10 +73,66 @@ document and the test together, or change neither. A contract and its
 enforcement drifting apart is worse than either being absent, because the test
 still passes and the document still reads as authoritative.
 
+## What fills each slot, by agent type
+
+Nanite runs two kinds of agent. An **API-driven** agent is Nanite's own model
+loop: every turn is the slot plan above, sent to a provider. A **CLI-launched**
+agent is a coding CLI (Claude Code, Codex, OpenCode) running in a per-session
+boot directory; Nanite does not send it slots. It sees a handful of planted
+files, the per-turn user payload, and whatever the CLI itself brings.
+
+The slot plan is still assembled for a CLI session on every turn. Only the
+System, Agent, Mode and Rules slots (as a hash) and the UserContext slot (as
+text prefixed to the user message) are consumed from it; the rest are not
+delivered to the CLI.
+
+| Slot | API-driven agent | CLI-launched agent |
+|---|---|---|
+| Universal | `UniversalRulesBlock`, position 0 | Not delivered. The boot prompt does not include it. |
+| System | Think-tool block (`ThinkToolBlock`, or the dispatcher-selected v2 form) | Not delivered. The boot prompt instead ends with a fixed narration instruction and a mandatory re-read-after-compaction instruction. |
+| Memory | Context Broker items whose source is memory | Not delivered. |
+| Agent | The profile's system prompt, plus a post-compaction disclosure when one is fresh | `CLAUDE.md` "Operating Instructions": the profile prompt plus role and mode framing, any resolved dynamic-context blocks, and the two fixed instructions above. Identity, allowed tools, directories, tags and constraints go to `.sandbox/agent-context.md`. |
+| Mode | Empty by design (see above) | Not applicable. |
+| Rules | Agent tags and tool allowlist as Markdown | Carried in `.sandbox/agent-context.md`, not as a rules block. |
+| Permissions | Rendered path-access summary | Not delivered. The CLI applies its own permission model. |
+| Workspace | `AGENTS.md`, `CLAUDE.md` walk-up from the session working directory | Not delivered by Nanite. The CLI reads project instruction files itself. |
+| Skills | Name and description listing; full skill loaded on demand | Granted skills are planted as real files in the CLI's native skill location; nothing is added to the prompt. |
+| Tools | Selected tool definitions, with a lazy remainder | The CLI's own tools plus Nanite's self and dev tools served by the `nanite mcp` subprocess. |
+| Session | Small session identifiers | Not delivered. |
+| Context | Context Broker items whose source is not memory | Not delivered. |
+| UserContext | Session context prompt and included documents | Prefixed to each user message (`composeUserPayload`). |
+| Handoff | Pinned compaction handoff | Not delivered. The CLI compacts its own transcript. |
+| Conversation | Serialized message history | The CLI's own transcript. |
+
+Two consequences follow from the table. The universal rules block, the
+permissions summary and the memory and context enrichment never reach a
+CLI-launched agent, so behavior those slots enforce for an API agent is absent
+for a CLI one. And a CLI agent gets its self-tool results through the MCP
+proxy, which applies the result cache and model-aware truncation but not the
+chat loop's per-tool cap, turn ceiling or stuck-loop handling.
+
+Sizes are deliberately not recorded here: they change with every profile, skill
+grant and tool grant. Measure them against a real database when needed.
+
+## Verify
+
+```bash
+# which slots the plan carries, in order
+grep -n -A18 'var SlotOrder' internal/context/slot.go
+# what the CLI boot prompt is built from
+grep -n 'func composeSystemPrompt\|func ResolveSystemPrompt\|func withCLINarration' internal/runtime/agent/prompt.go
+# the slots a CLI session consumes from the plan
+grep -n 'slotsChangedFor\|composeUserPayload' internal/service/chat_boot_drive.go
+# the universal block has one call site outside its definition and comments;
+# it is a slot source, and no CLI boot-content builder calls it
+grep -rn 'UniversalRulesBlock()' --include='*.go' internal | grep -v '_test\|//'
+```
+
 ## What this does not cover
 
-- **What fills each slot.** Sources are spread across the chat, agent, plugin
-  and broker packages and change more often than the shape does.
+- **How each slot's content is computed.** The table above says what reaches
+  each agent type; the sources are spread across the chat, agent, plugin and
+  broker packages and change more often than the shape does.
 - **Compaction.** Which slots may be compacted under pressure, and in what
   order, is its own subject.
 - **Provider specifics.** The caching model described here is the one Nanite

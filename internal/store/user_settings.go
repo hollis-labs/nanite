@@ -92,6 +92,28 @@ type UserSettings struct {
 	// The env var NANITE_AUTO_REPAIR is an operator-level kill switch
 	// and takes precedence over this column when both disagree.
 	AutoRepairPref string `json:"auto_repair_pref"`
+	// SubagentRuntime is the app default for which runtime a subagent
+	// spawned from an API-driven parent runs on (D-38, CW-20260929-0010):
+	//   ""    — unset, read as "api".
+	//   "api" — the child runs through Nanite's chat harness.
+	//   "cli" — the child may boot a CLI process, whose self-tool calls
+	//           bypass that harness.
+	// A session's own override (Store.SetSessionSubagentRuntime) wins.
+	// Interim home: migrates onto D-18 assignment.limits / launch.overrides
+	// when agent-contracts-leaf lands.
+	SubagentRuntime string `json:"subagent_runtime"`
+}
+
+// Subagent runtime values (UserSettings.SubagentRuntime and the per-session
+// override).
+const (
+	SubagentRuntimeAPI = "api"
+	SubagentRuntimeCLI = "cli"
+)
+
+// ValidSubagentRuntime reports whether v is "api" or "cli".
+func ValidSubagentRuntime(v string) bool {
+	return v == SubagentRuntimeAPI || v == SubagentRuntimeCLI
 }
 
 // GetUserSettings returns the singleton user settings row.
@@ -115,7 +137,7 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 	var contextOverflowRecovery bool
 	var subagentApprovalRequired bool
 	var subagentApprovalTimeoutSeconds int
-	var autoRepairPref string
+	var autoRepairPref, subagentRuntime string
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
@@ -130,7 +152,7 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 		        tool_classifier_provider, tool_classifier_model,
 		        tool_classifier_timeout_ms, context_overflow_recovery,
 		        subagent_approval_required, subagent_approval_timeout_seconds,
-		        auto_repair_pref
+		        auto_repair_pref, subagent_runtime
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
@@ -144,7 +166,7 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 		&toolClassifierProvider, &toolClassifierModel,
 		&toolClassifierTimeoutMS, &contextOverflowRecovery,
 		&subagentApprovalRequired, &subagentApprovalTimeoutSeconds,
-		&autoRepairPref)
+		&autoRepairPref, &subagentRuntime)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
@@ -183,6 +205,7 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 		SubagentApprovalRequired:       subagentApprovalRequired,
 		SubagentApprovalTimeoutSeconds: subagentApprovalTimeoutSeconds,
 		AutoRepairPref:                 autoRepairPref,
+		SubagentRuntime:                subagentRuntime,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
 		if err := json.Unmarshal([]byte(chainJSON), &us.ProviderFallbackChain); err != nil {
@@ -306,6 +329,10 @@ func (s *Store) UpdateUserSettings(ctx context.Context, us *UserSettings) error 
 	default:
 		return fmt.Errorf("update user settings: unknown auto_repair_pref %q (must be \"\", \"always\", or \"never\")", autoRepairPref)
 	}
+	// D-38 (CW-20260929-0010): "" is the unset sentinel (read as "api").
+	if us.SubagentRuntime != "" && !ValidSubagentRuntime(us.SubagentRuntime) {
+		return fmt.Errorf("update user settings: unknown subagent_runtime %q (must be \"\", \"api\", or \"cli\")", us.SubagentRuntime)
+	}
 	_, err = s.DB.ExecContext(ctx,
 		`UPDATE user_settings SET
 			provider_fallback_chain = ?,
@@ -344,6 +371,7 @@ func (s *Store) UpdateUserSettings(ctx context.Context, us *UserSettings) error 
 			subagent_approval_required = ?,
 			subagent_approval_timeout_seconds = ?,
 			auto_repair_pref = ?,
+			subagent_runtime = ?,
 			updated_at = ?
 		 WHERE id = 1`,
 		string(chainJSON), us.DefaultProvider, us.DefaultModel,
@@ -359,7 +387,7 @@ func (s *Store) UpdateUserSettings(ctx context.Context, us *UserSettings) error 
 		us.ToolClassifierProvider, us.ToolClassifierModel,
 		toolClassifierTimeoutMS, us.ContextOverflowRecovery,
 		us.SubagentApprovalRequired, us.SubagentApprovalTimeoutSeconds,
-		autoRepairPref,
+		autoRepairPref, us.SubagentRuntime,
 		now,
 	)
 	if err != nil {

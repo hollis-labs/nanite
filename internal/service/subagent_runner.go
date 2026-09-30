@@ -352,6 +352,23 @@ type agentSlugResolver interface {
 	GetAgentBySlug(ctx context.Context, slug string) (*store.AgentProfile, error)
 }
 
+// childRuntimeOverride carries the provider and model an API-run child must
+// use in place of the role's own, when BootRunner downgrades a CLI request.
+// It travels on the context so the legacyHTTPRunner interface and ChatRunner's
+// Run signature stay as they are.
+type childRuntimeOverride struct{ provider, model string }
+
+type childRuntimeOverrideKey struct{}
+
+func withChildRuntimeOverride(ctx context.Context, provider, model string) context.Context {
+	return context.WithValue(ctx, childRuntimeOverrideKey{}, childRuntimeOverride{provider: provider, model: model})
+}
+
+func childRuntimeOverrideFrom(ctx context.Context) (childRuntimeOverride, bool) {
+	ov, ok := ctx.Value(childRuntimeOverrideKey{}).(childRuntimeOverride)
+	return ov, ok
+}
+
 // sessionStoreForRunner is the narrow surface of *store.Store the
 // runner needs. Lets tests inject without spinning up sqlite.
 type sessionStoreForRunner interface {
@@ -480,11 +497,18 @@ func (r *ChatRunner) createChildSession(ctx context.Context, run *subagent.Run, 
 	if provider == "" {
 		provider = parent.Provider
 	}
+	model := agent.DefaultModel
+	// D-38 downgrade: BootRunner asked for a CLI child on an API parent that
+	// has not opted into CLI subagents, so the child runs on the parent's
+	// provider and model instead.
+	if ov, ok := childRuntimeOverrideFrom(ctx); ok {
+		provider, model = ov.provider, ov.model
+	}
 	childID := uuid.New().String()
 	if err := r.store.CreateSession(ctx, &store.Session{
 		ID:       childID,
 		Provider: provider,
-		Model:    agent.DefaultModel,
+		Model:    model,
 		Title:    fmt.Sprintf("subagent: %s — %s", run.Role, truncatePrompt(run.Prompt, 60)),
 	}); err != nil {
 		return "", fmt.Errorf("create child session: %w", err)

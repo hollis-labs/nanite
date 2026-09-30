@@ -44,6 +44,26 @@ ACP uses its real turn-scoped cancel. Native runtimes honestly report that
 turn cancellation is unsupported, so Nanite stops that exact wrapper and the
 next turn cold-boots instead of pretending a wire-level cancel occurred.
 
+## Subagent runtime
+
+A subagent's runtime follows its parent. A CLI process's calls to Nanite's own
+tools do not pass through the chat harness, so none of the result cache, the
+truncation or the per-turn ceilings apply to them; a subagent run through the
+chat harness gets all of it. From an API-driven parent — one whose provider has
+no CLI adapter — a subagent therefore runs through the harness unless the user
+or app opted into CLI subagents.
+
+The opt-in is `subagent_runtime` (`api` or `cli`): the session's own override
+first, then the app default in user settings, then `api`. A model-supplied
+`provider` argument and a role's `DefaultProvider` never count as the opt-in.
+When either names a CLI provider without it, the child runs on the parent's
+provider and model, the log records a warning, and the result the parent reads
+opens with a note saying so. A CLI-driven parent keeps booting CLI children.
+The parent's dispatch interface is the same either way.
+
+This is an interim home for the setting; it moves onto the launch-assignment
+limits once those exist.
+
 ## ACP permission requests
 
 Nanite configures `ACPBestEffortPermissionRequestResponder` only when both the

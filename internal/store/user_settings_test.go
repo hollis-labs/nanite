@@ -363,3 +363,54 @@ func TestUpdateUserSettings_BudgetPctClamp(t *testing.T) {
 		t.Errorf("expected budget_pct defaulted to 0.80 for negative input, got %f", got.ContextBudgetPct)
 	}
 }
+
+// D-38 (CW-20260929-0010): subagent_runtime, app default and per-session override.
+func TestSubagentRuntime_SettingsAndSessionOverride(t *testing.T) {
+	ctx := context.Background()
+	s := newSeededStore(t)
+
+	us, err := s.GetUserSettings(ctx)
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	if us.SubagentRuntime != "" {
+		t.Errorf("default SubagentRuntime = %q, want unset", us.SubagentRuntime)
+	}
+	us.SubagentRuntime = "cli"
+	if err := s.UpdateUserSettings(ctx, us); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if got, _ := s.GetUserSettings(ctx); got.SubagentRuntime != "cli" {
+		t.Errorf("SubagentRuntime round-trip = %q, want cli", got.SubagentRuntime)
+	}
+	us.SubagentRuntime = "browser"
+	if err := s.UpdateUserSettings(ctx, us); err == nil || !strings.Contains(err.Error(), "subagent_runtime") {
+		t.Errorf("unknown runtime accepted or wrong error: %v", err)
+	}
+
+	sess := &Session{Title: "t"}
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if v, err := s.GetSessionSubagentRuntime(ctx, sess.ID); err != nil || v != "" {
+		t.Errorf("new session override = %q, %v; want unset", v, err)
+	}
+	if err := s.SetSessionSubagentRuntime(ctx, sess.ID, "api"); err != nil {
+		t.Fatalf("SetSessionSubagentRuntime: %v", err)
+	}
+	if v, _ := s.GetSessionSubagentRuntime(ctx, sess.ID); v != "api" {
+		t.Errorf("override = %q, want api", v)
+	}
+	if err := s.SetSessionSubagentRuntime(ctx, sess.ID, ""); err != nil {
+		t.Fatalf("clear override: %v", err)
+	}
+	if v, _ := s.GetSessionSubagentRuntime(ctx, sess.ID); v != "" {
+		t.Errorf("cleared override = %q, want unset", v)
+	}
+	if err := s.SetSessionSubagentRuntime(ctx, sess.ID, "browser"); err == nil {
+		t.Error("unknown runtime accepted")
+	}
+	if err := s.SetSessionSubagentRuntime(ctx, "no-such-session", "cli"); err == nil {
+		t.Error("missing session accepted")
+	}
+}

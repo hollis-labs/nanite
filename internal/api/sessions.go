@@ -38,6 +38,11 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.SubagentRuntime != "" && !store.ValidSubagentRuntime(req.SubagentRuntime) {
+		a.errorResp(w, http.StatusBadRequest, "subagent_runtime must be \"api\" or \"cli\"")
+		return
+	}
+
 	sess := &store.Session{
 		ProjectID: req.ProjectID,
 		Model:     req.Model,
@@ -46,6 +51,12 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	if err := a.Services.Store.CreateSession(r.Context(), sess); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if req.SubagentRuntime != "" {
+		if err := a.Services.Store.SetSessionSubagentRuntime(r.Context(), sess.ID, req.SubagentRuntime); err != nil {
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	// Resolve agent: request param → user settings default → real "default"

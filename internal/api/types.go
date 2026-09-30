@@ -17,6 +17,9 @@ type CreateSessionRequest struct {
 	Model     string `json:"model"`
 	Provider  string `json:"provider"`
 	AgentID   string `json:"agent_id"`
+	// SubagentRuntime overrides the app's subagent_runtime for subagents
+	// spawned from this session: "api" or "cli"; empty leaves the app default.
+	SubagentRuntime string `json:"subagent_runtime"`
 }
 
 // Phase 0 item 21 ("Cut Modes, in full") removed this file's ModeID field

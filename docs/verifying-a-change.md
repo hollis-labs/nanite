@@ -31,9 +31,9 @@ the tree builds.**
 
 ## The landing check is the one you actually run
 
-`./scripts/check.sh` runs four stages — format, `go vet ./...`, `golangci-lint`,
-and `go test ./...` — and names each stage that failed rather than stopping at
-the first.
+`./scripts/check.sh` runs five stages — format, `go vet ./...`, `golangci-lint`,
+the transport-boundary lint (`docs/transport-boundary.md`), and `go test ./...`
+— and names each stage that failed rather than stopping at the first.
 
 Its lint stage measures **from the merge base with `origin/main`**, not across
 the tree; the script's header gives the reasoning. The consequence is the part

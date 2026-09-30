@@ -56,6 +56,9 @@ func (f *haltTestSessions) List(context.Context, bool) ([]store.Session, error) 
 func (f *haltTestSessions) Update(context.Context, *store.Session) error {
 	panic("haltTestSessions: Update not implemented")
 }
+func (f *haltTestSessions) UpdateMetadata(context.Context, string, string) error {
+	panic("haltTestSessions: UpdateMetadata not implemented")
+}
 func (f *haltTestSessions) Archive(context.Context, string) error {
 	panic("haltTestSessions: Archive not implemented")
 }
@@ -67,6 +70,18 @@ func (f *haltTestSessions) ListMessages(context.Context, string, int) ([]store.M
 }
 func (f *haltTestSessions) Search(context.Context, string, SearchOpts) ([]store.SearchResult, error) {
 	panic("haltTestSessions: Search not implemented")
+}
+func (f *haltTestSessions) ListMessagesPage(context.Context, string, int, int) (*store.MessagePage, error) {
+	panic("haltTestSessions: ListMessagesPage not implemented")
+}
+func (f *haltTestSessions) ListMessagesAround(context.Context, string, string, int, int) (*store.MessagePage, error) {
+	panic("haltTestSessions: ListMessagesAround not implemented")
+}
+func (f *haltTestSessions) DetectInterruptedTurn(context.Context, *store.Session, bool) map[string]any {
+	panic("haltTestSessions: DetectInterruptedTurn not implemented")
+}
+func (f *haltTestSessions) ListPendingEnvelopes(context.Context, string) ([]chat.Envelope, error) {
+	panic("haltTestSessions: ListPendingEnvelopes not implemented")
 }
 
 // haltTestAgents is a minimal AgentService fake. generateResponse only

@@ -27,20 +27,20 @@ func NewSkillService(cfg SkillServiceConfig) SkillService {
 	return &skillServiceImpl{skills: cfg.Skills}
 }
 
-func (s *skillServiceImpl) Get(_ context.Context, id string) (*store.Skill, error) {
-	return s.skills.GetSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+func (s *skillServiceImpl) Get(ctx context.Context, id string) (*store.Skill, error) {
+	return s.skills.GetSkill(ctx, id)
 }
 
-func (s *skillServiceImpl) GetBySlug(_ context.Context, slug string) (*store.Skill, error) {
-	return s.skills.GetSkillBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug)
+func (s *skillServiceImpl) GetBySlug(ctx context.Context, slug string) (*store.Skill, error) {
+	return s.skills.GetSkillBySlug(ctx, slug)
 }
 
-func (s *skillServiceImpl) List(_ context.Context) ([]store.Skill, error) {
-	return s.skills.ListSkills(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+func (s *skillServiceImpl) List(ctx context.Context) ([]store.Skill, error) {
+	return s.skills.ListSkills(ctx)
 }
 
-func (s *skillServiceImpl) ListBySource(_ context.Context, source string) ([]store.Skill, error) {
-	all, err := s.skills.ListSkills(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+func (s *skillServiceImpl) ListBySource(ctx context.Context, source string) ([]store.Skill, error) {
+	all, err := s.skills.ListSkills(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -53,14 +53,14 @@ func (s *skillServiceImpl) ListBySource(_ context.Context, source string) ([]sto
 	return result, nil
 }
 
-func (s *skillServiceImpl) Create(_ context.Context, sk *store.Skill) error {
-	return s.skills.CreateSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sk)
+func (s *skillServiceImpl) Create(ctx context.Context, sk *store.Skill) error {
+	return s.skills.CreateSkill(ctx, sk)
 }
 
-func (s *skillServiceImpl) Update(_ context.Context, sk *store.Skill) error {
-	return s.skills.UpdateSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sk)
+func (s *skillServiceImpl) Update(ctx context.Context, sk *store.Skill) error {
+	return s.skills.UpdateSkill(ctx, sk)
 }
 
-func (s *skillServiceImpl) Delete(_ context.Context, id string) error {
-	return s.skills.DeleteSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+func (s *skillServiceImpl) Delete(ctx context.Context, id string) error {
+	return s.skills.DeleteSkill(ctx, id)
 }

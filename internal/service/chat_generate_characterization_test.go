@@ -43,6 +43,9 @@ func (f *characterizationSessions) List(context.Context, bool) ([]store.Session,
 func (f *characterizationSessions) Update(context.Context, *store.Session) error {
 	panic("characterizationSessions.Update: unexpected call")
 }
+func (f *characterizationSessions) UpdateMetadata(context.Context, string, string) error {
+	panic("characterizationSessions.UpdateMetadata: unexpected call")
+}
 func (f *characterizationSessions) Archive(context.Context, string) error {
 	panic("characterizationSessions.Archive: unexpected call")
 }
@@ -54,6 +57,18 @@ func (f *characterizationSessions) ListMessages(ctx context.Context, id string, 
 }
 func (f *characterizationSessions) Search(context.Context, string, SearchOpts) ([]store.SearchResult, error) {
 	panic("characterizationSessions.Search: unexpected call")
+}
+func (f *characterizationSessions) ListMessagesPage(context.Context, string, int, int) (*store.MessagePage, error) {
+	panic("characterizationSessions.ListMessagesPage: unexpected call")
+}
+func (f *characterizationSessions) ListMessagesAround(context.Context, string, string, int, int) (*store.MessagePage, error) {
+	panic("characterizationSessions.ListMessagesAround: unexpected call")
+}
+func (f *characterizationSessions) DetectInterruptedTurn(context.Context, *store.Session, bool) map[string]any {
+	panic("characterizationSessions.DetectInterruptedTurn: unexpected call")
+}
+func (f *characterizationSessions) ListPendingEnvelopes(context.Context, string) ([]chat.Envelope, error) {
+	panic("characterizationSessions.ListPendingEnvelopes: unexpected call")
 }
 
 type characterizationAgents struct{ agent *store.AgentProfile }

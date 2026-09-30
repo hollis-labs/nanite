@@ -81,7 +81,25 @@ type Container struct {
 	// AgentConfig is the shared database write path for operator-managed
 	// profiles (GUI/API/CLI/MCP all route mutations through it).
 	AgentConfig *AgentConfigService
-	Skills      SkillService
+	// AgentMembership owns session <-> agent and agent <-> project bindings.
+	AgentMembership *AgentMembershipService
+	// AgentCapabilities owns per-row CRUD on an agent's known tools, known
+	// skills, procedures and knowledge seeds.
+	AgentCapabilities *AgentCapabilitiesService
+	// Reflexes owns reflex definitions, opt-outs and the pending-reflex
+	// review queue; ReflexEngine runs them.
+	Reflexes *ReflexService
+	// Loops owns goal CRUD, goal evidence and loop-run reads; launching and
+	// resolving loop runs is loop.LoopLauncher's, wired into the API.
+	Loops *LoopService
+	// Bookmarks owns message bookmarks.
+	Bookmarks *BookmarkService
+	// Schedules owns operator CRUD on agent_schedules; Engine fires them.
+	Schedules *ScheduleService
+	Skills    SkillService
+	Usage     *UsageService // token usage, execution metrics, utility calls
+	// ProviderConfig reads and writes provider and model configuration rows.
+	ProviderConfig *ProviderConfigService
 	// SkillVendor is the content-addressed vendored skill store (internal/
 	// skillvendor, TASKS/skills/03) that backs the explicit install/sync
 	// pipeline (internal/skillinstall, TASKS/skills/04/05 --
@@ -443,6 +461,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentReader: cfg.Store,
 		Settings:    cfg.Store,
 		Events:      events,
+		Runtime:     cfg.Store,
+		EventLog:    cfg.Store,
+		Envelopes:   cfg.Store,
 	})
 
 	// Adapter registry — adapters self-register via plugin loading.
@@ -564,6 +585,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Shared managed-agent database write service. GUI/API/CLI/MCP mutations
 	// are immediately visible because the runtime also reads from the DB.
 	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, nil)
+	agentMembership := NewAgentMembershipService(cfg.Store, cfg.Store)
+	usage := NewUsageService(cfg.Store, cfg.Store)
+	providerConfig := NewProviderConfigService(cfg.Store)
 
 	// agent_permissions.go (newFileAgentPermissionResolver) and
 	// ToolClient.PermissionResolver/GetPermissions/CheckPermission/
@@ -1444,6 +1468,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AppConfig:           cfg.AppConfig,
 		WorkingDir:          workingDir,
 		AgentConfig:         agentConfig,
+		AgentMembership:     agentMembership,
+		Usage:               usage,
+		ProviderConfig:      providerConfig,
+		AgentCapabilities:   NewAgentCapabilitiesService(cfg.Store),
+		Reflexes:            NewReflexService(cfg.Store),
+		Loops:               NewLoopService(cfg.Store),
+		Bookmarks:           NewBookmarkService(cfg.Store),
+		Schedules:           NewScheduleService(cfg.Store),
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,

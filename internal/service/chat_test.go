@@ -31,8 +31,9 @@ func (s *stubSessionService) Get(_ context.Context, id string) (*store.Session, 
 func (s *stubSessionService) List(_ context.Context, _ bool) ([]store.Session, error) {
 	return nil, nil
 }
-func (s *stubSessionService) Update(_ context.Context, _ *store.Session) error { return nil }
-func (s *stubSessionService) Archive(_ context.Context, _ string) error        { return nil }
+func (s *stubSessionService) Update(_ context.Context, _ *store.Session) error    { return nil }
+func (s *stubSessionService) UpdateMetadata(_ context.Context, _, _ string) error { return nil }
+func (s *stubSessionService) Archive(_ context.Context, _ string) error           { return nil }
 func (s *stubSessionService) Fork(_ context.Context, _ string, _ ForkOpts) (*store.Session, error) {
 	return nil, nil
 }
@@ -40,6 +41,18 @@ func (s *stubSessionService) ListMessages(_ context.Context, _ string, _ int) ([
 	return nil, nil
 }
 func (s *stubSessionService) Search(_ context.Context, _ string, _ SearchOpts) ([]store.SearchResult, error) {
+	return nil, nil
+}
+func (s *stubSessionService) ListMessagesPage(_ context.Context, _ string, _, _ int) (*store.MessagePage, error) {
+	return nil, nil
+}
+func (s *stubSessionService) ListMessagesAround(_ context.Context, _, _ string, _, _ int) (*store.MessagePage, error) {
+	return nil, nil
+}
+func (s *stubSessionService) DetectInterruptedTurn(_ context.Context, _ *store.Session, _ bool) map[string]any {
+	return nil
+}
+func (s *stubSessionService) ListPendingEnvelopes(_ context.Context, _ string) ([]chat.Envelope, error) {
 	return nil, nil
 }
 

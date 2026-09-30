@@ -23,9 +23,9 @@ type startSurfaceCapabilities struct {
 	SessionPolicies     []enumOption                 `json:"session_policies"`
 	Recipes             []service.DurableAgentRecipe `json:"recipes"`
 	DurableAgents       []store.DurableAgentInstance `json:"durable_agents"`
-	Profiles            []store.AgentProfile         `json:"profiles"`
-	Providers           []store.ProviderConfig       `json:"providers"`
-	Models              []store.Model                `json:"models"`
+	Profiles            []AgentProfileDTO            `json:"profiles"`
+	Providers           []ProviderConfigView         `json:"providers"`
+	Models              []ModelView                  `json:"models"`
 	WorkRootHints       []workRootHint               `json:"work_root_hints"`
 }
 
@@ -52,15 +52,15 @@ type workRootHint struct {
 }
 
 type sessionDetailsResponse struct {
-	Session              *store.Session                           `json:"session"`
-	PrimaryAgent         *store.AgentProfile                      `json:"primary_agent,omitempty"`
+	Session              *SessionView                             `json:"session"`
+	PrimaryAgent         *AgentProfileDTO                         `json:"primary_agent,omitempty"`
 	DurableAttachments   []store.DurableAgentInstanceSessionState `json:"durable_attachments"`
 	CurrentDurableAgent  *store.DurableAgentInstance              `json:"current_durable_agent,omitempty"`
 	ActivityState        string                                   `json:"activity_state"`
 	LastActivityAt       string                                   `json:"last_activity_at,omitempty"`
 	LastUsefulActivityAt string                                   `json:"last_useful_activity_at,omitempty"`
 	Halt                 sessionHaltDetail                        `json:"halt"`
-	Usage                *store.SessionUsageSummary               `json:"usage,omitempty"`
+	Usage                *SessionUsageView                        `json:"usage,omitempty"`
 	RecentDurableEvents  []store.DurableAgentEvent                `json:"recent_durable_events"`
 	Runtime              sessionRuntimeDetail                     `json:"runtime"`
 	BootSource           string                                   `json:"boot_source"`
@@ -104,7 +104,7 @@ func (a *API) handleStartSurfaceCapabilities(w http.ResponseWriter, r *http.Requ
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	profiles, err := a.Services.Store.ListAgents(r.Context())
+	profiles, err := a.Services.Agents.List(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -122,12 +122,12 @@ func (a *API) handleStartSurfaceCapabilities(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	profiles = active
-	providers, err := a.providersForStartSurface()
+	providers, err := a.providersForStartSurface(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	models, err := a.modelsForStartSurface()
+	models, err := a.modelsForStartSurface(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -144,9 +144,9 @@ func (a *API) handleStartSurfaceCapabilities(w http.ResponseWriter, r *http.Requ
 		SessionPolicies:     sessionPolicyOptions(),
 		Recipes:             nonNilSlice(recipes),
 		DurableAgents:       nonNilSlice(durableAgents),
-		Profiles:            nonNilSlice(profiles),
-		Providers:           nonNilSlice(providers),
-		Models:              nonNilSlice(models),
+		Profiles:            nonNilSlice(agentProfilesToDTO(profiles)),
+		Providers:           nonNilSlice(providerConfigsToView(providers)),
+		Models:              nonNilSlice(modelsToView(models)),
 		WorkRootHints:       []workRootHint{{ID: "operator-provided", Label: "Operator provided", Description: "Frontend should prompt for a project or working directory when the recipe/start path needs one."}},
 	})
 }
@@ -160,7 +160,7 @@ func nonNilSlice[T any](items []T) []T {
 
 func (a *API) handleGetSessionDetails(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	details, err := a.sessionDetails(id)
+	details, err := a.sessionDetails(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "session not found")
 		return
@@ -168,13 +168,19 @@ func (a *API) handleGetSessionDetails(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, details)
 }
 
-func (a *API) sessionDetails(id string) (sessionDetailsResponse, error) {
-	sess, err := a.Services.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+// sessionDetails assembles the session read model. The session, its primary
+// agent, its durable-agent attachments and its usage come from their
+// services; halt and runtime rows have no service yet and are still read from the
+// store, with context.TODO() until they move (transport-boundary,
+// CW-20260930-0083): touching those lines before then would count them as
+// new store calls under the R1 gate.
+func (a *API) sessionDetails(ctx context.Context, id string) (sessionDetailsResponse, error) {
+	sess, err := a.Services.Sessions.Get(ctx, id)
 	if err != nil {
 		return sessionDetailsResponse{}, err
 	}
 	details := sessionDetailsResponse{
-		Session:              sess,
+		Session:              sessionToViewPtr(sess),
 		Runtime:              sessionRuntimeDetail{State: "none"},
 		ActivityState:        "idle",
 		LastActivityAt:       sess.LastActivity,
@@ -188,17 +194,18 @@ func (a *API) sessionDetails(id string) (sessionDetailsResponse, error) {
 	if halt, err := a.Services.Store.GetSessionHalt(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil && halt != nil {
 		details.Halt = haltDetailFromStore(halt)
 	}
-	if primary, err := a.Services.Store.GetSessionPrimaryAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil {
-		if agent, err := a.Services.Store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, primary.AgentID); err == nil {
-			details.PrimaryAgent = agent
+	if primary, err := a.Services.AgentMembership.GetSessionPrimaryAgent(ctx, id); err == nil {
+		if agent, err := a.Services.Agents.Get(ctx, primary.AgentID); err == nil {
+			dto := agentProfileToDTO(agent)
+			details.PrimaryAgent = &dto
 		}
 	}
-	if rels, err := a.Services.Store.ListDurableAgentSessionStatesForSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil {
+	if rels, err := a.Services.DurableAgents.ListSessionStatesForSession(ctx, id); err == nil {
 		details.DurableAttachments = rels
 		if len(rels) > 0 {
-			if inst, err := a.Services.Store.GetDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, rels[0].InstanceID); err == nil {
+			if inst, err := a.Services.DurableAgents.Get(ctx, rels[0].InstanceID); err == nil {
 				details.CurrentDurableAgent = inst
-				if events, err := a.Services.Store.ListDurableAgentEvents(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst.ID, 5); err == nil {
+				if events, err := a.Services.DurableAgents.ListEvents(ctx, inst.ID, 5); err == nil {
 					details.RecentDurableEvents = nonNilSlice(events)
 					if len(events) > 0 {
 						details.LastUsefulActivityAt = laterTimestamp(
@@ -210,8 +217,8 @@ func (a *API) sessionDetails(id string) (sessionDetailsResponse, error) {
 			}
 		}
 	}
-	if usage, err := a.Services.Store.GetSessionUsage(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil && usage != nil && usage.MessageCount > 0 {
-		details.Usage = usage
+	if usage, err := a.Services.Usage.SessionUsage(ctx, id); err == nil && usage != nil && usage.MessageCount > 0 {
+		details.Usage = sessionUsageToViewPtr(usage)
 	}
 	if rows, err := a.Services.Store.ListAgentRuntimeRowsForSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil && len(rows) > 0 {
 		row := rows[0]
@@ -323,16 +330,16 @@ func laterTimestamp(current, candidate string) string {
 	return current
 }
 
-func (a *API) providersForStartSurface() ([]store.ProviderConfig, error) {
-	providers, err := a.Services.Store.ListProviders(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+func (a *API) providersForStartSurface(ctx context.Context) ([]store.ProviderConfig, error) {
+	providers, err := a.Services.ProviderConfig.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return visibleProviderRows(providers), nil
 }
 
-func (a *API) modelsForStartSurface() ([]store.Model, error) {
-	models, err := a.Services.Store.ListModels(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+func (a *API) modelsForStartSurface(ctx context.Context) ([]store.Model, error) {
+	models, err := a.Services.ProviderConfig.ListModels(ctx)
 	if err != nil {
 		return nil, err
 	}

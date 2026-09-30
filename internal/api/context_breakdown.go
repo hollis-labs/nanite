@@ -40,7 +40,7 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 	sessionID := r.PathValue("id")
 
 	// Get messages for the session.
-	messages, err := a.Services.Store.ListMessages(r.Context(), sessionID, 200)
+	messages, err := a.Services.Sessions.ListMessages(r.Context(), sessionID, 200)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -68,13 +68,13 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 	// Get the session's agent and its system prompt.
 	systemPrompt := ""
 	systemTokens := 500 // base estimate
-	if a.Services.Store != nil {
-		session, err := a.Services.Store.GetSession(r.Context(), sessionID)
-		if err == nil && session != nil {
-			agents, err := a.Services.Store.ListSessionAgents(r.Context(), session.ID)
-			if err == nil && len(agents) > 0 {
-				agent, err := a.Services.Store.GetAgent(r.Context(), agents[0].AgentID)
-				if err == nil && agent != nil {
+	if a.Services.Sessions != nil {
+		session, getErr := a.Services.Sessions.Get(r.Context(), sessionID)
+		if getErr == nil && session != nil {
+			agents, listErr := a.Services.AgentMembership.ListSessionAgents(r.Context(), session.ID)
+			if listErr == nil && len(agents) > 0 {
+				agent, agentErr := a.Services.Agents.Get(r.Context(), agents[0].AgentID)
+				if agentErr == nil && agent != nil {
 					systemPrompt = agent.SystemPrompt
 					systemTokens = chat.EstimateTokens(systemPrompt)
 				}
@@ -82,27 +82,20 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Get actual tool token costs from execution metrics when available,
-	// falling back to the event-log count with a 50-token estimate.
+	// Tool token cost: actual when execution metrics recorded it, else an
+	// event-log estimate — see UsageService.SessionToolTokens.
 	toolDetails := make([]ToolTokenDetail, 0)
-	toolTokensTotal := 0
-	toolSummary, err := a.Services.Store.GetSessionToolTokenSummary(r.Context(), sessionID)
-	if err == nil && toolSummary.TotalToolCalls > 0 {
-		toolTokensTotal = toolSummary.TotalInputTokens + toolSummary.TotalOutputTokens
+	toolTokens := a.Services.Usage.SessionToolTokens(r.Context(), sessionID)
+	toolTokensTotal := toolTokens.Tokens
+	if toolTokens.Calls > 0 {
+		kind := "actual"
+		if toolTokens.Estimated {
+			kind = "estimated"
+		}
 		toolDetails = append(toolDetails, ToolTokenDetail{
-			Name:   fmt.Sprintf("%d tool calls (actual)", toolSummary.TotalToolCalls),
+			Name:   fmt.Sprintf("%d tool calls (%s)", toolTokens.Calls, kind),
 			Tokens: toolTokensTotal,
 		})
-	} else {
-		// Fallback: count from event log with rough estimate.
-		toolCallCount := a.Services.Store.CountSessionToolCalls(r.Context(), sessionID)
-		if toolCallCount > 0 {
-			toolTokensTotal = toolCallCount * 50
-			toolDetails = append(toolDetails, ToolTokenDetail{
-				Name:   fmt.Sprintf("%d tool calls (estimated)", toolCallCount),
-				Tokens: toolTokensTotal,
-			})
-		}
 	}
 
 	// Total available tools (for display, not context cost).
@@ -122,7 +115,7 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 
 	// Get cost from usage summary.
 	costUSD := 0.0
-	usage, err := a.Services.Store.GetSessionUsage(r.Context(), sessionID)
+	usage, err := a.Services.Usage.SessionUsage(r.Context(), sessionID)
 	if err == nil && usage != nil {
 		costUSD = usage.EstimatedCostUSD
 	}

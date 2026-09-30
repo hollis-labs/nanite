@@ -80,12 +80,12 @@ func NewAgentService(cfg AgentServiceConfig) AgentService {
 	}
 }
 
-func (s *agentServiceImpl) Get(_ context.Context, id string) (*store.AgentProfile, error) {
-	return s.agents.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+func (s *agentServiceImpl) Get(ctx context.Context, id string) (*store.AgentProfile, error) {
+	return s.agents.GetAgent(ctx, id)
 }
 
-func (s *agentServiceImpl) GetBySlug(_ context.Context, slug string) (*store.AgentProfile, error) {
-	return s.agents.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug)
+func (s *agentServiceImpl) GetBySlug(ctx context.Context, slug string) (*store.AgentProfile, error) {
+	return s.agents.GetAgentBySlug(ctx, slug)
 }
 
 func (s *agentServiceImpl) List(_ context.Context) ([]store.AgentProfile, error) {

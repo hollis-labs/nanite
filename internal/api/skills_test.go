@@ -57,3 +57,71 @@ func TestHandleAssignAgentSkill_RejectsNonexistentAgent(t *testing.T) {
 // (unchanged by this task) is still the load-bearing 404 gate --
 // TestHandleAssignAgentSkill_RejectsNonexistentAgent above already covers
 // "no such agent at all" the same way this test would have degenerated to.
+
+// errorBody decodes an errorResp body and returns its "error" message.
+func errorBody(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode error body %q: %v", w.Body.String(), err)
+	}
+	return body["error"]
+}
+
+// TestHandleAssignAgentSkill_RejectsNonexistentSkill pins the wire contract
+// for the second existence check: a real agent with an unknown skill_id is
+// 404 "skill not found", and nothing is assigned.
+func TestHandleAssignAgentSkill_RejectsNonexistentSkill(t *testing.T) {
+	a, mux := newTestAPI(t)
+	agent := createTestAgent(t, a, "assign-missing-skill-agent")
+
+	body, _ := json.Marshal(map[string]string{"skill_id": "no-such-skill"})
+	req := httptest.NewRequest("POST", "/api/agents/"+agent.ID+"/skills", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d; body: %s", w.Code, w.Body.String())
+	}
+	if msg := errorBody(t, w); msg != "skill not found" {
+		t.Fatalf("error = %q, want %q", msg, "skill not found")
+	}
+	skills, err := a.Services.Store.ListAgentSkills(context.Background(), agent.ID)
+	if err != nil {
+		t.Fatalf("ListAgentSkills: %v", err)
+	}
+	if len(skills) != 0 {
+		t.Errorf("expected no assignment, got %d", len(skills))
+	}
+}
+
+// TestHandleRevokeAgentSkillGrant_NoGrant pins both no-grant cases to the
+// same wire response: no known-skill row at all, and a row that carries no
+// grant state.
+func TestHandleRevokeAgentSkillGrant_NoGrant(t *testing.T) {
+	a, mux := newTestAPI(t)
+	agent := createTestAgent(t, a, "revoke-no-grant-agent")
+
+	if err := a.Services.Store.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+		AgentID:   agent.ID,
+		SkillName: "ungranted",
+		Pinned:    true,
+		Reason:    "panel pin",
+	}); err != nil {
+		t.Fatalf("InsertAgentKnownSkill: %v", err)
+	}
+
+	for _, slug := range []string{"never-known", "ungranted"} {
+		req := httptest.NewRequest("DELETE", "/api/agents/"+agent.ID+"/skills/"+slug+"/grant", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("%s: expected 404, got %d; body: %s", slug, w.Code, w.Body.String())
+		}
+		if msg := errorBody(t, w); msg != "no grant exists for this agent/skill" {
+			t.Fatalf("%s: error = %q, want %q", slug, msg, "no grant exists for this agent/skill")
+		}
+	}
+}

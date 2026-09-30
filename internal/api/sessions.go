@@ -1,9 +1,7 @@
 package api
 
 import (
-	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,7 +12,6 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
-	"github.com/hollis-labs/nanite/internal/recovery"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -24,12 +21,12 @@ func (a *API) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	includeArchived := q.Get("include_archived") == "true"
 
-	sessions, err := a.Services.Store.ListSessions(r.Context(), includeArchived)
+	sessions, err := a.Services.Sessions.List(r.Context(), includeArchived)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, sessions)
+	a.jsonResp(w, http.StatusOK, sessionsToView(sessions))
 }
 
 func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -44,11 +41,6 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess := &store.Session{
-		ProjectID: req.ProjectID,
-		Model:     req.Model,
-		Provider:  req.Provider,
-	}
 	// Validate even with no selection: the default profile resolves the
 	// NANITE_HARNESS_* environment, and a bad value fails here, not every turn.
 	meta, err := service.MergeHarnessSelection("", req.HarnessProfile, req.HarnessOverrides)
@@ -59,52 +51,22 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.HarnessProfile != "" || len(req.HarnessOverrides) > 0 {
-		sess.Metadata = meta
+	opts := service.CreateSessionOpts{
+		ProjectID:       req.ProjectID,
+		Model:           req.Model,
+		Provider:        req.Provider,
+		AgentID:         req.AgentID,
+		SubagentRuntime: req.SubagentRuntime,
 	}
-	if err := a.Services.Store.CreateSession(r.Context(), sess); err != nil {
+	if req.HarnessProfile != "" || len(req.HarnessOverrides) > 0 {
+		opts.Metadata = meta
+	}
+	// Create resolves the primary agent (request -> user-settings default ->
+	// the real "default" row) and binds it best-effort.
+	sess, err := a.Services.Sessions.Create(r.Context(), opts)
+	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	if req.SubagentRuntime != "" {
-		if err := a.Services.Store.SetSessionSubagentRuntime(r.Context(), sess.ID, req.SubagentRuntime); err != nil {
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-
-	// Resolve agent: request param → user settings default → real "default"
-	// agent row. TASKS/adhoc/01-eliminate-file-based-agent-runtime.md: this
-	// used to fall back to the literal placeholder string "file-default",
-	// which got written straight into session_agents.agent_id (no FK on
-	// that column, so nothing caught it) — resolve the real agent_profiles
-	// row for the "default" slug instead, so only a genuine agent ID is
-	// ever written here.
-	agentID := req.AgentID
-	if agentID == "" {
-		if settings, err := a.Services.Store.GetUserSettings(r.Context()); err == nil && settings.DefaultAgent != "" {
-			agentID = settings.DefaultAgent
-		}
-	}
-	if agentID == "" {
-		if defaultAgent, err := a.Services.Store.GetAgentBySlug(r.Context(), "default"); err == nil && defaultAgent != nil {
-			agentID = defaultAgent.ID
-		}
-	}
-
-	// Assign the resolved agent as primary (best-effort — matches the
-	// pre-existing "log but don't fail" contract of this write). Skip the
-	// write entirely in the true edge case where even the "default" agent
-	// row can't be resolved (no such row exists at all) rather than write
-	// an empty/placeholder agent_id — the session itself was already
-	// created successfully and stays usable without a primary-agent
-	// binding; ResolveForSession's own two-hop fallback handles an unbound
-	// session gracefully on read.
-	if agentID != "" {
-		if err := a.Services.Store.EnsureSessionAgent(r.Context(), sess.ID, agentID, "default", true); err != nil {
-			// Log but don't fail — session was created successfully.
-			_ = err
-		}
 	}
 
 	// Emit session creation event (fire-and-forget).
@@ -114,7 +76,7 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	a.jsonResp(w, http.StatusCreated, sess)
+	a.jsonResp(w, http.StatusCreated, sessionToView(sess))
 }
 
 func (a *API) handleForkSession(w http.ResponseWriter, r *http.Request) {
@@ -126,30 +88,29 @@ func (a *API) handleForkSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	overrides := &store.Session{
-		Provider: req.Provider,
-		Model:    req.Model,
-	}
-
-	newSess, err := a.Services.Store.ForkSession(r.Context(), sourceID, overrides, req.IncludeMessages)
+	newSess, err := a.Services.Sessions.Fork(r.Context(), sourceID, service.ForkOpts{
+		IncludeMessages: req.IncludeMessages,
+		Provider:        req.Provider,
+		Model:           req.Model,
+	})
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	a.jsonResp(w, http.StatusCreated, newSess)
+	a.jsonResp(w, http.StatusCreated, sessionToView(newSess))
 }
 
 func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	sess, err := a.Services.Store.GetSession(r.Context(), id)
+	sess, err := a.Services.Sessions.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "session not found")
 		return
 	}
 
 	// Also return recent messages.
-	messages, err := a.Services.Store.ListMessages(r.Context(), id, 50)
+	messages, err := a.Services.Sessions.ListMessages(r.Context(), id, 50)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -157,122 +118,21 @@ func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	lookup := buildEnvelopeLookup(a.Services.Store, messages)
 	messages = injectEnvelopePriorResponses(messages, lookup)
 
-	a.jsonResp(w, http.StatusOK, map[string]any{
-		"session":           sess,
-		"messages":          messages,
-		"interrupted_turn":  a.detectInterruptedTurn(id, sess),
-		"active_message_id": a.Services.Streams.ActiveMessageForSession(id),
+	// A live stream means this process is genuinely generating the reply, so
+	// the turn is not interrupted — see SessionService.DetectInterruptedTurn.
+	hasLiveStream := a.Services.Streams != nil && a.Services.Streams.HasLiveStreamForSession(id)
+	a.jsonResp(w, http.StatusOK, SessionDetailView{
+		Session:         sessionToView(sess),
+		Messages:        messagesToView(messages),
+		InterruptedTurn: a.Services.Sessions.DetectInterruptedTurn(r.Context(), sess, hasLiveStream),
+		ActiveMessageID: a.Services.Streams.ActiveMessageForSession(id),
 	})
-}
-
-// detectInterruptedTurn reports whether the session has an in-flight turn whose
-// backend agent is gone — the case where a service restart (deploy/reload)
-// killed a turn mid-generation, leaving the GUI spinning forever with no
-// indication anything went wrong (CW-20260518-0084).
-//
-// The signal is intentionally minimal and derived from existing state:
-//
-//   - The session's last persisted message is a `user` message. A completed
-//     turn always ends with an `assistant` (or `tool`) row; a turn that started
-//     but never produced a reply leaves the user message dangling.
-//   - The process holds NO live in-memory stream for the session. During normal
-//     generation the StreamManager always has a live stream for the message
-//     being generated, so this is false for genuinely in-flight turns. After a
-//     restart the StreamManager is a fresh empty instance, so a turn that was
-//     generating at restart time reads as having no live stream.
-//
-// Both conditions together mean "a turn was dispatched, no reply landed, and
-// nothing in this process is producing one" — i.e. the agent process is gone.
-// Reconciling the dead agent_runtime rows is a separate task (CW-20260518-0085);
-// this only surfaces the state so the FE can stop the endless spinner.
-//
-// Returns nil when the session is not in an interrupted state — the FE treats a
-// null/absent field as "no interruption".
-//
-// PR #213 review hardening: this helper used to take the caller's messages
-// slice and inspect `messages[len-1]`, which assumed the slice was the
-// chronological tail. The current `handleGetSession` always passes the
-// latest 50 (`ListMessages(id, 50)` is `ORDER BY created_at DESC LIMIT 50`
-// reversed to ASC, so messages[-1] is in fact the absolute-latest message),
-// but `ListMessagesPaginated` exists and a future endpoint passing a
-// non-tail window would silently mis-trigger. Querying the store directly
-// for the latest message eliminates the caller-slice dependency entirely.
-func (a *API) detectInterruptedTurn(sessionID string, sess *store.Session) map[string]any {
-	if sess == nil {
-		return nil
-	}
-	// Only active sessions can have an in-flight turn; paused/archived ones
-	// were deliberately put to rest.
-	if sess.Status != "active" {
-		return nil
-	}
-	// Probe the store directly for the chronologically-last message rather
-	// than relying on a caller-supplied slice (ListMessages returns DESC then
-	// reverses to ASC; with limit=1 the single returned element is the
-	// absolute-latest row).
-	tail, err := a.Services.Store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, 1)
-	if err != nil || len(tail) == 0 {
-		return nil
-	}
-	last := tail[len(tail)-1]
-	// A live stream means this process is genuinely generating the reply —
-	// not interrupted. The pure "dangling user turn + no live stream" decision
-	// lives in internal/recovery (interrupted-turn detection, the fourth of
-	// the four recovery mechanisms); this method's job is just the store/
-	// stream lookups that feed it.
-	hasLiveStream := a.Services.Streams != nil && a.Services.Streams.HasLiveStreamForSession(sessionID)
-	result := recovery.DetectInterruptedTurn(last.Role, last.ID, last.CreatedAt, hasLiveStream)
-	if result != nil {
-		a.logInterruptedTurnDetected(sessionID, last, result)
-	}
-	return result
-}
-
-// interruptedTurnDetectedMeta is the structured event_log.metadata payload
-// for event_type="interrupted_turn_detected" — the session/turn context
-// that triggered the heuristic, not a bare event-type string. Mirrors the
-// shape convention chat_reflexes.go's "reflex_action" write established
-// (docs/engineering/architecture/06-session-lifecycle-and-recovery.md:
-// "extend event_log logging to all four [recovery mechanisms]").
-type interruptedTurnDetectedMeta struct {
-	SessionID       string `json:"session_id"`
-	LastMessageID   string `json:"last_message_id"`
-	LastMessageRole string `json:"last_message_role"`
-	LastActivityAt  string `json:"last_activity_at"`
-	Reason          string `json:"reason"`
-}
-
-// logInterruptedTurnDetected writes the event_log postmortem row for a real
-// interrupted-turn detection firing (a GET /sessions/{id} that finds a
-// dangling unanswered user turn with no live stream, per
-// DetectInterruptedTurn above). Best-effort — a.Services.Store.LogEvent
-// already swallows its own DB errors; this only degrades to a skipped
-// write if Store is nil (never true in production wiring).
-func (a *API) logInterruptedTurnDetected(sessionID string, last store.Message, result map[string]any) {
-	if a.Services.Store == nil {
-		return
-	}
-	reason, _ := result["reason"].(string)
-	meta := interruptedTurnDetectedMeta{
-		SessionID:       sessionID,
-		LastMessageID:   last.ID,
-		LastMessageRole: last.Role,
-		LastActivityAt:  last.CreatedAt,
-		Reason:          reason,
-	}
-	blob, err := json.Marshal(meta)
-	if err != nil {
-		blob = []byte("{}")
-	}
-	a.Services.Store.LogEvent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, "interrupted_turn_detected", "recovery",
-		fmt.Sprintf("interrupted turn detected: last message %s (%s) has no reply and no live stream", last.ID, last.Role),
-		string(blob))
 }
 
 func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Services.Store.GetSession(r.Context(), id)
+	existing, err := a.Services.Sessions.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "session not found")
 		return
@@ -294,7 +154,7 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		existing.IsPinned = *req.IsPinned
 	}
 	if req.Provider != nil || req.Model != nil {
-		if msgs, err := a.Services.Store.ListMessages(r.Context(), id, 1); err == nil && len(msgs) > 0 {
+		if msgs, err := a.Services.Sessions.ListMessages(r.Context(), id, 1); err == nil && len(msgs) > 0 {
 			if req.Provider != nil && *req.Provider != existing.Provider {
 				a.errorResp(w, http.StatusBadRequest, "provider cannot be changed after the session has messages")
 				return
@@ -321,7 +181,7 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Services.Store.UpdateSession(r.Context(), existing); err != nil {
+	if err := a.Services.Sessions.Update(r.Context(), existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -333,12 +193,14 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	a.jsonResp(w, http.StatusOK, existing)
+	a.jsonResp(w, http.StatusOK, sessionToView(existing))
 }
 
 func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.ArchiveSession(r.Context(), id); err != nil {
+	// Archive closes the session's live agent runtime (the onArchive hook)
+	// and emits session-end to activity and plugins.
+	if err := a.Services.Sessions.Archive(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -350,13 +212,6 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 
 	// Broadcast session archived presence so UI updates immediately.
 	a.Services.Streams.BroadcastSessionArchived(id)
-
-	// Emit session ended event (fire-and-forget).
-	if a.Services.Activity != nil {
-		safego.Go(r.Context(), "api.sessions.activity.session-ended", func() {
-			a.Services.Activity.EmitSessionEnded(r.Context(), id)
-		})
-	}
 
 	// Emit plugin event: session archived.
 	if a.Services.Plugins != nil {
@@ -591,14 +446,14 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 				after = n
 			}
 		}
-		page, err := a.Services.Store.ListMessagesAroundID(r.Context(), sessionID, around, before, after)
+		page, err := a.Services.Sessions.ListMessagesAround(r.Context(), sessionID, around, before, after)
 		if err != nil {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		lookup := buildEnvelopeLookup(a.Services.Store, page.Messages)
 		page.Messages = injectEnvelopePriorResponses(page.Messages, lookup)
-		a.jsonResp(w, http.StatusOK, page)
+		a.jsonResp(w, http.StatusOK, messagePageToView(page))
 		return
 	}
 
@@ -610,50 +465,22 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	page, err := a.Services.Store.ListMessagesPaginated(r.Context(), sessionID, limit, offset)
+	page, err := a.Services.Sessions.ListMessagesPage(r.Context(), sessionID, limit, offset)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	lookup := buildEnvelopeLookup(a.Services.Store, page.Messages)
 	page.Messages = injectEnvelopePriorResponses(page.Messages, lookup)
-	a.jsonResp(w, http.StatusOK, page)
+	a.jsonResp(w, http.StatusOK, messagePageToView(page))
 }
 
 func (a *API) handleListSessionPluginEnvelopes(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	insts, err := a.Services.Store.ListEnvelopeInstancesBySession(r.Context(), sessionID)
+	out, err := a.Services.Sessions.ListPendingEnvelopes(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-
-	out := make([]chat.Envelope, 0, len(insts))
-	for _, inst := range insts {
-		if inst.RespondedAt != nil {
-			continue
-		}
-		if inst.EnvelopeType != "subagent-spawn-approval" && inst.EnvelopeType != "elicitation-prompt" {
-			continue
-		}
-		var data map[string]any
-		if err := json.Unmarshal([]byte(inst.EnvelopeJSON), &data); err != nil {
-			slog.Warn("api: skip malformed plugin-envelope rehydrate row",
-				"session_id", sessionID,
-				"envelope_id", inst.ID,
-				"type", inst.EnvelopeType,
-				"err", err,
-			)
-			continue
-		}
-		out = append(out, chat.Envelope{
-			Kind:         "envelope",
-			Version:      1,
-			Type:         inst.EnvelopeType,
-			ID:           inst.ID,
-			Data:         data,
-			DisplayClass: string(service.EnvelopeDisplayClassActionRequired),
-		})
 	}
 	a.jsonResp(w, http.StatusOK, out)
 }

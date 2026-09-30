@@ -5,20 +5,40 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// capabilityError writes the response for an AgentCapabilitiesService error.
+// notFound is the store sentinel that maps to 404 for this call, or nil where
+// a missing row is not a client error (the re-read after a create). A store
+// write rejection is 400 with the store's message, a duplicate create 409,
+// anything else 500.
+func (a *API) capabilityError(w http.ResponseWriter, err, notFound error, notFoundMsg, existsMsg string) {
+	var writeErr *service.CapabilityWriteError
+	switch {
+	case notFound != nil && errors.Is(err, notFound):
+		a.errorResp(w, http.StatusNotFound, notFoundMsg)
+	case errors.Is(err, service.ErrCapabilityExists):
+		a.errorResp(w, http.StatusConflict, existsMsg)
+	case errors.As(err, &writeErr):
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+	default:
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	}
+}
 
 func (a *API) handleListAgentKnownTools(w http.ResponseWriter, r *http.Request) {
 	agent, ok := a.requireAgent(w, r)
 	if !ok {
 		return
 	}
-	rows, err := a.Services.Store.ListAgentKnownTools(r.Context(), agent.ID)
+	rows, err := a.Services.AgentCapabilities.ListKnownTools(r.Context(), agent.ID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, rows)
+	a.jsonResp(w, http.StatusOK, knownToolsToView(rows))
 }
 
 func (a *API) handleGetAgentKnownTool(w http.ResponseWriter, r *http.Request) {
@@ -31,16 +51,12 @@ func (a *API) handleGetAgentKnownTool(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "toolName is required")
 		return
 	}
-	row, err := a.Services.Store.GetAgentKnownTool(r.Context(), agent.ID, toolName)
+	row, err := a.Services.AgentCapabilities.GetKnownTool(r.Context(), agent.ID, toolName)
 	if err != nil {
-		if errors.Is(err, store.ErrAgentKnownToolNotFound) {
-			a.errorResp(w, http.StatusNotFound, "known tool not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, store.ErrAgentKnownToolNotFound, "known tool not found", "")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, row)
+	a.jsonResp(w, http.StatusOK, knownToolToView(row))
 }
 
 func (a *API) handleCreateAgentKnownTool(w http.ResponseWriter, r *http.Request) {
@@ -61,31 +77,17 @@ func (a *API) handleCreateAgentKnownTool(w http.ResponseWriter, r *http.Request)
 		a.errorResp(w, http.StatusBadRequest, "tool_name is required")
 		return
 	}
-	if existing, err := a.Services.Store.GetAgentKnownTool(r.Context(), agent.ID, req.ToolName); err == nil && existing != nil {
-		a.errorResp(w, http.StatusConflict, "known tool already exists")
-		return
-	} else if err != nil && !errors.Is(err, store.ErrAgentKnownToolNotFound) {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	row := store.AgentKnownTool{
-		AgentID:    agent.ID,
-		ToolName:   req.ToolName,
+	created, err := a.Services.AgentCapabilities.CreateKnownTool(r.Context(), agent.ID, req.ToolName, service.KnownToolInput{
 		Pinned:     req.Pinned,
 		SortOrder:  req.SortOrder,
 		TTLSeconds: req.TTLSeconds,
 		Reason:     req.Reason,
-	}
-	if err := a.Services.Store.InsertAgentKnownTool(r.Context(), row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	created, err := a.Services.Store.GetAgentKnownTool(r.Context(), agent.ID, req.ToolName)
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, nil, "", "known tool already exists")
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, created)
+	a.jsonResp(w, http.StatusCreated, knownToolToView(created))
 }
 
 func (a *API) handleUpdateAgentKnownTool(w http.ResponseWriter, r *http.Request) {
@@ -98,13 +100,9 @@ func (a *API) handleUpdateAgentKnownTool(w http.ResponseWriter, r *http.Request)
 		a.errorResp(w, http.StatusBadRequest, "toolName is required")
 		return
 	}
-	current, err := a.Services.Store.GetAgentKnownTool(r.Context(), agent.ID, toolName)
-	if err != nil {
-		if errors.Is(err, store.ErrAgentKnownToolNotFound) {
-			a.errorResp(w, http.StatusNotFound, "known tool not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	// A missing row is reported before the body is read.
+	if _, err := a.Services.AgentCapabilities.GetKnownTool(r.Context(), agent.ID, toolName); err != nil {
+		a.capabilityError(w, err, store.ErrAgentKnownToolNotFound, "known tool not found", "")
 		return
 	}
 	var req AgentKnownToolUpsertRequest
@@ -120,27 +118,17 @@ func (a *API) handleUpdateAgentKnownTool(w http.ResponseWriter, r *http.Request)
 		a.errorResp(w, http.StatusBadRequest, "tool_name in body must match path")
 		return
 	}
-	row := store.AgentKnownTool{
-		AgentID:         agent.ID,
-		ToolName:        toolName,
-		Pinned:          req.Pinned,
-		SortOrder:       req.SortOrder,
-		ActivationCount: current.ActivationCount,
-		LastUsedAt:      current.LastUsedAt,
-		AddedAt:         current.AddedAt,
-		TTLSeconds:      req.TTLSeconds,
-		Reason:          req.Reason,
-	}
-	if err := a.Services.Store.InsertAgentKnownTool(r.Context(), row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	updated, err := a.Services.Store.GetAgentKnownTool(r.Context(), agent.ID, toolName)
+	updated, err := a.Services.AgentCapabilities.UpdateKnownTool(r.Context(), agent.ID, toolName, service.KnownToolInput{
+		Pinned:     req.Pinned,
+		SortOrder:  req.SortOrder,
+		TTLSeconds: req.TTLSeconds,
+		Reason:     req.Reason,
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, nil, "", "")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, updated)
+	a.jsonResp(w, http.StatusOK, knownToolToView(updated))
 }
 
 func (a *API) handleDeleteAgentKnownTool(w http.ResponseWriter, r *http.Request) {
@@ -153,12 +141,8 @@ func (a *API) handleDeleteAgentKnownTool(w http.ResponseWriter, r *http.Request)
 		a.errorResp(w, http.StatusBadRequest, "toolName is required")
 		return
 	}
-	if err := a.Services.Store.DeleteAgentKnownTool(r.Context(), agent.ID, toolName); err != nil {
-		if errors.Is(err, store.ErrAgentKnownToolNotFound) {
-			a.errorResp(w, http.StatusNotFound, "known tool not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	if err := a.Services.AgentCapabilities.DeleteKnownTool(r.Context(), agent.ID, toolName); err != nil {
+		a.capabilityError(w, err, store.ErrAgentKnownToolNotFound, "known tool not found", "")
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -169,12 +153,12 @@ func (a *API) handleListAgentKnownSkills(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	rows, err := a.Services.Store.ListAgentKnownSkills(r.Context(), agent.ID)
+	rows, err := a.Services.AgentCapabilities.ListKnownSkills(r.Context(), agent.ID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, rows)
+	a.jsonResp(w, http.StatusOK, knownSkillsToView(rows))
 }
 
 func (a *API) handleGetAgentKnownSkill(w http.ResponseWriter, r *http.Request) {
@@ -187,18 +171,17 @@ func (a *API) handleGetAgentKnownSkill(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "skillName is required")
 		return
 	}
-	row, err := a.Services.Store.GetAgentKnownSkill(r.Context(), agent.ID, skillName)
+	row, err := a.Services.AgentCapabilities.GetKnownSkill(r.Context(), agent.ID, skillName)
 	if err != nil {
-		if errors.Is(err, store.ErrAgentKnownSkillNotFound) {
-			a.errorResp(w, http.StatusNotFound, "known skill not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, store.ErrAgentKnownSkillNotFound, "known skill not found", "")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, row)
+	a.jsonResp(w, http.StatusOK, knownSkillToView(row))
 }
 
+// handleCreateAgentKnownSkill upserts onto a bare assignment row left by
+// POST /api/agents/{id}/skills rather than conflicting with it; see
+// AgentCapabilitiesService.CreateKnownSkill.
 func (a *API) handleCreateAgentKnownSkill(w http.ResponseWriter, r *http.Request) {
 	agent, ok := a.requireMutableAgent(w, r)
 	if !ok {
@@ -217,50 +200,20 @@ func (a *API) handleCreateAgentKnownSkill(w http.ResponseWriter, r *http.Request
 		a.errorResp(w, http.StatusBadRequest, "skill_name is required")
 		return
 	}
-	existing, err := a.Services.Store.GetAgentKnownSkill(r.Context(), agent.ID, req.SkillName)
-	if err != nil && !errors.Is(err, store.ErrAgentKnownSkillNotFound) {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	row := store.AgentKnownSkill{
-		AgentID:    agent.ID,
-		SkillName:  req.SkillName,
+	created, err := a.Services.AgentCapabilities.CreateKnownSkill(r.Context(), agent.ID, req.SkillName, service.KnownSkillInput{
 		Pinned:     req.Pinned,
 		TTLSeconds: req.TTLSeconds,
 		Reason:     req.Reason,
-	}
-	if existing != nil {
-		// TASKS/skills/02's fix-required section: AssignSkillToAgent
-		// (POST /api/agents/{id}/skills, the Wizard's unrelated "Assigned
-		// Skills" step) and this handler now share the same
-		// agent_known_skills row space, keyed by (agent_id, skill_name). A
-		// bare row left by that other endpoint carries no known-skill data
-		// of its own — upsert onto it (preserving its original
-		// ActivationCount/LastUsedAt/AddedAt, the same fields
-		// handleUpdateAgentKnownSkill already carries forward for a real
-		// edit) instead of conflicting. A row that already carries real
-		// known-skill data is a genuine duplicate create attempt — 409
-		// stays correct and unchanged for that case.
-		if !existing.IsBareAssignment() {
-			a.errorResp(w, http.StatusConflict, "known skill already exists")
-			return
-		}
-		row.ActivationCount = existing.ActivationCount
-		row.LastUsedAt = existing.LastUsedAt
-		row.AddedAt = existing.AddedAt
-	}
-	if err := a.Services.Store.InsertAgentKnownSkill(r.Context(), row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	created, err := a.Services.Store.GetAgentKnownSkill(r.Context(), agent.ID, req.SkillName)
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, nil, "", "known skill already exists")
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, created)
+	a.jsonResp(w, http.StatusCreated, knownSkillToView(created))
 }
 
+// handleUpdateAgentKnownSkill edits pinned/ttl/reason only; the service
+// carries the grant state forward so a field edit cannot revoke a grant.
 func (a *API) handleUpdateAgentKnownSkill(w http.ResponseWriter, r *http.Request) {
 	agent, ok := a.requireMutableAgent(w, r)
 	if !ok {
@@ -271,13 +224,9 @@ func (a *API) handleUpdateAgentKnownSkill(w http.ResponseWriter, r *http.Request
 		a.errorResp(w, http.StatusBadRequest, "skillName is required")
 		return
 	}
-	current, err := a.Services.Store.GetAgentKnownSkill(r.Context(), agent.ID, skillName)
-	if err != nil {
-		if errors.Is(err, store.ErrAgentKnownSkillNotFound) {
-			a.errorResp(w, http.StatusNotFound, "known skill not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	// A missing row is reported before the body is read.
+	if _, err := a.Services.AgentCapabilities.GetKnownSkill(r.Context(), agent.ID, skillName); err != nil {
+		a.capabilityError(w, err, store.ErrAgentKnownSkillNotFound, "known skill not found", "")
 		return
 	}
 	var req AgentKnownSkillUpsertRequest
@@ -293,36 +242,16 @@ func (a *API) handleUpdateAgentKnownSkill(w http.ResponseWriter, r *http.Request
 		a.errorResp(w, http.StatusBadRequest, "skill_name in body must match path")
 		return
 	}
-	row := store.AgentKnownSkill{
-		AgentID:         agent.ID,
-		SkillName:       skillName,
-		Pinned:          req.Pinned,
-		ActivationCount: current.ActivationCount,
-		LastUsedAt:      current.LastUsedAt,
-		AddedAt:         current.AddedAt,
-		TTLSeconds:      req.TTLSeconds,
-		Reason:          req.Reason,
-		// TASKS/skills/02: this handler's request shape (AgentKnownSkillUpsertRequest)
-		// has no grant-state fields — carry the current row's values forward
-		// the same way ActivationCount/LastUsedAt/AddedAt already are, so a
-		// plain Panel field edit (pinned/ttl/reason) can never silently wipe
-		// a grant a future task 09 workflow set via InsertAgentKnownSkill
-		// directly.
-		ApprovedContentHash: current.ApprovedContentHash,
-		GrantedAt:           current.GrantedAt,
-		GrantedBy:           current.GrantedBy,
-		CapabilitiesGranted: current.CapabilitiesGranted,
-	}
-	if err := a.Services.Store.InsertAgentKnownSkill(r.Context(), row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	updated, err := a.Services.Store.GetAgentKnownSkill(r.Context(), agent.ID, skillName)
+	updated, err := a.Services.AgentCapabilities.UpdateKnownSkill(r.Context(), agent.ID, skillName, service.KnownSkillInput{
+		Pinned:     req.Pinned,
+		TTLSeconds: req.TTLSeconds,
+		Reason:     req.Reason,
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, nil, "", "")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, updated)
+	a.jsonResp(w, http.StatusOK, knownSkillToView(updated))
 }
 
 func (a *API) handleDeleteAgentKnownSkill(w http.ResponseWriter, r *http.Request) {
@@ -335,12 +264,8 @@ func (a *API) handleDeleteAgentKnownSkill(w http.ResponseWriter, r *http.Request
 		a.errorResp(w, http.StatusBadRequest, "skillName is required")
 		return
 	}
-	if err := a.Services.Store.DeleteAgentKnownSkill(r.Context(), agent.ID, skillName); err != nil {
-		if errors.Is(err, store.ErrAgentKnownSkillNotFound) {
-			a.errorResp(w, http.StatusNotFound, "known skill not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	if err := a.Services.AgentCapabilities.DeleteKnownSkill(r.Context(), agent.ID, skillName); err != nil {
+		a.capabilityError(w, err, store.ErrAgentKnownSkillNotFound, "known skill not found", "")
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -351,12 +276,12 @@ func (a *API) handleListAgentProcedures(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	rows, err := a.Services.Store.ListAgentProcedures(r.Context(), agent.ID)
+	rows, err := a.Services.AgentCapabilities.ListProcedures(r.Context(), agent.ID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, rows)
+	a.jsonResp(w, http.StatusOK, proceduresToView(rows))
 }
 
 func (a *API) handleGetAgentProcedure(w http.ResponseWriter, r *http.Request) {
@@ -369,16 +294,12 @@ func (a *API) handleGetAgentProcedure(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	row, err := a.Services.Store.GetAgentProcedure(r.Context(), agent.ID, name)
+	row, err := a.Services.AgentCapabilities.GetProcedure(r.Context(), agent.ID, name)
 	if err != nil {
-		if errors.Is(err, store.ErrAgentProcedureNotFound) {
-			a.errorResp(w, http.StatusNotFound, "procedure not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, store.ErrAgentProcedureNotFound, "procedure not found", "")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, row)
+	a.jsonResp(w, http.StatusOK, procedureToView(row))
 }
 
 func (a *API) handleCreateAgentProcedure(w http.ResponseWriter, r *http.Request) {
@@ -399,29 +320,15 @@ func (a *API) handleCreateAgentProcedure(w http.ResponseWriter, r *http.Request)
 		a.errorResp(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if existing, err := a.Services.Store.GetAgentProcedure(r.Context(), agent.ID, req.Name); err == nil && existing != nil {
-		a.errorResp(w, http.StatusConflict, "procedure already exists")
-		return
-	} else if err != nil && !errors.Is(err, store.ErrAgentProcedureNotFound) {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	row := store.AgentProcedure{
-		AgentID: agent.ID,
-		Name:    req.Name,
-		Body:    req.Body,
-		Scope:   req.Scope,
-	}
-	if err := a.Services.Store.InsertAgentProcedure(r.Context(), row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	created, err := a.Services.Store.GetAgentProcedure(r.Context(), agent.ID, req.Name)
+	created, err := a.Services.AgentCapabilities.CreateProcedure(r.Context(), agent.ID, req.Name, service.ProcedureInput{
+		Body:  req.Body,
+		Scope: req.Scope,
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, nil, "", "procedure already exists")
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, created)
+	a.jsonResp(w, http.StatusCreated, procedureToView(created))
 }
 
 func (a *API) handleUpdateAgentProcedure(w http.ResponseWriter, r *http.Request) {
@@ -434,12 +341,9 @@ func (a *API) handleUpdateAgentProcedure(w http.ResponseWriter, r *http.Request)
 		a.errorResp(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if _, err := a.Services.Store.GetAgentProcedure(r.Context(), agent.ID, name); err != nil {
-		if errors.Is(err, store.ErrAgentProcedureNotFound) {
-			a.errorResp(w, http.StatusNotFound, "procedure not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	// A missing row is reported before the body is read.
+	if _, err := a.Services.AgentCapabilities.GetProcedure(r.Context(), agent.ID, name); err != nil {
+		a.capabilityError(w, err, store.ErrAgentProcedureNotFound, "procedure not found", "")
 		return
 	}
 	var req AgentProcedureUpsertRequest
@@ -455,22 +359,15 @@ func (a *API) handleUpdateAgentProcedure(w http.ResponseWriter, r *http.Request)
 		a.errorResp(w, http.StatusBadRequest, "name in body must match path")
 		return
 	}
-	row := store.AgentProcedure{
-		AgentID: agent.ID,
-		Name:    name,
-		Body:    req.Body,
-		Scope:   req.Scope,
-	}
-	if err := a.Services.Store.InsertAgentProcedure(r.Context(), row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	updated, err := a.Services.Store.GetAgentProcedure(r.Context(), agent.ID, name)
+	updated, err := a.Services.AgentCapabilities.UpdateProcedure(r.Context(), agent.ID, name, service.ProcedureInput{
+		Body:  req.Body,
+		Scope: req.Scope,
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, nil, "", "")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, updated)
+	a.jsonResp(w, http.StatusOK, procedureToView(updated))
 }
 
 func (a *API) handleDeleteAgentProcedure(w http.ResponseWriter, r *http.Request) {
@@ -483,12 +380,8 @@ func (a *API) handleDeleteAgentProcedure(w http.ResponseWriter, r *http.Request)
 		a.errorResp(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if err := a.Services.Store.DeleteAgentProcedure(r.Context(), agent.ID, name); err != nil {
-		if errors.Is(err, store.ErrAgentProcedureNotFound) {
-			a.errorResp(w, http.StatusNotFound, "procedure not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	if err := a.Services.AgentCapabilities.DeleteProcedure(r.Context(), agent.ID, name); err != nil {
+		a.capabilityError(w, err, store.ErrAgentProcedureNotFound, "procedure not found", "")
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -499,12 +392,12 @@ func (a *API) handleListAgentKnowledgeSeeds(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	rows, err := a.Services.Store.ListAgentKnowledgeSeeds(r.Context(), agent.ID)
+	rows, err := a.Services.AgentCapabilities.ListKnowledgeSeeds(r.Context(), agent.ID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, rows)
+	a.jsonResp(w, http.StatusOK, knowledgeSeedsToView(rows))
 }
 
 func (a *API) handleGetAgentKnowledgeSeed(w http.ResponseWriter, r *http.Request) {
@@ -517,16 +410,12 @@ func (a *API) handleGetAgentKnowledgeSeed(w http.ResponseWriter, r *http.Request
 		a.errorResp(w, http.StatusBadRequest, "seedKey is required")
 		return
 	}
-	row, err := a.Services.Store.GetAgentKnowledgeSeed(r.Context(), agent.ID, seedKey)
+	row, err := a.Services.AgentCapabilities.GetKnowledgeSeed(r.Context(), agent.ID, seedKey)
 	if err != nil {
-		if errors.Is(err, store.ErrAgentKnowledgeSeedNotFound) {
-			a.errorResp(w, http.StatusNotFound, "knowledge seed not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, store.ErrAgentKnowledgeSeedNotFound, "knowledge seed not found", "")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, row)
+	a.jsonResp(w, http.StatusOK, knowledgeSeedToView(row))
 }
 
 func (a *API) handleCreateAgentKnowledgeSeed(w http.ResponseWriter, r *http.Request) {
@@ -547,10 +436,11 @@ func (a *API) handleCreateAgentKnowledgeSeed(w http.ResponseWriter, r *http.Requ
 		a.errorResp(w, http.StatusBadRequest, "seed_key is required")
 		return
 	}
-	if existing, err := a.Services.Store.GetAgentKnowledgeSeed(r.Context(), agent.ID, req.SeedKey); err == nil && existing != nil {
+	// A duplicate is reported before the tags are validated.
+	if _, err := a.Services.AgentCapabilities.GetKnowledgeSeed(r.Context(), agent.ID, req.SeedKey); err == nil {
 		a.errorResp(w, http.StatusConflict, "knowledge seed already exists")
 		return
-	} else if err != nil && !errors.Is(err, store.ErrAgentKnowledgeSeedNotFound) {
+	} else if !errors.Is(err, store.ErrAgentKnowledgeSeedNotFound) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -559,23 +449,16 @@ func (a *API) handleCreateAgentKnowledgeSeed(w http.ResponseWriter, r *http.Requ
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	row := store.AgentKnowledgeSeed{
-		AgentID:   agent.ID,
-		SeedKey:   req.SeedKey,
+	created, err := a.Services.AgentCapabilities.CreateKnowledgeSeed(r.Context(), agent.ID, req.SeedKey, service.KnowledgeSeedInput{
 		Namespace: req.Namespace,
 		Body:      req.Body,
 		TagsJSON:  tagsJSON,
-	}
-	if err := a.Services.Store.InsertAgentKnowledgeSeed(r.Context(), row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	created, err := a.Services.Store.GetAgentKnowledgeSeed(r.Context(), agent.ID, req.SeedKey)
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, nil, "", "knowledge seed already exists")
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, created)
+	a.jsonResp(w, http.StatusCreated, knowledgeSeedToView(created))
 }
 
 func (a *API) handleUpdateAgentKnowledgeSeed(w http.ResponseWriter, r *http.Request) {
@@ -588,13 +471,9 @@ func (a *API) handleUpdateAgentKnowledgeSeed(w http.ResponseWriter, r *http.Requ
 		a.errorResp(w, http.StatusBadRequest, "seedKey is required")
 		return
 	}
-	current, err := a.Services.Store.GetAgentKnowledgeSeed(r.Context(), agent.ID, seedKey)
-	if err != nil {
-		if errors.Is(err, store.ErrAgentKnowledgeSeedNotFound) {
-			a.errorResp(w, http.StatusNotFound, "knowledge seed not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	// A missing row is reported before the body is read.
+	if _, err := a.Services.AgentCapabilities.GetKnowledgeSeed(r.Context(), agent.ID, seedKey); err != nil {
+		a.capabilityError(w, err, store.ErrAgentKnowledgeSeedNotFound, "knowledge seed not found", "")
 		return
 	}
 	var req AgentKnowledgeSeedUpsertRequest
@@ -615,25 +494,16 @@ func (a *API) handleUpdateAgentKnowledgeSeed(w http.ResponseWriter, r *http.Requ
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	row := store.AgentKnowledgeSeed{
-		AgentID:   agent.ID,
-		SeedKey:   seedKey,
+	updated, err := a.Services.AgentCapabilities.UpdateKnowledgeSeed(r.Context(), agent.ID, seedKey, service.KnowledgeSeedInput{
 		Namespace: req.Namespace,
 		Body:      req.Body,
 		TagsJSON:  tagsJSON,
-		AppliedAt: current.AppliedAt,
-		CreatedAt: current.CreatedAt,
-	}
-	if err := a.Services.Store.InsertAgentKnowledgeSeed(r.Context(), row); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	updated, err := a.Services.Store.GetAgentKnowledgeSeed(r.Context(), agent.ID, seedKey)
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, nil, "", "")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, updated)
+	a.jsonResp(w, http.StatusOK, knowledgeSeedToView(updated))
 }
 
 func (a *API) handleDeleteAgentKnowledgeSeed(w http.ResponseWriter, r *http.Request) {
@@ -646,12 +516,8 @@ func (a *API) handleDeleteAgentKnowledgeSeed(w http.ResponseWriter, r *http.Requ
 		a.errorResp(w, http.StatusBadRequest, "seedKey is required")
 		return
 	}
-	if err := a.Services.Store.DeleteAgentKnowledgeSeed(r.Context(), agent.ID, seedKey); err != nil {
-		if errors.Is(err, store.ErrAgentKnowledgeSeedNotFound) {
-			a.errorResp(w, http.StatusNotFound, "knowledge seed not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	if err := a.Services.AgentCapabilities.DeleteKnowledgeSeed(r.Context(), agent.ID, seedKey); err != nil {
+		a.capabilityError(w, err, store.ErrAgentKnowledgeSeedNotFound, "knowledge seed not found", "")
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -667,20 +533,12 @@ func (a *API) handleMarkAgentKnowledgeSeedApplied(w http.ResponseWriter, r *http
 		a.errorResp(w, http.StatusBadRequest, "seedKey is required")
 		return
 	}
-	if err := a.Services.Store.MarkAgentKnowledgeSeedApplied(r.Context(), agent.ID, seedKey); err != nil {
-		if errors.Is(err, store.ErrAgentKnowledgeSeedNotFound) {
-			a.errorResp(w, http.StatusNotFound, "knowledge seed not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	row, err := a.Services.Store.GetAgentKnowledgeSeed(r.Context(), agent.ID, seedKey)
+	row, err := a.Services.AgentCapabilities.MarkKnowledgeSeedApplied(r.Context(), agent.ID, seedKey)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.capabilityError(w, err, store.ErrAgentKnowledgeSeedNotFound, "knowledge seed not found", "")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, row)
+	a.jsonResp(w, http.StatusOK, knowledgeSeedToView(row))
 }
 
 func (a *API) requireAgent(w http.ResponseWriter, r *http.Request) (*store.AgentProfile, bool) {

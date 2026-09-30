@@ -48,6 +48,19 @@
 # and uncommitted work are both in scope here.
 #
 # Override the diff base with CHECK_LINT_BASE=<rev> if you want a narrower one.
+#
+# ── The transport-boundary stage ──────────────────────────────────────────
+# A second lint stage runs `.golangci.transport.yml` — transports call the
+# service layer, not `store.Store` methods — against the **same** base, so
+# CHECK_LINT_BASE narrows both stages at once. It is the new-code rung of that
+# config's ratchet: it flags only lines your work touched, so an old call left
+# alone passes and an old call you edited around is yours to move. The whole-
+# tree count is report-only; `docs/transport-boundary.md` says how to measure
+# it and why nothing fails on it yet.
+#
+# Its positive control counts changed Go files *inside the transport packages*,
+# not changed Go files overall. A change that touches no transport prints
+# "examined nothing" for this stage, which is the true result, not a pass.
 
 set -uo pipefail
 
@@ -240,7 +253,37 @@ else
   finish "lint" $?
 fi
 
-# ── 4. test ───────────────────────────────────────────────────────────────
+# ── 4. transport ──────────────────────────────────────────────────────────
+# Reuses $lint_base from the lint stage; do not compute a second base. The
+# path regex mirrors the `path-except` scope in .golangci.transport.yml — a
+# new transport directory is added to both. GOWORK=off because a `go.work`
+# above this repo breaks type-checking, and a package that fails to type-check
+# yields no transport findings at all (see docs/transport-boundary.md).
+transport_config=.golangci.transport.yml
+transport_dirs='^internal/(api|selftools|mcpserver)/'
+changed_transport_go=$(
+  {
+    git diff --name-only --diff-filter=d "$lint_base" -- '*.go' 2>/dev/null
+    git ls-files --others --exclude-standard -- '*.go'
+  } | sort -u | grep -E "$transport_dirs" | grep -v '_test\.go$' | wc -l | tr -d ' '
+)
+
+begin "transport — golangci-lint --config $transport_config --new-from-rev $lint_base_short"
+if [ ! -f "$transport_config" ]; then
+  echo "ERROR: $transport_config is missing — this stage cannot check anything."
+  finish "transport" 1
+elif [ "$changed_transport_go" -eq 0 ]; then
+  echo "    0 changed non-test Go files in transport packages vs $lint_base_short"
+  echo "    — nothing to check"
+  finish_examined_nothing "transport"
+else
+  echo "    $changed_transport_go changed transport file(s) vs $lint_base_short; only"
+  echo "    store calls on lines they touched — the whole-tree count is report-only"
+  GOWORK=off golangci-lint run --config "$transport_config" --new-from-rev "$lint_base" ./...
+  finish "transport" $?
+fi
+
+# ── 5. test ───────────────────────────────────────────────────────────────
 begin "test — go test ./...  (Tier 1: feature done, before commit)"
 go test ./...
 finish "test" $?
@@ -249,7 +292,7 @@ finish "test" $?
 echo
 if [ ${#failed[@]} -eq 0 ]; then
   if [ ${#examined_nothing[@]} -eq 0 ]; then
-    echo "check.sh: all stages passed (format, vet, lint, test)"
+    echo "check.sh: all stages passed (format, vet, lint, transport, test)"
   else
     echo "check.sh: no stage failed — but these examined nothing: ${examined_nothing[*]}"
   fi

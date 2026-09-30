@@ -332,6 +332,10 @@ type Container struct {
 
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
+	// modelCatalogDone closes once the refresher goroutine has returned.
+	// Its OnRefresh hook writes the models table, so Shutdown waits on it
+	// before the process owner closes the Store (CW-20260930-0103).
+	modelCatalogDone <-chan struct{}
 
 	// subagentReaper sweeps subagent_runs for timed-out + orphan rows
 	// (CW-20260512-0002 b/c). Started during container build; stopped
@@ -982,7 +986,26 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Sync from disk cache immediately (warm cache path) so the registry is
 	// enriched before accepting traffic even when no network fetch is needed.
 	syncCatalogToRegistry(modelCatalog, cfg.Store)
-	modelCatalog.StartRefresher(catalogCtx)
+	// Run rather than StartRefresher: canceling catalogCtx alone does not
+	// mean the refresher has stopped writing, so every stop path below waits
+	// on catalogDone (CW-20260930-0103). Run returns promptly once canceled
+	// — the in-flight fetch is bound to catalogCtx.
+	catalogDone := make(chan struct{})
+	go func() {
+		defer close(catalogDone)
+		modelCatalog.Run(catalogCtx)
+	}()
+	// Bounded like shutdownWithMaxWait: a failed boot must fail, not hang
+	// on a refresher that never returns.
+	stopCatalogAndWait := func() {
+		stopCatalog()
+		select {
+		case <-catalogDone:
+		case <-time.After(containerShutdownMaxWait):
+			slog.Warn("service container: model catalog refresher did not exit after failed build",
+				"timeout", containerShutdownMaxWait.String())
+		}
+	}
 
 	// I1 (CW-20260426-0004): inspector service — dev-mode only.
 	// Created unconditionally but only populated/queried when developer_mode=true.
@@ -1093,7 +1116,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		SkillVendor: skillVendor,
 	})
 	if agentDepsErr != nil {
-		stopCatalog()
+		stopCatalogAndWait()
 		return nil, fmt.Errorf("service container: build agent dependencies: %w", agentDepsErr)
 	}
 	agentDeps := agentDepsBundle.Deps
@@ -1165,7 +1188,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// chatServiceImpl.generateResponse against a child session.
 	chatSvcImpl, ok := chatSvc.(*chatServiceImpl)
 	if !ok {
-		stopCatalog()
+		stopCatalogAndWait()
 		return nil, fmt.Errorf("service container: chatSvc is %T, expected *chatServiceImpl for ChatRunner", chatSvc)
 	}
 
@@ -1255,13 +1278,17 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Bound to a dedicated cancel func so Shutdown can stop it before
 	// the DB closes; goroutine exits on ctx.Done OR Reaper.Stop.
 	reaperCtx, stopReaper := context.WithCancel(context.Background())
+	subagentReaper := subagent.NewReaper(cfg.Store.DB, subagent.ReaperOptions{})
 	containerCommitted := false
 	defer func() {
 		if !containerCommitted {
+			// Stop, not just cancel: it blocks until the loop has returned,
+			// so a failed build cannot leave a reaper UPDATE racing the
+			// caller's DB close (CW-20260930-0103).
 			stopReaper()
+			subagentReaper.Stop()
 		}
 	}()
-	subagentReaper := subagent.NewReaper(cfg.Store.DB, subagent.ReaperOptions{})
 	subagentReaper.Start(reaperCtx)
 	slog.Info("service container: subagent reaper started",
 		"interval", subagent.DefaultReaperInterval.String(),
@@ -1281,12 +1308,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// before the chat layer starts serving requests; periodic reaper
 	// then catches mid-run deaths on the configured interval.
 	runtimeReaperCtx, stopRuntimeReaper := context.WithCancel(context.Background())
+	runtimeReaper := orphansweep.NewRuntimeReaper(agentDeps, orphansweep.RuntimeReaperOptions{})
 	defer func() {
 		if !containerCommitted {
 			stopRuntimeReaper()
+			runtimeReaper.Stop()
 		}
 	}()
-	runtimeReaper := orphansweep.NewRuntimeReaper(agentDeps, orphansweep.RuntimeReaperOptions{})
 	// PR #213 review: bound the startup sweep to runtimeReaperCtx (so Shutdown
 	// during container build can cancel it) and to a 30s wall clock (so a
 	// stuck SQLite query cannot block boot indefinitely).
@@ -1344,7 +1372,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	durableWake := NewDurableAgentWakeService(cfg.Store, durableAgents)
 	durableAgentRecipes, err := NewDurableAgentRecipeService(durableAgents, cfg.DurableAgentRecipeCatalogPaths...)
 	if err != nil {
-		stopCatalog()
+		stopCatalogAndWait()
 		return nil, fmt.Errorf("service container: durable agent recipes: %w", err)
 	}
 	// F5 follow-up (CW-20260420-0022): wire the HintDispatcher adapter
@@ -1517,6 +1545,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		ProviderDefaults:    cfg.Store,
 		CompactionEvents:    NewCompactionEventWriter(cfg.Store),
 		stopModelCatalog:    stopCatalog,
+		modelCatalogDone:    catalogDone,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,
 		runtimeReaper:       runtimeReaper,
@@ -1603,6 +1632,17 @@ func (c *Container) shutdownWithMaxWait(maxWait time.Duration) {
 
 	if c.stopModelCatalog != nil {
 		c.stopModelCatalog()
+	}
+	// CW-20260930-0103: canceling is not stopping. A refresh that finished
+	// its fetch as the cancel landed would otherwise go on to sync the
+	// models table after the process owner has closed the Store. Run
+	// returns promptly once canceled; the deadline is a backstop.
+	if c.modelCatalogDone != nil {
+		select {
+		case <-c.modelCatalogDone:
+		case <-shutdownCtx.Done():
+			slog.Warn("shutdown: model catalog refresher did not exit", "timeout", maxWait.String())
+		}
 	}
 
 	// TASKS/scheduling/05-engine-wiring-and-full-replace.md: stop the

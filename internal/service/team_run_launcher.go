@@ -187,6 +187,11 @@ type TeamRunRoutingInstaller interface {
 // durable Team Slot resolution) — the same "struct + method" shape WorkflowLauncher itself
 // already uses for an analogous "assemble several dependencies, expose one
 // Launch-shaped entry point" job, not a stylistic deviation.
+// ListMembers returns the resolved members of a team run.
+func (l *TeamRunLauncher) ListMembers(ctx context.Context, runID string) ([]store.TeamRunMember, error) {
+	return l.store.ListTeamRunMembersByRun(ctx, runID)
+}
+
 type TeamRunLauncher struct {
 	store    *store.Store
 	launcher *WorkflowLauncher

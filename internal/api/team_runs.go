@@ -119,11 +119,11 @@ type teamLaunchRequest struct {
 // resolved for this launch, so a caller doesn't need a second round-trip
 // just to see who got resolved into which Team Slot.
 type teamLaunchResponse struct {
-	IdempotencyKey string                `json:"idempotency_key"`
-	WorkflowRunID  string                `json:"workflow_run_id"`
-	Status         string                `json:"status"`
-	Error          string                `json:"error,omitempty"`
-	Members        []store.TeamRunMember `json:"members,omitempty"`
+	IdempotencyKey string              `json:"idempotency_key"`
+	WorkflowRunID  string              `json:"workflow_run_id"`
+	Status         string              `json:"status"`
+	Error          string              `json:"error,omitempty"`
+	Members        []TeamRunMemberView `json:"members,omitempty"`
 }
 
 // handleLaunchTeam launches a saved Team by id with invocation-time
@@ -218,14 +218,14 @@ func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 		// remove those best-effort to avoid leaving a partially-routed run.
 		var cleanupErr error
 		if len(installedRoutingIDs) > 0 {
-			if a.Services.Store == nil {
+			if a.Services.Reflexes == nil {
 				cleanupErr = errors.New("store not available for partial routing cleanup")
 			} else {
 				// Installation can itself fail because the request was canceled;
 				// cleanup protects persistent rows and must still get one attempt.
 				cleanupCtx := context.WithoutCancel(r.Context())
 				for _, reflexID := range installedRoutingIDs {
-					if err := a.Services.Store.DeleteAgentReflex(cleanupCtx, reflexID); err != nil {
+					if err := a.Services.Reflexes.Delete(cleanupCtx, reflexID); err != nil {
 						cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete reflex %s: %w", reflexID, err))
 					}
 				}
@@ -265,8 +265,8 @@ func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 	// re-reading them back purely for this response's own convenience must
 	// not be reported as the launch itself failing.
 	var members []store.TeamRunMember
-	if a.Services.Store != nil {
-		if ms, memberErr := a.Services.Store.ListTeamRunMembersByRun(r.Context(), result.RunID); memberErr == nil {
+	if a.Services.TeamRunLauncher != nil {
+		if ms, memberErr := a.Services.TeamRunLauncher.ListMembers(r.Context(), result.RunID); memberErr == nil {
 			members = ms
 		}
 	}
@@ -276,6 +276,6 @@ func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 		WorkflowRunID:  result.RunID,
 		Status:         string(result.Status),
 		Error:          result.Error,
-		Members:        members,
+		Members:        teamRunMembersToView(members),
 	})
 }

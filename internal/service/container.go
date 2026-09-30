@@ -445,6 +445,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentReader: cfg.Store,
 		Settings:    cfg.Store,
 		Events:      events,
+		Runtime:     cfg.Store,
+		EventLog:    cfg.Store,
+		Envelopes:   cfg.Store,
 	})
 
 	// Adapter registry — adapters self-register via plugin loading.

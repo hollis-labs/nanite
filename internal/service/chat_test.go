@@ -42,6 +42,18 @@ func (s *stubSessionService) ListMessages(_ context.Context, _ string, _ int) ([
 func (s *stubSessionService) Search(_ context.Context, _ string, _ SearchOpts) ([]store.SearchResult, error) {
 	return nil, nil
 }
+func (s *stubSessionService) ListMessagesPage(_ context.Context, _ string, _, _ int) (*store.MessagePage, error) {
+	return nil, nil
+}
+func (s *stubSessionService) ListMessagesAround(_ context.Context, _, _ string, _, _ int) (*store.MessagePage, error) {
+	return nil, nil
+}
+func (s *stubSessionService) DetectInterruptedTurn(_ context.Context, _ *store.Session, _ bool) map[string]any {
+	return nil
+}
+func (s *stubSessionService) ListPendingEnvelopes(_ context.Context, _ string) ([]chat.Envelope, error) {
+	return nil, nil
+}
 
 type stubAgentService struct {
 	agent *store.AgentProfile

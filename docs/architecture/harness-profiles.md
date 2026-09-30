@@ -130,10 +130,21 @@ override either.
 
 The guard is a go-hooks `Stop` implementation. When a reply is about to be
 finalized in an API-driven run, it looks for a completed-write claim (a phrase
-such as "wrote", "created", "saved" or "the write succeeded") in the same or an
-adjacent paragraph as an id-shaped token (a ULID, a UUID, a tracker id or a long
-hex digest). Fenced code, negated, conditional, future and interrogative
-sentences are not claims, and neither is an id with no write phrase or a phrase
+such as "wrote", "created", "saved" or "the write succeeded") and the id-shaped
+tokens it cites (a ULID, a UUID, a tracker id or a long hex digest). Text is
+normalized first: fullwidth and compatibility forms are folded, zero-width and
+format characters are dropped, and letters from other scripts that render like
+Latin ones, and Unicode dashes, are mapped to ASCII, so an invented id cannot be
+hidden with lookalikes. Ids match in any case and are compared in a canonical
+one. A token must look like an id, not a word or a number: a ULID-length token
+needs digits, and a hex digest needs both a digit and a letter.
+
+An id is taken from the claim's own paragraph. A claim that names its id ("the
+returned ID above") may take one from an adjacent paragraph; a claim that does
+not may not, so unrelated text next to an id is not paired with it. Every
+claiming paragraph counts, so a grounded first claim cannot hide a fabricated
+second one. Fenced code, and negated, conditional, future and interrogative
+clauses, are not claims, and neither is an id with no write phrase or a phrase
 with no id. CLI-launched sessions are skipped, since their tools run outside this
 loop.
 
@@ -143,12 +154,24 @@ successful write in the turn does not license citing other ids, and an id copied
 from the user's message does not ground a claim. The scan is clause-scoped: a
 negation or modal ("should", "will", "may") disarms only the clause it sits in,
 so a write verb earlier in the sentence still counts.
-A tool is write-capable unless it is known not to be: request_tools,
-tool_describe, tool_list, tool_validate, whoami, the result-cache tools and the
-scratchpad are never writes, and neither is a tool its server or the name
-heuristic marks read-only. An unknown tool counts as a write, so the guard errs
-toward silence. An id that only a read showed does not back a write claim, and a
-failed or denied write does not back a success claim.
+
+A tool must be recognizable as a writer to ground an id. In order: the discovery,
+cache, scratch and computing tools (request_tools, tool_describe, whoami, the
+result-cache tools, scratchpad, think, math_eval, datetime and the like) never
+count, because a tool that only computes echoes whatever the model gave it,
+including an invented id; a tool its server or the name heuristic marks
+read-only does not count; a tool marked destructive does; and otherwise a write
+verb in its name (write, create, update, transition, send, ingest, deploy, ...)
+does. A tool with none of these is treated as not writing. An id that only a read
+showed does not back a write claim, and a failed or denied write does not back a
+success claim.
+
+Prose written in an iteration that also called tools cannot be sent back: it is
+already on screen and the tools have run. It is checked once the turn is over,
+against the turn's final facts. A claim there that no write of the turn or the
+session backs is logged with action `narration_flagged`; under `deny` the reply
+gets a visible footer naming the ids, otherwise a status event is emitted. It is
+never blocked or retried.
 
 - `deny` sends the reply back once with a correction message and clears it from
   the client. If the retried reply still carries the claim, the loop does not
@@ -164,7 +187,10 @@ Every decision that found a claim writes an `event_log` row (type
 the ids and the tools that ran, so
 the false-positive rate can be tuned from real traffic. Successful write results
 log the ids they returned (type `write_result_ids`), which is what lets a later
-turn recap earlier work.
+turn recap earlier work. Reading them back is limited to a session's newest 500
+rows and is served in order by an index on the session, event type and id, so a
+long session does not slow the check; it runs only when a claim is otherwise
+unbacked.
 
 ## Recording and diagnostics
 

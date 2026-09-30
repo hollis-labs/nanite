@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -40,5 +41,29 @@ func TestSessionWriteResultIDsIsBounded(t *testing.T) {
 	}
 	if len(got) != maxWriteResultIDRows || got["ID0000"] || !got[fmt.Sprintf("ID%04d", maxWriteResultIDRows+4)] {
 		t.Errorf("got %d ids; oldest present=%v newest present=%v", len(got), got["ID0000"], got[fmt.Sprintf("ID%04d", maxWriteResultIDRows+4)])
+	}
+}
+
+// The read is served by the covering index in id order: no scan of the whole
+// session's events and no temporary b-tree sort ahead of the limit.
+func TestSessionWriteResultIDsUsesItsIndex(t *testing.T) {
+	s := newTestStore(t)
+	rows, err := s.DB.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+sessionWriteResultIDsQuery, "s", 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	joined := strings.Join(plan, " | ")
+	if !strings.Contains(joined, "idx_event_log_session_type") || strings.Contains(strings.ToUpper(joined), "TEMP B-TREE") {
+		t.Errorf("query plan = %s", joined)
 	}
 }

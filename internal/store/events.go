@@ -74,18 +74,20 @@ func (s *Store) CountSessionToolCalls(ctx context.Context, sessionID string) int
 }
 
 // maxWriteResultIDRows bounds how many of a session's most recent write-result
-// rows the guard reads. The query runs on idx_event_log_session and only when a
-// reply carries a write claim that this turn's tools do not back.
+// rows the guard reads. It runs only when a reply carries a write claim that
+// this turn's tools do not back.
 const maxWriteResultIDRows = 500
+
+// sessionWriteResultIDsQuery is served by idx_event_log_session_type
+// (session_id, event_type, id): newest rows first, no sort.
+const sessionWriteResultIDsQuery = `SELECT metadata FROM event_log WHERE session_id = ? AND event_type = 'write_result_ids' ORDER BY id DESC LIMIT ?`
 
 // SessionWriteResultIDs returns the id-shaped tokens that successful
 // write-capable tool results produced in a session, as logged by the
 // write-claim guard. The guard treats a reply citing one of them as a recap of
 // real earlier work rather than an invented write.
 func (s *Store) SessionWriteResultIDs(ctx context.Context, sessionID string) (map[string]bool, error) {
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT metadata FROM event_log WHERE session_id = ? AND event_type = 'write_result_ids' ORDER BY id DESC LIMIT ?`,
-		sessionID, maxWriteResultIDRows)
+	rows, err := s.DB.QueryContext(ctx, sessionWriteResultIDsQuery, sessionID, maxWriteResultIDRows)
 	if err != nil {
 		return nil, err
 	}

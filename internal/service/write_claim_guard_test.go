@@ -92,20 +92,60 @@ func (m *metaStub) GetToolMeta(_ context.Context, name string) (ToolMetaInfo, bo
 }
 
 func TestIsWriteCapable(t *testing.T) {
-	svc := &chatServiceImpl{tools: &metaStub{readOnly: map[string]bool{"kb_read": true}}}
+	svc := &chatServiceImpl{tools: &destructiveStub{
+		metaStub:    metaStub{readOnly: map[string]bool{"kb_read": true, "write_preview": true}},
+		destructive: map[string]bool{"opaque_mutator": true},
+	}}
 	ctx := context.Background()
 	for name, want := range map[string]bool{
-		"kb_write": true, "unknown_tool": true, "kb_read": false,
+		// recognizable writers
+		"kb_write": true, "torque_task_transition": true, "tether_group_post": true, "knowledgeWrite": true,
+		"context_ingest": true, "mux_message_send": true, "cerberus_forge_deploy": true, "torque_comment_add": true,
+		// declared destructive, name says nothing
+		"opaque_mutator": true,
+		// declared read-only wins over a write verb in the name
+		"write_preview": false, "kb_read": false,
+		// discovery, cache and scratch
 		"request_tools": false, "tool_describe": false, "whoami": false, "fetch_tool_result": false,
 		"search_tool_result": false, "scratchpad_write": false,
+		// pure / computing tools must not silence the guard or ground an id
+		"think": false, "math_eval": false, "datetime": false, "calc": false, "base64_encode": false,
+		// unclassified and not a writer by name
+		"unknown_tool": false, "tesseract_recall": false, "torque_task_get": false,
 	} {
 		if got := svc.isWriteCapable(ctx, name); got != want {
 			t.Errorf("isWriteCapable(%q) = %v, want %v", name, got, want)
 		}
 	}
-	// With no tool service every unclassified tool counts as a write.
-	if !(&chatServiceImpl{}).isWriteCapable(ctx, "kb_read") {
-		t.Error("an unclassifiable tool must count as write-capable")
+	// With no tool service the name still decides.
+	bare := &chatServiceImpl{}
+	if !bare.isWriteCapable(ctx, "kb_write") || bare.isWriteCapable(ctx, "think") || bare.isWriteCapable(ctx, "opaque_mutator") {
+		t.Error("name-only classification is wrong")
+	}
+}
+
+type destructiveStub struct {
+	metaStub
+	destructive map[string]bool
+}
+
+func (d *destructiveStub) GetToolMeta(ctx context.Context, name string) (ToolMetaInfo, bool) {
+	m, ok := d.metaStub.GetToolMeta(ctx, name)
+	m.IsDestructive = d.destructive[name]
+	return m, ok
+}
+
+func TestNameTokens(t *testing.T) {
+	for in, want := range map[string]string{
+		"torque_task_transition": "torque task transition",
+		"knowledgeWrite":         "knowledge write",
+		"mux-message.send":       "mux message send",
+		"HTTPPost":               "http post",
+		"":                       "",
+	} {
+		if got := strings.Join(nameTokens(in), " "); got != want {
+			t.Errorf("nameTokens(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -132,6 +172,8 @@ func (g *guardTools) Execute(_ context.Context, _ string, name string, _ map[str
 			return &ToolResult{Output: "Error: write refused", IsError: true}, nil
 		}
 		return &ToolResult{Output: `{"ok":true,"id":"` + returned + `"}`}, nil
+	case "think":
+		return &ToolResult{Output: "noted: the record id is " + invented}, nil
 	case "kb_read":
 		return &ToolResult{Output: `{"id":"` + returned + `","body":"existing entry"}`}, nil
 	}
@@ -140,7 +182,7 @@ func (g *guardTools) Execute(_ context.Context, _ string, name string, _ map[str
 
 func newGuardFixture(t *testing.T, steps []characterizationProviderStep, tools *guardTools) *characterizationFixture {
 	t.Helper()
-	f := newCharacterizationFixture(t, steps, "kb_write", "kb_read", "whoami")
+	f := newCharacterizationFixture(t, steps, "kb_write", "kb_read", "whoami", "think")
 	tools.definitions = f.tools.definitions
 	f.svc.tools = tools
 	return f
@@ -458,3 +500,99 @@ func TestWriteClaimGuardQuietWithoutAClaim(t *testing.T) {
 }
 
 var _ = chat.StreamEvent{}
+
+// A tool that only computes cannot ground an id even when it echoes one: the
+// reasoning tool repeats the model's invented id and the claim still fires.
+func TestWriteClaimGuardComputeToolsDoNotGround(t *testing.T) {
+	f := newGuardFixture(t, []characterizationProviderStep{
+		{events: toolTurnEvents(toolUse("t1", "think"))},
+		{events: doneEvents(claim(invented))},
+		{events: doneEvents("Nothing was written.")},
+	}, &guardTools{})
+	f.run(t, "think-echo")
+	if got := len(f.provider.requestsSnapshot()); got != 3 {
+		t.Fatalf("requests = %d: a compute tool's echo grounded the id", got)
+	}
+	if ev := guardEvents(t, f); len(ev) != 1 || ev[0]["action"] != "sent_back" {
+		t.Errorf("decision log = %+v", ev)
+	}
+	var n int
+	_ = f.st.DB.QueryRow(`SELECT COUNT(*) FROM event_log WHERE session_id = ? AND event_type = 'write_result_ids'`, f.session).Scan(&n)
+	if n != 0 {
+		t.Errorf("a compute tool's output was logged as write ids: %d rows", n)
+	}
+}
+
+// ---- prose in iterations that also call tools ---------------------------------
+
+func narratedToolTurn(text string, tu llmtypes.ToolUseBlock) []llmtypes.StreamEvent {
+	return []llmtypes.StreamEvent{
+		{Type: "delta", Content: text},
+		{Type: "tool_use", ToolUse: &tu},
+		{Type: "usage", Usage: &llmtypes.Usage{StopReason: "tool_use"}},
+		{Type: "done"},
+	}
+}
+
+// A claim made while calling tools cannot be sent back (it is already on screen
+// and the tools have run). It is flagged at the end of the turn: the reply gets
+// a footer under deny, and the decision is logged.
+func TestWriteClaimGuardFlagsUnbackedNarration(t *testing.T) {
+	f := newGuardFixture(t, []characterizationProviderStep{
+		{events: narratedToolTurn("I saved it as "+invented+" and I am checking it now. ", toolUse("r1", "kb_read"))},
+		{events: doneEvents("Checked: the record exists.")},
+	}, &guardTools{})
+	f.run(t, "narrated")
+	if got := len(f.provider.requestsSnapshot()); got != 2 {
+		t.Fatalf("narration must not trigger a retry: %d requests", got)
+	}
+	text := lastAssistantText(t, f)
+	if !strings.Contains(text, "Unverified claim") || !strings.Contains(text, invented) {
+		t.Errorf("reply lacks the footer for the narrated claim: %q", text)
+	}
+	ev := guardEvents(t, f)
+	if len(ev) != 1 || ev[0]["action"] != "narration_flagged" {
+		t.Errorf("decision log = %+v", ev)
+	}
+}
+
+// ...but narration about a write the same turn then really performed is fine.
+func TestWriteClaimGuardNarrationBackedByTheTurnsOwnWrite(t *testing.T) {
+	f := newGuardFixture(t, []characterizationProviderStep{
+		{events: narratedToolTurn("Saving the record now, it will be "+returned+". I saved "+returned+". ", toolUse("w1", "kb_write"))},
+		{events: doneEvents("Done.")},
+	}, &guardTools{})
+	f.run(t, "narrated-backed")
+	if strings.Contains(lastAssistantText(t, f), "Unverified") {
+		t.Errorf("a backed narration claim was flagged: %q", lastAssistantText(t, f))
+	}
+	for _, e := range guardEvents(t, f) {
+		if e["action"] == "narration_flagged" {
+			t.Errorf("flagged: %+v", e)
+		}
+	}
+}
+
+// Under warn the narrated claim is reported, not appended to the reply.
+func TestWriteClaimGuardNarrationUnderWarn(t *testing.T) {
+	f := newGuardFixture(t, []characterizationProviderStep{
+		{events: narratedToolTurn("I saved it as "+invented+". ", toolUse("r1", "kb_read"))},
+		{events: doneEvents("Checked.")},
+	}, &guardTools{})
+	if err := f.st.UpdateSessionMetadata(context.Background(), f.session, `{"harness_profile":"dev"}`); err != nil {
+		t.Fatal(err)
+	}
+	events := f.run(t, "narrated-warn")
+	if strings.Contains(lastAssistantText(t, f), "Unverified") {
+		t.Error("warn mode altered the reply")
+	}
+	warned := false
+	for _, e := range events {
+		if e.Type == "status" && strings.Contains(e.Content, "write-claim guard") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("no status event: %v", eventTypes(events))
+	}
+}

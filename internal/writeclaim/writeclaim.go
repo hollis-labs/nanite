@@ -15,6 +15,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Finding is one detected write claim.
@@ -33,10 +36,17 @@ type Finding struct {
 var (
 	reFence = regexp.MustCompile("(?s)```.*?```")
 
-	reULID    = regexp.MustCompile(`\b[0-9A-HJKMNP-TV-Z]{26}\b`)
-	reUUID    = regexp.MustCompile(`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
-	reTracker = regexp.MustCompile(`\b[A-Z]{2,4}-\d{8}-\d{2,4}\b`)
-	reHex     = regexp.MustCompile(`\b[0-9a-f]{16,64}\b`)
+	// Ids are matched case-insensitively and reported in a canonical case, so
+	// "01m3q..." and "01M3Q..." are the same id. The candidate patterns are
+	// loose; idShaped applies the content rules that keep ordinary words out.
+	reULID    = regexp.MustCompile(`(?i)\b[0-9A-HJKMNP-TV-Z]{26}\b`)
+	reUUID    = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	reTracker = regexp.MustCompile(`(?i)\b[A-Z]{2,4}-\d{8}-\d{2,4}\b`)
+	reHex     = regexp.MustCompile(`(?i)\b[0-9a-f]{16,64}\b`)
+
+	// A claim that names its id ("the returned ID", "id above") may take one
+	// from an adjacent paragraph; a bare write phrase may not.
+	reRefersToID = regexp.MustCompile(`(?i)\b(?:id|ids|identifier|key|handle|reference|returned)\b`)
 
 	// A completed write: a past or perfect verb, or "<write noun/verb> ...
 	// succeeded / completed / verified".
@@ -61,17 +71,92 @@ var (
 	reSentences  = regexp.MustCompile(`[.!?]+\s+|\n`)
 )
 
-// IDs returns the id-shaped tokens in text, in order of appearance, without
-// duplicates.
+// confusables maps letters from other scripts that render like Latin letters
+// to the Latin letter. NFKC folds fullwidth and compatibility forms but not
+// these, and a fabricated id written with them would otherwise slip past the
+// patterns and past a grounded-id comparison.
+var confusables = map[rune]rune{
+	// Cyrillic
+	'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'Н': 'H', 'К': 'K', 'М': 'M', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X', 'І': 'I', 'Ѕ': 'S', 'Ј': 'J',
+	'а': 'a', 'с': 'c', 'е': 'e', 'о': 'o', 'р': 'p', 'х': 'x', 'у': 'y', 'і': 'i', 'ѕ': 's', 'ј': 'j',
+	// Greek
+	'Α': 'A', 'Β': 'B', 'Ε': 'E', 'Ζ': 'Z', 'Η': 'H', 'Ι': 'I', 'Κ': 'K', 'Μ': 'M', 'Ν': 'N', 'Ο': 'O', 'Ρ': 'P', 'Τ': 'T', 'Υ': 'Y', 'Χ': 'X',
+	'ο': 'o', 'ν': 'v',
+	// dashes and minus signs
+	'\u2010': '-', '\u2011': '-', '\u2012': '-', '\u2013': '-', '\u2014': '-', '\u2015': '-', '\u2212': '-', '\uFE58': '-', '\uFE63': '-', '\uFF0D': '-',
+}
+
+// Normalize folds text to the form the patterns match: NFKC, zero-width and
+// format characters removed, lookalike letters and dashes mapped to ASCII.
+func Normalize(text string) string {
+	text = norm.NFKC.String(text)
+	var b strings.Builder
+	b.Grow(len(text))
+	for _, r := range text {
+		if unicode.Is(unicode.Cf, r) { // zero-width space/joiner, BOM, soft hyphen, bidi marks
+			continue
+		}
+		if m, ok := confusables[r]; ok {
+			r = m
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// idShaped applies the content rules that separate an id from a word or a
+// number: an id-length token with no digit is prose, and a long hex run needs
+// both a digit and a letter (a bare digit string is a number, not a digest).
+func idShaped(tok string, kind int) bool {
+	digits, letters := 0, 0
+	for _, r := range tok {
+		switch {
+		case r >= '0' && r <= '9':
+			digits++
+		case unicode.IsLetter(r):
+			letters++
+		}
+	}
+	switch kind {
+	case 0: // ULID
+		return digits >= 4
+	case 3: // hex digest
+		return digits >= 1 && letters >= 1
+	}
+	return true
+}
+
+// canonicalID puts an id in the case its kind is written in, so a lowercase
+// copy of an id compares equal to the original.
+func canonicalID(tok string) string {
+	if strings.Count(tok, "-") == 4 && len(tok) == 36 { // UUID
+		return strings.ToLower(tok)
+	}
+	if strings.Contains(tok, "-") { // tracker id
+		return strings.ToUpper(tok)
+	}
+	if len(tok) == 26 { // ULID
+		return strings.ToUpper(tok)
+	}
+	return strings.ToLower(tok) // hex digest
+}
+
+// IDs returns the id-shaped tokens in text, canonicalized, in order of
+// appearance, without duplicates. Text is normalized first, so lookalike and
+// fullwidth characters do not hide an id.
 func IDs(text string) []string {
+	text = Normalize(text)
 	type hit struct {
 		pos int
 		s   string
 	}
 	var hits []hit
-	for _, re := range []*regexp.Regexp{reULID, reUUID, reTracker, reHex} {
+	for kind, re := range []*regexp.Regexp{reULID, reUUID, reTracker, reHex} {
 		for _, m := range re.FindAllStringIndex(text, -1) {
-			hits = append(hits, hit{m[0], text[m[0]:m[1]]})
+			tok := text[m[0]:m[1]]
+			if idShaped(tok, kind) {
+				hits = append(hits, hit{m[0], canonicalID(tok)})
+			}
 		}
 	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].pos < hits[j].pos })
@@ -86,39 +171,63 @@ func IDs(text string) []string {
 	return out
 }
 
-// Detect reports the first write claim in reply. grounded holds ids the caller
-// has independent evidence for (ones that appeared in a successful write-capable
-// tool result this turn or earlier in the session; never the user's message); they are reported, not hidden, so the caller can
-// decide what a grounded id means.
+// Detect reports the write claims in reply as one Finding: every id cited by a
+// claiming paragraph, not just the first claim's. grounded holds ids the caller
+// has independent evidence for (ones that appeared in a successful
+// write-capable tool result this turn or earlier in the session; never the
+// user's message). They are reported, not hidden, so the caller can decide what
+// a grounded id means. Grounded ids are compared in canonical case.
 func Detect(reply string, grounded map[string]bool) (Finding, bool) {
-	clean := reFence.ReplaceAllString(reply, "")
+	// Compare in canonical form whatever case or script the caller's set was
+	// built in.
+	canon := make(map[string]bool, len(grounded))
+	for id, ok := range grounded {
+		if ok {
+			for _, c := range IDs(id) {
+				canon[c] = true
+			}
+		}
+	}
+	clean := reFence.ReplaceAllString(Normalize(reply), "")
 	paras := reParagraphs.Split(clean, -1)
+	var f Finding
+	seen := map[string]bool{}
 	for i, para := range paras {
-		phrase := claimPhrase(para)
+		phrase, sentence := claimPhrase(para)
 		if phrase == "" {
 			continue
 		}
-		// The id may sit in the claim's own paragraph or the one either side
-		// ("the write succeeded" ... "ID: 01M...").
-		lo, hi := max(0, i-1), min(len(paras), i+2)
-		ids := IDs(strings.Join(paras[lo:hi], "\n\n"))
+		// The claim's own paragraph first. Only a claim that names its id
+		// ("the returned ID above") may take one from a neighboring paragraph:
+		// a bare "created the summary" must not pick up an unrelated id next to it.
+		ids := IDs(para)
+		if len(ids) == 0 && reRefersToID.MatchString(sentence) {
+			lo, hi := max(0, i-1), min(len(paras), i+2)
+			ids = IDs(strings.Join(paras[lo:hi], "\n\n"))
+		}
 		if len(ids) == 0 {
 			continue
 		}
-		f := Finding{IDs: ids, Phrase: phrase, Paragraph: strings.TrimSpace(para)}
+		if f.Phrase == "" {
+			f.Phrase, f.Paragraph = phrase, strings.TrimSpace(para)
+		}
 		for _, id := range ids {
-			if !grounded[id] {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			f.IDs = append(f.IDs, id)
+			if !canon[id] {
 				f.Ungrounded = append(f.Ungrounded, id)
 			}
 		}
-		return f, true
 	}
-	return Finding{}, false
+	return f, len(f.IDs) > 0
 }
 
 // claimPhrase returns the completed-write phrase in the first sentence of para
-// that asserts one, or "".
-func claimPhrase(para string) string {
+// that asserts one, and that sentence; "" when there is none.
+func claimPhrase(para string) (phrase, sentence string) {
 	for _, s := range reSentences.Split(para, -1) {
 		s = strings.TrimSpace(s)
 		if s == "" || strings.HasSuffix(s, "?") {
@@ -129,9 +238,9 @@ func claimPhrase(para string) string {
 				continue
 			}
 			if m := reDone.FindString(clause); m != "" {
-				return m
+				return m, s
 			}
 		}
 	}
-	return ""
+	return "", ""
 }

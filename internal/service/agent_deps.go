@@ -1123,16 +1123,13 @@ func (s *runtimeEventBridgeSink) routeNormalizedEvent(ev runtimeevents.Event) {
 			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: payload.Content})
 		}
 	case runtimeevents.KindTurnCompleted:
-		var payload struct {
-			Usage *llmtypes.Usage `json:"usage"`
-		}
-		_ = json.Unmarshal(ev.Payload, &payload)
-		if payload.Usage != nil {
-			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: payload.Usage})
+		usage := runtimeagent.TurnCompletedUsage(ev.Payload, s.acp)
+		if usage != nil {
+			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: usage})
 		}
 		// ACP carries usage and completion in one normalized event; native
 		// emits its usage-bearing event followed by an empty completion.
-		if s.acp || payload.Usage == nil {
+		if s.acp || usage == nil {
 			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventDone})
 			terminal = true
 		}

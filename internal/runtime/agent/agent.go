@@ -530,7 +530,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	if deps.RuntimeEventSink != nil {
 		canonicalSink = deps.RuntimeEventSink(sessID, isACP)
 	}
-	sink := &runtimeEventSink{acp: isACP, canonical: canonicalSink}
+	sink := newRuntimeEventSink(providerName, isACP, canonicalSink)
 	if deps.EventFanout != nil {
 		sink.fanout = deps.EventFanout(sessID)
 	}

@@ -1186,8 +1186,8 @@ streamLoop:
 					run.finalUsage.CacheReadTokens += evt.Usage.CacheReadTokens
 				}
 				if evt.Usage.StopReason != "" {
-					stopReason = evt.Usage.StopReason
-					run.finalUsage.StopReason = evt.Usage.StopReason
+					stopReason = normalizeStopReason(evt.Usage.StopReason)
+					run.finalUsage.StopReason = stopReason
 				}
 			}
 

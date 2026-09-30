@@ -1,4 +1,4 @@
-package skillinstall
+package skillinstall_test
 
 import (
 	"context"
@@ -6,7 +6,11 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/service"
+	"github.com/hollis-labs/nanite/internal/skillinstall"
 )
+
+// This file is an external test package because internal/service imports
+// skillinstall; an in-package test importing service would be a cycle.
 
 // TestInstall_ResultRoundTripsThroughSkillService proves an installed package
 // receives a durable database identity and goes one layer
@@ -18,9 +22,9 @@ import (
 // *store.Store the Installer's Index field used, so this exercises the same
 // rows the pipeline actually created, not two disconnected stores.
 func TestInstall_ResultRoundTripsThroughSkillService(t *testing.T) {
-	inst, _, idx := newTestInstaller(t)
+	inst, _, idx := skillinstall.NewTestInstaller(t)
 
-	result, err := inst.Install(context.Background(), Source{Path: filepath.Join(fixturesDir, "sample-skill")})
+	result, err := inst.Install(context.Background(), skillinstall.Source{Path: filepath.Join(skillinstall.FixturesDir, "sample-skill")})
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}

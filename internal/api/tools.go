@@ -81,7 +81,7 @@ func (a *API) handleRefreshTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	diff, err := a.Services.MCP.AutoDiscover(r.Context(), a.Services.Store)
+	diff, err := a.Services.DiscoverMCPTools(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

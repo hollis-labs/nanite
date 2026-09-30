@@ -147,7 +147,7 @@ func (a *API) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 
 	// Run discovery to pick up new tools.
 	if a.Services.MCP != nil {
-		if _, err := a.Services.MCP.AutoDiscover(context.Background(), a.Services.Store); err != nil {
+		if _, err := a.Services.DiscoverMCPTools(context.Background()); err != nil {
 			slog.Warn("api: MCP tool discovery after create failed", "server", cfg.Name, "err", err)
 		}
 	}
@@ -202,7 +202,7 @@ func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 	if a.Services.MCP != nil {
 		a.Services.MCP.RemoveServer(name)
 		a.registerMCPTransport(&cfg)
-		if _, err := a.Services.MCP.AutoDiscover(context.Background(), a.Services.Store); err != nil {
+		if _, err := a.Services.DiscoverMCPTools(context.Background()); err != nil {
 			// #nosec G706 -- server and err are structured operational diagnostics, not a formatted log message.
 			slog.Warn("api: MCP tool discovery after update failed", "server", cfg.Name, "err", err)
 		}
@@ -254,7 +254,7 @@ func (a *API) handleImportMCPServers(w http.ResponseWriter, r *http.Request) {
 
 	// Run discovery for new tools.
 	if a.Services.MCP != nil && len(result.Created) > 0 {
-		if _, err := a.Services.MCP.AutoDiscover(context.Background(), a.Services.Store); err != nil {
+		if _, err := a.Services.DiscoverMCPTools(context.Background()); err != nil {
 			slog.Warn("api: MCP tool discovery after import failed", "created", result.Created, "err", err)
 		}
 	}

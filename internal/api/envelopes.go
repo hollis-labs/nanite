@@ -240,59 +240,6 @@ func injectEnvelopePriorResponses(messages []store.Message, lookup map[string]*s
 	return messages
 }
 
-// buildEnvelopeLookup fetches EnvelopeInstances for all envelope IDs found in
-// the given messages and returns them keyed by envelope ID.
-// Handles both single-object and JSON-array Envelope fields.
-func buildEnvelopeLookup(s *store.Store, messages []store.Message) map[string]*store.EnvelopeInstance {
-	lookup := make(map[string]*store.EnvelopeInstance)
-
-	fetchID := func(id string) {
-		if id == "" || lookup[id] != nil {
-			return
-		}
-		inst, err := s.GetEnvelopeInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
-		if err != nil {
-			if !errors.Is(err, sql.ErrNoRows) {
-				slog.Warn("buildEnvelopeLookup: GetEnvelopeInstance failed",
-					"envelope_id", id, "err", err)
-			}
-			return
-		}
-		lookup[id] = inst
-	}
-
-	for _, msg := range messages {
-		if msg.Envelope == "" {
-			continue
-		}
-		raw := json.RawMessage(msg.Envelope)
-		trimmed := bytes.TrimLeft(raw, " \t\r\n")
-		if len(trimmed) == 0 {
-			continue
-		}
-		if trimmed[0] == '[' {
-			var arr []struct {
-				ID string `json:"id"`
-			}
-			if err := json.Unmarshal(raw, &arr); err != nil {
-				continue
-			}
-			for _, e := range arr {
-				fetchID(e.ID)
-			}
-		} else {
-			var env struct {
-				ID string `json:"id"`
-			}
-			if err := json.Unmarshal(raw, &env); err != nil {
-				continue
-			}
-			fetchID(env.ID)
-		}
-	}
-	return lookup
-}
-
 // extractSessionID pulls an optional session_id from the raw JSON body so
 // session-scope enforcement doesn't require the ResponseV1 schema to grow a
 // new field.

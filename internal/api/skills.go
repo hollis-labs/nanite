@@ -204,7 +204,7 @@ func (a *API) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	if a.Services.SkillVendor != nil {
 		vendor = a.Services.SkillVendor
 	}
-	u := &skillinstall.Uninstaller{Vendor: vendor, Index: a.Services.Store}
+	u := &skillinstall.Uninstaller{Vendor: vendor, Index: a.Services.SkillUninstallIndex}
 	result, err := u.Uninstall(sk)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "skill uninstall failed: "+err.Error())
@@ -307,7 +307,7 @@ func (a *API) runSkillInstall(ctx context.Context, path string) (skillinstall.Re
 	var lastState skillinstall.State
 	installer := &skillinstall.Installer{
 		Vendor: a.Services.SkillVendor,
-		Index:  a.Services.Store,
+		Index:  a.Services.SkillIndex,
 		Emit: func(e skillinstall.Event) {
 			if e.Err == nil {
 				lastState = e.State
@@ -601,7 +601,7 @@ func (a *API) handleGetAgentSkillGrant(w http.ResponseWriter, r *http.Request) {
 		view.GrantedBy = row.GrantedBy
 	}
 
-	gate := skill.NewGate(a.Services.Store, a.Services.Store)
+	gate := skill.NewGate(a.Services.SkillIndex, a.Services.SkillGrants)
 	_, authErr := gate.Authorize(r.Context(), sk.Slug, agent.ID)
 	switch {
 	case authErr == nil:
@@ -709,7 +709,7 @@ func (a *API) handlePreviewSkill(w http.ResponseWriter, r *http.Request) {
 	// Step 1: the same unconditional, top-level grant check skill_get
 	// performs — see this handler's own doc comment for why preview does
 	// not bypass this.
-	gate := skill.NewGate(a.Services.Store, a.Services.Store)
+	gate := skill.NewGate(a.Services.SkillIndex, a.Services.SkillGrants)
 	if _, err := gate.Authorize(r.Context(), slug, req.AgentID); err != nil {
 		status := http.StatusForbidden
 		var reapproval *skill.ReapprovalRequiredError
@@ -732,8 +732,8 @@ func (a *API) handlePreviewSkill(w http.ResponseWriter, r *http.Request) {
 	// for LoadRootDefinition, the one piece those two callers literally
 	// share rather than duplicate.
 	deps := skill.MaterializerDeps{
-		Resolvers: a.Services.Store,
-		Index:     a.Services.Store,
+		Resolvers: a.Services.SkillResolvers,
+		Index:     a.Services.SkillIndex,
 		Vendor:    a.Services.SkillVendor,
 		Subagent:  a.Services.Subagent,
 	}

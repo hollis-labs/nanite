@@ -60,7 +60,7 @@ import (
 // callSkillGet implements skill_get. See this file's package doc for the
 // full pipeline this assembles.
 func (st *SelfToolsTransport) callSkillGet(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.Store == nil {
+	if st.SkillIndex == nil || st.SkillGrants == nil || st.SkillResolvers == nil {
 		return mcp.ErrorResult("skill_get: no store configured"), nil
 	}
 	if st.SkillVendor == nil {
@@ -82,7 +82,7 @@ func (st *SelfToolsTransport) callSkillGet(ctx context.Context, args map[string]
 		return mcp.ErrorResult("skill_get: no calling agent in context"), nil
 	}
 
-	sk, err := st.Store.GetSkillBySlug(ctx, slug)
+	sk, err := st.SkillIndex.GetSkillBySlug(ctx, slug)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("skill_get: look up skill %q: %v", slug, err)), nil
 	}
@@ -103,7 +103,7 @@ func (st *SelfToolsTransport) callSkillGet(ctx context.Context, args map[string]
 	// "build fresh per invocation" convention for install-adjacent
 	// pipeline objects (service.Container's own doc comment on
 	// *skillinstall.Installer).
-	gate := skill.NewGate(st.Store, st.Store)
+	gate := skill.NewGate(st.SkillIndex, st.SkillGrants)
 	if _, err := gate.Authorize(ctx, slug, agentID); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("skill_get: %v", err)), nil
 	}
@@ -121,8 +121,8 @@ func (st *SelfToolsTransport) callSkillGet(ctx context.Context, args map[string]
 	// only matters for a `cmd`-kind agent_context_resolvers row that
 	// itself omits a CWD, which falls back to this value.
 	deps := skill.MaterializerDeps{
-		Resolvers: st.Store,
-		Index:     st.Store,
+		Resolvers: st.SkillResolvers,
+		Index:     st.SkillIndex,
 		Vendor:    st.SkillVendor,
 		Subagent:  st.Subagent,
 	}

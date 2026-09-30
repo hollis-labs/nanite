@@ -163,7 +163,7 @@ func TestCallSkillGet_GrantedSkill_ReturnsMaterializedContentWithMarkerExecuted(
 		t.Fatalf("InsertAgentKnownSkill: %v", err)
 	}
 
-	transport := &SelfToolsTransport{Store: idx, SkillVendor: vendor}
+	transport := newSkillGetTransport(idx, vendor)
 	ctx := mcp.WithCallerProfile(context.Background(), agent.ID)
 
 	res, err := transport.CallTool(ctx, "skill_get", map[string]any{
@@ -195,7 +195,7 @@ func TestCallSkillGet_NoGrantRow_Refused(t *testing.T) {
 	sk := installSkillGetFixture(t, idx, vendor, dir)
 	agent := makeSkillGetTestAgent(t, idx, "skill-get-no-grant-agent")
 
-	transport := &SelfToolsTransport{Store: idx, SkillVendor: vendor}
+	transport := newSkillGetTransport(idx, vendor)
 	ctx := mcp.WithCallerProfile(context.Background(), agent.ID)
 
 	res, err := transport.CallTool(ctx, "skill_get", map[string]any{"slug": sk.Slug, "params": map[string]any{"who": "World"}})
@@ -227,7 +227,7 @@ func TestCallSkillGet_BareAssignmentGrant_Refused(t *testing.T) {
 		t.Fatalf("InsertAgentKnownSkill: %v", err)
 	}
 
-	transport := &SelfToolsTransport{Store: idx, SkillVendor: vendor}
+	transport := newSkillGetTransport(idx, vendor)
 	ctx := mcp.WithCallerProfile(context.Background(), agent.ID)
 
 	res, err := transport.CallTool(ctx, "skill_get", map[string]any{"slug": sk.Slug, "params": map[string]any{"who": "World"}})
@@ -265,7 +265,7 @@ func TestCallSkillGet_HashMismatch_ReapprovalRequired(t *testing.T) {
 		t.Fatal("expected re-install with changed content to produce a different content hash")
 	}
 
-	transport := &SelfToolsTransport{Store: idx, SkillVendor: vendor}
+	transport := newSkillGetTransport(idx, vendor)
 	ctx := mcp.WithCallerProfile(context.Background(), agent.ID)
 
 	res, err := transport.CallTool(ctx, "skill_get", map[string]any{"slug": sk.Slug, "params": map[string]any{"who": "World"}})
@@ -287,7 +287,7 @@ func TestCallSkillGet_NoCallerInContext_Refused(t *testing.T) {
 	dir := writeSkillGetFixture(t, "skill-get-no-caller")
 	sk := installSkillGetFixture(t, idx, vendor, dir)
 
-	transport := &SelfToolsTransport{Store: idx, SkillVendor: vendor}
+	transport := newSkillGetTransport(idx, vendor)
 	res, err := transport.CallTool(context.Background(), "skill_get", map[string]any{"slug": sk.Slug})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
@@ -305,7 +305,7 @@ func TestCallSkillGet_UnknownSlug_ClearError(t *testing.T) {
 	vendor := newSkillGetTestVendor(t)
 	agent := makeSkillGetTestAgent(t, idx, "skill-get-unknown-slug-agent")
 
-	transport := &SelfToolsTransport{Store: idx, SkillVendor: vendor}
+	transport := newSkillGetTransport(idx, vendor)
 	ctx := mcp.WithCallerProfile(context.Background(), agent.ID)
 	res, err := transport.CallTool(ctx, "skill_get", map[string]any{"slug": "does-not-exist"})
 	if err != nil {
@@ -338,7 +338,7 @@ func TestCallSkillGet_DisabledSkill_Refused(t *testing.T) {
 		t.Fatalf("InsertAgentKnownSkill: %v", err)
 	}
 
-	transport := &SelfToolsTransport{Store: idx, SkillVendor: vendor}
+	transport := newSkillGetTransport(idx, vendor)
 	ctx := mcp.WithCallerProfile(context.Background(), agent.ID)
 	res, err := transport.CallTool(ctx, "skill_get", map[string]any{"slug": sk.Slug, "params": map[string]any{"who": "World"}})
 	if err != nil {
@@ -372,7 +372,7 @@ func TestCallSkillGet_MissingRequiredParameter(t *testing.T) {
 		t.Fatalf("InsertAgentKnownSkill: %v", err)
 	}
 
-	transport := &SelfToolsTransport{Store: idx, SkillVendor: vendor}
+	transport := newSkillGetTransport(idx, vendor)
 	ctx := mcp.WithCallerProfile(context.Background(), agent.ID)
 	// "who" (required) is deliberately omitted from params.
 	res, err := transport.CallTool(ctx, "skill_get", map[string]any{"slug": sk.Slug})
@@ -402,7 +402,7 @@ func TestCallSkillGet_NilStoreOrVendor_ClearError(t *testing.T) {
 	}
 
 	idx := newSkillGetTestStore(t)
-	transport2 := &SelfToolsTransport{Store: idx, SkillVendor: nil}
+	transport2 := newSkillGetTransport(idx, nil)
 	res2, err := transport2.CallTool(context.Background(), "skill_get", map[string]any{"slug": "anything"})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
@@ -447,7 +447,7 @@ func TestCallSkillGet_ForkDependencyWithoutForkRole_ClearError(t *testing.T) {
 		t.Fatalf("InsertAgentKnownSkill: %v", err)
 	}
 
-	transport := &SelfToolsTransport{Store: idx, SkillVendor: vendor} // Subagent left nil
+	transport := newSkillGetTransport(idx, vendor) // Subagent left nil
 	ctx := mcp.WithCallerProfile(context.Background(), agent.ID)
 	res, err := transport.CallTool(ctx, "skill_get", map[string]any{"slug": rootSk.Slug})
 	if err != nil {
@@ -463,4 +463,12 @@ func TestCallSkillGet_ForkDependencyWithoutForkRole_ClearError(t *testing.T) {
 	if !strings.Contains(res.Content[0].Text, "fork") {
 		t.Errorf("expected a fork-composition-related error, got: %q", res.Content[0].Text)
 	}
+}
+
+// newSkillGetTransport builds a transport over idx the way production does,
+// with the given vendor (nil allowed).
+func newSkillGetTransport(idx *store.Store, vendor *skillvendor.Store) *SelfToolsTransport {
+	st := NewSelfToolsTransport(idx)
+	st.SkillVendor = vendor
+	return st
 }

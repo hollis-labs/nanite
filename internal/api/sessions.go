@@ -115,7 +115,7 @@ func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	lookup := buildEnvelopeLookup(a.Services.Store, messages)
+	lookup := a.Services.Sessions.EnvelopeLookup(r.Context(), messages)
 	messages = injectEnvelopePriorResponses(messages, lookup)
 
 	// A live stream means this process is genuinely generating the reply, so
@@ -345,7 +345,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	summarizer := service.BuildSummarizer(a.Services.Providers, a.Services.Store, settings)
+	summarizer := service.BuildSummarizer(a.Services.Providers, a.Services.ProviderDefaults, settings)
 	mode := service.ClassifyCompactionMode(agent)
 	pipeline := &ctxpkg.CompactionPipeline{
 		Window:                result.Window,
@@ -354,7 +354,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		Mode:                  mode,
 		ConversationMessages:  result.Messages,
 		SessionID:             sessionID,
-		CompactionEventWriter: service.NewCompactionEventWriter(a.Services.Store),
+		CompactionEventWriter: a.Services.CompactionEvents,
 	}
 
 	tokensBefore := result.Window.UsedTokens()
@@ -451,7 +451,7 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		lookup := buildEnvelopeLookup(a.Services.Store, page.Messages)
+		lookup := a.Services.Sessions.EnvelopeLookup(r.Context(), page.Messages)
 		page.Messages = injectEnvelopePriorResponses(page.Messages, lookup)
 		a.jsonResp(w, http.StatusOK, messagePageToView(page))
 		return
@@ -470,7 +470,7 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	lookup := buildEnvelopeLookup(a.Services.Store, page.Messages)
+	lookup := a.Services.Sessions.EnvelopeLookup(r.Context(), page.Messages)
 	page.Messages = injectEnvelopePriorResponses(page.Messages, lookup)
 	a.jsonResp(w, http.StatusOK, messagePageToView(page))
 }

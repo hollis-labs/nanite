@@ -343,6 +343,9 @@ func truncateAtBoundary(s string, maxBytes int) int {
 	return cut
 }
 
+// NewCallID returns a fresh, unique id for a tool call that has none of its own.
+func NewCallID() string { return newULID() }
+
 func newULID() string {
 	return ulid.MustNew(ulid.Timestamp(time.Now()), rand.Reader).String()
 }

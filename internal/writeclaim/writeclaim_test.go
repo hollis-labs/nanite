@@ -35,6 +35,10 @@ func TestDetectClaims(t *testing.T) {
 		"create ... successful":                 "Task creation was successful: CW-20260919-0100",
 		"inside a longer reply":                 "Here is the summary.\n\nDone. I updated CW-20260919-0100 and recorded " + fakeULID + ".\n\nAnything else?",
 		"uuid":                                  "Stored the record as 123e4567-e89b-12d3-a456-426614174000.",
+		"modal after the claim (should)":        "I saved it as CW-20260919-0004 and you should see it on the board.",
+		"modal after the claim (may)":           "I created CW-20260919-0004; you may want to review it.",
+		"modal after the claim (will)":          "I created CW-20260919-0004 which will appear in the list.",
+		"modal after the claim (once)":          "I created CW-20260919-0004 once the tool finished.",
 		"inline code id":                        "Filed `" + fakeULID + "` as requested.",
 	}
 	for name, reply := range claims {

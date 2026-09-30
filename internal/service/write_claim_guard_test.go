@@ -11,6 +11,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
+	"github.com/hollis-labs/nanite/internal/permission"
 )
 
 const (
@@ -37,7 +38,9 @@ func TestWriteClaimHookDecisions(t *testing.T) {
 	}{
 		"no claim":                        {harnessprofile.GuardDeny, "Task CW-20260919-0011 is in review.", none, wcNoClaim},
 		"guard off":                       {harnessprofile.GuardOff, claim(invented), none, wcOff},
-		"write succeeded this turn":       {harnessprofile.GuardDeny, claim(returned), writeClaimFacts{WroteThisTurn: true}, wcWriteSucceeded},
+		"write succeeded this turn":       {harnessprofile.GuardDeny, claim(returned), writeClaimFacts{WroteThisTurn: true, GroundedIDs: map[string]bool{returned: true}}, wcWriteSucceeded},
+		"wrote X, claims fabricated Y":    {harnessprofile.GuardDeny, claim(invented), writeClaimFacts{WroteThisTurn: true, GroundedIDs: map[string]bool{returned: true}}, wcUnbackedClaim},
+		"wrote, result had no id":         {harnessprofile.GuardDeny, claim(invented), writeClaimFacts{WroteThisTurn: true}, wcUnbackedClaim},
 		"recap of an earlier write":       {harnessprofile.GuardDeny, claim(returned), writeClaimFacts{GroundedIDs: map[string]bool{returned: true}}, wcGroundedInWrite},
 		"invented id, nothing ran":        {harnessprofile.GuardDeny, claim(invented), none, wcUnbackedClaim},
 		"an id only a READ result showed": {harnessprofile.GuardDeny, claim(returned), writeClaimFacts{ToolsRan: []string{"kb_read:ok"}}, wcUnbackedClaim},
@@ -335,6 +338,69 @@ func TestWriteClaimGuardFailedWriteDoesNotBackASuccessClaim(t *testing.T) {
 		t.Fatalf("requests = %d", got)
 	}
 	if ev := guardEvents(t, f); len(ev) != 1 || ev[0]["action"] != "sent_back" {
+		t.Errorf("decision log = %+v", ev)
+	}
+}
+
+// Having written something this turn does not license citing another id: the
+// model wrote X (returned) and claims Y (invented).
+func TestWriteClaimGuardWroteXThenClaimsFabricatedY(t *testing.T) {
+	f := newGuardFixture(t, []characterizationProviderStep{
+		{events: toolTurnEvents(toolUse("w1", "kb_write"))},
+		{events: doneEvents(claim(invented))},
+		{events: doneEvents("I saved " + returned + " only.")},
+	}, &guardTools{})
+	f.run(t, "x-then-y")
+	if got := len(f.provider.requestsSnapshot()); got != 3 {
+		t.Fatalf("requests = %d, want tool turn, fabricated claim, correction", got)
+	}
+	ev := guardEvents(t, f)
+	if len(ev) == 0 || ev[0]["reason"] != wcUnbackedClaim || ev[0]["action"] != "sent_back" {
+		t.Errorf("a fabricated id after a real write was not caught: %+v", ev)
+	}
+}
+
+// Wrote X, claims X: allowed.
+func TestWriteClaimGuardWroteXClaimsXIsAllowed(t *testing.T) {
+	f := newGuardFixture(t, []characterizationProviderStep{
+		{events: toolTurnEvents(toolUse("w1", "kb_write"))},
+		{events: doneEvents(claim(returned))},
+	}, &guardTools{})
+	f.run(t, "x-then-x")
+	if got := len(f.provider.requestsSnapshot()); got != 2 {
+		t.Errorf("requests = %d, want 2", got)
+	}
+}
+
+// An id that appears only in the user's message grounds nothing.
+func TestWriteClaimGuardUserMessageIDDoesNotGround(t *testing.T) {
+	f := newGuardFixture(t, []characterizationProviderStep{
+		{events: doneEvents(claim(invented))},
+		{events: doneEvents("Nothing was written.")},
+	}, &guardTools{})
+	f.userContent = "Please save a note about " + invented
+	f.run(t, "user-id")
+	if got := len(f.provider.requestsSnapshot()); got != 2 {
+		t.Errorf("requests = %d: an id copied from the user's message must not ground a claim", got)
+	}
+	if ev := guardEvents(t, f); len(ev) == 0 || ev[0]["reason"] != wcUnbackedClaim {
+		t.Errorf("decision log = %+v", ev)
+	}
+}
+
+// A write the permission layer denied never ran and grounds nothing.
+func TestWriteClaimGuardDeniedToolDoesNotGround(t *testing.T) {
+	f := newGuardFixture(t, []characterizationProviderStep{
+		{events: toolTurnEvents(toolUse("w1", "kb_write"))},
+		{events: doneEvents(claim(returned))},
+		{events: doneEvents("The write was denied; nothing was saved.")},
+	}, &guardTools{})
+	f.svc.permissions = permission.NewEngine(permission.ModePlan, nil)
+	f.run(t, "denied")
+	if got := len(f.provider.requestsSnapshot()); got != 3 {
+		t.Fatalf("requests = %d, want tool turn, claim, correction", got)
+	}
+	if ev := guardEvents(t, f); len(ev) == 0 || ev[0]["reason"] != wcUnbackedClaim {
 		t.Errorf("decision log = %+v", ev)
 	}
 }

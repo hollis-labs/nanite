@@ -1449,8 +1449,9 @@ streamLoop:
 			return consumeProviderIterationResult{directive: generationContinueIteration}
 		}
 
-		// D-34: a reply that reports a completed write citing an id, in a turn
-		// where no write tool succeeded, is checked before it is finalized.
+		// D-34: a reply that reports a completed write citing an id is checked
+		// before it is finalized: every cited id must come from a successful
+		// write-capable result.
 		if !chat.IsCLIProvider(providerName) && turnText != "" {
 			mode := harnessprofile.DefaultWriteClaimGuard
 			if run.loop.harness != nil {

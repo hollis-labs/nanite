@@ -62,7 +62,8 @@ func (s *chatServiceImpl) isWriteCapable(ctx context.Context, name string) bool 
 
 // writeClaimFacts is what the turn actually did.
 type writeClaimFacts struct {
-	// WroteThisTurn is true when a write-capable tool call succeeded.
+	// WroteThisTurn is true when a write-capable tool call succeeded. It labels
+	// the decision; it does not allow a claim whose ids are not grounded.
 	WroteThisTurn bool
 	// GroundedIDs are ids that appeared in a successful write-capable tool
 	// result, this turn or an earlier turn of the session.
@@ -92,16 +93,17 @@ func writeClaimHook(mode harnessprofile.GuardMode, in hooks.StopInput, facts wri
 		return hooks.Output{Decision: hooks.DecisionAllow}, d
 	}
 	d.Finding = finding
-	switch {
-	case facts.WroteThisTurn:
-		d.Reason = wcWriteSucceeded
-		return hooks.Output{Decision: hooks.DecisionAllow}, d
-	case len(finding.Ungrounded) == 0:
+	// Every cited id must be grounded in a successful write-capable result.
+	// Having written something this turn does not license citing other ids.
+	if len(finding.Ungrounded) == 0 {
 		d.Reason = wcGroundedInWrite
+		if facts.WroteThisTurn {
+			d.Reason = wcWriteSucceeded
+		}
 		return hooks.Output{Decision: hooks.DecisionAllow}, d
 	}
 	d.Fired, d.Reason = true, wcUnbackedClaim
-	reason := fmt.Sprintf("the reply reports a completed write citing %s, but no write tool succeeded this turn", strings.Join(finding.Ungrounded, ", "))
+	reason := fmt.Sprintf("the reply reports a completed write citing %s, but no successful write result this session returned it", strings.Join(finding.Ungrounded, ", "))
 	out := hooks.Output{Reason: reason, SystemMessage: "write-claim guard: " + reason}
 	switch mode {
 	case harnessprofile.GuardDeny:
@@ -118,7 +120,7 @@ func writeClaimHook(mode harnessprofile.GuardMode, in hooks.StopInput, facts wri
 // writeClaimNudge is the correction sent back to the model on a deny.
 func writeClaimNudge(d writeClaimDecision) string {
 	return "System check: your last reply reported a completed write and cited " + strings.Join(d.Finding.Ungrounded, ", ") +
-		", but no write tool succeeded in this turn, so the write did not happen and that id is not one you were given. " +
+		", but no write tool result returned that id, so the write did not happen and that id is not one you were given. " +
 		"Do not claim it. Either call the write tool now (use request_tools first if it is not loaded) and report the id it " +
 		"actually returns, or tell the user plainly that nothing was written."
 }
@@ -127,7 +129,7 @@ func writeClaimNudge(d writeClaimDecision) string {
 // after its one retry.
 func writeClaimFooter(ids []string) string {
 	return "\n\n⚠ Unverified claim: this reply cites " + strings.Join(ids, ", ") +
-		" as written, but no write tool succeeded in this turn. Treat that write as not done."
+		" as written, but no successful write returned it. Treat that write as not done."
 }
 
 // noteToolResult records one executed tool's outcome for the guard.

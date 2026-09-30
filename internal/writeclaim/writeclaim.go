@@ -47,9 +47,15 @@ var (
 		`(?:was\s+|is\s+|has\s+been\s+|had\s+been\s+)?` +
 		`(?:successful(?:ly)?|succeeded|completed?|done|confirmed|verified)\b)`)
 
-	// A sentence with any of these is not a claim of something that happened.
+	// A clause with any of these is not a claim of something that happened.
+	// It is applied per clause, not per sentence: a modal or negation after the
+	// claim ("... and you should see it", "... which will appear") must not
+	// disarm a write verb that precedes it.
 	reNotAClaim = regexp.MustCompile(`(?i)\b(?:not|never|unable|failed|fails|failing|couldn'?t|can'?t|cannot|didn'?t|wasn'?t|isn'?t|haven'?t|hasn'?t|` +
 		`will|would|could|should|shall|might|may|going\s+to|plan\s+to|want\s+me\s+to|if\s+you|once|when\s+you|to\s+be)\b|n't\b`)
+
+	// Clause boundaries inside a sentence.
+	reClauseSplit = regexp.MustCompile(`(?i);|,|\s[-\x{2013}\x{2014}]+\s|\b(?:and|which|but|once|so|while|whereas|because|although|though|then)\b`)
 
 	reParagraphs = regexp.MustCompile(`\n\s*\n`)
 	reSentences  = regexp.MustCompile(`[.!?]+\s+|\n`)
@@ -81,8 +87,8 @@ func IDs(text string) []string {
 }
 
 // Detect reports the first write claim in reply. grounded holds ids the caller
-// has independent evidence for (ones that appeared in this turn's tool results
-// or in the user's message); they are reported, not hidden, so the caller can
+// has independent evidence for (ones that appeared in a successful write-capable
+// tool result this turn or earlier in the session; never the user's message); they are reported, not hidden, so the caller can
 // decide what a grounded id means.
 func Detect(reply string, grounded map[string]bool) (Finding, bool) {
 	clean := reFence.ReplaceAllString(reply, "")
@@ -115,11 +121,16 @@ func Detect(reply string, grounded map[string]bool) (Finding, bool) {
 func claimPhrase(para string) string {
 	for _, s := range reSentences.Split(para, -1) {
 		s = strings.TrimSpace(s)
-		if s == "" || strings.HasSuffix(s, "?") || reNotAClaim.MatchString(s) {
+		if s == "" || strings.HasSuffix(s, "?") {
 			continue
 		}
-		if m := reDone.FindString(s); m != "" {
-			return m
+		for _, clause := range reClauseSplit.Split(s, -1) {
+			if reNotAClaim.MatchString(clause) {
+				continue
+			}
+			if m := reDone.FindString(clause); m != "" {
+				return m
+			}
 		}
 	}
 	return ""

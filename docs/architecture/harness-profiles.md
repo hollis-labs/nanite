@@ -37,7 +37,7 @@ did before profiles existed. A parity test pins that.
 
 ## What a profile can state
 
-Enforced by the chat loop: `limits.idle_timeout_ms`,
+Enforced by the chat loop: `hooks.write_claim_guard`, `limits.idle_timeout_ms`,
 `harness.subagent_idle_timeout_ms`, `hard_ceiling`, `consecutive_fail_cap`,
 `runaway_fail_cap`, `per_tool_cap`, `max_concurrent_tools`,
 `compact_preview_bytes`, `preview_pct`, `preview_min_bytes`, `preview_max_bytes`.
@@ -120,6 +120,47 @@ Every resolved value carries its source (`computed`, `app-settings`,
 `profile:<name>`, `profile:<name>/model:<pattern>`, `agent`, `launch`,
 `env:<VAR>`), and the profile carries a digest over its whole definition, so a
 run can be attributed to exactly the profile content it used.
+
+## The write-claim guard
+
+`hooks.write_claim_guard` sets how strictly the guard acts: `off`, `warn`,
+`ask` or `deny`. It is `deny` by default and `warn` in the `dev` profile, and any
+layer, including the environment (`NANITE_HARNESS_WRITE_CLAIM_GUARD`), can
+override either.
+
+The guard is a go-hooks `Stop` implementation. When a reply is about to be
+finalized in an API-driven run, it looks for a completed-write claim (a phrase
+such as "wrote", "created", "saved" or "the write succeeded") in the same or an
+adjacent paragraph as an id-shaped token (a ULID, a UUID, a tracker id or a long
+hex digest). Fenced code, negated, conditional, future and interrogative
+sentences are not claims, and neither is an id with no write phrase or a phrase
+with no id. CLI-launched sessions are skipped, since their tools run outside this
+loop.
+
+A claim is unbacked when no write-capable tool call succeeded in the turn and
+the cited id is not one an earlier successful write returned in the same session.
+A tool is write-capable unless it is known not to be: request_tools,
+tool_describe, tool_list, tool_validate, whoami, the result-cache tools and the
+scratchpad are never writes, and neither is a tool its server or the name
+heuristic marks read-only. An unknown tool counts as a write, so the guard errs
+toward silence. An id that only a read showed does not back a write claim, and a
+failed write does not back a success claim.
+
+- `deny` sends the reply back once with a correction message and clears it from
+  the client. If the retried reply still carries the claim, the loop does not
+  block again: the reply is finalized with a visible footer naming the ids.
+  The worst case is one extra model call.
+- `warn` and `ask` never block. Both emit a status event; `ask` is a distinct
+  recorded decision that a later release may turn into an operator prompt, and
+  behaves like `warn` today.
+
+Every decision that found a claim writes an `event_log` row (type
+`write_claim_guard`) with the mode, the action taken, the reason
+(`unbacked_write_claim`, `write_tool_succeeded_this_turn`,
+`claim_ids_grounded_in_a_prior_write_result`), the ids and the tools that ran, so
+the false-positive rate can be tuned from real traffic. Successful write results
+log the ids they returned (type `write_result_ids`), which is what lets a later
+turn recap earlier work.
 
 ## Recording and diagnostics
 

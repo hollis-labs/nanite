@@ -117,13 +117,15 @@ func (w *work) setComputed() {
 		ToolOutputMaxBytes:       DefaultToolOutputMaxBytes,
 		ToolOutputRemainingShare: DefaultToolOutputRemainingShare,
 		ToolOutputRemainingFloor: DefaultToolOutputRemainingFloor,
+
+		WriteClaimGuard: DefaultWriteClaimGuard,
 	}
 	for _, k := range []string{
 		"idle_timeout_ms", "subagent_idle_timeout_ms", "hard_ceiling", "consecutive_fail_cap",
 		"runaway_fail_cap", "per_tool_cap", "max_concurrent_tools", "compact_preview_bytes", "preview_pct",
 		"preview_min_bytes", "preview_max_bytes", "tool_output_bytes", "tool_output_pct",
 		"tool_output_min_bytes", "tool_output_max_bytes", "tool_output_remaining_share",
-		"tool_output_remaining_floor_bytes",
+		"tool_output_remaining_floor_bytes", "write_claim_guard",
 	} {
 		w.sources[k] = Source{Layer: "computed"}
 	}
@@ -196,6 +198,10 @@ func (w *work) apply(l Layer, layer string) {
 	if h.ToolOutputRemainingFloor != nil {
 		w.v.ToolOutputRemainingFloor = *h.ToolOutputRemainingFloor
 		src("tool_output_remaining_floor_bytes")
+	}
+	if l.Hooks.WriteClaimGuard != nil {
+		w.v.WriteClaimGuard = *l.Hooks.WriteClaimGuard
+		src("write_claim_guard")
 	}
 	// The remaining shared limits are carried, not enforced by the chat loop.
 	if lim.MaxDurationMs != nil {
@@ -382,6 +388,14 @@ func envLayers(getenv func(string) (string, bool)) ([]envLayer, error) {
 		{"compact_preview_bytes", num(func(l *Layer) **int { return &l.Harness.CompactPreviewBytes })},
 		{"preview_min_bytes", num(func(l *Layer) **int { return &l.Harness.PreviewMinBytes })},
 		{"preview_max_bytes", num(func(l *Layer) **int { return &l.Harness.PreviewMaxBytes })},
+		{"write_claim_guard", func(l *Layer, s string) error {
+			m := GuardMode(strings.ToLower(s))
+			if !m.Valid() {
+				return fmt.Errorf("must be one of off, warn, ask, deny")
+			}
+			l.Hooks.WriteClaimGuard = &m
+			return nil
+		}},
 		{"preview_pct", func(l *Layer, s string) error {
 			v, err := strconv.ParseFloat(s, 64)
 			if err != nil {

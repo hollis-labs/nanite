@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -70,4 +71,33 @@ func (s *Store) CountSessionToolCalls(ctx context.Context, sessionID string) int
 		sessionID,
 	).Scan(&count)
 	return count
+}
+
+// SessionWriteResultIDs returns the id-shaped tokens that successful
+// write-capable tool results produced in a session, as logged by the
+// write-claim guard. The guard treats a reply citing one of them as a recap of
+// real earlier work rather than an invented write.
+func (s *Store) SessionWriteResultIDs(ctx context.Context, sessionID string) (map[string]bool, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT metadata FROM event_log WHERE session_id = ? AND event_type = 'write_result_ids'`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRows(rows)
+	out := map[string]bool{}
+	for rows.Next() {
+		var meta string
+		if err := rows.Scan(&meta); err != nil {
+			return nil, err
+		}
+		var m struct {
+			IDs []string `json:"ids"`
+		}
+		if json.Unmarshal([]byte(meta), &m) == nil {
+			for _, id := range m.IDs {
+				out[id] = true
+			}
+		}
+	}
+	return out, rows.Err()
 }

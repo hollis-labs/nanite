@@ -37,6 +37,7 @@ require (
 	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/hollis-labs/go-harness-filters v0.1.1 // indirect
+	github.com/hollis-labs/go-hooks v0.1.0 // indirect
 	github.com/hollis-labs/go-queue v0.1.0 // indirect
 	github.com/hollis-labs/go-runner v0.7.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect

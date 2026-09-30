@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// CW-20260929-0019: migration 166 removes grants for retired skills that have
+// CW-20260929-0019: migration 167 removes grants for retired skills that have
 // no catalog row, and nothing else.
-func TestMigration166_RetiresDanglingSkillGrants(t *testing.T) {
+func TestMigration167_RetiresDanglingSkillGrants(t *testing.T) {
 	ctx := context.Background()
 	s := newSeededStore(t)
 	agent := &AgentProfile{Name: "Grantee", Slug: "grantee", SystemPrompt: "x"}
@@ -38,7 +38,7 @@ func TestMigration166_RetiresDanglingSkillGrants(t *testing.T) {
 		grant(slug)
 	}
 
-	sql, err := os.ReadFile("migrations/166_retire_dangling_skill_grants.sql")
+	sql, err := os.ReadFile("migrations/167_retire_dangling_skill_grants.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

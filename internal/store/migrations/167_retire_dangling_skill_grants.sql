@@ -1,5 +1,5 @@
 -- +goose Up
--- 166_retire_dangling_skill_grants.sql
+-- 167_retire_dangling_skill_grants.sql
 --
 -- CW-20260929-0019. Six agent_known_skills rows (System Architect, Torque
 -- Supervisor) name skills that are not in the skills table and are not in

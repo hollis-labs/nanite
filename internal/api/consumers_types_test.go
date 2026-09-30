@@ -108,7 +108,7 @@ func TestSessionDetailsResponseMatchesStoreEncoding(t *testing.T) {
 		after := sessionDetailsResponse{
 			Session: sessionToViewPtr(&sess), DurableAttachments: states, CurrentDurableAgent: &inst,
 			ActivityState: "online", LastActivityAt: "a", LastUsefulActivityAt: "b", Halt: halt,
-			Usage: usage, RecentDurableEvents: events, Runtime: runtime, BootSource: "api_default",
+			Usage: sessionUsageToViewPtr(usage), RecentDurableEvents: events, Runtime: runtime, BootSource: "api_default",
 			ImmutableStartFields: immutable, Checkpoint: checkpointDetail{Status: "unknown"},
 		}
 		if withAgent {

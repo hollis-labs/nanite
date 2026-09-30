@@ -84,6 +84,7 @@ type Container struct {
 	// AgentMembership owns session <-> agent and agent <-> project bindings.
 	AgentMembership *AgentMembershipService
 	Skills          SkillService
+	Usage           *UsageService // token usage, execution metrics, utility calls
 	// SkillVendor is the content-addressed vendored skill store (internal/
 	// skillvendor, TASKS/skills/03) that backs the explicit install/sync
 	// pipeline (internal/skillinstall, TASKS/skills/04/05 --
@@ -570,6 +571,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// are immediately visible because the runtime also reads from the DB.
 	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, nil)
 	agentMembership := NewAgentMembershipService(cfg.Store, cfg.Store)
+	usage := NewUsageService(cfg.Store, cfg.Store)
 
 	// agent_permissions.go (newFileAgentPermissionResolver) and
 	// ToolClient.PermissionResolver/GetPermissions/CheckPermission/
@@ -1451,6 +1453,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		WorkingDir:          workingDir,
 		AgentConfig:         agentConfig,
 		AgentMembership:     agentMembership,
+		Usage:               usage,
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,

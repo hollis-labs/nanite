@@ -44,8 +44,10 @@ func populate(t *testing.T, v any) {
 			f.SetString(fmt.Sprintf("value-%d", i))
 		case reflect.Bool:
 			f.SetBool(true)
-		case reflect.Int:
+		case reflect.Int, reflect.Int64:
 			f.SetInt(int64(1000 + i))
+		case reflect.Float64:
+			f.SetFloat(float64(i) + 0.25)
 		default:
 			t.Fatalf("%s.%s has kind %s; teach populate about it", rv.Type().Name(), rv.Type().Field(i).Name, f.Kind())
 		}

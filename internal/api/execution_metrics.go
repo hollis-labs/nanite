@@ -10,12 +10,12 @@ import (
 
 func (a *API) handleGetSessionExecutionMetrics(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	metrics, err := a.Services.Store.GetSessionExecutionMetrics(r.Context(), sessionID)
+	metrics, err := a.Services.Usage.SessionExecutionMetrics(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load execution metrics")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, metrics)
+	a.jsonResp(w, http.StatusOK, executionMetricsToView(metrics))
 }
 
 func (a *API) handleGetRecentExecutionMetrics(w http.ResponseWriter, r *http.Request) {
@@ -25,21 +25,21 @@ func (a *API) handleGetRecentExecutionMetrics(w http.ResponseWriter, r *http.Req
 			limit = n
 		}
 	}
-	metrics, err := a.Services.Store.GetRecentExecutionMetrics(r.Context(), limit)
+	metrics, err := a.Services.Usage.RecentExecutionMetrics(r.Context(), limit)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load execution metrics")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, metrics)
+	a.jsonResp(w, http.StatusOK, executionMetricsToView(metrics))
 }
 
 func (a *API) handleGetUtilityCallSummary(w http.ResponseWriter, r *http.Request) {
-	summary, err := a.Services.Store.GetUtilityCallSummary(r.Context())
+	summary, err := a.Services.Usage.UtilityCallSummary(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load utility call summary")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, summary)
+	a.jsonResp(w, http.StatusOK, utilityCallSummaryToView(summary))
 }
 
 func (a *API) handleGetUtilityCallLog(w http.ResponseWriter, r *http.Request) {
@@ -49,12 +49,12 @@ func (a *API) handleGetUtilityCallLog(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	log, err := a.Services.Store.GetUtilityCallLog(r.Context(), limit)
+	log, err := a.Services.Usage.UtilityCallLog(r.Context(), limit)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load utility call log")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, log)
+	a.jsonResp(w, http.StatusOK, executionMetricsToView(log))
 }
 
 // handleGetSessionHarnessProfile reports the harness profile the session's next
@@ -65,7 +65,7 @@ func (a *API) handleGetUtilityCallLog(w http.ResponseWriter, r *http.Request) {
 // model when none of these is set.
 func (a *API) handleGetSessionHarnessProfile(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	sess, err := a.Services.Store.GetSession(r.Context(), sessionID)
+	sess, err := a.Services.Sessions.Get(r.Context(), sessionID)
 	if err != nil || sess == nil {
 		a.errorResp(w, http.StatusNotFound, "session not found")
 		return

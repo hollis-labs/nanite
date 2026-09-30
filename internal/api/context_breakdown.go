@@ -82,27 +82,20 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Get actual tool token costs from execution metrics when available,
-	// falling back to the event-log count with a 50-token estimate.
+	// Tool token cost: actual when execution metrics recorded it, else an
+	// event-log estimate — see UsageService.SessionToolTokens.
 	toolDetails := make([]ToolTokenDetail, 0)
-	toolTokensTotal := 0
-	toolSummary, err := a.Services.Store.GetSessionToolTokenSummary(r.Context(), sessionID)
-	if err == nil && toolSummary.TotalToolCalls > 0 {
-		toolTokensTotal = toolSummary.TotalInputTokens + toolSummary.TotalOutputTokens
+	toolTokens := a.Services.Usage.SessionToolTokens(r.Context(), sessionID)
+	toolTokensTotal := toolTokens.Tokens
+	if toolTokens.Calls > 0 {
+		kind := "actual"
+		if toolTokens.Estimated {
+			kind = "estimated"
+		}
 		toolDetails = append(toolDetails, ToolTokenDetail{
-			Name:   fmt.Sprintf("%d tool calls (actual)", toolSummary.TotalToolCalls),
+			Name:   fmt.Sprintf("%d tool calls (%s)", toolTokens.Calls, kind),
 			Tokens: toolTokensTotal,
 		})
-	} else {
-		// Fallback: count from event log with rough estimate.
-		toolCallCount := a.Services.Store.CountSessionToolCalls(r.Context(), sessionID)
-		if toolCallCount > 0 {
-			toolTokensTotal = toolCallCount * 50
-			toolDetails = append(toolDetails, ToolTokenDetail{
-				Name:   fmt.Sprintf("%d tool calls (estimated)", toolCallCount),
-				Tokens: toolTokensTotal,
-			})
-		}
 	}
 
 	// Total available tools (for display, not context cost).
@@ -122,7 +115,7 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 
 	// Get cost from usage summary.
 	costUSD := 0.0
-	usage, err := a.Services.Store.GetSessionUsage(r.Context(), sessionID)
+	usage, err := a.Services.Usage.SessionUsage(r.Context(), sessionID)
 	if err == nil && usage != nil {
 		costUSD = usage.EstimatedCostUSD
 	}

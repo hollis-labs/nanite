@@ -60,7 +60,7 @@ type sessionDetailsResponse struct {
 	LastActivityAt       string                                   `json:"last_activity_at,omitempty"`
 	LastUsefulActivityAt string                                   `json:"last_useful_activity_at,omitempty"`
 	Halt                 sessionHaltDetail                        `json:"halt"`
-	Usage                *store.SessionUsageSummary               `json:"usage,omitempty"`
+	Usage                *SessionUsageView                        `json:"usage,omitempty"`
 	RecentDurableEvents  []store.DurableAgentEvent                `json:"recent_durable_events"`
 	Runtime              sessionRuntimeDetail                     `json:"runtime"`
 	BootSource           string                                   `json:"boot_source"`
@@ -169,8 +169,8 @@ func (a *API) handleGetSessionDetails(w http.ResponseWriter, r *http.Request) {
 }
 
 // sessionDetails assembles the session read model. The session, its primary
-// agent and its durable-agent attachments come from their services; halt,
-// usage and runtime rows have no service yet and are still read from the
+// agent, its durable-agent attachments and its usage come from their
+// services; halt and runtime rows have no service yet and are still read from the
 // store, with context.TODO() until they move (transport-boundary,
 // CW-20260930-0083): touching those lines before then would count them as
 // new store calls under the R1 gate.
@@ -217,8 +217,8 @@ func (a *API) sessionDetails(ctx context.Context, id string) (sessionDetailsResp
 			}
 		}
 	}
-	if usage, err := a.Services.Store.GetSessionUsage(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil && usage != nil && usage.MessageCount > 0 {
-		details.Usage = usage
+	if usage, err := a.Services.Usage.SessionUsage(ctx, id); err == nil && usage != nil && usage.MessageCount > 0 {
+		details.Usage = sessionUsageToViewPtr(usage)
 	}
 	if rows, err := a.Services.Store.ListAgentRuntimeRowsForSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil && len(rows) > 0 {
 		row := rows[0]

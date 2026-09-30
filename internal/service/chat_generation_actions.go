@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	hooks "github.com/hollis-labs/go-hooks"
+
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/pkg/models"
 
@@ -1447,6 +1449,56 @@ streamLoop:
 			return consumeProviderIterationResult{directive: generationContinueIteration}
 		}
 
+		// D-34: a reply that reports a completed write citing an id is checked
+		// before it is finalized: every cited id must come from a successful
+		// write-capable result.
+		if !chat.IsCLIProvider(providerName) && turnText != "" {
+			mode := harnessprofile.DefaultWriteClaimGuard
+			if run.loop.harness != nil {
+				mode = run.loop.harness.Values.WriteClaimGuard
+			}
+			stop := hooks.StopInput{LastAssistantMessage: turnText}
+			facts := s.writeClaimFactsFor(ctx, sessionID, run.loop, false)
+			out, decision := writeClaimHook(mode, stop, facts)
+			if decision.Reason == wcUnbackedClaim {
+				// Only now is the session's write history worth a query: the
+				// claim may recap earlier work.
+				facts = s.writeClaimFactsFor(ctx, sessionID, run.loop, true)
+				out, decision = writeClaimHook(mode, stop, facts)
+			}
+			if decision.Reason != wcNoClaim && decision.Reason != wcOff {
+				action := "allowed"
+				switch {
+				case decision.Fired && mode == harnessprofile.GuardDeny && run.loop.wcRetries < wcMaxRetriesPerRun:
+					action = "sent_back"
+				case decision.Fired && mode == harnessprofile.GuardDeny:
+					action = "footer_after_retry"
+				case decision.Fired:
+					action = "warned"
+				}
+				s.logWriteClaimDecision(ctx, sessionID, model, decision, facts, action)
+				switch action {
+				case "sent_back":
+					run.loop.wcRetries++
+					ch <- chat.StreamEvent{Type: "replace_content", Content: ""}
+					run.finalContent.Reset()
+					run.thinkingBlocks = run.thinkingBlocks[:0]
+					run.providerOutput = nil
+					run.chatMessages = append(run.chatMessages,
+						llmtypes.ChatMessage{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{{Type: "text", Text: turnText}}},
+						llmtypes.ChatMessage{Role: "user", ContentBlocks: []llmtypes.ContentBlock{{Type: "text", Text: writeClaimNudge(decision)}}})
+					run.loop.touchActivity()
+					run.loop.continueWith(ContinueWriteClaimGuard, "write-claim guard: unbacked write claim sent back")
+					return consumeProviderIterationResult{directive: generationContinueIteration}
+				case "footer_after_retry":
+					run.loop.wcFooter = writeClaimFooter(decision.Finding.Ungrounded)
+					ch <- chat.StreamEvent{Type: "status", Content: out.SystemMessage}
+				case "warned":
+					ch <- chat.StreamEvent{Type: "status", Content: out.SystemMessage}
+				}
+			}
+		}
+
 		if stopReason == "max_tokens" {
 			run.loop.wasTruncated = true
 			slog.Warn("chat-service: response truncated by max_tokens", "iter", run.loop.iteration)
@@ -1665,6 +1717,7 @@ func (s *chatServiceImpl) finalizeRun(
 	// NANITE_HARNESS_FAILURE_FOOTER. Mutate cleanContent so the footer is
 	// part of the persisted text (and the structured-message hash).
 	cleanContent = maybeAppendFailureFooter(cleanContent, run.loop.toolCallRefs)
+	cleanContent += run.loop.wcFooter
 
 	// Structured message.
 	structured := chat.WrapResponse(cleanContent, tier, run.loop.toolCallRefs, envRefs, run.loop.wasTruncated, hasError)

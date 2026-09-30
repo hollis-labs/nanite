@@ -67,6 +67,8 @@ github.com/hollis-labs/go-envelopes v0.4.0 h1:kmMZLWQrz4lYvKtYAaRiU85cNK2f84MXpb
 github.com/hollis-labs/go-envelopes v0.4.0/go.mod h1:v45Dt4l4kYVuUf2oTcxXYh1bBRXSND+Bi6CAM/OxwKY=
 github.com/hollis-labs/go-harness-filters v0.1.1 h1:uTAF+ejKhje+rXMEOwTHsO7ig2fCAQnkANXgZBAyYZA=
 github.com/hollis-labs/go-harness-filters v0.1.1/go.mod h1:84dThT2Ro93bk7Lzpr9KNsRDY4hUcIvYoBtmIB6IEzM=
+github.com/hollis-labs/go-hooks v0.1.0 h1:gasPcEgX3W/U+DOB04x08ZYAej2N9cjcP59AeUjkGFE=
+github.com/hollis-labs/go-hooks v0.1.0/go.mod h1:7tB/QvXFg5iLlFjYKwmzzhSK6WZUbPqXLFsP6b4tARE=
 github.com/hollis-labs/go-llm-contracts v0.3.0 h1:qVKulEixvxf5iJmUMzDfRoL00gfS6/r0TmAJ1zNX0Dc=
 github.com/hollis-labs/go-llm-contracts v0.3.0/go.mod h1:VIbzjZk7U+NCYuHdfa++ZwcaYI09om5xVxYTGd6cuw8=
 github.com/hollis-labs/go-llm-types v0.3.0 h1:QR4RX0F1zX0fYBh7sDVxnsFxmQ/vjlvc7bC6FWx+8s0=

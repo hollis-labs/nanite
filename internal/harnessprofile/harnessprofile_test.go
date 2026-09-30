@@ -48,6 +48,7 @@ func TestDefaultProfileIsComputedDefaults(t *testing.T) {
 		CompactPreviewBytes: 512, PreviewPct: 0.004, PreviewMinBytes: 4000, PreviewMaxBytes: 32000,
 		ToolOutputPct: 0.03, ToolOutputMinBytes: 24576, ToolOutputMaxBytes: 524288,
 		ToolOutputRemainingShare: 0.25, ToolOutputRemainingFloor: 4096,
+		WriteClaimGuard: GuardDeny,
 	}
 	if res.Values != want {
 		t.Errorf("values = %+v\nwant     %+v", res.Values, want)

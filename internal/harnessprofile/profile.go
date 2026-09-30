@@ -99,6 +99,9 @@ func validateLayer(l Layer) error {
 	neg("harness.compact_preview_bytes", h.CompactPreviewBytes != nil && *h.CompactPreviewBytes < 0)
 	neg("harness.preview_min_bytes", h.PreviewMinBytes != nil && *h.PreviewMinBytes < 0)
 	neg("harness.preview_max_bytes", h.PreviewMaxBytes != nil && *h.PreviewMaxBytes < 0)
+	if g := l.Hooks.WriteClaimGuard; g != nil && !g.Valid() {
+		errs = append(errs, fmt.Errorf("hooks.write_claim_guard %q must be one of off, warn, ask, deny", string(*g)))
+	}
 	if h.PreviewPct != nil && (*h.PreviewPct <= 0 || *h.PreviewPct > 1) {
 		errs = append(errs, errors.New("harness.preview_pct must be in (0, 1]"))
 	}

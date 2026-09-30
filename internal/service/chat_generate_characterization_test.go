@@ -191,6 +191,8 @@ type characterizationFixture struct {
 	tools    *characterizationTools
 	context  *characterizationContext
 	session  string
+	// userContent overrides the user message a run is dispatched with.
+	userContent string
 }
 
 type characterizationContext struct {
@@ -308,8 +310,12 @@ func (f *characterizationFixture) runCtx(ctx context.Context, t *testing.T, mess
 	if !ok {
 		t.Fatal("GetStream: production stream was not registered")
 	}
+	userContent := "characterize this turn"
+	if f.userContent != "" {
+		userContent = f.userContent
+	}
 	if err := f.svc.dispatcher.Run(ctx, dispatcher.Request{
-		SessionID: f.session, AssistantMsgID: messageID, UserContent: "characterize this turn", CallerType: dispatcher.CallerChat,
+		SessionID: f.session, AssistantMsgID: messageID, UserContent: userContent, CallerType: dispatcher.CallerChat,
 	}, producer); err != nil {
 		t.Fatalf("Dispatcher.Run: %v", err)
 	}

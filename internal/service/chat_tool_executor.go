@@ -745,6 +745,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 
 		// Record tool call outcome.
 		ls.recordToolCall(tu.Name, !r.isError)
+		s.noteToolResult(ctx, sessionID, ls, tu.Name, r.rawOutput, r.isError)
 
 		// Tool warning on errors.
 		if r.isError {

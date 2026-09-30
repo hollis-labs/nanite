@@ -26,6 +26,9 @@ const (
 	ContinueHookModified  ContinueSite = "CONTINUE_HOOK_MODIFIED"
 	ContinueModeChange    ContinueSite = "CONTINUE_MODE_CHANGE"
 	ContinuePreambleNudge ContinueSite = "CONTINUE_PREAMBLE_NUDGE"
+	// ContinueWriteClaimGuard: the reply claimed a completed write that no
+	// tool backed, and the guard sent it back once for correction (D-34).
+	ContinueWriteClaimGuard ContinueSite = "CONTINUE_WRITE_CLAIM_GUARD"
 )
 
 // Default iteration limits.
@@ -179,6 +182,16 @@ type loopState struct {
 	// when unknown. They feed the tool-output ceiling and the per-result cap.
 	windowTokens    int
 	remainingTokens int
+
+	// Write-claim guard state (D-34): whether a write-capable tool succeeded
+	// this turn, the ids such results produced, the tools that ran, how many
+	// times the guard has sent the reply back, and the footer to append when the
+	// retry did not fix it.
+	wcWrote    bool
+	wcWriteIDs map[string]bool
+	wcToolsRan []string
+	wcRetries  int
+	wcFooter   string
 	// Tool execution tracking.
 	lastToolResults     map[string]string
 	toolRepeatCount     map[string]int

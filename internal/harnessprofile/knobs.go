@@ -36,6 +36,10 @@ const (
 	// one multi-tool-call turn run at once (CW-20260929-0012). Before it, a turn
 	// that emitted N calls ran N at once.
 	DefaultMaxConcurrentTools = 8
+
+	// DefaultWriteClaimGuard is deny in normal operation; the dev profile
+	// states warn.
+	DefaultWriteClaimGuard = GuardDeny
 )
 
 // Knobs are the host-only harness knobs a profile may state. A nil field means
@@ -60,11 +64,41 @@ type Knobs struct {
 	ToolOutputRemainingFloor *int     `json:"tool_output_remaining_floor_bytes,omitempty" yaml:"tool_output_remaining_floor_bytes,omitempty"`
 }
 
+// GuardMode is how strictly a hook-based guard acts.
+type GuardMode string
+
+// The guard modes. Deny blocks what the guard catches. Ask and Warn never
+// block; Ask is a distinct recorded decision that a later release may turn into
+// an operator prompt. Off disables the guard.
+const (
+	GuardOff  GuardMode = "off"
+	GuardWarn GuardMode = "warn"
+	GuardAsk  GuardMode = "ask"
+	GuardDeny GuardMode = "deny"
+)
+
+// Valid reports whether m is one of the four modes.
+func (m GuardMode) Valid() bool {
+	switch m {
+	case GuardOff, GuardWarn, GuardAsk, GuardDeny:
+		return true
+	}
+	return false
+}
+
+// Hooks are the strictness settings of the harness's hook-based guards.
+type Hooks struct {
+	// WriteClaimGuard is the strictness of the guard that catches a reply
+	// claiming a completed write, with an id, when no write tool succeeded.
+	WriteClaimGuard *GuardMode `json:"write_claim_guard,omitempty" yaml:"write_claim_guard,omitempty"`
+}
+
 // Layer is what one configuration layer states: the shared limits shape plus
 // the host-only knobs.
 type Layer struct {
 	Limits  agentcontracts.Limits `json:"limits,omitempty" yaml:"limits,omitempty"`
 	Harness Knobs                 `json:"harness,omitempty" yaml:"harness,omitempty"`
+	Hooks   Hooks                 `json:"hooks,omitempty" yaml:"hooks,omitempty"`
 }
 
 // Values are the resolved, concrete harness values for one run.
@@ -90,6 +124,8 @@ type Values struct {
 	ToolOutputMaxBytes       int
 	ToolOutputRemainingShare float64
 	ToolOutputRemainingFloor int
+
+	WriteClaimGuard GuardMode
 }
 
 // TurnCeiling is the cumulative tool-output ceiling for a turn, in bytes; 0
@@ -209,6 +245,7 @@ func (r *Resolved) Effective() Effective {
 			"tool_output_max_bytes":             v.ToolOutputMaxBytes,
 			"tool_output_remaining_share":       v.ToolOutputRemainingShare,
 			"tool_output_remaining_floor_bytes": v.ToolOutputRemainingFloor,
+			"write_claim_guard":                 string(v.WriteClaimGuard),
 		},
 		Sources:    r.Sources,
 		Limits:     r.Limits,

@@ -81,7 +81,9 @@ type Container struct {
 	// AgentConfig is the shared database write path for operator-managed
 	// profiles (GUI/API/CLI/MCP all route mutations through it).
 	AgentConfig *AgentConfigService
-	Skills      SkillService
+	// AgentMembership owns session <-> agent and agent <-> project bindings.
+	AgentMembership *AgentMembershipService
+	Skills          SkillService
 	// SkillVendor is the content-addressed vendored skill store (internal/
 	// skillvendor, TASKS/skills/03) that backs the explicit install/sync
 	// pipeline (internal/skillinstall, TASKS/skills/04/05 --
@@ -564,6 +566,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Shared managed-agent database write service. GUI/API/CLI/MCP mutations
 	// are immediately visible because the runtime also reads from the DB.
 	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, nil)
+	agentMembership := NewAgentMembershipService(cfg.Store, cfg.Store)
 
 	// agent_permissions.go (newFileAgentPermissionResolver) and
 	// ToolClient.PermissionResolver/GetPermissions/CheckPermission/
@@ -1444,6 +1447,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AppConfig:           cfg.AppConfig,
 		WorkingDir:          workingDir,
 		AgentConfig:         agentConfig,
+		AgentMembership:     agentMembership,
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,

@@ -193,11 +193,63 @@ type UpdateAgentRequest struct {
 	Revision string `json:"revision"`
 }
 
-// AgentProfileView wraps a store.AgentProfile with the computed management
-// metadata the GUI needs to decide editability. The embedded profile flattens into the same JSON shape
-// existing consumers expect; the extra fields are additive.
+// AgentProfileView is the wire shape of an agent profile, plus the computed
+// management metadata the GUI needs to decide editability. It is API-owned:
+// its keys match what the embedded store.AgentProfile used to emit, so the
+// wire did not change when the embedding was removed, but a new column on
+// the row no longer reaches the wire until it is added here and in
+// agentProfileToView. TestAgentProfileViewJSONKeys pins the key set.
 type AgentProfileView struct {
-	store.AgentProfile
+	ID                      string `json:"id"`
+	Name                    string `json:"name"`
+	Slug                    string `json:"slug"`
+	Avatar                  string `json:"avatar"`
+	SystemPrompt            string `json:"system_prompt"`
+	Description             string `json:"description"`
+	Modes                   string `json:"modes"`
+	DefaultModel            string `json:"default_model"`
+	DefaultProvider         string `json:"default_provider"`
+	MCPServers              string `json:"mcp_servers"`
+	ToolPermissions         string `json:"tool_permissions"`
+	CanExecute              bool   `json:"can_execute"`
+	Settings                string `json:"settings"`
+	CreatedAt               string `json:"created_at"`
+	UpdatedAt               string `json:"updated_at"`
+	AgentHash               string `json:"agent_hash"`
+	Version                 int    `json:"version"`
+	Tools                   string `json:"tools"`
+	Directories             string `json:"directories"`
+	Constraints             string `json:"constraints"`
+	Tags                    string `json:"tags"`
+	Status                  string `json:"status"`
+	Source                  string `json:"source"`
+	SourceRef               string `json:"source_ref"`
+	Icon                    string `json:"icon"`
+	Kind                    string `json:"kind"`
+	CapabilitiesJSON        string `json:"capabilities_json"`
+	LimitsJSON              string `json:"limits_json"`
+	ModelStrategy           string `json:"model_strategy"`
+	ImportedAt              string `json:"imported_at"`
+	OriginSystem            string `json:"origin_system"`
+	Format                  string `json:"format"`
+	ParentDispatchAllowlist string `json:"parent_dispatch_allowlist"`
+	RoleTools               string `json:"role_tools"`
+	RoleSkills              string `json:"role_skills"`
+	ContextPolicy           string `json:"context_policy"`
+	Durable                 bool   `json:"durable"`
+	ActivationMode          string `json:"activation_mode"`
+	Class                   string `json:"class"`
+	DefaultState            string `json:"default_state"`
+	ConsumerID              string `json:"consumer_id"`
+	RoleID                  string `json:"role_id"`
+	ModelID                 string `json:"model_id"`
+	RuntimeKind             string `json:"runtime_kind"`
+	Protocol                string `json:"protocol"`
+	Transport               string `json:"transport"`
+	PluginID                string `json:"plugin_id"`
+	TetherManaged           bool   `json:"tether_managed"`
+	TetherURN               string `json:"tether_urn"`
+
 	// ManageClass is one of: managed, internal, plugin, external.
 	ManageClass string `json:"manage_class"`
 	// Editable reports whether this agent can be edited/deleted in place.
@@ -210,6 +262,105 @@ type AgentProfileView struct {
 	// Persisted reports whether a real agent_profiles DB row backs this
 	// profile. Database list/get results are always persisted.
 	Persisted bool `json:"persisted"`
+}
+
+// agentViewMeta is the computed management metadata agentProfileToView
+// attaches to a profile.
+type agentViewMeta struct {
+	ManageClass   string
+	Editable      bool
+	CopyToManaged bool
+	Revision      string
+	Persisted     bool
+}
+
+// agentProfileToView translates a stored profile and its computed metadata
+// into the API-owned wire shape.
+func agentProfileToView(p *store.AgentProfile, m agentViewMeta) AgentProfileView {
+	return AgentProfileView{
+		ID:                      p.ID,
+		Name:                    p.Name,
+		Slug:                    p.Slug,
+		Avatar:                  p.Avatar,
+		SystemPrompt:            p.SystemPrompt,
+		Description:             p.Description,
+		Modes:                   p.Modes,
+		DefaultModel:            p.DefaultModel,
+		DefaultProvider:         p.DefaultProvider,
+		MCPServers:              p.MCPServers,
+		ToolPermissions:         p.ToolPermissions,
+		CanExecute:              p.CanExecute,
+		Settings:                p.Settings,
+		CreatedAt:               p.CreatedAt,
+		UpdatedAt:               p.UpdatedAt,
+		AgentHash:               p.AgentHash,
+		Version:                 p.Version,
+		Tools:                   p.Tools,
+		Directories:             p.Directories,
+		Constraints:             p.Constraints,
+		Tags:                    p.Tags,
+		Status:                  p.Status,
+		Source:                  p.Source,
+		SourceRef:               p.SourceRef,
+		Icon:                    p.Icon,
+		Kind:                    p.Kind,
+		CapabilitiesJSON:        p.CapabilitiesJSON,
+		LimitsJSON:              p.LimitsJSON,
+		ModelStrategy:           p.ModelStrategy,
+		ImportedAt:              p.ImportedAt,
+		OriginSystem:            p.OriginSystem,
+		Format:                  p.Format,
+		ParentDispatchAllowlist: p.ParentDispatchAllowlist,
+		RoleTools:               p.RoleTools,
+		RoleSkills:              p.RoleSkills,
+		ContextPolicy:           p.ContextPolicy,
+		Durable:                 p.Durable,
+		ActivationMode:          p.ActivationMode,
+		Class:                   p.Class,
+		DefaultState:            p.DefaultState,
+		ConsumerID:              p.ConsumerID,
+		RoleID:                  p.RoleID,
+		ModelID:                 p.ModelID,
+		RuntimeKind:             p.RuntimeKind,
+		Protocol:                p.Protocol,
+		Transport:               p.Transport,
+		PluginID:                p.PluginID,
+		TetherManaged:           p.TetherManaged,
+		TetherURN:               p.TetherURN,
+		ManageClass:             m.ManageClass,
+		Editable:                m.Editable,
+		CopyToManaged:           m.CopyToManaged,
+		Revision:                m.Revision,
+		Persisted:               m.Persisted,
+	}
+}
+
+// SessionAgentView is the wire shape of one agent's binding to a session.
+type SessionAgentView struct {
+	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id"`
+	Mode      string `json:"mode"`
+	JoinedAt  string `json:"joined_at"`
+	IsPrimary bool   `json:"is_primary"`
+}
+
+// sessionAgentsToView translates session bindings into their wire shape. A
+// nil input stays nil so an empty result serializes the way it did before.
+func sessionAgentsToView(rows []store.SessionAgent) []SessionAgentView {
+	if rows == nil {
+		return nil
+	}
+	out := make([]SessionAgentView, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, SessionAgentView{
+			SessionID: r.SessionID,
+			AgentID:   r.AgentID,
+			Mode:      r.Mode,
+			JoinedAt:  r.JoinedAt,
+			IsPrimary: r.IsPrimary,
+		})
+	}
+	return out
 }
 
 type AddSessionAgentRequest struct {

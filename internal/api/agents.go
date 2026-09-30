@@ -81,14 +81,13 @@ func (a *API) agentView(p store.AgentProfile) AgentProfileView {
 	} else {
 		class = agentpkg.Classification{}.Classify(p.Source)
 	}
-	return AgentProfileView{
-		AgentProfile:  p,
+	return agentProfileToView(&p, agentViewMeta{
 		ManageClass:   string(class),
 		Editable:      class.Editable(),
 		CopyToManaged: class.CopyToManagedAllowed(),
 		Revision:      revision,
 		Persisted:     persisted,
-	}
+	})
 }
 
 func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
@@ -174,31 +173,21 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// role_id/consumer_id/model_id use the composition writer so pointer/FK
-	// validation remains shared with the assignment API.
-	if req.RoleID != "" || req.ConsumerID != "" || req.ModelID != "" {
-		if err := a.Services.Store.UpdateAgentComposition(r.Context(), res.Profile.ID, ptrOrNilString(req.RoleID), ptrOrNilString(req.ConsumerID), ptrOrNilString(req.ModelID)); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if refreshed, err := a.Services.Store.GetAgent(r.Context(), res.Profile.ID); err == nil {
-			res.Profile = refreshed
-		}
+	// validation remains shared with the assignment API; protocol/transport
+	// (TASKS/agent-host-acp/11) have the same DB-only shape.
+	profile, err := a.Services.AgentConfig.ApplyAssignments(r.Context(), res.Profile, service.AgentAssignments{
+		RoleID:     ptrOrNilString(req.RoleID),
+		ConsumerID: ptrOrNilString(req.ConsumerID),
+		ModelID:    ptrOrNilString(req.ModelID),
+		Protocol:   ptrOrNilString(req.Protocol),
+		Transport:  ptrOrNilString(req.Transport),
+	})
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
-	// protocol/transport (TASKS/agent-host-acp/11) -- same DB-only,
-	// zero-frontmatter-representation shape as role_id/consumer_id/
-	// model_id immediately above.
-	if req.Protocol != "" || req.Transport != "" {
-		if err := a.Services.Store.UpdateAgentACPConfig(r.Context(), res.Profile.ID, ptrOrNilString(req.Protocol), ptrOrNilString(req.Transport)); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if refreshed, err := a.Services.Store.GetAgent(r.Context(), res.Profile.ID); err == nil {
-			res.Profile = refreshed
-		}
-	}
-
-	view := a.agentView(*res.Profile)
+	view := a.agentView(*profile)
 	a.jsonResp(w, http.StatusCreated, view)
 }
 
@@ -371,31 +360,23 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// role_id/consumer_id/model_id -- see handleCreateAgent's matching
-	// comment. Pointer semantics here (nil = untouched, non-nil = set or
-	// clear) match every other partial-update field on UpdateAgentRequest.
-	if req.RoleID != nil || req.ConsumerID != nil || req.ModelID != nil {
-		if err := a.Services.Store.UpdateAgentComposition(r.Context(), res.Profile.ID, req.RoleID, req.ConsumerID, req.ModelID); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if refreshed, err := a.Services.Store.GetAgent(r.Context(), res.Profile.ID); err == nil {
-			res.Profile = refreshed
-		}
+	// role_id/consumer_id/model_id and protocol/transport -- see
+	// handleCreateAgent's matching comment. Pointer semantics here (nil =
+	// untouched, non-nil = set or clear) match every other partial-update
+	// field on UpdateAgentRequest.
+	profile, err := a.Services.AgentConfig.ApplyAssignments(r.Context(), res.Profile, service.AgentAssignments{
+		RoleID:     req.RoleID,
+		ConsumerID: req.ConsumerID,
+		ModelID:    req.ModelID,
+		Protocol:   req.Protocol,
+		Transport:  req.Transport,
+	})
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
-	// protocol/transport -- see handleCreateAgent's matching comment.
-	if req.Protocol != nil || req.Transport != nil {
-		if err := a.Services.Store.UpdateAgentACPConfig(r.Context(), res.Profile.ID, req.Protocol, req.Transport); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if refreshed, err := a.Services.Store.GetAgent(r.Context(), res.Profile.ID); err == nil {
-			res.Profile = refreshed
-		}
-	}
-
-	a.jsonResp(w, http.StatusOK, a.agentView(*res.Profile))
+	a.jsonResp(w, http.StatusOK, a.agentView(*profile))
 }
 
 // writeNotManaged emits the standard 409 response for an attempt to mutate a
@@ -486,12 +467,12 @@ func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListSessionAgents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	agents, err := a.Services.Store.ListSessionAgents(r.Context(), sessionID)
+	agents, err := a.Services.AgentMembership.ListSessionAgents(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, agents)
+	a.jsonResp(w, http.StatusOK, sessionAgentsToView(agents))
 }
 
 func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
@@ -508,7 +489,7 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify agent exists.
-	if _, err := a.Services.Store.GetAgent(r.Context(), req.AgentID); err != nil {
+	if _, err := a.Services.Agents.Get(r.Context(), req.AgentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
@@ -516,17 +497,10 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	isPrimary := req.Role == "primary"
 	mode := "default"
 
-	// If setting a new primary, demote the current primary first and capture
-	// the previous agent ID so we can emit agent.switched.
-	var previousAgentID string
-	if isPrimary {
-		if cur, err := a.Services.Store.GetSessionPrimaryAgent(r.Context(), sessionID); err == nil {
-			previousAgentID = cur.AgentID
-			_ = a.Services.Store.EnsureSessionAgent(r.Context(), sessionID, cur.AgentID, cur.Mode, false)
-		}
-	}
-
-	if err := a.Services.Store.EnsureSessionAgent(r.Context(), sessionID, req.AgentID, mode, isPrimary); err != nil {
+	// Setting a new primary demotes the current one; the previous agent ID
+	// comes back so we can emit agent.switched.
+	previousAgentID, err := a.Services.AgentMembership.SetSessionAgent(r.Context(), sessionID, req.AgentID, mode, isPrimary)
+	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -539,19 +513,19 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return the updated agents list.
-	agents, err := a.Services.Store.ListSessionAgents(r.Context(), sessionID)
+	agents, err := a.Services.AgentMembership.ListSessionAgents(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, agents)
+	a.jsonResp(w, http.StatusCreated, sessionAgentsToView(agents))
 }
 
 func (a *API) handleRemoveSessionAgent(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	agentID := r.PathValue("agentId")
 
-	if err := a.Services.Store.DeleteSessionAgent(r.Context(), sessionID, agentID); err != nil {
+	if err := a.Services.AgentMembership.RemoveSessionAgent(r.Context(), sessionID, agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "session agent not found")
 		return
 	}
@@ -562,7 +536,7 @@ func (a *API) handleRemoveSessionAgent(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListAgentProjects(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
-	projects, err := a.Services.Store.ListAgentProjects(r.Context(), agentID)
+	projects, err := a.Services.AgentMembership.ListAgentProjects(r.Context(), agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -587,17 +561,17 @@ func (a *API) handleAddAgentProject(w http.ResponseWriter, r *http.Request) {
 	// was no check here at all -- agent_projects.agent_id now carries a real
 	// FK to agent_profiles(id) (Phase 1 #05), so reject up front rather than
 	// letting the INSERT fail deeper in the store layer.
-	if _, err := a.Services.Store.GetAgent(r.Context(), agentID); err != nil {
+	if _, err := a.Services.Agents.Get(r.Context(), agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
-	if err := a.Services.Store.AddAgentProject(r.Context(), agentID, req.ProjectID); err != nil {
+	if err := a.Services.AgentMembership.AddAgentProject(r.Context(), agentID, req.ProjectID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	projects, err := a.Services.Store.ListAgentProjects(r.Context(), agentID)
+	projects, err := a.Services.AgentMembership.ListAgentProjects(r.Context(), agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -609,7 +583,7 @@ func (a *API) handleRemoveAgentProject(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 	projectID := r.PathValue("projectId")
 
-	if err := a.Services.Store.RemoveAgentProject(r.Context(), agentID, projectID); err != nil {
+	if err := a.Services.AgentMembership.RemoveAgentProject(r.Context(), agentID, projectID); err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -618,10 +592,14 @@ func (a *API) handleRemoveAgentProject(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListProjectAgents(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
-	agents, err := a.Services.Store.ListProjectAgents(r.Context(), projectID)
+	agents, err := a.Services.AgentMembership.ListProjectAgents(r.Context(), projectID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, agents)
+	views := make([]AgentProfileView, 0, len(agents))
+	for i := range agents {
+		views = append(views, a.agentView(agents[i]))
+	}
+	a.jsonResp(w, http.StatusOK, views)
 }

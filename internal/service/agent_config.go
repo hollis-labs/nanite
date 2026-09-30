@@ -164,6 +164,49 @@ func (s *AgentConfigService) Delete(profile *store.AgentProfile) error {
 	return nil
 }
 
+// AgentAssignments carries the DB-only columns a profile write does not
+// cover: the role/consumer/model composition FKs and the ACP
+// protocol/transport pair. Each field is a pointer: nil leaves the column
+// untouched, a pointer to "" clears it, a non-empty value sets it.
+type AgentAssignments struct {
+	RoleID     *string
+	ConsumerID *string
+	ModelID    *string
+	Protocol   *string
+	Transport  *string
+}
+
+// ApplyAssignments writes the non-nil assignments for profile and returns
+// the profile re-read after each write. Composition is written before
+// protocol/transport. A write error is returned unwrapped so its message
+// reaches the caller as the store phrased it; a failed re-read is not an
+// error and leaves the profile as it was.
+//
+// These writes run after Create/Update, not in the same transaction, so a
+// rejected assignment leaves the profile write in place.
+func (s *AgentConfigService) ApplyAssignments(ctx context.Context, profile *store.AgentProfile, a AgentAssignments) (*store.AgentProfile, error) {
+	if profile == nil {
+		return nil, fmt.Errorf("profile is required")
+	}
+	if a.RoleID != nil || a.ConsumerID != nil || a.ModelID != nil {
+		if err := s.store.UpdateAgentComposition(ctx, profile.ID, a.RoleID, a.ConsumerID, a.ModelID); err != nil {
+			return profile, err
+		}
+		if refreshed, err := s.store.GetAgent(ctx, profile.ID); err == nil {
+			profile = refreshed
+		}
+	}
+	if a.Protocol != nil || a.Transport != nil {
+		if err := s.store.UpdateAgentACPConfig(ctx, profile.ID, a.Protocol, a.Transport); err != nil {
+			return profile, err
+		}
+		if refreshed, err := s.store.GetAgent(ctx, profile.ID); err == nil {
+			profile = refreshed
+		}
+	}
+	return profile, nil
+}
+
 // CopyToManaged forks plugin or explicitly external provenance into a fresh
 // operator-owned database row. SourceRef is deliberately not dereferenced.
 func (s *AgentConfigService) CopyToManaged(source *store.AgentProfile, procedures []agent.ProcedureDefinition) (*AgentConfigResult, error) {

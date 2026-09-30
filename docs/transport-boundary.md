@@ -122,6 +122,13 @@ removing a single finding.
   `type wrap struct{ *store.Store }`, a call `w.Get(2)` is not flagged; a direct
   call and a call through a type alias (`type alias = store.Store`) are. A
   wrapper type that hides the store this way defeats Rule A.
+- **Passing the handle is invisible.** Rule A flags method calls on
+  `store.Store`, not the handle passed as an argument —
+  `buildEnvelopeLookup(a.Services.Store, …)` or
+  `service.NewCompactionEventWriter(a.Services.Store)`. A transport can reach
+  the store through a helper and pass. To find them:
+  `grep -rn 'Services\.Store[,)}]' internal/api internal/selftools internal/mcpserver`
+  (the `}` catches a struct-literal field).
 - **The regex scopes by path.** A transport package outside
   `^internal/(api|selftools|mcpserver)/` is not checked; a new transport
   directory needs the regex extended.

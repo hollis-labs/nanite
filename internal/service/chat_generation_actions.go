@@ -310,10 +310,13 @@ func (s *chatServiceImpl) initializeRun(
 		classifiedTier, _ := ls.Classification()
 		s.inspector.RecordScopeTier(sessionID, inspectorTurnID, classifiedTier.String())
 		if setup.harness != nil {
-			s.inspector.RecordHarness(sessionID, inspectorTurnID, inspectsvc.HarnessRecord{
-				Profile: setup.harness.Profile, Digest: setup.harness.Digest,
-				Effective: json.RawMessage(setup.harness.EffectiveJSON()),
-			})
+			rec := inspectsvc.HarnessRecord{Profile: setup.harness.Profile, Digest: setup.harness.Digest}
+			// An empty RawMessage is invalid JSON and would break the
+			// snapshot's marshaling, so the field is left unset on failure.
+			if eff := setup.harness.EffectiveJSON(); eff != "" {
+				rec.Effective = json.RawMessage(eff)
+			}
+			s.inspector.RecordHarness(sessionID, inspectorTurnID, rec)
 		}
 	}
 

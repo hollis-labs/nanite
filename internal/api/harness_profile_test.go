@@ -58,6 +58,33 @@ func TestCreateSession_HarnessProfileSelection(t *testing.T) {
 	}
 }
 
+// With no profile selected the default profile still resolves the process
+// environment, so a bad NANITE_HARNESS_* value is refused at creation and no
+// session is left behind; a good or absent value still creates.
+func TestCreateSession_BadEnvNoSelection(t *testing.T) {
+	a, s := newToolCallTestAPI(t)
+	before, _ := s.ListSessions(t.Context())
+
+	t.Setenv("NANITE_HARNESS_HARD_CEILING", "lots")
+	rec := postCreateSession(t, a, map[string]any{})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "NANITE_HARNESS_HARD_CEILING") {
+		t.Errorf("bad env, no selection: %d %s", rec.Code, rec.Body.String())
+	}
+	after, _ := s.ListSessions(t.Context())
+	if len(after) != len(before) {
+		t.Errorf("refused create left %d new session(s)", len(after)-len(before))
+	}
+
+	t.Setenv("NANITE_HARNESS_HARD_CEILING", "12")
+	if rec := postCreateSession(t, a, map[string]any{}); rec.Code >= 300 {
+		t.Errorf("good env: %d %s", rec.Code, rec.Body.String())
+	}
+	t.Setenv("NANITE_HARNESS_HARD_CEILING", "")
+	if rec := postCreateSession(t, a, map[string]any{}); rec.Code >= 300 {
+		t.Errorf("no env: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 // The endpoint reports what the session's next turn would run under, with the
 // source of each value, honoring the session's selection and ?model=.
 func TestSessionHarnessProfileEndpoint(t *testing.T) {

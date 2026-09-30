@@ -215,15 +215,19 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Validate even with no metadata: the default profile resolves the
+	// NANITE_HARNESS_* environment, and a bad value fails here, not every turn.
+	blob := []byte("{}")
 	if len(req.Metadata) > 0 {
-		blob, err := json.Marshal(req.Metadata)
-		if err == nil {
-			err = service.ValidateHarnessSelection(a.Services.HarnessProfiles, string(blob))
-		}
-		if err != nil {
+		var err error
+		if blob, err = json.Marshal(req.Metadata); err != nil {
 			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	if err := service.ValidateHarnessSelection(a.Services.HarnessProfiles, string(blob)); err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	providerID := strings.TrimSpace(req.Provider)

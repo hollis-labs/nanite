@@ -49,15 +49,17 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Model:     req.Model,
 		Provider:  req.Provider,
 	}
+	// Validate even with no selection: the default profile resolves the
+	// NANITE_HARNESS_* environment, and a bad value fails here, not every turn.
+	meta, err := service.MergeHarnessSelection("", req.HarnessProfile, req.HarnessOverrides)
+	if err == nil {
+		err = service.ValidateHarnessSelection(a.Services.HarnessProfiles, meta)
+	}
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if req.HarnessProfile != "" || len(req.HarnessOverrides) > 0 {
-		meta, err := service.MergeHarnessSelection("", req.HarnessProfile, req.HarnessOverrides)
-		if err == nil {
-			err = service.ValidateHarnessSelection(a.Services.HarnessProfiles, meta)
-		}
-		if err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
 		sess.Metadata = meta
 	}
 	if err := a.Services.Store.CreateSession(r.Context(), sess); err != nil {

@@ -171,14 +171,12 @@ func (ls *loopState) compactPreviewBudget() int {
 // ValidateHarnessSelection checks the profile name and overrides carried in a
 // session's metadata, and the harness environment overrides, against reg (nil
 // means the built-ins), so a session is rejected at creation instead of failing
-// every turn. Overrides are validated by resolving them.
+// every turn. Overrides are validated by resolving them. With nothing selected
+// the default profile is still resolved, so a bad environment value is caught.
 func ValidateHarnessSelection(reg *harnessprofile.Registry, metadata string) error {
 	profile, overrides, err := SessionHarnessSelection(metadata)
 	if err != nil {
 		return err
-	}
-	if profile == "" && overrides == (harnessprofile.Layer{}) {
-		return nil
 	}
 	if reg == nil {
 		reg = builtinOnlyRegistry()

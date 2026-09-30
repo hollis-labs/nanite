@@ -481,12 +481,26 @@ func TestHarnessV1CreateSessionRejectsBadHarnessSelection(t *testing.T) {
 	if w := post(map[string]any{"harness_profile": "dev"}); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "NANITE_HARNESS_HARD_CEILING") {
 		t.Errorf("bad env = %d %s", w.Code, w.Body.String())
 	}
+	// No profile selected and no metadata at all: still refused.
+	if w := post(nil); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "NANITE_HARNESS_HARD_CEILING") {
+		t.Errorf("bad env, no metadata = %d %s", w.Code, w.Body.String())
+	}
+	if w := post(map[string]any{"unrelated": "x"}); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "NANITE_HARNESS_HARD_CEILING") {
+		t.Errorf("bad env, no profile = %d %s", w.Code, w.Body.String())
+	}
 	after, _ := a.Services.Store.ListSessions(context.Background())
 	if len(after) != len(before) {
 		t.Errorf("a refused create left %d new session(s)", len(after)-len(before))
 	}
 
+	t.Setenv("NANITE_HARNESS_HARD_CEILING", "12")
+	if w := post(nil); w.Code >= 300 {
+		t.Errorf("good env, no selection = %d %s", w.Code, w.Body.String())
+	}
 	t.Setenv("NANITE_HARNESS_HARD_CEILING", "")
+	if w := post(nil); w.Code >= 300 {
+		t.Errorf("no env, no selection = %d %s", w.Code, w.Body.String())
+	}
 	if w := post(map[string]any{"harness_profile": "dev"}); w.Code >= 300 {
 		t.Errorf("valid selection = %d %s", w.Code, w.Body.String())
 	}

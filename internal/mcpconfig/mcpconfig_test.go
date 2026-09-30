@@ -144,7 +144,7 @@ func TestImportAndExport_Roundtrip(t *testing.T) {
 	}`
 
 	// Import
-	result, err := Import(s, []byte(input))
+	result, err := Import(context.Background(), s, []byte(input))
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestImportAndExport_Roundtrip(t *testing.T) {
 	}
 
 	// Import again — should skip both
-	result2, err := Import(s, []byte(input))
+	result2, err := Import(context.Background(), s, []byte(input))
 	if err != nil {
 		t.Fatalf("second import: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestImportAndExport_Roundtrip(t *testing.T) {
 	}
 
 	// Export
-	cfg, err := Export(s)
+	cfg, err := Export(context.Background(), s)
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestImport_EmptyEnvAndArgs(t *testing.T) {
 
 	input := `{"mcpServers": {"minimal": {"command": "echo"}}}`
 
-	result, err := Import(s, []byte(input))
+	result, err := Import(context.Background(), s, []byte(input))
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestImport_EmptyEnvAndArgs(t *testing.T) {
 	}
 
 	// Export should produce clean entry with no empty arrays
-	exported, _ := Export(s)
+	exported, _ := Export(context.Background(), s)
 	entry := exported.MCPServers["minimal"]
 	if len(entry.Args) != 0 {
 		t.Errorf("exported args = %v, want nil/empty", entry.Args)
@@ -302,7 +302,7 @@ func TestRemoteTransportSurvivesExportImportRoundTrip(t *testing.T) {
 		}
 	}
 
-	exported, err := Export(s)
+	exported, err := Export(context.Background(), s)
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}

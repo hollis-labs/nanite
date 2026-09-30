@@ -1,0 +1,240 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/store"
+)
+
+// mcpFakes records, in one ordered log, every store write, registrar call
+// and discovery run the service makes.
+type mcpFakes struct {
+	rows     map[string]store.MCPServerConfig
+	getErr   error
+	events   []string
+	remote   map[string]string // name -> headers passed to AddRemoteServerFromConfig
+	stdioArg map[string][]string
+}
+
+func newMCPFakes() *mcpFakes {
+	return &mcpFakes{rows: map[string]store.MCPServerConfig{}, remote: map[string]string{}, stdioArg: map[string][]string{}}
+}
+
+func (f *mcpFakes) ListMCPServers(context.Context) ([]store.MCPServerConfig, error) {
+	out := make([]store.MCPServerConfig, 0, len(f.rows))
+	for _, r := range f.rows {
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+func (f *mcpFakes) GetMCPServer(_ context.Context, name string) (*store.MCPServerConfig, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	r, ok := f.rows[name]
+	if !ok {
+		return nil, nil
+	}
+	return &r, nil
+}
+
+func (f *mcpFakes) CreateMCPServer(_ context.Context, cfg *store.MCPServerConfig) error {
+	f.events = append(f.events, "store.create "+cfg.Name)
+	cfg.ID = "id-" + cfg.Name
+	f.rows[cfg.Name] = *cfg
+	return nil
+}
+
+func (f *mcpFakes) UpdateMCPServer(_ context.Context, cfg *store.MCPServerConfig) error {
+	f.events = append(f.events, "store.update "+cfg.Name)
+	f.rows[cfg.Name] = *cfg
+	return nil
+}
+
+func (f *mcpFakes) DeleteMCPServer(_ context.Context, name string) error {
+	if _, ok := f.rows[name]; !ok {
+		return errors.New("mcp server \"" + name + "\" not found")
+	}
+	f.events = append(f.events, "store.delete "+name)
+	delete(f.rows, name)
+	return nil
+}
+
+func (f *mcpFakes) AddStdioServer(name, _ string, args, _, _ []string, _ mcp.TrustTier) error {
+	f.events = append(f.events, "add "+name)
+	f.stdioArg[name] = args
+	return nil
+}
+
+func (f *mcpFakes) AddRemoteServerFromConfig(name, _, _, headerJSON string, _ mcp.TrustTier) error {
+	f.events = append(f.events, "add "+name)
+	f.remote[name] = headerJSON
+	return nil
+}
+
+func (f *mcpFakes) RemoveServer(name string) { f.events = append(f.events, "remove "+name) }
+
+func (f *mcpFakes) discover(context.Context) error {
+	f.events = append(f.events, "discover")
+	return nil
+}
+
+func (f *mcpFakes) service() *MCPServerService { return NewMCPServerService(f, f, f.discover) }
+
+func assertEvents(t *testing.T, f *mcpFakes, want ...string) {
+	t.Helper()
+	if !reflect.DeepEqual(f.events, want) {
+		t.Fatalf("events = %q, want %q", f.events, want)
+	}
+	f.events = nil
+}
+
+func TestMCPServerService_CreateSequencing(t *testing.T) {
+	ctx := context.Background()
+	f := newMCPFakes()
+	svc := f.service()
+
+	cfg := &store.MCPServerConfig{Name: "local", Command: "run", Args: `["-v"]`}
+	if err := svc.Create(ctx, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	assertEvents(t, f, "store.create local", "add local", "discover")
+	if cfg.TransportType != store.TransportStdio || !cfg.Enabled || cfg.ID != "id-local" {
+		t.Fatalf("cfg after create = %+v, want stdio, enabled, store-filled ID", cfg)
+	}
+	if got := f.stdioArg["local"]; !reflect.DeepEqual(got, []string{"-v"}) {
+		t.Fatalf("stdio args = %q", got)
+	}
+
+	if err := svc.Create(ctx, &store.MCPServerConfig{Name: "local"}); !errors.Is(err, ErrMCPServerExists) {
+		t.Fatalf("duplicate create err = %v, want ErrMCPServerExists", err)
+	}
+	assertEvents(t, f)
+
+	var ve *MCPServerValidationError
+	if err := svc.Create(ctx, &store.MCPServerConfig{}); !errors.As(err, &ve) || ve.Msg != "name is required" {
+		t.Fatalf("nameless create err = %v", err)
+	}
+	if err := svc.Create(ctx, &store.MCPServerConfig{Name: "x", TransportType: "grpc"}); !errors.As(err, &ve) || ve.Msg != TransportTypeError {
+		t.Fatalf("bad transport err = %v", err)
+	}
+	assertEvents(t, f)
+}
+
+func TestMCPServerService_CreateIgnoresDuplicateLookupError(t *testing.T) {
+	f := newMCPFakes()
+	f.getErr = errors.New("db down")
+	if err := f.service().Create(context.Background(), &store.MCPServerConfig{Name: "x"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	assertEvents(t, f, "store.create x", "add x", "discover")
+}
+
+func TestMCPServerService_UpdateSequencing(t *testing.T) {
+	ctx := context.Background()
+	f := newMCPFakes()
+	existing := store.MCPServerConfig{
+		Name: "remote", TransportType: store.TransportSSE, Enabled: true,
+		Headers: `{"Authorization":"Bearer real-token"}`,
+	}
+	f.rows["remote"] = existing
+	svc := f.service()
+
+	// Placeholder header and empty transport: the registrar gets the stored
+	// token, and the transport stays sse.
+	cfg := &store.MCPServerConfig{Name: "remote", Enabled: true, Headers: `{"Authorization":"` + RedactedHeaderValue + `"}`}
+	if err := svc.Update(ctx, &existing, cfg); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	assertEvents(t, f, "store.update remote", "remove remote", "add remote", "discover")
+	if cfg.TransportType != store.TransportSSE {
+		t.Fatalf("transport = %q, want the stored sse", cfg.TransportType)
+	}
+	if !strings.Contains(f.remote["remote"], "real-token") || !strings.Contains(f.rows["remote"].Headers, "real-token") {
+		t.Fatalf("stored token not carried forward: registered %q, stored %q", f.remote["remote"], f.rows["remote"].Headers)
+	}
+
+	// Disabled: removed, not re-added, discovery still runs.
+	if err := svc.Update(ctx, &existing, &store.MCPServerConfig{Name: "remote"}); err != nil {
+		t.Fatalf("Update disabled: %v", err)
+	}
+	assertEvents(t, f, "store.update remote", "remove remote", "discover")
+
+	var ve *MCPServerValidationError
+	if err := svc.Update(ctx, &existing, &store.MCPServerConfig{Name: "remote", TransportType: "grpc"}); !errors.As(err, &ve) || ve.Msg != TransportTypeError {
+		t.Fatalf("bad transport err = %v", err)
+	}
+	assertEvents(t, f)
+}
+
+func TestMCPServerService_DeleteSequencing(t *testing.T) {
+	f := newMCPFakes()
+	f.rows["gone"] = store.MCPServerConfig{Name: "gone"}
+	svc := f.service()
+	if err := svc.Delete(context.Background(), "gone"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	assertEvents(t, f, "store.delete gone", "remove gone")
+	if err := svc.Delete(context.Background(), "gone"); err == nil || err.Error() != `mcp server "gone" not found` {
+		t.Fatalf("second delete err = %v, want the store's error unwrapped", err)
+	}
+	assertEvents(t, f)
+}
+
+func TestMCPServerService_ImportSequencing(t *testing.T) {
+	ctx := context.Background()
+	f := newMCPFakes()
+	f.rows["old"] = store.MCPServerConfig{Name: "old"}
+	svc := f.service()
+
+	data := []byte(`{"mcpServers":{"a":{"command":"x"},"b":{"url":"http://127.0.0.1:1/mcp"},"old":{"command":"y"}}}`)
+	res, err := svc.Import(ctx, data)
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if !reflect.DeepEqual(res.Created, []string{"a", "b"}) || !reflect.DeepEqual(res.Skipped, []string{"old"}) {
+		t.Fatalf("result = %+v", res)
+	}
+	assertEvents(t, f, "store.create a", "store.create b", "add a", "add b", "discover")
+
+	// Nothing created: no registration, no discovery.
+	if _, err := svc.Import(ctx, []byte(`{"mcpServers":{"a":{"command":"x"}}}`)); err != nil {
+		t.Fatalf("second Import: %v", err)
+	}
+	assertEvents(t, f)
+}
+
+func TestMCPServerService_NoManager(t *testing.T) {
+	f := newMCPFakes()
+	svc := NewMCPServerService(f, nil, nil)
+	ctx := context.Background()
+	cfg := &store.MCPServerConfig{Name: "x"}
+	if err := svc.Create(ctx, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := svc.Update(ctx, cfg, &store.MCPServerConfig{Name: "x", Enabled: true}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if _, err := svc.Import(ctx, []byte(`{"mcpServers":{"y":{"command":"z"}}}`)); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if err := svc.Delete(ctx, "x"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	assertEvents(t, f, "store.create x", "store.update x", "store.create y", "store.delete x")
+}
+
+// A container without an MCP manager must leave the registrar unset, not
+// holding a typed-nil *mcp.Manager that would pass the nil checks and panic.
+func TestNewContainerMCPServerService_NilManager(t *testing.T) {
+	svc := newContainerMCPServerService(nil, nil)
+	if svc.registrar != nil || svc.discover != nil {
+		t.Fatalf("registrar = %v, discover set = %v; want both unset", svc.registrar, svc.discover != nil)
+	}
+}

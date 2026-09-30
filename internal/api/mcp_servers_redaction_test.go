@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/service"
 )
 
 func putJSON(t *testing.T, mux *http.ServeMux, path string, body any) *httptest.ResponseRecorder {
@@ -68,7 +70,7 @@ func assertNoPlaintext(t *testing.T, which, body string) {
 	if !strings.Contains(got.Headers, "Authorization") {
 		t.Fatalf("%s response dropped the header key entirely: %q", which, got.Headers)
 	}
-	if !strings.Contains(got.Headers, RedactedHeaderValue) {
+	if !strings.Contains(got.Headers, service.RedactedHeaderValue) {
 		t.Fatalf("%s response headers not redacted: %q", which, got.Headers)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -258,6 +259,8 @@ func buildSkillListForSession(_ context.Context, s *store.Store, agentID, _ stri
 		return ""
 	}
 
+	warnDanglingSkillGrants(s, agentID)
+
 	// Phase 0 item 21 ("Cut Modes, in full") deleted the E2 mode filter
 	// (filterAgentSkillsByMode) that used to run here — it resolved
 	// s.GetSessionMode(sessionID), which no longer exists. There is no
@@ -287,6 +290,28 @@ func buildSkillListForSession(_ context.Context, s *store.Store, agentID, _ stri
 	}
 
 	return sb.String()
+}
+
+// warnedSkillGrants remembers the (agent, slug) pairs already reported, so a
+// dangling grant is logged once per process rather than every turn.
+var warnedSkillGrants sync.Map
+
+// warnDanglingSkillGrants logs, once each, the skills the agent is granted that
+// are not in the catalog. ListAgentSkills joins on skills, so without this the
+// agent silently never sees them (CW-20260929-0019).
+func warnDanglingSkillGrants(s *store.Store, agentID string) {
+	dangling, err := s.ListDanglingSkillGrants(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, agentID)
+	if err != nil {
+		slog.Debug("chat: list dangling skill grants failed", "err", err)
+		return
+	}
+	for _, slug := range dangling {
+		if _, seen := warnedSkillGrants.LoadOrStore(agentID+"\x00"+slug, struct{}{}); seen {
+			continue
+		}
+		slog.Warn("chat: agent is granted a skill that is not in the catalog; it will not see it",
+			"agent_id", agentID, "skill", slug)
+	}
 }
 
 // SkillDescriptionMaxRunes bounds one listing line. The description's job is

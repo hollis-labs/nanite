@@ -134,14 +134,13 @@ tools:
   - fetch_tool_result
   - search_tool_result
 # RoleSkills (FU-33) — curated skill roster surfaced inline.
+# sp-writing-plans, sp-brainstorming and dispatching-parallel-agents belonged
+# to the retired agent-os registry and are in no catalog (CW-20260929-0019).
 roleSkills:
-  - sp-writing-plans
-  - sp-brainstorming
   - adr
   - capture-decision
   - capture-followup
   - surface-discovery
-  - dispatching-parallel-agents
 # Procedures (FU-12) — file-SOT procedure declarations. Each entry upserts
 # an agent_procedures row at boot-time sync. body_file paths resolve under
 # internal/agent/builtin/profiles/. Advisor-class agents don't have the

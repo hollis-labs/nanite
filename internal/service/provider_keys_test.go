@@ -109,6 +109,34 @@ func TestSetAPIKey_ClearWithEnvKeyKeepsProviderOnEnvironment(t *testing.T) {
 	}
 }
 
+// Clearing a key and saving it again must not reorder the model pickers:
+// the entry goes back at its registration-order position.
+func TestSetAPIKey_ResaveKeepsCatalogInSpecOrder(t *testing.T) {
+	f := newKeyFixture(t)
+	ctx := context.Background()
+	for _, id := range []string{"anthropic-001", "openai-001"} {
+		if _, err := f.svc.SetAPIKey(ctx, id, "k-"+id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.svc.SetAPIKey(ctx, "anthropic-001", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.SetAPIKey(ctx, "anthropic-001", "k-again"); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range f.cat.List() {
+		got = append(got, e.Name)
+	}
+	if strings.Join(got, ",") != "anthropic,openai" {
+		t.Fatalf("catalog order after clear+save = %v, want anthropic,openai", got)
+	}
+	if _, ok := f.reg.Get("openai"); !ok {
+		t.Fatal("re-ordering the catalog must not touch openai's registration")
+	}
+}
+
 func TestSetAPIKey_ClearWithNoKeyLeftUnregisters(t *testing.T) {
 	f := newKeyFixture(t)
 	ctx := context.Background()

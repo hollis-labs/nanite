@@ -20,6 +20,7 @@ type providerRegistry interface {
 // providers chat can use. A typed-nil *providercatalog.Catalog
 // is fine: its methods are nil-receiver safe.
 type providerCatalogWriter interface {
+	Get(name string) (providercatalog.Entry, bool)
 	Add(e providercatalog.Entry)
 	Remove(name string) bool
 }
@@ -89,7 +90,7 @@ func (s *ProviderConfigService) SetAPIKey(ctx context.Context, id, key string) (
 	if resolved != "" {
 		s.registry.Register(spec.Name, spec.NewProvider(resolved))
 		if s.catalog != nil {
-			s.catalog.Add(providercatalog.Entry{Name: spec.Name, DisplayName: spec.DisplayName, RowID: spec.ProviderID})
+			s.addToCatalogInSpecOrder(spec)
 		}
 		slog.InfoContext(ctx, "provider re-registered with new key", "provider", spec.Name, "key_source", source)
 		return result, nil
@@ -100,4 +101,36 @@ func (s *ProviderConfigService) SetAPIKey(ctx context.Context, id, key string) (
 	}
 	slog.InfoContext(ctx, "provider unregistered: no key left", "provider", spec.Name)
 	return result, nil
+}
+
+// addToCatalogInSpecOrder upserts spec's catalog entry. Catalog.Add appends a
+// new name, so a provider cleared and then saved again would move to the end
+// of the pickers; instead the entries of later specs are lifted and re-added
+// after it, keeping startup's registration order.
+func (s *ProviderConfigService) addToCatalogInSpecOrder(spec APIProviderSpec) {
+	entry := providercatalog.Entry{Name: spec.Name, DisplayName: spec.DisplayName, RowID: spec.ProviderID}
+	if _, ok := s.catalog.Get(spec.Name); ok {
+		s.catalog.Add(entry)
+		return
+	}
+	specs := APIProviderSpecs()
+	var later []providercatalog.Entry
+	seen := false
+	for _, sp := range specs {
+		if sp.Name == spec.Name {
+			seen = true
+			continue
+		}
+		if !seen {
+			continue
+		}
+		if e, ok := s.catalog.Get(sp.Name); ok {
+			later = append(later, e)
+			s.catalog.Remove(sp.Name)
+		}
+	}
+	s.catalog.Add(entry)
+	for _, e := range later {
+		s.catalog.Add(e)
+	}
 }

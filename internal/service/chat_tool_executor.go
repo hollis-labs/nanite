@@ -723,9 +723,9 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// soft cap in c114 (6813 bytes), forcing the agent through
 		// fetch/search and burning all 10 turns before it could emit a
 		// card.
-		budget := truncate.BudgetForModel(modelID)
+		budget := ls.previewBudget(modelID)
 		if ls.turnResultCeiling > 0 && ls.cumulativeToolBytes > ls.turnResultCeiling {
-			budget = CompactPreviewBudgetBytes
+			budget = ls.compactPreviewBudget()
 			slog.Info("chat-service: turn tool output ceiling exceeded, using compact preview",
 				"tool", tu.Name,
 				"cumulative_bytes", ls.cumulativeToolBytes,

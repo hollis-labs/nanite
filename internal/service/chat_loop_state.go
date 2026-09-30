@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/harnessprofile"
+
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
@@ -171,6 +173,9 @@ const (
 // loopState consolidates all mutable state for the generateResponse loop.
 type loopState struct {
 	resultBudget int // Shared model-aware result-preview and retrieval-page budget.
+	// harness is the resolved harness profile for this run; nil only in tests
+	// that build a loopState directly, which then use the compiled-in defaults.
+	harness *harnessprofile.Resolved
 	// Tool execution tracking.
 	lastToolResults     map[string]string
 	toolRepeatCount     map[string]int

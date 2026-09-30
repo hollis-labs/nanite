@@ -59,20 +59,26 @@ const (
 // Returns the effective MaxChars in bytes, plus the resolved window in tokens
 // so callers can include it in telemetry.
 func computeDynamicMaxChars(modelID string) (effective int, windowTokens int) {
+	return computeDynamicMaxCharsWith(modelID, dynMaxCharsPct, MaxChars, MaxCharsCeiling)
+}
+
+// computeDynamicMaxCharsWith is computeDynamicMaxChars with the fraction and the
+// clamp bounds supplied, so a harness profile can tune them.
+func computeDynamicMaxCharsWith(modelID string, pct float64, floor, ceiling int) (effective int, windowTokens int) {
 	if modelID == "" {
-		return MaxChars, 0
+		return floor, 0
 	}
 	windowTokens = models.ContextWindowFor(modelID)
 	if windowTokens <= 0 {
-		return MaxChars, 0
+		return floor, 0
 	}
 	windowBytes := windowTokens * 4
-	proposed := int(float64(windowBytes) * dynMaxCharsPct)
-	if proposed < MaxChars {
-		return MaxChars, windowTokens
+	proposed := int(float64(windowBytes) * pct)
+	if proposed < floor {
+		return floor, windowTokens
 	}
-	if proposed > MaxCharsCeiling {
-		return MaxCharsCeiling, windowTokens
+	if proposed > ceiling {
+		return ceiling, windowTokens
 	}
 	return proposed, windowTokens
 }
@@ -80,6 +86,14 @@ func computeDynamicMaxChars(modelID string) (effective int, windowTokens int) {
 // BudgetForModel is the shared preview and default retrieval-page budget.
 func BudgetForModel(modelID string) int {
 	budget, _ := computeDynamicMaxChars(modelID)
+	return budget
+}
+
+// BudgetForModelWith is BudgetForModel with the window fraction and the
+// [floor, ceiling] clamp supplied, for a harness profile that tunes them. With
+// the defaults it returns exactly BudgetForModel.
+func BudgetForModelWith(modelID string, pct float64, floor, ceiling int) int {
+	budget, _ := computeDynamicMaxCharsWith(modelID, pct, floor, ceiling)
 	return budget
 }
 

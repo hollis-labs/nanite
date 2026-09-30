@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/recovery"
@@ -47,6 +48,17 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		ProjectID: req.ProjectID,
 		Model:     req.Model,
 		Provider:  req.Provider,
+	}
+	if req.HarnessProfile != "" || len(req.HarnessOverrides) > 0 {
+		meta, err := service.MergeHarnessSelection("", req.HarnessProfile, req.HarnessOverrides)
+		if err == nil {
+			err = service.ValidateHarnessSelection(a.Services.HarnessProfiles, meta)
+		}
+		if err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		sess.Metadata = meta
 	}
 	if err := a.Services.Store.CreateSession(r.Context(), sess); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())

@@ -18,6 +18,18 @@ type TunablesConfig struct {
 	OTel      OTelConfig      `yaml:"otel"`
 	Logging   LoggingConfig   `yaml:"logging"`
 	Recipes   RecipesConfig   `yaml:"recipes"`
+	Harness   HarnessConfig   `yaml:"harness"`
+}
+
+// HarnessConfig selects the harness profile a run uses when it names none, and
+// where user profiles live.
+type HarnessConfig struct {
+	// Profile is the default profile name; empty means "default". The
+	// NANITE_HARNESS_PROFILE environment variable overrides it.
+	Profile string `yaml:"profile"`
+	// ProfilesDir is a directory of user profile files. Empty means the
+	// "profiles" directory under the config directory.
+	ProfilesDir string `yaml:"profiles_dir"`
 }
 
 // RecipesConfig controls durable-agent recipe catalog loading.

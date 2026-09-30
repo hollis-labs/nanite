@@ -20,6 +20,10 @@ type CreateSessionRequest struct {
 	// SubagentRuntime overrides the app's subagent_runtime for subagents
 	// spawned from this session: "api" or "cli"; empty leaves the app default.
 	SubagentRuntime string `json:"subagent_runtime"`
+	// HarnessProfile selects a named harness profile for the session, and
+	// HarnessOverrides states per-launch overrides in the profile layer shape.
+	HarnessProfile   string         `json:"harness_profile,omitempty"`
+	HarnessOverrides map[string]any `json:"harness_overrides,omitempty"`
 }
 
 // Phase 0 item 21 ("Cut Modes, in full") removed this file's ModeID field

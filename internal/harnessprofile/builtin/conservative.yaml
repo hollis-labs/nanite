@@ -1,0 +1,11 @@
+# Tighter breakers for unattended or cost-sensitive runs: a runaway is cut off
+# sooner and no single tool can be called as often in one turn.
+name: conservative
+extends: default
+description: Earlier runaway cut-off and a lower per-tool backstop.
+limits:
+  idle_timeout_ms: 300000
+harness:
+  hard_ceiling: 100
+  runaway_fail_cap: 5
+  per_tool_cap: 50

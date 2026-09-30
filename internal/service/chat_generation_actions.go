@@ -10,10 +10,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/harnessprofile"
+
 	"github.com/google/uuid"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	feotel "github.com/hollis-labs/go-otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
@@ -24,10 +30,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
-	"github.com/hollis-labs/nanite/internal/truncate"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 )
 
 type generationDirective uint8
@@ -58,7 +60,7 @@ func (s *chatServiceImpl) settleToolTurn(
 ) settleToolTurnResult {
 	agentID := setup.agentID
 	model := setup.model
-	run.loop.resultBudget = truncate.BudgetForModel(model)
+	run.loop.resultBudget = run.loop.previewBudget(model)
 	selection := setup.selection
 	prov := setup.provider
 	// --- Build assistant message with tool_use blocks ---
@@ -273,7 +275,12 @@ func (s *chatServiceImpl) initializeRun(
 	// inactivity-timeout window. A subagent dispatch uses the
 	// Torque-parity liveness window (subagentIdleTimeoutSeconds) — the
 	// fixed 300s wall-clock deadline that used to bound subagent runs
-	ls := newLoopState(constraints, toolNames, debugMode, dispatcher.CallerTypeFromContext(ctx))
+	callerType := dispatcher.CallerTypeFromContext(ctx)
+	ls := newLoopState(constraints, toolNames, debugMode, callerType)
+	// D-33: the resolved harness profile owns the loop limits from here. The
+	// per-agent constraints and the per-tool-cap user setting were folded into
+	// the resolution as layers in prepareTurn.
+	applyHarness(ls, setup.harness, callerType == dispatcher.CallerSubagent)
 	if s.store != nil {
 		if us, err := s.store.GetUserSettings(ctx); err == nil && us != nil && us.ExtSettings != nil {
 			if v, ok := us.ExtSettings["tool_turn_ceiling_bytes"]; ok {
@@ -348,11 +355,6 @@ func (s *chatServiceImpl) initializeRun(
 		"reasoning_budget_tokens", reasoningCfg.BudgetTokens,
 	)
 
-	// Load per-tool cap from UserSettings.
-	if us, err := s.store.GetUserSettings(ctx); err == nil && us.ToolPerTurnCap > 0 {
-		ls.limits.defaultPerToolCap = us.ToolPerTurnCap
-	}
-
 	// CW-20260418-0043 diagnostic — log effective loop config on entry.
 	diagLogLoopStart(sessionID, assistantMsgID, agent.ID, ls, cap(ch))
 
@@ -419,6 +421,8 @@ type turnSetup struct {
 	// stream, resolved once from ctx at turn start. Zero-value turns (subagents,
 	// background wakes) are phased.
 	deltaMode chat.DeltaMode
+	// harness is the harness profile resolved for this turn.
+	harness *harnessprofile.Resolved
 }
 
 type prepareTurnResult struct {
@@ -1863,6 +1867,16 @@ func (s *chatServiceImpl) prepareTurn(
 		model = resolved
 	}
 
+	// --- Resolve harness profile (D-33) ---
+	// Selected by the session, resolved against the model and the agent's
+	// stored constraints. An unknown or invalid profile ends the turn with the
+	// reason; it is never replaced by a default.
+	harness, harnessErr := s.resolveHarness(ctx, session, constraints, model)
+	if harnessErr != nil {
+		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, harnessErr.Error(), nil)
+		return prepareTurnResult{directive: generationTerminate}
+	}
+
 	// --- Resolve provider ---
 	providerName, prov := s.resolveProvider(sessionID, session.Provider, agent.DefaultProvider, model, agent.RuntimeKind)
 	if prov == nil {
@@ -2235,6 +2249,7 @@ func (s *chatServiceImpl) prepareTurn(
 			systemPrompt:       systemPrompt,
 			inspectorTurnID:    inspectorTurnID,
 			deltaMode:          chat.DeltaModeFromContext(ctx),
+			harness:            harness,
 		},
 	}
 }

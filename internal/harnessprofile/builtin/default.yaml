@@ -1,0 +1,5 @@
+# The profile a run uses when none is selected. It states nothing: every knob
+# takes its computed default, so behavior is what the harness did before
+# profiles existed, and app settings (user_settings) still apply.
+name: default
+description: Computed defaults; identical to the harness's compiled-in behavior.

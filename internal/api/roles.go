@@ -17,12 +17,12 @@ import (
 // handleListRoles returns all roles.
 // GET /api/roles
 func (a *API) handleListRoles(w http.ResponseWriter, r *http.Request) {
-	roles, err := a.Services.Store.ListRoles(r.Context())
+	roles, err := a.Services.Roles.List(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, roles)
+	a.jsonResp(w, http.StatusOK, rolesToView(roles))
 }
 
 // handleCreateRole creates a new role.
@@ -49,18 +49,18 @@ func (a *API) handleCreateRole(w http.ResponseWriter, r *http.Request) {
 		DefaultSkills:      req.DefaultSkills,
 		DefaultPermissions: req.DefaultPermissions,
 	}
-	if err := a.Services.Store.CreateRole(r.Context(), role); err != nil {
+	if err := a.Services.Roles.Create(r.Context(), role); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, role)
+	a.jsonResp(w, http.StatusCreated, roleToView(role))
 }
 
 // handleGetRole returns a single role by ID.
 // GET /api/roles/{id}
 func (a *API) handleGetRole(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	role, err := a.Services.Store.GetRole(r.Context(), id)
+	role, err := a.Services.Roles.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -69,7 +69,7 @@ func (a *API) handleGetRole(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusNotFound, "role not found")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, role)
+	a.jsonResp(w, http.StatusOK, roleToView(role))
 }
 
 // handleUpdateRole updates a role's mutable fields.
@@ -77,7 +77,7 @@ func (a *API) handleGetRole(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Services.Store.GetRole(r.Context(), id)
+	existing, err := a.Services.Roles.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -121,18 +121,18 @@ func (a *API) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 		existing.DefaultPermissions = *req.DefaultPermissions
 	}
 
-	if err := a.Services.Store.UpdateRole(r.Context(), existing); err != nil {
+	if err := a.Services.Roles.Update(r.Context(), existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, existing)
+	a.jsonResp(w, http.StatusOK, roleToView(existing))
 }
 
 // handleDeleteRole deletes a role by ID.
 // DELETE /api/roles/{id}
 func (a *API) handleDeleteRole(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.DeleteRole(r.Context(), id); err != nil {
+	if err := a.Services.Roles.Delete(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

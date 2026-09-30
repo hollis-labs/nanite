@@ -110,6 +110,11 @@ type Container struct {
 	// MCPServers owns the persisted MCP server configs, keeps the MCP
 	// manager registered with them, and owns header redaction.
 	MCPServers *MCPServerService
+	// Roles owns role rows.
+	Roles *RoleService
+	// Projects owns project rows, the AD-27 repository-path rule, and the
+	// root file autocomplete walks for a session.
+	Projects *ProjectService
 
 	// Narrow store collaborators for transports that construct a pipeline
 	// object per call (skill gate, materializer, installer, uninstaller,
@@ -1536,6 +1541,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Schedules:           NewScheduleService(cfg.Store),
 		Settings:            NewUserSettingsService(cfg.Store),
 		MCPServers:          newContainerMCPServerService(cfg.Store, cfg.MCP),
+		Roles:               NewRoleService(cfg.Store),
+		Projects:            NewProjectService(cfg.Store, cfg.Store),
 		SkillIndex:          cfg.Store,
 		SkillUninstallIndex: cfg.Store,
 		SkillGrants:         cfg.Store,

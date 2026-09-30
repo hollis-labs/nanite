@@ -30,7 +30,14 @@ type ExecutionMetrics struct {
 	StopReason          string  `json:"stop_reason"`
 	Error               string  `json:"error"`
 	DebugSnapshots      string  `json:"debug_snapshots,omitempty"` // JSON blob of TurnSnapshot[]
-	CreatedAt           string  `json:"created_at"`
+	// ProfileName, ProfileDigest and EffectiveLimitsJSON record the harness
+	// profile the turn ran under (D-33): the name, a digest of its whole
+	// definition, and the resolved values with the layer that supplied each.
+	// Empty for utility calls and for rows older than the columns.
+	ProfileName         string `json:"profile_name,omitempty"`
+	ProfileDigest       string `json:"profile_digest,omitempty"`
+	EffectiveLimitsJSON string `json:"effective_limits_json,omitempty"`
+	CreatedAt           string `json:"created_at"`
 }
 
 // UtilityCallSummary aggregates utility call metrics by provider+model for comparison.
@@ -51,7 +58,8 @@ const executionMetricsCols = `id, session_id, message_id, provider, adapter, mod
 	context_messages, context_tokens, input_tokens, output_tokens,
 	cache_creation_tokens, cache_read_tokens, estimated_cost_usd,
 	tool_iterations, tool_calls, is_utility, stop_reason, error,
-	COALESCE(debug_snapshots, '') AS debug_snapshots, created_at`
+	COALESCE(debug_snapshots, '') AS debug_snapshots, created_at,
+	profile_name, profile_digest, effective_limits_json`
 
 func scanExecutionMetrics(rows interface{ Scan(...any) error }) (ExecutionMetrics, error) {
 	var m ExecutionMetrics
@@ -62,6 +70,7 @@ func scanExecutionMetrics(rows interface{ Scan(...any) error }) (ExecutionMetric
 		&m.CacheCreationTokens, &m.CacheReadTokens, &m.EstimatedCostUSD,
 		&m.ToolIterations, &m.ToolCalls, &m.IsUtility, &m.StopReason, &m.Error,
 		&m.DebugSnapshots, &m.CreatedAt,
+		&m.ProfileName, &m.ProfileDigest, &m.EffectiveLimitsJSON,
 	)
 	return m, err
 }
@@ -76,14 +85,14 @@ func (s *Store) RecordExecutionMetrics(ctx context.Context, m *ExecutionMetrics)
 			 context_messages, context_tokens, input_tokens, output_tokens,
 			 cache_creation_tokens, cache_read_tokens, estimated_cost_usd,
 			 tool_iterations, tool_calls, is_utility, stop_reason, error,
-			 debug_snapshots)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 debug_snapshots, profile_name, profile_digest, effective_limits_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.SessionID, m.MessageID, m.Provider, m.Adapter, m.Model,
 		m.AgentID, m.AgentSlug, m.Mode, m.DurationMs,
 		m.ContextMessages, m.ContextTokens, m.InputTokens, m.OutputTokens,
 		m.CacheCreationTokens, m.CacheReadTokens, m.EstimatedCostUSD,
 		m.ToolIterations, m.ToolCalls, m.IsUtility, m.StopReason, m.Error,
-		m.DebugSnapshots,
+		m.DebugSnapshots, m.ProfileName, m.ProfileDigest, m.EffectiveLimitsJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("record execution metrics: %w", err)

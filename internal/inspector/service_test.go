@@ -1,6 +1,7 @@
 package inspector
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -231,5 +232,14 @@ func TestBrokerDecisionMultiple(t *testing.T) {
 	snap := svc.Snapshot(sessionID, turnID)
 	if len(snap.BrokerDecisions) != 3 {
 		t.Fatalf("expected 3 broker decisions, got %d", len(snap.BrokerDecisions))
+	}
+}
+
+func TestRecordHarness(t *testing.T) {
+	svc := NewService()
+	svc.RecordHarness("s1", "1", HarnessRecord{Profile: "dev", Digest: "sha256:x", Effective: json.RawMessage(`{"values":{}}`)})
+	snap := svc.Snapshot("s1", "1")
+	if snap == nil || snap.Harness == nil || snap.Harness.Profile != "dev" || snap.Harness.Digest != "sha256:x" || string(snap.Harness.Effective) != `{"values":{}}` {
+		t.Fatalf("snapshot = %+v", snap)
 	}
 }

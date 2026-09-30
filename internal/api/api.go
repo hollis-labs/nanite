@@ -635,6 +635,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Execution Metrics
 	mux.HandleFunc("GET /api/sessions/{id}/metrics", a.handleGetSessionExecutionMetrics)
+	mux.HandleFunc("GET /api/sessions/{id}/harness-profile", a.handleGetSessionHarnessProfile)
 	mux.HandleFunc("GET /api/metrics/executions", a.handleGetRecentExecutionMetrics)
 	mux.HandleFunc("GET /api/metrics/utility", a.handleGetUtilityCallSummary)
 	mux.HandleFunc("GET /api/metrics/utility/log", a.handleGetUtilityCallLog)

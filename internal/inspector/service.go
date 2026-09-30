@@ -224,6 +224,15 @@ func (s *Service) RecordScopeTier(sessionID, turnID string, tier string) {
 	})
 }
 
+// RecordHarness records the harness profile the turn ran under.
+func (s *Service) RecordHarness(sessionID, turnID string, rec HarnessRecord) {
+	sb := s.getOrCreate(sessionID)
+	sb.upsert(turnID, func(snap *TurnSnapshot) {
+		snap.SessionID = sessionID
+		snap.Harness = &rec
+	})
+}
+
 // RecordReminders records reminder activity (set + fired) for the turn (J11).
 // Merges with any previously-recorded reminders for this turn — set and fired
 // slices are appended to so multiple producers can contribute.

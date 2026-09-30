@@ -309,6 +309,12 @@ func (s *chatServiceImpl) initializeRun(
 	if s.inspector != nil && inspectorTurnID != "" {
 		classifiedTier, _ := ls.Classification()
 		s.inspector.RecordScopeTier(sessionID, inspectorTurnID, classifiedTier.String())
+		if setup.harness != nil {
+			s.inspector.RecordHarness(sessionID, inspectorTurnID, inspectsvc.HarnessRecord{
+				Profile: setup.harness.Profile, Digest: setup.harness.Digest,
+				Effective: json.RawMessage(setup.harness.EffectiveJSON()),
+			})
+		}
 	}
 
 	// Phase 4 item 02
@@ -1738,6 +1744,9 @@ func (s *chatServiceImpl) finalizeRun(
 		DurationMs:      time.Since(lifecycle.startTime).Milliseconds(),
 		ContextMessages: len(run.chatMessages), ToolIterations: run.loop.iteration,
 		ToolCalls: len(run.loop.toolCallRefs),
+	}
+	if h := run.loop.harness; h != nil {
+		metrics.ProfileName, metrics.ProfileDigest, metrics.EffectiveLimitsJSON = h.Profile, h.Digest, h.EffectiveJSON()
 	}
 	if run.breakdown != nil {
 		metrics.ContextTokens = run.breakdown.Total

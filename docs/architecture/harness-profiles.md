@@ -83,6 +83,23 @@ Every resolved value carries its source (`computed`, `app-settings`,
 `env:<VAR>`), and the profile carries a digest over its whole definition, so a
 run can be attributed to exactly the profile content it used.
 
+## Recording and diagnostics
+
+Each turn's `execution_metrics` row records the profile name, the profile
+digest, and the effective values with the layer that supplied each (`profile_name`,
+`profile_digest`, `effective_limits_json`), so a result can be attributed to the
+exact profile content it ran under. They are returned by
+`GET /api/sessions/{id}/metrics` and, in developer mode, attached to the turn's
+inspector snapshot. Rows written before the columns existed, and utility calls,
+carry none.
+
+`GET /api/sessions/{id}/harness-profile` resolves what the session's next turn
+would run under, from the session's selection, its agent's constraints, the user
+settings and the model (`?model=` overrides it). `nanite profile list` and
+`nanite profile show <name> [--model M] [--json]` resolve a profile from the
+files and the current environment, without a server; they cannot show the
+session, agent and user-settings layers, which the endpoint does.
+
 ## dev is a profile, not a build mode
 
 `dev` is an ordinary named profile chosen the same way as any other. It is
@@ -95,6 +112,7 @@ make shipped and development builds behave differently in ways nobody selected.
 ```bash
 # the profile files a checkout ships, and the resolution order in code
 ls internal/harnessprofile/builtin
+nanite profile show conservative --model claude-opus-5
 grep -n 'w.apply(\|w.clamp()' internal/harnessprofile/resolve.go
 # the tests that pin precedence, sources, clamps and parity with today's defaults
 go test ./internal/harnessprofile ./internal/service -run 'Harness|Precedence|Clamp'

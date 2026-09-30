@@ -129,6 +129,7 @@ func diagLogLoopStart(sessionID, msgID, agentID string, ls *loopState, chCap int
 		"consecutive_fail_cap", ls.limits.consecutiveFailCap,
 		"idle_timeout_s", int(ls.limits.idleTimeout.Seconds()),
 		"tool_per_turn_cap", ls.limits.defaultPerToolCap,
+		"harness_profile", harnessProfileName(ls),
 		"ch_cap", chCap,
 	)
 }
@@ -195,4 +196,12 @@ func diagLogDeferReached(sessionID, msgID string, finalIter int, blockedSendSite
 		"final_iter", finalIter,
 		"last_blocked_send_site", blockedSendSite, // "" if none recorded
 	)
+}
+
+// harnessProfileName is the run's harness profile for log lines, "" when none.
+func harnessProfileName(ls *loopState) string {
+	if ls == nil || ls.harness == nil {
+		return ""
+	}
+	return ls.harness.Profile
 }

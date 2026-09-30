@@ -75,7 +75,7 @@ type Team struct {
 // and docs -- never a bare Slot/slot type. internal/context/slot.go
 // already defines an unrelated, already-load-bearing "slot" concept
 // (SlotOrder, the Context Broker's prompt-assembly ordering, one of six
-// invariants in internal/context/INVARIANTS.md and CLAUDE.md). A Team
+// invariants in internal/context/INVARIANTS.md and AGENTS.md). A Team
 // Slot is an organizational role, not a prompt-assembly position -- see
 // GLOSSARY.md for the full disambiguation. "Slot" alone is ambiguous in
 // this codebase going forward; always qualify it.

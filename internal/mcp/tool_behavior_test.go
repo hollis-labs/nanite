@@ -81,3 +81,23 @@ func TestToolBehaviorIgnoresNonBooleanHints(t *testing.T) {
 		t.Error("a non-boolean hint must not be coerced to true")
 	}
 }
+
+func TestToolDeclaredHintsDistinguishesAbsentFromFalse(t *testing.T) {
+	m := NewManager()
+	addToolForTest(t, m, "s", "declares_write", map[string]any{"readOnlyHint": false})
+	addToolForTest(t, m, "s", "declares_read", map[string]any{"readOnlyHint": true})
+	addToolForTest(t, m, "s", "title_only", map[string]any{"title": "x"})
+
+	if ro, d := m.ToolDeclaredHints("declares_write"); ro == nil || *ro || d != nil {
+		t.Errorf("declares_write: ro=%v d=%v", ro, d)
+	}
+	if ro, _ := m.ToolDeclaredHints("declares_read"); ro == nil || !*ro {
+		t.Errorf("declares_read: ro=%v", ro)
+	}
+	if ro, d := m.ToolDeclaredHints("title_only"); ro != nil || d != nil {
+		t.Errorf("title_only must declare nothing: ro=%v d=%v", ro, d)
+	}
+	if ro, d := m.ToolDeclaredHints("never_registered"); ro != nil || d != nil {
+		t.Error("an unregistered name declares nothing")
+	}
+}

@@ -754,6 +754,26 @@ func (m *Manager) ToolBehavior(uniformName string) (readOnly, destructive, ok bo
 	return boolHint("readOnlyHint"), boolHint("destructiveHint"), true
 }
 
+// ToolDeclaredHints reports which behavior hints a server actually declared for
+// a tool, as pointers: nil means the hint was absent (or not a boolean), which
+// ToolBehavior flattens to false. A caller that must tell "declared not
+// read-only" from "declared nothing" uses this.
+func (m *Manager) ToolDeclaredHints(uniformName string) (readOnly, destructive *bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, found := m.uniformIndex[uniformName]
+	if !found {
+		return nil, nil
+	}
+	hint := func(key string) *bool {
+		if b, isBool := entry.tool.Annotations[key].(bool); isBool {
+			return &b
+		}
+		return nil
+	}
+	return hint("readOnlyHint"), hint("destructiveHint")
+}
+
 // ToolAttribution returns the originating MCP server and the tool's
 // original name on that server, given a uniform agent-facing name.
 // Returns ok=false when the name is not a registered MCP tool. Used by

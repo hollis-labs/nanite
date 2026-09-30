@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 
 	hooks "github.com/hollis-labs/go-hooks"
 
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/internal/writeclaim"
 )
@@ -36,28 +38,135 @@ const (
 	wcMaxRetriesPerRun = 1
 )
 
-// nonWriteTools never count as a write, whatever their annotations say: they
-// discover, describe, page cached results or keep scratch state. Without this a
-// turn of request_tools and whoami would look write-capable.
+// nonWriteTools never count as a write, whatever their annotations or names
+// say: they discover, describe, page cached results, keep scratch state, or
+// compute. A tool that only computes must not ground an id: `think` and
+// `math_eval` echo what the model gave them, including an id it invented.
 var nonWriteTools = map[string]bool{
 	"request_tools": true, "tool_describe": true, "tool_list": true, "tool_validate": true,
 	"whoami": true, "fetch_tool_result": true, "search_tool_result": true,
+	"think": true, "math_eval": true, "calc": true, "calculator": true, "datetime": true,
+	"current_time": true, "echo": true, "uuid": true, "random": true, "sleep": true,
+	"base64_encode": true, "base64_decode": true, "json_format": true, "regex_test": true,
+}
+
+// writeVerbs are the name tokens that mark a tool as one that changes state
+// somewhere. A tool must be recognizably a writer to ground a claim: a name
+// with none of these, and no declared destructive annotation, is treated as
+// not writing.
+var writeVerbs = map[string]bool{
+	"write": true, "create": true, "update": true, "delete": true, "remove": true, "add": true,
+	"set": true, "put": true, "post": true, "save": true, "store": true, "capture": true,
+	"insert": true, "upsert": true, "append": true, "edit": true, "patch": true, "transition": true,
+	"promote": true, "ingest": true, "register": true, "deregister": true, "send": true,
+	"publish": true, "commit": true, "push": true, "deploy": true, "merge": true, "close": true,
+	"archive": true, "unarchive": true, "move": true, "rename": true, "apply": true, "assign": true,
+	"attach": true, "detach": true, "invite": true, "kick": true, "revoke": true, "lease": true,
+	"renew": true, "purge": true, "drain": true, "redrive": true, "replay": true, "sync": true,
+	"touch": true, "deprecate": true, "toggle": true, "run": true, "exec": true, "execute": true,
+	"dispatch": true, "launch": true, "start": true, "stop": true, "resume": true, "cancel": true,
+	"respond": true, "submit": true, "enqueue": true, "acknowledge": true, "ack": true,
+	"mark": true, "reorder": true, "bulk": true, "tag": true,
+	// State changes that do not read as CRUD: messaging and lifecycle, handoffs,
+	// approvals, sessions and checkpoints, installs, jobs, and UI surfaces.
+	"notify": true, "consume": true, "spawn": true, "pin": true, "unpin": true, "request": true,
+	"emit": true, "checkpoint": true, "up": true, "down": true, "reload": true, "advance": true,
+	"open": true, "step": true, "job": true, "stash": true, "approve": true, "reject": true,
+	"ensure": true, "embed": true, "compile": true, "withdraw": true, "supersede": true,
+	"leave": true, "done": true, "resize": true, "reanalyze": true, "install": true,
+	"wizard": true, "triage": true, "feedback": true, "draft": true,
+}
+
+// readVerbs are name tokens that make a tool a reader even when another token
+// is a write verb: cerberus_get_dns_record_set names a record set it fetches,
+// preview_ingest is a dry run, validate_ingest only checks. Only verbs that
+// collide with a write token are listed. "status", "inbox" and "read" are left
+// out on purpose: context_status_set and torque_collection_inbox_add write, and
+// mux_message_mark_read is a write whose last token is "read".
+var readVerbs = map[string]bool{
+	"get": true, "list": true, "search": true, "preview": true, "validate": true,
+	"describe": true, "inspect": true, "query": true, "lookup": true, "history": true,
+	"show": true, "view": true, "recall": true, "estimate": true, "thread": true, "trace": true,
+}
+
+// writeToolNames are whole names that classify as writers although no single
+// token can: message_resolve settles a message, while resolve in
+// tesseract_ref_resolve is a lookup; mux_call forwards to any tool and so may
+// wrap a write.
+var writeToolNames = map[string]bool{"message_resolve": true, "mux_call": true}
+
+// nameTokens splits a tool name on separators and camel-case boundaries into
+// lowercase tokens: "torque_task_transition" -> [torque task transition],
+// "knowledgeWrite" -> [knowledge write], "HTTPPost" -> [http post].
+func nameTokens(name string) []string {
+	var out []string
+	var cur []rune
+	flush := func() {
+		if len(cur) > 0 {
+			out = append(out, strings.ToLower(string(cur)))
+			cur = cur[:0]
+		}
+	}
+	runes := []rune(name)
+	for i, r := range runes {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			flush()
+			continue
+		}
+		if unicode.IsUpper(r) && len(cur) > 0 {
+			prev := runes[i-1]
+			nextLower := i+1 < len(runes) && unicode.IsLower(runes[i+1])
+			if unicode.IsLower(prev) || unicode.IsDigit(prev) || (unicode.IsUpper(prev) && nextLower) {
+				flush()
+			}
+		}
+		cur = append(cur, r)
+	}
+	flush()
+	return out
 }
 
 // isWriteCapable reports whether a successful call to name counts as a write.
-// A tool is write-capable unless it is known not to be: a fixed non-write set,
-// scratchpad tools, or a tool the server or the name heuristic marks read-only.
-// An unknown tool counts as write-capable, so the guard errs toward silence.
+// Order of evidence: never-write tools, then the tool's declared hints
+// (readOnlyHint=true is a read; readOnlyHint=false or destructiveHint=true is a
+// write), then the name heuristics: a read verb in the name, a write verb.
+// A tool with none of these is treated as not writing, so a computing or
+// unclassified tool cannot silence the guard or ground an id.
 func (s *chatServiceImpl) isWriteCapable(ctx context.Context, name string) bool {
 	if nonWriteTools[name] || isScratchpadTool(name) || isResultCacheTool(name) {
 		return false
 	}
+	var meta ToolMetaInfo
 	if s.tools != nil {
-		if meta, ok := s.tools.GetToolMeta(ctx, name); ok && meta.IsReadOnly {
+		meta, _ = s.tools.GetToolMeta(ctx, name)
+	}
+	// What a server declared beats what the name looks like. Absent hints are
+	// not declarations: they fall through to the name.
+	if meta.ReadOnlyDeclared {
+		return false
+	}
+	if meta.WriteDeclared {
+		return true
+	}
+	if meta.IsReadOnly {
+		return false
+	}
+	if meta.IsDestructive {
+		return true
+	}
+	if writeToolNames[name] {
+		return true
+	}
+	write := false
+	for _, tok := range nameTokens(name) {
+		if readVerbs[tok] {
 			return false
 		}
+		if writeVerbs[tok] {
+			write = true
+		}
 	}
-	return true
+	return write
 }
 
 // writeClaimFacts is what the turn actually did.
@@ -202,4 +311,48 @@ func (s *chatServiceImpl) logWriteClaimDecision(ctx context.Context, sessionID, 
 		"wrote_this_turn": facts.WroteThisTurn, "tools": facts.ToolsRan,
 	})
 	s.store.LogEvent(context.WithoutCancel(ctx), sessionID, wcEventType, "guard", d.Reason, string(blob))
+}
+
+// guardMode is the write-claim guard's mode for the run.
+func guardMode(ls *loopState) harnessprofile.GuardMode {
+	if ls != nil && ls.harness != nil {
+		return ls.harness.Values.WriteClaimGuard
+	}
+	return harnessprofile.DefaultWriteClaimGuard
+}
+
+// narrationClaimFooter checks the prose the model wrote in iterations that also
+// called tools (the narration) once the turn is over, against the turn's final
+// facts, and returns the footer to append to the reply, if any.
+//
+// That prose cannot be sent back the way a final reply can: it has already been
+// shown, and the loop it belonged to has moved on and run its tools. So a claim
+// found there is never blocked or retried. It is logged with action
+// "narration_flagged"; under deny the reply gets the visible footer, otherwise a
+// status event is emitted. An id the turn's own write later returned grounds it,
+// so "saving it now" narration followed by the real write is not flagged.
+func (s *chatServiceImpl) narrationClaimFooter(ctx context.Context, sessionID, model string, ls *loopState, narration string, ch chan chat.StreamEvent) string {
+	mode := guardMode(ls)
+	if narration == "" || mode == harnessprofile.GuardOff {
+		return ""
+	}
+	stop := hooks.StopInput{LastAssistantMessage: narration}
+	facts := s.writeClaimFactsFor(ctx, sessionID, ls, false)
+	out, d := writeClaimHook(mode, stop, facts)
+	if d.Reason == wcUnbackedClaim {
+		facts = s.writeClaimFactsFor(ctx, sessionID, ls, true)
+		out, d = writeClaimHook(mode, stop, facts)
+	}
+	if !d.Fired {
+		return ""
+	}
+	s.logWriteClaimDecision(ctx, sessionID, model, d, facts, "narration_flagged")
+	if mode == harnessprofile.GuardDeny {
+		if ls.wcFooter != "" {
+			return "" // the reply already carries a correction
+		}
+		return writeClaimFooter(d.Finding.Ungrounded)
+	}
+	ch <- chat.StreamEvent{Type: "status", Content: out.SystemMessage}
+	return ""
 }

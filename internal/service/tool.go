@@ -87,7 +87,13 @@ type ToolMetaInfo struct {
 	IsReadOnly        bool
 	IsDestructive     bool
 	IsConcurrencySafe bool // safe to run in parallel with other tools
-	MaxIterations     int  // 0 = no per-tool limit
+	// ReadOnlyDeclared and WriteDeclared are set only from hints the tool's
+	// server actually declared (readOnlyHint=true; readOnlyHint=false or
+	// destructiveHint=true). A name-heuristic result sets neither, so a caller
+	// can tell a declaration from a guess.
+	ReadOnlyDeclared bool
+	WriteDeclared    bool
+	MaxIterations    int // 0 = no per-tool limit
 }
 
 // ProgressiveDiscoveryThreshold is the MCP tool count above which
@@ -770,12 +776,17 @@ func (s *toolServiceImpl) GetToolMeta(ctx context.Context, toolName string) (Too
 		if readOnly, destructive, ok := s.mcpManager.ToolBehavior(toolName); ok {
 			meta.IsReadOnly = readOnly
 			meta.IsDestructive = destructive
+			ro, d := s.mcpManager.ToolDeclaredHints(toolName)
+			meta.ReadOnlyDeclared = ro != nil && *ro
+			meta.WriteDeclared = (ro != nil && !*ro) || (d != nil && *d)
 			return meta, true
 		}
 	}
 
 	// Read-only tools.
 	switch {
+	case strings.HasSuffix(toolName, "_mark_read") || strings.HasSuffix(toolName, "_mark_as_read"):
+		// Marking read changes state; it is not a read.
 	case strings.HasSuffix(toolName, "_read") || strings.HasSuffix(toolName, "_glob") ||
 		strings.HasSuffix(toolName, "_grep") || strings.HasSuffix(toolName, "_search") ||
 		strings.HasSuffix(toolName, "_list") || strings.HasSuffix(toolName, "_get"):

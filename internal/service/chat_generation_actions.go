@@ -1718,6 +1718,12 @@ func (s *chatServiceImpl) finalizeRun(
 	// part of the persisted text (and the structured-message hash).
 	cleanContent = maybeAppendFailureFooter(cleanContent, run.loop.toolCallRefs)
 	cleanContent += run.loop.wcFooter
+	// D-34: prose from iterations that also called tools is checked now that
+	// the turn's facts are complete; see narrationClaimFooter for why it is
+	// flagged rather than blocked.
+	if !chat.IsCLIProvider(providerName) {
+		cleanContent += s.narrationClaimFooter(ctx, sessionID, model, run.loop, run.narrationContent.String(), ch)
+	}
 
 	// Structured message.
 	structured := chat.WrapResponse(cleanContent, tier, run.loop.toolCallRefs, envRefs, run.loop.wasTruncated, hasError)

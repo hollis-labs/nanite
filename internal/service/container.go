@@ -125,6 +125,10 @@ type Container struct {
 	// Pins owns pinned-content rows; Reminders owns reminder rows.
 	Pins      *PinService
 	Reminders *ReminderService
+	// Consumers owns consumer rows; Documents owns a session's context
+	// documents and context prompt.
+	Consumers *ConsumerService
+	Documents *DocumentService
 
 	// Narrow store collaborators for transports that construct a pipeline
 	// object per call (skill gate, materializer, installer, uninstaller,
@@ -1556,6 +1560,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Shell:               NewShellService(cfg.Store),
 		Pins:                NewPinService(cfg.Store),
 		Reminders:           NewReminderService(cfg.Store),
+		Consumers:           NewConsumerService(cfg.Store),
+		Documents:           NewDocumentService(cfg.Store),
 		Artifacts: NewArtifactService(cfg.Store, func() string {
 			if cfg.AppConfig != nil {
 				return cfg.AppConfig.Artifacts.StorageDir

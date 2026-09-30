@@ -18,12 +18,12 @@ import (
 // handleListConsumers returns all consumers.
 // GET /api/consumers
 func (a *API) handleListConsumers(w http.ResponseWriter, r *http.Request) {
-	consumers, err := a.Services.Store.ListConsumers(r.Context())
+	consumers, err := a.Services.Consumers.List(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, consumers)
+	a.jsonResp(w, http.StatusOK, consumersToView(consumers))
 }
 
 // handleCreateConsumer creates a new consumer.
@@ -43,18 +43,18 @@ func (a *API) handleCreateConsumer(w http.ResponseWriter, r *http.Request) {
 		Slug: req.Slug,
 		Name: req.Name,
 	}
-	if err := a.Services.Store.CreateConsumer(r.Context(), consumer); err != nil {
+	if err := a.Services.Consumers.Create(r.Context(), consumer); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, consumer)
+	a.jsonResp(w, http.StatusCreated, consumerToView(consumer))
 }
 
 // handleGetConsumer returns a single consumer by ID.
 // GET /api/consumers/{id}
 func (a *API) handleGetConsumer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	consumer, err := a.Services.Store.GetConsumer(r.Context(), id)
+	consumer, err := a.Services.Consumers.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -63,7 +63,7 @@ func (a *API) handleGetConsumer(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusNotFound, "consumer not found")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, consumer)
+	a.jsonResp(w, http.StatusOK, consumerToView(consumer))
 }
 
 // handleUpdateConsumer updates a consumer's mutable fields.
@@ -71,7 +71,7 @@ func (a *API) handleGetConsumer(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateConsumer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Services.Store.GetConsumer(r.Context(), id)
+	existing, err := a.Services.Consumers.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -94,11 +94,11 @@ func (a *API) handleUpdateConsumer(w http.ResponseWriter, r *http.Request) {
 		existing.Name = *req.Name
 	}
 
-	if err := a.Services.Store.UpdateConsumer(r.Context(), existing); err != nil {
+	if err := a.Services.Consumers.Update(r.Context(), existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, existing)
+	a.jsonResp(w, http.StatusOK, consumerToView(existing))
 }
 
 // handleDeleteConsumer deletes a consumer by ID. Fails with a wrapped FK
@@ -108,7 +108,7 @@ func (a *API) handleUpdateConsumer(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/consumers/{id}
 func (a *API) handleDeleteConsumer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.DeleteConsumer(r.Context(), id); err != nil {
+	if err := a.Services.Consumers.Delete(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

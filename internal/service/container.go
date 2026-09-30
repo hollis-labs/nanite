@@ -89,8 +89,10 @@ type Container struct {
 	Reflexes *ReflexService
 	// Loops owns goal CRUD, goal evidence and loop-run reads; launching and
 	// resolving loop runs is loop.LoopLauncher's, wired into the API.
-	Loops  *LoopService
-	Skills SkillService
+	Loops *LoopService
+	// Bookmarks owns message bookmarks.
+	Bookmarks *BookmarkService
+	Skills    SkillService
 	// SkillVendor is the content-addressed vendored skill store (internal/
 	// skillvendor, TASKS/skills/03) that backs the explicit install/sync
 	// pipeline (internal/skillinstall, TASKS/skills/04/05 --
@@ -1456,6 +1458,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentCapabilities:   NewAgentCapabilitiesService(cfg.Store),
 		Reflexes:            NewReflexService(cfg.Store),
 		Loops:               NewLoopService(cfg.Store),
+		Bookmarks:           NewBookmarkService(cfg.Store),
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,

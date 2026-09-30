@@ -12,8 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/truncate"
+
 	"github.com/google/uuid"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
+
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -690,7 +693,7 @@ func boundedRuntimeString(value string, maxBytes int) string {
 	if maxBytes < 1 || len(value) <= maxBytes {
 		return value
 	}
-	return value[:maxBytes] + "…"
+	return truncate.UTF8Head(value, maxBytes) + "…"
 }
 
 func (f *HostRuntimeFeed) String() string {

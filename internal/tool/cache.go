@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"errors"
@@ -259,18 +260,55 @@ func (c *ResultCache) Search(sessionID, id, pattern string, maxMatches int) ([]M
 }
 
 // Purge deletes expired cache entries. Returns the count of deleted rows.
-func (c *ResultCache) Purge() (int, error) {
+func (c *ResultCache) Purge() (int, error) { return PurgeExpired(c.db) }
+
+// PurgeExpired deletes expired tool_result_cache and tool_call_arguments rows.
+// Retention is each row's own expires_at, set at insert from the configured
+// tool_result_cache_ttl_seconds, so a purge never removes a row the cache would
+// still serve. It needs only the database, which lets the server's background
+// worker run it without constructing a cache. Returns the rows deleted.
+func PurgeExpired(db *sql.DB) (int, error) {
+	if db == nil {
+		return 0, errors.New("cache purge: no database")
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := c.db.Exec(`DELETE FROM tool_result_cache WHERE expires_at < ?`, now)
+	result, err := db.Exec(`DELETE FROM tool_result_cache WHERE expires_at < ?`, now)
 	if err != nil {
 		return 0, fmt.Errorf("cache purge: %w", err)
 	}
 	n, _ := result.RowsAffected()
-	n += c.purgeArguments(now)
+	args, err := db.Exec(`DELETE FROM tool_call_arguments WHERE expires_at < ?`, now)
+	if err != nil {
+		return int(n), fmt.Errorf("cache purge arguments: %w", err)
+	}
+	m, _ := args.RowsAffected()
+	n += m
 	if n > 0 {
 		slog.Info("tool-cache: purged expired entries", "count", n)
 	}
 	return int(n), nil
+}
+
+// RunPurgeLoop purges expired rows once immediately and then every interval
+// until ctx is canceled, at which point it returns. Blocking; the server runs
+// it on its lifecycle manager. A failed purge is logged and the loop continues.
+func RunPurgeLoop(ctx context.Context, db *sql.DB, interval time.Duration) {
+	purge := func() {
+		if _, err := PurgeExpired(db); err != nil {
+			slog.Warn("tool-cache purge failed", "err", err)
+		}
+	}
+	purge()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			purge()
+		}
+	}
 }
 
 // truncateAtBoundary returns the largest cut point ≤ maxBytes that lands on

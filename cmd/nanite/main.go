@@ -33,6 +33,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	gosched "github.com/hollis-labs/go-scheduler"
 	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/api"
@@ -55,6 +56,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/truncate"
 	"github.com/hollis-labs/nanite/internal/version"
@@ -1352,6 +1354,15 @@ func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container)
 			}
 		}
 	})
+
+	// Periodic deletion of expired tool-result cache and tool-argument rows
+	// (CW-20260929-0012 #3). Rows already stop being served at expires_at; this
+	// reclaims the space. Same hourly cadence as truncate-cleanup.
+	if container.Store != nil {
+		lc.Go("tool-cache-purge", func(ctx context.Context) {
+			tool.RunPurgeLoop(ctx, container.Store.DB, 1*time.Hour)
+		})
+	}
 
 	// Periodic task snapshot (flush Badger state to SQLite).
 	if container.Tasks != nil {

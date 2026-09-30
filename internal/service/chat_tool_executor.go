@@ -686,7 +686,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 			}
 			warningError := r.rawOutput
 			if len(warningError) > 300 {
-				warningError = warningError[:300] + "..."
+				warningError = truncate.UTF8Head(warningError, 300) + "..."
 			}
 			warningPayload := chat.ToolWarningPayload{
 				ToolName: tu.Name, Error: warningError,
@@ -781,7 +781,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// Emit tool_result to client.
 		summary := resultText
 		if len(summary) > 500 {
-			summary = summary[:500] + "... (truncated)"
+			summary = truncate.UTF8Head(summary, 500) + "... (truncated)"
 		}
 		// IsError mirrors the underlying ToolCallRef.Status — load-bearing
 		// for the subagent fabrication-suspected detector (CW-20260512-0095).

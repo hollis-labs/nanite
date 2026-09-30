@@ -87,7 +87,10 @@ type Container struct {
 	// Reflexes owns reflex definitions, opt-outs and the pending-reflex
 	// review queue; ReflexEngine runs them.
 	Reflexes *ReflexService
-	Skills   SkillService
+	// Loops owns goal CRUD, goal evidence and loop-run reads; launching and
+	// resolving loop runs is loop.LoopLauncher's, wired into the API.
+	Loops  *LoopService
+	Skills SkillService
 	// SkillVendor is the content-addressed vendored skill store (internal/
 	// skillvendor, TASKS/skills/03) that backs the explicit install/sync
 	// pipeline (internal/skillinstall, TASKS/skills/04/05 --
@@ -1452,6 +1455,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentConfig:         agentConfig,
 		AgentCapabilities:   NewAgentCapabilitiesService(cfg.Store),
 		Reflexes:            NewReflexService(cfg.Store),
+		Loops:               NewLoopService(cfg.Store),
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,

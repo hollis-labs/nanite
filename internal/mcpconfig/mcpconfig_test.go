@@ -144,7 +144,7 @@ func TestImportAndExport_Roundtrip(t *testing.T) {
 	}`
 
 	// Import
-	result, err := Import(context.Background(), s, []byte(input))
+	result, err := Import(context.Background(), s, []byte(input), nil)
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestImportAndExport_Roundtrip(t *testing.T) {
 	}
 
 	// Import again — should skip both
-	result2, err := Import(context.Background(), s, []byte(input))
+	result2, err := Import(context.Background(), s, []byte(input), nil)
 	if err != nil {
 		t.Fatalf("second import: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestImport_EmptyEnvAndArgs(t *testing.T) {
 
 	input := `{"mcpServers": {"minimal": {"command": "echo"}}}`
 
-	result, err := Import(context.Background(), s, []byte(input))
+	result, err := Import(context.Background(), s, []byte(input), nil)
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}

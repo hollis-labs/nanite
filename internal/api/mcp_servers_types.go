@@ -6,8 +6,9 @@ import (
 )
 
 // MCPServerView is an MCP server config as the API returns it, from the
-// list, create and update endpoints. Header values are always redacted
-// (service.RedactHeaders); the keys survive. Field order is the store row's.
+// list, create and update endpoints. Header and env values are always
+// redacted (service.RedactHeaders, service.RedactEnv); the header keys and
+// env variable names survive. Field order is the store row's.
 type MCPServerView struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
@@ -32,7 +33,7 @@ func mcpServerToView(cfg *store.MCPServerConfig) MCPServerView {
 		Command:       cfg.Command,
 		URL:           cfg.URL,
 		Args:          cfg.Args,
-		Env:           cfg.Env,
+		Env:           service.RedactEnv(cfg.Env),
 		Enabled:       cfg.Enabled,
 		TrustTier:     cfg.TrustTier,
 		EnvAllowlist:  cfg.EnvAllowlist,
@@ -55,7 +56,8 @@ func mcpServersToView(servers []store.MCPServerConfig) []MCPServerView {
 // the body omits keeps its stored value; a field it sends replaces it, and an
 // empty string clears it. An explicit JSON null decodes the same as omitted
 // and also keeps the stored value. Header values sent back as the redaction
-// placeholder keep their stored values. name, id, created_at and updated_at
+// placeholder, and env entries sent back as KEY=<placeholder>, keep their
+// stored values. name, id, created_at and updated_at
 // are not settable here and are ignored if sent.
 type UpdateMCPServerRequest struct {
 	TransportType *string `json:"transport_type"`

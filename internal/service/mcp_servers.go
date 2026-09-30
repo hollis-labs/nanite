@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpconfig"
@@ -111,6 +112,11 @@ func (s *MCPServerService) Create(ctx context.Context, cfg *store.MCPServerConfi
 		return ErrMCPServerExists
 	}
 
+	// Nothing is stored yet, so a placeholder has no value to keep: drop it
+	// rather than store bullets.
+	cfg.Headers = MergeRedactedHeaders(cfg.Headers, "")
+	cfg.Env = MergeRedactedEnv(cfg.Env, "")
+
 	cfg.Enabled = true
 	if err := s.store.CreateMCPServer(ctx, cfg); err != nil {
 		return err
@@ -165,7 +171,7 @@ func (s *MCPServerService) Update(ctx context.Context, existing *store.MCPServer
 		row.Args = *patch.Args
 	}
 	if patch.Env != nil {
-		row.Env = *patch.Env
+		row.Env = MergeRedactedEnv(*patch.Env, existing.Env)
 	}
 	if patch.Enabled != nil {
 		row.Enabled = *patch.Enabled
@@ -212,7 +218,7 @@ func (s *MCPServerService) Delete(ctx context.Context, name string) error {
 // not already exist by name, registers the created ones and, when any were
 // created, runs discovery. Entries created before a failure stay created.
 func (s *MCPServerService) Import(ctx context.Context, data []byte) (*mcpconfig.ImportResult, error) {
-	result, err := mcpconfig.Import(ctx, s.store, data)
+	result, err := mcpconfig.Import(ctx, s.store, data, DropRedactedPlaceholders)
 	if err != nil {
 		return nil, err
 	}
@@ -230,10 +236,24 @@ func (s *MCPServerService) Import(ctx context.Context, data []byte) (*mcpconfig.
 	return result, nil
 }
 
-// Export returns every stored server as a .mcp.json config. Header values
-// are never exported (mcpconfig has no field for them); env values are.
+// Export returns every stored server as a .mcp.json config with every env
+// value replaced by RedactedHeaderValue; header values are never exported
+// (mcpconfig has no field for them). The result keeps each server's shape
+// and env key names but cannot be re-imported to a working state. The
+// complete file, secrets included, comes from mcpconfig.Export directly
+// (`nanite mcp export`).
 func (s *MCPServerService) Export(ctx context.Context) (*mcpconfig.ClaudeCodeConfig, error) {
-	return mcpconfig.Export(ctx, s.store)
+	cfg, err := mcpconfig.Export(ctx, s.store)
+	if err != nil {
+		return nil, err
+	}
+	for name, entry := range cfg.MCPServers {
+		for k := range entry.Env {
+			entry.Env[k] = RedactedHeaderValue
+		}
+		cfg.MCPServers[name] = entry
+	}
+	return cfg, nil
 }
 
 // runDiscovery runs tool discovery after a write, on a fresh context so a
@@ -317,16 +337,15 @@ func RedactHeaders(headersJSON string) string {
 // working token with a row of bullets, and the server would start returning
 // 401s with nothing in the audit trail to explain why. A redacted value means
 // "unchanged"; any other value, including an empty one, is a deliberate edit.
-// A redacted value for a key that was never stored is dropped.
+// A redacted value for a key that was never stored, or when the stored
+// headers are empty or do not parse, is dropped rather than stored as
+// bullets.
 func MergeRedactedHeaders(incoming, stored string) string {
 	in, err := mcp.ParseHeaderJSON(incoming)
 	if err != nil || len(in) == 0 {
 		return incoming
 	}
-	old, err := mcp.ParseHeaderJSON(stored)
-	if err != nil || len(old) == 0 {
-		return incoming
-	}
+	old, _ := mcp.ParseHeaderJSON(stored) // unparseable or empty: no stored values, so placeholders are dropped
 	changed := false
 	for k, v := range in {
 		if v != RedactedHeaderValue {
@@ -344,6 +363,97 @@ func MergeRedactedHeaders(incoming, stored string) string {
 		return incoming
 	}
 	encoded, err := json.Marshal(in)
+	if err != nil {
+		return incoming
+	}
+	return string(encoded)
+}
+
+// DropRedactedPlaceholders removes redaction placeholders from a config that
+// has no stored values to restore them from, as on import, so bullets are
+// never stored as a header or env value.
+func DropRedactedPlaceholders(cfg *store.MCPServerConfig) {
+	cfg.Headers = MergeRedactedHeaders(cfg.Headers, "")
+	cfg.Env = MergeRedactedEnv(cfg.Env, "")
+}
+
+// RedactEnv returns a config's env JSON (an array of "KEY=VALUE" strings)
+// with every value replaced by RedactedHeaderValue: "KEY=••••••••". Key names
+// survive so a UI can show which variables are set; every value is hidden,
+// since the server cannot tell a secret from DEBUG=1. An entry with no "="
+// (ignored at runtime, but possibly a pasted bare token) becomes a bare
+// placeholder. Order is kept. Env that does not parse comes back as "[]";
+// env with no entries comes back unchanged.
+func RedactEnv(envJSON string) string {
+	if strings.TrimSpace(envJSON) == "" {
+		return envJSON
+	}
+	var entries []string
+	if err := json.Unmarshal([]byte(envJSON), &entries); err != nil {
+		return "[]"
+	}
+	if len(entries) == 0 {
+		return envJSON
+	}
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			out[i] = k + "=" + RedactedHeaderValue
+		} else {
+			out[i] = RedactedHeaderValue
+		}
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return "[]"
+	}
+	return string(encoded)
+}
+
+// MergeRedactedEnv restores env values the client sent back redacted, the
+// env counterpart of MergeRedactedHeaders. For each incoming entry, in order:
+//   - "KEY=<placeholder>" with KEY stored: the stored "KEY=value" (the last
+//     stored entry for KEY, matching the runtime's last-wins rule)
+//   - "KEY=<placeholder>" with KEY not stored, or a bare placeholder: dropped
+//   - anything else, including "KEY=": a deliberate edit, kept as sent
+//
+// Incoming env that does not parse is returned as sent. Stored env that is
+// empty or does not parse has no values, so placeholders are dropped.
+func MergeRedactedEnv(incoming, stored string) string {
+	var in []string
+	if err := json.Unmarshal([]byte(incoming), &in); err != nil {
+		return incoming
+	}
+	var old []string
+	_ = json.Unmarshal([]byte(stored), &old) // unparseable or empty: no stored values
+	storedByKey := make(map[string]string, len(old))
+	for _, e := range old {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			storedByKey[k] = e
+		}
+	}
+
+	out := make([]string, 0, len(in))
+	changed := false
+	for _, e := range in {
+		if e == RedactedHeaderValue {
+			changed = true
+			continue
+		}
+		k, v, ok := strings.Cut(e, "=")
+		if !ok || v != RedactedHeaderValue {
+			out = append(out, e)
+			continue
+		}
+		changed = true
+		if prev, found := storedByKey[k]; found {
+			out = append(out, prev)
+		}
+	}
+	if !changed {
+		return incoming
+	}
+	encoded, err := json.Marshal(out)
 	if err != nil {
 		return incoming
 	}

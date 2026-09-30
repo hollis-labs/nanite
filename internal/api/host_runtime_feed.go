@@ -24,7 +24,7 @@ const hostRuntimeReplayPageSize = 128
 // the endpoint replays the bounded retained snapshot from cursor zero so a
 // fresh UI can reconstruct current lifecycle and tool state.
 func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
-	if a.Services == nil || a.Services.Store == nil || a.Services.RuntimeFeed == nil {
+	if a.Services == nil || a.Services.RuntimeFeed == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "host runtime feed not initialized")
 		return
 	}
@@ -67,7 +67,7 @@ func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
 				replay.Head.CurrentRuntimeRunID != lastHead.CurrentRuntimeRunID
 			gapSnapshotChanged := replay.Gap != nil && replay.Head != lastHead
 			if !headWritten || ownerChanged || gapSnapshotChanged {
-				data, marshalErr := json.Marshal(replay.Head)
+				data, marshalErr := json.Marshal(hostRuntimeHeadToView(replay.Head))
 				if marshalErr != nil {
 					return false
 				}
@@ -82,7 +82,7 @@ func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
 				lastHead = replay.Head
 			}
 			if replay.Gap != nil && !gapWritten {
-				data, marshalErr := json.Marshal(replay.Gap)
+				data, marshalErr := json.Marshal(hostRuntimeGapToView(replay.Gap))
 				if marshalErr != nil {
 					return false
 				}
@@ -92,8 +92,9 @@ func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
 				flusher.Flush()
 				gapWritten = true
 			}
-			for _, event := range replay.Events {
-				data, marshalErr := json.Marshal(event)
+			for i := range replay.Events {
+				event := &replay.Events[i]
+				data, marshalErr := json.Marshal(hostRuntimeEventToView(event))
 				if marshalErr != nil {
 					return false
 				}

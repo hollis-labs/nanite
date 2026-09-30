@@ -130,6 +130,8 @@ type Container struct {
 	Teams *TeamService
 	// Envelopes records users' responses to envelopes.
 	Envelopes *EnvelopeService
+	// SessionRuntime reads a session's halt status and runtime rows.
+	SessionRuntime *SessionRuntimeService
 
 	// Narrow store collaborators for transports that construct a pipeline
 	// object per call (skill gate, materializer, installer, uninstaller,
@@ -1601,6 +1603,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Documents:           NewDocumentService(cfg.Store),
 		Teams:               NewTeamService(cfg.Store),
 		Envelopes:           NewEnvelopeService(cfg.Store),
+		SessionRuntime:      NewSessionRuntimeService(cfg.Store),
 		Artifacts: NewArtifactService(cfg.Store, func() string {
 			if cfg.AppConfig != nil {
 				return cfg.AppConfig.Artifacts.StorageDir

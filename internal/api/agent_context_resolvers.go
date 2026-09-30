@@ -13,6 +13,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -24,12 +25,12 @@ func (a *API) handleListAgentContextResolvers(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	rows, err := a.Services.Store.ListAgentContextResolvers(r.Context(), agent.ID)
+	rows, err := a.Services.AgentCapabilities.ListContextResolvers(r.Context(), agent.ID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, rows)
+	a.jsonResp(w, http.StatusOK, contextResolversToView(rows))
 }
 
 // handleCreateAgentContextResolver creates a new resolver bound to the
@@ -62,17 +63,40 @@ func (a *API) handleCreateAgentContextResolver(w http.ResponseWriter, r *http.Re
 		JSONPath:       req.JSONPath,
 		Enabled:        enabled,
 	}
-	id, err := a.Services.Store.InsertAgentContextResolver(r.Context(), row)
+	created, err := a.Services.AgentCapabilities.CreateContextResolver(r.Context(), row)
 	if err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	created, err := a.Services.Store.GetAgentContextResolver(r.Context(), id)
-	if err != nil {
+		var we *service.CapabilityWriteError
+		if errors.As(err, &we) {
+			a.errorResp(w, http.StatusBadRequest, we.Error())
+			return
+		}
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, created)
+	a.jsonResp(w, http.StatusCreated, contextResolverToView(created))
+}
+
+// ownedContextResolver reads the resolver in the path for the agent in the
+// path. A missing resolver is a 404; one owned by a different agent is a 404
+// too unless notOwnedMsg is set, in which case it is a 400 with that
+// message. It reports whether the handler should continue.
+func (a *API) ownedContextResolver(w http.ResponseWriter, r *http.Request, agentID, notOwnedMsg string) (*store.AgentContextResolver, bool) {
+	row, err := a.Services.AgentCapabilities.OwnedContextResolver(r.Context(), agentID, r.PathValue("resolverId"))
+	switch {
+	case err == nil:
+		return row, true
+	case errors.Is(err, store.ErrAgentContextResolverNotFound):
+		a.errorResp(w, http.StatusNotFound, "context resolver not found")
+	case errors.Is(err, service.ErrContextResolverNotOwned):
+		if notOwnedMsg == "" {
+			a.errorResp(w, http.StatusNotFound, "context resolver not found")
+		} else {
+			a.errorResp(w, http.StatusBadRequest, notOwnedMsg)
+		}
+	default:
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	}
+	return nil, false
 }
 
 // handleGetAgentContextResolver returns a single resolver by id.
@@ -82,20 +106,11 @@ func (a *API) handleGetAgentContextResolver(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	resolver, err := a.Services.Store.GetAgentContextResolver(r.Context(), r.PathValue("resolverId"))
-	if err != nil {
-		if errors.Is(err, store.ErrAgentContextResolverNotFound) {
-			a.errorResp(w, http.StatusNotFound, "context resolver not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	resolver, ok := a.ownedContextResolver(w, r, agent.ID, "")
+	if !ok {
 		return
 	}
-	if resolver.AgentID != agent.ID {
-		a.errorResp(w, http.StatusNotFound, "context resolver not found")
-		return
-	}
-	a.jsonResp(w, http.StatusOK, resolver)
+	a.jsonResp(w, http.StatusOK, contextResolverToView(resolver))
 }
 
 // handleUpdateAgentContextResolver patches an existing resolver's
@@ -106,18 +121,8 @@ func (a *API) handleUpdateAgentContextResolver(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	resolverID := r.PathValue("resolverId")
-	current, err := a.Services.Store.GetAgentContextResolver(r.Context(), resolverID)
-	if err != nil {
-		if errors.Is(err, store.ErrAgentContextResolverNotFound) {
-			a.errorResp(w, http.StatusNotFound, "context resolver not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if current.AgentID != agent.ID {
-		a.errorResp(w, http.StatusBadRequest, "cannot patch a different agent's context resolver through this endpoint")
+	current, ok := a.ownedContextResolver(w, r, agent.ID, "cannot patch a different agent's context resolver through this endpoint")
+	if !ok {
 		return
 	}
 
@@ -127,52 +132,31 @@ func (a *API) handleUpdateAgentContextResolver(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	updated := *current
-	if req.SlotName != nil {
-		updated.SlotName = *req.SlotName
-	}
-	if req.Kind != nil {
-		updated.Kind = *req.Kind
-	}
-	if req.Run != nil {
-		updated.Run = *req.Run
-	}
-	if req.CWD != nil {
-		updated.CWD = *req.CWD
-	}
-	if req.Timeout != nil {
-		updated.Timeout = *req.Timeout
-	}
-	if req.URL != nil {
-		updated.URL = *req.URL
-	}
-	if req.HeadersJSON != nil {
-		updated.HeadersJSON = *req.HeadersJSON
-	}
-	if req.ResponseFormat != nil {
-		updated.ResponseFormat = *req.ResponseFormat
-	}
-	if req.JSONPath != nil {
-		updated.JSONPath = *req.JSONPath
-	}
-	if req.Enabled != nil {
-		updated.Enabled = *req.Enabled
-	}
-
-	if err := a.Services.Store.UpdateAgentContextResolver(r.Context(), updated); err != nil {
-		if errors.Is(err, store.ErrAgentContextResolverNotFound) {
-			a.errorResp(w, http.StatusNotFound, "context resolver not found")
-			return
-		}
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	resolver, err := a.Services.Store.GetAgentContextResolver(r.Context(), resolverID)
+	resolver, err := a.Services.AgentCapabilities.UpdateContextResolver(r.Context(), current, service.ContextResolverPatch{
+		SlotName:       req.SlotName,
+		Kind:           req.Kind,
+		Run:            req.Run,
+		CWD:            req.CWD,
+		Timeout:        req.Timeout,
+		URL:            req.URL,
+		HeadersJSON:    req.HeadersJSON,
+		ResponseFormat: req.ResponseFormat,
+		JSONPath:       req.JSONPath,
+		Enabled:        req.Enabled,
+	})
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		var we *service.CapabilityWriteError
+		switch {
+		case errors.Is(err, store.ErrAgentContextResolverNotFound):
+			a.errorResp(w, http.StatusNotFound, "context resolver not found")
+		case errors.As(err, &we):
+			a.errorResp(w, http.StatusBadRequest, we.Error())
+		default:
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
-	a.jsonResp(w, http.StatusOK, resolver)
+	a.jsonResp(w, http.StatusOK, contextResolverToView(resolver))
 }
 
 // handleDeleteAgentContextResolver deletes a resolver by id.
@@ -183,20 +167,10 @@ func (a *API) handleDeleteAgentContextResolver(w http.ResponseWriter, r *http.Re
 		return
 	}
 	resolverID := r.PathValue("resolverId")
-	resolver, err := a.Services.Store.GetAgentContextResolver(r.Context(), resolverID)
-	if err != nil {
-		if errors.Is(err, store.ErrAgentContextResolverNotFound) {
-			a.errorResp(w, http.StatusNotFound, "context resolver not found")
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+	if _, ok := a.ownedContextResolver(w, r, agent.ID, "cannot delete a different agent's context resolver through this endpoint"); !ok {
 		return
 	}
-	if resolver.AgentID != agent.ID {
-		a.errorResp(w, http.StatusBadRequest, "cannot delete a different agent's context resolver through this endpoint")
-		return
-	}
-	if err := a.Services.Store.DeleteAgentContextResolver(r.Context(), resolverID); err != nil {
+	if err := a.Services.AgentCapabilities.DeleteContextResolver(r.Context(), resolverID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

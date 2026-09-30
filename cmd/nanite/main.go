@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/harnessprofile"
+
 	"github.com/hollis-labs/go-envelopes"
 
 	"github.com/hollis-labs/nanite/internal/brand"
@@ -467,7 +469,21 @@ func cmdServeWithInitializers(
 		tesseractServerName = "tesseract"
 	}
 	externalTesseract := strings.TrimSpace(cfg.Tesseract.Command) != "" || mcpManager.HasServer(tesseractServerName)
+	harnessProfileName := appCfg.Harness.Profile
+	if env := strings.TrimSpace(os.Getenv("NANITE_HARNESS_PROFILE")); env != "" {
+		harnessProfileName = env
+	}
+	harnessProfilesDir := appCfg.Harness.ProfilesDir
+	if harnessProfilesDir == "" {
+		harnessProfilesDir = filepath.Join(serveLayout.ConfigDir(), "profiles")
+	}
+	harnessProfiles, err := harnessprofile.NewRegistry(harnessProfilesDir, harnessProfileName)
+	if err != nil {
+		slog.Error("load harness profiles", "err", err)
+		os.Exit(1)
+	}
 	container, err := service.NewContainer(service.ContainerConfig{
+		HarnessProfiles:          harnessProfiles,
 		Store:                    s,
 		Providers:                registry,
 		MCP:                      mcpManager,

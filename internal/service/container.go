@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/harnessprofile"
+
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/tesseract"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
 	gosched "github.com/hollis-labs/go-scheduler"
+
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
@@ -67,6 +70,9 @@ import (
 // Container holds all service instances and shared subsystems. It is the
 // single wiring point — created once in main.go and passed to the API layer.
 type Container struct {
+	// HarnessProfiles selects and resolves named harness profiles; used by the
+	// session-create handlers to reject an unknown profile early.
+	HarnessProfiles *harnessprofile.Registry
 	// ResultCache is the session-scoped tool-result cache shared by the chat
 	// loop and the self-tool HTTP proxy (POST /api/tools/call).
 	ResultCache *tool.ResultCache
@@ -311,7 +317,10 @@ type ContainerConfig struct {
 	ToolClient *toolclient.ToolClient
 	Plugins    *plugin.Host
 	AppConfig  *config.TunablesConfig
-	WorkingDir string
+	// HarnessProfiles is the harness profile registry (D-33). nil means the
+	// embedded built-in profiles only.
+	HarnessProfiles *harnessprofile.Registry
+	WorkingDir      string
 	// DisableEmbeddedTesseract selects an externally managed MCP process as
 	// the sole Tesseract owner. This prevents two decay workers/write handles
 	// from being opened on the same XDG store.
@@ -1043,6 +1052,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	resultCache := buildResultCache(cfg.Store)
 	chatSvc := NewChatService(ChatServiceConfig{
+		HarnessProfiles:    cfg.HarnessProfiles,
 		Sessions:           sessions,
 		Agents:             agents,
 		Tools:              tools,
@@ -1385,6 +1395,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		SkillVendor:         skillVendor,
 		Tools:               tools,
 		Chat:                chatSvc,
+		HarnessProfiles:     cfg.HarnessProfiles,
 		ResultCache:         resultCache,
 		Context:             ctxService,
 		Streams:             streams,

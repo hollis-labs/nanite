@@ -8,11 +8,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/harnessprofile"
+
 	"github.com/google/uuid"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
+
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -95,14 +98,16 @@ type ChatService interface {
 
 // ChatServiceConfig holds dependencies for constructing a ChatService.
 type ChatServiceConfig struct {
-	Sessions  SessionService
-	Agents    AgentService
-	Tools     ToolService
-	Streams   *StreamManager
-	Context   ContextService
-	Events    EventEmitter
-	Providers *provider.Registry
-	Store     Store // full store for low-level operations (usage, events, messages)
+	// HarnessProfiles is the harness profile registry; nil uses the built-ins.
+	HarnessProfiles *harnessprofile.Registry
+	Sessions        SessionService
+	Agents          AgentService
+	Tools           ToolService
+	Streams         *StreamManager
+	Context         ContextService
+	Events          EventEmitter
+	Providers       *provider.Registry
+	Store           Store // full store for low-level operations (usage, events, messages)
 
 	// Optional subsystems — nil-safe.
 	Orchestrator   *chat.Orchestrator
@@ -244,6 +249,9 @@ type chatServiceImpl struct {
 	// resultCache stores large tool results for the cache-and-pointer pattern.
 	resultCache  *tool.ResultCache
 	modelCatalog *modelsdev.Client
+	// harnessProfiles resolves named harness profiles (D-33). nil means the
+	// embedded built-ins only.
+	harnessProfiles *harnessprofile.Registry
 
 	// dbPath is the SQLite database path forwarded to sandbox.Populate.
 	dbPath string
@@ -581,6 +589,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		argValidator:           newArgValidator(),
 		resultCache:            cfg.ResultCache,
 		modelCatalog:           cfg.ModelCatalog,
+		harnessProfiles:        cfg.HarnessProfiles,
 		dbPath:                 cfg.DBPath,
 		adapterRegistry:        cfg.AdapterRegistry,
 		lifecycle:              cfg.Lifecycle,

@@ -1,0 +1,10 @@
+# Room to debug: a long idle window so a run is not cut off while someone reads
+# a trace, and a higher iteration ceiling. An ordinary profile, selected like
+# any other; it is not tied to the devmode build tag.
+name: dev
+extends: default
+description: Longer idle window and higher iteration ceiling for debugging.
+limits:
+  idle_timeout_ms: 3600000
+harness:
+  hard_ceiling: 400

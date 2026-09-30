@@ -137,5 +137,9 @@ removing a single finding.
 - `run.tests: false`: test files are never checked.
 - `--new-from-rev` only sees touched lines; R1 alone lets an old violation be
   edited around without being fixed.
+- The converse also holds: R1 reports any touched line that still calls the
+  store, even when the edit was unrelated tidying (swapping `context.TODO()`
+  for `ctx`, say). Leave a line whose store call is deliberately deferred
+  byte-identical until the change that moves it behind the service layer.
 - Behaviour on golangci-lint releases other than v2.11.4 was not checked;
   re-measure after a bump.

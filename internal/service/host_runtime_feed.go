@@ -95,6 +95,12 @@ func NewHostRuntimeFeed(s *store.Store) *HostRuntimeFeed {
 	return f
 }
 
+// EventsAfter returns up to limit committed feed events for the session after
+// the cursor, with the head snapshot and any gap, for replay.
+func (f *HostRuntimeFeed) EventsAfter(ctx context.Context, sessionID string, after int64, limit int) (store.HostRuntimeReplay, error) {
+	return f.store.HostRuntimeEventsAfter(ctx, sessionID, after, limit)
+}
+
 func (f *HostRuntimeFeed) ReserveRuntimeGeneration(ctx context.Context, sessionID, runID string) (int64, error) {
 	if f == nil || f.reserveFn == nil {
 		return 0, errors.New("host runtime feed is unavailable")

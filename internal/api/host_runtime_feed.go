@@ -59,7 +59,7 @@ func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
 	writePending := func() bool {
 		gapWritten := false
 		for {
-			replay, replayErr := a.Services.Store.HostRuntimeEventsAfter(r.Context(), sessionID, cursor, hostRuntimeReplayPageSize)
+			replay, replayErr := a.Services.RuntimeFeed.EventsAfter(r.Context(), sessionID, cursor, hostRuntimeReplayPageSize)
 			if replayErr != nil {
 				return false
 			}

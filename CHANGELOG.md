@@ -202,8 +202,25 @@ lives in the git log.
     behaviour and logs a startup warning. It is interim, and goes when the
     library option for strict MCP lands.
   - **Not covered:** Codex (reads no user-level config, because `CODEX_HOME`
-    is the boot dir), OpenCode (still loads `~/.config/opencode`) and ACP
-    launches.
+    is the boot dir), OpenCode (see the next entry) and ACP launches.
+
+- **OpenCode agents no longer load your own `~/.config/opencode`**
+  (CW-20261001-0239). `OPENCODE_CONFIG_DIR`, which Nanite already set to the
+  agent's boot dir, adds a config directory and leaves your global one in
+  place, so any MCP server in it ran inside every Nanite OpenCode agent. A
+  launch now also points `XDG_CONFIG_HOME` at a directory inside the boot dir.
+  Auth and data live under `XDG_DATA_HOME`, which is unchanged, so a logged-in
+  OpenCode stays logged in.
+  - **What agents notice:** nothing from your global OpenCode config applies to
+    a Nanite agent: MCP servers, plugins, custom providers, instructions. The
+    planted agent and its config are unaffected. Each launch takes about two
+    seconds longer, because OpenCode installs its plugin package into the new
+    config directory.
+  - **Kill switch:** `NANITE_OPENCODE_ISOLATE_CONFIG=0` restores the old
+    behaviour and logs a startup warning. Use it if your agents need a custom
+    provider defined in your global config.
+  - **Not covered:** OpenCode over ACP, and whatever config OpenCode finds in
+    the agent's own work directory (not checked).
 
 - **An agent's `nanite mcp` now opens no database** (CW-20261001-0188). Every
   agent Nanite launches gets the server's loopback address in its planted

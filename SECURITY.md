@@ -114,8 +114,9 @@ while it is off. This has limits:
   Each agent's `nanite mcp` forwards its tool calls to the running server
   and opens no database (CW-20261001-0188). A user-level MCP server of your
   own that opens the database is no longer loaded into a Claude agent
-  (CW-20261001-0221), but OpenCode still loads `~/.config/opencode`
-  (CW-20261001-0239).
+  (CW-20261001-0221) or an OpenCode agent (CW-20261001-0239). Codex reads no
+  user-level config either, because its config home is the boot dir. Launches
+  over ACP are not checked.
 - **Only direct writes are stopped.** Protection does not stop an agent from
   asking another process running as your user, outside the sandbox, to
   write for it (for example `systemd-run --user`, a terminal multiplexer, or

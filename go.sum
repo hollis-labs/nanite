@@ -75,6 +75,8 @@ github.com/hollis-labs/go-llm-contracts v0.4.0 h1:dG6mayXRfUGLHFWrJT138YdVPMfF2Y
 github.com/hollis-labs/go-llm-contracts v0.4.0/go.mod h1:S3OFdhPMWWthPUNOLbhVUqi1d6p98zXj3H8Ss9t2ntk=
 github.com/hollis-labs/go-llm-types v0.5.1 h1:4h473ppF+N+DxPJ9V+/Dt/kc3bkWcOaJOp6kRH9YxsQ=
 github.com/hollis-labs/go-llm-types v0.5.1/go.mod h1:n4XoMPvSTR7Dfjxj/D37cL8nQPKmtci2EzZQFjAvSr8=
+github.com/hollis-labs/go-loopdetect v0.1.0 h1:Ktwc0iIWMCk5cNTZZVcopR1OhbLF/8Y8lav01Y+il1A=
+github.com/hollis-labs/go-loopdetect v0.1.0/go.mod h1:Eu6dY0N4th+v11xjzCtaqo9/ixqQN4GIH6Q+LcbihBY=
 github.com/hollis-labs/go-materialize v0.1.0 h1:JQ7nKIlKIaWvuiN1yPpad0dQaJTLocuQQdfynY9n9nY=
 github.com/hollis-labs/go-materialize v0.1.0/go.mod h1:ubDxYOfG+hCX0PXQaVm8ssmJoc6ZCDh8iSO46pj0PK0=
 github.com/hollis-labs/go-mcp v0.14.1 h1:u4RdvFt8tCBiGF9LoygQCqP/TMFfXE6Ovo+zD6J6/6s=

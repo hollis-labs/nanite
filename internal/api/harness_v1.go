@@ -212,7 +212,7 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if req.WorkRoot != "" {
-		a.errorResp(w, http.StatusUnprocessableEntity, "work_root is unsupported on harness v1 session create; use durable-agent start/resume/wake when work-root policy matters")
+		a.errorResp(w, http.StatusUnprocessableEntity, "work_root is unsupported on harness v1 session create; a project-scoped session works in its project's repo_path, and durable-agent start/resume/wake sets any other work root")
 		return
 	}
 	if req.DurableAgentID != "" {
@@ -238,6 +238,23 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 	if req.SubagentRuntime != "" && !store.ValidSubagentRuntime(req.SubagentRuntime) {
 		a.errorResp(w, http.StatusBadRequest, "subagent_runtime must be \"api\" or \"cli\"")
 		return
+	}
+
+	// CW-20261001-0020: a project-scoped session's CLI agent works in the
+	// project's repo_path. Refuse the create when the project cannot be read
+	// or its repo_path names no directory, rather than boot an agent that
+	// cannot see its project. A project with no repo_path at all is allowed,
+	// as at boot (bootSessionWorkdir warns): plain API-chat sessions live in
+	// such projects.
+	if req.ProjectID != "" {
+		if _, err := a.Services.Projects.WorkRoot(r.Context(), req.ProjectID); err != nil && !errors.Is(err, service.ErrProjectNoRepoPath) {
+			status := http.StatusUnprocessableEntity
+			if errors.Is(err, service.ErrProjectNotFound) {
+				status = http.StatusNotFound
+			}
+			a.errorResp(w, status, "project-scoped session needs a project whose repo_path, when set, is an existing directory: "+err.Error())
+			return
+		}
 	}
 
 	providerID := strings.TrimSpace(req.Provider)

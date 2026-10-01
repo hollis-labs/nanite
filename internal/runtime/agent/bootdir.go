@@ -136,21 +136,23 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		// plumbing has to change.
 		Hooks: DefaultBootDirHooks,
 	}
+	params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID, opts.Workdir)
 	if deps != nil {
-		params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID)
 		params.Skills = deps.Skills
 		params.SkillVendor = deps.SkillVendor
 	}
 	return layout, params
 }
 
-func effectiveCLIWritableRoots(deps *Dependencies, sessionID string) []string {
-	if deps == nil {
-		return nil
-	}
-
+// effectiveCLIWritableRoots lists the directories a CLI agent may write
+// beyond its boot dir: the session's work root first (CW-20261001-0020 —
+// the boot dir stays the cwd, so without this the project is outside the
+// agent's sandbox), then the configured dev_tools_allowed_paths roots,
+// then the session's and its lineage's path grants. Duplicates are
+// dropped. A nil deps still yields the work root.
+func effectiveCLIWritableRoots(deps *Dependencies, sessionID, workRoot string) []string {
 	seen := make(map[string]struct{})
-	out := make([]string, 0, len(deps.CLIWritableRoots))
+	var out []string
 	add := func(path string) {
 		if path == "" {
 			return
@@ -166,6 +168,10 @@ func effectiveCLIWritableRoots(deps *Dependencies, sessionID string) []string {
 		out = append(out, clean)
 	}
 
+	add(workRoot)
+	if deps == nil {
+		return out
+	}
 	for _, root := range deps.CLIWritableRoots {
 		add(root)
 	}

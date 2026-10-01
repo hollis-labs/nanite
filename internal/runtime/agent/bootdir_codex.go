@@ -20,7 +20,8 @@ import (
 //	├── .sandbox/envelope-schema.md
 //	└── .mcp.json
 //
-// Spawn cwd: <bootDir>; project access via codex's --cd flag.
+// Spawn cwd: <bootDir>; project access via config.toml writable_roots,
+// which carries the session's work root (CW-20261001-0020).
 //
 // TASKS/agent-host-acp/04: the bootdir file-set is declared as a
 // plant.Spec (github.com/hollis-labs/go-agent-wrapper/plant) and planted

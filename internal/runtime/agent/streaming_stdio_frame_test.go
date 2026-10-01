@@ -173,7 +173,7 @@ func TestResolveSystemPrompt(t *testing.T) {
 	}
 
 	t.Run("override body wins verbatim, plus mandatory re-read appended", func(t *testing.T) {
-		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "CATALOG OVERRIDE", nil)
+		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "CATALOG OVERRIDE", nil, "")
 		want := "CATALOG OVERRIDE\n\n" + mandatoryPostCompactionRereadInstruction + "\n\n" + cliNarrationInstruction
 		if got != want {
 			t.Errorf("ResolveSystemPrompt = %q, want %q", got, want)
@@ -181,7 +181,7 @@ func TestResolveSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("empty override composes role + profile", func(t *testing.T) {
-		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "", nil)
+		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "", nil, "")
 		if !strings.Contains(got, "profile-level system prompt") {
 			t.Errorf("ResolveSystemPrompt = %q, want it to include the profile system prompt", got)
 		}
@@ -198,7 +198,7 @@ func TestResolveSystemPrompt(t *testing.T) {
 		// produce identical output for the same inputs.
 		opts := Options{Role: "reviewer", Mode: ModeLongLived}
 		viaOpts := resolveBootPrompt(profile, opts)
-		viaExport := ResolveSystemPrompt("reviewer", profile, ModeLongLived, "", nil)
+		viaExport := ResolveSystemPrompt("reviewer", profile, ModeLongLived, "", nil, "")
 		if viaOpts != viaExport {
 			t.Errorf("export drift:\n resolveBootPrompt   = %q\n ResolveSystemPrompt = %q", viaOpts, viaExport)
 		}
@@ -208,7 +208,7 @@ func TestResolveSystemPrompt(t *testing.T) {
 		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "", map[string]string{
 			"weather": "72F and sunny",
 			"empty":   "   ",
-		})
+		}, "")
 		if !strings.Contains(got, "profile-level system prompt") {
 			t.Errorf("ResolveSystemPrompt = %q, want it to still include the base prompt", got)
 		}

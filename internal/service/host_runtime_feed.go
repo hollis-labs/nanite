@@ -479,6 +479,18 @@ func projectHostRuntimePayload(kind runtimeevents.EventKind, isACP bool, raw jso
 				projected["failure"] = failure
 			}
 		}
+	// go-agent-wrapper v0.17.0's session notices (CW-20260930-0113): public
+	// state only. Provider session ids, the auth failure's CLI message and
+	// a refused action's display text (which can quote a command) stay out.
+	case runtimeevents.KindSessionLost:
+		projected["state"] = "session_lost"
+	case runtimeevents.KindSessionAuthFailed:
+		projected["state"] = "auth_failed"
+	case runtimeevents.KindAgentPermissionDenied:
+		projected["state"] = "permission_denied"
+		if action := firstSafeString(source, "action"); action != "" {
+			projected["action"] = action
+		}
 	case runtimeevents.KindStdinWrite, runtimeevents.KindStdoutRaw, runtimeevents.KindStderrRaw,
 		runtimeevents.KindStdoutLine, runtimeevents.KindStderrLine:
 		visibility = "metadata_only"

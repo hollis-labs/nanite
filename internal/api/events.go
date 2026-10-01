@@ -19,6 +19,23 @@ func (a *API) handleUnifiedEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Subscribe before the response opens. A client treats the stream as open
+	// once headers arrive, so an event emitted after that must already have a
+	// subscriber to reach; subscribing after the flush dropped anything
+	// broadcast in between (CW-20260930-0143).
+	//
+	// 1. Presence subscription
+	clientID, presenceEvents := a.Services.Streams.RegisterPresenceClient()
+	defer a.Services.Streams.UnregisterPresenceClient(clientID)
+
+	// 2. Plugin lifecycle events subscription (if host is configured)
+	var pluginCh <-chan goplugin.Event
+	if a.pluginHost != nil {
+		ch := a.pluginHost.SubscribeEvents()
+		defer a.pluginHost.UnsubscribeEvents(ch)
+		pluginCh = ch
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -28,11 +45,6 @@ func (a *API) handleUnifiedEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Initial comment establishes connection and flushes headers
 	fmt.Fprint(w, ": unified event stream open\n\n")
-	flusher.Flush()
-
-	// 1. Presence subscription
-	clientID, presenceEvents := a.Services.Streams.RegisterPresenceClient()
-	defer a.Services.Streams.UnregisterPresenceClient(clientID)
 
 	// Replay current active presence state
 	for _, evt := range a.Services.Streams.ActivePresenceState() {
@@ -42,14 +54,6 @@ func (a *API) handleUnifiedEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	flusher.Flush()
-
-	// 2. Plugin lifecycle events subscription (if host is configured)
-	var pluginCh <-chan goplugin.Event
-	if a.pluginHost != nil {
-		ch := a.pluginHost.SubscribeEvents()
-		defer a.pluginHost.UnsubscribeEvents(ch)
-		pluginCh = ch
-	}
 
 	keepalive := time.NewTicker(sseKeepaliveInterval)
 	defer keepalive.Stop()

@@ -8,10 +8,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/agentkit/agentsessions"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/go-providers/provider/events"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
 )
 
@@ -30,6 +32,10 @@ var newRuntimeKinds = []runtimeevents.Event{
 	{Kind: runtimeevents.KindStdoutLine, Payload: json.RawMessage(`{"line":"[permission_denied:Bash] rm -rf /"}`)},
 	{Kind: runtimeevents.KindStdoutRaw, Payload: json.RawMessage(`{"bytes":"[session_lost] requested=a actual=b"}`)},
 	{Kind: runtimeevents.KindStderrLine, Payload: json.RawMessage(`{"line":"warning"}`)},
+	// go-agent-wrapper v0.17.0's session notices.
+	{Kind: runtimeevents.KindSessionLost, Payload: json.RawMessage(`{"requested_id":"ses_a","actual_id":"ses_b","reason":"resume_replaced"}`)},
+	{Kind: runtimeevents.KindSessionAuthFailed, Payload: json.RawMessage(`{"error":"Authentication required"}`)},
+	{Kind: runtimeevents.KindAgentPermissionDenied, Payload: json.RawMessage(`{"action":"Bash","display_name":"rm -rf /"}`)},
 }
 
 var (
@@ -105,9 +111,14 @@ func TestProjectHostRuntimePayload_NewEventKinds(t *testing.T) {
 		if projected["terminal"] == true {
 			t.Fatalf("%s projected as terminal: %s", ev.Kind, raw)
 		}
-		for _, marker := range []string{"auth_failed", "permission_denied", "session_lost", "rm -rf"} {
-			if strings.Contains(string(raw), marker) {
-				t.Fatalf("%s projection leaks %q: %s", ev.Kind, marker, raw)
+		if projected["unsupported_kind"] == true {
+			t.Fatalf("%s projected as an unsupported kind: %s", ev.Kind, raw)
+		}
+		// Raw text, provider session ids and a refused action's display
+		// text never reach the public feed; the notices' own state does.
+		for _, leak := range []string{"[auth_failed]", "[permission_denied", "[session_lost]", "rm -rf", "ses_a", "ses_b", "Authentication required"} {
+			if strings.Contains(string(raw), leak) {
+				t.Fatalf("%s projection leaks %q: %s", ev.Kind, leak, raw)
 			}
 		}
 	}
@@ -124,6 +135,41 @@ func TestProjectHostRuntimePayload_NewEventKinds(t *testing.T) {
 		}
 		if strings.Contains(string(raw), "exit status") {
 			t.Fatalf("turn.failed projection leaks the error text: %s", raw)
+		}
+	}
+}
+
+// The bridge shows the three session notices as a status line in the chat
+// stream: user-visible, never a terminal, and without provider session ids
+// or the refused command's text.
+func TestAgentEventBridge_SessionNoticesBecomeStatusLines(t *testing.T) {
+	streams := NewStreamManager()
+	_ = streams.CreateStream("msg-notice", "s-notice")
+	ch, _, ok := streams.Subscribe("msg-notice", 0)
+	if !ok {
+		t.Fatal("subscribe to the session stream")
+	}
+	b := &agentEventBridge{streams: streams}
+	cb := b.typedCallback("s-notice")
+	for _, tc := range []struct {
+		ev   events.Event
+		want string
+	}{
+		{events.SessionLost{RequestedID: "ses_a", ActualID: "ses_b", Reason: "resume_replaced"}, "fresh one"},
+		{events.AuthFailed{Message: "Authentication required"}, "not logged in on this host"},
+		{events.PermissionDenied{Action: "Bash", DisplayName: "Bash"}, `refused "Bash"`},
+	} {
+		cb(tc.ev)
+		select {
+		case got := <-ch:
+			if got.Type != "status" || !strings.Contains(got.Content, tc.want) {
+				t.Fatalf("%T -> %+v, want a status line containing %q", tc.ev, got, tc.want)
+			}
+			if strings.Contains(got.Content, "ses_a") || strings.Contains(got.Content, "ses_b") {
+				t.Fatalf("%T status line leaks a provider session id: %q", tc.ev, got.Content)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%T produced no stream event", tc.ev)
 		}
 	}
 }

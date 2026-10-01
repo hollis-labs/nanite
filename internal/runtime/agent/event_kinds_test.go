@@ -28,6 +28,10 @@ var midTurnKinds = []runtimeevents.Event{
 	{Kind: runtimeevents.KindStdoutLine, Payload: json.RawMessage(`{"line":"[permission_denied:Bash] rm -rf /"}`)},
 	{Kind: runtimeevents.KindStdoutRaw, Payload: json.RawMessage(`{"bytes":"[session_lost] requested=a actual=b"}`)},
 	{Kind: runtimeevents.KindStderrLine, Payload: json.RawMessage(`{"line":"warning"}`)},
+	// go-agent-wrapper v0.17.0's session notices.
+	{Kind: runtimeevents.KindSessionLost, Payload: json.RawMessage(`{"requested_id":"ses_a","actual_id":"ses_b","reason":"resume_replaced"}`)},
+	{Kind: runtimeevents.KindSessionAuthFailed, Payload: json.RawMessage(`{"error":"Authentication required"}`)},
+	{Kind: runtimeevents.KindAgentPermissionDenied, Payload: json.RawMessage(`{"action":"Bash","display_name":"rm -rf /"}`)},
 }
 
 // The legacy fanout projection (wrapper_sink.go) tolerates every new kind:
@@ -55,17 +59,23 @@ func TestRuntimeEventSink_NewEventKindsAreNotRepliesOrTerminals(t *testing.T) {
 	if len(fanout) != 2 || fanout[0].Type != llmtypes.EventDelta || fanout[0].Content != "the reply" || fanout[1].Type != llmtypes.EventDone {
 		t.Fatalf("fanout = %+v, want exactly [delta \"the reply\", done]", fanout)
 	}
-	var gotResult, gotSpawn bool
+	var gotResult, gotSpawn, gotLost, gotAuth, gotDenied bool
 	for _, e := range typed {
-		switch e.(type) {
+		switch ev := e.(type) {
 		case events.ToolResult:
 			gotResult = true
 		case events.SubagentSpawn:
 			gotSpawn = true
+		case events.SessionLost:
+			gotLost = ev.RequestedID == "ses_a" && ev.ActualID == "ses_b"
+		case events.AuthFailed:
+			gotAuth = ev.Message == "Authentication required"
+		case events.PermissionDenied:
+			gotDenied = ev.Action == "Bash"
 		}
 	}
-	if !gotResult || !gotSpawn {
-		t.Fatalf("typed callback = %#v, want a ToolResult and a SubagentSpawn", typed)
+	if !gotResult || !gotSpawn || !gotLost || !gotAuth || !gotDenied {
+		t.Fatalf("typed callback = %#v, want ToolResult, SubagentSpawn, SessionLost, AuthFailed and PermissionDenied", typed)
 	}
 	if len(h.canonical) != 3+len(midTurnKinds) {
 		t.Fatalf("canonical got %d events, want every one (%d)", len(h.canonical), 3+len(midTurnKinds))

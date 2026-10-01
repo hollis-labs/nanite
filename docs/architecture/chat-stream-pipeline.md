@@ -212,9 +212,10 @@ Promissory-preamble nudge (iteration 0, once, non-CLI: synthetic assistant and u
 ### 3.7 StreamManager
 
 - The pump assigns `EventID` (from 1, per message), appends to the ring, and does a non-blocking send to the single subscriber. If the subscriber channel is full, the subscriber is cleared and its channel closed: the SSE handler sees EOF and the client is expected to reconnect with its cursor; the ring keeps the events.
-- One subscriber per message; one SSE connection per session (a second connection on the session closes the first with `session_takeover`).
+- One subscriber per message; one SSE connection per message (a second connection to the same message closes the first with `session_takeover`). Connections to different messages of one session coexist, so a turn queued behind a running one can be watched without cutting off the running turn's stream.
+- A queued turn's stream is detached from the session's live set until its turn starts: session broadcasts (CLI `tool_call`/`tool_result`, `status`) reach only the running turn's stream, and the active-message lookup returns the running turn.
 - Replay: cursor = larger of `?from` and `Last-Event-ID` (malformed `?from` → 400; malformed header ignored). `subscribe` replays ring events with `EventID` > cursor, then goes live. Evicted events leave no gap marker.
-- Completed stream: `subscribe` returns replay plus a closed channel, but `SubscribeSSE` still registers the session's SSE, so replaying a finished message takes over the session's live subscriber.
+- Completed stream: `subscribe` returns replay plus a closed channel, but `SubscribeSSE` still registers that message's SSE connection, so replaying a finished message takes over another connection to the same message.
 - Cleanup: `ScheduleCleanup` removes the stream 60 s (`defaultPostCompletionGrace`) after the producer closes; afterwards the events routes return 404 `stream not found`.
 - There is no unsubscribe: after a client disconnect the subscriber stays registered until its channel fills and the pump closes it.
 

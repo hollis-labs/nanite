@@ -34,12 +34,19 @@ Per-session environment isolation uses `wrapper.ChildEnvironment` in replace
 mode, so no shell or generated process wrapper is involved. ACP selection uses
 the wrapper's shipped Claude, Codex, OpenCode, Copilot, and Pi ACP adapters.
 
-User stop and same-session takeover cancel the Nanite generation context and
-request `Wrapper.CancelTurn` against the exact wrapper and router token bound
-when that generation admitted its prompt. No delayed cancellation or router
-cleanup resolves a mutable session-ID binding. The request is bounded and does
-not block the API caller; the generation remains a takeover barrier until the
-provider request and predecessor terminal/cleanup boundary complete.
+A turn sent while another is running on the same session queues behind it:
+it starts once the running turn has finished, and the agent receives it as its
+next turn. A mid-run message therefore steers at the next turn boundary; it
+never interrupts the running turn or loses its reply.
+
+Interrupting is explicit. User stop cancels the queued turns and the running
+one, and requests `Wrapper.CancelTurn` against the exact wrapper and router
+token bound when the running generation admitted its prompt. No delayed
+cancellation or router cleanup resolves a mutable session-ID binding. The
+request is bounded and does not block the API caller; a canceled generation
+remains a barrier until the provider request and predecessor terminal/cleanup
+boundary complete. The interrupted turn's output so far is saved, marked
+`interrupted` in its metadata.
 ACP uses its real turn-scoped cancel. Native runtimes honestly report that
 turn cancellation is unsupported, so Nanite stops that exact wrapper and the
 next turn cold-boots instead of pretending a wire-level cancel occurred.

@@ -1723,6 +1723,14 @@ func (s *chatServiceImpl) finalizeRun(
 		cleanContent += s.narrationClaimFooter(ctx, sessionID, model, run.loop, run.narrationContent.String(), ch)
 	}
 
+	// CW-20261001-0072: a user stop cancels ctx mid-turn. What the turn
+	// produced is still saved, marked interrupted, with the placeholder
+	// persistPartialAssistant uses when it produced nothing.
+	interrupted := ctx.Err() != nil
+	if interrupted && strings.TrimSpace(cleanContent) == "" {
+		cleanContent = "[generation interrupted]"
+	}
+
 	// Structured message.
 	structured := chat.WrapResponse(cleanContent, tier, run.loop.toolCallRefs, envRefs, run.loop.wasTruncated, hasError)
 	chat.LogStructuredWarnings(structured)
@@ -1738,6 +1746,9 @@ func (s *chatServiceImpl) finalizeRun(
 		Signature string `json:"signature"`
 	}
 	meta := map[string]any{}
+	if interrupted {
+		meta["interrupted"] = true
+	}
 	if thinking := run.narrationContent.String(); thinking != "" {
 		meta["thinking"] = thinking
 	}
@@ -1755,13 +1766,17 @@ func (s *chatServiceImpl) finalizeRun(
 		}
 	}
 
+	// Outcome bookkeeping must survive cancellation of the turn it records:
+	// a stopped turn's output is saved like any other (CW-20261001-0072).
+	persistCtx := context.WithoutCancel(ctx)
+
 	// Save assistant message.
 	assistantMsg := &store.Message{
 		ID: assistantMsgID, SessionID: sessionID, AgentID: agent.ID,
 		Role: "assistant", Content: structuredJSON, Envelope: envelopeJSON,
 		Metadata: msgMetadata,
 	}
-	if err := s.store.CreateMessage(ctx, assistantMsg); err != nil {
+	if err := s.store.CreateMessage(persistCtx, assistantMsg); err != nil {
 		slog.Error("chat-service: failed to save assistant message", "err", err)
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to save response", map[string]interface{}{"raw": err.Error()})
 		return finalizeRunResult{directive: generationTerminate}
@@ -1770,9 +1785,6 @@ func (s *chatServiceImpl) finalizeRun(
 	// PruneAfterTurn retired in Phase 3 S3a — slot compaction supersedes.
 	// The ContextService interface method remains for one release so out-of-tree
 	// callers don't break; removal is a follow-up.
-
-	// Outcome bookkeeping must survive cancellation of the completed turn it records.
-	persistCtx := context.WithoutCancel(ctx)
 
 	// Record token usage.
 	if run.finalUsage != nil && (run.finalUsage.InputTokens > 0 || run.finalUsage.OutputTokens > 0) {

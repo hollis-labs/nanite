@@ -15,11 +15,11 @@ import (
 // StreamManager owns the concurrent state for message streams, SSE
 // connections, and presence. Extracted from Engine's 6 sync.Map fields.
 type StreamManager struct {
-	sseMu          sync.Mutex // serialize session takeover with subscriber replacement
+	sseMu          sync.Mutex // serialize connection takeover with subscriber replacement
 	streams        sync.Map   // messageID -> *messageStream (CW-20260418-0100)
 	msgToSession   sync.Map   // messageID -> sessionID
 	sessionToMsgs  sync.Map   // sessionID -> *sessionStreams (reverse index for session-scoped delivery)
-	sessionSSE     sync.Map   // sessionID -> *sseConn
+	messageSSE     sync.Map   // messageID -> *sseConn
 	presenceClient sync.Map   // clientID -> chan chat.PresenceEvent
 	activePresence sync.Map   // sessionID -> chat.PresenceEvent
 	cliThrottle    sync.Map   // sessionID -> time.Time
@@ -319,6 +319,11 @@ func (sm *StreamManager) Subscribe(messageID string, fromEventID uint64) (<-chan
 // SubscribeSSE replaces a browser connection and its subscriber together.
 // Mark the old connection taken over before closing its event channel, so an
 // automatic reconnect cannot mistake a deliberate takeover for a network drop.
+//
+// Takeover is per message: a second connection to the same message (another
+// tab) replaces the first. Connections to different messages of one session
+// coexist — a turn queued behind a running one (CW-20261001-0072) must not cut
+// the running turn's stream off when its own stream is opened.
 func (sm *StreamManager) SubscribeSSE(messageID string, fromEventID uint64) (<-chan chat.StreamEvent, <-chan struct{}, bool) {
 	sm.sseMu.Lock()
 	defer sm.sseMu.Unlock()
@@ -327,9 +332,28 @@ func (sm *StreamManager) SubscribeSSE(messageID string, fromEventID uint64) (<-c
 		return nil, nil, false
 	}
 	ms := val.(*messageStream)
-	done := sm.RegisterSSE(ms.sessionID)
+	done := sm.RegisterSSE(messageID)
 	ch, _ := ms.subscribe(fromEventID)
 	return ch, done, true
+}
+
+// DetachFromSession takes messageID out of its session's set of live streams
+// without closing it: it stays subscribable, but session-scoped broadcasts no
+// longer reach it and ActiveMessageForSession no longer returns it. A turn
+// queued behind a running one is detached until it starts, so the running
+// turn's tool events and reconnects are not misattributed to it.
+func (sm *StreamManager) DetachFromSession(messageID string) {
+	if sid, ok := sm.msgToSession.Load(messageID); ok {
+		sm.removeSessionMessage(sid.(string), messageID)
+	}
+}
+
+// AttachToSession returns a detached stream to its session's live set.
+// Idempotent; a no-op once the stream has been cleaned up.
+func (sm *StreamManager) AttachToSession(messageID string) {
+	if sid, ok := sm.msgToSession.Load(messageID); ok {
+		sm.addSessionMessage(sid.(string), messageID)
+	}
 }
 
 // GetStream returns a subscription to the event stream for a given message
@@ -443,24 +467,24 @@ func (sm *StreamManager) HasLiveStreamForSession(sessionID string) bool {
 
 // --- SSE connection deduplication ---
 
-// RegisterSSE registers a new SSE connection for a session. If another
-// connection already exists, its done channel is closed (signaling
-// session_takeover) before being replaced. Returns the new connection's
-// done channel.
-func (sm *StreamManager) RegisterSSE(sessionID string) <-chan struct{} {
+// RegisterSSE registers a new SSE connection for a message. If another
+// connection to that message already exists, its done channel is closed
+// (signaling session_takeover) before being replaced. Returns the new
+// connection's done channel.
+func (sm *StreamManager) RegisterSSE(messageID string) <-chan struct{} {
 	conn := &sseConn{done: make(chan struct{})}
-	if prev, loaded := sm.sessionSSE.Swap(sessionID, conn); loaded {
+	if prev, loaded := sm.messageSSE.Swap(messageID, conn); loaded {
 		old := prev.(*sseConn)
 		close(old.done)
-		slog.Info("stream: SSE session takeover", "session_id", sessionID)
+		slog.Info("stream: SSE connection takeover", "message_id", messageID)
 	}
 	return conn.done
 }
 
-// UnregisterSSE removes the SSE connection for a session, but only if this
+// UnregisterSSE removes the SSE connection for a message, but only if this
 // is still the active connection (not already taken over).
-func (sm *StreamManager) UnregisterSSE(sessionID string, done <-chan struct{}) {
-	val, ok := sm.sessionSSE.Load(sessionID)
+func (sm *StreamManager) UnregisterSSE(messageID string, done <-chan struct{}) {
+	val, ok := sm.messageSSE.Load(messageID)
 	if !ok {
 		return
 	}
@@ -471,7 +495,7 @@ func (sm *StreamManager) UnregisterSSE(sessionID string, done <-chan struct{}) {
 	if current.done != done {
 		return
 	}
-	sm.sessionSSE.CompareAndDelete(sessionID, val)
+	sm.messageSSE.CompareAndDelete(messageID, val)
 }
 
 // --- Presence ---

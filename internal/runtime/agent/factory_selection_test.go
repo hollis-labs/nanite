@@ -21,7 +21,7 @@ func TestSelectNativeAdapter_PreservesNaniteLaunchPolicy(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, err := selectNativeAdapter(tc.provider, ModeLongLived, tc.cli)
+			selected, err := selectNativeAdapter(tc.provider, ModeLongLived, tc.cli, "")
 			if err != nil {
 				t.Fatalf("selectNativeAdapter: %v", err)
 			}
@@ -53,7 +53,7 @@ func equalStrings(a, b []string) bool {
 }
 
 func TestSelectNativeAdapter_RejectsShapeMismatch(t *testing.T) {
-	if _, err := selectNativeAdapter("codex", ModeLongLived, provider.NewCodexAdapterAppServer()); err == nil {
+	if _, err := selectNativeAdapter("codex", ModeLongLived, provider.NewCodexAdapterAppServer(), ""); err == nil {
 		t.Fatal("app-server adapter accepted for Nanite's subprocess-per-turn launch policy")
 	}
 }

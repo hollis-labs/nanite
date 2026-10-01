@@ -232,7 +232,7 @@ Both write through the same `streamMessageEvents`; harness v1 does not filter or
 
 | | Legacy | Harness v1 (`/api/harness/v1`) |
 |---|---|---|
-| Create session | `POST /api/sessions` `{project_id, model, provider, agent_id}` → 201 Session; default agent from user settings, then slug `default` | `POST /sessions` `{project_id, provider, model, agent_id, title, metadata}` → 201 `{session, details, stream_transport, route_hints}`; no default agent; 422 for `runtime_kind`, `work_root`, `durable_agent_id` |
+| Create session | `POST /api/sessions` `{project_id, model, provider, agent_id}` → 201 Session; default agent from user settings, then slug `default` | `POST /sessions` `{project_id, provider, model, agent_id, title, metadata}` → 201 `{session, details, stream_transport, route_hints}`; no default agent; 422 for `runtime_kind`, `work_root`, `durable_agent_id`; 404 for an unknown `project_id` and 422 for a project whose `repo_path` is unset or not an existing directory |
 | Send | `POST /api/messages` `{session_id, content, cycle_kind, effort, delta_mode}` → 202 `{message_id, stream_url}` | `POST /sessions/{id}/turns` `{content, cycle_kind, effort, delta_mode}` → 202 `{session_id, message_id, stream_url, raw_stream_url, event_transport, initial_activity_state}`; 404 before body decode |
 | Stream | `GET /api/stream/{messageID}` | `GET /sessions/{id}/events?message_id=` (required); 404 if the message belongs to another session |
 | Resume | `?from=` / `Last-Event-ID` | same code; `stream_url` carries no cursor |

@@ -180,6 +180,12 @@ func (m *minimalStore) SetAgentRuntimeProviderSessionID(context.Context, string,
 	return nil
 }
 
+// GetDurableAgentInstance satisfies the Store interface for the test fakes.
+// No instance exists by default.
+func (m *minimalStore) GetDurableAgentInstance(context.Context, string) (*store.DurableAgentInstance, error) {
+	return nil, store.ErrDurableAgentInstanceNotFound
+}
+
 // ListEnabledAgentContextResolvers satisfies the Store interface for the
 // test fakes (Phase 2 item 02,
 // TASKS/phase-2/02-port-forward-dynamic-resolver.md). Returns no

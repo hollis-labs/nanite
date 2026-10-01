@@ -99,7 +99,10 @@ func shouldAutoFireFirstTurn(mode Mode) bool {
 // validation to the wrapper's canonical native factory. Nanite keeps the
 // product decision (Claude streaming stdio; Codex/OpenCode per-turn) and its
 // already-configured adapter, including Claude developer-mode behavior.
-func selectNativeAdapter(providerName string, mode Mode, cli provider.CLIAdapter) (adapters.RuntimeAdapter, error) {
+//
+// workRoot is the session's project directory (Options.Workdir); see
+// workRootArgs for what it adds to argv.
+func selectNativeAdapter(providerName string, mode Mode, cli provider.CLIAdapter, workRoot string) (adapters.RuntimeAdapter, error) {
 	launchMode := adapters.LaunchSubprocessPerTurn
 	if shouldUseStreamingStdio(providerName, mode) {
 		launchMode = adapters.LaunchStreamingStdio
@@ -109,7 +112,29 @@ func selectNativeAdapter(providerName string, mode Mode, cli provider.CLIAdapter
 		RuntimeKind: adapters.RuntimeKindCLI,
 		LaunchMode:  launchMode,
 		CLIAdapter:  cli,
+		ExtraArgs:   workRootArgs(providerName, workRoot),
 	})
+}
+
+// workRootArgs returns the argv that grants a native CLI agent its work
+// root while its cwd stays the boot dir (CW-20261001-0020). Claude gets
+// --add-dir <root>; go-providers emits that flag only in Bare mode, so
+// Nanite appends it here. Codex reaches the root through its planted
+// config.toml writable_roots and opencode spawns in it (SpawnWorkdir), so
+// neither needs an argument. Empty workRoot adds nothing.
+//
+// Interim: the shared PreparedExecution (CW-20260930-0113) owns cwd and
+// --add-dir once it lands.
+func workRootArgs(providerName, workRoot string) []string {
+	if workRoot == "" {
+		return nil
+	}
+	switch normalizeProviderName(providerName) {
+	case "claude", "claude-code", "claudecode":
+		return []string{"--add-dir", workRoot}
+	default:
+		return nil
+	}
 }
 
 // useACPProtocol reports whether profile is explicitly configured to

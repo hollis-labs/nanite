@@ -138,7 +138,15 @@ func (s *chatServiceImpl) driveBootSession(
 		if agent != nil {
 			profileSlug = agent.Slug
 		}
-		workdir := bootSessionWorkdir(session)
+		workdir, err := s.bootSessionWorkdir(ctx, session)
+		if err != nil {
+			return nil, fmt.Errorf("driveBootSession: %w", err)
+		}
+		if workdir != "" {
+			s.activeSessionWorkRoots.Store(sessionID, workdir)
+		} else {
+			s.activeSessionWorkRoots.Delete(sessionID)
+		}
 		role := bootSessionRole(agent)
 		bootOpts := runtimeagent.Options{
 			Mode:                      runtimeagent.ModeLongLived,
@@ -829,7 +837,9 @@ func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agen
 			dynamicContext = blocks
 		}
 	}
-	systemPrompt := runtimeagent.ResolveSystemPrompt(role, agent, runtimeagent.ModeLongLived, bootPromptOverride, dynamicContext)
+	workRoot, _ := s.activeSessionWorkRoots.Load(sessionID)
+	workRootPath, _ := workRoot.(string)
+	systemPrompt := runtimeagent.ResolveSystemPrompt(role, agent, runtimeagent.ModeLongLived, bootPromptOverride, dynamicContext, workRootPath)
 	if err := fsutil.AtomicWriteFile(claudePath, []byte(runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description, systemPrompt)), 0o644); err != nil {
 		return fmt.Errorf("regen CLAUDE.md: %w", err)
 	}
@@ -840,15 +850,58 @@ func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agen
 	return nil
 }
 
-// bootSessionWorkdir picks the workdir Boot should hand the runtime. The
-// chat-harness today binds claude / codex to the per-session sandbox dir
-// (cwd = sandbox dir, no project dir threaded). The new boot-dir-based path
-// preserves that shape: empty Workdir lets the layout's SpawnWorkdir use the
-// boot dir as cwd. Project-repo workdir threading is a follow-up — chat
-// sessions don't carry a resolved project path through to this layer today.
-func bootSessionWorkdir(session *store.Session) string {
-	_ = session
-	return ""
+// bootSessionWorkdir resolves the work root a CLI agent for session is
+// launched against (CW-20261001-0020): a durable-agent session's instance
+// work_root, else the session's project repo_path, else "" — no project,
+// so the agent works in its boot dir as it always has. The result becomes
+// Options.Workdir: the boot dir stays the process cwd (Nanite's planted
+// CLAUDE.md / AGENTS.md depend on it), and the layouts grant the root as
+// claude --add-dir + additionalDirectories, codex writable_roots, or
+// opencode's cwd, and name it in the system prompt.
+//
+// A project with no repo_path boots without a work root (and a warning):
+// GUI sessions in such projects worked that way before, and the harness v1
+// create already refuses a project-scoped session that cannot see its
+// project. A repo_path that no longer resolves is an error rather than a
+// directory Boot would create in its place. A durable work_root may name a
+// directory that does not exist yet (recipes default to /tmp/<agent>);
+// Boot creates it.
+//
+// Interim: the shared PreparedExecution (CW-20260930-0113) owns cwd and
+// --add-dir once it lands, and replaces this resolution.
+func (s *chatServiceImpl) bootSessionWorkdir(ctx context.Context, session *store.Session) (string, error) {
+	if session == nil || s.store == nil {
+		return "", nil
+	}
+	if session.ContextType == "durable_agent" && session.ContextID != "" {
+		inst, err := s.store.GetDurableAgentInstance(ctx, session.ContextID)
+		if err != nil {
+			return "", fmt.Errorf("resolve work root: durable agent %s: %w", session.ContextID, err)
+		}
+		if root := strings.TrimSpace(inst.WorkRoot); root != "" {
+			expanded, err := runtimeagent.ExpandUserHome(root)
+			if err != nil {
+				return "", fmt.Errorf("resolve work root: durable agent %s work_root %q: %w", inst.ID, root, err)
+			}
+			if !filepath.IsAbs(expanded) {
+				return "", fmt.Errorf("resolve work root: durable agent %s work_root %q is not an absolute path", inst.ID, root)
+			}
+			return filepath.Clean(expanded), nil
+		}
+	}
+	if session.ProjectID == "" {
+		return "", nil
+	}
+	root, err := projectWorkRoot(ctx, s.store, session.ProjectID)
+	if errors.Is(err, ErrProjectNoRepoPath) {
+		slog.Warn("driveBootSession: project has no repo_path; the agent boots without a project folder",
+			"session_id", session.ID, "project_id", session.ProjectID)
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve work root: %w", err)
+	}
+	return root, nil
 }
 
 // applyLegacyCLIProviderToBootOpts threads a resolved CLI alias

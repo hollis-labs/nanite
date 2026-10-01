@@ -40,7 +40,7 @@ func TestResolveBootPrompt_NarrationSurvivesBootPromptOverride(t *testing.T) {
 // point (mid-session CLAUDE.md regeneration), which must agree with
 // resolveBootPrompt or a regenerated boot dir would silently lose the rule.
 func TestResolveSystemPrompt_CarriesCLINarration(t *testing.T) {
-	got := ResolveSystemPrompt("", &store.AgentProfile{SystemPrompt: "base"}, ModeLongLived, "", nil)
+	got := ResolveSystemPrompt("", &store.AgentProfile{SystemPrompt: "base"}, ModeLongLived, "", nil, "")
 	if !strings.Contains(got, "Narrate long waits") {
 		t.Error("ResolveSystemPrompt dropped the narration rule — mid-session regeneration would lose it")
 	}

@@ -3,15 +3,9 @@ package api
 import (
 	"database/sql"
 	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-
-	"github.com/hollis-labs/nanite/internal/chat"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -223,13 +217,6 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, map[string]string{"archived": id})
 }
 
-// handleCompactSession runs the slot-aware compaction pipeline against the
-// active conversation: drops dynamic context enrichment, summarizes the
-// oldest messages via the configured summarizer, and strips tool-result
-// blocks from older spans. The summary is persisted on the session and a
-// slot_changed envelope is fanned out to any active chat stream so the UI
-// can surface what just changed. The legacy 2000-char concat path and the
-// destructive `messages.is_compacted` writes are gone.
 // handleRebootSessionAgent reboots a single chat session's runtime agent
 // (CW-20260516-0057). POST /api/sessions/{id}/agent/reboot.
 //
@@ -314,110 +301,20 @@ func (a *API) handleRecoverSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("id")
-	ctx := r.Context()
-
-	session, err := a.Services.Sessions.Get(ctx, sessionID)
+	result, err := a.Services.CompactSession(r.Context(), r.PathValue("id"))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, service.ErrCompactionSessionNotFound) {
 			a.errorResp(w, http.StatusNotFound, "session not found")
 		} else {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 		}
 		return
 	}
-
-	agent, err := a.Services.Agents.ResolveForSession(ctx, sessionID)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	settings, _ := a.Services.Settings.Get(ctx)
-	windowSize := 0
-	if settings != nil {
-		windowSize = settings.ContextWindowTokens
-	}
-
-	result, err := a.Services.Context.AssembleSlots(ctx, session, agent, []llmtypes.ToolDefinition{}, "", windowSize, "")
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	summarizer := service.BuildSummarizer(a.Services.Providers, a.Services.ProviderDefaults, settings)
-	mode := service.ClassifyCompactionMode(agent)
-	pipeline := &ctxpkg.CompactionPipeline{
-		Window:                result.Window,
-		Estimator:             ctxpkg.DefaultEstimator{},
-		Summarizer:            summarizer,
-		Mode:                  mode,
-		ConversationMessages:  result.Messages,
-		SessionID:             sessionID,
-		CompactionEventWriter: a.Services.CompactionEvents,
-	}
-
-	tokensBefore := result.Window.UsedTokens()
-	if a.Services.Events != nil {
-		a.Services.Events.EmitPreCompact(ctx, sessionID, len(result.Messages), "manual")
-	}
-	cr, err := pipeline.RunForce(ctx)
-	if err != nil {
-		slog.Warn("api: compaction pipeline failed", "session_id", sessionID, "err", err)
-		a.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("compaction failed: %v", err))
-		return
-	}
-	tokensAfter := result.Window.UsedTokens()
-	tokensSaved := tokensBefore - tokensAfter
-	if tokensSaved < 0 {
-		tokensSaved = 0
-	}
-
-	summary := ""
-	stages := []string{}
-	if cr != nil {
-		summary = cr.Summary
-		stages = cr.StagesApplied
-	}
-	if summary == "" {
-		// Stage 2 (summarize) is the only stage that produces a summary today.
-		// When summarizer is unavailable Stage 2 skips, so derive a placeholder
-		// from the manifest of stages that did fire so the session card can
-		// still render something useful.
-		if len(stages) > 0 {
-			summary = fmt.Sprintf("Compaction applied %d stage(s); no LLM summary produced (summarizer unavailable).", len(stages))
-		}
-	}
-
-	if a.Services.Events != nil {
-		a.Services.Events.EmitPostCompact(ctx, sessionID, tokensSaved, stages)
-	}
-
-	if a.Services.Streams != nil {
-		payload := chat.SlotChangedV1{
-			Slot:         ctxpkg.SlotConversation,
-			Change:       chat.SlotChangeSummarized,
-			Reasoning:    fmt.Sprintf("/compact requested; %d stage(s) applied.", len(stages)),
-			TokensBefore: tokensBefore,
-			TokensAfter:  tokensAfter,
-		}
-		// Reuse the chat helper's marshaling+defaulting via a side channel:
-		// we wrap the same emit logic by sending through a single-buffered
-		// chan and forwarding to active streams.
-		envCh := make(chan chat.StreamEvent, 1)
-		if emitErr := chat.EmitSlotChangedEvent(envCh, payload); emitErr != nil {
-			slog.Warn("api: slot_changed marshal failed", "session_id", sessionID, "err", emitErr)
-		} else {
-			evt := <-envCh
-			a.Services.Streams.BroadcastSessionStreamEvent(sessionID, evt)
-		}
-	}
-
 	a.jsonResp(w, http.StatusOK, map[string]any{
-		"summary":        summary,
-		"stages_applied": stages,
-		"tokens_saved":   tokensSaved,
-		"mode":           mode,
+		"summary":        result.Summary,
+		"stages_applied": result.StagesApplied,
+		"tokens_saved":   result.TokensSaved,
+		"mode":           result.Mode,
 	})
 }
 

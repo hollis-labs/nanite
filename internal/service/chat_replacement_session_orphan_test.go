@@ -17,10 +17,11 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/permission"

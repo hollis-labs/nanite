@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -178,7 +179,16 @@ func TestCodexColdBootStartsAFreshThreadInsteadOfResumingOne(t *testing.T) {
 	if !ok {
 		t.Fatal("no runtime session after turn 1")
 	}
-	_ = sess.Stop(ctx)
+	if err := sess.Stop(ctx); err != nil {
+		t.Fatalf("stop first boot: %v", err)
+	}
+	// Stop requests shutdown; LoadLive observes the wrapper Run completion.
+	// A cold boot starts only after that first runtime has actually exited.
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := sess.Wait(waitCtx); errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first boot did not exit: %v", err)
+	}
 
 	events := ask("Now, what is the code word?")
 	if e := findEvent(events, "error"); e != nil {

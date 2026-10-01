@@ -168,12 +168,12 @@ func (a *API) handleGetSessionDetails(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, details)
 }
 
-// sessionDetails assembles the session read model. The session, its primary
-// agent, its durable-agent attachments and its usage come from their
-// services; halt and runtime rows have no service yet and are still read from the
-// store, with context.TODO() until they move (transport-boundary,
-// CW-20260930-0083): touching those lines before then would count them as
-// new store calls under the R1 gate.
+// sessionDetails assembles the session read model from the services that
+// own each part: the session, its halt status and runtime rows, its primary
+// agent, its durable-agent attachments and its usage. A part that cannot be
+// read falls back to its default (not halted, runtime state "none", and so
+// on), so a request canceled part-way through can yield defaults, visible
+// only to a client that has already gone.
 func (a *API) sessionDetails(ctx context.Context, id string) (sessionDetailsResponse, error) {
 	sess, err := a.Services.Sessions.Get(ctx, id)
 	if err != nil {
@@ -191,7 +191,7 @@ func (a *API) sessionDetails(ctx context.Context, id string) (sessionDetailsResp
 		ImmutableStartFields: []string{"provider", "model", "runtime_kind", "recipe", "lifecycle_class", "work_root"},
 		Checkpoint:           checkpointDetail{Status: "unknown"},
 	}
-	if halt, err := a.Services.Store.GetSessionHalt(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil && halt != nil {
+	if halt, err := a.Services.SessionRuntime.Halt(ctx, id); err == nil && halt != nil {
 		details.Halt = haltDetailFromStore(halt)
 	}
 	if primary, err := a.Services.AgentMembership.GetSessionPrimaryAgent(ctx, id); err == nil {
@@ -220,7 +220,7 @@ func (a *API) sessionDetails(ctx context.Context, id string) (sessionDetailsResp
 	if usage, err := a.Services.Usage.SessionUsage(ctx, id); err == nil && usage != nil && usage.MessageCount > 0 {
 		details.Usage = sessionUsageToViewPtr(usage)
 	}
-	if rows, err := a.Services.Store.ListAgentRuntimeRowsForSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil && len(rows) > 0 {
+	if rows, err := a.Services.SessionRuntime.RuntimeRows(ctx, id); err == nil && len(rows) > 0 {
 		row := rows[0]
 		// Rows keep the runtime_kind token they were written with; report
 		// its current spelling (subprocess -> subprocess-per-turn).

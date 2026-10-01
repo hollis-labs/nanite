@@ -7,10 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"

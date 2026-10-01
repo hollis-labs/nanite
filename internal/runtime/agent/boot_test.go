@@ -3,10 +3,11 @@ package agent
 import (
 	"context"
 	"errors"
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/permission"

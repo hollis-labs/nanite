@@ -3,10 +3,11 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	llmtypes "github.com/hollis-labs/go-llm-types"

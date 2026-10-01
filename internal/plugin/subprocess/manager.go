@@ -44,7 +44,7 @@ func (s ProcessState) String() string {
 type ManagerConfig struct {
 	Command string   // executable path
 	Args    []string // command-line arguments
-	Env     []string // "KEY=VALUE" pairs
+	Env     []string // explicit host-approved "KEY=VALUE" pairs; never ambient inheritance
 	WorkDir string   // working directory (plugin directory)
 
 	// Health check interval. Zero disables periodic health checks.
@@ -128,9 +128,7 @@ func (m *Manager) Start(ctx context.Context) (*Transport, error) {
 	if m.cfg.WorkDir != "" {
 		cmd.Dir = m.cfg.WorkDir
 	}
-	if len(m.cfg.Env) > 0 {
-		cmd.Env = append(cmd.Environ(), m.cfg.Env...)
-	}
+	cmd.Env = pluginEnvironment(cmd.Environ(), m.cfg.Env)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

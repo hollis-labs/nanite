@@ -35,6 +35,10 @@ func NewProjectService(st ProjectStore, sessions SessionGetter) *ProjectService 
 // ErrProjectNotFound reports a project that could not be read.
 var ErrProjectNotFound = errors.New("project not found")
 
+// ProjectInUseError is Delete's refusal for a project that still has
+// sessions that are not archived (CW-20261001-0125).
+type ProjectInUseError = store.ProjectInUseError
+
 // ErrProjectNoRepoPath reports a project with no repository attached.
 var ErrProjectNoRepoPath = errors.New("project has no repo_path")
 
@@ -105,7 +109,9 @@ func (s *ProjectService) Update(ctx context.Context, existing *store.Project, pa
 }
 
 // Delete removes a project. A project that cannot be read is
-// ErrProjectNotFound and nothing is deleted.
+// ErrProjectNotFound, and one that still has sessions that are not archived
+// is *ProjectInUseError; in both cases nothing is deleted. Archived sessions
+// are detached and kept (store.DeleteProject).
 func (s *ProjectService) Delete(ctx context.Context, id string) error {
 	if _, err := s.store.GetProject(ctx, id); err != nil {
 		return ErrProjectNotFound

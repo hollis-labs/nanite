@@ -453,13 +453,45 @@ func (s *runtimeEventSink) handleTurnCompleted(ctx context.Context, raw json.Raw
 // shape for llmtypes.EventError. go-agent-wrapper's own failure for a turn the
 // child never finished uses the same key, beside reason "process_exited".
 type turnFailedPayload struct {
-	Error string `json:"error"`
+	Error  string `json:"error"`
+	Reason string `json:"reason"`
+}
+
+// StopReasonInterrupted is the stop reason an interrupted turn's usage
+// carries into the chat loop, so the turn is saved as interrupted rather than
+// reported as failed.
+const StopReasonInterrupted = "interrupted"
+
+// TurnFailedInterrupted reports whether a KindTurnFailed payload is a turn
+// ended by CancelTurn (go-agent-wrapper v0.22.0+: reason "interrupted"), not
+// a failure.
+func TurnFailedInterrupted(raw json.RawMessage) bool {
+	var p turnFailedPayload
+	return len(raw) > 0 && json.Unmarshal(raw, &p) == nil && p.Reason == "interrupted"
+}
+
+// InterruptedTurnUsage is the usage an interrupted turn delivers: its own,
+// or an empty one, carrying StopReasonInterrupted.
+func InterruptedTurnUsage(raw json.RawMessage, acp bool) *llmtypes.Usage {
+	usage := TurnCompletedUsage(raw, acp)
+	if usage == nil {
+		usage = &llmtypes.Usage{}
+	}
+	usage.StopReason = StopReasonInterrupted
+	return usage
 }
 
 // handleTurnFailed projects a failed turn: its usage, when it carries any,
 // then the error. Since go-agent-wrapper v0.13.1 a failed turn's usage rides
-// on its turn.failed rather than on a completion of its own.
+// on its turn.failed rather than on a completion of its own. A turn ended by
+// CancelTurn is not an error: it is usage marked interrupted, then Done
+// (CW-20261001-0168).
 func (s *runtimeEventSink) handleTurnFailed(ctx context.Context, raw json.RawMessage) {
+	if TurnFailedInterrupted(raw) {
+		s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: InterruptedTurnUsage(raw, s.acp)})
+		s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+		return
+	}
 	var p turnFailedPayload
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &p)

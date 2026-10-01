@@ -1727,7 +1727,8 @@ func (s *chatServiceImpl) finalizeRun(
 	// CW-20261001-0072: a user stop cancels ctx mid-turn. What the turn
 	// produced is still saved, marked interrupted, with the placeholder
 	// persistPartialAssistant uses when it produced nothing.
-	interrupted := ctx.Err() != nil
+	interrupted := ctx.Err() != nil ||
+		(run.finalUsage != nil && run.finalUsage.StopReason == runtimeagent.StopReasonInterrupted)
 	if interrupted && strings.TrimSpace(cleanContent) == "" {
 		cleanContent = "[generation interrupted]"
 	}

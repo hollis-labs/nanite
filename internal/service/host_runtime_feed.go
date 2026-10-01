@@ -471,6 +471,12 @@ func projectHostRuntimePayload(kind runtimeevents.EventKind, isACP bool, raw jso
 			projected["usage"] = usage
 		}
 		projected["terminal"] = true
+		// A turn ended by CancelTurn (reason "interrupted") is an interrupt,
+		// not a failure (CW-20261001-0168).
+		if reason, _ := source["reason"].(string); reason == "interrupted" {
+			projected["interrupted"] = true
+			break
+		}
 		projected["failed"] = true
 		// The error text stays private; a classified failure surfaces as a
 		// closed enum (CW-20260930-0113).

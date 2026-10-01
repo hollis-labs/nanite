@@ -93,6 +93,21 @@ lives in the git log.
 
 ### Changed
 
+- **An agent's `nanite mcp` now opens no database** (CW-20261001-0188). Every
+  agent Nanite launches gets the server's loopback address in its planted
+  `.mcp.json` (`NANITE_API_URL`), and its `nanite mcp` forwards self-tool
+  calls there instead of opening the main database read-write inside the
+  agent's sandbox. This is what lets Nanite make the database's directory
+  read-only to agents (a follow-up to CW-20261001-0143).
+  - **Subagent, background and one-shot launches** used to dispatch locally
+    against the database. They now forward too, but keep exactly the tools
+    they had (`NANITE_MCP_SELF_TOOLS=store`). Chat agents keep the full set.
+    This restriction preserves each launch's tool surface; it is not a
+    security boundary, since the loopback tool API takes no credentials.
+  - **`dev_read(artifact_id=…)`** answers that the lookup is not available
+    in this launch mode.
+  - **`nanite mcp` without `NANITE_API_URL`** opens the database as before.
+
 - **Boot-profile compiler and provider bootdirs now ride shared
   `go-agent-launch` / `go-agent-context` primitives** (Phase 6,
   CW-20260515-0024/0025/0026). The mechanical slot file/inline IO,

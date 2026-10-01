@@ -97,3 +97,23 @@ func TestListTools_WiringACollaboratorListsItsTools(t *testing.T) {
 		t.Error("message_inbox listed while messaging is still unwired")
 	}
 }
+
+// BareStoreTools is the set a forwarding `nanite mcp` advertises for a launch
+// that is not a chat agent, and it must be the set that launch had when it
+// dispatched locally: what a transport over a real store lists with
+// HideUnwired (CW-20261001-0188).
+func TestBareStoreTools_MatchesBareTransport(t *testing.T) {
+	st := newSelfTools(t)
+	st.HideUnwired = true
+	want := listedNames(t, st)
+	var got []string
+	for _, tool := range BareStoreTools() {
+		got = append(got, tool.Name)
+	}
+	if len(got) == 0 {
+		t.Fatal("BareStoreTools is empty")
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("BareStoreTools = %v\nbare transport lists %v", got, want)
+	}
+}

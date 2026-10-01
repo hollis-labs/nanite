@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // A bare `nanite mcp` (no NANITE_API_URL, no allowlist) — how tether's MCP
@@ -77,12 +75,7 @@ func TestBareServer_HiddenToolCallReturnsItsReason(t *testing.T) {
 // With NANITE_API_URL the self tools are forwarded to the live harness,
 // which has every service, so the full catalog stays listed.
 func TestProxyServer_ListsFullSelfCatalog(t *testing.T) {
-	s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { s.Close(context.Background()) })
-	srv := New(s, "test-session", nil, "", "http://127.0.0.1:1", nil)
+	srv := NewForwarding("test-session", nil, "", "http://127.0.0.1:1", ScopeHarness, nil)
 	cs := connectClient(t, srv)
 
 	res, err := cs.ListTools(context.Background(), nil)

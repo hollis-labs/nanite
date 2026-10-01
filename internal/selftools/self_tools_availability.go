@@ -1,5 +1,11 @@
 package selftools
 
+import (
+	"context"
+
+	"github.com/hollis-labs/nanite/internal/mcp"
+)
+
 // selfToolNeeds maps each self tool whose handler depends on a collaborator
 // to a check that the collaborator is wired. NewSelfToolsTransport leaves
 // these collaborators nil; cmd/nanite wires them after the service container
@@ -71,6 +77,21 @@ func neverOnTransport(*SelfToolsTransport) bool { return false }
 func (st *SelfToolsTransport) toolWired(name string) bool {
 	need, ok := selfToolNeeds[name]
 	return !ok || need(st)
+}
+
+// BareStoreTools returns the self tools a transport over a bare store lists
+// with HideUnwired set: what `nanite mcp` advertises when it dispatches
+// locally, with none of the harness's collaborators wired. Every check in
+// selfToolNeeds reads a collaborator NewSelfToolsTransport leaves unwired,
+// never the store itself, so no store is needed to compute it.
+//
+// A forwarding `nanite mcp` for a launch that is not a chat agent advertises
+// exactly this set (CW-20261001-0188): such launches used to dispatch
+// locally, and routing their calls through the live harness must not give
+// them a tool they did not already have.
+func BareStoreTools() []mcp.Tool {
+	tools, _ := (&SelfToolsTransport{HideUnwired: true}).ListTools(context.Background())
+	return tools
 }
 
 // HiddenTools names the tools ListTools leaves out because their

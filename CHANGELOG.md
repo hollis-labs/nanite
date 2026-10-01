@@ -121,6 +121,27 @@ lives in the git log.
 
 ### Changed
 
+- **Claude agents now load only the `.mcp.json` Nanite plants for them**
+  (CW-20261001-0221). Every Claude agent Nanite launches (chat, one-shot,
+  resumed, subagent, background) gets `--strict-mcp-config` with
+  `--mcp-config <boot dir>/.mcp.json`. Before this, Claude also loaded
+  whatever the operator's own Claude has configured in `~/.claude.json`,
+  plugins and account connectors.
+  - **Why:** a user-level `mux mcp --proxy` spawned a second `nanite mcp`
+    inside the agent's sandbox with the real database open read-write, and
+    handed every agent the operator's full tool set, Cerberus (deploy, ssh)
+    included.
+  - **What agents notice:** the only MCP server a Nanite Claude agent has is
+    Nanite's own. Tools from the operator's other servers (Torque,
+    Tesseract, Tether and so on, through the user-level `mux`) are gone.
+    Anything an agent needs from them has to be planted deliberately.
+  - **Kill switch:** `NANITE_CLAUDE_STRICT_MCP=0` restores the old
+    behaviour and logs a startup warning. It is interim, and goes when the
+    library option for strict MCP lands.
+  - **Not covered:** Codex (reads no user-level config, because `CODEX_HOME`
+    is the boot dir), OpenCode (still loads `~/.config/opencode`) and ACP
+    launches.
+
 - **An agent's `nanite mcp` now opens no database** (CW-20261001-0188). Every
   agent Nanite launches gets the server's loopback address in its planted
   `.mcp.json` (`NANITE_API_URL`), and its `nanite mcp` forwards self-tool

@@ -443,7 +443,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		return nil, failure
 	}
 
-	selectedAdapter, err := selectAdapter(deps, selection, opts.Workdir)
+	selectedAdapter, err := selectAdapter(deps, selection, opts.Workdir, bootDir)
 	if err != nil {
 		return cleanup(fmt.Errorf("agent.Boot: select wrapper adapter: %w", err))
 	}

@@ -149,6 +149,10 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		return AgentDepsBundle{}, errors.New("BuildAgentDependencies: Streams is required")
 	}
 
+	// Startup is the one place to say the strict-MCP kill switch is on
+	// (CW-20261001-0221).
+	runtimeagent.WarnIfStrictMCPOff()
+
 	binPath := cfg.BinaryPath
 	if binPath == "" {
 		exe, err := os.Executable()

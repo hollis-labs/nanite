@@ -184,3 +184,67 @@ func TestCodexLayout_BootProperties(t *testing.T) {
 		t.Errorf("SpawnWorkdir = %q, want /tmp/boot", got)
 	}
 }
+
+// TestCodexLayout_AuthJSON_CopiesHostAuth pins that the planted auth.json
+// carries the host's codex auth (CW-20261001-0021). CODEX_HOME=<bootDir>
+// makes codex read auth from the boot dir only, so an empty plant fails
+// every launch with 401. go-providers v0.26.0 renders auth.json empty
+// unless the caller opts in; codexAuthJSONContent opts in.
+//
+// CODEX_HOME points at a fixture dir — the source lookup honors it, so the
+// test never reads the real ~/.codex/auth.json.
+func TestCodexLayout_AuthJSON_CopiesHostAuth(t *testing.T) {
+	const fixture = `{"OPENAI_API_KEY":null,"tokens":{"access_token":"fixture-access","refresh_token":"fixture-refresh"}}` + "\n"
+	codexHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(fixture), 0o600); err != nil {
+		t.Fatalf("write fixture auth.json: %v", err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+
+	profile := &store.AgentProfile{Name: "codex-auth", Slug: "codex-auth"}
+	bootDir, err := codexLayout{}.Setup(SetupParams{SessionID: "s-auth", AgentProfile: profile})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(bootDir) })
+
+	authPath := filepath.Join(bootDir, "auth.json")
+	body, err := os.ReadFile(authPath) //nolint:gosec // reads a file this test just planted into a temp boot dir
+	if err != nil {
+		t.Fatalf("read auth.json: %v", err)
+	}
+	if string(body) != fixture {
+		t.Errorf("planted auth.json = %q, want the host's auth.json %q", body, fixture)
+	}
+
+	// auth.json carries OAuth tokens — it must not be world-readable.
+	info, err := os.Stat(authPath)
+	if err != nil {
+		t.Fatalf("stat auth.json: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != codexConfigFileMode {
+		t.Errorf("auth.json mode = %o, want %o", perm, codexConfigFileMode)
+	}
+}
+
+// TestCodexLayout_AuthJSON_NotLoggedIn pins the not-logged-in path: no
+// host auth.json is not a Setup error. The boot dir still gets an empty
+// auth.json and codex reports "Not logged in" at dispatch.
+func TestCodexLayout_AuthJSON_NotLoggedIn(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+
+	profile := &store.AgentProfile{Name: "codex-noauth", Slug: "codex-noauth"}
+	bootDir, err := codexLayout{}.Setup(SetupParams{SessionID: "s-noauth", AgentProfile: profile})
+	if err != nil {
+		t.Fatalf("Setup with no host auth.json: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(bootDir) })
+
+	body, err := os.ReadFile(filepath.Join(bootDir, "auth.json")) //nolint:gosec // reads a file this test just planted into a temp boot dir
+	if err != nil {
+		t.Fatalf("read auth.json: %v", err)
+	}
+	if len(body) != 0 {
+		t.Errorf("auth.json = %q, want empty when the host is not logged in", body)
+	}
+}

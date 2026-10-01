@@ -134,18 +134,36 @@ const codexConfigFileMode = 0o600
 // + CODEX_HOME are a coherent set — go-providers' codex BootDirSpec
 // declares all three together for exactly this reason.
 //
-// The render copies the user's ~/.codex/auth.json (honoring $CODEX_HOME
-// in the PARENT env, matching codex's own discovery rule). If the user
-// isn't logged in, it returns "" — the planted auth.json is empty and
-// codex surfaces "Not logged in" at dispatch time, the same outcome as
-// today's (CODEX_HOME-unset) path. A non-NotExist read error (permission
-// denied, etc.) bubbles up so the operator sees an actionable message.
+// # Opting in to the host read (CW-20261001-0021)
+//
+// Since go-providers v0.26.0 the auth.json Render is pure by default: with
+// a zero PlantContext it returns "" and never reads the host's auth. The
+// copy happens only when the caller sets PlantContext.LegacyAllowHostEffects
+// or prepares EffectCodexAuthJSON through PrepareRuntime with its own
+// CredentialResolver. Nanite rendered with a zero PlantContext, so every
+// codex boot dir got a 0-byte auth.json and every launch failed 401.
+//
+// We opt in with LegacyAllowHostEffects, for this render only — config.toml
+// and the claude settings keep rendering pure. PrepareRuntime was not the
+// smaller change here: it writes auth.json straight into the boot root
+// rather than returning content for the plant.Spec, it needs a
+// Nanite-written resolver to re-derive the CODEX_HOME / ~/.codex lookup the
+// render already does, and it fails outright when the user is not logged
+// in. CW-20260930-0113 (Nanite adopting the shared PreparedExecution)
+// replaces this opt-in with the prepared effect.
+//
+// With the opt-in, the render copies the user's ~/.codex/auth.json
+// (honoring $CODEX_HOME in the PARENT env, matching codex's own discovery
+// rule). If the user isn't logged in, it returns "" — the planted
+// auth.json is empty and codex surfaces "Not logged in" at dispatch time.
+// A non-NotExist read error (permission denied, etc.) bubbles up so the
+// operator sees an actionable message.
 //
 // PlantContext.BootDir is left empty; the auth.json Render has no
 // BootDir-gated side effect (it only reads the source file).
 func codexAuthJSONContent() (string, error) {
 	adapter := provider.NewCodexAdapter()
-	return renderProviderConfigFile(adapter, "auth.json", provider.PlantContext{})
+	return renderProviderConfigFile(adapter, "auth.json", provider.PlantContext{LegacyAllowHostEffects: true})
 }
 
 // claudeDefaultPermissionMode is the permissions.defaultMode planted into

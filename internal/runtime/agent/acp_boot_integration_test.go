@@ -198,6 +198,7 @@ func TestBoot_ACPWrapperLifecycle_MultiTurnResumeCancelIdentityAndCleanup(t *tes
 	if err != nil {
 		t.Fatalf("Boot: %v", err)
 	}
+	assertRuntimeKind(t, st, "acp-stdio")
 	if !deps.Manager.IsLive(sess.ID) {
 		t.Fatal("ACP session was not registered live at Boot readiness")
 	}

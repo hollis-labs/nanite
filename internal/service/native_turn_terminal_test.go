@@ -156,13 +156,15 @@ echo '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":
 type nativeCLICase struct {
 	name, provider, adapter, pathEnv, script string
 	newAdapter                               func() provider.CLIAdapter
+	// runtimeKind is the agent_runtime.runtime_kind Boot records for it.
+	runtimeKind string
 }
 
 var (
 	claudeStreamingStdioCase = nativeCLICase{"claude streaming-stdio", "pty-claude", "claude", "CLAUDE_CLI_PATH", fakeStreamingStdioClaudeScript,
-		func() provider.CLIAdapter { return provider.NewClaudeAdapterStreamingStdio() }}
+		func() provider.CLIAdapter { return provider.NewClaudeAdapterStreamingStdio() }, "streaming-stdio"}
 	codexSubprocessCase = nativeCLICase{"codex subprocess-per-turn", "pty-codex", "codex", "CODEX_CLI_PATH", fakeCodexExecTurnScript,
-		func() provider.CLIAdapter { return provider.NewCodexAdapter() }}
+		func() provider.CLIAdapter { return provider.NewCodexAdapter() }, "subprocess-per-turn"}
 )
 
 // TestNativeCLITurn_SavesReplyAndEndsStream drives one chat turn end to end
@@ -187,6 +189,15 @@ func TestNativeCLITurn_SavesReplyAndEndsStream(t *testing.T) {
 			text, _ := structuredmessage.UnwrapText(saved.Content)
 			if saved.Role != "assistant" || text != "native reply" {
 				t.Fatalf("saved message = role %q content %q", saved.Role, saved.Content)
+			}
+			// The runtime row records how the agent ran (CW-20261001-0139).
+			var kind string
+			if err := f.st.DB.QueryRowContext(context.Background(),
+				`SELECT runtime_kind FROM agent_runtime WHERE id = ?`, f.session).Scan(&kind); err != nil {
+				t.Fatalf("read agent_runtime row: %v", err)
+			}
+			if kind != tc.runtimeKind {
+				t.Fatalf("agent_runtime.runtime_kind = %q, want %q", kind, tc.runtimeKind)
 			}
 		})
 	}

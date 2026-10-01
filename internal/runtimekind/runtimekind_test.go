@@ -32,7 +32,7 @@ func TestParse_LegacyTokensReadAsCurrentKinds(t *testing.T) {
 // Every runtime mode Nanite names is the leaf spelling, and parses to
 // itself.
 func TestParse_CurrentSpellingsRoundTrip(t *testing.T) {
-	for _, k := range []Kind{StreamingStdio, SubprocessPerTurn, JSONRPCStdio, HTTPSSE, PTY} {
+	for _, k := range []Kind{StreamingStdio, SubprocessPerTurn, JSONRPCStdio, HTTPSSE, PTY, ACPStdio, ACPTCP} {
 		if !runtimes.Mode(k).Valid() {
 			t.Errorf("%q is not a runtimes.Mode", k)
 		}
@@ -48,7 +48,9 @@ func TestParse_CurrentSpellingsRoundTrip(t *testing.T) {
 func TestIsManagedAutomation(t *testing.T) {
 	for k, want := range map[Kind]bool{
 		API: true, StreamingStdio: true, SubprocessPerTurn: true, JSONRPCStdio: true, HTTPSSE: true,
-		PTY: false, Unknown: false,
+		// ACP agent_runtime rows record their mode (CW-20261001-0139); that
+		// does not make ACP managed automation, which it was not as Unknown.
+		PTY: false, Unknown: false, ACPStdio: false, ACPTCP: false,
 	} {
 		if got := IsManagedAutomation(k); got != want {
 			t.Errorf("IsManagedAutomation(%q) = %v, want %v", k, got, want)

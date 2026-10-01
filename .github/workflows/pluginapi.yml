@@ -1,0 +1,27 @@
+name: pluginapi
+on:
+  push:
+    branches: [main]
+    paths: ['pkg/pluginapi/**', '.github/workflows/pluginapi.yml']
+  pull_request:
+    paths: ['pkg/pluginapi/**', '.github/workflows/pluginapi.yml']
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: 'off'
+    defaults:
+      run:
+        working-directory: pkg/pluginapi
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: pkg/pluginapi/go.mod
+      - name: Format
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race -count=20 ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

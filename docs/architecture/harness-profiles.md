@@ -240,8 +240,7 @@ session, agent and user-settings layers, which the endpoint does.
 ## dev is a profile, not a build mode
 
 `dev` is an ordinary named profile chosen the same way as any other. It is
-independent of the `devmode` build tag, which only disables plugin signature
-verification and must never ship. Tying a runtime profile to a build tag would
+independent of the `devmode` build tag. Tying a runtime profile to a build tag would
 make shipped and development builds behave differently in ways nobody selected.
 
 ## Verify

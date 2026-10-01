@@ -102,7 +102,6 @@ ui:
 release:
   archive_url: https://example.com/a.tar.gz
   checksum_url: https://example.com/a.sha256
-  signature_url: https://example.com/a.sig
   platforms: [darwin-arm64, linux-amd64]
 runtime: subprocess
 entrypoint: ./giphy

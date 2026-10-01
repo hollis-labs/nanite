@@ -78,7 +78,6 @@ type ToolStore interface {
 	GetCatalogSource(ctx context.Context, id string) (*store.CatalogSource, error)
 	CreateCatalogSource(ctx context.Context, name, url, sourceType string, priority int) (*store.CatalogSource, error)
 	UpdateCatalogSource(ctx context.Context, id, name, url string, enabled bool, priority int) error
-	SetCatalogSourcePublicKey(ctx context.Context, id, publicKey string) error
 	DeleteCatalogSource(ctx context.Context, id string) error
 }
 

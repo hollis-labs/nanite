@@ -18,7 +18,6 @@ import (
 	"github.com/hollis-labs/go-safefs/pathsafe"
 	"github.com/hollis-labs/nanite/internal/brand"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/nanite/internal/plugin/devmode"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
 	fplugin "github.com/hollis-labs/plugin-sdk"
@@ -53,16 +52,6 @@ type PluginInfo struct {
 	Status      string `json:"status"`
 	Type        string `json:"type"`
 	Installed   bool   `json:"installed"`
-	// TrustTier surfaces the install-time signature-verify outcome for the UI.
-	// Values:
-	//   "signed"    — signature verified against a trusted key.
-	//   "unsigned"  — installed without a signature (only reachable in
-	//                 devmode builds; production refuses install).
-	//   "untrusted" — signature mismatch / verify failed (should be
-	//                 impossible in production; surfaced in case it
-	//                 somehow happens).
-	//   ""          — unknown / not applicable (builtin, not-yet-installed).
-	TrustTier string `json:"trust_tier,omitempty"`
 	// SkippedRegistrations surfaces yaml-declared registrations a subprocess
 	// plugin declined at load time. Populated for loaded subprocess plugins
 	// only; nil/absent for builtin or not-yet-loaded plugins. Shape mirrors
@@ -191,7 +180,6 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 			Status:      status,
 			Type:        "user", // default; overridden below if in repos
 			Installed:   true,
-			TrustTier:   installedPluginTrustTier(),
 		}
 		if pms.pluginHost != nil {
 			// Host keys plugins by manifest.Identifier() (v1 ID when set, else Name),
@@ -220,7 +208,6 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 				Status:               statusStr,
 				Type:                 "core",
 				Installed:            true,
-				TrustTier:            "signed", // core plugins ship in the binary
 				SkippedRegistrations: collectSkippedRegistrations(pms.pluginHost, p.ID()),
 			})
 			seen[p.ID()] = true
@@ -263,31 +250,7 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 	_ = json.NewEncoder(w).Encode(result) // A client write failure cannot be repaired after headers are sent.
 }
 
-// collectSkippedRegistrations pulls runtime opt-outs off a loaded subprocess
-// plugin, if one exists for pluginID. Returns nil for builtin/compiled-in
-// plugins (they have no subprocess layer) or when the plugin is not currently
-// loaded. Safe to call unconditionally — all failures return nil.
-// installedPluginTrustTier returns the default trust tier to stamp onto an
-// on-disk plugin directory surfaced by /api/plugins/managed. Rationale:
-//
-//   - In production builds (devmode.HostDevSigningBypass == false) the
-//     install pipeline refuses to land an unsigned or bad-sig plugin, so
-//     an installed directory implies the signature verified: "signed".
-//   - In devmode builds the installer may have accepted an unsigned
-//     archive, and we cannot distinguish after the fact without an
-//     install-record column on disk. We surface "unsigned" as the honest
-//     worst-case so the Plugin Manager badge warns the operator.
-//
-// An "untrusted" tier can only appear if the verifier is somehow bypassed
-// post-install (should be impossible) — left reserved for future use when
-// we persist a per-plugin install record.
-func installedPluginTrustTier() string {
-	if devmode.HostDevSigningBypass {
-		return "unsigned"
-	}
-	return "signed"
-}
-
+// collectSkippedRegistrations returns runtime opt-outs for a loaded subprocess plugin.
 func collectSkippedRegistrations(host *naniteplugin.Host, pluginID string) []SkippedRegistrationInfo {
 	if host == nil {
 		return nil

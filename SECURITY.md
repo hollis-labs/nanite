@@ -199,9 +199,9 @@ machine:
 - no at-rest encryption; MCP server secrets are plaintext in the database
 - subprocess plugins run with your user's privileges
 - no sandbox for plugins or for the agent CLIs Nanite launches
-- plugins installed from a local path or archive are not signature-checked,
-  and plugin signing should not be relied on as a trust boundary: a plugin is
-  code you choose to run
+- plugin archives from catalogs are checked against their SHA256 checksum;
+  checksums establish byte integrity, not publisher trust. A plugin is code
+  you choose to run
 - CORS does not reject cross-origin requests, and there is no `Host` header
   validation
 - on macOS, sandboxed execution restricts writes and network but not reads

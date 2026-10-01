@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-// CatalogArchiveSource implements Source by downloading a signed archive
+// CatalogArchiveSource implements Source by downloading an archive
 // from a catalog entry over HTTP. Shared by cmd/nanite's CLI catalog
 // install flow (plugin_install_flow.go's installFromCatalog) and
 // internal/api's GUI/API catalog install handler (catalog.go's
@@ -19,12 +19,10 @@ import (
 // printEvents; API: pluginHost.EmitPluginInstallProgress) without needing
 // to fork this Source.
 type CatalogArchiveSource struct {
-	ID          string
-	ArchiveURL  string
-	SHA256      string
-	Signature   []byte
-	SignerKeyID string
-	Downloader  *HTTPDownloader
+	ID         string
+	ArchiveURL string
+	SHA256     string
+	Downloader *HTTPDownloader
 }
 
 // PluginID implements Source.
@@ -53,7 +51,5 @@ func (s *CatalogArchiveSource) Download(ctx context.Context, stagingDir string, 
 		Kind:           "archive",
 		Path:           path,
 		ExpectedSHA256: s.SHA256,
-		Signature:      s.Signature,
-		SignerKeyID:    s.SignerKeyID,
 	}, nil
 }

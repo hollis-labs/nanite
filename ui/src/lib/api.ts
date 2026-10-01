@@ -2871,15 +2871,6 @@ export const api = {
       throw new Error(`Failed to delete catalog source: ${res.status}`);
   },
 
-  setCatalogSourceKey: async (id: string, publicKey: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/plugins/catalog/sources/${id}/key`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ public_key: publicKey }),
-    });
-    if (!res.ok) throw new Error(`Failed to set source key: ${res.status}`);
-  },
-
   // --- Messaging subsystem (agent-to-agent + agent-to-user) ---
   // Distinct from session-chat `sendMessage` above — that's for user
   // chat turns; these target the agent-to-agent messaging primitive.

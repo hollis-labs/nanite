@@ -23,12 +23,6 @@ type UserSettings struct {
 	ExtSettings           map[string]any    `json:"ext_settings,omitempty"`
 	ToolLoadPreferences   map[string]string `json:"tool_load_preferences,omitempty"`
 	TaskBackend           string            `json:"task_backend"`
-	// AllowUnsignedPlugins permits installing plugin archives that lack a
-	// verified Ed25519 signature. The setting is ONLY honored in builds
-	// compiled with the `devmode` build tag (see internal/plugin/devmode).
-	// In production binaries this field is intentionally inert: a
-	// compromised row cannot disable signature verification.
-	AllowUnsignedPlugins bool `json:"allow_unsigned_plugins"`
 	// Embedding provider configuration. EmbeddingMode is one of
 	// "disabled" (default) or "explicit". When disabled or when provider is
 	// empty, no embedder is wired and similarity recall is unavailable.
@@ -125,7 +119,6 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 	var devMode, recoverMode bool
 	var toolLoadPrefsJSON string
 	var taskBackend string
-	var allowUnsigned bool
 	var embeddingProvider, embeddingModel, embeddingMode string
 	var contextWindowTokens int
 	var contextBudgetPct float64
@@ -142,7 +135,7 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
 		        developer_mode, recover_mode, tool_stream_behavior, tool_drawer_retention,
-		        tool_load_preferences, task_backend, allow_unsigned_plugins,
+		        tool_load_preferences, task_backend,
 		        embedding_provider, embedding_model, embedding_mode,
 		        context_window_tokens, context_budget_pct,
 		        summarizer_provider, summarizer_model, compaction_strategy,
@@ -157,7 +150,7 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
 		&devMode, &recoverMode, &toolStreamBehavior, &toolDrawerRetention,
-		&toolLoadPrefsJSON, &taskBackend, &allowUnsigned,
+		&toolLoadPrefsJSON, &taskBackend,
 		&embeddingProvider, &embeddingModel, &embeddingMode,
 		&contextWindowTokens, &contextBudgetPct,
 		&summarizerProvider, &summarizerModel, &compactionStrategy,
@@ -183,7 +176,6 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 		DeveloperMode:                  devMode,
 		RecoverMode:                    recoverMode,
 		TaskBackend:                    taskBackend,
-		AllowUnsignedPlugins:           allowUnsigned,
 		EmbeddingProvider:              embeddingProvider,
 		EmbeddingModel:                 embeddingModel,
 		EmbeddingMode:                  embeddingMode,
@@ -349,7 +341,6 @@ func (s *Store) UpdateUserSettings(ctx context.Context, us *UserSettings) error 
 			tool_drawer_retention = ?,
 			tool_load_preferences = ?,
 			task_backend = ?,
-			allow_unsigned_plugins = ?,
 			embedding_provider = ?,
 			embedding_model = ?,
 			embedding_mode = ?,
@@ -378,7 +369,7 @@ func (s *Store) UpdateUserSettings(ctx context.Context, us *UserSettings) error 
 		us.DefaultAgent, us.UtilityProvider, us.UtilityModel, us.ToolCallDisplayMode,
 		string(extJSON), us.DeveloperMode, us.RecoverMode,
 		us.ToolStreamBehavior, us.ToolDrawerRetention, string(toolPrefsJSON),
-		taskBackend, us.AllowUnsignedPlugins,
+		taskBackend,
 		us.EmbeddingProvider, us.EmbeddingModel, embeddingMode,
 		contextWindowTokens, contextBudgetPct,
 		us.SummarizerProvider, us.SummarizerModel, compactionStrategy,

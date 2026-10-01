@@ -17,7 +17,7 @@ import (
 )
 
 var userSettingsViewKeys = []string{
-	"allow_unsigned_plugins", "auto_repair_pref", "compaction_strategy",
+	"auto_repair_pref", "compaction_strategy",
 	"context_budget_pct", "context_overflow_recovery", "context_window_tokens",
 	"default_agent", "default_model", "default_provider", "developer_mode",
 	"embedding_mode", "embedding_model", "embedding_provider", "embedding_status",

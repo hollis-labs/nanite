@@ -14,6 +14,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/hollis-labs/go-safefs/atomicfile"
+	catalogfetch "github.com/hollis-labs/nanite/internal/plugin/catalog"
 	"github.com/hollis-labs/nanite/internal/safego"
 )
 
@@ -23,12 +25,11 @@ type CatalogEntry struct {
 	Version     string   `yaml:"version"     json:"version"`
 	Description string   `yaml:"description" json:"description"`
 	Author      string   `yaml:"author"      json:"author,omitempty"`
-	Repo        string   `yaml:"repo"        json:"repo,omitempty"`      // e.g. "hollis-labs/nanite-plugin-git"
-	ArchiveURL  string   `yaml:"archive_url" json:"archive_url"`         // download URL for .tar.gz
-	Checksum    string   `yaml:"checksum"    json:"checksum,omitempty"`  // "sha256:hex..."
-	Signature   string   `yaml:"signature"   json:"signature,omitempty"` // hex-encoded Ed25519 signature over the archive
-	Compat      string   `yaml:"compat"      json:"compat,omitempty"`    // semver range, e.g. ">=0.2.0"
-	Runtime     string   `yaml:"runtime"     json:"runtime,omitempty"`   // "builtin" or "subprocess"
+	Repo        string   `yaml:"repo"        json:"repo,omitempty"`     // e.g. "hollis-labs/nanite-plugin-git"
+	ArchiveURL  string   `yaml:"archive_url" json:"archive_url"`        // download URL for .tar.gz
+	Checksum    string   `yaml:"checksum"    json:"checksum,omitempty"` // "sha256:hex..."
+	Compat      string   `yaml:"compat"      json:"compat,omitempty"`   // semver range, e.g. ">=0.2.0"
+	Runtime     string   `yaml:"runtime"     json:"runtime,omitempty"`  // "builtin" or "subprocess"
 	Tags        []string `yaml:"tags"      json:"tags,omitempty"`
 }
 
@@ -38,15 +39,14 @@ type CatalogFile struct {
 	Plugins []CatalogEntry `yaml:"plugins"`
 }
 
-// CatalogSource is a minimal view of a catalog source (URL + priority + trust key).
+// CatalogSource is a minimal view of a catalog source (URL and priority).
 // Matches the DB model fields needed by the fetcher.
 type CatalogSource struct {
-	ID        string
-	Name      string
-	URL       string
-	Priority  int
-	Enabled   bool
-	PublicKey string // hex-encoded Ed25519 public key for signature verification
+	ID       string
+	Name     string
+	URL      string
+	Priority int
+	Enabled  bool
 }
 
 // MergedCatalogEntry is a CatalogEntry enriched with source metadata.
@@ -160,11 +160,14 @@ func (cf *CatalogFetcher) fetchSource(ctx context.Context, src CatalogSource) (*
 		return cf.loadDiskCache(src.ID)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, catalogfetch.MaxCatalogBytes+1))
 	if err != nil {
 		return cf.loadDiskCache(src.ID)
 	}
 
+	if int64(len(body)) > catalogfetch.MaxCatalogBytes {
+		return nil, fmt.Errorf("catalog body exceeds size cap")
+	}
 	var catalog CatalogFile
 	if err := yaml.Unmarshal(body, &catalog); err != nil {
 		return nil, fmt.Errorf("parse catalog from %s: %w", src.Name, err)
@@ -223,8 +226,8 @@ func (cf *CatalogFetcher) saveDiskCache(sourceID string, data []byte) {
 	if path == "" {
 		return
 	}
-	_ = os.MkdirAll(cf.cacheDir, 0o755) // The disk cache is optional; network fetch remains authoritative.
-	_ = os.WriteFile(path, data, 0o644) // The disk cache is optional; network fetch remains authoritative.
+	_ = os.MkdirAll(cf.cacheDir, 0o700)         // The disk cache is optional; network fetch remains authoritative.
+	_ = atomicfile.WriteFile(path, data, 0o600) // The disk cache is optional; network fetch remains authoritative.
 }
 
 func (cf *CatalogFetcher) loadDiskCache(sourceID string) (*CatalogFile, error) {
@@ -232,9 +235,17 @@ func (cf *CatalogFetcher) loadDiskCache(sourceID string) (*CatalogFile, error) {
 	if path == "" {
 		return nil, fmt.Errorf("no disk cache configured")
 	}
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path) // #nosec G304 -- path is an ID hash within the configured cache directory.
 	if err != nil {
 		return nil, fmt.Errorf("no cached catalog for source %s", sourceID)
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, catalogfetch.MaxCatalogBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read cached catalog: %w", err)
+	}
+	if int64(len(data)) > catalogfetch.MaxCatalogBytes {
+		return nil, fmt.Errorf("cached catalog exceeds size cap")
 	}
 	var catalog CatalogFile
 	if err := yaml.Unmarshal(data, &catalog); err != nil {

@@ -110,6 +110,7 @@ require (
 	github.com/hollis-labs/go-hooks v0.1.0
 	github.com/hollis-labs/go-llm-contracts v0.4.0
 	github.com/hollis-labs/go-llm-types v0.5.1
+	github.com/hollis-labs/go-localdaemon v0.1.0
 	github.com/hollis-labs/go-loopdetect v0.1.0
 	github.com/hollis-labs/go-materialize v0.1.0
 	github.com/hollis-labs/go-mcp v0.14.1

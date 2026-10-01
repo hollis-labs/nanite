@@ -28,6 +28,7 @@ func TestDetectClaims(t *testing.T) {
 	claims := map[string]string{
 		"c395 wording (id not in the sentence)": "The Tesseract write succeeded, and the returned item ID above is verified.\n\nID: " + fakeULID,
 		"same paragraph, ID first":              "ID " + fakeULID + " — the write succeeded and is verified.",
+		"own passive write":                     "Task CW-20260919-0100 was created by me.",
 		"wrote":                                 "I wrote memory " + fakeULID + " to Tesseract.",
 		"created a tracker id":                  "Created task CW-20260919-0100 in the Nanite project.",
 		"saved":                                 "Saved to knowledge as " + fakeULID,
@@ -223,5 +224,32 @@ func TestGroundedSetKeysNeedNotBeCanonical(t *testing.T) {
 	f, ok := Detect("I saved "+realULID+".", map[string]bool{strings.ToLower(realULID): true})
 	if !ok || len(f.Ungrounded) != 0 {
 		t.Errorf("lowercase grounded key did not ground: %+v", f)
+	}
+}
+
+func TestActivityReportsAreNotAssistantWriteClaims(t *testing.T) {
+	for _, reply := range []string{
+		"Observed: many tasks were created or updated on October 1 across PRJ-20260416-0001 and PRJ-20260417-0002.",
+		"Task CW-20260919-0011 was updated yesterday.",
+		"Torque reports that CW-20260919-0011 was created yesterday.",
+		"I found that CW-20260919-0011 was updated yesterday.",
+		"I reviewed records created under PRJ-20260416-0001.",
+	} {
+		if f, ok := Detect(reply, nil); ok {
+			t.Errorf("activity report rejected: %q: %+v", reply, f)
+		}
+	}
+}
+
+func TestWriteReceiptDoesNotClaimOtherSentencesRecords(t *testing.T) {
+	reply := "The activity spans PRJ-20260416-0001 and PRJ-20260417-0002. I saved the summary as " + realULID + ". Task CW-20260919-0011 was updated yesterday."
+	f, ok := Detect(reply, map[string]bool{realULID: true})
+	if !ok || len(f.IDs) != 1 || f.IDs[0] != realULID || len(f.Ungrounded) != 0 {
+		t.Fatalf("read citations were treated as write receipts: %+v, detected=%v", f, ok)
+	}
+	// A valid receipt must not excuse a separate fabricated write claim.
+	f, ok = Detect(reply+" I also created "+fakeULID+".", map[string]bool{realULID: true})
+	if !ok || len(f.Ungrounded) != 1 || f.Ungrounded[0] != fakeULID {
+		t.Fatalf("fabricated write escaped the guard: %+v, detected=%v", f, ok)
 	}
 }

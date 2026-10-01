@@ -46,6 +46,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/mcpserver"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/scheduler"
 	"github.com/hollis-labs/nanite/internal/selftools"
@@ -1578,19 +1579,10 @@ func cmdMCPServe(args []string) {
 	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
 	// --db default is empty: an unset flag resolves via go-apppaths
 	// (CW-20260517-0061). A non-empty flag becomes an explicit WithDBOverride.
-	dbFlag := fs.String("db", "", "SQLite database path (default: go-apppaths XDG layout — run `nanite path`)")
+	// With NANITE_API_URL set it is not used (CW-20261001-0188).
+	dbFlag := fs.String("db", "", "SQLite database path (default: go-apppaths XDG layout — run `nanite path`; unused when NANITE_API_URL is set)")
 	sessionID := fs.String("session", "", "Session ID")
 	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
-
-	dbPathStr := resolveDBPathWith(*dbFlag)
-	dbPath := &dbPathStr
-
-	s, err := store.New(context.Background(), *dbPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s mcp: open db: %v\n", brand.BinaryName, err)
-		os.Exit(1)
-	}
-	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
@@ -1616,11 +1608,6 @@ func cmdMCPServe(args []string) {
 	if artifactsRoot == "" {
 		artifactsRoot = "data/artifacts"
 	}
-	// NANITE_API_URL is planted into the boot dir's .mcp.json by a
-	// CLI-launch composition root. When present, self-tool calls forward
-	// to that live harness instead of dispatching against this
-	// subprocess's bare store (Option A — see internal/api/tools_call.go).
-	apiURL := os.Getenv("NANITE_API_URL")
 	// NANITE_MCP_TOOL_ALLOWLIST is planted into .mcp.json by
 	// internal/workflowrunner's renderMCPJSON for a workflow-runner
 	// subprocess ONLY — CLI-launched coding agents' renderMCPJSON
@@ -1628,10 +1615,45 @@ func cmdMCPServe(args []string) {
 	// they see the unrestricted catalog exactly as before
 	// (CW-20260814-0006).
 	toolAllowlist := parseToolAllowlist(os.Getenv(workflowrunner.ToolAllowlistEnvVar))
-	srv := mcpserver.New(s, *sessionID, allowedPaths, artifactsRoot, apiURL, toolAllowlist)
+
+	// NANITE_API_URL is planted into the boot dir's .mcp.json for every
+	// CLI-launched agent. With it, self-tool calls forward to that live
+	// harness (see internal/api/tools_call.go) and this process neither
+	// resolves nor opens --db: it runs inside the agent's sandbox, where
+	// Nanite write-protects the database's directory (CW-20261001-0188).
+	var srv *mcpserver.Server
+	if apiURL := os.Getenv("NANITE_API_URL"); apiURL != "" {
+		scope := selfToolScope(os.Getenv(runtimeagent.SelfToolsScopeEnv))
+		srv = mcpserver.NewForwarding(*sessionID, allowedPaths, artifactsRoot, apiURL, scope, toolAllowlist)
+	} else {
+		s, err := store.New(context.Background(), resolveDBPathWith(*dbFlag))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s mcp: open db: %v\n", brand.BinaryName, err)
+			os.Exit(1)
+		}
+		defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
+		srv = mcpserver.New(s, *sessionID, allowedPaths, artifactsRoot, toolAllowlist)
+	}
 	if err := srv.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "%s mcp: %v\n", brand.BinaryName, err)
 		os.Exit(1)
+	}
+}
+
+// selfToolScope maps the planted NANITE_MCP_SELF_TOOLS value to the self
+// tools a forwarding `nanite mcp` advertises. Unset is a chat launch's full
+// surface. A value other than the bare-store one gets the bare-store set,
+// the narrower of the two, with a warning.
+func selfToolScope(raw string) mcpserver.SelfToolScope {
+	switch strings.TrimSpace(raw) {
+	case "":
+		return mcpserver.ScopeHarness
+	case runtimeagent.SelfToolsScopeStore:
+		return mcpserver.ScopeStore
+	default:
+		slog.Warn("mcp: unknown self-tools scope; advertising the bare-store set",
+			"env", runtimeagent.SelfToolsScopeEnv, "value", raw)
+		return mcpserver.ScopeStore
 	}
 }
 

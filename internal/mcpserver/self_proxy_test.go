@@ -10,27 +10,11 @@ import (
 	"testing"
 
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
-func newProxyTestStore(t *testing.T) *store.Store {
-	t.Helper()
-	s, err := storetest.New(t, context.Background(), t.TempDir()+"/proxy.db")
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		s.Close(context.Background(
-
-		// TestSelfToolProxy_ForwardsCall pins that the proxy POSTs {session_id,
-		// name, args} to /api/tools/call on the configured API server and decodes
-		// the ToolResult it gets back — the CLI-launch self-tools proxy contract.
-		))
-	})
-	return s
-}
-
+// TestSelfToolProxy_ForwardsCall pins that the proxy POSTs {session_id,
+// name, args} to /api/tools/call on the configured API server and decodes
+// the ToolResult it gets back — the CLI-launch self-tools proxy contract.
 func TestSelfToolProxy_ForwardsCall(t *testing.T) {
 	var gotPath, gotSession, gotName string
 	var gotArgs map[string]any
@@ -52,7 +36,7 @@ func TestSelfToolProxy_ForwardsCall(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newSelfToolProxy(newProxyTestStore(t), srv.URL, "sess-42")
+	p := newSelfToolProxy(srv.URL, "sess-42", ScopeHarness)
 	res, err := p.CallTool(context.Background(), "todo_create", map[string]any{"title": "x"})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
@@ -85,7 +69,7 @@ func TestSelfToolProxy_SurfacesHarnessError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newSelfToolProxy(newProxyTestStore(t), srv.URL, "sess-1")
+	p := newSelfToolProxy(srv.URL, "sess-1", ScopeHarness)
 	_, err := p.CallTool(context.Background(), "todo_create", nil)
 	if err == nil {
 		t.Fatal("expected an error when the harness returns non-200")
@@ -98,7 +82,7 @@ func TestSelfToolProxy_SurfacesHarnessError(t *testing.T) {
 // TestSelfToolProxy_ListToolsServesCatalog pins that ListTools returns the
 // static self-tool catalog without contacting the API server.
 func TestSelfToolProxy_ListToolsServesCatalog(t *testing.T) {
-	p := newSelfToolProxy(newProxyTestStore(t), "http://127.0.0.1:1", "sess-1")
+	p := newSelfToolProxy("http://127.0.0.1:1", "sess-1", ScopeHarness)
 	tools, err := p.ListTools(context.Background())
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
@@ -129,7 +113,7 @@ func TestSelfToolProxy_CacheRetrievalFlagAndCatalog(t *testing.T) {
 		{"allowlist with one", []string{"whoami", "fetch_tool_result"}, false},
 		{"allowlist without them", []string{"whoami"}, false},
 	} {
-		s := New(newProxyTestStore(t), "sess-1", nil, "", srv.URL, tc.allowlist)
+		s := NewForwarding("sess-1", nil, "", srv.URL, ScopeHarness, tc.allowlist)
 		got = nil
 		if _, err := s.self.CallTool(context.Background(), "whoami", nil); err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
@@ -140,7 +124,7 @@ func TestSelfToolProxy_CacheRetrievalFlagAndCatalog(t *testing.T) {
 		}
 	}
 
-	p := newSelfToolProxy(newProxyTestStore(t), srv.URL, "sess-1")
+	p := newSelfToolProxy(srv.URL, "sess-1", ScopeHarness)
 	tools, _ := p.ListTools(context.Background())
 	seen := map[string]bool{}
 	for _, tl := range tools {

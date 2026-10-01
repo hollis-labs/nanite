@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/selftools"
-	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
@@ -21,39 +21,35 @@ import (
 // nanite API server (POST /api/tools/call) instead of dispatching them
 // locally.
 //
-// A `nanite mcp` subprocess spawned for a CLI-launched chat agent runs
-// against a bare store with none of the harness services wired. When the
-// subprocess is told the live server's address (NANITE_API_URL, planted
-// into the boot dir's .mcp.json), it uses this proxy for the `self`
-// transport so todo/plan/panel/messaging/subagent tools dispatch in the
-// running process where their dependencies are live. The `dev` transport
+// A `nanite mcp` subprocess spawned for a CLI-launched agent is told the
+// live server's address (NANITE_API_URL, planted into the boot dir's
+// .mcp.json) and uses this proxy for the `self` transport, so self tools
+// dispatch in the running process where their dependencies are live, and
+// the subprocess opens no database (CW-20261001-0188). The `dev` transport
 // stays local — filesystem tools belong in the subprocess.
 type selfToolProxy struct {
 	apiURL    string
 	sessionID string
 	catalog   []condmcp.Tool
-	client    *http.Client
+	// hidden are the self tools a ScopeStore proxy leaves out of its
+	// catalog. A call naming one is answered here and never forwarded.
+	hidden map[string]struct{}
+	client *http.Client
 	// cacheRetrieval is sent with every forwarded call: true when this
 	// subprocess exposes fetch_tool_result/search_tool_result, so the harness
 	// may cache an over-budget result behind a pointer the agent can follow.
 	cacheRetrieval bool
 }
 
-// newSelfToolProxy builds a proxy transport. The tool catalog is taken from
-// a local SelfToolsTransport — selfToolDefinitions() is static, so the
-// advertised surface matches what the live server can dispatch — while
-// CallTool forwards over HTTP.
-func newSelfToolProxy(s *store.Store, apiURL, sessionID string) *selfToolProxy {
-	catalog, _ := selftools.NewSelfToolsTransport(s).ListTools(context.Background())
-	// Cache navigation is served by the live harness (it owns the cache), so
-	// it is advertised here rather than by the bare local transport.
-	for _, def := range []llmtypes.ToolDefinition{toolclient.FetchToolResultMetaTool(), toolclient.SearchToolResultMetaTool()} {
-		catalog = append(catalog, condmcp.Tool{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema})
-	}
-	return &selfToolProxy{
+// newSelfToolProxy builds a proxy transport. The tool catalog is static —
+// the self-tool definitions, which the live server can all dispatch — while
+// CallTool forwards over HTTP. scope picks the catalog: ScopeHarness lists
+// every self tool and the harness's cache navigation tools, ScopeStore only
+// selftools.BareStoreTools.
+func newSelfToolProxy(apiURL, sessionID string, scope SelfToolScope) *selfToolProxy {
+	p := &selfToolProxy{
 		apiURL:    strings.TrimRight(apiURL, "/"),
 		sessionID: sessionID,
-		catalog:   catalog,
 		// A forwarded self-tool can be a synchronous dispatch (task_execute)
 		// that legitimately runs up to the subagent default of 300s. Keep
 		// the client timeout well clear of that so a valid long dispatch
@@ -62,6 +58,24 @@ func newSelfToolProxy(s *store.Store, apiURL, sessionID string) *selfToolProxy {
 		// cancellation path.
 		client: &http.Client{Timeout: 10 * time.Minute},
 	}
+	all, _ := (&selftools.SelfToolsTransport{}).ListTools(context.Background())
+	if scope == ScopeStore {
+		p.catalog = selftools.BareStoreTools()
+		p.hidden = map[string]struct{}{}
+		for _, t := range all {
+			if !slices.ContainsFunc(p.catalog, func(c condmcp.Tool) bool { return c.Name == t.Name }) {
+				p.hidden[t.Name] = struct{}{}
+			}
+		}
+		return p
+	}
+	p.catalog = all
+	// Cache navigation is served by the live harness (it owns the cache), so
+	// it is advertised here rather than by the bare local transport.
+	for _, def := range []llmtypes.ToolDefinition{toolclient.FetchToolResultMetaTool(), toolclient.SearchToolResultMetaTool()} {
+		p.catalog = append(p.catalog, condmcp.Tool{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema})
+	}
+	return p
 }
 
 // ListTools returns the static self-tool catalog.
@@ -69,8 +83,28 @@ func (p *selfToolProxy) ListTools(_ context.Context) ([]condmcp.Tool, error) {
 	return p.catalog, nil
 }
 
+// advertises reports whether name is in the proxy's catalog.
+func (p *selfToolProxy) advertises(name string) bool {
+	return slices.ContainsFunc(p.catalog, func(t condmcp.Tool) bool { return t.Name == name })
+}
+
+// HiddenTools names the self tools left out of a ScopeStore catalog, so a
+// call that names one gets this proxy's own answer rather than the SDK's
+// bare "unknown tool", as on a local bare-store server.
+func (p *selfToolProxy) HiddenTools() []string {
+	names := make([]string, 0, len(p.hidden))
+	for name := range p.hidden {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
 // CallTool forwards the call to the live API server and decodes the result.
 func (p *selfToolProxy) CallTool(ctx context.Context, name string, args map[string]any) (*condmcp.ToolResult, error) {
+	if _, hidden := p.hidden[name]; hidden {
+		return condmcp.ErrorResult(fmt.Sprintf("%s is not available to this launch: it needs a harness service only chat agents are given", name)), nil
+	}
 	payload := map[string]any{
 		"session_id": p.sessionID,
 		"name":       name,

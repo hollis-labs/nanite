@@ -39,28 +39,39 @@ type Server struct {
 	toolAllowlist map[string]struct{}
 }
 
-// New creates a Nanite MCP server backed by the given store. allowedPaths
-// controls which filesystem paths dev tools (dev_read, dev_grep, etc.) may
-// access — use the same roots the main server is configured with.
+// SelfToolScope picks the self tools a forwarding server (NewForwarding)
+// advertises.
+type SelfToolScope int
+
+const (
+	// ScopeHarness advertises every self tool, plus the harness's cache
+	// navigation tools: a chat launch's surface.
+	ScopeHarness SelfToolScope = iota
+	// ScopeStore advertises only selftools.BareStoreTools, the set a launch
+	// had when its `nanite mcp` dispatched locally against a bare store.
+	// Subagent, background and one-shot launches get it (CW-20261001-0188),
+	// so forwarding their calls to the live harness gives them no tool they
+	// did not already have. It keeps their tool surface, not isolation: the
+	// harness's /api/tools/call takes no credentials from a loopback caller.
+	ScopeStore
+)
+
+// New creates a Nanite MCP server whose self tools dispatch against the
+// given store. allowedPaths controls which filesystem paths dev tools
+// (dev_read, dev_grep, etc.) may access — use the same roots the main
+// server is configured with.
 //
 // artifactsRoot is the configured artifacts storage directory used to
 // confine `dev_read(artifact_id=...)` lookups against Context Broker
 // stash pointers (SP-20260512-0008 W2C, CW-20260512-0110). Pass "" to
 // disable artifact resolution from this stdio server (path-only mode).
 //
-// apiURL, when non-empty, is the base URL of a live nanite API server. The
-// `self` transport then forwards self-tool calls there (POST
-// /api/tools/call) so a CLI-launched chat agent dispatches through the
-// fully-wired in-process harness instead of this subprocess's bare store.
-// Empty keeps the prior local-dispatch behavior. The `dev` filesystem
-// tools always run locally regardless.
-//
 // toolAllowlist, when non-empty, restricts the tools this server ever
 // registers with the MCP SDK to exactly these names (across both the
 // self and dev transports) — see the Server.toolAllowlist field comment.
 // Pass nil/empty for the default, unrestricted catalog (CLI-launched
 // coding agents; CW-20260814-0006).
-func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot, apiURL string, toolAllowlist []string) *Server {
+func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot string, toolAllowlist []string) *Server {
 	dev := condmcp.NewDevToolsTransport(allowedPaths)
 	if artifactsRoot != "" {
 		dev = dev.WithArtifactResolver(condmcp.NewStoreArtifactResolver(s), artifactsRoot)
@@ -71,22 +82,57 @@ func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot,
 		sessionID:     sessionID,
 		toolAllowlist: buildToolAllowlist(toolAllowlist),
 	}
-	if apiURL != "" {
-		proxy := newSelfToolProxy(s, apiURL, sessionID)
-		// Only offer the harness to cache results behind a pointer when the
-		// agent can actually follow it.
-		proxy.cacheRetrieval = srv.toolAllowed("fetch_tool_result") && srv.toolAllowed("search_tool_result")
-		srv.self = proxy
-	} else {
-		// Nothing to forward to: tools whose collaborators only the live
-		// harness wires would answer every call with "… not configured", so
-		// leave them out of the listing (CW-20261001-0017). An explicit
-		// allowlist is the launcher naming its exact surface, and stands.
-		local := selftools.NewSelfToolsTransport(s)
-		local.HideUnwired = srv.toolAllowlist == nil
-		srv.self = local
-	}
+	// Nothing to forward to: tools whose collaborators only the live
+	// harness wires would answer every call with "… not configured", so
+	// leave them out of the listing (CW-20261001-0017). An explicit
+	// allowlist is the launcher naming its exact surface, and stands.
+	local := selftools.NewSelfToolsTransport(s)
+	local.HideUnwired = srv.toolAllowlist == nil
+	srv.self = local
 	return srv
+}
+
+// NewForwarding creates a Nanite MCP server that forwards self-tool calls
+// to the live nanite API server at apiURL (POST /api/tools/call), so a
+// CLI-launched agent dispatches through the fully-wired in-process harness.
+// It opens no store, and takes none: an agent's `nanite mcp` runs inside
+// the agent's sandbox, where Nanite write-protects the database's directory
+// (CW-20261001-0188, CW-20261001-0143). scope picks the self tools it
+// advertises. The dev filesystem tools run locally, except the
+// `dev_read(artifact_id=...)` lookup, which needs the store and answers
+// that it is not available here.
+//
+// allowedPaths, artifactsRoot and toolAllowlist are as for New.
+func NewForwarding(sessionID string, allowedPaths []string, artifactsRoot, apiURL string, scope SelfToolScope, toolAllowlist []string) *Server {
+	dev := condmcp.NewDevToolsTransport(allowedPaths)
+	if artifactsRoot != "" {
+		dev = dev.WithArtifactResolver(unavailableArtifactResolver{}, artifactsRoot)
+	}
+
+	srv := &Server{
+		dev:           dev,
+		sessionID:     sessionID,
+		toolAllowlist: buildToolAllowlist(toolAllowlist),
+	}
+	proxy := newSelfToolProxy(apiURL, sessionID, scope)
+	// Only offer the harness to cache results behind a pointer when the
+	// agent can actually follow it.
+	proxy.cacheRetrieval = proxy.advertises("fetch_tool_result") && srv.toolAllowed("fetch_tool_result") &&
+		proxy.advertises("search_tool_result") && srv.toolAllowed("search_tool_result")
+	srv.self = proxy
+	return srv
+}
+
+// errArtifactLookupUnavailable answers dev_read(artifact_id=...) on a
+// forwarding server, which has no store to look the artifact up in.
+var errArtifactLookupUnavailable = errors.New("artifact lookup is not available in this launch mode: this nanite mcp forwards to the live API and opens no database")
+
+// unavailableArtifactResolver is a forwarding server's dev_read artifact
+// resolver: every lookup fails with errArtifactLookupUnavailable.
+type unavailableArtifactResolver struct{}
+
+func (unavailableArtifactResolver) GetArtifact(string) (*condmcp.ArtifactMeta, error) {
+	return nil, errArtifactLookupUnavailable
 }
 
 // buildToolAllowlist normalizes a raw tool-name list into a lookup set,

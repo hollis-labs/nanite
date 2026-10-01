@@ -33,7 +33,7 @@ func TestRenderMCPJSON_APIBaseURLPlantsEnv(t *testing.T) {
 			DBPath:     "/data/nanite.db",
 			ServerID:   "nanite",
 			APIBaseURL: "http://127.0.0.1:8090",
-		}, "sess-1")
+		}, "sess-1", false)
 		if err != nil {
 			t.Fatalf("renderMCPJSON: %v", err)
 		}
@@ -52,7 +52,7 @@ func TestRenderMCPJSON_APIBaseURLPlantsEnv(t *testing.T) {
 			BinaryPath: "/usr/local/bin/nanite",
 			DBPath:     "/data/nanite.db",
 			ServerID:   "nanite",
-		}, "sess-1")
+		}, "sess-1", true)
 		if err != nil {
 			t.Fatalf("renderMCPJSON: %v", err)
 		}
@@ -67,12 +67,12 @@ func TestRenderMCPJSON_APIBaseURLPlantsEnv(t *testing.T) {
 	})
 }
 
-// TestMCPOverlay_APIBaseURLGatedByMode pins that the live-harness self-tools
-// proxy (NANITE_API_URL) is planted only for chat-agent launches. Subagent /
-// background / one-shot launches follow the standard boot and must not
-// forward self-tools to the harness, so mcpOverlay strips the API URL for
-// them — even though the shared MCPConfig carries it.
-func TestMCPOverlay_APIBaseURLGatedByMode(t *testing.T) {
+// TestMCPOverlay_EveryModeForwardsToTheAPI pins that every launch mode's
+// `nanite mcp` forwards to the live harness (NANITE_API_URL), so none opens
+// the database (CW-20261001-0188), while the harness's full self-tool
+// surface stays a chat-agent affordance (1b324a45): subagent, background
+// and one-shot launches carry the bare-store scope marker.
+func TestMCPOverlay_EveryModeForwardsToTheAPI(t *testing.T) {
 	params := func(mode Mode) SetupParams {
 		return SetupParams{
 			SessionID: "s1",
@@ -105,19 +105,25 @@ func TestMCPOverlay_APIBaseURLGatedByMode(t *testing.T) {
 	}
 
 	for _, mode := range []Mode{ModeLongLived, ModeResume} {
-		t.Run("chat launch "+mode.String()+" keeps NANITE_API_URL", func(t *testing.T) {
+		t.Run("chat launch "+mode.String()+" gets the full surface", func(t *testing.T) {
 			env := envOf(t, mode)
 			if env["NANITE_API_URL"] != "http://127.0.0.1:8090" {
-				t.Errorf("NANITE_API_URL = %v, want it planted for a chat launch", env["NANITE_API_URL"])
+				t.Errorf("NANITE_API_URL = %v, want it planted", env["NANITE_API_URL"])
+			}
+			if _, present := env[SelfToolsScopeEnv]; present {
+				t.Errorf("%s should be unset for a chat launch, got %#v", SelfToolsScopeEnv, env)
 			}
 		})
 	}
 
 	for _, mode := range []Mode{ModeOneShot, ModeSubagent, ModeBackground} {
-		t.Run("non-chat launch "+mode.String()+" strips NANITE_API_URL", func(t *testing.T) {
+		t.Run("non-chat launch "+mode.String()+" gets the bare-store set", func(t *testing.T) {
 			env := envOf(t, mode)
-			if _, present := env["NANITE_API_URL"]; present {
-				t.Errorf("NANITE_API_URL should be stripped for %s, got %#v", mode, env)
+			if env["NANITE_API_URL"] != "http://127.0.0.1:8090" {
+				t.Errorf("NANITE_API_URL = %v, want it planted", env["NANITE_API_URL"])
+			}
+			if env[SelfToolsScopeEnv] != SelfToolsScopeStore {
+				t.Errorf("%s = %v, want %q", SelfToolsScopeEnv, env[SelfToolsScopeEnv], SelfToolsScopeStore)
 			}
 		})
 	}

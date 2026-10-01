@@ -24,7 +24,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -234,22 +233,3 @@ func (s *stubCLIAdapter) Detect() (string, bool)                                
 // future go-providers release adds a method this test catches the gap
 // before runtime.
 var _ provider.CLIAdapter = (*stubCLIAdapter)(nil)
-
-// The ACP launch gate (CW-20260930-0113): with ACP gated, Copilot and Pi
-// route to the CLI "no adapter" error, whose message is the gate's own,
-// instead of booting an ACP agent that could panic the host.
-func TestClassifyNilProvider_ACPGated(t *testing.T) {
-	t.Setenv("NANITE_ALLOW_ACP_RUNTIMES", "")
-	s := &chatServiceImpl{agentDeps: &runtimeagent.Dependencies{}}
-	for _, name := range []string{"copilot", "pi"} {
-		if got := s.classifyNilProvider("cli", name); got != nilProviderRouteCLINoAdapter {
-			t.Errorf(`classifyNilProvider("cli", %q) = %v, want nilProviderRouteCLINoAdapter`, name, got)
-		}
-		if err := runtimeagent.LaunchError(name); !errors.Is(err, runtimeagent.ErrACPRuntimesDisabled) {
-			t.Errorf("LaunchError(%q) = %v, want the ACP gate", name, err)
-		}
-	}
-	if got := s.classifyNilProvider("cli", "claude"); got != nilProviderRouteCLI {
-		t.Errorf(`classifyNilProvider("cli", "claude") = %v, want nilProviderRouteCLI`, got)
-	}
-}

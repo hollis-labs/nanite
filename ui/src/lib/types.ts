@@ -87,11 +87,10 @@ export type DurableAgentAttachmentRelation =
 export const RUNTIME_KINDS = [
   "api",
   "streaming-stdio",
-  "subprocess",
+  "subprocess-per-turn",
   "jsonrpc-stdio",
-  "serve-http",
+  "http-sse",
   "pty",
-  "pty-debug",
 ] as const;
 export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 

@@ -26,6 +26,7 @@ var deniedCIDRs = mustParseCIDRs([]string{
 	"192.168.0.0/16", // RFC1918
 	"0.0.0.0/8",      // unspecified
 	"100.64.0.0/10",  // CGNAT
+	"192.88.99.0/24", // 6to4 relay anycast (RFC 7526, deprecated)
 	"fc00::/7",       // IPv6 ULA
 	"fe80::/10",      // IPv6 link-local
 	"::/128",         // IPv6 unspecified
@@ -86,8 +87,12 @@ func ResolveAndPin(ctx context.Context, resolver Resolver, host string, allowLoc
 		if reason, denied := deniedReason(ip, allowLocalhost); denied {
 			return nil, fmt.Errorf("%w: %s", ErrBlocked, reason)
 		}
+		// The localhost opt-in does not extend to an embedded address: a
+		// 127.0.0.1 reached through a NAT64 translator or a 6to4/Teredo
+		// tunnel is not this host (CW-20261001-0085, as go-egress-proxy
+		// v0.2.2 does).
 		for _, v4 := range embeddedIPv4s(ip) {
-			if reason, denied := deniedReason(v4, allowLocalhost); denied {
+			if reason, denied := deniedReason(v4, false); denied {
 				return nil, fmt.Errorf("%w: %s embeds %s", ErrBlocked, ip, reason)
 			}
 		}

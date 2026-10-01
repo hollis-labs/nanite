@@ -67,18 +67,62 @@ func TestResolveAndPinAppliesIPv4DenySetToEmbeddedAddresses(t *testing.T) {
 // embedded 0.0.0.1 would refuse the localhost opt-in the sandbox proxy and
 // web_fetch rely on.
 func TestResolveAndPinLocalhostOptInStillAllowsIPv6Loopback(t *testing.T) {
-	resolver := func(context.Context, string) ([]net.IP, error) {
-		return []net.IP{net.ParseIP("::1")}, nil
+	for _, raw := range []string{"::1", "127.0.0.1"} {
+		resolver := func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP(raw)}, nil
+		}
+		if _, err := ResolveAndPin(context.Background(), resolver, "localhost", true); err != nil {
+			t.Fatalf("localhost opt-in rejected %s: %v", raw, err)
+		}
 	}
-	if _, err := ResolveAndPin(context.Background(), resolver, "localhost", true); err != nil {
-		t.Fatalf("localhost opt-in rejected ::1: %v", err)
+}
+
+// TestResolveAndPinDeniesEmbeddedLoopbackEvenWithLocalhostOptIn aligns with
+// go-egress-proxy v0.2.2 (CW-20261001-0085): the localhost opt-in admits this
+// host's own loopback, and a 127.0.0.1 reached through a NAT64 translator,
+// a 6to4 or Teredo tunnel, or the IPv4-compatible form is not this host.
+func TestResolveAndPinDeniesEmbeddedLoopbackEvenWithLocalhostOptIn(t *testing.T) {
+	for name, raw := range map[string]string{
+		"nat64 well-known":        "64:ff9b::7f00:1",
+		"6to4":                    "2002:7f00:1::",
+		"teredo client 127.0.0.1": "2001:0:4136:e378:8000:63bf:80ff:fffe",
+		"teredo server 127.0.0.1": "2001:0:7f00:1:8000:63bf:f7f7:f7f7",
+		"ipv4-compatible":         "::7f00:1",
+		"nat64 well-known 127/8":  "64:ff9b::7f01:203",
+	} {
+		t.Run(name, func(t *testing.T) {
+			resolver := func(context.Context, string) ([]net.IP, error) {
+				return []net.IP{net.ParseIP(raw)}, nil
+			}
+			if _, err := ResolveAndPin(context.Background(), resolver, "localhost", true); !errors.Is(err, ErrBlocked) {
+				t.Fatalf("ResolveAndPin(%s) with the localhost opt-in = %v, want ErrBlocked", raw, err)
+			}
+		})
 	}
-	// An IPv4 loopback embedded in a transition form is loopback too.
-	embedded := func(context.Context, string) ([]net.IP, error) {
-		return []net.IP{net.ParseIP("64:ff9b::7f00:1")}, nil
-	}
-	if _, err := ResolveAndPin(context.Background(), embedded, "nat64.example", true); err != nil {
-		t.Fatalf("localhost opt-in rejected an embedded 127.0.0.1: %v", err)
+}
+
+// TestResolveAndPinDenies6to4RelayAnycast pins 192.88.99.0/24, the
+// deprecated 6to4 relay anycast range (RFC 7526), aligned with
+// go-egress-proxy v0.2.2: the whole /24, its neighbors untouched, and a
+// 6to4 address that embeds it.
+func TestResolveAndPinDenies6to4RelayAnycast(t *testing.T) {
+	for raw, blocked := range map[string]bool{
+		"192.88.99.0":      true,
+		"192.88.99.1":      true,
+		"192.88.99.255":    true,
+		"192.88.98.255":    false,
+		"192.88.100.0":     false,
+		"2002:c058:6301::": true,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			resolver := func(context.Context, string) ([]net.IP, error) {
+				return []net.IP{net.ParseIP(raw)}, nil
+			}
+			_, err := ResolveAndPin(context.Background(), resolver, "relay.example", false)
+			if got := errors.Is(err, ErrBlocked); got != blocked {
+				t.Fatalf("ResolveAndPin(%s) = %v, want blocked=%t", raw, err, blocked)
+			}
+		})
 	}
 }
 

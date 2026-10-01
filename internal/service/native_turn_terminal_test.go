@@ -213,9 +213,10 @@ func TestNativeCLITurn_ProcessExitMidTurnEndsStreamWithError(t *testing.T) {
 
 const nativeCLIMessageID = "assistant-native-cli"
 
-// runNativeCLITurn runs one chat turn for tc and returns the fixture and the
-// turn stream's events. It fails if the stream stays open.
-func runNativeCLITurn(t *testing.T, tc nativeCLICase) (*characterizationFixture, []chat.StreamEvent) {
+// newNativeCLIFixture wires a characterization fixture for tc's CLI provider
+// over the production runtime path: the real provider adapter and
+// go-agent-wrapper against tc's fake CLI, and the normalized bridge sink.
+func newNativeCLIFixture(t *testing.T, tc nativeCLICase) *characterizationFixture {
 	t.Helper()
 	scriptPath := filepath.Join(t.TempDir(), "fake-"+tc.adapter+".sh")
 	if err := os.WriteFile(scriptPath, []byte(tc.script), 0o755); err != nil { //nolint:gosec // the stand-in CLI binary must be executable, in t.TempDir()
@@ -260,6 +261,16 @@ func runNativeCLITurn(t *testing.T, tc nativeCLICase) (*characterizationFixture,
 	f.svc.agentDeps = deps
 	f.svc.agentEventBridge = bridge
 	f.svc.activeSessions = deps.Manager
+
+	return f
+}
+
+// runNativeCLITurn runs one chat turn for tc and returns the fixture and the
+// turn stream's events. It fails if the stream stays open.
+func runNativeCLITurn(t *testing.T, tc nativeCLICase) (*characterizationFixture, []chat.StreamEvent) {
+	t.Helper()
+	f := newNativeCLIFixture(t, tc)
+	ctx := context.Background()
 
 	producer := f.svc.streams.CreateStream(nativeCLIMessageID, f.session)
 	consumer, ok := f.svc.streams.GetStream(nativeCLIMessageID)

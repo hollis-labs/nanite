@@ -473,6 +473,14 @@ func logDecision(d GateDecision, err error) {
 func (g *Gate) run(ctx context.Context, req ExecRequest, caps Capabilities) (ExecResult, error) {
 	profile := composeProfile(caps, req.WorkDir, req.SkillSlug)
 
+	// CW-20261001-0079: where go-sandbox's loopback helper cannot raise lo,
+	// a loopback-granted skill would exit 125 with nothing else to go on.
+	if usesLoopbackHelper(profile) {
+		if err := loopbackSandboxCheck(); err != nil {
+			return ExecResult{}, fmt.Errorf("skill gate: %w", err)
+		}
+	}
+
 	// Apply's workspace parameter is unconditionally writable on every
 	// backend regardless of Profile contents (see package doc) — always a
 	// fresh, disposable, per-execution scratch directory, never
@@ -506,7 +514,7 @@ func (g *Gate) run(ctx context.Context, req ExecRequest, caps Capabilities) (Exe
 	// the bug this fixes (TASKS/skills/09's "Fix required" section).
 	cmd.Env = filterSecretEnv(os.Environ())
 
-	cleanup, err := sandbox.Apply(cmd, profile, scratchDir)
+	cleanup, err := applySandbox(cmd, profile, scratchDir)
 	if err != nil {
 		return ExecResult{}, fmt.Errorf("skill gate: apply sandbox profile: %w", err)
 	}
@@ -522,6 +530,12 @@ func (g *Gate) run(ctx context.Context, req ExecRequest, caps Capabilities) (Exe
 		return res, fmt.Errorf("skill gate: sandboxed execution failed: %w", runErr)
 	}
 	return res, nil
+}
+
+// applySandbox holds this package's one sandbox.Apply call: Gate.run and
+// the loopback probe (gate_loopback.go) both apply profiles through it.
+func applySandbox(cmd *exec.Cmd, profile sandbox.Profile, workspace string) (func(), error) {
+	return sandbox.Apply(cmd, profile, workspace)
 }
 
 // composeProfile builds the sandbox.Profile a grant's Capabilities

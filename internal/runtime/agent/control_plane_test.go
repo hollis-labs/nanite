@@ -147,8 +147,8 @@ func TestBoot_ControlPlaneProtectedFromAgents(t *testing.T) {
 			dbDir := filepath.Join(state, "workspaces", "default")
 			mkdirs(t, state, "coordination", "worktrees", "workspaces/default")
 			dbFile := filepath.Join(dbDir, "main.db")
-			if err := os.WriteFile(dbFile, []byte("nanite-database"), 0o600); err != nil {
-				t.Fatal(err)
+			if werr := os.WriteFile(dbFile, []byte("nanite-database"), 0o600); werr != nil {
+				t.Fatal(werr)
 			}
 			work, probeDir, bin := t.TempDir(), t.TempDir(), t.TempDir()
 			probe := filepath.Join(probeDir, "probe")
@@ -215,7 +215,7 @@ func TestBoot_ControlPlaneProtectedFromAgents(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(dbDir, "agent-wrote")); err == nil {
 				t.Error("the agent created a file in the database's directory")
 			}
-			if got, err := os.ReadFile(dbFile); err != nil || string(got) != "nanite-database" {
+			if got, err := os.ReadFile(dbFile); err != nil || string(got) != "nanite-database" { //nolint:gosec // a file this test created in t.TempDir()
 				t.Errorf("main.db after the agent ran = %q (%v), want it unchanged", got, err)
 			}
 			// Nanite's own writes are unaffected: protection binds the

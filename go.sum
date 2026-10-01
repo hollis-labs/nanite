@@ -57,8 +57,8 @@ github.com/hollis-labs/agent-contracts-leaf v0.3.0 h1:tOAbq1y2Qtkk/S81hpSTlE3ZIs
 github.com/hollis-labs/agent-contracts-leaf v0.3.0/go.mod h1:Yp3iEG7I1qHxGL+Ad085RDVP5xUM/dbL0nFxzCAQ9/w=
 github.com/hollis-labs/agentkit v0.12.3 h1:GbcD9UnEex82jr8m951d8CrEOKePFYw1Tol7NC/fQJE=
 github.com/hollis-labs/agentkit v0.12.3/go.mod h1:krgas5I+t6+VEDBGDhrGBX6xYSZtZRhrcwoGtZX1Mmg=
-github.com/hollis-labs/go-agent-wrapper v0.13.1 h1:zm8Y4vOVbcGcP8lJecMD/hl+siDQ+WJmW9bX5ElA9yc=
-github.com/hollis-labs/go-agent-wrapper v0.13.1/go.mod h1:EpN3WPjzWBVfxF4TzQWswUPL2K5TUWoKWrLPnGyymLQ=
+github.com/hollis-labs/go-agent-wrapper v0.15.0 h1:KajcNh6r7r/++nk/5hwIlvE8oyNrI3GZ0Or9g+s8324=
+github.com/hollis-labs/go-agent-wrapper v0.15.0/go.mod h1:vYz+80A/EmY6Z9SdCcSdaVvR9tIJgh4Z8oz7033KqT8=
 github.com/hollis-labs/go-apppaths v0.1.0 h1:LJQv483BhOoizLL4qKwsLcCbM0lQoVrNvksJ1thycd4=
 github.com/hollis-labs/go-apppaths v0.1.0/go.mod h1:b3gOdAFgSYY9ZT7VUooAczFdb6o0C2xSGQa7ktcyw30=
 github.com/hollis-labs/go-egress-proxy v0.2.3 h1:4T3Wv4W4Ek8xXKXg/J6rsLLcEgjpg3nBsiba+qTKOOE=
@@ -85,6 +85,8 @@ github.com/hollis-labs/go-modelsdev v0.3.0 h1:nGsGPpr6/Op37F0BrcHRgOVn0YEpFlcA94
 github.com/hollis-labs/go-modelsdev v0.3.0/go.mod h1:/scTnxJppW1p33PVaQ6iXvmc+zYYHoo+VnTgbmSA6TM=
 github.com/hollis-labs/go-otel v0.6.1 h1:bPqO0xFkTNIrcgW7J4YM/yt3yn1/2Hy9dKxX6/Etna0=
 github.com/hollis-labs/go-otel v0.6.1/go.mod h1:aju/sgq+E9fdnsxzvCMdcOxcFOryEPHEFHxQEEhRbjU=
+github.com/hollis-labs/go-permission v0.1.0 h1:eOlb2pPmEkh9D5zlVgWwOd4ryycEQYiLT1cLMEG6y2c=
+github.com/hollis-labs/go-permission v0.1.0/go.mod h1:OXz5GXvR7vFAb6TVoGDOESIEecC0V40524NdN0jiOrs=
 github.com/hollis-labs/go-providers v0.34.1 h1:Ewr5Z7BOpkWZMg3aveV5Z6DI/WxVxWDGVr4krGvcclo=
 github.com/hollis-labs/go-providers v0.34.1/go.mod h1:eDiOX1hTWT60bO+2PVtOoJnTwqz4tKawsw7X0S5B9M0=
 github.com/hollis-labs/go-queue v0.2.1 h1:q3ZJ+G+2UaVArfcHzlMle+qva0sdrJioOKSeQwGyPYo=

@@ -30,10 +30,15 @@ func TestSelectNativeAdapter_ClaudeArgvCarriesWorkRoot(t *testing.T) {
 			if err != nil {
 				t.Fatalf("selectNativeAdapter: %v", err)
 			}
+			// The configured argv plus --add-dir <root>, which go-agent-wrapper
+			// v0.15.0 places at the convention's extra slot (before the
+			// developer flag, if any) rather than last.
 			got := selected.CLIAdapter().BuildArgs("", "", "")
-			want := append(tc.cli.BuildArgs("", "", ""), "--add-dir", workRoot)
-			if !equalStrings(got, want) {
-				t.Fatalf("claude argv = %#v, want %#v", got, want)
+			if !hasAddDir(got, workRoot) {
+				t.Fatalf("claude argv = %#v, want --add-dir %s", got, workRoot)
+			}
+			if rest := withoutAddDir(got, workRoot); !sameMultiset(rest, tc.cli.BuildArgs("", "", "")) {
+				t.Fatalf("claude argv without the work root = %#v, want the configured argv %#v", rest, tc.cli.BuildArgs("", "", ""))
 			}
 		})
 	}
@@ -249,7 +254,7 @@ func TestSelectNativeAdapter_PromptAfterEndOfOptions(t *testing.T) {
 			}
 			args := selected.CLIAdapter().BuildArgs(turn, "system", "")
 			// Streaming stdio takes its turns on stdin: no prompt, so no
-			// `--`, in argv, and --add-dir at the end is a flag.
+			// `--`, in argv, and --add-dir anywhere in it is a flag.
 			if dd := endOfOptions(args); dd >= 0 {
 				t.Fatalf("claude streaming argv = %q, want no `--` (turns go over stdin)", args)
 			}
@@ -258,23 +263,49 @@ func TestSelectNativeAdapter_PromptAfterEndOfOptions(t *testing.T) {
 					t.Fatalf("claude streaming argv = %q carries the turn text", args)
 				}
 			}
-			if n := len(args); n < 2 || args[n-2] != "--add-dir" || args[n-1] != workRoot {
-				t.Fatalf("claude argv = %q, want it to end --add-dir %s", args, workRoot)
+			if !hasAddDir(args, workRoot) {
+				t.Fatalf("claude argv = %q, want --add-dir %s", args, workRoot)
 			}
 		})
 	}
 }
 
-// The wrapper appends Selection.ExtraArgs after the adapter's whole argv, so
-// on a per-turn launch they would follow `-- <prompt>`. Refused.
-func TestCheckExtraArgsPlacement(t *testing.T) {
-	if err := checkExtraArgsPlacement(true, []string{"--add-dir", "/r"}); err != nil {
-		t.Fatalf("streaming stdio: %v", err)
+func hasAddDir(args []string, dir string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--add-dir" && args[i+1] == dir {
+			return true
+		}
 	}
-	if err := checkExtraArgsPlacement(false, nil); err != nil {
-		t.Fatalf("per-turn, no additions: %v", err)
+	return false
+}
+
+func withoutAddDir(args []string, dir string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--add-dir" && i+1 < len(args) && args[i+1] == dir {
+			i++
+			continue
+		}
+		out = append(out, args[i])
 	}
-	if err := checkExtraArgsPlacement(false, []string{"--add-dir", "/r"}); err == nil {
-		t.Fatal("per-turn additions accepted; the wrapper would append them after `-- <prompt>`")
+	return out
+}
+
+func sameMultiset(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
 	}
+	count := map[string]int{}
+	for _, x := range a {
+		count[x]++
+	}
+	for _, x := range b {
+		count[x]--
+	}
+	for _, n := range count {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
 }

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,8 +83,8 @@ func TestBoot_WrapperLifecycle_Claude(t *testing.T) {
 		Manager:    NewSessionManager(),
 		Store:      store,
 		PathGrants: pg,
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			if name != "claude" {
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter {
+			if id != runtimes.ID("claude") {
 				return nil
 			}
 			return provider.NewClaudeAdapterStreamingStdio()
@@ -255,8 +256,8 @@ func TestBoot_WrapperLifecycle_Stop(t *testing.T) {
 		Manager:    NewSessionManager(),
 		Store:      store,
 		PathGrants: pg,
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			if name != "claude" {
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter {
+			if id != runtimes.ID("claude") {
 				return nil
 			}
 			return provider.NewClaudeAdapterStreamingStdio()
@@ -342,8 +343,8 @@ func TestBoot_WrapperLifecycle_Codex_EnvParity(t *testing.T) {
 		Manager:    NewSessionManager(),
 		Store:      store,
 		PathGrants: pg,
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			if name != "codex" {
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter {
+			if id != runtimes.ID("codex") {
 				return nil
 			}
 			return provider.NewCodexAdapter()
@@ -474,8 +475,8 @@ func TestBoot_WrapperLifecycle_OpenCode(t *testing.T) {
 		Manager:    NewSessionManager(),
 		Store:      store,
 		PathGrants: pg,
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			if name != "opencode" {
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter {
+			if id != runtimes.ID("opencode") {
 				return nil
 			}
 			return provider.NewOpencodeAdapter()

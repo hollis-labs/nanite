@@ -85,21 +85,10 @@ func TestStripRegistryPrefix_AliasTable(t *testing.T) {
 // chat.IsCLIProvider(providerName) fallback and pin that its behavior is
 // unchanged from before the runtime_kind wiring landed.
 func TestClassifyNilProvider_CLIWithAdapter(t *testing.T) {
-	// Stub adapter index resolves "claude" → a non-nil adapter, which
-	// is what the agent_deps.go closure does after stripRegistryPrefix
-	// normalizes the dropdown name.
-	stubAdapter := &stubCLIAdapter{name: "claude"}
-	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			// Mirror agent_deps.go's normalize-then-lookup behavior.
-			bare := stripRegistryPrefix(name)
-			if bare == "claude" {
-				return stubAdapter
-			}
-			return nil
-		},
-	}
-	s := &chatServiceImpl{agentDeps: deps}
+	// The runtime resolves names against the go-providers registry
+	// (runtimeagent.CanLaunch, CW-20260930-0113); "pty" and "pty-claude"
+	// normalize to claude.
+	s := &chatServiceImpl{agentDeps: &runtimeagent.Dependencies{}}
 
 	cliInputs := []string{"pty", "pty-claude"}
 	for _, name := range cliInputs {
@@ -115,21 +104,17 @@ func TestClassifyNilProvider_CLIWithAdapter(t *testing.T) {
 // convention (the exact class of agent that could previously misroute —
 // a CLI-configured agent whose default_provider isn't "pty"/"sub-"
 // prefixed).
+//
+// CW-20260930-0113: copilot and pi route too. They are registry runtimes
+// (ACP-only); with the three-adapter index gone chat used to fail them
+// with "no runtime adapter registered".
 func TestClassifyNilProvider_RuntimeKindCLI_Authoritative(t *testing.T) {
-	stubAdapter := &stubCLIAdapter{name: "claude"}
-	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			bare := stripRegistryPrefix(name)
-			if bare == "claude" {
-				return stubAdapter
-			}
-			return nil
-		},
-	}
-	s := &chatServiceImpl{agentDeps: deps}
+	s := &chatServiceImpl{agentDeps: &runtimeagent.Dependencies{}}
 
-	if got := s.classifyNilProvider("cli", "claude"); got != nilProviderRouteCLI {
-		t.Errorf(`classifyNilProvider("cli", "claude") = %v, want nilProviderRouteCLI`, got)
+	for _, name := range []string{"claude", "codex", "opencode", "copilot", "pi"} {
+		if got := s.classifyNilProvider("cli", name); got != nilProviderRouteCLI {
+			t.Errorf(`classifyNilProvider("cli", %q) = %v, want nilProviderRouteCLI`, name, got)
+		}
 	}
 }
 
@@ -149,14 +134,11 @@ func TestClassifyNilProvider_RuntimeKindAPI_StaysFatalForNonCLIName(t *testing.T
 // returns CLINoAdapter, not fatal. This separates "operator forgot to
 // wire CLIAdapters" from "operator typed a bad provider name".
 func TestClassifyNilProvider_CLINoAdapter(t *testing.T) {
-	// ProviderAdapter returns nil for every name — simulates an empty
-	// adapter index.
-	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(string) provider.CLIAdapter { return nil },
-	}
-	s := &chatServiceImpl{agentDeps: deps}
+	// CLI-shaped names that are not runtimes Nanite can launch: not in the
+	// registry, or (Antigravity) no Nanite boot-dir layout yet.
+	s := &chatServiceImpl{agentDeps: &runtimeagent.Dependencies{}}
 
-	for _, name := range []string{"pty-claude", "pty-codex", "pty-opencode"} {
+	for _, name := range []string{"pty-nonsense", "sub-agy"} {
 		if got := s.classifyNilProvider("", name); got != nilProviderRouteCLINoAdapter {
 			t.Errorf("classifyNilProvider(%q) = %v, want nilProviderRouteCLINoAdapter", name, got)
 		}
@@ -175,12 +157,6 @@ func TestClassifyNilProvider_CLIWithoutDeps(t *testing.T) {
 		t.Errorf("classifyNilProvider(pty-claude) with nil agentDeps = %v, want nilProviderRouteFatal", got)
 	}
 
-	// agentDeps non-nil but ProviderAdapter nil — same degradation.
-	s2 := &chatServiceImpl{agentDeps: &runtimeagent.Dependencies{ProviderAdapter: nil}}
-	if got := s2.classifyNilProvider("", "pty-claude"); got != nilProviderRouteFatal {
-		t.Errorf("classifyNilProvider(pty-claude) with nil ProviderAdapter = %v, want nilProviderRouteFatal", got)
-	}
-
 	// runtimeKind == "cli" but no runtime composition wired must ALSO
 	// degrade to fatal — runtime_kind alone can't route without the
 	// agent-runtime adapter wiring either.
@@ -196,14 +172,8 @@ func TestClassifyNilProvider_CLIWithoutDeps(t *testing.T) {
 // registry has no provider registered. Otherwise a typo'd provider
 // name would silently route through driveBootSession.
 func TestClassifyNilProvider_NonCLIStaysFatal(t *testing.T) {
-	// Even with a fully-wired adapter index that would return non-nil
-	// for any name, non-CLI names must NOT route to CLI.
-	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(string) provider.CLIAdapter {
-			return &stubCLIAdapter{name: "wat"}
-		},
-	}
-	s := &chatServiceImpl{agentDeps: deps}
+	// Even with the runtime wired, non-CLI names must NOT route to CLI.
+	s := &chatServiceImpl{agentDeps: &runtimeagent.Dependencies{}}
 
 	nonCLI := []string{"anthropic", "openai", "gemini-api", "mistral", "openrouter", "ollama", "typo-provider"}
 	for _, name := range nonCLI {

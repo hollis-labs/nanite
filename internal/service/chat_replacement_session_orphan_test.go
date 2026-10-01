@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"sync"
 	"testing"
 	"time"
@@ -46,14 +47,12 @@ func bootRealDeps(t *testing.T) *runtimeagent.Dependencies {
 		Agents: &fakeAgentProfilesResolver{profile: &store.AgentProfile{
 			ID: "agent-1", Slug: "test-agent", DefaultProvider: "codex",
 		}},
-		Manager:    runtimeagent.NewSessionManager(),
-		Store:      &agentRuntimeStore{store: st},
-		PathGrants: permission.NewPathGrants(),
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			return &fakeCLIAdapter{name: name}
-		},
-		MCPConfig:      runtimeagent.MCPConfig{}, // empty DBPath disables .mcp.json planting
-		WorkspacesRoot: t.TempDir(),
+		Manager:          runtimeagent.NewSessionManager(),
+		Store:            &agentRuntimeStore{store: st},
+		PathGrants:       permission.NewPathGrants(),
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter { return &fakeCLIAdapter{name: string(id)} },
+		MCPConfig:        runtimeagent.MCPConfig{}, // empty DBPath disables .mcp.json planting
+		WorkspacesRoot:   t.TempDir(),
 	}
 	t.Cleanup(func() { _ = deps.Manager.Shutdown(context.Background()) })
 	return deps

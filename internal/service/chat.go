@@ -1966,8 +1966,8 @@ const (
 	// because the CLI path doesn't go through Provider.StreamChat.
 	nilProviderRouteCLI
 	// nilProviderRouteCLINoAdapter is the case where the dropdown sent
-	// a CLI alias but no runtime adapter is registered (e.g. dev forgot
-	// to wire CLIAdapters into ContainerConfig). Emits a CLI-specific
+	// a CLI alias that is not a runtime Nanite can launch (not in the
+	// go-providers registry, or no boot-dir layout). Emits a CLI-specific
 	// error so the operator gets a pointed message instead of the
 	// generic "Provider not available" footer.
 	nilProviderRouteCLINoAdapter
@@ -2009,20 +2009,21 @@ const (
 // mechanism (and its provider-id encoding) is gone; this OR now exists
 // solely for the file-discovered-agent case above.
 //
-// Adapter lookup goes through agentDeps.ProviderAdapter which already
-// applies the CW-20260514-0045 alias normalization (stripRegistryPrefix
-// → chat.NormalizeCLIProvider), so the caller passes the dropdown-shape
-// name verbatim.
+// Runtime lookup goes through runtimeagent.CanLaunch, which resolves the
+// name against the go-providers registry after the CW-20260514-0045 alias
+// normalization (pty-/sub- prefixes), so the caller passes the
+// dropdown-shape name verbatim. Every registry runtime Nanite can launch
+// routes, Copilot and Pi included (CW-20260930-0113).
 func (s *chatServiceImpl) classifyNilProvider(runtimeKind, providerName string) nilProviderRoute {
 	if runtimeKind != "cli" && !chat.IsCLIProvider(providerName) {
 		return nilProviderRouteFatal
 	}
-	if s.agentDeps == nil || s.agentDeps.ProviderAdapter == nil {
+	if s.agentDeps == nil {
 		// CLI-routable but no runtime composition wired —
 		// behave as fatal so the operator sees the legacy error.
 		return nilProviderRouteFatal
 	}
-	if s.agentDeps.ProviderAdapter(providerName) == nil {
+	if !runtimeagent.CanLaunch(providerName) {
 		return nilProviderRouteCLINoAdapter
 	}
 	return nilProviderRouteCLI

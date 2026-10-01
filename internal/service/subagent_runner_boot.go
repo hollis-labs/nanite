@@ -176,18 +176,18 @@ func (r *BootRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 }
 
 // apiParent reports whether the spawning session is API-driven — its provider
-// has no CLI adapter — and returns that session. A parent that cannot be
+// is not a launchable CLI runtime — and returns that session. A parent that cannot be
 // loaded counts as not API-driven, which keeps the boot path's existing
 // behavior (createChildSession fails on the same lookup).
 func (r *BootRunner) apiParent(ctx context.Context, run *subagent.Run) (*store.Session, bool) {
-	if r.deps == nil || r.deps.ProviderAdapter == nil || r.store == nil {
+	if r.deps == nil || r.store == nil {
 		return nil, false
 	}
 	parent, err := r.store.GetSession(ctx, run.ParentSessionID)
 	if err != nil || parent == nil {
 		return nil, false
 	}
-	return parent, r.deps.ProviderAdapter(parent.Provider) == nil
+	return parent, !runtimeagent.CanLaunch(parent.Provider)
 }
 
 // subagentRuntimeSource is the slice of *store.Store that resolves the
@@ -240,7 +240,7 @@ func (r *BootRunner) runDowngraded(ctx context.Context, run *subagent.Run, agent
 		// empty one. Use the app's default provider unless that is itself a CLI
 		// provider, or fail saying why.
 		provider, model = r.defaultProviderModel(ctx, model)
-		if provider == "" || r.deps.ProviderAdapter(provider) != nil {
+		if provider == "" || runtimeagent.CanLaunch(provider) {
 			return nil, fmt.Errorf("subagent BootRunner: role %q resolves to CLI provider %q but subagent_runtime is api, and parent session %q has no provider and no default_provider is set to run the subagent on; set default_provider or subagent_runtime=cli",
 				run.Role, requested, run.ParentSessionID)
 		}
@@ -281,15 +281,16 @@ func (r *BootRunner) resolveRole(slug string) (*store.AgentProfile, error) {
 	return resolveRoleWithFallback(r.agents, slug, "BootRunner")
 }
 
-// canBoot reports whether the resolved agent's effective provider has a
-// CLI adapter registered with deps.ProviderAdapter. The composition root
-// strips the legacy "pty-"/"sub-" registry prefixes inside ProviderAdapter
-// so callers can pass a session-side provider name verbatim.
+// canBoot reports whether the resolved agent's effective provider is a
+// runtime Nanite can launch: the go-providers registry carries it and
+// go-agent-wrapper can launch it (runtimeagent.CanLaunch, CW-20260930-0113).
+// The legacy "pty-"/"sub-" prefixes are normalized there, so callers can
+// pass a session-side provider name verbatim.
 func (r *BootRunner) canBoot(agent *store.AgentProfile, run *subagent.Run) bool {
-	if r.deps == nil || r.deps.ProviderAdapter == nil {
+	if r.deps == nil {
 		return false
 	}
-	return r.deps.ProviderAdapter(r.effectiveProvider(agent, run)) != nil
+	return runtimeagent.CanLaunch(r.effectiveProvider(agent, run))
 }
 
 // effectiveProvider resolves the per-spawn provider override, then the

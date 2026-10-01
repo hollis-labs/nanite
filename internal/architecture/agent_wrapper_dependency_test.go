@@ -44,7 +44,6 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 	ownershipSymbol("internal/runtime/agent/agent.go", agentWrapperModule+"/wrapper", "Config"):             ownershipAllowance(1, "Nanite compiles wrapper launch inputs"),
 	ownershipSymbol("internal/runtime/agent/agent.go", agentWrapperModule+"/wrapper", "ChildEnvironment"):   ownershipAllowance(1, "Nanite supplies the isolated child environment DTO"),
 	ownershipSymbol("internal/runtime/agent/agent.go", agentWrapperModule+"/wrapper", "EnvironmentReplace"): ownershipAllowance(1, "Nanite selects replacement environment semantics"),
-	ownershipSymbol("internal/runtime/agent/agent.go", agentWrapperModule+"/adapters", "Adapter"):           ownershipAllowance(1, "Boot passes the selected adapter into wrapper.Config"),
 	ownershipSymbol("internal/runtime/agent/agent.go", agentWrapperModule+"/activity", "NewBridge"):         ownershipAllowance(1, "Nanite injects its normalized event sink"),
 
 	// Session is a thin wrapper facade plus recovery translation; lifecycle
@@ -73,27 +72,29 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 	ownershipSymbol("internal/runtime/agent/approval_bridge.go", agentWrapperModule+"/acp", "SelectPermissionOption"):               ownershipAllowance(1, "Return an exact provider option ID"),
 
 	// Dependency and selection DTOs are Nanite composition inputs.
-	ownershipSymbol("internal/runtime/agent/deps.go", agentWrapperModule+"/adapters", "Transport"):                              ownershipAllowance(1, "ACP adapter factory input DTO"),
-	ownershipSymbol("internal/runtime/agent/deps.go", agentWrapperModule+"/adapters", "Adapter"):                                ownershipAllowance(1, "ACP adapter factory output interface"),
-	ownershipSymbol("internal/runtime/agent/deps.go", "github.com/hollis-labs/agentkit/agentsessions", "ExitError"):             ownershipAllowance(4, "Recovery and telemetry compatibility DTO only"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters", "Transport"):                       ownershipAllowance(1, "Pass the configured ACP transport to shipped adapters"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters", "Adapter"):                         ownershipAllowance(1, "Return an adapter for wrapper ownership"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters/claudeacp", "New"):                   ownershipAllowance(1, "Construct the shipped Claude adapter, not its client"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters/codexacp", "New"):                    ownershipAllowance(1, "Construct the shipped Codex adapter, not its client"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters/copilotacp", "New"):                  ownershipAllowance(1, "Construct the shipped Copilot adapter, not its client"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters/copilotacp", "WithAdapterTransport"): ownershipAllowance(1, "Select Copilot's configured wrapper transport"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters/opencodeacp", "New"):                 ownershipAllowance(1, "Construct the shipped OpenCode adapter, not its client"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters/piacp", "New"):                       ownershipAllowance(1, "Construct the shipped Pi adapter, not its client"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "RuntimeAdapter"):                      ownershipAllowance(1, "Return wrapper's selected native adapter"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "LaunchSubprocessPerTurn"):             ownershipAllowance(1, "Nanite's Codex/OpenCode launch-mode policy"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "LaunchStreamingStdio"):                ownershipAllowance(1, "Nanite's Claude launch-mode policy"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "Select"):                              ownershipAllowance(1, "Canonical wrapper native adapter selection"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "Selection"):                           ownershipAllowance(1, "Nanite compiles the adapter selection DTO"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "Provider"):                            ownershipAllowance(1, "Normalize Nanite provider identity into wrapper vocabulary"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "RuntimeKindCLI"):                      ownershipAllowance(1, "This package handles CLI runtimes only"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "Transport"):                           ownershipAllowance(1, "Return the configured ACP transport DTO"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "TransportTCP"):                        ownershipAllowance(1, "Copilot TCP profile selection"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "TransportStdio"):                      ownershipAllowance(1, "Default ACP transport selection"),
+	ownershipSymbol("internal/runtime/agent/deps.go", agentWrapperModule+"/adapters", "Transport"):                  ownershipAllowance(1, "ACP adapter factory input DTO"),
+	ownershipSymbol("internal/runtime/agent/deps.go", agentWrapperModule+"/adapters", "Adapter"):                    ownershipAllowance(1, "ACP adapter factory output interface"),
+	ownershipSymbol("internal/runtime/agent/deps.go", "github.com/hollis-labs/agentkit/agentsessions", "ExitError"): ownershipAllowance(4, "Recovery and telemetry compatibility DTO only"),
+	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters", "Transport"):           ownershipAllowance(1, "Pass the configured ACP transport to shipped adapters"),
+	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters", "Adapter"):             ownershipAllowance(1, "Return an adapter for wrapper ownership"),
+	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "Transport"):               ownershipAllowance(1, "Return the configured ACP transport DTO"),
+	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "TransportTCP"):            ownershipAllowance(1, "Copilot TCP profile selection"),
+	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "TransportStdio"):          ownershipAllowance(1, "Default ACP transport selection"),
+
+	// CW-20260930-0113 (Sprint 4 piece 3): every adapter, native or ACP, is
+	// chosen by go-agent-wrapper's registry-driven launch.Select. Nanite
+	// supplies only the selection DTO (registry runtime id, mode, developer
+	// flag, extra argv) and reads launch.Supported to answer "can this
+	// runtime launch"; it constructs no adapter or client itself.
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/launch", "Select"):           ownershipAllowance(2, "Registry-driven adapter selection (native and ACP)"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/launch", "Selection"):        ownershipAllowance(2, "Nanite compiles the launch selection DTO"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/launch", "Supported"):        ownershipAllowance(1, "Read which runtime/mode pairs the wrapper can launch"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/adapters", "Adapter"):        ownershipAllowance(1, "Return the selected adapter for wrapper ownership"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/adapters", "Transport"):      ownershipAllowance(1, "Map a profile's ACP transport onto a mode"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/adapters", "TransportTCP"):   ownershipAllowance(2, "Copilot daemon transport and the ACP factory seam"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/adapters", "TransportStdio"): ownershipAllowance(1, "Default ACP transport for the factory seam"),
+	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/launch", "Select"):              ownershipAllowance(1, "ACP adapter by registry runtime and ACP mode"),
+	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/launch", "Selection"):           ownershipAllowance(1, "Nanite compiles the ACP launch selection DTO"),
 
 	// Boot-dir planting is Nanite-owned content compilation expressed only in
 	// wrapper's destination-agnostic DTOs; no process/session control is exposed.
@@ -137,9 +138,9 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 
 const (
 	agentWrapperModule    = "github.com/hollis-labs/go-agent-wrapper"
-	agentWrapperVersion   = "v0.13.1"
-	agentWrapperSum       = "h1:zm8Y4vOVbcGcP8lJecMD/hl+siDQ+WJmW9bX5ElA9yc="
-	agentWrapperGoModSum  = "h1:EpN3WPjzWBVfxF4TzQWswUPL2K5TUWoKWrLPnGyymLQ="
+	agentWrapperVersion   = "v0.15.0"
+	agentWrapperSum       = "h1:KajcNh6r7r/++nk/5hwIlvE8oyNrI3GZ0Or9g+s8324="
+	agentWrapperGoModSum  = "h1:vYz+80A/EmY6Z9SdCcSdaVvR9tIJgh4Z8oz7033KqT8="
 	runtimeEventsModule   = "github.com/hollis-labs/go-runtime-events"
 	runtimeEventsVersion  = "v0.1.2"
 	runtimeEventsSum      = "h1:ChyjCVidjeAVf+dUJjiJTdX/LYujkJILKuLi+cTDNJM="
@@ -446,12 +447,10 @@ func TestAgentOwnershipAllowancesAreExactAndAnchored(t *testing.T) {
 	}
 	anchors := []agentOwnershipSymbol{
 		ownershipSymbol("internal/runtime/agent/agent.go", agentWrapperModule+"/wrapper", "New"),
-		ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "Select"),
-		ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters/claudeacp", "New"),
-		ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters/codexacp", "New"),
-		ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters/copilotacp", "New"),
-		ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters/opencodeacp", "New"),
-		ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters/piacp", "New"),
+		// CW-20260930-0113: adapter construction is launch.Select's; these
+		// pin that Nanite reaches it through exactly these call sites.
+		ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/launch", "Select"),
+		ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/launch", "Supported"),
 	}
 	for _, anchor := range anchors {
 		if allowance, ok := allowedAgentOwnershipSymbols[anchor]; !ok || allowance.count != 1 {

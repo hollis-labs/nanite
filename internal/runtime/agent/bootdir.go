@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/hollis-labs/go-agent-wrapper/plant"
+	"github.com/hollis-labs/go-providers/registry"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -338,17 +339,28 @@ func bootdirLayoutFor(provider string) Layout {
 // TASKS/phase-2/01-wire-runtime-kind-routing.md) — deriving the bare
 // adapter name once CLI routing is already known, not deciding CLI-vs-API
 // itself.
+//
+// After the prefix is stripped, a name the go-providers registry resolves
+// (case-insensitively, with its aliases: "Claude", "claude-code",
+// "open-code", "agy") becomes the registry's canonical id
+// (CW-20260930-0113). Every name-keyed decision in this package (the
+// boot-dir layout, Claude framing, workRootArgs, skill planting) then agrees
+// with the runtime selectRuntime launched and CanLaunch routed. A name the
+// registry does not carry is returned as stripped.
 func normalizeProviderName(name string) string {
+	stripped := name
 	switch {
 	case name == "pty":
-		return "claude"
+		stripped = "claude"
 	case len(name) > 4 && name[:4] == "pty-":
-		return name[4:]
+		stripped = name[4:]
 	case len(name) > 4 && name[:4] == "sub-":
-		return name[4:]
-	default:
-		return name
+		stripped = name[4:]
 	}
+	if d, ok := registry.Lookup(stripped); ok {
+		return string(d.ID)
+	}
+	return stripped
 }
 
 // unsupportedLayout is the stub for providers without a verified boot-dir

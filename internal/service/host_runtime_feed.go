@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
 
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -471,6 +472,13 @@ func projectHostRuntimePayload(kind runtimeevents.EventKind, isACP bool, raw jso
 		}
 		projected["terminal"] = true
 		projected["failed"] = true
+		// The error text stays private; a classified failure surfaces as a
+		// closed enum (CW-20260930-0113).
+		if msg, ok := source["error"].(string); ok {
+			if failure := runtimeagent.ClassifyTurnFailure(msg); failure != "" {
+				projected["failure"] = failure
+			}
+		}
 	case runtimeevents.KindStdinWrite, runtimeevents.KindStdoutRaw, runtimeevents.KindStderrRaw,
 		runtimeevents.KindStdoutLine, runtimeevents.KindStderrLine:
 		visibility = "metadata_only"

@@ -385,7 +385,7 @@ func (s *chatServiceImpl) driveBootSession(
 			// no-op if cancellation/terminal cleanup already closed it.
 			router.send(llmtypes.StreamEvent{
 				Type:  llmtypes.EventError,
-				Error: fmt.Sprintf("driveBootSession: send input: %v", err),
+				Error: runtimeagent.UserFacingTurnError(fmt.Sprintf("driveBootSession: send input: %v", err)),
 			})
 			s.cleanupFailedRuntimeSend(sessionID, gen, bindingForCleanup, err)
 			return

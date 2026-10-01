@@ -35,15 +35,15 @@ import (
 // runner and (eventually) the background dispatcher without re-creating the
 // shared wrapper session registry.
 type AgentDepsConfig struct {
-	Store           *store.Store
-	PathGrants      *permission.PathGrants
-	Streams         *StreamManager
-	CLIAdapters     []provider.CLIAdapter
-	WorkspacesRoot  string
-	BinaryPath      string
-	DBPath          string
-	SandboxBaseProf sandbox.Profile
-	Permissions     *permission.Engine
+	Store            *store.Store
+	PathGrants       *permission.PathGrants
+	Streams          *StreamManager
+	CLIDeveloperMode bool
+	WorkspacesRoot   string
+	BinaryPath       string
+	DBPath           string
+	SandboxBaseProf  sandbox.Profile
+	Permissions      *permission.Engine
 	// RuntimeFeed is the session-scoped, durable public projection of the
 	// canonical wrapper event stream. Nil keeps focused dependency tests and
 	// embedding callers on the legacy-only path.
@@ -177,21 +177,6 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 	resolver := &agentProfileResolver{store: cfg.Store}
 	runtimeStore := &agentRuntimeStore{store: cfg.Store}
 
-	adapterIndex := indexAdapters(cfg.CLIAdapters)
-	providerAdapter := func(name string) provider.CLIAdapter {
-		if name == "" {
-			return nil
-		}
-		// Strip nanite registry prefixes ("pty-", "sub-") so callers can
-		// pass a session-side provider name verbatim. The adapter Name
-		// itself is always the bare adapter (claude/codex/opencode/...).
-		bare := stripRegistryPrefix(name)
-		if a, ok := adapterIndex[bare]; ok {
-			return a
-		}
-		return nil
-	}
-
 	telemetry := agentTelemetry{}
 
 	bridge := &agentEventBridge{streams: cfg.Streams, runtimeFeed: cfg.RuntimeFeed}
@@ -225,7 +210,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		TypedEventCallback:  bridge.typedCallback,
 		Permissions:         cfg.Permissions,
 		ApprovalRequestSink: approvalRequestSink,
-		ProviderAdapter:     providerAdapter,
+		DeveloperMode:       cfg.CLIDeveloperMode,
 		MCPConfig: runtimeagent.MCPConfig{
 			BinaryPath: binPath,
 			DBPath:     dbPath,
@@ -513,27 +498,13 @@ func (a *recoveryMCPAdapter) RestartTransport(ctx context.Context, sessionID str
 // bootdirLayoutFor, factory.go's normalizeProviderName, this) can't drift.
 //
 // Post-decision helper only (Phase 2 item 01,
-// TASKS/phase-2/01-wire-runtime-kind-routing.md) — this is called from
-// agentProfileResolver's ProviderAdapter closure ONLY once
-// classifyNilProvider (service/chat.go) has already decided the turn
-// routes CLI (primarily via agent_profiles.runtime_kind, not this
-// prefix convention); its job here is deriving which CLI adapter to
-// look up, not deciding CLI-vs-API.
+// TASKS/phase-2/01-wire-runtime-kind-routing.md): it derives a name from
+// the prefix convention, it does not decide CLI-vs-API. Since
+// CW-20260930-0113 the runtime layer resolves names against the
+// go-providers registry itself (runtimeagent.CanLaunch), so this survives
+// for the call sites that still compare bare names.
 func stripRegistryPrefix(name string) string {
 	return chat.NormalizeCLIProvider(name)
-}
-
-// indexAdapters builds the providerName → CLIAdapter resolution map from
-// the slice threaded through ContainerConfig.
-func indexAdapters(in []provider.CLIAdapter) map[string]provider.CLIAdapter {
-	out := make(map[string]provider.CLIAdapter, len(in))
-	for _, a := range in {
-		if a == nil {
-			continue
-		}
-		out[a.Name()] = a
-	}
-	return out
 }
 
 // --- AgentProfiles adapter ---
@@ -1140,7 +1111,7 @@ func (s *runtimeEventBridgeSink) routeNormalizedEvent(ev runtimeevents.Event) {
 		if usage := runtimeagent.TurnCompletedUsage(ev.Payload, s.acp); usage != nil {
 			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: usage})
 		}
-		s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: payload.Error})
+		s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: runtimeagent.UserFacingTurnError(payload.Error)})
 		terminal = true
 	default:
 		// The canonical sink receives every normalized kind. Only the three

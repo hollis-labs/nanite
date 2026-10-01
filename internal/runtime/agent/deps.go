@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	llmtypes "github.com/hollis-labs/go-llm-types"
@@ -77,14 +78,21 @@ type Dependencies struct {
 	Permissions         *permission.Engine
 	ApprovalRequestSink func(*permission.ApprovalRequest)
 
-	// ProviderAdapter resolves a provider name to its CLI adapter
-	// (claude / codex / opencode / ...). The adapter advertises its
-	// Caps and BootDirSpec.
-	ProviderAdapter func(providerName string) provider.CLIAdapter
+	// DeveloperMode selects Claude's native developer variant
+	// (--dangerously-skip-permissions) for every native Claude launch.
+	// Adapters come from the go-providers registry through
+	// go-agent-wrapper's launch.Select (runtime_select.go); there is no
+	// adapter index to register (CW-20260930-0113).
+	DeveloperMode bool
+
+	// NativeCLIAdapter is a test seam: when it returns non-nil for a
+	// runtime, that adapter is used instead of the registry's for a
+	// native launch. Production leaves it nil.
+	NativeCLIAdapter func(runtime runtimes.ID) provider.CLIAdapter
 
 	// ACPAdapterFactory is the test/composition seam for an ACP-backed
-	// adapters.Adapter. Production leaves it nil and uses the five shipped
-	// wrapper adapters selected by newACPAdapter.
+	// adapters.Adapter. Production leaves it nil and selects the shipped
+	// wrapper ACP adapter through launch.Select (runtime_select.go).
 	ACPAdapterFactory func(providerName string, transport adapters.Transport) (adapters.Adapter, error)
 
 	// MCPConfig describes how to plant the per-session .mcp.json. Nanite

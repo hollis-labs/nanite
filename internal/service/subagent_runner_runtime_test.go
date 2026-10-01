@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"log/slog"
 	"strings"
 	"testing"
@@ -81,12 +82,7 @@ func newRuntimeHarness(t *testing.T, parentProvider, roleProvider, sessionRuntim
 	legacy := &ctxLegacyRunner{}
 	return runtimeHarness{
 		runner: &BootRunner{
-			deps: &runtimeagent.Dependencies{ProviderAdapter: func(name string) provider.CLIAdapter {
-				if name == "pty-claude" {
-					return &fakeCLIAdapter{name: name}
-				}
-				return nil
-			}},
+			deps:   &runtimeagent.Dependencies{NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter { return &fakeCLIAdapter{name: string(id)} }},
 			bridge: bridge,
 			agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
 				"role": {ID: "ag", Slug: "role", DefaultProvider: roleProvider, DefaultModel: "role-model"},

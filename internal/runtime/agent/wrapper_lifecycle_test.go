@@ -421,13 +421,18 @@ func TestBoot_WrapperLifecycle_Codex_EnvParity(t *testing.T) {
 // OPENCODE_CONFIG_DIR's observed value to $NANITE_TEST_PROBE_FILE — proving
 // wrapper.ChildEnvironment propagates
 // opencodeLayout.AmendEnv's redirect exactly as it does for Codex — then
-// prints one plain-text line, driving OpencodeAdapter.ParseLine's real
-// production parser (each non-empty stdout line -> llmtypes.EventDelta; no
-// structured completion event, the bridge synthesizes EventDone on clean
-// exit).
+// prints one turn of `opencode run --format json` output, driving
+// OpencodeAdapter.ParseLine's real production parser: step_start -> session
+// id, text -> one whole-block llmtypes.EventDelta, step_finish with reason
+// "stop" -> usage then done. Since go-providers v0.28.0 run mode is typed
+// JSON and a plain-text line yields nothing (CW-20260930-0113); the lines
+// follow go-providers' provider/testdata/opencode/run_turn1.jsonl shape.
 const fakeOpencodeRunScript = `#!/bin/sh
 printf '%s' "$OPENCODE_CONFIG_DIR" > "$NANITE_TEST_PROBE_FILE"
-echo "hello from opencode"
+printf '%s\n' \
+  '{"type":"step_start","sessionID":"ses_fake","part":{"type":"step-start"}}' \
+  '{"type":"text","sessionID":"ses_fake","part":{"type":"text","text":"hello from opencode"}}' \
+  '{"type":"step_finish","sessionID":"ses_fake","part":{"type":"step-finish","reason":"stop","tokens":{"input":1,"output":3,"reasoning":0,"cache":{"read":0,"write":0}}}}'
 `
 
 // TestBoot_WrapperLifecycle_OpenCode is the regression coverage

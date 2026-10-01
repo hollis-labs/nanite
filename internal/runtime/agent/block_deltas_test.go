@@ -71,7 +71,7 @@ func (h *blockSinkHarness) text(t *testing.T) (canonical, fanout string) {
 }
 
 func TestBlockDeltas_WholeBlockRuntimesGetParagraphBreaks(t *testing.T) {
-	for _, provider := range []string{"claude", "pty", "pty-claude", "codex", "pty-codex"} {
+	for _, provider := range []string{"claude", "pty", "pty-claude", "codex", "pty-codex", "opencode", "pty-opencode"} {
 		t.Run(provider, func(t *testing.T) {
 			h := newBlockSinkHarness(t, provider, false)
 			h.delta(t, "Let me check the config.")
@@ -95,7 +95,6 @@ func TestBlockDeltas_TokenStreamsStayUnseparated(t *testing.T) {
 		{"acp claude", "claude", true},
 		{"acp codex", "codex", true},
 		{"acp opencode", "opencode", true},
-		{"native opencode lines", "opencode", false},
 		{"http-style provider name", "anthropic", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,6 +135,26 @@ func TestBlockDeltas_TurnBoundaryResets(t *testing.T) {
 				t.Fatalf("text %q: the first block of a new turn must not get a break", canonical)
 			}
 		})
+	}
+}
+
+// opencode reports usage once per step, as a usage-bearing KindTurnCompleted
+// in the middle of the turn. That must not reset the separator: the next
+// step's text block still follows earlier text. The empty completion is the
+// terminal one and does reset.
+func TestBlockDeltas_MidTurnUsageDoesNotReset(t *testing.T) {
+	h := newBlockSinkHarness(t, "opencode", false)
+	h.delta(t, "Let me read the file.")
+	h.write(t, runtimeevents.KindTurnCompleted, `{"usage":{"OutputTokens":12,"StopReason":"tool-calls"}}`)
+	h.delta(t, "The port is 8090.")
+	h.write(t, runtimeevents.KindTurnCompleted, `{"usage":{"OutputTokens":5,"StopReason":"stop"}}`)
+	h.write(t, runtimeevents.KindTurnCompleted, "")
+	h.delta(t, "Next turn.")
+
+	canonical, fanout := h.text(t)
+	want := "Let me read the file.\n\nThe port is 8090.Next turn."
+	if canonical != want || fanout != want {
+		t.Fatalf("canonical %q, fanout %q; want %q for both", canonical, fanout, want)
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/testhome"
 )
 
 // TestResolveLayout_TightensOwnedDirsTo0700 pins go-apppaths v0.2.0+'s
@@ -47,4 +49,16 @@ func TestResolveLayout_TightensOwnedDirsTo0700(t *testing.T) {
 			t.Errorf("%s mode = %#o, want 0700", dir, got)
 		}
 	}
+}
+
+// TestResolveLayout_TestLayoutIsOutsideRealHome fails if a layout resolved
+// in this package's tests, materializing and so chmodding, lands under the
+// developer's real home (CW-20260930-0208). TestMain's testhome guard is what
+// keeps it out.
+func TestResolveLayout_TestLayoutIsOutsideRealHome(t *testing.T) {
+	layout, err := ResolveLayout()
+	if err != nil {
+		t.Fatalf("ResolveLayout: %v", err)
+	}
+	testhome.AssertOutsideRealHome(t, layout.DataDir(), layout.StateDir(), layout.CacheDir(), layout.ConfigDir(), layout.MainDB())
 }

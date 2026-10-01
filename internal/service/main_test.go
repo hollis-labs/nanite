@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/envelope"
+
+	"github.com/hollis-labs/nanite/internal/testhome"
 )
 
 var serviceTestRoot string
@@ -18,18 +20,18 @@ var serviceTestRoot string
 func TestMain(m *testing.M) {
 	envelope.SetupForTesting()
 
-	root, err := os.MkdirTemp("", "nanite-service-test-")
+	// HOME and XDG_*_HOME come from testhome (CW-20260930-0208), which also
+	// refuses to run if nanite's layout still resolves under the real home.
+	// Its temp tree is this package's test root, so the container tests'
+	// "everything lands under serviceTestRoot" checks cover HOME and XDG too.
+	cleanup, err := testhome.Isolate()
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "create service test temp root: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "testhome: %v\n", err)
 		os.Exit(1)
 	}
+	root := testhome.Root()
 	serviceTestRoot = root
 	for env, value := range map[string]string{
-		"HOME":                filepath.Join(root, "home"),
-		"XDG_DATA_HOME":       filepath.Join(root, "xdg", "data"),
-		"XDG_STATE_HOME":      filepath.Join(root, "xdg", "state"),
-		"XDG_CACHE_HOME":      filepath.Join(root, "xdg", "cache"),
-		"XDG_CONFIG_HOME":     filepath.Join(root, "xdg", "config"),
 		"TESSERACT_DB_PATH":   filepath.Join(root, "tesseract", "main.db"),
 		"TESSERACT_WORKSPACE": "service-package-test",
 		// ACP tests here drive fake adapter factories, no ACP CLI process,
@@ -39,12 +41,12 @@ func TestMain(m *testing.M) {
 	} {
 		if err := os.Setenv(env, value); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "set %s for service tests: %v\n", env, err)
-			_ = os.RemoveAll(root)
+			cleanup()
 			os.Exit(1)
 		}
 	}
 
 	code := m.Run()
-	_ = os.RemoveAll(root)
+	cleanup()
 	os.Exit(code)
 }

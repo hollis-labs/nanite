@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/testhome"
 )
 
 // TestMain provides a package-wide safety net for the few API tests that build
@@ -18,18 +20,10 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	// A number of API paths use os.UserHomeDir as their execution or fixture
-	// root. TestMain points HOME at this isolated tree, so create the directory
-	// before tests attempt to chdir or create children beneath it.
-	if err := os.MkdirAll(filepath.Join(root, "home"), 0o700); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "create API test home: %v\n", err)
-		os.Exit(1)
-	}
+	// root. HOME and XDG_*_HOME come from testhome.Run below
+	// (CW-20260930-0208), which creates the isolated home and refuses to run
+	// if nanite's layout still resolves under the real one.
 	for env, dir := range map[string]string{
-		"HOME":                filepath.Join(root, "home"),
-		"XDG_DATA_HOME":       filepath.Join(root, "xdg", "data"),
-		"XDG_STATE_HOME":      filepath.Join(root, "xdg", "state"),
-		"XDG_CACHE_HOME":      filepath.Join(root, "xdg", "cache"),
-		"XDG_CONFIG_HOME":     filepath.Join(root, "xdg", "config"),
 		"TESSERACT_DB_PATH":   filepath.Join(root, "tesseract", "main.db"),
 		"TESSERACT_WORKSPACE": "api-package-test",
 	} {
@@ -38,7 +32,7 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
-	code := m.Run()
+	code := testhome.Run(m)
 	_ = os.RemoveAll(root)
 	os.Exit(code)
 }

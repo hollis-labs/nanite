@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/hollis-labs/agentkit/agentlaunch"
-	"github.com/hollis-labs/agentkit/artifact"
 	"github.com/hollis-labs/go-agent-wrapper/plant"
+	"github.com/hollis-labs/go-materialize/artifact"
+	"github.com/hollis-labs/go-materialize/materialize"
 )
 
 // bootdir_plant.go is the convergence point onto go-agent-wrapper's
@@ -77,7 +79,10 @@ import (
 // # The ownership rule this buys, and the trap it creates
 //
 // The shared engine tracks what it owns in a manifest it writes into the
-// boot dir at .agentkit/materialize-manifest.json. Reconcile (the
+// boot dir at .materialize/manifest.json (go-materialize's
+// materialize.ManifestRelPath; agentkit before v0.7.0 wrote it at
+// .agentkit/materialize-manifest.json — see "Boot dirs planted before the
+// manifest moved" below). Reconcile (the
 // operation Nanite uses — see plantSpec) classifies a desired path that
 // EXISTS ON DISK but is ABSENT FROM THE MANIFEST as an ownership
 // conflict, and refuses the whole plant before writing anything. The
@@ -92,6 +97,25 @@ import (
 // migrated onto this same path in CW-20260910-0020 rather than left on a
 // direct write loop — a mid-session skill planted outside the manifest
 // would have made the next crash-recovery Repopulate fail outright.
+//
+// # Boot dirs planted before the manifest moved
+//
+// agentkit v0.7.0 moved the manifest from .agentkit/materialize-manifest.json
+// to .materialize/manifest.json with no migration (CW-20260930-0113). A
+// boot dir carrying only the old manifest is stale: the engine no longer
+// finds a manifest there, so agentlaunch.MaterializeArtifacts bootstraps one
+// from the tree being planted and overwrites those paths. For a full
+// Populate that is a fresh re-plant. For a partial plant — a system-prompt
+// slot, a mid-session skill — the manifest it would save names only those
+// few entries, and the next full Populate would then refuse every other
+// planted file as unowned. So plantSpec keeps a stale dir manifest-less:
+// it removes the manifest a plant into a stale dir just wrote, and every
+// later plant bootstraps again and overwrites what it plants. Nothing is
+// migrated, nothing outside the planted paths is touched (Reconcile never
+// removes an unlisted file), and the old manifest stays where it is as the
+// marker. No production path re-plants a dir an earlier binary planted —
+// every Boot plants a fresh makeBootDir dir and the recovery registry is
+// in-memory — so this is a guard, not a hot path.
 //
 // # What did NOT move onto Planter
 //
@@ -397,11 +421,32 @@ func plantSpec(ctx context.Context, bootDir string, spec plant.Spec, cfg plantCo
 		return plant.Result{}, nil
 	}
 
+	stale := staleBootDir(bootDir)
 	result, err := plant.SharedPlanter{}.Plant(ctx, bootDir, plant.Spec{Artifacts: tree})
 	if err != nil {
 		return result, fmt.Errorf("agent: bootdir Planter(%s): %w", cfg.provider, err)
 	}
+	if stale {
+		// See the file header, "Boot dirs planted before the manifest moved".
+		if err := os.Remove(materialize.ManifestPath(bootDir)); err != nil && !os.IsNotExist(err) {
+			return result, fmt.Errorf("agent: bootdir Planter(%s): keep stale boot dir manifest-less: %w", cfg.provider, err)
+		}
+	}
 	return result, nil
+}
+
+// legacyManifestRelPath is where agentkit before v0.7.0 kept the
+// materialization manifest.
+const legacyManifestRelPath = ".agentkit/materialize-manifest.json"
+
+// staleBootDir reports whether bootDir was planted before the manifest
+// moved: it carries the legacy manifest and no current one.
+func staleBootDir(bootDir string) bool {
+	if _, err := os.Stat(filepath.Join(bootDir, legacyManifestRelPath)); err != nil {
+		return false
+	}
+	_, err := os.Stat(materialize.ManifestPath(bootDir))
+	return os.IsNotExist(err)
 }
 
 // sandboxFiles returns the Nanite app-extra .sandbox/ files as

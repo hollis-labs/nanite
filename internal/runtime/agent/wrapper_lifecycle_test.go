@@ -17,14 +17,18 @@ import (
 
 // fakeClaudeStreamJSONScript is a POSIX sh script standing in for the real
 // claude binary in -p --input-format stream-json --output-format
-// stream-json --verbose mode. It ignores stdin/argv (AutoFireFirstTurn's
-// NDJSON-framed kickoff is written but never read — the fake doesn't need
-// it) and prints exactly one turn's worth of real Claude stream-json
-// output, then exits — driving parseClaudeStreamLine's real production
+// stream-json --verbose mode. It ignores argv, reads and discards the one
+// stdin line AutoFireFirstTurn writes (the NDJSON-framed kickoff), and
+// prints exactly one turn's worth of real Claude stream-json output, then
+// exits. Reading the kickoff first matters: a fake that exits without
+// reading lets Boot's kickoff write race the exit, and under load (-race,
+// the whole package, CW-20260930-0113) Boot failed with "auto-fire first
+// turn: write |1: broken pipe". It drives parseClaudeStreamLine's real production
 // parser (not a mock) so the events this test asserts on are exactly what
 // wrapper.Wrapper.Run's translateStreamEvent/translateProviderEvent would
 // see from a genuine claude process.
 const fakeClaudeStreamJSONScript = `#!/bin/sh
+IFS= read -r _kickoff || true
 cat <<'EOF'
 {"type":"system","subtype":"init","session_id":"claude-fake-session-1"}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello "},{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"/tmp/x"}}]}}
@@ -421,13 +425,18 @@ func TestBoot_WrapperLifecycle_Codex_EnvParity(t *testing.T) {
 // OPENCODE_CONFIG_DIR's observed value to $NANITE_TEST_PROBE_FILE — proving
 // wrapper.ChildEnvironment propagates
 // opencodeLayout.AmendEnv's redirect exactly as it does for Codex — then
-// prints one plain-text line, driving OpencodeAdapter.ParseLine's real
-// production parser (each non-empty stdout line -> llmtypes.EventDelta; no
-// structured completion event, the bridge synthesizes EventDone on clean
-// exit).
+// prints one turn of `opencode run --format json` output, driving
+// OpencodeAdapter.ParseLine's real production parser: step_start -> session
+// id, text -> one whole-block llmtypes.EventDelta, step_finish with reason
+// "stop" -> usage then done. Since go-providers v0.28.0 run mode is typed
+// JSON and a plain-text line yields nothing (CW-20260930-0113); the lines
+// follow go-providers' provider/testdata/opencode/run_turn1.jsonl shape.
 const fakeOpencodeRunScript = `#!/bin/sh
 printf '%s' "$OPENCODE_CONFIG_DIR" > "$NANITE_TEST_PROBE_FILE"
-echo "hello from opencode"
+printf '%s\n' \
+  '{"type":"step_start","sessionID":"ses_fake","part":{"type":"step-start"}}' \
+  '{"type":"text","sessionID":"ses_fake","part":{"type":"text","text":"hello from opencode"}}' \
+  '{"type":"step_finish","sessionID":"ses_fake","part":{"type":"step-finish","reason":"stop","tokens":{"input":1,"output":3,"reasoning":0,"cache":{"read":0,"write":0}}}}'
 `
 
 // TestBoot_WrapperLifecycle_OpenCode is the regression coverage

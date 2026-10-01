@@ -130,16 +130,18 @@ func newRuntimeEventSink(providerName string, isACP bool, canonical runtimeevent
 //     (pty_codex.go item.completed). The parser's legacy item.message path is
 //     token-level; it is assumed dead in current codex, whose exec --json
 //     emits item.* lifecycle events instead.
+//   - opencode (run --format json, go-providers v0.28.0+): one delta per
+//     "text" part, a whole text block. Before v0.28.0 run mode was plain
+//     text, one delta per stdout line with its "\n" restored, and opencode
+//     was excluded here.
 //
-// opencode is excluded: each delta is one stdout line with its "\n" already
-// restored. ACP and HTTP providers stream token chunks, which must never be
-// separated.
+// ACP and HTTP providers stream token chunks, which must never be separated.
 //
 // Stopgap until the libs carry block/message ids on deltas
 // (CW-20260930-0228); remove it then.
 func deltasAreWholeBlocks(providerName string) bool {
 	switch normalizeProviderName(providerName) {
-	case "claude", "claude-code", "claudecode", "codex":
+	case "claude", "claude-code", "claudecode", "codex", "opencode":
 		return true
 	}
 	return false
@@ -150,6 +152,12 @@ func deltasAreWholeBlocks(providerName string) bool {
 // The break is written into the event itself, so every consumer — the
 // canonical sink, the runtime feed, the chat stream, drain paths — sees the
 // same text. Thinking deltas neither receive nor count as text.
+//
+// Every KindTurnCompleted ends the turn. Since go-agent-wrapper v0.13.1 a
+// native turn has exactly one, its terminal, carrying the turn's usage
+// summed over its steps; usage no longer arrives as a completion of its own
+// (before v0.13.1 it did, and opencode's per-step usage would have read as
+// several mid-turn completions).
 func (s *runtimeEventSink) separateBlocks(ev runtimeevents.Event) runtimeevents.Event {
 	s.blockMu.Lock()
 	defer s.blockMu.Unlock()

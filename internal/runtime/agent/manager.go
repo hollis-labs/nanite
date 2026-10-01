@@ -10,6 +10,7 @@ import (
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/go-agent-wrapper/acp"
 	"github.com/hollis-labs/go-agent-wrapper/wrapper"
+	"github.com/hollis-labs/go-providers/provider"
 )
 
 // ErrTurnCancelUnsupported is the wrapper-owned native-runtime ceiling. It is
@@ -44,7 +45,26 @@ func (s *Session) SendInput(payload []byte) error {
 		}
 		payload = framed
 	}
-	return s.wr.SendInput(context.Background(), payload)
+	err := s.wr.SendInput(context.Background(), payload)
+	s.forgetLostProviderSession(err)
+	return err
+}
+
+// forgetLostProviderSession clears the persisted provider session id when a
+// turn failed because the provider no longer has that session
+// (CW-20260930-0113). Since agentkit v0.7.0 a resume turn on an adapter that
+// classifies its stderr (OpenCode: "Session not found") fails with an error
+// wrapping provider.ErrProviderSessionLost, and agentkit drops the id from
+// its own session so the next turn starts fresh. The agent_runtime row still
+// holds the dead id, though, and a cold boot resumes whatever that row
+// holds, so without this the next boot would fail its first turn the same
+// way. The turn's own error still reaches the caller unchanged; resending
+// the prompt without the lost history is the caller's decision.
+func (s *Session) forgetLostProviderSession(err error) {
+	if !errors.Is(err, provider.ErrProviderSessionLost) || s.deps == nil || s.deps.Store == nil {
+		return
+	}
+	_ = s.deps.Store.SetProviderSessionID(s.ID, "")
 }
 
 // Stop terminates the runtime cooperatively: wr.Stop emits the

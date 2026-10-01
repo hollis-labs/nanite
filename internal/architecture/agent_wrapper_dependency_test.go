@@ -137,9 +137,9 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 
 const (
 	agentWrapperModule    = "github.com/hollis-labs/go-agent-wrapper"
-	agentWrapperVersion   = "v0.10.1"
-	agentWrapperSum       = "h1:VbpjVtdiJmhXnerciRM5Dvg3+Qa8HIMtGe/laFqbvis="
-	agentWrapperGoModSum  = "h1:8yu3L9IqfRVqX5r//L+FNMUCyqQ/fuHihVLVAJh2V7I="
+	agentWrapperVersion   = "v0.13.1"
+	agentWrapperSum       = "h1:zm8Y4vOVbcGcP8lJecMD/hl+siDQ+WJmW9bX5ElA9yc="
+	agentWrapperGoModSum  = "h1:EpN3WPjzWBVfxF4TzQWswUPL2K5TUWoKWrLPnGyymLQ="
 	runtimeEventsModule   = "github.com/hollis-labs/go-runtime-events"
 	runtimeEventsVersion  = "v0.1.2"
 	runtimeEventsSum      = "h1:ChyjCVidjeAVf+dUJjiJTdX/LYujkJILKuLi+cTDNJM="

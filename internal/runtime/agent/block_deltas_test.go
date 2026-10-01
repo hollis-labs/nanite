@@ -71,7 +71,7 @@ func (h *blockSinkHarness) text(t *testing.T) (canonical, fanout string) {
 }
 
 func TestBlockDeltas_WholeBlockRuntimesGetParagraphBreaks(t *testing.T) {
-	for _, provider := range []string{"claude", "pty", "pty-claude", "codex", "pty-codex"} {
+	for _, provider := range []string{"claude", "pty", "pty-claude", "codex", "pty-codex", "opencode", "pty-opencode"} {
 		t.Run(provider, func(t *testing.T) {
 			h := newBlockSinkHarness(t, provider, false)
 			h.delta(t, "Let me check the config.")
@@ -95,7 +95,6 @@ func TestBlockDeltas_TokenStreamsStayUnseparated(t *testing.T) {
 		{"acp claude", "claude", true},
 		{"acp codex", "codex", true},
 		{"acp opencode", "opencode", true},
-		{"native opencode lines", "opencode", false},
 		{"http-style provider name", "anthropic", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,6 +135,24 @@ func TestBlockDeltas_TurnBoundaryResets(t *testing.T) {
 				t.Fatalf("text %q: the first block of a new turn must not get a break", canonical)
 			}
 		})
+	}
+}
+
+// go-agent-wrapper v0.13.1 shape: an opencode turn with a tool call streams
+// one whole text block per step and ends with ONE KindTurnCompleted that
+// carries the usage summed over its steps. The blocks within the turn are
+// separated; that terminal, usage and all, ends the turn.
+func TestBlockDeltas_UsageBearingTerminalResets(t *testing.T) {
+	h := newBlockSinkHarness(t, "opencode", false)
+	h.delta(t, "Let me read the file.")
+	h.delta(t, "The port is 8090.")
+	h.write(t, runtimeevents.KindTurnCompleted, `{"usage":{"OutputTokens":17,"StopReason":"stop"}}`)
+	h.delta(t, "Next turn.")
+
+	canonical, fanout := h.text(t)
+	want := "Let me read the file.\n\nThe port is 8090.Next turn."
+	if canonical != want || fanout != want {
+		t.Fatalf("canonical %q, fanout %q; want %q for both", canonical, fanout, want)
 	}
 }
 

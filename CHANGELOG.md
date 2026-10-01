@@ -61,6 +61,34 @@ lives in the git log.
   files (skills, roles, agents, plugin data) and is unaffected by this
   change. Project-level `./nanite.yaml` is unchanged.
 
+- **On Linux, agents can no longer write Nanite's own config, state or data
+  directories** (CW-20261001-0143).
+  - **Most agents now run under `bwrap`, with those directories read-only:**
+    Claude Code, OpenCode, Copilot and Pi, natively or over ACP.
+  - **Codex is confined by its own `workspace-write` sandbox instead.** That
+    sandbox is a bwrap of its own and cannot run nested inside Nanite's.
+    Its writable roots (the work root, `dev_tools_allowed_paths` and path
+    grants) are filtered so that none offers a protected directory:
+    - A root that is, or is inside, one is dropped. That includes a path a
+      chat message names, which grants that path and its parent directory.
+    - A root that holds one is replaced by its other subdirectories.
+    Claude's `additionalDirectories` drop the same roots.
+  - **Still writable:** the main database's directory (see
+    [`SECURITY.md`](SECURITY.md)) and the worktree root. The rest of the
+    host filesystem stays as writable as before.
+  - **What agents notice:**
+    - An agent sees only its own processes (a private PID namespace).
+    - Setuid programs such as `sudo` refuse to run ("no new privileges").
+  - **Requires bubblewrap with unprivileged user namespaces.** Without it,
+    agent launches now fail instead of running unprotected, and
+    `nanite serve` logs an ERROR at startup. A missing `bwrap` reports
+    "ProtectedPaths cannot be enforced". Install `bubblewrap`; on Ubuntu its
+    AppArmor profile already permits the user namespace.
+  - **`NANITE_SANDBOX_PROTECT=0` turns protection off.** Use it for a host
+    whose sandbox backend misbehaves. While it is off, `nanite serve` logs a
+    warning at startup and `/api/health` lists one under `warnings`.
+  - **macOS** is unchanged for now (CW-20261001-0189).
+
 ### Added
 
 - **Subagent progress heartbeats + narration guidance** (CW-20260519-0068).
@@ -92,6 +120,27 @@ lives in the git log.
   `docs/phase6-shared-launch-adoption.md`.
 
 ### Changed
+
+- **Claude agents now load only the `.mcp.json` Nanite plants for them**
+  (CW-20261001-0221). Every Claude agent Nanite launches (chat, one-shot,
+  resumed, subagent, background) gets `--strict-mcp-config` with
+  `--mcp-config <boot dir>/.mcp.json`. Before this, Claude also loaded
+  whatever the operator's own Claude has configured in `~/.claude.json`,
+  plugins and account connectors.
+  - **Why:** a user-level `mux mcp --proxy` spawned a second `nanite mcp`
+    inside the agent's sandbox with the real database open read-write, and
+    handed every agent the operator's full tool set, Cerberus (deploy, ssh)
+    included.
+  - **What agents notice:** the only MCP server a Nanite Claude agent has is
+    Nanite's own. Tools from the operator's other servers (Torque,
+    Tesseract, Tether and so on, through the user-level `mux`) are gone.
+    Anything an agent needs from them has to be planted deliberately.
+  - **Kill switch:** `NANITE_CLAUDE_STRICT_MCP=0` restores the old
+    behaviour and logs a startup warning. It is interim, and goes when the
+    library option for strict MCP lands.
+  - **Not covered:** Codex (reads no user-level config, because `CODEX_HOME`
+    is the boot dir), OpenCode (still loads `~/.config/opencode`) and ACP
+    launches.
 
 - **An agent's `nanite mcp` now opens no database** (CW-20261001-0188). Every
   agent Nanite launches gets the server's loopback address in its planted

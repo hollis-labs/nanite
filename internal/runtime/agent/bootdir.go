@@ -139,6 +139,13 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 	}
 	params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID, opts.Workdir)
 	if deps != nil {
+		// No root offered to an agent (the work root, dev_tools_allowed_paths,
+		// path grants) may be, or sit inside, a control-plane directory
+		// (CW-20261001-0143). Codex also has the roots that contain one split
+		// around it, because its own sandbox, not Nanite's, enforces them.
+		_, codex := layout.(codexLayout)
+		params.CLIWritableRoots = rootsOutsideProtected(params.CLIWritableRoots,
+			deps.ControlPlane.protectedFor(opts.Workdir, naniteHomeDir()), codex)
 		params.Skills = deps.Skills
 		params.SkillVendor = deps.SkillVendor
 	}

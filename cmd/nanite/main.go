@@ -514,6 +514,7 @@ func cmdServeWithInitializers(
 		// (no drift between what the agent reads and what the gate
 		// enforces).
 		DevToolsAllowedPaths: resolveDevToolsAllowedPaths(cfg),
+		AgentControlPlane:    agentControlPlane(serveLayout, *dbPath, wtBaseDir),
 		// Durable-agent recipe catalog files/dirs merge with built-ins at
 		// startup through the app config seam used for product tunables.
 		DurableAgentRecipeCatalogPaths: appCfg.Recipes.CatalogPaths,
@@ -1023,6 +1024,7 @@ func cmdServeWithInitializers(
 	if serverErr != nil {
 		return fmt.Errorf("construct HTTP server: %w", serverErr)
 	}
+	srv.SetHealthWarnings(agentProtectionWarnings())
 
 	// Discover, load plugins, and re-discover MCP tools.
 	pluginsDir := discoverAndLoadPlugins(pluginHost, mcpManager, s)

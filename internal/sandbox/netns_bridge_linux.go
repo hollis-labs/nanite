@@ -364,7 +364,7 @@ func runNetnsHelper() int {
 		fatalNetnsHelper("invalid helper invocation")
 	}
 	if err := bringInterfaceUp("lo"); err != nil {
-		fatalNetnsHelper(fmt.Sprintf("bring up loopback: %v", err))
+		fatalNetnsHelper(fmt.Sprintf("%s: %v", netnsLoopbackFailure, err))
 	}
 
 	bridgeDir := os.Getenv(netnsBridgeDirEnvVar)

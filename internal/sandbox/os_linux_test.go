@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -200,6 +201,9 @@ func TestNetnsBridge_ForwardsToHostProxy(t *testing.T) {
 	if _, err := exec.LookPath("curl"); err != nil {
 		t.Skip("curl not installed")
 	}
+	if err := ProbeNetworkBridge(); errors.Is(err, ErrNetworkBridgeUnavailable) {
+		t.Skipf("%v; tracked as CW-20261001-0079", err)
+	}
 
 	t.Setenv("HOME", t.TempDir())
 
@@ -257,6 +261,11 @@ func TestNetnsBridge_HostArbitraryPortStillBlocked(t *testing.T) {
 	}
 	if _, err := exec.LookPath("curl"); err != nil {
 		t.Skip("curl not installed")
+	}
+	// Without a working bridge the helper exits before curl runs, so
+	// "blocked" would prove nothing about the bridge (CW-20260824-0006).
+	if err := ProbeNetworkBridge(); errors.Is(err, ErrNetworkBridgeUnavailable) {
+		t.Skipf("%v; tracked as CW-20261001-0079", err)
 	}
 	t.Setenv("HOME", t.TempDir())
 

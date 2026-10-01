@@ -29,6 +29,12 @@ var deniedCIDRs = mustParseCIDRs([]string{
 	"fc00::/7",       // IPv6 ULA
 	"fe80::/10",      // IPv6 link-local
 	"::/128",         // IPv6 unspecified
+	// NAT64 local-use prefix (RFC 8215), denied whole: the operator picks
+	// the network-specific prefix length inside it, so where the embedded
+	// IPv4 sits (RFC 6052 section 2.2) cannot be known from the address,
+	// and reading every candidate position always finds a zero-filled one.
+	// The well-known prefix gets an exact reading instead; see below.
+	"64:ff9b:1::/48",
 })
 
 // Loopback is separate because the sandbox proxy and web_fetch have an
@@ -37,6 +43,21 @@ var loopbackCIDRs = mustParseCIDRs([]string{
 	"127.0.0.0/8",
 	"::1/128",
 })
+
+// IPv6 transition forms that carry an IPv4 address the sender picks
+// (CW-20260930-0027, CW-20260930-0028). A DNS answer in one of these forms
+// matches none of the IPv6 ranges above, so the deny check reads the
+// embedded IPv4 out of it (embeddedIPv4s) and applies the IPv4 ranges to
+// that. Denying the prefixes outright instead would refuse every IPv4
+// destination on a DNS64/NAT64 network, which synthesizes a NAT64 answer for
+// each IPv4-only host. The IPv4-mapped form (::ffff:0:0/96) needs no entry:
+// net.IPNet.Contains already reads it as IPv4.
+var (
+	nat64WellKnown = mustParseCIDR("64:ff9b::/96") // RFC 6052: IPv4 in the last 32 bits
+	sixToFour      = mustParseCIDR("2002::/16")    // RFC 3056: IPv4 in bits 16-47
+	teredo         = mustParseCIDR("2001::/32")    // RFC 4380: server and obfuscated client IPv4
+	ipv4Compatible = mustParseCIDR("::/96")        // RFC 4291 (deprecated): IPv4 in the last 32 bits
+)
 
 // DefaultResolver uses the system resolver.
 func DefaultResolver(ctx context.Context, host string) ([]net.IP, error) {
@@ -62,20 +83,66 @@ func ResolveAndPin(ctx context.Context, resolver Resolver, host string, allowLoc
 		return nil, fmt.Errorf("%w: no IPs for %q", ErrBlocked, host)
 	}
 	for _, ip := range ips {
-		if !allowLocalhost {
-			for _, block := range loopbackCIDRs {
-				if block.Contains(ip) {
-					return nil, fmt.Errorf("%w: loopback %s", ErrBlocked, ip)
-				}
-			}
+		if reason, denied := deniedReason(ip, allowLocalhost); denied {
+			return nil, fmt.Errorf("%w: %s", ErrBlocked, reason)
 		}
-		for _, block := range deniedCIDRs {
-			if block.Contains(ip) {
-				return nil, fmt.Errorf("%w: %s in %s", ErrBlocked, ip, block)
+		for _, v4 := range embeddedIPv4s(ip) {
+			if reason, denied := deniedReason(v4, allowLocalhost); denied {
+				return nil, fmt.Errorf("%w: %s embeds %s", ErrBlocked, ip, reason)
 			}
 		}
 	}
 	return ips[0], nil
+}
+
+// deniedReason reports whether ip falls in a denied range, and which.
+// Loopback is denied only without the localhost opt-in.
+func deniedReason(ip net.IP, allowLocalhost bool) (string, bool) {
+	if !allowLocalhost {
+		for _, block := range loopbackCIDRs {
+			if block.Contains(ip) {
+				return fmt.Sprintf("loopback %s", ip), true
+			}
+		}
+	}
+	for _, block := range deniedCIDRs {
+		if block.Contains(ip) {
+			return fmt.Sprintf("%s in %s", ip, block), true
+		}
+	}
+	return "", false
+}
+
+// embeddedIPv4s returns the IPv4 addresses an IPv6 transition-form address
+// carries, for the deny check to judge; any denied one denies the address.
+// For Teredo both the server address and the client address (stored XORed
+// with 0xffffffff) are returned. The NAT64 local-use prefix is not read
+// here: deniedCIDRs refuses all of it.
+//
+// The IPv4-compatible range ::/96 also holds :: and ::1, which are judged as
+// IPv6 (unspecified, loopback) and are not read as 0.0.0.0 and 0.0.0.1.
+func embeddedIPv4s(ip net.IP) []net.IP {
+	if ip.To4() != nil {
+		return nil
+	}
+	b := ip.To16()
+	if b == nil {
+		return nil
+	}
+	switch {
+	case nat64WellKnown.Contains(ip):
+		return []net.IP{net.IPv4(b[12], b[13], b[14], b[15])}
+	case sixToFour.Contains(ip):
+		return []net.IP{net.IPv4(b[2], b[3], b[4], b[5])}
+	case teredo.Contains(ip):
+		return []net.IP{
+			net.IPv4(b[4], b[5], b[6], b[7]),
+			net.IPv4(^b[12], ^b[13], ^b[14], ^b[15]),
+		}
+	case ipv4Compatible.Contains(ip) && !ip.Equal(net.IPv6unspecified) && !ip.Equal(net.IPv6loopback):
+		return []net.IP{net.IPv4(b[12], b[13], b[14], b[15])}
+	}
+	return nil
 }
 
 // IsLocalhostName matches localhost and every subdomain reserved by RFC 6761.
@@ -87,11 +154,15 @@ func IsLocalhostName(host string) bool {
 func mustParseCIDRs(cidrs []string) []*net.IPNet {
 	out := make([]*net.IPNet, 0, len(cidrs))
 	for _, cidr := range cidrs {
-		_, block, err := net.ParseCIDR(cidr)
-		if err != nil {
-			panic(fmt.Sprintf("ssrf: invalid CIDR %q: %v", cidr, err))
-		}
-		out = append(out, block)
+		out = append(out, mustParseCIDR(cidr))
 	}
 	return out
+}
+
+func mustParseCIDR(cidr string) *net.IPNet {
+	_, block, err := net.ParseCIDR(cidr)
+	if err != nil {
+		panic(fmt.Sprintf("ssrf: invalid CIDR %q: %v", cidr, err))
+	}
+	return block
 }

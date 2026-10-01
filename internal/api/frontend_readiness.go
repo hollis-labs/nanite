@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
+	"github.com/hollis-labs/nanite/internal/runtimekind"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -222,10 +222,12 @@ func (a *API) sessionDetails(ctx context.Context, id string) (sessionDetailsResp
 	}
 	if rows, err := a.Services.Store.ListAgentRuntimeRowsForSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil && len(rows) > 0 {
 		row := rows[0]
+		// Rows keep the runtime_kind token they were written with; report
+		// its current spelling (subprocess -> subprocess-per-turn).
 		details.Runtime = sessionRuntimeDetail{
 			State:             normalizeRuntimeState(row.State),
 			RuntimeID:         row.ID,
-			RuntimeKind:       row.RuntimeKind,
+			RuntimeKind:       string(runtimekind.Parse(row.RuntimeKind)),
 			Provider:          row.Provider,
 			Mode:              row.Mode,
 			PID:               row.PID,
@@ -414,11 +416,10 @@ func runtimeKindOptions() []runtimeKindOption {
 	return []runtimeKindOption{
 		{Value: string(runtimekind.API), Label: "API", ManagedAutomation: true, ProductSupported: true},
 		{Value: string(runtimekind.StreamingStdio), Label: "Streaming stdio", ManagedAutomation: true, ProductSupported: true},
-		{Value: string(runtimekind.Subprocess), Label: "Subprocess", ManagedAutomation: true, ProductSupported: true},
+		{Value: string(runtimekind.SubprocessPerTurn), Label: "Subprocess per turn", ManagedAutomation: true, ProductSupported: true},
 		{Value: string(runtimekind.JSONRPCStdio), Label: "JSON-RPC stdio", ManagedAutomation: true, ProductSupported: true},
-		{Value: string(runtimekind.ServeHTTP), Label: "Serve HTTP", ManagedAutomation: true, ProductSupported: false},
+		{Value: string(runtimekind.HTTPSSE), Label: "HTTP/SSE", ManagedAutomation: true, ProductSupported: false},
 		{Value: string(runtimekind.PTY), Label: "PTY", ManagedAutomation: false, ProductSupported: false, Description: "Raw terminal/TUI path, not a managed start-surface option."},
-		{Value: string(runtimekind.PTYDebug), Label: "PTY debug", ManagedAutomation: false, ProductSupported: false, Description: "Debug-only raw terminal path."},
 	}
 }
 

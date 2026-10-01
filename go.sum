@@ -83,8 +83,8 @@ github.com/hollis-labs/go-messaging v0.7.0 h1:VDvodrSgeYbH3ElwoTXWU7VjsPjUeHgXke
 github.com/hollis-labs/go-messaging v0.7.0/go.mod h1:KLv+81DP4Zktb4/ZnCg5dlzxjaI3u9jAm/tWOZxqHq0=
 github.com/hollis-labs/go-modelsdev v0.3.0 h1:nGsGPpr6/Op37F0BrcHRgOVn0YEpFlcA94nZO1dPtb8=
 github.com/hollis-labs/go-modelsdev v0.3.0/go.mod h1:/scTnxJppW1p33PVaQ6iXvmc+zYYHoo+VnTgbmSA6TM=
-github.com/hollis-labs/go-otel v0.6.1 h1:bPqO0xFkTNIrcgW7J4YM/yt3yn1/2Hy9dKxX6/Etna0=
-github.com/hollis-labs/go-otel v0.6.1/go.mod h1:aju/sgq+E9fdnsxzvCMdcOxcFOryEPHEFHxQEEhRbjU=
+github.com/hollis-labs/go-otel v0.10.0 h1:5p+JeX2FqTEATnTV0qJ5QLrDtg+rUQjhbHMRNuhCSVY=
+github.com/hollis-labs/go-otel v0.10.0/go.mod h1:cm2TSPhd42xsC3HOdwju83tUBSWmzDWCBsxYAnHM8n4=
 github.com/hollis-labs/go-permission v0.1.0 h1:eOlb2pPmEkh9D5zlVgWwOd4ryycEQYiLT1cLMEG6y2c=
 github.com/hollis-labs/go-permission v0.1.0/go.mod h1:OXz5GXvR7vFAb6TVoGDOESIEecC0V40524NdN0jiOrs=
 github.com/hollis-labs/go-providers v0.39.0 h1:gcEo3cW5e8la8SdR9LS7lktRtElSnfXdsFTCx41SSZk=

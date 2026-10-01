@@ -119,6 +119,25 @@ lives in the git log.
     default, `nanite serve` logs a warning at startup while it is on, and the
     refusals above still apply to the grants it folds in.
 
+- **Claude agents Nanite launches can now call Nanite's own MCP tools**
+  (CW-20261001-0411). A launched Claude runs headless (`claude -p`, no TTY),
+  so its permission gate had nobody to ask, and every call to a planted
+  `mcp__nanite__*` tool was refused ("Claude requested permissions to use
+  mcp__nanite__agent_list, but you haven't granted it yet"). Every native
+  Claude launch now carries `--allowedTools=mcp__nanite__*`, and nothing else
+  is allowed: a tool from any other MCP server, including the user-level
+  servers that load again with `NANITE_CLAUDE_STRICT_MCP=0`, is still refused.
+  - **What a chat agent can now do:** its `nanite` server exposes the harness's
+    full self-tool set, including messaging, `subagent_spawn`, `task_execute`,
+    `workflow_run` and `dispatch_executor`. These were inert before, because
+    every call was denied. Subagent, background and one-shot launches keep the
+    smaller bare-store set the server gives them, so the rule widens nothing
+    for them. A `subagent_spawn` still waits for approval.
+  - **Why argv and not `settings.json`:** Claude ignores a project
+    `permissions.allow` in a workspace it has not trusted ("Ignoring 1
+    permissions.allow entry from .claude/settings.json"), and every Nanite boot
+    dir is untrusted. The planted `settings.json` is unchanged.
+
 ### Added
 
 - **Subagent progress heartbeats + narration guidance** (CW-20260519-0068).

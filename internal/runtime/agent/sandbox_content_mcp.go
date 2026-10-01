@@ -37,10 +37,7 @@ func renderMCPJSON(cfg MCPConfig, sessionID string, storeScope bool) (string, er
 		return "", fmt.Errorf("agent: MCPConfig.BinaryPath is required when DBPath is set")
 	}
 
-	serverID := cfg.ServerID
-	if serverID == "" {
-		serverID = "nanite"
-	}
+	serverID := mcpServerID(cfg)
 
 	args := []string{"mcp", "--db", cfg.DBPath}
 	if sessionID != "" {

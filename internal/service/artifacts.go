@@ -11,12 +11,13 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/go-safefs/pathsafe"
+	"github.com/hollis-labs/nanite/internal/artifactstore"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // DefaultArtifactsStorageDir matches config.DefaultAppConfig().Artifacts.StorageDir.
 // It is the artifacts root when none is configured.
-const DefaultArtifactsStorageDir = "data/artifacts"
+const DefaultArtifactsStorageDir = artifactstore.DefaultStorageDir
 
 // ArtifactTempFile is an upload staging file.
 type ArtifactTempFile interface {
@@ -229,37 +230,18 @@ type PlaceInput struct {
 // (ResolveArtifactStoragePath); the recorded path is the resolved one and
 // the size is read from the file.
 func (s *ArtifactService) Place(ctx context.Context, in PlaceInput) (*store.Artifact, error) {
-	storagePath, err := ResolveArtifactStoragePath(s.StorageDir(), in.StoragePath)
+	file, err := artifactstore.InspectPlaced(s.StorageDir(), in.StoragePath, in.Name, in.MimeType)
 	if err != nil {
-		var escape *pathsafe.EscapeError
-		if errors.As(err, &escape) {
-			return nil, artifactErr(ArtifactInvalid, "artifact path outside storage root")
-		}
-		return nil, artifactErr(ArtifactInvalid, "invalid storage_path: "+err.Error())
-	}
-	mimeType := in.MimeType
-	if mimeType == "" {
-		mimeType = mime.TypeByExtension(filepath.Ext(in.Name))
-		if mimeType == "" {
-			mimeType = "application/octet-stream"
-		}
-	}
-
-	info, err := os.Stat(storagePath)
-	if err != nil {
-		return nil, artifactErr(ArtifactInvalid, "storage_path must name an existing file: "+err.Error())
-	}
-	if !info.Mode().IsRegular() {
-		return nil, artifactErr(ArtifactInvalid, "storage_path must name a regular file")
+		return nil, artifactErr(ArtifactInvalid, err.Error())
 	}
 
 	artifact := &store.Artifact{
 		SessionID:      in.SessionID,
 		MessageID:      in.MessageID,
 		Name:           in.Name,
-		MimeType:       mimeType,
-		SizeBytes:      info.Size(),
-		StoragePath:    storagePath,
+		MimeType:       file.MIME,
+		SizeBytes:      file.Size,
+		StoragePath:    file.Path,
 		Origin:         store.ArtifactOriginPlaced,
 		SourceAgentID:  in.SourceAgentID,
 		SourcePluginID: in.SourcePluginID,
@@ -334,44 +316,9 @@ func SanitizeUploadFilename(name string) (string, error) {
 	return base, nil
 }
 
-// ResolveArtifactStoragePath resolves storagePath under root, refusing any
-// path that escapes it (a *pathsafe.EscapeError). A relative path is taken
-// relative to root. An absolute path is accepted only if, after resolving
-// symlinks, it lies under root; it is then made root-relative, because
-// pathsafe.ResolveUnder treats an absolute path as root-relative.
-//
-// It depends only on its arguments and pathsafe, so it can move to a lower
-// package when other callers need it (CW-20260930-0184: the plugin host
-// records placed artifacts without it).
+// ResolveArtifactStoragePath applies the shared artifact storage confinement
+// rule. Relative paths are relative to root; absolute paths must resolve under
+// root. Download re-checks this rule for legacy or externally modified rows.
 func ResolveArtifactStoragePath(root, storagePath string) (string, error) {
-	if !filepath.IsAbs(storagePath) {
-		return pathsafe.ResolveUnder(root, storagePath)
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("resolve artifacts root: %w", err)
-	}
-	if canonical, evalErr := filepath.EvalSymlinks(absRoot); evalErr == nil {
-		absRoot = canonical
-	}
-	absTarget, err := filepath.Abs(storagePath)
-	if err != nil {
-		return "", fmt.Errorf("resolve artifact path: %w", err)
-	}
-	if canonical, evalErr := filepath.EvalSymlinks(absTarget); evalErr == nil {
-		absTarget = canonical
-	}
-	rel, err := filepath.Rel(absRoot, absTarget)
-	if err != nil {
-		return "", fmt.Errorf("resolve artifact path relative to root: %w", err)
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", &pathsafe.EscapeError{
-			Root:     absRoot,
-			Attempt:  storagePath,
-			Resolved: absTarget,
-			Cause:    errors.New("resolved path outside root"),
-		}
-	}
-	return pathsafe.ResolveUnder(absRoot, rel)
+	return artifactstore.Resolve(root, storagePath)
 }

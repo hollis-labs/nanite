@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-envelopes"
+	"github.com/hollis-labs/nanite/internal/artifactstore"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/secrets"
@@ -120,19 +121,20 @@ type Host struct {
 	// are plugin-agnostic by design — task.Service, store.Store). Event hooks
 	// and CRUD handlers carry their owner inline via eventHookEntry /
 	// crudHandlerEntry; see those types above.
-	taskBackendOwners  map[string]string        // task backend name → plugin ID
-	providerOwners     map[string]string        // provider name → plugin ID (forward-compat; see providerUnregistrar)
-	configSchemaOwners map[string]struct{}      // plugin IDs with a persisted config schema (clear on unload)
-	configs            map[string]*PluginConfig // per-plugin config, keyed by plugin ID
-	activePlugin       string                   // ID of the plugin currently being loaded
-	store              *store.Store             // DB-backed plugin settings (nil if unavailable)
-	router             *http.ServeMux
-	pluginMux          *MutablePluginMux                // mutable wrapper that owns all plugin-registered routes
-	routePatterns      map[string]bool                  // patterns already wired on core router (forwarder installed)
-	pendingRoutes      []pendingRoute                   // routes queued before router was set
-	filters            *FilterRegistry                  // named filter chains
-	eventSubs          []chan plugin.Event              // SSE subscribers for event streaming
-	envelopes          map[string]EnvelopeRegistryEntry // envelope type → registry entry (B.4)
+	taskBackendOwners   map[string]string        // task backend name → plugin ID
+	providerOwners      map[string]string        // provider name → plugin ID (forward-compat; see providerUnregistrar)
+	configSchemaOwners  map[string]struct{}      // plugin IDs with a persisted config schema (clear on unload)
+	configs             map[string]*PluginConfig // per-plugin config, keyed by plugin ID
+	activePlugin        string                   // ID of the plugin currently being loaded
+	artifactStorageRoot string
+	store               *store.Store // DB-backed plugin settings (nil if unavailable)
+	router              *http.ServeMux
+	pluginMux           *MutablePluginMux                // mutable wrapper that owns all plugin-registered routes
+	routePatterns       map[string]bool                  // patterns already wired on core router (forwarder installed)
+	pendingRoutes       []pendingRoute                   // routes queued before router was set
+	filters             *FilterRegistry                  // named filter chains
+	eventSubs           []chan plugin.Event              // SSE subscribers for event streaming
+	envelopes           map[string]EnvelopeRegistryEntry // envelope type → registry entry (B.4)
 	// envelopeRegistry is the shared go-envelopes Registry that owns
 	// compiled JSON Schemas for both core and plugin envelope types.
 	// Plugin types land here under "<pluginID>.<envType>" via
@@ -628,6 +630,14 @@ func (h *Host) SetPluginConfig(pluginID string, cfg *PluginConfig) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.configs[pluginID] = cfg
+}
+
+// SetArtifactStorageRoot sets the same artifacts root used by the HTTP service.
+// An empty value uses the shared default. Configure it before loading plugins.
+func (h *Host) SetArtifactStorageRoot(root string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.artifactStorageRoot = root
 }
 
 // SetStore sets the database store for DB-backed plugin settings.
@@ -1163,22 +1173,30 @@ func (h *Host) PlaceArtifact(sessionID, messageID, name, mimeType, storagePath s
 	h.mu.RLock()
 	pluginID := h.activePlugin
 	s := h.store
+	root := h.artifactStorageRoot
+	ctx := h.ctx
 	h.mu.RUnlock()
 
 	if s == nil {
 		return fmt.Errorf("no store available for artifact creation")
 	}
 
+	file, err := artifactstore.InspectPlaced(root, storagePath, name, mimeType)
+	if err != nil {
+		return err
+	}
+
 	artifact := &store.Artifact{
 		SessionID:      sessionID,
 		MessageID:      messageID,
 		Name:           name,
-		MimeType:       mimeType,
-		StoragePath:    storagePath,
+		MimeType:       file.MIME,
+		SizeBytes:      file.Size,
+		StoragePath:    file.Path,
 		Origin:         store.ArtifactOriginPlaced,
 		SourcePluginID: pluginID,
 	}
-	return s.CreateArtifact(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, artifact)
+	return s.CreateArtifact(ctx, artifact)
 }
 
 // LoadPlugin loads a plugin into the host.

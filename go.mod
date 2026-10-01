@@ -10,7 +10,7 @@ require (
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/trace v1.46.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.58.0
+	modernc.org/sqlite v1.60.1
 )
 
 require (
@@ -37,8 +37,8 @@ require (
 	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/hollis-labs/go-harness-filters v0.1.1 // indirect
-	github.com/hollis-labs/go-queue v0.1.0 // indirect
-	github.com/hollis-labs/go-runner v0.7.0 // indirect
+	github.com/hollis-labs/go-queue v0.2.1 // indirect
+	github.com/hollis-labs/go-runner v0.8.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
@@ -95,7 +95,7 @@ require (
 	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0
 	google.golang.org/protobuf v1.36.12 // indirect
-	modernc.org/libc v1.75.7 // indirect
+	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
@@ -106,16 +106,16 @@ require (
 	github.com/hollis-labs/go-apppaths v0.1.0
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-hooks v0.1.0
-	github.com/hollis-labs/go-llm-contracts v0.3.0
+	github.com/hollis-labs/go-llm-contracts v0.4.0
 	github.com/hollis-labs/go-llm-types v0.4.0
 	github.com/hollis-labs/go-materialize v0.1.0
 	github.com/hollis-labs/go-mcp v0.7.1
-	github.com/hollis-labs/go-messaging v0.5.2
+	github.com/hollis-labs/go-messaging v0.7.0
 	github.com/hollis-labs/go-runtime-events v0.1.2
 	github.com/hollis-labs/go-safefs v0.1.0
-	github.com/hollis-labs/go-scheduler v0.2.0
+	github.com/hollis-labs/go-scheduler v0.3.0
 	github.com/hollis-labs/go-sqlite v0.1.0
-	github.com/hollis-labs/go-tether-client v0.3.0
+	github.com/hollis-labs/go-tether-client v0.5.1
 	github.com/hollis-labs/go-workflow v0.1.0
 	github.com/hollis-labs/tesseract v0.10.0
 	github.com/openai/openai-go/v3 v3.61.0

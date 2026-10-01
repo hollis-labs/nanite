@@ -12,26 +12,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/go-egress-proxy/egress"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/safego"
-	"github.com/hollis-labs/nanite/internal/ssrf"
 )
 
 // ProxyResolver resolves a hostname to IP addresses. Tests replace this to
 // control what IPs the proxy pins against without real DNS lookups. Matches
 // the signature used by internal/mcp web_fetch so the pattern stays
 // consistent across the codebase.
-type ProxyResolver = ssrf.Resolver
+type ProxyResolver = egress.Resolver
 
 // defaultProxyResolver uses the system resolver.
 func defaultProxyResolver(ctx context.Context, host string) ([]net.IP, error) {
-	return ssrf.DefaultResolver(ctx, host)
+	return egress.DefaultResolver(ctx, host)
 }
 
 // errProxySSRFBlocked is the sentinel used for SSRF-class rejections so
 // tests can distinguish validator errors from transport errors via
 // errors.Is.
-var errProxySSRFBlocked = ssrf.ErrBlocked
+var errProxySSRFBlocked = egress.ErrSSRFBlocked
 
 // allowedCONNECTPorts restricts CONNECT to the TLS ports sandboxed tools
 // legitimately need. Everything else is refused before any dial.
@@ -214,7 +214,7 @@ func (p *Proxy) resolveAndPin(ctx context.Context, host string) (net.IP, error) 
 	if resolver == nil {
 		resolver = defaultProxyResolver
 	}
-	return ssrf.ResolveAndPin(ctx, resolver, host, p.AllowLocalhost)
+	return egress.ResolveAndPin(ctx, resolver, host, p.AllowLocalhost)
 }
 
 func (p *Proxy) innerDial(ctx context.Context, network, addr string) (net.Conn, error) {

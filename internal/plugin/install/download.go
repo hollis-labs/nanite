@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/ssrf"
+	"github.com/hollis-labs/go-egress-proxy/egress"
 )
 
 // DefaultMaxArchiveBytes caps plugin archive size at 100 MiB. Matches the
@@ -30,7 +30,7 @@ type HTTPDownloader struct {
 	Client         *http.Client
 	MaxBytes       int64
 	Timeout        time.Duration
-	Resolver       ssrf.Resolver
+	Resolver       egress.Resolver
 	Dialer         func(ctx context.Context, network, addr string) (net.Conn, error)
 	AllowLocalhost bool
 }
@@ -151,7 +151,7 @@ func (d *HTTPDownloader) secureHTTPClient() *http.Client {
 	}
 	resolver := d.Resolver
 	if resolver == nil {
-		resolver = ssrf.DefaultResolver
+		resolver = egress.DefaultResolver
 	}
 	innerDial := d.Dialer
 	if innerDial == nil {
@@ -164,7 +164,7 @@ func (d *HTTPDownloader) secureHTTPClient() *http.Client {
 			if err != nil {
 				return nil, err
 			}
-			pinned, err := ssrf.ResolveAndPin(ctx, resolver, host, d.AllowLocalhost)
+			pinned, err := egress.ResolveAndPin(ctx, resolver, host, d.AllowLocalhost)
 			if err != nil {
 				return nil, err
 			}

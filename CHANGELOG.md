@@ -121,6 +121,20 @@ lives in the git log.
 
 ### Changed
 
+- **A Codex chat keeps its conversation from one turn to the next**
+  (CW-20260930-0113, the go-providers v0.41 and agentkit v0.20.4 lib bump).
+  Codex exec turns used to each start a new thread; turn 2 now resumes
+  turn 1's thread (`exec … resume <id> -- <prompt>`), so Codex remembers what
+  was said earlier in the session.
+  - **A thread does not survive a restart.** Codex keeps its threads in the
+    per-boot directory Nanite gives it, so after a host restart (or when a
+    session is evicted or killed) the next turn starts a fresh thread and
+    carries the earlier conversation in the recovery context, as before.
+  - Resuming a session across a restart still works for Claude (by its own
+    session id) and for ACP agents.
+  - The libs also fix a host crash when an ACP agent exits while a turn is
+    being sent.
+
 - **Claude agents now load only the `.mcp.json` Nanite plants for them**
   (CW-20261001-0221). Every Claude agent Nanite launches (chat, one-shot,
   resumed, subagent, background) gets `--strict-mcp-config` with

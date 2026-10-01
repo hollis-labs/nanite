@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	toolresult "github.com/hollis-labs/go-toolresult"
 	_ "modernc.org/sqlite"
 )
 
@@ -48,7 +49,7 @@ func TestResultCache_SmallResult(t *testing.T) {
 	defer db.Close()
 
 	body := "small result"
-	visible, cached, err := cache.StoreResult("sess-1", "call-1", "test_tool", body)
+	visible, cached, err := storeResultForTest(cache, "sess-1", "call-1", "test_tool", body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestResultCache_LargeResult_StoreAndFetch(t *testing.T) {
 	defer db.Close()
 
 	body := strings.Repeat("x", 200) // over 100 byte soft threshold
-	visible, cached, err := cache.StoreResult("sess-1", "call-1", "test_tool", body)
+	visible, cached, err := storeResultForTest(cache, "sess-1", "call-1", "test_tool", body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestResultCache_LargeResult_StoreAndFetch(t *testing.T) {
 	id := visible[idStart : idStart+idEnd]
 
 	// Fetch full body.
-	slice, totalSize, err := cache.Fetch("sess-1", id, 0, 0)
+	slice, totalSize, err := fetchResultForTest(cache, "sess-1", id, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestResultCache_LargeResult_StoreAndFetch(t *testing.T) {
 	}
 
 	// Fetch with offset and length.
-	slice2, _, err := cache.Fetch("sess-1", id, 10, 20)
+	slice2, _, err := fetchResultForTest(cache, "sess-1", id, 10, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +113,7 @@ func TestResultCache_HardCap(t *testing.T) {
 	defer db.Close()
 
 	body := strings.Repeat("x", 1500) // over 1000 byte hard cap
-	_, cached, err := cache.StoreResult("sess-1", "call-1", "test_tool", body)
+	_, cached, err := storeResultForTest(cache, "sess-1", "call-1", "test_tool", body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +128,7 @@ func TestResultCache_HardCap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err = cache.Fetch("sess-1", id, 0, 0)
+	_, _, err = fetchResultForTest(cache, "sess-1", id, 0, 0)
 	if err == nil {
 		t.Error("expected error for hard-cap entry")
 	}
@@ -137,7 +138,8 @@ func TestResultCache_HardCap(t *testing.T) {
 }
 
 func TestResultCache_Search(t *testing.T) {
-	cache, db := setupTestCache(t)
+	_, db := setupTestCache(t)
+	cache := NewResultCache(db, ResultCacheConfig{SoftTruncBytes: 100})
 	defer db.Close()
 
 	lines := []string{
@@ -148,7 +150,7 @@ func TestResultCache_Search(t *testing.T) {
 		"line 5: hello final",
 	}
 	body := strings.Repeat("x", 50) + "\n" + strings.Join(lines, "\n") + "\n" + strings.Repeat("y", 50)
-	_, _, err := cache.StoreResult("sess-1", "call-1", "test_tool", body)
+	_, _, err := storeResultForTest(cache, "sess-1", "call-1", "test_tool", body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +161,7 @@ func TestResultCache_Search(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	matches, err := cache.Search("sess-1", id, "hello", 10)
+	matches, err := searchResultForTest(cache, "sess-1", id, "hello", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,76 +196,12 @@ func TestResultCache_FetchNotFound(t *testing.T) {
 	cache, db := setupTestCache(t)
 	defer db.Close()
 
-	_, _, err := cache.Fetch("sess-1", "nonexistent", 0, 0)
+	_, _, err := fetchResultForTest(cache, "sess-1", "nonexistent", 0, 0)
 	if err == nil {
 		t.Error("expected error for nonexistent ID")
 	}
 }
 
-// TestTruncateAtBoundary_LineBoundary asserts that the helper prefers to cut
-// at a newline rather than in the middle of a line (CW-20260426-0011).
-func TestTruncateAtBoundary_LineBoundary(t *testing.T) {
-	// Build a body where the soft threshold falls in the middle of a line.
-	// Lines are 20 bytes each; threshold is set at 35 — lands mid-line-2.
-	// Expected: cut at the end of line 1 (position 20, the \n index).
-	line1 := strings.Repeat("a", 19) + "\n" // 20 bytes
-	line2 := strings.Repeat("b", 19) + "\n" // 20 bytes
-	body := line1 + line2 + strings.Repeat("c", 20)
-
-	cut := truncateAtBoundary(body, 35)
-	// cut should be at the \n in line1, i.e. index 19 (just before the \n).
-	if cut != 19 {
-		t.Errorf("expected cut at 19 (end of line1 before \\n), got %d", cut)
-	}
-	// Verify the truncated prefix ends with a complete line (no partial content).
-	prefix := body[:cut]
-	if strings.Contains(prefix, "b") {
-		t.Error("truncated prefix must not contain line2 content")
-	}
-}
-
-// TestTruncateAtBoundary_UTF8 asserts that the helper never splits a multi-byte
-// UTF-8 sequence (CW-20260426-0011).
-func TestTruncateAtBoundary_UTF8(t *testing.T) {
-	// "é" is 2 bytes (0xC3 0xA9). Build a string of 'a'*9 + "é" so the
-	// 2-byte sequence straddles the threshold of 10.
-	s := strings.Repeat("a", 9) + "é" + strings.Repeat("a", 10)
-	cut := truncateAtBoundary(s, 10)
-	// The cut must not land inside the 2-byte sequence.
-	// Valid positions: 9 (before "é") or 11 (after "é" — but 11 > 10 so not taken).
-	// truncateAtBoundary walks back, so it should land at 9.
-	if cut != 9 {
-		t.Errorf("expected cut at 9 (before multi-byte rune), got %d", cut)
-	}
-	// Ensure the slice is valid UTF-8.
-	if !utf8.ValidString(s[:cut]) {
-		t.Errorf("prefix is not valid UTF-8: %q", s[:cut])
-	}
-}
-
-// TestTruncateAtBoundary_NoNewline asserts fallback to UTF-8-safe byte position
-// when no newline precedes the threshold.
-func TestTruncateAtBoundary_NoNewline(t *testing.T) {
-	s := strings.Repeat("x", 200)
-	cut := truncateAtBoundary(s, 50)
-	if cut != 50 {
-		t.Errorf("expected cut at 50 (no newline, plain ASCII), got %d", cut)
-	}
-}
-
-// TestTruncateAtBoundary_BeyondLength asserts the full length is returned when
-// maxBytes >= len(s).
-func TestTruncateAtBoundary_BeyondLength(t *testing.T) {
-	s := "hello"
-	cut := truncateAtBoundary(s, 100)
-	if cut != len(s) {
-		t.Errorf("expected cut at %d, got %d", len(s), cut)
-	}
-}
-
-// TestResultCache_TruncatesAtLineBoundary is the integration-level regression:
-// a large result whose soft threshold falls mid-line must produce a visible
-// preview that ends at a complete line, not mid-content (CW-20260426-0011).
 func TestResultCache_TruncatesAtLineBoundary(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -301,7 +239,7 @@ func TestResultCache_TruncatesAtLineBoundary(t *testing.T) {
 	}
 	body := strings.Join(bodyLines, "\n") + "\n"
 
-	visible, cached, err := cache.StoreResult("sess", "call", "tool", body)
+	visible, cached, err := storeResultForTest(cache, "sess", "call", "tool", body)
 	if err != nil {
 		t.Fatalf("StoreResult: %v", err)
 	}
@@ -408,11 +346,11 @@ You're picking up the core routing ticket for A2A protocol adoption, in the Nani
 // was written, run, and deleted during that investigation — this is the
 // same approach (a real-shaped fixture, production thresholds) kept in the
 // suite so a future change to Torque's TaskRecord field order or to
-// DefaultSoftTruncBytes can't silently reintroduce the bug with nothing to
+// toolresult.DefaultBudget can't silently reintroduce the bug with nothing to
 // catch it.
 //
-// Uses production defaults throughout (DefaultSoftTruncBytes,
-// DefaultHardCapBytes, DefaultCacheTTLSeconds) — not a lowered test
+// Uses production defaults throughout (toolresult.DefaultBudget,
+// toolresult.DefaultHardCapBytes, int(toolresult.DefaultTTL / time.Second)) — not a lowered test
 // threshold — so the test fails if those defaults ever change in a way
 // that stops a realistic task record from truncating.
 func TestResultCache_TruncatedTorqueTaskRecovery(t *testing.T) {
@@ -437,9 +375,9 @@ func TestResultCache_TruncatedTorqueTaskRecovery(t *testing.T) {
 	}
 
 	cache := NewResultCache(db, ResultCacheConfig{
-		SoftTruncBytes:  DefaultSoftTruncBytes,
-		HardCapBytes:    DefaultHardCapBytes,
-		CacheTTLSeconds: DefaultCacheTTLSeconds,
+		SoftTruncBytes:  toolresult.DefaultBudget,
+		HardCapBytes:    toolresult.DefaultHardCapBytes,
+		CacheTTLSeconds: int(toolresult.DefaultTTL / time.Second),
 	})
 
 	record := torqueTaskRecordFixture{
@@ -466,11 +404,11 @@ func TestResultCache_TruncatedTorqueTaskRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(body) <= DefaultSoftTruncBytes {
-		t.Fatalf("fixture body is %d bytes, must exceed DefaultSoftTruncBytes (%d) for this test to be meaningful — the fixture no longer reproduces a realistic truncating call", len(body), DefaultSoftTruncBytes)
+	if len(body) <= toolresult.DefaultBudget {
+		t.Fatalf("fixture body is %d bytes, must exceed toolresult.DefaultBudget (%d) for this test to be meaningful — the fixture no longer reproduces a realistic truncating call", len(body), toolresult.DefaultBudget)
 	}
 
-	visible, cached, err := cache.StoreResult("sess-torque", "call-1", "torque_task_get", string(body))
+	visible, cached, err := storeResultForTest(cache, "sess-torque", "call-1", "torque_task_get", string(body))
 	if err != nil {
 		t.Fatalf("StoreResult: %v", err)
 	}
@@ -491,7 +429,7 @@ func TestResultCache_TruncatedTorqueTaskRecovery(t *testing.T) {
 	id := rest[:end]
 
 	// fetch_tool_result's underlying call.
-	full, totalSize, err := cache.Fetch("sess-torque", id, 0, 0)
+	full, totalSize, err := fetchResultForTest(cache, "sess-torque", id, 0, 0)
 	if err != nil {
 		t.Fatalf("Fetch (fetch_tool_result): %v", err)
 	}
@@ -506,7 +444,7 @@ func TestResultCache_TruncatedTorqueTaskRecovery(t *testing.T) {
 	}
 
 	// search_tool_result's underlying call.
-	matches, err := cache.Search("sess-torque", id, "DependsOn", 5)
+	matches, err := searchResultForTest(cache, "sess-torque", id, "DependsOn", 5)
 	if err != nil {
 		t.Fatalf("Search (search_tool_result): %v", err)
 	}
@@ -635,4 +573,20 @@ func TestRunPurgeLoop_SurvivesPurgeErrors(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("loop did not stop after errors + cancel")
 	}
+}
+
+// Helpers extract the fields asserted by the cache recovery integration tests.
+func storeResultForTest(c *ResultCache, scope, call, tool, body string) (string, bool, error) {
+	view, err := c.Results.Present(context.Background(), scope, toolresult.Meta{CallID: call, Tool: tool}, body, 0)
+	return view.Content, view.Cached, err
+}
+
+func fetchResultForTest(c *ResultCache, scope, id string, offset, length int) (string, int, error) {
+	page, err := c.Results.Read(context.Background(), scope, id, "", offset, length, toolresult.DefaultHardCapBytes)
+	return page.Content, page.TotalBytes, err
+}
+
+func searchResultForTest(c *ResultCache, scope, id, pattern string, maximum int) ([]toolresult.SearchMatch, error) {
+	page, err := c.Results.Search(context.Background(), scope, id, "", pattern, 0, maximum, toolresult.DefaultHardCapBytes)
+	return page.Matches, err
 }

@@ -235,7 +235,7 @@ func TestChatCacheRecovery_SearchThenFetchHiddenEvidence(t *testing.T) {
 			if !strings.Contains(seen["fetch"], target) {
 				t.Fatalf("hidden evidence never reached the provider: %q", seen["fetch"])
 			}
-			if _, err := f.svc.resultCache.ReadPage("different-session", cacheID, pointer, 0, 0, 4000); err == nil {
+			if _, err := f.svc.resultCache.Results.Read(context.Background(), "different-session", cacheID, pointer, 0, 0, 4000); err == nil {
 				t.Fatal("session isolation failed")
 			}
 			snap := f.svc.inspector.Snapshot(f.session, "1")

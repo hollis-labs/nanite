@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	toolresult "github.com/hollis-labs/go-toolresult"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/selftools"
@@ -51,7 +52,7 @@ func TestPresentSelfToolResult_OverBudgetIsCachedWithPointer(t *testing.T) {
 		t.Fatalf("no recovery pointer in: %.400s", text)
 	}
 	// Retrieval through the same endpoint returns the original bytes.
-	page, isErr := a.Services.ResultCache.FetchToolResult("sess-a", map[string]any{"id": m[1], "length": float64(64)}, budget)
+	page, isErr := a.Services.ResultCache.Results.HandleFetch(context.Background(), "sess-a", map[string]any{"id": m[1], "length": float64(64)}, budget)
 	if isErr || !strings.Contains(page, "row of output") {
 		t.Errorf("fetch = %v %q", isErr, page)
 	}
@@ -135,7 +136,7 @@ func TestHandleSelfToolCall_CacheNavigationRoundTrip(t *testing.T) {
 	mkSession(t, s, "sess-a", "")
 	mkSession(t, s, "sess-b", "")
 	body := strings.Repeat("filler line\n", 20_000) + "NEEDLE-42\n"
-	view, err := a.Services.ResultCache.PresentResult("sess-a", "c1", "todo_list", body, 1000)
+	view, err := a.Services.ResultCache.Results.Present(context.Background(), "sess-a", toolresult.Meta{CallID: "c1", Tool: "todo_list"}, body, 1000)
 	if err != nil || !view.Cached {
 		t.Fatalf("seed: %+v %v", view, err)
 	}

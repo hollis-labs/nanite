@@ -9,7 +9,7 @@ import "unicode/utf8"
 // mid-sequence, which a model reads as garbage and a JSON encoder rewrites to
 // U+FFFD. Use UTF8Cut / UTF8Head for a hard byte cap. Where a line boundary is
 // also wanted, use the boundary-preferring cuts in internal/tool
-// (truncateAtBoundary, previewResult) or internal/truncate.OutputForModel.
+// (go-toolresult.Preview) or internal/truncate.OutputForModel.
 //
 // A raw byte cut remains acceptable only where the bytes are never rendered as
 // text: equality-only comparisons (reflexes head1KB), log/diagnostic lines

@@ -291,3 +291,23 @@ func TestRuntimeEventSink_TerminalEventCarriesUsage(t *testing.T) {
 		})
 	}
 }
+
+// A turn.failed that CancelTurn caused (reason "interrupted") is an interrupt
+// on the legacy fanout too: usage marked interrupted, then Done, never an
+// error (CW-20261001-0168).
+func TestRuntimeEventSink_InterruptedTurnIsNotAnError(t *testing.T) {
+	h := newBlockSinkHarness(t, "claude", false)
+	h.write(t, runtimeevents.KindTurnFailed, `{"error":"aborted by interrupt","reason":"interrupted","usage":{"OutputTokens":1}}`)
+	first, second := <-h.fanout, <-h.fanout
+	if first.Type != llmtypes.EventUsage || first.Usage == nil || first.Usage.StopReason != StopReasonInterrupted || first.Usage.OutputTokens != 1 {
+		t.Fatalf("first fanout event = %+v, want the turn's usage marked interrupted", first)
+	}
+	if second.Type != llmtypes.EventDone {
+		t.Fatalf("second fanout event = %+v, want done", second)
+	}
+	select {
+	case ev := <-h.fanout:
+		t.Fatalf("extra fanout event %+v after an interrupted turn", ev)
+	default:
+	}
+}

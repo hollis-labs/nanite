@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -152,12 +153,29 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 	return layout, params
 }
 
+// PathMentionLaunchRootsEnv is the kill switch for CW-20261001-0232. Set to
+// "1", the session's and its lineage's path grants feed a CLI launch's
+// writable roots again, as they did before. Default off.
+const PathMentionLaunchRootsEnv = "NANITE_PATH_MENTION_LAUNCH_ROOTS"
+
+// PathMentionLaunchRootsEnabled reports whether the kill switch is on.
+func PathMentionLaunchRootsEnabled() bool {
+	return os.Getenv(PathMentionLaunchRootsEnv) == "1"
+}
+
 // effectiveCLIWritableRoots lists the directories a CLI agent may write
 // beyond its boot dir: the session's work root first (CW-20261001-0020 —
 // the boot dir stays the cwd, so without this the project is outside the
-// agent's sandbox), then the configured dev_tools_allowed_paths roots,
-// then the session's and its lineage's path grants. Duplicates are
-// dropped. A nil deps still yields the work root.
+// agent's sandbox), then the configured dev_tools_allowed_paths roots.
+// Duplicates are dropped, and so is any root that is not an existing
+// directory. A nil deps still yields the work root.
+//
+// Only configuration widens the roots. Path grants are minted from free
+// text in a turn, which any loopback client can supply (CW-20261001-0232),
+// so they stay with the in-process dev_* tools and are not folded in here,
+// unless the PathMentionLaunchRootsEnv kill switch asks for the old
+// behavior. Even then they are only grants that survived the mention
+// policy (permission.MentionPolicy).
 func effectiveCLIWritableRoots(deps *Dependencies, sessionID, workRoot string) []string {
 	seen := make(map[string]struct{})
 	var out []string
@@ -173,6 +191,14 @@ func effectiveCLIWritableRoots(deps *Dependencies, sessionID, workRoot string) [
 			return
 		}
 		seen[clean] = struct{}{}
+		// A root that is not an existing directory is never handed to a CLI:
+		// Codex's sandbox binds every writable root, and one that is missing
+		// ("bwrap: Can't bind mount ... No such file or directory") makes every
+		// command of the turn fail.
+		if info, err := os.Stat(clean); err != nil || !info.IsDir() {
+			slog.Debug("agent: dropping CLI writable root that is not an existing directory", "root", clean)
+			return
+		}
 		out = append(out, clean)
 	}
 
@@ -184,7 +210,7 @@ func effectiveCLIWritableRoots(deps *Dependencies, sessionID, workRoot string) [
 		add(root)
 	}
 
-	if deps.PathGrants == nil || sessionID == "" {
+	if !PathMentionLaunchRootsEnabled() || deps.PathGrants == nil || sessionID == "" {
 		return out
 	}
 
@@ -197,12 +223,22 @@ func effectiveCLIWritableRoots(deps *Dependencies, sessionID, workRoot string) [
 	return out
 }
 
+// grantAsWritableRoot is the directory a grant stands for: the grant itself
+// when it is a directory, its directory when it is a file, and nothing when it
+// does not exist. A mention of a file to be created registers its parent
+// directory as a grant of its own (permission Q2), so a path that is missing
+// is not widened to its parent here: that would turn a mention of
+// ~/newdir/x.txt into a root of $HOME.
 func grantAsWritableRoot(grant string) string {
 	if grant == "" {
 		return ""
 	}
 	clean := filepath.Clean(grant)
-	if info, err := os.Stat(clean); err == nil && info.IsDir() {
+	info, err := os.Stat(clean)
+	if err != nil {
+		return ""
+	}
+	if info.IsDir() {
 		return clean
 	}
 	return filepath.Dir(clean)

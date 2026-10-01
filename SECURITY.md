@@ -84,6 +84,19 @@ coordination state to grant itself authority:
   sandbox cannot run nested inside Nanite's. Nanite narrows Codex's writable
   roots so they leave those directories out.
 
+**Paths named in a message.** A path mentioned in a chat turn ("edit
+`~/proj/main.go`") grants the in-process `dev_*` tools access to it for that
+session, and to its parent directory. The text of a turn is not proof that a
+person wrote it, since any local client of the loopback API can post one, so:
+such a grant never reaches an agent CLI's writable roots (those come from the
+work root, `dev_tools_allowed_paths` and your configuration), only a chat turn
+mints one, and it is refused when it would cover a sensitive path (`~/.ssh`,
+`~/.gnupg`, `~/.codex`, `~/.claude*`, `~/.local/bin`, the systemd user
+directory, Nanite's and its sibling apps' state) or anything outside `$HOME`
+and `dev_tools_allowed_paths` (CW-20261001-0232).
+`NANITE_PATH_MENTION_LAUNCH_ROOTS=1` restores the old behavior of folding
+these grants into launch roots; leave it off.
+
 Everything else stays as writable as your user can make it.
 `NANITE_SANDBOX_PROTECT=0` turns this protection off; `/api/health` warns
 while it is off. This has limits:

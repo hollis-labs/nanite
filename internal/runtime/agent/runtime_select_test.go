@@ -1,7 +1,11 @@
 package agent
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
@@ -201,4 +205,60 @@ func TestSelectAdapter_ExtraArgsPrecedePrompt(t *testing.T) {
 			t.Errorf("%s argv = %q, want the extra args before `--` and the turn last", id, args)
 		}
 	}
+}
+
+// CW-20260930-0113 review: CanLaunch resolves names through the registry
+// (case-insensitive, aliases), so every name-keyed decision Boot makes must
+// resolve the same way, or a name like "Claude" routes to CLI and then fails
+// at boot-dir setup. normalizeProviderName canonicalizes to the registry id.
+func TestCapitalisedAndAliasNamesAgreeEverywhere(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		layout Layout
+		claude bool
+	}{
+		{"Claude", claudeLayout{}, true},
+		{"pty-Claude", claudeLayout{}, true},
+		{"claude-code", claudeLayout{}, true},
+		{"CODEX", codexLayout{}, false},
+		{"pty-open-code", opencodeLayout{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !CanLaunch(tc.name) {
+				t.Fatalf("CanLaunch(%q) = false", tc.name)
+			}
+			if got := bootdirLayoutFor(tc.name); got != tc.layout {
+				t.Fatalf("bootdirLayoutFor(%q) = %T, want %T", tc.name, got, tc.layout)
+			}
+			if !HasBootdirLayout(tc.name) {
+				t.Fatalf("HasBootdirLayout(%q) = false", tc.name)
+			}
+			if got := shouldUseStreamingStdio(tc.name, ModeLongLived); got != tc.claude {
+				t.Fatalf("shouldUseStreamingStdio(%q) = %v, want %v", tc.name, got, tc.claude)
+			}
+			if got := len(workRootArgs(tc.name, "/w")) > 0; got != tc.claude {
+				t.Fatalf("workRootArgs(%q) present = %v, want %v", tc.name, got, tc.claude)
+			}
+		})
+	}
+}
+
+// A capitalised name boots: selection, layout and adapter agree.
+func TestBoot_CapitalisedProviderName(t *testing.T) {
+	deps, _ := makeBootDeps(t, "codex")
+	// No Workdir: makeBootDeps injects a custom fake adapter, which
+	// launch.Select refuses to decorate with Claude's --add-dir.
+	sess, err := Boot(context.Background(), deps, Options{
+		Mode:     ModeLongLived,
+		Provider: "Claude",
+	})
+	if err != nil {
+		t.Fatalf("Boot(Provider=Claude): %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sess.BootDir, "CLAUDE.md")); err != nil {
+		t.Fatalf("Claude boot dir has no CLAUDE.md: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = sess.Stop(ctx)
 }

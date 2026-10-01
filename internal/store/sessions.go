@@ -285,17 +285,19 @@ func hydrateSessionOptionalFields(sess *Session, haltedAt sql.NullString, halted
 	}
 }
 
+// nextShortCodeSQL allocates a session's short code (cN, one past the highest
+// in use) inside the INSERT that uses it. SQLite runs the statement, scalar
+// subquery included, under its write lock, so concurrent creates cannot read
+// the same maximum. Reading the maximum first and inserting afterwards let
+// two creates pick the same code and the second fail "UNIQUE constraint
+// failed: sessions.short_code" (CW-20261001-0172).
+const nextShortCodeSQL = `('c' || (COALESCE((SELECT MAX(CAST(SUBSTR(short_code, 2) AS INTEGER)) FROM sessions), 0) + 1))`
+
 // CreateSession inserts a new session, auto-generating ID and short_code.
 func (s *Store) CreateSession(ctx context.Context, sess *Session) error {
 	if sess.ID == "" {
 		sess.ID = uuid.New().String()
 	}
-
-	code, err := s.NextShortCode(ctx)
-	if err != nil {
-		return fmt.Errorf("generate short code: %w", err)
-	}
-	sess.ShortCode = code
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if sess.Status == "" {
@@ -305,19 +307,20 @@ func (s *Store) CreateSession(ctx context.Context, sess *Session) error {
 		sess.Metadata = "{}"
 	}
 
-	_, err = s.DB.ExecContext(ctx,
+	err := s.DB.QueryRowContext(ctx,
 		`INSERT INTO sessions (id, short_code, title, custom_name, project_id,
 		                       context_type, context_id, provider, model,
 		                       status, is_pinned, sort_order, message_count,
 		                       metadata, last_activity, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
-		sess.ID, sess.ShortCode, nullIfEmpty(sess.Title), nullIfEmpty(sess.CustomName),
+		 VALUES (?, `+nextShortCodeSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+		 RETURNING short_code`,
+		sess.ID, nullIfEmpty(sess.Title), nullIfEmpty(sess.CustomName),
 		nullIfEmpty(sess.ProjectID),
 		nullIfEmpty(sess.ContextType), nullIfEmpty(sess.ContextID),
 		nullIfEmpty(sess.Provider), nullIfEmpty(sess.Model),
 		sess.Status, sess.IsPinned, sess.SortOrder,
 		sess.Metadata, now, now, now,
-	)
+	).Scan(&sess.ShortCode)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
@@ -429,7 +432,10 @@ func (s *Store) GetSessionByShortCode(ctx context.Context, code string) (*Sessio
 	return &sess, nil
 }
 
-// NextShortCode returns the next available short code (c1, c2, ...).
+// NextShortCode returns the next available short code (c1, c2, ...). It is a
+// read-only preview: by the time a caller inserts, a concurrent create may
+// have taken it. CreateSession and ForkSession do not use it; they allocate
+// inside their INSERT (nextShortCodeSQL).
 func (s *Store) NextShortCode(ctx context.Context) (string, error) {
 	var raw sql.NullString
 	err := s.DB.QueryRowContext(ctx,
@@ -744,16 +750,11 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 		}
 	}
 
-	// Assign new session ID + short code before opening tx; short_code
-	// generation requires its own read and is safely idempotent.
+	// Assign the new session ID before opening the tx. Its short code is
+	// allocated inside the INSERT (nextShortCodeSQL), not read beforehand.
 	if newSess.ID == "" {
 		newSess.ID = uuid.New().String()
 	}
-	code, err := s.NextShortCode(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("generate short code: %w", err)
-	}
-	newSess.ShortCode = code
 	if newSess.Status == "" {
 		newSess.Status = "active"
 	}
@@ -767,19 +768,20 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	if _, err := tx.ExecContext(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`INSERT INTO sessions (id, short_code, title, custom_name, project_id,
 		                       context_type, context_id, provider, model,
 		                       status, is_pinned, sort_order, message_count,
 		                       tags, metadata, last_activity, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-		newSess.ID, newSess.ShortCode, nullIfEmpty(newSess.Title), nullIfEmpty(newSess.CustomName),
+		 VALUES (?, `+nextShortCodeSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+		 RETURNING short_code`,
+		newSess.ID, nullIfEmpty(newSess.Title), nullIfEmpty(newSess.CustomName),
 		nullIfEmpty(newSess.ProjectID),
 		nullIfEmpty(newSess.ContextType), nullIfEmpty(newSess.ContextID),
 		nullIfEmpty(newSess.Provider), nullIfEmpty(newSess.Model),
 		newSess.Status, newSess.IsPinned, newSess.SortOrder,
 		newSess.Tags, newSess.Metadata, now, now, now,
-	); err != nil {
+	).Scan(&newSess.ShortCode); err != nil {
 		return nil, fmt.Errorf("create forked session: %w", err)
 	}
 

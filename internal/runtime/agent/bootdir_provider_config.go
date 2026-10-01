@@ -107,9 +107,19 @@ import (
 // report.
 func codexConfigTOMLContent(writableRoots []string) (string, error) {
 	adapter := provider.NewCodexAdapter()
+	adapter.SandboxMode = codexSandboxMode
 	adapter.WritableRoots = writableRoots
 	return renderProviderConfigFile(adapter, "config.toml", provider.PlantContext{})
 }
+
+// codexSandboxMode is the sandbox_mode Nanite plants for codex: go-providers'
+// headless default, named here because Nanite's own protection depends on
+// it. Under "workspace-write" codex confines every command it runs to its
+// cwd, $TMPDIR, /tmp and the planted writable_roots, so Nanite does not wrap
+// codex in its control-plane sandbox (codexSandboxesItself): Ubuntu's
+// AppArmor bwrap profile denies capabilities to anything inside a bwrap, so
+// codex's own bwrap cannot nest there (CW-20261001-0143).
+const codexSandboxMode = "workspace-write"
 
 // codexConfigFileMode is the file mode go-providers' codex BootDirSpec
 // declares for config.toml — 0o600, because it embeds per-task secret-ish

@@ -458,6 +458,11 @@ type ContainerConfig struct {
 	// baseline READ roots the agent operates against. Empty / nil leaves
 	// the "workspace allow-list" section out of the rendered summary.
 	DevToolsAllowedPaths []string
+
+	// AgentControlPlane names Nanite's own directories that every launched
+	// agent is denied writes to (CW-20261001-0143). The zero value protects
+	// nothing; cmd/nanite fills it from the app layout.
+	AgentControlPlane runtimeagent.ControlPlane
 }
 
 // NewImportAdapterRegistry builds an AdapterRegistry for the IMPORT
@@ -1149,6 +1154,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Providers:        cfg.Providers,
 		APIBaseURL:       cfg.APIBaseURL,
 		CLIWritableRoots: cfg.DevToolsAllowedPaths,
+		ControlPlane:     cfg.AgentControlPlane,
 		Permissions:      permissions,
 		RuntimeFeed:      runtimeFeed,
 		// TASKS/skills/10: threads the same vendored skill store
@@ -1166,7 +1172,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	agentBootDir := agentDepsBundle.BootDirAdapter
 	slog.Info("service container: agent runtime dependencies built",
 		"cli_developer_mode", cfg.CLIDeveloperMode,
-		"workspaces_root", agentDeps.WorkspacesRoot)
+		"workspaces_root", agentDeps.WorkspacesRoot,
+		"agent_protected_dirs", cfg.AgentControlPlane.Dirs,
+		"agent_writable_exceptions", cfg.AgentControlPlane.Writable)
 
 	resultCache := buildResultCache(cfg.Store)
 	chatSvc := NewChatService(ChatServiceConfig{

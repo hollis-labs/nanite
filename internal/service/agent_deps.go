@@ -57,6 +57,9 @@ type AgentDepsConfig struct {
 	// dev_tools_allowed_paths config setting that scopes the in-process
 	// dev_* tools (CW-20260518-0075).
 	CLIWritableRoots []string
+	// ControlPlane is runtimeagent.Dependencies.ControlPlane
+	// (CW-20261001-0143).
+	ControlPlane runtimeagent.ControlPlane
 
 	// APIBaseURL is the base URL of the live nanite API server, threaded
 	// into the boot dir's .mcp.json so a CLI-launched chat agent's
@@ -219,6 +222,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		},
 		WorkspacesRoot:     workspacesRoot,
 		CLIWritableRoots:   cfg.CLIWritableRoots,
+		ControlPlane:       cfg.ControlPlane,
 		Telemetry:          telemetry,
 		SandboxBaseProfile: cfg.SandboxBaseProf,
 		// TASKS/skills/10: cfg.Store satisfies runtimeagent.SkillStore

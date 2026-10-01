@@ -74,8 +74,40 @@ from the UI use the same denylist and secret filtering, and the session's
 `yolo` shell mode skips OS isolation.
 
 Agent CLIs that Nanite launches (Claude Code, Codex and the like) run as
-your user. Their own permission systems apply; Nanite does not currently
-wrap them in an OS sandbox.
+your user. Their own permission systems apply.
+
+On Linux, Nanite also keeps its own config, state and data directories out
+of agents' reach, so an agent cannot rewrite Nanite's configuration or
+coordination state to grant itself authority:
+- Most agents run under `bwrap` with those directories read-only.
+- Codex runs under its own `workspace-write` sandbox instead, because that
+  sandbox cannot run nested inside Nanite's. Nanite narrows Codex's writable
+  roots so they leave those directories out.
+
+Everything else stays as writable as your user can make it.
+`NANITE_SANDBOX_PROTECT=0` turns this protection off; `/api/health` warns
+while it is off. This has limits:
+
+- **The main database is not protected yet.** Each agent runs its own
+  `nanite mcp` server, which opens the database read-write, so the
+  database's directory stays writable to agents. An agent can still write
+  the database directly, including its permissions and approvals
+  (CW-20261001-0188).
+- **Only direct writes are stopped.** Protection does not stop an agent from
+  asking another process running as your user, outside the sandbox, to
+  write for it (for example `systemd-run --user`, a terminal multiplexer, or
+  another app's API). Nor does it stop the agent planting something under
+  your home directory that later runs outside the sandbox, such as a shell
+  rc file or a git hook.
+- **Only directories are protected.** Where a protected directory has to
+  stay writable underneath (the database's directory, the worktrees root),
+  Nanite protects the sibling directories instead. A loose file sitting
+  directly in such a parent stays writable.
+- **A launch's own work directory is not protected.** It comes from the
+  session's or project's configuration, and an agent cannot choose it; one
+  that lies inside Nanite's directories is writable.
+- **If `bwrap` cannot run**, agent launches fail rather than run unprotected.
+- **macOS** agents are not wrapped yet (CW-20261001-0189).
 
 ## Data at rest
 

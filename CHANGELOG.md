@@ -61,6 +61,34 @@ lives in the git log.
   files (skills, roles, agents, plugin data) and is unaffected by this
   change. Project-level `./nanite.yaml` is unchanged.
 
+- **On Linux, agents can no longer write Nanite's own config, state or data
+  directories** (CW-20261001-0143).
+  - **Most agents now run under `bwrap`, with those directories read-only:**
+    Claude Code, OpenCode, Copilot and Pi, natively or over ACP.
+  - **Codex is confined by its own `workspace-write` sandbox instead.** That
+    sandbox is a bwrap of its own and cannot run nested inside Nanite's.
+    Its writable roots (the work root, `dev_tools_allowed_paths` and path
+    grants) are filtered so that none offers a protected directory:
+    - A root that is, or is inside, one is dropped. That includes a path a
+      chat message names, which grants that path and its parent directory.
+    - A root that holds one is replaced by its other subdirectories.
+    Claude's `additionalDirectories` drop the same roots.
+  - **Still writable:** the main database's directory (see
+    [`SECURITY.md`](SECURITY.md)) and the worktree root. The rest of the
+    host filesystem stays as writable as before.
+  - **What agents notice:**
+    - An agent sees only its own processes (a private PID namespace).
+    - Setuid programs such as `sudo` refuse to run ("no new privileges").
+  - **Requires bubblewrap with unprivileged user namespaces.** Without it,
+    agent launches now fail instead of running unprotected, and
+    `nanite serve` logs an ERROR at startup. A missing `bwrap` reports
+    "ProtectedPaths cannot be enforced". Install `bubblewrap`; on Ubuntu its
+    AppArmor profile already permits the user namespace.
+  - **`NANITE_SANDBOX_PROTECT=0` turns protection off.** Use it for a host
+    whose sandbox backend misbehaves. While it is off, `nanite serve` logs a
+    warning at startup and `/api/health` lists one under `warnings`.
+  - **macOS** is unchanged for now (CW-20261001-0189).
+
 ### Added
 
 - **Subagent progress heartbeats + narration guidance** (CW-20260519-0068).

@@ -111,7 +111,7 @@ require (
 	github.com/hollis-labs/go-llm-contracts v0.4.0
 	github.com/hollis-labs/go-llm-types v0.4.0
 	github.com/hollis-labs/go-materialize v0.1.0
-	github.com/hollis-labs/go-mcp v0.7.1
+	github.com/hollis-labs/go-mcp v0.14.1
 	github.com/hollis-labs/go-messaging v0.7.0
 	github.com/hollis-labs/go-runtime-events v0.1.2
 	github.com/hollis-labs/go-safefs v0.1.0

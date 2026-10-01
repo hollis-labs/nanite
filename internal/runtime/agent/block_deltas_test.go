@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
@@ -70,12 +71,32 @@ func (h *blockSinkHarness) text(t *testing.T) (canonical, fanout string) {
 	}
 }
 
-func TestBlockDeltas_WholeBlockRuntimesGetParagraphBreaks(t *testing.T) {
-	for _, provider := range []string{"claude", "pty", "pty-claude", "codex", "pty-codex", "opencode", "pty-opencode"} {
-		t.Run(provider, func(t *testing.T) {
-			h := newBlockSinkHarness(t, provider, false)
-			h.delta(t, "Let me check the config.")
-			h.delta(t, "The port is 8090.")
+// block writes one text delta of block id (empty: no block_id).
+func (h *blockSinkHarness) block(t *testing.T, id, content string) {
+	t.Helper()
+	p := map[string]string{"content": content}
+	if id != "" {
+		p["block_id"] = id
+	}
+	b, _ := json.Marshal(p)
+	h.write(t, runtimeevents.KindAgentDelta, string(b))
+}
+
+// CW-20260930-0228: blocks are separated by block_id, which go-agent-wrapper
+// v0.17.0 stamps on every runtime's deltas, native and ACP alike. Two blocks
+// get a paragraph break whatever the provider.
+func TestBlockDeltas_NewBlockGetsParagraphBreak(t *testing.T) {
+	for _, tc := range []struct {
+		provider string
+		acp      bool
+	}{
+		{"claude", false}, {"codex", false}, {"opencode", false},
+		{"claude", true}, {"copilot", true}, {"pi", true},
+	} {
+		t.Run(fmt.Sprintf("%s acp=%v", tc.provider, tc.acp), func(t *testing.T) {
+			h := newBlockSinkHarness(t, tc.provider, tc.acp)
+			h.block(t, "b1", "Let me check the config.")
+			h.block(t, "b2", "The port is 8090.")
 			canonical, fanout := h.text(t)
 			want := "Let me check the config.\n\nThe port is 8090."
 			if canonical != want || fanout != want {
@@ -85,23 +106,15 @@ func TestBlockDeltas_WholeBlockRuntimesGetParagraphBreaks(t *testing.T) {
 	}
 }
 
-// The regression that matters: token-chunk streams must never be separated.
-func TestBlockDeltas_TokenStreamsStayUnseparated(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		provider string
-		acp      bool
-	}{
-		{"acp claude", "claude", true},
-		{"acp codex", "codex", true},
-		{"acp opencode", "opencode", true},
-		{"http-style provider name", "anthropic", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newBlockSinkHarness(t, tc.provider, tc.acp)
-			h.delta(t, "Hel")
-			h.delta(t, "lo, wor")
-			h.delta(t, "ld.")
+// The regression that matters: the tokens of one block must never be
+// separated, and neither must deltas that carry no block_id at all.
+func TestBlockDeltas_OneBlockStaysJoined(t *testing.T) {
+	for _, id := range []string{"msg-1", ""} {
+		t.Run(fmt.Sprintf("block_id=%q", id), func(t *testing.T) {
+			h := newBlockSinkHarness(t, "claude", true)
+			h.block(t, id, "Hel")
+			h.block(t, id, "lo, wor")
+			h.block(t, id, "ld.")
 			canonical, fanout := h.text(t)
 			if canonical != "Hello, world." || fanout != "Hello, world." {
 				t.Fatalf("canonical %q, fanout %q; want the chunks joined untouched", canonical, fanout)
@@ -112,10 +125,10 @@ func TestBlockDeltas_TokenStreamsStayUnseparated(t *testing.T) {
 
 func TestBlockDeltas_NoBreakWhereOneAlreadyIs(t *testing.T) {
 	h := newBlockSinkHarness(t, "claude", false)
-	h.delta(t, "Line one.\n")
-	h.delta(t, "Line two.")
-	h.delta(t, " continued")
-	h.delta(t, "\nNew line.")
+	h.block(t, "b1", "Line one.\n")
+	h.block(t, "b2", "Line two.")
+	h.block(t, "b3", " continued")
+	h.block(t, "b4", "\nNew line.")
 	canonical, fanout := h.text(t)
 	want := "Line one.\nLine two. continued\nNew line."
 	if canonical != want || fanout != want {
@@ -127,9 +140,9 @@ func TestBlockDeltas_TurnBoundaryResets(t *testing.T) {
 	for _, terminal := range []runtimeevents.EventKind{runtimeevents.KindTurnCompleted, runtimeevents.KindTurnFailed, runtimeevents.KindTurnStarted} {
 		t.Run(string(terminal), func(t *testing.T) {
 			h := newBlockSinkHarness(t, "claude", false)
-			h.delta(t, "Turn one.")
+			h.block(t, "b1", "Turn one.")
 			h.write(t, terminal, "")
-			h.delta(t, "Turn two.")
+			h.block(t, "b2", "Turn two.")
 			canonical, _ := h.text(t)
 			if canonical != "Turn one.Turn two." {
 				t.Fatalf("text %q: the first block of a new turn must not get a break", canonical)
@@ -138,16 +151,15 @@ func TestBlockDeltas_TurnBoundaryResets(t *testing.T) {
 	}
 }
 
-// go-agent-wrapper v0.13.1 shape: an opencode turn with a tool call streams
-// one whole text block per step and ends with ONE KindTurnCompleted that
-// carries the usage summed over its steps. The blocks within the turn are
-// separated; that terminal, usage and all, ends the turn.
+// An opencode turn with a tool call: one block per step, then ONE
+// KindTurnCompleted carrying the turn's usage. The blocks within the turn
+// are separated; that terminal, usage and all, ends the turn.
 func TestBlockDeltas_UsageBearingTerminalResets(t *testing.T) {
 	h := newBlockSinkHarness(t, "opencode", false)
-	h.delta(t, "Let me read the file.")
-	h.delta(t, "The port is 8090.")
-	h.write(t, runtimeevents.KindTurnCompleted, `{"usage":{"OutputTokens":17,"StopReason":"stop"}}`)
-	h.delta(t, "Next turn.")
+	h.block(t, "prt_1", "Let me read the file.")
+	h.block(t, "prt_2", "The port is 8090.")
+	h.write(t, runtimeevents.KindTurnCompleted, `{"usage":{"OutputTokens":17,"StopReason":"end_turn"}}`)
+	h.block(t, "prt_3", "Next turn.")
 
 	canonical, fanout := h.text(t)
 	want := "Let me read the file.\n\nThe port is 8090.Next turn."
@@ -158,10 +170,10 @@ func TestBlockDeltas_UsageBearingTerminalResets(t *testing.T) {
 
 func TestBlockDeltas_ThinkingNeitherReceivesNorCountsAsText(t *testing.T) {
 	h := newBlockSinkHarness(t, "claude", false)
-	h.write(t, runtimeevents.KindAgentDelta, `{"content":"pondering","phase":"thought"}`)
-	h.delta(t, "First.")
-	h.write(t, runtimeevents.KindAgentDelta, `{"content":"more pondering","thinking":true}`)
-	h.delta(t, "Second.")
+	h.write(t, runtimeevents.KindAgentDelta, `{"content":"pondering","phase":"thought","block_id":"t1"}`)
+	h.block(t, "b1", "First.")
+	h.write(t, runtimeevents.KindAgentDelta, `{"content":"more pondering","thinking":true,"block_id":"t2"}`)
+	h.block(t, "b2", "Second.")
 
 	canonical, _ := h.text(t)
 	if canonical != "First.\n\nSecond." {
@@ -179,13 +191,13 @@ func TestBlockDeltas_ThinkingNeitherReceivesNorCountsAsText(t *testing.T) {
 // Rewriting the content must keep every other payload field.
 func TestBlockDeltas_PreservesOtherPayloadFields(t *testing.T) {
 	h := newBlockSinkHarness(t, "codex", false)
-	h.delta(t, "One.")
-	h.write(t, runtimeevents.KindAgentDelta, `{"content":"Two.","phase":"message","extra":{"k":1}}`)
+	h.block(t, "item_1", "One.")
+	h.write(t, runtimeevents.KindAgentDelta, `{"content":"Two.","phase":"final","block_id":"item_2","extra":{"k":1}}`)
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(h.canonical[1].Payload, &fields); err != nil {
 		t.Fatal(err)
 	}
-	if string(fields["content"]) != `"\n\nTwo."` || string(fields["phase"]) != `"message"` || string(fields["extra"]) != `{"k":1}` {
+	if string(fields["content"]) != `"\n\nTwo."` || string(fields["phase"]) != `"final"` || string(fields["block_id"]) != `"item_2"` || string(fields["extra"]) != `{"k":1}` {
 		t.Fatalf("payload = %s", h.canonical[1].Payload)
 	}
 }

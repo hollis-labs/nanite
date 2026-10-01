@@ -138,13 +138,13 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 
 const (
 	agentWrapperModule    = "github.com/hollis-labs/go-agent-wrapper"
-	agentWrapperVersion   = "v0.15.0"
-	agentWrapperSum       = "h1:KajcNh6r7r/++nk/5hwIlvE8oyNrI3GZ0Or9g+s8324="
-	agentWrapperGoModSum  = "h1:vYz+80A/EmY6Z9SdCcSdaVvR9tIJgh4Z8oz7033KqT8="
+	agentWrapperVersion   = "v0.17.1"
+	agentWrapperSum       = "h1:E3oukdZKyP/fSHIK6Z8WT322/bQjjrT3Y5iWIuTwEu4="
+	agentWrapperGoModSum  = "h1:sUUc+Qx2H5YtyuPA3eoRCWefN1W69V52JdsYGIX7Tno="
 	runtimeEventsModule   = "github.com/hollis-labs/go-runtime-events"
-	runtimeEventsVersion  = "v0.1.2"
-	runtimeEventsSum      = "h1:ChyjCVidjeAVf+dUJjiJTdX/LYujkJILKuLi+cTDNJM="
-	runtimeEventsGoModSum = "h1:QLoJ1xs+P2KoVuiz4wi+r+JZdE4dqm28I0YfauXAUs0="
+	runtimeEventsVersion  = "v0.2.1"
+	runtimeEventsSum      = "h1:ik7AxHU5pPLvNXPIfYYC10czm3zoueKrPvsD2bFrISs="
+	runtimeEventsGoModSum = "h1:+4cNkz4YKLfhCtve9FjMRKOp/0SokwjJ5vGfZ0/mHRk="
 )
 
 func TestAgentWrapperDependencyBoundary(t *testing.T) {

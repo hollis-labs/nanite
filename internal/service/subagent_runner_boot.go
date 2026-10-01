@@ -132,13 +132,14 @@ func NewBootRunner(
 	}
 }
 
-// Run spawns the subagent. CLI providers (claude/codex/opencode etc., as
-// resolved via deps.ProviderAdapter) Boot a fresh ModeSubagent process
-// and stream events back through the bridge's per-session router; HTTP
-// providers (anthropic/openai/etc.) delegate to the legacy ChatRunner.
+// Run spawns the subagent. CLI providers (every runtime in the go-providers
+// registry Nanite can launch: claude, codex, opencode, copilot, pi) Boot a
+// fresh ModeSubagent process and stream events back through the bridge's
+// per-session router; HTTP providers (anthropic/openai/etc.) delegate to
+// the legacy ChatRunner.
 //
-// Branch decision is structural: a CLI adapter resolved by the deps
-// ProviderAdapter resolver is the signal we can Boot; otherwise the
+// Branch decision is structural: runtimeagent.CanLaunch for the effective
+// provider is the signal we can Boot (CW-20260930-0113); otherwise the
 // child session has no spawnable runtime and must use the chat-harness
 // drive against an HTTP provider.
 func (r *BootRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Result, error) {

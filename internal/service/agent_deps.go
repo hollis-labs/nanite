@@ -1327,6 +1327,16 @@ func (b *agentEventBridge) typedCallback(sessionID string) provider.EventsCallba
 				Type:    "status",
 				Detail:  "subagent: " + evt.Tool,
 			})
+		case events.SessionLost, events.AuthFailed, events.PermissionDenied:
+			// go-agent-wrapper v0.17.0's session notices (CW-20260930-0113).
+			// Shown as a status line, never as a terminal: a lost session
+			// can continue in a new one, an auth failure's turn ends on its
+			// own turn.failed, and a refused permission lets the turn finish.
+			b.streams.BroadcastSessionStreamEvent(sessionID, chat.StreamEvent{
+				EventID: b.nextEventID(),
+				Type:    "status",
+				Content: sessionNoticeText(evt),
+			})
 		case events.Heartbeat:
 			// Optional: surface as a no-op presence ping. Drop for now;
 			// the FE stalled-stream watchdog uses other signals.
@@ -1364,3 +1374,26 @@ func toolDetailFromArgs(args map[string]any) string {
 // the package's compile graph even when no in-tree caller threads it
 // further (the lib's Manager.emit is the canonical caller).
 var _ = context.TODO
+
+// sessionNoticeText is the user-facing status line for a go-agent-wrapper
+// session notice. It names what happened and the next step; provider session
+// ids and raw CLI output stay out of it.
+func sessionNoticeText(ev events.Event) string {
+	switch e := ev.(type) {
+	case events.SessionLost:
+		return "The provider no longer had this conversation; the agent continues in a fresh one without the earlier history."
+	case events.AuthFailed:
+		return "The agent's CLI is not logged in on this host; log it in, then retry."
+	case events.PermissionDenied:
+		name := e.DisplayName
+		if name == "" {
+			name = e.Action
+		}
+		if name == "" {
+			return "The agent's CLI refused a tool action it could not ask approval for."
+		}
+		return fmt.Sprintf("The agent's CLI refused %q: it needed an approval it could not ask for.", name)
+	default:
+		return ""
+	}
+}

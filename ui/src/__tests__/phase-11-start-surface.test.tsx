@@ -64,8 +64,8 @@ function capabilities(
         product_supported: true,
       },
       {
-        value: "subprocess",
-        label: "Subprocess",
+        value: "subprocess-per-turn",
+        label: "Subprocess per turn",
         managed_automation: true,
         product_supported: true,
       },
@@ -461,7 +461,7 @@ describe("Phase 11 Start surface", () => {
         launch_source_type: "durable_advisor",
         provider: "anthropic",
         model: "claude-sonnet-4",
-        runtime_kind: "subprocess",
+        runtime_kind: "subprocess-per-turn",
         work_root: "/tmp/work",
         attachment_relation: "primary",
         wake_payload: { reason: "manual" },
@@ -485,7 +485,7 @@ describe("Phase 11 Start surface", () => {
     await screen.findByText("Chat with a model");
     fireEvent.click(screen.getByRole("button", { name: "Recipe" }));
     fireEvent.change(screen.getByLabelText("Recipe runtime kind"), {
-      target: { value: "subprocess" },
+      target: { value: "subprocess-per-turn" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Project root" }));
     fireEvent.click(screen.getByRole("button", { name: /dry run/i }));
@@ -496,7 +496,7 @@ describe("Phase 11 Start surface", () => {
         expect.objectContaining({
           provider: "anthropic",
           model: "claude-sonnet-4",
-          runtime_kind: "subprocess",
+          runtime_kind: "subprocess-per-turn",
           work_root: "/tmp/work",
         }),
       );

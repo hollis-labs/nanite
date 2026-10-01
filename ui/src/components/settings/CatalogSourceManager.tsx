@@ -7,8 +7,6 @@ import {
   Plus,
   Trash2,
   AlertCircle,
-  Shield,
-  ChevronDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
@@ -21,8 +19,6 @@ interface CatalogSourceManagerProps {
 
 export function CatalogSourceManager({ onBack }: CatalogSourceManagerProps) {
   const [adding, setAdding] = useState(false)
-  const [editingKey, setEditingKey] = useState<string | null>(null) // source ID being key-edited
-  const [keyInput, setKeyInput] = useState('')
   const queryClient = useQueryClient()
 
   const {
@@ -50,16 +46,6 @@ export function CatalogSourceManager({ onBack }: CatalogSourceManagerProps) {
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
       api.updateCatalogSource(id, { enabled }),
     onSuccess: invalidate,
-  })
-
-  const setKeyMutation = useMutation({
-    mutationFn: ({ id, publicKey }: { id: string; publicKey: string }) =>
-      api.setCatalogSourceKey(id, publicKey),
-    onSuccess: () => {
-      setEditingKey(null)
-      setKeyInput('')
-      invalidate()
-    },
   })
 
   return (
@@ -189,52 +175,6 @@ export function CatalogSourceManager({ onBack }: CatalogSourceManagerProps) {
                 </div>
               </div>
 
-              {/* Detail footer */}
-              <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Shield className="w-3 h-3 text-fg-faint" />
-                    <span className="text-[11px] text-fg-muted">
-                      {source.public_key ? 'Signed (key set)' : 'No verification key'}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (editingKey === source.id) {
-                        setEditingKey(null)
-                      } else {
-                        setEditingKey(source.id)
-                        setKeyInput(source.public_key || '')
-                      }
-                    }}
-                    className="text-[10px] text-fg-faint hover:text-fg-muted transition-colors"
-                  >
-                    <ChevronDown className={`w-3 h-3 transition-transform ${editingKey === source.id ? 'rotate-180' : ''}`} />
-                  </button>
-                </div>
-
-                {/* Inline key editor */}
-                {editingKey === source.id && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <input
-                      type="text"
-                      placeholder="Ed25519 public key (64 hex chars)"
-                      value={keyInput}
-                      onChange={(e) => setKeyInput(e.target.value)}
-                      className="flex-1 bg-surface/50 border border-border rounded-md px-2.5 py-1.5 text-xs text-fg placeholder:text-fg-faint font-mono focus:outline-none focus:ring-1 focus:ring-border-subtle"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs"
-                      disabled={setKeyMutation.isPending}
-                      onClick={() => setKeyMutation.mutate({ id: source.id, publicKey: keyInput })}
-                    >
-                      {setKeyMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
-                    </Button>
-                  </div>
-                )}
-              </div>
             </div>
           ))}
         </div>

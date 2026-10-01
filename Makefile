@@ -1,10 +1,5 @@
 .PHONY: build build-dev install dev clean test lint vuln generate-envelopes eval package-release
 
-# Build React SPA then embed in Go binary. Production build: NO build tags —
-# the `devmode` tag MUST NOT be set here. internal/plugin/devmode compiles to
-# HostDevSigningBypass=false, which is what keeps catalog + per-plugin
-# signature verification unconditional in release binaries.
-#
 # GOWORK=off: a shipped/deployed artifact must resolve dependencies from
 # go.mod/go.sum only, never from a developer's ambient portfolio-wide
 # go.work substituting a local sibling-repo checkout. Without this, `make
@@ -17,12 +12,7 @@
 build: generate-envelopes build-ui
 	GOWORK=off go build -o nanite ./cmd/nanite
 
-# Developer build with signing bypass enabled. Adds the `devmode` build tag so
-# internal/plugin/devmode.HostDevSigningBypass == true. In this build:
-#   - Catalog signatures are skipped.
-#   - Per-plugin signatures are skipped iff user_settings.allow_unsigned_plugins
-#     is true.
-# Never ship this binary to users.
+# Developer build enables development-only agent profiles. Never publish it.
 build-dev: generate-envelopes build-ui
 	GOWORK=off go build -tags devmode -o nanite ./cmd/nanite
 

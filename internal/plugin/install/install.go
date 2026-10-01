@@ -65,17 +65,9 @@ type Handle struct {
 	// ExpectedSHA256 is the hex-encoded sha256 the archive must match.
 	// Ignored for "directory" kind.
 	ExpectedSHA256 string
-
-	// Signature is the raw Ed25519 signature bytes over the archive.
-	// Ignored for "directory" kind.
-	Signature []byte
-
-	// SignerKeyID identifies which trusted key signed this archive (for
-	// trust lookup). Ignored for "directory" kind.
-	SignerKeyID string
 }
 
-// Verifier checks archive integrity + signature. Implementation in G.2.
+// Verifier checks archive integrity. Implementation in G.2.
 type Verifier interface {
 	Verify(ctx context.Context, h Handle) error
 }

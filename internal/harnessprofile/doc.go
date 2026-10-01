@@ -24,8 +24,7 @@
 // changed, so a resolved value never lies about where it came from.
 //
 // The "dev" profile is an ordinary named profile chosen the same way as any
-// other. It is deliberately independent of the devmode build tag, which only
-// disables plugin signature verification and must never ship: keying a runtime
+// other. It is independent of the devmode build tag: keying a runtime
 // profile to a build tag would make shipped and development builds behave
 // differently in ways nobody selected.
 package harnessprofile

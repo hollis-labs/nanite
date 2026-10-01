@@ -2,7 +2,6 @@ package api
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,7 +43,6 @@ func RegisterCatalogRoutes(mux *http.ServeMux, s *store.Store, pluginsDir string
 	mux.HandleFunc("POST /api/plugins/catalog/sources", cs.handleAddSource)
 	mux.HandleFunc("PUT /api/plugins/catalog/sources/{id}", cs.handleUpdateSource)
 	mux.HandleFunc("DELETE /api/plugins/catalog/sources/{id}", cs.handleDeleteSource)
-	mux.HandleFunc("PUT /api/plugins/catalog/sources/{id}/key", cs.handleSetSourceKey)
 
 	// Catalog browsing and install.
 	mux.HandleFunc("GET /api/plugins/catalog", cs.handleBrowseCatalog)
@@ -153,34 +151,6 @@ func (cs *catalogState) handleDeleteSource(w http.ResponseWriter, r *http.Reques
 	cs.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func (cs *catalogState) handleSetSourceKey(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var req SetSourceKeyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		cs.errorResp(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	// Validate key format if non-empty (64 hex chars = 32 bytes).
-	if req.PublicKey != "" {
-		if len(req.PublicKey) != 64 {
-			cs.errorResp(w, http.StatusBadRequest, "public_key must be a 64-character hex string (32 bytes Ed25519)")
-			return
-		}
-		if _, err := hex.DecodeString(req.PublicKey); err != nil {
-			cs.errorResp(w, http.StatusBadRequest, "public_key must be valid hex encoding")
-			return
-		}
-	}
-
-	if err := cs.store.SetCatalogSourcePublicKey(r.Context(), id, req.PublicKey); err != nil {
-		cs.errorResp(w, http.StatusNotFound, err.Error())
-		return
-	}
-
-	cs.jsonResp(w, http.StatusOK, map[string]string{"status": "key updated"})
-}
-
 // --- Catalog browsing ---
 
 // catalogBrowseEntry extends the merged catalog entry with install status.
@@ -202,7 +172,7 @@ func (cs *catalogState) handleBrowseCatalog(w http.ResponseWriter, r *http.Reque
 	fetcherSources := make([]naniteplugin.CatalogSource, len(sources))
 	for i, s := range sources {
 		fetcherSources[i] = naniteplugin.CatalogSource{
-			ID: s.ID, Name: s.Name, URL: s.URL, Priority: s.Priority, Enabled: s.Enabled, PublicKey: s.PublicKey,
+			ID: s.ID, Name: s.Name, URL: s.URL, Priority: s.Priority, Enabled: s.Enabled,
 		}
 	}
 
@@ -249,14 +219,8 @@ func (cs *catalogState) handleRefreshCatalog(w http.ResponseWriter, r *http.Requ
 
 // --- Catalog install ---
 //
-// handleCatalogInstall converges onto the CLI's install.Installer pipeline
-// (AD-04, TASKS/audit-remediation/01-plugin-install-convergence/01-unify-
-// plugin-catalog-install-pipeline.md) instead of the older, weaker
-// download/verify/extract implementation that used to live here directly
-// (internal/plugin.VerifyChecksum/VerifySignature — both now fully
-// retired). The supporting install.Extractor/install.Loader adapters and
-// the KeyLookup/checksum/signature-decoding helpers live in
-// catalog_install.go.
+// handleCatalogInstall installs a catalog archive through checksum verification,
+// bounded extraction, manifest validation and staged placement.
 func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Request) {
 	var req CatalogInstallRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
@@ -273,7 +237,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	fetcherSources := make([]naniteplugin.CatalogSource, len(sources))
 	for i, s := range sources {
 		fetcherSources[i] = naniteplugin.CatalogSource{
-			ID: s.ID, Name: s.Name, URL: s.URL, Priority: s.Priority, Enabled: s.Enabled, PublicKey: s.PublicKey,
+			ID: s.ID, Name: s.Name, URL: s.URL, Priority: s.Priority, Enabled: s.Enabled,
 		}
 	}
 
@@ -324,41 +288,15 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	sig, err := decodeCatalogSignature(entry.Signature)
-	if err != nil {
-		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("plugin %q has an invalid signature encoding: %v", entry.Name, err))
-		return
-	}
-
-	// entry.SourceID doubles as the install.Handle.SignerKeyID here: the
-	// API's per-entry catalog model has no separate signer-key-id field the
-	// way the CLI's single hardcoded signed catalog does, so the source
-	// that carried the entry IS its signer identity. See catalogKeyLookup.
 	src := &install.CatalogArchiveSource{
-		ID:          entry.Name,
-		ArchiveURL:  entry.ArchiveURL,
-		SHA256:      stripChecksumPrefix(entry.Checksum),
-		Signature:   sig,
-		SignerKeyID: entry.SourceID,
-		Downloader:  cs.archiveDownloader,
-	}
-
-	// AllowUnsigned is threaded from user_settings.allow_unsigned_plugins
-	// (AD-25, TASKS/audit-remediation/01-plugin-install-convergence/02-wire-
-	// allow-unsigned-plugins-setting.md). Only has an observable effect in a
-	// devmode build — see SignatureVerifier.AllowUnsigned and
-	// devmode.HostDevSigningBypass's own doc comments. A settings-read
-	// failure fails safe to false (unsigned installs stay rejected), same as
-	// the CLI's resolveAllowUnsignedPlugins.
-	allowUnsigned := false
-	if us, err := cs.store.GetUserSettings(r.Context()); err == nil {
-		allowUnsigned = us.AllowUnsignedPlugins
+		ID:         entry.Name,
+		ArchiveURL: entry.ArchiveURL,
+		SHA256:     stripChecksumPrefix(entry.Checksum),
+		Downloader: cs.archiveDownloader,
 	}
 
 	inst, _ := install.NewInstaller(install.BuildOptions{
-		KeyLookup:     catalogKeyLookup(sources),
-		AllowUnsigned: allowUnsigned,
-		Extractor:     &catalogExtractor{archiveURL: entry.ArchiveURL},
+		Extractor: &catalogExtractor{archiveURL: entry.ArchiveURL},
 		Loader: hostLoader{pms: &pluginManagerState{
 			pluginsDir: cs.pluginsDir,
 			pluginHost: cs.pluginHost,
@@ -381,16 +319,6 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		"source":  entry.SourceName,
 		"message": fmt.Sprintf("Plugin %q v%s installed from %s.", entry.Name, entry.Version, entry.SourceName),
 	})
-}
-
-// findSourcePublicKey looks up the public key for a source by ID.
-func findSourcePublicKey(sources []store.CatalogSource, sourceID string) string {
-	for _, s := range sources {
-		if s.ID == sourceID {
-			return s.PublicKey
-		}
-	}
-	return ""
 }
 
 // checksumFile computes the sha256 checksum of a file.

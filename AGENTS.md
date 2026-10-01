@@ -94,8 +94,8 @@ migration will break running instances on apply. Deploy the new binary and
 restart the service *before* any post-migration process applies the schema
 change.
 
-The `devmode` build tag disables plugin signature verification. `make build`
-must never set it; `make build-dev` exists for that and must never ship.
+Production builds use no build tags. `make build-dev` enables development-only
+agent profiles and must never ship.
 
 The envelope catalog belongs to the released `go-envelopes` module, not to this
 repo — `config/envelopes.yaml` no longer exists. New core types are released

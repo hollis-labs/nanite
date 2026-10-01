@@ -14,7 +14,7 @@ Do not copy an old in-process plugin template into a subprocess plugin. Their li
 
 A distributable plugin uses manifest v1 and speaks MCP over stdio. Keep the YAML manifest authoritative, use the published `plugin-sdk` wire types, and send protocol output only on stdout. Diagnostics belong on stderr.
 
-Install and lifecycle operations flow through Nanite's plugin state machine. Production builds verify catalog and per-plugin Ed25519 signatures; only a binary built with the `devmode` tag can bypass verification. Never distribute a `devmode` build.
+Install and lifecycle operations flow through Nanite's plugin state machine. Catalog archives must match their SHA256 checksum before extraction; checksums establish byte integrity, not publisher trust. Never distribute a `devmode` build.
 
 Useful commands:
 
@@ -72,4 +72,4 @@ For a new core type, update and release go-envelopes first, then bump Nanite's m
 
 ## Verification
 
-For a built-in change run the focused plugin tests followed by `./scripts/check.sh`. For a subprocess plugin, test the manifest, stdio MCP handshake, clean shutdown, install/upgrade/rollback state machine, and signed-catalog path. Validate the production build without `devmode`.
+For a built-in change run the focused plugin tests followed by `./scripts/check.sh`. For a subprocess plugin, test the manifest, stdio MCP handshake, clean shutdown, install/upgrade/rollback state machine, and checksum-verified catalog path. Validate the production build without `devmode`.

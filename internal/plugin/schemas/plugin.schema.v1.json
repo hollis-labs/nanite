@@ -302,7 +302,6 @@
       "properties": {
         "archive_url":   { "type": "string", "format": "uri" },
         "checksum_url":  { "type": "string", "format": "uri" },
-        "signature_url": { "type": "string", "format": "uri" },
         "platforms":     { "type": "array", "items": { "type": "string" } }
       }
     },

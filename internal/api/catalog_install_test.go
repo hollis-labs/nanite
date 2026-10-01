@@ -6,8 +6,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -59,17 +57,12 @@ func setupCatalogTestState(t *testing.T) (*catalogState, string) {
 }
 
 // addCatalogSource registers a custom catalog source pointing at
-// srv.URL+"/catalog.yaml", optionally with a trusted public key.
-func addCatalogSource(t *testing.T, cs *catalogState, srv *httptest.Server, publicKeyHex string) *store.CatalogSource {
+// srv.URL+"/catalog.yaml".
+func addCatalogSource(t *testing.T, cs *catalogState, srv *httptest.Server) *store.CatalogSource {
 	t.Helper()
 	src, err := cs.store.CreateCatalogSource(context.Background(), "Test Source", srv.URL+"/catalog.yaml", "custom", 100)
 	if err != nil {
 		t.Fatalf("CreateCatalogSource: %v", err)
-	}
-	if publicKeyHex != "" {
-		if err := cs.store.SetCatalogSourcePublicKey(context.Background(), src.ID, publicKeyHex); err != nil {
-			t.Fatalf("SetCatalogSourcePublicKey: %v", err)
-		}
 	}
 	return src
 }
@@ -122,7 +115,7 @@ plugins:
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(catalogYAML)) })
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-	addCatalogSource(t, cs, srv, "")
+	addCatalogSource(t, cs, srv)
 
 	handlerMux := http.NewServeMux()
 	handlerMux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
@@ -192,54 +185,6 @@ func buildZipArchive(t *testing.T, files map[string]string) []byte {
 	return buf.Bytes()
 }
 
-// TestHandleCatalogInstall_RejectsUnsignedEntry is the GO-PLUGIN-001
-// regression test: a catalog entry with no signature, from an
-// operator-created source with no configured public key, must be rejected
-// outright in a production (non-devmode) build/test run — not silently
-// installed. This test file has no `devmode` build tag, so `go test
-// ./internal/api/...` exercises exactly the production posture.
-func TestHandleCatalogInstall_RejectsUnsignedEntry(t *testing.T) {
-	cs, pluginsDir := setupCatalogTestState(t)
-
-	archive := buildTarGzArchive(t, map[string]string{"plugin.yaml": minimalCatalogPluginManifest("testplug")})
-	sum := sha256.Sum256(archive)
-	shaHex := hex.EncodeToString(sum[:])
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/testplug.tar.gz", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	// No `signature:` field at all -- the entry carries an integrity
-	// checksum but no signature, and its source has no trusted key either.
-	catalogYAML := fmt.Sprintf(`version: 1
-plugins:
-  - name: testplug
-    version: "1.0.0"
-    description: test plugin
-    archive_url: %s/testplug.tar.gz
-    checksum: "sha256:%s"
-`, srv.URL, shaHex)
-	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
-
-	addCatalogSource(t, cs, srv, "" /* no public key configured */)
-
-	handlerMux := http.NewServeMux()
-	handlerMux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
-
-	body, _ := json.Marshal(map[string]string{"name": "testplug"})
-	req := httptest.NewRequest("POST", "/api/plugins/catalog/install", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-	handlerMux.ServeHTTP(rec, req)
-
-	if rec.Code >= 200 && rec.Code < 300 {
-		t.Fatalf("expected a non-2xx response for an unsigned catalog entry, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if fileExists(filepath.Join(pluginsDir, "testplug", "plugin.yaml")) {
-		t.Error("plugin must not be written to pluginsDir when signature verification is rejected")
-	}
-}
-
 // TestHandleCatalogInstall_PathTraversal is the GO-PLUGIN-002 regression
 // test: a catalog entry named with a path-traversal payload must be
 // rejected with 400 before any file is written outside pluginsDir, mirroring
@@ -259,7 +204,7 @@ plugins:
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	addCatalogSource(t, cs, srv, "")
+	addCatalogSource(t, cs, srv)
 
 	handlerMux := http.NewServeMux()
 	handlerMux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
@@ -299,16 +244,9 @@ plugins:
 func TestHandleCatalogInstall_Success_TarGz(t *testing.T) {
 	cs, pluginsDir := setupCatalogTestState(t)
 
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-
 	archive := buildTarGzArchive(t, map[string]string{"plugin.yaml": minimalCatalogPluginManifest("testplug")})
 	sum := sha256.Sum256(archive)
 	shaHex := hex.EncodeToString(sum[:])
-	sig := ed25519.Sign(priv, archive)
-	sigHex := hex.EncodeToString(sig)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/testplug.tar.gz", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
@@ -322,11 +260,10 @@ plugins:
     description: test plugin
     archive_url: %s/testplug.tar.gz
     checksum: "sha256:%s"
-    signature: "%s"
-`, srv.URL, shaHex, sigHex)
+`, srv.URL, shaHex)
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
 
-	addCatalogSource(t, cs, srv, hex.EncodeToString(pub))
+	addCatalogSource(t, cs, srv)
 
 	handlerMux := http.NewServeMux()
 	handlerMux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
@@ -357,16 +294,9 @@ plugins:
 func TestHandleCatalogInstall_Success_Zip(t *testing.T) {
 	cs, pluginsDir := setupCatalogTestState(t)
 
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-
 	archive := buildZipArchive(t, map[string]string{"plugin.yaml": minimalCatalogPluginManifest("zipplug")})
 	sum := sha256.Sum256(archive)
 	shaHex := hex.EncodeToString(sum[:])
-	sig := ed25519.Sign(priv, archive)
-	sigHex := hex.EncodeToString(sig)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/zipplug.zip", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
@@ -380,11 +310,10 @@ plugins:
     description: test zip plugin
     archive_url: %s/zipplug.zip
     checksum: "sha256:%s"
-    signature: "%s"
-`, srv.URL, shaHex, sigHex)
+`, srv.URL, shaHex)
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
 
-	addCatalogSource(t, cs, srv, hex.EncodeToString(pub))
+	addCatalogSource(t, cs, srv)
 
 	handlerMux := http.NewServeMux()
 	handlerMux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
@@ -413,11 +342,6 @@ plugins:
 func TestHandleCatalogInstall_Success_WrapperDirectory(t *testing.T) {
 	cs, pluginsDir := setupCatalogTestState(t)
 
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-
 	// plugin.yaml (and a sibling file, to confirm the whole subtree
 	// flattens, not just the manifest) live inside a single wrapper
 	// directory rather than at the archive root.
@@ -427,8 +351,6 @@ func TestHandleCatalogInstall_Success_WrapperDirectory(t *testing.T) {
 	})
 	sum := sha256.Sum256(archive)
 	shaHex := hex.EncodeToString(sum[:])
-	sig := ed25519.Sign(priv, archive)
-	sigHex := hex.EncodeToString(sig)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/wrapplug.zip", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
@@ -442,11 +364,10 @@ plugins:
     description: test wrapper-directory plugin
     archive_url: %s/wrapplug.zip
     checksum: "sha256:%s"
-    signature: "%s"
-`, srv.URL, shaHex, sigHex)
+`, srv.URL, shaHex)
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
 
-	addCatalogSource(t, cs, srv, hex.EncodeToString(pub))
+	addCatalogSource(t, cs, srv)
 
 	handlerMux := http.NewServeMux()
 	handlerMux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
@@ -482,62 +403,6 @@ plugins:
 	}
 }
 
-// TestHandleCatalogInstall_WrongSignature asserts a signed-but-tampered (or
-// wrong-key-signed) entry is rejected — signature verification must
-// actually check the signature, not just require its presence.
-func TestHandleCatalogInstall_WrongSignature(t *testing.T) {
-	cs, pluginsDir := setupCatalogTestState(t)
-
-	pub, _, err := ed25519.GenerateKey(rand.Reader) // note: unrelated signer
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-	_, otherPriv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-
-	archive := buildTarGzArchive(t, map[string]string{"plugin.yaml": minimalCatalogPluginManifest("testplug")})
-	sum := sha256.Sum256(archive)
-	shaHex := hex.EncodeToString(sum[:])
-	// Signed with a DIFFERENT key than the one the source trusts.
-	sig := ed25519.Sign(otherPriv, archive)
-	sigHex := hex.EncodeToString(sig)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/testplug.tar.gz", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	catalogYAML := fmt.Sprintf(`version: 1
-plugins:
-  - name: testplug
-    version: "1.0.0"
-    description: test plugin
-    archive_url: %s/testplug.tar.gz
-    checksum: "sha256:%s"
-    signature: "%s"
-`, srv.URL, shaHex, sigHex)
-	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
-
-	addCatalogSource(t, cs, srv, hex.EncodeToString(pub))
-
-	handlerMux := http.NewServeMux()
-	handlerMux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
-
-	body, _ := json.Marshal(map[string]string{"name": "testplug"})
-	req := httptest.NewRequest("POST", "/api/plugins/catalog/install", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-	handlerMux.ServeHTTP(rec, req)
-
-	if rec.Code >= 200 && rec.Code < 300 {
-		t.Fatalf("expected a non-2xx response for a wrong-key signature, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if fileExists(filepath.Join(pluginsDir, "testplug", "plugin.yaml")) {
-		t.Error("plugin must not be written when signature verification fails")
-	}
-}
-
 // TestHandleCatalogInstall_AlreadyInstalled mirrors
 // TestHandleInstallLocal_AlreadyInstalled's 409 coverage for the catalog
 // path's own pre-flight existence check.
@@ -557,7 +422,7 @@ plugins:
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	addCatalogSource(t, cs, srv, "")
+	addCatalogSource(t, cs, srv)
 
 	handlerMux := http.NewServeMux()
 	handlerMux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
@@ -585,7 +450,7 @@ plugins: []
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	addCatalogSource(t, cs, srv, "")
+	addCatalogSource(t, cs, srv)
 
 	handlerMux := http.NewServeMux()
 	handlerMux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
@@ -597,5 +462,45 @@ plugins: []
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleCatalogInstall_WrongChecksum proves integrity verification stays in the API pipeline.
+func TestHandleCatalogInstall_WrongChecksum(t *testing.T) {
+	cs, pluginsDir := setupCatalogTestState(t)
+
+	archive := buildTarGzArchive(t, map[string]string{"plugin.yaml": minimalCatalogPluginManifest("testplug")})
+	shaHex := strings.Repeat("0", 64)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/testplug.tar.gz", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	catalogYAML := fmt.Sprintf(`version: 1
+plugins:
+  - name: testplug
+    version: "1.0.0"
+    description: test plugin
+    archive_url: %s/testplug.tar.gz
+    checksum: "sha256:%s"
+`, srv.URL, shaHex)
+	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
+
+	addCatalogSource(t, cs, srv)
+
+	handlerMux := http.NewServeMux()
+	handlerMux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
+
+	body, _ := json.Marshal(map[string]string{"name": "testplug"})
+	req := httptest.NewRequest("POST", "/api/plugins/catalog/install", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handlerMux.ServeHTTP(rec, req)
+
+	if rec.Code >= 200 && rec.Code < 300 {
+		t.Fatalf("expected a non-2xx response for a wrong checksum, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if fileExists(filepath.Join(pluginsDir, "testplug", "plugin.yaml")) {
+		t.Error("plugin must not be written when checksum verification fails")
 	}
 }

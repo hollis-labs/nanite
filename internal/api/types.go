@@ -1045,10 +1045,6 @@ type UpdateSourceRequest struct {
 	Priority *int   `json:"priority"`
 }
 
-type SetSourceKeyRequest struct {
-	PublicKey string `json:"public_key"`
-}
-
 type CatalogInstallRequest struct {
 	Name string `json:"name"`
 }

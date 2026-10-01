@@ -281,10 +281,9 @@ type ManifestUI struct {
 
 // ManifestRelease describes the published artifact(s) for this plugin version.
 type ManifestRelease struct {
-	ArchiveURL   string   `yaml:"archive_url"`
-	ChecksumURL  string   `yaml:"checksum_url"`
-	SignatureURL string   `yaml:"signature_url"`
-	Platforms    []string `yaml:"platforms"`
+	ArchiveURL  string   `yaml:"archive_url"`
+	ChecksumURL string   `yaml:"checksum_url"`
+	Platforms   []string `yaml:"platforms"`
 }
 
 // Identifier returns the canonical plugin identifier: ID when set (v1),

@@ -44,8 +44,7 @@ func TestMigration147DownUpRemovesOnlyUntouchedLegacySeed(t *testing.T) {
 		t.Fatalf("legacy source missing after Down: %v", err)
 	}
 	if legacy.Name != "Hollis Labs" || legacy.URL != legacyOfficialCatalogURL ||
-		legacy.Type != "official" || !legacy.Enabled || legacy.Priority != 100 ||
-		legacy.PublicKey != "" {
+		legacy.Type != "official" || !legacy.Enabled || legacy.Priority != 100 {
 		t.Fatalf("Down recreated the wrong legacy source shape: %+v", legacy)
 	}
 	if !legacy.CreatedAt.Equal(legacy.UpdatedAt) {
@@ -134,8 +133,16 @@ func TestMigration147DownDoesNotOverwriteExistingOfficialRow(t *testing.T) {
 		t.Fatalf("operator row missing after Down: %v", err)
 	}
 	if got.Name != "Operator Catalog" || got.URL != "https://example.com/operator.yaml" ||
-		got.Type != "custom" || got.Enabled || got.Priority != 7 || got.PublicKey == "" {
+		got.Type != "custom" || got.Enabled || got.Priority != 7 {
 		t.Fatalf("Down overwrote operator-owned row: %+v", got)
+	}
+
+	var key string
+	if err := s.DB.QueryRowContext(ctx, `SELECT public_key FROM catalog_sources WHERE id = ?`, legacyOfficialCatalogID).Scan(&key); err != nil {
+		t.Fatalf("read historical key: %v", err)
+	}
+	if key != "abababababababababababababababababababababababababababababababab" {
+		t.Fatalf("Down overwrote operator key: %q", key)
 	}
 
 	if _, err := provider.Up(ctx); err != nil {

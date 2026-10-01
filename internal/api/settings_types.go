@@ -12,7 +12,6 @@ import "github.com/hollis-labs/nanite/internal/store"
 // One difference from the map path: it carried integers through float64, so
 // an int above 2^53 lost precision on the wire. The view keeps it exact.
 type UserSettingsView struct {
-	AllowUnsignedPlugins           bool              `json:"allow_unsigned_plugins"`
 	AutoRepairPref                 string            `json:"auto_repair_pref"`
 	CompactionStrategy             string            `json:"compaction_strategy"`
 	ContextBudgetPct               float64           `json:"context_budget_pct"`
@@ -54,7 +53,6 @@ type UserSettingsView struct {
 
 func userSettingsToView(us *store.UserSettings, embeddingStatus string) UserSettingsView {
 	return UserSettingsView{
-		AllowUnsignedPlugins:           us.AllowUnsignedPlugins,
 		AutoRepairPref:                 us.AutoRepairPref,
 		CompactionStrategy:             us.CompactionStrategy,
 		ContextBudgetPct:               us.ContextBudgetPct,

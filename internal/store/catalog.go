@@ -15,8 +15,7 @@ type CatalogSource struct {
 	URL       string    `json:"url"`
 	Type      string    `json:"type"` // "official" or "custom"
 	Enabled   bool      `json:"enabled"`
-	Priority  int       `json:"priority"`   // higher = wins on conflict
-	PublicKey string    `json:"public_key"` // hex-encoded Ed25519 public key for signature verification
+	Priority  int       `json:"priority"` // higher = wins on conflict
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -24,7 +23,7 @@ type CatalogSource struct {
 // ListCatalogSources returns all catalog sources ordered by priority descending.
 func (s *Store) ListCatalogSources(ctx context.Context) ([]CatalogSource, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT id, name, url, type, enabled, priority, public_key, created_at, updated_at
+		SELECT id, name, url, type, enabled, priority, created_at, updated_at
 		FROM catalog_sources
 		ORDER BY priority DESC, name ASC
 	`)
@@ -37,7 +36,7 @@ func (s *Store) ListCatalogSources(ctx context.Context) ([]CatalogSource, error)
 	for rows.Next() {
 		var cs CatalogSource
 		var enabled int
-		if err := rows.Scan(&cs.ID, &cs.Name, &cs.URL, &cs.Type, &enabled, &cs.Priority, &cs.PublicKey, &cs.CreatedAt, &cs.UpdatedAt); err != nil {
+		if err := rows.Scan(&cs.ID, &cs.Name, &cs.URL, &cs.Type, &enabled, &cs.Priority, &cs.CreatedAt, &cs.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan catalog source: %w", err)
 		}
 		cs.Enabled = enabled == 1
@@ -95,21 +94,6 @@ func (s *Store) UpdateCatalogSource(ctx context.Context, id, name, url string, e
 	return nil
 }
 
-// SetCatalogSourcePublicKey sets the trusted public key for a catalog source.
-func (s *Store) SetCatalogSourcePublicKey(ctx context.Context, id, publicKey string) error {
-	res, err := s.DB.ExecContext(ctx, `
-		UPDATE catalog_sources SET public_key=?, updated_at=datetime('now') WHERE id=?
-	`, publicKey, id)
-	if err != nil {
-		return fmt.Errorf("set public key: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("catalog source %q not found", id)
-	}
-	return nil
-}
-
 // DeleteCatalogSource removes a catalog source.
 func (s *Store) DeleteCatalogSource(ctx context.Context, id string) error {
 	res, err := s.DB.ExecContext(ctx, `DELETE FROM catalog_sources WHERE id=?`, id)
@@ -128,9 +112,9 @@ func (s *Store) GetCatalogSource(ctx context.Context, id string) (*CatalogSource
 	var cs CatalogSource
 	var enabled int
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT id, name, url, type, enabled, priority, public_key, created_at, updated_at
+		SELECT id, name, url, type, enabled, priority, created_at, updated_at
 		FROM catalog_sources WHERE id=?
-	`, id).Scan(&cs.ID, &cs.Name, &cs.URL, &cs.Type, &enabled, &cs.Priority, &cs.PublicKey, &cs.CreatedAt, &cs.UpdatedAt)
+	`, id).Scan(&cs.ID, &cs.Name, &cs.URL, &cs.Type, &enabled, &cs.Priority, &cs.CreatedAt, &cs.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get catalog source %q: %w", id, err)
 	}

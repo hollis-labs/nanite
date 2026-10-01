@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/plugin/install"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // This file holds the adapters that let handleCatalogInstall
@@ -20,31 +17,6 @@ import (
 // plugin-catalog-install-pipeline.md) instead of the retired
 // download/verify/extract implementation that used to live inline in that
 // handler.
-
-// catalogKeyLookup builds an install.KeyLookup over the currently-configured
-// catalog sources, keyed on source ID (used as install.Handle.SignerKeyID —
-// the API's per-entry catalog model has no separate signer-key-id field the
-// way the CLI's single hardcoded catalog does; a source's own trusted
-// public key IS its signer identity here).
-//
-// A source with no configured public key makes findSourcePublicKey return
-// "", so this returns (nil, false). SignatureVerifier.Verify treats that as
-// "unknown signer key id" and rejects the install. This is the fix for
-// GO-PLUGIN-001: previously a missing source key silently skipped signature
-// verification entirely instead of failing closed.
-func catalogKeyLookup(sources []store.CatalogSource) install.KeyLookup {
-	return func(keyID string) (ed25519.PublicKey, bool) {
-		hexKey := findSourcePublicKey(sources, keyID)
-		if hexKey == "" {
-			return nil, false
-		}
-		raw, err := hex.DecodeString(hexKey)
-		if err != nil || len(raw) != ed25519.PublicKeySize {
-			return nil, false
-		}
-		return ed25519.PublicKey(raw), true
-	}
-}
 
 // catalogExtractor is a format-dispatching install.Extractor for
 // catalog-sourced archives. The CLI-only install.TarGzExtractor only
@@ -213,24 +185,6 @@ func (cs *catalogState) catalogInstallEmit(pluginID string) install.EventFunc {
 func stripChecksumPrefix(s string) string {
 	s = strings.TrimSpace(s)
 	return strings.TrimPrefix(s, "sha256:")
-}
-
-// decodeCatalogSignature hex-decodes a catalog entry's signature field. An
-// empty signature decodes to (nil, nil) rather than an error — the
-// resulting empty install.Handle.Signature is what makes
-// SignatureVerifier.Verify fail closed with "missing signature" in a
-// production build, rather than this function pre-emptively rejecting the
-// request before the install pipeline's own fail-closed check runs.
-func decodeCatalogSignature(s string) ([]byte, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, nil
-	}
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		return nil, fmt.Errorf("decode signature: %w", err)
-	}
-	return b, nil
 }
 
 // catalogInstallErrorStatus maps an install.Installer.Install error — always

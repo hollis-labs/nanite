@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,10 +13,9 @@ import (
 	"github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/catalog"
 	"github.com/hollis-labs/nanite/internal/plugin/install"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// defaultCatalogURL is the primary signed catalog for nanite plugins.
+// defaultCatalogURL is the primary catalog for nanite plugins.
 // Overridden by NANITE_CATALOG_URL.
 const defaultCatalogURL = "https://plugins.nanite.hollislabs.dev/catalog.yaml"
 
@@ -77,54 +74,22 @@ func (noopLoader) Load(ctx context.Context, pluginID, pluginDir string) error { 
 // one originally). The loader is a no-op; triggerActivation() handles the
 // running-service refresh (hot-reload for a subprocess plugin,
 // triggerRestart() for a builtin) after Run returns successfully.
-//
-// AllowUnsigned is threaded from user_settings.allow_unsigned_plugins (AD-25,
-// TASKS/audit-remediation/01-plugin-install-convergence/02-wire-allow-
-// unsigned-plugins-setting.md) via resolveAllowUnsignedPlugins. Only has an
-// observable effect in a devmode build — see SignatureVerifier.AllowUnsigned
-// and devmode.HostDevSigningBypass's own doc comments.
-func buildInstaller(emit install.EventFunc) (*install.Installer, *catalog.KeyRing, *install.DirStaging) {
-	ring := catalog.NewKeyRing()
+func buildInstaller(emit install.EventFunc) (*install.Installer, *install.DirStaging) {
 	inst, staging := install.NewInstaller(install.BuildOptions{
-		KeyLookup:     ring.LookupFunc(),
-		AllowUnsigned: resolveAllowUnsignedPlugins(resolveDBPath()),
-		Extractor:     &install.TarGzExtractor{},
-		Loader:        noopLoader{},
-		StagingRoot:   resolveStagingRoot(),
-		PluginsRoot:   resolvePluginsDir(),
-		Emit:          emit,
+		Extractor:   &install.TarGzExtractor{},
+		Loader:      noopLoader{},
+		StagingRoot: resolveStagingRoot(),
+		PluginsRoot: resolvePluginsDir(),
+		Emit:        emit,
 	})
-	return inst, ring, staging
-}
-
-// resolveAllowUnsignedPlugins reads user_settings.allow_unsigned_plugins from
-// the database at dbPath so buildInstaller can thread it into the
-// SignatureVerifier it constructs (AD-25). Only has an observable effect in a
-// devmode build: install.SignatureVerifier only consults AllowUnsigned when
-// devmode.HostDevSigningBypass is true, which is compiled to false outside a
-// `-tags devmode` build regardless of what this function returns.
-//
-// Any failure to open or read the store (first run before the DB exists,
-// corrupt row, etc.) fails safe to false — "couldn't read the setting" must
-// never be silently treated as "allow unsigned."
-func resolveAllowUnsignedPlugins(dbPath string) bool {
-	s, err := store.New(context.Background(), dbPath)
-	if err != nil {
-		return false
-	}
-	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
-	us, err := s.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
-	if err != nil {
-		return false
-	}
-	return us.AllowUnsignedPlugins
+	return inst, staging
 }
 
 // installLocalFromStateMachine runs the state machine for a local directory
 // source. Returns the final install dir on success.
 func installLocalFromStateMachine(ctx context.Context, absSrc, pluginID string) (string, error) {
 	emit := printEvents()
-	inst, _, _ := buildInstaller(emit)
+	inst, _ := buildInstaller(emit)
 	return inst.Install(ctx, &localDirSource{id: pluginID, absPath: absSrc})
 }
 
@@ -134,39 +99,29 @@ func installLocalFromStateMachine(ctx context.Context, absSrc, pluginID string) 
 // back), and ("", false, err) on hard failures.
 func installFromCatalog(ctx context.Context, pluginID string) (string, bool, error) {
 	emit := printEvents()
-	inst, ring, _ := buildInstaller(emit)
+	inst, _ := buildInstaller(emit)
 
 	catURL := resolveCatalogURL()
-	signed, err := fetchCatalog(ctx, ring, catURL)
+	fetched, err := fetchCatalog(ctx, catURL)
 	if err != nil {
 		return "", false, fmt.Errorf("catalog: %w", err)
 	}
 
-	entry, ok := findCatalogEntry(signed.YAML, pluginID)
+	entry, ok := findCatalogEntry(fetched.YAML, pluginID)
 	if !ok {
 		return "", false, nil
 	}
 
-	sig, err := decodeHexSig(entry.Signature)
-	if err != nil {
-		return "", false, fmt.Errorf("catalog entry %q: %w", pluginID, err)
-	}
 	sha := stripSha256Prefix(entry.Checksum)
 	if sha == "" {
 		return "", false, fmt.Errorf("catalog entry %q has no sha256 checksum", pluginID)
 	}
-	keyID := entry.SignerKeyID
-	if keyID == "" {
-		keyID = "catalog-root"
-	}
 
 	src := &install.CatalogArchiveSource{
-		ID:          pluginID,
-		ArchiveURL:  entry.ArchiveURL,
-		SHA256:      sha,
-		Signature:   sig,
-		SignerKeyID: keyID,
-		Downloader:  &install.HTTPDownloader{},
+		ID:         pluginID,
+		ArchiveURL: entry.ArchiveURL,
+		SHA256:     sha,
+		Downloader: &install.HTTPDownloader{},
 	}
 	final, err := inst.Install(ctx, src)
 	if err != nil {
@@ -175,9 +130,8 @@ func installFromCatalog(ctx context.Context, pluginID string) (string, bool, err
 	return final, true, nil
 }
 
-func fetchCatalog(ctx context.Context, ring *catalog.KeyRing, catalogURL string) (*catalog.SignedCatalog, error) {
-	f := &catalog.SignedFetcher{
-		Ring:     ring,
+func fetchCatalog(ctx context.Context, catalogURL string) (*catalog.Catalog, error) {
+	f := &catalog.Fetcher{
 		CacheDir: resolveCatalogCacheDir(),
 	}
 	return f.Fetch(ctx, catalogURL)
@@ -187,11 +141,9 @@ func fetchCatalog(ctx context.Context, ring *catalog.KeyRing, catalogURL string)
 // this CLI consumes. Declared locally so catalog-file format changes are
 // centralized in one place.
 type catalogEntryLite struct {
-	Name        string `yaml:"name"`
-	ArchiveURL  string `yaml:"archive_url"`
-	Checksum    string `yaml:"checksum"`
-	Signature   string `yaml:"signature"`
-	SignerKeyID string `yaml:"signer_key_id"`
+	Name       string `yaml:"name"`
+	ArchiveURL string `yaml:"archive_url"`
+	Checksum   string `yaml:"checksum"`
 }
 
 type catalogFileLite struct {
@@ -215,18 +167,6 @@ func stripSha256Prefix(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "sha256:")
 	return s
-}
-
-func decodeHexSig(s string) ([]byte, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, errors.New("missing signature")
-	}
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		return nil, fmt.Errorf("decode signature: %w", err)
-	}
-	return b, nil
 }
 
 // printEvents returns an EventFunc that writes human-readable progress to

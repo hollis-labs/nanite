@@ -1123,21 +1123,23 @@ func (s *runtimeEventBridgeSink) routeNormalizedEvent(ev runtimeevents.Event) {
 			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: payload.Content})
 		}
 	case runtimeevents.KindTurnCompleted:
-		usage := runtimeagent.TurnCompletedUsage(ev.Payload, s.acp)
-		if usage != nil {
+		// A turn's one terminal event: its usage, when it carries any, then
+		// Done. ACP always reported both in one event; go-agent-wrapper
+		// v0.13.1 does the same for native runtimes (CW-20261001-0019).
+		if usage := runtimeagent.TurnCompletedUsage(ev.Payload, s.acp); usage != nil {
 			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: usage})
 		}
-		// ACP carries usage and completion in one normalized event; native
-		// emits its usage-bearing event followed by an empty completion.
-		if s.acp || usage == nil {
-			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventDone})
-			terminal = true
-		}
+		s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+		terminal = true
 	case runtimeevents.KindTurnFailed:
 		var payload struct {
 			Error string `json:"error"`
 		}
 		_ = json.Unmarshal(ev.Payload, &payload)
+		// A failed turn's usage rides on its turn.failed, ahead of the error.
+		if usage := runtimeagent.TurnCompletedUsage(ev.Payload, s.acp); usage != nil {
+			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: usage})
+		}
 		s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: payload.Error})
 		terminal = true
 	default:

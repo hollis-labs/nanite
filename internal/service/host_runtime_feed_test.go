@@ -155,10 +155,18 @@ func TestProjectHostRuntimePayloadNormalizesNativeAndACPToolsAndCompletion(t *te
 			checks: map[string]any{"tool_id": "call-3", "stage": "failed", "status": "failed"},
 		},
 		{
-			name:   "native usage completion is not terminal",
+			// go-agent-wrapper v0.13.1: a native turn's one terminal event
+			// carries its usage (CW-20261001-0019).
+			name:   "native usage completion is terminal",
 			kind:   runtimeevents.KindTurnCompleted,
 			raw:    `{"usage":{"InputTokens":5,"OutputTokens":3,"StopReason":"end_turn"}}`,
-			checks: map[string]any{"terminal": false},
+			checks: map[string]any{"terminal": true},
+		},
+		{
+			name:   "native process-exited failure is terminal",
+			kind:   runtimeevents.KindTurnFailed,
+			raw:    `{"error":"wrapper: process exited before the turn completed","reason":"process_exited","exit_code":1,"usage":{"InputTokens":5,"OutputTokens":3}}`,
+			checks: map[string]any{"terminal": true, "failed": true},
 		},
 		{
 			name:   "ACP usage completion is terminal",
@@ -184,6 +192,22 @@ func TestProjectHostRuntimePayloadNormalizesNativeAndACPToolsAndCompletion(t *te
 				t.Fatalf("tool projection leaked private data: %s", raw)
 			}
 		})
+	}
+}
+
+// A failed turn's usage rides on its turn.failed since go-agent-wrapper
+// v0.13.1, so the feed projects it there as it does on a completion.
+func TestProjectHostRuntimePayloadCarriesFailedTurnUsage(t *testing.T) {
+	raw, _, _ := projectHostRuntimePayload(runtimeevents.KindTurnFailed, false,
+		json.RawMessage(`{"error":"boom","usage":{"InputTokens":5,"OutputTokens":3}}`))
+	var got struct {
+		Usage map[string]any `json:"usage"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode projection: %v", err)
+	}
+	if got.Usage["input_tokens"] != float64(5) || got.Usage["output_tokens"] != float64(3) {
+		t.Fatalf("failed-turn usage = %#v, want input 5 / output 3 (payload %s)", got.Usage, raw)
 	}
 }
 

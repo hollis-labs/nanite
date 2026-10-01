@@ -43,6 +43,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	permissionlib "github.com/hollis-labs/go-permission"
 )
 
 // lineageMaxHops bounds how many parent links LookupPath will walk before
@@ -74,7 +76,7 @@ type PathGrants struct {
 	//
 	// Mutex-guarded together with grants + lineage because the natural
 	// lifetime boundary is identical — spawn registers, defer clears.
-	derivedRules map[string]*RuleSet
+	derivedRules map[string]*permissionlib.RuleSet
 	// mention bounds which free-text mentions may become grants
 	// (CW-20261001-0232). Nil applies only the built-in sensitive-path
 	// denylist. Guarded by mu.
@@ -86,7 +88,7 @@ func NewPathGrants() *PathGrants {
 	return &PathGrants{
 		grants:       make(map[string]map[string]struct{}),
 		lineage:      make(map[string]string),
-		derivedRules: make(map[string]*RuleSet),
+		derivedRules: make(map[string]*permissionlib.RuleSet),
 	}
 }
 
@@ -347,7 +349,7 @@ func (g *PathGrants) ClearLineage(sessionID string) {
 //
 // Nil-safe at every level: nil receiver, empty sessionID, or nil rules
 // all no-op.
-func (g *PathGrants) RegisterDerivedRules(sessionID string, rules *RuleSet) {
+func (g *PathGrants) RegisterDerivedRules(sessionID string, rules *permissionlib.RuleSet) {
 	if g == nil || sessionID == "" || rules == nil {
 		return
 	}
@@ -362,7 +364,7 @@ func (g *PathGrants) RegisterDerivedRules(sessionID string, rules *RuleSet) {
 // The returned pointer is read-only by contract — callers MUST treat the
 // underlying slice as immutable. Internal storage is shared so this
 // avoids a per-lookup deep copy on the renderer hot path.
-func (g *PathGrants) LookupDerivedRules(sessionID string) *RuleSet {
+func (g *PathGrants) LookupDerivedRules(sessionID string) *permissionlib.RuleSet {
 	if g == nil || sessionID == "" {
 		return nil
 	}

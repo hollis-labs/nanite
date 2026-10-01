@@ -29,8 +29,8 @@ const (
 	SlotRules = "rules"
 	// SlotPermissions carries the per-session path-access summary
 	// (CW-20260512-0118, SP-20260512-0010 W2). Sourced via
-	// permission.RenderPermissionSummary from the agent's resolved
-	// permission.RuleSet, the binary-scoped AllowedPaths list, and the
+	// go-permission/summary.RenderPermissionSummary from the agent's resolved
+	// go-permission.RuleSet, the binary-scoped AllowedPaths list, and the
 	// session-scoped PathGrants bucket (own + lineage). The summary makes
 	// the path-access substrate VISIBLE to the LLM so subagents read
 	// constraints and refuse instead of fabricating against inaccessible

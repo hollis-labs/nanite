@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-providers/provider/events"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
@@ -43,7 +44,7 @@ type AgentDepsConfig struct {
 	BinaryPath       string
 	DBPath           string
 	SandboxBaseProf  sandbox.Profile
-	Permissions      *permission.Engine
+	Permissions      *permissionlib.Engine
 	// RuntimeFeed is the session-scoped, durable public projection of the
 	// canonical wrapper event stream. Nil keeps focused dependency tests and
 	// embedding callers on the legacy-only path.
@@ -189,7 +190,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 	telemetry := agentTelemetry{}
 
 	bridge := &agentEventBridge{streams: cfg.Streams, runtimeFeed: cfg.RuntimeFeed}
-	approvalRequestSink := func(req *permission.ApprovalRequest) {
+	approvalRequestSink := func(req *permissionlib.ApprovalRequest) {
 		if req == nil {
 			return
 		}

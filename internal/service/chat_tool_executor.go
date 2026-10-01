@@ -11,11 +11,9 @@ import (
 	"time"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	feotel "github.com/hollis-labs/go-otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-
 	"github.com/hollis-labs/go-loopdetect"
+	feotel "github.com/hollis-labs/go-otel"
+	permissionlib "github.com/hollis-labs/go-permission"
 	toolresult "github.com/hollis-labs/go-toolresult"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
@@ -25,6 +23,8 @@ import (
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/truncate"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 // toolPlanStatus describes the outcome of pre-checking a tool.
@@ -166,16 +166,16 @@ func (s *chatServiceImpl) preCheckTools(
 
 		// Permission check.
 		if s.permissions != nil {
-			meta := permission.ToolMeta{}
+			meta := permissionlib.ToolMeta{}
 			if toolInfo, ok := s.tools.GetToolMeta(ctx, tu.Name); ok {
 				meta.IsReadOnly = toolInfo.IsReadOnly
 				meta.IsDestructive = toolInfo.IsDestructive
 			}
 			permResult := s.permissions.Check(ctx, sessionID, tu.Name, tu.Input, meta)
 			switch permResult.Decision {
-			case permission.DecisionAllow:
+			case permissionlib.DecisionAllow:
 				// Allow: fall through to tool execution below.
-			case permission.DecisionDeny:
+			case permissionlib.DecisionDeny:
 				ls.recordToolCall(tu.Name, false)
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, permResult.Reason)
 				slog.Warn("chat-service: tool denied", "tool", tu.Name, "reason", permResult.Reason)
@@ -192,7 +192,7 @@ func (s *chatServiceImpl) preCheckTools(
 				plans = append(plans, plan)
 				continue
 
-			case permission.DecisionAsk:
+			case permissionlib.DecisionAsk:
 				// Emit approval request and block until user responds.
 				req := s.permissions.RequestApproval(sessionID, tu.Name, tu.Input, permResult.Reason)
 				approvalData, _ := json.Marshal(chat.ApprovalRequestPayload{
@@ -204,7 +204,7 @@ func (s *chatServiceImpl) preCheckTools(
 				ch <- chat.StreamEvent{Type: "approval_request", Data: string(approvalData)}
 
 				resp := s.permissions.WaitForApproval(ctx, req)
-				if resp.Decision != permission.DecisionAllow {
+				if resp.Decision != permissionlib.DecisionAllow {
 					ls.recordToolCall(tu.Name, false)
 					denyReason := "user denied"
 					if resp.TimedOut {

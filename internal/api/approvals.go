@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/hollis-labs/nanite/internal/permission"
+	permissionlib "github.com/hollis-labs/go-permission"
 )
 
 // handleRespondApproval handles POST /api/sessions/{id}/approvals/{requestId}.
@@ -27,18 +27,18 @@ func (a *API) handleRespondApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	decision := permission.Decision(req.Decision)
-	if decision != permission.DecisionAllow && decision != permission.DecisionDeny {
+	decision := permissionlib.Decision(req.Decision)
+	if decision != permissionlib.DecisionAllow && decision != permissionlib.DecisionDeny {
 		a.errorResp(w, http.StatusBadRequest, "decision must be 'allow' or 'deny'")
 		return
 	}
 
-	scope := permission.Scope(req.Scope)
+	scope := permissionlib.Scope(req.Scope)
 	switch scope {
-	case permission.ScopeOnce, permission.ScopeSession:
+	case permissionlib.ScopeOnce, permissionlib.ScopeSession:
 		// supported
 	case "":
-		scope = permission.ScopeOnce
+		scope = permissionlib.ScopeOnce
 	default:
 		a.errorResp(w, http.StatusBadRequest, "scope must be 'once' or 'session'")
 		return
@@ -75,9 +75,9 @@ func (a *API) handleSetPermissionMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mode := permission.Mode(req.Mode)
+	mode := permissionlib.Mode(req.Mode)
 	switch mode {
-	case permission.ModeDefault, permission.ModeAcceptEdits, permission.ModePlan, permission.ModeYolo:
+	case permissionlib.ModeDefault, permissionlib.ModeAcceptEdits, permissionlib.ModePlan, permissionlib.ModeYolo:
 		// valid
 	default:
 		a.errorResp(w, http.StatusBadRequest, "invalid mode — must be default, accept-edits, plan, or yolo")

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/go-agent-wrapper/acp"
-	"github.com/hollis-labs/nanite/internal/permission"
+	permissionlib "github.com/hollis-labs/go-permission"
 )
 
 // bestEffortPermissionResponder adapts a provider-originated ACP
@@ -20,8 +20,8 @@ import (
 // authoritative pre-execution enforcement for host-owned tools.
 func bestEffortPermissionResponder(
 	sessionID string,
-	engine *permission.Engine,
-	emit func(*permission.ApprovalRequest),
+	engine *permissionlib.Engine,
+	emit func(*permissionlib.ApprovalRequest),
 ) acp.BestEffortPermissionRequestResponder {
 	if engine == nil || emit == nil {
 		return nil
@@ -62,11 +62,11 @@ func permissionInput(raw json.RawMessage) map[string]any {
 	return nil
 }
 
-func selectACPOption(options []acp.PermissionOption, response permission.ApprovalResponse) acp.PermissionSelection {
+func selectACPOption(options []acp.PermissionOption, response permissionlib.ApprovalResponse) acp.PermissionSelection {
 	var preferred []acp.PermissionOptionKind
 	switch response.Decision {
-	case permission.DecisionAllow:
-		if response.Scope == permission.ScopeSession {
+	case permissionlib.DecisionAllow:
+		if response.Scope == permissionlib.ScopeSession {
 			// A provider that lacks allow_always can still honor the user's
 			// immediate allow decision without broadening it.
 			preferred = []acp.PermissionOptionKind{acp.PermissionAllowAlways, acp.PermissionAllowOnce}
@@ -74,8 +74,8 @@ func selectACPOption(options []acp.PermissionOption, response permission.Approva
 			// Never turn a one-shot allow into an always grant.
 			preferred = []acp.PermissionOptionKind{acp.PermissionAllowOnce}
 		}
-	case permission.DecisionDeny:
-		if response.Scope == permission.ScopeSession {
+	case permissionlib.DecisionDeny:
+		if response.Scope == permissionlib.ScopeSession {
 			preferred = []acp.PermissionOptionKind{acp.PermissionRejectAlways, acp.PermissionRejectOnce}
 		} else {
 			// Never broaden a one-shot denial into provider-persisted policy.

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
@@ -49,6 +50,15 @@ func TestNewContainer_ConfinesPathMentions(t *testing.T) {
 		t.Fatalf("NewContainer: %v", err)
 	}
 	t.Cleanup(c.Shutdown)
+	c.Permissions.SetMode(permissionlib.ModeAcceptEdits)
+	for _, tool := range []string{"dev_edit", "dev_write"} {
+		if got := c.Permissions.Check(t.Context(), "session", tool, nil, permissionlib.ToolMeta{}); got.Decision != permissionlib.DecisionAllow {
+			t.Fatalf("host file-edit registration missing for %s: %+v", tool, got)
+		}
+	}
+	if got := c.Permissions.Check(t.Context(), "session", "shell", nil, permissionlib.ToolMeta{}); got.Decision != permissionlib.DecisionAsk {
+		t.Fatalf("accept-edits widened to a non-edit write: %+v", got)
+	}
 
 	for _, tc := range []struct {
 		name, path string

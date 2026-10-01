@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -28,12 +29,12 @@ func TestChatRunner_ForwardsParentDeniesIntoChildSession(t *testing.T) {
 	// Stage a parent-session derived RuleSet with a deny rule. In
 	// production this would have been set when the parent itself was
 	// spawned, or by a future YAML-rules wiring layer at session boot.
-	pg.RegisterDerivedRules(parentSessionID, &permission.RuleSet{
-		Rules: []permission.Rule{
+	pg.RegisterDerivedRules(parentSessionID, &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
 			{
 				Tool:     "dev_read",
 				Pattern:  "/Users/u/sensitive/**",
-				Behavior: permission.DecisionDeny,
+				Behavior: permissionlib.DecisionDeny,
 				Source:   "parent profile.yaml",
 			},
 		},
@@ -96,7 +97,7 @@ func TestChatRunner_ForwardsParentDeniesIntoChildSession(t *testing.T) {
 	// Parent deny must have been forwarded.
 	var foundForwarded bool
 	for _, r := range derived.Rules {
-		if r.Behavior != permission.DecisionDeny {
+		if r.Behavior != permissionlib.DecisionDeny {
 			continue
 		}
 		if !strings.Contains(r.Pattern, "/Users/u/sensitive/**") {
@@ -119,9 +120,9 @@ func TestChatRunner_ForwardsParentDeniesIntoChildSession(t *testing.T) {
 // with many spawned children would leak derived RuleSets indefinitely.
 func TestChatRunner_DerivedRulesClearedOnRunReturn(t *testing.T) {
 	pg := permission.NewPathGrants()
-	pg.RegisterDerivedRules("sess-parent-gc", &permission.RuleSet{
-		Rules: []permission.Rule{
-			{Tool: "dev_read", Pattern: "/etc/**", Behavior: permission.DecisionDeny, Source: "p"},
+	pg.RegisterDerivedRules("sess-parent-gc", &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
+			{Tool: "dev_read", Pattern: "/etc/**", Behavior: permissionlib.DecisionDeny, Source: "p"},
 		},
 	})
 
@@ -181,12 +182,12 @@ func TestChatRunner_ThreeLevelChainPropagatesDenies(t *testing.T) {
 	pg := permission.NewPathGrants()
 
 	// Top parent has a directly-registered ruleset with a top-secret deny.
-	pg.RegisterDerivedRules("top-session", &permission.RuleSet{
-		Rules: []permission.Rule{
+	pg.RegisterDerivedRules("top-session", &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
 			{
 				Tool:     "dev_read",
 				Pattern:  "/Users/u/top-secret/**",
-				Behavior: permission.DecisionDeny,
+				Behavior: permissionlib.DecisionDeny,
 				Source:   "top-parent profile",
 			},
 		},
@@ -231,7 +232,7 @@ func TestChatRunner_ThreeLevelChainPropagatesDenies(t *testing.T) {
 	}
 	var lvl1HasTopDeny bool
 	for _, r := range lvl1Derived.Rules {
-		if r.Behavior == permission.DecisionDeny && strings.Contains(r.Pattern, "/top-secret/") {
+		if r.Behavior == permissionlib.DecisionDeny && strings.Contains(r.Pattern, "/top-secret/") {
 			lvl1HasTopDeny = true
 			if strings.Count(r.Source, "(via parent)") != 1 {
 				t.Errorf("lvl1 forwarded deny should have exactly 1 (via parent) suffix, got Source=%q", r.Source)
@@ -280,7 +281,7 @@ func TestChatRunner_ThreeLevelChainPropagatesDenies(t *testing.T) {
 	}
 	var grandchildHasTopDeny bool
 	for _, r := range grandchildDerived.Rules {
-		if r.Behavior == permission.DecisionDeny && strings.Contains(r.Pattern, "/top-secret/") {
+		if r.Behavior == permissionlib.DecisionDeny && strings.Contains(r.Pattern, "/top-secret/") {
 			grandchildHasTopDeny = true
 			suffixCount := strings.Count(r.Source, "(via parent)")
 			if suffixCount != 2 {
@@ -300,7 +301,7 @@ func TestChatRunner_ThreeLevelChainPropagatesDenies(t *testing.T) {
 	result := grandchildDerived.Evaluate("dev_read", map[string]any{
 		"path": "/Users/u/top-secret/leaked.txt",
 	})
-	if result == nil || result.Decision != permission.DecisionDeny {
+	if result == nil || result.Decision != permissionlib.DecisionDeny {
 		t.Errorf("grandchild Evaluate failed to deny top-secret path: result=%+v", result)
 	}
 }

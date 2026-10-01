@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -292,17 +293,17 @@ func TestAssembleSlotSources_PermissionsSlot_W3ForwardedDeniesRendered(t *testin
 	}
 
 	// Stage the derivation the runner would have done at spawn time.
-	parentRules := &permission.RuleSet{
-		Rules: []permission.Rule{
+	parentRules := &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
 			{
 				Tool:     "dev_read",
 				Pattern:  "/Users/u/sensitive/**",
-				Behavior: permission.DecisionDeny,
+				Behavior: permissionlib.DecisionDeny,
 				Source:   "parent profile.yaml",
 			},
 		},
 	}
-	derived, err := permission.DeriveSubagentRuleSet(permission.DerivationInput{
+	derived, err := permissionlib.DeriveSubagentRuleSet(permissionlib.DerivationInput{
 		Parent: parentRules,
 	})
 	if err != nil {

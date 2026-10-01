@@ -19,7 +19,7 @@ import (
 func mkdirs(t *testing.T, root string, rel ...string) {
 	t.Helper()
 	for _, r := range rel {
-		if err := os.MkdirAll(filepath.Join(root, r), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(root, r), 0o750); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -141,8 +141,8 @@ func TestBoot_ControlPlaneProtectedFromAgents(t *testing.T) {
 			if tc.acp {
 				name = "copilot" // found through PATH, the production lookup
 			}
-			if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil { //nolint:gosec // an executable test fixture in t.TempDir()
-				t.Fatal(err)
+			if werr := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); werr != nil { //nolint:gosec // an executable test fixture in t.TempDir()
+				t.Fatal(werr)
 			}
 			if tc.acp {
 				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))

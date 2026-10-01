@@ -108,8 +108,8 @@ func realDir(path string, keepMissing bool) string {
 	if err != nil {
 		return ""
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		return real
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
 	}
 	if keepMissing {
 		return abs

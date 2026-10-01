@@ -492,10 +492,10 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	protectedPaths := deps.ControlPlane.protectedFor(append([]string{spawnWorkdir, ws.Root, bootDir, naniteHomeDir()}, deps.CLIWritableRoots...)...)
 	var sandboxPolicy *sandbox.ResolvedAccessPolicy
 	if isACP && len(protectedPaths) > 0 {
-		policy, err := acpControlPlanePolicy(spawnWorkdir)
-		if err != nil {
-			_ = deps.Store.MarkRuntimeFailed(sessID, err.Error())
-			return cleanup(fmt.Errorf("agent.Boot: ACP control-plane sandbox policy: %w", err))
+		policy, policyErr := acpControlPlanePolicy(spawnWorkdir)
+		if policyErr != nil {
+			_ = deps.Store.MarkRuntimeFailed(sessID, policyErr.Error())
+			return cleanup(fmt.Errorf("agent.Boot: ACP control-plane sandbox policy: %w", policyErr))
 		}
 		sandboxPolicy = policy
 	}

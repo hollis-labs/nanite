@@ -85,3 +85,39 @@ func TestChatStreamTakeoverIsNotTransportEOF(t *testing.T) {
 		t.Fatalf("takeover became a reconnectable EOF: %q", body)
 	}
 }
+
+// CW-20261001-0072: a turn queued behind a running one opens its own stream
+// while the running turn's is still open. Takeover is per message, so the
+// running turn keeps its stream through to stream_end.
+func TestChatStreamsForDifferentMessagesOfOneSessionCoexist(t *testing.T) {
+	streams := service.NewStreamManager()
+	a := &API{Services: &service.Container{Streams: streams}}
+	running := streams.CreateStream("running", "session")
+	queued := streams.CreateStream("queued", "session")
+	defer close(queued)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/stream/{messageID}", a.handleStream)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &http.Client{Timeout: 2 * time.Second}
+	first, err := client.Get(server.URL + "/api/stream/running")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Body.Close()
+	second, err := client.Get(server.URL + "/api/stream/queued")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Body.Close()
+	running <- chat.StreamEvent{Type: "delta", Content: "reply 1"}
+	running <- chat.StreamEvent{Type: "stream_end"}
+	close(running)
+	body, err := io.ReadAll(first.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "session_takeover") || !strings.Contains(string(body), `"content":"reply 1"`) || !strings.Contains(string(body), "event: stream_end") {
+		t.Fatalf("running turn's stream = %q; want its reply and stream_end, no takeover", body)
+	}
+}

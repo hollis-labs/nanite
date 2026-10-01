@@ -1212,6 +1212,11 @@ func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, user
 // registration in the activeGen map has already happened by the time this
 // is called; this only owns running the turn and cleaning up afterward.
 func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, deltaMode chat.DeltaMode, cancel context.CancelFunc, current, predecessor *inFlightGen) {
+	if predecessor != nil && s.streams != nil {
+		// Queued: keep the running turn's session broadcasts (tool events)
+		// and reconnect target from landing on this not-yet-started stream.
+		s.streams.DetachFromSession(assistantMsgID)
+	}
 	s.lifecycle.Go(name, func(bgCtx context.Context) {
 		// Bridge lifecycle shutdown (bgCtx) into our takeover-ctx so
 		// generateResponse still aborts on process Shutdown.
@@ -1253,6 +1258,9 @@ func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID,
 			current.turnMu.Lock()
 			current.predecessor = nil
 			current.turnMu.Unlock()
+		}
+		if predecessor != nil && s.streams != nil {
+			s.streams.AttachToSession(assistantMsgID)
 		}
 
 		// CW-20260512-0121: route through the single dispatcher door.

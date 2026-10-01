@@ -209,7 +209,7 @@ func (a *API) handleHarnessV1Capabilities(w http.ResponseWriter, r *http.Request
 			MidRun:    "queue",
 			Interrupt: harnessV1RoutePrefix + "/sessions/{id}/cancel",
 			Notes: []string{
-				"A turn sent while another is running on the session waits for it to finish, then runs; its stream stays open with no events until then.",
+				"A turn sent while another is running on the session waits for it to finish, then runs. Its stream stays open with no events until then, and opening it does not affect the running turn's stream: SSE takeover is per message.",
 				"Cancel stops the running turn and any queued turns. The running turn's output so far is saved, with metadata.interrupted=true.",
 			},
 		},

@@ -21,7 +21,10 @@ import (
 // fakeGatedClaudeScript is a long-lived streaming-stdio claude whose first
 // turn holds until the test releases it, so a second turn can be posted while
 // the first is in flight. It records every stdin frame, answers frame n with
-// "reply n", and marks when the first frame arrived. %[1]s is a scratch dir.
+// "reply n", and marks when the first frame arrived. While held, the first
+// turn makes a tool call when the test asks, so its session-broadcast
+// tool_call event lands while the second turn is queued. %[1]s is a scratch
+// dir.
 const fakeGatedClaudeScript = `#!/bin/sh
 echo '{"type":"system","subtype":"init","session_id":"claude-fake-0072"}'
 n=0
@@ -30,6 +33,9 @@ while IFS= read -r line; do
   printf '%%s\n' "$line" >> "%[1]s/frames"
   if [ "$n" -eq 1 ]; then
     : > "%[1]s/turn1-started"
+    while [ ! -f "%[1]s/emit-tool" ]; do sleep 0.05; done
+    echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"/tmp/x"}}]}}'
+    : > "%[1]s/tool-emitted"
     while [ ! -f "%[1]s/release-turn1" ]; do sleep 0.05; done
   fi
   echo "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"reply $n\"}]}}"
@@ -52,14 +58,33 @@ func TestSteering_TurnSentMidRunQueuesAndBothReply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleMessage(first): %v", err)
 	}
-	firstStream := subscribe(t, f, first)
+	// Subscribe the way the SSE handler does, connection registration included.
+	firstStream, firstTakenOver, ok := f.svc.streams.SubscribeSSE(first, 0)
+	if !ok {
+		t.Fatalf("no stream for %s", first)
+	}
 	waitForFile(t, filepath.Join(dir, "turn1-started"))
 
 	second, err := f.svc.HandleMessage(ctx, f.session, "second: steering update")
 	if err != nil {
 		t.Fatalf("HandleMessage(second): %v", err)
 	}
-	secondStream := subscribe(t, f, second)
+	secondStream, _, ok := f.svc.streams.SubscribeSSE(second, 0)
+	if !ok {
+		t.Fatalf("no stream for %s", second)
+	}
+	// Opening the queued turn's stream must not take over the running one's.
+	select {
+	case <-firstTakenOver:
+		t.Fatal("opening the queued turn's stream took over the running turn's stream")
+	default:
+	}
+
+	// The running turn's tool call, made while the second turn is queued.
+	if err := os.WriteFile(filepath.Join(dir, "emit-tool"), nil, 0o600); err != nil {
+		t.Fatalf("emit tool: %v", err)
+	}
+	waitForFile(t, filepath.Join(dir, "tool-emitted"))
 
 	// The second turn is queued, not delivered and not interrupting: the
 	// running turn still holds the agent.
@@ -72,13 +97,17 @@ func TestSteering_TurnSentMidRunQueuesAndBothReply(t *testing.T) {
 	}
 
 	for _, turn := range []struct {
-		msgID  string
-		stream <-chan chat.StreamEvent
-		reply  string
-	}{{first, firstStream, "reply 1"}, {second, secondStream, "reply 2"}} {
+		msgID    string
+		stream   <-chan chat.StreamEvent
+		reply    string
+		toolCall bool
+	}{{first, firstStream, "reply 1", true}, {second, secondStream, "reply 2", false}} {
 		events := drainTurnStream(t, turn.stream)
 		if findEvent(events, "stream_end") == nil {
 			t.Fatalf("turn %s: no stream_end; events %+v", turn.msgID, events)
+		}
+		if got := findEvent(events, "tool_call") != nil; got != turn.toolCall {
+			t.Fatalf("turn %s: tool_call on stream = %v, want %v (the tool call is the running turn's); events %v", turn.msgID, got, turn.toolCall, eventTypes(events))
 		}
 		if delta := findEvent(events, "delta"); delta == nil || delta.Content != turn.reply {
 			t.Fatalf("turn %s: reply delta = %+v, want %q; events %v", turn.msgID, delta, turn.reply, eventTypes(events))

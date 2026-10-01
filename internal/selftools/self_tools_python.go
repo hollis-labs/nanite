@@ -106,8 +106,19 @@ try:
     _envelope = json.loads(sys.stdin.readline())
     _time_limit = int(_envelope.get("time_limit_sec", 10))
     _mem_limit  = int(_envelope.get("mem_limit_mb",  256)) * 1024 * 1024
-    # CPU time
-    _resource.setrlimit(_resource.RLIMIT_CPU, (_time_limit, _time_limit))
+    # CPU time. The soft limit raises SIGXCPU; the hard limit, one second
+    # later, is the SIGKILL backstop. A hard limit equal to the soft one is
+    # a straight SIGKILL on Linux, which the Go side cannot tell from any
+    # other kill. The handler exits with 152 (128 + SIGXCPU), which Go reads
+    # as a timeout, rather than take SIGXCPU's default core-dump action.
+    _resource.setrlimit(_resource.RLIMIT_CPU, (_time_limit, _time_limit + 1))
+    import signal as _signal
+    _signal.signal(_signal.SIGXCPU, lambda *_: os._exit(152))
+    # No core file either if model code restores SIGXCPU's default action.
+    try:
+        _resource.setrlimit(_resource.RLIMIT_CORE, (0, 0))
+    except (ValueError, _resource.error):
+        pass
     # Address space (covers heap + stack + mmap)
     try:
         _resource.setrlimit(_resource.RLIMIT_AS, (_mem_limit, _mem_limit))
@@ -339,11 +350,17 @@ func RunPythonSandbox(
 	cmdErr := cmd.Wait()
 	<-pumpDone
 
-	// Determine if we timed out (either Go wall-clock context deadline or Python CPU rlimit signal).
+	// Determine if we timed out: the Go wall-clock deadline, or the CPU
+	// rlimit, which the preamble's SIGXCPU handler reports as exit code
+	// pythonCPULimitExitCode (a raw SIGXCPU death counts too, for model code
+	// that restores the default handler).
 	timedOut := runCtx.Err() == context.DeadlineExceeded
 	if !timedOut && cmdErr != nil {
 		var exitErr *exec.ExitError
 		if errors.As(cmdErr, &exitErr) {
+			if exitErr.ExitCode() == pythonCPULimitExitCode {
+				timedOut = true
+			}
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 				if status.Signal() == syscall.SIGXCPU {
 					timedOut = true
@@ -397,7 +414,7 @@ func RunPythonSandbox(
 			}
 			result.Error = strings.Join(lines, "\n")
 		} else {
-			result.Error = fmt.Sprintf("exit code %d", exitCode(cmdErr))
+			result.Error = exitDescription(cmdErr)
 		}
 	}
 
@@ -476,6 +493,25 @@ func pumpToolCalls(
 			return fmt.Errorf("pump: encode response: %w", err)
 		}
 	}
+}
+
+// pythonCPULimitExitCode is the status the preamble's SIGXCPU handler exits
+// with (128 + SIGXCPU) when the model code reaches its CPU-time limit.
+// CW-20261001-0026: before the handler, the CPU limit was a SIGKILL that
+// reported as "exit code -1".
+const pythonCPULimitExitCode = 152
+
+// exitDescription describes a failed python3 exit for the result's Error:
+// the signal by name when one killed it (ExitCode is -1 then), else the
+// exit code.
+func exitDescription(err error) string {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return fmt.Sprintf("killed by signal %s", status.Signal())
+		}
+	}
+	return fmt.Sprintf("exit code %d", exitCode(err))
 }
 
 // exitCode extracts the exit code from a command error.

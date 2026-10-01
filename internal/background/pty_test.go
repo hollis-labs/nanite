@@ -168,9 +168,22 @@ func TestPTYBackend_CancelKillsProcessGroup(t *testing.T) {
 	}
 
 	// Process group should be gone — Kill(-pgid, 0) returns ESRCH
-	// when the group has no members.
-	if err := syscall.Kill(-pgid, 0); err != syscall.ESRCH {
-		t.Fatalf("kill -%d, 0 = %v; want ESRCH (group already reaped)", pgid, err)
+	// when the group has no members. The backend reaps only its direct
+	// child, /bin/sh. Where /bin/sh is dash, `sleep` is a forked
+	// grandchild: the group kill ends it too, but its zombie is
+	// reparented to the nearest subreaper and reaped asynchronously, and
+	// until then it still counts as a member. Wait a bounded time for the
+	// group to empty; a member that survived the kill never leaves it.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err := syscall.Kill(-pgid, 0)
+		if err == syscall.ESRCH {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("kill -%d, 0 = %v 2s after cancel; want ESRCH (group killed and reaped)", pgid, err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

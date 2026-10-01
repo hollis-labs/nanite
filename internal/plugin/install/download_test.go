@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/ssrf"
+	"github.com/hollis-labs/go-egress-proxy/egress"
 )
 
 func TestDownload_HappyPath(t *testing.T) {
@@ -159,8 +159,8 @@ func TestDownload_BlocksPrivateAndIMDSDestinations(t *testing.T) {
 				},
 			}
 			_, err := d.Download(context.Background(), "https://catalog.example/plugin.tar.gz", t.TempDir(), "x", nil)
-			if !errors.Is(err, ssrf.ErrBlocked) {
-				t.Fatalf("Download error = %v, want ssrf.ErrBlocked", err)
+			if !errors.Is(err, egress.ErrSSRFBlocked) {
+				t.Fatalf("Download error = %v, want egress.ErrSSRFBlocked", err)
 			}
 			if dialed {
 				t.Fatal("blocked destination reached the dialer")

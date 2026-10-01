@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/go-egress-proxy/egress"
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
-	"github.com/hollis-labs/nanite/internal/ssrf"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
@@ -79,8 +79,8 @@ func TestA2APushNotifierBlocksSharedSSRFPolicyRanges(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := notifier.secureHTTPClient().Do(req); !errors.Is(err, ssrf.ErrBlocked) {
-				t.Fatalf("blocked IP %s error = %v, want ssrf.ErrBlocked", blocked, err)
+			if _, err := notifier.secureHTTPClient().Do(req); !errors.Is(err, egress.ErrSSRFBlocked) {
+				t.Fatalf("blocked IP %s error = %v, want egress.ErrSSRFBlocked", blocked, err)
 			}
 			if dialed {
 				t.Fatalf("blocked IP %s reached the dialer", blocked)
@@ -104,8 +104,8 @@ func TestA2APushNotifierRejectsMixedDNSAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := notifier.secureHTTPClient().Do(req); !errors.Is(err, ssrf.ErrBlocked) {
-		t.Fatalf("mixed DNS answer error = %v, want ssrf.ErrBlocked", err)
+	if _, err := notifier.secureHTTPClient().Do(req); !errors.Is(err, egress.ErrSSRFBlocked) {
+		t.Fatalf("mixed DNS answer error = %v, want egress.ErrSSRFBlocked", err)
 	}
 	if dialed {
 		t.Fatal("mixed DNS answer reached the dialer")
@@ -162,8 +162,8 @@ func TestA2APushNotifierRevalidatesRedirectDNS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := notifier.secureHTTPClient().Do(req); !errors.Is(err, ssrf.ErrBlocked) {
-		t.Fatalf("redirect rebind error = %v, want ssrf.ErrBlocked", err)
+	if _, err := notifier.secureHTTPClient().Do(req); !errors.Is(err, egress.ErrSSRFBlocked) {
+		t.Fatalf("redirect rebind error = %v, want egress.ErrSSRFBlocked", err)
 	}
 	if resolveCalls != 2 {
 		t.Fatalf("resolver calls = %d, want initial request plus redirect", resolveCalls)
@@ -227,7 +227,7 @@ func TestA2APushNotifierSSRFRejectionUsesRetryBackoff(t *testing.T) {
 	if pending[0].AttemptCount != 1 {
 		t.Fatalf("attempt count = %d, want 1", pending[0].AttemptCount)
 	}
-	if !strings.Contains(pending[0].LastError, ssrf.ErrBlocked.Error()) {
+	if !strings.Contains(pending[0].LastError, egress.ErrSSRFBlocked.Error()) {
 		t.Fatalf("last error = %q, want SSRF classifier", pending[0].LastError)
 	}
 	if pending[0].NextRetry.Before(before.Add(59 * time.Second)) {

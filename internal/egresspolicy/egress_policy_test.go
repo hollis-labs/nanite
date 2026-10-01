@@ -1,11 +1,84 @@
-package ssrf
+// Package egresspolicy_test is Nanite's acceptance suite for go-egress-proxy's
+// SSRF policy (CW-20260930-0219). It is Nanite's former internal/ssrf test
+// suite, ported unchanged in substance onto egress.ResolveAndPin, so every
+// address class Nanite fixed before adopting the library stays pinned
+// against the library Nanite now uses: the original deny ranges, the
+// embedded-IPv4 forms of CW-20260930-0027/0028 (#357), and the embedded
+// loopback and 6to4 relay anycast rules of CW-20261001-0085 (#367).
+package egresspolicy_test
 
 import (
 	"context"
 	"errors"
 	"net"
 	"testing"
+
+	"github.com/hollis-labs/go-egress-proxy/egress"
 )
+
+func TestResolveAndPinRejectsAnyDeniedDNSAnswer(t *testing.T) {
+	resolver := func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("203.0.113.10"), net.ParseIP("169.254.169.254")}, nil
+	}
+	if _, err := egress.ResolveAndPin(context.Background(), resolver, "catalog.example", false); !errors.Is(err, egress.ErrSSRFBlocked) {
+		t.Fatalf("ResolveAndPin error = %v, want egress.ErrSSRFBlocked", err)
+	}
+}
+
+func TestResolveAndPinRejectsDeniedRanges(t *testing.T) {
+	tests := map[string]string{
+		"rfc1918-10":       "10.1.2.3",
+		"rfc1918-172":      "172.16.1.2",
+		"rfc1918-192":      "192.168.1.2",
+		"ipv4-loopback":    "127.0.0.2",
+		"ipv6-loopback":    "::1",
+		"imds-link-local":  "169.254.169.254",
+		"ipv6-link-local":  "fe80::1",
+		"cgnat":            "100.64.0.1",
+		"ipv6-ula":         "fd00::1",
+		"ipv4-unspecified": "0.0.0.0",
+		"ipv6-unspecified": "::",
+	}
+	for name, rawIP := range tests {
+		t.Run(name, func(t *testing.T) {
+			resolver := func(context.Context, string) ([]net.IP, error) {
+				return []net.IP{net.ParseIP(rawIP)}, nil
+			}
+			if _, err := egress.ResolveAndPin(context.Background(), resolver, "catalog.example", false); !errors.Is(err, egress.ErrSSRFBlocked) {
+				t.Fatalf("egress.ResolveAndPin(%s) error = %v, want egress.ErrSSRFBlocked", rawIP, err)
+			}
+		})
+	}
+}
+
+func TestResolveAndPinReturnsValidatedLiteral(t *testing.T) {
+	want := net.ParseIP("203.0.113.10")
+	resolver := func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{want}, nil
+	}
+	got, err := egress.ResolveAndPin(context.Background(), resolver, "catalog.example", false)
+	if err != nil {
+		t.Fatalf("ResolveAndPin: %v", err)
+	}
+	if !got.Equal(want) {
+		t.Fatalf("ResolveAndPin = %s, want %s", got, want)
+	}
+}
+
+func TestResolveAndPinLocalhostOptInDoesNotAllowOtherPrivateRanges(t *testing.T) {
+	resolver := func(_ context.Context, host string) ([]net.IP, error) {
+		if host == "localhost" {
+			return []net.IP{net.ParseIP("127.0.0.1")}, nil
+		}
+		return []net.IP{net.ParseIP("10.0.0.1")}, nil
+	}
+	if _, err := egress.ResolveAndPin(context.Background(), resolver, "localhost", true); err != nil {
+		t.Fatalf("localhost opt-in rejected loopback: %v", err)
+	}
+	if _, err := egress.ResolveAndPin(context.Background(), resolver, "private.example", true); !errors.Is(err, egress.ErrSSRFBlocked) {
+		t.Fatalf("private range error = %v, want egress.ErrSSRFBlocked", err)
+	}
+}
 
 // CW-20260930-0027 / CW-20260930-0028: IPv6 transition forms carry an IPv4
 // address the attacker picks. A DNS answer in one of them used to match no
@@ -54,9 +127,9 @@ func TestResolveAndPinAppliesIPv4DenySetToEmbeddedAddresses(t *testing.T) {
 			resolver := func(context.Context, string) ([]net.IP, error) {
 				return []net.IP{tc.ip}, nil
 			}
-			_, err := ResolveAndPin(context.Background(), resolver, "target.example", false)
-			if got := errors.Is(err, ErrBlocked); got != tc.blocked {
-				t.Fatalf("ResolveAndPin(%s) error = %v, want blocked=%t", tc.ip, err, tc.blocked)
+			_, err := egress.ResolveAndPin(context.Background(), resolver, "target.example", false)
+			if got := errors.Is(err, egress.ErrSSRFBlocked); got != tc.blocked {
+				t.Fatalf("egress.ResolveAndPin(%s) error = %v, want blocked=%t", tc.ip, err, tc.blocked)
 			}
 		})
 	}
@@ -71,7 +144,7 @@ func TestResolveAndPinLocalhostOptInStillAllowsIPv6Loopback(t *testing.T) {
 		resolver := func(context.Context, string) ([]net.IP, error) {
 			return []net.IP{net.ParseIP(raw)}, nil
 		}
-		if _, err := ResolveAndPin(context.Background(), resolver, "localhost", true); err != nil {
+		if _, err := egress.ResolveAndPin(context.Background(), resolver, "localhost", true); err != nil {
 			t.Fatalf("localhost opt-in rejected %s: %v", raw, err)
 		}
 	}
@@ -94,8 +167,8 @@ func TestResolveAndPinDeniesEmbeddedLoopbackEvenWithLocalhostOptIn(t *testing.T)
 			resolver := func(context.Context, string) ([]net.IP, error) {
 				return []net.IP{net.ParseIP(raw)}, nil
 			}
-			if _, err := ResolveAndPin(context.Background(), resolver, "localhost", true); !errors.Is(err, ErrBlocked) {
-				t.Fatalf("ResolveAndPin(%s) with the localhost opt-in = %v, want ErrBlocked", raw, err)
+			if _, err := egress.ResolveAndPin(context.Background(), resolver, "localhost", true); !errors.Is(err, egress.ErrSSRFBlocked) {
+				t.Fatalf("egress.ResolveAndPin(%s) with the localhost opt-in = %v, want egress.ErrSSRFBlocked", raw, err)
 			}
 		})
 	}
@@ -118,9 +191,9 @@ func TestResolveAndPinDenies6to4RelayAnycast(t *testing.T) {
 			resolver := func(context.Context, string) ([]net.IP, error) {
 				return []net.IP{net.ParseIP(raw)}, nil
 			}
-			_, err := ResolveAndPin(context.Background(), resolver, "relay.example", false)
-			if got := errors.Is(err, ErrBlocked); got != blocked {
-				t.Fatalf("ResolveAndPin(%s) = %v, want blocked=%t", raw, err, blocked)
+			_, err := egress.ResolveAndPin(context.Background(), resolver, "relay.example", false)
+			if got := errors.Is(err, egress.ErrSSRFBlocked); got != blocked {
+				t.Fatalf("egress.ResolveAndPin(%s) = %v, want blocked=%t", raw, err, blocked)
 			}
 		})
 	}

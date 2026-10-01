@@ -13,8 +13,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"github.com/hollis-labs/go-egress-proxy/egress"
 	"github.com/hollis-labs/nanite/internal/a2a"
-	"github.com/hollis-labs/nanite/internal/ssrf"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -28,7 +28,7 @@ type A2APushNotifier struct {
 
 	// resolver and dialer are injectable seams for proving that every DNS
 	// answer is checked and the validated literal is what gets dialed.
-	resolver ssrf.Resolver
+	resolver egress.Resolver
 	dialer   func(ctx context.Context, network, addr string) (net.Conn, error)
 
 	// Production defaults are HTTPS-only and deny localhost. Tests that use a
@@ -252,7 +252,7 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 
 // roundTripperFunc lets the notifier enforce its endpoint-specific HTTPS rule
 // immediately before every request, including redirects, while the shared
-// destination-address policy remains owned by internal/ssrf.
+// destination-address policy remains owned by go-egress-proxy (egress.ResolveAndPin).
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -267,7 +267,7 @@ func (pn *A2APushNotifier) secureHTTPClient() *http.Client {
 
 	resolver := pn.resolver
 	if resolver == nil {
-		resolver = ssrf.DefaultResolver
+		resolver = egress.DefaultResolver
 	}
 	innerDial := pn.dialer
 	if innerDial == nil {
@@ -281,7 +281,7 @@ func (pn *A2APushNotifier) secureHTTPClient() *http.Client {
 			if err != nil {
 				return nil, err
 			}
-			pinned, err := ssrf.ResolveAndPin(ctx, resolver, host, pn.allowLocalhost)
+			pinned, err := egress.ResolveAndPin(ctx, resolver, host, pn.allowLocalhost)
 			if err != nil {
 				return nil, err
 			}

@@ -26,16 +26,16 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/hollis-labs/nanite/internal/ssrf"
+	"github.com/hollis-labs/go-egress-proxy/egress"
 )
 
 // ssrfResolver resolves a hostname to IP addresses. Tests replace this to
 // control what IPs the dialer pins against without real DNS lookups.
-type ssrfResolver = ssrf.Resolver
+type ssrfResolver = egress.Resolver
 
 // defaultSSRFResolver uses the system resolver.
 func defaultSSRFResolver(ctx context.Context, host string) ([]net.IP, error) {
-	return ssrf.DefaultResolver(ctx, host)
+	return egress.DefaultResolver(ctx, host)
 }
 
 // GeneralToolsTransport provides general-purpose utility tools
@@ -62,8 +62,8 @@ func NewGeneralToolsTransport() *GeneralToolsTransport {
 }
 
 // errSSRFBlocked preserves the package-level classifier used by web-fetch
-// resilience while the semantic policy itself lives in internal/ssrf.
-var errSSRFBlocked = ssrf.ErrBlocked
+// resilience while the semantic policy itself lives in go-egress-proxy (egress.ResolveAndPin).
+var errSSRFBlocked = egress.ErrSSRFBlocked
 
 // ListTools returns the general utility tools.
 func (g *GeneralToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
@@ -312,7 +312,7 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 		if splitErr != nil {
 			return nil, splitErr
 		}
-		pinned, resolveErr := ssrf.ResolveAndPin(ctx, resolver, host, allowLocal)
+		pinned, resolveErr := egress.ResolveAndPin(ctx, resolver, host, allowLocal)
 		if resolveErr != nil {
 			return nil, resolveErr
 		}

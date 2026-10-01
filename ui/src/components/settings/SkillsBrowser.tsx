@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Eye,
   Filter,
-  GitFork,
   Plus,
   Trash2,
   Wrench,
@@ -117,21 +116,6 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
   const { data: skills = [], isLoading } = useQuery({
     queryKey: ["skills"],
     queryFn: api.listSkills,
-  });
-
-  // Dev-mode flag drives the inline-edit affordance on internal skills.
-  const { data: devModeData } = useQuery({
-    queryKey: ["dev-mode"],
-    queryFn: api.getDevMode,
-  });
-  const devMode = devModeData?.dev_mode ?? false;
-
-  const forkMutation = useMutation({
-    mutationFn: ({ id, prompt }: { id: string; prompt?: string }) =>
-      api.forkSkillToUser(id, { prompt }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["skills"] });
-    },
   });
 
   // Every distinct mode slug tagged on any skill, sorted, for the filter
@@ -332,7 +316,6 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               const source = resolveSource(skill);
               const ids = parseModeIDs(skill);
               const tagSlugs = ids.length > 0 ? ids : parseModeSlugs(skill.settings);
-              const isInternal = source === "" || source === "builtin" || source === "seed";
               return (
                 <ContextMenu key={skill.id}>
                   <ContextMenuTrigger asChild>
@@ -405,17 +388,6 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                       <Eye className="w-3.5 h-3.5" />
                       View Details
                     </ContextMenuItem>
-                    {devMode && isInternal && (
-                      <ContextMenuItem
-                        className="gap-2 text-xs"
-                        onClick={() => {
-                          forkMutation.mutate({ id: skill.id, prompt: skill.prompt });
-                        }}
-                      >
-                        <GitFork className="w-3.5 h-3.5" />
-                        Fork to user override
-                      </ContextMenuItem>
-                    )}
                     {!skill.is_builtin && (
                       <>
                         <ContextMenuSeparator />

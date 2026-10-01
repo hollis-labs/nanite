@@ -19,7 +19,7 @@ import (
 // isolation (those are already unit-tested individually by 03/04/05).
 //
 // The internal_api_call reaction's config.endpoint targets an
-// httptest.NewServer rather than the real /api/example/task-updates route
+// httptest.NewServer as the reaction target
 // (internal/api/example_task_updates.go) — this task's own documented
 // choice (see this task file's Work Log) for proving the internal_api_call
 // path inside a regression test, matching 03-reaction-engine-core.md's own
@@ -40,7 +40,7 @@ func TestCallTaskUpdateReport_FullChain_RenderCardAndInternalAPICall(t *testing.
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	// Seed the exact two rows SeedTaskUpdateReportReactions would produce,
+	// Configure two operator reactions,
 	// pointed at the httptest server instead of a real apiBaseURL — proves
 	// callTaskUpdateReport's own Fire/marker/telemetry wiring independent
 	// of the seed function (covered by its own tests below).
@@ -250,117 +250,5 @@ func TestCallTaskUpdateReport_NoReactionsConfigured_StillConfirmsAndNoEvents(t *
 	}
 	if len(events) != 0 {
 		t.Errorf("got %d selftool_reaction event_log rows for a tool with no configured reactions, want 0", len(events))
-	}
-}
-
-// TestSeedTaskUpdateReportReactions_SeedsBothRowsIdempotently pins the
-// seed function's own two documented behaviors: it seeds the exact two
-// rows the design doc's worked example specifies, resolving
-// internal_api_call's endpoint against apiBaseURL, and it is idempotent
-// across repeat calls — mirroring internal/agent/reflexes/seeds.go's
-// SeedBaseReflexes contract.
-func TestSeedTaskUpdateReportReactions_SeedsBothRowsIdempotently(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-
-	n, err := SeedTaskUpdateReportReactions(ctx, s, "http://127.0.0.1:9999", nil)
-	if err != nil {
-		t.Fatalf("SeedTaskUpdateReportReactions (first call): %v", err)
-	}
-	if n != 2 {
-		t.Fatalf("first seed call inserted %d rows, want 2", n)
-	}
-
-	rows, err := s.ListEnabledSelftoolReactions(ctx, taskUpdateReportToolName)
-	if err != nil {
-		t.Fatalf("ListEnabledSelftoolReactions: %v", err)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("got %d enabled reactions for task_update_report, want 2", len(rows))
-	}
-
-	byKind := map[string]store.SelftoolReaction{}
-	for _, r := range rows {
-		byKind[r.ReactionKindID] = r
-	}
-	rc, ok := byKind[reactions.KindRenderCard]
-	if !ok {
-		t.Fatalf("no render_card row seeded")
-	}
-	if !strings.Contains(rc.Config, `"envelope_type":"info-card"`) || !strings.Contains(rc.Config, `"body":"{{msg}}"`) {
-		t.Errorf("render_card config = %s, missing expected envelope_type/body template", rc.Config)
-	}
-
-	api, ok := byKind[reactions.KindInternalAPICall]
-	if !ok {
-		t.Fatalf("no internal_api_call row seeded")
-	}
-	if !strings.Contains(api.Config, `"endpoint":"http://127.0.0.1:9999/api/example/task-updates"`) {
-		t.Errorf("internal_api_call config = %s, endpoint not resolved against apiBaseURL as expected", api.Config)
-	}
-
-	// Idempotency: a second call against a DIFFERENT apiBaseURL must not
-	// insert new rows or mutate the existing ones — an operator's own
-	// edit (or the original seed) survives re-boot untouched.
-	n2, err := SeedTaskUpdateReportReactions(ctx, s, "http://127.0.0.1:1234", nil)
-	if err != nil {
-		t.Fatalf("SeedTaskUpdateReportReactions (second call): %v", err)
-	}
-	if n2 != 0 {
-		t.Fatalf("second seed call inserted %d rows, want 0 (idempotent)", n2)
-	}
-	rowsAfter, err := s.ListEnabledSelftoolReactions(ctx, taskUpdateReportToolName)
-	if err != nil {
-		t.Fatalf("ListEnabledSelftoolReactions (after second seed): %v", err)
-	}
-	if len(rowsAfter) != 2 {
-		t.Fatalf("got %d enabled reactions after second seed call, want still 2", len(rowsAfter))
-	}
-	for _, r := range rowsAfter {
-		if r.ReactionKindID == reactions.KindInternalAPICall && !strings.Contains(r.Config, "9999") {
-			t.Errorf("existing internal_api_call row was mutated by the second seed call: %s", r.Config)
-		}
-	}
-}
-
-// TestSeedTaskUpdateReportReactions_RespectsOperatorDisable proves the
-// idempotency check is "does a row exist at all" (store.
-// CountSelftoolReactionsByToolAndKind), not "does an enabled row exist" —
-// a disabled row must NOT be re-seeded as a duplicate enabled row.
-func TestSeedTaskUpdateReportReactions_RespectsOperatorDisable(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-
-	if _, err := SeedTaskUpdateReportReactions(ctx, s, "http://127.0.0.1:9999", nil); err != nil {
-		t.Fatalf("initial seed: %v", err)
-	}
-
-	rows, err := s.ListEnabledSelftoolReactions(ctx, taskUpdateReportToolName)
-	if err != nil {
-		t.Fatalf("ListEnabledSelftoolReactions: %v", err)
-	}
-	var renderCardID string
-	for _, r := range rows {
-		if r.ReactionKindID == reactions.KindRenderCard {
-			renderCardID = r.ID
-		}
-	}
-	if renderCardID == "" {
-		t.Fatalf("no render_card row found after initial seed")
-	}
-	if _, err := s.DB.ExecContext(ctx, `UPDATE selftool_reactions SET enabled = 0 WHERE id = ?`, renderCardID); err != nil {
-		t.Fatalf("disable render_card row: %v", err)
-	}
-
-	if _, err := SeedTaskUpdateReportReactions(ctx, s, "http://127.0.0.1:9999", nil); err != nil {
-		t.Fatalf("re-seed after disable: %v", err)
-	}
-
-	n, err := s.CountSelftoolReactionsByToolAndKind(ctx, taskUpdateReportToolName, reactions.KindRenderCard)
-	if err != nil {
-		t.Fatalf("CountSelftoolReactionsByToolAndKind: %v", err)
-	}
-	if n != 1 {
-		t.Errorf("got %d render_card rows for task_update_report after re-seed, want still 1 (operator's disable must not be undone by a duplicate insert)", n)
 	}
 }

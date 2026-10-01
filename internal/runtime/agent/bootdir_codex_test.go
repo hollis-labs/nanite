@@ -254,10 +254,10 @@ func TestCodexLayout_AuthJSON_LinksHostLogin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open auth.json for the refresh: %v", err)
 	}
-	if _, err := f.WriteString(refreshed); err != nil {
+	if _, err = f.WriteString(refreshed); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Close(); err != nil {
+	if err = f.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if body, _ := os.ReadFile(hostAuth); string(body) != refreshed { //nolint:gosec // reads this test's own fixture

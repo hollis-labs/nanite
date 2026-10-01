@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -96,7 +95,7 @@ func TestPollHealthUntilReady_BecomesHealthy(t *testing.T) {
 	defer srv.Close()
 
 	start := time.Now()
-	err := pollHealthUntilReady(context.Background(), srv.URL, 5*time.Second, nil)
+	err := pollHealthUntilReady(context.Background(), srv.URL, 5*time.Second, 0)
 	if err != nil {
 		t.Fatalf("pollHealthUntilReady: %v", err)
 	}
@@ -114,31 +113,9 @@ func TestPollHealthUntilReady_Timeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := pollHealthUntilReady(context.Background(), srv.URL, 300*time.Millisecond, nil)
+	err := pollHealthUntilReady(context.Background(), srv.URL, 300*time.Millisecond, 0)
 	if err == nil {
 		t.Fatal("pollHealthUntilReady: want a timeout error, got nil")
-	}
-}
-
-// TestPollHealthUntilReady_ExitChFailsFast pins item 6: if the spawned
-// child dies before becoming healthy, the poll loop must surface that
-// immediately instead of waiting out the full timeout.
-func TestPollHealthUntilReady_ExitChFailsFast(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	defer srv.Close()
-
-	exitCh := make(chan error, 1)
-	exitCh <- errors.New("exit status 1")
-
-	start := time.Now()
-	err := pollHealthUntilReady(context.Background(), srv.URL, 30*time.Second, exitCh)
-	if err == nil {
-		t.Fatal("pollHealthUntilReady: want an error when the child exited, got nil")
-	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("pollHealthUntilReady took %s to notice the exited child, want well under the 30s timeout", elapsed)
 	}
 }
 

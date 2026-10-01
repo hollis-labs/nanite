@@ -34,9 +34,8 @@ import (
 //
 // Claude only. A Codex launch sets CODEX_HOME to the boot dir, so codex
 // reads no ~/.codex/config.toml, but it also reads no .mcp.json. An OpenCode
-// launch sets OPENCODE_CONFIG_DIR, which adds a config directory and does not
-// replace the user's ~/.config/opencode, so user-level servers still load
-// (CW-20261001-0239). An ACP launch plants no boot dir.
+// launch gets its own config isolation (opencode_config.go). An ACP launch
+// plants no boot dir.
 
 // StrictMCPEnv is the interim kill switch. Set to 0 (or false), Claude
 // launches go back to loading every MCP scope, as before CW-20261001-0221.

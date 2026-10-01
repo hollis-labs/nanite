@@ -110,6 +110,8 @@ require (
 	github.com/hollis-labs/go-hooks v0.1.0
 	github.com/hollis-labs/go-llm-contracts v0.4.0
 	github.com/hollis-labs/go-llm-types v0.5.1
+	github.com/hollis-labs/go-localdaemon v0.1.0
+	github.com/hollis-labs/go-loopdetect v0.1.0
 	github.com/hollis-labs/go-materialize v0.1.0
 	github.com/hollis-labs/go-mcp v0.14.1
 	github.com/hollis-labs/go-messaging v0.7.0
@@ -120,6 +122,7 @@ require (
 	github.com/hollis-labs/go-tether-client v0.5.1
 	github.com/hollis-labs/go-toolresult v0.1.0
 	github.com/hollis-labs/go-workflow v0.1.0
+	github.com/hollis-labs/go-worktree v0.1.0
 	github.com/hollis-labs/tesseract v0.10.0
 	github.com/openai/openai-go/v3 v3.61.0
 	github.com/pressly/goose/v3 v3.28.0

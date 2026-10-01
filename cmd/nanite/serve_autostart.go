@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	localdaemon "github.com/hollis-labs/go-localdaemon"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 )
@@ -23,16 +23,9 @@ const (
 	autostartHealthCheckTimeout = 2 * time.Second
 	autostartPollTimeout        = 20 * time.Second
 	autostartPollInitialDelay   = 100 * time.Millisecond
-	autostartPollMaxDelay       = 1 * time.Second
 )
 
 var autostartHTTPClient = &http.Client{}
-
-// errAutoStartUnsupported is returned by lockExclusiveNonBlocking on
-// platforms where nanite chat's auto-start mechanics (flock + Setsid
-// detachment) have no equivalent. CW-20260813-0007 item 7 scopes this
-// feature to Unix/macOS/Linux; Windows support is a separate ticket.
-var errAutoStartUnsupported = errors.New("auto-starting `nanite serve` is not supported on this platform")
 
 // ensureServeRunning implements CW-20260813-0007's self-bootstrapping
 // client/server: `nanite chat` checks whether a `nanite serve` instance is
@@ -79,40 +72,30 @@ func ensureServeRunning(ctx context.Context, baseURL string, noAutostart bool) e
 	lockPath := filepath.Join(stateDir, "serve.lock")
 	logPath := filepath.Join(stateDir, "serve.log")
 
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		return fmt.Errorf("auto-start: open lock file %s: %w", lockPath, err)
-	}
-	defer func() {
-		if closeErr := lockFile.Close(); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "auto-start: close lock file %s: %v\n", lockPath, closeErr)
-		}
-	}()
-
-	fd := int(lockFile.Fd())
-	var exitCh chan error
-	if lockErr := lockExclusiveNonBlocking(fd); lockErr != nil {
-		if errors.Is(lockErr, errAutoStartUnsupported) {
-			return fmt.Errorf("nanite serve is not reachable at %s: %w", baseURL, lockErr)
-		}
-		// Another `nanite chat` invocation holds the lock and is already
-		// spawning (or just finished spawning) the server. Don't race it —
-		// wait and re-check health below instead of spawning our own.
-	} else {
-		defer unlockFile(fd)
-
-		// Re-check health now that we hold the lock: the previous holder
-		// may have already finished starting the server while we waited.
+	lock, lockErr := localdaemon.TryAcquire(lockPath)
+	var pid int
+	switch {
+	case lockErr == nil:
+		defer func() {
+			if releaseErr := lock.Release(); releaseErr != nil {
+				fmt.Fprintf(os.Stderr, "auto-start: release lock %s: %v\n", lockPath, releaseErr)
+			}
+		}()
+		// A previous launcher may have completed startup before we acquired the lock.
 		if healthy, _ := checkHealth(ctx, baseURL); healthy {
 			return nil
 		}
-		exitCh, err = spawnServe(port, logPath)
+		pid, err = spawnServe(ctx, port, logPath)
 		if err != nil {
 			return fmt.Errorf("auto-start: %w", err)
 		}
+	case errors.Is(lockErr, localdaemon.ErrAlreadyRunning):
+		// Another launcher owns startup; wait for its server without spawning.
+	default:
+		return fmt.Errorf("auto-start: acquire lock %s: %w", lockPath, lockErr)
 	}
 
-	if err := pollHealthUntilReady(ctx, baseURL, autostartPollTimeout, exitCh); err != nil {
+	if err := pollHealthUntilReady(ctx, baseURL, autostartPollTimeout, pid); err != nil {
 		return fmt.Errorf("auto-start: %w (log: %s)", err, logPath)
 	}
 	return nil
@@ -144,99 +127,41 @@ func checkHealth(ctx context.Context, baseURL string) (bool, error) {
 	return resp.StatusCode == http.StatusOK, nil
 }
 
-// pollHealthUntilReady polls baseURL's health endpoint with bounded
-// exponential backoff until it reports healthy, exitCh fires (a spawned
-// child died before becoming healthy — nil exitCh simply never fires), or
-// timeout elapses.
-//
-// This is the same poll-until-ready mechanism CW-20260813-0008 (retry/
-// backoff for harness-v1 connection establishment) needs for its own
-// connection-retry loop. Share this rather than writing a second one if
-// that ticket lands close to this one.
-func pollHealthUntilReady(ctx context.Context, baseURL string, timeout time.Duration, exitCh <-chan error) error {
-	deadline := time.Now().Add(timeout)
-	delay := autostartPollInitialDelay
-	for {
-		if healthy, _ := checkHealth(ctx, baseURL); healthy {
-			return nil
+// pollHealthUntilReady waits for the authenticated Nanite health endpoint.
+// A positive pid identifies our spawned child; zero means another launcher owns it.
+func pollHealthUntilReady(ctx context.Context, baseURL string, timeout time.Duration, pid int) error {
+	return localdaemon.WaitReady(ctx, timeout, autostartPollInitialDelay, func(checkCtx context.Context) (bool, error) {
+		if healthy, _ := checkHealth(checkCtx, baseURL); healthy {
+			return true, nil
 		}
-		if !time.Now().Before(deadline) {
-			return fmt.Errorf("timed out after %s waiting for nanite serve to become healthy at %s", timeout, baseURL)
+		if pid > 0 && !localdaemon.IsAlive(pid) {
+			return false, errors.New("nanite serve exited before becoming healthy")
 		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case err := <-exitCh:
-			// exitCh is nil when there is no spawned child to watch (the
-			// "loser" of the spawn race) — a nil-channel receive never
-			// fires, so this case is simply inert in that path.
-			timer.Stop()
-			if err != nil {
-				return fmt.Errorf("nanite serve exited before becoming healthy: %w", err)
-			}
-			return errors.New("nanite serve exited before becoming healthy")
-		case <-timer.C:
-		}
-		delay = nextBackoffDelay(delay, autostartPollInitialDelay, autostartPollMaxDelay)
-	}
+		return false, nil
+	})
 }
 
-// spawnServe re-execs the running nanite binary as `nanite serve --port
-// <port>`, detached from this process's controlling terminal (item 2/7):
-// stdout/stderr redirect to logPath instead of being inherited, and the
-// platform-specific detachedProcAttr (Setsid on unix) puts it in its own
-// session so it survives this process exiting or its parent terminal
-// closing. The child inherits the environment, so NANITE_DB_PATH /
-// NANITE_WORKSPACE overrides carry through unchanged.
-//
-// Returns a channel that receives the child's exit result exactly once,
-// used by pollHealthUntilReady to fail fast (item 6) instead of waiting out
-// the full timeout when the spawn failed outright (e.g. the port is held by
-// something unhealthy).
-func spawnServe(port int, logPath string) (chan error, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("resolve nanite binary path: %w", err)
-	}
-
+// spawnServe starts the resident server in its own session. It inherits Nanite's
+// environment and outlives its launcher; the library reaps it in the background.
+func spawnServe(ctx context.Context, port int, logPath string) (int, error) {
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return nil, fmt.Errorf("open serve log %s: %w", logPath, err)
+		return 0, fmt.Errorf("open serve log %s: %w", logPath, err)
 	}
-
-	cmd := exec.Command(exe, "serve", "--port", strconv.Itoa(port))
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.SysProcAttr = detachedProcAttr()
-
-	if err := cmd.Start(); err != nil {
-		if closeErr := logFile.Close(); closeErr != nil {
-			return nil, fmt.Errorf("start nanite serve (%s): %w (also failed to close log file: %w)", exe, err, closeErr)
+	defer func() {
+		if err := logFile.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "auto-start: close serve log %s: %v\n", logPath, err)
 		}
-		return nil, fmt.Errorf("start nanite serve (%s): %w", exe, err)
-	}
-
-	exitCh := make(chan error, 1)
-	go func() {
-		// waitErr alone drives exitCh's contract with pollHealthUntilReady
-		// (any receive means the child exited). A log-file close failure is
-		// unrelated to whether the child is still alive, so it's reported
-		// separately rather than folded into exitCh, which would otherwise
-		// read as a false "server exited" signal.
-		waitErr := cmd.Wait()
-		if closeErr := logFile.Close(); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "auto-start: close serve log %s: %v\n", logPath, closeErr)
-		}
-		exitCh <- waitErr
 	}()
-	return exitCh, nil
+	return localdaemon.Spawn(ctx, localdaemon.SpawnOptions{
+		Args:   []string{"serve", "--port", strconv.Itoa(port)},
+		Stdout: logFile, Stderr: logFile,
+	})
 }
 
 // autostartStateDir resolves (and creates) the directory the auto-start
 // lock file and server log live in, anchored on the go-apppaths StateDir —
-// runtime state, matching internal/coordination and internal/worktree's
+// runtime state, matching coordination and worker worktree
 // directories in cmdServe, not derived from the DB path.
 func autostartStateDir() (string, error) {
 	layout, err := config.ResolveLayout()

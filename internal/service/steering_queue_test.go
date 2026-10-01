@@ -145,7 +145,7 @@ func waitForFile(t *testing.T, path string) {
 
 func readLines(t *testing.T, path string) []string {
 	t.Helper()
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // a file the fake CLI wrote in this test's own t.TempDir()
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}

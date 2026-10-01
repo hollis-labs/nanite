@@ -413,9 +413,12 @@ type turnCompletedPayload struct {
 // For ACP it folds the adapter's top-level stop_reason into Usage.StopReason —
 // synthesizing an otherwise-empty Usage if need be — because every consumer
 // reads the stop reason from usage and ACP truncation (stop_reason
-// "max_tokens") was otherwise never seen (CW-20260930-0113). Native payloads
-// carry no top-level stop_reason and are returned unchanged. Stopgap until the
-// libs normalize stop reasons into usage (CW-20260930-0228).
+// "max_tokens") was otherwise never seen (CW-20260930-0113). Since
+// go-agent-wrapper v0.17.0 that top-level value is already normalized
+// (llmtypes.NormalizeStopReason: ACP's max_turn_requests -> turn_limit); it
+// still rides beside usage rather than in it, which is the only thing this
+// folds. Native usage carries its own normalized StopReason (go-providers
+// v0.35.0), so native payloads are returned unchanged.
 func TurnCompletedUsage(raw json.RawMessage, acp bool) *llmtypes.Usage {
 	var p turnCompletedPayload
 	if len(raw) == 0 || json.Unmarshal(raw, &p) != nil {

@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/hollis-labs/nanite/internal/fsutil"
-	"github.com/hollis-labs/nanite/internal/pathsafe"
+	"github.com/hollis-labs/go-safefs/atomicfile"
+	"github.com/hollis-labs/go-safefs/pathsafe"
 )
 
 // stagingDirName is the sibling directory under Store.root that Write
@@ -139,7 +139,7 @@ func (s *Store) checkExisting(addressDir, address string) (bool, error) {
 }
 
 // stageFiles writes norm's contents into a fresh temporary directory under
-// s.root, using fsutil's crash-safe atomic-write-then-rename primitive for
+// s.root, using atomicfile's crash-safe atomic-write-then-rename primitive for
 // each individual file. Returns the staging directory's path, ready to be
 // published via a single os.Rename onto the final address directory.
 // Cleans up the staging directory itself on any failure.
@@ -159,7 +159,7 @@ func (s *Store) stageFiles(address string, norm FileMap) (string, error) {
 			_ = os.RemoveAll(stagingDir)
 			return "", fmt.Errorf("skillvendor: mkdir for %q: %w", relPath, err)
 		}
-		if err := fsutil.AtomicWriteFile(target, content, 0o644); err != nil {
+		if err := atomicfile.WriteFile(target, content, 0o644); err != nil {
 			_ = os.RemoveAll(stagingDir)
 			return "", fmt.Errorf("skillvendor: write %q: %w", relPath, err)
 		}

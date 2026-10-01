@@ -46,7 +46,7 @@ type RuntimeConfig struct {
 	// When unset (nil) the runtime falls back to the project root if one is
 	// configured (see cmd/nanite/main.go resolveDevToolsAllowedPaths). When
 	// set, the user's list REPLACES the default — set explicitly to widen or
-	// narrow the scope. The path-safety escape check (internal/pathsafe)
+	// narrow the scope. The path-safety escape check (go-safefs/pathsafe)
 	// still runs on every dev_* call regardless of how the allow-list was
 	// sourced; this knob only widens which roots qualify, it never disables
 	// traversal protection.

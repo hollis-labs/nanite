@@ -18,11 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/fsutil"
+	"github.com/hollis-labs/go-safefs/atomicfile"
 )
 
 // TestAtomicWriteFile_NoPartialFileOnRenameFailure drives
-// fsutil.AtomicWriteFile at a path whose target is a non-empty directory,
+// atomicfile.WriteFile at a path whose target is a non-empty directory,
 // exercising the rename-error branch. The target must not be replaced and
 // no sibling temp files should leak.
 func TestAtomicWriteFile_NoPartialFileOnRenameFailure(t *testing.T) {
@@ -40,7 +40,7 @@ func TestAtomicWriteFile_NoPartialFileOnRenameFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := fsutil.AtomicWriteFile(target, []byte(`{"phase":"test"}`), 0o644)
+	err := atomicfile.WriteFile(target, []byte(`{"phase":"test"}`), 0o644)
 	if err == nil {
 		t.Fatal("expected error writing over a non-empty directory")
 	}
@@ -252,7 +252,7 @@ func TestInstallHome_StagingCleanupOnSeedFailure(t *testing.T) {
 // TestAtomicWriteFile_SmokeInScaffold confirms that ScaffoldNaniteMD uses
 // the atomic primitive by writing successfully and leaving no temp files
 // in the project root. This is a smoke test for the call-site swap, not
-// a deep coverage of fsutil.
+// a deep coverage of atomicfile.
 func TestAtomicWriteFile_SmokeInScaffold(t *testing.T) {
 	project := t.TempDir()
 
@@ -281,6 +281,6 @@ func TestAtomicWriteFile_SmokeInScaffold(t *testing.T) {
 	}
 
 	// Sanity: confirm the primitive we swapped in is the one we think.
-	// If fsutil import were accidentally dropped this would catch it.
-	_ = fsutil.AtomicWriteFile
+	// If the atomicfile import were accidentally dropped this would catch it.
+	_ = atomicfile.WriteFile
 }

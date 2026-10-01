@@ -12,10 +12,9 @@
 // Naming note: the bare word "loop" is reachable from two other, different
 // things in this codebase, and this package is neither of them:
 //
-//  1. internal/loopdetect — the harness's own per-turn tool-call repeat-count
-//     guard (internal/loopdetect/detector.go). It detects a single agent
-//     turn's reason-act-observe cycle repeating a tool call too many times
-//     within one turn and fires a callback; it has no concept of a Goal, a
+//  1. go-loopdetect — the harness's per-session tool-call repeat-count
+//     guard. Its Detector detects repeated tool-call fingerprints in a
+//     sliding window and reports a detection; it has no concept of a Goal, a
 //     budget, or a multi-iteration WorkflowRun sequence. This package (loop)
 //     operates one level up: it decides what happens *between* whole
 //     WorkflowRun executions, not within one turn's tool-call loop.

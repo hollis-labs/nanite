@@ -395,6 +395,8 @@ func (s *runtimeEventSink) handleSessionNotice(kind runtimeevents.EventKind, raw
 		s.typedCB(events.AuthFailed{Message: p.Error})
 	case runtimeevents.KindAgentPermissionDenied:
 		s.typedCB(events.PermissionDenied{Action: p.Action, DisplayName: p.DisplayName})
+	default:
+		// Write routes only the three notice kinds here.
 	}
 }
 

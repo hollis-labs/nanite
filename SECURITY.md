@@ -38,7 +38,6 @@ exemptions:
 
 - `GET /api/health`
 - `/api/tools/call`, which the handler itself restricts to loopback callers
-- `/api/example/task-updates`, a same-process demo endpoint
 
 Non-API paths (the embedded web UI) are not covered by basic auth. Nanite
 does not refuse a non-loopback bind without auth; it logs a warning at startup

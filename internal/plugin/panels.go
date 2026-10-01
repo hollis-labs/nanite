@@ -153,7 +153,7 @@ func (h *Host) GetPanels() []PanelEntry {
 }
 
 // registerManifestPanels registers all panels declared in the plugin manifest.
-// Mirrors registerManifestCardRules.
+// Registers panel declarations at plugin load.
 func registerManifestPanels(host *Host, manifest *PluginManifest, pluginID string) error {
 	for i, p := range manifest.Registers.Panels {
 		if p.ID == "" {

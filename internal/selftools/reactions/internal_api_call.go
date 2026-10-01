@@ -31,7 +31,7 @@ type internalAPICallConfig struct {
 // plain same-process HTTP client call against endpoint exactly as
 // configured, not a direct in-process handler invocation. endpoint is
 // expected to already be a fully-qualified, same-process URL (e.g.
-// "http://127.0.0.1:<port>/api/example/task-updates"), matching how
+// "http://127.0.0.1:<port>/api/tools/call"), matching how
 // cmd/nanite/main.go's own apiBaseURL is already threaded, pre-resolved,
 // into every other same-process HTTP consumer in this codebase
 // (WorkflowContextAssembler, ExternalWorkflowEngineConfig.APIBaseURL,

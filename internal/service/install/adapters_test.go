@@ -85,7 +85,7 @@ agents:
 	}
 }
 
-func TestSyncAdaptersForProject_WritesAllFourCLIFiles(t *testing.T) {
+func TestSyncAdaptersForProject_WritesAllThreeCLIFiles(t *testing.T) {
 	project := t.TempDir()
 
 	// Set up .nanite/config.yaml with two agents so the adapters have
@@ -106,13 +106,13 @@ agents:
 		t.Fatal(err)
 	}
 
-	if err := syncAdaptersForProject(project, []string{"claude", "codex", "gemini", "opencode"}); err != nil {
+	if err := syncAdaptersForProject(project, []string{"claude", "codex", "opencode"}); err != nil {
 		t.Fatalf("syncAdaptersForProject: %v", err)
 	}
 
-	// All four CLI files should now exist with managed sections containing
+	// All three CLI files should now exist with managed sections containing
 	// both agent names.
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md", "GEMINI.md", "OPENCODE.md"} {
+	for _, name := range []string{"CLAUDE.md", "AGENTS.md", "OPENCODE.md"} {
 		path := filepath.Join(project, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -150,13 +150,13 @@ func TestSyncAdaptersForProject_EmptyAgentsListWritesPlaceholder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := syncAdaptersForProject(project, []string{"claude", "codex", "gemini", "opencode"}); err != nil {
+	if err := syncAdaptersForProject(project, []string{"claude", "codex", "opencode"}); err != nil {
 		t.Fatalf("syncAdaptersForProject: %v", err)
 	}
 
 	// All CLI files should exist with placeholder content (adapters now write
 	// a managed section even when the agents list is empty).
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md", "GEMINI.md", "OPENCODE.md"} {
+	for _, name := range []string{"CLAUDE.md", "AGENTS.md", "OPENCODE.md"} {
 		data, err := os.ReadFile(filepath.Join(project, name))
 		if err != nil {
 			t.Errorf("%s should exist after empty-agents sync: %v", name, err)
@@ -225,11 +225,11 @@ func TestSyncAdaptersForProject_EmptyAllowedListWritesNoFiles(t *testing.T) {
 	}
 }
 
-func TestNewBuiltinAdapterRegistry_RegistersFiveAdapters(t *testing.T) {
+func TestNewBuiltinAdapterRegistry_RegistersFourAdapters(t *testing.T) {
 	reg := newBuiltinAdapterRegistry()
 	adapters := reg.Adapters()
-	if len(adapters) != 5 {
-		t.Errorf("len = %d, want 5", len(adapters))
+	if len(adapters) != 4 {
+		t.Errorf("len = %d, want 4", len(adapters))
 	}
 
 	// Verify expected names are present.
@@ -237,7 +237,7 @@ func TestNewBuiltinAdapterRegistry_RegistersFiveAdapters(t *testing.T) {
 	for _, a := range adapters {
 		names[a.Name()] = true
 	}
-	for _, want := range []string{"claude", "codex", "gemini", "opencode", "nanite-native"} {
+	for _, want := range []string{"claude", "codex", "opencode", "nanite-native"} {
 		if !names[want] {
 			t.Errorf("missing adapter: %q (got %v)", want, names)
 		}

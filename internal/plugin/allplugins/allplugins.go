@@ -10,12 +10,10 @@ package allplugins
 import (
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-codex"
-	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-gemini"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-nanite-native"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-opencode"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/agentwidgets"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/bookmarks"
-	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/card-rules-demo"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/contextwidgets"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/debugwidgets"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/observabilitywidgets"

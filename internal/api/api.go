@@ -623,7 +623,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/envelopes/{id}/respond", a.handleEnvelopeRespond)
 
 	// Debug
-	mux.HandleFunc("GET /api/debug/slots", a.handleDebugSlots)
 
 	// Inspector (I1 — dev-mode per-turn aggregator, CW-20260426-0004)
 	mux.HandleFunc("GET /api/inspector/sessions/{session_id}/turns", a.handleInspectorListTurns)
@@ -653,7 +652,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// self-tools/07-worked-example-task-update-report.md) — a trivial
 	// demo/test fixture the task_update_report self-tool's seeded
 	// internal_api_call reaction targets. See example_task_updates.go.
-	mux.HandleFunc("POST /api/example/task-updates", a.handleExampleTaskUpdate)
 }
 
 // jsonResp writes a JSON response with the given status code.

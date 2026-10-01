@@ -47,7 +47,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/plugin"
 	adapterclaude "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
 	adaptercodex "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-codex"
-	adaptergemini "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-gemini"
 	nanitenative "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-nanite-native"
 	adapteropencode "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-opencode"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
@@ -482,7 +481,6 @@ func newRuntimeAdapterRegistry() *agent.AdapterRegistry {
 	reg := agent.NewAdapterRegistry()
 	reg.Register(adapterclaude.New().Adapter())
 	reg.Register(adaptercodex.New().Adapter())
-	reg.Register(adaptergemini.New().Adapter())
 	reg.Register(adapteropencode.New().Adapter())
 	reg.Register(nanitenative.New().Adapter())
 	return reg

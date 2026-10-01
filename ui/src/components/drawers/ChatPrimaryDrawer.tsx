@@ -4,8 +4,7 @@
  * Replaces the old `BottomChatDrawer` chrome at the top of the chat column.
  * Tab strip docks to the bottom edge so the strip itself is the handle when
  * the drawer is closed. Documents / Pins / PinnedCardTab bodies are lifted
- * verbatim from `BottomChatDrawer.tsx`. Reports / Diffs are net-new
- * empty-state placeholders. Tools renders the existing `ToolCallItem`
+ * verbatim from `BottomChatDrawer.tsx`. Tools renders the existing `ToolCallItem`
  * list, matching today's `ToolCallDrawer` body layout.
  */
 
@@ -13,7 +12,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDownLeft,
   ArrowUpRight,
-  ClipboardList,
   Eye,
   EyeOff,
   FileText,
@@ -56,6 +54,9 @@ export function ChatPrimaryDrawer() {
   const isStreaming = useIsStreaming();
   const queryClient = useQueryClient();
 
+  const activeTab = drawer.activeTab === "reports" || drawer.activeTab === "diffs"
+    ? "documents"
+    : drawer.activeTab;
   const hasRunningTool = toolCalls.some((tc) => tc.status === "running");
 
   // DB-backed pinned cards (existing API).
@@ -102,7 +103,7 @@ export function ChatPrimaryDrawer() {
           className="overflow-hidden border-x border-t border-border bg-bg-elevated"
           style={{ height: drawer.height }}
         >
-          <DrawerBody activeTab={drawer.activeTab} pinnedCards={pinnedCards} />
+          <DrawerBody activeTab={activeTab} pinnedCards={pinnedCards} />
         </div>
       )}
 
@@ -114,32 +115,20 @@ export function ChatPrimaryDrawer() {
         <div className="flex items-center justify-between gap-2 px-3 py-0.5 shrink-0 border-x border-t border-border bg-bg-elevated">
           <div className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden min-w-0 flex-1">
             <PrimaryTabButton
-              active={drawer.activeTab === "documents"}
+              active={activeTab === "documents"}
               icon={<FileText className="w-3.5 h-3.5" />}
               label="Documents"
               onClick={() => setDrawer({ activeTab: "documents" })}
             />
             <PrimaryTabButton
-              active={drawer.activeTab === "reports"}
-              icon={<ClipboardList className="w-3.5 h-3.5" />}
-              label="Reports"
-              onClick={() => setDrawer({ activeTab: "reports" })}
-            />
-            <PrimaryTabButton
-              active={drawer.activeTab === "diffs"}
-              icon={<GitCompare className="w-3.5 h-3.5" />}
-              label="Diffs"
-              onClick={() => setDrawer({ activeTab: "diffs" })}
-            />
-            <PrimaryTabButton
-              active={drawer.activeTab === "tools"}
+              active={activeTab === "tools"}
               icon={<Wrench className="w-3.5 h-3.5" />}
               label="Tools"
               runningPip={hasRunningTool && isStreaming}
               onClick={() => setDrawer({ activeTab: "tools" })}
             />
             <PrimaryTabButton
-              active={drawer.activeTab === "pins"}
+              active={activeTab === "pins"}
               icon={<Pin className="w-3.5 h-3.5" />}
               label="Pins"
               onClick={() => setDrawer({ activeTab: "pins" })}
@@ -150,7 +139,7 @@ export function ChatPrimaryDrawer() {
             {pinnedCards.map((card) => (
               <PrimaryPinnedTabButton
                 key={card.id}
-                active={drawer.activeTab === `pin:${card.id}`}
+                active={activeTab === `pin:${card.id}`}
                 card={card}
                 onClick={() => setDrawer({ activeTab: `pin:${card.id}` })}
                 onUnpin={async () => {
@@ -283,10 +272,6 @@ function DrawerBody({
   switch (activeTab) {
     case "documents":
       return <DocumentsTab />;
-    case "reports":
-      return <ReportsTab />;
-    case "diffs":
-      return <DiffsTab />;
     case "tools":
       return <ToolsTab />;
     case "pins":
@@ -661,26 +646,6 @@ function PasteForm({
           {submitting ? "Saving…" : "Save"}
         </button>
       </div>
-    </div>
-  );
-}
-
-// ── Reports tab (empty state) ────────────────────────────────────────────────
-
-function ReportsTab() {
-  return (
-    <div className="flex h-full items-center justify-center p-6 text-xs text-fg-muted">
-      No reports yet — they'll appear here as agents produce them.
-    </div>
-  );
-}
-
-// ── Diffs tab (empty state) ──────────────────────────────────────────────────
-
-function DiffsTab() {
-  return (
-    <div className="flex h-full items-center justify-center p-6 text-xs text-fg-muted">
-      No diffs in this session yet.
     </div>
   );
 }

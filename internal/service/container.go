@@ -131,6 +131,8 @@ type Container struct {
 	Documents *DocumentService
 	// Teams owns team definitions and their validation.
 	Teams *TeamService
+	// Envelopes records users' responses to envelopes.
+	Envelopes *EnvelopeService
 
 	// Narrow store collaborators for transports that construct a pipeline
 	// object per call (skill gate, materializer, installer, uninstaller,
@@ -440,6 +442,12 @@ type ContainerConfig struct {
 	// back to the DB-only shape so tests without explicit wiring work.
 	ProviderCatalog *providercatalog.Catalog
 
+	// ModelCatalogOptions are appended to the models.dev client's options,
+	// after the container's own WithOnRefresh (which must not be replaced).
+	// nil fetches the live catalog. Tests pass modelsdevtest.Options so a
+	// container boot never reaches the network; cmdServe passes WithURL when
+	// NANITE_MODELSDEV_URL is set (CW-20260930-0105).
+	ModelCatalogOptions []modelsdev.Option
 	// DurableAgentRecipeCatalogPaths is the ordered set of local recipe
 	// catalog files or directories loaded at startup. Configured recipes
 	// override built-ins by ID; duplicate configured IDs are rejected.
@@ -723,6 +731,21 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	// Embedded Tesseract instance for memory storage.
 	var tesseractInstance *tesseract.Tesseract
+	// containerCommitted flips once the Container is built. Until then every
+	// resource started below registers its cleanup as a defer on it, so any
+	// error return unwinds them all, in reverse start order: reapers, then
+	// the model catalog refresher, then Tesseract (CW-20260930-0105).
+	containerCommitted := false
+	defer func() {
+		if containerCommitted || tesseractInstance == nil {
+			return
+		}
+		// A failed build would otherwise leak the decay goroutine and the
+		// Tesseract DB handle.
+		if closeErr := tesseractInstance.Close(); closeErr != nil {
+			slog.Warn("service container: close Tesseract after failed build", "err", closeErr)
+		}
+	}()
 	var memorySvc *memory.Service
 	var embeddingStatus string
 	var embeddingProviderID, embeddingModel string
@@ -1007,9 +1030,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// table (store.SyncModelsFromRegistry) so agents.model_id has a real,
 	// current row to FK against — see Phase 1 #06.
 	catalogCtx, stopCatalog := context.WithCancel(context.Background())
-	modelCatalog := modelsdev.New(modelsdev.WithOnRefresh(func(c *modelsdev.Client) {
+	modelCatalogOptions := append([]modelsdev.Option{modelsdev.WithOnRefresh(func(c *modelsdev.Client) {
 		syncCatalogToRegistry(c, cfg.Store)
-	}))
+	})}, cfg.ModelCatalogOptions...)
+	modelCatalog := modelsdev.New(modelCatalogOptions...)
 	// Sync from disk cache immediately (warm cache path) so the registry is
 	// enriched before accepting traffic even when no network fetch is needed.
 	syncCatalogToRegistry(modelCatalog, cfg.Store)
@@ -1024,7 +1048,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	}()
 	// Bounded like shutdownWithMaxWait: a failed boot must fail, not hang
 	// on a refresher that never returns.
-	stopCatalogAndWait := func() {
+	defer func() {
+		if containerCommitted {
+			return
+		}
 		stopCatalog()
 		select {
 		case <-catalogDone:
@@ -1032,7 +1059,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			slog.Warn("service container: model catalog refresher did not exit after failed build",
 				"timeout", containerShutdownMaxWait.String())
 		}
-	}
+	}()
 
 	// I1 (CW-20260426-0004): inspector service — dev-mode only.
 	// Created unconditionally but only populated/queried when developer_mode=true.
@@ -1143,7 +1170,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		SkillVendor: skillVendor,
 	})
 	if agentDepsErr != nil {
-		stopCatalogAndWait()
 		return nil, fmt.Errorf("service container: build agent dependencies: %w", agentDepsErr)
 	}
 	agentDeps := agentDepsBundle.Deps
@@ -1215,7 +1241,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// chatServiceImpl.generateResponse against a child session.
 	chatSvcImpl, ok := chatSvc.(*chatServiceImpl)
 	if !ok {
-		stopCatalogAndWait()
 		return nil, fmt.Errorf("service container: chatSvc is %T, expected *chatServiceImpl for ChatRunner", chatSvc)
 	}
 
@@ -1306,7 +1331,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// the DB closes; goroutine exits on ctx.Done OR Reaper.Stop.
 	reaperCtx, stopReaper := context.WithCancel(context.Background())
 	subagentReaper := subagent.NewReaper(cfg.Store.DB, subagent.ReaperOptions{})
-	containerCommitted := false
 	defer func() {
 		if !containerCommitted {
 			// Stop, not just cancel: it blocks until the loop has returned,
@@ -1399,7 +1423,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	durableWake := NewDurableAgentWakeService(cfg.Store, durableAgents)
 	durableAgentRecipes, err := NewDurableAgentRecipeService(durableAgents, cfg.DurableAgentRecipeCatalogPaths...)
 	if err != nil {
-		stopCatalogAndWait()
 		return nil, fmt.Errorf("service container: durable agent recipes: %w", err)
 	}
 	// F5 follow-up (CW-20260420-0022): wire the HintDispatcher adapter
@@ -1565,6 +1588,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Consumers:           NewConsumerService(cfg.Store),
 		Documents:           NewDocumentService(cfg.Store),
 		Teams:               NewTeamService(cfg.Store),
+		Envelopes:           NewEnvelopeService(cfg.Store),
 		Artifacts: NewArtifactService(cfg.Store, func() string {
 			if cfg.AppConfig != nil {
 				return cfg.AppConfig.Artifacts.StorageDir

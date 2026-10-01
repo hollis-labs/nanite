@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
@@ -23,7 +24,8 @@ func TestNewContainer_WiresStoreCollaborators(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	c, err := NewContainer(ContainerConfig{
-		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               st, Providers: provider.NewRegistry(), WorkingDir: root,
 		DisableEmbeddedTesseract: true,
 	})
 	if err != nil {

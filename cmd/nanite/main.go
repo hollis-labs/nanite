@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-envelopes"
+	"github.com/hollis-labs/go-modelsdev/modelsdev"
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
@@ -172,6 +173,13 @@ func cmdServeWithInitializers(
 	// data-loss failure mode this migration removes.
 	dbFlag := fs.String("db", "", "SQLite database path (default: go-apppaths XDG layout — run `nanite path`)")
 	dev := fs.Bool("dev", false, "Development mode (skip embedded SPA)")
+	fs.Usage = func() {
+		out := fs.Output()
+		_, _ = fmt.Fprintf(out, "Usage of %s serve:\n", brand.BinaryName)
+		fs.PrintDefaults()
+		_, _ = fmt.Fprintf(out, "\nEnvironment:\n  %s\n    \t%s\n", modelsDevURLEnv,
+			"models.dev catalog URL for pricing and context windows (default: the live catalog); an offline mirror or a local fixture")
+	}
 	_ = fs.Parse(args) // ExitOnError terminates on parse failure; the returned error is unreachable.
 
 	resolvedDB := resolveDBPathWith(*dbFlag)
@@ -508,11 +516,27 @@ func cmdServeWithInitializers(
 		// Durable-agent recipe catalog files/dirs merge with built-ins at
 		// startup through the app config seam used for product tunables.
 		DurableAgentRecipeCatalogPaths: appCfg.Recipes.CatalogPaths,
+		ModelCatalogOptions:            modelCatalogOptionsFromEnv(),
 	})
 	if err != nil {
 		slog.Error("failed to create service container", "err", err)
 		return fmt.Errorf("failed to create service container: %w", err)
 	}
+	// CW-20260930-0105: every error return below would otherwise run the
+	// deferred store close with all of the container's goroutines still live.
+	// Mirror the signal path's order: daemons stop, then the container; the
+	// coordination store and the store close after, from their earlier
+	// defers. The signal path exits through os.Exit and never reaches this;
+	// both Shutdowns are safe to repeat.
+	var daemonLifecycle *lifecycle.Manager
+	defer func() {
+		if daemonLifecycle != nil {
+			if shutdownErr := daemonLifecycle.Shutdown(10 * time.Second); shutdownErr != nil {
+				slog.Error("daemon lifecycle shutdown", "err", shutdownErr)
+			}
+		}
+		container.Shutdown()
+	}()
 	// Wire python_run's sandbox bridge to the same permission engine and
 	// ToolService used by ordinary chat-turn tool execution. These are set
 	// after NewContainer because selfTools is constructed earlier in initMCP.
@@ -967,7 +991,7 @@ func cmdServeWithInitializers(
 	// Lifecycle manager for long-running daemon goroutines (cleanup,
 	// snapshots, reapers). Owned by cmdServe; shut down on signal before
 	// container.Shutdown so daemons stop referencing container state.
-	daemonLifecycle := lifecycle.NewManager("cmd.nanite.daemons")
+	daemonLifecycle = lifecycle.NewManager("cmd.nanite.daemons")
 
 	// Shutdown handler. Uses context.Background() because cmdServe has no
 	// parent ctx at this scope; the goroutine lives until the process exits.
@@ -1660,4 +1684,19 @@ func parseToolAllowlist(raw string) []string {
 		}
 	}
 	return names
+}
+
+// modelsDevURLEnv overrides where the model catalog refresher fetches
+// models.dev pricing and context-window data (CW-20260930-0105).
+const modelsDevURLEnv = "NANITE_MODELSDEV_URL"
+
+// modelCatalogOptionsFromEnv points the model catalog refresher at
+// NANITE_MODELSDEV_URL when it is set: an offline mirror, or a local fixture
+// so a test that boots `nanite serve` never reaches the network. Unset keeps
+// the live catalog.
+func modelCatalogOptionsFromEnv() []modelsdev.Option {
+	if u := strings.TrimSpace(os.Getenv(modelsDevURLEnv)); u != "" {
+		return []modelsdev.Option{modelsdev.WithURL(u)}
+	}
+	return nil
 }

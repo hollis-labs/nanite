@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -51,8 +52,9 @@ func newTestAPIWithSeededProviders(t *testing.T) (*API, *http.ServeMux) {
 	s := newSeededStore(t)
 
 	svc, err := service.NewContainer(service.ContainerConfig{
-		Store:     s,
-		Providers: provider.NewRegistry(),
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               s,
+		Providers:           provider.NewRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)
@@ -99,9 +101,10 @@ func TestListProviders_CatalogConfigured_SurfacesAllEntries(t *testing.T) {
 	cat.Add(providercatalog.Entry{Name: "openai", DisplayName: "OpenAI", RowID: "openai-001"})
 
 	svc, err := service.NewContainer(service.ContainerConfig{
-		Store:           s,
-		Providers:       provider.NewRegistry(),
-		ProviderCatalog: cat,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               s,
+		Providers:           provider.NewRegistry(),
+		ProviderCatalog:     cat,
 	})
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)
@@ -154,9 +157,10 @@ func TestListProviders_CatalogHidesDuplicateDBRow(t *testing.T) {
 	cat.Add(providercatalog.Entry{Name: "anthropic", DisplayName: "Anthropic-from-catalog", RowID: "anthropic-001"})
 
 	svc, err := service.NewContainer(service.ContainerConfig{
-		Store:           s,
-		Providers:       provider.NewRegistry(),
-		ProviderCatalog: cat,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               s,
+		Providers:           provider.NewRegistry(),
+		ProviderCatalog:     cat,
 	})
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)
@@ -196,8 +200,9 @@ func TestListProviders_CatalogHidesDuplicateDBRow(t *testing.T) {
 func TestListProviders_NilCatalog_FallsBackToDB(t *testing.T) {
 	s := newSeededStore(t)
 	svc, err := service.NewContainer(service.ContainerConfig{
-		Store:     s,
-		Providers: provider.NewRegistry(),
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               s,
+		Providers:           provider.NewRegistry(),
 		// ProviderCatalog intentionally omitted.
 	})
 	if err != nil {

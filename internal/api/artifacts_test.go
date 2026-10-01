@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/config"
+	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
@@ -131,9 +132,10 @@ func newArtifactTestAPI(t *testing.T) (*API, string) {
 	appCfg.Artifacts.StorageDir = artifactsRoot
 
 	svc, err := service.NewContainer(service.ContainerConfig{
-		Store:     s,
-		Providers: provider.NewRegistry(),
-		AppConfig: appCfg,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               s,
+		Providers:           provider.NewRegistry(),
+		AppConfig:           appCfg,
 	})
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)

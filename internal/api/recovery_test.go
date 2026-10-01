@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/storetest"
@@ -29,8 +30,9 @@ func newTestAPIWithRecovery(t *testing.T) (*API, *http.ServeMux, *broker.Broker)
 	t.Cleanup(func() { s.Close(context.Background()) })
 
 	svc, err := service.NewContainer(service.ContainerConfig{
-		Store:     s,
-		Providers: provider.NewRegistry(),
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               s,
+		Providers:           provider.NewRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)

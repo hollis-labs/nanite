@@ -16,6 +16,7 @@ import (
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/config"
+	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	pluginsdk "github.com/hollis-labs/plugin-sdk"
@@ -279,8 +280,13 @@ func TestNewContainer_PostReaperFailureStopsReapers(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	beforeSubagent, beforeRuntime := reaperGoroutineCounts(t)
-	beforeCatalog := modelCatalogGoroutineCount(t)
+	beforeCatalog := settledModelCatalogGoroutineCount(t, 300*time.Millisecond)
+	beforeDecay := tesseractDecayGoroutineCount(t)
 	_, err = NewContainer(ContainerConfig{
+		// The refresher's fetch completes only 200ms after its cancel, so a
+		// failed build that cancels without waiting leaves it visible below
+		// (CW-20260930-0105; before this seam the check caught 0/20).
+		ModelCatalogOptions:            modelsdevtest.LingerAfterCancel(t, 200*time.Millisecond),
 		Store:                          st,
 		Providers:                      provider.NewRegistry(),
 		WorkingDir:                     root,
@@ -295,6 +301,11 @@ func TestNewContainer_PostReaperFailureStopsReapers(t *testing.T) {
 	// (CW-20260930-0103).
 	if afterCatalog := modelCatalogGoroutineCount(t); afterCatalog > beforeCatalog {
 		t.Fatalf("model catalog refresher survived failed construction: %d -> %d", beforeCatalog, afterCatalog)
+	}
+	// Close joins Tesseract's workers, and the decay loop ticks hourly, so an
+	// unclosed instance stays visible indefinitely.
+	if afterDecay := tesseractDecayGoroutineCount(t); afterDecay > beforeDecay {
+		t.Fatalf("Tesseract decay goroutine survived failed construction: %d -> %d", beforeDecay, afterDecay)
 	}
 
 	// The reapers' Stop returns once the loop's deferred closeDone runs,
@@ -379,9 +390,10 @@ func TestNewContainer_TesseractDBIsPackageTempIsolated(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	container, err := NewContainer(ContainerConfig{
-		Store:      st,
-		Providers:  provider.NewRegistry(),
-		WorkingDir: root,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               st,
+		Providers:           provider.NewRegistry(),
+		WorkingDir:          root,
 	})
 	if err != nil {
 		t.Fatalf("NewContainer: %v", err)
@@ -429,7 +441,8 @@ func TestNewContainer_ExternalTesseractDoesNotOpenEmbeddedOwner(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	container, err := NewContainer(ContainerConfig{
-		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               st, Providers: provider.NewRegistry(), WorkingDir: root,
 		DisableEmbeddedTesseract: true,
 	})
 	if err != nil {
@@ -481,7 +494,8 @@ func TestNewContainer_MissingLegacySourceWithJournalDisablesEmbeddedTesseract(t 
 	}
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 	container, err := NewContainer(ContainerConfig{
-		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               st, Providers: provider.NewRegistry(), WorkingDir: root,
 	})
 	if err != nil {
 		t.Fatalf("NewContainer: %v", err)
@@ -522,7 +536,8 @@ func TestNewContainer_EmptyUnjournaledTargetDBDisablesEmbeddedTesseract(t *testi
 	}
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 	container, err := NewContainer(ContainerConfig{
-		Store: st, Providers: provider.NewRegistry(), WorkingDir: root,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               st, Providers: provider.NewRegistry(), WorkingDir: root,
 	})
 	if err != nil {
 		t.Fatalf("NewContainer: %v", err)
@@ -570,6 +585,32 @@ func modelCatalogGoroutineCount(t *testing.T) int {
 		t.Fatalf("write goroutine profile: %v", err)
 	}
 	return strings.Count(stacks.String(), "go-modelsdev/modelsdev.(*Client).Run")
+}
+
+// settledModelCatalogGoroutineCount returns the refresher count once it has
+// held steady for window. A refresher an earlier test or iteration left
+// lingering (see modelsdevtest.LingerAfterCancel) would otherwise inflate
+// the baseline and mask a new leak under -count.
+func settledModelCatalogGoroutineCount(t *testing.T, window time.Duration) int {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	count, steadySince := modelCatalogGoroutineCount(t), time.Now()
+	for time.Since(steadySince) < window && time.Now().Before(deadline) {
+		time.Sleep(25 * time.Millisecond)
+		if now := modelCatalogGoroutineCount(t); now != count {
+			count, steadySince = now, time.Now()
+		}
+	}
+	return count
+}
+
+func tesseractDecayGoroutineCount(t *testing.T) int {
+	t.Helper()
+	var stacks bytes.Buffer
+	if err := pprof.Lookup("goroutine").WriteTo(&stacks, 2); err != nil {
+		t.Fatalf("write goroutine profile: %v", err)
+	}
+	return strings.Count(stacks.String(), "tesseract/internal/memory.(*DecayJob).Run")
 }
 
 func reaperGoroutineCounts(t *testing.T) (subagent, runtime int) {

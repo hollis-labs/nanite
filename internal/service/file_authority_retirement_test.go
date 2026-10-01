@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	_ "modernc.org/sqlite"
@@ -109,6 +110,7 @@ func TestRetiredDurableAgentFileAuthorityPreservesDatabaseState(t *testing.T) {
 	}
 
 	container, err := NewContainer(ContainerConfig{
+		ModelCatalogOptions:      modelsdevtest.Options(t),
 		Store:                    reopened,
 		Providers:                provider.NewRegistry(),
 		WorkingDir:               root,
@@ -190,7 +192,8 @@ func TestRetiredFileAuthorityRealDatabaseCopySurvivesMigrationAndBoot(t *testing
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "xdg", "cache"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg", "config"))
 	container, err := NewContainer(ContainerConfig{
-		Store: migrated, Providers: provider.NewRegistry(), WorkingDir: root, DisableEmbeddedTesseract: true,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               migrated, Providers: provider.NewRegistry(), WorkingDir: root, DisableEmbeddedTesseract: true,
 	})
 	if err != nil {
 		t.Fatalf("boot against migrated backup: %v", err)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/config"
+	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
@@ -63,10 +64,11 @@ func newSkillsTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	appCfg.Skills.VendorStorageDir = filepath.Join(root, "skills-vendor")
 
 	svc, err := service.NewContainer(service.ContainerConfig{
-		Store:      s,
-		Providers:  provider.NewRegistry(),
-		WorkingDir: root,
-		AppConfig:  appCfg,
+		ModelCatalogOptions: modelsdevtest.Options(t),
+		Store:               s,
+		Providers:           provider.NewRegistry(),
+		WorkingDir:          root,
+		AppConfig:           appCfg,
 	})
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)

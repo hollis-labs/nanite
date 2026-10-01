@@ -244,13 +244,23 @@ func TestCapitalisedAndAliasNamesAgreeEverywhere(t *testing.T) {
 }
 
 // A capitalised name boots: selection, layout and adapter agree.
+//
+// A Claude boot spawns its streaming-stdio process at once, so it needs a
+// fake that stays alive (fakeClaudeLongLivedScript): makeBootDeps' fake
+// adapter runs /usr/bin/true, whose immediate exit races the session's
+// readiness under load.
 func TestBoot_CapitalisedProviderName(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "fake-claude.sh")
+	if err := os.WriteFile(script, []byte(fakeClaudeLongLivedScript), 0o755); err != nil { //nolint:gosec // an executable test fixture in t.TempDir()
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CLI_PATH", script)
 	deps, _ := makeBootDeps(t, "codex")
-	// No Workdir: makeBootDeps injects a custom fake adapter, which
-	// launch.Select refuses to decorate with Claude's --add-dir.
+	deps.NativeCLIAdapter = nil // the registry's own streaming Claude adapter
 	sess, err := Boot(context.Background(), deps, Options{
 		Mode:     ModeLongLived,
 		Provider: "Claude",
+		Workdir:  t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("Boot(Provider=Claude): %v", err)

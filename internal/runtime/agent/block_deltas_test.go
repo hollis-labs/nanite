@@ -138,17 +138,15 @@ func TestBlockDeltas_TurnBoundaryResets(t *testing.T) {
 	}
 }
 
-// opencode reports usage once per step, as a usage-bearing KindTurnCompleted
-// in the middle of the turn. That must not reset the separator: the next
-// step's text block still follows earlier text. The empty completion is the
-// terminal one and does reset.
-func TestBlockDeltas_MidTurnUsageDoesNotReset(t *testing.T) {
+// go-agent-wrapper v0.13.1 shape: an opencode turn with a tool call streams
+// one whole text block per step and ends with ONE KindTurnCompleted that
+// carries the usage summed over its steps. The blocks within the turn are
+// separated; that terminal, usage and all, ends the turn.
+func TestBlockDeltas_UsageBearingTerminalResets(t *testing.T) {
 	h := newBlockSinkHarness(t, "opencode", false)
 	h.delta(t, "Let me read the file.")
-	h.write(t, runtimeevents.KindTurnCompleted, `{"usage":{"OutputTokens":12,"StopReason":"tool-calls"}}`)
 	h.delta(t, "The port is 8090.")
-	h.write(t, runtimeevents.KindTurnCompleted, `{"usage":{"OutputTokens":5,"StopReason":"stop"}}`)
-	h.write(t, runtimeevents.KindTurnCompleted, "")
+	h.write(t, runtimeevents.KindTurnCompleted, `{"usage":{"OutputTokens":17,"StopReason":"stop"}}`)
 	h.delta(t, "Next turn.")
 
 	canonical, fanout := h.text(t)

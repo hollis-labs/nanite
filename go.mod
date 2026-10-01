@@ -102,7 +102,7 @@ require (
 
 require (
 	github.com/hollis-labs/agent-contracts-leaf v0.2.0
-	github.com/hollis-labs/go-agent-wrapper v0.13.0
+	github.com/hollis-labs/go-agent-wrapper v0.13.1
 	github.com/hollis-labs/go-apppaths v0.1.0
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-hooks v0.1.0

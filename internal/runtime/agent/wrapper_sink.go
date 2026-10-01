@@ -153,21 +153,17 @@ func deltasAreWholeBlocks(providerName string) bool {
 // canonical sink, the runtime feed, the chat stream, drain paths — sees the
 // same text. Thinking deltas neither receive nor count as text.
 //
-// Only a terminal completion ends the turn. A native usage-bearing
-// KindTurnCompleted is mid-turn: opencode reports usage once per step, so a
-// turn with tool calls carries several before its empty terminal one. This
-// is the same terminal rule the service bridge and host runtime feed apply.
+// Every KindTurnCompleted ends the turn. Since go-agent-wrapper v0.13.1 a
+// native turn has exactly one, its terminal, carrying the turn's usage
+// summed over its steps; usage no longer arrives as a completion of its own
+// (before v0.13.1 it did, and opencode's per-step usage would have read as
+// several mid-turn completions).
 func (s *runtimeEventSink) separateBlocks(ev runtimeevents.Event) runtimeevents.Event {
 	s.blockMu.Lock()
 	defer s.blockMu.Unlock()
 
 	switch ev.Kind {
-	case runtimeevents.KindTurnCompleted:
-		if s.acp || TurnCompletedUsage(ev.Payload, false) == nil {
-			s.textInTurn = false
-		}
-		return ev
-	case runtimeevents.KindTurnStarted, runtimeevents.KindTurnFailed:
+	case runtimeevents.KindTurnStarted, runtimeevents.KindTurnCompleted, runtimeevents.KindTurnFailed:
 		s.textInTurn = false
 		return ev
 	case runtimeevents.KindAgentDelta:

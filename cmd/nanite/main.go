@@ -302,6 +302,7 @@ func cmdServeWithInitializers(
 	logger := plugin.NewLogger(brand.ID + "-plugin")
 	pluginHost := plugin.NewHost(nil, logger)
 	pluginHost.SetStore(s)
+	pluginHost.SetArtifactStorageRoot(appCfg.Artifacts.StorageDir)
 	// Phase 5 item 02: share this same store instance with manage.go's
 	// package-level DisablePlugin/EnablePlugin/IsDisabled/PluginStatus so
 	// the running server and those functions read/write the same `plugins`

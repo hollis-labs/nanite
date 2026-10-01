@@ -155,6 +155,12 @@ secrets included; protect its output like the database.
 
 Per-session sandbox directories are created under `~/.nanite/sandboxes/`.
 
+Placed artifacts from HTTP clients and plugins must name an existing regular
+file under the configured artifacts storage root. Both paths apply the same
+confinement rule, resolve symlinks, and record the file size. Download re-checks
+confinement so a legacy or externally modified row cannot serve an outside file.
+This limits artifact registration; it does not sandbox the plugin process.
+
 ## External data processors
 
 Nanite is not local-only once you configure a model provider. What leaves the

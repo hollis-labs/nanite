@@ -490,6 +490,11 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 
 	sandboxProfile := buildSandboxProfile(deps.SandboxBaseProfile, opts, ws.Root, bootDir)
 	protectedPaths := deps.ControlPlane.protectedFor(append([]string{spawnWorkdir, ws.Root, bootDir, naniteHomeDir()}, deps.CLIWritableRoots...)...)
+	if codexSandboxesItself(selection) {
+		// Codex's own sandbox confines it instead; its writable_roots were
+		// narrowed around these paths when the boot dir was planted.
+		protectedPaths = nil
+	}
 	var sandboxPolicy *sandbox.ResolvedAccessPolicy
 	if isACP && len(protectedPaths) > 0 {
 		policy, policyErr := acpControlPlanePolicy(spawnWorkdir)

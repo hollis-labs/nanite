@@ -61,10 +61,15 @@ lives in the git log.
   files (skills, roles, agents, plugin data) and is unaffected by this
   change. Project-level `./nanite.yaml` is unchanged.
 
-- **On Linux, agent CLIs now run under `bwrap`, with Nanite's own directories
-  read-only** (CW-20261001-0143). Every agent Nanite launches (Claude Code,
-  Codex, OpenCode, Copilot, Pi, natively or over ACP) can no longer write
-  Nanite's config, state or data directories.
+- **On Linux, agents can no longer write Nanite's own config, state or data
+  directories** (CW-20261001-0143).
+  - **Most agents now run under `bwrap`, with those directories read-only:**
+    Claude Code, OpenCode, Copilot and Pi, natively or over ACP.
+  - **Codex is confined by its own `workspace-write` sandbox instead.** That
+    sandbox is a bwrap of its own and cannot run nested inside Nanite's.
+    Its writable roots (the work root, `dev_tools_allowed_paths` and path
+    grants) are narrowed so that none contains a protected directory. A
+    configured root that holds one is replaced by its other subdirectories.
   - **Still writable:** the main database's directory (see
     [`SECURITY.md`](SECURITY.md)) and the worktree root. The rest of the
     host filesystem stays as writable as before.
@@ -72,10 +77,13 @@ lives in the git log.
     - An agent sees only its own processes (a private PID namespace).
     - Setuid programs such as `sudo` refuse to run ("no new privileges").
   - **Requires bubblewrap with unprivileged user namespaces.** Without it,
-    agent launches now fail instead of running unprotected. A missing
-    `bwrap` reports "ProtectedPaths cannot be enforced". Install
-    `bubblewrap`; on Ubuntu its AppArmor profile already permits the user
-    namespace.
+    agent launches now fail instead of running unprotected, and
+    `nanite serve` logs an ERROR at startup. A missing `bwrap` reports
+    "ProtectedPaths cannot be enforced". Install `bubblewrap`; on Ubuntu its
+    AppArmor profile already permits the user namespace.
+  - **`NANITE_SANDBOX_PROTECT=0` turns protection off.** Use it for a host
+    whose sandbox backend misbehaves. While it is off, `nanite serve` logs a
+    warning at startup and `/api/health` lists one under `warnings`.
   - **macOS** is unchanged for now (CW-20261001-0189).
 
 ### Added

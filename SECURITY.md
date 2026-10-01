@@ -74,11 +74,19 @@ from the UI use the same denylist and secret filtering, and the session's
 `yolo` shell mode skips OS isolation.
 
 Agent CLIs that Nanite launches (Claude Code, Codex and the like) run as
-your user. Their own permission systems apply. On Linux, Nanite also runs
-each one under `bwrap` with Nanite's own config, state and data directories
-read-only, so an agent cannot rewrite Nanite's configuration or
-coordination state to grant itself authority. Everything else stays as
-writable as your user can make it. This has limits:
+your user. Their own permission systems apply.
+
+On Linux, Nanite also keeps its own config, state and data directories out
+of agents' reach, so an agent cannot rewrite Nanite's configuration or
+coordination state to grant itself authority:
+- Most agents run under `bwrap` with those directories read-only.
+- Codex runs under its own `workspace-write` sandbox instead, because that
+  sandbox cannot run nested inside Nanite's. Nanite narrows Codex's writable
+  roots so they leave those directories out.
+
+Everything else stays as writable as your user can make it.
+`NANITE_SANDBOX_PROTECT=0` turns this protection off; `/api/health` warns
+while it is off. This has limits:
 
 - **The main database is not protected yet.** Each agent runs its own
   `nanite mcp` server, which opens the database read-write, so the

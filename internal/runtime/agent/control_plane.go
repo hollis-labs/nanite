@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-sandbox/sandbox"
 )
 
@@ -19,7 +20,9 @@ import (
 // host-filesystem profile with those directories read-only, because
 // Nanite's own SandboxProfile carries no ID. An ACP launch needs a resolved
 // policy to merge them into, or the wrapper refuses it, so it gets
-// acpControlPlanePolicy.
+// acpControlPlanePolicy. Native codex is the exception: it runs under its
+// own sandbox, whose writable_roots are narrowed around these directories
+// (codexSandboxesItself, writableRootsAround).
 //
 // The boundary is go-sandbox's: direct writes into a protected directory
 // fail, from the agent and from every process it starts inside the
@@ -27,6 +30,23 @@ import (
 // (`systemd-run --user`, a terminal multiplexer, a host app's API) are not
 // stopped, and neither is persistence planted elsewhere under $HOME that
 // later runs outside the sandbox (a shell rc file, a git hook).
+
+// ProtectEnv is the operator kill switch, the same shape as Torque's
+// TORQUE_SANDBOX_PROTECT and Tether's TETHER_SANDBOX_PROTECT. Protection is
+// on by default; "0", "false", "off" or "no" turns it off, so an operator
+// can launch agents on a host whose sandbox backend misbehaves without
+// rolling Nanite back. cmd/nanite warns loudly at startup and /api/health
+// reports a warning while it is off.
+const ProtectEnv = "NANITE_SANDBOX_PROTECT"
+
+// ProtectionEnabled reports whether ProtectEnv leaves protection on.
+func ProtectionEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(ProtectEnv))) {
+	case "0", "false", "off", "no":
+		return false
+	}
+	return true
+}
 
 // ControlPlane names the directories Nanite's agents must never write.
 type ControlPlane struct {
@@ -56,28 +76,44 @@ func (c ControlPlane) protectedFor(launchWritable ...string) []string {
 	var out []string
 	for _, d := range c.Dirs {
 		if d = realDir(d, false); d != "" {
-			out = protectAround(out, d, writable)
+			out = splitAround(out, d, writable)
 		}
 	}
-	// Sorted, a directory precedes everything inside it, so an entry nested
-	// in one already kept (two overlapping Dirs) is dropped.
-	slices.Sort(out)
-	var kept []string
-	for _, p := range out {
-		if !slices.ContainsFunc(kept, func(k string) bool { return pathWithin(p, k) }) {
-			kept = append(kept, p)
-		}
-	}
-	return kept
+	return outermost(out)
 }
 
-func protectAround(out []string, dir string, writable []string) []string {
+// writableRootsAround narrows writable roots so that none contains a
+// protected directory: a root with a protected directory inside it is
+// replaced by its other child directories, recursively. It is how a codex
+// launch, which Nanite does not wrap (codexSandboxesItself), keeps the
+// control plane out of its own sandbox's writable_roots. Files directly in
+// a narrowed root are no longer writable to the agent.
+func writableRootsAround(roots, protected []string) []string {
+	if len(protected) == 0 {
+		return roots
+	}
+	var out []string
+	for _, r := range roots {
+		resolved := realDir(r, false)
+		if resolved == "" {
+			out = append(out, r) // not created yet: nothing inside it to protect
+			continue
+		}
+		out = splitAround(out, resolved, protected)
+	}
+	return outermost(out)
+}
+
+// splitAround appends dir to out unless an avoid path is dir itself (then
+// nothing) or lies inside it (then dir's child directories, recursively,
+// each judged the same way).
+func splitAround(out []string, dir string, avoid []string) []string {
 	split := false
-	for _, w := range writable {
-		if w == dir {
+	for _, a := range avoid {
+		if a == dir {
 			return out
 		}
-		split = split || pathWithin(w, dir)
+		split = split || pathWithin(a, dir)
 	}
 	if !split {
 		return append(out, dir)
@@ -88,12 +124,25 @@ func protectAround(out []string, dir string, writable []string) []string {
 	}
 	for _, e := range entries {
 		// A symlink is skipped, not followed: its target is not this
-		// directory's to protect.
+		// directory's to judge.
 		if e.IsDir() && e.Type()&os.ModeSymlink == 0 {
-			out = protectAround(out, filepath.Join(dir, e.Name()), writable)
+			out = splitAround(out, filepath.Join(dir, e.Name()), avoid)
 		}
 	}
 	return out
+}
+
+// outermost sorts dirs and drops duplicates and any entry nested inside
+// another. Sorted, a directory precedes everything inside it.
+func outermost(dirs []string) []string {
+	slices.Sort(dirs)
+	var kept []string
+	for _, p := range dirs {
+		if !slices.ContainsFunc(kept, func(k string) bool { return pathWithin(p, k) }) {
+			kept = append(kept, p)
+		}
+	}
+	return kept
 }
 
 // realDir resolves path to its absolute, symlink-free form. A path that does
@@ -140,4 +189,17 @@ func acpControlPlanePolicy(workdir string) (*sandbox.ResolvedAccessPolicy, error
 		return nil, err
 	}
 	return &policy, nil
+}
+
+// codexSandboxesItself reports whether a launch is native codex under its
+// own sandbox, which confines its commands' writes to its cwd, $TMPDIR,
+// /tmp and its writable_roots, narrowed around the control plane
+// (composeBootdirParams). Nanite does not wrap such a launch: codex's
+// sandbox is a bwrap of its own, and inside Nanite's it cannot get the
+// capabilities it needs (Ubuntu's AppArmor unpriv_bwrap profile ends in
+// `audit deny capability`), so every command it runs would fail. A codex
+// with danger-full-access, or over ACP, keeps Nanite's sandbox.
+func codexSandboxesItself(sel RuntimeSelection) bool {
+	return sel.Runtime == runtimes.Codex && !sel.ACP() &&
+		(codexSandboxMode == "workspace-write" || codexSandboxMode == "read-only")
 }

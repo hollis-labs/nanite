@@ -138,6 +138,13 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		Hooks: DefaultBootDirHooks,
 	}
 	params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID, opts.Workdir)
+	if _, codex := layout.(codexLayout); codex && deps != nil {
+		// Codex runs under its own sandbox, not Nanite's
+		// (codexSandboxesItself), so no writable root may contain a
+		// control-plane directory (CW-20261001-0143).
+		params.CLIWritableRoots = writableRootsAround(params.CLIWritableRoots,
+			deps.ControlPlane.protectedFor(params.CLIWritableRoots...))
+	}
 	if deps != nil {
 		params.Skills = deps.Skills
 		params.SkillVendor = deps.SkillVendor

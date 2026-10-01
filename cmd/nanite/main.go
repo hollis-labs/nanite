@@ -1023,6 +1023,7 @@ func cmdServeWithInitializers(
 	if serverErr != nil {
 		return fmt.Errorf("construct HTTP server: %w", serverErr)
 	}
+	srv.SetHealthWarnings(agentProtectionWarnings())
 
 	// Discover, load plugins, and re-discover MCP tools.
 	pluginsDir := discoverAndLoadPlugins(pluginHost, mcpManager, s)

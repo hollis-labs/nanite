@@ -8,6 +8,7 @@ import (
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/go-providers/provider"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
 	"github.com/hollis-labs/go-sandbox/sandbox"
@@ -75,8 +76,8 @@ type Dependencies struct {
 	// When either is nil Boot leaves the wrapper responder nil, retaining the
 	// wrapper's safe default-cancel behavior. This is best-effort provider
 	// cooperation, not a replacement for toolclient/RPC authorization.
-	Permissions         *permission.Engine
-	ApprovalRequestSink func(*permission.ApprovalRequest)
+	Permissions         *permissionlib.Engine
+	ApprovalRequestSink func(*permissionlib.ApprovalRequest)
 
 	// DeveloperMode selects Claude's native developer variant
 	// (--dangerously-skip-permissions) for every native Claude launch.

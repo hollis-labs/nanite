@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/permission"
@@ -923,7 +924,7 @@ func (r *ChatRunner) registerSubagentDerivedRules(childID, parentSessionID strin
 	// For now this leaves subagentRules nil — the derivation reduces to
 	// "forward all parent denies into the child", which is the H1
 	// protection the ticket calls out as the load-bearing requirement.
-	var subagentRules *permission.RuleSet
+	var subagentRules *permissionlib.RuleSet
 	_ = agent // reserved for future profile-rules wiring
 
 	// Child working_dir for resolving any `./` patterns in the subagent's
@@ -935,7 +936,7 @@ func (r *ChatRunner) registerSubagentDerivedRules(childID, parentSessionID strin
 	// (Resolve fast-paths an empty subagent ruleset).
 	childWorkingDir := r.pathGrants.BestSessionDir(childID)
 
-	derived, err := permission.DeriveSubagentRuleSet(permission.DerivationInput{
+	derived, err := permissionlib.DeriveSubagentRuleSet(permissionlib.DerivationInput{
 		Parent:             parentRules,
 		Subagent:           subagentRules,
 		SubagentWorkingDir: childWorkingDir,

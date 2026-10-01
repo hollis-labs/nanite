@@ -8,10 +8,9 @@ import (
 
 	hooks "github.com/hollis-labs/go-hooks"
 	llmtypes "github.com/hollis-labs/go-llm-types"
-
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
-	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/writeclaim"
 )
 
@@ -519,7 +518,7 @@ func TestWriteClaimGuardDeniedToolDoesNotGround(t *testing.T) {
 		{events: doneEvents(claim(returned))},
 		{events: doneEvents("The write was denied; nothing was saved.")},
 	}, &guardTools{})
-	f.svc.permissions = permission.NewEngine(permission.ModePlan, nil)
+	f.svc.permissions = permissionlib.NewEngine(permissionlib.ModePlan, nil)
 	f.run(t, "denied")
 	if got := len(f.provider.requestsSnapshot()); got != 3 {
 		t.Fatalf("requests = %d, want tool turn, claim, correction", got)

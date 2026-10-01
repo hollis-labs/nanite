@@ -37,7 +37,6 @@ require (
 	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/hollis-labs/go-harness-filters v0.1.1 // indirect
-	github.com/hollis-labs/go-permission v0.1.0 // indirect
 	github.com/hollis-labs/go-queue v0.2.1 // indirect
 	github.com/hollis-labs/go-runner v0.8.2 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
@@ -115,6 +114,7 @@ require (
 	github.com/hollis-labs/go-materialize v0.1.0
 	github.com/hollis-labs/go-mcp v0.14.1
 	github.com/hollis-labs/go-messaging v0.7.0
+	github.com/hollis-labs/go-permission v0.1.0
 	github.com/hollis-labs/go-runtime-events v0.2.1
 	github.com/hollis-labs/go-safefs v0.1.0
 	github.com/hollis-labs/go-scheduler v0.3.0

@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-agent-wrapper/acp"
-	"github.com/hollis-labs/nanite/internal/permission"
+	permissionlib "github.com/hollis-labs/go-permission"
 )
 
 func TestBestEffortPermissionResponder_NilDependenciesKeepWrapperDefault(t *testing.T) {
-	engine := permission.NewEngine(permission.ModeDefault, nil)
-	if got := bestEffortPermissionResponder("session", nil, func(*permission.ApprovalRequest) {}); got != nil {
+	engine := permissionlib.NewEngine(permissionlib.ModeDefault, nil)
+	if got := bestEffortPermissionResponder("session", nil, func(*permissionlib.ApprovalRequest) {}); got != nil {
 		t.Fatal("nil engine produced a responder; wrapper safe-cancel default must remain active")
 	}
 	if got := bestEffortPermissionResponder("session", engine, nil); got != nil {
@@ -23,32 +23,32 @@ func TestBestEffortPermissionResponder_NilDependenciesKeepWrapperDefault(t *test
 func TestBestEffortPermissionResponder_UsesNaniteApprovalVocabulary(t *testing.T) {
 	cases := []struct {
 		name         string
-		decision     permission.Decision
-		scope        permission.Scope
+		decision     permissionlib.Decision
+		scope        permissionlib.Scope
 		options      []acp.PermissionOption
 		wantOptionID string
 	}{
 		{
 			name:     "allow once",
-			decision: permission.DecisionAllow, scope: permission.ScopeOnce,
+			decision: permissionlib.DecisionAllow, scope: permissionlib.ScopeOnce,
 			options:      []acp.PermissionOption{{OptionID: "yes-once", Kind: acp.PermissionAllowOnce}},
 			wantOptionID: "yes-once",
 		},
 		{
 			name:     "allow session falls back safely to once",
-			decision: permission.DecisionAllow, scope: permission.ScopeSession,
+			decision: permissionlib.DecisionAllow, scope: permissionlib.ScopeSession,
 			options:      []acp.PermissionOption{{OptionID: "yes-once", Kind: acp.PermissionAllowOnce}},
 			wantOptionID: "yes-once",
 		},
 		{
 			name:     "deny session",
-			decision: permission.DecisionDeny, scope: permission.ScopeSession,
+			decision: permissionlib.DecisionDeny, scope: permissionlib.ScopeSession,
 			options:      []acp.PermissionOption{{OptionID: "no-always", Kind: acp.PermissionRejectAlways}},
 			wantOptionID: "no-always",
 		},
 		{
 			name:     "once decision never broadens",
-			decision: permission.DecisionAllow, scope: permission.ScopeOnce,
+			decision: permissionlib.DecisionAllow, scope: permissionlib.ScopeOnce,
 			options:      []acp.PermissionOption{{OptionID: "yes-always", Kind: acp.PermissionAllowAlways}},
 			wantOptionID: "",
 		},
@@ -56,10 +56,10 @@ func TestBestEffortPermissionResponder_UsesNaniteApprovalVocabulary(t *testing.T
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			engine := permission.NewEngine(permission.ModeDefault, nil)
+			engine := permissionlib.NewEngine(permissionlib.ModeDefault, nil)
 			engine.SetApprovalTimeout(time.Second)
-			emitted := make(chan *permission.ApprovalRequest, 1)
-			responder := bestEffortPermissionResponder("nanite-session", engine, func(req *permission.ApprovalRequest) {
+			emitted := make(chan *permissionlib.ApprovalRequest, 1)
+			responder := bestEffortPermissionResponder("nanite-session", engine, func(req *permissionlib.ApprovalRequest) {
 				emitted <- req
 			})
 
@@ -93,9 +93,9 @@ func TestBestEffortPermissionResponder_UsesNaniteApprovalVocabulary(t *testing.T
 }
 
 func TestBestEffortPermissionResponder_CanceledTurnReturnsZeroSelection(t *testing.T) {
-	engine := permission.NewEngine(permission.ModeDefault, nil)
-	emitted := make(chan *permission.ApprovalRequest, 1)
-	responder := bestEffortPermissionResponder("nanite-session", engine, func(req *permission.ApprovalRequest) {
+	engine := permissionlib.NewEngine(permissionlib.ModeDefault, nil)
+	emitted := make(chan *permissionlib.ApprovalRequest, 1)
+	responder := bestEffortPermissionResponder("nanite-session", engine, func(req *permissionlib.ApprovalRequest) {
 		emitted <- req
 	})
 	ctx, cancel := context.WithCancel(context.Background())

@@ -18,6 +18,7 @@ package service
 //
 // These invariants are documented in internal/context/INVARIANTS.md;
 // each entry there points back to the test name below.
+// Permission visibility exercises go-permission/summary through ContextClient.
 //
 // The test exercises REAL Dispatcher.WithCallerType + Context Broker +
 // Context Service + Anthropic cache_plan assembly. No mocks for the

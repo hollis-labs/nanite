@@ -8,15 +8,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/harnessprofile"
-
 	"github.com/google/uuid"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	"github.com/hollis-labs/go-loopdetect"
 	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/go-providers/provider"
-
-	"github.com/hollis-labs/go-loopdetect"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -24,6 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/filter"
+	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
@@ -142,7 +141,7 @@ type ChatServiceConfig struct {
 	UtilityModel    string
 
 	// Permissions engine — nil-safe (permissions disabled).
-	Permissions *permission.Engine
+	Permissions *permissionlib.Engine
 
 	// PathGrants tracks session-scoped explicit-mention path grants for
 	// the trust-agent permission redesign (CW-20260430-0009). nil-safe.
@@ -254,7 +253,7 @@ type chatServiceImpl struct {
 
 	utilityProvider string
 	utilityModel    string
-	permissions     *permission.Engine
+	permissions     *permissionlib.Engine
 	pathGrants      *permission.PathGrants
 
 	// argValidator caches compiled JSON Schemas for tool InputSchema validation.

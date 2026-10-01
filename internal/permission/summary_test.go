@@ -3,6 +3,9 @@ package permission
 import (
 	"strings"
 	"testing"
+
+	permissionlib "github.com/hollis-labs/go-permission"
+	permissionsummary "github.com/hollis-labs/go-permission/summary"
 )
 
 // TestRenderPermissionSummary_EmptyInputProducesEmptyOutput asserts that an
@@ -10,7 +13,7 @@ import (
 // context_client → SlotPermissions) ships nothing when there's nothing to
 // say. The header alone is not worth burning tokens on.
 func TestRenderPermissionSummary_EmptyInputProducesEmptyOutput(t *testing.T) {
-	out := RenderPermissionSummary(SummaryInput{})
+	out := permissionsummary.RenderPermissionSummary(permissionsummary.SummaryInput{})
 	if out != "" {
 		t.Fatalf("expected empty output for empty input, got:\n%s", out)
 	}
@@ -21,23 +24,23 @@ func TestRenderPermissionSummary_EmptyInputProducesEmptyOutput(t *testing.T) {
 // allow-list + a session grant + an explicit deny rule. Covers ordering
 // (allow before deny), source provenance, and the closing refusal hook.
 func TestRenderPermissionSummary_TypicalChatProfile(t *testing.T) {
-	rs := &RuleSet{
-		Rules: []Rule{
+	rs := &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
 			{
 				Tool:     "dev_read",
 				Pattern:  "/Users/u/secret/**",
-				Behavior: DecisionDeny,
+				Behavior: permissionlib.DecisionDeny,
 				Source:   "profile.yaml",
 			},
 			{
 				Tool:     "dev_edit",
 				Pattern:  "/Users/u/project_a/**",
-				Behavior: DecisionAllow,
+				Behavior: permissionlib.DecisionAllow,
 				Source:   "profile.yaml",
 			},
 		},
 	}
-	in := SummaryInput{
+	in := permissionsummary.SummaryInput{
 		WorkingDir: "/Users/u/project_a",
 		Rules:      rs,
 		AllowedPaths: []string{
@@ -50,7 +53,7 @@ func TestRenderPermissionSummary_TypicalChatProfile(t *testing.T) {
 		SessionScope: "this chat session's scope",
 	}
 
-	out := RenderPermissionSummary(in)
+	out := permissionsummary.RenderPermissionSummary(in)
 
 	mustContain(t, out, "## Path access")
 	mustContain(t, out, "You can READ under (workspace allow-list):")
@@ -76,17 +79,17 @@ func TestRenderPermissionSummary_TypicalChatProfile(t *testing.T) {
 // in the researcher's profile. The summary must SHOW the deny so the
 // agent reads it and refuses instead of fabricating.
 func TestRenderPermissionSummary_ResearcherSubagentWithDeniedPath(t *testing.T) {
-	rs := &RuleSet{
-		Rules: []Rule{
+	rs := &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
 			{
 				Tool:     "dev_read",
 				Pattern:  "/Users/u/Projects-apps/Fragments Engine vFinalIdentity/**",
-				Behavior: DecisionDeny,
+				Behavior: permissionlib.DecisionDeny,
 				Source:   "researcher subagent permissions",
 			},
 		},
 	}
-	in := SummaryInput{
+	in := permissionsummary.SummaryInput{
 		WorkingDir: "/Users/u/Projects-apps/nanite",
 		Rules:      rs,
 		AllowedPaths: []string{
@@ -98,7 +101,7 @@ func TestRenderPermissionSummary_ResearcherSubagentWithDeniedPath(t *testing.T) 
 		SessionScope: "this researcher subagent's scope",
 	}
 
-	out := RenderPermissionSummary(in)
+	out := permissionsummary.RenderPermissionSummary(in)
 
 	mustContain(t, out, "You can READ under (workspace allow-list):")
 	mustContain(t, out, "/Users/u/Projects-apps/nanite/")
@@ -124,18 +127,18 @@ func TestRenderPermissionSummary_ResearcherSubagentWithDeniedPath(t *testing.T) 
 // stability across turns is what keeps the slot in the Anthropic
 // cacheable prefix.
 func TestRenderPermissionSummary_DeterministicOverInputs(t *testing.T) {
-	in := SummaryInput{
+	in := permissionsummary.SummaryInput{
 		WorkingDir: "/Users/u/proj",
-		Rules: &RuleSet{
-			Rules: []Rule{
-				{Tool: "dev_read", Pattern: "/no/**", Behavior: DecisionDeny, Source: "p.yaml"},
+		Rules: &permissionlib.RuleSet{
+			Rules: []permissionlib.Rule{
+				{Tool: "dev_read", Pattern: "/no/**", Behavior: permissionlib.DecisionDeny, Source: "p.yaml"},
 			},
 		},
 		AllowedPaths: []string{"/Users/u/proj"},
 		OwnGrants:    []string{"/Users/u/proj/extra"},
 	}
-	a := RenderPermissionSummary(in)
-	b := RenderPermissionSummary(in)
+	a := permissionsummary.RenderPermissionSummary(in)
+	b := permissionsummary.RenderPermissionSummary(in)
 	if a != b {
 		t.Errorf("non-deterministic output:\nfirst:\n%s\nsecond:\n%s", a, b)
 	}
@@ -147,11 +150,11 @@ func TestRenderPermissionSummary_DeterministicOverInputs(t *testing.T) {
 // regardless of map-iteration order in upstream sources (PathGrants
 // internals use Go maps).
 func TestRenderPermissionSummary_SortStability(t *testing.T) {
-	a := RenderPermissionSummary(SummaryInput{
+	a := permissionsummary.RenderPermissionSummary(permissionsummary.SummaryInput{
 		AllowedPaths: []string{"/b", "/a", "/c"},
 		OwnGrants:    []string{"/x/2", "/x/1"},
 	})
-	b := RenderPermissionSummary(SummaryInput{
+	b := permissionsummary.RenderPermissionSummary(permissionsummary.SummaryInput{
 		AllowedPaths: []string{"/c", "/b", "/a"},
 		OwnGrants:    []string{"/x/1", "/x/2"},
 	})
@@ -165,11 +168,11 @@ func TestRenderPermissionSummary_SortStability(t *testing.T) {
 // from parent" section. Each path appears exactly once in the rendered
 // output, attributed to the most-specific origin (own > parent).
 func TestRenderPermissionSummary_InheritedSuppressedByOwn(t *testing.T) {
-	in := SummaryInput{
+	in := permissionsummary.SummaryInput{
 		OwnGrants:       []string{"/Users/u/shared"},
 		InheritedGrants: []string{"/Users/u/shared", "/Users/u/parent-only"},
 	}
-	out := RenderPermissionSummary(in)
+	out := permissionsummary.RenderPermissionSummary(in)
 	mustContain(t, out, "You have explicit access to (session grants):")
 	mustContain(t, out, "/Users/u/shared")
 	mustContain(t, out, "You inherit these from the parent session:")
@@ -185,12 +188,12 @@ func TestRenderPermissionSummary_InheritedSuppressedByOwn(t *testing.T) {
 // render in their own section so the agent can pre-announce the upcoming
 // approval prompt rather than blindly invoking a tool that will pause.
 func TestRenderPermissionSummary_AskRulesSurface(t *testing.T) {
-	rs := &RuleSet{
-		Rules: []Rule{
-			{Tool: "dev_bash", Pattern: "rm -rf", Behavior: DecisionAsk, Source: "profile.yaml"},
+	rs := &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
+			{Tool: "dev_bash", Pattern: "rm -rf", Behavior: permissionlib.DecisionAsk, Source: "profile.yaml"},
 		},
 	}
-	out := RenderPermissionSummary(SummaryInput{Rules: rs})
+	out := permissionsummary.RenderPermissionSummary(permissionsummary.SummaryInput{Rules: rs})
 	mustContain(t, out, "These will require approval:")
 	mustContain(t, out, "`dev_bash`")
 	mustContain(t, out, "rm -rf")
@@ -200,7 +203,7 @@ func TestRenderPermissionSummary_AskRulesSurface(t *testing.T) {
 // TestRenderPermissionSummary_SessionScopeDefault asserts that an empty
 // SessionScope renders the generic "this session's scope" qualifier.
 func TestRenderPermissionSummary_SessionScopeDefault(t *testing.T) {
-	out := RenderPermissionSummary(SummaryInput{
+	out := permissionsummary.RenderPermissionSummary(permissionsummary.SummaryInput{
 		AllowedPaths: []string{"/x"},
 	})
 	mustContain(t, out, "outside this session's scope")
@@ -210,7 +213,7 @@ func TestRenderPermissionSummary_SessionScopeDefault(t *testing.T) {
 // asserts that the AllowedPaths list gets normalized — trailing separator
 // appended so rows read as directory roots, not ambiguous file paths.
 func TestRenderPermissionSummary_AllowedPathsCleanedAndSeparatorAppended(t *testing.T) {
-	out := RenderPermissionSummary(SummaryInput{
+	out := permissionsummary.RenderPermissionSummary(permissionsummary.SummaryInput{
 		AllowedPaths: []string{"/Users/u/proj", "/Users/u/proj/"},
 	})
 	// Both inputs collapse to a single deduped entry with trailing /
@@ -224,12 +227,12 @@ func TestRenderPermissionSummary_AllowedPathsCleanedAndSeparatorAppended(t *test
 // without a Source tag renders with "unknown source" rather than breaking
 // the bullet shape — keeps the renderer deterministic on partial inputs.
 func TestRenderPermissionSummary_UnknownSourceFallback(t *testing.T) {
-	rs := &RuleSet{
-		Rules: []Rule{
-			{Tool: "dev_read", Pattern: "/x/**", Behavior: DecisionDeny}, // no Source
+	rs := &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
+			{Tool: "dev_read", Pattern: "/x/**", Behavior: permissionlib.DecisionDeny}, // no Source
 		},
 	}
-	out := RenderPermissionSummary(SummaryInput{Rules: rs})
+	out := permissionsummary.RenderPermissionSummary(permissionsummary.SummaryInput{Rules: rs})
 	mustContain(t, out, "(from unknown source)")
 }
 
@@ -294,11 +297,11 @@ func TestListLineageGrants_EmptyOnNoLineage(t *testing.T) {
 // W2/W3 to consume (see W4 implementer report § 7).
 func TestRenderPermissionSummary_W4Integration_ResolvedPatternsRendered(t *testing.T) {
 	workingDir := t.TempDir()
-	rs := &RuleSet{
-		Rules: []Rule{
-			{Tool: "dev_read", Pattern: "./**", Behavior: DecisionAllow, Source: "profile.yaml"},
-			{Tool: "dev_write", Pattern: "./generated/**", Behavior: DecisionAllow, Source: "profile.yaml"},
-			{Tool: "dev_read", Pattern: "/Users/u/secret/**", Behavior: DecisionDeny, Source: "profile.yaml"},
+	rs := &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
+			{Tool: "dev_read", Pattern: "./**", Behavior: permissionlib.DecisionAllow, Source: "profile.yaml"},
+			{Tool: "dev_write", Pattern: "./generated/**", Behavior: permissionlib.DecisionAllow, Source: "profile.yaml"},
+			{Tool: "dev_read", Pattern: "/Users/u/secret/**", Behavior: permissionlib.DecisionDeny, Source: "profile.yaml"},
 		},
 	}
 	resolved, err := rs.Resolve(workingDir)
@@ -306,7 +309,7 @@ func TestRenderPermissionSummary_W4Integration_ResolvedPatternsRendered(t *testi
 		t.Fatalf("RuleSet.Resolve: %v", err)
 	}
 
-	out := RenderPermissionSummary(SummaryInput{
+	out := permissionsummary.RenderPermissionSummary(permissionsummary.SummaryInput{
 		WorkingDir: workingDir,
 		Rules:      resolved,
 	})

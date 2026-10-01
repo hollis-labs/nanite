@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/permission"
+	permissionlib "github.com/hollis-labs/go-permission"
 )
 
 // skipIfNoPython3 skips the test if python3 is not on PATH.
@@ -24,15 +24,15 @@ func skipIfNoPython3(t *testing.T) {
 // allowAllPermChecker approves every tool call unconditionally.
 type allowAllPermChecker struct{}
 
-func (allowAllPermChecker) Check(_ context.Context, _, _ string, _ map[string]any, _ permission.ToolMeta) permission.CheckResult {
-	return permission.CheckResult{Decision: permission.DecisionAllow, Reason: "test: allow all"}
+func (allowAllPermChecker) Check(_ context.Context, _, _ string, _ map[string]any, _ permissionlib.ToolMeta) permissionlib.CheckResult {
+	return permissionlib.CheckResult{Decision: permissionlib.DecisionAllow, Reason: "test: allow all"}
 }
 
 // denyAllPermChecker denies every tool call.
 type denyAllPermChecker struct{}
 
-func (denyAllPermChecker) Check(_ context.Context, _, toolName string, _ map[string]any, _ permission.ToolMeta) permission.CheckResult {
-	return permission.CheckResult{Decision: permission.DecisionDeny, Reason: "test: deny all"}
+func (denyAllPermChecker) Check(_ context.Context, _, toolName string, _ map[string]any, _ permissionlib.ToolMeta) permissionlib.CheckResult {
+	return permissionlib.CheckResult{Decision: permissionlib.DecisionDeny, Reason: "test: deny all"}
 }
 
 // stubDispatcher is a simple in-memory dispatcher for pilot tests.

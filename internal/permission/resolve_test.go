@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	permissionlib "github.com/hollis-labs/go-permission"
 )
 
 // TestResolve_globPatternPerSession is the acceptance criterion from
@@ -16,9 +18,9 @@ func TestResolve_globPatternPerSession(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()
 
-	profile := &RuleSet{
-		Rules: []Rule{
-			{Tool: "dev_read", Pattern: "./**", Behavior: DecisionAllow},
+	profile := &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
+			{Tool: "dev_read", Pattern: "./**", Behavior: permissionlib.DecisionAllow},
 		},
 	}
 
@@ -31,8 +33,8 @@ func TestResolve_globPatternPerSession(t *testing.T) {
 		t.Fatalf("resolve for session B: %v", err)
 	}
 
-	canonicalA, _ := canonicalizeWorkingDir(dirA)
-	canonicalB, _ := canonicalizeWorkingDir(dirB)
+	canonicalA, _ := filepath.EvalSymlinks(dirA)
+	canonicalB, _ := filepath.EvalSymlinks(dirB)
 
 	wantA := filepath.Join(canonicalA, "**")
 	wantB := filepath.Join(canonicalB, "**")
@@ -58,9 +60,9 @@ func TestResolve_globPatternPerSession(t *testing.T) {
 func TestResolve_subdirGlob(t *testing.T) {
 	dir := t.TempDir()
 
-	rs := &RuleSet{
-		Rules: []Rule{
-			{Tool: "dev_write", Pattern: "./generated/**", Behavior: DecisionAllow},
+	rs := &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
+			{Tool: "dev_write", Pattern: "./generated/**", Behavior: permissionlib.DecisionAllow},
 		},
 	}
 
@@ -69,7 +71,7 @@ func TestResolve_subdirGlob(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 
-	canonical, _ := canonicalizeWorkingDir(dir)
+	canonical, _ := filepath.EvalSymlinks(dir)
 	want := filepath.Join(canonical, "generated") + string(filepath.Separator) + "**"
 	if resolved.Rules[0].Pattern != want {
 		t.Errorf("got %q, want %q", resolved.Rules[0].Pattern, want)
@@ -82,14 +84,14 @@ func TestResolve_subdirGlob(t *testing.T) {
 func TestResolve_absolutePatternsUntouched(t *testing.T) {
 	dir := t.TempDir()
 
-	rs := &RuleSet{
-		Rules: []Rule{
-			{Tool: "dev_read", Pattern: "/Users/someone/elsewhere/**", Behavior: DecisionAllow},
-			{Tool: "dev_edit", Pattern: "/srv/data/file.txt", Behavior: DecisionAllow},
+	rs := &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{
+			{Tool: "dev_read", Pattern: "/Users/someone/elsewhere/**", Behavior: permissionlib.DecisionAllow},
+			{Tool: "dev_edit", Pattern: "/srv/data/file.txt", Behavior: permissionlib.DecisionAllow},
 			// Shell command substring — not a path pattern at all; must pass through.
-			{Tool: "shell", Pattern: "rm -rf", Behavior: DecisionDeny},
+			{Tool: "shell", Pattern: "rm -rf", Behavior: permissionlib.DecisionDeny},
 			// Bare tool-name glob with empty Pattern; nothing to resolve.
-			{Tool: "memory_*", Pattern: "", Behavior: DecisionAllow},
+			{Tool: "memory_*", Pattern: "", Behavior: permissionlib.DecisionAllow},
 		},
 	}
 
@@ -125,14 +127,14 @@ func TestResolve_traversalRejected(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rs := &RuleSet{Rules: []Rule{
-				{Tool: "dev_read", Pattern: tc.pattern, Behavior: DecisionAllow},
+			rs := &permissionlib.RuleSet{Rules: []permissionlib.Rule{
+				{Tool: "dev_read", Pattern: tc.pattern, Behavior: permissionlib.DecisionAllow},
 			}}
 			_, err := rs.Resolve(dir)
 			if err == nil {
 				t.Fatalf("expected ErrPatternEscapesWorkingDir for pattern %q, got nil", tc.pattern)
 			}
-			if !errors.Is(err, ErrPatternEscapesWorkingDir) {
+			if !errors.Is(err, permissionlib.ErrPatternEscapesWorkingDir) {
 				t.Errorf("pattern %q: error %v is not ErrPatternEscapesWorkingDir", tc.pattern, err)
 			}
 		})
@@ -164,8 +166,8 @@ func TestResolve_symlinkCanonicalization(t *testing.T) {
 		t.Fatalf("create symlink: %v", err)
 	}
 
-	rs := &RuleSet{Rules: []Rule{
-		{Tool: "dev_read", Pattern: "./**", Behavior: DecisionAllow},
+	rs := &permissionlib.RuleSet{Rules: []permissionlib.Rule{
+		{Tool: "dev_read", Pattern: "./**", Behavior: permissionlib.DecisionAllow},
 	}}
 
 	resolved, err := rs.Resolve(linkPath)
@@ -187,14 +189,14 @@ func TestResolve_symlinkCanonicalization(t *testing.T) {
 // working_dir would otherwise resolve `./**` to `/`, granting the agent
 // the whole filesystem.
 func TestResolve_emptyWorkingDirRejected(t *testing.T) {
-	rs := &RuleSet{Rules: []Rule{
-		{Tool: "dev_read", Pattern: "./**", Behavior: DecisionAllow},
+	rs := &permissionlib.RuleSet{Rules: []permissionlib.Rule{
+		{Tool: "dev_read", Pattern: "./**", Behavior: permissionlib.DecisionAllow},
 	}}
 	_, err := rs.Resolve("")
 	if err == nil {
 		t.Fatal("expected ErrEmptyWorkingDir, got nil")
 	}
-	if !errors.Is(err, ErrEmptyWorkingDir) {
+	if !errors.Is(err, permissionlib.ErrEmptyWorkingDir) {
 		t.Errorf("got %v, want ErrEmptyWorkingDir", err)
 	}
 }
@@ -203,9 +205,9 @@ func TestResolve_emptyWorkingDirRejected(t *testing.T) {
 // promise: if no rule uses `./`, the resolver tolerates an empty
 // working_dir (it has nothing to do).
 func TestResolve_emptyWorkingDirOKWhenNoRelative(t *testing.T) {
-	rs := &RuleSet{Rules: []Rule{
-		{Tool: "dev_read", Pattern: "/abs/path/**", Behavior: DecisionAllow},
-		{Tool: "shell", Pattern: "rm", Behavior: DecisionDeny},
+	rs := &permissionlib.RuleSet{Rules: []permissionlib.Rule{
+		{Tool: "dev_read", Pattern: "/abs/path/**", Behavior: permissionlib.DecisionAllow},
+		{Tool: "shell", Pattern: "rm", Behavior: permissionlib.DecisionDeny},
 	}}
 	resolved, err := rs.Resolve("")
 	if err != nil {
@@ -218,7 +220,7 @@ func TestResolve_emptyWorkingDirOKWhenNoRelative(t *testing.T) {
 
 // TestResolve_nilRuleSet exercises the nil-safe path.
 func TestResolve_nilRuleSet(t *testing.T) {
-	var rs *RuleSet
+	var rs *permissionlib.RuleSet
 	resolved, err := rs.Resolve("/tmp")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
@@ -233,13 +235,13 @@ func TestResolve_nilRuleSet(t *testing.T) {
 // working_dir itself with no glob suffix.
 func TestResolve_dotAloneResolvesToWorkingDir(t *testing.T) {
 	dir := t.TempDir()
-	canonical, _ := canonicalizeWorkingDir(dir)
+	canonical, _ := filepath.EvalSymlinks(dir)
 
 	cases := []string{".", "./"}
 	for _, pattern := range cases {
 		t.Run(pattern, func(t *testing.T) {
-			rs := &RuleSet{Rules: []Rule{
-				{Tool: "dev_read", Pattern: pattern, Behavior: DecisionAllow},
+			rs := &permissionlib.RuleSet{Rules: []permissionlib.Rule{
+				{Tool: "dev_read", Pattern: pattern, Behavior: permissionlib.DecisionAllow},
 			}}
 			resolved, err := rs.Resolve(dir)
 			if err != nil {
@@ -258,19 +260,19 @@ func TestResolve_dotAloneResolvesToWorkingDir(t *testing.T) {
 // trace a resolved pattern back to its origin.
 func TestResolve_preservesModeAndSource(t *testing.T) {
 	dir := t.TempDir()
-	rs := &RuleSet{
-		Mode: ModeAcceptEdits,
-		Rules: []Rule{
-			{Tool: "dev_read", Pattern: "./**", Behavior: DecisionAllow, Source: "test:profile.yaml"},
-			{Tool: "dev_edit", Pattern: "/abs/**", Behavior: DecisionAllow, Source: "test:profile.yaml"},
+	rs := &permissionlib.RuleSet{
+		Mode: permissionlib.ModeAcceptEdits,
+		Rules: []permissionlib.Rule{
+			{Tool: "dev_read", Pattern: "./**", Behavior: permissionlib.DecisionAllow, Source: "test:profile.yaml"},
+			{Tool: "dev_edit", Pattern: "/abs/**", Behavior: permissionlib.DecisionAllow, Source: "test:profile.yaml"},
 		},
 	}
 	resolved, err := rs.Resolve(dir)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if resolved.Mode != ModeAcceptEdits {
-		t.Errorf("mode lost: got %s, want %s", resolved.Mode, ModeAcceptEdits)
+	if resolved.Mode != permissionlib.ModeAcceptEdits {
+		t.Errorf("mode lost: got %s, want %s", resolved.Mode, permissionlib.ModeAcceptEdits)
 	}
 	for i := range resolved.Rules {
 		if resolved.Rules[i].Source != "test:profile.yaml" {
@@ -284,9 +286,9 @@ func TestResolve_preservesModeAndSource(t *testing.T) {
 // from a YAML decoder).
 func TestResolvePattern_singleRule(t *testing.T) {
 	dir := t.TempDir()
-	canonical, _ := canonicalizeWorkingDir(dir)
+	canonical, _ := filepath.EvalSymlinks(dir)
 
-	in := Rule{Tool: "dev_read", Pattern: "./src/**", Behavior: DecisionAllow}
+	in := permissionlib.Rule{Tool: "dev_read", Pattern: "./src/**", Behavior: permissionlib.DecisionAllow}
 	out, err := in.ResolvePattern(canonical)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -306,20 +308,20 @@ func TestResolvePattern_singleRule(t *testing.T) {
 func TestHasWorkspaceRelative(t *testing.T) {
 	cases := []struct {
 		name string
-		rs   *RuleSet
+		rs   *permissionlib.RuleSet
 		want bool
 	}{
 		{"nil", nil, false},
-		{"empty", &RuleSet{}, false},
-		{"all absolute", &RuleSet{Rules: []Rule{
+		{"empty", &permissionlib.RuleSet{}, false},
+		{"all absolute", &permissionlib.RuleSet{Rules: []permissionlib.Rule{
 			{Pattern: "/abs/**"},
 			{Pattern: ""},
 		}}, false},
-		{"one relative", &RuleSet{Rules: []Rule{
+		{"one relative", &permissionlib.RuleSet{Rules: []permissionlib.Rule{
 			{Pattern: "/abs/**"},
 			{Pattern: "./**"},
 		}}, true},
-		{"dot alone", &RuleSet{Rules: []Rule{
+		{"dot alone", &permissionlib.RuleSet{Rules: []permissionlib.Rule{
 			{Pattern: "."},
 		}}, true},
 	}
@@ -334,27 +336,3 @@ func TestHasWorkspaceRelative(t *testing.T) {
 
 // TestSplitGlob exercises the literal/glob split that underpins the
 // containment check for `./` patterns.
-func TestSplitGlob(t *testing.T) {
-	cases := []struct {
-		in             string
-		wantLiteral    string
-		wantGlobSuffix string
-	}{
-		{"", "", ""},
-		{"**", "", "**"},
-		{"generated/**", "generated", "**"},
-		{"generated/foo.go", "generated/foo.go", ""},
-		{"src/*.go", "src", "*.go"},
-		{"deep/nested/path/*.md", "deep/nested/path", "*.md"},
-		{"a/b/[abc]*", "a/b", "[abc]*"},
-		{"foo?bar", "", "foo?bar"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			lit, glob := splitGlob(tc.in)
-			if lit != tc.wantLiteral || glob != tc.wantGlobSuffix {
-				t.Errorf("got (%q, %q), want (%q, %q)", lit, glob, tc.wantLiteral, tc.wantGlobSuffix)
-			}
-		})
-	}
-}

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/permission"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 )
 
@@ -19,7 +19,7 @@ func TestBuildAgentDependencies_ACPApprovalUsesExistingSessionStream(t *testing.
 		t.Fatal("message stream not found")
 	}
 
-	engine := permission.NewEngine(permission.ModeDefault, nil)
+	engine := permissionlib.NewEngine(permissionlib.ModeDefault, nil)
 	bundle, err := BuildAgentDependencies(AgentDepsConfig{
 		Store:       newConfigTestStore(t),
 		Streams:     streams,
@@ -35,7 +35,7 @@ func TestBuildAgentDependencies_ACPApprovalUsesExistingSessionStream(t *testing.
 
 	req := engine.RequestApproval("session-1", "shell", map[string]any{"command": "pwd"}, "provider requested permission")
 	t.Cleanup(func() {
-		engine.Respond(req.ID, permission.DecisionDeny, permission.ScopeOnce, "session-1")
+		engine.Respond(req.ID, permissionlib.DecisionDeny, permissionlib.ScopeOnce, "session-1")
 		_ = engine.WaitForApproval(t.Context(), req)
 	})
 	bundle.Deps.ApprovalRequestSink(req)

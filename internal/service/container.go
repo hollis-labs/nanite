@@ -13,18 +13,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/harnessprofile"
-
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/tesseract"
-
 	embedcontracts "github.com/hollis-labs/go-embed-contracts"
+	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/go-loopdetect"
 	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/go-providers/provider"
 	gosched "github.com/hollis-labs/go-scheduler"
-
-	"github.com/hollis-labs/go-loopdetect"
 	"github.com/hollis-labs/go-worktree"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
@@ -39,6 +35,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/elicitation"
 	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/filter"
+	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/mcp"
@@ -68,6 +65,7 @@ import (
 	workflowapi "github.com/hollis-labs/nanite/internal/workflowapi"
 	"github.com/hollis-labs/nanite/internal/workspace"
 	"github.com/hollis-labs/nanite/pkg/models"
+	"github.com/hollis-labs/tesseract"
 )
 
 // Container holds all service instances and shared subsystems. It is the
@@ -268,7 +266,7 @@ type Container struct {
 	ModelSelector *provider.StaticModelSelector
 
 	// Permissions is the per-invocation permission engine. nil = permissions disabled.
-	Permissions *permission.Engine
+	Permissions *permissionlib.Engine
 
 	// PathGrants tracks session-scoped explicit-mention path grants for
 	// the trust-agent permission redesign (CW-20260430-0009). Always
@@ -1031,9 +1029,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	// Permission engine. Yolo mode when developer_mode=1 so dev-mode sessions
 	// never hit approval prompts.
-	permissions := permission.NewEngine(permission.ModeDefault, nil)
+	permissions := permissionlib.NewEngine(permissionlib.ModeDefault, nil,
+		permissionlib.WithFileEditTools("dev_edit", "dev_write"),
+		permissionlib.WithAuditor(permissionlib.SlogAuditor{}),
+	)
 	if us, err := cfg.Store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err == nil && us.DeveloperMode {
-		permissions.SetMode(permission.ModeYolo)
+		permissions.SetMode(permissionlib.ModeYolo)
 	}
 
 	// (pathGrants is constructed earlier and shared with ContextClient so the

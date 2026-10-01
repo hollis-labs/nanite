@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -118,8 +118,8 @@ func TestPythonRunProductionCollaborators(t *testing.T) {
 			},
 		}
 		transport := &selftools.SelfToolsTransport{
-			PythonPermChecker: permission.NewEngine(permission.ModeDefault, &permission.RuleSet{
-				Rules: []permission.Rule{{Tool: "blocked_tool", Behavior: permission.DecisionDeny}},
+			PythonPermChecker: permissionlib.NewEngine(permissionlib.ModeDefault, &permissionlib.RuleSet{
+				Rules: []permissionlib.Rule{{Tool: "blocked_tool", Behavior: permissionlib.DecisionDeny}},
 			}),
 			PythonDispatcher: NewPythonToolDispatcher(tools),
 		}
@@ -167,7 +167,7 @@ except RuntimeError as exc:
 			},
 		}
 		transport := &selftools.SelfToolsTransport{
-			PythonPermChecker: permission.NewEngine(permission.ModeDefault, nil),
+			PythonPermChecker: permissionlib.NewEngine(permissionlib.ModeDefault, nil),
 			PythonDispatcher:  NewPythonToolDispatcher(tools),
 		}
 

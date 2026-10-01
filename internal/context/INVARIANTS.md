@@ -242,7 +242,7 @@ inheritance (W3 / CW-20260512-0119) is pinned by
 `internal/service/subagent_runner_derivation_test.go`.
 
 **Relied on by.** `internal/chat/context_client.go::buildPermissionsSlotContent`
-(renderer); `internal/permission/summary.go::RenderPermissionSummary`
+(renderer); `RenderPermissionSummary` in `go-permission/summary`
 (human-readable projection); the universal-rules block's refusal hook
 (in `internal/chat/universal_rules.go`) which cites the
 SlotPermissions content.

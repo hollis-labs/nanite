@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/permission"
 )
 
 // pythonSandboxDefaultTimeLimitSec is the default CPU/wall-clock cap.
@@ -43,7 +43,7 @@ const pythonSandboxMaxTracebackLines = 20
 // validate tool-call requests originating from inside the Python sandbox.
 // The production wiring passes *permission.Engine; tests can stub it.
 type PythonPermissionChecker interface {
-	Check(ctx context.Context, sessionID, toolName string, input map[string]any, meta permission.ToolMeta) permission.CheckResult
+	Check(ctx context.Context, sessionID, toolName string, input map[string]any, meta permissionlib.ToolMeta) permissionlib.CheckResult
 }
 
 // PythonToolDispatcher executes a single tool call on behalf of the sandbox
@@ -452,10 +452,10 @@ func pumpToolCalls(
 		resp.ID = req.ID
 
 		if perm != nil {
-			checkResult := perm.Check(ctx, sessionID, req.Name, req.Args, permission.ToolMeta{
+			checkResult := perm.Check(ctx, sessionID, req.Name, req.Args, permissionlib.ToolMeta{
 				IsReadOnly: false, // conservative: sandbox calls are treated as non-read-only
 			})
-			if checkResult.Decision == permission.DecisionDeny {
+			if checkResult.Decision == permissionlib.DecisionDeny {
 				resp.Error = fmt.Sprintf("permission denied for tool %q: %s", req.Name, checkResult.Reason)
 				mu.Lock()
 				*log = append(*log, PythonToolCallLog{Name: req.Name, Status: "denied"})

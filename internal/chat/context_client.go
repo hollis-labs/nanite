@@ -8,14 +8,15 @@ import (
 	"strings"
 	"time"
 
-	feotel "github.com/hollis-labs/go-otel"
-	"go.opentelemetry.io/otel/attribute"
-
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	feotel "github.com/hollis-labs/go-otel"
+	permissionlib "github.com/hollis-labs/go-permission"
+	permissionsummary "github.com/hollis-labs/go-permission/summary"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
 	wsutil "github.com/hollis-labs/nanite/internal/workspace"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // DefaultBudgetPct is the default fraction of the context window to use.
@@ -440,12 +441,12 @@ func (cb *ContextClient) buildPermissionsSlotContent(session *store.Session, age
 	// For top-level chat sessions that haven't been registered with a
 	// per-session ruleset, LookupDerivedRules returns nil and the
 	// renderer skips the rule-list sections naturally.
-	var resolvedRules *permission.RuleSet
+	var resolvedRules *permissionlib.RuleSet
 	if cb.PathGrants != nil {
 		resolvedRules = cb.PathGrants.LookupDerivedRules(session.ID)
 	}
 
-	return permission.RenderPermissionSummary(permission.SummaryInput{
+	return permissionsummary.RenderPermissionSummary(permissionsummary.SummaryInput{
 		Rules:           resolvedRules,
 		AllowedPaths:    cb.DevToolsAllowedPaths,
 		OwnGrants:       ownGrants,

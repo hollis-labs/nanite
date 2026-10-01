@@ -60,7 +60,7 @@ func Isolate() (cleanup func(), err error) {
 		return nil, fmt.Errorf("resolve real home: %w", err)
 	}
 	realHome = home
-	if err := pinGoToolchain(home); err != nil {
+	if err = pinGoToolchain(home); err != nil {
 		return nil, err
 	}
 

@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/hollis-labs/nanite/internal/fsutil"
+	"github.com/hollis-labs/go-safefs/atomicfile"
 )
 
 // loadProjectConfig reads and parses the project's .nanite/config.yaml
@@ -100,7 +100,7 @@ func writeYAMLBack(path string, root *yaml.Node) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	if err := fsutil.AtomicWriteFile(path, out, 0o644); err != nil {
+	if err := atomicfile.WriteFile(path, out, 0o644); err != nil {
 		return fmt.Errorf("write config %s: %w", path, err)
 	}
 	return nil

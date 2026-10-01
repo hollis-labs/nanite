@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hollis-labs/go-safefs/atomicfile"
 	"github.com/hollis-labs/nanite/internal/agent"
-	"github.com/hollis-labs/nanite/internal/fsutil"
 )
 
 const reviewerSubagent = `---
@@ -23,7 +23,7 @@ func writeFile(t *testing.T, path, body string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := fsutil.AtomicWriteFile(path, []byte(body), 0o600); err != nil {
+	if err := atomicfile.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }

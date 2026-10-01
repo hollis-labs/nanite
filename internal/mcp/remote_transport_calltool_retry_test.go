@@ -10,7 +10,7 @@ import (
 	"time"
 
 	gmcpclient "github.com/hollis-labs/go-mcp/client"
-	"github.com/hollis-labs/nanite/internal/pathsafe"
+	"github.com/hollis-labs/go-safefs/pathsafe"
 )
 
 // TestIsProvablyUnsent pins the exact classifier CallTool's retry gate

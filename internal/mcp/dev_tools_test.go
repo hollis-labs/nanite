@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/pathsafe"
+	"github.com/hollis-labs/go-safefs/pathsafe"
 )
 
 // skipIfNoOSSandbox skips a test on Linux when bwrap is unavailable and the

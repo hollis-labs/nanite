@@ -93,7 +93,7 @@ func (a *agentBootDirAdapter) Untrack(sessionID string) {
 // per-session sandbox dir (CLAUDE.md / agent-context.md /
 // envelope-schema.md / .mcp.json + provider-specific files) by
 // dispatching to the per-provider Layout.Populate against the existing
-// bootDir. Idempotent — Layout.Populate uses fsutil.AtomicWriteFile +
+// bootDir. Idempotent — Layout.Populate uses atomicfile.WriteFile +
 // os.MkdirAll throughout.
 //
 // Returns an error when sessionID is unknown (no Track entry — broker

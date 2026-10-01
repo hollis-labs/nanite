@@ -257,10 +257,12 @@ func TestPathGrants_TildeExpansion_NoHOME(t *testing.T) {
 	if !g.IsPathAllowed("c127", expanded) {
 		t.Errorf("IsPathAllowed(c127, %q) = false; ListGrants = %v", expanded, g.ListGrants("c127"))
 	}
-	// Parent-dir grant: the home directory itself should be reachable,
-	// matching Q2 of the locked design.
-	if !g.IsPathAllowed("c127", home) {
-		t.Errorf("IsPathAllowed(c127, %q) = false; parent-dir grant missing", home)
+	// Q2 would also grant the parent directory, here $HOME itself. Since
+	// CW-20261001-0232 a parent that is an ancestor of a sensitive path (~/.ssh,
+	// ~/.gnupg, ...) is refused, so mentioning something in $HOME no longer
+	// grants all of $HOME. The mentioned path itself stays granted.
+	if g.IsPathAllowed("c127", home) {
+		t.Errorf("IsPathAllowed(c127, %q) = true; the home directory must not be granted as a mention's parent", home)
 	}
 }
 

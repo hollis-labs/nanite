@@ -54,8 +54,8 @@ type ControlPlane struct {
 	// Missing entries are skipped; protection covers what exists at launch.
 	Dirs []string
 	// Writable are directories inside Dirs that agents must still write:
-	// the main database's directory (the agent's own `nanite mcp`
-	// subprocess opens it) and the worktree root agents work in.
+	// the worktree root agents work in. The main database's directory is not
+	// one: no agent process opens the database any more (CW-20261001-0188).
 	Writable []string
 }
 

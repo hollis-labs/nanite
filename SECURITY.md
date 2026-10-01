@@ -84,15 +84,33 @@ coordination state to grant itself authority:
   sandbox cannot run nested inside Nanite's. Nanite narrows Codex's writable
   roots so they leave those directories out.
 
+**Paths named in a message.** A path mentioned in a chat turn ("edit
+`~/proj/main.go`") grants the in-process `dev_*` tools access to it for that
+session, and to its parent directory. The text of a turn is not proof that a
+person wrote it, since any local client of the loopback API can post one, so:
+such a grant never reaches an agent CLI's writable roots (those come from the
+work root, `dev_tools_allowed_paths` and your configuration), only a chat turn
+mints one, and it is refused when it would cover a sensitive path (`~/.ssh`,
+`~/.gnupg`, `~/.codex`, `~/.claude*`, `~/.local/bin`, the systemd user
+directory, Nanite's and its sibling apps' state) or anything outside `$HOME`
+and `dev_tools_allowed_paths` (CW-20261001-0232).
+`NANITE_PATH_MENTION_LAUNCH_ROOTS=1` restores the old behavior of folding
+these grants into launch roots; leave it off.
+
 Everything else stays as writable as your user can make it.
 `NANITE_SANDBOX_PROTECT=0` turns this protection off; `/api/health` warns
 while it is off. This has limits:
 
-- **The main database is not protected yet.** Each agent runs its own
-  `nanite mcp` server, which opens the database read-write, so the
-  database's directory stays writable to agents. An agent can still write
-  the database directly, including its permissions and approvals
-  (CW-20261001-0188).
+- **The main database is protected with them.** Its directory is read-only
+  to agents, so an agent cannot write the database directly, including its
+  permissions and approvals. That holds for a database outside Nanite's
+  own directories (`--db`, `NANITE_DB_PATH`) too, unless its directory is
+  `/` or contains your home directory, which Nanite will not make read-only.
+  Each agent's `nanite mcp` forwards its tool calls to the running server
+  and opens no database (CW-20261001-0188). A user-level MCP server of your
+  own that opens the database is no longer loaded into a Claude agent
+  (CW-20261001-0221), but OpenCode still loads `~/.config/opencode`
+  (CW-20261001-0239).
 - **Only direct writes are stopped.** Protection does not stop an agent from
   asking another process running as your user, outside the sandbox, to
   write for it (for example `systemd-run --user`, a terminal multiplexer, or
@@ -100,8 +118,8 @@ while it is off. This has limits:
   your home directory that later runs outside the sandbox, such as a shell
   rc file or a git hook.
 - **Only directories are protected.** Where a protected directory has to
-  stay writable underneath (the database's directory, the worktrees root),
-  Nanite protects the sibling directories instead. A loose file sitting
+  stay writable underneath (the worktrees root), Nanite protects the sibling
+  directories instead. A loose file sitting
   directly in such a parent stays writable.
 - **A launch's own work directory is not protected.** It comes from the
   session's or project's configuration, and an agent cannot choose it; one

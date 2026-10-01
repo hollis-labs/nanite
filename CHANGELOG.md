@@ -67,15 +67,15 @@ lives in the git log.
     Claude Code, OpenCode, Copilot and Pi, natively or over ACP.
   - **Codex is confined by its own `workspace-write` sandbox instead.** That
     sandbox is a bwrap of its own and cannot run nested inside Nanite's.
-    Its writable roots (the work root, `dev_tools_allowed_paths` and path
-    grants) are filtered so that none offers a protected directory:
-    - A root that is, or is inside, one is dropped. That includes a path a
-      chat message names, which grants that path and its parent directory.
+    Its writable roots (the work root and `dev_tools_allowed_paths`; path
+    grants only with `NANITE_PATH_MENTION_LAUNCH_ROOTS=1`) are filtered so
+    that none offers a protected directory:
+    - A root that is, or is inside, one is dropped.
     - A root that holds one is replaced by its other subdirectories.
     Claude's `additionalDirectories` drop the same roots.
-  - **Still writable:** the main database's directory (see
-    [`SECURITY.md`](SECURITY.md)) and the worktree root. The rest of the
-    host filesystem stays as writable as before.
+  - **Still writable:** the worktree root. The rest of the host filesystem
+    stays as writable as before. The main database's directory is read-only
+    to agents too (CW-20261001-0188; see [`SECURITY.md`](SECURITY.md)).
   - **What agents notice:**
     - An agent sees only its own processes (a private PID namespace).
     - Setuid programs such as `sudo` refuse to run ("no new privileges").
@@ -88,6 +88,36 @@ lives in the git log.
     whose sandbox backend misbehaves. While it is off, `nanite serve` logs a
     warning at startup and `/api/health` lists one under `warnings`.
   - **macOS** is unchanged for now (CW-20261001-0189).
+
+- **A path named in a message no longer lets a launched agent write there**
+  (CW-20261001-0232). Naming a path such as `~/.ssh` or `/etc` in a turn's
+  text used to register a session path grant, and those grants were added to
+  the writable roots of the Codex and Claude launches (Codex's
+  `writable_roots`, Claude's `additionalDirectories`). Any local client of the
+  unauthenticated loopback API could post such a turn. Now:
+  - **Launch roots come only from configuration:** the work root,
+    `dev_tools_allowed_paths` and operator or profile config. Path grants no
+    longer feed them, and neither do a subagent's inherited grants. A root
+    that is not an existing directory is dropped, because a missing writable
+    root made every Codex command of the turn fail.
+  - **Path grants are for the in-process `dev_*` tools only,** and only a
+    chat turn mints them. A durable agent's wake or a subagent's turn mints
+    none.
+  - **A mention is refused as a grant** when its real path (symlinks
+    resolved) is, is inside, or is a parent of a sensitive path: `~/.ssh`,
+    `~/.gnupg`, `~/.codex`, `~/.claude*`, `~/.local/bin`, the systemd and
+    autostart user directories, `~/.aws`, `~/.kube`, `~/.docker`, `~/.netrc`,
+    the shell startup files, the Nanite, Torque, Tether, Tesseract, Hadron,
+    Tangent and fragments-engine config, data and state directories, and this
+    instance's own directories. Because a mention also grants its parent
+    directory, a mention of `~/notes.txt` no longer grants `$HOME`, one of
+    `~/.config/app.toml` no longer grants `~/.config`, and one of `/tmp` no
+    longer grants `/`. It is also refused when its real path is outside `$HOME`
+    and `dev_tools_allowed_paths`.
+  - **`NANITE_PATH_MENTION_LAUNCH_ROOTS=1` restores the old fold** of path
+    grants into launch roots, for an operator who relied on it. It is off by
+    default, `nanite serve` logs a warning at startup while it is on, and the
+    refusals above still apply to the grants it folds in.
 
 ### Added
 

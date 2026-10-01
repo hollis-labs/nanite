@@ -75,6 +75,10 @@ type PathGrants struct {
 	// Mutex-guarded together with grants + lineage because the natural
 	// lifetime boundary is identical — spawn registers, defer clears.
 	derivedRules map[string]*RuleSet
+	// mention bounds which free-text mentions may become grants
+	// (CW-20261001-0232). Nil applies only the built-in sensitive-path
+	// denylist. Guarded by mu.
+	mention *MentionPolicy
 }
 
 // NewPathGrants returns an empty grant store.
@@ -103,12 +107,24 @@ func NewPathGrants() *PathGrants {
 // on every dev_* call so a bogus grant cannot bypass traversal
 // protection.
 func (g *PathGrants) RegisterFromUserMessage(sessionID, message string) []string {
+	granted, _ := g.RegisterMentions(sessionID, message)
+	return granted
+}
+
+// RegisterMentions is RegisterFromUserMessage that also reports the
+// mentioned paths it refused (CW-20261001-0232). A mention is refused when
+// the policy forbids it (path_mention_policy.go): a sensitive path, an
+// ancestor of one, or, when the policy confines, a path outside $HOME and the
+// allowed bases. The literal path and its parent are judged separately, so a
+// refused parent leaves a permitted literal granted. refused holds the
+// refused paths themselves, for a count in a log, not for display.
+func (g *PathGrants) RegisterMentions(sessionID, message string) (granted, refused []string) {
 	if g == nil || sessionID == "" || message == "" {
-		return nil
+		return nil, nil
 	}
 	mentions := ExtractPathMentions(message)
 	if len(mentions) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	cleaned := make([]string, 0, len(mentions)*2)
@@ -130,11 +146,15 @@ func (g *PathGrants) RegisterFromUserMessage(sessionID, message string) []string
 				continue
 			}
 			seen[p] = struct{}{}
+			if g.mentionRefusal(p) != "" {
+				refused = append(refused, p)
+				continue
+			}
 			cleaned = append(cleaned, p)
 		}
 	}
 	if len(cleaned) == 0 {
-		return nil
+		return nil, refused
 	}
 
 	g.mu.Lock()
@@ -147,7 +167,7 @@ func (g *PathGrants) RegisterFromUserMessage(sessionID, message string) []string
 	for _, p := range cleaned {
 		bucket[p] = struct{}{}
 	}
-	return cleaned
+	return cleaned, refused
 }
 
 // LookupKind classifies how a candidate matched the session's grant

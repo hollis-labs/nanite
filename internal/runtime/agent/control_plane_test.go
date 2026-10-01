@@ -113,9 +113,12 @@ func controlPlaneProbeScript(protected, exception, work, probe string, hold bool
 }
 
 // An agent Nanite launches cannot write Nanite's control-plane directories,
-// natively or over ACP, while the directories excepted inside them and its
-// own work dir stay writable; Nanite itself still writes them
-// (CW-20261001-0143). Codex is confined by its own sandbox instead; see
+// natively or over ACP, while the directory excepted inside them (the
+// worktree root, in production) and its own work dir stay writable; Nanite
+// itself still writes them (CW-20261001-0143). The main database's directory
+// is not an exception: it sits in the protected data dir with its main.db,
+// and an agent can neither create files there nor change the database
+// (CW-20261001-0188). Codex is confined by its own sandbox instead; see
 // TestBoot_CodexRunsUnderItsOwnSandbox and
 // TestBoot_RealCodexSandboxConfinesControlPlane.
 func TestBoot_ControlPlaneProtectedFromAgents(t *testing.T) {
@@ -140,12 +143,24 @@ func TestBoot_ControlPlaneProtectedFromAgents(t *testing.T) {
 				t.Fatal(err)
 			}
 			protected := filepath.Join(state, "coordination")
-			exception := filepath.Join(state, "db")
-			mkdirs(t, state, "coordination", "db")
+			exception := filepath.Join(state, "worktrees")
+			dbDir := filepath.Join(state, "workspaces", "default")
+			mkdirs(t, state, "coordination", "worktrees", "workspaces/default")
+			dbFile := filepath.Join(dbDir, "main.db")
+			if werr := os.WriteFile(dbFile, []byte("nanite-database"), 0o600); werr != nil {
+				t.Fatal(werr)
+			}
 			work, probeDir, bin := t.TempDir(), t.TempDir(), t.TempDir()
 			probe := filepath.Join(probeDir, "probe")
 
-			script := controlPlaneProbeScript(protected, exception, work, probe, tc.provider == "claude")
+			// The probe also appends to main.db itself, the write that
+			// `nanite mcp` used to make, and tries a sibling the way a
+			// SQLite -wal or -shm file would be created.
+			script := controlPlaneProbeScript(protected, exception, work, probe, tc.provider == "claude",
+				probeTarget{"database", dbDir})
+			script = strings.Replace(script, fmt.Sprintf("echo done > %q.done\n", probe),
+				fmt.Sprintf("if ( echo agent >> %q ) 2>/dev/null; then echo yes > %q.dbfile; else echo no > %q.dbfile; fi\n", dbFile, probe, probe)+
+					fmt.Sprintf("echo done > %q.done\n", probe), 1)
 			name := "fake-cli"
 			if tc.acp {
 				name = "copilot" // found through PATH, the production lookup
@@ -189,13 +204,19 @@ func TestBoot_ControlPlaneProtectedFromAgents(t *testing.T) {
 			}
 			readProbe(t, probe+".done")
 
-			for name, want := range map[string]string{"protected": "no", "exception": "yes", "work": "yes"} {
+			for name, want := range map[string]string{"protected": "no", "exception": "yes", "work": "yes", "database": "no", "dbfile": "no"} {
 				if got := strings.TrimSpace(readProbe(t, probe+"."+name)); got != want {
 					t.Errorf("agent write into the %s dir landed=%s, want %s", name, got, want)
 				}
 			}
 			if _, err := os.Stat(filepath.Join(protected, "agent-wrote")); err == nil {
 				t.Error("the agent's file exists in the protected dir")
+			}
+			if _, err := os.Stat(filepath.Join(dbDir, "agent-wrote")); err == nil {
+				t.Error("the agent created a file in the database's directory")
+			}
+			if got, err := os.ReadFile(dbFile); err != nil || string(got) != "nanite-database" { //nolint:gosec // a file this test created in t.TempDir()
+				t.Errorf("main.db after the agent ran = %q (%v), want it unchanged", got, err)
 			}
 			// Nanite's own writes are unaffected: protection binds the
 			// dir read-only only inside the agent's sandbox.

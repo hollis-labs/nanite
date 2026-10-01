@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -187,16 +188,37 @@ func (opencodeLayout) RegenerateSystemPromptSlot(bootDir string, params SetupPar
 	return err
 }
 
-// AmendEnv injects OPENCODE_CONFIG_DIR=<bootDir>.
+// AmendEnv injects OPENCODE_CONFIG_DIR=<bootDir>, and points XDG_CONFIG_HOME
+// at a directory inside it (CW-20261001-0239).
+//
+// OPENCODE_CONFIG_DIR adds a config directory; it does not replace the
+// operator's own ~/.config/opencode, whose MCP servers (and plugins,
+// providers, instructions) would load into every Nanite agent, among them a
+// server that opens Nanite's database inside the agent's sandbox. opencode
+// finds that global config under $XDG_CONFIG_HOME/opencode, so moving
+// XDG_CONFIG_HOME leaves the planted config as the only one. Auth and data
+// are under XDG_DATA_HOME, which is not touched, so a logged-in opencode stays
+// logged in. Checked with opencode 1.18.33: `opencode debug config` lists a
+// user-level `mcp` server with OPENCODE_CONFIG_DIR alone, and none with the
+// redirect, with the planted agent present either way; a real `opencode run`
+// replies either way (the redirect adds about two seconds, as opencode
+// installs its plugin package into the new config dir).
+//
+// NANITE_OPENCODE_ISOLATE_CONFIG=0 leaves XDG_CONFIG_HOME alone
+// (OpenCodeIsolateEnv); it is for an operator whose agents need their own
+// global opencode config, a custom provider for example.
 //
 // Nanite-owned, unchanged by TASKS/agent-host-acp/04: plant.Planter's
 // contract is file-planting only and has no concept of env composition.
 func (opencodeLayout) AmendEnv(base map[string]string, bootDir string) map[string]string {
-	out := make(map[string]string, len(base)+1)
+	out := make(map[string]string, len(base)+2)
 	for k, v := range base {
 		out[k] = v
 	}
 	out["OPENCODE_CONFIG_DIR"] = bootDir
+	if opencodeConfigIsolated() {
+		out["XDG_CONFIG_HOME"] = filepath.Join(bootDir, opencodeXDGConfigDir)
+	}
 	return out
 }
 

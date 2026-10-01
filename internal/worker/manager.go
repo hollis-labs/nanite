@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hollis-labs/go-worktree"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/coordination"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/task"
-	"github.com/hollis-labs/nanite/internal/worktree"
 )
 
 // ChatDelegator is the subset of ChatService needed to delegate tasks.
@@ -32,7 +32,7 @@ type ManagerConfig struct {
 	Chat                 ChatDelegator
 	Coord                coordination.CoordStore
 	Tasks                task.Service
-	Worktrees            worktree.Manager
+	Worktrees            *worktree.Manager
 }
 
 // Manager manages worker lifecycle with concurrency limiting.
@@ -40,7 +40,7 @@ type Manager struct {
 	chat       ChatDelegator
 	coord      coordination.CoordStore
 	tasks      task.Service
-	worktrees  worktree.Manager
+	worktrees  *worktree.Manager
 	workers    sync.Map      // workerID -> *Worker
 	sem        chan struct{} // concurrency semaphore
 	maxWorkers int
@@ -108,27 +108,42 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 
 	start := time.Now()
 
+	var isolatedWorktree *worktree.Worktree
+
 	// Cleanup function — always release semaphore and stop heartbeat.
 	cleanup := func() {
 		close(heartbeatStop)
 		<-m.sem // release semaphore
-		if w.GetWorktreePath() != "" && m.worktrees != nil {
-			if err := m.worktrees.Cleanup(workerID); err != nil {
-				slog.Warn("worker: worktree cleanup failed", "worker_id", workerID[:8], "err", err)
+		if isolatedWorktree != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cleanupCancel()
+			removed, err := m.worktrees.Remove(cleanupCtx, *isolatedWorktree, worktree.RemoveOptions{})
+			if err != nil {
+				slog.Warn("worker: worktree cleanup failed", "worker_id", workerID[:8], "path", isolatedWorktree.Path, "err", err)
+			}
+			if err == nil && !removed.Removed {
+				slog.Warn("worker: preserved worktree", "worker_id", workerID[:8], "path", isolatedWorktree.Path, "reason", removed.Reason)
 			}
 		}
 	}
 
 	// Create worktree if isolation requested.
-	if req.Isolation == "worktree" && m.worktrees != nil {
-		wtPath, err := m.worktrees.Create(workerID)
+	if req.Isolation == "worktree" {
+		if m.worktrees == nil {
+			cleanup()
+			m.workers.Delete(workerID)
+			cancel()
+			return nil, fmt.Errorf("worktree isolation requires a git repository")
+		}
+		wt, err := m.worktrees.Create(workerCtx, worktree.Spec{ID: workerID})
 		if err != nil {
 			cleanup()
 			m.workers.Delete(workerID)
 			cancel()
 			return nil, fmt.Errorf("create worktree: %w", err)
 		}
-		w.SetWorktreePath(wtPath)
+		isolatedWorktree = &wt
+		w.SetWorktreePath(wt.Path)
 	}
 
 	// Transition to running.

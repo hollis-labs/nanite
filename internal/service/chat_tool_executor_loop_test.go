@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/go-loopdetect"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/inspector"
-	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )

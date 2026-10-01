@@ -24,6 +24,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	gosched "github.com/hollis-labs/go-scheduler"
 
+	"github.com/hollis-labs/go-worktree"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
@@ -67,7 +68,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/worker"
 	workflowapi "github.com/hollis-labs/nanite/internal/workflowapi"
 	"github.com/hollis-labs/nanite/internal/workspace"
-	"github.com/hollis-labs/nanite/internal/worktree"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
 
@@ -222,7 +222,7 @@ type Container struct {
 	DurableAgentRecipes DurableAgentRecipeService
 	Tasks               task.Service
 	Workers             *worker.Manager
-	Worktrees           worktree.Manager
+	Worktrees           *worktree.Manager
 
 	// Engine is the go-scheduler schedule-tick engine (TASKS/scheduling/
 	// 05-engine-wiring-and-full-replace.md) — the full replacement for the
@@ -417,7 +417,7 @@ type ContainerConfig struct {
 	CoordStore coordination.CoordStore
 
 	// Worktree manager for worker filesystem isolation. nil = disabled.
-	Worktrees worktree.Manager
+	Worktrees *worktree.Manager
 
 	// Worker concurrency limit (0 = default 5).
 	MaxConcurrentWorkers int

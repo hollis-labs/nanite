@@ -119,6 +119,7 @@ require (
 	github.com/hollis-labs/go-sqlite v0.1.0
 	github.com/hollis-labs/go-tether-client v0.5.1
 	github.com/hollis-labs/go-workflow v0.1.0
+	github.com/hollis-labs/go-worktree v0.1.0
 	github.com/hollis-labs/tesseract v0.10.0
 	github.com/openai/openai-go/v3 v3.61.0
 	github.com/pressly/goose/v3 v3.28.0

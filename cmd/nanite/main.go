@@ -19,6 +19,7 @@ import (
 	"github.com/hollis-labs/go-envelopes"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 
+	"github.com/hollis-labs/go-worktree"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/coordination"
@@ -28,7 +29,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/learnings"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
-	"github.com/hollis-labs/nanite/internal/worktree"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
@@ -446,10 +446,9 @@ func cmdServeWithInitializers(
 	// worktrees are ephemeral runtime state, explicitly NOT derived from
 	// filepath.Dir(dbPath).
 	wtBaseDir := filepath.Join(serveLayout.StateDir(), "worktrees")
-	wtMgr, wtErr := worktree.NewManager(wtBaseDir)
+	wtMgr, wtErr := newWorkerWorktreeManager(wtBaseDir)
 	if wtErr != nil {
 		slog.Warn("worktree manager init failed, worktree isolation disabled", "err", wtErr)
-		wtMgr = worktree.NewNoopManager()
 	} else {
 		slog.Info("worktree manager initialized", "dir", wtBaseDir)
 	}
@@ -945,12 +944,23 @@ func cmdServeWithInitializers(
 	}
 	slog.Info("Agent Workflows startup recovery complete", "inspected", workflowRecovery.Inspected, "resumed", workflowRecovery.Resumed)
 
-	// Clean up orphaned worktrees from previous runs.
+	// Reap clean orphaned checkouts; preserved work is reported for recovery.
 	if container.Worktrees != nil {
-		if cleaned, wtCleanErr := container.Worktrees.CleanupOrphaned(nil); wtCleanErr != nil {
-			slog.Warn("worktree orphan cleanup", "err", wtCleanErr)
-		} else if cleaned > 0 {
-			slog.Info("worktree cleanup: removed orphaned worktrees", "count", cleaned)
+		report, sweepErr := container.Worktrees.Sweep(context.Background(), worktree.OrphanedBy(nil), worktree.SweepOptions{})
+		if sweepErr != nil {
+			slog.Warn("worktree orphan cleanup", "err", sweepErr)
+		}
+		if len(report.Removed) > 0 {
+			slog.Info("worktree cleanup: removed orphaned worktrees", "count", len(report.Removed))
+		}
+		for _, kept := range report.Kept {
+			slog.Warn("worktree cleanup: preserved worktree", "path", kept.Path, "reason", kept.Reason)
+		}
+		for _, path := range report.Unregistered {
+			slog.Warn("worktree cleanup: unregistered directory preserved", "path", path)
+		}
+		for _, err := range report.Errs {
+			slog.Warn("worktree cleanup failed", "err", err)
 		}
 	}
 

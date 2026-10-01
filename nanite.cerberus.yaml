@@ -19,8 +19,8 @@ resources:
         - ./nanite
         - serve
         - -db
-        - /Users/chrispian/.local/share/nanite/workspaces/default/main.db
-      dir: /Users/chrispian/dev/hollis-labs/apps/nanite
+        - ~/.local/share/nanite/workspaces/default/main.db
+      dir: ~/dev/hollis-labs/apps/nanite
       env_file: .env
       mode: os_service
       port: 8090
@@ -42,7 +42,7 @@ resources:
         - npm
         - run
         - dev
-      dir: /Users/chrispian/dev/hollis-labs/apps/nanite/ui
+      dir: ~/dev/hollis-labs/apps/nanite/ui
       mode: dev_session
       port: 5176
       run_from: workspace
@@ -53,3 +53,16 @@ resources:
       - vite
       - v2
 registry_urn: msg://agent/agent-mux/prj_w723b9pvp3
+  - name: Nanite DB Backup
+    type: process
+    project: nanite
+    connector: local
+    config:
+      command:
+        - sqlite-backup
+        - --db=./main.db
+        - --dest=~/dev/backups/nanite
+        - --interval=1h
+        - --keep-hourly=48
+        - --keep-daily=14
+      dir: .

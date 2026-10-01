@@ -132,7 +132,7 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 
 	// Detach first: the write takes SQLite's write lock, so the check below
 	// sees sessions no other writer can attach or unarchive before commit.
-	if _, err := tx.ExecContext(ctx,
+	if _, err = tx.ExecContext(ctx,
 		`UPDATE sessions SET project_id = NULL WHERE project_id = ? AND status = 'archived'`, id); err != nil {
 		return fmt.Errorf("delete project %s: detach archived sessions: %w", id, err)
 	}
@@ -145,28 +145,28 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 	var live []ProjectSessionRef
 	for rows.Next() {
 		var ref ProjectSessionRef
-		if err := rows.Scan(&ref.ID, &ref.Title, &ref.Status); err != nil {
+		if scanErr := rows.Scan(&ref.ID, &ref.Title, &ref.Status); scanErr != nil {
 			closeRows(rows)
-			return fmt.Errorf("delete project %s: scan session: %w", id, err)
+			return fmt.Errorf("delete project %s: scan session: %w", id, scanErr)
 		}
 		live = append(live, ref)
 	}
-	if err := rows.Err(); err != nil {
+	if rowsErr := rows.Err(); rowsErr != nil {
 		closeRows(rows)
-		return fmt.Errorf("delete project %s: list sessions: %w", id, err)
+		return fmt.Errorf("delete project %s: list sessions: %w", id, rowsErr)
 	}
 	closeRows(rows)
 	if len(live) > 0 {
 		return &ProjectInUseError{ProjectID: id, Sessions: live}
 	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_projects WHERE project_id = ?`, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM agent_projects WHERE project_id = ?`, id); err != nil {
 		return fmt.Errorf("delete project %s: remove agent links: %w", id, err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete project %s: %w", id, err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("delete project %s: commit: %w", id, err)
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -271,4 +272,63 @@ func TestBoot_CapitalisedProviderName(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = sess.Stop(ctx)
+}
+
+// Only a session a later Boot can resume is worth persisting or presetting:
+// native Codex's thread lives under the per-boot CODEX_HOME.
+func TestProviderSessionSurvivesBoot(t *testing.T) {
+	for _, tc := range []struct {
+		sel  RuntimeSelection
+		want bool
+	}{
+		{RuntimeSelection{runtimes.Claude, runtimes.ModeStreamingStdio}, true},
+		{RuntimeSelection{runtimes.OpenCode, runtimes.ModeSubprocessPerTurn}, true},
+		{RuntimeSelection{runtimes.Codex, runtimes.ModeSubprocessPerTurn}, false},
+		{RuntimeSelection{runtimes.Codex, runtimes.ModeACPStdio}, true}, // an ACP agent plants no boot dir
+		{RuntimeSelection{runtimes.Copilot, runtimes.ModeACPStdio}, true},
+	} {
+		if got := providerSessionSurvivesBoot(tc.sel); got != tc.want {
+			t.Errorf("providerSessionSurvivesBoot(%s %s) = %v, want %v", tc.sel.Runtime, tc.sel.Mode, got, tc.want)
+		}
+	}
+}
+
+// agentkit v0.21.0 and go-providers v0.42.0 (CW-20260930-0113, the
+// latest-libs bump): a caller's extra args go where the launch convention
+// takes them, so on a resume turn they sit in front of the subcommand. For
+// Codex exec that is `exec ... -s .. --cd .. --add-dir .. resume <id> -- <prompt>`:
+// codex refuses exec-only flags after `resume <id>`. Nanite's own Codex
+// launch passes none of these (workRootArgs gives only Claude an argument),
+// so this pins what the libs do with the ones a future caller adds, on turn 2.
+func TestSelectAdapter_ExtraArgsPrecedeResume(t *testing.T) {
+	extras := []string{"-s", "read-only", "--cd", "/proj", "--add-dir", "/extra"}
+	const turn = "--dangerously-bypass-approvals-and-sandbox"
+	a, err := launch.Select(launch.Selection{Runtime: string(runtimes.Codex), Mode: runtimes.ModeSubprocessPerTurn, ExtraArgs: extras})
+	if err != nil {
+		t.Fatalf("launch.Select(codex): %v", err)
+	}
+	args := a.(adapters.RuntimeAdapter).CLIAdapter().BuildArgs(turn, "", "thr-1")
+
+	index := func(want string) int {
+		for i, arg := range args {
+			if arg == want {
+				return i
+			}
+		}
+		return -1
+	}
+	resume, id, dd := index("resume"), index("thr-1"), index("--")
+	if resume < 0 || id != resume+1 || dd != id+1 || args[len(args)-1] != turn || dd != len(args)-2 {
+		t.Fatalf("turn 2 argv = %q, want `... resume thr-1 -- <prompt>` with the prompt last", args)
+	}
+	for _, flag := range []string{"-s", "--cd", "--add-dir"} {
+		if i := index(flag); i < 0 || i > resume {
+			t.Errorf("%s at %d is not in front of `resume` (%d): %q", flag, i, resume, args)
+		}
+	}
+	// Turn 1 of the same adapter has no resume, and still takes them before `--`.
+	first := a.(adapters.RuntimeAdapter).CLIAdapter().BuildArgs(turn, "", "")
+	if slices.Contains(first, "resume") || slices.Index(first, "--cd") > slices.Index(first, "--") {
+		t.Errorf("turn 1 argv = %q", first)
+	}
 }

@@ -492,6 +492,10 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		}
 	}
 
+	if !providerSessionSurvivesBoot(selection) {
+		sessionIDPreset = ""
+	}
+
 	sandboxProfile := buildSandboxProfile(deps.SandboxBaseProfile, opts, ws.Root, bootDir)
 	protectedPaths := deps.ControlPlane.protectedFor(spawnWorkdir, opts.Workdir, ws.Root, bootDir, naniteHomeDir())
 	if codexSandboxesItself(selection) {
@@ -510,6 +514,9 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	}
 
 	onSessionID := func(id string) {
+		if !providerSessionSurvivesBoot(selection) {
+			return // nothing a later Boot could resume
+		}
 		_ = deps.Store.SetProviderSessionID(sessID, id)
 	}
 

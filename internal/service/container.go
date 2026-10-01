@@ -24,6 +24,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	gosched "github.com/hollis-labs/go-scheduler"
 
+	"github.com/hollis-labs/go-loopdetect"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
@@ -39,7 +40,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/filter"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
-	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/permission"

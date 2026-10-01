@@ -14,9 +14,11 @@ import (
 
 // TestHarnessV1CreateSession_ProjectMustResolveRepoPath pins
 // CW-20261001-0020's create-time guard: a project-scoped session's agent
-// works in the project's repo_path, so a project whose repo_path does not
-// resolve is refused up front instead of booting an agent that cannot see
-// its project.
+// works in the project's repo_path, so an unknown project, or one whose
+// repo_path is set but does not resolve, is refused up front instead of
+// booting an agent that cannot see its project. A project with no
+// repo_path is allowed, matching the boot path, which warns and boots
+// without a work root: plain API-chat sessions live in such projects.
 func TestHarnessV1CreateSession_ProjectMustResolveRepoPath(t *testing.T) {
 	a, mux := newTestAPI(t)
 	ctx := context.Background()
@@ -48,7 +50,7 @@ func TestHarnessV1CreateSession_ProjectMustResolveRepoPath(t *testing.T) {
 		{"project with an existing repo_path", harnessV1CreateSessionRequest{ProjectID: "with-repo", Provider: "anthropic"}, http.StatusCreated},
 		{"no project", harnessV1CreateSessionRequest{Provider: "anthropic"}, http.StatusCreated},
 		{"unknown project", harnessV1CreateSessionRequest{ProjectID: "nope", Provider: "anthropic"}, http.StatusNotFound},
-		{"project with no repo_path", harnessV1CreateSessionRequest{ProjectID: "no-repo", Provider: "anthropic"}, http.StatusUnprocessableEntity},
+		{"project with no repo_path", harnessV1CreateSessionRequest{ProjectID: "no-repo", Provider: "anthropic"}, http.StatusCreated},
 		{"project whose repo_path is gone", harnessV1CreateSessionRequest{ProjectID: "gone-repo", Provider: "anthropic"}, http.StatusUnprocessableEntity},
 		{"work_root stays a durable-agent field", harnessV1CreateSessionRequest{ProjectID: "with-repo", WorkRoot: "/tmp"}, http.StatusUnprocessableEntity},
 	} {

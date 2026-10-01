@@ -119,8 +119,9 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 // project that cannot be read and ErrProjectNoRepoPath for one with no
 // repository attached; any other error is a repo_path that no longer
 // resolves. The harness v1 session create calls it so a project-scoped
-// session fails up front instead of booting an agent that cannot see its
-// project.
+// session whose repo_path does not resolve fails up front instead of
+// booting an agent that cannot see its project; like the boot path, it
+// lets ErrProjectNoRepoPath through.
 func (s *ProjectService) WorkRoot(ctx context.Context, id string) (string, error) {
 	return projectWorkRoot(ctx, s.store, id)
 }

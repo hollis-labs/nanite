@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/fsutil"
-	"github.com/hollis-labs/nanite/internal/pathsafe"
+	"github.com/hollis-labs/go-safefs/atomicfile"
+	"github.com/hollis-labs/go-safefs/pathsafe"
 )
 
 //go:embed all:framework manifests/*.json
@@ -113,7 +113,7 @@ func ExtractTo(targetDir string, opts ExtractOptions) (*ExtractReport, error) {
 
 		info, statErr := os.Lstat(target)
 		if errors.Is(statErr, fs.ErrNotExist) {
-			if writeErr := fsutil.AtomicWriteFile(target, embedded, 0o644); writeErr != nil {
+			if writeErr := atomicfile.WriteFile(target, embedded, 0o644); writeErr != nil {
 				return fmt.Errorf("write %s: %w", target, writeErr)
 			}
 			report.Created++
@@ -128,7 +128,7 @@ func ExtractTo(targetDir string, opts ExtractOptions) (*ExtractReport, error) {
 				if removeErr != nil {
 					return fmt.Errorf("remove non-regular asset %s: %w", target, removeErr)
 				}
-				writeErr := fsutil.AtomicWriteFile(target, embedded, 0o644)
+				writeErr := atomicfile.WriteFile(target, embedded, 0o644)
 				if writeErr != nil {
 					return fmt.Errorf("write %s: %w", target, writeErr)
 				}
@@ -152,14 +152,14 @@ func ExtractTo(targetDir string, opts ExtractOptions) (*ExtractReport, error) {
 		}
 
 		if opts.Force {
-			if writeErr := fsutil.AtomicWriteFile(target, embedded, 0o644); writeErr != nil {
+			if writeErr := atomicfile.WriteFile(target, embedded, 0o644); writeErr != nil {
 				return fmt.Errorf("write %s: %w", target, writeErr)
 			}
 			report.Forced++
 			return nil
 		}
 		if manifests.isHistoricalStock(rel, existing) {
-			if writeErr := fsutil.AtomicWriteFile(target, embedded, 0o644); writeErr != nil {
+			if writeErr := atomicfile.WriteFile(target, embedded, 0o644); writeErr != nil {
 				return fmt.Errorf("upgrade historical asset %s: %w", target, writeErr)
 			}
 			report.Updated++
@@ -334,7 +334,7 @@ func writeConflictSnapshots(targetDir, rel string, existing, replacement []byte)
 		case !errors.Is(err, fs.ErrNotExist):
 			return nil, fmt.Errorf("read conflict snapshot %s: %w", path, err)
 		}
-		if writeErr := fsutil.AtomicWriteFile(path, snapshot.data, 0o644); writeErr != nil {
+		if writeErr := atomicfile.WriteFile(path, snapshot.data, 0o644); writeErr != nil {
 			return nil, fmt.Errorf("write conflict snapshot %s: %w", path, writeErr)
 		}
 	}

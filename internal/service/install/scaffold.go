@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"text/template"
 
+	"github.com/hollis-labs/go-safefs/atomicfile"
 	"github.com/hollis-labs/nanite/internal/assets"
-	"github.com/hollis-labs/nanite/internal/fsutil"
 )
 
 // ScaffoldSource holds values used to render scaffold templates.
@@ -47,7 +47,7 @@ func ScaffoldNaniteDir(projectDir, globalHome string, src ScaffoldSource) error 
 		if err != nil {
 			return err
 		}
-		if err := fsutil.AtomicWriteFile(cfgPath, []byte(rendered), 0o644); err != nil {
+		if err := atomicfile.WriteFile(cfgPath, []byte(rendered), 0o644); err != nil {
 			return fmt.Errorf("write config.yaml: %w", err)
 		}
 	} else if err != nil {
@@ -104,7 +104,7 @@ func ScaffoldNaniteMD(projectDir string, src ScaffoldSource) error {
 	if err != nil {
 		return err
 	}
-	if err := fsutil.AtomicWriteFile(path, []byte(rendered), 0o644); err != nil {
+	if err := atomicfile.WriteFile(path, []byte(rendered), 0o644); err != nil {
 		return fmt.Errorf("write NANITE.md: %w", err)
 	}
 	return nil

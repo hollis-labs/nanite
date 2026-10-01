@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/go-safefs/atomicfile"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
-	"github.com/hollis-labs/nanite/internal/fsutil"
 )
 
 const (
@@ -214,7 +214,7 @@ func Launch(ctx context.Context, cfg Config, input agentworkflow.WorkflowInput) 
 	if err != nil {
 		return Result{}, err
 	}
-	if err := fsutil.AtomicWriteFile(filepath.Join(workDir, ".mcp.json"), []byte(mcpJSON), 0o644); err != nil {
+	if err = atomicfile.WriteFile(filepath.Join(workDir, ".mcp.json"), []byte(mcpJSON), 0o644); err != nil {
 		return Result{}, fmt.Errorf("workflowrunner: plant .mcp.json: %w", err)
 	}
 
@@ -223,7 +223,7 @@ func Launch(ctx context.Context, cfg Config, input agentworkflow.WorkflowInput) 
 		return Result{}, fmt.Errorf("workflowrunner: marshal input: %w", err)
 	}
 	inputPath := filepath.Join(workDir, "input.json")
-	if err := fsutil.AtomicWriteFile(inputPath, inputBody, 0o644); err != nil {
+	if err = atomicfile.WriteFile(inputPath, inputBody, 0o644); err != nil {
 		return Result{}, fmt.Errorf("workflowrunner: write input file: %w", err)
 	}
 

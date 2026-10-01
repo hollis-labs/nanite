@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"github.com/hollis-labs/go-safefs/pathsafe"
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/brand"
-	"github.com/hollis-labs/nanite/internal/pathsafe"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 

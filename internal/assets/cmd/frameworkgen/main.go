@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/fsutil"
+	"github.com/hollis-labs/go-safefs/atomicfile"
 )
 
 const (
@@ -439,7 +439,7 @@ func emit(outputPath string, want []byte, checkOnly bool) error {
 	if mkdirErr := os.MkdirAll(filepath.Dir(outputPath), 0o755); mkdirErr != nil {
 		return fmt.Errorf("create output directory for %s: %w", outputPath, mkdirErr)
 	}
-	if writeErr := fsutil.AtomicWriteFile(outputPath, want, 0o644); writeErr != nil {
+	if writeErr := atomicfile.WriteFile(outputPath, want, 0o644); writeErr != nil {
 		return fmt.Errorf("write generated output %s: %w", outputPath, writeErr)
 	}
 	return nil

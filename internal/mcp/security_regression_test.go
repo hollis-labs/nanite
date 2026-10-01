@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/pathsafe"
+	"github.com/hollis-labs/go-safefs/pathsafe"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 )
 

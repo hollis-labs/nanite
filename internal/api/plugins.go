@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hollis-labs/go-safefs/pathsafe"
 	"github.com/hollis-labs/nanite/internal/brand"
-	"github.com/hollis-labs/nanite/internal/pathsafe"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/devmode"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"

@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hollis-labs/go-safefs/atomicfile"
 	"github.com/hollis-labs/nanite/internal/agent"
-	"github.com/hollis-labs/nanite/internal/fsutil"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 
@@ -95,7 +95,7 @@ func (a *Adapter) Import(_ string) ([]agent.Definition, error) {
 func (a *Adapter) PopulateSandbox(sandboxDir string, ap store.AgentProfile, session agent.SandboxContext) error {
 	content := buildAgentsMD(ap)
 	path := filepath.Join(sandboxDir, "AGENTS.md")
-	if err := fsutil.AtomicWriteFile(path, []byte(content), 0o644); err != nil {
+	if err := atomicfile.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("adapter-codex: write AGENTS.md: %w", err)
 	}
 	return nil

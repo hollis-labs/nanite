@@ -44,6 +44,10 @@ const (
 	// debug posture; Nanite has no consumer that tells the two apart, and
 	// neither is managed automation.
 	PTY = Kind(runtimes.ModePTY)
+	// ACPStdio is an Agent Client Protocol agent on stdio.
+	ACPStdio = Kind(runtimes.ModeACPStdio)
+	// ACPTCP is an Agent Client Protocol agent over TCP (Copilot's daemon).
+	ACPTCP = Kind(runtimes.ModeACPTCP)
 	// Unknown is an empty or unrecognized token.
 	Unknown Kind = "unknown"
 )
@@ -68,6 +72,10 @@ func Parse(raw string) Kind {
 		return HTTPSSE
 	case "pty", "tui", "terminal", "pty-debug", "debug-pty", "raw-pty":
 		return PTY
+	case "acp-stdio", "acp":
+		return ACPStdio
+	case "acp-tcp":
+		return ACPTCP
 	default:
 		return Unknown
 	}

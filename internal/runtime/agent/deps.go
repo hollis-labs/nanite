@@ -266,9 +266,12 @@ type RuntimeStore interface {
 // the in-memory session-liveness probe + an `updated_at` age threshold do
 // the work instead.
 type RuntimeRow struct {
-	ID              string
-	AgentProfile    string
-	Provider        string
+	ID           string
+	AgentProfile string
+	Provider     string
+	// RuntimeKind is how the process runs: the selected launch mode as a
+	// runtimekind token (streaming-stdio, subprocess-per-turn, acp-stdio, ...).
+	RuntimeKind     string
 	Mode            string
 	Workdir         string
 	State           string

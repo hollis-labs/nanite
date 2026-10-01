@@ -556,6 +556,7 @@ func (s *agentRuntimeStore) CreateRuntimeRow(row *runtimeagent.RuntimeRow) error
 		ID:              row.ID,
 		AgentProfile:    row.AgentProfile,
 		Provider:        row.Provider,
+		RuntimeKind:     row.RuntimeKind,
 		Mode:            row.Mode,
 		Workdir:         row.Workdir,
 		State:           row.State,

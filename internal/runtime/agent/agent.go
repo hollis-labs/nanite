@@ -13,6 +13,7 @@ import (
 	"github.com/hollis-labs/go-agent-wrapper/activity"
 	"github.com/hollis-labs/go-agent-wrapper/wrapper"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
+	"github.com/hollis-labs/nanite/internal/runtimekind"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/oklog/ulid/v2"
 )
@@ -456,9 +457,12 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	// CreateRuntimeRow would conflict on the unique sessionID key.
 	if !opts.IsRelaunch {
 		if err := deps.Store.CreateRuntimeRow(&RuntimeRow{
-			ID:              sessID,
-			AgentProfile:    opts.AgentProfile,
-			Provider:        providerName,
+			ID:           sessID,
+			AgentProfile: opts.AgentProfile,
+			Provider:     providerName,
+			// The launch mode Boot actually selected. Left unset, every row
+			// written since 2026-08-19 read "unknown" (CW-20261001-0139).
+			RuntimeKind:     string(runtimekind.Parse(string(selection.Mode))),
 			Mode:            opts.Mode.String(),
 			Workdir:         spawnWorkdir,
 			State:           "launching",

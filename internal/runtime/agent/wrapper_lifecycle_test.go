@@ -118,6 +118,7 @@ func TestBoot_WrapperLifecycle_Claude(t *testing.T) {
 	if sess.Provider != "claude" {
 		t.Fatalf("session.Provider = %q, want claude", sess.Provider)
 	}
+	assertRuntimeKind(t, store, "streaming-stdio")
 
 	// Boot only returns once wrapper.Wrapper.Run reaches
 	// runtimeevents.KindSessionReady — the shared Manager must already
@@ -377,6 +378,7 @@ func TestBoot_WrapperLifecycle_Codex_EnvParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Boot: %v", err)
 	}
+	assertRuntimeKind(t, store, "subprocess-per-turn")
 	bootDir := sess.BootDir
 
 	// Codex's runtime kind here (subprocess-per-turn "adapter runtime" —
@@ -565,5 +567,20 @@ func TestBoot_WrapperLifecycle_OpenCode(t *testing.T) {
 	}
 	if string(seen) != bootDir {
 		t.Errorf("fake opencode process observed OPENCODE_CONFIG_DIR=%q, want %q (wrapper ChildEnvironment is not propagating opencodeLayout.AmendEnv's redirect)", string(seen), bootDir)
+	}
+}
+
+// assertRuntimeKind checks that the runtime row Boot persisted records the
+// launch mode it selected; rows written from 2026-08-19 read "unknown"
+// (CW-20261001-0139).
+func assertRuntimeKind(t *testing.T, store *fakeRuntimeStore, want string) {
+	t.Helper()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.created) == 0 {
+		t.Fatal("Boot persisted no runtime row")
+	}
+	if got := store.created[0].RuntimeKind; got != want {
+		t.Errorf("runtime row RuntimeKind = %q, want %q", got, want)
 	}
 }

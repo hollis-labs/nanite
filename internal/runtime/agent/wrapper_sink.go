@@ -43,13 +43,11 @@ type runtimeEventSink struct {
 	typedCB   provider.EventsCallback
 	acp       bool
 
-	// blockDeltas marks a native runtime whose text deltas are whole
-	// content blocks rather than token chunks (see deltasAreWholeBlocks).
-	// Their blocks carry no boundary, so separateBlocks adds one.
-	blockDeltas bool
+	// Block separation state (see separateBlocks).
 	blockMu     sync.Mutex
-	textInTurn  bool // a text delta has been seen in the current turn
-	textAtBreak bool // that text ended in a newline
+	textInTurn  bool   // a text delta has been seen in the current turn
+	textAtBreak bool   // that text ended in a newline
+	textBlockID string // block_id of the turn's last text delta
 
 	readyOnce sync.Once
 	onReady   func()
@@ -71,9 +69,7 @@ type legacyStreamProjectionOwner interface {
 // silently drop on cancellation, matching Sink.Write's "drop on overflow
 // without erroring" guidance.
 func (s *runtimeEventSink) Write(ctx context.Context, ev runtimeevents.Event) error {
-	if s.blockDeltas {
-		ev = s.separateBlocks(ev)
-	}
+	ev = s.separateBlocks(ev)
 	var canonicalErr error
 	if s.canonical != nil {
 		canonicalErr = s.canonical.Write(ctx, ev)
@@ -94,6 +90,8 @@ func (s *runtimeEventSink) Write(ctx context.Context, ev runtimeevents.Event) er
 		s.handleToolResult(ev.Payload)
 	case runtimeevents.KindAgentSubagentSpawn:
 		s.handleSubagentSpawn(ev.Payload)
+	case runtimeevents.KindSessionLost, runtimeevents.KindSessionAuthFailed, runtimeevents.KindAgentPermissionDenied:
+		s.handleSessionNotice(ev.Kind, ev.Payload)
 	case runtimeevents.KindTurnCompleted:
 		if !canonicalOwnsStream {
 			s.handleTurnCompleted(ctx, ev.Payload)
@@ -115,49 +113,27 @@ func (s *runtimeEventSink) Write(ctx context.Context, ev runtimeevents.Event) er
 // provider.
 func newRuntimeEventSink(providerName string, isACP bool, canonical runtimeevents.Sink) *runtimeEventSink {
 	return &runtimeEventSink{
-		acp:         isACP,
-		canonical:   canonical,
-		blockDeltas: !isACP && deltasAreWholeBlocks(providerName),
+		acp:       isACP,
+		canonical: canonical,
 	}
 }
 
-// deltasAreWholeBlocks reports whether a native (non-ACP) runtime emits each
-// text content block as one whole delta, with nothing marking where one block
-// ends and the next begins (CW-20260930-0113):
-//   - claude (streaming-stdio, no partial messages): one delta per assistant
-//     text content block (go-providers pty_claude.go parseAssistantEvent);
-//   - codex (exec --json): one delta per completed agent_message item
-//     (pty_codex.go item.completed). The parser's legacy item.message path is
-//     token-level; it is assumed dead in current codex, whose exec --json
-//     emits item.* lifecycle events instead.
-//   - opencode (run --format json, go-providers v0.28.0+): one delta per
-//     "text" part, a whole text block. Before v0.28.0 run mode was plain
-//     text, one delta per stdout line with its "\n" restored, and opencode
-//     was excluded here.
+// separateBlocks puts a paragraph break between two content blocks of the
+// same turn, unless the join is already at a line break. A block boundary is
+// a change of the delta's block_id: since go-agent-wrapper v0.17.0 every
+// runtime stamps it (Claude's event uuid, codex exec's item.id, opencode's
+// part id, ACP's messageId), and every token of one block carries the same
+// one. A delta with no block_id gets no break, so a runtime that cannot say
+// which block a fragment belongs to keeps its text joined, as token streams
+// must be. This replaced the per-provider deltasAreWholeBlocks stopgap
+// (CW-20260930-0228).
 //
-// ACP and HTTP providers stream token chunks, which must never be separated.
-//
-// Stopgap until the libs carry block/message ids on deltas
-// (CW-20260930-0228); remove it then.
-func deltasAreWholeBlocks(providerName string) bool {
-	switch normalizeProviderName(providerName) {
-	case "claude", "claude-code", "claudecode", "codex", "opencode":
-		return true
-	}
-	return false
-}
-
-// separateBlocks puts a paragraph break before a text delta that follows
-// earlier text in the same turn, unless the join is already at a line break.
 // The break is written into the event itself, so every consumer — the
 // canonical sink, the runtime feed, the chat stream, drain paths — sees the
 // same text. Thinking deltas neither receive nor count as text.
 //
 // Every KindTurnCompleted ends the turn. Since go-agent-wrapper v0.13.1 a
-// native turn has exactly one, its terminal, carrying the turn's usage
-// summed over its steps; usage no longer arrives as a completion of its own
-// (before v0.13.1 it did, and opencode's per-step usage would have read as
-// several mid-turn completions).
+// native turn has exactly one, its terminal, carrying the turn's usage.
 func (s *runtimeEventSink) separateBlocks(ev runtimeevents.Event) runtimeevents.Event {
 	s.blockMu.Lock()
 	defer s.blockMu.Unlock()
@@ -165,6 +141,7 @@ func (s *runtimeEventSink) separateBlocks(ev runtimeevents.Event) runtimeevents.
 	switch ev.Kind {
 	case runtimeevents.KindTurnStarted, runtimeevents.KindTurnCompleted, runtimeevents.KindTurnFailed:
 		s.textInTurn = false
+		s.textBlockID = ""
 		return ev
 	case runtimeevents.KindAgentDelta:
 	default:
@@ -185,7 +162,8 @@ func (s *runtimeEventSink) separateBlocks(ev runtimeevents.Event) runtimeevents.
 	}
 
 	content := p.Content
-	if s.textInTurn && !s.textAtBreak && !startsWithSpace(content) {
+	newBlock := p.BlockID != "" && p.BlockID != s.textBlockID
+	if s.textInTurn && newBlock && !s.textAtBreak && !startsWithSpace(content) {
 		content = "\n\n" + content
 		encoded, err := json.Marshal(content)
 		if err != nil {
@@ -200,6 +178,9 @@ func (s *runtimeEventSink) separateBlocks(ev runtimeevents.Event) runtimeevents.
 	}
 	s.textInTurn = true
 	s.textAtBreak = strings.HasSuffix(content, "\n")
+	if p.BlockID != "" {
+		s.textBlockID = p.BlockID
+	}
 	return ev
 }
 
@@ -230,6 +211,7 @@ func (s *runtimeEventSink) sendFanout(ctx context.Context, ev llmtypes.StreamEve
 type deltaPayload struct {
 	Content  string          `json:"content"`
 	Phase    string          `json:"phase"`
+	BlockID  string          `json:"block_id"`
 	Thinking json.RawMessage `json:"thinking"`
 }
 
@@ -383,6 +365,37 @@ func (s *runtimeEventSink) handleSubagentSpawn(raw json.RawMessage) {
 		return
 	}
 	s.typedCB(events.SubagentSpawn{Tool: p.SubagentSpawn.Tool, Args: p.SubagentSpawn.Args})
+}
+
+// handleSessionNotice forwards go-agent-wrapper v0.17.0's three session
+// notices to the typed callback as the go-providers events they came from,
+// so the chat bridge can show them (CW-20260930-0113). None is terminal:
+// session.lost can mean the turn continued in a new provider session, an
+// auth failure is followed by the turn's own turn.failed, and a permission
+// refusal lets the turn complete. They never reach the legacy fanout.
+func (s *runtimeEventSink) handleSessionNotice(kind runtimeevents.EventKind, raw json.RawMessage) {
+	if s.typedCB == nil {
+		return
+	}
+	var p struct {
+		RequestedID string `json:"requested_id"`
+		ActualID    string `json:"actual_id"`
+		Reason      string `json:"reason"`
+		Error       string `json:"error"`
+		Action      string `json:"action"`
+		DisplayName string `json:"display_name"`
+	}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &p)
+	}
+	switch kind {
+	case runtimeevents.KindSessionLost:
+		s.typedCB(events.SessionLost{RequestedID: p.RequestedID, ActualID: p.ActualID, Reason: p.Reason})
+	case runtimeevents.KindSessionAuthFailed:
+		s.typedCB(events.AuthFailed{Message: p.Error})
+	case runtimeevents.KindAgentPermissionDenied:
+		s.typedCB(events.PermissionDenied{Action: p.Action, DisplayName: p.DisplayName})
+	}
 }
 
 // turnCompletedPayload is the usage-bearing part of a turn's terminal event,

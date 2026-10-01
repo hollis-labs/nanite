@@ -91,11 +91,83 @@ func (s *Store) UpdateProject(ctx context.Context, p *Project) error {
 	return nil
 }
 
-// DeleteProject deletes a project by ID.
+// ProjectSessionRef names a session that still belongs to a project.
+type ProjectSessionRef struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+// ProjectInUseError is DeleteProject's refusal: sessions that are not
+// archived still belong to the project. Nothing was changed.
+type ProjectInUseError struct {
+	ProjectID string
+	Sessions  []ProjectSessionRef
+}
+
+func (e *ProjectInUseError) Error() string {
+	return fmt.Sprintf("project %s still has %d session(s) that are not archived; archive them or move them to another project first",
+		e.ProjectID, len(e.Sessions))
+}
+
+// DeleteProject deletes a project by ID, in one transaction
+// (CW-20261001-0125):
+//   - archived sessions are detached (project_id NULL); their rows and
+//     messages are kept. Session and message rows are never deleted here.
+//   - a session that is not archived refuses the delete with
+//     *ProjectInUseError, and nothing changes;
+//   - the project's agent_projects links, which name it and nothing else,
+//     go with it.
+//
+// sessions.project_id and agent_projects.project_id are NO ACTION foreign
+// keys, so before this a project that ever had a session could not be
+// deleted at all. todos, reminders and pinned_content carry project_id with
+// no foreign key and are left as they are.
 func (s *Store) DeleteProject(ctx context.Context, id string) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("delete project %s: begin tx: %w", id, err)
+	}
+	defer rollbackUnlessCommitted(tx)
+
+	// Detach first: the write takes SQLite's write lock, so the check below
+	// sees sessions no other writer can attach or unarchive before commit.
+	if _, err = tx.ExecContext(ctx,
+		`UPDATE sessions SET project_id = NULL WHERE project_id = ? AND status = 'archived'`, id); err != nil {
+		return fmt.Errorf("delete project %s: detach archived sessions: %w", id, err)
+	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, COALESCE(NULLIF(custom_name, ''), COALESCE(title, '')), COALESCE(status, '')
+		 FROM sessions WHERE project_id = ? ORDER BY last_activity DESC, id`, id)
+	if err != nil {
+		return fmt.Errorf("delete project %s: list sessions: %w", id, err)
+	}
+	var live []ProjectSessionRef
+	for rows.Next() {
+		var ref ProjectSessionRef
+		if scanErr := rows.Scan(&ref.ID, &ref.Title, &ref.Status); scanErr != nil {
+			closeRows(rows)
+			return fmt.Errorf("delete project %s: scan session: %w", id, scanErr)
+		}
+		live = append(live, ref)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		closeRows(rows)
+		return fmt.Errorf("delete project %s: list sessions: %w", id, rowsErr)
+	}
+	closeRows(rows)
+	if len(live) > 0 {
+		return &ProjectInUseError{ProjectID: id, Sessions: live}
+	}
+
+	if _, err = tx.ExecContext(ctx, `DELETE FROM agent_projects WHERE project_id = ?`, id); err != nil {
+		return fmt.Errorf("delete project %s: remove agent links: %w", id, err)
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete project %s: %w", id, err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("delete project %s: commit: %w", id, err)
 	}
 	return nil
 }

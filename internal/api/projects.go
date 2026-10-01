@@ -96,6 +96,15 @@ func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 			a.errorResp(w, http.StatusNotFound, "project not found")
 			return
 		}
+		var inUse *service.ProjectInUseError
+		if errors.As(err, &inUse) {
+			// The sessions in the way, so a client can archive or move them.
+			a.jsonResp(w, http.StatusConflict, map[string]any{
+				"error":    inUse.Error(),
+				"sessions": inUse.Sessions,
+			})
+			return
+		}
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

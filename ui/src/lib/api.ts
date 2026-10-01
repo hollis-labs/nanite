@@ -3086,7 +3086,12 @@ export const api = {
     const res = await fetch(`${API_BASE}/projects/${projectId}`, {
       method: "DELETE",
     });
-    if (!res.ok) throw new Error(`Failed to delete project: ${res.status}`);
+    if (!res.ok) {
+      // 409: sessions that are not archived still belong to the project;
+      // the server's message says so.
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to delete project: ${res.status}`);
+    }
   },
 
   // Plugin Keybindings

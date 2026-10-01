@@ -3,7 +3,7 @@
 // is the caller's fact to supply.
 //
 // A claim needs both halves, in the same paragraph or an adjacent one: a
-// completed-write phrase
+// completed-write phrase about the assistant's own action
 // ("wrote", "created", "the write succeeded") and an id-shaped token (a ULID, a
 // UUID, a tracker id such as CW-20260919-0004, or a long hex digest). Either
 // alone is ordinary prose: "confirmed CW-20260919-0011 is in review" reports a
@@ -66,6 +66,13 @@ var (
 
 	// Clause boundaries inside a sentence.
 	reClauseSplit = regexp.MustCompile(`(?i);|,|\s[-\x{2013}\x{2014}]+\s|\b(?:and|which|but|once|so|while|whereas|because|although|though|then)\b`)
+
+	// A record being "updated" is evidence of activity, not a claim that the
+	// assistant updated it. Accept explicit first-person actions and terse
+	// outcome statements, while leaving third-person activity reports alone.
+	reOwnAction   = regexp.MustCompile(`(?i)\b(?:i|we|i've|we've|i'd|we'd)(?:\s+(?:have|had|just|also|already|successfully|now|actually|previously))*\s+$`)
+	reOwnPassive  = regexp.MustCompile(`(?i)\bby\s+(?:me|us)\b`)
+	reTerseAction = regexp.MustCompile(`(?i)^(?:(?:also|done|recap)\s*[:,.-]?\s*)?$`)
 
 	reParagraphs = regexp.MustCompile(`\n\s*\n`)
 	reSentences  = regexp.MustCompile(`[.!?]+\s+|\n`)
@@ -193,54 +200,62 @@ func Detect(reply string, grounded map[string]bool) (Finding, bool) {
 	var f Finding
 	seen := map[string]bool{}
 	for i, para := range paras {
-		phrase, sentence := claimPhrase(para)
-		if phrase == "" {
-			continue
-		}
-		// The claim's own paragraph first. Only a claim that names its id
-		// ("the returned ID above") may take one from a neighboring paragraph:
-		// a bare "created the summary" must not pick up an unrelated id next to it.
-		ids := IDs(para)
-		if len(ids) == 0 && reRefersToID.MatchString(sentence) {
-			lo, hi := max(0, i-1), min(len(paras), i+2)
-			ids = IDs(strings.Join(paras[lo:hi], "\n\n"))
-		}
-		if len(ids) == 0 {
-			continue
-		}
-		if f.Phrase == "" {
-			f.Phrase, f.Paragraph = phrase, strings.TrimSpace(para)
-		}
-		for _, id := range ids {
-			if seen[id] {
+		for _, sentence := range reSentences.Split(para, -1) {
+			phrase := claimPhrase(sentence)
+			if phrase == "" {
 				continue
 			}
-			seen[id] = true
-			f.IDs = append(f.IDs, id)
-			if !canon[id] {
-				f.Ungrounded = append(f.Ungrounded, id)
+			// Bind receipts to the claiming sentence. Other sentences in an
+			// activity summary can cite records the assistant only read.
+			ids := IDs(sentence)
+			if len(ids) == 0 && reRefersToID.MatchString(sentence) {
+				ids = IDs(para)
+				if len(ids) == 0 {
+					lo, hi := max(0, i-1), min(len(paras), i+2)
+					ids = IDs(strings.Join(paras[lo:hi], "\n\n"))
+				}
+			}
+			if len(ids) == 0 {
+				continue
+			}
+			if f.Phrase == "" {
+				f.Phrase, f.Paragraph = phrase, strings.TrimSpace(para)
+			}
+			for _, id := range ids {
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				f.IDs = append(f.IDs, id)
+				if !canon[id] {
+					f.Ungrounded = append(f.Ungrounded, id)
+				}
 			}
 		}
 	}
 	return f, len(f.IDs) > 0
 }
 
-// claimPhrase returns the completed-write phrase in the first sentence of para
-// that asserts one, and that sentence; "" when there is none.
-func claimPhrase(para string) (phrase, sentence string) {
-	for _, s := range reSentences.Split(para, -1) {
-		s = strings.TrimSpace(s)
-		if s == "" || strings.HasSuffix(s, "?") {
+// claimPhrase returns a completed-write phrase asserting the assistant's own
+// action, rather than a third-party record's history.
+func claimPhrase(sentence string) string {
+	sentence = strings.TrimSpace(sentence)
+	if sentence == "" || strings.HasSuffix(sentence, "?") {
+		return ""
+	}
+	for _, clause := range reClauseSplit.Split(sentence, -1) {
+		if reNotAClaim.MatchString(clause) {
 			continue
 		}
-		for _, clause := range reClauseSplit.Split(s, -1) {
-			if reNotAClaim.MatchString(clause) {
-				continue
-			}
-			if m := reDone.FindString(clause); m != "" {
-				return m, s
+		for _, match := range reDone.FindAllStringIndex(clause, -1) {
+			phrase := clause[match[0]:match[1]]
+			prefix := strings.TrimLeft(strings.TrimSpace(clause[:match[0]]), "-*#> ")
+			// Multi-word matches explicitly report a successful write, such
+			// as "the write succeeded" or "task creation was successful".
+			if strings.ContainsAny(phrase, " \t") || reOwnAction.MatchString(clause[:match[0]]) || reOwnPassive.MatchString(clause[match[1]:]) || reTerseAction.MatchString(prefix) {
+				return phrase
 			}
 		}
 	}
-	return "", ""
+	return ""
 }

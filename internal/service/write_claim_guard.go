@@ -228,10 +228,12 @@ func writeClaimHook(mode harnessprofile.GuardMode, in hooks.StopInput, facts wri
 
 // writeClaimNudge is the correction sent back to the model on a deny.
 func writeClaimNudge(d writeClaimDecision) string {
-	return "System check: your last reply reported a completed write and cited " + strings.Join(d.Finding.Ungrounded, ", ") +
-		", but no write tool result returned that id, so the write did not happen and that id is not one you were given. " +
-		"Do not claim it. Either call the write tool now (use request_tools first if it is not loaded) and report the id it " +
-		"actually returns, or tell the user plainly that nothing was written."
+	return "System check: the write-claim guard could not verify the claimed write for " + strings.Join(d.Finding.Ungrounded, ", ") +
+		" against successful write-tool receipts in this session. This does not establish that no write happened. " +
+		"Review the claim and the actual tool results. Keep the user's requested answer and any supported claims; " +
+		"distinguish observed record activity from changes you made. Correct unsupported claims without inventing a prior " +
+		"user correction or discarding the requested summary. Do not repeat a successful write or perform a new write just " +
+		"to satisfy this check; only write when the user's request calls for it."
 }
 
 // writeClaimFooter is appended to a reply that still carries an unbacked claim

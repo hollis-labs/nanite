@@ -70,7 +70,7 @@ import (
 // ProviderSettings fields, but converts them on its own fixed
 // conventions — Files 0644, MCPConfig 0600, ProviderSettings to its own
 // providerSettingsPath(provider), Hooks 0700. Nanite's destinations and
-// modes differ (codex's config.toml/auth.json at 0600, opencode's
+// modes differ (codex's config.toml at 0600, opencode's
 // hand-rolled descriptors riding Files rather than ProviderSettings), so
 // leaning on that legacy conversion would silently relocate files and
 // change modes. Nothing in this package populates the legacy fields on
@@ -331,7 +331,7 @@ func bootDirTreeFromDir(ctx context.Context, srcDir, destPrefix, ownershipGroup 
 // this per concrete Planter type (rather than in plant.Spec itself, which
 // deliberately stays destination-agnostic) keeps go-agent-wrapper's
 // contract thin while letting Nanite's file-planting mechanics — e.g.
-// codex's config.toml/auth.json needing 0o600, not the 0o644 default —
+// codex's config.toml needing 0o600, not the 0o644 default —
 // live where they always have: Nanite-side.
 type plantConfig struct {
 	// provider is the Spec.ProviderSettings map key this Planter reads.
@@ -347,8 +347,8 @@ type plantConfig struct {
 	// 0 falls back to 0o644.
 	providerSettingsMode os.FileMode
 	// fileModeOverrides sets a non-default mode for specific Files
-	// entries (codex's auth.json needs 0o600 alongside config.toml,
-	// same as go-providers' BootDirSpec declares).
+	// entries. No provider sets one today: codex's auth.json, its only
+	// user, became a symlink to the host login (CW-20261001-0027).
 	fileModeOverrides map[string]os.FileMode
 }
 

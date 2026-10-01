@@ -18,7 +18,8 @@ import (
 //	├── config.toml                  # provider config: approval_policy + sandbox_mode (sourced from go-providers BootDirSpec)
 //	├── .sandbox/agent-context.md
 //	├── .sandbox/envelope-schema.md
-//	└── .mcp.json
+//	├── .mcp.json
+//	└── auth.json -> host login      # symlink to $CODEX_HOME/auth.json or ~/.codex/auth.json (bootdir_codex_auth.go)
 //
 // Spawn cwd: <bootDir>; project access via config.toml writable_roots,
 // which carries the session's work root (CW-20261001-0020).
@@ -44,10 +45,10 @@ type codexLayout struct{}
 
 // codexPlanter implements plant.Planter for the codex bootdir shape.
 // Plant destinations: Spec.Files entries land verbatim at their map-key
-// path (including auth.json, forced to 0o600 via fileModeOverrides);
-// Spec.MCPConfig lands at ".mcp.json"; Spec.ProviderSettings["codex"]
-// lands at "config.toml", also at 0o600. See bootdir_plant.go's
-// plantSpec for the shared write routine.
+// path; Spec.MCPConfig lands at ".mcp.json"; Spec.ProviderSettings["codex"]
+// lands at "config.toml" at 0o600. See bootdir_plant.go's plantSpec for
+// the shared write routine. auth.json is not planted through here — see
+// codexLayout.Populate.
 type codexPlanter struct{}
 
 var _ plant.Planter = codexPlanter{}
@@ -57,7 +58,6 @@ func (codexPlanter) Plant(ctx context.Context, bootDir string, spec plant.Spec) 
 		provider:             "codex",
 		providerSettingsPath: "config.toml",
 		providerSettingsMode: codexConfigFileMode,
-		fileModeOverrides:    map[string]os.FileMode{"auth.json": codexConfigFileMode},
 	})
 }
 
@@ -77,15 +77,15 @@ func codexAgentsMD(params SetupParams) string {
 // codexPlantSpec assembles the full codex bootdir file-set as a
 // plant.Spec.
 //
-// config.toml and auth.json are provider CONFIG files sourced from
-// go-providers' CodexAdapter.BootDirSpec (not hand-rolled). config.toml
-// carries approval_policy + sandbox_mode — the fix for the headless-codex
-// approval deadlock — and rides Spec.ProviderSettings["codex"]; auth.json
-// carries the user's codex auth, planted because CODEX_HOME (set by
-// AmendEnv) redirects codex's auth lookup into the boot dir, and rides
-// Spec.Files (codexPlanter forces its mode to codexConfigFileMode via
-// fileModeOverrides — Spec.Files carries no per-entry mode of its own).
-// See bootdir_provider_config.go.
+// config.toml is a provider CONFIG file sourced from go-providers'
+// CodexAdapter.BootDirSpec (not hand-rolled). It carries approval_policy +
+// sandbox_mode — the fix for the headless-codex approval deadlock — and
+// rides Spec.ProviderSettings["codex"]. See bootdir_provider_config.go.
+//
+// auth.json is deliberately absent from the spec: CODEX_HOME (set by
+// AmendEnv) redirects codex's auth lookup into the boot dir, and
+// Populate answers that with a symlink to the host login, outside the
+// materialize engine (bootdir_codex_auth.go, CW-20261001-0027).
 //
 // TASKS/skills/10: codex has NO native skill-loading mechanism — confirmed
 // against go-providers' own CodexAdapter.BootDirSpec (no skills-related
@@ -114,15 +114,10 @@ func codexPlantSpec(params SetupParams) (plant.Spec, error) {
 	if err != nil {
 		return plant.Spec{}, err
 	}
-	authJSON, err := codexAuthJSONContent()
-	if err != nil {
-		return plant.Spec{}, err
-	}
 
 	files := map[string][]byte{
 		"AGENTS.md": []byte(codexAgentsMD(params)),
 		"boot.md":   []byte(params.BootContent),
-		"auth.json": []byte(authJSON),
 	}
 	for relPath, content := range sandboxFiles(params) {
 		files[relPath] = content
@@ -152,7 +147,8 @@ func (l codexLayout) Setup(params SetupParams) (string, error) {
 	return bootDir, nil
 }
 
-// Populate writes the codex boot-dir shape into bootDir. Idempotent.
+// Populate writes the codex boot-dir shape into bootDir, then links
+// auth.json to the host's codex login (linkCodexHostAuth). Idempotent.
 //
 // Layout.Populate has no context.Context parameter (see bootdir.go
 // and claudeLayout.Populate's comment for why codexPlanter.Plant is
@@ -165,7 +161,14 @@ func (codexLayout) Populate(bootDir string, params SetupParams) (plant.Result, e
 	if err != nil {
 		return plant.Result{}, err
 	}
-	return codexPlanter{}.Plant(context.Background(), bootDir, spec)
+	result, err := codexPlanter{}.Plant(context.Background(), bootDir, spec)
+	if err != nil {
+		return result, err
+	}
+	if err := linkCodexHostAuth(bootDir); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 // RegenerateSystemPromptSlot rewrites only AGENTS.md, leaving the rest
@@ -188,7 +191,7 @@ func (codexLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParams
 // the planted config.toml the one codex actually consults — without this
 // codex would merge ~/.codex/config.toml instead and the planted
 // approval_policy / sandbox_mode (the headless-deadlock fix) would never
-// take effect. codexPlantSpec plants auth.json alongside so the
+// take effect. Populate links auth.json to the host login so the
 // redirected auth lookup still resolves. Mirrors opencodeLayout.AmendEnv's
 // OPENCODE_CONFIG_DIR=<bootDir> pattern.
 //

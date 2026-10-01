@@ -33,8 +33,8 @@ var newRuntimeKinds = []runtimeevents.Event{
 }
 
 var (
-	sessionLostErr = &agentsessions.SessionLostError{RequestedID: "ses_dead", Err: errors.New("exit status 1")}
-	notAuthErr     = fmt.Errorf("agentsessions: %w: %w", provider.ErrProviderNotAuthenticated, errors.New("exit status 1"))
+	errSessionLost      = &agentsessions.SessionLostError{RequestedID: "ses_dead", Err: errors.New("exit status 1")}
+	errNotAuthenticated = fmt.Errorf("agentsessions: %w: %w", provider.ErrProviderNotAuthenticated, errors.New("exit status 1"))
 )
 
 // The chat router: the new kinds mid-turn neither reach chat as text nor
@@ -52,8 +52,8 @@ func TestRuntimeEventBridgeSink_NewEventKinds(t *testing.T) {
 		wantError string
 	}{
 		{"completed", runtimeevents.Event{Kind: runtimeevents.KindTurnCompleted, TurnID: "turn-1"}, []llmtypes.EventType{llmtypes.EventDelta, llmtypes.EventDone}, ""},
-		{"session lost", failed(sessionLostErr), []llmtypes.EventType{llmtypes.EventDelta, llmtypes.EventError}, "your next message starts a fresh one"},
-		{"not authenticated", failed(notAuthErr), []llmtypes.EventType{llmtypes.EventDelta, llmtypes.EventError}, "not logged in on this host"},
+		{"session lost", failed(errSessionLost), []llmtypes.EventType{llmtypes.EventDelta, llmtypes.EventError}, "your next message starts a fresh one"},
+		{"not authenticated", failed(errNotAuthenticated), []llmtypes.EventType{llmtypes.EventDelta, llmtypes.EventError}, "not logged in on this host"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := newRuntimeEventBridgeSink(&agentEventBridge{streams: NewStreamManager()}, "s-kinds", false)
@@ -111,7 +111,7 @@ func TestProjectHostRuntimePayload_NewEventKinds(t *testing.T) {
 			}
 		}
 	}
-	for err, want := range map[error]string{sessionLostErr: "session_lost", notAuthErr: "not_authenticated"} {
+	for err, want := range map[error]string{errSessionLost: "session_lost", errNotAuthenticated: "not_authenticated"} {
 		payload, _ := json.Marshal(map[string]string{"error": err.Error()})
 		raw, _, truncated := projectHostRuntimePayload(runtimeevents.KindTurnFailed, false, payload)
 		if truncated {

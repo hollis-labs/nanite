@@ -107,12 +107,13 @@ func shouldAutoFireFirstTurn(mode Mode) bool {
 // workRoot is the session's project directory (Options.Workdir); see
 // workRootArgs for what it adds to argv.
 func selectNativeAdapter(providerName string, mode Mode, cli provider.CLIAdapter, workRoot string) (adapters.RuntimeAdapter, error) {
+	streaming := shouldUseStreamingStdio(providerName, mode)
 	launchMode := adapters.LaunchSubprocessPerTurn
-	if shouldUseStreamingStdio(providerName, mode) {
+	if streaming {
 		launchMode = adapters.LaunchStreamingStdio
 	}
 	extra := workRootArgs(providerName, workRoot)
-	if err := checkExtraArgsPlacement(launchMode, extra); err != nil {
+	if err := checkExtraArgsPlacement(streaming, extra); err != nil {
 		return nil, err
 	}
 	return adapters.Select(adapters.Selection{
@@ -133,9 +134,9 @@ func selectNativeAdapter(providerName string, mode Mode, cli provider.CLIAdapter
 // stdin), so its --add-dir is safe at the end. A future per-turn addition
 // belongs in the adapter's own ExtraArgs field, which go-providers places
 // before the `--`.
-func checkExtraArgsPlacement(mode adapters.LaunchMode, extra []string) error {
-	if len(extra) > 0 && mode != adapters.LaunchStreamingStdio {
-		return fmt.Errorf("agent: native launch mode %q puts the prompt after `--`, so argv additions %q appended by the wrapper would be read as prompt text", mode, extra)
+func checkExtraArgsPlacement(streaming bool, extra []string) error {
+	if len(extra) > 0 && !streaming {
+		return fmt.Errorf("agent: a per-turn native launch puts the prompt after `--`, so argv additions %q appended by the wrapper would be read as prompt text", extra)
 	}
 	return nil
 }

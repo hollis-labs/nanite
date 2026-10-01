@@ -37,6 +37,13 @@ import (
 // create and manage its own skills, agent profiles, and workflows
 // through the same store layer the API uses.
 type SelfToolsTransport struct {
+	// HideUnwired makes ListTools leave out tools whose collaborators are
+	// nil (selfToolNeeds). `nanite mcp` sets it when it serves this
+	// transport locally, so an agent is never offered a tool that can only
+	// answer "… not configured" (CW-20261001-0017). CallTool is unchanged:
+	// a hidden tool still answers with its handler's own error.
+	HideUnwired bool
+
 	Store             *store.Store
 	BuilderRegistry   *builders.Registry
 	BuilderSessions   *builders.SessionManager
@@ -263,9 +270,22 @@ func (st *SelfToolsTransport) RecallToolLearnings(ctx context.Context, userID, t
 	return st.LearningRecaller.RecallByToolName(ctx, userID, toolName)
 }
 
-// ListTools returns all self-service tool definitions.
+// ListTools returns the self-service tool definitions: all of them, or,
+// when HideUnwired is set, those whose collaborators are wired. The check
+// runs on every call, so a tool reappears as soon as its collaborator is
+// wired (see selfToolNeeds).
 func (st *SelfToolsTransport) ListTools(_ context.Context) ([]mcp.Tool, error) {
-	return selfToolDefinitions(), nil
+	all := selfToolDefinitions()
+	if !st.HideUnwired {
+		return all, nil
+	}
+	listed := make([]mcp.Tool, 0, len(all))
+	for _, t := range all {
+		if st.toolWired(t.Name) {
+			listed = append(listed, t)
+		}
+	}
+	return listed, nil
 }
 
 // CallTool dispatches to the appropriate handler based on tool name.

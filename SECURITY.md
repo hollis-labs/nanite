@@ -160,6 +160,14 @@ confinement rule, resolve symlinks, and record the file size. Download re-checks
 confinement so a legacy or externally modified row cannot serve an outside file.
 This limits artifact registration; it does not sandbox the plugin process.
 
+Subprocess plugins inherit only `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`,
+`USER`, `LOGNAME`, `LANG`, `LC_ALL`, and `XDG_RUNTIME_DIR`. Host code may
+explicitly provide additional launch entries. Provider keys, Nanite auth
+credentials, SSH agent sockets, Docker handles, proxy settings, and runtime
+injection variables are not inherited. Plugin configuration is delivered
+through the init protocol. This environment policy does not restrict files
+a plugin can read with your user privileges.
+
 ## External data processors
 
 Nanite is not local-only once you configure a model provider. What leaves the
@@ -189,9 +197,7 @@ machine:
   Basic Auth credential
 - no built-in TLS
 - no at-rest encryption; MCP server secrets are plaintext in the database
-- subprocess plugins run with your user's privileges and inherit the full
-  environment of the Nanite process, including any provider keys or
-  `NANITE_AUTH_*` values set there
+- subprocess plugins run with your user's privileges
 - no sandbox for plugins or for the agent CLIs Nanite launches
 - plugins installed from a local path or archive are not signature-checked,
   and plugin signing should not be relied on as a trust boundary: a plugin is

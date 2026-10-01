@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -179,5 +180,102 @@ func assertFileNamesWorkRoot(t *testing.T, path, marker, workRoot string) {
 	}
 	if !strings.Contains(string(body), marker) || !strings.Contains(string(body), workRoot) {
 		t.Fatalf("%s does not name the work root %q (marker %q):\n%s", filepath.Base(path), workRoot, marker, body)
+	}
+}
+
+// CW-20261001-0069: since go-providers v0.34.1 a per-turn argv ends with
+// `-- <prompt>`, so untrusted turn text cannot be parsed as a flag. These
+// pin the real argv Nanite's selected adapters build, with a turn that is
+// itself a dangerous flag: Nanite's own additions never land after the
+// `--`, the prompt is the only thing after it, and Claude's --add-dir
+// appears exactly once.
+func TestSelectNativeAdapter_PromptAfterEndOfOptions(t *testing.T) {
+	const (
+		workRoot = "/home/x/dev/project"
+		turn     = "--dangerously-bypass-approvals-and-sandbox"
+	)
+	endOfOptions := func(args []string) int {
+		for i, a := range args {
+			if a == "--" {
+				return i
+			}
+		}
+		return -1
+	}
+
+	t.Run("codex exec", func(t *testing.T) {
+		selected, err := selectNativeAdapter("codex", ModeLongLived, provider.NewCodexAdapter(), workRoot)
+		if err != nil {
+			t.Fatalf("selectNativeAdapter: %v", err)
+		}
+		args := selected.CLIAdapter().BuildArgs(turn, "system", "")
+		dd := endOfOptions(args)
+		if len(args) < 4 || args[0] != "exec" || dd != len(args)-2 || args[len(args)-1] != turn {
+			t.Fatalf("codex argv = %q, want exec … -- <turn>", args)
+		}
+		jsonFlag := -1
+		for i, a := range args {
+			if a == "--json" {
+				jsonFlag = i
+			}
+		}
+		if jsonFlag < 0 || jsonFlag > dd {
+			t.Fatalf("codex argv = %q, want --json before --", args)
+		}
+	})
+
+	t.Run("opencode run", func(t *testing.T) {
+		selected, err := selectNativeAdapter("opencode", ModeLongLived, provider.NewOpencodeAdapter(), workRoot)
+		if err != nil {
+			t.Fatalf("selectNativeAdapter: %v", err)
+		}
+		args := selected.CLIAdapter().BuildArgs(turn, "", "")
+		dd := endOfOptions(args)
+		if len(args) < 3 || args[0] != "run" || dd != len(args)-2 || args[len(args)-1] != turn {
+			t.Fatalf("opencode argv = %q, want run … -- <turn>", args)
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		cli  provider.CLIAdapter
+	}{
+		{"claude streaming", provider.NewClaudeAdapterStreamingStdio()},
+		{"claude streaming dev", provider.NewClaudeAdapterDevStreamingStdio()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, err := selectNativeAdapter("claude", ModeLongLived, tc.cli, workRoot)
+			if err != nil {
+				t.Fatalf("selectNativeAdapter: %v", err)
+			}
+			args := selected.CLIAdapter().BuildArgs(turn, "system", "")
+			// Streaming stdio takes its turns on stdin: no prompt, so no
+			// `--`, in argv, and --add-dir at the end is a flag.
+			if dd := endOfOptions(args); dd >= 0 {
+				t.Fatalf("claude streaming argv = %q, want no `--` (turns go over stdin)", args)
+			}
+			for _, a := range args {
+				if a == turn {
+					t.Fatalf("claude streaming argv = %q carries the turn text", args)
+				}
+			}
+			if n := len(args); n < 2 || args[n-2] != "--add-dir" || args[n-1] != workRoot {
+				t.Fatalf("claude argv = %q, want it to end --add-dir %s", args, workRoot)
+			}
+		})
+	}
+}
+
+// The wrapper appends Selection.ExtraArgs after the adapter's whole argv, so
+// on a per-turn launch they would follow `-- <prompt>`. Refused.
+func TestCheckExtraArgsPlacement(t *testing.T) {
+	if err := checkExtraArgsPlacement(adapters.LaunchStreamingStdio, []string{"--add-dir", "/r"}); err != nil {
+		t.Fatalf("streaming stdio: %v", err)
+	}
+	if err := checkExtraArgsPlacement(adapters.LaunchSubprocessPerTurn, nil); err != nil {
+		t.Fatalf("per-turn, no additions: %v", err)
+	}
+	if err := checkExtraArgsPlacement(adapters.LaunchSubprocessPerTurn, []string{"--add-dir", "/r"}); err == nil {
+		t.Fatal("per-turn additions accepted; the wrapper would append them after `-- <prompt>`")
 	}
 }

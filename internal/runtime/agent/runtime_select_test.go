@@ -24,7 +24,7 @@ func selectNativeAdapter(providerName string, _ Mode, cli provider.CLIAdapter, w
 		return nil, err
 	}
 	deps := &Dependencies{NativeCLIAdapter: func(runtimes.ID) provider.CLIAdapter { return cli }}
-	a, err := selectAdapter(deps, sel, workRoot)
+	a, err := selectAdapter(deps, sel, workRoot, "")
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func TestSelectAdapter_RegistryNative(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		a, err := selectAdapter(&Dependencies{DeveloperMode: tc.dev}, sel, "")
+		a, err := selectAdapter(&Dependencies{DeveloperMode: tc.dev}, sel, "", "")
 		if err != nil {
 			t.Fatalf("selectAdapter(%s): %v", tc.provider, err)
 		}
@@ -141,7 +141,7 @@ func TestSelectAdapter_ClaudeIsStreamingStdioShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, dev := range []bool{false, true} {
-		a, err := selectAdapter(&Dependencies{DeveloperMode: dev}, sel, "")
+		a, err := selectAdapter(&Dependencies{DeveloperMode: dev}, sel, "", "")
 		if err != nil {
 			t.Fatalf("selectAdapter(dev=%v): %v", dev, err)
 		}

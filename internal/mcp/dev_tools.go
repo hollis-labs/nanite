@@ -173,9 +173,56 @@ func expandHome(path string) string {
 // (Q1-Q3 of the locked design) widen the allow-list per session without
 // requiring ahead-of-time config. The pathsafe escape check still runs on
 // the candidate so traversal protection is unaffected.
+//
+// resolveAllowed returns only the path. The write sinks (dev_write,
+// dev_edit) use resolveConfined, which also returns the root that admitted
+// the path, so the write itself can be held inside it.
 func (d *DevToolsTransport) resolveAllowed(ctx context.Context, userPath string) (string, error) {
+	p, err := d.resolveConfined(ctx, userPath)
+	if err != nil {
+		return "", err
+	}
+	return p.path, nil
+}
+
+// confinedPath is a dev-tools path that an allowed root or a session grant
+// admitted, kept together with that root (CW-20260930-0251).
+type confinedPath struct {
+	// root is the canonical directory that admitted the path.
+	root string
+	// path is the canonical absolute path, at or under root.
+	path string
+}
+
+// rel returns path relative to root, the name a write sink opens through
+// an os.Root on root.
+func (p confinedPath) rel() (string, error) {
+	rel, err := filepath.Rel(p.root, p.path)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("path %q is outside root %q", p.path, p.root)
+	}
+	return rel, nil
+}
+
+// canonicalPath returns p with every symlink on it followed, a dangling
+// final one included, by go-safefs's resolution bounded by the filesystem
+// root. A suffix that does not exist yet is kept as written.
+func canonicalPath(p string) (string, error) {
+	fsRoot := filepath.VolumeName(p) + string(filepath.Separator)
+	rel, err := filepath.Rel(fsRoot, p)
+	if err != nil {
+		return "", err
+	}
+	return pathsafe.ResolveUnder(fsRoot, rel)
+}
+
+// resolveConfined is resolveAllowed's implementation; see its comment.
+func (d *DevToolsTransport) resolveConfined(ctx context.Context, userPath string) (confinedPath, error) {
 	if userPath == "" {
-		return "", fmt.Errorf("path is required")
+		return confinedPath{}, fmt.Errorf("path is required")
 	}
 
 	// Expand a leading ~ in the user-supplied path. Go's filepath package
@@ -187,7 +234,7 @@ func (d *DevToolsTransport) resolveAllowed(ctx context.Context, userPath string)
 
 	abs, err := filepath.Abs(userPath)
 	if err != nil {
-		return "", fmt.Errorf("invalid path: %w", err)
+		return confinedPath{}, fmt.Errorf("invalid path: %w", err)
 	}
 
 	if len(d.AllowedPaths) == 0 {
@@ -198,7 +245,7 @@ func (d *DevToolsTransport) resolveAllowed(ctx context.Context, userPath string)
 		if resolved, ok := d.tryResolveViaSessionGrant(ctx, abs, userPath); ok {
 			return resolved, nil
 		}
-		return "", &pathsafe.EscapeError{
+		return confinedPath{}, &pathsafe.EscapeError{
 			Root:     "",
 			Attempt:  userPath,
 			Resolved: abs,
@@ -206,27 +253,36 @@ func (d *DevToolsTransport) resolveAllowed(ctx context.Context, userPath string)
 		}
 	}
 
+	// Resolve the target once, before looking at any root: every symlink on
+	// it is followed, a dangling final one included, so each root judges
+	// where the path actually leads. CW-20260930-0251 removed the fallback
+	// that judged the unresolved path whenever EvalSymlinks failed (a
+	// missing or dangling final component), which made the answer depend on
+	// whether the target happened to exist yet.
 	var lastErr error
+	target, targetErr := canonicalPath(abs)
+	if targetErr != nil {
+		lastErr = targetErr
+	}
 	for _, root := range d.AllowedPaths {
+		if targetErr != nil {
+			break
+		}
 		absRoot, absErr := filepath.Abs(root)
 		if absErr != nil {
 			lastErr = absErr
 			continue
 		}
-		// Resolve symlinks on the root once so macOS /var vs /private/var
-		// comparisons work. Fall back to the cleaned path if resolution
-		// fails (e.g. root does not exist).
-		if real, evalErr := filepath.EvalSymlinks(absRoot); evalErr == nil {
-			absRoot = real
-		}
-		// Resolve symlinks on the target's longest existing ancestor so the
-		// Rel computation uses the same canonical form as the root.
-		target := abs
-		if real, evalErr := filepath.EvalSymlinks(target); evalErr == nil {
-			target = real
+		// Canonical form of the root too, so macOS /var vs /private/var
+		// comparisons work; a root that does not exist yet keeps its
+		// missing suffix.
+		canonRoot, rootErr := canonicalPath(absRoot)
+		if rootErr != nil {
+			lastErr = rootErr
+			continue
 		}
 
-		rel, relErr := filepath.Rel(absRoot, target)
+		rel, relErr := filepath.Rel(canonRoot, target)
 		if relErr != nil {
 			lastErr = relErr
 			continue
@@ -234,18 +290,18 @@ func (d *DevToolsTransport) resolveAllowed(ctx context.Context, userPath string)
 		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 			// Target is outside this root; try the next root.
 			lastErr = &pathsafe.EscapeError{
-				Root:     absRoot,
+				Root:     canonRoot,
 				Attempt:  userPath,
 				Resolved: target,
 				Cause:    errors.New("resolved path outside root"),
 			}
 			continue
 		}
-		// Delegate the final symlink-aware check to pathsafe. This catches
-		// symlinks inside the target that point out of the root.
-		resolved, resolveErr := pathsafe.ResolveUnder(absRoot, rel)
+		// pathsafe re-checks the root-relative path symlink by symlink, so
+		// the root, not the filesystem, bounds the result.
+		resolved, resolveErr := pathsafe.ResolveUnder(canonRoot, rel)
 		if resolveErr == nil {
-			return resolved, nil
+			return confinedPath{root: canonRoot, path: resolved}, nil
 		}
 		lastErr = resolveErr
 	}
@@ -259,14 +315,20 @@ func (d *DevToolsTransport) resolveAllowed(ctx context.Context, userPath string)
 	// Surface the typed *pathsafe.EscapeError from the final attempt so
 	// callers can classify with errors.As. Non-escape errors (e.g. malformed
 	// ancestor) propagate too.
-	return "", lastErr
+	return confinedPath{}, lastErr
 }
 
 // tryResolveViaSessionGrant runs the path-safety escape check using the
 // matching session grant as the "root" so the symlink-aware safety net
-// stays in the loop. Returns (cleanedAbs, true) on success; ("", false)
-// when the ctx carries no grant store, the session has no matching grant,
-// or the safety check fails.
+// stays in the loop. Returns (the confined path, true) on success;
+// (zero, false) when the ctx carries no grant store, the session has no
+// matching grant, or the safety check fails.
+//
+// CW-20260930-0251: before this, a grant match returned the candidate
+// with a best-effort EvalSymlinks and no escape check at all, so a symlink
+// planted under a granted directory carried dev_write / dev_edit wherever
+// it pointed. The candidate is now resolved under the grant's root
+// (grantRoot) by pathsafe.ResolveUnder and refused if it leaves it.
 //
 // abs is the already-tilde-expanded, filepath.Abs'd candidate; userPath is
 // kept around for the EscapeError diagnostic when a downstream call needs
@@ -279,7 +341,7 @@ func (d *DevToolsTransport) resolveAllowed(ctx context.Context, userPath string)
 // the c138 reproduction (Glass-8 partial regression) was invisible until
 // this log was added. Tool calls are low-frequency enough that volume
 // is not a concern.
-func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, _ string) (string, bool) {
+func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, _ string) (confinedPath, bool) {
 	sessionID, checker := permission.PathGrantsFromContext(ctx)
 	hadChecker := checker != nil
 
@@ -312,16 +374,99 @@ func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, 
 	)
 
 	if !matched {
-		return "", false
+		return confinedPath{}, false
 	}
-	// Resolve symlinks on the existing-ancestor of the target so the
-	// downstream open()/MkdirAll() observes the same canonical form
-	// pathsafe would. Match the per-root logic above.
-	target := abs
-	if real, evalErr := filepath.EvalSymlinks(target); evalErr == nil {
-		target = real
+	root := grantRoot(checker, sessionID, abs)
+	canonRoot, err := canonicalPath(root)
+	if err != nil {
+		slog.Info("permission: dev_tools grant root unresolvable",
+			"session_id", sessionID, "err", err)
+		return confinedPath{}, false
 	}
-	return filepath.Clean(target), true
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return confinedPath{}, false
+	}
+	resolved, err := pathsafe.ResolveUnder(canonRoot, rel)
+	if err != nil {
+		slog.Info("permission: dev_tools grant match refused by confinement",
+			"session_id", sessionID, "err", err)
+		return confinedPath{}, false
+	}
+	return confinedPath{root: canonRoot, path: resolved}, true
+}
+
+// grantRoot returns the directory a session grant covering abs confines it
+// to: the outermost of abs and its ancestors that the grants still match,
+// which is the granted directory a prefix match came from. When nothing
+// above abs matches, abs itself is the grant: a granted directory confines
+// its own contents and a granted file confines to its directory.
+func grantRoot(checker permission.PathGrantChecker, sessionID, abs string) string {
+	root := abs
+	for {
+		parent := filepath.Dir(root)
+		if parent == root {
+			break
+		}
+		if matched, _, _ := checker.LookupPath(sessionID, parent); !matched {
+			break
+		}
+		root = parent
+	}
+	if root == abs {
+		if info, err := os.Stat(abs); err != nil || !info.IsDir() {
+			return filepath.Dir(abs)
+		}
+	}
+	return root
+}
+
+// writeConfined writes data to p through an os.Root opened on p.root
+// (CW-20260930-0251). resolveConfined checked the path when it admitted
+// it; an agent that swaps a symlink onto the path afterwards (dev_bash runs
+// alongside) would otherwise redirect the write, since os.WriteFile follows
+// links. os.Root refuses any name that resolves outside the root, however
+// it gets there. The root itself was configured or granted, so it is
+// created when missing, as dev_write always did.
+func writeConfined(p confinedPath, data []byte) error {
+	rel, err := p.rel()
+	if err != nil {
+		return err
+	}
+	// #nosec G301 -- dev_write has always created the directories an agent writes into 0o755, as project directories are.
+	if err = os.MkdirAll(p.root, 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	r, err := os.OpenRoot(p.root)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = r.Close() // Read-only handle on the root directory; the write's own error is what matters.
+	}()
+	if dir := filepath.Dir(rel); dir != "." {
+		if err := r.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("mkdir: %w", err)
+		}
+	}
+	return r.WriteFile(rel, data, 0o644)
+}
+
+// readConfined reads p through an os.Root opened on p.root, for the same
+// reason writeConfined writes through one.
+func readConfined(p confinedPath) ([]byte, error) {
+	rel, err := p.rel()
+	if err != nil {
+		return nil, err
+	}
+	r, err := os.OpenRoot(p.root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = r.Close() // Read-only handle on the root directory; the read's own error is what matters.
+	}()
+	return r.ReadFile(rel)
 }
 
 // resolveArtifact resolves a Context Broker stash pointer's artifact_id
@@ -944,18 +1089,13 @@ func (d *DevToolsTransport) callWrite(ctx context.Context, args map[string]any) 
 	if path == "" {
 		return ErrorResult("path is required"), nil
 	}
-	resolved, err := d.resolveAllowed(ctx, path)
+	resolved, err := d.resolveConfined(ctx, path)
 	if err != nil {
 		return pathErrorResult(path, err), nil
 	}
-	path = resolved
+	path = resolved.path
 
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return ErrorResult(fmt.Sprintf("mkdir: %v", err)), nil
-	}
-
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := writeConfined(resolved, []byte(content)); err != nil {
 		return ErrorResult(fmt.Sprintf("write: %v", err)), nil
 	}
 
@@ -975,13 +1115,13 @@ func (d *DevToolsTransport) callEdit(ctx context.Context, args map[string]any) (
 	if oldStr == newStr {
 		return ErrorResult("old_string and new_string must be different"), nil
 	}
-	resolved, err := d.resolveAllowed(ctx, path)
+	resolved, err := d.resolveConfined(ctx, path)
 	if err != nil {
 		return pathErrorResult(path, err), nil
 	}
-	path = resolved
+	path = resolved.path
 
-	data, err := os.ReadFile(path)
+	data, err := readConfined(resolved)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("read: %v", err)), nil
 	}
@@ -1004,7 +1144,7 @@ func (d *DevToolsTransport) callEdit(ctx context.Context, args map[string]any) (
 		newContent = strings.Replace(content, oldStr, newStr, 1)
 	}
 
-	if err := os.WriteFile(path, []byte(newContent), 0o644); err != nil {
+	if err := writeConfined(resolved, []byte(newContent)); err != nil {
 		return ErrorResult(fmt.Sprintf("write: %v", err)), nil
 	}
 

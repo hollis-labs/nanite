@@ -482,22 +482,22 @@ func mcpConfigBytes(params SetupParams) ([]byte, error) {
 // an empty map when MCP planting is disabled (zero-value DBPath). Kept
 // as its own function (rather than folded into mcpConfigBytes) because
 // sandbox_content_mcp_test.go exercises it directly, and because it is
-// the single seam that applies the live-harness-proxy Mode gating below.
+// the single seam that applies the self-tool scope Mode gating below.
 //
 // Returns an error when the MCP config is internally inconsistent
 // (BinaryPath required when DBPath is set) so a misconfigured boot fails
 // fast rather than planting a broken descriptor.
 func mcpOverlay(params SetupParams) (map[string]string, error) {
-	cfg := params.MCPConfig
-	// The live-harness self-tools proxy (NANITE_API_URL) is a chat-agent
-	// affordance only. Subagent / background / one-shot launches follow the
-	// standard boot and dispatch self-tools locally against their own store,
-	// so strip the API URL for them — renderMCPJSON then omits the env.
-	// ModeResume is kept proxied: it re-boots a crash-recovered chat agent.
-	if cfg.APIBaseURL != "" && params.Mode != ModeLongLived && params.Mode != ModeResume {
-		cfg.APIBaseURL = ""
-	}
-	body, err := renderMCPJSON(cfg, params.SessionID)
+	// Every launch's `nanite mcp` forwards its self-tool calls to the live
+	// harness (NANITE_API_URL), so none opens the database, whose directory
+	// Nanite write-protects from agents (CW-20261001-0188). The harness's
+	// full self-tool surface is a chat-agent affordance only (1b324a45):
+	// subagent, background and one-shot launches keep the bare-store set
+	// they had when they dispatched locally, named by SelfToolsScopeEnv.
+	// ModeResume re-boots a crash-recovered chat agent, so it keeps the
+	// full surface.
+	storeScope := params.Mode != ModeLongLived && params.Mode != ModeResume
+	body, err := renderMCPJSON(params.MCPConfig, params.SessionID, storeScope)
 	if err != nil {
 		return nil, err
 	}

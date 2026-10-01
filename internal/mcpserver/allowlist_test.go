@@ -21,7 +21,7 @@ func newAllowlistedTestServer(t *testing.T, allowlist []string) *Server {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })
-	return New(s, "test-session", nil, "", "", allowlist)
+	return New(s, "test-session", nil, "", allowlist)
 }
 
 // connectClient wires srv (this package's Server, wrapping a

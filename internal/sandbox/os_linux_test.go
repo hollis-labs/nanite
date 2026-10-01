@@ -81,6 +81,11 @@ func TestBwrapArgs_UnshareNetUnconditional(t *testing.T) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bwrap not installed")
 	}
+	// This checks how the arguments are built, not whether this host can
+	// run them, so the bridge check is told the bridge works
+	// (CW-20261001-0079 refuses network-granted exec on hosts where it
+	// cannot).
+	injectNetworkBridgeProbe(t, func() error { return nil })
 
 	// Empty allowlist: --unshare-net present, as before.
 	cmdEmpty := exec.Command("/bin/true")

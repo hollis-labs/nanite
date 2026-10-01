@@ -239,9 +239,7 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 		a.errorResp(w, http.StatusNotFound, "stream not found")
 		return
 	}
-	if sessionID, found := a.Services.Streams.GetSessionForMessage(messageID); found {
-		defer a.Services.Streams.UnregisterSSE(sessionID, sseDone)
-	}
+	defer a.Services.Streams.UnregisterSSE(messageID, sseDone)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -269,7 +267,7 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 		case <-ctx.Done():
 			return
 		case <-sseDone:
-			// Another tab opened an SSE connection for this session — send takeover event and close.
+			// Another tab opened an SSE connection for this message — send takeover event and close.
 			writeTakeover()
 			return
 		case evt, ok := <-ch:

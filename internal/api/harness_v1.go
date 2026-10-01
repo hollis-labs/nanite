@@ -55,6 +55,14 @@ type harnessV1InitializeResponse struct {
 	Unsupported         []string                   `json:"unsupported"`
 }
 
+// harnessV1TurnDelivery states what a turn sent while another is running on
+// the session does, and how to interrupt instead (CW-20261001-0072).
+type harnessV1TurnDelivery struct {
+	MidRun    string   `json:"mid_run"`
+	Interrupt string   `json:"interrupt"`
+	Notes     []string `json:"notes,omitempty"`
+}
+
 type harnessV1FieldSupport struct {
 	Supported   []string `json:"supported"`
 	Unsupported []string `json:"unsupported"`
@@ -76,6 +84,7 @@ type harnessV1CapabilitiesResponse struct {
 	SupportedEventTypes   []enumOption               `json:"supported_event_types"`
 	SessionCreateFields   harnessV1FieldSupport      `json:"session_create_fields"`
 	TurnSendFields        harnessV1FieldSupport      `json:"turn_send_fields"`
+	TurnDelivery          harnessV1TurnDelivery      `json:"turn_delivery"`
 	PermissionRequests    harnessV1PermissionSupport `json:"permission_requests"`
 	RouteHints            harnessV1RouteHints        `json:"route_hints"`
 }
@@ -195,6 +204,14 @@ func (a *API) handleHarnessV1Capabilities(w http.ResponseWriter, r *http.Request
 		TurnSendFields: harnessV1FieldSupport{
 			Supported:   []string{"content", "cycle_kind", "effort", "delta_mode"},
 			Unsupported: []string{},
+		},
+		TurnDelivery: harnessV1TurnDelivery{
+			MidRun:    "queue",
+			Interrupt: harnessV1RoutePrefix + "/sessions/{id}/cancel",
+			Notes: []string{
+				"A turn sent while another is running on the session waits for it to finish, then runs. Its stream stays open with no events until then, and opening it does not affect the running turn's stream: SSE takeover is per message.",
+				"Cancel stops the running turn and any queued turns. The running turn's output so far is saved, with metadata.interrupted=true.",
+			},
 		},
 		PermissionRequests: harnessV1PermissionSupportInfo(),
 		RouteHints:         harnessV1Routes(),

@@ -46,6 +46,16 @@ const chatShutdownMaxWait = 10 * time.Second
 // the predecessor's terminal return before issuing their first prompt.
 const runtimeTurnCancelMaxWait = 2 * time.Second
 
+// runtimeStopMaxWait bounds the stop that stands in for turn cancellation on a
+// runtime without it (native CLIs). agentkit's streaming-stdio Stop closes
+// stdin and waits up to 2s for the child to exit, then sends SIGTERM and waits
+// up to 5s before SIGKILL, and it escalates to SIGKILL as soon as the caller's
+// ctx ends. A 2s budget therefore SIGKILLed a healthy Claude straight after
+// its SIGTERM (CW-20261001-0072). This covers both graces with margin, so the
+// child gets its SIGTERM grace. It runs off the API caller's path; only
+// successors queued behind the stopped turn wait on it.
+const runtimeStopMaxWait = 10 * time.Second
+
 // ChatService is the top-level orchestrator for message handling. It composes
 // all Wave 1–2 services and replaces the monolithic Engine for chat operations.
 type ChatService interface {
@@ -763,17 +773,69 @@ func waitClosed(ctx context.Context, ch <-chan struct{}) bool {
 	}
 }
 
-// generationBoundarySafe carries safety transitively through takeover chains.
-// A binding-less canceled B cannot report itself safe until its own
-// predecessor A completed a safe cancellation and fully returned.
+// generationBoundarySafe carries safety transitively through generation
+// chains. A binding-less canceled B cannot report itself safe until its own
+// predecessor A fully returned and, if A was itself canceled, completed a safe
+// cancellation. A predecessor that ran to its own end was marked safe before
+// its done closed (markGenerationCompleted).
 func generationBoundarySafe(ctx context.Context, predecessor *inFlightGen) bool {
 	if predecessor == nil {
 		return true
 	}
-	if !waitClosed(ctx, predecessor.cancelIssued) || !waitClosed(ctx, predecessor.done) {
+	if !waitClosed(ctx, predecessor.done) {
+		return false
+	}
+	if generationCancelAsked(predecessor) && !waitClosed(ctx, predecessor.cancelIssued) {
 		return false
 	}
 	return generationResolvedSafe(predecessor)
+}
+
+func generationCancelAsked(gen *inFlightGen) bool {
+	if gen == nil {
+		return false
+	}
+	gen.turnMu.Lock()
+	defer gen.turnMu.Unlock()
+	return gen.cancelAsked
+}
+
+func generationPredecessor(gen *inFlightGen) *inFlightGen {
+	if gen == nil {
+		return nil
+	}
+	gen.turnMu.Lock()
+	defer gen.turnMu.Unlock()
+	return gen.predecessor
+}
+
+func generationDone(gen *inFlightGen) bool {
+	select {
+	case <-gen.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// markGenerationCompleted records that gen ran to its own end without a
+// cancellation request: its provider stream or runtime turn reached its
+// terminal, so nothing of it can reach a successor. The caller runs it before
+// gen.done closes, so a queued successor that sees done also sees the
+// boundary. A generation already claimed by cancellation, or retained as an
+// unsafe tombstone (a failed runtime send), resolves on that path instead.
+func (s *chatServiceImpl) markGenerationCompleted(gen *inFlightGen) {
+	if gen == nil {
+		return
+	}
+	s.activeGenMu.Lock()
+	gen.turnMu.Lock()
+	if !gen.cancelAsked && !gen.retainUnsafe {
+		gen.cancelSafe = true
+		gen.safeOnce.Do(func() { close(gen.safeBoundary) })
+	}
+	gen.turnMu.Unlock()
+	s.activeGenMu.Unlock()
 }
 
 func generationResolvedSafe(gen *inFlightGen) bool {
@@ -989,7 +1051,7 @@ func (s *chatServiceImpl) finishClaimedCancellation(sessionID string, gen *inFli
 					// captured wrapper. Wait for both Run and the exact SendInput call;
 					// normalized sink delivery is synchronous inside Run, so exact
 					// router release after those waits is an ordered drain ack.
-					stopCtx, stopCancel := context.WithTimeout(ownerCtx, runtimeTurnCancelMaxWait)
+					stopCtx, stopCancel := context.WithTimeout(ownerCtx, runtimeStopMaxWait)
 					stopErr := sess.Stop(stopCtx)
 					waitErr := sess.Wait(stopCtx)
 					turnSafe = !errors.Is(waitErr, context.Canceled) &&
@@ -1060,29 +1122,58 @@ func (s *chatServiceImpl) requestGenerationCancellation(sessionID string, gen *i
 // NOT cleared here — deregisterGeneration handles that when the canceled
 // goroutine returns, preserving the takeover semantics in
 // registerGeneration.
+//
+// CW-20261001-0072: a turn sent while another is in flight queues behind it
+// (launchGeneration), so the registry slot holds the newest queued turn. A
+// user stop cancels that turn and every generation ahead of it that has not
+// finished, including the one actually running.
 func (s *chatServiceImpl) CancelActiveGeneration(sessionID string) bool {
 	s.activeGenMu.Lock()
 	cur, ok := s.activeGen[sessionID]
-	var binding *runtimeTurnBinding
-	var predecessor *inFlightGen
-	var sendStarted, claimed bool
-	if ok && cur != nil {
-		binding, predecessor, sendStarted, claimed = s.claimGenerationCancellationLocked(cur)
-	}
 	s.activeGenMu.Unlock()
 	if !ok || cur == nil {
 		return false
 	}
-	if claimed {
-		s.finishClaimedCancellation(sessionID, cur, binding, predecessor, sendStarted)
-	}
+	s.cancelGenerationChain(sessionID, cur)
 	return true
 }
 
+// cancelGenerationChain claims cancellation for gen and each predecessor that
+// is still in flight, then finishes each claim. Claims happen under one
+// activeGenMu hold, so a queued turn cannot start between its own claim and its
+// predecessor's.
+func (s *chatServiceImpl) cancelGenerationChain(sessionID string, gen *inFlightGen) {
+	type claim struct {
+		gen         *inFlightGen
+		binding     *runtimeTurnBinding
+		predecessor *inFlightGen
+		sendStarted bool
+	}
+	var claims []claim
+	s.activeGenMu.Lock()
+	for g := gen; g != nil; g = generationPredecessor(g) {
+		if g != gen && generationDone(g) {
+			break
+		}
+		binding, predecessor, sendStarted, claimed := s.claimGenerationCancellationLocked(g)
+		if claimed {
+			claims = append(claims, claim{g, binding, predecessor, sendStarted})
+		}
+	}
+	s.activeGenMu.Unlock()
+	for _, c := range claims {
+		s.finishClaimedCancellation(sessionID, c.gen, c.binding, c.predecessor, c.sendStarted)
+	}
+}
+
 // launchGeneration starts a cancellable generateResponse goroutine for the
-// given target session. If another generateResponse is already running for
-// this session, it is canceled first — prevents concurrent duplicate loops
-// when the user retries mid-stream (CW-20260418-0043).
+// given target session. If another generation is already in flight for this
+// session, the new one queues behind it: it starts once its predecessor has
+// finished, so two loops never run on one session at once
+// (CW-20260418-0043), and a turn sent mid-run reaches the agent at the next
+// turn boundary instead of interrupting the running turn (CW-20261001-0072,
+// matching Torque's steering). Interrupting is explicit:
+// CancelActiveGeneration, the user-stop path.
 //
 // The cancel is wired into both our per-session registry (for takeover) and
 // the lifecycle manager (for graceful Shutdown) via a small bridge goroutine.
@@ -1109,9 +1200,8 @@ func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, user
 
 	prev, current := s.registerGeneration(sessionID, assistantMsgID, cancel)
 	if prev != nil {
-		slog.Info("chat-service: canceling prior in-flight generation for session",
-			"session_id", sessionID, "new_msg_id", assistantMsgID)
-		s.requestGenerationCancellation(sessionID, prev)
+		slog.Info("chat-service: queuing turn behind in-flight generation for session",
+			"session_id", sessionID, "new_msg_id", assistantMsgID, "prev_msg_id", prev.msgID)
 	}
 
 	s.runGeneration(genCtx, name, sessionID, assistantMsgID, userContent, ch, callerType, deltaMode, cancel, current, prev)
@@ -1122,6 +1212,11 @@ func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, user
 // registration in the activeGen map has already happened by the time this
 // is called; this only owns running the turn and cleaning up afterward.
 func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, deltaMode chat.DeltaMode, cancel context.CancelFunc, current, predecessor *inFlightGen) {
+	if predecessor != nil && s.streams != nil {
+		// Queued: keep the running turn's session broadcasts (tool events)
+		// and reconnect target from landing on this not-yet-started stream.
+		s.streams.DetachFromSession(assistantMsgID)
+	}
 	s.lifecycle.Go(name, func(bgCtx context.Context) {
 		// Bridge lifecycle shutdown (bgCtx) into our takeover-ctx so
 		// generateResponse still aborts on process Shutdown.
@@ -1140,14 +1235,32 @@ func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID,
 			defer close(current.done)
 		}
 
-		// A takeover must not race its Prompt ahead of the exact predecessor's
-		// CancelTurn request or terminal return. Native wrappers truthfully
-		// report unsupported cancellation, so this naturally waits for their
-		// turn to finish instead of pretending the process was interrupted.
+		// A queued turn must not race its Prompt ahead of its predecessor's
+		// terminal: it waits for the predecessor to finish, and for a canceled
+		// predecessor also for its CancelTurn request or exact terminal return.
+		// Native wrappers truthfully report unsupported cancellation, so a
+		// canceled native turn is waited out rather than presumed interrupted.
 		if !waitForPredecessor(genCtx, bgCtx, predecessor) {
+			if genCtx.Err() != nil && generationResolvedSafe(predecessor) {
+				// Canceled while queued: this turn never ran, and its
+				// predecessor's boundary resolved safely.
+				close(ch)
+				return
+			}
 			s.retainUnsafePredecessor(sessionID, current, predecessor)
 			close(ch)
 			return
+		}
+		if current != nil && predecessor != nil {
+			// The predecessor finished at a safe boundary. Dropping the
+			// reference keeps a session that is never idle from growing an
+			// unbounded chain of finished generations.
+			current.turnMu.Lock()
+			current.predecessor = nil
+			current.turnMu.Unlock()
+		}
+		if predecessor != nil && s.streams != nil {
+			s.streams.AttachToSession(assistantMsgID)
 		}
 
 		// CW-20260512-0121: route through the single dispatcher door.
@@ -1176,6 +1289,7 @@ func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID,
 			// the runner would have honored.
 			close(ch)
 		}
+		s.markGenerationCompleted(current)
 	})
 }
 
@@ -1183,18 +1297,19 @@ func waitForPredecessor(genCtx, ownerCtx context.Context, predecessor *inFlightG
 	if predecessor == nil {
 		return true
 	}
-	for _, barrier := range []<-chan struct{}{predecessor.cancelIssued, predecessor.done} {
-		if barrier == nil {
-			continue
-		}
+	select {
+	case <-predecessor.done:
+	case <-ownerCtx.Done():
+		return false
+	}
+	if generationCancelAsked(predecessor) {
 		select {
-		case <-barrier:
+		case <-predecessor.cancelIssued:
 		case <-ownerCtx.Done():
 			return false
 		}
 	}
-	safe := generationResolvedSafe(predecessor)
-	if predecessor.cancelIssued != nil && !safe {
+	if !generationResolvedSafe(predecessor) {
 		return false
 	}
 	return genCtx.Err() == nil
@@ -1517,7 +1632,7 @@ func (s *chatServiceImpl) shutdownWithMaxWait(maxWait time.Duration) error {
 	}
 	s.activeGenMu.Unlock()
 	for sessionID, gen := range active {
-		s.requestGenerationCancellation(sessionID, gen)
+		s.cancelGenerationChain(sessionID, gen)
 	}
 	if sessions != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), maxWait)

@@ -75,6 +75,13 @@ var bwrapRoBindCandidates = []string{
 //   - --die-with-parent and --new-session prevent orphan escape and TTY
 //     hijacking (gap #5 partial).
 func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, extraWritePath string, networkAllow []string, proxyAddr string) (cleanup func(), isolated bool, err error) {
+	return applyBwrapSandbox(cmd, sandboxDir, extraWritePath, networkAllow, proxyAddr, networkBridgeCheck)
+}
+
+// applyBwrapSandbox is applyOSSandbox with the network-bridge host check
+// passed in. ProbeNetworkBridge passes nil, since it is the check's own probe
+// and runs the bridge to find out whether it works.
+func applyBwrapSandbox(cmd *exec.Cmd, sandboxDir string, extraWritePath string, networkAllow []string, proxyAddr string, bridgeCheck func() error) (cleanup func(), isolated bool, err error) {
 	bwrapPath, lookErr := exec.LookPath("bwrap")
 	isolated, warnMsg, verdictErr := resolveIsolationVerdict(lookErr == nil, "bwrap not found — install bubblewrap for OS-level isolation")
 	if verdictErr != nil {
@@ -196,6 +203,14 @@ func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, extraWritePath string, net
 	bridgeCleanup := func() {}
 
 	if len(networkAllow) > 0 && proxyAddr != "" {
+		// CW-20261001-0079: on a host whose bwrap network namespace cannot
+		// raise loopback, the bridge's helper would exit 125 and the caller
+		// would see only that. Refuse up front with the cause instead.
+		if bridgeCheck != nil {
+			if err := bridgeCheck(); err != nil {
+				return nil, false, err
+			}
+		}
 		bridge, bridgeErr := newNetnsBridge(proxyAddr, origPath, origArgs, cmd.Env)
 		if bridgeErr != nil {
 			return nil, false, fmt.Errorf("sandbox: wire network-allowlist bridge: %w", bridgeErr)

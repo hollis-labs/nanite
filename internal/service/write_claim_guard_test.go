@@ -12,6 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/writeclaim"
 )
 
 const (
@@ -675,5 +676,38 @@ func TestWriteClaimGuardNarrationUnderWarn(t *testing.T) {
 	}
 	if !warned {
 		t.Errorf("no status event: %v", eventTypes(events))
+	}
+}
+
+func TestWriteClaimNudgePreservesAnswerAndDoesNotDemandWrites(t *testing.T) {
+	nudge := writeClaimNudge(writeClaimDecision{Finding: writeclaim.Finding{Ungrounded: []string{"CW-20260919-0011"}}})
+	for _, want := range []string{"CW-20260919-0011", "does not establish that no write happened", "Keep the user's requested answer", "Do not repeat a successful write"} {
+		if !strings.Contains(nudge, want) {
+			t.Errorf("correction missing %q: %s", want, nudge)
+		}
+	}
+}
+
+func TestWriteClaimGuardPreservesReadActivitySummary(t *testing.T) {
+	reply := "Observed: tasks under PRJ-20260416-0001 were created or updated yesterday. I saved the summary as " + returned + "."
+	f := newGuardFixture(t, []characterizationProviderStep{
+		{events: toolTurnEvents(toolUse("w1", "kb_write"))},
+		{events: doneEvents(reply)},
+	}, &guardTools{})
+	events := f.run(t, "activity-summary")
+	if got := len(f.provider.requestsSnapshot()); got != 2 {
+		t.Fatalf("activity summary triggered a correction: %d requests", got)
+	}
+	var stored struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(lastAssistantText(t, f)), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if findEvent(events, "replace_content") != nil || stored.Text != reply {
+		t.Fatalf("the guard changed the requested summary: %q", stored.Text)
+	}
+	if ev := guardEvents(t, f); len(ev) != 1 || ev[0]["reason"] != wcWriteSucceeded || ev[0]["fired"] != false {
+		t.Fatalf("read activity was rejected: %+v", ev)
 	}
 }

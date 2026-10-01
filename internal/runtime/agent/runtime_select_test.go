@@ -272,3 +272,22 @@ func TestBoot_CapitalisedProviderName(t *testing.T) {
 	defer cancel()
 	_ = sess.Stop(ctx)
 }
+
+// Only a session a later Boot can resume is worth persisting or presetting:
+// native Codex's thread lives under the per-boot CODEX_HOME.
+func TestProviderSessionSurvivesBoot(t *testing.T) {
+	for _, tc := range []struct {
+		sel  RuntimeSelection
+		want bool
+	}{
+		{RuntimeSelection{runtimes.Claude, runtimes.ModeStreamingStdio}, true},
+		{RuntimeSelection{runtimes.OpenCode, runtimes.ModeSubprocessPerTurn}, true},
+		{RuntimeSelection{runtimes.Codex, runtimes.ModeSubprocessPerTurn}, false},
+		{RuntimeSelection{runtimes.Codex, runtimes.ModeACPStdio}, true}, // an ACP agent plants no boot dir
+		{RuntimeSelection{runtimes.Copilot, runtimes.ModeACPStdio}, true},
+	} {
+		if got := providerSessionSurvivesBoot(tc.sel); got != tc.want {
+			t.Errorf("providerSessionSurvivesBoot(%s %s) = %v, want %v", tc.sel.Runtime, tc.sel.Mode, got, tc.want)
+		}
+	}
+}

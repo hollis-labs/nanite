@@ -14,13 +14,15 @@ import (
 )
 
 // agentControlPlane is the set of Nanite's own directories its agents may
-// not write (CW-20261001-0143): config, state and data. Two directories
-// inside them stay writable:
-//   - the main database's directory. Each agent runs its own `nanite mcp
-//     --db <main.db>` subprocess inside its sandbox, and that opens the
-//     database read-write. Until it stops doing so (CW-20261001-0188), an
-//     agent can still write main.db directly;
-//   - the worktree root (wtBaseDir), where agents do their work.
+// not write (CW-20261001-0143): config, state and data, and the main
+// database's directory (CW-20261001-0188). The database is inside the data
+// directory by default, and protected with it; a --db or NANITE_DB_PATH
+// outside the layout gets its own directory protected too. Only the worktree
+// root (wtBaseDir), where agents do their work, stays writable inside them.
+//
+// An agent's own `nanite mcp` no longer opens the database: it forwards to
+// the live API (CW-20261001-0188), so nothing in an agent's tree needs the
+// database's directory.
 //
 // Linux only for now. go-sandbox's macOS write-protect has not been run on
 // a Mac (its v0.5.0 CHANGELOG), and enforcement fails closed: an
@@ -44,9 +46,16 @@ func agentControlPlane(layout paths.Layout, dbPath, worktreeRoot string) runtime
 		slog.Error("the sandbox backend cannot write-protect paths, so every agent launch will be refused; install bubblewrap, or set "+runtimeagent.ProtectEnv+"=0 to launch agents without protection",
 			"backend", caps.Backend, "goos", caps.GOOS)
 	}
+	dirs := []string{layout.ConfigDir(), layout.StateDir(), layout.DataDir()}
+	// Always offered, not only when it lies outside the layout: a database
+	// inside the data directory is nested in it and dropped as redundant, and
+	// one that is not (a --db override) is protected on its own.
+	if dbDir := filepath.Dir(dbPath); dbPath != "" && dbDir != "." {
+		dirs = append(dirs, dbDir)
+	}
 	return runtimeagent.ControlPlane{
-		Dirs:     safeControlPlaneDirs([]string{layout.ConfigDir(), layout.StateDir(), layout.DataDir()}),
-		Writable: []string{filepath.Dir(dbPath), worktreeRoot},
+		Dirs:     safeControlPlaneDirs(dirs),
+		Writable: []string{worktreeRoot},
 	}
 }
 

@@ -210,34 +210,52 @@ func TestRemediateUnknownRemediation(t *testing.T) {
 
 // TestRemediateRespectsTimeout — the per-remediation timeout (default
 // 10s, configurable via WithRemediationTimeout) bounds the dependency
-// call. Use a fake that blocks until ctx.Done(), set a 50ms timeout,
-// and assert the call returns within ~100ms with ctx.DeadlineExceeded.
+// call. The fake reads the deadline on the context it is handed, then
+// blocks until ctx.Done(). Remediate sets that deadline when it calls
+// context.WithTimeout, before the fake runs, so the time remaining at the
+// fake's entry can never exceed the configured timeout, however slowly
+// the box schedules. With the 10s default it would be about 10s, and with
+// no bound there would be no deadline at all. This used to assert a 200ms
+// wall-clock elapsed, which measured scheduling rather than the bound and
+// failed at 226ms under load (CW-20261001-0146).
 func TestRemediateRespectsTimeout(t *testing.T) {
+	const timeout = 50 * time.Millisecond
 	bd := &blockingBootDir{}
-	b := NewBroker(Dependencies{BootDir: bd}, WithRemediationTimeout(50*time.Millisecond))
+	b := NewBroker(Dependencies{BootDir: bd}, WithRemediationTimeout(timeout))
 
-	start := time.Now()
 	err := b.Remediate(context.Background(), &FailureEvent{SessionID: "s"}, Classification{Remediation: RemediationRepopulateSandbox})
-	elapsed := time.Since(start)
 
+	if !bd.hadDeadline {
+		t.Fatal("dependency call had no deadline — the remediation timeout was not applied")
+	}
+	if bd.remaining > timeout {
+		t.Errorf("deadline was %v away at the call, want <= the configured %v", bd.remaining, timeout)
+	}
 	if err == nil {
 		t.Fatal("expected ctx-deadline error, got nil")
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("error = %v, want context.DeadlineExceeded", err)
 	}
-	if elapsed > 200*time.Millisecond {
-		t.Errorf("elapsed = %v, want < 200ms — timeout did not fire promptly", elapsed)
-	}
 }
 
-// blockingBootDir blocks Repopulate until ctx is canceled, then
-// returns ctx.Err(). Lets the timeout test exercise the bounded
-// context.WithTimeout path inside Remediate.
-type blockingBootDir struct{}
+// blockingBootDir records the deadline Repopulate is handed, then blocks
+// until ctx is canceled and returns ctx.Err(). Lets the timeout test
+// exercise the bounded context.WithTimeout path inside Remediate. With no
+// deadline it returns at once rather than block the test forever.
+type blockingBootDir struct {
+	hadDeadline bool
+	remaining   time.Duration
+}
 
-func (blockingBootDir) Repopulate(ctx context.Context, _ string) error {
+func (b *blockingBootDir) Repopulate(ctx context.Context, _ string) error {
+	deadline, ok := ctx.Deadline()
+	b.hadDeadline = ok
+	if !ok {
+		return errors.New("blockingBootDir: no deadline")
+	}
+	b.remaining = time.Until(deadline)
 	<-ctx.Done()
 	return ctx.Err()
 }
-func (blockingBootDir) RegenerateCLAUDEMD(_ context.Context, _ string) error { return nil }
+func (*blockingBootDir) RegenerateCLAUDEMD(_ context.Context, _ string) error { return nil }

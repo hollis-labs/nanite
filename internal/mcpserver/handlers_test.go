@@ -24,7 +24,7 @@ func newTestServer(t *testing.T) *Server {
 		s.Close(context.Background())
 		os.Remove(dbPath)
 	})
-	return New(s, "test-session", nil, "", "", nil)
+	return New(s, "test-session", nil, "", nil)
 }
 
 // TestBuildTool_HappyPath verifies a schema passes through cleanly and the

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"testing"
 	"time"
@@ -28,10 +29,7 @@ const realCodexEnv = "NANITE_REAL_CODEX"
 // whether each file exists afterwards.
 func realCodexProbe(t *testing.T, policy permission.MentionPolicy, protectedIsDenied bool) (protectedWritten, workWritten bool) {
 	t.Helper()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skipf("no home directory: %v", err)
-	}
+	home := realHome(t)
 	// Not under $TMPDIR or /tmp, which codex's workspace-write sandbox makes
 	// writable by default and would hide the roots under test.
 	cache := filepath.Join(home, ".cache")
@@ -46,10 +44,11 @@ func realCodexProbe(t *testing.T, policy permission.MentionPolicy, protectedIsDe
 	work := filepath.Join(base, "work")
 	protected := filepath.Join(base, "protected")
 	for _, d := range []string{work, protected} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
+		if err = os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
+	policy.Home = home
 	if protectedIsDenied {
 		policy.Denied = append(policy.Denied, protected)
 	}
@@ -92,6 +91,17 @@ func realCodexProbe(t *testing.T, policy permission.MentionPolicy, protectedIsDe
 	return perr == nil, true
 }
 
+// realHome is the account's real home directory. This package's tests run
+// with $HOME pointed at a temp dir (TestMain), so $HOME is not it.
+func realHome(t *testing.T) string {
+	t.Helper()
+	u, err := user.Current()
+	if err != nil || u.HomeDir == "" {
+		t.Skipf("no home directory for the current user: %v", err)
+	}
+	return u.HomeDir
+}
+
 func TestRealCodex_NamedProtectedPathStaysUnwritable(t *testing.T) {
 	if os.Getenv(realCodexEnv) != "1" {
 		t.Skipf("set %s=1 to run codex for real (spends tokens)", realCodexEnv)
@@ -99,27 +109,40 @@ func TestRealCodex_NamedProtectedPathStaysUnwritable(t *testing.T) {
 	if _, err := exec.LookPath("codex"); err != nil {
 		t.Skip("codex is not installed")
 	}
-	home, _ := os.UserHomeDir()
+	home := realHome(t)
 	if _, err := os.Stat(filepath.Join(home, ".codex", "auth.json")); err != nil {
 		t.Skip("no host Codex login to link into the boot dir")
 	}
+	// The boot dir links the host login at $CODEX_HOME/auth.json, which TestMain
+	// points at an empty dir.
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 
-	t.Run("default", func(t *testing.T) {
+	// The launch with the grants not folded in (the default) and nothing at all
+	// refusing the mention: the same turn as the control below, so the switch is
+	// the only difference.
+	t.Run("default: a named path is not a launch root", func(t *testing.T) {
 		t.Setenv(PathMentionLaunchRootsEnv, "")
-		written, _ := realCodexProbe(t, permission.MentionPolicy{Confine: true}, true)
-		if written {
-			t.Fatal("codex wrote the protected path a turn named: the mention became a writable root")
+		if written, _ := realCodexProbe(t, permission.MentionPolicy{}, false); written {
+			t.Fatal("codex wrote the path a turn named: the mention became a writable root")
+		}
+	})
+
+	// The policy alone, with the switch on: the mention is refused as a grant,
+	// so even the old fold has nothing to carry.
+	t.Run("kill switch on, mention refused by the policy", func(t *testing.T) {
+		t.Setenv(PathMentionLaunchRootsEnv, "1")
+		if written, _ := realCodexProbe(t, permission.MentionPolicy{Confine: true}, true); written {
+			t.Fatal("codex wrote a path the mention policy refuses")
 		}
 	})
 
 	// The positive control: with the old behavior restored and nothing refusing
 	// the mention, the same turn does reach the path. If this one fails, the
-	// probe cannot see the problem and the default case above proves nothing.
+	// probe cannot see the problem and the cases above prove nothing.
 	t.Run("old behavior reaches it", func(t *testing.T) {
 		t.Setenv(PathMentionLaunchRootsEnv, "1")
-		written, _ := realCodexProbe(t, permission.MentionPolicy{}, false)
-		if !written {
-			t.Fatal("with the grants folded into the roots the protected path was still unwritable, so the probe is not discriminating")
+		if written, _ := realCodexProbe(t, permission.MentionPolicy{}, false); !written {
+			t.Fatal("with the grants folded into the roots the named path was still unwritable, so the probe is not discriminating")
 		}
 	})
 }

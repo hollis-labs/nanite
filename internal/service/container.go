@@ -875,6 +875,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// longer widen a CLI launch's writable roots (see runtimeagent's
 	// effectiveCLIWritableRoots).
 	mentionPolicy := permission.MentionPolicy{Confine: true, Bases: cfg.DevToolsAllowedPaths}
+	// Nanite's own control-plane directories (CW-20261001-0143), whole: unlike
+	// a launch, a mention has no business with even the database directory.
+	mentionPolicy.Denied = append(mentionPolicy.Denied, cfg.AgentControlPlane.Dirs...)
 	if dbPath := cfg.Store.DBPath(context.Background()); dbPath != "" {
 		mentionPolicy.Denied = append(mentionPolicy.Denied, filepath.Dir(dbPath))
 	}

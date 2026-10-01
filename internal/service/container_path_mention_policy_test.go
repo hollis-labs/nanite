@@ -8,6 +8,7 @@ import (
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/modelsdevtest"
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
@@ -24,8 +25,11 @@ func TestNewContainer_ConfinesPathMentions(t *testing.T) {
 	base := t.TempDir()  // a configured allowed base outside $HOME
 	other := t.TempDir() // outside $HOME and not configured
 	dataDir := filepath.Join(home, "instance-data")
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		t.Fatal(err)
+	controlDir := filepath.Join(home, "instance-control") // a control-plane directory, apart from the database's
+	for _, d := range []string{dataDir, controlDir} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	st, err := storetest.New(t, context.Background(), filepath.Join(dataDir, "nanite.db"))
@@ -38,6 +42,7 @@ func TestNewContainer_ConfinesPathMentions(t *testing.T) {
 		ModelCatalogOptions: modelsdevtest.Options(t),
 		Store:               st, Providers: provider.NewRegistry(), WorkingDir: home,
 		DevToolsAllowedPaths:     []string{base},
+		AgentControlPlane:        runtimeagent.ControlPlane{Dirs: []string{controlDir}},
 		DisableEmbeddedTesseract: true,
 	})
 	if err != nil {
@@ -54,6 +59,7 @@ func TestNewContainer_ConfinesPathMentions(t *testing.T) {
 		{"outside home and bases", filepath.Join(other, "x.go"), false},
 		{"system path", "/etc/hosts", false},
 		{"this instance's data directory", filepath.Join(dataDir, "nanite.db"), false},
+		{"a control-plane directory", filepath.Join(controlDir, "coordination", "x"), false},
 		{"ssh", filepath.Join(home, ".ssh", "id_ed25519"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

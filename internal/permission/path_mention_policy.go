@@ -163,11 +163,11 @@ func within(p, dir string) bool {
 // forms returns p as spelled and, when different, by real path.
 func forms(p string) []string {
 	clean := filepath.Clean(p)
-	real := realPath(clean)
-	if real == clean {
+	resolved := realPath(clean)
+	if resolved == clean {
 		return []string{clean}
 	}
-	return []string{clean, real}
+	return []string{clean, resolved}
 }
 
 // mentionRefusal says why abs, an absolute cleaned path, may not become a
@@ -228,13 +228,13 @@ func (g *PathGrants) mentionRefusal(abs string) string {
 			bases = append(bases, home)
 		}
 		inside := false
-		real := cands[len(cands)-1] // the real path when it differs, else the spelling
+		resolved := cands[len(cands)-1] // the real path when it differs, else the spelling
 		for _, base := range bases {
 			if base == "" {
 				continue
 			}
 			for _, bform := range forms(base) {
-				if within(real, bform) {
+				if within(resolved, bform) {
 					inside = true
 				}
 			}

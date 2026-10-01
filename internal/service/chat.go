@@ -1343,8 +1343,8 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	// fall through to the notify-pause path.
 	//
 	// Only a CallerChat turn registers (CW-20261001-0232). A background turn,
-	// whether a durable-agent wake prompt, a schedule body or a harness
-	// trigger, carries text a program wrote, and gets no grants. Chat is not
+	// such as a durable-agent wake prompt, carries text a program wrote, and
+	// gets no grants; nor does a subagent's turn. Chat is not
 	// proof of a person either: the message and harness APIs are on an
 	// unauthenticated loopback. So the registration itself refuses sensitive
 	// paths, their ancestors and, in production, anything outside $HOME and

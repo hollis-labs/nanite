@@ -174,7 +174,7 @@ func PathMentionLaunchRootsEnabled() bool {
 // text in a turn, which any loopback client can supply (CW-20261001-0232),
 // so they stay with the in-process dev_* tools and are not folded in here,
 // unless the PathMentionLaunchRootsEnv kill switch asks for the old
-// behaviour. Even then they are only grants that survived the mention
+// behavior. Even then they are only grants that survived the mention
 // policy (permission.MentionPolicy).
 func effectiveCLIWritableRoots(deps *Dependencies, sessionID, workRoot string) []string {
 	seen := make(map[string]struct{})

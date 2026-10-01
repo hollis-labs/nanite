@@ -74,8 +74,25 @@ from the UI use the same denylist and secret filtering, and the session's
 `yolo` shell mode skips OS isolation.
 
 Agent CLIs that Nanite launches (Claude Code, Codex and the like) run as
-your user. Their own permission systems apply; Nanite does not currently
-wrap them in an OS sandbox.
+your user. Their own permission systems apply. On Linux, Nanite also runs
+each one under `bwrap` with Nanite's own config, state and data directories
+read-only, so an agent cannot rewrite Nanite's configuration or
+coordination state to grant itself authority. Everything else stays as
+writable as your user can make it. This has limits:
+
+- **The main database is not protected yet.** Each agent runs its own
+  `nanite mcp` server, which opens the database read-write, so the
+  database's directory stays writable to agents. An agent can still write
+  the database directly, including its permissions and approvals
+  (CW-20261001-0188).
+- **Only direct writes are stopped.** Protection does not stop an agent from
+  asking another process running as your user, outside the sandbox, to
+  write for it (for example `systemd-run --user`, a terminal multiplexer, or
+  another app's API). Nor does it stop the agent planting something under
+  your home directory that later runs outside the sandbox, such as a shell
+  rc file or a git hook.
+- **If `bwrap` cannot run**, agent launches fail rather than run unprotected.
+- **macOS** agents are not wrapped yet (CW-20261001-0189).
 
 ## Data at rest
 

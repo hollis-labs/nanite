@@ -513,6 +513,7 @@ func cmdServeWithInitializers(
 		// (no drift between what the agent reads and what the gate
 		// enforces).
 		DevToolsAllowedPaths: resolveDevToolsAllowedPaths(cfg),
+		AgentControlPlane:    agentControlPlane(serveLayout, *dbPath, wtBaseDir),
 		// Durable-agent recipe catalog files/dirs merge with built-ins at
 		// startup through the app config seam used for product tunables.
 		DurableAgentRecipeCatalogPaths: appCfg.Recipes.CatalogPaths,

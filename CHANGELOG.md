@@ -61,6 +61,23 @@ lives in the git log.
   files (skills, roles, agents, plugin data) and is unaffected by this
   change. Project-level `./nanite.yaml` is unchanged.
 
+- **On Linux, agent CLIs now run under `bwrap`, with Nanite's own directories
+  read-only** (CW-20261001-0143). Every agent Nanite launches (Claude Code,
+  Codex, OpenCode, Copilot, Pi, natively or over ACP) can no longer write
+  Nanite's config, state or data directories.
+  - **Still writable:** the main database's directory (see
+    [`SECURITY.md`](SECURITY.md)) and the worktree root. The rest of the
+    host filesystem stays as writable as before.
+  - **What agents notice:**
+    - An agent sees only its own processes (a private PID namespace).
+    - Setuid programs such as `sudo` refuse to run ("no new privileges").
+  - **Requires bubblewrap with unprivileged user namespaces.** Without it,
+    agent launches now fail instead of running unprotected. A missing
+    `bwrap` reports "ProtectedPaths cannot be enforced". Install
+    `bubblewrap`; on Ubuntu its AppArmor profile already permits the user
+    namespace.
+  - **macOS** is unchanged for now (CW-20261001-0189).
+
 ### Added
 
 - **Subagent progress heartbeats + narration guidance** (CW-20260519-0068).

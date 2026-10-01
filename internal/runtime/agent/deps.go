@@ -117,6 +117,11 @@ type Dependencies struct {
 	// (CW-20260518-0075).
 	CLIWritableRoots []string
 
+	// ControlPlane names the directories every launched agent is denied
+	// writes to (CW-20261001-0143, control_plane.go). The zero value
+	// protects nothing.
+	ControlPlane ControlPlane
+
 	// Telemetry receives PTY restart and lifecycle observability events.
 	Telemetry Telemetry
 

@@ -13,6 +13,7 @@ import (
 	"github.com/hollis-labs/go-agent-wrapper/activity"
 	"github.com/hollis-labs/go-agent-wrapper/wrapper"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
+	"github.com/hollis-labs/go-sandbox/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/oklog/ulid/v2"
 )
@@ -488,6 +489,16 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	}
 
 	sandboxProfile := buildSandboxProfile(deps.SandboxBaseProfile, opts, ws.Root, bootDir)
+	protectedPaths := deps.ControlPlane.protectedFor(append([]string{spawnWorkdir, ws.Root, bootDir, naniteHomeDir()}, deps.CLIWritableRoots...)...)
+	var sandboxPolicy *sandbox.ResolvedAccessPolicy
+	if isACP && len(protectedPaths) > 0 {
+		policy, err := acpControlPlanePolicy(spawnWorkdir)
+		if err != nil {
+			_ = deps.Store.MarkRuntimeFailed(sessID, err.Error())
+			return cleanup(fmt.Errorf("agent.Boot: ACP control-plane sandbox policy: %w", err))
+		}
+		sandboxPolicy = policy
+	}
 
 	onSessionID := func(id string) {
 		_ = deps.Store.SetProviderSessionID(sessID, id)
@@ -551,6 +562,8 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		WorkspaceDir:    ws.Root,
 		LogPath:         ws.LogPath,
 		SandboxProfile:  sandboxProfile,
+		SandboxPolicy:   sandboxPolicy,
+		ProtectedPaths:  protectedPaths,
 		SessionIDPreset: sessionIDPreset,
 		SystemPrompt:    ResolveSystemPrompt(opts.Role, profile, opts.Mode, opts.BootPromptOverride, opts.DynamicContext, opts.Workdir),
 		ACPManager:      deps.Manager.ACPManager(),

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
 	"github.com/oklog/ulid/v2"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
+	"github.com/hollis-labs/nanite/internal/runtimekind"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 

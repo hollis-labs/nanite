@@ -448,7 +448,7 @@ func TestBoot_WrapperLifecycle_Codex_EnvParity(t *testing.T) {
 // JSON and a plain-text line yields nothing (CW-20260930-0113); the lines
 // follow go-providers' provider/testdata/opencode/run_turn1.jsonl shape.
 const fakeOpencodeRunScript = `#!/bin/sh
-printf '%s' "$OPENCODE_CONFIG_DIR" > "$NANITE_TEST_PROBE_FILE"
+printf '%s\n%s' "$OPENCODE_CONFIG_DIR" "$XDG_CONFIG_HOME" > "$NANITE_TEST_PROBE_FILE"
 printf '%s\n' \
   '{"type":"step_start","sessionID":"ses_fake","part":{"type":"step-start"}}' \
   '{"type":"text","sessionID":"ses_fake","part":{"type":"text","text":"hello from opencode"}}' \
@@ -565,8 +565,15 @@ func TestBoot_WrapperLifecycle_OpenCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read probe file (fake opencode process never ran, or wrapper child environment is broken): %v", err)
 	}
-	if string(seen) != bootDir {
-		t.Errorf("fake opencode process observed OPENCODE_CONFIG_DIR=%q, want %q (wrapper ChildEnvironment is not propagating opencodeLayout.AmendEnv's redirect)", string(seen), bootDir)
+	// OPENCODE_CONFIG_DIR and, on its own line, XDG_CONFIG_HOME
+	// (CW-20261001-0239): both are the boot dir's, so the operator's own
+	// opencode config is not loaded next to the planted one.
+	gotDir, gotXDG, _ := strings.Cut(string(seen), "\n")
+	if gotDir != bootDir {
+		t.Errorf("fake opencode process observed OPENCODE_CONFIG_DIR=%q, want %q (wrapper ChildEnvironment is not propagating opencodeLayout.AmendEnv's redirect)", gotDir, bootDir)
+	}
+	if want := filepath.Join(bootDir, opencodeXDGConfigDir); gotXDG != want {
+		t.Errorf("fake opencode process observed XDG_CONFIG_HOME=%q, want %q", gotXDG, want)
 	}
 }
 

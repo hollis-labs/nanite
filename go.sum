@@ -91,6 +91,8 @@ github.com/hollis-labs/go-runner v0.7.0 h1:nJIDnZHBVn1Ii8hITTxLsGMVaEI9AWipar85q
 github.com/hollis-labs/go-runner v0.7.0/go.mod h1:+PgCa0CxAImd63sZgLb8Zw0uasyDWyHRdcE2sH8Zc7Q=
 github.com/hollis-labs/go-runtime-events v0.1.2 h1:ChyjCVidjeAVf+dUJjiJTdX/LYujkJILKuLi+cTDNJM=
 github.com/hollis-labs/go-runtime-events v0.1.2/go.mod h1:QLoJ1xs+P2KoVuiz4wi+r+JZdE4dqm28I0YfauXAUs0=
+github.com/hollis-labs/go-safefs v0.1.0 h1:DOlOS/0OnLKgUXON9YiPTzZZyYhqogNUo9RoYpa7UOY=
+github.com/hollis-labs/go-safefs v0.1.0/go.mod h1:cy6lXh6KhPuIoQ9hGQSL+sd4N1dhJ1hE3sSCMXNB6JA=
 github.com/hollis-labs/go-sandbox v0.4.0 h1:1Dv++5ApL09CiDVVD8ny9W6fUeHt9GIotn0LOp8lxd0=
 github.com/hollis-labs/go-sandbox v0.4.0/go.mod h1:MzF8Y0T3TmCHALvHi6vTkIZimc+rlWfu7OQUksYx6R8=
 github.com/hollis-labs/go-scheduler v0.2.0 h1:WkvePh4+7Y+xtjy0WH2HX27oaFIWAloC14BHUP577T0=

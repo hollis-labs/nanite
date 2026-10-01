@@ -17,14 +17,18 @@ import (
 
 // fakeClaudeStreamJSONScript is a POSIX sh script standing in for the real
 // claude binary in -p --input-format stream-json --output-format
-// stream-json --verbose mode. It ignores stdin/argv (AutoFireFirstTurn's
-// NDJSON-framed kickoff is written but never read — the fake doesn't need
-// it) and prints exactly one turn's worth of real Claude stream-json
-// output, then exits — driving parseClaudeStreamLine's real production
+// stream-json --verbose mode. It ignores argv, reads and discards the one
+// stdin line AutoFireFirstTurn writes (the NDJSON-framed kickoff), and
+// prints exactly one turn's worth of real Claude stream-json output, then
+// exits. Reading the kickoff first matters: a fake that exits without
+// reading lets Boot's kickoff write race the exit, and under load (-race,
+// the whole package, CW-20260930-0113) Boot failed with "auto-fire first
+// turn: write |1: broken pipe". It drives parseClaudeStreamLine's real production
 // parser (not a mock) so the events this test asserts on are exactly what
 // wrapper.Wrapper.Run's translateStreamEvent/translateProviderEvent would
 // see from a genuine claude process.
 const fakeClaudeStreamJSONScript = `#!/bin/sh
+IFS= read -r _kickoff || true
 cat <<'EOF'
 {"type":"system","subtype":"init","session_id":"claude-fake-session-1"}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello "},{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"/tmp/x"}}]}}

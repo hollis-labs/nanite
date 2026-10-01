@@ -61,7 +61,7 @@
 // # Write ordering / crash safety
 //
 // Write stages every file into a temporary sibling directory first (each
-// file written via internal/fsutil's crash-safe atomic-write-then-rename
+// file written via go-safefs/atomicfile's crash-safe atomic-write-then-rename
 // primitive), then publishes the whole package atomically via a single
 // os.Rename of the staging directory onto the final address directory.
 // Concurrent writers computing the same address for the same content race

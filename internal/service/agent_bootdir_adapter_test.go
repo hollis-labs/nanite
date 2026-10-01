@@ -53,7 +53,7 @@ func makeClaudeProfile() *store.AgentProfile {
 
 // TestBootDirAdapter_Repopulate_Idempotent verifies that calling
 // Repopulate twice in a row leaves the bootDir in the same canonical
-// shape — every plant call uses fsutil.AtomicWriteFile so the second
+// shape — every plant call uses atomicfile.WriteFile so the second
 // invocation overwrites without error.
 func TestBootDirAdapter_Repopulate_Idempotent(t *testing.T) {
 	t.Parallel()

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/fsutil"
-	"github.com/hollis-labs/nanite/internal/pathsafe"
+	"github.com/hollis-labs/go-safefs/atomicfile"
+	"github.com/hollis-labs/go-safefs/pathsafe"
 )
 
 func TestInstallProjectOptions_Normalized_DefaultsNilIOStreams(t *testing.T) {
@@ -111,16 +111,16 @@ func TestService_InstallHome_UpgradesLegacyStockAndIsIdempotent(t *testing.T) {
 	}
 	legacy = bytes.TrimSuffix(legacy, []byte("\n"))
 	stockPath := mustTestPath(t, target, "commands/doc-note.md")
-	if writeErr := fsutil.AtomicWriteFile(stockPath, legacy, 0o644); writeErr != nil {
+	if writeErr := atomicfile.WriteFile(stockPath, legacy, 0o644); writeErr != nil {
 		t.Fatalf("write legacy stock asset: %v", writeErr)
 	}
 	customPath := mustTestPath(t, target, "commands/doc-search.md")
 	custom := []byte("user-owned search instructions\n")
-	if writeErr := fsutil.AtomicWriteFile(customPath, custom, 0o644); writeErr != nil {
+	if writeErr := atomicfile.WriteFile(customPath, custom, 0o644); writeErr != nil {
 		t.Fatalf("write customized asset: %v", writeErr)
 	}
 	userFile := mustTestPath(t, target, "user-notes.md")
-	if writeErr := fsutil.AtomicWriteFile(userFile, []byte("preserve me\n"), 0o644); writeErr != nil {
+	if writeErr := atomicfile.WriteFile(userFile, []byte("preserve me\n"), 0o644); writeErr != nil {
 		t.Fatalf("write user file: %v", writeErr)
 	}
 
@@ -180,13 +180,13 @@ func TestService_InstallHome_ForceSymlinkSafetySurvivesStagedPromotion(t *testin
 	}
 	for _, runtimePath := range []string{"plugin-data", "plugin-cache"} {
 		sentinel := mustTestPath(t, target, runtimePath+"/sentinel")
-		if err := fsutil.AtomicWriteFile(sentinel, []byte(runtimePath+" survives\n"), 0o600); err != nil {
+		if err := atomicfile.WriteFile(sentinel, []byte(runtimePath+" survives\n"), 0o600); err != nil {
 			t.Fatalf("write %s sentinel: %v", runtimePath, err)
 		}
 	}
 	const retiredSentinel = "runtime retired-name file survives\n"
 	runtimeRetiredLeaf := mustTestPath(t, target, "plugin-cache/ref-conduit-plugin.md")
-	if err := fsutil.AtomicWriteFile(runtimeRetiredLeaf, []byte(retiredSentinel), 0o600); err != nil {
+	if err := atomicfile.WriteFile(runtimeRetiredLeaf, []byte(retiredSentinel), 0o600); err != nil {
 		t.Fatalf("write runtime retired-name sentinel: %v", err)
 	}
 

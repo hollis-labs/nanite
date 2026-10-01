@@ -74,7 +74,12 @@ from the UI use the same denylist and secret filtering, and the session's
 `yolo` shell mode skips OS isolation.
 
 Agent CLIs that Nanite launches (Claude Code, Codex and the like) run as
-your user. Their own permission systems apply.
+your user. Their own permission systems apply. A launched Claude is allowed
+the tools of Nanite's own MCP server (`--allowedTools=mcp__nanite__*`) and no
+other server's; the server itself scopes its tools by launch mode, so a chat
+agent gets the harness's self-tool set (messaging, `subagent_spawn`,
+`task_execute`, `workflow_run`, `dispatch_executor` and the rest) and subagent,
+background and one-shot launches a smaller one (CW-20261001-0411).
 
 On Linux, Nanite also keeps its own config, state and data directories out
 of agents' reach, so an agent cannot rewrite Nanite's configuration or

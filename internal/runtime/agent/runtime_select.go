@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
@@ -139,7 +140,8 @@ func launchSupported(sel RuntimeSelection) bool {
 //
 // bootDir is the planted boot dir of a native launch, "" for ACP. A native
 // Claude launch gets the strict-MCP flags for its .mcp.json (strictMCPArgs)
-// ahead of workRootArgs, so the variadic --add-dir stays last.
+// and the allow rule for the planted server (claudeMCPAllowArgs) ahead of
+// workRootArgs, so the variadic --add-dir stays last.
 func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir string) (adapters.Adapter, error) {
 	if sel.ACP() {
 		if deps.ACPAdapterFactory != nil {
@@ -152,9 +154,13 @@ func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir s
 		return launch.Select(launch.Selection{Runtime: string(sel.Runtime), Mode: sel.Mode})
 	}
 	selection := launch.Selection{
-		Runtime:   string(sel.Runtime),
-		Mode:      sel.Mode,
-		ExtraArgs: append(strictMCPArgs(sel.Runtime, bootDir), workRootArgs(string(sel.Runtime), workRoot)...),
+		Runtime: string(sel.Runtime),
+		Mode:    sel.Mode,
+		ExtraArgs: slices.Concat(
+			strictMCPArgs(sel.Runtime, bootDir),
+			claudeMCPAllowArgs(sel.Runtime, bootDir, deps.MCPConfig),
+			workRootArgs(string(sel.Runtime), workRoot),
+		),
 	}
 	if deps.NativeCLIAdapter != nil {
 		if cli := deps.NativeCLIAdapter(sel.Runtime); cli != nil {

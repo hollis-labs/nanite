@@ -90,13 +90,18 @@ func TestControlPlane_ProtectedFor(t *testing.T) {
 	}
 }
 
+// probeTarget is one more directory a probe script tries to write.
+type probeTarget struct{ name, dir string }
+
 // controlPlaneProbeScript tries three writes and records which landed:
 // into a protected dir, into the writable exception inside it, and into its
-// own work dir. hold keeps it up like a streaming-stdio Claude.
-func controlPlaneProbeScript(protected, exception, work, probe string, hold bool) string {
+// own work dir, and into each extra target. hold keeps it up like a
+// streaming-stdio Claude.
+func controlPlaneProbeScript(protected, exception, work, probe string, hold bool, extra ...probeTarget) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
-	for _, w := range []struct{ name, dir string }{{"protected", protected}, {"exception", exception}, {"work", work}} {
+	targets := append([]probeTarget{{"protected", protected}, {"exception", exception}, {"work", work}}, extra...)
+	for _, w := range targets {
 		fmt.Fprintf(&b, "if ( echo agent > %q/agent-wrote ) 2>/dev/null; then echo yes > %q.%s; else echo no > %q.%s; fi\n",
 			w.dir, probe, w.name, probe, w.name)
 	}
@@ -157,7 +162,12 @@ func TestBoot_ControlPlaneProtectedFromAgents(t *testing.T) {
 			deps, _ := makeBootDeps(t, tc.provider)
 			deps.NativeCLIAdapter = nil
 			deps.ControlPlane = ControlPlane{Dirs: []string{state}, Writable: []string{exception}}
-			opts := Options{Mode: tc.mode, Provider: tc.provider, Workdir: work, Role: "executor"}
+			// The protected dir is also offered as a root, configured
+			// (dev_tools_allowed_paths) and named in a user message (a path
+			// grant): neither may un-protect it.
+			deps.CLIWritableRoots = []string{protected}
+			grantNamed(t, deps, "sess-"+tc.provider, filepath.Join(protected, "note"))
+			opts := Options{Mode: tc.mode, Provider: tc.provider, Workdir: work, Role: "executor", SessionID: "sess-" + tc.provider}
 			if tc.mode == ModeOneShot {
 				opts.OneShotPrompt = "say hi"
 			}
@@ -221,24 +231,102 @@ func TestCodexSandboxesItself(t *testing.T) {
 	}
 }
 
-// A writable root that contains a protected directory is narrowed to its
-// other child directories; one that does not, or does not exist yet, is
-// kept.
-func TestWritableRootsAround(t *testing.T) {
+// A root offered to an agent must not give it the control plane
+// (CW-20261001-0143): one equal to or inside a protected directory is
+// dropped, however it is spelled; one containing a protected directory is
+// split around it (Codex) or kept whole (split=false); the rest are kept as
+// given, in order.
+func TestRootsOutsideProtected(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	mkdirs(t, root, "allowed/state/coordination", "allowed/ok", "allowed/deep/x", "other")
-	p := func(rel string) string { return filepath.Join(root, rel) }
-	roots := []string{p("allowed"), p("other"), p("missing")}
-	got := writableRootsAround(roots, []string{p("allowed/state")})
-	want := []string{p("allowed/deep"), p("allowed/ok"), p("missing"), p("other")}
-	if !slices.Equal(got, want) {
-		t.Errorf("writableRootsAround\n got %q\nwant %q", got, want)
+	mkdirs(t, root, "allowed/state/coordination/sub", "allowed/ok", "allowed/deep/x", "other", "elsewhere")
+	if err := os.Symlink(filepath.Join(root, "allowed/state/coordination"), filepath.Join(root, "other/link-in")); err != nil {
+		t.Fatal(err)
 	}
-	if got := writableRootsAround(roots, nil); !slices.Equal(got, roots) {
+	if err := os.Symlink(filepath.Join(root, "elsewhere"), filepath.Join(root, "other/link-out")); err != nil {
+		t.Fatal(err)
+	}
+	p := func(rel string) string { return filepath.Join(root, rel) }
+	protected := []string{p("allowed/state")}
+
+	for _, tc := range []struct {
+		name  string
+		roots []string
+		split bool
+		want  []string
+	}{
+		{"equal to a protected dir", []string{p("allowed/state"), p("other")}, true, []string{p("other")}},
+		{"equal to a protected dir, kept whole otherwise", []string{p("allowed/state"), p("other")}, false, []string{p("other")}},
+		{"inside a protected dir", []string{p("allowed/state/coordination"), p("other")}, true, []string{p("other")}},
+		{"deep inside a protected dir", []string{p("allowed/state/coordination/sub")}, false, nil},
+		{"inside one, and not created yet", []string{p("allowed/state/coordination/new/deeper"), p("missing")}, false, []string{p("missing")}},
+		{"a symlink into a protected dir", []string{p("other/link-in")}, false, nil},
+		{"a symlink out of the way", []string{p("other/link-out")}, true, []string{p("other/link-out")}},
+		{"spelled with .. and a trailing slash", []string{p("other/../allowed/state/") + "/", p("allowed/ok/../ok")}, false, []string{p("allowed/ok/../ok")}},
+		{"containing one, split", []string{p("allowed")}, true, []string{p("allowed/deep"), p("allowed/ok")}},
+		{"containing one, kept whole", []string{p("allowed"), p("other")}, false, []string{p("allowed"), p("other")}},
+		{"unrelated roots keep their order", []string{p("other"), p("missing"), p("elsewhere")}, true, []string{p("other"), p("missing"), p("elsewhere")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := rootsOutsideProtected(tc.roots, protected, tc.split)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("rootsOutsideProtected(%q, split=%v)\n got %q\nwant %q", tc.roots, tc.split, got, tc.want)
+			}
+		})
+	}
+	roots := []string{p("allowed"), p("allowed/state"), p("other")}
+	if got := rootsOutsideProtected(roots, nil, true); !slices.Equal(got, roots) {
 		t.Errorf("with nothing protected the roots changed: %q", got)
+	}
+}
+
+// What a user's message does to the launch's roots: naming a control-plane
+// path grants it and its parent, so a message that mentions
+// <state>/inner/note grants <state>/inner, and one that mentions
+// <state>/note grants <state> itself (CW-20261001-0143). Neither may reach
+// the planted roots, for Claude or Codex, nor may a configured
+// dev_tools_allowed_paths root that is the control plane.
+func TestComposeBootdirParams_RootsKeepOutOfControlPlane(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed, state, ok, work := codexLayoutFixture(t, base)
+	inner := filepath.Join(state, "inner")
+	for _, tc := range []struct {
+		provider string
+		want     []string
+	}{
+		{"claude", []string{work, allowed, ok}}, // kept whole: Claude's mount protection backs it
+		{"codex", []string{work, ok}},           // split: Codex's own sandbox enforces its roots
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			deps, _ := makeBootDeps(t, tc.provider)
+			deps.ControlPlane = ControlPlane{Dirs: []string{state}}
+			deps.CLIWritableRoots = []string{allowed, state, inner, ok}
+			grantNamed(t, deps, "sess-roots", filepath.Join(state, "note"), filepath.Join(inner, "note"), filepath.Join(ok, "note"))
+			profile := storeProfile(tc.provider)
+			_, params := composeBootdirParams(deps, Options{Provider: tc.provider, Workdir: work, SessionID: "sess-roots"}, &profile, "sess-roots")
+			if !slices.Equal(params.CLIWritableRoots, tc.want) {
+				t.Errorf("planted roots\n got %q\nwant %q", params.CLIWritableRoots, tc.want)
+			}
+		})
+	}
+}
+
+// grantNamed registers paths the way chat does for a user message that
+// mentions them, and checks the control-plane grants really exist, so a test
+// built on them cannot pass by exercising nothing.
+func grantNamed(t *testing.T, deps *Dependencies, sessionID string, paths ...string) {
+	t.Helper()
+	deps.PathGrants.RegisterFromUserMessage(sessionID, "please write "+strings.Join(paths, " "))
+	grants := deps.PathGrants.ListGrants(sessionID)
+	for _, want := range paths {
+		if !slices.Contains(grants, want) {
+			t.Fatalf("naming %s did not grant it: grants = %q", want, grants)
+		}
 	}
 }
 
@@ -247,7 +335,7 @@ func TestWritableRootsAround(t *testing.T) {
 // (protected) and base/allowed/ok, beside the work root base/work.
 func codexLayoutFixture(t *testing.T, base string) (allowed, state, ok, work string) {
 	t.Helper()
-	mkdirs(t, base, "allowed/state", "allowed/ok", "work")
+	mkdirs(t, base, "allowed/state/inner", "allowed/ok", "work")
 	if err := os.WriteFile(filepath.Join(base, "work", "README.md"), []byte("hello\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -267,6 +355,7 @@ func TestBoot_CodexRunsUnderItsOwnSandbox(t *testing.T) {
 	allowed, state, ok, work := codexLayoutFixture(t, base)
 	probeDir, bin := t.TempDir(), t.TempDir()
 	probe := filepath.Join(probeDir, "probe")
+	inner := filepath.Join(state, "inner")
 	script := controlPlaneProbeScript(state, ok, work, probe, false)
 	if werr := os.WriteFile(filepath.Join(bin, "codex"), []byte(script), 0o755); werr != nil { //nolint:gosec // an executable test fixture in t.TempDir()
 		t.Fatal(werr)
@@ -276,8 +365,11 @@ func TestBoot_CodexRunsUnderItsOwnSandbox(t *testing.T) {
 	deps, _ := makeBootDeps(t, "codex")
 	deps.NativeCLIAdapter = nil
 	deps.ControlPlane = ControlPlane{Dirs: []string{state}}
-	deps.CLIWritableRoots = []string{allowed}
-	sess, err := Boot(context.Background(), deps, Options{Mode: ModeOneShot, Provider: "codex", Workdir: work, Role: "executor", OneShotPrompt: "say hi"})
+	// The control plane is offered every way a root can arrive: inside a
+	// configured root, as one, inside one, and named in a user message.
+	deps.CLIWritableRoots = []string{allowed, state, inner}
+	grantNamed(t, deps, "sess-codex", filepath.Join(state, "note"), filepath.Join(inner, "note"))
+	sess, err := Boot(context.Background(), deps, Options{Mode: ModeOneShot, Provider: "codex", Workdir: work, Role: "executor", OneShotPrompt: "say hi", SessionID: "sess-codex"})
 	if err != nil {
 		t.Fatalf("Boot(codex): %v", err)
 	}
@@ -303,7 +395,7 @@ func TestBoot_CodexRunsUnderItsOwnSandbox(t *testing.T) {
 			t.Errorf("planted config.toml lacks %s:\n%s", want, cfg)
 		}
 	}
-	for _, unwanted := range []string{strconv.Quote(allowed), strconv.Quote(state)} {
+	for _, unwanted := range []string{strconv.Quote(allowed), strconv.Quote(state), strconv.Quote(inner)} {
 		if strings.Contains(cfg, unwanted) {
 			t.Errorf("planted writable_roots include %s, which holds or is the control plane:\n%s", unwanted, cfg)
 		}
@@ -338,7 +430,8 @@ func TestBoot_RealCodexSandboxConfinesControlPlane(t *testing.T) {
 	agentTmp, bin := t.TempDir(), t.TempDir()
 	probe := filepath.Join(agentTmp, "probe")
 
-	inner := controlPlaneProbeScript(state, ok, work, probe, false)
+	innerDir := filepath.Join(state, "inner")
+	inner := controlPlaneProbeScript(state, ok, work, probe, false, probeTarget{"inner", innerDir})
 	inner = strings.TrimPrefix(inner, "#!/bin/sh\n")
 	inner = fmt.Sprintf("cat %q > %q.read\n", filepath.Join(work, "README.md"), probe) + inner
 	shim := fmt.Sprintf("#!/bin/sh\nmode=$(sed -n 's/^sandbox_mode = \"\\(.*\\)\"$/\\1/p' \"$CODEX_HOME/config.toml\")\n"+
@@ -352,10 +445,14 @@ func TestBoot_RealCodexSandboxConfinesControlPlane(t *testing.T) {
 	deps, _ := makeBootDeps(t, "codex")
 	deps.NativeCLIAdapter = nil
 	deps.ControlPlane = ControlPlane{Dirs: []string{state}}
-	deps.CLIWritableRoots = []string{allowed}
+	// The protected dir is also a root every way one can arrive: configured,
+	// inside a configured root, and named in a user message (a path grant,
+	// which grants the named path's parent too). The writes must still fail.
+	deps.CLIWritableRoots = []string{allowed, state, innerDir}
+	grantNamed(t, deps, "sess-real-codex", filepath.Join(state, "note"), filepath.Join(innerDir, "note"))
 	sess, err := Boot(context.Background(), deps, Options{
 		Mode: ModeOneShot, Provider: "codex", Workdir: work, Role: "executor", OneShotPrompt: "say hi",
-		Env: map[string]string{"TMPDIR": agentTmp},
+		Env: map[string]string{"TMPDIR": agentTmp}, SessionID: "sess-real-codex",
 	})
 	if err != nil {
 		t.Fatalf("Boot(codex): %v", err)
@@ -372,9 +469,14 @@ func TestBoot_RealCodexSandboxConfinesControlPlane(t *testing.T) {
 	if got := strings.TrimSpace(readProbe(t, probe+".read")); got != "hello" {
 		t.Errorf("codex read README.md as %q, want hello", got)
 	}
-	for name, want := range map[string]string{"protected": "no", "exception": "yes", "work": "yes"} {
+	for name, want := range map[string]string{"protected": "no", "inner": "no", "exception": "yes", "work": "yes"} {
 		if got := strings.TrimSpace(readProbe(t, probe+"."+name)); got != want {
 			t.Errorf("codex write into the %s dir landed=%s, want %s", name, got, want)
+		}
+	}
+	for _, f := range []string{filepath.Join(state, "agent-wrote"), filepath.Join(innerDir, "agent-wrote")} {
+		if _, err := os.Stat(f); err == nil {
+			t.Errorf("codex's file exists in the protected tree: %s", f)
 		}
 	}
 	if err := os.WriteFile(filepath.Join(state, "nanite-wrote"), []byte("nanite"), 0o600); err != nil {

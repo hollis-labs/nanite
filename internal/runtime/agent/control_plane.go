@@ -22,7 +22,7 @@ import (
 // policy to merge them into, or the wrapper refuses it, so it gets
 // acpControlPlanePolicy. Native codex is the exception: it runs under its
 // own sandbox, whose writable_roots are narrowed around these directories
-// (codexSandboxesItself, writableRootsAround).
+// (codexSandboxesItself, rootsOutsideProtected).
 //
 // The boundary is go-sandbox's: direct writes into a protected directory
 // fail, from the agent and from every process it starts inside the
@@ -60,15 +60,21 @@ type ControlPlane struct {
 }
 
 // protectedFor returns the real-path directories to protect for one launch.
+// launchOwned are the launch's own roots, which Nanite chose (work dir,
+// workspace, boot dir, ~/.nanite). Never pass a root a user or a config file
+// offered, such as a path grant or dev_tools_allowed_paths: an exempt root
+// is not protected, so one that names the control plane would un-protect it
+// (rootsOutsideProtected drops those roots instead).
+//
 // A Dirs entry that contains a writable root (Writable, or one of the
-// launch's own: work dir, workspace, boot dir) is not protected whole: its
+// launch's own) is not protected whole: its
 // child directories are, except the ones leading to that root, recursively.
 // Files directly inside a split directory therefore stay writable;
 // go-sandbox protects directories only, because a file's own directory
 // stays writable and an atomic save would replace it.
-func (c ControlPlane) protectedFor(launchWritable ...string) []string {
+func (c ControlPlane) protectedFor(launchOwned ...string) []string {
 	var writable []string
-	for _, w := range append(slices.Clone(c.Writable), launchWritable...) {
+	for _, w := range append(slices.Clone(c.Writable), launchOwned...) {
 		if w = realDir(w, true); w != "" {
 			writable = append(writable, w)
 		}
@@ -82,26 +88,66 @@ func (c ControlPlane) protectedFor(launchWritable ...string) []string {
 	return outermost(out)
 }
 
-// writableRootsAround narrows writable roots so that none contains a
-// protected directory: a root with a protected directory inside it is
-// replaced by its other child directories, recursively. It is how a codex
-// launch, which Nanite does not wrap (codexSandboxesItself), keeps the
-// control plane out of its own sandbox's writable_roots. Files directly in
-// a narrowed root are no longer writable to the agent.
-func writableRootsAround(roots, protected []string) []string {
+// rootsOutsideProtected keeps a launch's writable roots (the work root,
+// dev_tools_allowed_paths, the session's path grants) from offering the
+// control plane to the agent (CW-20261001-0143). A path grant is whatever a
+// user's message names, and its parent directory too, so a message that
+// mentions <state>/coordination/x grants <state>/coordination itself. Each
+// root is judged by its real path, resolved through its nearest existing
+// ancestor when it does not exist yet:
+//   - equal to or inside a protected directory: dropped;
+//   - containing one: replaced by its other child directories, recursively,
+//     when split (Codex, whose own sandbox enforces its roots), else kept
+//     whole (Claude's additionalDirectories, which its bwrap protection
+//     already backs);
+//   - anything else: kept as given, in order.
+//
+// protected must not have been computed with these roots as exemptions, or a
+// root would un-protect itself. With nothing protected the roots are
+// returned unchanged. When split, files directly in a narrowed root are no
+// longer writable to the agent.
+func rootsOutsideProtected(roots, protected []string, split bool) []string {
 	if len(protected) == 0 {
 		return roots
 	}
 	var out []string
 	for _, r := range roots {
-		resolved := realDir(r, false)
+		resolved := resolveLoose(r)
 		if resolved == "" {
-			out = append(out, r) // not created yet: nothing inside it to protect
 			continue
 		}
-		out = splitAround(out, resolved, protected)
+		switch {
+		case slices.ContainsFunc(protected, func(p string) bool { return pathWithin(resolved, p) }):
+			// equal to or inside a protected directory
+		case split && slices.ContainsFunc(protected, func(p string) bool { return pathWithin(p, resolved) }):
+			out = append(out, splitAround(nil, resolved, protected)...)
+		default:
+			out = append(out, r)
+		}
 	}
-	return outermost(out)
+	return slices.Compact(out)
+}
+
+// resolveLoose is the real path of path, with symlinks resolved through its
+// nearest existing ancestor: a root that does not exist yet is judged where
+// it would be created. "" when path cannot be made absolute.
+func resolveLoose(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+	rest := ""
+	for cur := abs; ; {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return abs
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+		cur = parent
+	}
 }
 
 // splitAround appends dir to out unless an avoid path is dir itself (then

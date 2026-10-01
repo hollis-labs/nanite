@@ -68,8 +68,11 @@ lives in the git log.
   - **Codex is confined by its own `workspace-write` sandbox instead.** That
     sandbox is a bwrap of its own and cannot run nested inside Nanite's.
     Its writable roots (the work root, `dev_tools_allowed_paths` and path
-    grants) are narrowed so that none contains a protected directory. A
-    configured root that holds one is replaced by its other subdirectories.
+    grants) are filtered so that none offers a protected directory:
+    - A root that is, or is inside, one is dropped. That includes a path a
+      chat message names, which grants that path and its parent directory.
+    - A root that holds one is replaced by its other subdirectories.
+    Claude's `additionalDirectories` drop the same roots.
   - **Still writable:** the main database's directory (see
     [`SECURITY.md`](SECURITY.md)) and the worktree root. The rest of the
     host filesystem stays as writable as before.

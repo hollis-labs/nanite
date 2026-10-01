@@ -99,6 +99,13 @@ while it is off. This has limits:
   another app's API). Nor does it stop the agent planting something under
   your home directory that later runs outside the sandbox, such as a shell
   rc file or a git hook.
+- **Only directories are protected.** Where a protected directory has to
+  stay writable underneath (the database's directory, the worktrees root),
+  Nanite protects the sibling directories instead. A loose file sitting
+  directly in such a parent stays writable.
+- **A launch's own work directory is not protected.** It comes from the
+  session's or project's configuration, and an agent cannot choose it; one
+  that lies inside Nanite's directories is writable.
 - **If `bwrap` cannot run**, agent launches fail rather than run unprotected.
 - **macOS** agents are not wrapped yet (CW-20261001-0189).
 

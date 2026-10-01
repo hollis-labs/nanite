@@ -385,23 +385,24 @@ func (s *runtimeEventSink) handleSubagentSpawn(raw json.RawMessage) {
 	s.typedCB(events.SubagentSpawn{Tool: p.SubagentSpawn.Tool, Args: p.SubagentSpawn.Args})
 }
 
-// turnCompletedPayload mirrors translateStreamEvent's two
-// llmtypes.StreamEvent -> KindTurnCompleted shapes: {"usage": ev.Usage}
-// for EventUsage and a nil/empty payload for EventDone. ACP adapters add a
-// top-level "stop_reason" beside "usage".
+// turnCompletedPayload is the usage-bearing part of a turn's terminal event,
+// KindTurnCompleted or KindTurnFailed. Since go-agent-wrapper v0.13.1 a native
+// turn has exactly one terminal event, carrying the usage accumulated over the
+// turn under "usage" when it reported any. ACP adapters add a top-level
+// "stop_reason" beside "usage".
 type turnCompletedPayload struct {
 	Usage      *llmtypes.Usage `json:"usage"`
 	StopReason string          `json:"stop_reason"`
 }
 
-// TurnCompletedUsage returns the usage a KindTurnCompleted payload carries,
-// or nil when it carries none. For ACP it folds the adapter's top-level
-// stop_reason into Usage.StopReason — synthesizing an otherwise-empty Usage
-// if need be — because every consumer reads the stop reason from usage and
-// ACP truncation (stop_reason "max_tokens") was otherwise never seen
-// (CW-20260930-0113). Native payloads carry no top-level stop_reason and
-// are returned unchanged. Stopgap until the libs normalize stop reasons into
-// usage (CW-20260930-0228).
+// TurnCompletedUsage returns the usage a terminal event's payload
+// (KindTurnCompleted or KindTurnFailed) carries, or nil when it carries none.
+// For ACP it folds the adapter's top-level stop_reason into Usage.StopReason —
+// synthesizing an otherwise-empty Usage if need be — because every consumer
+// reads the stop reason from usage and ACP truncation (stop_reason
+// "max_tokens") was otherwise never seen (CW-20260930-0113). Native payloads
+// carry no top-level stop_reason and are returned unchanged. Stopgap until the
+// libs normalize stop reasons into usage (CW-20260930-0228).
 func TurnCompletedUsage(raw json.RawMessage, acp bool) *llmtypes.Usage {
 	var p turnCompletedPayload
 	if len(raw) == 0 || json.Unmarshal(raw, &p) != nil {
@@ -418,41 +419,35 @@ func TurnCompletedUsage(raw json.RawMessage, acp bool) *llmtypes.Usage {
 	return p.Usage
 }
 
+// handleTurnCompleted projects a turn's terminal completion: its usage, when
+// it carries any, then Done. Every KindTurnCompleted is terminal — ACP always
+// reported usage and completion in one event, and go-agent-wrapper v0.13.1
+// does the same for native runtimes, so no second, empty completion follows
+// (CW-20261001-0019).
 func (s *runtimeEventSink) handleTurnCompleted(ctx context.Context, raw json.RawMessage) {
-	if len(raw) == 0 {
-		s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventDone})
-		return
+	if usage := TurnCompletedUsage(raw, s.acp); usage != nil {
+		s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: usage})
 	}
-	usage := TurnCompletedUsage(raw, s.acp)
-	if usage == nil {
-		s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventDone})
-		return
-	}
-	s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: usage})
-	if s.acp {
-		// ACP reports usage and terminal completion together in one event;
-		// native adapters emit a second empty KindTurnCompleted event.
-		s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventDone})
-	}
-	// llmtypes.EventUsage and llmtypes.EventDone arrive as two distinct
-	// StreamEvents pre-migration (parseCodexStreamLine's turn.completed
-	// case emits both when usage is present) — translateStreamEvent maps
-	// each individually to its own KindTurnCompleted Write call, so a
-	// usage-bearing Write here never also carries the terminal Done
-	// signal; the adapter's own separate nil-payload KindTurnCompleted
-	// Write (from the paired EventDone) supplies that.
+	s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventDone})
 }
 
 // turnFailedPayload mirrors translateStreamEvent's {"error": ev.Error}
-// shape for llmtypes.EventError.
+// shape for llmtypes.EventError. go-agent-wrapper's own failure for a turn the
+// child never finished uses the same key, beside reason "process_exited".
 type turnFailedPayload struct {
 	Error string `json:"error"`
 }
 
+// handleTurnFailed projects a failed turn: its usage, when it carries any,
+// then the error. Since go-agent-wrapper v0.13.1 a failed turn's usage rides
+// on its turn.failed rather than on a completion of its own.
 func (s *runtimeEventSink) handleTurnFailed(ctx context.Context, raw json.RawMessage) {
 	var p turnFailedPayload
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &p)
+	}
+	if usage := TurnCompletedUsage(raw, s.acp); usage != nil {
+		s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: usage})
 	}
 	s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: p.Error})
 }

@@ -32,6 +32,10 @@ func TestMain(m *testing.M) {
 		"XDG_CONFIG_HOME":     filepath.Join(root, "xdg", "config"),
 		"TESSERACT_DB_PATH":   filepath.Join(root, "tesseract", "main.db"),
 		"TESSERACT_WORKSPACE": "service-package-test",
+		// ACP tests here drive fake adapter factories, no ACP CLI process,
+		// so they opt in to the runtime layer's ACP launch gate; the gate's
+		// own tests turn it back off with t.Setenv.
+		"NANITE_ALLOW_ACP_RUNTIMES": "1",
 	} {
 		if err := os.Setenv(env, value); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "set %s for service tests: %v\n", env, err)

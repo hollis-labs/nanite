@@ -31,6 +31,7 @@ import (
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/reminders"
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -1986,9 +1987,13 @@ func (s *chatServiceImpl) prepareTurn(
 			// stays nil and is only dereferenced via comma-ok type
 			// assertions on the non-CLI path.
 		case nilProviderRouteCLINoAdapter:
-			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
-				fmt.Sprintf("CLI provider %q has no runtime adapter registered.", providerName),
-				map[string]interface{}{"raw": fmt.Sprintf("CLI provider %q not in agent runtime adapter index", providerName)})
+			msg := fmt.Sprintf("CLI provider %q has no runtime adapter registered.", providerName)
+			launchErr := runtimeagent.LaunchError(providerName)
+			if errors.Is(launchErr, runtimeagent.ErrACPRuntimesDisabled) {
+				msg = launchErr.Error()
+			}
+			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError, msg,
+				map[string]interface{}{"raw": fmt.Sprintf("CLI provider %q cannot launch: %v", providerName, launchErr)})
 			return prepareTurnResult{directive: generationTerminate}
 		default:
 			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,

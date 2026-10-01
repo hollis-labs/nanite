@@ -14,10 +14,11 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func TestHostRuntimeFeedSSEReplaysAfterCommittedCursor(t *testing.T) {
-	s, openErr := store.New(context.Background(), filepath.Join(t.TempDir(), "runtime-feed.db"))
+	s, openErr := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "runtime-feed.db"))
 	if openErr != nil {
 		t.Fatalf("new store: %v", openErr)
 	}
@@ -88,7 +89,7 @@ func TestHostRuntimeFeedSSEReplaysAfterCommittedCursor(t *testing.T) {
 }
 
 func TestHostRuntimeFeedSSEHeadOrdersFreshAndLiveReplacementWithoutSpam(t *testing.T) {
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "runtime-head.db"))
+	s, err := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "runtime-head.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +183,7 @@ func TestHostRuntimeFeedSSEHeadOrdersFreshAndLiveReplacementWithoutSpam(t *testi
 }
 
 func TestHostRuntimeFeedSSECursorAheadOrdersHeadGapAndReplay(t *testing.T) {
-	s, openErr := store.New(context.Background(), filepath.Join(t.TempDir(), "runtime-rewind.db"))
+	s, openErr := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "runtime-rewind.db"))
 	if openErr != nil {
 		t.Fatal(openErr)
 	}

@@ -26,15 +26,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	// The package's ACP tests drive fake adapters (no ACP CLI process), so
-	// they opt in to the ACP launch gate (ErrACPRuntimesDisabled); the
-	// gate's own tests turn it back off with t.Setenv.
-	if err := os.Setenv("NANITE_ALLOW_ACP_RUNTIMES", "1"); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "set NANITE_ALLOW_ACP_RUNTIMES for agent tests: %v\n", err)
-		_ = os.RemoveAll(codexHome)
-		os.Exit(1)
-	}
-
 	// CW-20260930-0208: keep the tests out of the real home and XDG dirs.
 	code := testhome.Run(m)
 	_ = os.RemoveAll(codexHome)

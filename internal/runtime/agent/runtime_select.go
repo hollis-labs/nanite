@@ -3,8 +3,6 @@ package agent
 import (
 	"errors"
 	"fmt"
-	"os"
-	"strings"
 
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
@@ -45,29 +43,6 @@ var nativeModes = map[runtimes.ID]runtimes.Mode{
 // carry.
 var errUnknownRuntime = errors.New("agent: no such runtime in the registry")
 
-// ErrACPRuntimesDisabled refuses every ACP launch (acp-stdio, acp-tcp:
-// Copilot, Pi, and protocol=acp on any runtime) while Nanite runs a
-// go-agent-wrapper with the ACP session panic: before wrapper v0.21.1
-// acp/lifecycle.go's finish() closes the events channel before done, so an
-// ACP agent that exits during launch (for example a CLI that is not
-// installed) panics the whole host process with "send on closed channel".
-//
-// REMOVE this gate (acpGateEnv, acpAllowed, the check in selectRuntime)
-// once Nanite takes go-agent-wrapper >= v0.21.1 (CW-20260930-0113).
-var ErrACPRuntimesDisabled = errors.New("ACP runtimes are disabled until Nanite runs go-agent-wrapper ≥ v0.21.1 (ACP session panic on early exit); set NANITE_ALLOW_ACP_RUNTIMES=1 to override")
-
-// acpGateEnv opts back in to ACP launches, for a host that accepts the risk.
-const acpGateEnv = "NANITE_ALLOW_ACP_RUNTIMES"
-
-func acpAllowed() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(acpGateEnv))) {
-	case "1", "true", "yes":
-		return true
-	default:
-		return false
-	}
-}
-
 // resolveRuntime maps a Nanite provider name, including the legacy pty-/sub-
 // prefixes and registry aliases (claude-code, agy), to its registry runtime.
 func resolveRuntime(providerName string) (registry.Descriptor, bool) {
@@ -85,19 +60,13 @@ func selectRuntime(providerName string, profile *store.AgentProfile) (RuntimeSel
 	if !ok {
 		return RuntimeSelection{}, fmt.Errorf("%w: %q", errUnknownRuntime, providerName)
 	}
-	var sel RuntimeSelection
-	switch mode, native := nativeModes[d.ID]; {
-	case useACPProtocol(profile):
-		sel = RuntimeSelection{Runtime: d.ID, Mode: acpMode(d, effectiveACPTransport(profile))}
-	case native:
-		sel = RuntimeSelection{Runtime: d.ID, Mode: mode}
-	default:
-		sel = RuntimeSelection{Runtime: d.ID, Mode: d.DefaultMode}
+	if useACPProtocol(profile) {
+		return RuntimeSelection{Runtime: d.ID, Mode: acpMode(d, effectiveACPTransport(profile))}, nil
 	}
-	if sel.ACP() && !acpAllowed() {
-		return RuntimeSelection{}, ErrACPRuntimesDisabled
+	if mode, ok := nativeModes[d.ID]; ok {
+		return RuntimeSelection{Runtime: d.ID, Mode: mode}, nil
 	}
-	return sel, nil
+	return RuntimeSelection{Runtime: d.ID, Mode: d.DefaultMode}, nil
 }
 
 // acpMode is the ACP mode for transport on d: acp-tcp only where the
@@ -121,8 +90,7 @@ func CanLaunch(providerName string) bool {
 }
 
 // LaunchError says why providerName cannot launch with its default
-// selection, or returns nil when it can (CanLaunch). Chat shows it, so a
-// refusal such as ErrACPRuntimesDisabled reaches the user as written.
+// selection, or returns nil when it can (CanLaunch).
 func LaunchError(providerName string) error {
 	sel, err := selectRuntime(providerName, nil)
 	if err != nil {

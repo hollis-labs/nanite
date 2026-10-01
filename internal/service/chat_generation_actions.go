@@ -1987,13 +1987,9 @@ func (s *chatServiceImpl) prepareTurn(
 			// stays nil and is only dereferenced via comma-ok type
 			// assertions on the non-CLI path.
 		case nilProviderRouteCLINoAdapter:
-			msg := fmt.Sprintf("CLI provider %q has no runtime adapter registered.", providerName)
-			launchErr := runtimeagent.LaunchError(providerName)
-			if errors.Is(launchErr, runtimeagent.ErrACPRuntimesDisabled) {
-				msg = launchErr.Error()
-			}
-			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError, msg,
-				map[string]interface{}{"raw": fmt.Sprintf("CLI provider %q cannot launch: %v", providerName, launchErr)})
+			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
+				fmt.Sprintf("CLI provider %q has no runtime adapter registered.", providerName),
+				map[string]interface{}{"raw": fmt.Sprintf("CLI provider %q cannot launch: %v", providerName, runtimeagent.LaunchError(providerName))})
 			return prepareTurnResult{directive: generationTerminate}
 		default:
 			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,

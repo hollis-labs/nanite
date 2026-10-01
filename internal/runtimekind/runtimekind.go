@@ -3,7 +3,7 @@
 // how its agent runs.
 //
 // agentkit v0.12.0 removed the shared vocabulary this used to come from
-// (agentkit/agentruntime/runtimekind) in favour of agent-contracts-leaf's
+// (agentkit/agentruntime/runtimekind) in favor of agent-contracts-leaf's
 // runtimes.Mode, with no aliases for the old spellings, and left each host
 // to normalize its own tokens at its boundary (CW-20260930-0113). This is
 // that boundary.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // netnsLoopbackFailure prefixes the helper's message when it cannot bring up
@@ -23,7 +24,30 @@ const netnsLoopbackFailure = "bring up loopback"
 // child runs under the unpriv_bwrap AppArmor profile, which denies every
 // capability (CW-20261001-0079). Network-denied sandboxed commands are
 // unaffected.
-var ErrNetworkBridgeUnavailable = errors.New("sandbox: network-granted exec is unavailable on this host: bwrap's network namespace denies CAP_NET_ADMIN, so the netns bridge cannot bring up loopback (on Ubuntu: AppArmor's unpriv_bwrap profile under kernel.apparmor_restrict_unprivileged_userns=1)")
+var ErrNetworkBridgeUnavailable = errors.New("sandbox: network-granted exec is unavailable on this host: bwrap's network namespace denies CAP_NET_ADMIN, so the netns bridge cannot bring up loopback (on Ubuntu: AppArmor's unpriv_bwrap profile under kernel.apparmor_restrict_unprivileged_userns=1). Run the command without network access, or have the operator apply the host fix in Torque CW-20261001-0079")
+
+// networkBridgeProbe is the probe networkBridgeCheck runs; tests replace it.
+var networkBridgeProbe = ProbeNetworkBridge
+
+var (
+	networkBridgeOnce sync.Once
+	networkBridgeErr  error
+)
+
+// networkBridgeCheck reports, from a probe run once per process, whether a
+// network-granted sandboxed command can run here (CW-20261001-0079): the
+// cached ErrNetworkBridgeUnavailable error when the netns helper cannot raise
+// loopback, nil otherwise. A probe failure of any other kind is not cached as
+// a refusal; the real exec reports its own error. applyOSSandbox calls it
+// only for a network-granted command, so a network-denied one never probes.
+func networkBridgeCheck() error {
+	networkBridgeOnce.Do(func() {
+		if err := networkBridgeProbe(); errors.Is(err, ErrNetworkBridgeUnavailable) {
+			networkBridgeErr = err
+		}
+	})
+	return networkBridgeErr
+}
 
 // ProbeNetworkBridge runs a no-op command through the network-granted
 // sandbox path (bwrap's network namespace plus the netns bridge) and reports
@@ -48,7 +72,7 @@ func ProbeNetworkBridge() error {
 	}()
 
 	cmd := exec.Command("true")
-	cleanup, _, err := applyOSSandbox(cmd, dir, "", []string{"probe.invalid"}, ln.Addr().String())
+	cleanup, _, err := applyBwrapSandbox(cmd, dir, "", []string{"probe.invalid"}, ln.Addr().String(), nil)
 	if err != nil {
 		return fmt.Errorf("sandbox: network bridge probe: %w", err)
 	}

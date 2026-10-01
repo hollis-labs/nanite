@@ -47,36 +47,21 @@ import (
 	"testing"
 	"time"
 
-	gosandbox "github.com/hollis-labs/go-sandbox/sandbox"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
-// skipWithoutLoopbackSandbox skips when go-sandbox cannot run a
-// loopback-granted command on this host: its loopback helper needs
-// CAP_NET_ADMIN inside bwrap's network namespace to bring lo up, and hosts
-// that confine bwrap (Ubuntu's unpriv_bwrap AppArmor profile under
-// kernel.apparmor_restrict_unprivileged_userns=1) deny it, so the helper
-// exits 125 with "bring up loopback: operation not permitted". The probe
-// runs the gate's own profile shape; any other failure is left for the
-// test to report. Tracked as CW-20261001-0079.
+// skipWithoutLoopbackSandbox skips where go-sandbox's loopback helper cannot
+// raise lo inside bwrap's network namespace (CW-20261001-0079), using the
+// gate's own probe. Any other probe failure is left for the test to report.
 func skipWithoutLoopbackSandbox(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
 		return
 	}
-	cmd := exec.Command("true")
-	cleanup, err := gosandbox.Apply(cmd, gosandbox.Profile{ID: "loopback-probe", AllowLoopback: true, Subprocess: true}, t.TempDir())
-	if err != nil {
-		return
-	}
-	defer cleanup()
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if runErr := cmd.Run(); runErr != nil && strings.Contains(stderr.String(), "bring up loopback") {
-		t.Skipf("loopback-granted sandboxed exec is unavailable on this host (%s): bwrap's network namespace denies CAP_NET_ADMIN (on Ubuntu: AppArmor's unpriv_bwrap profile under kernel.apparmor_restrict_unprivileged_userns=1); tracked as CW-20261001-0079",
-			strings.TrimSpace(stderr.String()))
+	if err := probeLoopbackSandbox(); errors.Is(err, errLoopbackSandboxUnavailable) {
+		t.Skipf("%v", err)
 	}
 }
 

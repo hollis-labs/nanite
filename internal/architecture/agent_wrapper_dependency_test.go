@@ -124,7 +124,7 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", agentWrapperModule+"/plant", "Spec"):         ownershipAllowance(9, "Compile Claude boot-content DTOs"),
 	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", agentWrapperModule+"/plant", "Result"):       ownershipAllowance(4, "Return planted-content metadata"),
 	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", agentWrapperModule+"/plant", "Planter"):       ownershipAllowance(1, "Codex boot-content planter conformance"),
-	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", agentWrapperModule+"/plant", "Spec"):          ownershipAllowance(8, "Compile Codex boot-content DTOs"),
+	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", agentWrapperModule+"/plant", "Spec"):          ownershipAllowance(7, "Compile Codex boot-content DTOs"),
 	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", agentWrapperModule+"/plant", "Result"):        ownershipAllowance(4, "Return planted-content metadata"),
 	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", agentWrapperModule+"/plant", "Planter"):    ownershipAllowance(1, "OpenCode boot-content planter conformance"),
 	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", agentWrapperModule+"/plant", "Spec"):       ownershipAllowance(9, "Compile OpenCode boot-content DTOs"),

@@ -112,59 +112,12 @@ func codexConfigTOMLContent(writableRoots []string) (string, error) {
 }
 
 // codexConfigFileMode is the file mode go-providers' codex BootDirSpec
-// declares for config.toml and auth.json — 0o600, because both embed
-// per-task secret-ish content (config.toml the loopback URL when present,
-// auth.json the user's OAuth tokens / API key). Nanite honors it so the
-// planted files are not world-readable.
+// declares for config.toml — 0o600, because it embeds per-task secret-ish
+// content (the loopback URL when present). Nanite honors it so the planted
+// file is not world-readable. auth.json is not planted from content at
+// all: it is a symlink to the host login, whose own mode stays the user's
+// (bootdir_codex_auth.go).
 const codexConfigFileMode = 0o600
-
-// codexAuthJSONContent renders the codex auth.json body via go-providers'
-// CodexAdapter.BootDirSpec().
-//
-// # Why this file is planted alongside config.toml
-//
-// Codex reads its config (config.toml) AND its auth (auth.json) from
-// $CODEX_HOME. The codex layout sets CODEX_HOME=<bootDir> (see
-// codexLayout.AmendEnv) so the planted config.toml is the one codex
-// actually consults — without that env pointer codex reads
-// ~/.codex/config.toml and the plant is inert. But once CODEX_HOME points
-// at the boot dir, codex ALSO looks for <bootDir>/auth.json instead of
-// ~/.codex/auth.json. Planting only config.toml would therefore fix the
-// approval-hang but break auth ("Not logged in"). config.toml + auth.json
-// + CODEX_HOME are a coherent set — go-providers' codex BootDirSpec
-// declares all three together for exactly this reason.
-//
-// # Opting in to the host read (CW-20261001-0021)
-//
-// Since go-providers v0.26.0 the auth.json Render is pure by default: with
-// a zero PlantContext it returns "" and never reads the host's auth. The
-// copy happens only when the caller sets PlantContext.LegacyAllowHostEffects
-// or prepares EffectCodexAuthJSON through PrepareRuntime with its own
-// CredentialResolver. Nanite rendered with a zero PlantContext, so every
-// codex boot dir got a 0-byte auth.json and every launch failed 401.
-//
-// We opt in with LegacyAllowHostEffects, for this render only — config.toml
-// and the claude settings keep rendering pure. PrepareRuntime was not the
-// smaller change here: it writes auth.json straight into the boot root
-// rather than returning content for the plant.Spec, it needs a
-// Nanite-written resolver to re-derive the CODEX_HOME / ~/.codex lookup the
-// render already does, and it fails outright when the user is not logged
-// in. CW-20260930-0113 (Nanite adopting the shared PreparedExecution)
-// replaces this opt-in with the prepared effect.
-//
-// With the opt-in, the render copies the user's ~/.codex/auth.json
-// (honoring $CODEX_HOME in the PARENT env, matching codex's own discovery
-// rule). If the user isn't logged in, it returns "" — the planted
-// auth.json is empty and codex surfaces "Not logged in" at dispatch time.
-// A non-NotExist read error (permission denied, etc.) bubbles up so the
-// operator sees an actionable message.
-//
-// PlantContext.BootDir is left empty; the auth.json Render has no
-// BootDir-gated side effect (it only reads the source file).
-func codexAuthJSONContent() (string, error) {
-	adapter := provider.NewCodexAdapter()
-	return renderProviderConfigFile(adapter, "auth.json", provider.PlantContext{LegacyAllowHostEffects: true})
-}
 
 // claudeDefaultPermissionMode is the permissions.defaultMode planted into
 // every Nanite claude boot dir's .claude/settings.json. "acceptEdits"

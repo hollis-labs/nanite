@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,9 +58,10 @@ func TestCodexLayout_Setup_FileShape(t *testing.T) {
 	}
 
 	// Sandbox + boot.md + .mcp.json common to nanite layouts must exist,
-	// plus the provider config files config.toml + auth.json.
+	// plus config.toml and the auth.json link. Lstat: under TestMain's
+	// empty CODEX_HOME the auth.json link dangles by design.
 	for _, p := range []string{"boot.md", ".sandbox/agent-context.md", ".sandbox/envelope-schema.md", ".mcp.json", "config.toml", "auth.json"} {
-		if _, err := os.Stat(filepath.Join(bootDir, p)); err != nil {
+		if _, err := os.Lstat(filepath.Join(bootDir, p)); err != nil {
 			t.Errorf("missing common file %s: %v", p, err)
 		}
 	}
@@ -185,66 +188,151 @@ func TestCodexLayout_BootProperties(t *testing.T) {
 	}
 }
 
-// TestCodexLayout_AuthJSON_CopiesHostAuth pins that the planted auth.json
-// carries the host's codex auth (CW-20261001-0021). CODEX_HOME=<bootDir>
-// makes codex read auth from the boot dir only, so an empty plant fails
-// every launch with 401. go-providers v0.26.0 renders auth.json empty
-// unless the caller opts in; codexAuthJSONContent opts in.
-//
-// CODEX_HOME points at a fixture dir — the source lookup honors it, so the
-// test never reads the real ~/.codex/auth.json.
-func TestCodexLayout_AuthJSON_CopiesHostAuth(t *testing.T) {
-	const fixture = `{"OPENAI_API_KEY":null,"tokens":{"access_token":"fixture-access","refresh_token":"fixture-refresh"}}` + "\n"
+// hostCodexLogin points CODEX_HOME at a fresh fixture dir, optionally
+// holding a 0600 auth.json, and returns the host auth.json path. No test
+// touches the real ~/.codex.
+func hostCodexLogin(t *testing.T, loggedIn bool, content string) string {
+	t.Helper()
 	codexHome := t.TempDir()
-	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(fixture), 0o600); err != nil {
-		t.Fatalf("write fixture auth.json: %v", err)
+	hostAuth := filepath.Join(codexHome, "auth.json")
+	if loggedIn {
+		if err := os.WriteFile(hostAuth, []byte(content), 0o600); err != nil {
+			t.Fatalf("write fixture auth.json: %v", err)
+		}
 	}
 	t.Setenv("CODEX_HOME", codexHome)
+	return hostAuth
+}
 
+func setupCodexBootDir(t *testing.T, session string) string {
+	t.Helper()
 	profile := &store.AgentProfile{Name: "codex-auth", Slug: "codex-auth"}
-	bootDir, err := codexLayout{}.Setup(SetupParams{SessionID: "s-auth", AgentProfile: profile})
+	bootDir, err := codexLayout{}.Setup(SetupParams{SessionID: session, AgentProfile: profile})
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(bootDir) })
+	return bootDir
+}
 
-	authPath := filepath.Join(bootDir, "auth.json")
-	body, err := os.ReadFile(authPath) //nolint:gosec // reads a file this test just planted into a temp boot dir
+// assertAuthLink fails unless <bootDir>/auth.json is a symlink to target.
+func assertAuthLink(t *testing.T, bootDir, target string) {
+	t.Helper()
+	planted := filepath.Join(bootDir, "auth.json")
+	info, err := os.Lstat(planted)
 	if err != nil {
-		t.Fatalf("read auth.json: %v", err)
+		t.Fatalf("lstat auth.json: %v", err)
 	}
-	if string(body) != fixture {
-		t.Errorf("planted auth.json = %q, want the host's auth.json %q", body, fixture)
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("auth.json mode = %v, want a symlink to the host login", info.Mode())
 	}
-
-	// auth.json carries OAuth tokens — it must not be world-readable.
-	info, err := os.Stat(authPath)
-	if err != nil {
-		t.Fatalf("stat auth.json: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != codexConfigFileMode {
-		t.Errorf("auth.json mode = %o, want %o", perm, codexConfigFileMode)
+	if got, err := os.Readlink(planted); err != nil || got != target {
+		t.Fatalf("auth.json -> %q (err %v), want %q", got, err, target)
 	}
 }
 
-// TestCodexLayout_AuthJSON_NotLoggedIn pins the not-logged-in path: no
-// host auth.json is not a Setup error. The boot dir still gets an empty
-// auth.json and codex reports "Not logged in" at dispatch.
+// TestCodexLayout_AuthJSON_LinksHostLogin pins CW-20261001-0027: the
+// planted auth.json is a symlink to the host's login, so codex reads the
+// host's credentials, and a token refresh — which codex writes in place
+// with truncate, through the link — lands in the host's file rather than
+// in a boot-dir copy that dies with the session. The refresh below
+// mirrors codex's FileAuthStorage::save (open truncate+write, no rename).
+func TestCodexLayout_AuthJSON_LinksHostLogin(t *testing.T) {
+	const fixture = `{"tokens":{"access_token":"fixture-access","refresh_token":"fixture-refresh-1"}}`
+	hostAuth := hostCodexLogin(t, true, fixture)
+	bootDir := setupCodexBootDir(t, "s-auth")
+	assertAuthLink(t, bootDir, hostAuth)
+
+	planted := filepath.Join(bootDir, "auth.json")
+	if body, err := os.ReadFile(planted); err != nil || string(body) != fixture { //nolint:gosec // reads a link this test just planted into a temp boot dir
+		t.Fatalf("auth.json reads %q (err %v), want the host login %q", body, err, fixture)
+	}
+
+	// A refresh inside the session, written the way codex writes it.
+	const refreshed = `{"tokens":{"access_token":"fixture-access-2","refresh_token":"fixture-refresh-2"}}`
+	f, err := os.OpenFile(planted, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0o600) //nolint:gosec // writes through a link this test planted to its own fixture
+	if err != nil {
+		t.Fatalf("open auth.json for the refresh: %v", err)
+	}
+	if _, err := f.WriteString(refreshed); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if body, _ := os.ReadFile(hostAuth); string(body) != refreshed { //nolint:gosec // reads this test's own fixture
+		t.Errorf("host auth.json = %q after the refresh, want %q", body, refreshed)
+	}
+	assertAuthLink(t, bootDir, hostAuth)
+	info, err := os.Stat(hostAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("host auth.json mode = %o after the refresh, want the user's 0600", perm)
+	}
+
+	// A re-plant (crash-recovery Populate) keeps the link and never writes
+	// through it: auth.json is outside the materialize engine's tree.
+	if _, err := (codexLayout{}).Populate(bootDir, SetupParams{SessionID: "s-auth", AgentProfile: &store.AgentProfile{Name: "codex-auth", Slug: "codex-auth"}}); err != nil {
+		t.Fatalf("re-Populate: %v", err)
+	}
+	assertAuthLink(t, bootDir, hostAuth)
+	if body, _ := os.ReadFile(hostAuth); string(body) != refreshed { //nolint:gosec // reads this test's own fixture
+		t.Errorf("host auth.json = %q after a re-plant, want it untouched: %q", body, refreshed)
+	}
+}
+
+// TestCodexLayout_AuthJSON_NotLoggedIn pins the not-logged-in decision: the
+// link is planted anyway and dangles, which reads exactly like a missing
+// file (codex reports "Not logged in" at dispatch), and Setup does not
+// fail. A login on the host afterwards is picked up through the same link.
 func TestCodexLayout_AuthJSON_NotLoggedIn(t *testing.T) {
-	t.Setenv("CODEX_HOME", t.TempDir())
+	hostAuth := hostCodexLogin(t, false, "")
+	bootDir := setupCodexBootDir(t, "s-noauth")
+	assertAuthLink(t, bootDir, hostAuth)
 
-	profile := &store.AgentProfile{Name: "codex-noauth", Slug: "codex-noauth"}
-	bootDir, err := codexLayout{}.Setup(SetupParams{SessionID: "s-noauth", AgentProfile: profile})
-	if err != nil {
-		t.Fatalf("Setup with no host auth.json: %v", err)
+	planted := filepath.Join(bootDir, "auth.json")
+	if _, err := os.Stat(planted); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("stat through the link = %v, want not-exist (codex: not logged in)", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(bootDir) })
 
-	body, err := os.ReadFile(filepath.Join(bootDir, "auth.json")) //nolint:gosec // reads a file this test just planted into a temp boot dir
-	if err != nil {
-		t.Fatalf("read auth.json: %v", err)
+	const login = `{"OPENAI_API_KEY":"fixture-key"}`
+	if err := os.WriteFile(hostAuth, []byte(login), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if len(body) != 0 {
-		t.Errorf("auth.json = %q, want empty when the host is not logged in", body)
+	if body, err := os.ReadFile(planted); err != nil || string(body) != login { //nolint:gosec // reads a link this test just planted into a temp boot dir
+		t.Fatalf("auth.json reads %q (err %v) after the host login, want %q", body, err, login)
+	}
+}
+
+// A boot dir planted before CW-20261001-0027 holds a snapshot copy. A
+// re-plant replaces it with the link, so no credential copy survives.
+func TestCodexLayout_AuthJSON_ReplacesSnapshotCopy(t *testing.T) {
+	hostAuth := hostCodexLogin(t, true, `{"OPENAI_API_KEY":"fixture-key"}`)
+	bootDir := setupCodexBootDir(t, "s-copy")
+	planted := filepath.Join(bootDir, "auth.json")
+	if err := os.Remove(planted); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(planted, []byte(`{"OPENAI_API_KEY":"stale-copy"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := linkCodexHostAuth(bootDir); err != nil {
+		t.Fatalf("linkCodexHostAuth: %v", err)
+	}
+	assertAuthLink(t, bootDir, hostAuth)
+}
+
+// A relative CODEX_HOME resolves against Nanite's working directory, not
+// against the boot dir the link lives in.
+func TestCodexHostAuthPath_AbsoluteForRelativeCodexHome(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("CODEX_HOME", "rel-codex-home")
+	want := filepath.Join(dir, "rel-codex-home", "auth.json")
+	if got := codexHostAuthPath(); got != want {
+		t.Fatalf("codexHostAuthPath() = %q, want %q", got, want)
 	}
 }

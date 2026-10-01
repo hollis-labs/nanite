@@ -12,9 +12,9 @@ import (
 
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/go-safefs/atomicfile"
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
-	"github.com/hollis-labs/nanite/internal/fsutil"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -840,11 +840,11 @@ func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agen
 	workRoot, _ := s.activeSessionWorkRoots.Load(sessionID)
 	workRootPath, _ := workRoot.(string)
 	systemPrompt := runtimeagent.ResolveSystemPrompt(role, agent, runtimeagent.ModeLongLived, bootPromptOverride, dynamicContext, workRootPath)
-	if err := fsutil.AtomicWriteFile(claudePath, []byte(runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description, systemPrompt)), 0o644); err != nil {
+	if err := atomicfile.WriteFile(claudePath, []byte(runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description, systemPrompt)), 0o644); err != nil {
 		return fmt.Errorf("regen CLAUDE.md: %w", err)
 	}
 	contextPath := filepath.Join(bootDir, ".sandbox", "agent-context.md")
-	if err := fsutil.AtomicWriteFile(contextPath, []byte(runtimeagent.BuildAgentContext(agent)), 0o644); err != nil {
+	if err := atomicfile.WriteFile(contextPath, []byte(runtimeagent.BuildAgentContext(agent)), 0o644); err != nil {
 		return fmt.Errorf("regen agent-context.md: %w", err)
 	}
 	return nil

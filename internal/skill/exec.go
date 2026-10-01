@@ -107,7 +107,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/pathsafe"
+	"github.com/hollis-labs/go-safefs/pathsafe"
 	"github.com/hollis-labs/nanite/internal/safego"
 )
 
@@ -514,7 +514,7 @@ func declaresScript(def Definition, rel string) bool {
 // scriptRelPath must both (a) appear in def.Scripts and (b) exist as a
 // real, non-directory file under pkgDir — a caller cannot use this entry
 // point to run an undeclared or nonexistent file under the guise of
-// "script execution." scriptRelPath is resolved via internal/pathsafe so a
+// "script execution." scriptRelPath is resolved via go-safefs/pathsafe so a
 // path-traversal attempt is rejected before ever reaching the gate.
 func ExecuteScript(ctx context.Context, gate GatedExecutor, def Definition, agentID, pkgDir, scriptRelPath string, command []string, opts ExecOptions) (string, error) {
 	if !declaresScript(def, scriptRelPath) {

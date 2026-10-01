@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/fsutil"
+	"github.com/hollis-labs/go-safefs/atomicfile"
 )
 
 var retiredAssetPatterns = []*regexp.Regexp{
@@ -276,13 +276,13 @@ func TestExtractTo_UpgradesKnownStockAndPreservesCustomization(t *testing.T) {
 	// exercising its exact historical digest.
 	legacy = bytes.TrimSuffix(legacy, []byte("\n"))
 	stockPath := filepath.Join(dir, "commands", "doc-note.md")
-	if writeErr := fsutil.AtomicWriteFile(stockPath, legacy, 0o644); writeErr != nil {
+	if writeErr := atomicfile.WriteFile(stockPath, legacy, 0o644); writeErr != nil {
 		t.Fatalf("write legacy stock file: %v", writeErr)
 	}
 
 	customPath := filepath.Join(dir, "commands", "doc-search.md")
 	custom := []byte("user-owned search instructions\n")
-	if writeErr := fsutil.AtomicWriteFile(customPath, custom, 0o644); writeErr != nil {
+	if writeErr := atomicfile.WriteFile(customPath, custom, 0o644); writeErr != nil {
 		t.Fatalf("write custom file: %v", writeErr)
 	}
 
@@ -458,7 +458,7 @@ func TestExtractTo_ForceRepairsManagedParentSymlinkBeforeRetirement(t *testing.T
 	}
 	runtimeRetiredLeaf := filepath.Join(runtimeDir, "ref-conduit-plugin.md")
 	const sentinel = "runtime file must survive parent-symlink repair\n"
-	if err := fsutil.AtomicWriteFile(runtimeRetiredLeaf, []byte(sentinel), 0o600); err != nil {
+	if err := atomicfile.WriteFile(runtimeRetiredLeaf, []byte(sentinel), 0o600); err != nil {
 		t.Fatalf("write runtime sentinel: %v", err)
 	}
 	if err := os.Symlink("plugin-cache", docsPath); err != nil {
@@ -529,7 +529,7 @@ func TestRetirePath_RemovesStockAndPreservesCustomized(t *testing.T) {
 	stock := []byte("released legacy asset")
 	set := manifestSet{historical: []contentManifest{{Files: map[string]string{"retired.md": contentDigest(stock)}}}}
 	target := filepath.Join(dir, "retired.md")
-	if writeErr := fsutil.AtomicWriteFile(target, stock, 0o644); writeErr != nil {
+	if writeErr := atomicfile.WriteFile(target, stock, 0o644); writeErr != nil {
 		t.Fatal(writeErr)
 	}
 	report := &ExtractReport{}
@@ -544,7 +544,7 @@ func TestRetirePath_RemovesStockAndPreservesCustomized(t *testing.T) {
 	}
 
 	custom := []byte("user customization")
-	if writeErr := fsutil.AtomicWriteFile(target, custom, 0o644); writeErr != nil {
+	if writeErr := atomicfile.WriteFile(target, custom, 0o644); writeErr != nil {
 		t.Fatal(writeErr)
 	}
 	report = &ExtractReport{}

@@ -11,8 +11,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/hollis-labs/go-safefs/atomicfile"
 	"github.com/hollis-labs/nanite/internal/agent"
-	"github.com/hollis-labs/nanite/internal/fsutil"
 	adapterclaude "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
 	adaptercodex "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-codex"
 	adaptergemini "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-gemini"
@@ -123,7 +123,7 @@ func extractAgentsFromConfig(path string) ([]store.AgentProfile, error) {
 // if all managed targets were identical no-ops, but its existence is the
 // audit trail. The atomic write of each snapshot means a mid-write crash
 // cannot leave a partial snapshot; the re-render that follows is also
-// atomic (fsutil.AtomicWriteFile inside WriteManagedSection's package is
+// atomic (atomicfile.WriteFile inside WriteManagedSection's package is
 // tracked separately, but the install-side snapshot already gives us a
 // recoverable prior copy).
 func snapshotAdapterTargetsForRefresh(projectDir string, ts time.Time) (string, error) {
@@ -173,7 +173,7 @@ func snapshotAdapterTargetsForRefresh(projectDir string, ts time.Time) (string, 
 			continue
 		}
 		dst := filepath.Join(archiveDir, name+".pre-refresh")
-		if err := fsutil.AtomicWriteFile(dst, data, 0o644); err != nil {
+		if err := atomicfile.WriteFile(dst, data, 0o644); err != nil {
 			return archiveDir, fmt.Errorf("write refresh snapshot %s: %w", dst, err)
 		}
 	}

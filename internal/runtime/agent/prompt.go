@@ -44,6 +44,7 @@ func composeSystemPrompt(role string, profile *store.AgentProfile, mode Mode) st
 // Empty override delegates to composeSystemPrompt for the prior behavior.
 // Either way, Options.DynamicContext (Phase 2 item 02,
 // TASKS/phase-2/02-port-forward-dynamic-resolver.md) is folded in next,
+// then the Options.Workdir project-folder section (appendWorkRoot),
 // and withMandatoryPostCompactionReread (Phase 2 item 03) appends the
 // fixed post-compaction re-read instruction last (see its doc comment) —
 // that part is NOT overridable by a catalog-authored prompt.
@@ -52,12 +53,7 @@ func composeSystemPrompt(role string, profile *store.AgentProfile, mode Mode) st
 // (claude / codex / opencode) — plus any future addition — share one
 // override hook rather than three independently-wired branches.
 func resolveBootPrompt(profile *store.AgentProfile, opts Options) string {
-	base := opts.BootPromptOverride
-	if base == "" {
-		base = composeSystemPrompt(opts.Role, profile, opts.Mode)
-	}
-	base = appendDynamicContext(base, opts.DynamicContext)
-	return withCLINarration(withMandatoryPostCompactionReread(base))
+	return ResolveSystemPrompt(opts.Role, profile, opts.Mode, opts.BootPromptOverride, opts.DynamicContext, opts.Workdir)
 }
 
 // ResolveSystemPrompt is the exported entry point for recomputing a
@@ -77,13 +73,38 @@ func resolveBootPrompt(profile *store.AgentProfile, opts Options) string {
 // session's operating instructions on the first mid-run slot change —
 // the same gap would otherwise recur for dynamic-resolver content if the
 // caller didn't re-thread it here too.
-func ResolveSystemPrompt(role string, profile *store.AgentProfile, mode Mode, bootPromptOverride string, dynamicContext map[string]string) string {
+//
+// workRoot (Options.Workdir) names the session's project directory in its
+// own section; see appendWorkRoot.
+func ResolveSystemPrompt(role string, profile *store.AgentProfile, mode Mode, bootPromptOverride string, dynamicContext map[string]string, workRoot string) string {
 	base := bootPromptOverride
 	if base == "" {
 		base = composeSystemPrompt(role, profile, mode)
 	}
 	base = appendDynamicContext(base, dynamicContext)
+	base = appendWorkRoot(base, workRoot)
 	return withCLINarration(withMandatoryPostCompactionReread(base))
+}
+
+// appendWorkRoot appends a "## Project folder" section naming workRoot
+// (CW-20261001-0020). A native CLI agent's cwd is its boot dir, where
+// Nanite plants CLAUDE.md / AGENTS.md, so the work root reaches it only as
+// an extra directory (claude --add-dir, codex writable_roots); this
+// section is what tells the agent that directory is the project it was
+// started for. Empty workRoot returns base unchanged.
+func appendWorkRoot(base, workRoot string) string {
+	if strings.TrimSpace(workRoot) == "" {
+		return base
+	}
+	section := "## Project folder\n\n" +
+		"This session works on the project at " + workRoot + ". " +
+		"Your current directory is Nanite's boot directory, not the project: " +
+		"read, search and change the project's files under " + workRoot + ", " +
+		"and read its own CLAUDE.md and/or AGENTS.md, if it has them, before you start."
+	if strings.TrimSpace(base) == "" {
+		return section
+	}
+	return base + "\n\n" + section
 }
 
 // appendDynamicContext appends each non-empty block in blocks (keyed by

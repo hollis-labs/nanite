@@ -290,6 +290,14 @@ func expandUserHome(path string) (string, error) {
 	return filepath.Join(home, path[2:]), nil
 }
 
+// ExpandUserHome applies expandUserHome for a caller that resolves a
+// workdir before Boot does, so everything it hands that path to (the
+// recovery adapter's tracked Options, the broker's exit metadata) holds
+// the same absolute path Boot uses.
+func ExpandUserHome(path string) (string, error) {
+	return expandUserHome(path)
+}
+
 // effectiveProvider centralizes the precedence rule for the bare
 // adapter name agent.Boot dispatches on. CW-20260514-0053: when a
 // boot-profile-driven launch threads spec.Provider through
@@ -442,7 +450,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		if cli == nil {
 			return cleanup(fmt.Errorf("agent.Boot: no adapter registered for provider %q", providerName))
 		}
-		selectedAdapter, err = selectNativeAdapter(providerName, opts.Mode, cli)
+		selectedAdapter, err = selectNativeAdapter(providerName, opts.Mode, cli, opts.Workdir)
 	}
 	if err != nil {
 		return cleanup(fmt.Errorf("agent.Boot: select wrapper adapter: %w", err))
@@ -554,7 +562,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		LogPath:         ws.LogPath,
 		SandboxProfile:  sandboxProfile,
 		SessionIDPreset: sessionIDPreset,
-		SystemPrompt:    ResolveSystemPrompt(opts.Role, profile, opts.Mode, opts.BootPromptOverride, opts.DynamicContext),
+		SystemPrompt:    ResolveSystemPrompt(opts.Role, profile, opts.Mode, opts.BootPromptOverride, opts.DynamicContext, opts.Workdir),
 		ACPManager:      deps.Manager.ACPManager(),
 		ACPBestEffortPermissionRequestResponder: bestEffortPermissionResponder(
 			sessID, deps.Permissions, deps.ApprovalRequestSink,

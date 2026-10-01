@@ -91,11 +91,11 @@ delivered to the CLI.
 | Universal | `UniversalRulesBlock`, position 0 | Not delivered. The boot prompt does not include it. |
 | System | Think-tool block (`ThinkToolBlock`, or the dispatcher-selected v2 form) | Not delivered. The boot prompt instead ends with a fixed narration instruction and a mandatory re-read-after-compaction instruction. |
 | Memory | Context Broker items whose source is memory | Not delivered. |
-| Agent | The profile's system prompt, plus a post-compaction disclosure when one is fresh | `CLAUDE.md` "Operating Instructions": the profile prompt plus role and mode framing, any resolved dynamic-context blocks, and the two fixed instructions above. Identity, allowed tools, directories, tags and constraints go to `.sandbox/agent-context.md`. |
+| Agent | The profile's system prompt, plus a post-compaction disclosure when one is fresh | `CLAUDE.md` "Operating Instructions": the profile prompt plus role and mode framing, any resolved dynamic-context blocks, a "Project folder" section naming the session's work root when it has one, and the two fixed instructions above. Identity, allowed tools, directories, tags and constraints go to `.sandbox/agent-context.md`. |
 | Mode | Empty by design (see above) | Not applicable. |
 | Rules | Agent tags and tool allowlist as Markdown | Carried in `.sandbox/agent-context.md`, not as a rules block. |
 | Permissions | Rendered path-access summary | Not delivered. The CLI applies its own permission model. |
-| Workspace | `AGENTS.md`, `CLAUDE.md` walk-up from the session working directory | Not delivered by Nanite. The CLI reads project instruction files itself. |
+| Workspace | `AGENTS.md`, `CLAUDE.md` walk-up from the session working directory | Not delivered by Nanite. The CLI runs in its boot directory; the work root (a durable agent's `work_root`, else the project's `repo_path`) is granted as an extra directory, and the boot prompt names it and tells the agent to read its instruction files. |
 | Skills | Name and description listing; full skill loaded on demand | Granted skills are planted as real files in the CLI's native skill location; nothing is added to the prompt. |
 | Tools | Selected tool definitions, with a lazy remainder | The CLI's own tools plus Nanite's self and dev tools served by the `nanite mcp` subprocess. |
 | Session | Small session identifiers | Not delivered. |

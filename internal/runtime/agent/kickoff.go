@@ -53,6 +53,9 @@ func composeBootContent(opts Options) string {
 	if opts.ParentSessionID != "" {
 		fmt.Fprintf(&b, "**Parent session id:** %s\n", opts.ParentSessionID)
 	}
+	if opts.Workdir != "" {
+		fmt.Fprintf(&b, "**Project folder:** %s\n", opts.Workdir)
+	}
 	if opts.Mode != ModeLongLived {
 		fmt.Fprintf(&b, "**Mode:** %s\n", opts.Mode.String())
 	}

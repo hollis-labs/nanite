@@ -35,6 +35,9 @@ func NewProjectService(st ProjectStore, sessions SessionGetter) *ProjectService 
 // ErrProjectNotFound reports a project that could not be read.
 var ErrProjectNotFound = errors.New("project not found")
 
+// ErrProjectNoRepoPath reports a project with no repository attached.
+var ErrProjectNoRepoPath = errors.New("project has no repo_path")
+
 // ProjectValidationError reports a project field the rules reject. Its
 // message is meant for the caller.
 type ProjectValidationError struct {
@@ -108,6 +111,38 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 		return ErrProjectNotFound
 	}
 	return s.store.DeleteProject(ctx, id)
+}
+
+// WorkRoot returns the directory a CLI agent in one of project id's
+// sessions works in: the project's repo_path, which must still name an
+// existing directory (CW-20261001-0020). It is ErrProjectNotFound for a
+// project that cannot be read and ErrProjectNoRepoPath for one with no
+// repository attached; any other error is a repo_path that no longer
+// resolves. The harness v1 session create calls it so a project-scoped
+// session whose repo_path does not resolve fails up front instead of
+// booting an agent that cannot see its project; like the boot path, it
+// lets ErrProjectNoRepoPath through.
+func (s *ProjectService) WorkRoot(ctx context.Context, id string) (string, error) {
+	return projectWorkRoot(ctx, s.store, id)
+}
+
+// projectWorkRoot is WorkRoot over any project reader; the chat service
+// resolves the same root at boot through its own store.
+func projectWorkRoot(ctx context.Context, st interface {
+	GetProject(ctx context.Context, id string) (*store.Project, error)
+}, id string) (string, error) {
+	p, err := st.GetProject(ctx, id)
+	if err != nil || p == nil {
+		return "", fmt.Errorf("%w: %q", ErrProjectNotFound, id)
+	}
+	if strings.TrimSpace(p.RepoPath) == "" {
+		return "", fmt.Errorf("%w: project %q", ErrProjectNoRepoPath, id)
+	}
+	root, err := canonicalExistingDir(p.RepoPath)
+	if err != nil {
+		return "", fmt.Errorf("project %q repo_path %q: %w", id, p.RepoPath, err)
+	}
+	return root, nil
 }
 
 // AutocompleteRoot returns the directory file autocomplete walks for a

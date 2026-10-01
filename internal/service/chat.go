@@ -381,6 +381,13 @@ type chatServiceImpl struct {
 	// per-session maps.
 	activeSessionContextBlocks sync.Map
 
+	// activeSessionWorkRoots stamps the work root a CLI session booted
+	// against (bootSessionWorkdir, CW-20261001-0020), keyed by chat session
+	// id, so regenerateBootDirSlots re-plants the same project-folder
+	// section the initial Boot did. Values are string; cleared in
+	// CloseAgentSession alongside the other per-session maps.
+	activeSessionWorkRoots sync.Map
+
 	// dispatcher is the single agent-dispatch door
 	// (CW-20260512-0121 / SP-20260512-0011). launchGeneration routes
 	// the user → chat call-site through this; ChatRunner (subagent
@@ -1553,6 +1560,7 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 	s.activeSessionSlots.Delete(sessionID)
 	s.toolPartitionStates.Delete(sessionID)
 	s.activeSessionContextBlocks.Delete(sessionID)
+	s.activeSessionWorkRoots.Delete(sessionID)
 	if s.agentEventBridge != nil {
 		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
 	}

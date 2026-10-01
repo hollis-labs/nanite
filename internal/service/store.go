@@ -317,6 +317,11 @@ type Store interface {
 	// fakes (chat_test.go's minimalStore).
 	ListAgentToolNames(ctx context.Context, agentID string) ([]string, error)
 	ListAlwaysIncludedKnownTools(ctx context.Context) ([]store.KnownTool, error)
+
+	// GetDurableAgentInstance backs chat_boot_drive.go's bootSessionWorkdir:
+	// a durable-agent session's CLI agent launches against its instance's
+	// work_root (CW-20261001-0020).
+	GetDurableAgentInstance(ctx context.Context, id string) (*store.DurableAgentInstance, error)
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

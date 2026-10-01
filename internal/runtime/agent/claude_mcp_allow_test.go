@@ -120,12 +120,12 @@ func TestSelectAdapter_ClaudeArgvCarriesTheMCPAllowRule(t *testing.T) {
 				t.Errorf("extra argv with strict MCP off = %q, want it to read %q", argv[allow:], want)
 			}
 
-			switch tc.mode {
-			case runtimes.ModeSubprocessPerTurn:
+			if tc.mode == runtimes.ModeSubprocessPerTurn {
 				if argv[len(argv)-1] != "do the thing" || argv[len(argv)-2] != "--" {
 					t.Errorf("the prompt does not follow a -- at the end of %q", argv)
 				}
-			case runtimes.ModeStreamingStdio:
+			}
+			if tc.mode == runtimes.ModeStreamingStdio {
 				if tc.dev {
 					if argv[len(argv)-1] != "--dangerously-skip-permissions" {
 						t.Errorf("developer flag is not last in %q", argv)

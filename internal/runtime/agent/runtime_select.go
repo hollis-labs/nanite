@@ -81,6 +81,20 @@ func acpMode(d registry.Descriptor, transport adapters.Transport) runtimes.Mode 
 	return runtimes.ModeACPStdio
 }
 
+// providerSessionSurvivesBoot reports whether a provider session one Boot
+// created can be resumed by another, so that its id is worth persisting and
+// presetting. Native Codex's cannot: it keeps a thread's rollout under
+// CODEX_HOME, which Nanite points at the per-boot dir, so a later Boot has no
+// such thread and `exec resume <id>` fails with "no rollout found for thread
+// id". go-providers v0.41.0 made Codex exec report a thread id and resume
+// from it (CW-20260930-0113, the latest-libs bump); within one Boot that is
+// what carries context from turn to turn, and the libs handle it. Presetting
+// it across Boots would fail the first turn after every cold boot, where
+// before the bump Codex ignored the id and started a fresh thread.
+func providerSessionSurvivesBoot(sel RuntimeSelection) bool {
+	return sel.ACP() || sel.Runtime != runtimes.Codex
+}
+
 // CanLaunch reports whether Nanite can boot providerName with its default
 // selection (no ACP override): the registry carries the runtime,
 // go-agent-wrapper has a launch factory for the selected mode, and a native

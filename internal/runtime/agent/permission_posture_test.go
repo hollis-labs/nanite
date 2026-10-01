@@ -117,3 +117,40 @@ func readProbe(t *testing.T, path string) string {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// A thread id from another Boot (a stored provider session id, or a
+// checkpoint's) is not preset for native Codex: its thread lives under the
+// per-boot CODEX_HOME, so `exec resume <id>` would fail with "no rollout
+// found for thread id". The first turn starts a thread.
+func TestBoot_CodexIgnoresAThreadIDFromAnotherBoot(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-codex.sh")
+	if err := os.WriteFile(script, []byte(postureProbeTurnScript), 0o755); err != nil { //nolint:gosec // an executable test fixture in t.TempDir()
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_CLI_PATH", script)
+	probe := filepath.Join(dir, "probe")
+
+	deps, store := makeBootDeps(t, "codex")
+	deps.NativeCLIAdapter = nil
+	sess, err := Boot(context.Background(), deps, Options{
+		Mode: ModeOneShot, Provider: "codex", Workdir: t.TempDir(), Role: "executor", OneShotPrompt: "say hi",
+		ResumeProviderSessionID: "thr-from-an-old-boot",
+		Env:                     map[string]string{"NANITE_TEST_PROBE_FILE": probe},
+	})
+	if err != nil {
+		t.Fatalf("Boot: %v", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sess.Stop(ctx)
+	}()
+	argv := readProbe(t, probe+".argv")
+	if strings.Contains(argv, "resume") || strings.Contains(argv, "thr-from-an-old-boot") {
+		t.Errorf("codex's first turn resumed a thread from another boot: %q", argv)
+	}
+	if id := store.provIDs[sess.ID]; id != "" {
+		t.Errorf("a codex thread id was persisted for a later boot: %q", id)
+	}
+}

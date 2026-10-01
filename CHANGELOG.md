@@ -73,9 +73,9 @@ lives in the git log.
     - A root that is, or is inside, one is dropped.
     - A root that holds one is replaced by its other subdirectories.
     Claude's `additionalDirectories` drop the same roots.
-  - **Still writable:** the main database's directory (see
-    [`SECURITY.md`](SECURITY.md)) and the worktree root. The rest of the
-    host filesystem stays as writable as before.
+  - **Still writable:** the worktree root. The rest of the host filesystem
+    stays as writable as before. The main database's directory is read-only
+    to agents too (CW-20261001-0188; see [`SECURITY.md`](SECURITY.md)).
   - **What agents notice:**
     - An agent sees only its own processes (a private PID namespace).
     - Setuid programs such as `sudo` refuse to run ("no new privileges").

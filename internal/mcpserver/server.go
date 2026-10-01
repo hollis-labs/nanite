@@ -2,11 +2,14 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
 	gmcpserver "github.com/hollis-labs/go-mcp/server"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
@@ -75,7 +78,13 @@ func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot,
 		proxy.cacheRetrieval = srv.toolAllowed("fetch_tool_result") && srv.toolAllowed("search_tool_result")
 		srv.self = proxy
 	} else {
-		srv.self = selftools.NewSelfToolsTransport(s)
+		// Nothing to forward to: tools whose collaborators only the live
+		// harness wires would answer every call with "… not configured", so
+		// leave them out of the listing (CW-20261001-0017). An explicit
+		// allowlist is the launcher naming its exact surface, and stands.
+		local := selftools.NewSelfToolsTransport(s)
+		local.HideUnwired = srv.toolAllowlist == nil
+		srv.self = local
 	}
 	return srv
 }
@@ -125,6 +134,67 @@ func (s *Server) buildMCPServer() *gmcpserver.Server {
 func (s *Server) registerTools(srv *gmcpserver.Server) {
 	s.registerTransportTools(srv, "self", s.self)
 	s.registerTransportTools(srv, "dev", s.dev)
+	s.routeHiddenTools(srv, s.self)
+}
+
+// hiddenToolLister is a transport that leaves some tools it can dispatch
+// out of its listing (selftools.SelfToolsTransport with HideUnwired).
+type hiddenToolLister interface {
+	HiddenTools() []string
+}
+
+// routeHiddenTools sends a tools/call for a tool t left out of its listing
+// to t anyway, so a client that already knows the name gets the tool's own
+// "… not configured" error rather than the SDK's bare "unknown tool"
+// (CW-20261001-0017). A name the allowlist excludes is never routed: for
+// those, not registering is the dispatch gate (CW-20260814-0006).
+func (s *Server) routeHiddenTools(srv *gmcpserver.Server, t toolTransport) {
+	lister, ok := t.(hiddenToolLister)
+	if !ok {
+		return
+	}
+	hidden := map[string]struct{}{}
+	for _, name := range lister.HiddenTools() {
+		if s.toolAllowed(name) {
+			hidden[name] = struct{}{}
+		}
+	}
+	if len(hidden) == 0 {
+		return
+	}
+	slog.Info("mcpserver: tools hidden because their services are not wired here", "count", len(hidden))
+	srv.SDKServer().AddReceivingMiddleware(func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
+		return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
+			params, ok := req.GetParams().(*mcpsdk.CallToolParamsRaw)
+			if method != "tools/call" || !ok || params == nil {
+				return next(ctx, method, req)
+			}
+			if _, isHidden := hidden[params.Name]; !isHidden {
+				return next(ctx, method, req)
+			}
+			var args map[string]any
+			if len(params.Arguments) > 0 {
+				if err := json.Unmarshal(params.Arguments, &args); err != nil {
+					return nil, fmt.Errorf("tool %q: invalid arguments: %w", params.Name, err)
+				}
+			}
+			return hiddenToolResult(t.CallTool(ctx, params.Name, args)), nil
+		}
+	})
+}
+
+// hiddenToolResult renders a hidden tool's outcome the way go-mcp/server
+// renders a registered tool's (see makeTransportHandler): a transport error
+// or an IsError result becomes error content on the tool result, never a
+// JSON-RPC error.
+func hiddenToolResult(result *condmcp.ToolResult, err error) *mcpsdk.CallToolResult {
+	if err != nil {
+		return &mcpsdk.CallToolResult{IsError: true, Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: err.Error()}}}
+	}
+	return &mcpsdk.CallToolResult{
+		IsError: result != nil && result.IsError,
+		Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: convertEnvelopeMarkers(extractText(result))}},
+	}
 }
 
 type toolTransport interface {

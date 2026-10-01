@@ -171,7 +171,12 @@ func TestToolAllowlist_Unrestricted_SeesFullCatalog(t *testing.T) {
 	for _, tool := range res.Tools {
 		got[tool.Name] = true
 	}
-	for _, name := range []string{"todo_create", "dev_read", "agent_create", "workflow_execute_llm_step"} {
+	// todo_create and workflow_execute_llm_step are absent from this list
+	// for a different reason: this bare store has no TodoStore or
+	// WorkflowExecutor wired, so CW-20261001-0017 leaves them out of an
+	// unrestricted bare listing. The dispatch check below still proves no
+	// allowlist gated them.
+	for _, name := range []string{"dev_read", "agent_create", "skill_list"} {
 		if !got[name] {
 			t.Errorf("expected unrestricted server to list %q, it did not; got %v", name, toolNames(res.Tools))
 		}

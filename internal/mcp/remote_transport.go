@@ -90,51 +90,41 @@ func (t *remoteTransport) ListTools(ctx context.Context) ([]Tool, error) {
 
 // CallTool invokes a tool and converts the result.
 //
-// A failed call is not retried by this adapter, with one narrow exception
-// (isProvablyUnsent, below). A connection error generally cannot distinguish
-// "the request never arrived" from "the reply did not come back", and
-// re-issuing a tool call that may already have run is the wrong side to err
-// on -- the same reasoning the SSE transport already applied, now uniform
-// across every remote kind. go-mcp/client's own retry policy is configured
-// at zero for this reason (see Manager's Pool construction); the Pool still
-// tears the connection down on any error (see its own doc), so the next
-// call reconnects.
+// A failed call is not retried by this adapter, with one narrow exception:
+// go-mcp's RetryIfUnsent, which retries once, after tearing the connection
+// down and re-dialing, only when gmcpclient.IsProvablyUnsent reports the
+// request never reached the wire. A connection error generally cannot
+// distinguish "the request never arrived" from "the reply did not come
+// back", and re-issuing a tool call that may already have run is the wrong
+// side to err on -- the same reasoning the SSE transport already applied, now
+// uniform across every remote kind. The Pool's own default retry is
+// configured at zero for this reason (see Manager's Pool construction), so
+// RetryIfUnsent's max(n, 1) is exactly one retry.
+//
+// The unsent case is the official SDK's "client is closing" rejection,
+// which it raises before writing the request: an explicit Close in
+// progress, a prior write failure, or (the common case here) the read side
+// already having failed, e.g. because a stdio server's subprocess died
+// between calls. That closes the gap CW-20260918's Agent Mux incident traced
+// end to end: a stdio server (no periodic liveness probe; go-mcp/client's
+// maybeProbeLocked skips TransportStdio) whose subprocess died during an idle
+// period failed its next real call, and stayed failed until some other
+// caller invalidated the connection.
+//
+// CW-20260930-0207: go-mcp v0.8.0 published this policy (RetryIfUnsent) and
+// its classifier (IsProvablyUnsent) from Nanite's former hand-rolled
+// isProvablyUnsent plus Invalidate-and-retry, which this replaces. The call
+// timeout stays Nanite's own (withCallTimeout), spanning the dial and the
+// retry, rather than go-mcp's per-attempt WithDefaultCallTimeouts.
 func (t *remoteTransport) CallTool(ctx context.Context, name string, arguments map[string]any) (*ToolResult, error) {
 	callCtx, cancel := t.withCallTimeout(ctx)
 	defer cancel()
 
-	res, _, err := t.pool.CallTool(callCtx, t.name, name, arguments)
-	if err != nil && isProvablyUnsent(err) {
-		t.pool.Invalidate(t.name)
-		res, _, err = t.pool.CallTool(callCtx, t.name, name, arguments)
-	}
+	res, _, err := t.pool.CallTool(callCtx, t.name, name, arguments, gmcpclient.WithCallRetry(gmcpclient.RetryIfUnsent))
 	if err != nil {
 		return nil, fmt.Errorf("tools/call %s: %w", name, err)
 	}
 	return convertSDKCallResult(res), nil
-}
-
-// isProvablyUnsent reports whether err is the one CallTool failure shape
-// that is safe to retry despite the general "ambiguous send state" policy
-// above: the official SDK's jsonrpc2.Connection.Call rejects a request with
-// an error whose message contains "client is closing" in exactly three
-// cases (see its shuttingDown check) -- an explicit Close already in
-// progress, a prior write failure, or (the common case here) the read side
-// already having failed, e.g. because a stdio server's subprocess died
-// between calls. All three checks run and return BEFORE the connection ever
-// writes the request to the wire -- unlike every other CallTool failure,
-// there is no ambiguity about whether the call reached the server: it
-// didn't, so retrying after invalidating the stale connection cannot double
-// an effect.
-//
-// This closes the gap CW-20260918's Agent Mux incident traced end to end:
-// a stdio server (no periodic liveness probe -- see go-mcp/client's
-// maybeProbeLocked, which explicitly skips TransportStdio) whose subprocess
-// died during an idle period fails its next real call with exactly this
-// message, and previously stayed failed until some other caller happened to
-// invalidate the connection.
-func isProvablyUnsent(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "client is closing")
 }
 
 // SetMaxResponseBytes forwards the tier-derived cap to the underlying

@@ -14,12 +14,12 @@ import (
 )
 
 // TestIsProvablyUnsent pins the exact classifier CallTool's retry gate
-// relies on: only the official SDK's "client is closing" phrasing (see
-// remote_transport.go's doc comment on isProvablyUnsent for why that
-// specific phrase is safe to retry unconditionally) should match, not any
-// other recoverable-looking connection error. Widening this match is what
-// would reintroduce the double-execution risk CallTool's general no-retry
-// policy exists to avoid.
+// relies on, now go-mcp's own gmcpclient.IsProvablyUnsent (RetryIfUnsent's
+// gate; CW-20260930-0207): only the official SDK's "client is closing"
+// phrasing (see remote_transport.go's CallTool doc for why that specific
+// phrase is safe to retry) should match, not any other recoverable-looking
+// connection error. Widening this match is what would reintroduce the
+// double-execution risk CallTool's general no-retry policy exists to avoid.
 func TestIsProvablyUnsent(t *testing.T) {
 	tests := []struct {
 		name string
@@ -38,8 +38,8 @@ func TestIsProvablyUnsent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isProvablyUnsent(tt.err); got != tt.want {
-				t.Errorf("isProvablyUnsent(%v) = %v, want %v", tt.err, got, tt.want)
+			if got := gmcpclient.IsProvablyUnsent(tt.err); got != tt.want {
+				t.Errorf("IsProvablyUnsent(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}
@@ -163,7 +163,7 @@ func TestRemoteTransportCallTool_RetriesProvablyUnsentError(t *testing.T) {
 // TestRemoteTransportCallTool_DialFailureIsNotMisclassifiedAsProvablyUnsent
 // guards the other direction: a stdio server that can never be dialed at
 // all (bad command) fails with an ordinary exec/dial error, not the SDK's
-// "client is closing" phrasing -- isProvablyUnsent must not fire on it, so
+// "client is closing" phrasing -- IsProvablyUnsent must not fire on it, so
 // CallTool must not (incorrectly) attempt a retry-after-invalidate cycle
 // for a failure class the classifier was never meant to cover.
 //
@@ -190,7 +190,7 @@ func TestRemoteTransportCallTool_DialFailureIsNotMisclassifiedAsProvablyUnsent(t
 	if err == nil {
 		t.Fatal("CallTool against an unresolvable command succeeded, want a dial error")
 	}
-	if isProvablyUnsent(err) {
+	if gmcpclient.IsProvablyUnsent(err) {
 		t.Fatalf("CallTool's dial-failure error was classified as provably-unsent: %v", err)
 	}
 	if strings.Contains(err.Error(), "client is closing") {

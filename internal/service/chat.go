@@ -1028,7 +1028,15 @@ func (s *chatServiceImpl) finishClaimedCancellation(sessionID string, gen *inFli
 				drainCancel()
 			} else {
 				sess := binding.session
-				turnCtx, turnCancel := context.WithTimeout(ownerCtx, runtimeTurnCancelMaxWait)
+				// A native turn interrupt (streaming-stdio Claude) ends when the
+				// CLI aborts its running tool or generation and writes its result,
+				// which can take longer than an ACP cancel. Giving it only the ACP
+				// bound would fall through to Stop and kill a healthy process.
+				turnBudget := runtimeTurnCancelMaxWait
+				if !sess.IsACP() {
+					turnBudget = runtimeStopMaxWait
+				}
+				turnCtx, turnCancel := context.WithTimeout(ownerCtx, turnBudget)
 				var cancelErr error
 				var sendErr error
 				turnSafe = false

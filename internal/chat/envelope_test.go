@@ -3,6 +3,8 @@ package chat
 import (
 	"os"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/testhome"
 )
 
 func TestMain(m *testing.M) {
@@ -12,7 +14,8 @@ func TestMain(m *testing.M) {
 	// manifest/envelopes.yaml at startup (envelopes.LoadCore, called from
 	// cmd/nanite/main.go) — config/envelopes.yaml does not exist in this repo.
 	InitCoreTypes([]string{"metric-card", "session-task", "document-viewer"})
-	os.Exit(m.Run())
+	// CW-20260930-0208: keep the tests out of the real home and XDG dirs.
+	os.Exit(testhome.Run(m))
 }
 
 func TestParseEnvelopes(t *testing.T) {

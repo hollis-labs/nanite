@@ -1,10 +1,14 @@
 package selftools
 
 import (
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"go.uber.org/goleak"
+
+	"github.com/hollis-labs/nanite/internal/testhome"
 )
 
 // TestMain runs goleak.VerifyTestMain to surface goroutine leaks from tests
@@ -20,5 +24,14 @@ import (
 // move.
 func TestMain(m *testing.M) {
 	envelope.SetupForTesting()
-	goleak.VerifyTestMain(m)
+	// CW-20260930-0208: keep the tests out of the real home and XDG dirs,
+	// then surface goroutine leaks as goleak.VerifyTestMain did.
+	code := testhome.Run(m)
+	if code == 0 {
+		if err := goleak.Find(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "goleak: %v\n", err)
+			code = 1
+		}
+	}
+	os.Exit(code)
 }

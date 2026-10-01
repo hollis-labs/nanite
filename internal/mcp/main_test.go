@@ -1,11 +1,14 @@
 package mcp
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"go.uber.org/goleak"
+
+	"github.com/hollis-labs/nanite/internal/testhome"
 )
 
 // TestMain runs goleak.VerifyTestMain to surface goroutine leaks from tests in
@@ -30,11 +33,21 @@ func TestMain(m *testing.M) {
 	}
 
 	envelope.SetupForTesting()
-	goleak.VerifyTestMain(m,
-		// groupKillBackstop is spawned by sandbox.setProcessGroupKill on every
-		// context cancellation. It intentionally outlives the canceled command
-		// by execWaitDelay+execGroupKillGrace (≈2.25s) to SIGKILL any grandchild
-		// processes that survive Go's WaitDelay escalation. Not a real leak.
-		goleak.IgnoreAnyFunction("github.com/hollis-labs/nanite/internal/sandbox.groupKillBackstop"),
-	)
+	// CW-20260930-0208: keep the tests out of the real home (dev_bash's
+	// sandbox dir is ~/.nanite/sandboxes) and XDG dirs, then surface goroutine
+	// leaks as goleak.VerifyTestMain did.
+	code := testhome.Run(m)
+	if code == 0 {
+		if err := goleak.Find(
+			// groupKillBackstop is spawned by sandbox.setProcessGroupKill on every
+			// context cancellation. It intentionally outlives the canceled command
+			// by execWaitDelay+execGroupKillGrace (≈2.25s) to SIGKILL any grandchild
+			// processes that survive Go's WaitDelay escalation. Not a real leak.
+			goleak.IgnoreAnyFunction("github.com/hollis-labs/nanite/internal/sandbox.groupKillBackstop"),
+		); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "goleak: %v\n", err)
+			code = 1
+		}
+	}
+	os.Exit(code)
 }

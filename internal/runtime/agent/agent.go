@@ -13,6 +13,7 @@ import (
 	"github.com/hollis-labs/go-agent-wrapper/activity"
 	"github.com/hollis-labs/go-agent-wrapper/wrapper"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
+	"github.com/hollis-labs/go-sandbox/sandbox"
 	"github.com/hollis-labs/nanite/internal/runtimekind"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/oklog/ulid/v2"
@@ -442,7 +443,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		return nil, failure
 	}
 
-	selectedAdapter, err := selectAdapter(deps, selection, opts.Workdir)
+	selectedAdapter, err := selectAdapter(deps, selection, opts.Workdir, bootDir)
 	if err != nil {
 		return cleanup(fmt.Errorf("agent.Boot: select wrapper adapter: %w", err))
 	}
@@ -492,6 +493,21 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	}
 
 	sandboxProfile := buildSandboxProfile(deps.SandboxBaseProfile, opts, ws.Root, bootDir)
+	protectedPaths := deps.ControlPlane.protectedFor(spawnWorkdir, opts.Workdir, ws.Root, bootDir, naniteHomeDir())
+	if codexSandboxesItself(selection) {
+		// Codex's own sandbox confines it instead; its writable_roots were
+		// narrowed around these paths when the boot dir was planted.
+		protectedPaths = nil
+	}
+	var sandboxPolicy *sandbox.ResolvedAccessPolicy
+	if isACP && len(protectedPaths) > 0 {
+		policy, policyErr := acpControlPlanePolicy(spawnWorkdir)
+		if policyErr != nil {
+			_ = deps.Store.MarkRuntimeFailed(sessID, policyErr.Error())
+			return cleanup(fmt.Errorf("agent.Boot: ACP control-plane sandbox policy: %w", policyErr))
+		}
+		sandboxPolicy = policy
+	}
 
 	onSessionID := func(id string) {
 		_ = deps.Store.SetProviderSessionID(sessID, id)
@@ -555,6 +571,8 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		WorkspaceDir:    ws.Root,
 		LogPath:         ws.LogPath,
 		SandboxProfile:  sandboxProfile,
+		SandboxPolicy:   sandboxPolicy,
+		ProtectedPaths:  protectedPaths,
 		SessionIDPreset: sessionIDPreset,
 		SystemPrompt:    ResolveSystemPrompt(opts.Role, profile, opts.Mode, opts.BootPromptOverride, opts.DynamicContext, opts.Workdir),
 		ACPManager:      deps.Manager.ACPManager(),

@@ -64,6 +64,9 @@ type Server struct {
 	pluginHost *naniteplugin.Host
 	pluginsDir string
 	httpCfg    config.HTTPConfig
+	// healthWarnings are reported by /api/health, such as agent sandbox
+	// protection being turned off (CW-20261001-0143).
+	healthWarnings []string
 }
 
 // New creates a new Server wired to the given store and API.
@@ -136,6 +139,12 @@ func resolveHTTPConfig(cfg config.HTTPConfig) (config.HTTPConfig, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// SetHealthWarnings sets the warnings /api/health reports. Must be called
+// before ListenAndServe.
+func (s *Server) SetHealthWarnings(warnings []string) {
+	s.healthWarnings = warnings
 }
 
 // SetPluginsDir sets the plugins directory path for the management API routes.
@@ -264,10 +273,14 @@ func (s *Server) routes() {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{
+	body := map[string]any{
 		"status":  "ok",
 		"version": version.Version,
-	}); err != nil {
+	}
+	if len(s.healthWarnings) > 0 {
+		body["warnings"] = s.healthWarnings
+	}
+	if err := json.NewEncoder(w).Encode(body); err != nil {
 		slog.Debug("server: write health response failed", "err", err)
 	}
 }

@@ -122,7 +122,11 @@ func launchSupported(sel RuntimeSelection) bool {
 // when deps.DeveloperMode is set, with workRootArgs at the convention's extra
 // slot. ACP: the shipped protocol adapter for the mode. deps.NativeCLIAdapter
 // and deps.ACPAdapterFactory are test seams; production leaves both nil.
-func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot string) (adapters.Adapter, error) {
+//
+// bootDir is the planted boot dir of a native launch, "" for ACP. A native
+// Claude launch gets the strict-MCP flags for its .mcp.json (strictMCPArgs)
+// ahead of workRootArgs, so the variadic --add-dir stays last.
+func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir string) (adapters.Adapter, error) {
 	if sel.ACP() {
 		if deps.ACPAdapterFactory != nil {
 			transport := adapters.TransportStdio
@@ -136,7 +140,7 @@ func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot string) (a
 	selection := launch.Selection{
 		Runtime:   string(sel.Runtime),
 		Mode:      sel.Mode,
-		ExtraArgs: workRootArgs(string(sel.Runtime), workRoot),
+		ExtraArgs: append(strictMCPArgs(sel.Runtime, bootDir), workRootArgs(string(sel.Runtime), workRoot)...),
 	}
 	if deps.NativeCLIAdapter != nil {
 		if cli := deps.NativeCLIAdapter(sel.Runtime); cli != nil {

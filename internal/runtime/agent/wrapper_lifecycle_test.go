@@ -20,11 +20,15 @@ import (
 // claude binary in -p --input-format stream-json --output-format
 // stream-json --verbose mode. It ignores argv, reads and discards the one
 // stdin line AutoFireFirstTurn writes (the NDJSON-framed kickoff), and
-// prints exactly one turn's worth of real Claude stream-json output, then
-// exits. Reading the kickoff first matters: a fake that exits without
+// prints exactly one turn's worth of real Claude stream-json output. It then
+// waits for one more stdin line before exiting, so the test decides when the
+// process ends. Reading the kickoff first matters: a fake that exits without
 // reading lets Boot's kickoff write race the exit, and under load (-race,
 // the whole package, CW-20260930-0113) Boot failed with "auto-fire first
-// turn: write |1: broken pipe". It drives parseClaudeStreamLine's real production
+// turn: write |1: broken pipe". Waiting for the release matters too: a fake
+// that exits as soon as it has printed can be gone before the test checks
+// Manager.IsLive right after Boot returns (CW-20261001-0118). It drives
+// parseClaudeStreamLine's real production
 // parser (not a mock) so the events this test asserts on are exactly what
 // wrapper.Wrapper.Run's translateStreamEvent/translateProviderEvent would
 // see from a genuine claude process.
@@ -35,6 +39,7 @@ cat <<'EOF'
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello "},{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"/tmp/x"}}]}}
 {"type":"result","subtype":"success","is_error":false,"result":"hello world","usage":{"input_tokens":10,"output_tokens":5}}
 EOF
+IFS= read -r _release || true
 `
 
 // TestBoot_WrapperLifecycle_Claude drives one full session lifecycle
@@ -119,6 +124,10 @@ func TestBoot_WrapperLifecycle_Claude(t *testing.T) {
 	// expose that wrapper handle before Boot returns.
 	if !deps.Manager.IsLive(sess.ID) {
 		t.Errorf("deps.Manager.IsLive(%q) = false immediately after Boot, want true", sess.ID)
+	}
+	// Release the fake so it exits.
+	if err := sess.SendInput([]byte("release")); err != nil {
+		t.Fatalf("SendInput(release): %v", err)
 	}
 
 	waitCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -279,6 +288,10 @@ func TestBoot_WrapperLifecycle_Stop(t *testing.T) {
 
 	if !deps.Manager.IsLive(sess.ID) {
 		t.Errorf("deps.Manager.IsLive(%q) = false immediately after Boot, want true", sess.ID)
+	}
+	// Release the fake so it exits.
+	if err := sess.SendInput([]byte("release")); err != nil {
+		t.Fatalf("SendInput(release): %v", err)
 	}
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)

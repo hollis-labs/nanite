@@ -105,12 +105,13 @@ require (
 	github.com/hollis-labs/agent-contracts-leaf v0.3.0
 	github.com/hollis-labs/go-agent-wrapper v0.17.1
 	github.com/hollis-labs/go-apppaths v0.1.0
+	github.com/hollis-labs/go-egress-proxy v0.2.3
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-hooks v0.1.0
 	github.com/hollis-labs/go-llm-contracts v0.4.0
 	github.com/hollis-labs/go-llm-types v0.5.1
 	github.com/hollis-labs/go-materialize v0.1.0
-	github.com/hollis-labs/go-mcp v0.7.1
+	github.com/hollis-labs/go-mcp v0.14.1
 	github.com/hollis-labs/go-messaging v0.7.0
 	github.com/hollis-labs/go-runtime-events v0.2.1
 	github.com/hollis-labs/go-safefs v0.1.0

@@ -61,6 +61,8 @@ github.com/hollis-labs/go-agent-wrapper v0.17.1 h1:E3oukdZKyP/fSHIK6Z8WT322/bQjj
 github.com/hollis-labs/go-agent-wrapper v0.17.1/go.mod h1:sUUc+Qx2H5YtyuPA3eoRCWefN1W69V52JdsYGIX7Tno=
 github.com/hollis-labs/go-apppaths v0.1.0 h1:LJQv483BhOoizLL4qKwsLcCbM0lQoVrNvksJ1thycd4=
 github.com/hollis-labs/go-apppaths v0.1.0/go.mod h1:b3gOdAFgSYY9ZT7VUooAczFdb6o0C2xSGQa7ktcyw30=
+github.com/hollis-labs/go-egress-proxy v0.2.3 h1:4T3Wv4W4Ek8xXKXg/J6rsLLcEgjpg3nBsiba+qTKOOE=
+github.com/hollis-labs/go-egress-proxy v0.2.3/go.mod h1:awKn1o5SIRU36m8CwVE4QIl7d59qaMziXXK9QUwudLg=
 github.com/hollis-labs/go-embed-contracts v0.1.1 h1:PGpgBvFpNwz7dHLRWJ3ewlbOLzsg8rauEpfpcwh3+Lw=
 github.com/hollis-labs/go-embed-contracts v0.1.1/go.mod h1:3sLCY4JVhL1oFwqjCBOuC4J5xnJCvpUrlkHvMDRWndo=
 github.com/hollis-labs/go-envelopes v0.4.0 h1:kmMZLWQrz4lYvKtYAaRiU85cNK2f84MXpbcb+QefAeI=
@@ -75,8 +77,8 @@ github.com/hollis-labs/go-llm-types v0.5.1 h1:4h473ppF+N+DxPJ9V+/Dt/kc3bkWcOaJOp
 github.com/hollis-labs/go-llm-types v0.5.1/go.mod h1:n4XoMPvSTR7Dfjxj/D37cL8nQPKmtci2EzZQFjAvSr8=
 github.com/hollis-labs/go-materialize v0.1.0 h1:JQ7nKIlKIaWvuiN1yPpad0dQaJTLocuQQdfynY9n9nY=
 github.com/hollis-labs/go-materialize v0.1.0/go.mod h1:ubDxYOfG+hCX0PXQaVm8ssmJoc6ZCDh8iSO46pj0PK0=
-github.com/hollis-labs/go-mcp v0.7.1 h1:ysi27GKTgl1CDoCWAGnz4cuVHnBhoBRAKuGTyjsNXk4=
-github.com/hollis-labs/go-mcp v0.7.1/go.mod h1:sy+7ptjvPxcwu3XDL5EGC6OUlze0iy/hHddLh5T4MZQ=
+github.com/hollis-labs/go-mcp v0.14.1 h1:u4RdvFt8tCBiGF9LoygQCqP/TMFfXE6Ovo+zD6J6/6s=
+github.com/hollis-labs/go-mcp v0.14.1/go.mod h1:Ff+towTWDfy6lheDalxfzZh15RwWiKM4yQKW91Pr+eM=
 github.com/hollis-labs/go-messaging v0.7.0 h1:VDvodrSgeYbH3ElwoTXWU7VjsPjUeHgXke4ADKLbzZI=
 github.com/hollis-labs/go-messaging v0.7.0/go.mod h1:KLv+81DP4Zktb4/ZnCg5dlzxjaI3u9jAm/tWOZxqHq0=
 github.com/hollis-labs/go-modelsdev v0.3.0 h1:nGsGPpr6/Op37F0BrcHRgOVn0YEpFlcA94nZO1dPtb8=

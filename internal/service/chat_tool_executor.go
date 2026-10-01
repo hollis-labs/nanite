@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/go-loopdetect"
+	toolresult "github.com/hollis-labs/go-toolresult"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
@@ -23,7 +24,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/safego"
-	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/truncate"
 )
 
@@ -537,7 +537,7 @@ func (s *chatServiceImpl) executeSingleTool(
 		if ls != nil && ls.resultBudget > 0 {
 			budget = ls.resultBudget
 		}
-		return s.handleResultCacheMetaTool(tu, sessionID, ch, mu, start, budget)
+		return s.handleResultCacheMetaTool(ctx, tu, sessionID, ch, mu, start, budget)
 	}
 
 	// Handle P4 scratchpad tools locally (pure loopState access — no MCP routing).
@@ -806,11 +806,11 @@ func (s *chatServiceImpl) postProcessToolResults(
 				"compact_budget", CompactPreviewBudgetBytes,
 			)
 		}
-		view := tool.ResultView{BudgetBytes: budget, Format: "complete"}
+		view := toolresult.View{BudgetBytes: budget, Format: "complete"}
 		wasCached := false
 		wasPresented := false
 		if s.resultCache != nil && !r.isError && !isScratchpadTool(tu.Name) && !isCacheExemptTool(tu.Name) {
-			presented, err := s.resultCache.PresentResult(sessionID, tu.ID, tu.Name, resultText, view.BudgetBytes)
+			presented, err := s.resultCache.Results.Present(ctx, sessionID, toolresult.Meta{CallID: tu.ID, Tool: tu.Name}, resultText, view.BudgetBytes)
 			if err != nil {
 				slog.Warn("chat-service: result cache store error", "tool", tu.Name, "err", err)
 			} else {
@@ -1015,6 +1015,7 @@ func toolCallDetail(toolName string, input map[string]any) string {
 // handleResultCacheMetaTool handles fetch_tool_result and search_tool_result
 // meta-tool calls locally without MCP routing.
 func (s *chatServiceImpl) handleResultCacheMetaTool(
+	ctx context.Context,
 	tu llmtypes.ToolUseBlock,
 	sessionID string,
 	ch chan chat.StreamEvent,
@@ -1038,9 +1039,9 @@ func (s *chatServiceImpl) handleResultCacheMetaTool(
 		resultText = "Error: result cache not available"
 		isError = true
 	} else if tu.Name == "fetch_tool_result" {
-		resultText, isError = s.handleFetchToolResult(sessionID, tu.Input, budget)
+		resultText, isError = s.resultCache.Results.HandleFetch(ctx, sessionID, tu.Input, budget)
 	} else {
-		resultText, isError = s.handleSearchToolResult(sessionID, tu.Input, budget)
+		resultText, isError = s.resultCache.Results.HandleSearch(ctx, sessionID, tu.Input, budget)
 	}
 
 	duration := time.Since(start)
@@ -1054,12 +1055,4 @@ func (s *chatServiceImpl) handleResultCacheMetaTool(
 		rawOutput: resultText,
 		duration:  duration,
 	}
-}
-
-func (s *chatServiceImpl) handleFetchToolResult(sessionID string, input map[string]any, budget int) (string, bool) {
-	return s.resultCache.FetchToolResult(sessionID, input, budget)
-}
-
-func (s *chatServiceImpl) handleSearchToolResult(sessionID string, input map[string]any, budget int) (string, bool) {
-	return s.resultCache.SearchToolResult(sessionID, input, budget)
 }

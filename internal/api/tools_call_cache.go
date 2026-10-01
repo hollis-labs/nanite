@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	toolresult "github.com/hollis-labs/go-toolresult"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/tool"
@@ -151,7 +152,7 @@ func (a *API) presentSelfToolResult(ctx context.Context, req selfToolCallRequest
 	if len(body) <= budget {
 		return result
 	}
-	view, err := a.Services.ResultCache.PresentResult(req.SessionID, req.toolCallID(), req.Name, body, budget)
+	view, err := a.Services.ResultCache.Results.Present(ctx, req.SessionID, toolresult.Meta{CallID: req.toolCallID(), Tool: req.Name}, body, budget)
 	if err != nil {
 		slog.Warn("tools/call: result cache store error", "tool", req.Name, "err", err)
 		return result
@@ -181,9 +182,9 @@ func (a *API) serveCacheNavigation(ctx context.Context, req selfToolCallRequest)
 	var text string
 	var isErr bool
 	if req.Name == "fetch_tool_result" {
-		text, isErr = a.Services.ResultCache.FetchToolResult(req.SessionID, req.Args, budget)
+		text, isErr = a.Services.ResultCache.Results.HandleFetch(ctx, req.SessionID, req.Args, budget)
 	} else {
-		text, isErr = a.Services.ResultCache.SearchToolResult(req.SessionID, req.Args, budget)
+		text, isErr = a.Services.ResultCache.Results.HandleSearch(ctx, req.SessionID, req.Args, budget)
 	}
 	return &mcp.ToolResult{IsError: isErr, Content: []mcp.ToolContent{{Type: "text", Text: text}}}, true
 }

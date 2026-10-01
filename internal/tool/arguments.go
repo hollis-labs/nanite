@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	toolresult "github.com/hollis-labs/go-toolresult"
 )
 
 // DefaultArgumentBudgetBytes bounds the body persisted per tool call. It is
-// the same preview budget idiom results use (previewResult), sized for audit:
+// the same preview budget idiom results use (toolresult.Preview), sized for audit:
 // enough to see which file or query a call named, not to archive file contents.
 const DefaultArgumentBudgetBytes = 4 * 1024
 
@@ -57,7 +59,7 @@ func (c *ResultCache) PersistArguments(sessionID, toolCallID, toolName string, a
 	budget := c.argBudgetBytes
 	rec.ByteSize, rec.SHA256, rec.RedactedCount = len(doc), hex.EncodeToString(sum[:]), count
 	if len(doc) > budget {
-		body, _ = previewResult(body, budget)
+		body, _ = toolresult.Preview(body, budget)
 		rec.WasTruncated = true
 	}
 	rec.Body = body

@@ -460,10 +460,15 @@ func projectHostRuntimePayload(kind runtimeevents.EventKind, isACP bool, raw jso
 		if len(usage) > 0 {
 			projected["usage"] = usage
 		}
-		// Native emits usage as one completion-shaped event and then emits
-		// the actual empty terminal. ACP carries both in one event.
-		projected["terminal"] = isACP || len(usage) == 0
+		// A turn's one terminal event. ACP always reported usage and
+		// completion together; go-agent-wrapper v0.13.1 does the same for
+		// native runtimes (CW-20261001-0019).
+		projected["terminal"] = true
 	case runtimeevents.KindTurnFailed:
+		// A failed turn's usage rides on its turn.failed.
+		if usage := publicUsage(source["usage"]); len(usage) > 0 {
+			projected["usage"] = usage
+		}
 		projected["terminal"] = true
 		projected["failed"] = true
 	case runtimeevents.KindStdinWrite, runtimeevents.KindStdoutRaw, runtimeevents.KindStderrRaw,

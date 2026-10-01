@@ -80,7 +80,7 @@ The v0.1.2 vocabulary is handled as follows:
 
 | Source kinds | Public treatment |
 | --- | --- |
-| `process.*`, `session.*`, `turn.*` | Lifecycle state; process exit/outcome; numeric usage. A native usage-bearing `turn.completed` is marked nonterminal because native emits a later terminal completion. |
+| `process.*`, `session.*`, `turn.*` | Lifecycle state; process exit/outcome; numeric usage. Every `turn.completed` and `turn.failed` is terminal: since go-agent-wrapper v0.13.1 a native turn ends in one terminal event carrying the turn's usage, as an ACP turn always did, so a `turn.failed` can carry usage too. |
 | `agent.tool_use`, `agent.tool_result` | One normalized tool ID/name/status/stage. Flat ACP results without status are updates; known nested native/Copilot results are terminal. Tool arguments, titles that can contain commands, and results are omitted. |
 | `interrupt.*` | Requested/acknowledged state, correlated by the preserved parent ID. |
 | `agent.permission_*` | Requested/resolved state only; no tool call, options, or input. |

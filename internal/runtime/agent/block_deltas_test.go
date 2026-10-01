@@ -226,3 +226,56 @@ func TestRuntimeEventSink_ACPStopReasonReachesFanout(t *testing.T) {
 		t.Fatalf("second fanout event = %+v, want done", second)
 	}
 }
+
+// Since go-agent-wrapper v0.13.1 every turn ends in one terminal event that
+// carries the turn's usage. The legacy fanout projection delivers that usage
+// first, then the terminal, for native and ACP alike (CW-20261001-0019).
+func TestRuntimeEventSink_TerminalEventCarriesUsage(t *testing.T) {
+	const usage = `"usage":{"InputTokens":10,"OutputTokens":5,"StopReason":"end_turn"}`
+	for _, tc := range []struct {
+		name      string
+		acp       bool
+		kind      runtimeevents.EventKind
+		payload   string
+		want      []llmtypes.EventType
+		wantError string
+	}{
+		{"native completion with usage", false, runtimeevents.KindTurnCompleted, `{` + usage + `}`,
+			[]llmtypes.EventType{llmtypes.EventUsage, llmtypes.EventDone}, ""},
+		{"native completion without usage", false, runtimeevents.KindTurnCompleted, ``,
+			[]llmtypes.EventType{llmtypes.EventDone}, ""},
+		{"ACP completion with usage", true, runtimeevents.KindTurnCompleted, `{"stop_reason":"end_turn",` + usage + `}`,
+			[]llmtypes.EventType{llmtypes.EventUsage, llmtypes.EventDone}, ""},
+		{"native failure with usage", false, runtimeevents.KindTurnFailed, `{"error":"boom",` + usage + `}`,
+			[]llmtypes.EventType{llmtypes.EventUsage, llmtypes.EventError}, "boom"},
+		{"native process exited mid-turn", false, runtimeevents.KindTurnFailed,
+			`{"error":"wrapper: process exited before the turn completed","reason":"process_exited","exit_code":1,` + usage + `}`,
+			[]llmtypes.EventType{llmtypes.EventUsage, llmtypes.EventError}, "wrapper: process exited before the turn completed"},
+		{"native failure without usage", false, runtimeevents.KindTurnFailed, `{"error":"boom"}`,
+			[]llmtypes.EventType{llmtypes.EventError}, "boom"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newBlockSinkHarness(t, "claude", tc.acp)
+			h.write(t, tc.kind, tc.payload)
+			var got []llmtypes.EventType
+			for len(h.fanout) > 0 {
+				ev := <-h.fanout
+				got = append(got, ev.Type)
+				if ev.Type == llmtypes.EventUsage && (ev.Usage == nil || ev.Usage.InputTokens != 10 || ev.Usage.OutputTokens != 5) {
+					t.Fatalf("usage = %+v, want input 10 / output 5", ev.Usage)
+				}
+				if ev.Type == llmtypes.EventError && ev.Error != tc.wantError {
+					t.Fatalf("error = %q, want %q", ev.Error, tc.wantError)
+				}
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("fanout = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("fanout = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}

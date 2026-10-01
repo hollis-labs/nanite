@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/testhome"
 )
 
 // TestMain points CODEX_HOME at an empty temp dir for the whole package.
@@ -24,7 +26,8 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	code := m.Run()
+	// CW-20260930-0208: keep the tests out of the real home and XDG dirs.
+	code := testhome.Run(m)
 	_ = os.RemoveAll(codexHome)
 	os.Exit(code)
 }

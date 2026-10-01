@@ -354,7 +354,7 @@ func cmdServeWithInitializers(
 	plugin.SetEnvelopeValidatorDevModeFunc(func() bool { return envelopeValidatorDevMode })
 
 	// Set up provider registry (API keys, CLI adapters).
-	registry, cliAdapters, providerCatalog := initProviders(envelopeValidatorDevMode)
+	registry, providerCatalog := initProviders()
 
 	slog.Info("app config loaded",
 		"cli_active_throttle_seconds", appCfg.Presence.CLIActiveThrottleSeconds,
@@ -500,7 +500,7 @@ func cmdServeWithInitializers(
 		MaxCLIProcesses:          maxCLIProcs,
 		CoordStore:               coord,
 		Worktrees:                wtMgr,
-		CLIAdapters:              cliAdapters,
+		CLIDeveloperMode:         envelopeValidatorDevMode,
 		ProviderCatalog:          providerCatalog,
 		DisableEmbeddedTesseract: externalTesseract,
 		TesseractServerName:      tesseractServerName,
@@ -1040,7 +1040,7 @@ func cmdServeWithInitializers(
 // DevPTY constructor which sets SkipPermissions=true in the adapter itself —
 // CW-20260515-0003 dropped the legacy skipPermsAdapter wrapper that used to
 // append --dangerously-skip-permissions externally.
-func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *providercatalog.Catalog) {
+func initProviders() (*provider.Registry, *providercatalog.Catalog) {
 	registry := provider.NewRegistry()
 	catalog := providercatalog.New()
 
@@ -1068,47 +1068,12 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 		slog.Warn("no API providers configured — chat will not work")
 	}
 
-	// Phase 4c.6 (CW-20260508-0002): provider.PTYBridge / SubprocessBridge
-	// registry registrations deleted. CLI agents (claude / codex / opencode)
-	// now spawn through internal/runtime/agent.Boot; the CLIAdapter slice
-	// still feeds the agent runtime composition root via
-	// ContainerConfig.CLIAdapters so the per-provider bootdir layouts can
-	// resolve their adapter binaries.
-	//
-	// CW-20260508-0010: pruned gemini/copilot/aider/junie/kiro/qwen
-	// registrations — they were never reached by any production code path
-	// (factory.shouldUsePTY only matches claude/codex/opencode shapes).
-	// Adapters remain in go-providers for other portfolio consumers
-	// (agent-mux, clockwork-manifold).
-	//
-	// CW-20260515-0004: use the StreamingStdio constructor so claude
-	// launches as a long-lived `-p --input-format stream-json
-	// --output-format stream-json --verbose` process that reads NDJSON
-	// `{"type":"user",...}` per-turn payloads from stdin and emits
-	// stream-json events on stdout. ParseLineEvents in go-providers
-	// (pty_claude_events.go) is built for exactly this NDJSON shape.
-	//
-	// History: CW-20260515-0003 swapped to NewClaudeAdapterPTY which
-	// emitted bare-claude (TUI) argv. That fixed the c200 print-mode
-	// crash but produced c202's silent hang — claude TUI ran fine in
-	// the allocated PTY but its output is ANSI/screen redraws which
-	// ParseLineEvents cannot decode. Sessions stayed state=running
-	// forever with zero assistant deltas. StreamingStdio is the
-	// "long-lived claude that the framework can talk to programmatically"
-	// shape go-providers was designed for. Dev mode uses the matching
-	// DevStreamingStdio constructor (sets SkipPermissions=true in the
-	// adapter itself).
-	var claudeAdapter provider.CLIAdapter = provider.NewClaudeAdapterStreamingStdio()
-	if devMode {
-		claudeAdapter = provider.NewClaudeAdapterDevStreamingStdio()
-	}
-	cliAdapters := []provider.CLIAdapter{
-		claudeAdapter,
-		provider.NewCodexAdapter(),
-		provider.NewOpencodeAdapter(),
-	}
-
-	return registry, cliAdapters, catalog
+	// CLI agents (claude / codex / opencode, and copilot / pi over ACP)
+	// spawn through internal/runtime/agent.Boot, which takes each runtime's
+	// adapter from the go-providers registry through go-agent-wrapper's
+	// launch.Select (CW-20260930-0113). There is no adapter list to build
+	// here; dev mode reaches Claude as ContainerConfig.CLIDeveloperMode.
+	return registry, catalog
 }
 
 // resolveDevToolsAllowedPaths returns the effective directory allow-list.

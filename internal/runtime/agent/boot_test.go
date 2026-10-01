@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"os"
 	"strings"
 	"testing"
@@ -30,8 +31,8 @@ func makeBootDeps(t *testing.T, profileProvider string) (*Dependencies, *fakeRun
 		Manager:    NewSessionManager(),
 		Store:      store,
 		PathGrants: pg,
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			return &fakeAdapter{name: name}
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter {
+			return &fakeAdapter{name: string(id)}
 		},
 		MCPConfig:      MCPConfig{}, // empty disables .mcp.json planting
 		WorkspacesRoot: t.TempDir(),
@@ -208,17 +209,19 @@ func TestBoot_MarksRuntimeFailed_OnCheckpointError(t *testing.T) {
 	}
 }
 
-// TestBoot_MissingProviderAdapter returns a clear error.
-func TestBoot_MissingProviderAdapter(t *testing.T) {
+// TestBoot_UnknownRuntime returns a clear error: a provider the
+// go-providers registry does not carry cannot be launched
+// (CW-20260930-0113; there is no adapter index to be missing from).
+func TestBoot_UnknownRuntime(t *testing.T) {
 	deps, _ := makeBootDeps(t, "codex")
-	deps.ProviderAdapter = func(string) provider.CLIAdapter { return nil }
 
 	_, err := Boot(context.Background(), deps, Options{
-		Mode:    ModeLongLived,
-		Workdir: t.TempDir(),
+		Mode:     ModeLongLived,
+		Provider: "nonsense-provider",
+		Workdir:  t.TempDir(),
 	})
-	if err == nil || !strings.Contains(err.Error(), "no adapter") {
-		t.Fatalf("expected no-adapter error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "no such runtime") {
+		t.Fatalf("expected an unknown-runtime error, got %v", err)
 	}
 }
 

@@ -7,7 +7,9 @@ package agent
 import (
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
+	"github.com/hollis-labs/go-agent-wrapper/launch"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -114,24 +116,27 @@ func TestNewACPAdapter(t *testing.T) {
 	}
 }
 
-// TestAcpSupportedProvidersTable pins the exact provider set newACPAdapter
-// dispatches for -- the two native ACP adapters (task 09 OpenCode, task 10
-// Copilot CLI) plus the three Phase 4 bridge-mediated adapters
-// (TASKS/agent-host-acp/23: Claude, Codex, Pi).
-func TestAcpSupportedProvidersTable(t *testing.T) {
-	want := map[string]bool{
-		"opencode": true,
-		"copilot":  true,
-		"claude":   true,
-		"codex":    true,
-		"pi":       true,
+// TestNewACPAdapter_EveryRegistryACPRuntime: with the provider table gone,
+// newACPAdapter accepts exactly the registry runtimes go-agent-wrapper has an
+// acp-stdio launch factory for (CW-20260930-0113).
+func TestNewACPAdapter_EveryRegistryACPRuntime(t *testing.T) {
+	var got []string
+	for _, k := range launch.Supported() {
+		if k.Mode != runtimes.ModeACPStdio {
+			continue
+		}
+		got = append(got, string(k.Runtime))
+		if _, err := newACPAdapter(string(k.Runtime), adapters.TransportStdio); err != nil {
+			t.Errorf("newACPAdapter(%s): %v", k.Runtime, err)
+		}
 	}
-	if len(acpSupportedProviders) != len(want) {
-		t.Fatalf("acpSupportedProviders has %d entries, want %d: %v", len(acpSupportedProviders), len(want), acpSupportedProviders)
-	}
-	for name, wantOK := range want {
-		if got := acpSupportedProviders[name]; got != wantOK {
-			t.Errorf("acpSupportedProviders[%q] = %v, want %v", name, got, wantOK)
+	for _, want := range []string{"claude", "codex", "opencode", "copilot", "pi"} {
+		found := false
+		for _, g := range got {
+			found = found || g == want
+		}
+		if !found {
+			t.Errorf("registry has no acp-stdio launch for %s (got %v)", want, got)
 		}
 	}
 }

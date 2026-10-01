@@ -449,5 +449,5 @@ func (s *runtimeEventSink) handleTurnFailed(ctx context.Context, raw json.RawMes
 	if usage := TurnCompletedUsage(raw, s.acp); usage != nil {
 		s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: usage})
 	}
-	s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: p.Error})
+	s.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: UserFacingTurnError(p.Error)})
 }

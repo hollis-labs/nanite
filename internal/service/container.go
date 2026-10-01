@@ -429,13 +429,11 @@ type ContainerConfig struct {
 	// CLI process concurrency limit (0 = unlimited).
 	MaxCLIProcesses int
 
-	// CLIAdapters is the slice of go-providers CLI adapters the agent-runtime
-	// composition root resolves by Name(). Threaded from main.go so the
-	// dev-mode `--dangerously-skip-permissions` wrapping (and other
-	// per-process customizations) is preserved. nil = the runtime has no
-	// adapters and Boot fails for any provider; callers should populate
-	// at least claude/codex/opencode.
-	CLIAdapters []provider.CLIAdapter
+	// CLIDeveloperMode runs native Claude agents in Claude's developer
+	// variant (--dangerously-skip-permissions). Adapters themselves come
+	// from the go-providers registry through launch.Select
+	// (CW-20260930-0113); there is no adapter slice to thread.
+	CLIDeveloperMode bool
 
 	// ProviderCatalog is the registry-backed dropdown catalog
 	// (CW-20260526-0001). nil-safe — when nil, handleListProviders falls
@@ -1132,16 +1130,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// agentsessions.Manager once, after the core deps (store, pathGrants,
 	// streams) exist. Threaded through ChatServiceConfig so HandleMessage
 	// + subagent runner + future background dispatcher reuse the singleton.
-	// CLIAdapters fallback covers older main.go versions until the slice is
-	// populated; agent.Boot fails clean when no adapter matches.
-	cliAdapters := cfg.CLIAdapters
-	if len(cliAdapters) == 0 {
-		cliAdapters = []provider.CLIAdapter{
-			provider.NewClaudeAdapter(),
-			provider.NewCodexAdapter(),
-			provider.NewOpencodeAdapter(),
-		}
-	}
 	runtimeFeed := NewHostRuntimeFeed(cfg.Store)
 	runtimeFeedCommitted := false
 	defer func() {
@@ -1155,7 +1143,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Store:            cfg.Store,
 		PathGrants:       pathGrants,
 		Streams:          streams,
-		CLIAdapters:      cliAdapters,
+		CLIDeveloperMode: cfg.CLIDeveloperMode,
 		DBPath:           cfg.Store.DBPath(catalogCtx),
 		MCP:              cfg.MCP,
 		Providers:        cfg.Providers,
@@ -1177,7 +1165,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	agentBridge := agentDepsBundle.Bridge
 	agentBootDir := agentDepsBundle.BootDirAdapter
 	slog.Info("service container: agent runtime dependencies built",
-		"adapters", len(cliAdapters),
+		"cli_developer_mode", cfg.CLIDeveloperMode,
 		"workspaces_root", agentDeps.WorkspacesRoot)
 
 	resultCache := buildResultCache(cfg.Store)

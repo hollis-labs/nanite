@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-agent-wrapper/activity"
-	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	"github.com/hollis-labs/go-agent-wrapper/wrapper"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -401,7 +400,14 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	}
 
 	providerName := effectiveProvider(opts, profile)
-	isACP := useACPProtocol(profile)
+	selection, err := selectRuntime(providerName, profile)
+	if err != nil {
+		if hadLineage && deps.PathGrants != nil {
+			deps.PathGrants.ClearLineage(sessID)
+		}
+		return nil, fmt.Errorf("agent.Boot: %w", err)
+	}
+	isACP := selection.ACP()
 	bootDir := ""
 	spawnWorkdir := opts.Workdir
 	if spawnWorkdir == "" {
@@ -435,23 +441,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		return nil, failure
 	}
 
-	var selectedAdapter adapters.Adapter
-	if isACP {
-		factory := deps.ACPAdapterFactory
-		if factory == nil {
-			factory = newACPAdapter
-		}
-		selectedAdapter, err = factory(providerName, effectiveACPTransport(profile))
-	} else {
-		if deps.ProviderAdapter == nil {
-			return cleanup(errors.New("agent.Boot: Dependencies.ProviderAdapter is required for native protocol"))
-		}
-		cli := deps.ProviderAdapter(providerName)
-		if cli == nil {
-			return cleanup(fmt.Errorf("agent.Boot: no adapter registered for provider %q", providerName))
-		}
-		selectedAdapter, err = selectNativeAdapter(providerName, opts.Mode, cli, opts.Workdir)
-	}
+	selectedAdapter, err := selectAdapter(deps, selection, opts.Workdir)
 	if err != nil {
 		return cleanup(fmt.Errorf("agent.Boot: select wrapper adapter: %w", err))
 	}

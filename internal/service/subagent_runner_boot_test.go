@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"strings"
 	"sync"
 	"testing"
@@ -212,9 +213,7 @@ func TestBootRunner_HTTPProvider_DelegatesToLegacy(t *testing.T) {
 	legacyResult := &subagent.Result{Summary: "from legacy", ResultJSON: `{"src":"legacy"}`}
 	legacy := &fakeLegacyRunner{result: legacyResult}
 
-	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(name string) provider.CLIAdapter { return nil }, // HTTP-only
-	}
+	deps := &runtimeagent.Dependencies{}
 	r := &BootRunner{
 		deps: deps,
 		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
@@ -244,9 +243,7 @@ func TestBootRunner_HTTPProvider_DelegatesToLegacy(t *testing.T) {
 // fallback is configured AND the provider has no CLI adapter, Run returns
 // a clear configuration error instead of attempting a Boot.
 func TestBootRunner_HTTPProvider_NoLegacyErrors(t *testing.T) {
-	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(name string) provider.CLIAdapter { return nil },
-	}
+	deps := &runtimeagent.Dependencies{}
 	r := &BootRunner{
 		deps: deps,
 		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
@@ -310,12 +307,7 @@ func TestBootRunner_CLIProvider_BootsAndDrains(t *testing.T) {
 	}
 
 	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			if name == "claude" {
-				return &fakeCLIAdapter{name: "claude"}
-			}
-			return nil
-		},
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter { return &fakeCLIAdapter{name: string(id)} },
 	}
 
 	r := &BootRunner{
@@ -384,7 +376,7 @@ func TestBootRunner_ModeSubagentAutoFireUsesPreparedRuntimeOwner(t *testing.T) {
 		Protocol: "acp", Transport: "stdio",
 	}
 	deps.Agents = &fakeAgentProfilesResolver{profile: profile}
-	deps.ProviderAdapter = func(string) provider.CLIAdapter { return &fakeCLIAdapter{name: "opencode"} }
+	deps.NativeCLIAdapter = func(id runtimes.ID) provider.CLIAdapter { return &fakeCLIAdapter{name: string(id)} }
 	deps.ACPAdapterFactory = func(string, adapters.Transport) (adapters.Adapter, error) {
 		return &cancelACPAdapter{client: client}, nil
 	}
@@ -445,16 +437,7 @@ func TestBootRunner_RunProviderOverride_ThreadsToBootOptions(t *testing.T) {
 	}
 
 	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			// Composition root would strip the "pty-" prefix; the test
-			// stub matches the bare adapter name directly. canBoot's
-			// effectiveProvider returns "claude" for this run, so this
-			// is what the lookup sees.
-			if name == "claude" {
-				return &fakeCLIAdapter{name: "claude"}
-			}
-			return nil
-		},
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter { return &fakeCLIAdapter{name: string(id)} },
 	}
 
 	r := &BootRunner{
@@ -515,12 +498,7 @@ func TestBootRunner_NoProviderOverride_LeavesOptionsProviderToProfileFallback(t 
 	}
 
 	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			if name == "claude" {
-				return &fakeCLIAdapter{name: "claude"}
-			}
-			return nil
-		},
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter { return &fakeCLIAdapter{name: string(id)} },
 	}
 
 	r := &BootRunner{
@@ -567,7 +545,7 @@ func TestBootRunner_BootError_UnbindsRouter(t *testing.T) {
 	}
 
 	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(name string) provider.CLIAdapter { return &fakeCLIAdapter{name: name} },
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter { return &fakeCLIAdapter{name: string(id)} },
 	}
 	r := &BootRunner{
 		deps:   deps,
@@ -614,7 +592,7 @@ func TestBootRunner_CLIProvider_EmptySummaryFallback(t *testing.T) {
 		return &runtimeagent.Session{ID: opts.SessionID}, nil
 	}
 	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(name string) provider.CLIAdapter { return &fakeCLIAdapter{name: name} },
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter { return &fakeCLIAdapter{name: string(id)} },
 	}
 	r := &BootRunner{
 		deps:   deps,
@@ -652,7 +630,7 @@ func TestBootRunner_PersistFailure_AbortsBeforeBoot(t *testing.T) {
 		return nil, nil
 	}
 	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(name string) provider.CLIAdapter { return &fakeCLIAdapter{name: name} },
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter { return &fakeCLIAdapter{name: string(id)} },
 	}
 	r := &BootRunner{
 		deps:   deps,
@@ -700,12 +678,7 @@ func TestBootRunner_ProviderOverride_RoutesToCLIPath(t *testing.T) {
 		return &runtimeagent.Session{ID: opts.SessionID}, nil
 	}
 	deps := &runtimeagent.Dependencies{
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			if name == "pty-claude" {
-				return &fakeCLIAdapter{name: name}
-			}
-			return nil
-		},
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter { return &fakeCLIAdapter{name: string(id)} },
 	}
 	legacy := &fakeLegacyRunner{}
 	r := &BootRunner{

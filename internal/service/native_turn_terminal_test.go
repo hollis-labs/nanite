@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"os"
 	"path/filepath"
 	"slices"
@@ -242,9 +243,8 @@ func runNativeCLITurn(t *testing.T, tc nativeCLICase) (*characterizationFixture,
 		Manager:    runtimeagent.NewSessionManager(),
 		Store:      &agentRuntimeStore{store: f.st},
 		PathGrants: permission.NewPathGrants(),
-		ProviderAdapter: func(name string) provider.CLIAdapter {
-			// Same prefix handling as BuildAgentDependencies' lookup.
-			if stripRegistryPrefix(name) != tc.adapter {
+		NativeCLIAdapter: func(id runtimes.ID) provider.CLIAdapter {
+			if string(id) != tc.adapter {
 				return nil
 			}
 			return tc.newAdapter()

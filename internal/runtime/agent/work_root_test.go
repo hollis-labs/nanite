@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -269,13 +268,13 @@ func TestSelectNativeAdapter_PromptAfterEndOfOptions(t *testing.T) {
 // The wrapper appends Selection.ExtraArgs after the adapter's whole argv, so
 // on a per-turn launch they would follow `-- <prompt>`. Refused.
 func TestCheckExtraArgsPlacement(t *testing.T) {
-	if err := checkExtraArgsPlacement(adapters.LaunchStreamingStdio, []string{"--add-dir", "/r"}); err != nil {
+	if err := checkExtraArgsPlacement(true, []string{"--add-dir", "/r"}); err != nil {
 		t.Fatalf("streaming stdio: %v", err)
 	}
-	if err := checkExtraArgsPlacement(adapters.LaunchSubprocessPerTurn, nil); err != nil {
+	if err := checkExtraArgsPlacement(false, nil); err != nil {
 		t.Fatalf("per-turn, no additions: %v", err)
 	}
-	if err := checkExtraArgsPlacement(adapters.LaunchSubprocessPerTurn, []string{"--add-dir", "/r"}); err == nil {
+	if err := checkExtraArgsPlacement(false, []string{"--add-dir", "/r"}); err == nil {
 		t.Fatal("per-turn additions accepted; the wrapper would append them after `-- <prompt>`")
 	}
 }

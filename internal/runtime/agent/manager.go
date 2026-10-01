@@ -162,8 +162,11 @@ func (s *Session) Checkpoint(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-// CancelTurn requests turn-scoped cancellation through Wrapper. ACP adapters
-// support it; native adapters return wrapper.ErrTurnCancelUnsupported.
+// CancelTurn requests turn-scoped cancellation through Wrapper. ACP sends
+// session/cancel. Native streaming-stdio Claude sends Claude's stream-json
+// interrupt (go-agent-wrapper v0.22.0+): the turn ends turn.failed with reason
+// "interrupted" and the process stays up for the next SendInput. Other native
+// adapters return wrapper.ErrTurnCancelUnsupported.
 func (s *Session) CancelTurn(ctx context.Context) error {
 	if s == nil || s.wr == nil {
 		return errors.New("agent.Session.CancelTurn: session not initialized")
@@ -171,8 +174,11 @@ func (s *Session) CancelTurn(ctx context.Context) error {
 	return s.wr.CancelTurn(ctx)
 }
 
-// WaitTurnTerminal waits until an ACP turn is no longer processing. Native
-// wrappers cannot expose that boundary today and return
+// WaitTurnTerminal waits until an ACP turn is no longer processing. A native
+// session that can cancel a turn has no processing snapshot: its interrupted
+// turn ends with turn.failed, which crosses the caller's per-turn router,
+// and callers wait for that router's terminal drain. So it returns nil at
+// once for such a session. Any other native session returns
 // ErrTurnCancelUnsupported; callers that require takeover safety must stop
 // and cold-boot that exact native session instead.
 func (s *Session) WaitTurnTerminal(ctx context.Context) error {
@@ -180,6 +186,9 @@ func (s *Session) WaitTurnTerminal(ctx context.Context) error {
 		return errors.New("agent.Session.WaitTurnTerminal: session not initialized")
 	}
 	if !s.isACP {
+		if s.SupportsTurnCancellation() {
+			return nil
+		}
 		return ErrTurnCancelUnsupported
 	}
 	ticker := time.NewTicker(time.Millisecond)
@@ -198,9 +207,19 @@ func (s *Session) WaitTurnTerminal(ctx context.Context) error {
 }
 
 // SupportsTurnCancellation reports the wrapper's honest protocol boundary.
-// ACP exposes CancelTurn after SendInput acknowledges that Prompt was written;
-// native adapters require exact Stop+Wait takeover instead.
+// ACP exposes CancelTurn after SendInput acknowledges that Prompt was written.
+// Native streaming-stdio Claude exposes it through Claude's stream-json
+// interrupt (go-agent-wrapper v0.22.0+, CW-20261001-0168). Other native
+// adapters require exact Stop+Wait takeover instead, and so does a Claude
+// whose CancelTurn still reports unsupported: callers fall back to Stop when
+// CancelTurn fails.
 func (s *Session) SupportsTurnCancellation() bool {
+	return s != nil && (s.isACP || shouldUseStreamingStdio(s.Provider, s.Mode))
+}
+
+// IsACP reports whether the session runs over ACP rather than a native CLI
+// adapter.
+func (s *Session) IsACP() bool {
 	return s != nil && s.isACP
 }
 

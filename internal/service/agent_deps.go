@@ -1107,6 +1107,15 @@ func (s *runtimeEventBridgeSink) routeNormalizedEvent(ev runtimeevents.Event) {
 		s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventDone})
 		terminal = true
 	case runtimeevents.KindTurnFailed:
+		if runtimeagent.TurnFailedInterrupted(ev.Payload) {
+			// Ended by CancelTurn: an interrupt, not an error. Its usage carries
+			// the interrupted stop reason, so the turn is saved as interrupted
+			// (CW-20261001-0168).
+			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: runtimeagent.InterruptedTurnUsage(ev.Payload, s.acp)})
+			s.bridge.deliverRuntimeStream(s.sessionID, router, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+			terminal = true
+			break
+		}
 		var payload struct {
 			Error string `json:"error"`
 		}

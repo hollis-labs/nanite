@@ -558,8 +558,16 @@ export interface HarnessCapabilitiesResponse {
   supported_event_types: EnumOption[];
   session_create_fields: HarnessFieldSupport;
   turn_send_fields: HarnessFieldSupport;
+  turn_delivery: HarnessTurnDelivery;
   permission_requests: HarnessPermissionSupport;
   route_hints: HarnessRouteHints;
+}
+
+/** What a turn sent mid-run does; `mid_run` is "queue" (CW-20261001-0072). */
+export interface HarnessTurnDelivery {
+  mid_run: string;
+  interrupt: string;
+  notes?: string[];
 }
 
 export interface HarnessSessionRoutes {

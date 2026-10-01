@@ -312,6 +312,12 @@ func TestCancelActiveGeneration_ClaimsBeforeDeregisterCanDeleteSlot(t *testing.T
 	svc := &chatServiceImpl{activeGen: make(map[string]*inFlightGen)}
 	_, gen := svc.registerGeneration("atomic-cancel", "message", func() {})
 	predecessor := newInFlightGen("unsafe-predecessor", func() {})
+	// An unsafe tombstone: its cancellation is already claimed and still
+	// settling. A predecessor that is neither done nor claimed is a running turn
+	// that a user stop also cancels (CW-20261001-0072), which this test is not
+	// about.
+	predecessor.cancelOnce.Do(func() {})
+	predecessor.cancelAsked = true
 	gen.predecessor = predecessor
 
 	// Hold turnMu so CancelActiveGeneration can acquire activeGenMu and stop

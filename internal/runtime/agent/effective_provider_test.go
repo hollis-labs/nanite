@@ -137,13 +137,21 @@ func TestComposeBootdirParams_LegacyProfileProviderStillWorks(t *testing.T) {
 	}
 }
 
-func TestComposeBootdirParams_IncludesSessionPathGrantsInCLIWritableRoots(t *testing.T) {
+// CW-20261001-0232: a path named in a turn's text is a session path grant for
+// the in-process dev_* tools, and no longer a CLI launch writable root. The
+// roots are the work root and the configured dev_tools_allowed_paths, nothing
+// a turn can add. (The kill switch that restores the fold is covered in
+// cli_launch_roots_test.go.)
+func TestComposeBootdirParams_SessionPathGrantsAreNotCLIWritableRoots(t *testing.T) {
 	sessionID := "sess-grants"
 	projectRoot := t.TempDir()
 	explicitDir := t.TempDir()
 	explicitFile := filepath.Join(explicitDir, "notes.md")
 	grants := permission.NewPathGrants()
 	grants.RegisterFromUserMessage(sessionID, explicitFile)
+	if !grants.IsPathAllowed(sessionID, explicitFile) {
+		t.Fatal("the mention was not granted, so this test would prove nothing")
+	}
 
 	layout, params := composeBootdirParams(&Dependencies{
 		CLIWritableRoots: []string{projectRoot},
@@ -153,26 +161,12 @@ func TestComposeBootdirParams_IncludesSessionPathGrantsInCLIWritableRoots(t *tes
 	if _, ok := layout.(codexLayout); !ok {
 		t.Fatalf("composeBootdirParams returned %T, want codexLayout", layout)
 	}
-
-	want := map[string]bool{
-		projectRoot: true,
-		explicitDir: true,
-	}
-	if len(params.CLIWritableRoots) != len(want) {
-		t.Fatalf("CLIWritableRoots = %v, want %v", params.CLIWritableRoots, keys(want))
-	}
-	for _, root := range params.CLIWritableRoots {
-		if !want[root] {
-			t.Fatalf("unexpected CLIWritableRoot %q (roots=%v)", root, params.CLIWritableRoots)
-		}
-		delete(want, root)
-	}
-	if len(want) != 0 {
-		t.Fatalf("missing CLIWritableRoots %v (roots=%v)", keys(want), params.CLIWritableRoots)
+	if got, want := params.CLIWritableRoots, []string{projectRoot}; !equalStrings(got, want) {
+		t.Fatalf("CLIWritableRoots = %v, want only the configured %v", got, want)
 	}
 }
 
-func TestComposeBootdirParams_IncludesLineagePathGrantsInCLIWritableRoots(t *testing.T) {
+func TestComposeBootdirParams_LineagePathGrantsAreNotCLIWritableRoots(t *testing.T) {
 	parentID := "sess-parent"
 	childID := "sess-child"
 	parentDir := t.TempDir()
@@ -181,33 +175,15 @@ func TestComposeBootdirParams_IncludesLineagePathGrantsInCLIWritableRoots(t *tes
 	grants.RegisterFromUserMessage(parentID, filepath.Join(parentDir, "design.md"))
 	grants.RegisterFromUserMessage(childID, filepath.Join(childDir, "todo.md"))
 	grants.RegisterLineage(childID, parentID)
+	if len(grants.ListLineageGrants(childID)) == 0 {
+		t.Fatal("the child inherited nothing, so this test would prove nothing")
+	}
 
 	_, params := composeBootdirParams(&Dependencies{
 		PathGrants: grants,
 	}, Options{SessionID: childID}, &store.AgentProfile{DefaultProvider: "claude"}, childID)
 
-	want := map[string]bool{
-		parentDir: true,
-		childDir:  true,
+	if len(params.CLIWritableRoots) != 0 {
+		t.Fatalf("CLIWritableRoots = %v, want none: neither the child's nor the lineage's grants are launch roots", params.CLIWritableRoots)
 	}
-	if len(params.CLIWritableRoots) != len(want) {
-		t.Fatalf("CLIWritableRoots = %v, want %v", params.CLIWritableRoots, keys(want))
-	}
-	for _, root := range params.CLIWritableRoots {
-		if !want[root] {
-			t.Fatalf("unexpected CLIWritableRoot %q (roots=%v)", root, params.CLIWritableRoots)
-		}
-		delete(want, root)
-	}
-	if len(want) != 0 {
-		t.Fatalf("missing CLIWritableRoots %v (roots=%v)", keys(want), params.CLIWritableRoots)
-	}
-}
-
-func keys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
 }

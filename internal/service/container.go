@@ -864,6 +864,20 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// (CW-20260512-0118), and dev_tools reads it via the per-call
 	// context (permission.WithPathGrants) when enforcing the gate.
 	pathGrants := permission.NewPathGrants()
+	// CW-20261001-0232: a text mention is a grant only inside $HOME and the
+	// configured allowed bases, and never over a sensitive path or Nanite's own
+	// data directory. The grants serve the in-process dev_* tools; they no
+	// longer widen a CLI launch's writable roots (see runtimeagent's
+	// effectiveCLIWritableRoots).
+	mentionPolicy := permission.MentionPolicy{Confine: true, Bases: cfg.DevToolsAllowedPaths}
+	if dbPath := cfg.Store.DBPath(context.Background()); dbPath != "" {
+		mentionPolicy.Denied = append(mentionPolicy.Denied, filepath.Dir(dbPath))
+	}
+	pathGrants.SetMentionPolicy(mentionPolicy)
+	if runtimeagent.PathMentionLaunchRootsEnabled() {
+		slog.Warn(runtimeagent.PathMentionLaunchRootsEnv+"=1: path grants minted from turn text are folded into CLI launch writable roots again; any local client that can post a turn can widen what a launched agent may write",
+			"env", runtimeagent.PathMentionLaunchRootsEnv)
+	}
 
 	contextClient := chat.NewContextClient(cfg.Store)
 	contextClient.PathGrants = pathGrants

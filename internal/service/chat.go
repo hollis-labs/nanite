@@ -1341,8 +1341,42 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	// register session-scoped grants for the literal path AND its parent
 	// directory. Loose patterns and tool names do NOT auto-grant — those
 	// fall through to the notify-pause path.
-	if s.pathGrants != nil {
-		granted := s.pathGrants.RegisterFromUserMessage(sessionID, content)
+	//
+	// Only a CallerChat turn registers (CW-20261001-0232). A background turn,
+	// whether a durable-agent wake prompt, a schedule body or a harness
+	// trigger, carries text a program wrote, and gets no grants. Chat is not
+	// proof of a person either: the message and harness APIs are on an
+	// unauthenticated loopback. So the registration itself refuses sensitive
+	// paths, their ancestors and, in production, anything outside $HOME and
+	// the allowed bases (permission.MentionPolicy), and the grants it does
+	// make serve the in-process dev_* tools only, never a CLI launch's
+	// writable roots (bootdir.go).
+	//
+	// HandleMessage is shared by two real callers with two different
+	// correct CallerType values: internal/api/harness_v1.go and
+	// internal/api/messages.go (real end-user HTTP handlers — always
+	// CallerChat, and they stamp nothing on ctx) and
+	// chatDurableAgentRuntimeController.SendMessage (a durable agent's
+	// scheduled wake delivery — background work, not a user typing into
+	// chat, so it stamps dispatcher.CallerBackground onto ctx before
+	// calling in). Prefer whatever valid CallerType arrives on ctx and
+	// fall back to CallerChat — mirrors the existing ambient-ctx +
+	// documented-fallback convention chat_generate.go's request_build
+	// slog already uses for dispatcher.CallerTypeFromContext, except the
+	// fallback here must be a *valid* CallerType (not "unknown") because
+	// this value is actually dispatched, not just logged — Dispatcher.Run
+	// rejects an empty/invalid CallerType outright.
+	callerType := dispatcher.CallerChat
+	if ct := dispatcher.CallerTypeFromContext(ctx); ct.Valid() {
+		callerType = ct
+	}
+	if s.pathGrants != nil && callerType == dispatcher.CallerChat {
+		granted, refused := s.pathGrants.RegisterMentions(sessionID, content)
+		if len(refused) > 0 {
+			// A count only: the paths are the text's, and may be hostile.
+			slog.Warn("permission: path mentions refused as grants",
+				"session_id", sessionID, "count", len(refused))
+		}
 		if len(granted) > 0 {
 			// INFO carries a count only — the granted slice contains user
 			// filesystem paths from chat input and shouldn't land in
@@ -1373,24 +1407,8 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	// (CW-20260418-0043). The lifecycle manager's shutdown ctx is bridged
 	// inside launchGeneration so process Shutdown still drains cleanly.
 	//
-	// HandleMessage is shared by two real callers with two different
-	// correct CallerType values: internal/api/harness_v1.go and
-	// internal/api/messages.go (real end-user HTTP handlers — always
-	// CallerChat, and they stamp nothing on ctx) and
-	// chatDurableAgentRuntimeController.SendMessage (a durable agent's
-	// scheduled wake delivery — background work, not a user typing into
-	// chat, so it stamps dispatcher.CallerBackground onto ctx before
-	// calling in). Prefer whatever valid CallerType arrives on ctx and
-	// fall back to CallerChat — mirrors the existing ambient-ctx +
-	// documented-fallback convention chat_generate.go's request_build
-	// slog already uses for dispatcher.CallerTypeFromContext, except the
-	// fallback here must be a *valid* CallerType (not "unknown") because
-	// this value is actually dispatched, not just logged — Dispatcher.Run
-	// rejects an empty/invalid CallerType outright.
-	callerType := dispatcher.CallerChat
-	if ct := dispatcher.CallerTypeFromContext(ctx); ct.Valid() {
-		callerType = ct
-	}
+	// The caller type was resolved above, where the path-mention grants needed
+	// it, and is what the generation is dispatched with.
 	// The delta mode arrives the same way: stamped on ctx by the API handler,
 	// absent for durable-agent wakes (which get the phased default).
 	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, callerType, chat.DeltaModeFromContext(ctx))

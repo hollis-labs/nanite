@@ -22,6 +22,9 @@
 package config
 
 import (
+	"fmt"
+	"log/slog"
+
 	"github.com/hollis-labs/go-apppaths/paths"
 	"github.com/hollis-labs/nanite/internal/brand"
 )
@@ -37,8 +40,21 @@ import (
 //
 // Callers that only introspect (the `nanite path` subcommand) pass
 // paths.WithoutMaterialize() so resolution never creates directories.
+//
+// Materializing also tightens nanite's own directories (the four XDG roots,
+// the workspace directory and the database's directory) to 0700, existing
+// ones included (go-apppaths v0.2.0+, CW-20260930-0208). A directory the
+// process may not chmod is left as found; layoutWarn logs it, so a mode that
+// could not be tightened is visible instead of silent.
 func ResolveLayout(extra ...paths.Option) (paths.Layout, error) {
-	return paths.Resolve(brand.ID, extra...)
+	opts := append([]paths.Option{paths.WithWarn(layoutWarn)}, extra...)
+	return paths.Resolve(brand.ID, opts...)
+}
+
+// layoutWarn reports a go-apppaths warning (a path it could not tighten)
+// through slog.
+func layoutWarn(format string, args ...any) {
+	slog.Warn(fmt.Sprintf(format, args...))
 }
 
 // tesseractAppName is the go-apppaths appName of the Tesseract memory store

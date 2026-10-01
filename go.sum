@@ -59,8 +59,8 @@ github.com/hollis-labs/agentkit v0.12.3 h1:GbcD9UnEex82jr8m951d8CrEOKePFYw1Tol7N
 github.com/hollis-labs/agentkit v0.12.3/go.mod h1:krgas5I+t6+VEDBGDhrGBX6xYSZtZRhrcwoGtZX1Mmg=
 github.com/hollis-labs/go-agent-wrapper v0.15.0 h1:KajcNh6r7r/++nk/5hwIlvE8oyNrI3GZ0Or9g+s8324=
 github.com/hollis-labs/go-agent-wrapper v0.15.0/go.mod h1:vYz+80A/EmY6Z9SdCcSdaVvR9tIJgh4Z8oz7033KqT8=
-github.com/hollis-labs/go-apppaths v0.1.0 h1:LJQv483BhOoizLL4qKwsLcCbM0lQoVrNvksJ1thycd4=
-github.com/hollis-labs/go-apppaths v0.1.0/go.mod h1:b3gOdAFgSYY9ZT7VUooAczFdb6o0C2xSGQa7ktcyw30=
+github.com/hollis-labs/go-apppaths v0.3.0 h1:Ny1uC3Z3PFkd/Fc9v/BvneWVaRU5uRlTZ09vCHLGtf4=
+github.com/hollis-labs/go-apppaths v0.3.0/go.mod h1:BAf880VPj8p11kZqJie6HfIXwW/1lRpV5LY1cjf2Rpo=
 github.com/hollis-labs/go-egress-proxy v0.2.3 h1:4T3Wv4W4Ek8xXKXg/J6rsLLcEgjpg3nBsiba+qTKOOE=
 github.com/hollis-labs/go-egress-proxy v0.2.3/go.mod h1:awKn1o5SIRU36m8CwVE4QIl7d59qaMziXXK9QUwudLg=
 github.com/hollis-labs/go-embed-contracts v0.1.1 h1:PGpgBvFpNwz7dHLRWJ3ewlbOLzsg8rauEpfpcwh3+Lw=

@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
+	"github.com/hollis-labs/nanite/internal/runtimekind"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 

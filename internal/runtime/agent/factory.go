@@ -99,6 +99,9 @@ func shouldAutoFireFirstTurn(mode Mode) bool {
 // validation to the wrapper's canonical native factory. Nanite keeps the
 // product decision (Claude streaming stdio; Codex/OpenCode per-turn) and its
 // already-configured adapter, including Claude developer-mode behavior.
+// The launch mode is always explicit: the libraries' Codex default is now
+// jsonrpc-stdio (app-server; agentkit v0.12.0, go-providers v0.31.0), and
+// Nanite runs Codex per turn (CW-20260930-0113).
 //
 // workRoot is the session's project directory (Options.Workdir); see
 // workRootArgs for what it adds to argv.
@@ -118,13 +121,22 @@ func selectNativeAdapter(providerName string, mode Mode, cli provider.CLIAdapter
 
 // workRootArgs returns the argv that grants a native CLI agent its work
 // root while its cwd stays the boot dir (CW-20261001-0020). Claude gets
-// --add-dir <root>; go-providers emits that flag only in Bare mode, so
-// Nanite appends it here. Codex reaches the root through its planted
+// --add-dir <root>. Codex reaches the root through its planted
 // config.toml writable_roots and opencode spawns in it (SpawnWorkdir), so
 // neither needs an argument. Empty workRoot adds nothing.
 //
+// Nothing else on Nanite's launch path emits Claude's --add-dir, so this is
+// its only source and it appears once (TestSelectNativeAdapter_
+// ClaudeAddDirExactlyOnce). Since go-providers v0.31.0 the projected launch
+// convention carries --add-dir <project> in every mode, but Nanite does not
+// launch through the projection: it hands the wrapper its own CLIAdapter.
+// That adapter's BuildArgs emits --add-dir only when its ProjectDir field is
+// set (in every mode since v0.33.0), and Nanite's Claude adapter is one
+// instance shared by every session (cmd/nanite/main.go), so ProjectDir
+// stays empty rather than racing per session.
+//
 // Interim: the shared PreparedExecution (CW-20260930-0113) owns cwd and
-// --add-dir once it lands.
+// --add-dir once Nanite launches through it; drop this then.
 func workRootArgs(providerName, workRoot string) []string {
 	if workRoot == "" {
 		return nil

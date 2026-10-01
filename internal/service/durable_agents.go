@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
+	"github.com/hollis-labs/nanite/internal/runtimekind"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 

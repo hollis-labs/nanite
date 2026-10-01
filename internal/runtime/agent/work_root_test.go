@@ -39,6 +39,38 @@ func TestSelectNativeAdapter_ClaudeArgvCarriesWorkRoot(t *testing.T) {
 	}
 }
 
+// go-providers v0.31.0+ projects Claude's --add-dir <project> in every
+// mode. Nanite's launch path is not the projection, so its own workRootArgs
+// is still the flag's only source: exactly one --add-dir, naming the work
+// root (CW-20260930-0113).
+func TestSelectNativeAdapter_ClaudeAddDirExactlyOnce(t *testing.T) {
+	const workRoot = "/home/x/dev/project"
+	for _, tc := range []struct {
+		name string
+		cli  provider.CLIAdapter
+	}{
+		{"production", provider.NewClaudeAdapterStreamingStdio()},
+		{"developer mode", provider.NewClaudeAdapterDevStreamingStdio()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, err := selectNativeAdapter("claude", ModeLongLived, tc.cli, workRoot)
+			if err != nil {
+				t.Fatalf("selectNativeAdapter: %v", err)
+			}
+			args := selected.CLIAdapter().BuildArgs("prompt", "system", "session")
+			var dirs []string
+			for i, a := range args {
+				if a == "--add-dir" && i+1 < len(args) {
+					dirs = append(dirs, args[i+1])
+				}
+			}
+			if len(dirs) != 1 || dirs[0] != workRoot {
+				t.Fatalf("--add-dir values = %q in %#v, want exactly [%q]", dirs, args, workRoot)
+			}
+		})
+	}
+}
+
 func TestSelectNativeAdapter_WorkRootAddsNoArgvForCodexOrEmptyRoot(t *testing.T) {
 	codex := provider.NewCodexAdapter()
 	selected, err := selectNativeAdapter("codex", ModeLongLived, codex, "/home/x/dev/project")

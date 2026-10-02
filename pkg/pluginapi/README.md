@@ -82,3 +82,19 @@ Credentials grant no arbitrary SQL or tool execution.
 Run `GOWORK=off go vet ./...` and `GOWORK=off go test -race -count=20 ./...`
 from this directory. Tags for this nested module use `pkg/pluginapi/vX.Y.Z`.
 The application root's `go test ./...` does not traverse a nested Go module.
+
+Agent tools belong to the shared manifest's `tools` array. Nanite accepts
+`read`, `write` and `destructive` effects; unknown effects refuse the bundle.
+`ToolEffectHints` supplies behavior metadata to the host permission engine.
+These declarations do not grant execution authority. The host must still apply
+agent roster permissions and the plugin's `nanite.load_type` (`auto` or
+`opt-in`), with explicit user tool preferences taking precedence. Tool names
+use at most 64 ASCII letters, digits, underscores or hyphens, with at most 128
+tools per bundle. `ValidateAgentTools` supplements SDK common validation.
+
+The host discovers tools from accepted manifest declarations, without querying
+the child for extra names or schemas. Calls use SDK `MCPCallRequest` with the
+original declared `tool_name`, `arguments` and host-provided current
+`session_id`; a child cannot choose its caller's session. Results use SDK
+`MCPCallResult`, preserving `is_error` and delivering validated envelopes to
+that session. Unload removes the plugin's tool namespace and availability.

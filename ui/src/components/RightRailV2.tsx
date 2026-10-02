@@ -425,7 +425,7 @@ export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props)
 
         {/* Plugin tab panels — lazily mounted on first activation, then kept alive */}
         {pluginTabs.map((entry) => {
-          const PluginComponent = entry.component ? getSlotComponent(entry.component) : null
+          const PluginComponent = entry.component ? getSlotComponent(entry.component, entry.plugin_id, entry.id) : null
           if (!PluginComponent) return null
           return (
             <div key={entry.id} className={resolvedActiveTab === entry.id ? 'flex flex-1 min-h-0 flex-col' : 'hidden'}>

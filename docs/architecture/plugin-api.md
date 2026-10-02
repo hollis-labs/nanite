@@ -77,3 +77,21 @@ host's `BeforeSpawn` callback revalidates the receipt before each spawn and
 pins supervised restarts to the original review. Transport calls always apply
 the host deadline, even when callers supplied a longer one; request and response
 frames have independent caps. `SECURITY.md` documents the execution boundary.
+
+The browser endpoint uses `plugin-sdk/registry.Response` at protocol 1:
+`plugins` describes bundles/runtime dependencies, and `contributions` maps
+host-defined kinds and keys to explicit module exports. Nanite stores grouping,
+priority, labels, props and schema URLs in opaque contribution metadata. Slot
+keys include the slot name so IDs in separate groups cannot collide. Browser
+reconciliation, module caching, stylesheet ownership and subscriptions belong
+to `@hollis-labs/plugin-registry`; Nanite supplies core-name refusal and React
+render policy. A manifest change reconciles against already loaded modules.
+Bundle cache tokens use the accepted bundle digest; stylesheet URLs carry it
+too. Slot renderers pass the owner and entry ID rather than guessing from an
+export name shared by several plugins.
+
+The optional live browser fixture runs `TestPluginsRegistryLiveBrowserSmoke`
+with `NANITE_PLUGIN_BROWSER_SMOKE_READY` naming a new private readiness file.
+It serves a real loaded SDK subprocess and bundle from an isolated test host.
+Pass the recorded origin as `VITE_NANITE_PLUGIN_SMOKE_URL` to the frontend
+`plugin-loader.test.tsx` test; its final request stops the fixture.

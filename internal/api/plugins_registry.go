@@ -2,19 +2,18 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
+	"net/url"
 	"path"
-	"path/filepath"
 	"sync"
 
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	goplugin "github.com/hollis-labs/plugin-sdk"
+	"github.com/hollis-labs/plugin-sdk/registry"
 )
 
 // RegistryEnvelopeEntry is one envelope entry in the /api/plugins/registry
-// response. Mirrors the shape in plan §B.7 / finding #6.
+// contribution metadata; the shared SDK owns the surrounding wire shape.
 type RegistryEnvelopeEntry struct {
 	PluginID  string `json:"plugin_id"`
 	Component string `json:"component"`
@@ -33,8 +32,8 @@ type RegistryWidgetEntry struct {
 }
 
 // RegistrySlotEntry is one slot entry in the /api/plugins/registry response.
-// The outer shape maps slot name → ordered list of entries; order is the
-// priority-sorted order the host already maintains.
+// Contributions use a flat slot-name/entry-ID key; the metadata retains
+// Nanite presentation fields and priority.
 type RegistrySlotEntry struct {
 	ID        string                 `json:"id"`
 	PluginID  string                 `json:"plugin_id"`
@@ -46,25 +45,8 @@ type RegistrySlotEntry struct {
 	Props     map[string]interface{} `json:"props,omitempty"`
 }
 
-// RegistryPluginEntry is one plugin entry in the /api/plugins/registry
-// response describing bundle + stylesheet URLs and metadata the frontend
-// needs to load the plugin's UI.
-type RegistryPluginEntry struct {
-	BundleURL     string `json:"bundle_url,omitempty"`
-	StylesheetURL string `json:"stylesheet_url,omitempty"`
-	BundleHash    string `json:"bundle_hash"`   // always present; empty until manifest schema grows a field (see backlog)
-	ReactVersion  string `json:"react_version"` // always present; empty when manifest omits ui.react_version
-}
-
-// RegistryResponse is the top-level shape for GET /api/plugins/registry.
-// All four keys are non-nil maps even when empty so the frontend can treat
-// them as stable dictionaries.
-type RegistryResponse struct {
-	Envelopes map[string]RegistryEnvelopeEntry `json:"envelopes"`
-	Widgets   map[string]RegistryWidgetEntry   `json:"widgets"`
-	Slots     map[string][]RegistrySlotEntry   `json:"slots"`
-	Plugins   map[string]RegistryPluginEntry   `json:"plugins"`
-}
+// RegistryResponse uses the released host-neutral browser wire contract.
+type RegistryResponse = registry.Response
 
 // registryCache caches the last-computed response keyed by the host's
 // registry version counter. On cache miss (version changed, or first call)
@@ -101,7 +83,7 @@ func registerPluginsRegistryRoute(mux *http.ServeMux, host *naniteplugin.Host, p
 // serve returns the cached JSON payload, recomputing when the host's
 // registryVersion has advanced since the last call. The host may be nil in
 // tests that exercise an empty response — in that case we emit the bare-skeleton
-// response with all maps present-but-empty.
+// shared response with both maps present-but-empty.
 func (c *registryCache) serve(host *naniteplugin.Host) ([]byte, error) {
 	var version uint64
 	if host != nil {
@@ -116,7 +98,13 @@ func (c *registryCache) serve(host *naniteplugin.Host) ([]byte, error) {
 	}
 	c.mu.Unlock()
 
-	resp := buildRegistryResponse(host, c.pluginsDir)
+	resp, buildErr := buildRegistryResponse(host, c.pluginsDir)
+	if buildErr != nil {
+		return nil, buildErr
+	}
+	if err := resp.Validate(); err != nil {
+		return nil, err
+	}
 	buf, err := json.Marshal(resp)
 	if err != nil {
 		return nil, err
@@ -143,112 +131,101 @@ func (c *registryCache) serve(host *naniteplugin.Host) ([]byte, error) {
 // buildRegistryResponse computes the registry response from the host's
 // in-memory registries. Extracted so tests can call it directly without a
 // live HTTP handler. Never returns nil maps — the frontend relies on the
-// four top-level keys always being present.
-func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) RegistryResponse {
-	resp := RegistryResponse{
-		Envelopes: make(map[string]RegistryEnvelopeEntry),
-		Widgets:   make(map[string]RegistryWidgetEntry),
-		Slots:     make(map[string][]RegistrySlotEntry),
-		Plugins:   make(map[string]RegistryPluginEntry),
-	}
+// shared top-level maps always being present.
+func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) (RegistryResponse, error) {
+	response := registry.NewResponse()
 	if host == nil {
-		return resp
+		return response, nil
 	}
-
-	// Envelopes — keyed by envelope type. schema_url is a best-effort URL under
-	// the existing /api/plugins/{name}/ui/... serving route; if no schema path
-	// is recorded we omit the field.
-	for _, e := range host.GetEnvelopes() {
-		entry := RegistryEnvelopeEntry{
-			PluginID:  e.PluginID,
-			Component: e.Component,
-			Version:   e.Version,
+	for id, declaration := range host.GetManifests() {
+		item := registry.Plugin{}
+		if declaration.UI.Entry != "" {
+			item.BundleURL = buildUIURL(id, declaration.UI.BundleDir, declaration.UI.Entry)
 		}
-		if e.SchemaPath != "" {
-			entry.SchemaURL = path.Join("/api/plugins", e.PluginID, "ui", e.SchemaPath)
-			if declaration := host.GetManifest(e.PluginID); declaration != nil && declaration.Shared != nil {
-				entry.SchemaURL = path.Join("/api/plugins", e.PluginID, "schema", e.Type)
+		if declaration.UI.Stylesheet != "" {
+			item.StylesheetURL = buildUIURL(id, declaration.UI.BundleDir, declaration.UI.Stylesheet)
+		}
+		if declaration.UI.ReactVersion != "" {
+			item.Runtime = &registry.Runtime{Name: "react", Version: declaration.UI.ReactVersion}
+		}
+		if declaration.Shared != nil {
+			if declaration.UI.Entry != "" {
+				item.BundleURL = path.Join("/api/plugins", id, "bundle", declaration.UI.Entry)
+			}
+			if declaration.UI.Stylesheet != "" {
+				item.StylesheetURL = path.Join("/api/plugins", id, "bundle", declaration.UI.Stylesheet)
+			}
+			if pluginsDir != "" {
+				if approval, err := naniteplugin.ReadInstallApproval(pluginsDir, id); err == nil {
+					item.BundleVersion = approval.Review.BundleDigest
+					if item.StylesheetURL != "" {
+						item.StylesheetURL += "?v=" + url.QueryEscape(item.BundleVersion)
+					}
+				}
 			}
 		}
-		resp.Envelopes[e.Type] = entry
+		response.Plugins[id] = item
 	}
-
-	// Widgets — type == "widget" filter over UI components. Other types
-	// (action, view, workflow, envelope) are not surfaced under this key; the
-	// envelope map already covers envelopes, and the remaining types are not
-	// part of the B.7 shape per finding #6.
-	for _, comp := range host.GetUIComponentsWithOwners() {
-		if comp.Type != goplugin.UIComponentTypeWidget {
+	for _, envelope := range host.GetEnvelopes() {
+		if envelope.Component == "" || envelope.PluginID == "" {
 			continue
 		}
-		resp.Widgets[comp.ID] = RegistryWidgetEntry{
-			PluginID:    comp.PluginID,
-			Name:        comp.Name,
-			Description: comp.Description,
+		metadata := RegistryEnvelopeEntry{PluginID: envelope.PluginID, Component: envelope.Component, Version: envelope.Version}
+		if envelope.SchemaPath != "" {
+			metadata.SchemaURL = path.Join("/api/plugins", envelope.PluginID, "ui", envelope.SchemaPath)
+			if declaration := host.GetManifest(envelope.PluginID); declaration != nil && declaration.Shared != nil {
+				metadata.SchemaURL = path.Join("/api/plugins", envelope.PluginID, "schema", envelope.Type)
+			}
+		}
+		if contributionErr := addRegistryContribution(&response, "envelope", envelope.Type, envelope.PluginID, envelope.Component, metadata); contributionErr != nil {
+			return registry.Response{}, contributionErr
 		}
 	}
-
-	// Slots — keep the host's priority-sorted ordering.
+	for _, component := range host.GetUIComponentsWithOwners() {
+		if component.Type != goplugin.UIComponentTypeWidget {
+			continue
+		}
+		// An explicit export belongs to the host declaration. Display names and
+		// widget IDs cannot be guessed into JavaScript identifiers.
+		declaration := host.GetManifest(component.PluginID)
+		if declaration == nil {
+			continue
+		}
+		for _, declared := range declaration.Registers.Components {
+			if declared.Name == component.ID && declared.Export != "" {
+				if contributionErr := addRegistryContribution(&response, "widget", component.ID, component.PluginID, declared.Export, RegistryWidgetEntry{PluginID: component.PluginID, Name: component.Name, Description: component.Description}); contributionErr != nil {
+					return registry.Response{}, contributionErr
+				}
+			}
+		}
+	}
 	for slot, entries := range host.GetAllSlots() {
-		out := make([]RegistrySlotEntry, 0, len(entries))
 		for _, entry := range entries {
-			out = append(out, RegistrySlotEntry{
-				ID:        entry.ID,
-				PluginID:  entry.PluginID,
-				Label:     entry.Label,
-				Icon:      entry.Icon,
-				Priority:  entry.Priority,
-				Component: entry.Component,
-				Action:    entry.Action,
-				Props:     entry.Props,
-			})
+			if entry.Component == "" || entry.PluginID == "" {
+				continue
+			}
+			metadata := struct {
+				RegistrySlotEntry
+				Slot string `json:"slot"`
+			}{RegistrySlotEntry: RegistrySlotEntry{ID: entry.ID, PluginID: entry.PluginID, Label: entry.Label, Icon: entry.Icon, Priority: entry.Priority, Component: entry.Component, Action: entry.Action, Props: entry.Props}, Slot: string(slot)}
+			if contributionErr := addRegistryContribution(&response, "slot", string(slot)+"/"+entry.ID, entry.PluginID, entry.Component, metadata); contributionErr != nil {
+				return registry.Response{}, contributionErr
+			}
 		}
-		resp.Slots[string(slot)] = out
 	}
+	return response, nil
+}
 
-	// Plugins — bundle / stylesheet URLs derive from ui.bundle_dir + ui.entry
-	// and ui.stylesheet in the plugin manifest. Match the existing serving
-	// route GET /api/plugins/{name}/ui/{file...} (see plugins.go). When the
-	// manifest has no ui block we still emit the plugin entry with empty
-	// string fields so the frontend can reason about presence uniformly.
-	//
-	// bundle_hash: the v1 manifest schema does not yet include a checksum
-	// field for the bundle. Returning empty string + filing a backlog item
-	// rather than extending schema mid-B.7.
-	for pluginID, manifest := range host.GetManifests() {
-		entry := RegistryPluginEntry{}
-		ui := manifest.UI
-		if ui.Entry != "" {
-			entry.BundleURL = buildUIURL(pluginID, ui.BundleDir, ui.Entry)
-		}
-		if ui.Stylesheet != "" {
-			entry.StylesheetURL = buildUIURL(pluginID, ui.BundleDir, ui.Stylesheet)
-		}
-		if manifest.Shared != nil {
-			if ui.Entry != "" {
-				entry.BundleURL = path.Join("/api/plugins", pluginID, "bundle", ui.Entry)
-			}
-			if ui.Stylesheet != "" {
-				entry.StylesheetURL = path.Join("/api/plugins", pluginID, "bundle", ui.Stylesheet)
-			}
-		}
-		entry.ReactVersion = ui.ReactVersion
-		// Compute BundleHash from the bundle file's mtime so the frontend gets
-		// a cache-buster whenever the bundle is rebuilt. Uses mtime rather than
-		// a content hash to avoid reading large files on every registry recompute.
-		if pluginsDir != "" && ui.Entry != "" {
-			rel := path.Join(ui.BundleDir, ui.Entry)
-			if len(rel) >= 3 && rel[:3] == "ui/" {
-				rel = rel[3:]
-			}
-			bundlePath := filepath.Join(pluginsDir, pluginID, "ui", rel)
-			if fi, err := os.Stat(bundlePath); err == nil {
-				entry.BundleHash = fmt.Sprintf("%d", fi.ModTime().UnixMilli())
-			}
-		}
-		resp.Plugins[pluginID] = entry
+func addRegistryContribution(response *registry.Response, kind, key, owner, export string, metadata any) error {
+	raw, err := registry.Meta(metadata)
+	if err != nil {
+		return err
 	}
-	return resp
+	if _, exists := response.Plugins[owner]; !exists {
+		response.Plugins[owner] = registry.Plugin{}
+	}
+	response.Set(kind, key, registry.Contribution{PluginID: owner, Export: export, Meta: raw})
+	return nil
 }
 
 // buildUIURL composes the /api/plugins/{plugin}/ui/{file} path served by the

@@ -470,9 +470,7 @@ func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
 	}
 
 	// Track ownership.
-	if callerPlugin != "" {
-		h.uiOwners[component.ID] = callerPlugin
-	}
+	h.uiOwners[component.ID] = callerPlugin
 
 	// If the component has a server-side handler, register the route (only once).
 	if component.Handler != nil && !alreadyRegistered {
@@ -1052,6 +1050,9 @@ func (h *Host) RegisterSlot(entry UISlotEntry) error {
 	replaced := false
 	for i, existing := range entries {
 		if existing.ID == entry.ID {
+			if existing.PluginID != entry.PluginID {
+				return fmt.Errorf("slot entry %q is owned by %q", entry.ID, existing.PluginID)
+			}
 			entries[i] = entry
 			replaced = true
 			break

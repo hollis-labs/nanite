@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
@@ -14,7 +15,7 @@ import (
 	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
-// TestPluginsRegistry_EmptyHost asserts the response shape carries all four
+// TestPluginsRegistry_EmptyHost asserts the response carries both shared
 // top-level keys as non-nil empty maps when no plugins are loaded. The
 // frontend treats these keys as stable dictionaries; nulls here would be a
 // breaking regression.
@@ -36,27 +37,21 @@ func TestPluginsRegistry_EmptyHost(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Envelopes == nil {
-		t.Error("envelopes must be {} not null")
+	if resp.Plugins == nil || resp.Contributions == nil {
+		t.Fatal("registry maps must be present")
 	}
-	if resp.Widgets == nil {
-		t.Error("widgets must be {} not null")
+	if len(resp.Plugins) != 0 || len(resp.Contributions) != 0 {
+		t.Fatalf("nonempty registry: %+v", resp)
 	}
-	if resp.Slots == nil {
-		t.Error("slots must be {} not null")
-	}
-	if resp.Plugins == nil {
-		t.Error("plugins must be {} not null")
-	}
-	if len(resp.Envelopes) != 0 || len(resp.Widgets) != 0 || len(resp.Slots) != 0 || len(resp.Plugins) != 0 {
-		t.Errorf("expected all maps empty, got %+v", resp)
+	if err := resp.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 
 // TestPluginsRegistry_EnvelopeAndSlotFromDiscovered drops a synthetic plugin
 // on disk with envelope + slot registrations and a ui block, runs it through
 // DiscoverPlugins / LoadDiscovered, then asserts the three populated-map
-// paths (envelopes, slots, plugins.bundle_url/stylesheet/react_version).
+// shared contributions and runtime metadata.
 func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 	pluginsDir := t.TempDir()
 	pluginID := "synth-registry-plugin"
@@ -80,25 +75,29 @@ func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 		t.Fatal("LoadDiscovered loaded no plugins")
 	}
 
-	resp := buildRegistryResponse(host, "")
-
-	env, ok := resp.Envelopes["synth-card"]
-	if !ok {
-		t.Fatalf("envelopes['synth-card'] missing; got %+v", resp.Envelopes)
+	resp, buildErr := buildRegistryResponse(host, pluginsDir)
+	if buildErr != nil {
+		t.Fatal(buildErr)
 	}
-	if env.Component != "SynthCard" || env.Version != 1 || env.PluginID != pluginID {
+
+	env, ok := resp.Contributions["envelope"]["synth-card"]
+	if !ok {
+		t.Fatalf("envelopes['synth-card'] missing; got %+v", resp.Contributions["envelope"])
+	}
+	if env.Export != "SynthCard" || env.PluginID != pluginID {
 		t.Errorf("envelope fields wrong: %+v", env)
 	}
-	if env.SchemaURL == "" {
+	var envelopeMeta RegistryEnvelopeEntry
+	if err := json.Unmarshal(env.Meta, &envelopeMeta); err != nil {
+		t.Fatal(err)
+	}
+	if envelopeMeta.SchemaURL == "" {
 		t.Error("schema_url should be populated when manifest includes a schema path")
 	}
 
-	slotEntries, ok := resp.Slots["composer-toolbar"]
-	if !ok || len(slotEntries) == 0 {
-		t.Fatalf("slots['composer-toolbar'] missing/empty; got %+v", resp.Slots)
-	}
-	if slotEntries[0].ID != "synth-slot-entry" || slotEntries[0].Component != "SynthToolbarButton" {
-		t.Errorf("slot entry fields wrong: %+v", slotEntries[0])
+	slotEntry, ok := resp.Contributions["slot"]["composer-toolbar/synth-slot-entry"]
+	if !ok || slotEntry.Export != "SynthToolbarButton" || slotEntry.PluginID != pluginID {
+		t.Fatalf("slot contribution: %+v", slotEntry)
 	}
 
 	pl, ok := resp.Plugins[pluginID]
@@ -110,15 +109,14 @@ func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 		t.Errorf("bundle_url mismatch: got %q want %q", pl.BundleURL, wantBundle)
 	}
 	wantSheet := "/api/plugins/" + pluginID + "/bundle/ui/dist/style.css"
-	if pl.StylesheetURL != wantSheet {
+	if !strings.HasPrefix(pl.StylesheetURL, wantSheet+"?v=") {
 		t.Errorf("stylesheet_url mismatch: got %q want %q", pl.StylesheetURL, wantSheet)
 	}
-	if pl.ReactVersion != "^19.0.0" {
-		t.Errorf("react_version mismatch: got %q", pl.ReactVersion)
+	if pl.Runtime == nil || pl.Runtime.Name != "react" || pl.Runtime.Version != "^19.0.0" {
+		t.Errorf("react_version mismatch: got %q", pl.Runtime)
 	}
-	// bundle_hash stays empty — manifest v1 does not carry this field yet.
-	if pl.BundleHash != "" {
-		t.Errorf("bundle_hash should be empty until schema extends; got %q", pl.BundleHash)
+	if pl.BundleVersion == "" {
+		t.Fatal("reviewed bundle requires cache version")
 	}
 
 	// End-to-end: exercise the HTTP handler before and after UnloadPlugin to
@@ -156,11 +154,11 @@ func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 	if _, ok := after.Plugins[pluginID]; ok {
 		t.Errorf("plugin %q should be gone from registry after unload", pluginID)
 	}
-	if _, ok := after.Envelopes["synth-card"]; ok {
+	if _, ok := after.Contributions["envelope"]["synth-card"]; ok {
 		t.Errorf("envelope 'synth-card' should be gone after unload")
 	}
-	if entries, ok := after.Slots["composer-toolbar"]; ok && len(entries) > 0 {
-		t.Errorf("slot 'composer-toolbar' should be empty after unload: %+v", entries)
+	if _, ok := after.Contributions["slot"]["composer-toolbar/synth-slot-entry"]; ok {
+		t.Errorf("slot 'composer-toolbar' should be empty after unload: %+v", after.Contributions["slot"])
 	}
 }
 
@@ -178,4 +176,18 @@ func (s *synthPlugin) Load(h goplugin.Host) error { return nil }
 func (s *synthPlugin) Unload() error              { return nil }
 func (s *synthPlugin) Status() goplugin.PluginStatus {
 	return goplugin.PluginStatus{Loaded: true, Enabled: true}
+}
+
+func TestPluginsRegistryRejectsUnserializableHostMetadata(t *testing.T) {
+	host := naniteplugin.NewHost(http.NewServeMux(), naniteplugin.NewLogger("test"))
+	if err := host.RegisterSlot(naniteplugin.UISlotEntry{ID: "bad-meta", PluginID: "example", Slot: "composer-toolbar", Label: "Bad", Component: "Bad", Props: map[string]any{"invalid": make(chan int)}}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	registerPluginsRegistryRoute(mux, host, t.TempDir())
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/plugins/registry", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("invalid metadata silently dropped: %d %s", rec.Code, rec.Body.String())
+	}
 }

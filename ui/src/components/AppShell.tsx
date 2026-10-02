@@ -28,7 +28,7 @@ installPluginDevHelpers()
 export function AppShell() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [pluginModal, setPluginModal] = useState<{ component: string; props?: Record<string, unknown> } | null>(null)
+  const [pluginModal, setPluginModal] = useState<{ component: string; plugin_id?: string; id?: string; props?: Record<string, unknown> } | null>(null)
   const focusRef = useRef<(() => void) | null>(null)
   const queryClient = useQueryClient()
   const currentPage = useLayoutStore((s) => s.currentPage)
@@ -43,7 +43,7 @@ export function AppShell() {
       const detail = (e as CustomEvent).detail
       if (detail?.component) {
         // Generic plugin modal — render via slot component registry
-        setPluginModal({ component: detail.component, props: detail.props })
+        setPluginModal({ component: detail.component, plugin_id: detail.plugin_id, id: detail.id, props: detail.props })
       }
     }
     // Also listen for plugin-action events with handler type (backward compat)
@@ -126,7 +126,7 @@ export function AppShell() {
   const renderPluginPage = (page: string) => {
     const entry = pluginNavItems.find((e) => e.id === page)
     if (!entry?.component) return null
-    const PluginComponent = getSlotComponent(entry.component)
+    const PluginComponent = getSlotComponent(entry.component, entry.plugin_id, entry.id)
     if (!PluginComponent) return null
     return (
       <Suspense fallback={<div className="flex-1 flex items-center justify-center text-fg-muted text-sm">Loading...</div>}>
@@ -169,7 +169,7 @@ export function AppShell() {
       />
       {/* modal slot — generic plugin modals */}
       {pluginModal && (() => {
-        const PluginModalComponent = getSlotComponent(pluginModal.component)
+        const PluginModalComponent = getSlotComponent(pluginModal.component, pluginModal.plugin_id, pluginModal.id)
         if (!PluginModalComponent) return null
         return (
           <Dialog open onOpenChange={(open) => { if (!open) setPluginModal(null) }}>

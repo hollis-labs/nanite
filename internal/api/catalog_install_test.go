@@ -21,6 +21,7 @@ import (
 
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/install"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
@@ -36,7 +37,12 @@ import (
 // *store.Store — handleCatalogInstall needs catalog_sources rows, which
 // pluginManagerState-style in-memory-struct test setups (see
 // plugins_install_test.go's setupPluginTestState) don't have a slot for.
-func setupCatalogTestState(t *testing.T) (*catalogState, string) {
+type catalogTestState struct {
+	*catalogState
+	store *store.Store
+}
+
+func setupCatalogTestState(t *testing.T) (*catalogTestState, string) {
 	t.Helper()
 	pluginsDir := t.TempDir()
 	dbDir := t.TempDir()
@@ -47,18 +53,18 @@ func setupCatalogTestState(t *testing.T) (*catalogState, string) {
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })
 
-	return &catalogState{
-		store:             s,
+	return &catalogTestState{store: s, catalogState: &catalogState{
+		sources: service.NewCatalogSourceService(s), cleanup: service.NewPluginCleanupService(s),
 		fetcher:           naniteplugin.NewCatalogFetcher(5*time.Minute, filepath.Join(pluginsDir, ".cache")),
 		pluginsDir:        pluginsDir,
 		pluginHost:        nil,
 		archiveDownloader: &install.HTTPDownloader{AllowLocalhost: true},
-	}, pluginsDir
+	}}, pluginsDir
 }
 
 // addCatalogSource registers a custom catalog source pointing at
 // srv.URL+"/catalog.yaml".
-func addCatalogSource(t *testing.T, cs *catalogState, srv *httptest.Server) *store.CatalogSource {
+func addCatalogSource(t *testing.T, cs *catalogTestState, srv *httptest.Server) *store.CatalogSource {
 	t.Helper()
 	src, err := cs.store.CreateCatalogSource(context.Background(), "Test Source", srv.URL+"/catalog.yaml", "custom", 100)
 	if err != nil {

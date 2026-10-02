@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
@@ -312,7 +313,7 @@ func TestPluginMutationHandlersRejectNonCanonicalNames(t *testing.T) {
 				naniteplugin.SetPluginStateStore(nil)
 				_ = db.Close(context.Background())
 			})
-			pms := &pluginManagerState{pluginsDir: pluginsDir, reposPath: filepath.Join(pluginsDir, "repos.yaml"), store: db}
+			pms := &pluginManagerState{pluginsDir: pluginsDir, reposPath: filepath.Join(pluginsDir, "repos.yaml"), cleanup: service.NewPluginCleanupService(db)}
 
 			for _, name := range badNames {
 				body, err := json.Marshal(pluginActionReq{Name: name})

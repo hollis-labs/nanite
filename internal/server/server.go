@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/config"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/version"
 )
@@ -152,9 +153,10 @@ func (s *Server) SetHealthWarnings(warnings []string) {
 func (s *Server) SetPluginsDir(dir string) {
 	s.pluginsDir = dir
 	// Register plugin management API routes now that we have the directory.
-	api.RegisterPluginManagementRoutes(s.mux, dir, s.store, s.pluginHost)
+	cleanup := service.NewPluginCleanupService(s.store)
+	api.RegisterPluginManagementRoutes(s.mux, dir, cleanup, s.pluginHost)
 	// Register plugin catalog API routes.
-	api.RegisterCatalogRoutes(s.mux, s.store, dir, s.pluginHost)
+	api.RegisterCatalogRoutes(s.mux, service.NewCatalogSourceService(s.store), cleanup, dir, s.pluginHost)
 }
 
 // ListenAndServe starts the HTTP server.

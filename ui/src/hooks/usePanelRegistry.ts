@@ -90,6 +90,8 @@ export const usePanelRegistryStore = create<PanelRegistryState>()((set) => ({
 
   register: (def) => {
     set((state) => {
+      const existing = state.panels[def.id]
+      if (def.source === 'plugin' && existing && (existing.source === 'builtin' || existing.pluginId !== def.pluginId)) return state
       const panels = { ...state.panels, [def.id]: def }
       return { panels, orderedIds: computeOrderedIds(panels) }
     })

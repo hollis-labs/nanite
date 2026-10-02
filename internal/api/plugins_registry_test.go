@@ -15,6 +15,42 @@ import (
 	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
+func TestPluginPanelUpdatesInvalidateRegistryCache(t *testing.T) {
+	host := naniteplugin.NewHost(http.NewServeMux(), naniteplugin.NewLogger("test"))
+	mux := http.NewServeMux()
+	registerPluginsRegistryRoute(mux, host, t.TempDir())
+	read := func() RegistryResponse {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/plugins/registry", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatal(rec.Body.String())
+		}
+		var response RegistryResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	_ = read()
+	if err := host.RegisterPanel(naniteplugin.PanelEntry{ID: "docs", PluginID: "docs-plugin", Component: "First"}); err != nil {
+		t.Fatal(err)
+	}
+	if actual := read().Contributions["panel"]["docs"].Export; actual != "First" {
+		t.Fatalf("export = %q", actual)
+	}
+	if err := host.RegisterPanel(naniteplugin.PanelEntry{ID: "docs", PluginID: "docs-plugin", Component: "Second"}); err != nil {
+		t.Fatal(err)
+	}
+	if actual := read().Contributions["panel"]["docs"].Export; actual != "Second" {
+		t.Fatalf("export = %q", actual)
+	}
+	host.UnregisterPluginPanels("docs-plugin")
+	if _, present := read().Contributions["panel"]["docs"]; present {
+		t.Fatal("removed panel remained cached")
+	}
+}
+
 // TestPluginsRegistry_EmptyHost asserts the response carries both shared
 // top-level keys as non-nil empty maps when no plugins are loaded. The
 // frontend treats these keys as stable dictionaries; nulls here would be a
@@ -59,7 +95,7 @@ func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 	if err := os.MkdirAll(pluginPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeAPIPluginBundle(t, pluginPath, pluginID, "Synthetic Plugin", pluginapi.Block{UI: pluginapi.UI{Bundle: "ui/dist/index.js", Stylesheet: "ui/dist/style.css", ReactVersion: "^19.0.0"}, Registers: pluginapi.Registrations{Envelopes: []pluginapi.Envelope{{Type: "synth-card", Component: "SynthCard", Version: 1, Schema: "schemas/synth-card.json"}}, Slots: []pluginapi.Slot{{ID: "synth-slot-entry", Slot: "composer-toolbar", Component: "SynthToolbarButton", Priority: 10}}}})
+	writeAPIPluginBundle(t, pluginPath, pluginID, "Synthetic Plugin", pluginapi.Block{UI: pluginapi.UI{Bundle: "ui/dist/index.js", Stylesheet: "ui/dist/style.css", ReactVersion: "^19.0.0"}, Registers: pluginapi.Registrations{Envelopes: []pluginapi.Envelope{{Type: "synth-card", Component: "SynthCard", Version: 1, Schema: "schemas/synth-card.json"}}, Slots: []pluginapi.Slot{{ID: "synth-slot-entry", Slot: "composer-toolbar", Component: "SynthToolbarButton", Priority: 10}}, Panels: []pluginapi.Panel{{ID: "synth-panel", Title: "Synthetic panel", Component: "SynthPanel", Icon: "file-text", Order: 120, DefaultVisible: true}}}})
 
 	host := naniteplugin.NewHost(http.NewServeMux(), naniteplugin.NewLogger("test"))
 	discovered, err := naniteplugin.DiscoverPlugins(pluginsDir)
@@ -98,6 +134,18 @@ func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 	slotEntry, ok := resp.Contributions["slot"]["composer-toolbar/synth-slot-entry"]
 	if !ok || slotEntry.Export != "SynthToolbarButton" || slotEntry.PluginID != pluginID {
 		t.Fatalf("slot contribution: %+v", slotEntry)
+	}
+
+	panel, ok := resp.Contributions["panel"]["synth-panel"]
+	if !ok || panel.Export != "SynthPanel" || panel.PluginID != pluginID {
+		t.Fatalf("panel = %+v", panel)
+	}
+	var panelMeta RegistryPanelEntry
+	if decodeErr := json.Unmarshal(panel.Meta, &panelMeta); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if panelMeta.Title != "Synthetic panel" || panelMeta.Icon != "file-text" || panelMeta.Order != 120 || !panelMeta.DefaultVisible {
+		t.Fatalf("panel metadata = %+v", panelMeta)
 	}
 
 	pl, ok := resp.Plugins[pluginID]
@@ -153,6 +201,9 @@ func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 	}
 	if _, ok := after.Plugins[pluginID]; ok {
 		t.Errorf("plugin %q should be gone from registry after unload", pluginID)
+	}
+	if _, present := after.Contributions["panel"]["synth-panel"]; present {
+		t.Fatal("panel remained after unload")
 	}
 	if _, ok := after.Contributions["envelope"]["synth-card"]; ok {
 		t.Errorf("envelope 'synth-card' should be gone after unload")

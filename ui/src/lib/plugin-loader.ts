@@ -14,6 +14,8 @@ export interface DynamicRegistryEntry {
   source: string
 }
 
+const CORE_PANEL_IDS = new Set(['widgets', 'work', 'workflows', 'inbox', 'artifacts'])
+
 export function createNanitePluginRegistry(options: PluginRegistryOptions = {}) {
   return createReactPluginRegistry({
     ...options,
@@ -22,6 +24,10 @@ export function createNanitePluginRegistry(options: PluginRegistryOptions = {}) 
       kind === 'envelope' && ENVELOPE_REGISTRY[key]?.source === 'core'
     ) || (
       kind === 'widget' && WIDGET_REGISTRY[key]?.source === 'core'
+    ) || (
+      kind === 'panel' && CORE_PANEL_IDS.has(key)
+    ) || (
+      kind === 'slot' && key.startsWith('right-rail-tab/') && CORE_PANEL_IDS.has(key.slice('right-rail-tab/'.length))
     ) || (options.reserved?.(kind, key) ?? false),
   })
 }

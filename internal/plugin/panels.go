@@ -13,14 +13,13 @@ var panelIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 // PanelEntry is a registered right-rail panel held in the host registry.
 // Built-in panels are registered by the host at startup (tier=0). Plugin
 // panels are registered at plugin load time (tier=1) and removed at unload.
-//
-// J9 (CW-20260426-0007): registration + manifest schema only. The render
-// function for plugin panels is deferred to a follow-up ticket.
 type PanelEntry struct {
 	// ID is the stable panel identifier. Referenced by J8 panel_open/panel_close.
 	ID string
 	// Title is the human-readable tab label.
 	Title string
+	// Component names an explicit export of the plugin UI bundle.
+	Component string
 	// PluginID is the plugin that registered this panel. Empty for built-ins.
 	PluginID string
 	// Description is optional documentation text.
@@ -128,9 +127,20 @@ func (r *panelRegistry) snapshot() []PanelEntry {
 // Called by applyManifestRegistrations at plugin load time.
 // Returns an error when the panel declaration is invalid or conflicts.
 func (h *Host) RegisterPanel(entry PanelEntry) error {
+	if entry.PluginID == "" {
+		return fmt.Errorf("plugin panel %q requires an owner", entry.ID)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, slot := range h.slots["right-rail-tab"] {
+		if slot.ID == entry.ID && slot.PluginID != entry.PluginID {
+			return fmt.Errorf("panel id %q is owned by slot plugin %q", entry.ID, slot.PluginID)
+		}
+	}
 	if err := h.panels.registerPlugin(entry); err != nil {
 		return err
 	}
+	h.bumpRegistryVersionLocked()
 	h.logger.Info("registered panel", "id", entry.ID, "plugin", entry.PluginID, "title", entry.Title)
 	return nil
 }
@@ -138,8 +148,11 @@ func (h *Host) RegisterPanel(entry PanelEntry) error {
 // UnregisterPluginPanels removes all panels owned by pluginID.
 // Called by UnloadPlugin during hot-unload. Returns the number removed.
 func (h *Host) UnregisterPluginPanels(pluginID string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	n := h.panels.removeByPlugin(pluginID)
 	if n > 0 {
+		h.bumpRegistryVersionLocked()
 		h.logger.Debug("plugin unload: removed panels", "plugin", pluginID, "count", n)
 	}
 	return n
@@ -166,6 +179,7 @@ func registerManifestPanels(host *Host, manifest *PluginManifest, pluginID strin
 		entry := PanelEntry{
 			ID:             p.ID,
 			Title:          p.Title,
+			Component:      p.Component,
 			PluginID:       pluginID,
 			Description:    p.Description,
 			Icon:           p.Icon,
@@ -177,4 +191,12 @@ func registerManifestPanels(host *Host, manifest *PluginManifest, pluginID strin
 		}
 	}
 	return nil
+}
+
+// registerBuiltinPanels reserves core IDs before plugin discovery. Presentation
+// remains in the core UI; these entries establish host ownership.
+func (h *Host) registerBuiltinPanels() {
+	for _, id := range []string{"widgets", "work", "workflows", "inbox", "artifacts"} {
+		h.panels.registerBuiltin(PanelEntry{ID: id, DefaultVisible: true})
+	}
 }

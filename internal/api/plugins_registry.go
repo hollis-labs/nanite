@@ -45,6 +45,15 @@ type RegistrySlotEntry struct {
 	Props     map[string]interface{} `json:"props,omitempty"`
 }
 
+// RegistryPanelEntry holds Nanite presentation metadata for a panel export.
+type RegistryPanelEntry struct {
+	Title          string `json:"title"`
+	Description    string `json:"description,omitempty"`
+	Icon           string `json:"icon,omitempty"`
+	DefaultVisible bool   `json:"default_visible"`
+	Order          int    `json:"order"`
+}
+
 // RegistryResponse uses the released host-neutral browser wire contract.
 type RegistryResponse = registry.Response
 
@@ -211,6 +220,15 @@ func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) (Registry
 			if contributionErr := addRegistryContribution(&response, "slot", string(slot)+"/"+entry.ID, entry.PluginID, entry.Component, metadata); contributionErr != nil {
 				return registry.Response{}, contributionErr
 			}
+		}
+	}
+	for _, panel := range host.GetPanels() {
+		if panel.PluginID == "" || panel.Component == "" {
+			continue
+		}
+		metadata := RegistryPanelEntry{Title: panel.Title, Description: panel.Description, Icon: panel.Icon, DefaultVisible: panel.DefaultVisible, Order: panel.Order}
+		if contributionErr := addRegistryContribution(&response, "panel", panel.ID, panel.PluginID, panel.Component, metadata); contributionErr != nil {
+			return registry.Response{}, contributionErr
 		}
 	}
 	return response, nil

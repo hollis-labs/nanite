@@ -103,3 +103,13 @@ tab IDs separate from built-in and pinned-card IDs. `session_id` always reflects
 the active session and overrides a stale value in manifest props. Unload removes
 the plugin tab immediately; a selected unloaded tab shows an unavailable message
 until another tab is selected. A failed render is contained to that tab.
+
+Manifest `panels` contribute explicit exports under the browser registry's
+`panel` kind. The right rail reconciles those declarations and loaded
+`right-rail-tab` slots into its panel preferences, then renders the owning
+export with the active `session_id`. Unload removes both the view and its
+in-memory panel definition. The host reserves core panel IDs before discovery
+and refuses conflicting ownership across panels and rail slots; the browser
+and panel store enforce core precedence too. Render errors are contained to the
+plugin view. Error recovery observes the changed export without remounting a
+healthy view when another registry contribution changes.

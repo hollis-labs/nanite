@@ -7,7 +7,7 @@ import type { PluginInstallReview, PluginInstallReviewResponse } from "@/lib/typ
 function declarations(review: PluginInstallReview): Map<string, string> {
   return new Map([
     ["Executable", `${review.entrypoint} ${JSON.stringify(review.arguments)}`],
-    ...review.capabilities.map((cap) => [`Capability: ${cap.name}`, `${cap.reason}${cap.optional ? " (optional)" : ""}`] as const),
+    ...review.capabilities.map((cap) => [`Capability: ${cap.name}`, `${cap.reason ?? ""}${cap.optional ? " (optional)" : ""}${cap.metadata !== undefined ? `\nRequested access:\n${JSON.stringify(cap.metadata, null, 2)}` : ""}`] as const),
     ...review.secrets.map((secret) => [`Secret: ${secret.name}`, `${secret.environment || "Plugin keychain"}${secret.required ? " (required)" : " (optional)"}`] as const),
     ...review.environment.map((name) => [`Configuration environment: ${name}`, name] as const),
     ...review.tools.map((tool) => [`Tool: ${tool.name}`, tool.effect] as const),
@@ -42,8 +42,8 @@ export function PluginReviewDialog({ review, busy, onCancel, onApprove }: {
             const changed = review.previous !== null && before !== after;
             return <div key={name} className="rounded-md border p-2">
               <p className="font-medium">{name}{changed ? (before === undefined ? " · Added" : after === undefined ? " · Removed" : " · Changed") : ""}</p>
-              {changed && before !== undefined && <p className="text-fg-muted">Before: {before}</p>}
-              {after !== undefined && <p>{changed ? "After: " : ""}{after}</p>}
+              {changed && before !== undefined && <p className="text-fg-muted whitespace-pre-wrap break-words">Before: {before}</p>}
+              {after !== undefined && <p className="whitespace-pre-wrap break-words">{changed ? "After: " : ""}{after}</p>}
             </div>;
           })}
           <p className="text-xs break-all text-fg-muted">Bundle: {review.review.bundle_digest}</p>

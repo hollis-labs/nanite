@@ -10,7 +10,7 @@ import (
 )
 
 // basicAuthMiddleware returns a middleware that enforces HTTP Basic Auth on /api/ routes
-// (except /api/health) when NANITE_AUTH_USER and NANITE_AUTH_PASSWORD env vars are set.
+// (except health and routes enforcing their own credentials) when NANITE_AUTH_USER and NANITE_AUTH_PASSWORD env vars are set.
 // If neither is set, the middleware is a no-op (local dev mode).
 func basicAuthMiddleware(next http.Handler) http.Handler {
 	user, pass, enabled := basicAuthCredentials()
@@ -33,6 +33,14 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		// (see api.handleSelfToolCall), so the loopback gate — not basic
 		// auth — is this route's trust boundary.
 		if r.URL.Path == "/api/tools/call" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Plugin read queries authenticate their connection bearer at the core
+		// handler. Requiring Basic Auth here would disclose the user's broader
+		// credentials to plugins and prevent their scoped grant from working.
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/plugin-host/query/") {
 			next.ServeHTTP(w, r)
 			return
 		}

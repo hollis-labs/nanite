@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/go-safefs/atomicfile"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/pkg/pluginapi"
 	"github.com/hollis-labs/plugin-sdk/manifest"
 	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
 )
@@ -56,8 +57,9 @@ type InstallApproval struct {
 
 // Capability vocabulary belongs to the host, not to the shared SDK.
 var capabilityEnvironment = map[string][]string{
-	"ssh_agent":     {"SSH_AUTH_SOCK"},
-	"docker_socket": {"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"},
+	pluginapi.CapabilityReadOnlyQuery: {},
+	"ssh_agent":                       {"SSH_AUTH_SOCK"},
+	"docker_socket":                   {"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"},
 }
 
 func BuildInstallReview(ctx context.Context, directory string) (InstallReview, error) {
@@ -77,6 +79,11 @@ func BuildInstallReview(ctx context.Context, directory string) (InstallReview, e
 	for _, request := range common.Capabilities {
 		if _, known := capabilityEnvironment[request.Name]; !known && !request.Optional {
 			return InstallReview{}, fmt.Errorf("unknown required capability %q", request.Name)
+		}
+		if request.Name == pluginapi.CapabilityReadOnlyQuery {
+			if _, scopeErr := pluginapi.DecodeQueryScope(request.Metadata); scopeErr != nil {
+				return InstallReview{}, fmt.Errorf("readonly.query scope: %w", scopeErr)
+			}
 		}
 		review.Capabilities = append(review.Capabilities, request)
 	}
@@ -273,11 +280,13 @@ func VerifyInstallApproval(ctx context.Context, directory string) (*InstallAppro
 
 // ReviewedLaunch contains only grants and configuration accepted for these bytes.
 type ReviewedLaunch struct {
-	Config       map[string]string
-	Secrets      []string
-	Environment  []string
-	Granted      []string
-	ReviewDigest string
+	QueryScope    *pluginapi.QueryScope
+	QueryOptional bool
+	Config        map[string]string
+	Secrets       []string
+	Environment   []string
+	Granted       []string
+	ReviewDigest  string
 }
 
 // PluginSecretKey confines keychain lookups to this plugin's declared secret.
@@ -333,6 +342,14 @@ func ResolveReviewedLaunch(ctx context.Context, directory string, overrides ...m
 		keys, known := capabilityEnvironment[request.Name]
 		if !known {
 			continue
+		}
+		if request.Name == pluginapi.CapabilityReadOnlyQuery {
+			scope, scopeErr := pluginapi.DecodeQueryScope(request.Metadata)
+			if scopeErr != nil {
+				return ReviewedLaunch{}, scopeErr
+			}
+			result.QueryScope = &scope
+			result.QueryOptional = request.Optional
 		}
 		result.Granted = append(result.Granted, request.Name)
 		for _, key := range keys {

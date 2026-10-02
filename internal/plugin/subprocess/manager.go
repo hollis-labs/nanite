@@ -2,6 +2,7 @@ package subprocess
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -40,6 +41,9 @@ func (s ProcessState) String() string {
 
 // ManagerConfig configures the subprocess manager.
 type ManagerConfig struct {
+	Identity json.RawMessage // opaque host-verified init claims
+	OnUnload func()          // release host-owned connection resources on unload or failed init
+
 	Command     string                      // executable path
 	Args        []string                    // command-line arguments
 	Env         []string                    // explicit host-approved "KEY=VALUE" pairs; never ambient inheritance
@@ -129,7 +133,12 @@ func (m *Manager) Start(ctx context.Context, init InitParams) (*Transport, error
 		OnExit: func(info pluginhost.ExitInfo, restarting bool) {
 			m.recordCrash(fmt.Errorf("plugin exited: code %d, signal %s", info.Code, info.Signal))
 		},
-		OnGiveUp: m.recordCrash,
+		OnGiveUp: func(err error) {
+			m.recordCrash(err)
+			if m.cfg.OnUnload != nil {
+				m.cfg.OnUnload()
+			}
+		},
 	})
 	m.supervisor = supervisor
 	transport := &Transport{secrets: append([]string(nil), m.cfg.Secrets...), current: func() *pluginhost.Conn {
@@ -168,6 +177,10 @@ func (m *Manager) recordCrash(err error) {
 func (m *Manager) Stop() error { return m.stop(context.Background()) }
 
 func (m *Manager) stop(ctx context.Context) error {
+	if m.cfg.OnUnload != nil {
+		m.cfg.OnUnload()
+		defer m.cfg.OnUnload() // Stop joins the supervisor before final credential cleanup.
+	}
 	m.mu.Lock()
 	supervisor := m.supervisor
 	m.state = StateStopping

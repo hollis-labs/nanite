@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -243,6 +245,9 @@ func reviewPluginInstall(ctx context.Context, review plugin.InstallReview, previ
 	fmt.Printf("Executable: %s %q\n", review.Entrypoint, review.Arguments)
 	for _, capability := range review.Capabilities {
 		fmt.Printf("Capability: %s — %s (optional: %t)\n", capability.Name, capability.Reason, capability.Optional)
+		if len(capability.Metadata) != 0 {
+			fmt.Printf("  Requested access: %s\n", compactCapabilityMetadata(capability.Metadata))
+		}
 	}
 	for _, secret := range review.Secrets {
 		fmt.Printf("Secret: %s (environment: %s, required: %t)\n", secret.Name, secret.Environment, secret.Required)
@@ -267,7 +272,7 @@ func reviewPluginInstall(ctx context.Context, review plugin.InstallReview, previ
 func installReviewDeclarations(review plugin.InstallReview) map[string]string {
 	declarations := map[string]string{"Executable": fmt.Sprintf("%s %q", review.Entrypoint, review.Arguments)}
 	for _, capability := range review.Capabilities {
-		declarations["Capability "+capability.Name] = fmt.Sprintf("%s (optional: %t)", capability.Reason, capability.Optional)
+		declarations["Capability "+capability.Name] = fmt.Sprintf("%s (optional: %t); requested access: %s", capability.Reason, capability.Optional, compactCapabilityMetadata(capability.Metadata))
 	}
 	for _, secret := range review.Secrets {
 		declarations["Secret "+secret.Name] = fmt.Sprintf("environment: %s, required: %t", secret.Environment, secret.Required)
@@ -307,4 +312,15 @@ func installReviewChanges(previous, current plugin.InstallReview) []string {
 		}
 	}
 	return changes
+}
+
+func compactCapabilityMetadata(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return "none"
+	}
+	var output bytes.Buffer
+	if err := json.Compact(&output, raw); err != nil {
+		return "invalid declaration"
+	}
+	return output.String()
 }

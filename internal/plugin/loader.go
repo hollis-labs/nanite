@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/pkg/pluginapi"
 	fplugin "github.com/hollis-labs/plugin-sdk"
 )
 
@@ -303,7 +305,40 @@ func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, h
 	mgrCfg.Secrets = launch.Secrets
 	mgrCfg.Env = launch.Environment
 	mgrCfg.Granted = launch.Granted
-	mgrCfg.BeforeSpawn = func(ctx context.Context) error { return CheckAcceptedBundle(ctx, dp.Dir, launch.ReviewDigest) }
+	var queryGrant *pluginapi.QueryGrant
+	if launch.QueryScope != nil {
+		var grant pluginapi.QueryGrant
+		var grantErr error
+		if host == nil {
+			grantErr = fmt.Errorf("host read-only queries are unavailable")
+		} else {
+			grant, grantErr = host.prepareHostQueryGrant(m.Identifier(), *launch.QueryScope)
+		}
+		if grantErr != nil {
+			if !launch.QueryOptional {
+				return nil, grantErr
+			}
+			mgrCfg.Granted = slices.DeleteFunc(mgrCfg.Granted, func(name string) bool { return name == pluginapi.CapabilityReadOnlyQuery })
+		} else {
+			identity, identityErr := queryGrantIdentity(grant)
+			if identityErr != nil {
+				return nil, identityErr
+			}
+			queryGrant = &grant
+			mgrCfg.Identity = identity
+			mgrCfg.Secrets = append(mgrCfg.Secrets, grant.Token)
+			mgrCfg.OnUnload = func() { host.revokeHostQueryGrant(grant.Token) }
+		}
+	}
+	mgrCfg.BeforeSpawn = func(ctx context.Context) error {
+		if checkErr := CheckAcceptedBundle(ctx, dp.Dir, launch.ReviewDigest); checkErr != nil {
+			return checkErr
+		}
+		if queryGrant != nil {
+			return host.bindHostQueryGrant(ctx, *queryGrant)
+		}
+		return nil
+	}
 
 	return subprocess.NewSubprocessPlugin(dp.Dir, m.Identifier(), launch.Config, mgrCfg), nil
 }

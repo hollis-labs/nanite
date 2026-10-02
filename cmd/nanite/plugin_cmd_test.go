@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
 
 	"github.com/hollis-labs/nanite/internal/plugin/install"
 
@@ -140,6 +143,17 @@ func TestInstallReviewUpgradeDiff(t *testing.T) {
 	for _, expected := range []string{"Changed Executable", "Removed Secret removed", "Added Secret added", "Changed Tool query: read → write"} {
 		if !strings.Contains(changes, expected) {
 			t.Fatalf("missing %q in %s", expected, changes)
+		}
+	}
+}
+
+func TestInstallReviewQueryScopeUpgradeDiff(t *testing.T) {
+	before := plugin.InstallReview{Capabilities: []sdkprocess.CapabilityRequest{{Name: "readonly.query", Metadata: json.RawMessage(`{"resources":["sessions"],"session_ids":["allowed"]}`)}}}
+	after := plugin.InstallReview{Capabilities: []sdkprocess.CapabilityRequest{{Name: "readonly.query", Metadata: json.RawMessage(`{"resources":["sessions"],"all_sessions":true}`)}}}
+	changes := strings.Join(installReviewChanges(before, after), "\n")
+	for _, wanted := range []string{"Changed Capability readonly.query", `"session_ids":["allowed"]`, `"all_sessions":true`} {
+		if !strings.Contains(changes, wanted) {
+			t.Fatalf("missing %s in %s", wanted, changes)
 		}
 	}
 }

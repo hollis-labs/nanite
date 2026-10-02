@@ -53,7 +53,7 @@ func parseSnippets(t *testing.T, text string) map[string]any {
 // expected snippet.
 func TestChatSearch_BasicMatch(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const sessID = "sess-search-basic"
 	seedSession(t, s, sessID)
@@ -90,7 +90,7 @@ func TestChatSearch_BasicMatch(t *testing.T) {
 // messages.
 func TestChatSearch_ScopeActive(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const sessID = "sess-search-scope-active"
 	seedSession(t, s, sessID)
@@ -121,7 +121,7 @@ func TestChatSearch_ScopeActive(t *testing.T) {
 // summary blobs.
 func TestChatSearch_ScopeCompacted(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const sessID = "sess-search-scope-compacted"
 	seedSession(t, s, sessID)
@@ -152,7 +152,7 @@ func TestChatSearch_ScopeCompacted(t *testing.T) {
 // compacted messages.
 func TestChatSearch_ScopeAll(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const sessID = "sess-search-scope-all"
 	seedSession(t, s, sessID)
@@ -178,7 +178,7 @@ func TestChatSearch_ScopeAll(t *testing.T) {
 // TestChatSearch_LimitEnforced verifies the limit parameter is respected.
 func TestChatSearch_LimitEnforced(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const sessID = "sess-search-limit"
 	seedSession(t, s, sessID)
@@ -205,7 +205,7 @@ func TestChatSearch_LimitEnforced(t *testing.T) {
 // TestChatSearch_MaxLimitCapped verifies that a limit over 100 is capped at 100.
 func TestChatSearch_MaxLimitCapped(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const sessID = "sess-search-maxlimit"
 	seedSession(t, s, sessID)
@@ -235,7 +235,7 @@ func TestChatSearch_MaxLimitCapped(t *testing.T) {
 // there are no matching messages.
 func TestChatSearch_NoMatch(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const sessID = "sess-search-nomatch"
 	seedSession(t, s, sessID)
@@ -257,7 +257,7 @@ func TestChatSearch_NoMatch(t *testing.T) {
 // TestChatSearch_MissingQuery verifies an error result for missing query.
 func TestChatSearch_MissingQuery(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	ctx := mcp.WithSessionID(context.Background(), "sess-any")
 	result, err := st.CallTool(ctx, "chat_search", map[string]any{})
@@ -273,7 +273,7 @@ func TestChatSearch_MissingQuery(t *testing.T) {
 // session in context.
 func TestChatSearch_MissingSessionID(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	result, err := st.CallTool(context.Background(), "chat_search", map[string]any{
 		"query": "anything",
@@ -289,7 +289,7 @@ func TestChatSearch_MissingSessionID(t *testing.T) {
 // TestChatSearch_CaseInsensitive verifies the search is case-insensitive.
 func TestChatSearch_CaseInsensitive(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const sessID = "sess-search-case"
 	seedSession(t, s, sessID)

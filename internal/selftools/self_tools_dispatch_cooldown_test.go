@@ -53,7 +53,7 @@ func TestMatchDispatchToAgentReflex_RecurrenceOverride_SuppressesRefire(t *testi
 		t.Fatalf("InsertAgentReflex: %v", err)
 	}
 
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const msg = "probe-cooldown-token please route this"
 

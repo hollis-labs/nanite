@@ -123,7 +123,7 @@ func TestMatchDispatchToAgentReflex_RunScopedReflex_IsolatedToItsOwnRun(t *testi
 		t.Fatalf("InsertAgentReflex (global): %v", err)
 	}
 
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	t.Run("fires for its own run's session", func(t *testing.T) {
 		const msg = "probe-run-scoped-mcp-token please route this"
@@ -213,7 +213,7 @@ func TestMatchDispatchToAgentReflex_NoTeamRunMembersTable_DegradesGracefully(t *
 		t.Fatalf("InsertAgentReflex: %v", err)
 	}
 
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const msg = "probe-no-team-table-mcp-token please route this"
 	hints := st.matchDispatchToAgentReflex(ctx, "sess-no-team-table-mcp", "agent-no-team-table-mcp", msg)

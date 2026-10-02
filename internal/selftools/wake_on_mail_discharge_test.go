@@ -37,7 +37,7 @@ func TestWakeOnMail_PrescribedSequenceDischargesTheTrigger(t *testing.T) {
 	// measure nothing. The guard below would catch it, but the wiring is the
 	// thing worth stating.
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 	st.MessagingTools.Service = mailboxadapter.New(s).Service
 
 	const (

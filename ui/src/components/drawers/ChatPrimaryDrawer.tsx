@@ -3,15 +3,13 @@
  *
  * Replaces the old `BottomChatDrawer` chrome at the top of the chat column.
  * Tab strip docks to the bottom edge so the strip itself is the handle when
- * the drawer is closed. Documents / Pins / PinnedCardTab bodies are lifted
+ * the drawer is closed. Documents / PinnedCardTab bodies are lifted
  * verbatim from `BottomChatDrawer.tsx`. Tools renders the existing `ToolCallItem`
  * list, matching today's `ToolCallDrawer` body layout.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowDownLeft,
-  ArrowUpRight,
   Eye,
   EyeOff,
   FileText,
@@ -20,7 +18,6 @@ import {
   Image as ImageIcon,
   Inbox,
   Package,
-  Pin,
   PinOff,
   Plus,
   StickyNote,
@@ -32,17 +29,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EnvelopeRenderer } from "@/components/chat/envelopes/EnvelopeRenderer";
 import { ToolCallItem } from "@/components/chat/ToolCallItem";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ScopeChip, type ScopeFilter, ScopeFilterChip } from "@/components/work/ScopeChip";
 import { api } from "@/lib/api";
 import { resolveIcon } from "@/lib/icons";
 import { PluginDrawerTabBody, usePluginDrawerTabs } from "./PluginDrawerTab";
 import type {
-  AgentStateScope,
   Document,
   DrawerCardType,
   DrawerPinnedCard,
   Envelope,
-  PinnedContent,
 } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { useIsStreaming, useToolCalls } from "@/stores/useChatStore";
@@ -131,12 +125,6 @@ export function ChatPrimaryDrawer() {
               label="Tools"
               runningPip={hasRunningTool && isStreaming}
               onClick={() => setDrawer({ activeTab: "tools" })}
-            />
-            <PrimaryTabButton
-              active={activeTab === "pins"}
-              icon={<Pin className="w-3.5 h-3.5" />}
-              label="Pins"
-              onClick={() => setDrawer({ activeTab: "pins" })}
             />
             {pluginTabs.map((entry) => {
               const Icon = resolveIcon(entry.icon);
@@ -291,8 +279,6 @@ function DrawerBody({
       return <DocumentsTab />;
     case "tools":
       return <ToolsTab />;
-    case "pins":
-      return <PinsTab />;
     default:
       if (activeTab.startsWith("pin:")) {
         const card = pinnedCards.find((c) => `pin:${c.id}` === activeTab);
@@ -678,182 +664,6 @@ function ToolsTab() {
       {toolCalls.map((tc) => (
         <ToolCallItem key={tc.id} toolCall={tc} variant="drawer" />
       ))}
-    </div>
-  );
-}
-
-// ── Pins tab ─────────────────────────────────────────────────────────────────
-// Lifted verbatim from BottomChatDrawer.tsx's `PinsTab` (and its helpers
-// PinsScopeSection, PinRow). No logic changes.
-
-function PinsTab() {
-  const activeSessionId = useAppStore((s) => s.activeSessionId);
-  const activeProjectId = useAppStore((s) => s.activeProjectId);
-  const queryClient = useQueryClient();
-  const [filter, setFilter] = useState<ScopeFilter>("all");
-
-  const { data: pins = [], isLoading } = useQuery({
-    queryKey: ["pins", activeSessionId],
-    queryFn: () => api.listPins(activeSessionId!),
-    enabled: !!activeSessionId,
-    refetchInterval: 5000, // refresh frequently — pins can be set during a turn
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.deletePin(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["pins", activeSessionId] });
-    },
-  });
-
-  const scopeMutation = useMutation({
-    mutationFn: ({
-      id,
-      scope,
-      projectId,
-    }: {
-      id: string;
-      scope: AgentStateScope;
-      projectId?: string;
-    }) => api.updatePinScope(id, scope, projectId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["pins", activeSessionId] });
-    },
-  });
-
-  if (!activeSessionId) {
-    return <EmptyState message="No active session" />;
-  }
-
-  // Partition pins by scope. Filter narrows to a specific tier when set.
-  const sessionPins = pins.filter((p) => p.scope === "session");
-  const projectPins = pins.filter((p) => p.scope === "project");
-  const showSession = filter === "all" || filter === "session";
-  const showProject = filter === "all" || filter === "project";
-
-  const promote = (id: string) => {
-    if (!activeProjectId) return;
-    scopeMutation.mutate({ id, scope: "project", projectId: activeProjectId });
-  };
-  const demote = (id: string) => {
-    scopeMutation.mutate({ id, scope: "session", projectId: "" });
-  };
-
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-3 py-1 shrink-0 gap-2">
-        <p className="text-xs text-fg-muted">
-          Pinned context — survives compaction · set by agent via{" "}
-          <code className="font-mono text-fg-faint">nanite_pin</code>
-        </p>
-        <ScopeFilterChip filter={filter} onChange={setFilter} />
-      </div>
-      <ScrollArea className="flex-1">
-        {isLoading && <div className="px-3 py-2 text-xs text-fg-faint">Loading…</div>}
-        {!isLoading && pins.length === 0 && (
-          <div className="px-3 py-4 text-xs text-fg-faint italic">
-            No pinned content yet. The agent can pin content using{" "}
-            <code className="font-mono">nanite_pin</code>.
-          </div>
-        )}
-        {showSession && sessionPins.length > 0 && (
-          <PinsScopeSection label="This Session">
-            <div className="space-y-1">
-              {sessionPins.map((pin) => (
-                <PinRow
-                  key={pin.id}
-                  pin={pin}
-                  canPromote={!!activeProjectId}
-                  canDemote={false}
-                  onPromote={promote}
-                  onDemote={demote}
-                  onDelete={(id) => deleteMutation.mutate(id)}
-                />
-              ))}
-            </div>
-          </PinsScopeSection>
-        )}
-        {showProject && projectPins.length > 0 && (
-          <PinsScopeSection label="This Project">
-            <div className="space-y-1">
-              {projectPins.map((pin) => (
-                <PinRow
-                  key={pin.id}
-                  pin={pin}
-                  canPromote={false}
-                  canDemote
-                  onPromote={promote}
-                  onDemote={demote}
-                  onDelete={(id) => deleteMutation.mutate(id)}
-                />
-              ))}
-            </div>
-          </PinsScopeSection>
-        )}
-      </ScrollArea>
-    </div>
-  );
-}
-
-function PinsScopeSection({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="px-2 pt-2">
-      <div className="px-1 mb-1 text-[10px] uppercase tracking-wider text-fg-faint">{label}</div>
-      {children}
-    </div>
-  );
-}
-
-interface PinRowProps {
-  pin: PinnedContent;
-  canPromote: boolean;
-  canDemote: boolean;
-  onPromote: (id: string) => void;
-  onDemote: (id: string) => void;
-  onDelete: (id: string) => void;
-}
-
-function PinRow({ pin, canPromote, canDemote, onPromote, onDemote, onDelete }: PinRowProps) {
-  return (
-    <div className="group flex items-start gap-2 px-2 py-2 rounded-lg border border-border bg-surface text-xs">
-      <Pin className="w-3 h-3 shrink-0 mt-0.5 text-fg-faint" />
-      <div className="flex-1 min-w-0">
-        <p className="text-fg leading-relaxed break-words">{pin.content}</p>
-        <div className="flex items-center gap-2 mt-1">
-          <ScopeChip scope={pin.scope} />
-          {pin.agent_id && <span className="text-[10px] text-fg-faint">by {pin.agent_id}</span>}
-        </div>
-      </div>
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        {canPromote && (
-          <button
-            type="button"
-            onClick={() => onPromote(pin.id)}
-            className="p-0.5 rounded text-fg-faint hover:text-primary"
-            title="Promote to project"
-          >
-            <ArrowUpRight className="w-3 h-3" />
-          </button>
-        )}
-        {canDemote && (
-          <button
-            type="button"
-            onClick={() => onDemote(pin.id)}
-            className="p-0.5 rounded text-fg-faint hover:text-fg"
-            title="Demote to session"
-          >
-            <ArrowDownLeft className="w-3 h-3" />
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => onDelete(pin.id)}
-          className="p-0.5 rounded text-fg-faint hover:text-danger transition-colors"
-          title="Unpin"
-        >
-          <PinOff className="w-3 h-3" />
-        </button>
-      </div>
     </div>
   );
 }

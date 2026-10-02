@@ -95,12 +95,12 @@ func TestNaniteToolList_RegistrationAndShape(t *testing.T) {
 
 // TestNaniteToolList_FilterNarrowsByNameAndSummary asserts the filter
 // is case-insensitive and matches against BOTH the tool name and its
-// summary, using the existing context pin tools.
+// summary, using the existing schedule tools.
 func TestNaniteToolList_FilterNarrowsByNameAndSummary(t *testing.T) {
 	st := newSelfTools(t)
-	// Substring match in NAME — `context_pin`.
+	// Substring match in NAME — `schedule_create`.
 	res, err := st.CallTool(context.Background(), "tool_list", map[string]any{
-		"filter": "pin",
+		"filter": "schedule",
 	})
 	if err != nil {
 		t.Fatalf("filter call: %v", err)
@@ -119,26 +119,26 @@ func TestNaniteToolList_FilterNarrowsByNameAndSummary(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if out.Count == 0 {
-		t.Fatal("expected ≥1 match for filter=pin (context_pin must surface)")
+		t.Fatal("expected ≥1 match for filter=schedule (schedule_create must surface)")
 	}
-	sawContextPin := false
+	sawScheduleList := false
 	for _, tool := range out.Tools {
-		if tool.Name == "context_pin" {
-			sawContextPin = true
+		if tool.Name == "schedule_create" {
+			sawScheduleList = true
 		}
 		// Every survivor must contain the filter token in name OR summary.
-		if !strings.Contains(strings.ToLower(tool.Name), "pin") &&
-			!strings.Contains(strings.ToLower(tool.Summary), "pin") {
-			t.Errorf("filter leaked tool %q without 'pin' in name or summary (summary=%q)", tool.Name, tool.Summary)
+		if !strings.Contains(strings.ToLower(tool.Name), "schedule") &&
+			!strings.Contains(strings.ToLower(tool.Summary), "schedule") {
+			t.Errorf("filter leaked tool %q without 'schedule' in name or summary (summary=%q)", tool.Name, tool.Summary)
 		}
 	}
-	if !sawContextPin {
-		t.Error("filter=pin must surface context_pin (the c120 motivating case)")
+	if !sawScheduleList {
+		t.Error("filter=schedule must surface schedule_create (the c120 motivating case)")
 	}
 
-	// Case-insensitive: "PIN" should match the same set as "pin".
+	// Case-insensitive: "SCHEDULE" should match the same set as "schedule".
 	resUC, err := st.CallTool(context.Background(), "tool_list", map[string]any{
-		"filter": "PIN",
+		"filter": "SCHEDULE",
 	})
 	if err != nil {
 		t.Fatalf("uppercase filter call: %v", err)

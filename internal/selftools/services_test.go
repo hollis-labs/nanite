@@ -51,15 +51,6 @@ func newTestSelfToolsTransport(st *store.Store) *SelfToolsTransport {
 	return NewSelfToolsTransport(st, testReadServices(st), testWriteServices(st))
 }
 
-type testPinWriter struct{ *store.Store }
-
-func (s testPinWriter) Create(ctx context.Context, pin store.PinnedContent) error {
-	return s.CreatePinnedContent(ctx, pin)
-}
-func (s testPinWriter) Delete(ctx context.Context, id string) error {
-	return s.DeletePinnedContent(ctx, id)
-}
-
 type testScheduleWriter struct{ *store.Store }
 
 func (s testScheduleWriter) InsertPrepared(ctx context.Context, row store.AgentSchedule) error {
@@ -69,7 +60,7 @@ func testWriteServices(st *store.Store) WriteServices {
 	if st == nil {
 		return WriteServices{}
 	}
-	return WriteServices{Pins: testPinWriter{st}, Schedules: testScheduleWriter{st}, Membership: st, Dispatch: st, Events: st}
+	return WriteServices{Schedules: testScheduleWriter{st}, Membership: st, Dispatch: st, Events: st}
 }
 
 // fixtureStore is only for seeding and inspecting package-local test fixtures.

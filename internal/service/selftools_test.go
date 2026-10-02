@@ -105,16 +105,6 @@ func TestSelfToolsWriteServiceWiring(t *testing.T) {
 		}
 		return result.Content[0].Text
 	}
-	call("context_pin", map[string]any{"content": "wired pin", "scope": "project"})
-	pins, err := st.ListPinnedContent(ctx, session.ID)
-	if err != nil || len(pins) != 1 || pins[0].ProjectID != project.ID || pins[0].Content != "wired pin" {
-		t.Fatalf("pins: %+v %v", pins, err)
-	}
-	call("context_unpin", map[string]any{"pin_id": pins[0].ID})
-	pins, err = st.ListPinnedContent(ctx, session.ID)
-	if err != nil || len(pins) != 0 {
-		t.Fatalf("unpin: %+v %v", pins, err)
-	}
 	call("schedule_create", map[string]any{"name": "wired schedule", "message": "wake me", "kind": "one_shot"})
 	schedules, err := st.ListAgentSchedules(ctx, agent.ID)
 	if err != nil || len(schedules) != 1 || schedules[0].NextRun == "" || !strings.HasPrefix(schedules[0].ID, "self-sched-") {

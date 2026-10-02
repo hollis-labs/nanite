@@ -356,12 +356,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}/context-prompt", a.handleGetSessionContextPrompt)
 	mux.HandleFunc("PUT /api/sessions/{id}/context-prompt", a.handleSetSessionContextPrompt)
 
-	// Pinned content (J11, CW-20260426-0009)
-	mux.HandleFunc("GET /api/sessions/{id}/pins", a.handleListPins)
-	mux.HandleFunc("DELETE /api/pins/{id}", a.handleDeletePin)
-	// D2 (CW-20260428-0015): pin scope promote/demote.
-	mux.HandleFunc("PATCH /api/pins/{id}/scope", a.handleUpdatePinScope)
-
 	// Bottom-drawer pinned cards (C1, CW-20260428-0012)
 	mux.HandleFunc("GET /api/sessions/{id}/drawer-cards", a.handleListBottomDrawerCards)
 	mux.HandleFunc("POST /api/sessions/{id}/drawer-cards", a.handlePinBottomDrawerCard)

@@ -22,11 +22,16 @@ func NewPluginCoreData(st *store.Store) *PluginCoreData {
 	return &PluginCoreData{store: st, dataDir: brand.PluginDataDir}
 }
 func (adopter *PluginCoreData) AdoptPluginCoreData(ctx context.Context, owner string) error {
-	features := map[string]string{"nanite.bookmarks": "bookmarks", "nanite.reminders": "reminders"}
-	feature, known := features[owner]
+	features := map[string]struct{ feature, table string }{
+		"nanite.bookmarks": {"bookmarks", "bookmarks"},
+		"nanite.reminders": {"reminders", "reminders"},
+		"nanite.pins":      {"pins", "pinned_content"},
+	}
+	spec, known := features[owner]
 	if !known {
 		return nil
 	}
+	feature := spec.feature
 	if adopter.store == nil {
 		return fmt.Errorf("plugin core data: store unavailable")
 	}
@@ -46,7 +51,7 @@ func (adopter *PluginCoreData) AdoptPluginCoreData(ctx context.Context, owner st
 	}
 	defer func() { _ = tx.Rollback() }()
 	var exists bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)`, feature).Scan(&exists); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)`, spec.table).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
@@ -77,7 +82,7 @@ func (adopter *PluginCoreData) AdoptPluginCoreData(ctx context.Context, owner st
 			return fmt.Errorf("plugin core data: %s table exists beside committed receipt", feature)
 		}
 	}
-	if _, err = dataexport.ExportAndDrop(ctx, tx, dataexport.Spec{PluginID: owner, Feature: feature, SourceID: source, Table: feature}, directory); err != nil {
+	if _, err = dataexport.ExportAndDrop(ctx, tx, dataexport.Spec{PluginID: owner, Feature: feature, SourceID: source, Table: spec.table}, directory); err != nil {
 		return err
 	}
 	return tx.Commit()

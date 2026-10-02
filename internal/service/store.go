@@ -202,15 +202,6 @@ type HandoffStashStore interface {
 	GetLatestStashForSession(ctx context.Context, sessionID string) (store.HandoffStash, error)
 }
 
-// PinnedContentStore covers pinned content persistence (J11, CW-20260426-0009; D1, CW-20260428-0014).
-type PinnedContentStore interface {
-	CreatePinnedContent(ctx context.Context, p store.PinnedContent) error
-	ListPinnedContent(ctx context.Context, sessionID string) ([]store.PinnedContent, error)
-	DeletePinnedContent(ctx context.Context, id string) error
-	UpdatePinScope(ctx context.Context, id, scope, projectID string) error
-	ClearSessionPins(ctx context.Context, sessionID string) error
-}
-
 // CompactionEventStore covers structured compaction-event persistence and
 // retrieval (P8 CompactionContract — write side CW-20260420-0027 Part C,
 // read side CW-20260420-0025 Part A disclosure injection).
@@ -256,7 +247,6 @@ type Store interface {
 	HandoffStashStore
 	CompactionEventStore
 	EnvelopeStore
-	PinnedContentStore
 	SubagentRunsReader
 
 	// AgentRuntimeProviderSessionID returns the captured provider session id

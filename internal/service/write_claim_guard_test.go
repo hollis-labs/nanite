@@ -144,7 +144,7 @@ func TestIsWriteCapableNameHeuristic(t *testing.T) {
 	for name, want := range map[string]bool{
 		// writers with no CRUD verb, one or two per token class
 		"handoff_stash": true, "handoff_approve": true, "subagent_spawn": true, "builder_step": true,
-		"context_pin": true, "install_home": true, "mux_message_notify": true, "mux_message_consume": true,
+		"install_home": true, "mux_message_notify": true, "mux_message_consume": true,
 		"mux_message_mark_read": true, "tether_group_mark_read": true, "tether_group_leave": true,
 		"torque_session_checkpoint": true, "torque_task_checkpoint_emit": true, "torque_task_subtodo_done": true,
 		"cerberus_docker_up": true, "cerberus_docker_down": true, "cerberus_resource_reload": true,

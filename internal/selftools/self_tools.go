@@ -1064,57 +1064,6 @@ the current turn for subsequent writes.
 				"required": []string{"mode"},
 			},
 		},
-		{
-			Name: "context_pin",
-			Description: "Pin content so the system keeps it in context across turns (session scope) or across sessions in a project (project scope). " +
-				"Pinned content rides in the SlotUserContext budget and is visible in the bottom drawer Pins tab.\n\n" +
-				"**When to use:** When you want to keep a piece of context visible throughout the conversation or across sessions — " +
-				"e.g. a key decision, a reference snippet, a current task description.\n\n" +
-				"**Scopes (D1, CW-20260428-0014):**\n" +
-				"- `turn`: ephemeral, cleared after the current turn (not stored in DB).\n" +
-				"- `session` (default): survives compaction, cleared at session end.\n" +
-				"- `project`: persists for the project; surfaces in any session of the same project. Requires project_id (resolved from the current session's project when omitted).\n\n" +
-				"**Budget:** Pinned content shares the 2000-token SlotUserContext budget. " +
-				"Oldest pins truncate first when over budget. Keep pins thin.\n\n" +
-				"**Output shape:** `{pin_id, scope, status: 'pinned'}`.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"content": map[string]any{
-						"type":        "string",
-						"description": "Content to pin. Keep thin — shares the 2000-token SlotUserContext budget.",
-					},
-					"scope": map[string]any{
-						"type":        "string",
-						"enum":        []string{"turn", "session", "project"},
-						"description": "Pin lifetime. Default: session.",
-					},
-					"project_id": map[string]any{
-						"type":        "string",
-						"description": "Project ID — required when scope=project. Auto-resolved from the current session's project when omitted.",
-					},
-				},
-				"required": []string{"content"},
-			},
-		},
-		{
-			Name: "context_unpin",
-			Description: "Remove a pinned item by ID, freeing its context budget.\n\n" +
-				"**When to use:** When pinned content is no longer needed — after the user acknowledges it, " +
-				"after the task it describes is complete, or when the budget needs freeing.\n\n" +
-				"**Required context:** pin_id from a prior context_pin call.\n\n" +
-				"**Output shape:** `{pin_id, status: 'unpinned'}`.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"pin_id": map[string]any{
-						"type":        "string",
-						"description": "Pin ID to remove (from prior context_pin call).",
-					},
-				},
-				"required": []string{"pin_id"},
-			},
-		},
 		// --- executeTask dispatch primitive (CW-20260421-0010, B3) ---
 		{
 			Name: "task_execute",

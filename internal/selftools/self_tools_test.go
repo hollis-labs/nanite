@@ -421,7 +421,6 @@ func TestSelfToolsTransport_ProjectScopeAutofillCharacterization(t *testing.T) {
 		args map[string]any
 	}{
 		{name: "todo_create", args: map[string]any{"title": "project todo", "scope": store.TodoScopeProject}},
-		{name: "context_pin", args: map[string]any{"content": "project pin", "scope": store.PinScopeProject}},
 	} {
 		res, err := st.CallTool(ctx, call.name, call.args)
 		if err != nil || res.IsError {
@@ -433,11 +432,6 @@ func TestSelfToolsTransport_ProjectScopeAutofillCharacterization(t *testing.T) {
 	if err != nil || len(todos) != 1 || todos[0].ProjectID != project.ID || todos[0].ScopeID != project.ID {
 		t.Fatalf("project todo autofill = %#v (err=%v), want project_id/scope_id %q", todos, err, project.ID)
 	}
-	pins, err := fixtureStore(st).ListPinnedContent(t.Context(), session.ID)
-	if err != nil || len(pins) != 1 || pins[0].ProjectID != project.ID {
-		t.Fatalf("project pin autofill = %#v (err=%v), want project_id %q", pins, err, project.ID)
-	}
-
 	// Preserve the pre-extraction plan rule: project is merely another
 	// non-workspace plan scope, so missing scope_id is filled with session ID.
 	res, err := st.CallTool(ctx, "plan_create", map[string]any{"title": "legacy project plan", "scope": "project"})
@@ -719,5 +713,24 @@ func TestSelfToolsTransport_PlanCRUD(t *testing.T) {
 	plans, _ = fixtureStore(st).ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "sess-1"})
 	if len(plans) != 0 {
 		t.Fatalf("expected 0 plans after delete, got %d", len(plans))
+	}
+}
+
+func TestNaniteCorePinToolsRetired(t *testing.T) {
+	st := newSelfTools(t)
+	for _, name := range []string{"context_pin", "context_unpin"} {
+		tools, listErr := st.ListTools(context.Background())
+		if listErr != nil {
+			t.Fatal(listErr)
+		}
+		for _, tool := range tools {
+			if tool.Name == name {
+				t.Fatalf("retired core tool declared: %s", name)
+			}
+		}
+		result, err := st.CallTool(context.Background(), name, map[string]any{})
+		if err == nil && (result == nil || !result.IsError) {
+			t.Fatalf("retired tool dispatched: %s", name)
+		}
 	}
 }

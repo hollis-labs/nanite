@@ -257,3 +257,31 @@ session/project identities cannot be supplied to the plugin's agent tools.
 All older readers of the retired table must restart before deploying the
 adoption binary and enabling the plugin. Disabled, rejected or absent plugins
 leave core rows retained for a later committed transfer.
+
+## Pins extraction
+
+The released `nanite.pins` plugin owns durable pinned content, its working-drawer
+UI, tools, HTTP routes and bounded E3 context source. Core pin readers/writers,
+`context_pin`/`context_unpin` and pin REST routes are retired. Generic pinned
+envelope cards remain a separate host feature.
+
+After every required registration succeeds, the host's fixed allowlist maps
+owner `nanite.pins`, feature `pins`, to table `pinned_content`. E1 exports all
+columns and typed cells into the host-supplied DataDir, fsyncs the export, then
+commits its receipt and table drop together. Failed activation/export leaves
+core rows intact. Operators must refresh older compiled table readers before
+cutover. Reconnects use the existing receipt, including its original source ID
+when the database moves. Orphan exports grant no write authority.
+
+Session/project pins persist until explicit deletion; project identity is
+resolved from the authoritative session. Edits and deletion survive import
+replay. Null-origin legacy project pins cannot be demoted into an invented
+session. New turn scope is rejected because the old core tool neither persisted
+nor injected it; legacy turn rows remain stored but do not enter context unless
+promoted. Legacy agent attribution remains intact; new pins leave it empty
+because SDK calls carry session identity but no agent identity.
+
+The read-only query grant includes session metadata and export receipts only.
+The context source excludes query text and uses the existing broker budget and
+slot assembly. Slot positions, cache boundaries and compaction invariants remain
+unchanged. Context reads never consume or delete pins.

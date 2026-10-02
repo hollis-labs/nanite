@@ -161,7 +161,6 @@ type minimalStore struct {
 	stubHandoffStashStore
 	stubCompactionEventStore
 	stubEnvelopeStore
-	stubPinnedContentStore
 	stubSubagentRunsReader
 }
 
@@ -209,20 +208,6 @@ func (stubEnvelopeStore) CreateEnvelopeInstance(ctx context.Context, inst *store
 func (stubEnvelopeStore) GetEnvelopeInstance(ctx context.Context, id string) (*store.EnvelopeInstance, error) {
 	return nil, fmt.Errorf("not found")
 }
-
-type stubPinnedContentStore struct{}
-
-func (stubPinnedContentStore) CreatePinnedContent(context.Context, store.PinnedContent) error {
-	return nil
-}
-func (stubPinnedContentStore) ListPinnedContent(context.Context, string) ([]store.PinnedContent, error) {
-	return nil, nil
-}
-func (stubPinnedContentStore) DeletePinnedContent(context.Context, string) error { return nil }
-func (stubPinnedContentStore) UpdatePinScope(context.Context, string, string, string) error {
-	return nil
-}
-func (stubPinnedContentStore) ClearSessionPins(context.Context, string) error { return nil }
 
 type stubHandoffStashStore struct{}
 

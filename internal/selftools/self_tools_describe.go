@@ -137,8 +137,7 @@ var describeRelations = map[string]struct {
 	"background_job": {
 		relatedTools: []string{"background_status", "background_cancel", "subagent_spawn"},
 	},
-	"reminder_set":  {relatedTools: []string{"context_pin", "context_unpin"}},
-	"context_pin":   {relatedTools: []string{"reminder_set", "context_unpin"}},
+	"context_pin":   {relatedTools: []string{"context_unpin"}},
 	"context_unpin": {relatedTools: []string{"context_pin"}},
 	"panel_open":    {relatedTools: []string{"panel_close", "signal_mode", "card_show"}},
 	"panel_close":   {relatedTools: []string{"panel_open"}},

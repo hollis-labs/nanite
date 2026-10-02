@@ -23,7 +23,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/skill"
@@ -173,13 +172,6 @@ type SelfToolsTransport struct {
 	// Set post-construction; nil causes sandbox tool calls to error.
 	// CW-20260420-0019 (D6).
 	PythonDispatcher PythonToolDispatcher
-
-	// ReminderEngine is the deterministic trigger engine for agent-set reminders
-	// (J11, CW-20260426-0009). When set, reminder_set calls register the
-	// creation turn with the engine so turn_count triggers compute correctly.
-	// Nil-safe — without the engine, reminders are persisted but turn_count
-	// triggers fall back to turn 0 as the creation baseline.
-	ReminderEngine *reminders.Engine
 
 	// SchemaLookup is the cross-server tool-schema registry used by
 	// tool_validate (B1, CW-20260429-0006). When set, the validator can
@@ -406,8 +398,6 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	case "signal_mode":
 		return st.PresentationTools.callSignalMode(ctx, args)
 	// --- Reminders + Pin (J11, CW-20260426-0009) ---
-	case "reminder_set":
-		return st.callSetReminder(ctx, args)
 	case "context_pin":
 		return st.callPin(ctx, args)
 	case "context_unpin":

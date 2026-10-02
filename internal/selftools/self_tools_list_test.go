@@ -95,13 +95,12 @@ func TestNaniteToolList_RegistrationAndShape(t *testing.T) {
 
 // TestNaniteToolList_FilterNarrowsByNameAndSummary asserts the filter
 // is case-insensitive and matches against BOTH the tool name and its
-// summary. The "reminder" filter is the canonical c120 case — agent
-// guessed `nanite_reminder_create` instead of `reminder_set`.
+// summary, using the existing context pin tools.
 func TestNaniteToolList_FilterNarrowsByNameAndSummary(t *testing.T) {
 	st := newSelfTools(t)
-	// Substring match in NAME — `set_reminder`.
+	// Substring match in NAME — `context_pin`.
 	res, err := st.CallTool(context.Background(), "tool_list", map[string]any{
-		"filter": "reminder",
+		"filter": "pin",
 	})
 	if err != nil {
 		t.Fatalf("filter call: %v", err)
@@ -120,26 +119,26 @@ func TestNaniteToolList_FilterNarrowsByNameAndSummary(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if out.Count == 0 {
-		t.Fatal("expected ≥1 match for filter=reminder (reminder_set must surface)")
+		t.Fatal("expected ≥1 match for filter=pin (context_pin must surface)")
 	}
-	sawSetReminder := false
+	sawContextPin := false
 	for _, tool := range out.Tools {
-		if tool.Name == "reminder_set" {
-			sawSetReminder = true
+		if tool.Name == "context_pin" {
+			sawContextPin = true
 		}
 		// Every survivor must contain the filter token in name OR summary.
-		if !strings.Contains(strings.ToLower(tool.Name), "reminder") &&
-			!strings.Contains(strings.ToLower(tool.Summary), "reminder") {
-			t.Errorf("filter leaked tool %q without 'reminder' in name or summary (summary=%q)", tool.Name, tool.Summary)
+		if !strings.Contains(strings.ToLower(tool.Name), "pin") &&
+			!strings.Contains(strings.ToLower(tool.Summary), "pin") {
+			t.Errorf("filter leaked tool %q without 'pin' in name or summary (summary=%q)", tool.Name, tool.Summary)
 		}
 	}
-	if !sawSetReminder {
-		t.Error("filter=reminder must surface reminder_set (the c120 motivating case)")
+	if !sawContextPin {
+		t.Error("filter=pin must surface context_pin (the c120 motivating case)")
 	}
 
-	// Case-insensitive: "REMINDER" should match the same set as "reminder".
+	// Case-insensitive: "PIN" should match the same set as "pin".
 	resUC, err := st.CallTool(context.Background(), "tool_list", map[string]any{
-		"filter": "REMINDER",
+		"filter": "PIN",
 	})
 	if err != nil {
 		t.Fatalf("uppercase filter call: %v", err)
@@ -607,5 +606,22 @@ func TestSafeTruncate_RuneBoundary(t *testing.T) {
 	}
 	if got2 := safeTruncate(in, 100); got2 != in {
 		t.Errorf("safeTruncate(%q, 100) = %q, want unchanged", in, got2)
+	}
+}
+
+func TestNaniteCoreReminderToolRetired(t *testing.T) {
+	transport := newSelfTools(t)
+	tools, listErr := transport.ListTools(context.Background())
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	for _, tool := range tools {
+		if tool.Name == "reminder_set" {
+			t.Fatal("core reminder tool remains")
+		}
+	}
+	result, err := transport.CallTool(context.Background(), "reminder_set", map[string]any{"text": "retired"})
+	if err == nil && (result == nil || !result.IsError) {
+		t.Fatal("retired tool accepted call")
 	}
 }

@@ -202,16 +202,6 @@ type HandoffStashStore interface {
 	GetLatestStashForSession(ctx context.Context, sessionID string) (store.HandoffStash, error)
 }
 
-// ReminderStore covers reminder persistence (J11, CW-20260426-0009; D1, CW-20260428-0014).
-type ReminderStore interface {
-	CreateReminder(ctx context.Context, r store.Reminder) error
-	GetReminder(ctx context.Context, id string) (store.Reminder, error)
-	ListUnfiredReminders(ctx context.Context, sessionID string) ([]store.Reminder, error)
-	MarkReminderFired(ctx context.Context, id string) error
-	UpdateReminderScope(ctx context.Context, id, scope, projectID string) error
-	DeleteReminder(ctx context.Context, id string) error
-}
-
 // PinnedContentStore covers pinned content persistence (J11, CW-20260426-0009; D1, CW-20260428-0014).
 type PinnedContentStore interface {
 	CreatePinnedContent(ctx context.Context, p store.PinnedContent) error
@@ -266,7 +256,6 @@ type Store interface {
 	HandoffStashStore
 	CompactionEventStore
 	EnvelopeStore
-	ReminderStore
 	PinnedContentStore
 	SubagentRunsReader
 

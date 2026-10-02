@@ -12,8 +12,6 @@ import (
 
 var pinViewKeys = []string{"id", "session_id", "scope", "project_id", "content", "agent_id", "created_at", "updated_at"}
 
-var reminderViewKeys = []string{"id", "session_id", "scope", "project_id", "text", "trigger_json", "fired_at", "created_at", "updated_at"}
-
 func TestPinViewJSON(t *testing.T) {
 	var p store.PinnedContent
 	populate(t, &p)
@@ -22,16 +20,6 @@ func TestPinViewJSON(t *testing.T) {
 	assertSameJSON(t, "zero (omitempty)", pinToView(&store.PinnedContent{}), store.PinnedContent{})
 	assertSameJSON(t, "empty list", pinsToView([]store.PinnedContent{}), []store.PinnedContent{})
 	assertSameJSON(t, "nil list", pinsToView(nil), []store.PinnedContent(nil))
-}
-
-func TestReminderViewJSON(t *testing.T) {
-	var r store.Reminder
-	populate(t, &r)
-	assertKeys(t, "ReminderView", mustJSON(t, reminderToView(&r)), reminderViewKeys)
-	assertSameJSON(t, "populated", reminderToView(&r), r)
-	assertSameJSON(t, "zero (omitempty)", reminderToView(&store.Reminder{}), store.Reminder{})
-	assertSameJSON(t, "empty list", remindersToView([]store.Reminder{}), []store.Reminder{})
-	assertSameJSON(t, "nil list", remindersToView(nil), []store.Reminder(nil))
 }
 
 func TestPins_HTTP(t *testing.T) {
@@ -73,35 +61,6 @@ func TestPins_HTTP(t *testing.T) {
 	}
 	if rec := mcpDo(mux, "GET", "/api/sessions/"+sid+"/pins", ""); strings.Contains(rec.Body.String(), `"id":"pin-2"`) {
 		t.Fatalf("pin-2 listed after delete: %s", rec.Body.String())
-	}
-}
-
-func TestReminders_HTTP(t *testing.T) {
-	a, mux := newTestAPI(t)
-	sess := newB2aSession(t, a)
-	ctx := context.Background()
-	if err := a.store.CreateReminder(ctx, store.Reminder{ID: "rem-1", SessionID: sess.ID, Scope: store.ReminderScopeSession, Text: "check in", TriggerJSON: `{"after_turns":1}`}); err != nil {
-		t.Fatalf("CreateReminder: %v", err)
-	}
-	var rems []ReminderView
-	w := mcpDo(mux, "GET", "/api/sessions/"+sess.ID+"/reminders", "")
-	if err := json.Unmarshal(w.Body.Bytes(), &rems); err != nil || len(rems) != 1 || rems[0].Text != "check in" {
-		t.Fatalf("list: %d %s", w.Code, w.Body.String())
-	}
-	if rec := mcpDo(mux, "PATCH", "/api/reminders/rem-1/scope", `{"scope":"bogus"}`); rec.Code != http.StatusBadRequest ||
-		errorBody(t, rec) != `update reminder scope: invalid scope "bogus"` {
-		t.Fatalf("bad scope: %d %s", rec.Code, rec.Body.String())
-	}
-	w = mcpDo(mux, "PATCH", "/api/reminders/rem-1/scope", `{"scope":"project","project_id":"p1"}`)
-	var updated ReminderView
-	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil || w.Code != http.StatusOK || updated.Scope != "project" || updated.ProjectID != "p1" || updated.Text != "check in" {
-		t.Fatalf("scope: %d %s", w.Code, w.Body.String())
-	}
-	if rec := mcpDo(mux, "DELETE", "/api/reminders/rem-1", ""); rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"deleted":true,"id":"rem-1"}` {
-		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
-	}
-	if _, err := a.store.GetReminder(ctx, "rem-1"); err == nil {
-		t.Fatal("reminder still readable after delete")
 	}
 }
 

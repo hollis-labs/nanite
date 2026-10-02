@@ -362,13 +362,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// D2 (CW-20260428-0015): pin scope promote/demote.
 	mux.HandleFunc("PATCH /api/pins/{id}/scope", a.handleUpdatePinScope)
 
-	// Reminders (D1 / D2, CW-20260428-0014/0015) — exposes session +
-	// project-scoped reminders so the FE Work panel can list / promote /
-	// demote / delete them. Originating tool surface is reminder_set.
-	mux.HandleFunc("GET /api/sessions/{id}/reminders", a.handleListReminders)
-	mux.HandleFunc("DELETE /api/reminders/{id}", a.handleDeleteReminder)
-	mux.HandleFunc("PATCH /api/reminders/{id}/scope", a.handleUpdateReminderScope)
-
 	// Bottom-drawer pinned cards (C1, CW-20260428-0012)
 	mux.HandleFunc("GET /api/sessions/{id}/drawer-cards", a.handleListBottomDrawerCards)
 	mux.HandleFunc("POST /api/sessions/{id}/drawer-cards", a.handlePinBottomDrawerCard)

@@ -27,7 +27,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	"github.com/hollis-labs/nanite/internal/permission"
-	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
@@ -175,10 +174,6 @@ type ChatServiceConfig struct {
 	// nil-safe: when nil loop detection is disabled. Shared across all sessions.
 	LoopDetector *loopdetect.Detector
 
-	// ReminderEngine is the deterministic trigger engine for agent-set reminders
-	// (J11, CW-20260426-0009). nil-safe: when nil reminder eval is skipped.
-	ReminderEngine *reminders.Engine
-
 	// ReflexEngine is the FU-30 DB-backed agent reflex engine. nil-safe: when
 	// nil, per-turn reflex evaluation is skipped. Evaluates agent_reflexes,
 	// applies inject_reminder / force_tool_choice / halt actions per turn.
@@ -277,10 +272,6 @@ type chatServiceImpl struct {
 	// loopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
 	// nil-safe: disabled when nil.
 	loopDetector *loopdetect.Detector
-
-	// reminderEngine is the deterministic trigger engine for agent-set reminders
-	// (J11, CW-20260426-0009). nil-safe: when nil reminder eval is skipped.
-	reminderEngine *reminders.Engine
 
 	// reflexEngine evaluates DB-backed agent reflexes per turn (FU-30) and
 	// returns staged actions injected into the turn. nil-safe.
@@ -617,7 +608,6 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		subagentInbox:          cfg.SubagentInbox,
 		inspector:              cfg.Inspector,
 		loopDetector:           cfg.LoopDetector,
-		reminderEngine:         cfg.ReminderEngine,
 		reflexEngine:           cfg.ReflexEngine,
 		agentDeps:              cfg.AgentDeps,
 		activeSessions:         activeSessions,

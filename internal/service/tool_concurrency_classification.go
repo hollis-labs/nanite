@@ -123,11 +123,9 @@ var declaredToolConcurrencySafety = map[string]bool{
 	"chat_get":      true,
 	"procedure_get": true,
 
-	"panel_open":  false, // UI drawer signal — order-sensitive
-	"panel_close": false, // UI drawer signal — order-sensitive
-	"signal_mode": false, // UI mode signal — order-sensitive
-
-	"reminder_set":  false,
+	"panel_open":    false, // UI drawer signal — order-sensitive
+	"panel_close":   false, // UI drawer signal — order-sensitive
+	"signal_mode":   false, // UI mode signal — order-sensitive
 	"context_pin":   false,
 	"context_unpin": false,
 

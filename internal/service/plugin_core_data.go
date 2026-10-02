@@ -22,7 +22,9 @@ func NewPluginCoreData(st *store.Store) *PluginCoreData {
 	return &PluginCoreData{store: st, dataDir: brand.PluginDataDir}
 }
 func (adopter *PluginCoreData) AdoptPluginCoreData(ctx context.Context, owner string) error {
-	if owner != "nanite.bookmarks" {
+	features := map[string]string{"nanite.bookmarks": "bookmarks", "nanite.reminders": "reminders"}
+	feature, known := features[owner]
+	if !known {
 		return nil
 	}
 	if adopter.store == nil {
@@ -44,19 +46,19 @@ func (adopter *PluginCoreData) AdoptPluginCoreData(ctx context.Context, owner st
 	}
 	defer func() { _ = tx.Rollback() }()
 	var exists bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='bookmarks')`).Scan(&exists); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)`, feature).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
 		// A moved DB retains its receipt's original SourceID. Never create another
 		// source or acknowledge an absent table with no committed export.
 		var count int
-		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM plugin_core_exports WHERE plugin_id=? AND feature='bookmarks'`, owner).Scan(&count)
+		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM plugin_core_exports WHERE plugin_id=? AND feature=?`, owner, feature).Scan(&count)
 		if err != nil {
-			return fmt.Errorf("plugin core data: retired bookmarks receipt unavailable: %w", err)
+			return fmt.Errorf("plugin core data: retired %s receipt unavailable: %w", feature, err)
 		}
 		if count != 1 {
-			return fmt.Errorf("plugin core data: exactly one bookmarks receipt required")
+			return fmt.Errorf("plugin core data: exactly one %s receipt required", feature)
 		}
 		return nil
 	}
@@ -68,14 +70,14 @@ func (adopter *PluginCoreData) AdoptPluginCoreData(ctx context.Context, owner st
 	}
 	if ledger {
 		var count int
-		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM plugin_core_exports WHERE plugin_id=? AND feature='bookmarks'`, owner).Scan(&count); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM plugin_core_exports WHERE plugin_id=? AND feature=?`, owner, feature).Scan(&count); err != nil {
 			return err
 		}
 		if count != 0 {
-			return fmt.Errorf("plugin core data: bookmarks table exists beside committed receipt")
+			return fmt.Errorf("plugin core data: %s table exists beside committed receipt", feature)
 		}
 	}
-	if _, err = dataexport.ExportAndDrop(ctx, tx, dataexport.Spec{PluginID: owner, Feature: "bookmarks", SourceID: source, Table: "bookmarks"}, directory); err != nil {
+	if _, err = dataexport.ExportAndDrop(ctx, tx, dataexport.Spec{PluginID: owner, Feature: feature, SourceID: source, Table: feature}, directory); err != nil {
 		return err
 	}
 	return tx.Commit()

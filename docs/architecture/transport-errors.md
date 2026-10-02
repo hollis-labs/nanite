@@ -3,9 +3,12 @@
 Service error categories use `github.com/hollis-labs/go-svcerr`. Services
 choose an explicit code and safe message; a wrapped store error remains a
 server-side cause. Missing rows are identified through `errors.Is` against
-`sql.ErrNoRows`, never by matching error text. An
+`sql.ErrNoRows` or domain absence sentinels, never by matching error text. An
 infrastructure failure must not become a missing-resource response. The HTTP
-and MCP mappers log the carrier's wrapped cause separately from its safe message;
+and MCP mappers log the code and safe message even when no cause is wrapped.
+HTTP logs include the route pattern, method and path identifiers; mapped MCP
+self tools include the tool name and resource identifier. Wrapped causes are
+logged separately from the safe message;
 `Error()` intentionally omits that cause. Internal and unavailable failures log
 at ERROR; client-correctable categories log at WARN.
 

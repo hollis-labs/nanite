@@ -13,6 +13,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/plugin/install"
 
 	"github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/pkg/pluginapi"
 )
 
 func TestIsLocalPath(t *testing.T) {
@@ -165,5 +166,14 @@ func TestInstallReviewToolLoadingUpgradeDiff(t *testing.T) {
 	changes := strings.Join(installReviewChanges(before, after), "\n")
 	if !strings.Contains(changes, "Changed Tool loading: opt-in → auto") {
 		t.Fatalf("tool activation hidden: %s", changes)
+	}
+}
+
+func TestInstallReviewReflexDefaultUpgradeDiff(t *testing.T) {
+	before := plugin.InstallReview{ReflexSeeds: []pluginapi.ReflexSeed{{ID: "remind", AgentSlug: "loom-weaver", Reminder: "old"}}}
+	after := plugin.InstallReview{ReflexSeeds: []pluginapi.ReflexSeed{{ID: "remind", AgentSlug: "loom-curator", Reminder: "new"}}}
+	changes := installReviewChanges(before, after)
+	if len(changes) != 1 || !strings.Contains(changes[0], "loom-curator") || !strings.Contains(changes[0], "new") {
+		t.Fatalf("seed changes hidden: %v", changes)
 	}
 }

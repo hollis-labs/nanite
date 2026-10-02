@@ -82,7 +82,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
-	github.com/hollis-labs/plugin-sdk v0.6.0
+	github.com/hollis-labs/plugin-sdk v0.6.1
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/mattn/go-isatty v0.0.24
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -123,7 +123,7 @@ require (
 	github.com/hollis-labs/go-toolresult v0.1.0
 	github.com/hollis-labs/go-workflow v0.1.0
 	github.com/hollis-labs/go-worktree v0.1.0
-	github.com/hollis-labs/nanite/pkg/pluginapi v0.1.4
+	github.com/hollis-labs/nanite/pkg/pluginapi v0.1.5
 	github.com/hollis-labs/plugin-host v0.1.2
 	github.com/hollis-labs/plugins-catalog v0.1.0
 	github.com/hollis-labs/tesseract v0.10.0

@@ -261,6 +261,10 @@ func reviewPluginInstall(ctx context.Context, review plugin.InstallReview, previ
 	for _, tool := range review.Tools {
 		fmt.Printf("Tool: %s (effect: %s)\n", tool.Name, tool.Effect)
 	}
+	for _, seed := range review.ReflexSeeds {
+		raw, _ := json.Marshal(seed)
+		fmt.Printf("Reflex reminder default: %s\n", raw)
+	}
 	fmt.Printf("Type %s to approve this bundle: ", review.ID)
 	entered, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
@@ -288,6 +292,10 @@ func installReviewDeclarations(review plugin.InstallReview) map[string]string {
 	}
 	for _, tool := range review.Tools {
 		declarations["Tool "+tool.Name] = tool.Effect
+	}
+	for _, seed := range review.ReflexSeeds {
+		raw, _ := json.Marshal(seed)
+		declarations["Reflex seed "+seed.ID] = string(raw)
 	}
 	return declarations
 }

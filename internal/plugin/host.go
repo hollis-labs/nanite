@@ -97,6 +97,7 @@ type crudHandlerEntry struct {
 
 type Host struct {
 	contextSources ContextSourceRegistrar
+	reflexSeeds    ReflexSeedRegistrar
 	queryURL       string
 	queryGrants    map[[32]byte]hostQueryGrant
 
@@ -1299,6 +1300,7 @@ func (h *Host) UnloadPlugin(id string) error {
 
 	// Cancel retrieval before child shutdown can wait on an in-flight call.
 	h.removePluginContextSources(id)
+	h.removePluginReflexSeeds(id)
 
 	// Inner Unload call outside the lock.
 	if err := p.Unload(); err != nil {
@@ -1728,6 +1730,7 @@ func (h *Host) Shutdown() error {
 	var errors []string
 	for _, np := range snapshot {
 		h.removePluginContextSources(np.id)
+		h.removePluginReflexSeeds(np.id)
 		if err := np.p.Unload(); err != nil {
 			errors = append(errors, fmt.Sprintf("failed to unload plugin %q: %v", np.id, err))
 		}

@@ -12,6 +12,7 @@ function declarations(review: PluginInstallReview): Map<string, string> {
     ...review.secrets.map((secret) => [`Secret: ${secret.name}`, `${secret.environment || "Plugin keychain"}${secret.required ? " (required)" : " (optional)"}`] as const),
     ...review.environment.map((name) => [`Configuration environment: ${name}`, name] as const),
     ...review.tools.map((tool) => [`Tool: ${tool.name}`, tool.effect] as const),
+    ...(review.reflex_seeds ?? []).map((seed) => [`Reflex reminder: ${seed.id}`, `Agent: ${seed.agent_slug}\nPriority: ${seed.priority ?? 0}\nReminder: ${seed.reminder}\nTrigger: ${JSON.stringify(seed.trigger, null, 2)}`] as const),
   ]);
 }
 
@@ -31,7 +32,7 @@ export function PluginReviewDialog({ review, busy, onCancel, onApprove }: {
         <AlertDialogHeader>
           <AlertDialogTitle>Review {review.review.name}</AlertDialogTitle>
           <AlertDialogDescription>
-            {review.review.id} · v{review.review.version}. Approve the capabilities and secrets declared by this bundle before it runs.
+            {review.review.id} · v{review.review.version}. Review what this bundle can access and contribute before it runs.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="max-h-[55vh] overflow-y-auto space-y-3 text-sm">

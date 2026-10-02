@@ -46,3 +46,22 @@ it("shows tool activation changes before approval", () => {
   expect(screen.getByText("Before: opt-in")).toBeTruthy();
   expect(screen.getByText("After: auto")).toBeTruthy();
 });
+
+it("shows reflex target, reminder and predicate changes before approval", () => {
+  const before: PluginInstallReview = {
+    id: "nanite.loom", name: "Loom", version: "1.0.0",
+    bundle_digest: "old", entrypoint: "plugin", arguments: [],
+    capabilities: [], secrets: [], environment: [], tools: [],
+    reflex_seeds: [{ id: "search-first", agent_slug: "loom-weaver", reminder: "Search first", trigger: { kind: "tool_calls_window", window: 2, op: "=", value: 0 } }],
+  };
+  const after: PluginInstallReview = { ...before, reflex_seeds: [{ ...before.reflex_seeds![0], agent_slug: "loom-curator", reminder: "Search again" }] };
+  const onApprove = vi.fn();
+  render(<PluginReviewDialog review={{ status: "review_required", review: after, review_digest: "reviewed", previous: { review: before, review_digest: "old" } }} busy={false} onCancel={vi.fn()} onApprove={onApprove} />);
+  expect(screen.getByText("Reflex reminder: search-first · Changed")).toBeTruthy();
+  expect(screen.getByText(/Before:/).textContent).toContain("loom-weaver");
+  const changed = screen.getByText(/After:/).textContent;
+  expect(changed).toContain("loom-curator");
+  expect(changed).toContain("Search again");
+  expect(changed).toContain("tool_calls_window");
+  expect(onApprove).not.toHaveBeenCalled();
+});

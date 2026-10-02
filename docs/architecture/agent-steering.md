@@ -128,3 +128,18 @@ belong to Nanite, and adoption requires a released module plus behavioral parity
 against real Nanite traces, including failure ordering and persisted effects.
 Transcribed library goldens alone do not establish that equivalence. Library
 adoption and feature seed extraction therefore keep separate ownership and gates.
+
+Reviewed `reflex.seed` declarations contribute reminder defaults for explicit
+agent slugs. `PluginReflexSeeds` validates the public predicate subset and core
+provenance rules, then binds each stable plugin/seed/agent identity to a durable
+`agent_reflexes` row. Defaults initialize new rows; existing edits, firing
+history and operator status survive reload. Deletion leaves a binding tombstone
+so reload cannot recreate a deleted default.
+
+Preparation does not enable execution. Activation follows all successful
+manifest registrations. Candidate enumeration admits plugin-owned rows only
+through the host's active source set; unload, failed initialization and terminal
+child failure revoke it. Editor/catalog reads retain inactive definitions.
+Transient restarts retain the accepted declarations. Plugin seeds honor
+per-agent opt-outs and do not give the child raw steering state or an execution
+callback.

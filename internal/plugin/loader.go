@@ -308,6 +308,7 @@ func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, h
 	mgrCfg.OnUnload = func() {
 		if host != nil {
 			host.removePluginContextSources(m.Identifier())
+			host.removePluginReflexSeeds(m.Identifier())
 		}
 	}
 	var queryGrant *pluginapi.QueryGrant
@@ -335,6 +336,7 @@ func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, h
 			mgrCfg.OnUnload = func() {
 				host.revokeHostQueryGrant(grant.Token)
 				host.removePluginContextSources(m.Identifier())
+				host.removePluginReflexSeeds(m.Identifier())
 			}
 		}
 	}

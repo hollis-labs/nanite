@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/hollis-labs/go-sqlite/sqlitekit"
@@ -20,8 +21,9 @@ var migrationsFS embed.FS
 
 // Store wraps the SQLite database connection.
 type Store struct {
-	DB     *sql.DB
-	dbPath string
+	DB               *sql.DB
+	dbPath           string
+	pluginReflexGate atomic.Pointer[func(AgentReflex) bool]
 }
 
 // DBPath returns the path to the SQLite database file.

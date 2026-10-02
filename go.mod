@@ -17,7 +17,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/hollis-labs/agentkit v0.21.0
-	github.com/hollis-labs/go-envelopes v0.4.0
+	github.com/hollis-labs/go-envelopes v0.4.1-0.20261002014505-e426da17b661
 	github.com/hollis-labs/go-modelsdev v0.3.0
 	github.com/hollis-labs/go-otel v0.10.0
 	github.com/hollis-labs/go-providers v0.42.0

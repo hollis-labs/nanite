@@ -42,13 +42,9 @@ type Client struct {
 // transport supports local TLS/test setup; nil uses the standard transport with
 // proxies disabled so local session content never reaches an environment proxy.
 func NewClient(baseURL string, transport http.RoundTripper) (*Client, error) {
-	u, err := url.Parse(baseURL)
+	u, err := loopbackHostURL(baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("pluginapi: invalid host URL")
-	}
-	ip := net.ParseIP(u.Hostname())
-	if (u.Scheme != "http" && u.Scheme != "https") || ip == nil || !ip.IsLoopback() || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
-		return nil, fmt.Errorf("pluginapi: host URL must name a literal loopback HTTP(S) address")
+		return nil, err
 	}
 	if transport == nil {
 		transport = &http.Transport{
@@ -104,4 +100,16 @@ func (c *Client) CallTool(ctx context.Context, call ToolCall) (ToolResult, error
 		return ToolResult{}, fmt.Errorf("pluginapi: tool response is missing content")
 	}
 	return result, nil
+}
+
+func loopbackHostURL(baseURL string) (*url.URL, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("pluginapi: invalid host URL")
+	}
+	ip := net.ParseIP(u.Hostname())
+	if (u.Scheme != "http" && u.Scheme != "https") || ip == nil || !ip.IsLoopback() || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+		return nil, fmt.Errorf("pluginapi: host URL must name a literal loopback HTTP(S) address")
+	}
+	return u, nil
 }

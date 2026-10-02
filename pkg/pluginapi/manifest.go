@@ -56,6 +56,7 @@ type Registrations struct {
 	CRUD           []Resource      `json:"crud,omitempty"`
 	HTTPRoutes     []Route         `json:"http_routes,omitempty"`
 	ContextSources []ContextSource `json:"context_sources,omitempty"`
+	ReflexSeeds    []ReflexSeed    `json:"reflex_seeds,omitempty"`
 }
 
 // Component names refer directly to named exports of UI.Bundle.
@@ -225,6 +226,17 @@ func (b Block) Validate() error {
 			return fmt.Errorf("nanite: context source id exceeds limit")
 		}
 	}
+	if len(b.Registers.ReflexSeeds) > MaxReflexSeeds {
+		return fmt.Errorf("nanite: too many reflex seeds")
+	}
+	for _, seed := range b.Registers.ReflexSeeds {
+		if err := check("reflex-seed", seed.ID); err != nil {
+			return err
+		}
+		if err := seed.Validate(); err != nil {
+			return err
+		}
+	}
 	for _, r := range b.Registers.HTTPRoutes {
 		switch r.Method {
 		case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":
@@ -234,7 +246,11 @@ func (b Block) Validate() error {
 		if !bundlePath(r.Path) || strings.ContainsAny(r.Path, "?#%{}") {
 			return fmt.Errorf("nanite: route path %q must be relative to the plugin namespace", r.Path)
 		}
-		key := "route:" + r.Method + ":" + path.Clean(r.Path)
+		normalized := path.Clean(r.Path)
+		if strings.HasSuffix(r.Path, "/") {
+			normalized += "/"
+		}
+		key := "route:" + r.Method + ":" + normalized
 		if seen[key] {
 			return fmt.Errorf("nanite: duplicate route %q", key)
 		}

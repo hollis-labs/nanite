@@ -132,3 +132,24 @@ an import request. Keep the export after an idempotent transactional import.
 Request `data_exports` with explicit `all_sessions` workspace scope to use
 `QueryClient.ExportReceipts`. It lists committed receipts owned by the current
 plugin in the host database; a credential cannot choose another plugin owner.
+
+Feature plugins declare `nanite.registers.reflex_seeds` with stable plugin-local
+IDs, explicit agent slugs, bounded predicates and reminder text. A required
+`reflex.seed` capability must list the exact `seed_ids` and `agent_slugs`.
+Contributions are opt-out-able, stay at plugin provenance and give no halt,
+dispatch, schedule, tool enforcement or class-wide authority. Predicates run
+inside the host; this declaration sends no raw steering state to the plugin.
+The host owns canonical validation, durable edits/history and inactive-source
+execution gating. Default seeds initialize a definition rather than replacing
+operator edits on reload.
+
+HTTP root and trailing-slash subtree declarations are distinct. A root resource
+and its item routes can therefore use `GET bookmarks`, `GET bookmarks/` and
+`DELETE bookmarks/` within the host-owned plugin namespace.
+
+Implement SDK `HTTPHandle` with `HandleHTTP(ctx, pluginID, mux, request)` to use
+ordinary `net/http` routes within that namespace. The adapter strips only the
+owned prefix, preserves escaped separators and repeated/empty query values,
+and bounds buffered bodies to `MaxHTTPBody`. Declare a subtree for item routes
+and register patterns such as `GET /bookmarks/{id}` on the child mux. Dispatch
+private context retrieval separately. Streaming remains on core SSE paths.

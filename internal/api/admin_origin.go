@@ -54,11 +54,23 @@ func adminOrigin(origin string) (string, bool) {
 	if host == "" || strings.HasSuffix(u.Host, ":") {
 		return "", false
 	}
+	if strings.HasPrefix(u.Host, "[") && !strings.Contains(host, ":") {
+		return "", false
+	}
 	if strings.Contains(host, ":") {
 		if net.ParseIP(host) == nil {
 			return "", false
 		}
 	} else {
+		dnsName := strings.TrimSuffix(host, ".")
+		if dnsName == "" || len(dnsName) > 253 {
+			return "", false
+		}
+		for _, label := range strings.Split(dnsName, ".") {
+			if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+				return "", false
+			}
+		}
 		for _, c := range host {
 			switch {
 			case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '-':

@@ -38,6 +38,9 @@ func TestPreferencesTransactionPreservesRowAndDurability(t *testing.T) {
 		t.Fatal("callback replay or incorrect commit")
 	}
 	after := privateSettingsRow(t, s.DB)
+	if after["updated_at"] == before["updated_at"] {
+		t.Fatal("actual change retained updated_at")
+	}
 	for _, key := range []string{"tool_stream_behavior", "tool_drawer_retention", "updated_at", "admin_preferences_version"} {
 		delete(before, key)
 		delete(after, key)
@@ -87,6 +90,8 @@ func TestPreferencesTransactionFailure(t *testing.T) {
 				case "cancel":
 					cancel()
 				case "commit":
+					// Force sql.ErrTxDone from the host's Commit call; this
+					// synthetic control is not a SQLite COMMIT I/O failure.
 					return tx.tx.Rollback()
 				}
 				return nil
@@ -94,7 +99,8 @@ func TestPreferencesTransactionFailure(t *testing.T) {
 			if err == nil || calls != 1 {
 				t.Fatal("failure admitted or callback replayed")
 			}
-			// Wait for database/sql's cancellation rollback before using its one connection.
+			// A pool read acquires the single connection after rollback,
+			// including database/sql's asynchronous cancellation cleanup.
 			if !reflect.DeepEqual(before, privateSettingsRow(t, s.DB)) {
 				t.Fatal("failure changed row/version (values omitted)")
 			}

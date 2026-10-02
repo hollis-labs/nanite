@@ -107,6 +107,9 @@ func observedHandler(t *testing.T, a *API, s *observedPreferencesStore) http.Han
 }
 func TestAdminPreferenceCommandsAndReset(t *testing.T) {
 	_, st, h := adminFixture(t)
+	if _, err := st.DB.Exec(`UPDATE user_settings SET updated_at='2001-01-01' WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
 	initial, etag := preferencesRead(t, h)
 	before := preferencesRow(t, st.DB)
 	body := preferencesBody(initial.Revision, `{"tool_stream_behavior":"hidden","tool_drawer_retention":60}`, `[]`)
@@ -125,6 +128,9 @@ func TestAdminPreferenceCommandsAndReset(t *testing.T) {
 		}
 	}
 	after := preferencesRow(t, st.DB)
+	if after["updated_at"] == before["updated_at"] {
+		t.Fatal("actual change retained updated_at")
+	}
 	for _, key := range []string{"tool_stream_behavior", "tool_drawer_retention", "updated_at", "admin_preferences_version"} {
 		delete(before, key)
 		delete(after, key)
@@ -156,7 +162,7 @@ func TestAdminPreferenceCommandsAndReset(t *testing.T) {
 	}
 	mixed := preferencesCommand(h, "update", preferencesBody(initial.Revision, `{"tool_stream_behavior":"persist"}`, `["tool_drawer_retention"]`), reset.Header().Get("ETag"))
 	mixedResult := adminDecode[admin.UpdateResponse](t, mixed)
-	if mixedResult.Snapshot.Values["tool_drawer_retention"].Value.Value() != float64(15) || mixedResult.Snapshot.Values["tool_drawer_retention"].HasOverride {
+	if mixedResult.Snapshot.Values["tool_stream_behavior"].Value.Value() != "persist" || mixedResult.Snapshot.Values["tool_drawer_retention"].Value.Value() != float64(15) || mixedResult.Snapshot.Values["tool_drawer_retention"].HasOverride {
 		t.Fatal("combined candidate reset failed")
 	}
 }
@@ -164,6 +170,11 @@ func TestAdminPreferenceCommandsAndReset(t *testing.T) {
 func TestAdminPreferenceNegativeControls(t *testing.T) {
 	_, st, h := adminFixture(t)
 	snapshot, etag := preferencesRead(t, h)
+	beforeInvalid := preferencesRow(t, st.DB)
+	invalid := preferencesCommand(h, "validate", preferencesBody(snapshot.Revision, `{"tool_stream_behavior":"bad"}`, `[]`), "")
+	if adminDecode[admin.Validation](t, invalid).Valid || !reflect.DeepEqual(beforeInvalid, preferencesRow(t, st.DB)) {
+		t.Fatal("invalid preview admitted or persisted")
+	}
 	good := preferencesBody(snapshot.Revision, `{"tool_stream_behavior":"hidden"}`, `[]`)
 	for _, tc := range []struct {
 		name, op, body, tag string
@@ -173,6 +184,7 @@ func TestAdminPreferenceNegativeControls(t *testing.T) {
 		{"stale", "update", good, `"stale"`, 412},
 		{"weak", "update", good, "W/" + etag, 412},
 		{"old-manifest", "update", preferencesBody("old", `{"tool_stream_behavior":"hidden"}`, `[]`), `"stale"`, 409},
+		{"old-manifest-unknown-key", "update", preferencesBody("old", `{"secret":"x"}`, `[]`), etag, 400},
 		{"malformed", "update", `{`, etag, 400},
 		{"unknown-property", "update", strings.TrimSuffix(good, "}") + `,"unknown":true}`, etag, 400},
 		{"unknown-key", "update", preferencesBody(snapshot.Revision, `{"secret":"x"}`, `[]`), etag, 400},

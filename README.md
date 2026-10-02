@@ -166,8 +166,11 @@ baseline requires a deliberate data/representation migration.
 
 Every POST, including validation, requires exactly one well-formed HTTP(S)
 `Origin`, checked before decoding. Use Nanite's actual scheme and authority or
-an exact finite `cors_allowed_origins` entry; wildcards and forwarded headers
-never grant admin access. CLI clients must also supply an approved Origin
+an exact operator-configured `cors_allowed_origins` entry; the legacy route
+defaults for localhost/127.0.0.1 on port 5173 grant no admin access unless
+explicitly configured. Wildcards and forwarded headers never grant admin
+access. Origin hostnames must be valid DNS names or IP literals; underscore
+hostnames are rejected. CLI clients must also supply an approved Origin
 (for example `-H 'Origin: http://localhost:8080'` when addressing that local
 HTTP authority). Behind TLS termination, explicitly allow the external HTTPS
 Origin in configuration. Admin CORS admits `If-Match` and exposes `ETag`;

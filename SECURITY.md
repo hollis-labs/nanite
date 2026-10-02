@@ -53,12 +53,24 @@ can be read by anyone able to observe the connection. If you expose Nanite
 beyond the local machine, put it behind TLS, a trusted TLS-terminating reverse
 proxy, a VPN, or an SSH tunnel, and restrict it with firewall rules.
 
-**CORS.** With no `http.cors_allowed_origins` configured, only
+**Legacy route CORS.** With no `http.cors_allowed_origins` configured, only
 `http://localhost:5173` and `http://127.0.0.1:5173` (the Vite dev server) are
 allowed. Matching is exact; `*` is accepted and disables credentialed CORS.
 The allowlist controls which browser origins may read responses — the server
 does not reject requests carrying a disallowed `Origin`, and it does not
-validate the `Host` header.
+validate the `Host` header on legacy routes.
+
+**Admin Origin policy.** `/api/admin` and `/api/admin/` use credentialed CORS
+for same-origin requests or exact operator-configured `cors_allowed_origins`
+entries only. The injected port-5173 dev defaults and `*` grant no admin
+access. Every admin POST, including validate, update and reset, requires one
+well-formed HTTP(S) Origin before body decoding, as well as operator Basic
+Auth; missing, null, malformed, duplicate and foreign Origins are rejected.
+Same-origin uses the actual request authority and TLS scheme, without trusting
+forwarded headers. CLI clients must send an approved Origin; a TLS-terminating
+proxy's external HTTPS Origin must be explicitly configured. Admin CORS
+allows If-Match and exposes ETag. This exception does not change legacy CORS or
+authentication behavior.
 
 **Execution isolation.** Commands Nanite itself runs on an agent's behalf
 (code-execution and dev tools) go through `internal/sandbox`: a minimal
@@ -222,8 +234,8 @@ machine:
 - plugin archives from catalogs are checked against their SHA256 checksum;
   checksums establish byte integrity, not publisher trust. A plugin is code
   you choose to run
-- CORS does not reject cross-origin requests, and there is no `Host` header
-  validation
+- legacy CORS does not reject cross-origin requests, and there is no general
+  `Host` header validation; admin POSTs enforce the Origin policy described above
 - on macOS, sandboxed execution restricts writes and network but not reads
 
 These are constraints of a local single-user tool, not hidden roadmap

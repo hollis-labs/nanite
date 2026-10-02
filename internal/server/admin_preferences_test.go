@@ -67,6 +67,39 @@ func TestAdminMountedPreferencesWriteAndPolicy(t *testing.T) {
 		t.Fatal(decodeErr)
 	}
 	body := `{"revision":"` + snapshot.Revision + `","set":{"tool_stream_behavior":"hidden"},"unset":[]}`
+	defaults, err := New(st, a, 0, false, nil, config.HTTPConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, origin := range []string{"http://localhost:5173", "http://127.0.0.1:5173"} {
+		for _, operation := range []string{"validate", "update", "reset"} {
+			unread := &mountedUnreadBody{}
+			request := httptest.NewRequest("POST", "http://nanite.test/api/admin/settings/preferences/"+operation, unread)
+			request.SetBasicAuth("operator", "fixture-password")
+			request.Header.Set("Origin", origin)
+			request.Header.Set("If-Match", read.Header().Get("ETag"))
+			access := counted.access.Load()
+			w := httptest.NewRecorder()
+			defaults.handlerChain().ServeHTTP(w, request)
+			if w.Code != 403 || unread.reads != 0 || counted.access.Load() != access {
+				t.Fatalf("default origin admitted %s: status=%d reads=%d", operation, w.Code, unread.reads)
+			}
+		}
+		for _, path := range []string{"/api/admin", "/api/admin/", "/api/settings"} {
+			request := httptest.NewRequest("OPTIONS", "http://nanite.test"+path, nil)
+			request.Header.Set("Origin", origin)
+			w := httptest.NewRecorder()
+			access := counted.access.Load()
+			defaults.handlerChain().ServeHTTP(w, request)
+			want := ""
+			if path == "/api/settings" {
+				want = origin
+			}
+			if w.Code != 204 || w.Header().Get("Access-Control-Allow-Origin") != want || counted.access.Load() != access {
+				t.Fatalf("default preflight policy changed: %s status=%d", path, w.Code)
+			}
+		}
+	}
 	for _, tc := range []struct {
 		name          string
 		origins       []string
@@ -79,23 +112,25 @@ func TestAdminMountedPreferencesWriteAndPolicy(t *testing.T) {
 		{name: "null", origins: []string{"null"}, authenticated: true, status: 403},
 		{name: "duplicate", origins: []string{"http://localhost:5173", "http://localhost:5173"}, authenticated: true, status: 403},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			unread := &mountedUnreadBody{}
-			request := httptest.NewRequest("POST", "http://nanite.test/api/admin/settings/preferences/update", unread)
-			request.Header["Origin"] = tc.origins
-			request.Header.Set("If-Match", read.Header().Get("ETag"))
-			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("X-Nanite-Caller-Agent", "operator")
-			if tc.authenticated {
-				request.SetBasicAuth("operator", "fixture-password")
-			}
-			access := counted.access.Load()
-			w := httptest.NewRecorder()
-			h.ServeHTTP(w, request)
-			if w.Code != tc.status || unread.reads != 0 || counted.access.Load() != access {
-				t.Fatalf("policy accessed body/store: status=%d reads=%d", w.Code, unread.reads)
-			}
-		})
+		for _, operation := range []string{"validate", "update", "reset"} {
+			t.Run(tc.name+"/"+operation, func(t *testing.T) {
+				unread := &mountedUnreadBody{}
+				request := httptest.NewRequest("POST", "http://nanite.test/api/admin/settings/preferences/"+operation, unread)
+				request.Header["Origin"] = tc.origins
+				request.Header.Set("If-Match", read.Header().Get("ETag"))
+				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set("X-Nanite-Caller-Agent", "operator")
+				if tc.authenticated {
+					request.SetBasicAuth("operator", "fixture-password")
+				}
+				access := counted.access.Load()
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, request)
+				if w.Code != tc.status || unread.reads != 0 || counted.access.Load() != access {
+					t.Fatalf("policy accessed body/store: status=%d reads=%d", w.Code, unread.reads)
+				}
+			})
+		}
 	}
 	request := httptest.NewRequest("POST", "http://nanite.test/api/admin/settings/preferences/update", strings.NewReader(body))
 	request.SetBasicAuth("operator", "fixture-password")
@@ -110,5 +145,21 @@ func TestAdminMountedPreferencesWriteAndPolicy(t *testing.T) {
 	p, err := st.GetAdminPreferences(ctx)
 	if err != nil || p.ToolStreamBehavior != "hidden" {
 		t.Fatal("mounted write did not persist")
+	}
+	for _, operation := range []string{"validate", "reset"} {
+		command := body
+		if operation == "reset" {
+			command = `{"revision":"` + snapshot.Revision + `","keys":[]}`
+		}
+		commandRequest := httptest.NewRequest("POST", "http://nanite.test/api/admin/settings/preferences/"+operation, strings.NewReader(command))
+		commandRequest.SetBasicAuth("operator", "fixture-password")
+		commandRequest.Header.Set("Origin", "http://localhost:5173")
+		commandRequest.Header.Set("If-Match", w.Header().Get("ETag"))
+		commandRequest.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, commandRequest)
+		if response.Code != 200 {
+			t.Fatalf("configured origin denied %s: %d %s", operation, response.Code, response.Body.String())
+		}
 	}
 }

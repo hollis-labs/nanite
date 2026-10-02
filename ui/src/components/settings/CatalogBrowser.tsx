@@ -120,7 +120,7 @@ export function CatalogBrowser({
       const match =
         entry.name.toLowerCase().includes(q) ||
         entry.description?.toLowerCase().includes(q) ||
-        entry.author?.toLowerCase().includes(q) ||
+        entry.id.toLowerCase().includes(q) ||
         entry.tags?.some((t) => t.toLowerCase().includes(q));
       if (!match) return false;
     }
@@ -304,15 +304,15 @@ export function CatalogBrowser({
         <div className="grid gap-3 grid-cols-2">
           {sorted.map((entry) => (
             <CatalogEntryCard
-              key={`${entry.source_id}-${entry.name}`}
+              key={`${entry.source_id}-${entry.id}`}
               entry={entry}
-              installing={installingName === entry.name}
-              onInstall={() => installMutation.mutate(entry.name)}
+              installing={installingName === entry.id}
+              onInstall={() => installMutation.mutate(entry.id)}
               rowRef={(el) => {
-                if (el) rowRefs.current.set(entry.name, el);
-                else rowRefs.current.delete(entry.name);
+                if (el) rowRefs.current.set(entry.id, el);
+                else rowRefs.current.delete(entry.id);
               }}
-              highlight={focusEntryName === entry.name}
+              highlight={focusEntryName === entry.id}
             />
           ))}
         </div>
@@ -395,12 +395,6 @@ function CatalogEntryCard({
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className="text-[11px] text-fg-muted">v{entry.version}</span>
-            {entry.author && (
-              <>
-                <span className="text-fg-faint text-[10px]">&middot;</span>
-                <span className="text-[11px] text-fg-muted truncate">{entry.author}</span>
-              </>
-            )}
             <span className="text-fg-faint text-[10px]">&middot;</span>
             <span className="text-[10px] text-fg-faint truncate">{entry.source_name}</span>
           </div>
@@ -421,7 +415,7 @@ function CatalogEntryCard({
           {!isInstalled && (
             <button
               onClick={onInstall}
-              disabled={installing}
+              disabled={installing || !entry.available}
               className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-brand-fg bg-brand hover:bg-brand-hover rounded-md transition-colors disabled:opacity-40"
             >
               {installing ? (
@@ -429,7 +423,7 @@ function CatalogEntryCard({
               ) : (
                 <Download className="w-3 h-3" />
               )}
-              Install
+              {entry.available ? "Install" : "Unavailable for this platform"}
             </button>
           )}
         </div>

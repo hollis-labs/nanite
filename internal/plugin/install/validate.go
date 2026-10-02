@@ -1,8 +1,7 @@
 // Package install validates plugin archives and their manifests before they
 // are loaded into the host.
 //
-// ValidateManifest enforces the plugin.yaml v1 JSON Schema (via santhosh-tekuri
-// jsonschema), cross-reference consistency between declared registrations and
+// ValidateManifest enforces the released shared manifest and Nanite contract, cross-reference consistency between declared registrations and
 // on-disk assets, and plugin-archive hygiene checks (bundle files exist, agent
 // profiles resolve, envelope schema files resolve, etc).
 //
@@ -12,14 +11,15 @@
 package install
 
 import (
-	"encoding/json"
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/hollis-labs/plugin-sdk/manifest"
 
 	plugin "github.com/hollis-labs/nanite/internal/plugin"
 )
@@ -37,12 +37,11 @@ const (
 type Kind string
 
 const (
-	KindSchema    Kind = "schema"
-	KindCrossRef  Kind = "cross-ref"
-	KindBundle    Kind = "bundle"
-	KindAsset     Kind = "asset"
-	KindPlatform  Kind = "platform"
-	KindSignature Kind = "signature"
+	KindSchema   Kind = "schema"
+	KindCrossRef Kind = "cross-ref"
+	KindBundle   Kind = "bundle"
+	KindAsset    Kind = "asset"
+	KindPlatform Kind = "platform"
 )
 
 // InstallFailure is a single validation problem.
@@ -122,7 +121,12 @@ func ValidateManifest(manifestPath, pluginDir string, opts ValidationOptions) *I
 		opts:         opts,
 	}
 
-	data, err := os.ReadFile(manifestPath)
+	file, err := os.Open(manifestPath) // #nosec G304 -- fixed manifest path in the staged bundle; bounded data-only read.
+	var data []byte
+	if err == nil {
+		defer func() { _ = file.Close() }()
+		data, err = io.ReadAll(io.LimitReader(file, manifest.MaxBytes+1))
+	}
 	if err != nil {
 		v.refuse(KindSchema, "", fmt.Sprintf("read plugin.yaml: %v", err))
 		return v.result()
@@ -209,42 +213,12 @@ func (v *validator) validateShadcnVersion(m *plugin.PluginManifest) {
 // (on success) also returns the strongly-typed PluginManifest so later phases
 // can operate on it without re-parsing.
 func (v *validator) validateSchema(data []byte) (*plugin.PluginManifest, bool) {
-	var raw any
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		v.refuse(KindSchema, "", fmt.Sprintf("parse yaml: %v", err))
-		return nil, false
-	}
-
-	// Convert yaml any → json-compatible any for the schema library.
-	jsonBytes, err := json.Marshal(raw)
+	declaration, err := plugin.DecodeManifest(bytes.NewReader(data))
 	if err != nil {
-		v.refuse(KindSchema, "", fmt.Sprintf("normalize yaml→json: %v", err))
-		return nil, false
-	}
-	var jsonDoc any
-	if err := json.Unmarshal(jsonBytes, &jsonDoc); err != nil {
-		v.refuse(KindSchema, "", fmt.Sprintf("normalize yaml→json: %v", err))
-		return nil, false
-	}
-
-	s, err := plugin.SchemaV1()
-	if err != nil {
-		v.refuse(KindSchema, "", fmt.Sprintf("load embedded schema: %v", err))
-		return nil, false
-	}
-	if err := s.Validate(jsonDoc); err != nil {
-		// Always refuse on schema violations — even in developer mode a
-		// malformed manifest cannot be loaded.
 		v.refuse(KindSchema, "", err.Error())
 		return nil, false
 	}
-
-	var manifest plugin.PluginManifest
-	if err := yaml.Unmarshal(data, &manifest); err != nil {
-		v.refuse(KindSchema, "", fmt.Sprintf("decode manifest: %v", err))
-		return nil, false
-	}
-	return &manifest, true
+	return declaration, true
 }
 
 // envelopeTypePattern mirrors the schema pattern for envelope types.
@@ -368,24 +342,9 @@ func (v *validator) validateBundleAssets(m *plugin.PluginManifest) {
 		return
 	}
 
-	// Subprocess entrypoint.
-	if m.Runtime == "subprocess" && m.Entrypoint != "" {
-		// Entrypoint may be "./bin", "python3 plugin.py", etc. Only check
-		// dot-prefixed relative paths for existence; PATH-resolved commands
-		// can't be verified here. Reject parent-directory paths because
-		// entrypoints are expected to stay inside pluginDir.
-		tokens := strings.Fields(m.Entrypoint)
-		if len(tokens) > 0 {
-			t := tokens[0]
-			switch {
-			case strings.HasPrefix(t, "../") || t == "..":
-				v.refuseOrWarn(KindBundle, "entrypoint", fmt.Sprintf("entrypoint %q must not escape plugin dir", t))
-			case strings.HasPrefix(t, "./"):
-				if !v.pathExists(t) {
-					v.refuseOrWarn(KindBundle, "entrypoint", fmt.Sprintf("entrypoint %q not found under plugin dir", t))
-				}
-			}
-		}
+	// Executable confinement is a hard boundary in every install mode.
+	if _, err := plugin.ResolveBundleFile(v.pluginDir, m.Entrypoint, true); err != nil {
+		v.refuse(KindBundle, "entrypoint.command", err.Error())
 	}
 
 	// Envelope schema files.
@@ -395,7 +354,7 @@ func (v *validator) validateBundleAssets(m *plugin.PluginManifest) {
 		}
 		field := fmt.Sprintf("registers.envelopes[%d].schema", i)
 		if !v.pathExists(e.Schema) {
-			v.refuseOrWarn(KindAsset, field, fmt.Sprintf("envelope schema %q not found", e.Schema))
+			v.refuse(KindAsset, field, fmt.Sprintf("envelope schema %q not found", e.Schema))
 		}
 	}
 
@@ -403,7 +362,7 @@ func (v *validator) validateBundleAssets(m *plugin.PluginManifest) {
 	for i, a := range m.Registers.AgentProfiles {
 		field := fmt.Sprintf("registers.agent_profiles[%d].file", i)
 		if !v.pathExists(a.File) {
-			v.refuseOrWarn(KindAsset, field, fmt.Sprintf("agent profile %q not found", a.File))
+			v.refuse(KindAsset, field, fmt.Sprintf("agent profile %q not found", a.File))
 		}
 	}
 
@@ -411,14 +370,14 @@ func (v *validator) validateBundleAssets(m *plugin.PluginManifest) {
 	ui := m.UI
 	if ui.BundleDir != "" || ui.Entry != "" || ui.Stylesheet != "" || ui.AssetsDir != "" {
 		if ui.Entry == "" {
-			v.refuseOrWarn(KindBundle, "ui.entry", "ui.entry required when ui bundle is declared")
+			v.refuse(KindBundle, "ui.entry", "ui.entry required when ui bundle is declared")
 		} else {
 			entry := ui.Entry
 			if ui.BundleDir != "" {
 				entry = filepath.Join(ui.BundleDir, ui.Entry)
 			}
 			if !v.pathExists(entry) {
-				v.refuseOrWarn(KindBundle, "ui.entry", fmt.Sprintf("ui entry %q not found", entry))
+				v.refuse(KindBundle, "ui.entry", fmt.Sprintf("ui entry %q not found", entry))
 			}
 		}
 		if ui.Stylesheet != "" {
@@ -427,7 +386,7 @@ func (v *validator) validateBundleAssets(m *plugin.PluginManifest) {
 				sheet = filepath.Join(ui.BundleDir, ui.Stylesheet)
 			}
 			if !v.pathExists(sheet) {
-				v.refuseOrWarn(KindBundle, "ui.stylesheet", fmt.Sprintf("ui stylesheet %q not found", sheet))
+				v.refuse(KindBundle, "ui.stylesheet", fmt.Sprintf("ui stylesheet %q not found", sheet))
 			}
 		}
 	}
@@ -438,23 +397,7 @@ func (v *validator) validateBundleAssets(m *plugin.PluginManifest) {
 // pluginDir (via ".." segments or symlink-style tricks on the literal path)
 // return false — validator never follows entries outside the plugin sandbox.
 func (v *validator) pathExists(rel string) bool {
-	if rel == "" {
-		return false
-	}
-	cleanRel := filepath.Clean(rel)
-	if filepath.IsAbs(cleanRel) {
-		return false
-	}
-	pluginDir := filepath.Clean(v.pluginDir)
-	p := filepath.Join(pluginDir, cleanRel)
-	resolvedRel, err := filepath.Rel(pluginDir, p)
-	if err != nil {
-		return false
-	}
-	if resolvedRel == ".." || strings.HasPrefix(resolvedRel, ".."+string(filepath.Separator)) {
-		return false
-	}
-	_, err = os.Stat(p)
+	_, err := plugin.ResolveBundleFile(v.pluginDir, rel, false)
 	return err == nil
 }
 

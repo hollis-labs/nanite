@@ -230,11 +230,7 @@ func TestParseManifestV1File(t *testing.T) {
 	if err := os.WriteFile(path, []byte("schema_version: 1\nid: foo\nname: Foo\nversion: 1.0.0\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	m, err := ParseManifest(path)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if m.SchemaVersion != 1 || m.ID != "foo" {
-		t.Errorf("parsed: %+v", m)
+	if _, err := ParseManifest(path); err == nil {
+		t.Fatal("external legacy manifest accepted")
 	}
 }

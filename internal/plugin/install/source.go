@@ -19,10 +19,12 @@ import (
 // printEvents; API: pluginHost.EmitPluginInstallProgress) without needing
 // to fork this Source.
 type CatalogArchiveSource struct {
-	ID         string
-	ArchiveURL string
-	SHA256     string
-	Downloader *HTTPDownloader
+	ID             string
+	ArchiveURL     string
+	SHA256         string
+	ManifestSHA256 string
+	Size           int64
+	Downloader     *HTTPDownloader
 }
 
 // PluginID implements Source.
@@ -48,8 +50,10 @@ func (s *CatalogArchiveSource) Download(ctx context.Context, stagingDir string, 
 		return Handle{}, err
 	}
 	return Handle{
-		Kind:           "archive",
-		Path:           path,
-		ExpectedSHA256: s.SHA256,
+		Kind:                   "archive",
+		Path:                   path,
+		ExpectedSHA256:         s.SHA256,
+		ExpectedManifestSHA256: s.ManifestSHA256,
+		ExpectedSize:           s.Size,
 	}, nil
 }

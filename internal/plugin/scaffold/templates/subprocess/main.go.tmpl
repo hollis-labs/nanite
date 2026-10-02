@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+"github.com/hollis-labs/plugin-sdk/manifest"
 
 	plugin "github.com/hollis-labs/plugin-sdk"
 	"github.com/hollis-labs/plugin-sdk/subprocess"
@@ -55,15 +56,7 @@ func (p *{{.StructName}}) Command(ctx context.Context, req subprocess.CommandReq
 	}, nil
 }
 
-// MCPCallTool services mcp/call_tool invocations. The list of tools
-// available to the host is declarative via plugin.yaml's
-// `registers.mcp_servers[].tools` — the host enumerates tools from the
-// manifest, not by sending `mcp/list_tools` to the plugin.
-//
-// NOTE (BLG-20260414-012): plugin-sdk v0.6.0's subprocess server does
-// NOT dispatch the `mcp/list_tools` protocol method — tool listing is
-// yaml-authoritative. If a future SDK adds a ListTools capability
-// interface, reimplement it here and keep plugin.yaml in sync.
+// MCPCallTool handles the shared manifest's declared echo tool.
 func (p *{{.StructName}}) MCPCallTool(ctx context.Context, req subprocess.MCPCallRequest) (subprocess.MCPCallResult, error) {
 	switch req.ToolName {
 	case "echo":
@@ -95,7 +88,16 @@ func mcpError(msg string) (subprocess.MCPCallResult, error) {
 	return subprocess.MCPCallResult{Content: payload, IsError: true}, nil
 }
 
+// declaration is the shared contract emitted by --manifest for release tooling.
+func declaration() manifest.Manifest {
+ return manifest.Manifest{SchemaVersion:2,ID:{{quote .Name}},Name:{{quote .DisplayName}},Version:"0.1.0",Description:{{quote .Description}},License:"MIT",Protocol:1,Runtime:"subprocess",Entrypoint:manifest.Entrypoint{Command:{{quote .Name}}},Hosts:map[string]manifest.HostRange{"nanite":{Min:"0.1.0"}},Nanite:json.RawMessage({{quote .NaniteBlock}}),Tools:[]manifest.Tool{ {{ "{" }}Name:"echo",Description:"Echo text",InputSchema:json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`),Effect:"read"{{ "}" }} } }
+}
+
 func main() {
+ if len(os.Args) == 2 && os.Args[1] == "--manifest" {
+  if err := manifest.Encode(os.Stdout,declaration()); err != nil { fmt.Fprintln(os.Stderr,err); os.Exit(1) }
+  return
+ }
 	if err := subprocess.Serve(&{{.StructName}}{}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

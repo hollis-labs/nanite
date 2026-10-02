@@ -132,10 +132,9 @@ func (r loopGoalSpecRequest) toGoalSpec() *loop.GoalSpec {
 }
 
 // loopLaunchRequest is POST /api/loops' request body -- a JSON-friendly
-// mirror of loop.LoopLaunchRequest (launcher.go). ContinuationPolicy and
-// Budget reuse loop.ContinuationPolicy/store.Budget directly (both already
-// carry their own snake_case json tags -- no separate DTO needed for
-// either). Exactly one of GoalID/InlineGoal must be set; that union check
+// mirror of loop.LoopLaunchRequest (launcher.go). Budget has an API-owned
+// request shape; ContinuationPolicy is an engine policy. Exactly one of
+// GoalID/InlineGoal must be set; that union check
 // is left to LoopEngine.Run's own resolveGoal (via LoopLauncher.Launch,
 // which forwards both straight through) rather than duplicated here -- see
 // internal/loop/launcher.go's own package doc comment.
@@ -143,7 +142,7 @@ type loopLaunchRequest struct {
 	GoalID             *string                  `json:"goal_id,omitempty"`
 	InlineGoal         *loopGoalSpecRequest     `json:"inline_goal,omitempty"`
 	DefinitionName     string                   `json:"definition_name"`
-	Budget             *store.Budget            `json:"budget,omitempty"`
+	Budget             *loopBudgetRequest       `json:"budget,omitempty"`
 	ContinuationPolicy *loop.ContinuationPolicy `json:"continuation_policy,omitempty"`
 	WorkflowParams     map[string]any           `json:"workflow_params,omitempty"`
 	AgentProfileID     string                   `json:"agent_profile_id"`
@@ -369,7 +368,7 @@ func (a *API) handleLaunchLoop(w http.ResponseWriter, r *http.Request) {
 	launchReq := loop.LoopLaunchRequest{
 		GoalID:          req.GoalID,
 		DefinitionName:  req.DefinitionName,
-		BudgetOverrides: req.Budget,
+		BudgetOverrides: req.Budget.toStore(),
 		WorkflowParams:  req.WorkflowParams,
 		AgentProfileID:  req.AgentProfileID,
 		ProjectID:       req.ProjectID,
@@ -538,4 +537,19 @@ func (a *API) handleListLoopIterations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.jsonResp(w, http.StatusOK, loopRunIterationsToView(rows))
+}
+
+type loopBudgetRequest struct {
+	MaxIterations           int    `json:"max_iterations"`
+	MaxFailures             int    `json:"max_failures"`
+	MaxRuntimeSeconds       int    `json:"max_runtime_seconds"`
+	MaxNoProgressIterations int    `json:"max_no_progress_iterations"`
+	OnExhausted             string `json:"on_exhausted"`
+}
+
+func (r *loopBudgetRequest) toStore() *store.Budget {
+	if r == nil {
+		return nil
+	}
+	return &store.Budget{MaxIterations: r.MaxIterations, MaxFailures: r.MaxFailures, MaxRuntimeSeconds: r.MaxRuntimeSeconds, MaxNoProgressIterations: r.MaxNoProgressIterations, OnExhausted: r.OnExhausted}
 }

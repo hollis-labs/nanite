@@ -1,7 +1,6 @@
 package api
 
 import (
-	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -551,7 +550,7 @@ type AgentBuilderDryRunResponse struct {
 	UnsupportedFields        []string                             `json:"unsupported_fields"`
 	NormalizedProfilePayload AgentBuilderProfileInput             `json:"normalized_profile_payload"`
 	CapabilityOperations     []AgentBuilderCapabilityOperation    `json:"capability_operations"`
-	DurableRecipePlan        *service.DurableAgentRecipePlan      `json:"durable_recipe_plan,omitempty"`
+	DurableRecipePlan        *DurableAgentRecipePlanView          `json:"durable_recipe_plan,omitempty"`
 	LaunchPlanPreview        *AgentBuilderLaunchPlanPreview       `json:"launch_plan_preview,omitempty"`
 	NotificationPreview      AgentBuilderReadyNotificationPreview `json:"notification_preview"`
 }

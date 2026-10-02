@@ -541,7 +541,7 @@ func (a *API) handleListAgentProjects(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, projects)
+	a.jsonResp(w, http.StatusOK, projectsToView(projects))
 }
 
 func (a *API) handleAddAgentProject(w http.ResponseWriter, r *http.Request) {
@@ -576,7 +576,7 @@ func (a *API) handleAddAgentProject(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, projects)
+	a.jsonResp(w, http.StatusCreated, projectsToView(projects))
 }
 
 func (a *API) handleRemoveAgentProject(w http.ResponseWriter, r *http.Request) {

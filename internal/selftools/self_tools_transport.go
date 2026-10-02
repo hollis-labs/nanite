@@ -593,7 +593,7 @@ func (at *AgentProfileTools) callCreateAgent(args map[string]any) (*mcp.ToolResu
 		return mcp.ErrorResult(fmt.Sprintf("create agent: %v", err)), nil
 	}
 
-	out, _ := json.Marshal(a)
+	out, _ := json.Marshal(selfToolAgentProfileToView(a))
 	return mcp.TextResult(fmt.Sprintf("Created agent %q (id=%s)\n%s", a.Name, a.ID, string(out))), nil
 }
 
@@ -952,7 +952,7 @@ func (wt *WorkTrackingTools) callTodoCreate(ctx context.Context, args map[string
 	}
 
 	wt.notifyWorkChanged()
-	out, _ := json.Marshal(t)
+	out, _ := json.Marshal(selfToolTodoToView(t))
 	return mcp.TextResult(fmt.Sprintf("Created todo %q (id=%s, scope=%s)\n%s", t.Title, t.ID, t.Scope, string(out))), nil
 }
 
@@ -1117,7 +1117,7 @@ func (wt *WorkTrackingTools) callPlanCreate(ctx context.Context, args map[string
 	}
 
 	wt.notifyWorkChanged()
-	out, _ := json.Marshal(p)
+	out, _ := json.Marshal(selfToolPlanToView(p))
 	return mcp.TextResult(fmt.Sprintf("Created plan %q (id=%s, scope=%s)\n%s", p.Title, p.ID, p.Scope, string(out))), nil
 }
 
@@ -1276,7 +1276,7 @@ func (wt *WorkTrackingTools) callPlanGet(args map[string]any) (*mcp.ToolResult, 
 		return mcp.ErrorResult(fmt.Sprintf("get plan: %v", err)), nil
 	}
 
-	out, _ := json.Marshal(p)
+	out, _ := json.Marshal(selfToolPlanToView(p))
 	return mcp.TextResult(string(out)), nil
 }
 

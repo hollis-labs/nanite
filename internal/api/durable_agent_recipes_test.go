@@ -98,6 +98,9 @@ func TestDurableAgentRecipesAPI_ApplyAndStart(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("decode apply: %v", err)
 	}
+	if result.Plan.Instance.ID == "" || result.Plan.Instance.URN == "" || result.Plan.Instance.CreatedAt.IsZero() {
+		t.Fatalf("apply plan lost persisted identity/defaults: %+v", result.Plan.Instance)
+	}
 	if result.Instance == nil || result.Instance.CurrentSessionID == "" || result.LaunchResult == nil {
 		t.Fatalf("result = %+v", result)
 	}

@@ -23,7 +23,7 @@ func (a *API) handleListTodos(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, todos)
+	a.jsonResp(w, http.StatusOK, todoToViews(todos))
 }
 
 // todoScopeReq is the body shape for PATCH /api/todos/{id}/scope (D2).
@@ -47,21 +47,22 @@ func (a *API) handleUpdateTodoScope(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Services.Streams.BroadcastWorkChanged()
-	a.jsonResp(w, http.StatusOK, t)
+	a.jsonResp(w, http.StatusOK, todoToView(t))
 }
 
 func (a *API) handleCreateTodo(w http.ResponseWriter, r *http.Request) {
-	var t store.Todo
-	if err := a.decode(r, &t); err != nil {
+	var req TodoView
+	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
+	t := req.toStore()
 	if err := a.Services.Todos.CreateTodo(r.Context(), &t); err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	a.Services.Streams.BroadcastWorkChanged()
-	a.jsonResp(w, http.StatusCreated, t)
+	a.jsonResp(w, http.StatusCreated, todoToView(&t))
 }
 
 func (a *API) handleGetTodo(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +71,7 @@ func (a *API) handleGetTodo(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, t)
+	a.jsonResp(w, http.StatusOK, todoToView(t))
 }
 
 func (a *API) handleUpdateTodo(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +86,7 @@ func (a *API) handleUpdateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Services.Streams.BroadcastWorkChanged()
-	a.jsonResp(w, http.StatusOK, t)
+	a.jsonResp(w, http.StatusOK, todoToView(t))
 }
 
 func (a *API) handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
@@ -103,5 +104,5 @@ func (a *API) handleListTodoChildren(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, children)
+	a.jsonResp(w, http.StatusOK, todoToViews(children))
 }

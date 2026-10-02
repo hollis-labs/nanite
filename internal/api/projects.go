@@ -101,7 +101,7 @@ func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 			// The sessions in the way, so a client can archive or move them.
 			a.jsonResp(w, http.StatusConflict, map[string]any{
 				"error":    inUse.Error(),
-				"sessions": inUse.Sessions,
+				"sessions": projectSessionRefsToView(inUse.Sessions),
 			})
 			return
 		}

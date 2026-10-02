@@ -7,7 +7,6 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/mcpconfig"
 	"github.com/hollis-labs/nanite/internal/service"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // handleListMCPServers returns all persisted MCP server configs, with header
@@ -25,12 +24,13 @@ func (a *API) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
 // handleCreateMCPServer adds a new MCP server config and registers it.
 // POST /api/mcp-servers
 func (a *API) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
-	var cfg store.MCPServerConfig
-	if err := a.decode(r, &cfg); err != nil {
+	var req CreateMCPServerRequest
+	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
+	cfg := req.toStore()
 	if err := a.Services.MCPServers.Create(r.Context(), &cfg); err != nil {
 		var ve *service.MCPServerValidationError
 		switch {

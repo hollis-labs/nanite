@@ -272,7 +272,7 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 		UnsupportedFields:        dedupeStrings(unsupported),
 		NormalizedProfilePayload: normalized,
 		CapabilityOperations:     ops,
-		DurableRecipePlan:        recipePlan,
+		DurableRecipePlan:        durableAgentRecipePlanToView(recipePlan),
 		LaunchPlanPreview:        launchPreview,
 		NotificationPreview:      notification,
 	}, nil

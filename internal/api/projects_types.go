@@ -40,3 +40,21 @@ func projectsToView(projects []store.Project) []ProjectView {
 	}
 	return out
 }
+
+// ProjectSessionRefView identifies a session that prevents project deletion.
+type ProjectSessionRefView struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+func projectSessionRefsToView(rows []store.ProjectSessionRef) []ProjectSessionRefView {
+	if rows == nil {
+		return nil
+	}
+	out := make([]ProjectSessionRefView, len(rows))
+	for i, r := range rows {
+		out[i] = ProjectSessionRefView{ID: r.ID, Title: r.Title, Status: r.Status}
+	}
+	return out
+}

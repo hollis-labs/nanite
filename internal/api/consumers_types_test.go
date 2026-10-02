@@ -85,9 +85,9 @@ func consumersFixture(t *testing.T) (store.Session, store.AgentProfile, store.Du
 	populate(t, &sess)
 	agent := populatedAgentProfile(t)
 	created := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
-	inst := store.DurableAgentInstance{ID: "inst-1", Name: "Curator", Slug: "curator", Status: "active", CreatedAt: created}
-	states := []store.DurableAgentInstanceSessionState{{SessionStatus: "active", Provider: "anthropic", RuntimeState: "running"}}
-	events := []store.DurableAgentEvent{{ID: "ev-1", InstanceID: "inst-1", EventType: "woke", Message: "hello", CreatedAt: created}}
+	inst := store.DurableAgentInstance{ID: "inst-1", Name: "Curator", Slug: "curator", Status: "active", CreatedAt: created, UpdatedAt: created, ArchivedAt: &created, ProfileID: "profile", LifecycleClass: "harness", Provider: "anthropic", Model: "model", RuntimeKind: "api", LaunchSourceType: "api_chat", LaunchSourceID: "recipe", WorkRoot: "/work", CurrentSessionID: "session", URN: "msg://agent/test/curator", FailureReason: "failure", MetadataJSON: "{}"}
+	states := []store.DurableAgentInstanceSessionState{{DurableAgentInstanceSession: store.DurableAgentInstanceSession{InstanceID: "inst-1", SessionID: "session", Relation: "primary", AttachedAt: created, DetachedAt: &created}, SessionStatus: "active", Provider: "anthropic", Model: "model", RuntimeState: "running", RuntimeFailureReason: "failure", HaltedAt: "stamp", HaltedReason: "budget"}}
+	events := []store.DurableAgentEvent{{ID: "ev-1", InstanceID: "inst-1", EventType: "woke", Message: "hello", CreatedAt: created, StatusBefore: "starting", StatusAfter: "running", SessionID: "session", Source: "manual", MetadataJSON: "{}"}}
 	usage := &store.SessionUsageSummary{MessageCount: 3, TotalTokens: 42, EstimatedCostUSD: 0.5}
 	return sess, agent, inst, states, events, usage
 }
@@ -106,9 +106,9 @@ func TestSessionDetailsResponseMatchesStoreEncoding(t *testing.T) {
 			ImmutableStartFields: immutable, Checkpoint: checkpointDetail{Status: "unknown"},
 		}
 		after := sessionDetailsResponse{
-			Session: sessionToViewPtr(&sess), DurableAttachments: states, CurrentDurableAgent: &inst,
+			Session: sessionToViewPtr(&sess), DurableAttachments: durableAgentInstanceSessionStateToViews(states), CurrentDurableAgent: durableAgentInstanceToView(&inst),
 			ActivityState: "online", LastActivityAt: "a", LastUsefulActivityAt: "b", Halt: halt,
-			Usage: sessionUsageToViewPtr(usage), RecentDurableEvents: events, Runtime: runtime, BootSource: "api_default",
+			Usage: sessionUsageToViewPtr(usage), RecentDurableEvents: durableAgentEventToViews(events), Runtime: runtime, BootSource: "api_default",
 			ImmutableStartFields: immutable, Checkpoint: checkpointDetail{Status: "unknown"},
 		}
 		if withAgent {
@@ -142,7 +142,7 @@ func TestStartSurfaceCapabilitiesMatchesStoreEncoding(t *testing.T) {
 	}
 	after := startSurfaceCapabilities{
 		SchemaVersion: 1, RuntimeKinds: runtimeKindOptions(), LifecycleClasses: lifecycleClassOptions(),
-		DurableAgents: durable, Profiles: agentProfilesToDTO(profiles), Providers: providerConfigsToView(providers), Models: modelsToView(models),
+		DurableAgents: durableAgentInstanceToViews(durable), Profiles: agentProfilesToDTO(profiles), Providers: providerConfigsToView(providers), Models: modelsToView(models),
 		Recipes: []service.DurableAgentRecipe{},
 	}
 	if got, want := mustJSON(t, after), mustJSON(t, before); string(got) != string(want) {

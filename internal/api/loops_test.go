@@ -134,7 +134,7 @@ func forceEscalationViaAPI(t *testing.T, mux *http.ServeMux, defName, profileID 
 		InlineGoal:     &loopGoalSpecRequest{Intent: "escalation fixture " + defName},
 		DefinitionName: defName,
 		AgentProfileID: profileID,
-		Budget:         &store.Budget{MaxIterations: 1},
+		Budget:         &loopBudgetRequest{MaxIterations: 1},
 	})
 	if resp.Status != store.LoopRunStatusWaitingOnEscalation {
 		t.Fatalf("Status = %q, want waiting_on_escalation (last_decision %+v)", resp.Status, resp.LastDecision)
@@ -299,7 +299,7 @@ func TestLoopsAPI_LaunchLoop_InlineGoal_CreatesGoalAndLoopRun(t *testing.T) {
 		// Budget would make Decide return CONTINUE forever (see
 		// internal/loop's own budgetExhausted doc comment). This test
 		// only cares that Launch produced a real Goal+LoopRun.
-		Budget: &store.Budget{MaxIterations: 1},
+		Budget: &loopBudgetRequest{MaxIterations: 1},
 	})
 	if resp.LoopRunID == "" {
 		t.Fatalf("empty loop_run_id in launch response")
@@ -338,7 +338,7 @@ func TestLoopsAPI_LaunchLoop_ExistingGoalID_ReusesGoal(t *testing.T) {
 		AgentProfileID: profile.ID,
 		// Bounded on purpose -- see the identical comment on
 		// TestLoopsAPI_LaunchLoop_InlineGoal_CreatesGoalAndLoopRun above.
-		Budget: &store.Budget{MaxIterations: 1},
+		Budget: &loopBudgetRequest{MaxIterations: 1},
 	})
 
 	lr, err := st.GetLoopRun(context.Background(), resp.LoopRunID)
@@ -371,7 +371,7 @@ func TestLoopsAPI_LaunchLoop_ConflictOnActiveGoal409s(t *testing.T) {
 		GoalID:         &goalID,
 		DefinitionName: wf.Name,
 		AgentProfileID: profile.ID,
-		Budget:         &store.Budget{MaxIterations: 1},
+		Budget:         &loopBudgetRequest{MaxIterations: 1},
 	})
 
 	w := doJSONRequest(t, mux, http.MethodPost, "/api/loops", loopLaunchRequest{
@@ -408,7 +408,7 @@ func TestLoopsAPI_GetAndListLoops(t *testing.T) {
 		InlineGoal:     &loopGoalSpecRequest{Intent: "list me"},
 		DefinitionName: wf.Name,
 		AgentProfileID: profile.ID,
-		Budget:         &store.Budget{MaxIterations: 1},
+		Budget:         &loopBudgetRequest{MaxIterations: 1},
 	})
 
 	w := doJSONRequest(t, mux, http.MethodGet, "/api/loops/"+resp.LoopRunID, nil)
@@ -614,7 +614,7 @@ func TestLoopsAPI_ResolveEscalation_NotWaitingOnEscalation409s(t *testing.T) {
 		GoalID:         &goalID,
 		DefinitionName: wf.Name,
 		AgentProfileID: profile.ID,
-		Budget:         &store.Budget{MaxIterations: 10},
+		Budget:         &loopBudgetRequest{MaxIterations: 10},
 	})
 	if resp.Status != store.LoopRunStatusCompleted {
 		t.Fatalf("Status = %q, want completed", resp.Status)

@@ -14,9 +14,9 @@ import (
 
 func TestSelfToolsReadServiceWiring(t *testing.T) {
 	ctx := t.Context()
-	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "selftools.db"))
-	if err != nil {
-		t.Fatal(err)
+	st, openErr := storetest.New(t, ctx, filepath.Join(t.TempDir(), "selftools.db"))
+	if openErr != nil {
+		t.Fatal(openErr)
 	}
 	t.Cleanup(func() { _ = st.Close(context.Background()) })
 	transport := NewSelfToolsTransport(st)

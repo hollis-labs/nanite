@@ -152,13 +152,13 @@ func (st *SelfToolsTransport) callHandoffStash(ctx context.Context, args map[str
 		return mcp.ErrorResult(fmt.Sprintf("handoff_stash: %v", err)), nil
 	}
 	stashID := uuid.New().String()
-	if err := st.Reads.Handoffs.Upsert(ctx, store.HandoffStash{
+	if writeErr := st.Reads.Handoffs.Upsert(ctx, store.HandoffStash{
 		ID:        stashID,
 		SessionID: sessionID,
 		Payload:   string(envelopeBytes),
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-	}); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("handoff_stash: %v", err)), nil
+	}); writeErr != nil {
+		return mcp.ErrorResult(fmt.Sprintf("handoff_stash: %v", writeErr)), nil
 	}
 
 	resp := struct {

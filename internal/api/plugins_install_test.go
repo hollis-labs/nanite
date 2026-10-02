@@ -36,10 +36,7 @@ func createTestPlugin(t *testing.T, dir, name string) string {
 	t.Helper()
 	pluginDir := filepath.Join(dir, name)
 	os.MkdirAll(pluginDir, 0755)
-	manifest := `name: ` + name + `
-version: 1.0.0
-description: Test plugin
-`
+	manifest := minimalCatalogPluginManifest(name)
 	os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(manifest), 0644)
 	os.WriteFile(filepath.Join(pluginDir, "README.md"), []byte("# "+name), 0644)
 	return pluginDir
@@ -180,10 +177,7 @@ func TestHandleInstallArchive_TarGz(t *testing.T) {
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 
-	manifest := `name: archive-plugin
-version: 2.0.0
-description: From archive
-`
+	manifest := minimalCatalogPluginManifest("archive-plugin")
 	// Directory entry.
 	tw.WriteHeader(&tar.Header{Name: "archive-plugin/", Typeflag: tar.TypeDir, Mode: 0755})
 	// plugin.yaml

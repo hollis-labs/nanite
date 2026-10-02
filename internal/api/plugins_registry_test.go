@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hollis-labs/nanite/pkg/pluginapi"
+
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	goplugin "github.com/hollis-labs/plugin-sdk"
 )
@@ -62,51 +64,14 @@ func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 	if err := os.MkdirAll(pluginPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `schema_version: 1
-name: ` + pluginID + `
-id: ` + pluginID + `
-version: 0.0.1
-description: synthetic plugin for registry endpoint tests
-protocol: 1
-runtime: builtin
-registers:
-  envelopes:
-    - type: synth-card
-      component: SynthCard
-      version: 1
-      schema: schemas/synth-card.json
-  components:
-    - name: synth-widget
-      type: widget
-      description: synthetic widget
-  slots:
-    - id: synth-slot-entry
-      slot: composer-toolbar
-      priority: 10
-      component: SynthToolbarButton
-ui:
-  bundle_dir: ui/dist
-  entry: index.js
-  stylesheet: style.css
-  react_version: ^19.0.0
-`
-	if err := os.WriteFile(filepath.Join(pluginPath, "plugin.yaml"), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Register a no-op constructor so DiscoverPlugins accepts this as a
-	// builtin (the loader requires a registered constructor for runtime:
-	// builtin plugins).
-	naniteplugin.RegisterPlugin(pluginID, func() goplugin.Plugin {
-		return &synthPlugin{id: pluginID}
-	})
-	t.Cleanup(func() { naniteplugin.UnregisterPluginForTest(pluginID) })
+	writeAPIPluginBundle(t, pluginPath, pluginID, "Synthetic Plugin", pluginapi.Block{UI: pluginapi.UI{Bundle: "ui/dist/index.js", Stylesheet: "ui/dist/style.css", ReactVersion: "^19.0.0"}, Registers: pluginapi.Registrations{Envelopes: []pluginapi.Envelope{{Type: "synth-card", Component: "SynthCard", Version: 1, Schema: "schemas/synth-card.json"}}, Slots: []pluginapi.Slot{{ID: "synth-slot-entry", Slot: "composer-toolbar", Component: "SynthToolbarButton", Priority: 10}}}})
 
 	host := naniteplugin.NewHost(http.NewServeMux(), naniteplugin.NewLogger("test"))
 	discovered, err := naniteplugin.DiscoverPlugins(pluginsDir)
 	if err != nil {
 		t.Fatalf("DiscoverPlugins: %v", err)
 	}
+	t.Cleanup(func() { _ = host.UnloadPlugin(pluginID) })
 	loaded, loadErrs := naniteplugin.LoadDiscovered(host, discovered)
 	if len(loadErrs) > 0 {
 		t.Fatalf("LoadDiscovered errs: %v", loadErrs)
@@ -140,11 +105,11 @@ ui:
 	if !ok {
 		t.Fatalf("plugins[%q] missing; got %+v", pluginID, resp.Plugins)
 	}
-	wantBundle := "/api/plugins/" + pluginID + "/ui/dist/index.js"
+	wantBundle := "/api/plugins/" + pluginID + "/bundle/ui/dist/index.js"
 	if pl.BundleURL != wantBundle {
 		t.Errorf("bundle_url mismatch: got %q want %q", pl.BundleURL, wantBundle)
 	}
-	wantSheet := "/api/plugins/" + pluginID + "/ui/dist/style.css"
+	wantSheet := "/api/plugins/" + pluginID + "/bundle/ui/dist/style.css"
 	if pl.StylesheetURL != wantSheet {
 		t.Errorf("stylesheet_url mismatch: got %q want %q", pl.StylesheetURL, wantSheet)
 	}

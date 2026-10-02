@@ -2,12 +2,17 @@ package install
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/hollis-labs/plugin-sdk/manifest"
 )
 
 // State is the current position in the install state machine.
@@ -39,7 +44,7 @@ type Event struct {
 type EventFunc func(Event)
 
 // Source describes where a plugin archive comes from. A Source is either a
-// catalog-backed archive (resolves to signed tar.gz + checksum + signature)
+// catalog-backed archive (resolves to checksum-verified tar.gz + checksum)
 // or a local-path source (already-extracted directory on disk). Concrete
 // implementations live in G.2 (archive/catalog) and G.6 (local path).
 type Source interface {
@@ -64,7 +69,9 @@ type Handle struct {
 
 	// ExpectedSHA256 is the hex-encoded sha256 the archive must match.
 	// Ignored for "directory" kind.
-	ExpectedSHA256 string
+	ExpectedSHA256         string
+	ExpectedManifestSHA256 string
+	ExpectedSize           int64
 }
 
 // Verifier checks archive integrity. Implementation in G.2.
@@ -195,7 +202,7 @@ func (i *Installer) Install(ctx context.Context, src Source) (string, error) {
 
 	// Verifying.
 	if isArchive {
-		i.transition(pluginID, StateVerifying, "verifying signature")
+		i.transition(pluginID, StateVerifying, "verifying checksum")
 		if i.Verifier == nil {
 			rolledBack = true
 			return "", i.fail(pluginID, StateVerifying, errors.New("Verifier is nil"))
@@ -234,6 +241,33 @@ func (i *Installer) Install(ctx context.Context, src Source) (string, error) {
 	if err := i.Validator.Validate(ctx, stagingDir); err != nil {
 		rolledBack = true
 		return "", i.fail(pluginID, StateValidating, fmt.Errorf("validate: %w", err))
+	}
+
+	if identityValidator, ok := i.Validator.(interface {
+		ValidateIdentity(context.Context, string, string) error
+	}); ok {
+		if identityErr := identityValidator.ValidateIdentity(ctx, stagingDir, pluginID); identityErr != nil {
+			rolledBack = true
+			return "", i.fail(pluginID, StateValidating, identityErr)
+		}
+	}
+	if handle.ExpectedManifestSHA256 != "" {
+		file, openErr := os.Open(filepath.Join(stagingDir, "plugin.yaml")) // #nosec G304 -- fixed manifest file inside private staging directory.
+		if openErr != nil {
+			rolledBack = true
+			return "", i.fail(pluginID, StateValidating, openErr)
+		}
+		raw, readErr := io.ReadAll(io.LimitReader(&contextReader{ctx: ctx, reader: file}, manifest.MaxBytes+1))
+		_ = file.Close()
+		if readErr != nil {
+			rolledBack = true
+			return "", i.fail(pluginID, StateValidating, readErr)
+		}
+		digest := sha256.Sum256(raw)
+		if !strings.EqualFold(hex.EncodeToString(digest[:]), handle.ExpectedManifestSHA256) {
+			rolledBack = true
+			return "", i.fail(pluginID, StateValidating, errors.New("manifest checksum differs from catalog"))
+		}
 	}
 
 	// Atomic swap into the final plugins dir. Done before Loading so that

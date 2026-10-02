@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -191,7 +189,7 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 
 		if dp.IsSubprocess() {
 			// Subprocess plugin: create a SubprocessPlugin that bridges via JSON-RPC.
-			sp, err := newSubprocessPluginFromManifest(dp)
+			sp, err := NewSubprocessPluginFromManifest(dp)
 			if err != nil {
 				wrapped := fmt.Errorf("create subprocess plugin %s: %w", pluginID, err)
 				errs = append(errs, wrapped)
@@ -264,41 +262,19 @@ type ManifestProvider interface {
 	Manifest() *PluginManifest
 }
 
-// newSubprocessPluginFromManifest creates a SubprocessPlugin from a discovered
+// NewSubprocessPluginFromManifest creates a SubprocessPlugin from a discovered
 // plugin manifest with runtime: subprocess.
-func newSubprocessPluginFromManifest(dp DiscoveredPlugin) (*subprocess.SubprocessPlugin, error) {
+func NewSubprocessPluginFromManifest(dp DiscoveredPlugin) (*subprocess.SubprocessPlugin, error) {
 	m := dp.Manifest
 
-	// Resolve the entrypoint command and args.
-	command, args := parseEntrypoint(m.Entrypoint, dp.Dir)
-
-	// Resolve the command so it's unambiguous under Manager's cmd.Dir setting.
-	// Go's exec package evaluates a relative cmd.Path relative to cmd.Dir at
-	// fork/exec time — a plugin-dir-joined relative path like
-	// "plugins/oembed/oembed" paired with Dir="plugins/oembed" would be
-	// re-resolved inside the plugin dir (→ ENOENT, surfaced as
-	// "fork/exec …: no such file or directory").
-	//
-	// Two entrypoint shapes to handle:
-	//   - Filesystem path ("./oembed", "plugins/oembed/oembed", "/usr/bin/x"):
-	//     must end up absolute so cmd.Dir can't re-shift it.
-	//   - PATH lookup name ("python3", "node"): exec.LookPath resolves to an
-	//     absolute path via $PATH — we keep LookPath's return value instead of
-	//     Abs-ing the bare name (which would incorrectly produce "$PWD/python3").
-	resolved, err := exec.LookPath(command)
+	if m.Shared == nil {
+		return nil, fmt.Errorf("subprocess plugin requires a shared manifest")
+	}
+	command, err := ResolveBundleFile(dp.Dir, m.Shared.Entrypoint.Command, true)
 	if err != nil {
-		absCmd := filepath.Join(dp.Dir, command)
-		resolved, err = exec.LookPath(absCmd)
-		if err != nil {
-			return nil, fmt.Errorf("entrypoint %q not found: %w", m.Entrypoint, err)
-		}
+		return nil, fmt.Errorf("entrypoint: %w", err)
 	}
-	if !filepath.IsAbs(resolved) {
-		if abs, absErr := filepath.Abs(resolved); absErr == nil {
-			resolved = abs
-		}
-	}
-	command = resolved
+	args := append([]string(nil), m.Shared.Entrypoint.Args...)
 
 	// Resolve config values for the subprocess.
 	config := make(map[string]string)
@@ -318,17 +294,6 @@ func newSubprocessPluginFromManifest(dp DiscoveredPlugin) (*subprocess.Subproces
 	mgrCfg.Args = args
 
 	return subprocess.NewSubprocessPlugin(dp.Dir, m.Identifier(), config, mgrCfg), nil
-}
-
-// parseEntrypoint splits an entrypoint string like "python3 plugin.py" into
-// a command and args. If the entrypoint is a single token (e.g., "./my-plugin"),
-// args is nil.
-func parseEntrypoint(entrypoint, pluginDir string) (string, []string) {
-	parts := strings.Fields(entrypoint)
-	if len(parts) == 0 {
-		return entrypoint, nil
-	}
-	return parts[0], parts[1:]
 }
 
 // LoadRegisteredBuiltins loads all registered plugin constructors that are not

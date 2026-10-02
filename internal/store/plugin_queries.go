@@ -71,3 +71,61 @@ func (s *Store) ReadPluginQueryMetrics(ctx context.Context, sessionID string, li
 	}
 	return out, rows.Err()
 }
+
+// ReadPluginQueryReferences projects only core message identity, never message
+// content, tool payloads or debug metadata. Both narrowing IDs are bound values.
+func (s *Store) ReadPluginQueryReferences(ctx context.Context, sessionID, messageID string, limit int) ([]Message, error) {
+	if sessionID == "" || limit < 1 || limit > maxPluginQueryRows {
+		return nil, fmt.Errorf("invalid plugin reference query")
+	}
+	const projection = `SELECT id,session_id,role,created_at FROM messages WHERE session_id=? AND (?='' OR id=?) ORDER BY created_at DESC,id DESC LIMIT ?`
+	rows, err := s.DB.QueryContext(ctx, projection, sessionID, messageID, messageID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRows(rows)
+	out := make([]Message, 0)
+	for rows.Next() {
+		var row Message
+		if err := rows.Scan(&row.ID, &row.SessionID, &row.Role, &row.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+type PluginCoreExport struct {
+	PluginID, Feature, SourceID, Path, SHA256 string
+	RowCount                                  int
+}
+
+// ReadPluginExportReceipts lists committed receipts only from this database and
+// this credential's owner. An extraction creates the ledger in its drop
+// transaction; its absence before the first extraction means no export exists.
+func (s *Store) ReadPluginExportReceipts(ctx context.Context, owner string, limit int) ([]PluginCoreExport, error) {
+	if owner == "" || limit < 1 || limit > maxPluginQueryRows {
+		return nil, fmt.Errorf("invalid plugin export query")
+	}
+	exists, err := s.tableExists(ctx, "plugin_core_exports")
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return []PluginCoreExport{}, nil
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT plugin_id,feature,source_id,relative_path,sha256,row_count FROM plugin_core_exports WHERE plugin_id=? ORDER BY feature,source_id LIMIT ?`, owner, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRows(rows)
+	out := make([]PluginCoreExport, 0)
+	for rows.Next() {
+		var row PluginCoreExport
+		if err := rows.Scan(&row.PluginID, &row.Feature, &row.SourceID, &row.Path, &row.SHA256, &row.RowCount); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}

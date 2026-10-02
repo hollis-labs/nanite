@@ -36,13 +36,18 @@ func (a *API) handlePluginHostQuery(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "invalid host query parameters")
 		return
 	}
+	resource := pluginapi.QueryResource(r.PathValue("resource"))
 	for key, values := range parameters {
-		if key != "session_id" && key != "limit" || len(values) != 1 {
+		if key != "session_id" && key != "limit" && (key != "message_id" || resource != pluginapi.QueryMessageReferences) || len(values) != 1 {
 			a.errorResp(w, http.StatusBadRequest, "invalid host query parameters")
 			return
 		}
 	}
-	query := pluginapi.QueryRequest{Resource: pluginapi.QueryResource(r.PathValue("resource")), SessionID: parameters.Get("session_id")}
+	query := pluginapi.QueryRequest{Resource: resource, SessionID: parameters.Get("session_id"), MessageID: parameters.Get("message_id")}
+	if parameters.Has("message_id") && (pluginapi.CoreReference{SessionID: query.SessionID, MessageID: query.MessageID}).Validate() != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid message reference")
+		return
+	}
 	if raw := parameters.Get("limit"); parameters.Has("limit") {
 		limit, err := strconv.Atoi(raw)
 		if err != nil || limit < 1 || limit > pluginapi.MaxQueryLimit {
@@ -59,7 +64,13 @@ func (a *API) handlePluginHostQuery(w http.ResponseWriter, r *http.Request) {
 	stopRevocation := context.AfterFunc(permit.Context, cancel)
 	defer cancel()
 	defer stopRevocation()
-	data, err := a.Services.PluginQueries.Read(ctx, permit.Scope, query)
+	var data any
+	var err error
+	if query.Resource == pluginapi.QueryDataExports {
+		data, err = a.Services.PluginQueries.ReadExports(ctx, permit.PluginID, permit.Scope, query)
+	} else {
+		data, err = a.Services.PluginQueries.Read(ctx, permit.Scope, query)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrPluginQueryDenied):

@@ -69,7 +69,7 @@ func adminDecode[T any](t *testing.T, response *httptest.ResponseRecorder) T {
 	return value
 }
 
-func TestAdminReadOnlyDiscovery(t *testing.T) {
+func TestAdminWritableDiscovery(t *testing.T) {
 	a, st, handler := adminFixture(t)
 	before, err := st.GetAdminPreferences(context.Background())
 	if err != nil {
@@ -80,13 +80,13 @@ func TestAdminReadOnlyDiscovery(t *testing.T) {
 		t.Fatal("wrong app contract")
 	}
 	group := manifest.Settings[0]
-	if group.ID != "preferences" || group.Scope != (admin.Scope{Kind: "app", ID: "nanite"}) || group.Capabilities != (admin.Capabilities{CanRead: true}) {
-		t.Fatal("wrong read-only scope")
+	if group.ID != "preferences" || group.Scope != (admin.Scope{Kind: "app", ID: "nanite"}) || group.Capabilities != (admin.Capabilities{CanRead: true, CanValidate: true, CanUpdate: true, CanReset: true}) {
+		t.Fatal("wrong writable scope")
 	}
-	if group.Endpoints.Read == nil || group.Endpoints.Read.Path != "/api/admin/settings/preferences" || group.Endpoints.Validate != nil || group.Endpoints.Update != nil || group.Endpoints.Reset != nil {
-		t.Fatal("mutation advertised")
+	if group.Endpoints.Read == nil || group.Endpoints.Read.Path != "/api/admin/settings/preferences" || group.Endpoints.Validate == nil || group.Endpoints.Update == nil || group.Endpoints.Reset == nil {
+		t.Fatal("mutation endpoints absent")
 	}
-	if !reflect.DeepEqual(group.Resolution.Precedence, []admin.SourceKind{admin.OverrideSource}) || group.Resolution.WriteLayer != "" {
+	if !reflect.DeepEqual(group.Resolution.Precedence, []admin.SourceKind{admin.OverrideSource, admin.DefaultSource}) || group.Resolution.WriteLayer != admin.OverrideSource {
 		t.Fatal("invented fallback/write layer")
 	}
 	if len(group.Fields) != 2 || len(group.Schema.Properties) != 2 {
@@ -94,12 +94,12 @@ func TestAdminReadOnlyDiscovery(t *testing.T) {
 	}
 	for _, key := range []string{"tool_stream_behavior", "tool_drawer_retention"} {
 		field, exists := group.Fields[key]
-		if !exists || field.Editable || field.Secret || field.RestartRequired || field.ApplyTarget != "" || field.ReadOnlyReason == "" {
+		if !exists || !field.Editable || field.Secret || field.RestartRequired || field.ApplyTarget != "" || field.ReadOnlyReason != "" {
 			t.Fatalf("dishonest declaration %s", key)
 		}
 		property := group.Schema.Properties[key]
-		if !property.ReadOnly || property.Default != nil {
-			t.Fatal("invented default")
+		if property.ReadOnly || property.Default == nil {
+			t.Fatal("missing canonical default")
 		}
 	}
 	expectedStream := []any{"streaming", "persist", "hidden"}
@@ -140,7 +140,7 @@ func TestAdminReadOnlyDiscovery(t *testing.T) {
 	}
 }
 
-func TestAdminRealStoreETagAndPOSTDenial(t *testing.T) {
+func TestAdminRealStoreETagAndOriginDenial(t *testing.T) {
 	_, st, handler := adminFixture(t)
 	ctx := context.Background()
 	read := func() (*httptest.ResponseRecorder, admin.Snapshot) {
@@ -153,11 +153,11 @@ func TestAdminRealStoreETagAndPOSTDenial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if oldETag != `"`+preferences.Version+`"` || strings.HasPrefix(oldETag, "W/") {
+	if oldETag != `"`+snapshot.Revision+":"+preferences.Version+`"` || strings.HasPrefix(oldETag, "W/") {
 		t.Fatal("ETag not strong host generation")
 	}
 	for _, record := range snapshot.Values {
-		if record.Editable || !record.HasOverride || record.Source == nil || record.Source.Kind != admin.OverrideSource || record.ApplyState != admin.UnknownApply || record.ReadOnlyReason == "" {
+		if !record.Editable || record.HasOverride || record.Source == nil || record.Source.Kind != admin.DefaultSource || record.ApplyState != admin.UnknownApply || record.ReadOnlyReason != "" {
 			t.Fatal("dishonest value metadata")
 		}
 	}
@@ -219,10 +219,10 @@ func TestAdminRealStoreETagAndPOSTDenial(t *testing.T) {
 	}
 	backend := adminPreferencesBackend{}
 	if _, previewErr := backend.Preview(ctx, admin.Changes{}); previewErr == nil {
-		t.Fatal("preview unexpectedly supported")
+		t.Fatal("missing provider preview admitted")
 	}
 	if transactionErr := backend.WithTransaction(ctx, func(admin.GroupTransaction) error { t.Fatal("transaction callback ran"); return nil }); transactionErr == nil {
-		t.Fatal("transaction unexpectedly supported")
+		t.Fatal("missing provider transaction admitted")
 	}
 	if _, execErr := st.DB.Exec(`UPDATE user_settings SET admin_preferences_version='' WHERE id=1`); execErr != nil {
 		t.Fatal(execErr)
@@ -382,6 +382,10 @@ func TestAdminBackendErrorRedaction(t *testing.T) {
 
 type adminFailingStore struct{}
 
+func (adminFailingStore) WithAdminPreferencesTransaction(context.Context, func(*store.PreferencesTransaction) error) error {
+	return errors.New("SECRET at /private/database")
+}
+
 func (adminFailingStore) GetUserSettings(context.Context) (*store.UserSettings, error) {
 	return nil, errors.New("unused")
 }
@@ -447,7 +451,7 @@ func TestAdminConcurrentPreferenceReads(t *testing.T) {
 				t.Error(readErr)
 				return
 			}
-			known[`"`+preferences.Version+`"`] = pair{stream, float64(retention)}
+			known[`"`+initial.Revision+":"+preferences.Version+`"`] = pair{stream, float64(retention)}
 		}
 	}()
 	readers.Wait()

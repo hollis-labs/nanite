@@ -65,6 +65,8 @@ type Server struct {
 	pluginHost *naniteplugin.Host
 	pluginsDir string
 	httpCfg    config.HTTPConfig
+	// adminAllowedOrigins excludes the legacy routes' injected dev defaults.
+	adminAllowedOrigins []string
 	// healthWarnings are reported by /api/health, such as agent sandbox
 	// protection being turned off (CW-20261001-0143).
 	healthWarnings []string
@@ -76,19 +78,22 @@ type Server struct {
 // Empty/zero fields are replaced with conservative defaults — see
 // resolveHTTPConfig and the default* constants above.
 func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugin.Host, httpCfg config.HTTPConfig) (*Server, error) {
+	adminAllowedOrigins := append([]string(nil), httpCfg.CORSAllowedOrigins...)
 	resolvedHTTPConfig, err := resolveHTTPConfig(httpCfg)
 	if err != nil {
 		return nil, fmt.Errorf("resolve HTTP config: %w", err)
 	}
+	resolvedHTTPConfig.CORSAllowedOrigins = append([]string(nil), resolvedHTTPConfig.CORSAllowedOrigins...)
 	mux := http.NewServeMux()
 	srv := &Server{
-		store:      s,
-		port:       port,
-		dev:        dev,
-		mux:        mux,
-		api:        a,
-		pluginHost: pluginHost,
-		httpCfg:    resolvedHTTPConfig,
+		store:               s,
+		port:                port,
+		dev:                 dev,
+		mux:                 mux,
+		api:                 a,
+		pluginHost:          pluginHost,
+		httpCfg:             resolvedHTTPConfig,
+		adminAllowedOrigins: adminAllowedOrigins,
 	}
 
 	// Set the router on the plugin host if it exists
@@ -100,7 +105,7 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 	}
 
 	user, password, _ := basicAuthCredentials()
-	adminHandler, adminErr := a.NewAdminHandler(api.NewBasicWorkflowResponderAuthenticator(user, password))
+	adminHandler, adminErr := a.NewAdminHandler(api.NewBasicWorkflowResponderAuthenticator(user, password), adminAllowedOrigins...)
 	if adminErr != nil {
 		return nil, fmt.Errorf("configure admin handler: %w", adminErr)
 	}
@@ -307,6 +312,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // short-circuit, placement in the chain — is stable.
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/admin" || strings.HasPrefix(r.URL.Path, "/api/admin/") {
+			s.adminCORSMiddleware(next).ServeHTTP(w, r)
+			return
+		}
 		origin := r.Header.Get("Origin")
 		// Vary: Origin must be set on all responses whose content could vary
 		// with Origin, even when the caller is disallowed — otherwise shared

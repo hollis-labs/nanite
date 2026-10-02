@@ -269,3 +269,7 @@ func TestHandleGrantAgentTool_Precedence(t *testing.T) {
 func (f failingSettingsStore) GetAdminPreferences(context.Context) (*store.AdminPreferences, error) {
 	return nil, errors.New("settings unavailable")
 }
+
+func (f failingSettingsStore) WithAdminPreferencesTransaction(context.Context, func(*store.PreferencesTransaction) error) error {
+	return errors.New("unused transaction")
+}

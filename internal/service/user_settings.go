@@ -17,6 +17,7 @@ import (
 type userSettingsStore interface {
 	GetUserSettings(ctx context.Context) (*store.UserSettings, error)
 	GetAdminPreferences(ctx context.Context) (*store.AdminPreferences, error)
+	WithAdminPreferencesTransaction(context.Context, func(*store.PreferencesTransaction) error) error
 	UpdateUserSettings(ctx context.Context, us *store.UserSettings) error
 }
 
@@ -62,6 +63,12 @@ func (s *UserSettingsService) Get(ctx context.Context) (*store.UserSettings, err
 // AdminPreferences reads the two public preferences and their opaque version together.
 func (s *UserSettingsService) AdminPreferences(ctx context.Context) (*store.AdminPreferences, error) {
 	return s.store.GetAdminPreferences(ctx)
+}
+
+// WithAdminPreferencesTransaction exposes targeted persistence under SQLite's
+// writer lock, independently of the legacy whole-row settings interface.
+func (s *UserSettingsService) WithAdminPreferencesTransaction(ctx context.Context, fn func(*store.PreferencesTransaction) error) error {
+	return s.store.WithAdminPreferencesTransaction(ctx, fn)
 }
 
 // Update writes the whole settings row.

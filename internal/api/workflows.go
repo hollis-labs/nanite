@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	ssekit "github.com/hollis-labs/go-ssekit"
 	workflowapi "github.com/hollis-labs/nanite/internal/workflowapi"
 	"github.com/hollis-labs/nanite/internal/workflowcompat"
 )
@@ -320,7 +321,7 @@ func (a *API) handleSharedWorkflowEvents(w http.ResponseWriter, r *http.Request)
 		a.errorResp(w, http.StatusServiceUnavailable, "shared workflow engine not initialized")
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		a.errorResp(w, http.StatusInternalServerError, "streaming not supported")
 		return
@@ -349,12 +350,10 @@ func (a *API) handleSharedWorkflowEvents(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
-	clearSSEWriteDeadline(w)
-	flusher.Flush()
+	stream, err := newSSEWriter(w, false)
+	if err != nil {
+		return
+	}
 
 	poll := time.NewTicker(50 * time.Millisecond)
 	keepalive := time.NewTicker(15 * time.Second)
@@ -372,10 +371,9 @@ func (a *API) handleSharedWorkflowEvents(w http.ResponseWriter, r *http.Request)
 			if marshalErr != nil {
 				continue
 			}
-			if _, writeErr := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", strconv.FormatInt(item.Cursor, 10), item.Event.Type, data); writeErr != nil {
+			if writeErr := stream.Send(ssekit.Event{ID: strconv.FormatInt(item.Cursor, 10), Name: item.Event.Type, Data: data}); writeErr != nil {
 				return false
 			}
-			flusher.Flush()
 		}
 		return true
 	}
@@ -391,10 +389,9 @@ func (a *API) handleSharedWorkflowEvents(w http.ResponseWriter, r *http.Request)
 				return
 			}
 		case <-keepalive.C:
-			if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
+			if err := stream.Comment("keepalive"); err != nil {
 				return
 			}
-			flusher.Flush()
 		}
 	}
 }

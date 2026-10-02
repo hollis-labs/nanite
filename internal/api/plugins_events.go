@@ -2,10 +2,10 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
+	ssekit "github.com/hollis-labs/go-ssekit"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 )
 
@@ -50,7 +50,7 @@ func handlePluginsEvents(w http.ResponseWriter, r *http.Request, host *naniteplu
 		http.Error(w, "plugin system not initialized", http.StatusServiceUnavailable)
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
@@ -59,16 +59,15 @@ func handlePluginsEvents(w http.ResponseWriter, r *http.Request, host *naniteplu
 	ch := host.SubscribeEvents()
 	defer host.UnsubscribeEvents(ch)
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	clearSSEWriteDeadline(w)
+	stream, err := newSSEWriter(w, true)
+	if err != nil {
+		return
+	}
 	// Initial comment flushes headers and establishes the stream before the
 	// first event arrives.
-	fmt.Fprint(w, ": plugin lifecycle stream open\n\n")
-	flusher.Flush()
+	if err := stream.Comment("plugin lifecycle stream open"); err != nil {
+		return
+	}
 
 	keepalive := time.NewTicker(sseKeepaliveInterval)
 	defer keepalive.Stop()
@@ -79,8 +78,9 @@ func handlePluginsEvents(w http.ResponseWriter, r *http.Request, host *naniteplu
 		case <-ctx.Done():
 			return
 		case <-keepalive.C:
-			fmt.Fprint(w, ": keepalive\n\n")
-			flusher.Flush()
+			if err := stream.Comment("keepalive"); err != nil {
+				return
+			}
 		case event, open := <-ch:
 			if !open {
 				return
@@ -92,8 +92,9 @@ func handlePluginsEvents(w http.ResponseWriter, r *http.Request, host *naniteplu
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, payload)
-			flusher.Flush()
+			if err := stream.Send(ssekit.Event{Name: event.Type, Data: payload}); err != nil {
+				return
+			}
 		}
 	}
 }

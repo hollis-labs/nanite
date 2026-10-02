@@ -242,6 +242,11 @@ func TestHostRuntimeCursorQueryPrecedesHeaderAndRejectsMalformed(t *testing.T) {
 	if got, err := hostRuntimeCursor(request); err != nil || got != 7 {
 		t.Fatalf("cursor = %d, %v, want query cursor 7", got, err)
 	}
+	empty := httptest.NewRequest(http.MethodGet, "/api/sessions/s/runtime-events?after=", nil)
+	empty.Header.Set("Last-Event-ID", "99")
+	if got, err := hostRuntimeCursor(empty); err != nil || got != 0 {
+		t.Fatalf("empty explicit cursor = %d, %v, want zero", got, err)
+	}
 	bad := httptest.NewRequest(http.MethodGet, "/api/sessions/s/runtime-events", nil)
 	bad.Header.Set("Last-Event-ID", "not-a-cursor")
 	if _, err := hostRuntimeCursor(bad); err == nil {

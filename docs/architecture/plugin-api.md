@@ -208,3 +208,17 @@ The plugin supplies translation into a bounded nonempty prompt and optional
 identity facts. Core owns instance resolution, session creation and prompt
 delivery. A successful projection reports `queued`, not completed execution;
 skipped or failed wakes return a conflict. Clients never retry an uncertain wake.
+
+The `nanite.loom` integration owns Fragments Engine callback translation at
+`/api/plugins/nanite.loom/curator-wake` and three explicit Curator/Weaver reminder
+declarations. The previous core callback route has no compatibility alias.
+Its host service defers pilot ownership transfer until final activation, after
+all accepted registrations succeed. A single transaction binds each uniquely
+identified system pilot reminder to its original definition ID and changes only
+its ownership/provenance markers. Edits, status, timestamps, firing history and
+opt-outs remain attached. Ambiguous or non-system sources refuse the handoff.
+Missing source definitions receive binding tombstones and are never recreated
+by reload; desired new reminders can be defined through the host editor.
+The normal reflex editor cannot change provenance; this host-controlled handoff
+is the narrow exception for existing feature definitions. No evaluator,
+resolver, executor or scheduling implementation moves into the plugin.

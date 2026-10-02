@@ -1147,16 +1147,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	} else if n > 0 {
 		slog.Info("service container: seeded base reflexes", "count", n)
 	}
-	// CW-20260816-0023: Loom Curator/Weaver pilot reflex pair
-	// (check_before_answer, capture_on_discovery). AgentID-scoped, so it
-	// must run after the compiled-in seed pass above has resolved the target
-	// agent_profiles IDs. A seed whose target is absent is skipped with a
-	// warning (not fatal) and picked up after the profile is provisioned.
-	if n, err := reflexes.SeedAgentReflexesBySlug(context.Background(), cfg.Store, reflexes.LoomPilotReflexSeeds(), slog.Default()); err != nil {
-		slog.Warn("service container: loom pilot reflex seed", "err", err)
-	} else if n > 0 {
-		slog.Info("service container: seeded loom pilot reflexes", "count", n)
-	}
 
 	// Phase 4c.1 (CW-20260508-0002): construct *agent.Dependencies +
 	// agentsessions.Manager once, after the core deps (store, pathGrants,

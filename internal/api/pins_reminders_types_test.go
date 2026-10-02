@@ -123,10 +123,10 @@ func TestAgentBuilderDryRun_UpdateUnknownProfile(t *testing.T) {
 	}
 }
 
-func TestLoomCuratorWake_NotProvisioned(t *testing.T) {
+func TestLoomCoreCallbackRouteRetired(t *testing.T) {
 	_, mux := newTestAPI(t)
 	w := mcpDo(mux, "POST", "/api/loom/curator-wake", `{"generator":"g","fragment":{"id":"frag-1"}}`)
-	if w.Code != http.StatusServiceUnavailable || !strings.HasPrefix(errorBody(t, w), "loom curator durable-agent instance not provisioned") {
-		t.Fatalf("not provisioned: %d %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("retired callback: %d %s", w.Code, w.Body.String())
 	}
 }

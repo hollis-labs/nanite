@@ -1,25 +1,55 @@
 package reflexes
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
+
+	"github.com/hollis-labs/nanite/pkg/pluginapi"
+	"github.com/hollis-labs/plugin-sdk/manifest"
 )
 
-// loomPilotTriggerSpec extracts the trigger_kind/trigger_spec JSON for a
-// named seed in LoomPilotReflexSeeds(), scoped by agent slug. Mirrors
-// evaluator_test.go's seedTriggerSpec helper for BaseSeeds().
+// These behavioral checks consume the released plugin declarations and the
+// actual host evaluator. No second core Loom seed implementation is retained.
 func loomPilotTriggerSpec(t *testing.T, agentSlug, name string) (string, string) {
 	t.Helper()
-	for _, s := range LoomPilotReflexSeeds() {
-		if s.AgentSlug == agentSlug && s.Name == name {
-			b, err := json.Marshal(s.TriggerSpec)
-			if err != nil {
-				t.Fatalf("marshal trigger: %v", err)
+	published := os.Getenv("NANITE_LOOM_TEST_BUNDLE")
+	if published == "" {
+		t.Skip("requires verified loom/v0.1.0 release bundle")
+	}
+	root, err := os.OpenRoot(published) // #nosec G703 -- opt-in fixture selects an externally verified release directory.
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	raw, err := root.ReadFile("plugin.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration, err := manifest.Decode(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := pluginapi.DecodeBlock(declaration.Nanite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.ReplaceAll(name, "_", "-")
+	if name == "capture_on_discovery" {
+		id = strings.TrimPrefix(agentSlug, "loom-") + "-" + id
+	}
+	for _, seed := range block.Registers.ReflexSeeds {
+		if seed.AgentSlug == agentSlug && seed.ID == id {
+			trigger, marshalErr := json.Marshal(seed.Trigger)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
 			}
-			return s.TriggerKind, string(b)
+			return "predicate", string(trigger)
 		}
 	}
-	t.Fatalf("no loom pilot seed matching agent_slug=%s name=%s", agentSlug, name)
+	t.Fatal("released Loom seed missing", agentSlug, id)
 	return "", ""
 }
 

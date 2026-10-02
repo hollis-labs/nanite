@@ -147,9 +147,7 @@ func QueryGrantFromIdentity(identity json.RawMessage) (QueryGrant, error) {
 	if len(identity) > maxQueryScopeBytes {
 		return QueryGrant{}, fmt.Errorf("pluginapi: query identity is oversized")
 	}
-	var claims struct {
-		HostQuery json.RawMessage `json:"nanite_host_query,omitempty"`
-	}
+	var claims hostIdentity
 	if err := manifest.DecodeExtension(identity, &claims); err != nil {
 		return QueryGrant{}, fmt.Errorf("pluginapi: invalid host identity")
 	}

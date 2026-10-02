@@ -15,7 +15,7 @@ import (
 
 // Version identifies the public host contract, independently of the Nanite
 // application version. A plugin declares this range in hosts.nanite.
-const Version = "0.1.6"
+const Version = "0.1.7"
 
 // Drawer slots are host-owned browser contribution locations.
 const (

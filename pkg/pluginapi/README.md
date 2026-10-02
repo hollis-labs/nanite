@@ -153,3 +153,12 @@ owned prefix, preserves escaped separators and repeated/empty query values,
 and bounds buffered bodies to `MaxHTTPBody`. Declare a subtree for item routes
 and register patterns such as `GET /bookmarks/{id}` on the child mux. Dispatch
 private context retrieval separately. Streaming remains on core SSE paths.
+
+Integration plugins may request `durable_agent.wake` with an explicit
+`agent_slugs` allowlist of database-backed durable instance slugs. The host
+delivers a revocable `DurableWakeGrant` under `identity.nanite_durable_wake`.
+Use `DurableWakeClient.Wake` to submit a bounded reason, nonempty prompt and
+optional identity facts. Prompt delivery starts a real agent turn through the
+core wake service. This capability grants no provisioning, profile edits,
+arbitrary tool calls or scheduling. The client refuses redirects and environment
+proxies, limits request/response sizes, and never retries an uncertain wake.

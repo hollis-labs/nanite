@@ -221,10 +221,10 @@ Promissory-preamble nudge (iteration 0, once, non-CLI: synthetic assistant and u
 
 ### 3.8 SSE framing (`streamMessageEvents`)
 
-- Headers: `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`; the write deadline is cleared (`clearSSEWriteDeadline`).
-- Frame: `id: N` (omitted when `EventID` is 0), `event: <type>`, `data: <StreamEvent JSON>` (the JSON also carries `event_id`), blank line. Flush per event.
+- Headers: `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`; `newSSEWriter` in `internal/api/sse.go` delegates framing and flushing to go-ssekit and clears both read and write deadlines for the long-lived response. The helper overrides the library cache default to preserve `no-cache` and retains each endpoint's buffering hint.
+- Frame: `id: N` (omitted when `EventID` is 0), `event: <type>`, `data: <StreamEvent JSON>` (the JSON also carries `event_id`), blank line. Flush per event; a write or flush failure ends the handler without cancelling generation, so the retained ring remains available for reconnect.
 - No `retry:` field, no comment lines, no heartbeat: the stream is silent during approvals (up to 5 minutes), rate-budget waits and tool runs.
-- Marshal, write and flush errors are ignored; a dead peer is noticed only when the request context ends.
+- JSON marshaling remains at the transport boundary. Write and flush errors end the handler immediately; request cancellation also ends it. Neither path cancels the generation producer.
 - On channel close the handler returns with no terminal marker.
 
 ### 3.9 Routes: legacy messages API vs harness v1

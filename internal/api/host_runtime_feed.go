@@ -3,12 +3,12 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	ssekit "github.com/hollis-labs/go-ssekit"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -28,7 +28,7 @@ func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusServiceUnavailable, "host runtime feed not initialized")
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		a.errorResp(w, http.StatusInternalServerError, "streaming not supported")
 		return
@@ -45,13 +45,10 @@ func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	clearSSEWriteDeadline(w)
-	flusher.Flush()
+	stream, err := newSSEWriter(w, true)
+	if err != nil {
+		return
+	}
 
 	cursor := after
 	headWritten := false
@@ -74,10 +71,9 @@ func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
 				// A head is snapshot authority, not a committed feed record. It
 				// deliberately has no SSE id, so disconnecting after this frame
 				// cannot skip the replay rows that follow it.
-				if _, writeErr := fmt.Fprintf(w, "event: host_runtime.head.v1\ndata: %s\n\n", data); writeErr != nil {
+				if writeErr := stream.Send(ssekit.Event{Name: "host_runtime.head.v1", Data: data}); writeErr != nil {
 					return false
 				}
-				flusher.Flush()
 				headWritten = true
 				lastHead = replay.Head
 			}
@@ -86,10 +82,9 @@ func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
 				if marshalErr != nil {
 					return false
 				}
-				if _, writeErr := fmt.Fprintf(w, "id: %d\nevent: host_runtime.gap.v1\ndata: %s\n\n", replay.PrunedThrough, data); writeErr != nil {
+				if writeErr := stream.Send(ssekit.Event{ID: strconv.FormatInt(replay.PrunedThrough, 10), Name: "host_runtime.gap.v1", Data: data}); writeErr != nil {
 					return false
 				}
-				flusher.Flush()
 				gapWritten = true
 			}
 			for i := range replay.Events {
@@ -98,10 +93,9 @@ func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
 				if marshalErr != nil {
 					return false
 				}
-				if _, writeErr := fmt.Fprintf(w, "id: %d\nevent: host_runtime.v1\ndata: %s\n\n", event.Cursor, data); writeErr != nil {
+				if writeErr := stream.Send(ssekit.Event{ID: strconv.FormatInt(event.Cursor, 10), Name: "host_runtime.v1", Data: data}); writeErr != nil {
 					return false
 				}
-				flusher.Flush()
 			}
 			cursor = replay.NextCursor
 			if len(replay.Events) < hostRuntimeReplayPageSize || cursor >= replay.LatestCursor {
@@ -126,10 +120,9 @@ func (a *API) handleHostRuntimeFeed(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-keepalive.C:
-			if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
+			if err := stream.Comment("keepalive"); err != nil {
 				return
 			}
-			flusher.Flush()
 		}
 	}
 }

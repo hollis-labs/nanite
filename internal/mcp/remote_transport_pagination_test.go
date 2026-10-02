@@ -165,3 +165,42 @@ func TestRemoteTransportListTools_CancellationDuringLaterPage(t *testing.T) {
 		t.Fatalf("cancellation lost: %v", err)
 	}
 }
+
+func TestRemoteTransportListTools_DiscoveryLimits(t *testing.T) {
+	t.Run("unique cursors", func(t *testing.T) {
+		var mu sync.Mutex
+		requests := 0
+		tr := paginatedTransport(t, func(_ context.Context, _ string) (*sdkmcp.ListToolsResult, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			requests++
+			// Stop a broken implementation promptly instead of waiting for its deadline.
+			if requests > 2*maxToolListPages {
+				return nil, errors.New("fixture request limit exceeded")
+			}
+			return toolPage("tool", fmt.Sprintf("unique_%d", requests)), nil
+		})
+		got, err := tr.ListTools(context.Background())
+		if got != nil || err == nil || !strings.Contains(err.Error(), fmt.Sprintf("tools/list exceeded %d pages", maxToolListPages)) {
+			t.Fatalf("want page-limit error without partial tools, got %v, %v", got, err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if requests != 2*maxToolListPages {
+			t.Fatalf("want capped pages on each of two attempts, got %d requests", requests)
+		}
+	})
+	t.Run("total tools", func(t *testing.T) {
+		tools := make([]*sdkmcp.Tool, maxToolListTools+1)
+		for i := range tools {
+			tools[i] = &sdkmcp.Tool{Name: fmt.Sprintf("tool_%d", i), InputSchema: map[string]any{"type": "object"}}
+		}
+		tr := paginatedTransport(t, func(_ context.Context, _ string) (*sdkmcp.ListToolsResult, error) {
+			return &sdkmcp.ListToolsResult{Tools: tools}, nil
+		})
+		got, err := tr.ListTools(context.Background())
+		if got != nil || err == nil || !strings.Contains(err.Error(), fmt.Sprintf("tools/list exceeded %d tools", maxToolListTools)) {
+			t.Fatalf("want tool-limit error without partial tools, got %v, %v", got, err)
+		}
+	})
+}

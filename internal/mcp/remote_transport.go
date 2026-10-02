@@ -12,6 +12,13 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// Bound accumulated discovery results even when a server keeps issuing new
+// cursors within the call deadline. Limits apply to each complete-list attempt.
+const (
+	maxToolListPages = 100
+	maxToolListTools = 100_000
+)
+
 // defaultCallTimeout is the safety-net context deadline applied to a
 // ListTools/CallTool call when the caller's own context carries none.
 // stdio keeps its historical 30s (a local process either answers in
@@ -103,14 +110,20 @@ func (t *remoteTransport) listToolPages(ctx context.Context) ([]*sdkmcp.Tool, er
 	session := client.SDKSession()
 	var tools []*sdkmcp.Tool
 	seen := make(map[string]bool)
-	for {
+	for pages := 1; ; pages++ {
 		if page == nil {
 			return nil, fmt.Errorf("server returned no tools/list result")
+		}
+		if len(page.Tools) > maxToolListTools-len(tools) {
+			return nil, fmt.Errorf("tools/list exceeded %d tools", maxToolListTools)
 		}
 		tools = append(tools, page.Tools...)
 		cursor := page.NextCursor
 		if cursor == "" {
 			return tools, nil
+		}
+		if pages >= maxToolListPages {
+			return nil, fmt.Errorf("tools/list exceeded %d pages", maxToolListPages)
 		}
 		if seen[cursor] {
 			return nil, fmt.Errorf("server repeated tools/list cursor %q", cursor)

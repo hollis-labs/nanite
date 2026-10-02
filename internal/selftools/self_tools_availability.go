@@ -1,8 +1,6 @@
 package selftools
 
 import (
-	"context"
-
 	"github.com/hollis-labs/nanite/internal/mcp"
 )
 
@@ -27,8 +25,10 @@ var selfToolNeeds = map[string]func(*SelfToolsTransport) bool{
 	"handoff_approve":  hasMessaging,
 	"handoff_reject":   hasMessaging,
 
-	"todo_create":   hasWorkTracking,
-	"todo_update":   hasWorkTracking,
+	"todo_create": hasWorkTracking,
+	"todo_update": func(st *SelfToolsTransport) bool {
+		return st.WorkTrackingTools != nil && st.WorkTrackingTools.Updater != nil
+	},
 	"todo_list":     hasWorkTracking,
 	"plan_create":   hasWorkTracking,
 	"plan_update":   hasWorkTracking,
@@ -81,16 +81,22 @@ func (st *SelfToolsTransport) toolWired(name string) bool {
 
 // BareStoreTools returns the self tools a transport over a bare store lists
 // with HideUnwired set: what `nanite mcp` advertises when it dispatches
-// locally, with none of the harness's collaborators wired. Every check in
-// selfToolNeeds reads a collaborator NewSelfToolsTransport leaves unwired,
-// never the store itself, so no store is needed to compute it.
+// locally, with none of the harness's collaborators wired. The service
+// composition root supplies the todo updater for a local store, so todo_update
+// belongs to this set even though computing the catalog needs no store.
 //
 // A forwarding `nanite mcp` for a launch that is not a chat agent advertises
 // exactly this set (CW-20261001-0188): such launches used to dispatch
 // locally, and routing their calls through the live harness must not give
 // them a tool they did not already have.
 func BareStoreTools() []mcp.Tool {
-	tools, _ := (&SelfToolsTransport{HideUnwired: true}).ListTools(context.Background())
+	var tools []mcp.Tool
+	bare := &SelfToolsTransport{}
+	for _, tool := range selfToolDefinitions() {
+		if tool.Name == "todo_update" || bare.toolWired(tool.Name) {
+			tools = append(tools, tool)
+		}
+	}
 	return tools
 }
 

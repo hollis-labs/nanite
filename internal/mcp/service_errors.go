@@ -17,7 +17,11 @@ func ServiceErrorResult(err error) *ToolResult {
 		code, message, field = typed.Code, typed.Message, typed.Field
 	}
 	if typed != nil && typed.Err != nil {
-		slog.Error("mcp: service operation failed", "code", typed.Code, "cause", typed.Err)
+		if typed.Code == svcerr.CodeInternal || typed.Code == svcerr.CodeUnavailable {
+			slog.Error("mcp: service operation failed", "code", typed.Code, "cause", typed.Err)
+		} else {
+			slog.Warn("mcp: service operation rejected", "code", typed.Code, "cause", typed.Err)
+		}
 	} else if typed == nil {
 		slog.Error("mcp: service operation failed", "cause", err)
 	}

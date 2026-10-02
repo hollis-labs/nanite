@@ -126,3 +126,46 @@ func TestSelfToolsWriteServiceWiring(t *testing.T) {
 		t.Fatalf("schedules: %+v %v", schedules, err)
 	}
 }
+
+func TestSelfToolsTodoUpdateListedAndCallable(t *testing.T) {
+	ctx := t.Context()
+	st, openErr := storetest.New(t, ctx, filepath.Join(t.TempDir(), "todo-update.db"))
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
+	transport := NewSelfToolsTransport(st)
+	transport.HideUnwired = true
+	if transport.WorkTrackingTools.Store != nil || transport.WorkTrackingTools.Updater == nil {
+		t.Fatal("expected production service-only todo updater wiring")
+	}
+	tools, err := transport.ListTools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := false
+	for _, tool := range tools {
+		if tool.Name == "todo_update" {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Fatal("todo_update missing from production transport discovery")
+	}
+	row := &store.Todo{Title: "Original", Scope: "session", ScopeID: "fixture"}
+	if createErr := st.CreateTodo(ctx, row); createErr != nil {
+		t.Fatal(createErr)
+	}
+	result, err := transport.CallTool(ctx, "todo_update", map[string]any{"id": row.ID, "title": "Updated"})
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("todo_update: %+v %v", result, err)
+	}
+	var updated store.Todo
+	if decodeErr := json.Unmarshal([]byte(result.Content[0].Text), &updated); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	persisted, err := st.GetTodo(ctx, row.ID)
+	if err != nil || updated.Title != "Updated" || persisted.Title != "Updated" {
+		t.Fatalf("update not applied: %+v %+v %v", updated, persisted, err)
+	}
+}

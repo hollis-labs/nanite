@@ -577,7 +577,7 @@ func (a *API) handleRemoveAgentProject(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")
 
 	if err := a.Services.AgentMembership.RemoveAgentProject(r.Context(), agentID, projectID); err != nil {
-		a.errorResp(w, http.StatusNotFound, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "removed"})

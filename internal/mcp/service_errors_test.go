@@ -38,3 +38,23 @@ func TestServiceErrorResultLogsWrappedCause(t *testing.T) {
 		t.Fatalf("unsafe response: %+v", result)
 	}
 }
+
+func TestServiceErrorResultLogSeverity(t *testing.T) {
+	for _, code := range []svcerr.Code{svcerr.CodeInvalid, svcerr.CodeNotFound, svcerr.CodeConflict, svcerr.CodePermission, svcerr.CodeInternal, svcerr.CodeUnavailable} {
+		t.Run(string(code), func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			err := svcerr.Wrap(errors.New("private cause"), code, "safe message")
+			ServiceErrorResult(err)
+			level := "WARN"
+			if code == svcerr.CodeInternal || code == svcerr.CodeUnavailable {
+				level = "ERROR"
+			}
+			if !strings.Contains(logs.String(), "level="+level) || !strings.Contains(logs.String(), "private cause") {
+				t.Fatalf("unexpected severity or missing cause: %s", logs.String())
+			}
+		})
+	}
+}

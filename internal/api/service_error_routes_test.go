@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +25,7 @@ func serviceErrorRoutes(t *testing.T) (*store.Store, http.Handler) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close(context.Background()) })
-	svc := &service.Container{Agents: service.NewAgentService(service.AgentServiceConfig{Agents: st, Writers: st}), AgentConfig: service.NewAgentConfigService(st, agent.Classification{}, nil), Todos: service.NewTodoService(service.TodoServiceConfig{Todos: st, Plans: st}), Schedules: service.NewScheduleService(st), Streams: service.NewStreamManager()}
+	svc := &service.Container{Agents: service.NewAgentService(service.AgentServiceConfig{Agents: st, Writers: st}), AgentConfig: service.NewAgentConfigService(st, agent.Classification{}, nil), AgentMembership: service.NewAgentMembershipService(st, st), Todos: service.NewTodoService(service.TodoServiceConfig{Todos: st, Plans: st}), Schedules: service.NewScheduleService(st), Streams: service.NewStreamManager()}
 	mux := http.NewServeMux()
 	New(svc).RegisterRoutes(mux)
 	return st, mux
@@ -58,6 +59,7 @@ func TestServiceErrorRoutesClassifyExpectedFailures(t *testing.T) {
 	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Duplicate","slug":"managed","system_prompt":"fixture"}`, 409)
 	serviceErrorRequest(t, h, "POST", "/api/agents/managed/copy-to-managed", `{}`, 409)
 	serviceErrorRequest(t, h, "POST", "/api/agents/missing/copy-to-managed", `{}`, 404)
+	serviceErrorRequest(t, h, "GET", "/api/agents/missing/known-tools", "", 404)
 	serviceErrorRequest(t, h, "PATCH", "/api/todos/missing/scope", `{"scope":"session","scope_id":"fixture"}`, 404)
 	serviceErrorRequest(t, h, "PATCH", "/api/todos/missing/scope", `{"scope":"bad"}`, 400)
 	serviceErrorRequest(t, h, "POST", "/api/schedules", `{"agent_id":"missing"}`, 404)
@@ -105,6 +107,13 @@ func TestServiceErrorRoutesClosedDBIsInternal(t *testing.T) {
 	}
 	for _, c := range []struct{ method, path, body string }{
 		{"POST", "/api/agents", `{"name":"Fresh","slug":"fresh","system_prompt":"fixture"}`},
+		{"POST", "/api/durable-agents", `{"slug":"fixture","profile_id":"target"}`},
+		{"DELETE", "/api/agents/target/projects/project", ""},
+		{"GET", "/api/agents/target", ""},
+		{"GET", "/api/agents/target/known-tools", ""},
+		{"DELETE", "/api/agents/target", ""},
+		{"POST", "/api/sessions/fixture/agents", `{"agent_id":"target"}`},
+		{"POST", "/api/agents/target/projects", `{"project_id":"fixture"}`},
 		{"PUT", "/api/agents/target", `{"name":"Changed"}`},
 		{"POST", "/api/agents/target/copy-to-managed", `{}`},
 		{"PATCH", "/api/todos/missing/scope", `{"scope":"session","scope_id":"fixture"}`},
@@ -146,5 +155,29 @@ func TestServiceErrorRoutesAssignmentsKeepValidationSeparateFromWriteFailure(t *
 	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Assignment","slug":"assignment","system_prompt":"fixture","role_id":"missing"}`, 500)
 	if !strings.Contains(logs.String(), "write_secret") {
 		t.Fatalf("assignment cause absent from log: %s", logs.String())
+	}
+}
+
+func TestServiceErrorRoutesDurableAgentMissingProfile(t *testing.T) {
+	_, h := serviceErrorRoutes(t)
+	serviceErrorRequest(t, h, "POST", "/api/durable-agents", `{"slug":"fixture","profile_id":"missing"}`, 404)
+}
+func TestServiceErrorRoutesAgentBehaviorValidation(t *testing.T) {
+	st, h := serviceErrorRoutes(t)
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{ID: "target", Slug: "target", Name: "Target", Source: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"class", "activation_mode", "default_state"} {
+		for _, method := range []string{"POST", "PUT"} {
+			path := "/api/agents"
+			if method == "PUT" {
+				path += "/target"
+			}
+			body := fmt.Sprintf(`{"name":"Fixture","slug":"fresh","system_prompt":"fixture","%s":"bogus"}`, field)
+			message := serviceErrorRequest(t, h, method, path, body, 400)
+			if !strings.Contains(message, field) {
+				t.Fatalf("missing field in safe message: %s", message)
+			}
+		}
 	}
 }

@@ -108,6 +108,9 @@ func TestTransportParityTodoUpdate(t *testing.T) {
 		{name: "omitted fields", args: map[string]any{}},
 		{name: "null leaves fields unchanged", args: map[string]any{"title": nil, "description": nil, "status": nil, "priority": nil, "labels": nil, "metadata": nil}},
 		{name: "invalid status", args: map[string]any{"status": "bogus"}, category: svcerr.CodeInvalid},
+		{name: "empty status", args: map[string]any{"status": ""}, category: svcerr.CodeInvalid},
+		{name: "empty priority", args: map[string]any{"priority": ""}, category: svcerr.CodeInvalid},
+		{name: "labels array rejected", args: map[string]any{"labels": []string{"wrong shape"}}, category: svcerr.CodeInvalid},
 		{name: "invalid priority", args: map[string]any{"priority": "bogus"}, category: svcerr.CodeInvalid},
 		{name: "missing todo", args: map[string]any{"title": "never stored"}, missing: true, category: svcerr.CodeNotFound},
 	}
@@ -298,5 +301,27 @@ func TestAgentCreateClosedDBParity(t *testing.T) {
 	tp.AssertSameOutcome(t, "closed DB create", a, b)
 	if strings.Contains(a.Detail, "database is closed") || strings.Contains(b.Detail, "database is closed") {
 		t.Fatal("closed DB cause leaked")
+	}
+}
+
+func TestTransportTodoUpdateFailureField(t *testing.T) {
+	st, _, cs := parityDoors(t)
+	row := &store.Todo{Title: "Original", Scope: "session", ScopeID: "fixture"}
+	if err := st.CreateTodo(context.Background(), row); err != nil {
+		t.Fatal(err)
+	}
+	result, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "todo_update", Arguments: map[string]any{"id": row.ID, "priority": "invalid"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Code  string `json:"code"`
+		Field string `json:"field"`
+	}
+	if err := json.Unmarshal([]byte(callText(result)), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError || body.Code != string(svcerr.CodeInvalid) || body.Field != "priority" {
+		t.Fatalf("field lost at MCP door: %+v %+v", result, body)
 	}
 }

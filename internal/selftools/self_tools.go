@@ -345,7 +345,7 @@ func selfToolDefinitions() []mcp.Tool {
 		},
 		{
 			Name: "todo_update",
-			Description: "Update a todo's status, priority, title, or description. Partial update — only provided fields change.\n\n" +
+			Description: "Update a todo's title, description, status, priority, labels, or metadata. Omitted or null fields stay unchanged. An empty string clears the field, except status and priority, where an empty string is invalid. Labels must be a JSON array encoded as a string; a labels array argument is rejected.\n\n" +
 				"**When to use:** When the user marks a task done, blocks it, changes its priority, or renames it. Typical status transitions: pending → in_progress → done, or → blocked.\n\n" +
 				"**Required context:** You need the todo ID. Get it from todo_list if you don't have it.\n\n" +
 				"**Output shape:** Updated todo JSON on success.",

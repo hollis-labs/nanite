@@ -333,3 +333,23 @@ func TestAgentConfigTypedErrorsPreserveDistinctSentinels(t *testing.T) {
 		t.Fatalf("permission error lost sentinel: %v", denied)
 	}
 }
+
+func TestAgentConfigBehaviorValidationField(t *testing.T) {
+	svc, _, _ := newAgentConfigTestService(t)
+	for _, field := range []string{"class", "activation_mode", "default_state"} {
+		profile := &store.AgentProfile{Slug: "fixture"}
+		switch field {
+		case "class":
+			profile.Class = "bogus"
+		case "activation_mode":
+			profile.ActivationMode = "bogus"
+		case "default_state":
+			profile.DefaultState = "bogus"
+		}
+		_, err := svc.Create(profile, nil)
+		var typed *svcerr.Error
+		if !errors.As(err, &typed) || typed.Code != svcerr.CodeInvalid || typed.Field != field {
+			t.Fatalf("%s: %+v", field, err)
+		}
+	}
+}

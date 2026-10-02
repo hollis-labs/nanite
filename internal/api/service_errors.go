@@ -17,7 +17,11 @@ func (a *API) serviceError(w http.ResponseWriter, err error) {
 		message = typed.Message
 	}
 	if typed != nil && typed.Err != nil {
-		slog.Error("api: service operation failed", "code", typed.Code, "cause", typed.Err)
+		if typed.Code == svcerr.CodeInternal || typed.Code == svcerr.CodeUnavailable {
+			slog.Error("api: service operation failed", "code", typed.Code, "cause", typed.Err)
+		} else {
+			slog.Warn("api: service operation rejected", "code", typed.Code, "cause", typed.Err)
+		}
 	} else if typed == nil {
 		slog.Error("api: service operation failed", "cause", err)
 	}

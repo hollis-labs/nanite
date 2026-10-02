@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"modernc.org/sqlite"
@@ -63,7 +62,7 @@ func notManagedError(p *store.AgentProfile, class agent.ManageClass, verb string
 	} else {
 		message = fmt.Sprintf("agent is not an editable database config: %q is %s, which Nanite manages; there is no copy-to-managed path for it", slug, class.Describe())
 	}
-	return svcerr.Wrap(ErrAgentNotManaged, svcerr.CodePermission, message, svcerr.WithStatus(http.StatusConflict))
+	return svcerr.Wrap(ErrAgentNotManaged, svcerr.CodePermission, message)
 }
 
 // AgentConfigResult retains Revision for wire compatibility. It is always
@@ -100,6 +99,9 @@ func (s *AgentConfigService) Create(profile *store.AgentProfile, procedures []ag
 	}
 	if err := agent.ValidateSlug(profile.Slug); err != nil {
 		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField("slug"))
+	}
+	if field, err := store.ValidateAgentBehaviorFields(profile); err != nil {
+		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField(field))
 	}
 	if existing, err := s.store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile.Slug); err == nil && existing != nil {
 		return nil, svcerr.Wrap(ErrManagedSlugExists, svcerr.CodeConflict, "a managed agent with this slug already exists")
@@ -141,6 +143,9 @@ func (s *AgentConfigService) Update(existing, updated *store.AgentProfile, proce
 	}
 	if err := agent.ValidateSlug(updated.Slug); err != nil {
 		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField("slug"))
+	}
+	if field, err := store.ValidateAgentBehaviorFields(updated); err != nil {
+		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField(field))
 	}
 	updated.ID = existing.ID
 	updated.Source = existing.Source

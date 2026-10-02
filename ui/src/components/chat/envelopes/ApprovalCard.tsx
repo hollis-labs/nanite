@@ -21,9 +21,8 @@ interface ApprovalCardProps {
  * discriminator mechanism." The manifest keeps the `subagent-spawn-approval`
  * wire type (backend emitter / response-handler registration / the
  * sessions.go recovery-rehydration gate all key off this literal string
- * unchanged) but now points its `component`/`export` at this file. Both
- * flavors ride through EnvelopeRenderer with `props: "envelope"`
- * (CORE_OVERRIDES in scripts/generate-plugin-imports.mjs) so this
+ * unchanged). Nanite's scripts/lib/core-envelope-bindings.json points
+ * both types at this component with `props: "envelope"`, so this
  * component always receives the full envelope wrapper, not just `data` —
  * required to read `prior_response` for post-reload hydration.
  */

@@ -39,35 +39,17 @@ func SetupForTesting() *envelopes.Registry {
 	return reg
 }
 
-// LegacyPluginID is the synthetic plugin ID used to register Nanite's
-// orphan envelope schemas with the shared go-envelopes Registry. The
-// schemas were extracted into the lib's manifest dir (manifest/schemas/)
-// but were never carried into the YAML manifest because they predate the
-// catalog tightening. Until the catalog cleanup task lands and decides
-// promote-vs-delete for each, Nanite registers them at startup so
-// callers like card_show continue to resolve schemas for the types still
-// on this list.
+// LegacyPluginID is the synthetic plugin ID for host-supported orphan schemas.
+// The currently pinned library has retired the former plugin schema resources;
+// no such schemas are registered from the core catalog.
 const LegacyPluginID = "nanite-legacy"
 
-// OrphanTypes is the verbatim list of envelope types that ship a JSON
-// Schema in go-envelopes manifest/schemas/ but are absent from the
-// canonical YAML manifest. Order is preserved from the seed extraction.
-//
-// All five original entries have been removed by the Phase 0 plugin cuts:
-// "giphy-modal" by TASKS/phase-0/15a-cut-giphy.md, and "kb-result"/
-// "resolution-capture"/"ticket-form"/"ticket-confirmation" by
-// TASKS/phase-0/15c-cut-support-ticket.md. Their JSON schemas still live
-// in go-envelopes' manifest/schemas/ (an external module none of these
-// tasks own) and are covered by contracts_test.go's knownTypes list,
-// which intentionally tracks the schema-file set rather than this
-// runtime-registration list — do not resync the two. This list is now
-// empty; kept as a named var (not deleted) so a future orphan schema has
-// an obvious place to register.
+// OrphanTypes is empty after the plugin cuts. A future host-supported orphan
+// must have a schema available in the selected module's public export catalog.
 var OrphanTypes = []string{}
 
 // LegacyTypeName returns the namespaced registry name a bare orphan
-// resolves to under nanite-legacy.* (e.g. "giphy-modal" →
-// "nanite-legacy.giphy-modal"). Used by callers that still address the
+// resolves to under nanite-legacy.*. Used by callers that still address the
 // schema by its historical bare name.
 func LegacyTypeName(bare string) string {
 	return LegacyPluginID + "." + bare

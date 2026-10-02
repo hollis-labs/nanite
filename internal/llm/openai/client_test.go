@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/nanite/internal/usagecost"
 	"github.com/openai/openai-go/v3/option"
 )
 
@@ -346,5 +347,29 @@ func TestStreamChat_PromptTokensDetailsCachedTokens(t *testing.T) {
 				t.Errorf("CacheCreationTokens = %d, want %d", usage.CacheCreationTokens, tc.wantCacheCreation)
 			}
 		})
+	}
+}
+
+func TestStreamChatPreservesAccountingPresence(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: "+`{"id":"x","object":"chat.completion.chunk","model":"gpt-test","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":30,"total_tokens":130,"prompt_tokens_details":{"cached_tokens":10},"completion_tokens_details":{"reasoning_tokens":20}}}`+"\n\ndata: [DONE]\n\n")
+	})
+	events, err := c.StreamChat(t.Context(), llmtypes.ChatRequest{Model: "gpt-test", Messages: []llmtypes.ChatMessage{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for event := range events {
+		if event.Type == llmtypes.EventUsage {
+			found = true
+			report, ok := usagecost.Parse(event.Content)
+			if !ok || report.Reasoning == nil || *report.Reasoning != 20 || report.CacheRead == nil || *report.CacheRead != 10 || report.CacheWrite != nil {
+				t.Fatalf("SDK accounting lost presence: %+v", report)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no accounting usage event")
 	}
 }

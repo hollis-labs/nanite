@@ -2,7 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // ExecutionMetrics captures the full context of an LLM call for observability.
@@ -78,6 +82,16 @@ func scanExecutionMetrics(rows interface{ Scan(...any) error }) (ExecutionMetric
 // RecordExecutionMetrics inserts an execution metrics record.
 func (s *Store) RecordExecutionMetrics(ctx context.Context, m *ExecutionMetrics) error {
 	m.EstimatedCostUSD = estimateCost(m.Model, m.InputTokens, m.OutputTokens)
+	// Completed chat metrics share the immutable estimate from the usage row.
+	// Utility calls without a chat ledger row retain their existing estimator.
+	if !m.IsUtility && m.MessageID != "" {
+		var cost float64
+		if usageErr := s.DB.QueryRowContext(ctx, `SELECT estimated_cost_usd FROM token_usage WHERE session_id=? AND message_id=? ORDER BY id DESC LIMIT 1`, m.SessionID, m.MessageID).Scan(&cost); usageErr == nil {
+			m.EstimatedCostUSD = cost
+		} else if !errors.Is(usageErr, sql.ErrNoRows) {
+			return fmt.Errorf("read usage cost for metrics: %w", usageErr)
+		}
+	}
 	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO execution_metrics
 			(session_id, message_id, provider, adapter, model,
@@ -228,4 +242,11 @@ func (s *Store) GetUtilityCallLog(ctx context.Context, limit int) ([]ExecutionMe
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// estimateCost is the existing utility-only estimator for metrics without a
+// completed chat usage row. Chat costs come from the frozen component ledger.
+func estimateCost(model string, inputTokens, outputTokens int) float64 {
+	inputPerM, outputPerM := models.Pricing(model)
+	return (float64(inputTokens)*inputPerM + float64(outputTokens)*outputPerM) / 1_000_000
 }

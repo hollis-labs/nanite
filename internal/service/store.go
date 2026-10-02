@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 
+	ledger "github.com/hollis-labs/go-usage-ledger"
+
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -84,6 +86,7 @@ type ToolStore interface {
 // UsageStore provides access to token usage, execution metrics, and event logs.
 type UsageStore interface {
 	RecordUsage(ctx context.Context, sessionID, messageID, model string, inputTokens, outputTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens int) error
+	RecordUsageSnapshot(ctx context.Context, sessionID, messageID, model string, inputTokens, outputTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens int, calls []ledger.Row) error
 	GetSessionUsage(ctx context.Context, sessionID string) (*store.SessionUsageSummary, error)
 	GetUsageSummary(ctx context.Context) (*store.UsageSummary, error)
 	RecordExecutionMetrics(ctx context.Context, m *store.ExecutionMetrics) error

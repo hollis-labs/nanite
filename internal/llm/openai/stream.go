@@ -6,6 +6,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/llm/toolargs"
+	"github.com/hollis-labs/nanite/internal/usagecost"
 	sdk "github.com/openai/openai-go/v3"
 )
 
@@ -41,10 +42,11 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 		defer close(out)
 		defer func() { _ = stream.Close() }()
 		var (
-			stopReason   string
-			lastUsage    *llmtypes.Usage
-			pendingTools = map[int64]*partialToolCall{}
-			toolOrder    []int64
+			stopReason     string
+			lastUsage      *llmtypes.Usage
+			lastAccounting string
+			pendingTools   = map[int64]*partialToolCall{}
+			toolOrder      []int64
 		)
 
 		emit := func(ev llmtypes.StreamEvent) bool {
@@ -59,7 +61,8 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 		for stream.Next() {
 			chunk := stream.Current()
 			// Capture usage when present (final chunk under include_usage).
-			if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 || chunk.Usage.TotalTokens > 0 {
+			if chunk.JSON.Usage.Valid() {
+				lastAccounting = usagecost.Content(usagecost.FromRaw("openai", chunk.Usage.RawJSON()))
 				lastUsage = &llmtypes.Usage{
 					InputTokens:         int(chunk.Usage.PromptTokens),
 					OutputTokens:        int(chunk.Usage.CompletionTokens),
@@ -121,7 +124,7 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 
 		if lastUsage != nil {
 			lastUsage.StopReason = stopReason
-			if !emit(llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: lastUsage}) {
+			if !emit(llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: lastUsage, Content: lastAccounting}) {
 				return
 			}
 		}

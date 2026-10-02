@@ -23,6 +23,8 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	costcalc "github.com/hollis-labs/go-modelsdev-catalog-helpers"
+	ledger "github.com/hollis-labs/go-usage-ledger"
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
@@ -34,6 +36,7 @@ import (
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
+	"github.com/hollis-labs/nanite/internal/usagecost"
 )
 
 type generationDirective uint8
@@ -444,6 +447,7 @@ type runState struct {
 	narrationContent strings.Builder
 	finalContent     strings.Builder
 	finalUsage       *chat.Usage
+	usageCalls       []ledger.Row
 	breakdown        *chat.TokenBreakdown
 	thinkingBlocks   []llmtypes.ThinkingBlock
 	providerOutput   *llmtypes.ContentBlock
@@ -1042,6 +1046,17 @@ func (s *chatServiceImpl) consumeProviderIteration(
 	providerName := setup.providerName
 	slotResult := setup.slotResult
 	defer attempt.close()
+	// One snapshot per provider call: freeze the catalog before reading usage.
+	accounting := usagecost.Report{}
+	var pricingCatalog costcalc.Catalog
+	if s.modelCatalog != nil {
+		pricingCatalog = s.modelCatalog
+	}
+	usageRow := usagecost.NewRow(pricingCatalog, providerName, model)
+	defer func() {
+		usageRow.Usage = accounting.Usage(providerName)
+		run.usageCalls = append(run.usageCalls, usageRow)
+	}()
 
 	// --- Consume provider stream ---
 	var turnContent strings.Builder
@@ -1170,6 +1185,12 @@ streamLoop:
 			}
 
 		case "usage":
+			report, hasAccounting := usagecost.Parse(evt.Content)
+			if hasAccounting {
+				accounting.Merge(report)
+			} else {
+				accounting.Merge(usagecost.Fallback(evt.Usage))
+			}
 			if evt.Usage != nil {
 				if run.finalUsage == nil {
 					run.finalUsage = &chat.Usage{}
@@ -1789,14 +1810,17 @@ func (s *chatServiceImpl) finalizeRun(
 	// callers don't break; removal is a follow-up.
 
 	// Record token usage.
-	if run.finalUsage != nil && (run.finalUsage.InputTokens > 0 || run.finalUsage.OutputTokens > 0) {
+	if len(run.usageCalls) > 0 {
+		if run.finalUsage == nil {
+			run.finalUsage = &chat.Usage{}
+		}
 		toolInputTokens := 0
 		if run.breakdown != nil {
 			toolInputTokens = run.breakdown.Tools
 		}
-		if err := s.store.RecordUsage(persistCtx, sessionID, assistantMsgID, model,
+		if err := s.store.RecordUsageSnapshot(persistCtx, sessionID, assistantMsgID, model,
 			run.finalUsage.InputTokens, run.finalUsage.OutputTokens, toolInputTokens,
-			run.finalUsage.CacheCreationTokens, run.finalUsage.CacheReadTokens); err != nil {
+			run.finalUsage.CacheCreationTokens, run.finalUsage.CacheReadTokens, run.usageCalls); err != nil {
 			slog.Warn("chat-service: failed to record token usage", "err", err)
 		}
 	}

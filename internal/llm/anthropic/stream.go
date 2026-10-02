@@ -14,6 +14,7 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/llm/toolargs"
+	"github.com/hollis-labs/nanite/internal/usagecost"
 )
 
 // StreamChat implements llmcontracts.Provider.StreamChat. Mirrors the
@@ -147,6 +148,7 @@ func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.Mes
 		signature string
 	}
 
+	var lastOutputTokens int
 	var currentTool *toolUseAcc
 	var currentThinking *thinkingAcc
 
@@ -167,11 +169,16 @@ func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.Mes
 			// telemetry is fed.
 			start := ev.AsMessageStart()
 			u := start.Message.Usage
+			// message_start output is provisional; only message_delta reports billed output.
+			accounting := usagecost.FromRaw("anthropic", u.RawJSON())
+			accounting.Output = nil
+			accounting.Reasoning = nil
 			if c.RateTracker != nil && u.InputTokens > 0 {
 				c.RateTracker.Record(int(u.InputTokens))
 			}
 			ch <- llmtypes.StreamEvent{
-				Type: llmtypes.EventUsage,
+				Type:    llmtypes.EventUsage,
+				Content: usagecost.Content(accounting),
 				Usage: &llmtypes.Usage{
 					InputTokens:         int(u.InputTokens),
 					CacheCreationTokens: int(u.CacheCreationInputTokens),
@@ -259,10 +266,13 @@ func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.Mes
 
 		case "message_delta":
 			md := ev.AsMessageDelta()
+			outputDelta := int(md.Usage.OutputTokens) - lastOutputTokens
+			lastOutputTokens = int(md.Usage.OutputTokens)
 			ch <- llmtypes.StreamEvent{
-				Type: llmtypes.EventUsage,
+				Type:    llmtypes.EventUsage,
+				Content: usagecost.Content(usagecost.FromRaw("anthropic", md.Usage.RawJSON())),
 				Usage: &llmtypes.Usage{
-					OutputTokens: int(md.Usage.OutputTokens),
+					OutputTokens: outputDelta,
 					StopReason:   string(md.Delta.StopReason),
 				},
 			}

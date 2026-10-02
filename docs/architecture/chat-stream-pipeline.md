@@ -47,14 +47,14 @@ Nanite's internal message object is Anthropic-shaped: `llmtypes.ContentBlock` ty
 |---|---|
 | `delta` | `Content` |
 | `tool_use` | `ToolUse{ID, Name, Input}` |
-| `usage` | `Usage{InputTokens, OutputTokens, CacheCreationTokens, CacheReadTokens, StopReason}` |
+| `usage` | `Usage{InputTokens, OutputTokens, CacheCreationTokens, CacheReadTokens, StopReason}`; HTTP adapters also carry typed/versioned `usagecost.Report` JSON in `Content` |
 | `thinking` | `ThinkingBlock{Thinking, Signature}` |
 | `error` | `Error` |
 | `done` | none |
 | `session_id` | `SessionID` |
 | `openai_response_output` (Nanite-local) | `Content` = JSON array of raw Responses output items |
 
-No reasoning-token field. End of stream = channel close. The consumer (`consumeProviderIteration` in `internal/service/chat_generation_actions.go`) sums `usage` per field, treats `done` and `session_id` as no-ops, and has no default case.
+The shared Usage type has no reasoning-token or field-presence fields. Nanite HTTP adapters preserve these in an internal accounting payload (`internal/usagecost`), consumed before UI events; remove the bridge after CW-20261002-0112. End of stream = channel close. The consumer (`consumeProviderIteration` in `internal/service/chat_generation_actions.go`) sums `usage` per field, treats `done` and `session_id` as no-ops, and has no default case.
 
 ### 2.3 Mapping
 
@@ -66,7 +66,7 @@ No reasoning-token field. End of stream = channel close. The consumer (`consumeP
 | `text_delta` | `delta` |
 | `tool_use` block: `input_json_delta` fragments | appended to one accumulator (block index unused); at `content_block_stop` parsed into one `tool_use` (malformed → `{"_raw": …}`, empty → `{}`) |
 | `thinking` block: `thinking_delta`, `signature_delta` | one `thinking{Thinking, Signature}` at block stop; only when interleaved thinking is enabled (§2.6) |
-| `message_delta.usage.output_tokens`, `delta.stop_reason` | `usage{OutputTokens, StopReason}` (stop reason raw) |
+| `message_delta.usage.output_tokens`, `delta.stop_reason` | `usage{OutputTokens, StopReason}` (cumulative output converted to deltas); accounting keeps the latest cumulative report and final thinking breakdown |
 | `message_stop` | `done` |
 | SSE error, decode error, network error | `error` |
 
@@ -82,7 +82,7 @@ Not consumed: `ping`, `citations_delta`, `server_tool_use` and `web_search_tool_
 | `finish_reason` | `tool_calls`→`tool_use`, `stop`→`end_turn`, `length`→`max_tokens`, `content_filter` passthrough |
 | stream end | `done` |
 
-Not consumed: `refusal`, `logprobs`, annotations, `role`, `function_call`, `completion_tokens_details` (reasoning tokens), non-final usage. A stream that ends without `[DONE]` is not detected (the SDK reports no error); `tool_use`, `usage`, `done` are still emitted. Thinking blocks are dropped from requests.
+Not consumed: `refusal`, `logprobs`, annotations, `role`, `function_call`, non-final usage. A stream that ends without `[DONE]` is not detected (the SDK reports no error); `tool_use`, `usage`, `done` are still emitted. Thinking blocks are dropped from requests.
 
 **OpenAI Responses**
 
@@ -114,7 +114,7 @@ The CLI runtime-to-loop path sends non-blocking and drops events when its buffer
 | Tool arguments | assembled from fragments; one `tool_use` at block stop | assembled by index; emitted after stream end | taken from the final item at `response.completed` | complete (Claude CLI, ACP); none (Codex, OpenCode) |
 | Usage | input+cache at start; output at `message_delta` | one final chunk | `response.completed` | at turn end, when present |
 | Stop reason | raw | mapped to Anthropic vocabulary | derived | Claude CLI `stop_reason` else `end_turn`; Codex none; ACP not read |
-| Reasoning | consumed only if interleaved thinking enabled; signature kept | none in the API; tokens dropped | summary → unsigned `thinking`; encrypted items opaque | ACP thoughts → unsigned; Claude CLI and Codex dropped |
+| Reasoning | thinking blocks consumed if interleaved enabled; signature kept; final thinking-token breakdown retained for accounting when reported | reasoning token breakdown retained for accounting; no thinking text | summary → unsigned `thinking`; encrypted items opaque; reasoning tokens retained for accounting | ACP thoughts → unsigned; Claude CLI and Codex reasoning counts/presence lost upstream |
 
 ### 2.5 Failure handling
 
@@ -391,3 +391,11 @@ grep -rn 'OnCircuitOpen' internal/ | grep -v _test                 # declared an
 grep -rn 'thinking_blocks' internal/ | grep -v _test               # write sites only
 grep -n 'func modelSupportsInterleavedThinking' internal/llm/anthropic/client.go
 ```
+
+## Usage cost snapshots
+
+Each completed chat turn records a versioned `cost_snapshot` ON its `token_usage` row, with per-provider-call `go-usage-ledger` components, provenance, provider/model identity, catalog price snapshots, and five component dollar amounts calculated by `go-modelsdev-catalog-helpers`. Prices freeze before consuming each call. Catalog refreshes never change persisted cost or past summaries. `cost_status` is `PARTIAL` if any call omits any component, contains estimates, lacks a model price, or reports a nonzero component with an ambiguous optional zero rate. Reported zero and omitted are distinct. Session/global/model summaries expose `partial_rows`; cost displays label partial totals.
+
+[OpenAI accounting](https://developers.openai.com/api/docs/guides/agents-api/observability) includes cached input within input and reasoning within output; normalization subtracts those counts once to create disjoint components. [Claude caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) reports uncached input separately from cache reads/writes. [Claude thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking) is included in output; its final `output_tokens_details.thinking_tokens`, when present, is split once. Both providers bill reasoning at the output tariff when the catalog omits its optional reasoning rate. Missing reasoning breakdown remains unknown; inclusive output can still provide a partial estimate without adding guessed reasoning. Anthropic cumulative message deltas replace earlier counts within a call rather than charging them repeatedly.
+
+CLI/ACP streams whose upstream shared Usage has already lost presence and reasoning cannot recover it locally: positive counts are retained, zero counts remain unknown, and unresolved runtime provider/catalog identities remain unpriced and partial. No subscription bill or provider figure is inferred. Catalog misses fall back only to matching `IsLegacy` registry entries for archived model ids, retaining known input/output prices and explicit partial status for missing dimensions. Pre-migration estimates stay unchanged and are marked partial without invented snapshots. Utility-only execution metrics and context-budget projections retain their existing estimators; completed chat execution metrics use the frozen chat-row cost.

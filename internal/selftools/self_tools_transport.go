@@ -400,10 +400,6 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	case "signal_mode":
 		return st.PresentationTools.callSignalMode(ctx, args)
 	// --- Reminders + Pin (J11, CW-20260426-0009) ---
-	case "context_pin":
-		return st.callPin(ctx, args)
-	case "context_unpin":
-		return st.callUnpin(ctx, args)
 	// --- Discovery / introspection (CW-20260429-0005, A1) ---
 	case "tool_describe":
 		return st.callToolDescribe(ctx, args)

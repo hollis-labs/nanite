@@ -80,7 +80,6 @@ import type {
   MessagePage,
   ModelRecord,
   PermissionMode,
-  PinnedContent,
   Plan,
   PlanFilter,
   PlanStep,
@@ -1701,18 +1700,6 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to set context prompt: ${res.status}`);
   },
 
-  // Pinned content (J11, CW-20260426-0009; D1/D2, CW-20260428-0014/0015)
-  listPins: async (sessionId: string): Promise<PinnedContent[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/pins`);
-    if (!res.ok) throw new Error(`Failed to list pins: ${res.status}`);
-    return res.json();
-  },
-
-  deletePin: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/pins/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`Failed to delete pin: ${res.status}`);
-  },
-
   // Bottom-drawer pinned cards (C1, CW-20260428-0012)
   // Returns 409 when the 10-pin cap is exceeded — surfaced as DrawerPinCapError
   // so callers can render the "10-tab limit; unpin one first" toast.
@@ -1748,25 +1735,6 @@ export const api = {
       method: "DELETE",
     });
     if (!res.ok) throw new Error(`Failed to unpin drawer card: ${res.status}`);
-  },
-
-  /** D2 — promote/demote a pin between session and project scope. */
-  updatePinScope: async (
-    id: string,
-    scope: AgentStateScope,
-    projectId?: string,
-  ): Promise<void> => {
-    const res = await fetch(`${API_BASE}/pins/${id}/scope`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scope, project_id: projectId ?? "" }),
-    });
-    if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to update pin scope: ${res.status}`);
-    }
   },
 
   // Compact

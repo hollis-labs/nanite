@@ -36,15 +36,10 @@ type HandoffService interface {
 
 // WriteServices keep dispatch state and mutations behind service collaborators.
 type WriteServices struct {
-	Pins       PinWriter
 	Schedules  ScheduleWriter
 	Membership PrimaryAgentReader
 	Dispatch   DispatchReader
 	Events     reflexes.TraceStore
-}
-type PinWriter interface {
-	Create(context.Context, store.PinnedContent) error
-	Delete(context.Context, string) error
 }
 type ScheduleWriter interface {
 	InsertPrepared(context.Context, store.AgentSchedule) error

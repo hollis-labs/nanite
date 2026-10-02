@@ -1892,25 +1892,11 @@ export interface Document {
   updated_at: string;
 }
 
-// --- Pinned content (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
+// Shared scopes for agent work state.
 
 export type AgentStateScope = "turn" | "session" | "project";
 
-export interface PinnedContent {
-  id: string;
-  session_id?: string | null;
-  scope: AgentStateScope;
-  /** Project ID — populated when scope='project'. */
-  project_id?: string;
-  content: string;
-  agent_id: string;
-  created_at: string;
-  updated_at: string;
-}
-
-// --- Bottom drawer pinned cards (C1, CW-20260428-0012) ---
-//
-// User-pinned cards in the bottom chat drawer. Distinct from PinnedContent
+// User-pinned cards in the bottom chat drawer. Separate from durable plugin pins
 // (J11) which is the agent-context slot pin feature. card_type is one of
 // 'markdown' | 'diff' | 'image' | 'scratchpad' | 'artifact-mini' |
 // 'agent-envelope' (forward-compat strings tolerated). content_ref is a

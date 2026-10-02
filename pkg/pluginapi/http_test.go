@@ -59,8 +59,8 @@ func TestHandleHTTPRefusesMalformedOrOversizedTraffic(t *testing.T) {
 func TestHandleHTTPKeepsMuxRedirectInOwnedNamespace(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /items/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
-	response, err := HandleHTTP(context.Background(), "bookmarks", mux, sdkprocess.HTTPRequest{Method: "GET", Path: "/api/plugins/bookmarks/items", RawQuery: "a=1&a=2"})
-	if err != nil || response.Status != http.StatusTemporaryRedirect || response.Headers["Location"] != "/api/plugins/bookmarks/items/?a=1&a=2" {
+	response, err := HandleHTTP(context.Background(), "nanite.bookmarks", mux, sdkprocess.HTTPRequest{Method: "GET", Path: "/api/plugins/nanite.bookmarks/items", RawQuery: "a=1&a=2"})
+	if err != nil || response.Status != http.StatusTemporaryRedirect || response.Headers["Location"] != "/api/plugins/nanite.bookmarks/items/?a=1&a=2" {
 		t.Fatalf("redirect escaped namespace: %+v %v", response, err)
 	}
 }

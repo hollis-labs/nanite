@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/hollis-labs/plugin-sdk/manifest"
 	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
 )
 
@@ -22,7 +23,7 @@ const maxHTTPHeaders = 64 << 10
 // adapter. The supplied context retains cancellation; SessionID and Identity
 // stay on the SDK request for the plugin to consume explicitly.
 func HandleHTTP(ctx context.Context, pluginID string, handler http.Handler, call sdkprocess.HTTPRequest) (sdkprocess.HTTPResponse, error) {
-	if !slug.MatchString(pluginID) || len(pluginID) > 64 || handler == nil || len(call.Body) > MaxHTTPBody {
+	if !manifest.ValidID(pluginID) || len(pluginID) > 63 || handler == nil || len(call.Body) > MaxHTTPBody {
 		return sdkprocess.HTTPResponse{}, fmt.Errorf("pluginapi: invalid HTTP adapter input")
 	}
 	prefix := "/api/plugins/" + pluginID

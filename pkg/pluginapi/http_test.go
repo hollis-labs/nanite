@@ -64,3 +64,19 @@ func TestHandleHTTPKeepsMuxRedirectInOwnedNamespace(t *testing.T) {
 		t.Fatalf("redirect escaped namespace: %+v %v", response, err)
 	}
 }
+
+func TestHandleHTTPEscapedDelimitersRemainPathData(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /items/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("id") != "one?two#three" || r.URL.RawQuery != "real=query" {
+			t.Errorf("path data became URL delimiters: %+v id=%q", r.URL, r.PathValue("id"))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	for _, rawPath := range []string{"", "/api/plugins/nanite.feature/items/one%3Ftwo%23three"} {
+		response, err := HandleHTTP(context.Background(), "nanite.feature", mux, sdkprocess.HTTPRequest{Method: "GET", Path: "/api/plugins/nanite.feature/items/one?two#three", RawPath: rawPath, RawQuery: "real=query"})
+		if err != nil || response.Status != http.StatusNoContent {
+			t.Fatalf("escaped path refused: %+v %v", response, err)
+		}
+	}
+}

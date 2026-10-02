@@ -46,6 +46,7 @@ func HandleHTTP(ctx context.Context, pluginID string, handler http.Handler, call
 	if err != nil {
 		return sdkprocess.HTTPResponse{}, err
 	}
+	request.URL = endpoint
 	request.RequestURI = endpoint.RequestURI()
 	headerBytes := 0
 	for key, value := range call.Headers {
@@ -68,6 +69,9 @@ func HandleHTTP(ctx context.Context, pluginID string, handler http.Handler, call
 	headerBytes = 0
 	for key, values := range writer.header {
 		value := strings.Join(values, ", ")
+		if http.CanonicalHeaderKey(key) == "Location" && strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "//") {
+			value = prefix + value
+		}
 		headerBytes += len(key) + len(value)
 		if headerBytes > maxHTTPHeaders || !validHTTPHeader(key, value) {
 			return sdkprocess.HTTPResponse{}, fmt.Errorf("pluginapi: invalid response headers")

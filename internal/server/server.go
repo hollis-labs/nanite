@@ -99,6 +99,13 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 		a.SetPluginHost(pluginHost)
 	}
 
+	user, password, _ := basicAuthCredentials()
+	adminHandler, adminErr := a.NewAdminHandler(api.NewBasicWorkflowResponderAuthenticator(user, password))
+	if adminErr != nil {
+		return nil, fmt.Errorf("configure admin handler: %w", adminErr)
+	}
+	mux.Handle("/api/admin", adminHandler)
+	mux.Handle("/api/admin/", adminHandler)
 	srv.routes()
 	return srv, nil
 }

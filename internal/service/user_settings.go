@@ -14,6 +14,7 @@ import (
 // writes: the singleton user_settings row.
 type userSettingsStore interface {
 	GetUserSettings(ctx context.Context) (*store.UserSettings, error)
+	GetAdminPreferences(ctx context.Context) (*store.AdminPreferences, error)
 	UpdateUserSettings(ctx context.Context, us *store.UserSettings) error
 }
 
@@ -40,6 +41,11 @@ func (s *UserSettingsService) Get(ctx context.Context) (*store.UserSettings, err
 	return s.store.GetUserSettings(ctx)
 }
 
+// AdminPreferences reads the two public preferences and their opaque version together.
+func (s *UserSettingsService) AdminPreferences(ctx context.Context) (*store.AdminPreferences, error) {
+	return s.store.GetAdminPreferences(ctx)
+}
+
 // Update writes the whole settings row.
 func (s *UserSettingsService) Update(ctx context.Context, us *store.UserSettings) error {
 	return s.store.UpdateUserSettings(ctx, us)
@@ -55,20 +61,28 @@ func (e *SettingsValidationError) Error() string { return e.Msg }
 
 func settingsInvalid(msg string) error { return &SettingsValidationError{Msg: msg} }
 
+// ToolStreamBehaviorValues is shared by legacy validation and admin discovery.
+func ToolStreamBehaviorValues() []string { return []string{"streaming", "persist", "hidden"} }
+
+// ToolDrawerRetentionValues is shared by legacy validation and admin discovery.
+func ToolDrawerRetentionValues() []int { return []int{-1, 5, 15, 30, 60} }
+
 // ValidateToolStreamBehavior accepts streaming, persist or hidden.
 func ValidateToolStreamBehavior(v string) error {
-	switch v {
-	case "streaming", "persist", "hidden":
-		return nil
+	for _, allowed := range ToolStreamBehaviorValues() {
+		if v == allowed {
+			return nil
+		}
 	}
 	return settingsInvalid("tool_stream_behavior must be one of: streaming, persist, hidden")
 }
 
 // ValidateToolDrawerRetention accepts -1 (keep) or 5, 15, 30 or 60.
 func ValidateToolDrawerRetention(v int) error {
-	switch v {
-	case -1, 5, 15, 30, 60:
-		return nil
+	for _, allowed := range ToolDrawerRetentionValues() {
+		if v == allowed {
+			return nil
+		}
 	}
 	return settingsInvalid("tool_drawer_retention must be one of: -1, 5, 15, 30, 60")
 }

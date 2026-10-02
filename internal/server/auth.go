@@ -2,10 +2,13 @@ package server
 
 import (
 	"crypto/subtle"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 
+	"github.com/hollis-labs/go-envelopes/admin"
 	"github.com/hollis-labs/nanite/internal/brand"
 )
 
@@ -47,7 +50,7 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		reqUser, reqPass, ok := r.BasicAuth()
 		if !ok {
 			w.Header().Set("WWW-Authenticate", `Basic realm="`+brand.ID+`"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeBasicAuthUnauthorized(w, r)
 			return
 		}
 
@@ -56,7 +59,7 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 
 		if !userMatch || !passMatch {
 			w.Header().Set("WWW-Authenticate", `Basic realm="`+brand.ID+`"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeBasicAuthUnauthorized(w, r)
 			return
 		}
 
@@ -78,4 +81,20 @@ func basicAuthCredentials() (user, pass string, enabled bool) {
 	pass = os.Getenv(brand.Env("AUTH_PASSWORD"))
 	enabled = user != "" || pass != ""
 	return user, pass, enabled
+}
+
+// writeBasicAuthUnauthorized changes only the denial representation for the
+// admin mount. Credential comparisons, exemptions and admission are unchanged.
+func writeBasicAuthUnauthorized(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/admin" && !strings.HasPrefix(r.URL.Path, "/api/admin/") {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.WriteHeader(http.StatusUnauthorized)
+	response := admin.ErrorResponse{Error: admin.Failure{Code: admin.Unauthenticated, Message: "Authentication is required."}}
+	if encodeErr := json.NewEncoder(w).Encode(response); encodeErr != nil {
+		slog.Debug("server: write admin auth response failed", "err", encodeErr)
+	}
 }

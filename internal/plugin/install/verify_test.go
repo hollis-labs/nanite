@@ -29,6 +29,7 @@ func TestChecksumVerifier(t *testing.T) {
 		handle Handle
 		max    int64
 	}{
+		{"wrong catalog size", Handle{Kind: "archive", Path: path, ExpectedSHA256: sha, ExpectedSize: int64(len(body) + 1)}, 0},
 		{"wrong digest", Handle{Kind: "archive", Path: path, ExpectedSHA256: strings.Repeat("0", 64)}, 0},
 		{"malformed digest", Handle{Kind: "archive", Path: path, ExpectedSHA256: strings.Repeat("x", 64)}, 0},
 		{"missing digest", Handle{Kind: "archive", Path: path}, 0},

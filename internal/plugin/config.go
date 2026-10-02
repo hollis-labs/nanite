@@ -1,10 +1,13 @@
 package plugin
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
+	"github.com/hollis-labs/plugin-sdk/manifest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,13 +38,14 @@ type ToolLoadOverride struct {
 	LoadType LoadType `yaml:"load_type" json:"load_type"`
 }
 
-// PluginManifest represents the parsed plugin.yaml file.
-//
-// The schema is versioned via SchemaVersion. v1 adds explicit registration
-// declarations (Registers.*), richer requires (structured), UI bundle metadata,
-// and release archive metadata so that plugin.yaml is the authoritative source
-// of truth for how a plugin registers itself with the host.
+// PluginManifest is the host's runtime registration view. External declarations
+// are decoded from plugin-sdk/manifest plus pluginapi.Block. Compiled feature
+// metadata is loaded separately by LoadEmbeddedManifest.
 type PluginManifest struct {
+	// Shared is the validated external contract; the remaining fields adapt
+	// declarations for host registries and compiled feature metadata.
+	Shared         *manifest.Manifest `yaml:"-" json:"-"`
+	EntrypointArgs []string           `yaml:"-" json:"-"`
 	// SchemaVersion identifies the plugin.yaml schema version.
 	// v1 is the current schema. Unset/0 is treated as legacy (pre-v1).
 	SchemaVersion int `yaml:"schema_version"`
@@ -155,6 +159,7 @@ type ManifestRegisters struct {
 // omitted the frontend falls back to the generic Layers icon.
 // Order is a numeric sort hint; plugin panels default to 100+.
 type PanelRegistration struct {
+	Component      string `yaml:"component,omitempty"`
 	ID             string `yaml:"id"`
 	Title          string `yaml:"title"`
 	DefaultVisible bool   `yaml:"default_visible"`
@@ -309,6 +314,7 @@ func (pm *PluginManifest) EffectiveLoadType(toolName string) LoadType {
 
 // ConfigEntry describes a single configuration value in plugin.yaml.
 type ConfigEntry struct {
+	Secret      bool   `yaml:"-" json:"-"`
 	Type        string `yaml:"type"`
 	Required    bool   `yaml:"required"`
 	EnvVar      string `yaml:"env_var"`
@@ -335,7 +341,12 @@ func NewPluginConfig(pluginID, pluginDir string) (*PluginConfig, error) {
 
 	// Parse plugin.yaml for schema.
 	manifestPath := filepath.Join(pluginDir, "plugin.yaml")
-	data, err := os.ReadFile(manifestPath)
+	file, err := os.Open(manifestPath) // #nosec G304 -- fixed plugin.yaml under the host-configured plugin directory; bounded read.
+	var data []byte
+	if err == nil {
+		defer func() { _ = file.Close() }()
+		data, err = io.ReadAll(io.LimitReader(file, manifest.MaxBytes+1))
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			return pc, nil // no manifest — empty config
@@ -343,11 +354,11 @@ func NewPluginConfig(pluginID, pluginDir string) (*PluginConfig, error) {
 		return nil, fmt.Errorf("read plugin.yaml: %w", err)
 	}
 
-	var manifest PluginManifest
-	if err := yaml.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("parse plugin.yaml: %w", err)
+	parsed, decodeErr := DecodeManifest(bytes.NewReader(data))
+	if decodeErr != nil {
+		return nil, fmt.Errorf("parse plugin.yaml: %w", decodeErr)
 	}
-	pc.schema = manifest.Config
+	pc.schema = parsed.Config
 
 	// Load optional per-plugin config.yaml overrides.
 	configPath := filepath.Join(pluginDir, "config.yaml")
@@ -363,15 +374,12 @@ func NewPluginConfig(pluginID, pluginDir string) (*PluginConfig, error) {
 
 // ParseManifest reads and parses a plugin.yaml file.
 func ParseManifest(path string) (*PluginManifest, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path) // #nosec G304 -- caller-selected manifest file; decoder performs a bounded data-only read.
 	if err != nil {
 		return nil, err
 	}
-	var m PluginManifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	return &m, nil
+	defer func() { _ = file.Close() }()
+	return DecodeManifest(file)
 }
 
 // Get resolves a config value.  Resolution order:

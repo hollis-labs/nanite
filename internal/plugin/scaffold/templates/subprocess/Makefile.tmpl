@@ -1,6 +1,6 @@
 PLUGIN_ID := {{.Name}}
-VERSION   := $(shell awk '/^version:/ {print $$2; exit}' plugin.yaml)
-PLATFORMS := darwin-arm64 darwin-amd64 linux-amd64 linux-arm64 windows-amd64
+VERSION   := 0.1.0
+PLATFORMS := darwin-arm64 darwin-amd64 linux-amd64 linux-arm64
 
 DIST_DIR     := dist
 STAGING_DIR  := $(DIST_DIR)/staging

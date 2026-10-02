@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/hollis-labs/nanite/internal/plugin"
 )
 
 // BuildOptions bundles the entry-point-specific pieces every install caller
@@ -73,6 +75,21 @@ func (ManifestValidator) Validate(ctx context.Context, pluginDir string) error {
 		if verr.HasRefusals() {
 			return fmt.Errorf("manifest validation failed: %s", verr.Error())
 		}
+	}
+	return nil
+}
+
+// ValidateIdentity prevents installing a valid bundle under another plugin's ID.
+func (ManifestValidator) ValidateIdentity(ctx context.Context, directory, expectedID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	declared, err := plugin.ParseManifest(filepath.Join(directory, "plugin.yaml"))
+	if err != nil {
+		return err
+	}
+	if declared.ID != expectedID {
+		return fmt.Errorf("manifest ID %q differs from requested %q", declared.ID, expectedID)
 	}
 	return nil
 }

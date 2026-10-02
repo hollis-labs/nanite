@@ -1,18 +1,13 @@
 package main
 
 import (
+	"runtime"
+	"strings"
 	"testing"
 )
 
 func TestFindCatalogEntry_Match(t *testing.T) {
-	y := []byte(`
-plugins:
-  - name: giphy
-    archive_url: https://example.com/giphy.tar.gz
-    checksum: sha256:deadbeef
-  - name: other
-    archive_url: https://example.com/other.tar.gz
-`)
+	y := []byte(`{"schema_version":2,"catalog_version":"0.1.0","generated_at":"2026-10-01T00:00:00Z","plugins":[{"id":"giphy","name":"Giphy","version":"1.0.0","hosts":{"nanite":{"min":"0.1.0"}},"source":{"type":"git","repo":"https://github.com/example/plugins","tag":"v1.0.0"},"archives":[{"platform":"` + runtime.GOOS + "-" + runtime.GOARCH + `","url":"https://example.com/giphy.tar.gz","sha256":"` + strings.Repeat("a", 64) + `","size":123}],"manifest_sha256":"` + strings.Repeat("b", 64) + `","directory":{"status":"active"},"summary":{}}]}`)
 	e, ok := findCatalogEntry(y, "giphy")
 	if !ok {
 		t.Fatal("expected match")

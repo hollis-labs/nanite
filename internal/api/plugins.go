@@ -91,6 +91,9 @@ func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *st
 	mux.HandleFunc("POST /api/plugins/uninstall", pms.handleUninstall)
 	mux.HandleFunc("POST /api/plugins/disable", pms.handleDisable)
 
+	mux.HandleFunc("GET /api/plugins/{name}/bundle/{file...}", pms.handlePluginBundle)
+	mux.HandleFunc("GET /api/plugins/{name}/schema/{type}", pms.handlePluginSchema)
+
 	// Serve plugin UI bundles for dynamic ESM loading.
 	// GET /api/plugins/{name}/ui/{file...} → plugins/{name}/ui/{file...}
 	mux.HandleFunc("GET /api/plugins/{name}/ui/{file...}", func(w http.ResponseWriter, r *http.Request) {
@@ -858,39 +861,13 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 	var p fplugin.Plugin
 
 	if manifest.Runtime == "subprocess" {
-		// Subprocess plugin: create a SubprocessPlugin bridge.
-		if manifest.Entrypoint == "" {
-			slog.Warn("plugin-api: subprocess plugin has no entrypoint", "name", manifest.Name)
+		var buildErr error
+		p, buildErr = naniteplugin.NewSubprocessPluginFromManifest(naniteplugin.DiscoveredPlugin{Manifest: manifest, Dir: pluginDir})
+		if buildErr != nil {
+			slog.Warn("plugin-api: subprocess preparation failed", "id", manifest.ID, "err", buildErr)
 			return false
 		}
-		command := manifest.Entrypoint
-		parts := strings.Fields(command)
-		cmd, args := parts[0], parts[1:]
 
-		// Resolve relative entrypoint from plugin dir.
-		if !filepath.IsAbs(cmd) {
-			abs := filepath.Join(pluginDir, cmd)
-			if fileExists(abs) {
-				cmd = abs
-			}
-		}
-
-		resolvedConfig := make(map[string]string)
-		for key, entry := range manifest.Config {
-			if entry.EnvVar != "" {
-				if v := os.Getenv(entry.EnvVar); v != "" {
-					resolvedConfig[key] = v
-					continue
-				}
-			}
-			if entry.Default != "" {
-				resolvedConfig[key] = entry.Default
-			}
-		}
-
-		mgrCfg := subprocess.DefaultManagerConfig(cmd, pluginDir)
-		mgrCfg.Args = args
-		p = subprocess.NewSubprocessPlugin(pluginDir, manifest.Identifier(), resolvedConfig, mgrCfg)
 	} else {
 		// Builtin plugin: use compiled-in constructor.
 		constructor, ok := naniteplugin.LookupConstructor(manifest.Name)

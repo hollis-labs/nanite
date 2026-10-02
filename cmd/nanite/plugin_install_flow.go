@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/catalog"
@@ -17,7 +15,7 @@ import (
 
 // defaultCatalogURL is the primary catalog for nanite plugins.
 // Overridden by NANITE_CATALOG_URL.
-const defaultCatalogURL = "https://plugins.nanite.hollislabs.dev/catalog.yaml"
+const defaultCatalogURL = "https://github.com/hollis-labs/plugins-catalog/releases/latest/download/catalog.yaml"
 
 func resolveCatalogURL() string {
 	if u := os.Getenv(brand.Env("CATALOG_URL")); u != "" {
@@ -107,21 +105,37 @@ func installFromCatalog(ctx context.Context, pluginID string) (string, bool, err
 		return "", false, fmt.Errorf("catalog: %w", err)
 	}
 
-	entry, ok := findCatalogEntry(fetched.YAML, pluginID)
+	decoded, err := plugin.DecodeCatalog(fetched.YAML)
+	if err != nil {
+		return "", false, fmt.Errorf("catalog: %w", err)
+	}
+	var entry plugin.CatalogEntry
+	ok := false
+	for _, candidate := range decoded.Plugins {
+		if candidate.ID == pluginID {
+			entry, ok = candidate, true
+			break
+		}
+	}
 	if !ok {
 		return "", false, nil
 	}
 
+	if !entry.Available {
+		return "", false, fmt.Errorf("plugin %q has no archive for this platform", pluginID)
+	}
 	sha := stripSha256Prefix(entry.Checksum)
 	if sha == "" {
 		return "", false, fmt.Errorf("catalog entry %q has no sha256 checksum", pluginID)
 	}
 
 	src := &install.CatalogArchiveSource{
-		ID:         pluginID,
-		ArchiveURL: entry.ArchiveURL,
-		SHA256:     sha,
-		Downloader: &install.HTTPDownloader{},
+		ID:             pluginID,
+		ArchiveURL:     entry.ArchiveURL,
+		ManifestSHA256: entry.ManifestSHA256,
+		Size:           entry.ArchiveSize,
+		SHA256:         sha,
+		Downloader:     &install.HTTPDownloader{},
 	}
 	final, err := inst.Install(ctx, src)
 	if err != nil {
@@ -137,30 +151,18 @@ func fetchCatalog(ctx context.Context, catalogURL string) (*catalog.Catalog, err
 	return f.Fetch(ctx, catalogURL)
 }
 
-// catalogEntryLite is a parser-friendly subset of the catalog entry fields
-// this CLI consumes. Declared locally so catalog-file format changes are
-// centralized in one place.
-type catalogEntryLite struct {
-	Name       string `yaml:"name"`
-	ArchiveURL string `yaml:"archive_url"`
-	Checksum   string `yaml:"checksum"`
-}
-
-type catalogFileLite struct {
-	Plugins []catalogEntryLite `yaml:"plugins"`
-}
-
-func findCatalogEntry(yamlBytes []byte, pluginID string) (catalogEntryLite, bool) {
-	var cf catalogFileLite
-	if err := yaml.Unmarshal(yamlBytes, &cf); err != nil {
-		return catalogEntryLite{}, false
+// findCatalogEntry uses the same strict released contract as the host.
+func findCatalogEntry(raw []byte, pluginID string) (plugin.CatalogEntry, bool) {
+	cf, err := plugin.DecodeCatalog(raw)
+	if err != nil {
+		return plugin.CatalogEntry{}, false
 	}
-	for _, e := range cf.Plugins {
-		if e.Name == pluginID {
-			return e, true
+	for _, entry := range cf.Plugins {
+		if entry.ID == pluginID {
+			return entry, true
 		}
 	}
-	return catalogEntryLite{}, false
+	return plugin.CatalogEntry{}, false
 }
 
 func stripSha256Prefix(s string) string {

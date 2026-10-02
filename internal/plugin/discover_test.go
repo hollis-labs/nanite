@@ -3,6 +3,7 @@ package plugin
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -14,13 +15,7 @@ func TestDiscoverPlugins_FaultTolerantAndPureRead(t *testing.T) {
 	if err := os.MkdirAll(validDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	validManifest := `schema_version: 1
-name: valid-subproc
-id: valid-subproc
-version: 0.1.0
-runtime: subprocess
-entrypoint: ./bin/run
-`
+	validManifest := strings.ReplaceAll(sharedManifestBytes(t), "example.plugin", "valid-subproc")
 	if err := os.WriteFile(filepath.Join(validDir, "plugin.yaml"), []byte(validManifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -55,13 +50,7 @@ runtime: subprocess
 	if err := os.MkdirAll(legacyDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	legacyManifest := `schema_version: 1
-name: legacy-disabled
-id: legacy-disabled
-version: 0.1.0
-runtime: subprocess
-entrypoint: ./bin/legacy
-`
+	legacyManifest := strings.ReplaceAll(sharedManifestBytes(t), "example.plugin", "legacy-disabled")
 	legacyPath := filepath.Join(legacyDir, "plugin.yaml.disabled")
 	if err := os.WriteFile(legacyPath, []byte(legacyManifest), 0o600); err != nil {
 		t.Fatal(err)

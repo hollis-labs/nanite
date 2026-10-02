@@ -134,17 +134,7 @@ func (s *DirStaging) validate() error {
 	return nil
 }
 
-// ValidatePluginID guards against path traversal via the pluginID. Pattern
-// matches the v1 manifest schema + subprocess validator:
-// ^[a-z][a-z0-9-]{1,62}$ — must start with a letter, only lowercase
-// alnum and '-', total length 2-63.
-//
-// Exported so callers that need to confine a catalog- or manifest-derived
-// name before doing anything else with it (e.g. internal/api's catalog
-// install handler) can reuse the exact allowlist DirStaging.Begin/Commit
-// enforce internally, rather than reimplementing it or adding a second,
-// different confinement mechanism (AD-04 item 1,
-// TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md).
+// ValidatePluginID reuses the host's shared identity and directory length rule.
 func ValidatePluginID(id string) error {
 	return plugin.ValidatePluginID(id)
 }

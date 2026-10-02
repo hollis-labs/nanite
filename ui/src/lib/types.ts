@@ -2325,6 +2325,7 @@ export interface PluginInstallReview {
   environment: string[];
   tools: Array<{ name: string; effect: string }>;
   tool_load_type?: "auto" | "opt-in";
+  reflex_seeds?: Array<{ id: string; agent_slug: string; trigger: unknown; reminder: string; priority?: number }>;
 }
 
 export interface PluginInstallReviewResponse {

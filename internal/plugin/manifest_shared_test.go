@@ -15,7 +15,7 @@ func sharedManifestBytes(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	common := manifest.Manifest{SchemaVersion: 2, ID: "example.plugin", Name: "Example", Version: "1.0.0", Protocol: 1, Runtime: "subprocess", Entrypoint: manifest.Entrypoint{Command: "bin/plugin", Args: []string{"literal argument"}}, Hosts: map[string]manifest.HostRange{"nanite": {Min: "0.1.0", Max: "0.1.0"}}, Nanite: block, Config: manifest.Config{Fields: map[string]manifest.Field{"enabled": {Type: "boolean", Default: "false"}}, Secrets: map[string]manifest.Secret{"token": {Required: true, Env: "EXAMPLE_TOKEN"}}}}
+	common := manifest.Manifest{SchemaVersion: 2, ID: "example.plugin", Name: "Example", Version: "1.0.0", Protocol: 1, Runtime: "subprocess", Entrypoint: manifest.Entrypoint{Command: "bin/plugin", Args: []string{"literal argument"}}, Hosts: map[string]manifest.HostRange{"nanite": {Min: pluginapi.Version, Max: pluginapi.Version}}, Nanite: block, Config: manifest.Config{Fields: map[string]manifest.Field{"enabled": {Type: "boolean", Default: "false"}}, Secrets: map[string]manifest.Secret{"token": {Required: true, Env: "EXAMPLE_TOKEN"}}}}
 	var out strings.Builder
 	if encodeErr := manifest.Encode(&out, common); encodeErr != nil {
 		t.Fatal(encodeErr)
@@ -70,7 +70,7 @@ func TestDecodeSharedManifestRejectsLegacyAndAmbiguousDeclarations(t *testing.T)
 }
 
 func TestPublicHostRangeIsIndependentOfApplicationVersion(t *testing.T) {
-	for _, required := range []manifest.HostRange{{Min: "0.1.0", Max: "0.1.0"}, {Min: "0.0.9"}, {Max: "0.1.1"}} {
+	for _, required := range []manifest.HostRange{{Min: pluginapi.Version, Max: pluginapi.Version}, {Min: "0.0.9"}, {Max: pluginapi.Version}} {
 		if err := CheckHostRange(required); err != nil {
 			t.Fatal(err)
 		}

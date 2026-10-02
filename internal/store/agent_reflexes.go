@@ -391,10 +391,15 @@ func (s *Store) ListAgentReflexesForAgent(ctx context.Context, agentID, classTag
 		                 )
 		               )
 		         )
-		      OR agent_id = ?
+		      OR (agent_id = ? AND (
+		            provenance_tier != 'plugin' OR opt_out_allowed = 0 OR NOT EXISTS (
+		              SELECT 1 FROM agent_reflex_opt_outs o
+		               WHERE o.agent_id = ? AND o.reflex_id = agent_reflexes.id
+		            )
+		          ))
 		       )
 		 ORDER BY priority DESC, created_at ASC`,
-		classTag, agentID, agentID,
+		classTag, agentID, agentID, agentID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list agent_reflexes: %w", err)
@@ -406,7 +411,9 @@ func (s *Store) ListAgentReflexesForAgent(ctx context.Context, agentID, classTag
 		if err := scanAgentReflex(rows, &r); err != nil {
 			return nil, fmt.Errorf("scan agent_reflexes: %w", err)
 		}
-		out = append(out, r)
+		if s.pluginReflexAvailable(r) {
+			out = append(out, r)
+		}
 	}
 	return out, rows.Err()
 }
@@ -458,10 +465,15 @@ func (s *Store) ListAgentReflexesForWorkflowRun(ctx context.Context, runID, agen
 		                 )
 		               )
 		         )
-		      OR agent_id = ?
+		      OR (agent_id = ? AND (
+		            provenance_tier != 'plugin' OR opt_out_allowed = 0 OR NOT EXISTS (
+		              SELECT 1 FROM agent_reflex_opt_outs o
+		               WHERE o.agent_id = ? AND o.reflex_id = agent_reflexes.id
+		            )
+		          ))
 		       )
 		 ORDER BY priority DESC, created_at ASC`,
-		runID, classTag, agentID, agentID,
+		runID, classTag, agentID, agentID, agentID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list agent_reflexes for workflow run: %w", err)
@@ -473,7 +485,9 @@ func (s *Store) ListAgentReflexesForWorkflowRun(ctx context.Context, runID, agen
 		if err := scanAgentReflex(rows, &r); err != nil {
 			return nil, fmt.Errorf("scan agent_reflexes: %w", err)
 		}
-		out = append(out, r)
+		if s.pluginReflexAvailable(r) {
+			out = append(out, r)
+		}
 	}
 	return out, rows.Err()
 }
@@ -518,7 +532,9 @@ func (s *Store) ListAgentReflexesForLoopRun(ctx context.Context, loopRunID strin
 		if err := scanAgentReflex(rows, &r); err != nil {
 			return nil, fmt.Errorf("scan agent_reflexes: %w", err)
 		}
-		out = append(out, r)
+		if s.pluginReflexAvailable(r) {
+			out = append(out, r)
+		}
 	}
 	return out, rows.Err()
 }

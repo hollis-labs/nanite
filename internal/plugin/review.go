@@ -38,6 +38,7 @@ type InstallReview struct {
 	Environment  []string                       `json:"environment"`
 	Tools        []ReviewTool                   `json:"tools"`
 	ToolLoadType LoadType                       `json:"tool_load_type,omitempty"`
+	ReflexSeeds  []pluginapi.ReflexSeed         `json:"reflex_seeds,omitempty"`
 }
 
 type ReviewSecret struct {
@@ -60,6 +61,7 @@ type InstallApproval struct {
 var capabilityEnvironment = map[string][]string{
 	pluginapi.CapabilityReadOnlyQuery: {},
 	pluginapi.CapabilityContextSource: {},
+	pluginapi.CapabilityReflexSeed:    {},
 	"ssh_agent":                       {"SSH_AUTH_SOCK"},
 	"docker_socket":                   {"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"},
 }
@@ -106,6 +108,11 @@ func BuildInstallReview(ctx context.Context, directory string) (InstallReview, e
 	for _, tool := range common.Tools {
 		review.Tools = append(review.Tools, ReviewTool{Name: tool.Name, Effect: tool.Effect})
 	}
+	block, blockErr := pluginapi.DecodeBlock(common.Nanite)
+	if blockErr != nil {
+		return InstallReview{}, blockErr
+	}
+	review.ReflexSeeds = block.Registers.ReflexSeeds
 	slices.SortFunc(review.Secrets, func(a, b ReviewSecret) int { return strings.Compare(a.Name, b.Name) })
 	slices.Sort(review.Environment)
 	return review, nil

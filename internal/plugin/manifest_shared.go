@@ -34,6 +34,9 @@ func DecodeManifest(reader io.Reader) (*PluginManifest, error) {
 	if _, scopeErr := pluginapi.ContextScopeFor(block, common.Capabilities); scopeErr != nil {
 		return nil, scopeErr
 	}
+	if _, scopeErr := pluginapi.ReflexScopeFor(block, common.Capabilities); scopeErr != nil {
+		return nil, scopeErr
+	}
 	result := &PluginManifest{
 		SchemaVersion: common.SchemaVersion, ID: common.ID, Name: common.Name,
 		Version: common.Version, Description: common.Description, License: common.License,

@@ -23,7 +23,7 @@ import (
 // plugin HTTP routes. Chosen conservatively; plugins needing more should
 // stream over a different channel. A future manifest field may expose
 // this per-route — not wired today.
-const maxPluginHTTPBodyBytes = 10 << 20 // 10 MiB
+const maxPluginHTTPBodyBytes = pluginapi.MaxHTTPBody
 
 // sensitivePluginHTTPHeaders names request headers that must NOT be
 // forwarded to untrusted plugin subprocesses. Keys are in
@@ -293,10 +293,29 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		host.mu.Unlock()
 	}()
 
+	var seedRegistrar ReflexSeedRegistrar
 	if manifest.Shared != nil {
 		block, err := pluginapi.DecodeBlock(manifest.Shared.Nanite)
 		if err != nil {
 			return err
+		}
+		reflexScope, err := pluginapi.ReflexScopeFor(block, manifest.Shared.Capabilities)
+		if err != nil {
+			return err
+		}
+		if len(block.Registers.ReflexSeeds) != 0 {
+			if _, ok := p.(*subprocess.SubprocessPlugin); !ok {
+				return fmt.Errorf("plugin reflex seeds require a subprocess")
+			}
+			host.mu.RLock()
+			seedRegistrar = host.reflexSeeds
+			host.mu.RUnlock()
+			if seedRegistrar == nil {
+				return fmt.Errorf("plugin reflex seeds unavailable")
+			}
+			if err = seedRegistrar.PreparePluginReflexSeeds(pluginID, block.Registers.ReflexSeeds, reflexScope); err != nil {
+				return err
+			}
 		}
 		scope, err := pluginapi.ContextScopeFor(block, manifest.Shared.Capabilities)
 		if err != nil {
@@ -468,6 +487,11 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 	// cannot override built-in panel IDs.
 	if len(reg.Panels) > 0 {
 		if err := registerManifestPanels(host, manifest, pluginID); err != nil {
+			return err
+		}
+	}
+	if seedRegistrar != nil {
+		if err := seedRegistrar.ActivatePluginReflexSeeds(pluginID); err != nil {
 			return err
 		}
 	}
@@ -717,12 +741,6 @@ func newSubprocessHTTPHandler(transport *subprocess.Transport, handlerName strin
 			body = b
 		}
 
-		query := make(map[string]string, len(r.URL.Query()))
-		for k, vs := range r.URL.Query() {
-			if len(vs) > 0 {
-				query[k] = vs[0]
-			}
-		}
 		// Filter and flatten request headers before forwarding to the
 		// subprocess. Sensitive headers (auth, cookies, CSRF tokens)
 		// are dropped — plugins are untrusted. Multi-value headers are
@@ -742,11 +760,12 @@ func newSubprocessHTTPHandler(transport *subprocess.Transport, handlerName strin
 		}
 
 		req := &subprocess.HTTPRequest{
-			Method:  r.Method,
-			Path:    r.URL.Path,
-			Query:   query,
-			Headers: headers,
-			Body:    body,
+			Method:   r.Method,
+			Path:     r.URL.Path,
+			RawPath:  r.URL.RawPath,
+			RawQuery: r.URL.RawQuery,
+			Headers:  headers,
+			Body:     body,
 		}
 		// handlerName is intentionally unused here today — the plugin
 		// side dispatches on Method+Path and handlerName is preserved
@@ -761,12 +780,16 @@ func newSubprocessHTTPHandler(transport *subprocess.Transport, handlerName strin
 			http.Error(w, "plugin http handler: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		for k, v := range resp.Headers {
-			w.Header().Set(k, v)
-		}
 		status := resp.Status
 		if status == 0 {
 			status = http.StatusOK
+		}
+		if status < 200 || status > 599 || len(resp.Body) > pluginapi.MaxHTTPBody {
+			http.Error(w, "invalid plugin HTTP response", http.StatusBadGateway)
+			return
+		}
+		for k, v := range resp.Headers {
+			w.Header().Set(k, v)
 		}
 		w.WriteHeader(status)
 		if len(resp.Body) > 0 {

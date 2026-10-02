@@ -441,7 +441,7 @@ func TestNewSubprocessHTTPHandler(t *testing.T) {
 
 	// --- Case 1: happy path — sensitive headers stripped, multi-values flattened.
 	body := []byte(`{"hello":"world"}`)
-	r := httptest.NewRequest(http.MethodPost, "/api/plugin/foo?x=1", bytes.NewReader(body))
+	r := httptest.NewRequest(http.MethodPost, "/api/plugins/foo/items/one%2Ftwo?x=1&x=2&empty=&bare", bytes.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer secret-token")
 	r.Header.Set("Cookie", "session=abc")
@@ -480,11 +480,11 @@ func TestNewSubprocessHTTPHandler(t *testing.T) {
 	if gotReq.Method != http.MethodPost {
 		t.Errorf("forwarded method = %q", gotReq.Method)
 	}
-	if gotReq.Path != "/api/plugin/foo" {
+	if gotReq.Path != "/api/plugins/foo/items/one/two" {
 		t.Errorf("forwarded path = %q", gotReq.Path)
 	}
-	if gotReq.Query["x"] != "1" {
-		t.Errorf("forwarded query = %v", gotReq.Query)
+	if gotReq.RawQuery != "x=1&x=2&empty=&bare" || gotReq.RawPath != "/api/plugins/foo/items/one%2Ftwo" || gotReq.Query != nil {
+		t.Errorf("forwarded URL lost information: %+v", gotReq)
 	}
 	for _, banned := range []string{"Authorization", "Cookie", "X-Api-Key"} {
 		if _, ok := gotReq.Headers[banned]; ok {

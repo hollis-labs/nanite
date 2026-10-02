@@ -979,6 +979,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		if cfg.Plugins != nil {
 			adapter := NewPluginContextSources()
 			cfg.Plugins.SetContextSourceRegistrar(adapter)
+			cfg.Plugins.SetReflexSeedRegistrar(NewPluginReflexSeeds(cfg.Store))
 			sources = append(sources, adapter)
 		}
 		broker := contextbroker.New(contextbroker.DefaultBudget(), sources...)

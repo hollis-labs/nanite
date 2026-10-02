@@ -47,9 +47,19 @@ func (p *apiSubprocessFixture) MCPCallTool(_ context.Context, request sdkprocess
 	return sdkprocess.MCPCallResult{Content: raw}, nil
 }
 
-func (p *apiSubprocessFixture) HTTPHandle(_ context.Context, request sdkprocess.HTTPRequest) (sdkprocess.HTTPResponse, error) {
+func (p *apiSubprocessFixture) HTTPHandle(ctx context.Context, request sdkprocess.HTTPRequest) (sdkprocess.HTTPResponse, error) {
 	if request.Path != pluginapi.ContextFetchPath {
-		return sdkprocess.HTTPResponse{Status: 404}, nil
+		if strings.HasSuffix(request.Path, "/invalid-status") {
+			return sdkprocess.HTTPResponse{Status: 700}, nil
+		}
+		mux := http.NewServeMux()
+		echo := func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			_ = json.NewEncoder(w).Encode(map[string]any{"method": r.Method, "id": r.PathValue("id"), "raw_query": r.URL.RawQuery, "query": r.URL.Query(), "path": r.URL.Path, "raw_path": r.URL.RawPath, "body": string(body), "authorization": r.Header.Get("Authorization")})
+		}
+		mux.HandleFunc("/items", echo)
+		mux.HandleFunc("/items/{id}", echo)
+		return pluginapi.HandleHTTP(ctx, p.id, mux, request)
 	}
 	decoded, err := pluginapi.DecodeContextRequest(&request)
 	if err != nil {
@@ -113,6 +123,19 @@ func writeAPIPluginBundle(t *testing.T, dir, id, name string, block pluginapi.Bl
 		t.Fatal(err)
 	}
 	declaration := manifest.Manifest{SchemaVersion: 2, ID: id, Name: name, Version: "1.0.0", Protocol: 1, Runtime: "subprocess", Entrypoint: manifest.Entrypoint{Command: "plugin", Args: []string{"-test.run=^TestAPISubprocessChild$", "--", "--nanite-plugin-child", id, name}}, Hosts: map[string]manifest.HostRange{"nanite": {Min: "0.1.0"}}, Nanite: ext}
+	if len(block.Registers.ReflexSeeds) > 0 {
+		scope := pluginapi.ReflexScope{}
+		agents := map[string]bool{}
+		for _, seed := range block.Registers.ReflexSeeds {
+			scope.SeedIDs = append(scope.SeedIDs, seed.ID)
+			if !agents[seed.AgentSlug] {
+				scope.AgentSlugs = append(scope.AgentSlugs, seed.AgentSlug)
+				agents[seed.AgentSlug] = true
+			}
+		}
+		metadata, _ := json.Marshal(scope)
+		declaration.Capabilities = append(declaration.Capabilities, sdkprocess.CapabilityRequest{Name: pluginapi.CapabilityReflexSeed, Metadata: metadata})
+	}
 	var raw strings.Builder
 	if checkErr := manifest.Encode(&raw, declaration); checkErr != nil {
 		t.Fatal(checkErr)

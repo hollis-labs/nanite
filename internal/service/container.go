@@ -976,6 +976,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			return out, nil
 		}))
 
+		if cfg.Plugins != nil {
+			adapter := NewPluginContextSources()
+			cfg.Plugins.SetContextSourceRegistrar(adapter)
+			sources = append(sources, adapter)
+		}
 		broker := contextbroker.New(contextbroker.DefaultBudget(), sources...)
 		contextClient.ContextBroker = broker
 		slog.Info("service container: context broker enabled", "sources", len(sources))

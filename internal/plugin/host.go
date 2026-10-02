@@ -96,8 +96,9 @@ type crudHandlerEntry struct {
 }
 
 type Host struct {
-	queryURL    string
-	queryGrants map[[32]byte]hostQueryGrant
+	contextSources ContextSourceRegistrar
+	queryURL       string
+	queryGrants    map[[32]byte]hostQueryGrant
 
 	// lifecycleMu serializes complete load/unload transactions. h.mu still
 	// protects registry state and is deliberately released around plugin
@@ -1296,6 +1297,9 @@ func (h *Host) UnloadPlugin(id string) error {
 	}
 	h.mu.Unlock()
 
+	// Cancel retrieval before child shutdown can wait on an in-flight call.
+	h.removePluginContextSources(id)
+
 	// Inner Unload call outside the lock.
 	if err := p.Unload(); err != nil {
 		return fmt.Errorf("failed to unload plugin %q: %w", id, err)
@@ -1723,6 +1727,7 @@ func (h *Host) Shutdown() error {
 
 	var errors []string
 	for _, np := range snapshot {
+		h.removePluginContextSources(np.id)
 		if err := np.p.Unload(); err != nil {
 			errors = append(errors, fmt.Sprintf("failed to unload plugin %q: %v", np.id, err))
 		}

@@ -161,12 +161,23 @@ confinement so a legacy or externally modified row cannot serve an outside file.
 This limits artifact registration; it does not sandbox the plugin process.
 
 Subprocess plugins inherit only `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`,
-`USER`, `LOGNAME`, `LANG`, `LC_ALL`, and `XDG_RUNTIME_DIR`. Host code may
-explicitly provide additional launch entries. Provider keys, Nanite auth
+`USER`, `LOGNAME`, `LANG`, `LC_ALL`, and `XDG_RUNTIME_DIR`. A reviewed `ssh_agent` or `docker_socket` capability may add its named
+connection variables. Host code may explicitly provide additional launch entries. Provider keys, Nanite auth
 credentials, SSH agent sockets, Docker handles, proxy settings, and runtime
-injection variables are not inherited. Plugin configuration is delivered
-through the init protocol. This environment policy does not restrict files
+injection variables are not inherited. Declared secrets resolve from their named environment variable or the
+plugin-specific OS keychain key, arrive through init configuration, and are
+scrubbed from subprocess stderr and RPC error logs. This environment policy does not restrict files
 a plugin can read with your user privileges.
+
+Installing a subprocess plugin requires reviewing the actual staged bundle.
+The GUI shows capabilities, secret names and tool effects; the CLI requires
+entering the plugin ID. An upgrade shows changes from the previous approval.
+The receipt stores a digest of every regular file's path, permissions and bytes
+outside the bundle. Loads and supervised restarts refuse changed or unapproved
+bundles. Symlinks and oversized bundles are refused. Local installs copy files;
+linked development directories cannot retain an approval. Runtime calls have a
+30-second host deadline and bounded request/response frames (8 MiB/16 MiB).
+These checks detect changed code; plugins still run with your user's privileges.
 
 ## External data processors
 
@@ -181,7 +192,7 @@ machine:
   `https://models.dev/api.json` for model metadata and pricing. The request
   carries no session data.
 - **Plugin catalogs.** Browsing or installing from a catalog fetches its
-  index (by default `https://plugins.nanite.hollislabs.dev/catalog.yaml`) and
+  index (by default the `hollis-labs/plugins-catalog` latest release feed) and
   the plugin archives it names.
 - **Tools, plugins and MCP servers.** Agent tools such as web fetch reach the
   URLs an agent asks for. Configured MCP servers and installed plugins receive

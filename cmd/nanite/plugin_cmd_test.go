@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/plugin/install"
 
 	"github.com/hollis-labs/nanite/internal/plugin"
 )
@@ -40,16 +44,20 @@ func TestCopyPluginDir(t *testing.T) {
 	writeFile(t, filepath.Join(src, "plugin.yaml"), "schema_version: 1\nid: test\n")
 	writeFile(t, filepath.Join(src, "main.go"), "package main")
 	writeFile(t, filepath.Join(src, "ui/src/index.tsx"), "export {}")
+	writeFile(t, filepath.Join(src, "ui/dist/index.js"), "export {}")
 	writeFile(t, filepath.Join(src, ".git/HEAD"), "ref: refs/heads/main")
 	writeFile(t, filepath.Join(src, "node_modules/foo/package.json"), "{}")
 	writeFile(t, filepath.Join(src, "dist/giphy"), "binary")
 
 	dst := filepath.Join(t.TempDir(), "target")
-	if err := copyPluginDir(src, dst); err != nil {
+	if err := os.MkdirAll(dst, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&install.TarGzExtractor{SkipDevelopmentFiles: true}).Extract(context.Background(), install.Handle{Kind: "directory", Path: src}, dst, nil); err != nil {
 		t.Fatalf("copyPluginDir: %v", err)
 	}
 
-	for _, rel := range []string{"plugin.yaml", "main.go", "ui/src/index.tsx"} {
+	for _, rel := range []string{"plugin.yaml", "main.go", "ui/src/index.tsx", "ui/dist/index.js"} {
 		if _, err := os.Stat(filepath.Join(dst, rel)); err != nil {
 			t.Errorf("expected %s in target, got %v", rel, err)
 		}
@@ -122,5 +130,16 @@ func writeFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("write: %v", err)
+	}
+}
+
+func TestInstallReviewUpgradeDiff(t *testing.T) {
+	before := plugin.InstallReview{Entrypoint: "plugin", Arguments: []string{"old"}, Secrets: []plugin.ReviewSecret{{Name: "removed", Required: true}}, Tools: []plugin.ReviewTool{{Name: "query", Effect: "read"}}}
+	after := plugin.InstallReview{Entrypoint: "plugin", Arguments: []string{"new"}, Secrets: []plugin.ReviewSecret{{Name: "added", Required: true}}, Tools: []plugin.ReviewTool{{Name: "query", Effect: "write"}}}
+	changes := strings.Join(installReviewChanges(before, after), "\n")
+	for _, expected := range []string{"Changed Executable", "Removed Secret removed", "Added Secret added", "Changed Tool query: read → write"} {
+		if !strings.Contains(changes, expected) {
+			t.Fatalf("missing %q in %s", expected, changes)
+		}
 	}
 }

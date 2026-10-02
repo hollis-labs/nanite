@@ -251,7 +251,7 @@ func TestHandleCatalogInstall_PathTraversal(t *testing.T) {
 }
 
 // TestHandleCatalogInstall_Success_TarGz is the positive-path regression
-// test: a validly-signed, checksummed .tar.gz catalog entry installs
+// test: a checksummed .tar.gz catalog entry installs
 // successfully end-to-end through the converged pipeline. Protects against
 // the fail-closed fix (above) becoming fail-always.
 func TestHandleCatalogInstall_Success_TarGz(t *testing.T) {
@@ -280,6 +280,15 @@ func TestHandleCatalogInstall_Success_TarGz(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/plugins/catalog/install", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handlerMux.ServeHTTP(rec, req)
+	digest := assertInstallReview(t, rec, pluginsDir, "")
+	var accepted map[string]string
+	if err := json.Unmarshal(body, &accepted); err != nil {
+		t.Fatal(err)
+	}
+	accepted["approved_digest"] = digest
+	body, _ = json.Marshal(accepted)
+	rec = httptest.NewRecorder()
+	handlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/plugins/catalog/install", bytes.NewReader(body)))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -295,7 +304,7 @@ func TestHandleCatalogInstall_Success_TarGz(t *testing.T) {
 }
 
 // TestHandleCatalogInstall_Success_Zip is AD-04 item 2's required
-// regression test: a validly-signed, checksummed .zip catalog entry (as
+// regression test: a checksummed .zip catalog entry (as
 // opposed to .tar.gz) also installs successfully — the format-dispatching
 // catalogExtractor must not silently drop zip support the way a naive
 // convergence onto the CLI's tar.gz-only TarGzExtractor would have.
@@ -325,6 +334,15 @@ func TestHandleCatalogInstall_Success_Zip(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/plugins/catalog/install", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handlerMux.ServeHTTP(rec, req)
+	digest := assertInstallReview(t, rec, pluginsDir, "")
+	var accepted map[string]string
+	if err := json.Unmarshal(body, &accepted); err != nil {
+		t.Fatal(err)
+	}
+	accepted["approved_digest"] = digest
+	body, _ = json.Marshal(accepted)
+	rec = httptest.NewRecorder()
+	handlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/plugins/catalog/install", bytes.NewReader(body)))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -374,6 +392,15 @@ func TestHandleCatalogInstall_Success_WrapperDirectory(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/plugins/catalog/install", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handlerMux.ServeHTTP(rec, req)
+	digest := assertInstallReview(t, rec, pluginsDir, "")
+	var accepted map[string]string
+	if err := json.Unmarshal(body, &accepted); err != nil {
+		t.Fatal(err)
+	}
+	accepted["approved_digest"] = digest
+	body, _ = json.Marshal(accepted)
+	rec = httptest.NewRecorder()
+	handlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/plugins/catalog/install", bytes.NewReader(body)))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -492,4 +519,31 @@ func TestHandleCatalogInstall_WrongChecksum(t *testing.T) {
 	if fileExists(filepath.Join(pluginsDir, "testplug", "plugin.yaml")) {
 		t.Error("plugin must not be written when checksum verification fails")
 	}
+}
+
+func assertInstallReview(t *testing.T, rec *httptest.ResponseRecorder, root, existingID string) string {
+	t.Helper()
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected review, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Status string                     `json:"status"`
+		Review naniteplugin.InstallReview `json:"review"`
+		Digest string                     `json:"review_digest"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Status != "review_required" || response.Digest != response.Review.Digest() {
+		t.Fatalf("invalid review: %s", rec.Body.String())
+	}
+	if existingID == "" {
+		if fileExists(filepath.Join(root, response.Review.ID, "plugin.yaml")) {
+			t.Fatal("preview installed plugin")
+		}
+		if _, err := naniteplugin.ReadInstallApproval(root, response.Review.ID); err == nil {
+			t.Fatal("preview approved plugin")
+		}
+	}
+	return response.Digest
 }

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/brand"
@@ -74,11 +76,12 @@ func (noopLoader) Load(ctx context.Context, pluginID, pluginDir string) error { 
 // triggerRestart() for a builtin) after Run returns successfully.
 func buildInstaller(emit install.EventFunc) (*install.Installer, *install.DirStaging) {
 	inst, staging := install.NewInstaller(install.BuildOptions{
-		Extractor:   &install.TarGzExtractor{},
+		Extractor:   &install.TarGzExtractor{SkipDevelopmentFiles: true},
 		Loader:      noopLoader{},
 		StagingRoot: resolveStagingRoot(),
 		PluginsRoot: resolvePluginsDir(),
 		Emit:        emit,
+		Review:      reviewPluginInstall,
 	})
 	return inst, staging
 }
@@ -224,4 +227,84 @@ func pluginUpdate(id string) {
 		newManifest = nil
 	}
 	triggerActivation(id, newManifest)
+}
+
+func reviewPluginInstall(ctx context.Context, review plugin.InstallReview, previous *plugin.InstallApproval) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	fmt.Printf("\nReview %s (%s) v%s\nBundle: %s\n", review.Name, review.ID, review.Version, review.BundleDigest)
+	if previous != nil {
+		fmt.Printf("Previously accepted: v%s, bundle %s\n", previous.Review.Version, previous.Review.BundleDigest)
+		for _, change := range installReviewChanges(previous.Review, review) {
+			fmt.Println(change)
+		}
+	}
+	fmt.Printf("Executable: %s %q\n", review.Entrypoint, review.Arguments)
+	for _, capability := range review.Capabilities {
+		fmt.Printf("Capability: %s — %s (optional: %t)\n", capability.Name, capability.Reason, capability.Optional)
+	}
+	for _, secret := range review.Secrets {
+		fmt.Printf("Secret: %s (environment: %s, required: %t)\n", secret.Name, secret.Environment, secret.Required)
+	}
+	for _, environment := range review.Environment {
+		fmt.Printf("Config environment: %s\n", environment)
+	}
+	for _, tool := range review.Tools {
+		fmt.Printf("Tool: %s (effect: %s)\n", tool.Name, tool.Effect)
+	}
+	fmt.Printf("Type %s to approve this bundle: ", review.ID)
+	entered, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("install review input: %w", err)
+	}
+	if strings.TrimSpace(entered) != review.ID {
+		return "", fmt.Errorf("installation was not approved")
+	}
+	return review.Digest(), nil
+}
+
+func installReviewDeclarations(review plugin.InstallReview) map[string]string {
+	declarations := map[string]string{"Executable": fmt.Sprintf("%s %q", review.Entrypoint, review.Arguments)}
+	for _, capability := range review.Capabilities {
+		declarations["Capability "+capability.Name] = fmt.Sprintf("%s (optional: %t)", capability.Reason, capability.Optional)
+	}
+	for _, secret := range review.Secrets {
+		declarations["Secret "+secret.Name] = fmt.Sprintf("environment: %s, required: %t", secret.Environment, secret.Required)
+	}
+	for _, environment := range review.Environment {
+		declarations["Config environment "+environment] = environment
+	}
+	for _, tool := range review.Tools {
+		declarations["Tool "+tool.Name] = tool.Effect
+	}
+	return declarations
+}
+
+func installReviewChanges(previous, current plugin.InstallReview) []string {
+	before, after := installReviewDeclarations(previous), installReviewDeclarations(current)
+	keys := make([]string, 0, len(before)+len(after))
+	for key := range before {
+		keys = append(keys, key)
+	}
+	for key := range after {
+		if _, exists := before[key]; !exists {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	var changes []string
+	for _, key := range keys {
+		old, had := before[key]
+		next, has := after[key]
+		switch {
+		case !had:
+			changes = append(changes, fmt.Sprintf("Added %s: %s", key, next))
+		case !has:
+			changes = append(changes, fmt.Sprintf("Removed %s: %s", key, old))
+		case old != next:
+			changes = append(changes, fmt.Sprintf("Changed %s: %s → %s", key, old, next))
+		}
+	}
+	return changes
 }

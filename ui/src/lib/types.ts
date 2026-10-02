@@ -2311,6 +2311,26 @@ export interface CatalogSource {
   updated_at: string;
 }
 
+export interface PluginInstallReview {
+  id: string;
+  name: string;
+  version: string;
+  bundle_digest: string;
+  entrypoint: string;
+  arguments: string[];
+  capabilities: Array<{ name: string; reason: string; optional?: boolean }>;
+  secrets: Array<{ name: string; environment?: string; required: boolean }>;
+  environment: string[];
+  tools: Array<{ name: string; effect: string }>;
+}
+
+export interface PluginInstallReviewResponse {
+  status: "review_required";
+  review: PluginInstallReview;
+  review_digest: string;
+  previous: { review: PluginInstallReview; review_digest: string } | null;
+}
+
 export interface CatalogBrowseEntry {
   id: string;
   name: string;

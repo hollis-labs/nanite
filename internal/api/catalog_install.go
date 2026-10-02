@@ -143,19 +143,16 @@ func flattenCatalogPluginRoot(pluginRoot, targetDir string) error {
 // service and must hot-load the freshly-installed plugin itself so it's
 // usable immediately (AD-04 item 3).
 //
-// Mirrors handleInstall/handleInstallLocal/handleInstallArchive's own
-// convention of not failing the HTTP response when hot-load fails — by
-// this point the plugin's files are already safely committed to disk, and
-// an operator can retry via POST /api/plugins/reload. runPluginLoadIntoHost's
-// bool result is intentionally not surfaced as a Loader error, matching
-// how the other three install handlers already discard it.
+// A failed hot-load leaves the accepted bundle installed for a later reload.
 type hostLoader struct {
 	pms *pluginManagerState
 }
 
 // Load implements install.Loader.
 func (l hostLoader) Load(ctx context.Context, pluginID, pluginDir string) error {
-	l.pms.runPluginLoadIntoHost(filepath.Join(pluginDir, "plugin.yaml"), pluginDir)
+	if l.pms.pluginHost != nil && !l.pms.runPluginLoadIntoHost(filepath.Join(pluginDir, "plugin.yaml"), pluginDir) {
+		return fmt.Errorf("accepted plugin %q is installed but could not be loaded; configure it and retry reload", pluginID)
+	}
 	return nil
 }
 

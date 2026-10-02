@@ -31,6 +31,9 @@ type DirStaging struct {
 // func on failure paths; on success paths, Commit takes over ownership
 // of the staging dir and cleanup is a no-op.
 func (s *DirStaging) Begin(ctx context.Context, pluginID string) (string, func(), error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
 	if err := s.validate(); err != nil {
 		return "", nil, err
 	}
@@ -44,7 +47,18 @@ func (s *DirStaging) Begin(ctx context.Context, pluginID string) (string, func()
 		return "", nil, fmt.Errorf("staging: mkdir plugins root: %w", err)
 	}
 
-	lockPath := filepath.Join(s.StagingRoot, pluginID+".lock")
+	lockDir := filepath.Join(s.PluginsRoot, ".install-locks")
+	if err := os.MkdirAll(lockDir, 0700); err != nil {
+		return "", nil, err
+	}
+	info, err := os.Lstat(lockDir)
+	if err != nil {
+		return "", nil, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", nil, fmt.Errorf("install lock directory must not be a symlink")
+	}
+	lockPath := filepath.Join(lockDir, pluginID+".lock")
 	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
@@ -76,6 +90,9 @@ func (s *DirStaging) Begin(ctx context.Context, pluginID string) (string, func()
 // The staging lockfile is removed as part of a successful Commit so the
 // caller's Begin cleanup becomes a no-op.
 func (s *DirStaging) Commit(ctx context.Context, stagingDir, pluginID string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if err := s.validate(); err != nil {
 		return "", err
 	}
@@ -120,7 +137,7 @@ func (s *DirStaging) Commit(ctx context.Context, stagingDir, pluginID string) (s
 			_ = err
 		}
 	}
-	_ = os.Remove(filepath.Join(s.StagingRoot, pluginID+".lock"))
+	_ = os.Remove(filepath.Join(s.PluginsRoot, ".install-locks", pluginID+".lock"))
 	return finalDir, nil
 }
 

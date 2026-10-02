@@ -39,6 +39,7 @@ func createTestPlugin(t *testing.T, dir, name string) string {
 	os.MkdirAll(pluginDir, 0755)
 	manifest := minimalCatalogPluginManifest(name)
 	os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(manifest), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "plugin"), []byte("#!/bin/sh\n"), 0755) // #nosec G306 -- executable fixture in t.TempDir requires the owner execute bit.
 	os.WriteFile(filepath.Join(pluginDir, "README.md"), []byte("# "+name), 0644)
 	return pluginDir
 }
@@ -59,6 +60,22 @@ func TestHandleInstallLocal(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	mux.ServeHTTP(rec, req)
+	digest := assertInstallReview(t, rec, pluginsDir, "")
+	if err := os.WriteFile(filepath.Join(srcDir, "test-local-plugin", "README.md"), []byte("changed after preview"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	staleBody, _ := json.Marshal(map[string]string{"path": filepath.Join(srcDir, "test-local-plugin"), "approved_digest": digest})
+	stale := httptest.NewRecorder()
+	mux.ServeHTTP(stale, httptest.NewRequest(http.MethodPost, "/api/plugins/install-local", bytes.NewReader(staleBody)))
+	refreshed := assertInstallReview(t, stale, pluginsDir, "")
+	if refreshed == digest {
+		t.Fatal("changed bundle retained review")
+	}
+	digest = refreshed
+
+	body, _ = json.Marshal(map[string]string{"path": filepath.Join(srcDir, "test-local-plugin"), "approved_digest": digest})
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/plugins/install-local", bytes.NewReader(body)))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -184,6 +201,9 @@ func TestHandleInstallArchive_TarGz(t *testing.T) {
 	// plugin.yaml
 	tw.WriteHeader(&tar.Header{Name: "archive-plugin/plugin.yaml", Size: int64(len(manifest)), Mode: 0644})
 	tw.Write([]byte(manifest))
+	executable := "#!/bin/sh\n"
+	tw.WriteHeader(&tar.Header{Name: "archive-plugin/plugin", Size: int64(len(executable)), Mode: 0755})
+	tw.Write([]byte(executable))
 	// A data file.
 	data := "hello from archive"
 	tw.WriteHeader(&tar.Header{Name: "archive-plugin/data.txt", Size: int64(len(data)), Mode: 0644})
@@ -214,6 +234,17 @@ func TestHandleInstallArchive_TarGz(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	mux.ServeHTTP(rec, req)
+	digest := assertInstallReview(t, rec, pluginsDir, "")
+	var acceptedBody bytes.Buffer
+	acceptedForm := multipart.NewWriter(&acceptedBody)
+	acceptedForm.WriteField("approved_digest", digest)
+	acceptedPart, _ := acceptedForm.CreateFormFile("archive", "archive-plugin.tar.gz")
+	acceptedPart.Write(buf.Bytes())
+	acceptedForm.Close()
+	req = httptest.NewRequest(http.MethodPost, "/api/plugins/install-archive", &acceptedBody)
+	req.Header.Set("Content-Type", acceptedForm.FormDataContentType())
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -237,17 +268,17 @@ func TestHandleInstallArchive_TarGz(t *testing.T) {
 	}
 }
 
-// TestHandleInstall_PathTraversal asserts that handleInstall rejects names
+// TestHandleInstall_PathTraversal asserts that catalog install rejects names
 // that would resolve outside pluginsDir via ".." segments. Regression for
 // the audit Critical finding: plugin install target was joined raw.
 func TestHandleInstall_PathTraversal(t *testing.T) {
-	pms, _ := setupPluginTestState(t)
+	cs := &catalogState{}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/plugins/install", pms.handleInstall)
+	mux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
 
 	body, _ := json.Marshal(map[string]string{"name": "../../etc/passwd"})
-	req := httptest.NewRequest("POST", "/api/plugins/install", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/plugins/catalog/install", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -583,7 +614,7 @@ func TestExtractZip_RejectsOversizedFile(t *testing.T) {
 
 // TestExtractZip_RejectsTraversal asserts that pathsafe.ResolveUnder
 // rejects zip entries whose names contain .. segments. Complements the
-// TestHandleInstall_PathTraversal test that hits handleInstall.
+// TestHandleInstall_PathTraversal test that hits catalog install.
 func TestExtractZip_RejectsTraversal(t *testing.T) {
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "trav.zip")

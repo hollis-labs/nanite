@@ -89,7 +89,7 @@ export function PluginManager() {
   const updateMap = useMemo(() => {
     const m = new Map<string, string>();
     for (const e of catalogEntries) {
-      if (e.update_available) m.set(e.name, e.version);
+      if (e.update_available) m.set(e.id, e.version);
     }
     return m;
   }, [catalogEntries]);
@@ -114,16 +114,6 @@ export function PluginManager() {
     },
     [addToast, bumpConfigVersion, queryClient, refetch],
   );
-
-  const installMutation = useMutation({
-    mutationFn: api.installPlugin,
-    onMutate: (name) => setPendingAction(name),
-    onSuccess: () => void handlePostAction("installed"),
-    onError: (err: Error) => {
-      addToast(`Failed to install: ${err.message}`);
-      setPendingAction(null);
-    },
-  });
 
   const uninstallMutation = useMutation({
     mutationFn: api.uninstallPlugin,
@@ -442,7 +432,7 @@ export function PluginManager() {
                               </>
                             ) : isAvailable ? (
                               <button
-                                onClick={() => installMutation.mutate(plugin.name)}
+                                onClick={() => { setCatalogFocusEntry(plugin.name); setActiveTab("catalog"); }}
                                 disabled={isActionPending(plugin.name)}
                                 className="px-2 py-1 text-[11px] font-medium text-brand-fg bg-brand hover:bg-brand-hover rounded-md transition-colors disabled:opacity-40"
                               >

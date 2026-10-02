@@ -48,5 +48,37 @@ func testReadServices(st *store.Store) ReadServices {
 	return ReadServices{Skills: testSkillReader{st}, Sessions: testSessionReader{st}, Procedures: testProcedureReader{st}, Handoffs: testHandoffService{st}}
 }
 func newTestSelfToolsTransport(st *store.Store) *SelfToolsTransport {
-	return NewSelfToolsTransport(st, testReadServices(st))
+	return NewSelfToolsTransport(st, testReadServices(st), testWriteServices(st))
+}
+
+type testPinWriter struct{ *store.Store }
+
+func (s testPinWriter) Create(ctx context.Context, pin store.PinnedContent) error {
+	return s.CreatePinnedContent(ctx, pin)
+}
+func (s testPinWriter) Delete(ctx context.Context, id string) error {
+	return s.DeletePinnedContent(ctx, id)
+}
+
+type testReminderWriter struct{ *store.Store }
+
+func (s testReminderWriter) Create(ctx context.Context, row store.Reminder) error {
+	return s.CreateReminder(ctx, row)
+}
+
+type testScheduleWriter struct{ *store.Store }
+
+func (s testScheduleWriter) InsertPrepared(ctx context.Context, row store.AgentSchedule) error {
+	return s.InsertAgentSchedule(ctx, row)
+}
+func testWriteServices(st *store.Store) WriteServices {
+	if st == nil {
+		return WriteServices{}
+	}
+	return WriteServices{Pins: testPinWriter{st}, Reminders: testReminderWriter{st}, Schedules: testScheduleWriter{st}, Membership: st, Dispatch: st, Events: st}
+}
+
+// fixtureStore is only for seeding and inspecting package-local test fixtures.
+func fixtureStore(st *SelfToolsTransport) *store.Store {
+	return st.Reads.Sessions.(testSessionReader).Store
 }

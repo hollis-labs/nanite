@@ -139,11 +139,11 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 
 	t.Run("handoff uses context session and supports approve reject", func(t *testing.T) {
 		st := newSelfTools(t)
-		st.MessagingTools.Service = mailboxadapter.New(st.Store).Service
-		fromAgent := seedAgent(t, st.Store, "From Agent", "handoff-from", "", "")
-		toAgent := seedAgent(t, st.Store, "To Agent", "handoff-to", "", "")
-		sessionID := createMessagingSession(t, st.Store)
-		if err := st.Store.EnsureSessionAgent(t.Context(), sessionID, fromAgent.ID, "default", true); err != nil {
+		st.MessagingTools.Service = mailboxadapter.New(fixtureStore(st)).Service
+		fromAgent := seedAgent(t, fixtureStore(st), "From Agent", "handoff-from", "", "")
+		toAgent := seedAgent(t, fixtureStore(st), "To Agent", "handoff-to", "", "")
+		sessionID := createMessagingSession(t, fixtureStore(st))
+		if err := fixtureStore(st).EnsureSessionAgent(t.Context(), sessionID, fromAgent.ID, "default", true); err != nil {
 			t.Fatalf("EnsureSessionAgent: %v", err)
 		}
 		ctx := mcp.WithSessionID(t.Context(), sessionID)
@@ -161,7 +161,7 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 		if got := messagingToolText(t, st, ctx, "handoff_approve", map[string]any{"handoff_id": handoffID}); got != "approved" {
 			t.Fatalf("handoff_approve = %q, want approved", got)
 		}
-		primary, err := st.Store.GetSessionPrimaryAgent(t.Context(), sessionID)
+		primary, err := fixtureStore(st).GetSessionPrimaryAgent(t.Context(), sessionID)
 		if err != nil {
 			t.Fatalf("GetSessionPrimaryAgent: %v", err)
 		}
@@ -169,8 +169,8 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 			t.Fatalf("primary agent = %q, want %q", primary.AgentID, toAgent.ID)
 		}
 
-		rejectSessionID := createMessagingSession(t, st.Store)
-		if err := st.Store.EnsureSessionAgent(t.Context(), rejectSessionID, fromAgent.ID, "default", true); err != nil {
+		rejectSessionID := createMessagingSession(t, fixtureStore(st))
+		if err := fixtureStore(st).EnsureSessionAgent(t.Context(), rejectSessionID, fromAgent.ID, "default", true); err != nil {
 			t.Fatalf("EnsureSessionAgent reject session: %v", err)
 		}
 		rejectCtx := mcp.WithSessionID(t.Context(), rejectSessionID)

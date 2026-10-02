@@ -38,7 +38,7 @@ func gatedSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfTools
 	emitter := &gatedApprovalEmitter{}
 	settings := gatedSettingsReader{us: store.UserSettings{SubagentApprovalRequired: true}}
 	svc := subagent.NewService(s.DB, runner, nil, emitter, settings)
-	return &SelfToolsTransport{Reads: testReadServices(s), Store: s, Subagent: svc}
+	return &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s), Subagent: svc}
 }
 
 // gatedSettingsReader forces SubagentApprovalRequired=true so the
@@ -76,7 +76,7 @@ func newSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfToolsTr
 	}
 	t.Cleanup(func() { _ = s.Close(context.Background()); _ = os.Remove(dbPath) })
 	svc := subagent.NewService(s.DB, runner, nil, nil, nil)
-	return &SelfToolsTransport{Reads: testReadServices(s), Store: s, Subagent: svc}
+	return &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s), Subagent: svc}
 }
 
 // failingRunner returns the configured error from Run — used to drive
@@ -474,7 +474,7 @@ func TestRecoverSyncSummary_StoreError_ReturnsError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Remove(dbPath) })
 
-	st := &SelfToolsTransport{Reads: testReadServices(s), Store: s}
+	st := &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s)}
 
 	// Run row pointing at a child session — recoverSyncSummary will
 	// call Store.ListMessages with this child session ID.
@@ -515,7 +515,7 @@ func TestSyncSubagentEnvelope_RecoverSummaryError_EmitsInternalNotEmptyReply(t *
 	t.Cleanup(func() { _ = os.Remove(dbPath) })
 
 	svc := subagent.NewService(s.DB, subagent.EchoRunner{}, nil, nil, nil)
-	st := &SelfToolsTransport{Reads: testReadServices(s), Store: s, Subagent: svc}
+	st := &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s), Subagent: svc}
 
 	// Build a completed run directly via the service Spawn path
 	// (Spawn returns the run ID synchronously in sync mode). Use a
@@ -596,7 +596,7 @@ func TestSyncSubagentEnvelope_RecoverSummaryError_EmitsInternalNotEmptyReply(t *
 // subagent runner leaves behind once it spawns a child chat session.
 func markSessionAsSubagent(t *testing.T, st *SelfToolsTransport, childSessionID string) {
 	t.Helper()
-	_, err := st.Store.DB.Exec(
+	_, err := fixtureStore(st).DB.Exec(
 		`INSERT INTO subagent_runs
 		   (id, parent_session_id, child_session_id, role, prompt, mode,
 		    status, inputs_json, result_json, error, timeout_seconds,
@@ -621,7 +621,7 @@ func markSessionAsSubagent(t *testing.T, st *SelfToolsTransport, childSessionID 
 // parent_session_id arg.
 func TestCallSpawnSubagent_RecursionCap_RejectsParentedCaller(t *testing.T) {
 	st := newSubagentTestTransport(t, subagent.EchoRunner{})
-	st.Subagent.SetParentageChecker(st.Store)
+	st.Subagent.SetParentageChecker(fixtureStore(st))
 	markSessionAsSubagent(t, st, "sess-child")
 
 	// Root caller — ctx carries a session id with no parent. Async mode
@@ -679,7 +679,7 @@ func TestCallSpawnSubagent_RecursionCap_RejectsParentedCaller(t *testing.T) {
 // arg — the check uses the authoritative ctx session id.
 func TestCallSpawnSubagent_RecursionCap_IgnoresForgedArg(t *testing.T) {
 	st := newSubagentTestTransport(t, subagent.EchoRunner{})
-	st.Subagent.SetParentageChecker(st.Store)
+	st.Subagent.SetParentageChecker(fixtureStore(st))
 	markSessionAsSubagent(t, st, "sess-child")
 
 	// ctx says the real caller is the parented "sess-child", but the
@@ -707,7 +707,7 @@ func TestCallSpawnSubagent_RecursionCap_IgnoresForgedArg(t *testing.T) {
 // error result before any dispatch work.
 func TestCallExecuteTask_RecursionCap_RejectsParentedCaller(t *testing.T) {
 	st := newSubagentTestTransport(t, subagent.EchoRunner{})
-	st.Subagent.SetParentageChecker(st.Store)
+	st.Subagent.SetParentageChecker(fixtureStore(st))
 	// task_execute needs a dispatch spawner; the recursion check fires
 	// before dispatch so a nil-safe stub is enough — but the cap must
 	// reject before Dispatch is even consulted. Wire a spawner that

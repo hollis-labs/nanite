@@ -135,21 +135,21 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 			// failure (we just skip recording a decision).
 			slog.Warn("mcp: broker decide failed",
 				"session_id", sessionID, "err", derr)
-			if st.Store != nil {
+			if st.Writes.Events != nil {
 				meta := fmt.Sprintf(
 					`{"error":%q,"reflex_match_id":%q}`,
 					derr.Error(), brokerInput.ReflexMatchID,
 				)
 				// Outcome bookkeeping must survive cancellation of the broker decision it records.
-				st.Store.LogEvent(context.WithoutCancel(ctx), sessionID, "broker_decision_error", "error", derr.Error(), meta)
+				st.Writes.Events.LogEvent(context.WithoutCancel(ctx), sessionID, "broker_decision_error", "error", derr.Error(), meta)
 			}
-		case st.Store != nil:
+		case st.Writes.Events != nil:
 			meta := fmt.Sprintf(
 				`{"agent_profile":%q,"reason":%q,"confidence":%g,"reflex_match_id":%q}`,
 				decision.AgentProfile, decision.Reason, decision.Confidence, brokerInput.ReflexMatchID,
 			)
 			// Outcome bookkeeping must survive cancellation of the broker decision it records.
-			st.Store.LogEvent(context.WithoutCancel(ctx), sessionID, "broker_decision", "info", decision.Reason, meta)
+			st.Writes.Events.LogEvent(context.WithoutCancel(ctx), sessionID, "broker_decision", "info", decision.Reason, meta)
 		}
 	}
 
@@ -214,7 +214,7 @@ var subagentRecursionBlockedMsg = subagent.ErrRecursionBlocked.Error()
 //   - (true, nil)  when the caller's session is a subagent — reject.
 //   - (false, err) on a real DB error — caller must reject (fail closed).
 func (st *SelfToolsTransport) recursionBlocked(ctx context.Context) (bool, error) {
-	if st.Store == nil {
+	if st.Writes.Dispatch == nil {
 		return false, nil
 	}
 	callerSessionID := mcp.SessionIDFromContext(ctx)
@@ -223,7 +223,7 @@ func (st *SelfToolsTransport) recursionBlocked(ctx context.Context) (bool, error
 		// Fail open here — the subagent.Service guard is the backstop.
 		return false, nil
 	}
-	isChild, err := st.Store.IsSubagentSession(ctx, callerSessionID)
+	isChild, err := st.Writes.Dispatch.IsSubagentSession(ctx, callerSessionID)
 	if err != nil {
 		// Fail closed: an unverifiable parentage means we refuse rather
 		// than risk an unbounded recursive spawn chain.
@@ -277,13 +277,13 @@ func (st *SelfToolsTransport) recursionBlocked(ctx context.Context) (bool, error
 // outright — the workflow_run self-tool remains the direct, supported
 // way to invoke a named workflow.
 func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, sessionID, agentProfileID, message string) *dispatch.ReflexHints {
-	if st.Store == nil {
+	if st.Writes.Dispatch == nil {
 		return nil
 	}
 
 	class := ""
 	if agentProfileID != "" {
-		if ap, err := st.Store.GetAgent(ctx, agentProfileID); err == nil && ap != nil {
+		if ap, err := st.Writes.Dispatch.GetAgent(ctx, agentProfileID); err == nil && ap != nil {
 			class = ap.Class
 		}
 	}
@@ -301,7 +301,7 @@ func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, se
 		MessageTokenEst: len(message) / 4,
 	})
 
-	allCandidates, err := st.Store.ListAgentReflexesForAgent(ctx, agentProfileID, class)
+	allCandidates, err := st.Writes.Dispatch.ListAgentReflexesForAgent(ctx, agentProfileID, class)
 	if err != nil {
 		slog.Warn("mcp: dispatch-reflex list failed",
 			"agent_id", agentProfileID, "class", class, "err", err)
@@ -341,11 +341,11 @@ func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, se
 	// than aborting this call site's own evaluation — additive widening
 	// must never regress the base (non-Team) dispatch_to_agent behavior
 	// that existed before this task.
-	if runID, found, rerr := st.Store.ResolveWorkflowRunIDForSession(ctx, sessionID); rerr != nil {
+	if runID, found, rerr := st.Writes.Dispatch.ResolveWorkflowRunIDForSession(ctx, sessionID); rerr != nil {
 		slog.Warn("mcp: dispatch-reflex workflow-run resolve failed",
 			"session_id", sessionID, "err", rerr)
 	} else if found {
-		runScoped, rlErr := st.Store.ListAgentReflexesForWorkflowRun(ctx, runID, agentProfileID, class)
+		runScoped, rlErr := st.Writes.Dispatch.ListAgentReflexesForWorkflowRun(ctx, runID, agentProfileID, class)
 		if rlErr != nil {
 			slog.Warn("mcp: dispatch-reflex run-scoped list failed",
 				"session_id", sessionID, "workflow_run_id", runID, "err", rlErr)
@@ -386,7 +386,7 @@ func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, se
 	// below as the ActionKindLookup Resolve() calls — this call site's own
 	// candidates list (below) is filtered to dispatch_to_agent only, so no
 	// other kind name is ever requested.
-	dispatchKind, kindErr := st.Store.GetReflexActionKind(ctx, store.ReflexActionDispatchToAgent)
+	dispatchKind, kindErr := st.Writes.Dispatch.GetReflexActionKind(ctx, store.ReflexActionDispatchToAgent)
 	var dispatchKindDefaultSeconds *int64
 	if kindErr == nil {
 		dispatchKindDefaultSeconds = dispatchKind.DefaultRecurrenceSeconds
@@ -482,7 +482,7 @@ func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, se
 		excerpt = excerpt[:200]
 	}
 	extra := map[string]any{"matched_input_excerpt": excerpt}
-	reflexes.EmitFirings(ctx, st.Store, st.Plugins, resolved, outcomes, state, reflexes.FiringContext{
+	reflexes.EmitFirings(ctx, st.Writes.Events, st.Plugins, resolved, outcomes, state, reflexes.FiringContext{
 		AgentID:       agentProfileID,
 		AgentClass:    class,
 		ExtraMetadata: extra,

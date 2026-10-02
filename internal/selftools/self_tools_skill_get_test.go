@@ -392,7 +392,7 @@ func TestCallSkillGet_MissingRequiredParameter(t *testing.T) {
 // nil-safe field on SelfToolsTransport per this file's own doc convention.
 func TestCallSkillGet_NilStoreOrVendor_ClearError(t *testing.T) {
 	vendor := newSkillGetTestVendor(t)
-	transport := &SelfToolsTransport{Store: nil, SkillVendor: vendor}
+	transport := &SelfToolsTransport{SkillVendor: vendor}
 	res, err := transport.CallTool(context.Background(), "skill_get", map[string]any{"slug": "anything"})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)

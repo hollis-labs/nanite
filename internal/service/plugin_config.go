@@ -107,7 +107,8 @@ func (s *PluginConfigService) Update(ctx context.Context, id string, incoming ma
 	}
 	updated, readErr := s.store.GetPluginSettings(ctx, id)
 	if readErr != nil {
-		return &PluginConfigUpdate{Fallback: dbSettings}, nil
+		// A successful write retains the HTTP fallback when the follow-up read fails.
+		return &PluginConfigUpdate{Fallback: dbSettings}, nil //nolint:nilerr // Existing post-write response contract.
 	}
 	s.mask(updated)
 	return &PluginConfigUpdate{Settings: updated}, nil

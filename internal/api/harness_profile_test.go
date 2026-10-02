@@ -12,7 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func postCreateSession(t *testing.T, a *API, body any) *httptest.ResponseRecorder {
+func postCreateSession(t *testing.T, a *testAPI, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, _ := json.Marshal(body)
 	rec := httptest.NewRecorder()

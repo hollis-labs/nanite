@@ -246,9 +246,9 @@ type Container struct {
 	// ends up living.
 	Engine *gosched.Engine
 
-	// Subsystems exposed for API handlers that need direct access.
-	// These will shrink as more domain services are added.
-	Store          *store.Store
+	// The raw store stays private. Transports use domain services; the
+	// composition root retains the handle it supplied in ContainerConfig.
+	store          *store.Store
 	ToolClient     *toolclient.ToolClient
 	ProcessTracker *chat.ProcessTracker
 	Orchestrator   *chat.Orchestrator
@@ -1563,7 +1563,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Tasks:               tasks,
 		Workers:             workers,
 		Worktrees:           cfg.Worktrees,
-		Store:               cfg.Store,
+		store:               cfg.Store,
 		ToolClient:          cfg.ToolClient,
 		ProcessTracker:      processTracker,
 		Orchestrator:        orchestrator,
@@ -1649,13 +1649,13 @@ func newContainerMCPServerService(st *store.Store, m *mcp.Manager) *MCPServerSer
 // DiscoverMCPTools runs MCP tool discovery and syncs discovered tools into
 // the skills table. The caller checks MCP for nil first.
 func (c *Container) DiscoverMCPTools(ctx context.Context) (*mcp.DiscoveryDiff, error) {
-	return c.MCP.AutoDiscover(ctx, c.Store)
+	return c.MCP.AutoDiscover(ctx, c.store)
 }
 
 // ResolveSessionHarness resolves the harness profile a session runs under,
 // against the container's harness registry and the user settings.
 func (c *Container) ResolveSessionHarness(ctx context.Context, sess *store.Session, constraints chat.AgentConstraints, model string) (*harnessprofile.Resolved, error) {
-	return ResolveHarness(ctx, c.HarnessProfiles, c.Store, sess, constraints, model)
+	return ResolveHarness(ctx, c.HarnessProfiles, c.store, sess, constraints, model)
 }
 
 // RefreshUtilitySettings updates the utility provider/model on the running

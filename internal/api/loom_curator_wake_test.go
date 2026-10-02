@@ -22,7 +22,7 @@ import (
 // the normal database-backed service path before boot. That creation path also
 // supplies the canonical builtin schedule; the fixture never inserts it by
 // hand and deliberately has no config-file input.
-func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
+func newTestAPIWithLoomCurator(t *testing.T) (*testAPI, *http.ServeMux) {
 	t.Helper()
 	root := t.TempDir()
 	for env, dir := range map[string]string{
@@ -70,7 +70,7 @@ func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 	}
 	t.Cleanup(func() { svc.Shutdown() })
 
-	a := New(svc)
+	a := newAPIStoreFixture(svc, s)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
 	return a, mux
@@ -79,7 +79,7 @@ func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 func TestLoomCuratorInstanceProvisionedInDatabase(t *testing.T) {
 	a, _ := newTestAPIWithLoomCurator(t)
 
-	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
+	inst, err := a.store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
 	if err != nil {
 		t.Fatalf("loom-curator instance not provisioned: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestLoomCuratorWake_FEPayloadShape(t *testing.T) {
 		t.Fatalf("wake_reason = %q, want callback:wiki_page", resp.WakeReason)
 	}
 
-	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
+	inst, err := a.store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
 	if err != nil {
 		t.Fatalf("get instance: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestLoomCuratorWake_DeliversRealTurn(t *testing.T) {
 		t.Fatalf("wake result missing launch_result/session: %+v", resp)
 	}
 
-	messages, err := a.Services.Store.ListMessages(context.Background(), resp.LaunchResult.Session.ID, 10)
+	messages, err := a.store.ListMessages(context.Background(), resp.LaunchResult.Session.ID, 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestLoomCuratorDatabaseScheduleRuns(t *testing.T) {
 	a, _ := newTestAPIWithLoomCurator(t)
 	ctx := context.Background()
 
-	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
+	inst, err := a.store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
 	if err != nil {
 		t.Fatalf("loom-curator instance not provisioned: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestLoomCuratorDatabaseScheduleRuns(t *testing.T) {
 		t.Fatal("seeded instance has empty ProfileID")
 	}
 
-	schedules, err := a.Services.Store.ListAgentSchedules(ctx, inst.ProfileID)
+	schedules, err := a.store.ListAgentSchedules(ctx, inst.ProfileID)
 	if err != nil {
 		t.Fatalf("ListAgentSchedules(%s): %v", inst.ProfileID, err)
 	}

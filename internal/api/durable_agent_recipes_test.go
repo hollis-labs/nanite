@@ -15,7 +15,7 @@ import (
 func TestDurableAgentRecipesAPI_ListGetDryRun(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Recipe API Agent", Slug: "recipe-api-agent", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func TestDurableAgentRecipesAPI_ListGetDryRun(t *testing.T) {
 func TestDurableAgentRecipesAPI_ApplyAndStart(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Apply API Agent", Slug: "apply-api-agent", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	body, _ := json.Marshal(DurableAgentRecipeRequest{

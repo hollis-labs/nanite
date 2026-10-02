@@ -86,15 +86,15 @@ func (hadronAPITestExecutor) Verify(context.Context, agentworkflow.VerifyRequest
 	return agentworkflow.VerifyResult{}, nil
 }
 
-func newTestAPIWithSharedSurface(t *testing.T) (*API, *http.ServeMux, *workflowhost.Engine) {
+func newTestAPIWithSharedSurface(t *testing.T) (*testAPI, *http.ServeMux, *workflowhost.Engine) {
 	t.Helper()
 	a, mux := newTestAPI(t)
-	state, err := workflowhost.NewWorkflowStateStore(a.Services.Store)
+	state, err := workflowhost.NewWorkflowStateStore(a.store)
 	if err != nil {
 		t.Fatalf("NewWorkflowStateStore: %v", err)
 	}
-	engine := newAPITestWorkflowHost(t, a.Services.Store)
-	coordinator, err := workflowcompat.NewCutoverCoordinator(a.Services.Store)
+	engine := newAPITestWorkflowHost(t, a.store)
+	coordinator, err := workflowcompat.NewCutoverCoordinator(a.store)
 	if err != nil {
 		t.Fatalf("NewCutoverCoordinator: %v", err)
 	}
@@ -104,7 +104,7 @@ func newTestAPIWithSharedSurface(t *testing.T) (*API, *http.ServeMux, *workflowh
 		t.Fatalf("PrepareSharedStartup: %v", prepareErr)
 	}
 	executor := hadronAPITestExecutor{}
-	surface, err := workflowcompat.NewSharedSurface(a.Services.Store, state, engine, executor)
+	surface, err := workflowcompat.NewSharedSurface(a.store, state, engine, executor)
 	if err != nil {
 		t.Fatalf("NewSharedSurface: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestWorkflowAPIExplicitHadronSelectionProjectsDurableStateWithoutMixingLega
 	a, mux, _ := newTestAPIWithSharedSurface(t)
 	legacyStarted := time.Now().UTC().Add(-time.Minute)
 	legacyCompleted := legacyStarted.Add(time.Second)
-	if err := a.Services.Store.CreateWorkflowRun(t.Context(), &store.WorkflowRunRow{
+	if err := a.store.CreateWorkflowRun(t.Context(), &store.WorkflowRunRow{
 		ID: "legacy-run", DefinitionName: "Legacy Only", Status: "completed",
 		StartedAt: legacyStarted, CompletedAt: legacyCompleted,
 	}); err != nil {
@@ -173,7 +173,7 @@ func TestWorkflowAPIExplicitHadronSelectionProjectsDurableStateWithoutMixingLega
 	}
 
 	var engineKind, revisionID string
-	if err := a.Services.Store.DB.QueryRow(`
+	if err := a.store.DB.QueryRow(`
 SELECT engine_kind, definition_revision_id
 FROM workflow_runs WHERE id=?`, created.RunID).Scan(&engineKind, &revisionID); err != nil {
 		t.Fatalf("load workflow engine kind: %v", err)
@@ -181,7 +181,7 @@ FROM workflow_runs WHERE id=?`, created.RunID).Scan(&engineKind, &revisionID); e
 	if engineKind != store.WorkflowEngineIdentityShared.Kind {
 		t.Fatalf("engine_kind=%q, want %q", engineKind, store.WorkflowEngineIdentityShared.Kind)
 	}
-	revision, err := a.Services.Store.GetWorkflowRunDefinitionRevision(t.Context(), created.RunID)
+	revision, err := a.store.GetWorkflowRunDefinitionRevision(t.Context(), created.RunID)
 	if err != nil || revision.RevisionID != revisionID || revision.DefinitionName != "Hadron API Pilot" {
 		t.Fatalf("run definition revision = %+v id=%q, %v", revision, revisionID, err)
 	}
@@ -381,7 +381,7 @@ func TestWorkflowAPIQueriesExactSharedAndPilotIdentitiesButRejectsMixedPairs(t *
 	created := workflowAPIRequest(t, mux, http.MethodPost, "/api/workflows/runs?locator=identity.workflow.yaml", hadronAPITestSource, nil)
 	var result hadronAPIPostResponse
 	decodeWorkflowAPIResponse(t, created, &result)
-	revision, err := a.Services.Store.GetWorkflowRunDefinitionRevision(t.Context(), result.RunID)
+	revision, err := a.store.GetWorkflowRunDefinitionRevision(t.Context(), result.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,10 +390,10 @@ func TestWorkflowAPIQueriesExactSharedAndPilotIdentitiesButRejectsMixedPairs(t *
 	pilotRevision.Engine = store.WorkflowEngineIdentityPilot
 	pilotRevision.RegisteredBy = "pre-extraction-pilot"
 	pilotRevision.CreatedAt = pilotRevision.CreatedAt.Add(time.Nanosecond)
-	if _, err := a.Services.Store.CreateWorkflowDefinitionRevision(t.Context(), pilotRevision); err != nil {
+	if _, err := a.store.CreateWorkflowDefinitionRevision(t.Context(), pilotRevision); err != nil {
 		t.Fatalf("create exact pilot revision: %v", err)
 	}
-	if _, err := a.Services.Store.DB.ExecContext(t.Context(), `
+	if _, err := a.store.DB.ExecContext(t.Context(), `
 UPDATE workflow_runs
 SET engine_kind = ?, engine_contract_version = ?, definition_revision_id = ?
 WHERE id = ?`, store.WorkflowEngineIdentityPilot.Kind, store.WorkflowEngineIdentityPilot.ContractVersion,
@@ -405,7 +405,7 @@ WHERE id = ?`, store.WorkflowEngineIdentityPilot.Kind, store.WorkflowEngineIdent
 		t.Fatalf("exact pilot GET status=%d body=%s", get.Code, get.Body.String())
 	}
 
-	if _, err := a.Services.Store.DB.ExecContext(t.Context(), `
+	if _, err := a.store.DB.ExecContext(t.Context(), `
 UPDATE workflow_runs SET engine_contract_version = 'v0.1.0' WHERE id = ?`, result.RunID); err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +453,7 @@ func TestWorkflowAPIHadronCancelProjectsClosedLegacyStatus(t *testing.T) {
 	if status["status"] != "canceled" {
 		t.Fatalf("cancel response=%v", status)
 	}
-	run, err := a.Services.Store.GetWorkflowRun(t.Context(), waiting.RunID)
+	run, err := a.store.GetWorkflowRun(t.Context(), waiting.RunID)
 	if err != nil || run.Status != "canceled" {
 		t.Fatalf("durable canceled run=%+v err=%v", run, err)
 	}
@@ -518,7 +518,7 @@ func TestWorkflowAPIAuthenticatedCallbackAndApprovalAreIdempotent(t *testing.T) 
 			}
 
 			var responderRef, idempotencyKey string
-			if err := a.Services.Store.DB.QueryRowContext(t.Context(), `
+			if err := a.store.DB.QueryRowContext(t.Context(), `
 SELECT json_extract(record_json, '$.resolution.responder.reference'),
        json_extract(record_json, '$.resolution.idempotency_key')
 FROM workflow_waits WHERE run_id = ?`, waiting.RunID).Scan(&responderRef, &idempotencyKey); err != nil {

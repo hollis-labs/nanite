@@ -399,7 +399,7 @@ func TestUnresolvedCLIModelWarnsOnce(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	unresolvedCLIModelWarned.Delete("claude=warn-once-model")
 
-	a := &API{Services: &service.Container{AppConfig: &config.TunablesConfig{Harness: config.HarnessConfig{CLIModels: map[string]string{"claude": "warn-once-model"}}}}}
+	a := &testAPI{API: &API{Services: &service.Container{AppConfig: &config.TunablesConfig{Harness: config.HarnessConfig{CLIModels: map[string]string{"claude": "warn-once-model"}}}}}}
 	for i := 0; i < 3; i++ {
 		if got := a.cliSizingModel("pty-claude", "claude-cli"); got != "" {
 			t.Fatalf("sizing model = %q, want the floor", got)

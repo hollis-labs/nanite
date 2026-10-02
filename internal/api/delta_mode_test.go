@@ -20,7 +20,7 @@ import (
 func TestTurnEndpointsCarryDeltaMode(t *testing.T) {
 	a, mux := newTestAPI(t)
 	sess := &store.Session{Provider: "anthropic", Model: "claude-sonnet-4", Status: "active"}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 

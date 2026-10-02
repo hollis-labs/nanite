@@ -20,7 +20,7 @@ func TestHandleAddAgentProject_RejectsNonexistentAgent(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	proj := &store.Project{ID: "proj-agent-projects-test", Name: "Test Project"}
-	if err := a.Services.Store.CreateProject(context.Background(), proj); err != nil {
+	if err := a.store.CreateProject(context.Background(), proj); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
 
@@ -34,7 +34,7 @@ func TestHandleAddAgentProject_RejectsNonexistentAgent(t *testing.T) {
 		t.Fatalf("POST /api/agents/{id}/projects for nonexistent agent: expected 404, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	projects, err := a.Services.Store.ListAgentProjects(context.Background(), "does-not-exist")
+	projects, err := a.store.ListAgentProjects(context.Background(), "does-not-exist")
 	if err != nil {
 		t.Fatalf("ListAgentProjects: %v", err)
 	}

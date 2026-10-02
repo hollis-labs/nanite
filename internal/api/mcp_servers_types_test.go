@@ -221,7 +221,7 @@ func TestMCPServers_UIShapedPutPreservesHeadersTrustTierAllowlist_CW20260930_011
 	if w := mcpDo(mux, "PUT", "/api/mcp-servers/remote", ui); w.Code != http.StatusOK {
 		t.Fatalf("update: %d %s", w.Code, w.Body.String())
 	}
-	row, err := a.Services.Store.GetMCPServer(context.Background(), "remote")
+	row, err := a.store.GetMCPServer(context.Background(), "remote")
 	if err != nil || row == nil {
 		t.Fatalf("GetMCPServer: %v %v", row, err)
 	}
@@ -233,7 +233,7 @@ func TestMCPServers_UIShapedPutPreservesHeadersTrustTierAllowlist_CW20260930_011
 
 // mcpFullServer creates a stdio server with every settable field set, and
 // returns the stored row.
-func mcpFullServer(t *testing.T, a *API, mux http.Handler) *store.MCPServerConfig {
+func mcpFullServer(t *testing.T, a *testAPI, mux http.Handler) *store.MCPServerConfig {
 	t.Helper()
 	create := `{"name":"full","transport_type":"stdio","command":"run","url":"http://127.0.0.1:1/x",` +
 		`"args":"[\"-v\"]","env":"[\"K=V\"]","trust_tier":"first_party","env_allowlist":"[\"HOME\"]",` +
@@ -241,7 +241,7 @@ func mcpFullServer(t *testing.T, a *API, mux http.Handler) *store.MCPServerConfi
 	if w := mcpDo(mux, "POST", "/api/mcp-servers", create); w.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", w.Code, w.Body.String())
 	}
-	row, err := a.Services.Store.GetMCPServer(context.Background(), "full")
+	row, err := a.store.GetMCPServer(context.Background(), "full")
 	if err != nil || row == nil {
 		t.Fatalf("GetMCPServer: %v %v", row, err)
 	}
@@ -304,7 +304,7 @@ func TestMCPServers_PutOmittedFieldKeepsStoredValue(t *testing.T) {
 				if w := mcpDo(mux, "PUT", "/api/mcp-servers/full", "{"+strings.Join(parts, ",")+"}"); w.Code != http.StatusOK {
 					t.Fatalf("update: %d %s", w.Code, w.Body.String())
 				}
-				after, err := a.Services.Store.GetMCPServer(context.Background(), "full")
+				after, err := a.store.GetMCPServer(context.Background(), "full")
 				if err != nil || after == nil {
 					t.Fatalf("GetMCPServer: %v %v", after, err)
 				}
@@ -325,7 +325,7 @@ func TestMCPServers_PutExplicitEmptyClears(t *testing.T) {
 	if w := mcpDo(mux, "PUT", "/api/mcp-servers/full", body); w.Code != http.StatusOK {
 		t.Fatalf("update: %d %s", w.Code, w.Body.String())
 	}
-	row, err := a.Services.Store.GetMCPServer(context.Background(), "full")
+	row, err := a.store.GetMCPServer(context.Background(), "full")
 	if err != nil || row == nil {
 		t.Fatalf("GetMCPServer: %v %v", row, err)
 	}
@@ -338,7 +338,7 @@ func TestMCPServers_PutExplicitEmptyClears(t *testing.T) {
 	// "headers":"" clears too.
 	mcpDo(mux, "PUT", "/api/mcp-servers/full", `{"headers":"{\"A\":\"b\"}"}`)
 	mcpDo(mux, "PUT", "/api/mcp-servers/full", `{"headers":""}`)
-	if row, _ = a.Services.Store.GetMCPServer(context.Background(), "full"); row.Headers != "{}" {
+	if row, _ = a.store.GetMCPServer(context.Background(), "full"); row.Headers != "{}" {
 		t.Fatalf(`headers after "headers":"" = %q, want {}`, row.Headers)
 	}
 }
@@ -356,7 +356,7 @@ func TestMCPServers_PutResponseIsTheStoredRow(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	after, err := a.Services.Store.GetMCPServer(context.Background(), "full")
+	after, err := a.store.GetMCPServer(context.Background(), "full")
 	if err != nil || after == nil {
 		t.Fatalf("GetMCPServer: %v %v", after, err)
 	}
@@ -384,7 +384,7 @@ func TestMCPServers_PutCarriesForwardRedactedHeaders(t *testing.T) {
 	if w := mcpDo(mux, "PUT", "/api/mcp-servers/cf", put); w.Code != http.StatusOK {
 		t.Fatalf("update: %d %s", w.Code, w.Body.String())
 	}
-	row, err := a.Services.Store.GetMCPServer(context.Background(), "cf")
+	row, err := a.store.GetMCPServer(context.Background(), "cf")
 	if err != nil || row == nil {
 		t.Fatalf("GetMCPServer: %v %v", row, err)
 	}
@@ -452,7 +452,7 @@ func (failingMCPStore) UpdateMCPServer(context.Context, *store.MCPServerConfig) 
 func (failingMCPStore) DeleteMCPServer(context.Context, string) error                 { return nil }
 
 func TestMCPServers_UpdateLoadFailureBeforeDecode(t *testing.T) {
-	a := &API{Services: &service.Container{MCPServers: service.NewMCPServerService(failingMCPStore{}, nil, nil)}}
+	a := &testAPI{API: &API{Services: &service.Container{MCPServers: service.NewMCPServerService(failingMCPStore{}, nil, nil)}}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /api/mcp-servers/{name}", a.handleUpdateMCPServer)
 	w := mcpDo(mux, "PUT", "/api/mcp-servers/x", `not json`)
@@ -485,7 +485,7 @@ func (r *recordingRegistrar) RemoveServer(string) {}
 func TestMCPServers_UIShapedPutKeepsRedactedEnvAndRegistersRealToken(t *testing.T) {
 	base, _ := newTestAPI(t)
 	reg := &recordingRegistrar{env: map[string][]string{}, headers: map[string]string{}}
-	a := &API{Services: &service.Container{MCPServers: service.NewMCPServerService(base.Services.Store, reg, nil)}}
+	a := &testAPI{API: &API{Services: &service.Container{MCPServers: service.NewMCPServerService(base.store, reg, nil)}}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/mcp-servers", a.handleCreateMCPServer)
 	mux.HandleFunc("PUT /api/mcp-servers/{name}", a.handleUpdateMCPServer)
@@ -505,7 +505,7 @@ func TestMCPServers_UIShapedPutKeepsRedactedEnvAndRegistersRealToken(t *testing.
 		t.Fatalf("update response carries the env value: %s", w.Body.String())
 	}
 
-	row, err := base.Services.Store.GetMCPServer(context.Background(), "stdio")
+	row, err := base.store.GetMCPServer(context.Background(), "stdio")
 	if err != nil || row == nil {
 		t.Fatalf("GetMCPServer: %v %v", row, err)
 	}
@@ -533,8 +533,8 @@ func TestMCPServers_CreateAndImportDropPlaceholders(t *testing.T) {
 		t.Fatalf("import: %d %s", w.Code, w.Body.String())
 	}
 	ctx := context.Background()
-	c, _ := a.Services.Store.GetMCPServer(ctx, "c")
-	i, _ := a.Services.Store.GetMCPServer(ctx, "i")
+	c, _ := a.store.GetMCPServer(ctx, "c")
+	i, _ := a.store.GetMCPServer(ctx, "i")
 	if c == nil || i == nil {
 		t.Fatalf("rows missing: c=%v i=%v", c, i)
 	}
@@ -564,7 +564,7 @@ func TestMCPServers_RedactedExportReimportsWithoutBullets(t *testing.T) {
 	if w := mcpDo(mux2, "POST", "/api/mcp-servers/import", exported); w.Code != http.StatusOK {
 		t.Fatalf("import: %d %s", w.Code, w.Body.String())
 	}
-	row, err := b.Services.Store.GetMCPServer(context.Background(), "round")
+	row, err := b.store.GetMCPServer(context.Background(), "round")
 	if err != nil || row == nil {
 		t.Fatalf("GetMCPServer: %v %v", row, err)
 	}

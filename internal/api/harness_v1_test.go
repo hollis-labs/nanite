@@ -101,7 +101,7 @@ func TestHarnessV1InitializeAndCapabilities(t *testing.T) {
 func TestHarnessV1CreateAndLoadSession(t *testing.T) {
 	a, mux := newTestAPI(t)
 	agent := &store.AgentProfile{Name: "Harness Agent", Slug: "harness-agent", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
+	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -165,7 +165,7 @@ func TestHarnessV1CreateSessionRejectsUnsupportedRuntime(t *testing.T) {
 func TestHarnessV1TurnCancelAndEvents(t *testing.T) {
 	a, mux := newTestAPI(t)
 	sess := &store.Session{Provider: "anthropic", Model: "claude-sonnet-4", Status: "active"}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestHarnessV1TurnCancelAndEvents(t *testing.T) {
 		t.Fatalf("idle cancel response = %+v", cancelResp)
 	}
 
-	if err := a.Services.Store.CreateMessage(context.Background(), &store.Message{
+	if err := a.store.CreateMessage(context.Background(), &store.Message{
 		ID:        "msg-stream",
 		SessionID: sess.ID,
 		Role:      "assistant",
@@ -256,7 +256,7 @@ func TestHarnessV1TurnCancelAndEvents(t *testing.T) {
 func TestHarnessV1DurableWrappers(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Harness Durable", Slug: "harness-durable", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -269,7 +269,7 @@ func TestHarnessV1DurableWrappers(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := a.Services.Store.CreateDurableAgentInstance(context.Background(), advisor); err != nil {
+	if err := a.store.CreateDurableAgentInstance(context.Background(), advisor); err != nil {
 		t.Fatalf("CreateDurableAgentInstance advisor: %v", err)
 	}
 	process := &store.DurableAgentInstance{
@@ -282,14 +282,14 @@ func TestHarnessV1DurableWrappers(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchProcessTick,
 	}
-	if err := a.Services.Store.CreateDurableAgentInstance(context.Background(), process); err != nil {
+	if err := a.store.CreateDurableAgentInstance(context.Background(), process); err != nil {
 		t.Fatalf("CreateDurableAgentInstance process: %v", err)
 	}
 	scopeSession := &store.Session{Provider: "anthropic", Model: "model-a"}
-	if err := a.Services.Store.CreateSession(context.Background(), scopeSession); err != nil {
+	if err := a.store.CreateSession(context.Background(), scopeSession); err != nil {
 		t.Fatalf("CreateSession scope: %v", err)
 	}
-	if err := a.Services.Store.AttachDurableAgentInstanceSession(context.Background(), process.ID, scopeSession.ID, store.DurableAgentSessionRelationWake); err != nil {
+	if err := a.store.AttachDurableAgentInstanceSession(context.Background(), process.ID, scopeSession.ID, store.DurableAgentSessionRelationWake); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession process: %v", err)
 	}
 
@@ -348,7 +348,7 @@ func TestHarnessV1DurableWrappers(t *testing.T) {
 func TestHarnessV1RecoverSession(t *testing.T) {
 	a, mux := newTestAPI(t)
 	sess := &store.Session{Provider: "anthropic", Model: "claude-sonnet-4", Status: "active"}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -388,7 +388,7 @@ func TestHarnessV1CreateSessionAgentResolution(t *testing.T) {
 		Slug:         "test-agent",
 		SystemPrompt: "test prompt",
 	}
-	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
+	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -469,7 +469,7 @@ func TestHarnessV1CreateSessionRejectsBadHarnessSelection(t *testing.T) {
 		mux.ServeHTTP(w, req)
 		return w
 	}
-	before, _ := a.Services.Store.ListSessions(context.Background())
+	before, _ := a.store.ListSessions(context.Background())
 
 	if w := post(map[string]any{"harness_profile": "does-not-exist"}); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "unknown harness profile") {
 		t.Errorf("unknown profile = %d %s", w.Code, w.Body.String())
@@ -488,7 +488,7 @@ func TestHarnessV1CreateSessionRejectsBadHarnessSelection(t *testing.T) {
 	if w := post(map[string]any{"unrelated": "x"}); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "NANITE_HARNESS_HARD_CEILING") {
 		t.Errorf("bad env, no profile = %d %s", w.Code, w.Body.String())
 	}
-	after, _ := a.Services.Store.ListSessions(context.Background())
+	after, _ := a.store.ListSessions(context.Background())
 	if len(after) != len(before) {
 		t.Errorf("a refused create left %d new session(s)", len(after)-len(before))
 	}
@@ -527,14 +527,14 @@ func TestHarnessV1CreateSession_SubagentRuntime(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := a.Services.Store.GetSessionSubagentRuntime(context.Background(), created.Session.ID); err != nil || got != "cli" {
+	if got, err := a.store.GetSessionSubagentRuntime(context.Background(), created.Session.ID); err != nil || got != "cli" {
 		t.Errorf("stored override = %q, %v; want cli", got, err)
 	}
 
 	w = post("")
 	var plain harnessV1SessionResponse
 	_ = json.NewDecoder(w.Body).Decode(&plain)
-	if got, _ := a.Services.Store.GetSessionSubagentRuntime(context.Background(), plain.Session.ID); got != "" {
+	if got, _ := a.store.GetSessionSubagentRuntime(context.Background(), plain.Session.ID); got != "" {
 		t.Errorf("no field sent, override = %q, want unset", got)
 	}
 

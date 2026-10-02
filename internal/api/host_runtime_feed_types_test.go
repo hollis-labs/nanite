@@ -77,7 +77,7 @@ func TestHostRuntimeEventViewJSON(t *testing.T) {
 
 // The feed needs only the runtime feed, not the store handle.
 func TestHostRuntimeFeed_GuardsOnTheFeed(t *testing.T) {
-	a := &API{Services: &service.Container{}}
+	a := &testAPI{API: &API{Services: &service.Container{}}}
 	rec := httptest.NewRecorder()
 	a.handleHostRuntimeFeed(rec, httptest.NewRequest("GET", "/api/sessions/s/runtime-events", nil))
 	if rec.Code != http.StatusServiceUnavailable || errorBody(t, rec) != "host runtime feed not initialized" {
@@ -85,7 +85,7 @@ func TestHostRuntimeFeed_GuardsOnTheFeed(t *testing.T) {
 	}
 
 	base, _ := newTestAPI(t)
-	a = &API{Services: &service.Container{RuntimeFeed: base.Services.RuntimeFeed}}
+	a = &testAPI{API: &API{Services: &service.Container{RuntimeFeed: base.Services.RuntimeFeed}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	req := httptest.NewRequest("GET", "/api/sessions/s/runtime-events", nil).WithContext(ctx)
@@ -123,10 +123,10 @@ func TestSessionDetails_RuntimeReadsFallBackAndUseCallerCtx(t *testing.T) {
 	a, _ := newTestAPI(t)
 	ctx := context.Background()
 	sess := &store.Session{Provider: "anthropic", Model: "m", Status: "active"}
-	if err := a.Services.Store.CreateSession(ctx, sess); err != nil {
+	if err := a.store.CreateSession(ctx, sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := a.Services.Store.MarkSessionHalted(ctx, sess.ID, "halted for the test"); err != nil {
+	if err := a.store.MarkSessionHalted(ctx, sess.ID, "halted for the test"); err != nil {
 		t.Fatalf("MarkSessionHalted: %v", err)
 	}
 	fake := &failingRuntime{}

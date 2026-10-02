@@ -24,7 +24,7 @@ import (
 
 // newToolCallTestAPI builds an API plus the store backing it, so the test
 // can wire a SelfToolsTransport against the same DB.
-func newToolCallTestAPI(t *testing.T) (*API, *store.Store) {
+func newToolCallTestAPI(t *testing.T) (*testAPI, *store.Store) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := storetest.New(t, context.Background(), dbPath)
@@ -42,10 +42,10 @@ func newToolCallTestAPI(t *testing.T) (*API, *store.Store) {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
 	t.Cleanup(func() { svc.Shutdown() })
-	return New(svc), s
+	return newAPIStoreFixture(svc, s), s
 }
 
-func postToolCall(t *testing.T, a *API, body any) *httptest.ResponseRecorder {
+func postToolCall(t *testing.T, a *testAPI, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, err := json.Marshal(body)
 	if err != nil {

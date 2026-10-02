@@ -556,7 +556,7 @@ func cmdServeWithInitializers(
 	// LLMStepRequest.EnableContextAssembly has something to resolve
 	// against — reuses container.Sessions/Agents/Store/Context exactly as
 	// generateResponse does, rather than a second context-assembly path.
-	workflowContextAssembler := service.NewWorkflowContextAssembler(container.Sessions, container.Agents, container.Store, container.Context)
+	workflowContextAssembler := service.NewWorkflowContextAssembler(container.Sessions, container.Agents, s, container.Context)
 	workflowStepExecutor := service.NewWorkflowStepExecutor(container.Tools, registry, workflowContextAssembler)
 	selfTools.WorkflowExecutor = workflowStepExecutor
 
@@ -573,7 +573,7 @@ func cmdServeWithInitializers(
 	// Complete the one-way cutover before publishing any launch surface. Active
 	// legacy rows are never assigned fabricated plans: the coordinator returns
 	// their immutable audit cohort and startup stops for explicit disposition.
-	cutover, err := workflowcompat.NewCutoverCoordinator(container.Store)
+	cutover, err := workflowcompat.NewCutoverCoordinator(s)
 	if err != nil {
 		return fmt.Errorf("construct Agent Workflows cutover coordinator: %w", err)
 	}
@@ -602,7 +602,7 @@ func cmdServeWithInitializers(
 	}
 	slog.Info("Agent Workflows shared cutover ready", "phase", cutoverReport.State.Phase, "generation", cutoverReport.State.Generation)
 
-	workflowState, err := workflowhost.NewWorkflowStateStore(container.Store)
+	workflowState, err := workflowhost.NewWorkflowStateStore(s)
 	if err != nil {
 		return fmt.Errorf("construct shared workflow state: %w", err)
 	}
@@ -614,10 +614,10 @@ func cmdServeWithInitializers(
 	if err != nil {
 		return fmt.Errorf("construct shared workflow artifact store: %w", err)
 	}
-	workflowActivationScheduler := workflowhost.NewActivationScheduler(container.Store)
+	workflowActivationScheduler := workflowhost.NewActivationScheduler(s)
 	workflowWaitCoordinator := &workflowruntime.WaitCoordinator{
 		Store: workflowState, Scheduler: workflowActivationScheduler,
-		Materializer: workflowhost.NewWaitMaterializer(container.Store),
+		Materializer: workflowhost.NewWaitMaterializer(s),
 		Authorizer:   workflowhost.NaniteResponderAuthorizer{},
 	}
 	sharedWorkflowEngine, err := workflowhost.NewEngine(workflowState)
@@ -690,15 +690,15 @@ func cmdServeWithInitializers(
 
 	// A contained LoopRun launches ordinary named definitions through the same
 	// shared host. Its terminal push resumes the exact persisted outer run.
-	loopEngine := loop.NewLoopEngine(container.Store, workflowDefinitionsRegistry, workflowLauncher)
-	loopResumeNotifier := service.NewLoopResumeNotifier(container.Store, workflowLauncher)
+	loopEngine := loop.NewLoopEngine(s, workflowDefinitionsRegistry, workflowLauncher)
+	loopResumeNotifier := service.NewLoopResumeNotifier(s, workflowLauncher)
 	loopEngine.WithOuterResumeNotifier(loopResumeNotifier)
 	teamStepResolver := service.NewWorkflowTeamStepResolver(
-		container.Store,
-		&reflexes.StateCollector{Store: container.Store, Window: 5},
+		s,
+		&reflexes.StateCollector{Store: s, Window: 5},
 	)
 	sharedWorkflowEngine.
-		WithLoopStepHost(workflowbridge.LoopAdapter{Launcher: loopEngine, Runs: container.Store}).
+		WithLoopStepHost(workflowbridge.LoopAdapter{Launcher: loopEngine, Runs: s}).
 		WithTeamStepHost(workflowbridge.TeamAdapter{Resolver: teamStepResolver}).
 		WithExternalStepHost(workflowbridge.ExternalAdapter{Engines: externalWorkflowSteps})
 
@@ -731,7 +731,7 @@ func cmdServeWithInitializers(
 	// TeamRun definitions launch directly as immutable shared-host material;
 	// they are not installed into the mutable named registry.
 	container.TeamRunLauncher = service.NewTeamRunLauncher(
-		container.Store,
+		s,
 		workflowLauncher,
 		container.DurableAgents,
 	)
@@ -739,7 +739,7 @@ func cmdServeWithInitializers(
 	// The API invokes this service only after TeamRunLauncher returns the
 	// real workflow run id and has persisted its Team Slot member rows.
 	container.TeamRouting = service.NewTeamRoutingService(
-		container.Store,
+		s,
 		container.Messaging,
 		container.TeamRunLauncher,
 	)
@@ -792,7 +792,7 @@ func cmdServeWithInitializers(
 	// TASKS/ESCALATIONS.md's 2026-08-21 entry) ARE configured here, unlike
 	// ReflexLookup/ReflexExecutor above: loopTickResumeBridge (constructed
 	// just above) satisfies scheduler.LoopResumer directly, and
-	// container.Store.GetLoopRun already satisfies scheduler.LoopRunLookup's
+	// s.GetLoopRun already satisfies scheduler.LoopRunLookup's
 	// func-type shape -- nothing new to build here, both dependencies are
 	// already in scope by this point in the boot sequence. See
 	// internal/loop/tick_schedule.go for the one real producer of a
@@ -959,7 +959,7 @@ func cmdServeWithInitializers(
 
 	// Create API layer.
 	a := api.New(container)
-	workflowSurface, err := workflowcompat.NewSharedSurface(container.Store, workflowState, sharedWorkflowEngine, workflowStepExecutor)
+	workflowSurface, err := workflowcompat.NewSharedSurface(s, workflowState, sharedWorkflowEngine, workflowStepExecutor)
 	if err != nil {
 		return fmt.Errorf("construct shared workflow API compatibility surface: %w", err)
 	}
@@ -983,7 +983,7 @@ func cmdServeWithInitializers(
 	// workflowDefinitionsRegistry instance. Not stored on
 	// service.Container itself -- see internal/api/api.go's own
 	// loopLauncher field doc comment for the import-cycle reason.
-	a.SetLoopLauncher(loop.NewLoopLauncher(loopEngine, container.Store))
+	a.SetLoopLauncher(loop.NewLoopLauncher(loopEngine, s))
 
 	// Lifecycle manager for long-running daemon goroutines (cleanup,
 	// snapshots, reapers). Owned by cmdServe; shut down on signal before
@@ -1012,7 +1012,7 @@ func cmdServeWithInitializers(
 			}
 		})
 	})
-	startBackgroundWorkers(daemonLifecycle, container)
+	startBackgroundWorkers(daemonLifecycle, container, s)
 
 	// Start HTTP server.
 	srv, serverErr := server.New(s, a, *port, *dev, pluginHost, appCfg.HTTP)
@@ -1272,7 +1272,7 @@ func initMCP(s *store.Store, cfg *config.RuntimeConfig, appCfg *config.TunablesC
 // startBackgroundWorkers launches periodic goroutines for cleanup, snapshots,
 // and reapers on the supplied lifecycle manager. Each daemon's inner loop
 // selects on ctx.Done() so Shutdown drains them deterministically.
-func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container) {
+func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container, s *store.Store) {
 	if container.TeamRunLauncher != nil {
 		lc.Go("team-workflow-reconcile", func(ctx context.Context) {
 			container.TeamRunLauncher.RunReconciler(ctx, 5*time.Second, 100, func(report service.TeamRunReconcileReport) {
@@ -1301,9 +1301,9 @@ func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container)
 	// Periodic deletion of expired tool-result cache and tool-argument rows
 	// (CW-20260929-0012 #3). Rows already stop being served at expires_at; this
 	// reclaims the space. Same hourly cadence as truncate-cleanup.
-	if container.Store != nil {
+	if s != nil {
 		lc.Go("tool-cache-purge", func(ctx context.Context) {
-			tool.RunPurgeLoop(ctx, container.Store.DB, 1*time.Hour)
+			tool.RunPurgeLoop(ctx, s.DB, 1*time.Hour)
 		})
 	}
 

@@ -144,7 +144,7 @@ func TestAutocompleteFiles_WalksSessionProjectRepo(t *testing.T) {
 		t.Fatalf("create project: %d %s", w.Code, w.Body.String())
 	}
 	sess := &store.Session{Provider: "anthropic", Model: "m", Status: "active", ProjectID: "ac"}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 

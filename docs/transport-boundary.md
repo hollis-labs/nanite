@@ -89,10 +89,19 @@ A revision passed to `--new-from-rev` that does not exist makes golangci-lint
 warn ("could not read git repo") and report every finding; it does not silently
 pass.
 
-`service.Container.Store` stays exported while call sites still use it. It is
-unexported last, behind one documented accessor, once the count is near zero;
-unexporting it first would move every call site onto the accessor without
-removing a single finding.
+The container's raw store is private, with no transport accessor. Composition
+roots keep their own handle for wiring. API tests retain fixture storage in a
+test-only wrapper, separately from the production container.
+
+`service.NewSelfToolsTransport` wires consumer-owned read/write collaborators
+without introducing an import cycle. Pure CRUD builders retain narrow existing
+interfaces; handoff persistence, scheduling, pins, reminders, dispatch data and
+telemetry use service collaborators. The transport has no raw store field.
+
+Catalog source CRUD and plugin configuration use services and explicit API DTOs.
+Plugin configuration keeps secret routing, masking and change notification below
+the handler; catalog installation uses the shared plugin install pipeline.
+This completion does not adopt R2 or R3, or change scheduler storage.
 
 ## Transport-parity checklist
 
@@ -127,7 +136,7 @@ removing a single finding.
   `buildEnvelopeLookup(a.Services.Store, …)` or
   `service.NewCompactionEventWriter(a.Services.Store)`. A transport can reach
   the store through a helper and pass. To find them:
-  `grep -rn 'Services\.Store[,)}]' internal/api internal/selftools internal/mcpserver`
+  `rg 'Services\.Store[,)}]' internal/api internal/selftools internal/mcpserver`
   (the `}` catches a struct-literal field).
 - **The regex scopes by path.** A transport package outside
   `^internal/(api|selftools|mcpserver)/` is not checked; a new transport

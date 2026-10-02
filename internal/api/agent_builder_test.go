@@ -11,10 +11,10 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func countRows(t *testing.T, a *API, table string) int {
+func countRows(t *testing.T, a *testAPI, table string) int {
 	t.Helper()
 	var n int
-	if err := a.Services.Store.DB.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+	if err := a.store.DB.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
 		t.Fatalf("count %s: %v", table, err)
 	}
 	return n
@@ -23,7 +23,7 @@ func countRows(t *testing.T, a *API, table string) int {
 func TestAgentBuilderDryRun_DoesNotMutateStore(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Builder Profile", Slug: "builder-profile", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestAgentBuilderDryRun_DoesNotMutateStore(t *testing.T) {
 func TestAgentBuilderDryRun_RecipePlanAndNoMutation(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Recipe Builder", Slug: "recipe-builder", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -211,7 +211,7 @@ func TestAgentBuilderDryRun_UpdateProfileRejectsInternal(t *testing.T) {
 		SystemPrompt: "x",
 		Source:       "internal",
 	}
-	if err := a.Services.Store.CreateAgent(context.Background(), internalAgent); err != nil {
+	if err := a.store.CreateAgent(context.Background(), internalAgent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 

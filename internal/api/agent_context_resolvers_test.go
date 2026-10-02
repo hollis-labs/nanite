@@ -16,7 +16,7 @@ import (
 func TestAgentContextResolversAPI_CRUD_EndToEnd(t *testing.T) {
 	a, mux := newTestAPI(t)
 	agent := &store.AgentProfile{Name: "Resolver Agent", Slug: "resolver-agent", SystemPrompt: "x", Class: "advisor"}
-	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
+	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -105,7 +105,7 @@ func TestAgentContextResolversAPI_CRUD_EndToEnd(t *testing.T) {
 	}
 
 	// A disabled resolver drops out of the boot-time enabled listing.
-	enabled, err := a.Services.Store.ListEnabledAgentContextResolvers(req.Context(), agent.ID)
+	enabled, err := a.store.ListEnabledAgentContextResolvers(req.Context(), agent.ID)
 	if err != nil {
 		t.Fatalf("ListEnabledAgentContextResolvers: %v", err)
 	}
@@ -137,10 +137,10 @@ func TestAgentContextResolversAPI_CrossAgentAccessRejected(t *testing.T) {
 	a, mux := newTestAPI(t)
 	agentA := &store.AgentProfile{Name: "Agent A", Slug: "resolver-agent-a", SystemPrompt: "x", Class: "advisor"}
 	agentB := &store.AgentProfile{Name: "Agent B", Slug: "resolver-agent-b", SystemPrompt: "x", Class: "advisor"}
-	if err := a.Services.Store.CreateAgent(context.Background(), agentA); err != nil {
+	if err := a.store.CreateAgent(context.Background(), agentA); err != nil {
 		t.Fatalf("CreateAgent A: %v", err)
 	}
-	if err := a.Services.Store.CreateAgent(context.Background(), agentB); err != nil {
+	if err := a.store.CreateAgent(context.Background(), agentB); err != nil {
 		t.Fatalf("CreateAgent B: %v", err)
 	}
 

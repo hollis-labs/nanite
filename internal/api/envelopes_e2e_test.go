@@ -19,11 +19,11 @@ func TestEnvelopeRespond_E2E_TranscriptThreadedIntoContext(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	sess := &store.Session{}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{Name: "e", Slug: "e", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
+	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -38,7 +38,7 @@ func TestEnvelopeRespond_E2E_TranscriptThreadedIntoContext(t *testing.T) {
 	}
 
 	// Next-turn simulation: assemble context as the LLM adapter would.
-	client := chat.NewContextClient(a.Services.Store)
+	client := chat.NewContextClient(a.store)
 	sources, err := client.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
@@ -66,11 +66,11 @@ func TestEnvelopeRespond_E2E_SilentHandlerNotInContext(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	sess := &store.Session{}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{Name: "s", Slug: "s", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
+	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestEnvelopeRespond_E2E_SilentHandlerNotInContext(t *testing.T) {
 		t.Fatalf("respond: %d", w.Code)
 	}
 
-	client := chat.NewContextClient(a.Services.Store)
+	client := chat.NewContextClient(a.store)
 	sources, err := client.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
@@ -96,7 +96,7 @@ func TestEnvelopeRespond_E2E_SilentHandlerNotInContext(t *testing.T) {
 	}
 
 	// Response still persisted on the instance.
-	got, _ := a.Services.Store.GetEnvelopeInstance(context.Background(), inst.ID)
+	got, _ := a.store.GetEnvelopeInstance(context.Background(), inst.ID)
 	if got.RespondedAt == nil || got.ResponseStatus != "submitted" {
 		t.Fatalf("instance not updated: %+v", got)
 	}

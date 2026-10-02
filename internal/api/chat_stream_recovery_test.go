@@ -18,7 +18,7 @@ import (
 func TestSessionExposesActiveMessageForRecovery(t *testing.T) {
 	a, mux := newTestAPI(t)
 	sess := &store.Session{Model: "test-model", Provider: "test"}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatal(err)
 	}
 	producer := a.Services.Streams.CreateStream("in-flight", sess.ID)
@@ -38,7 +38,7 @@ func TestSessionExposesActiveMessageForRecovery(t *testing.T) {
 
 func TestChatReconnectAdvancesBeyondInitialURLCursor(t *testing.T) {
 	streams := service.NewStreamManager()
-	a := &API{Services: &service.Container{Streams: streams}}
+	a := &testAPI{API: &API{Services: &service.Container{Streams: streams}}}
 	producer := streams.CreateStream("message", "session")
 	initial, _, _ := streams.Subscribe("message", 0)
 	producer <- chat.StreamEvent{Type: "delta", Content: "first"}
@@ -59,7 +59,7 @@ func TestChatReconnectAdvancesBeyondInitialURLCursor(t *testing.T) {
 
 func TestChatStreamTakeoverIsNotTransportEOF(t *testing.T) {
 	streams := service.NewStreamManager()
-	a := &API{Services: &service.Container{Streams: streams}}
+	a := &testAPI{API: &API{Services: &service.Container{Streams: streams}}}
 	producer := streams.CreateStream("message", "session")
 	defer close(producer)
 	mux := http.NewServeMux()
@@ -91,7 +91,7 @@ func TestChatStreamTakeoverIsNotTransportEOF(t *testing.T) {
 // running turn keeps its stream through to stream_end.
 func TestChatStreamsForDifferentMessagesOfOneSessionCoexist(t *testing.T) {
 	streams := service.NewStreamManager()
-	a := &API{Services: &service.Container{Streams: streams}}
+	a := &testAPI{API: &API{Services: &service.Container{Streams: streams}}}
 	running := streams.CreateStream("running", "session")
 	queued := streams.CreateStream("queued", "session")
 	defer close(queued)

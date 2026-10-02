@@ -15,7 +15,7 @@ import (
 func TestStartSurfaceCapabilities(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Start Surface Agent", Slug: "start-surface-agent", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -24,7 +24,7 @@ func TestStartSurfaceCapabilities(t *testing.T) {
 		ProfileID:        profile.ID,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := a.Services.Store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
+	if err := a.store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 
@@ -65,14 +65,14 @@ func containsDurableAgent(items []store.DurableAgentInstance, id string) bool {
 func TestSessionDetailsContract(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Details Agent", Slug: "details-agent", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	sess := &store.Session{Provider: "anthropic", Model: "model-a"}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := a.Services.Store.EnsureSessionAgent(context.Background(), sess.ID, profile.ID, "default", true); err != nil {
+	if err := a.store.EnsureSessionAgent(context.Background(), sess.ID, profile.ID, "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -81,13 +81,13 @@ func TestSessionDetailsContract(t *testing.T) {
 		ProfileID:        profile.ID,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := a.Services.Store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
+	if err := a.store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
-	if err := a.Services.Store.AttachDurableAgentInstanceSession(context.Background(), inst.ID, sess.ID, store.DurableAgentSessionRelationPrimary); err != nil {
+	if err := a.store.AttachDurableAgentInstanceSession(context.Background(), inst.ID, sess.ID, store.DurableAgentSessionRelationPrimary); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
 	}
-	if err := a.Services.Store.CreateDurableAgentEvent(context.Background(), &store.DurableAgentEvent{
+	if err := a.store.CreateDurableAgentEvent(context.Background(), &store.DurableAgentEvent{
 		InstanceID:   inst.ID,
 		EventType:    store.DurableAgentEventStartSucceeded,
 		StatusBefore: store.DurableAgentStatusStarting,
@@ -97,7 +97,7 @@ func TestSessionDetailsContract(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateDurableAgentEvent: %v", err)
 	}
-	if err := a.Services.Store.CreateAgentRuntimeRow(context.Background(), &store.AgentRuntimeRow{
+	if err := a.store.CreateAgentRuntimeRow(context.Background(), &store.AgentRuntimeRow{
 		ID:              "runtime-a",
 		AgentProfile:    profile.ID,
 		Provider:        "claude",
@@ -111,7 +111,7 @@ func TestSessionDetailsContract(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateAgentRuntimeRow: %v", err)
 	}
-	if err := a.Services.Store.RecordUsage(context.Background(), sess.ID, "message-1", "model-a", 10, 12, 0, 0, 3); err != nil {
+	if err := a.store.RecordUsage(context.Background(), sess.ID, "message-1", "model-a", 10, 12, 0, 0, 3); err != nil {
 		t.Fatalf("RecordUsage: %v", err)
 	}
 
@@ -148,10 +148,10 @@ func TestSessionDetailsContract(t *testing.T) {
 func TestSessionDetailsContract_NoRuntimeAndHalted(t *testing.T) {
 	a, mux := newTestAPI(t)
 	sess := &store.Session{Provider: "anthropic", Model: "model-a", Status: "active"}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := a.Services.Store.MarkSessionHalted(context.Background(), sess.ID, "detector_B: repeated empty output"); err != nil {
+	if err := a.store.MarkSessionHalted(context.Background(), sess.ID, "detector_B: repeated empty output"); err != nil {
 		t.Fatalf("MarkSessionHalted: %v", err)
 	}
 
@@ -177,10 +177,10 @@ func TestSessionDetailsContract_NoRuntimeAndHalted(t *testing.T) {
 func TestUpdateSessionProviderModelImmutableAfterMessages(t *testing.T) {
 	a, mux := newTestAPI(t)
 	sess := &store.Session{Provider: "anthropic", Model: "model-a"}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := a.Services.Store.CreateMessage(context.Background(), &store.Message{SessionID: sess.ID, Role: "user", Content: "hello"}); err != nil {
+	if err := a.store.CreateMessage(context.Background(), &store.Message{SessionID: sess.ID, Role: "user", Content: "hello"}); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 	body, _ := json.Marshal(UpdateSessionRequest{Provider: ptrString("openai")})

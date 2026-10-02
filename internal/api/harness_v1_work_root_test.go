@@ -27,7 +27,7 @@ func TestHarnessV1CreateSession_ProjectMustResolveRepoPath(t *testing.T) {
 		{ID: "no-repo", Name: "no-repo"},
 		{ID: "gone-repo", Name: "gone-repo", RepoPath: filepath.Join(t.TempDir(), "missing")},
 	} {
-		if err := a.Services.Store.CreateProject(ctx, p); err != nil {
+		if err := a.store.CreateProject(ctx, p); err != nil {
 			t.Fatalf("CreateProject %s: %v", p.ID, err)
 		}
 	}

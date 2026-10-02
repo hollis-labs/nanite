@@ -29,7 +29,7 @@ func TestArtifactViewJSON(t *testing.T) {
 	assertSameJSON(t, "nil list", artifactsToView(nil), []store.Artifact{})
 }
 
-func artifactDo(a *API, handler func(http.ResponseWriter, *http.Request), method, path, body string, pathValues map[string]string) *httptest.ResponseRecorder {
+func artifactDo(a *testAPI, handler func(http.ResponseWriter, *http.Request), method, path, body string, pathValues map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	for k, v := range pathValues {
 		req.SetPathValue(k, v)
@@ -49,7 +49,7 @@ func TestArtifacts_ErrorClasses(t *testing.T) {
 	// resolves as outside the root and is a 400 — the confinement rule's
 	// existing behavior, not exercised here.)
 	gone := &store.Artifact{SessionID: "sess1", Name: "gone.txt", MimeType: "text/plain", StoragePath: filepath.Join("sess1", "gone.txt")}
-	if err := a.Services.Store.CreateArtifact(ctx, gone); err != nil {
+	if err := a.store.CreateArtifact(ctx, gone); err != nil {
 		t.Fatalf("CreateArtifact: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "sess1", "adir"), 0o750); err != nil {
@@ -160,7 +160,7 @@ func TestArtifacts_DownloadSanitizesContentDisposition(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	art := &store.Artifact{SessionID: "sess1", Name: "a\"b\r\nX-Evil: 1.txt", MimeType: "text/plain", StoragePath: filepath.Join("sess1", "f.txt")}
-	if err := a.Services.Store.CreateArtifact(context.Background(), art); err != nil {
+	if err := a.store.CreateArtifact(context.Background(), art); err != nil {
 		t.Fatalf("CreateArtifact: %v", err)
 	}
 	rec := artifactDo(a, a.handleDownloadArtifact, "GET", "/", "", map[string]string{"id": art.ID})

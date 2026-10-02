@@ -13,9 +13,9 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func newShellSession(t *testing.T, a *API, id, metadata string) {
+func newShellSession(t *testing.T, a *testAPI, id, metadata string) {
 	t.Helper()
-	if err := a.Services.Store.CreateSession(context.Background(), &store.Session{ID: id, Title: id, Metadata: metadata}); err != nil {
+	if err := a.store.CreateSession(context.Background(), &store.Session{ID: id, Title: id, Metadata: metadata}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 }
@@ -78,7 +78,7 @@ func TestShellMode_HTTP(t *testing.T) {
 	if w := mcpDo(mux, "GET", base, ""); strings.TrimSpace(w.Body.String()) != `{"mode":"session"}` {
 		t.Fatalf("after set: %s", w.Body.String())
 	}
-	sess, err := a.Services.Store.GetSession(context.Background(), "sh-http")
+	sess, err := a.store.GetSession(context.Background(), "sh-http")
 	if err != nil || !strings.Contains(sess.Metadata, `"keep":"me"`) {
 		t.Fatalf("metadata merge lost a key: %q %v", sess.Metadata, err)
 	}
@@ -98,7 +98,7 @@ func TestShellExec_ApprovalWorkDirAndRecord(t *testing.T) {
 	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"command":"echo hi","mode":"ask","requires_approval":true}` {
 		t.Fatalf("ask mode: %d %s", w.Code, w.Body.String())
 	}
-	if msgs, _ := a.Services.Store.ListMessages(context.Background(), "sh-ask", 10); len(msgs) != 0 {
+	if msgs, _ := a.store.ListMessages(context.Background(), "sh-ask", 10); len(msgs) != 0 {
 		t.Fatalf("unapproved command was recorded: %+v", msgs)
 	}
 
@@ -115,7 +115,7 @@ func TestShellExec_ApprovalWorkDirAndRecord(t *testing.T) {
 	if got := strings.TrimSpace(res.Output); got != dir && got != resolved {
 		t.Fatalf("pwd = %q, want the session's project_dir %q", got, dir)
 	}
-	msg, err := a.Services.Store.GetMessage(context.Background(), res.MessageID)
+	msg, err := a.store.GetMessage(context.Background(), res.MessageID)
 	if err != nil || msg.Role != "user" || !strings.HasPrefix(msg.Content, "$ pwd\n") || !strings.Contains(msg.Metadata, `"type":"shell_exec"`) {
 		t.Fatalf("recorded message = %+v, %v", msg, err)
 	}

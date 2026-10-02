@@ -50,7 +50,7 @@ func skillFixture(t *testing.T, name string) string {
 // which artifacts_test.go's own newArtifactTestAPI already avoids the same
 // way for artifacts. Harmless (the directory is .gitignore'd) but easy to
 // avoid, so this test file does.
-func newSkillsTestAPI(t *testing.T) (*API, *http.ServeMux) {
+func newSkillsTestAPI(t *testing.T) (*testAPI, *http.ServeMux) {
 	t.Helper()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "test.db")
@@ -78,7 +78,7 @@ func newSkillsTestAPI(t *testing.T) (*API, *http.ServeMux) {
 		t.Fatal("expected SkillVendor to initialize against a writable temp root")
 	}
 
-	a := New(svc)
+	a := newAPIStoreFixture(svc, s)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
 	return a, mux
@@ -236,7 +236,7 @@ func TestHandleSyncSkill_SlugMismatch(t *testing.T) {
 		t.Fatalf("expected 409 for a sync slug mismatch, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	got, err := a.Services.Store.GetSkillBySlug(context.Background(), "other-skill")
+	got, err := a.store.GetSkillBySlug(context.Background(), "other-skill")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug(other-skill): %v", err)
 	}
@@ -245,7 +245,7 @@ func TestHandleSyncSkill_SlugMismatch(t *testing.T) {
 	}
 
 	// The target row itself must also be untouched.
-	unchanged, err := a.Services.Store.GetSkillBySlug(context.Background(), "sample-skill")
+	unchanged, err := a.store.GetSkillBySlug(context.Background(), "sample-skill")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug(sample-skill): %v", err)
 	}

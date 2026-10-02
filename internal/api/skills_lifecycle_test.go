@@ -24,10 +24,10 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func createTestAgent(t *testing.T, a *API, slug string) *store.AgentProfile {
+func createTestAgent(t *testing.T, a *testAPI, slug string) *store.AgentProfile {
 	t.Helper()
 	ag := &store.AgentProfile{Name: "Test Agent " + slug, Slug: slug, SystemPrompt: "test"}
-	if err := a.Services.Store.CreateAgent(context.Background(), ag); err != nil {
+	if err := a.store.CreateAgent(context.Background(), ag); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return ag
@@ -129,7 +129,7 @@ func TestHandleDeleteSkill_RealUninstall(t *testing.T) {
 		t.Error("expected vendor_deleted = true for a fully installed skill")
 	}
 
-	got, err := a.Services.Store.GetSkillBySlug(context.Background(), installed.Skill.Slug)
+	got, err := a.store.GetSkillBySlug(context.Background(), installed.Skill.Slug)
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestHandleDeleteSkill_TypedNilVendor_ClearErrorNotPanic(t *testing.T) {
 	// The index row must be left intact — a failed vendor-deletion attempt
 	// aborts the whole call rather than deleting the index row anyway,
 	// matching Uninstaller's own vendor-before-index ordering contract.
-	got, err := a.Services.Store.GetSkillBySlug(context.Background(), installed.Skill.Slug)
+	got, err := a.store.GetSkillBySlug(context.Background(), installed.Skill.Slug)
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestSkillDelete_RESTAndSelfTool_SameEndState(t *testing.T) {
 		t.Fatalf("REST delete: expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	transport := service.NewSelfToolsTransport(a.Services.Store)
+	transport := service.NewSelfToolsTransport(a.store)
 	transport.SkillVendor = a.Services.SkillVendor
 	toolResult, err := transport.CallTool(context.Background(), "skill_delete", map[string]any{"slug": toolInstalled.Skill.Slug})
 	if err != nil {
@@ -248,7 +248,7 @@ func TestSkillDelete_RESTAndSelfTool_SameEndState(t *testing.T) {
 		{"REST", restInstalled.Skill.Slug, restInstalled.Address},
 		{"self-tool", toolInstalled.Skill.Slug, toolInstalled.Address},
 	} {
-		got, err := a.Services.Store.GetSkillBySlug(context.Background(), tc.slug)
+		got, err := a.store.GetSkillBySlug(context.Background(), tc.slug)
 		if err != nil {
 			t.Fatalf("%s: GetSkillBySlug: %v", tc.label, err)
 		}
@@ -311,7 +311,7 @@ func TestAgentSkillGrant_FullLifecycle(t *testing.T) {
 	}
 
 	// list shows the granted skill with correct provenance.
-	agentSkills, err := a.Services.Store.ListAgentSkills(context.Background(), agent.ID)
+	agentSkills, err := a.store.ListAgentSkills(context.Background(), agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentSkills: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestHandleGrantAgentSkill_RejectsUnvendoredSkill(t *testing.T) {
 	// A bare admin-CRUD row (task 02) with no ContentHash -- never
 	// installed/vendored.
 	sk := &store.Skill{Name: "Bare Row", Slug: "bare-row-grant-test", Description: "no content"}
-	if err := a.Services.Store.CreateSkill(context.Background(), sk); err != nil {
+	if err := a.store.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 	agent := createTestAgent(t, a, "bare-row-grant-agent")

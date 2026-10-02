@@ -32,10 +32,10 @@ import (
 // registry-growth/agent-card-pollution assertions below exercise the exact
 // shared-registry relationship cmd/nanite/main.go's own doc comments
 // describe.
-func newTestAPIWithTeamRunLauncher(t *testing.T) (*API, *http.ServeMux, *store.Store) {
+func newTestAPIWithTeamRunLauncher(t *testing.T) (*testAPI, *http.ServeMux, *store.Store) {
 	t.Helper()
 	a, mux := newTestAPI(t)
-	st := a.Services.Store
+	st := a.store
 
 	registry := agentworkflow.NewRegistry(nil)
 	engine := newAPITestWorkflowHost(t, st)

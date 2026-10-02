@@ -53,7 +53,7 @@ func TestHandleShellExec_YOLOMode_SandboxIsolatedFalse(t *testing.T) {
 		Title:    "Shell YOLO Test",
 		Metadata: `{"shell_mode":"yolo"}`,
 	}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestHandleShellExec_SessionMode_SandboxIsolatedTrue(t *testing.T) {
 		Title:    "Shell Session Mode Test",
 		Metadata: `{"shell_mode":"session"}`,
 	}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -140,7 +140,7 @@ func TestSetSessionMetadataFieldRejectsCorruptMetadataWithoutOverwrite(t *testin
 		Title:    "Corrupt metadata",
 		Metadata: corruptMetadata,
 	}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -148,7 +148,7 @@ func TestSetSessionMetadataFieldRejectsCorruptMetadataWithoutOverwrite(t *testin
 	if err == nil || !strings.Contains(err.Error(), "parse session metadata") {
 		t.Fatalf("SetMode error = %v, want metadata parse error", err)
 	}
-	got, err := a.Services.Store.GetSession(context.Background(), sess.ID)
+	got, err := a.store.GetSession(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}

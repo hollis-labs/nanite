@@ -79,7 +79,7 @@ func TestEnvelopeRespond_FollowUpAndMessageID(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != http.StatusOK || out["follow_up"] != "next step" || out["message_id"] == "" || out["ok"] != true {
 		t.Fatalf("respond: %d %s", w.Code, w.Body.String())
 	}
-	msg, err := a.Services.Store.GetMessage(context.Background(), out["message_id"].(string))
+	msg, err := a.store.GetMessage(context.Background(), out["message_id"].(string))
 	if err != nil || msg.Role != chat.RoleEnvelopeResponse || msg.SessionID != sessID {
 		t.Fatalf("transcript message = %+v, %v", msg, err)
 	}
@@ -108,7 +108,7 @@ func (f *raceEnvelopes) UpdateEnvelopeResponse(context.Context, string, string, 
 func (f *raceEnvelopes) CreateMessage(context.Context, *store.Message) error { return nil }
 
 func TestEnvelopeRespond_LosingTheClaimRaceReturnsTheWinner(t *testing.T) {
-	a := &API{Services: &service.Container{Envelopes: service.NewEnvelopeService(&raceEnvelopes{})}}
+	a := &testAPI{API: &API{Services: &service.Container{Envelopes: service.NewEnvelopeService(&raceEnvelopes{})}}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/envelopes/{id}/respond", a.handleEnvelopeRespond)
 	w := doPost(mux, "/api/envelopes/e/respond", envelopeRespondBody(t, "race-kind", "e", nil))
@@ -142,7 +142,7 @@ func TestEnvelopeRespond_HandlerTimeoutRecordsFailure_CW20260930_0241(t *testing
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("timed out after %s; the configured 50ms handler timeout was not applied", elapsed)
 	}
-	after, err := a.Services.Store.GetEnvelopeInstance(context.Background(), inst.ID)
+	after, err := a.store.GetEnvelopeInstance(context.Background(), inst.ID)
 	if err != nil || after.ResponseStatus != "failed" || after.ResponseJSON != `{"reason":"handler_timeout"}` {
 		t.Fatalf("stored after timeout: status=%q json=%q err=%v", after.ResponseStatus, after.ResponseJSON, err)
 	}
@@ -169,7 +169,7 @@ func TestEnvelopeRespond_LateHandlerSuccessIsRecorded(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"message_id"`) {
 		t.Fatalf("respond: %d %s", w.Code, w.Body.String())
 	}
-	after, err := a.Services.Store.GetEnvelopeInstance(context.Background(), inst.ID)
+	after, err := a.store.GetEnvelopeInstance(context.Background(), inst.ID)
 	if err != nil || after.ResponseStatus != "submitted" {
 		t.Fatalf("stored: status=%q err=%v", after.ResponseStatus, err)
 	}
@@ -196,7 +196,7 @@ func TestEnvelopeRespond_CallerGoneStillRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Respond: %v", err)
 	}
-	after, err := a.Services.Store.GetEnvelopeInstance(context.Background(), inst.ID)
+	after, err := a.store.GetEnvelopeInstance(context.Background(), inst.ID)
 	if err != nil || after.ResponseStatus != "submitted" {
 		t.Fatalf("stored: status=%q err=%v", after.ResponseStatus, err)
 	}
@@ -219,7 +219,7 @@ func (claimedEnvelopes) CreateMessage(context.Context, *store.Message) error { r
 // A claimed envelope with no stored response answers a 409 with "response":
 // null, not an empty body.
 func TestEnvelopeRespond_ConflictWithoutStoredResponseIsNull(t *testing.T) {
-	a := &API{Services: &service.Container{Envelopes: service.NewEnvelopeService(claimedEnvelopes{})}}
+	a := &testAPI{API: &API{Services: &service.Container{Envelopes: service.NewEnvelopeService(claimedEnvelopes{})}}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/envelopes/{id}/respond", a.handleEnvelopeRespond)
 	w := doPost(mux, "/api/envelopes/e/respond", envelopeRespondBody(t, "k", "e", nil))
@@ -249,7 +249,7 @@ func (f *rereadFails) CreateMessage(context.Context, *store.Message) error { ret
 // A failed re-read after losing the claim race is a 500 with its error, not
 // a nil dereference.
 func TestEnvelopeRespond_ClaimRaceRereadErrorIs500(t *testing.T) {
-	a := &API{Services: &service.Container{Envelopes: service.NewEnvelopeService(&rereadFails{})}}
+	a := &testAPI{API: &API{Services: &service.Container{Envelopes: service.NewEnvelopeService(&rereadFails{})}}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/envelopes/{id}/respond", a.handleEnvelopeRespond)
 	w := doPost(mux, "/api/envelopes/e/respond", envelopeRespondBody(t, "k", "e", nil))
@@ -278,7 +278,7 @@ func (f *answeredEnvelopes) CreateMessage(context.Context, *store.Message) error
 // An envelope already answered is refused from the read, without a claim.
 func TestEnvelopeRespond_AnsweredEnvelopeNotClaimed(t *testing.T) {
 	fake := &answeredEnvelopes{}
-	a := &API{Services: &service.Container{Envelopes: service.NewEnvelopeService(fake)}}
+	a := &testAPI{API: &API{Services: &service.Container{Envelopes: service.NewEnvelopeService(fake)}}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/envelopes/{id}/respond", a.handleEnvelopeRespond)
 	if w := doPost(mux, "/api/envelopes/e/respond", envelopeRespondBody(t, "done-kind", "e", nil)); w.Code != http.StatusConflict {

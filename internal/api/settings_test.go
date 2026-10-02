@@ -13,10 +13,10 @@ import (
 // newSettingsTestAPI wraps newTestAPI, seeds the singleton user_settings row,
 // and injects an embedder-select deps that never hits the network. That keeps
 // settings-endpoint tests deterministic and fast.
-func newSettingsTestAPI(t *testing.T) (*API, *http.ServeMux) {
+func newSettingsTestAPI(t *testing.T) (*testAPI, *http.ServeMux) {
 	t.Helper()
 	a, mux := newTestAPI(t)
-	if _, err := a.Services.Store.DB.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
+	if _, err := a.store.DB.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
 		t.Fatalf("seed user_settings: %v", err)
 	}
 	a.SetEmbedderSelectDeps(service.EmbedderSelectDeps{

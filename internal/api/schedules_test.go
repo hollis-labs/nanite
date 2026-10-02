@@ -18,10 +18,10 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func createScheduleTestAgent(t *testing.T, a *API, slug string) *store.AgentProfile {
+func createScheduleTestAgent(t *testing.T, a *testAPI, slug string) *store.AgentProfile {
 	t.Helper()
 	agent := &store.AgentProfile{Name: "Schedule Agent " + slug, Slug: slug, SystemPrompt: "x", Class: "advisor"}
-	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
+	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return agent
@@ -340,7 +340,7 @@ func TestSchedulesAPI_StatusEndpoint(t *testing.T) {
 	// Wire a real gosched.Engine over the same production adapters used
 	// in cmd/nanite/main.go's own wiring.
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	storeAdapter := &scheduler.StoreAdapter{Store: a.Services.Store, Logger: logger}
+	storeAdapter := &scheduler.StoreAdapter{Store: a.store, Logger: logger}
 	runnerAdapter := &scheduler.RunnerAdapter{}
 	engine := gosched.New(storeAdapter, runnerAdapter)
 	a.Services.Engine = engine

@@ -80,12 +80,12 @@ func TestSelfToolsTransport_ListSkills(t *testing.T) {
 
 	// Seed two skills in different categories directly through the store
 	// (skill_create no longer exists as a self-tool).
-	if err := st.Store.CreateSkill(context.Background(), &store.Skill{
+	if err := fixtureStore(st).CreateSkill(context.Background(), &store.Skill{
 		Name: "Skill A", Slug: "skill-a", Description: "cat-x skill", Category: "cat-x",
 	}); err != nil {
 		t.Fatalf("seed skill-a: %v", err)
 	}
-	if err := st.Store.CreateSkill(context.Background(), &store.Skill{
+	if err := fixtureStore(st).CreateSkill(context.Background(), &store.Skill{
 		Name: "Skill B", Slug: "skill-b", Description: "cat-y skill", Category: "cat-y",
 	}); err != nil {
 		t.Fatalf("seed skill-b: %v", err)
@@ -158,7 +158,7 @@ func TestSelfToolsTransport_DeleteSkill(t *testing.T) {
 	// Seed a skill directly through the store (skill_create no longer
 	// exists as a self-tool).
 	seed := &store.Skill{Name: "To Delete", Slug: "to-delete", Description: "Will be deleted"}
-	if err := st.Store.CreateSkill(context.Background(), seed); err != nil {
+	if err := fixtureStore(st).CreateSkill(context.Background(), seed); err != nil {
 		t.Fatalf("seed skill: %v", err)
 	}
 	skillID := seed.ID
@@ -173,7 +173,7 @@ func TestSelfToolsTransport_DeleteSkill(t *testing.T) {
 	}
 
 	// Verify it's gone.
-	sk, _ := st.Store.GetSkill(context.Background(), skillID)
+	sk, _ := fixtureStore(st).GetSkill(context.Background(), skillID)
 	if sk != nil {
 		t.Error("skill should have been deleted")
 	}
@@ -198,7 +198,7 @@ func (b *countingBroadcaster) BroadcastWorkChanged() { b.calls++ }
 // not. CW-20260418-0044.
 func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 	st := newSelfTools(t)
-	st.WorkTrackingTools.Store = st.Store
+	st.WorkTrackingTools.Store = fixtureStore(st)
 	b := &countingBroadcaster{}
 	st.WorkTrackingTools.Broadcaster = b
 	ctx := context.Background()
@@ -213,7 +213,7 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 	if b.calls != 1 {
 		t.Fatalf("expected 1 broadcast after todo_create, got %d", b.calls)
 	}
-	todos, err := st.Store.ListTodos(context.Background(), store.TodoFilter{Scope: "session", ScopeID: "sess-wire"})
+	todos, err := fixtureStore(st).ListTodos(context.Background(), store.TodoFilter{Scope: "session", ScopeID: "sess-wire"})
 	if err != nil || len(todos) != 1 {
 		t.Fatalf("expected 1 todo, got %d (err=%v)", len(todos), err)
 	}
@@ -245,7 +245,7 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 		t.Fatalf("expected 3 broadcasts after plan_create, got %d", b.calls)
 	}
 
-	plans, _ := st.Store.ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "sess-wire"})
+	plans, _ := fixtureStore(st).ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "sess-wire"})
 	if len(plans) != 1 {
 		t.Fatalf("expected 1 plan, got %d", len(plans))
 	}
@@ -303,7 +303,7 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 // correctly. CW-20260418-0045.
 func TestSelfToolsTransport_TodoListEmitsEnvelope(t *testing.T) {
 	st := newSelfTools(t)
-	st.WorkTrackingTools.Store = st.Store
+	st.WorkTrackingTools.Store = fixtureStore(st)
 	ctx := context.Background()
 
 	// With scope: envelope must appear and carry scope + scope_id.
@@ -346,7 +346,7 @@ func TestSelfToolsTransport_TodoListEmitsEnvelope(t *testing.T) {
 // filter never matches).
 func TestSelfToolsTransport_PlanCreate_AutoFillsSessionIDFromCtx(t *testing.T) {
 	st := newSelfTools(t)
-	st.WorkTrackingTools.Store = st.Store
+	st.WorkTrackingTools.Store = fixtureStore(st)
 	ctx := mcp.WithSessionID(context.Background(), "ctx-session-xyz")
 
 	r, err := st.CallTool(ctx, "plan_create", map[string]any{
@@ -357,7 +357,7 @@ func TestSelfToolsTransport_PlanCreate_AutoFillsSessionIDFromCtx(t *testing.T) {
 	if err != nil || r.IsError {
 		t.Fatalf("plan_create failed: %v / %s", err, r.Content[0].Text)
 	}
-	plans, _ := st.Store.ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "ctx-session-xyz"})
+	plans, _ := fixtureStore(st).ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "ctx-session-xyz"})
 	if len(plans) != 1 {
 		t.Fatalf("expected 1 plan with ctx scope_id, got %d", len(plans))
 	}
@@ -368,7 +368,7 @@ func TestSelfToolsTransport_PlanCreate_AutoFillsSessionIDFromCtx(t *testing.T) {
 // rather than silently writing an empty scope_id.
 func TestSelfToolsTransport_PlanCreate_ErrorsWithoutSessionID(t *testing.T) {
 	st := newSelfTools(t)
-	st.WorkTrackingTools.Store = st.Store
+	st.WorkTrackingTools.Store = fixtureStore(st)
 
 	r, _ := st.CallTool(context.Background(), "plan_create", map[string]any{
 		"title": "no scope_id",
@@ -385,14 +385,14 @@ func TestSelfToolsTransport_PlanCreate_ErrorsWithoutSessionID(t *testing.T) {
 // non-workspace scope_id=session_id behavior.
 func TestSelfToolsTransport_ProjectScopeAutofillCharacterization(t *testing.T) {
 	st := newSelfTools(t)
-	st.WorkTrackingTools.Store = st.Store
+	st.WorkTrackingTools.Store = fixtureStore(st)
 
 	project := &store.Project{ID: "project-autofill", Name: "Autofill Project"}
-	if err := st.Store.CreateProject(t.Context(), project); err != nil {
+	if err := fixtureStore(st).CreateProject(t.Context(), project); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
 	session := &store.Session{ProjectID: project.ID}
-	if err := st.Store.CreateSession(t.Context(), session); err != nil {
+	if err := fixtureStore(st).CreateSession(t.Context(), session); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	ctx := mcp.WithSessionID(t.Context(), session.ID)
@@ -414,15 +414,15 @@ func TestSelfToolsTransport_ProjectScopeAutofillCharacterization(t *testing.T) {
 		}
 	}
 
-	todos, err := st.Store.ListTodos(t.Context(), store.TodoFilter{Scope: store.TodoScopeProject, ProjectID: project.ID})
+	todos, err := fixtureStore(st).ListTodos(t.Context(), store.TodoFilter{Scope: store.TodoScopeProject, ProjectID: project.ID})
 	if err != nil || len(todos) != 1 || todos[0].ProjectID != project.ID || todos[0].ScopeID != project.ID {
 		t.Fatalf("project todo autofill = %#v (err=%v), want project_id/scope_id %q", todos, err, project.ID)
 	}
-	reminders, err := st.Store.ListUnfiredReminders(t.Context(), session.ID)
+	reminders, err := fixtureStore(st).ListUnfiredReminders(t.Context(), session.ID)
 	if err != nil || len(reminders) != 1 || reminders[0].ProjectID != project.ID {
 		t.Fatalf("project reminder autofill = %#v (err=%v), want project_id %q", reminders, err, project.ID)
 	}
-	pins, err := st.Store.ListPinnedContent(t.Context(), session.ID)
+	pins, err := fixtureStore(st).ListPinnedContent(t.Context(), session.ID)
 	if err != nil || len(pins) != 1 || pins[0].ProjectID != project.ID {
 		t.Fatalf("project pin autofill = %#v (err=%v), want project_id %q", pins, err, project.ID)
 	}
@@ -433,7 +433,7 @@ func TestSelfToolsTransport_ProjectScopeAutofillCharacterization(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("plan_create failed: %v / %#v", err, res.Content)
 	}
-	plans, err := st.Store.ListPlans(t.Context(), store.PlanFilter{Scope: "project", ScopeID: session.ID})
+	plans, err := fixtureStore(st).ListPlans(t.Context(), store.PlanFilter{Scope: "project", ScopeID: session.ID})
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("plan project-scope characterization = %#v (err=%v), want scope_id=session %q", plans, err, session.ID)
 	}
@@ -444,7 +444,7 @@ func TestSelfToolsTransport_ProjectScopeAutofillCharacterization(t *testing.T) {
 // emits the appended-step JSON. CW-20260430-0001 (SP1).
 func TestSelfToolsTransport_PlanStepAdd_HappyPath(t *testing.T) {
 	st := newSelfTools(t)
-	st.WorkTrackingTools.Store = st.Store
+	st.WorkTrackingTools.Store = fixtureStore(st)
 	ctx := context.Background()
 
 	// Seed a plan with one step via plan_create.
@@ -457,7 +457,7 @@ func TestSelfToolsTransport_PlanStepAdd_HappyPath(t *testing.T) {
 	if err != nil || createRes.IsError {
 		t.Fatalf("plan_create failed: %v / %s", err, createRes.Content[0].Text)
 	}
-	plans, _ := st.Store.ListPlans(context.Background(), store.PlanFilter{Scope: "workspace"})
+	plans, _ := fixtureStore(st).ListPlans(context.Background(), store.PlanFilter{Scope: "workspace"})
 	if len(plans) != 1 {
 		t.Fatalf("expected 1 plan, got %d", len(plans))
 	}
@@ -483,7 +483,7 @@ func TestSelfToolsTransport_PlanStepAdd_HappyPath(t *testing.T) {
 	}
 
 	// Existing step is preserved; new steps appended at the tail with s2/s3 ids.
-	got, err := st.Store.GetPlan(context.Background(), planID)
+	got, err := fixtureStore(st).GetPlan(context.Background(), planID)
 	if err != nil {
 		t.Fatalf("GetPlan: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestSelfToolsTransport_PlanStepAdd_HappyPath(t *testing.T) {
 // no-op. CW-20260430-0001 (SP1).
 func TestSelfToolsTransport_PlanStepAdd_PlanIDNotFound(t *testing.T) {
 	st := newSelfTools(t)
-	st.WorkTrackingTools.Store = st.Store
+	st.WorkTrackingTools.Store = fixtureStore(st)
 	ctx := context.Background()
 
 	r, err := st.CallTool(ctx, "plan_step_add", map[string]any{
@@ -660,7 +660,7 @@ func TestExtractLiteralSubagentOutput_NonLiteralPrompt(t *testing.T) {
 // self-service tools (create → list → get → delete).
 func TestSelfToolsTransport_PlanCRUD(t *testing.T) {
 	st := newSelfTools(t)
-	st.WorkTrackingTools.Store = st.Store
+	st.WorkTrackingTools.Store = fixtureStore(st)
 	ctx := context.Background()
 
 	createResult, err := st.CallTool(ctx, "plan_create", map[string]any{
@@ -673,7 +673,7 @@ func TestSelfToolsTransport_PlanCRUD(t *testing.T) {
 		t.Fatalf("plan_create failed: %v / %s", err, createResult.Content[0].Text)
 	}
 
-	plans, err := st.Store.ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "sess-1"})
+	plans, err := fixtureStore(st).ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "sess-1"})
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("expected 1 plan after create, got %d (err=%v)", len(plans), err)
 	}
@@ -697,7 +697,7 @@ func TestSelfToolsTransport_PlanCRUD(t *testing.T) {
 		t.Fatalf("plan_delete failed: %s", delResult.Content[0].Text)
 	}
 
-	plans, _ = st.Store.ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "sess-1"})
+	plans, _ = fixtureStore(st).ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "sess-1"})
 	if len(plans) != 0 {
 		t.Fatalf("expected 0 plans after delete, got %d", len(plans))
 	}

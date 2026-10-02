@@ -23,7 +23,7 @@ func TestCallSpawnSubagent_FailFast_NoProfile_EmitsConfigEnvelope(t *testing.T) 
 	// Wire the gate against the real test store — its migrations seed
 	// the canonical internal slugs (worker, planner, hint-selector,
 	// default). "system-architect" is deliberately unregistered.
-	st.Subagent.SetProfileResolver(st.Store)
+	st.Subagent.SetProfileResolver(fixtureStore(st))
 
 	res, err := st.callSpawnSubagent(context.Background(), map[string]any{
 		"parent_session_id": "sess-1",
@@ -75,7 +75,7 @@ func TestCallSpawnSubagent_FailFast_NoProfile_EmitsConfigEnvelope(t *testing.T) 
 // canonical "fail fast instead of stall" the ticket retires.
 func TestCallSpawnSubagent_FailFast_NotExecutable_EmitsConfigEnvelope(t *testing.T) {
 	st := newSubagentTestTransport(t, subagent.EchoRunner{})
-	st.Subagent.SetProfileResolver(st.Store)
+	st.Subagent.SetProfileResolver(fixtureStore(st))
 
 	res, err := st.callSpawnSubagent(context.Background(), map[string]any{
 		"parent_session_id": "sess-1",
@@ -116,7 +116,7 @@ func TestCallSpawnSubagent_FailFast_NotExecutable_EmitsConfigEnvelope(t *testing
 // sync path doesn't trip ErrorKindEmptyReply for unrelated reasons.
 func TestCallSpawnSubagent_FailFast_TextOnlyWhitelist_Admitted(t *testing.T) {
 	st := newSubagentTestTransport(t, subagent.EchoRunner{})
-	st.Subagent.SetProfileResolver(st.Store)
+	st.Subagent.SetProfileResolver(fixtureStore(st))
 
 	res, err := st.callSpawnSubagent(context.Background(), map[string]any{
 		"parent_session_id": "sess-hint",

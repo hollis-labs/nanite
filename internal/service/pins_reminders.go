@@ -8,6 +8,7 @@ import (
 
 // PinStore is the store surface PinService uses.
 type PinStore interface {
+	CreatePinnedContent(context.Context, store.PinnedContent) error
 	ListPinnedContent(ctx context.Context, sessionID string) ([]store.PinnedContent, error)
 	DeletePinnedContent(ctx context.Context, id string) error
 	UpdatePinScope(ctx context.Context, id, scope, projectID string) error
@@ -66,4 +67,14 @@ func (s *ReminderService) UpdateScope(ctx context.Context, id, scope, projectID 
 // Get returns one reminder.
 func (s *ReminderService) Get(ctx context.Context, id string) (store.Reminder, error) {
 	return s.store.GetReminder(ctx, id)
+}
+
+// Create persists an already-scoped pin from the self-tools.
+func (s *PinService) Create(ctx context.Context, row store.PinnedContent) error {
+	return s.store.CreatePinnedContent(ctx, row)
+}
+
+// Create persists a reminder after its trigger has been validated.
+func (s *ReminderService) Create(ctx context.Context, row store.Reminder) error {
+	return s.store.CreateReminder(ctx, row)
 }

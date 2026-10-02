@@ -48,13 +48,14 @@ type UI struct {
 }
 
 type Registrations struct {
-	Slots      []Slot     `json:"slots,omitempty"`
-	Panels     []Panel    `json:"panels,omitempty"`
-	Envelopes  []Envelope `json:"envelopes,omitempty"`
-	Commands   []Command  `json:"commands,omitempty"`
-	Events     []Event    `json:"events,omitempty"`
-	CRUD       []Resource `json:"crud,omitempty"`
-	HTTPRoutes []Route    `json:"http_routes,omitempty"`
+	Slots          []Slot          `json:"slots,omitempty"`
+	Panels         []Panel         `json:"panels,omitempty"`
+	Envelopes      []Envelope      `json:"envelopes,omitempty"`
+	Commands       []Command       `json:"commands,omitempty"`
+	Events         []Event         `json:"events,omitempty"`
+	CRUD           []Resource      `json:"crud,omitempty"`
+	HTTPRoutes     []Route         `json:"http_routes,omitempty"`
+	ContextSources []ContextSource `json:"context_sources,omitempty"`
 }
 
 // Component names refer directly to named exports of UI.Bundle.
@@ -211,6 +212,17 @@ func (b Block) Validate() error {
 				return fmt.Errorf("nanite: duplicate CRUD method %q", method)
 			}
 			seen[key] = true
+		}
+	}
+	if len(b.Registers.ContextSources) > MaxContextSources {
+		return fmt.Errorf("nanite: too many context sources")
+	}
+	for _, source := range b.Registers.ContextSources {
+		if err := check("context-source", source.ID); err != nil {
+			return err
+		}
+		if len(source.ID) > 64 {
+			return fmt.Errorf("nanite: context source id exceeds limit")
 		}
 	}
 	for _, r := range b.Registers.HTTPRoutes {

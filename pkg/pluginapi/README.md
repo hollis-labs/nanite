@@ -98,3 +98,19 @@ original declared `tool_name`, `arguments` and host-provided current
 `session_id`; a child cannot choose its caller's session. Results use SDK
 `MCPCallResult`, preserving `is_error` and delivering validated envelopes to
 that session. Unload removes the plugin's tool namespace and availability.
+
+Plugins contribute retrieval sources through `nanite.registers.context_sources`
+with an `id` per source and a required `context.source` capability. Its metadata
+lists the same `source_ids` and either explicit `session_ids` or `all_sessions`.
+`include_query` separately permits user text and extracted keywords. A change to
+that scope requires approval against the new bundle. Retrieval runs in the
+existing dynamic context slot; it cannot replace instructions or cache markers.
+
+Implement the SDK `HTTPHandler` for the private `ContextFetchPath` POST operation
+and decode it with `DecodeContextRequest`. This operation travels over canonical
+SDK `http/handle`, requires no public route declaration, and has no browser URL.
+Return HTTP 200 with a JSON `ContextResponse` using `ContextProtocol`; an empty
+`items` array means no contribution. Keys must be unique, content must be valid
+UTF-8, and relevance is finite in [0,1]. Hosts assign source ownership and token
+estimates. The wire bounds each response to 1 MiB and 128 items. Hosts additionally
+apply retrieval deadlines, token budgets, scope checks and unload cancellation.

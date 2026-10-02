@@ -128,3 +128,7 @@ workspaces sharing a plugin DataDir. `DataExportReceipt.Verify` checks ownership
 workspace, row count and checksum. Import only a receipt committed by the host
 with its schema change; an orphan file left by a rolled-back transaction is not
 an import request. Keep the export after an idempotent transactional import.
+
+Request `data_exports` with explicit `all_sessions` workspace scope to use
+`QueryClient.ExportReceipts`. It lists committed receipts owned by the current
+plugin in the host database; a credential cannot choose another plugin owner.

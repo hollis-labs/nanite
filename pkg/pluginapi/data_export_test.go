@@ -116,3 +116,29 @@ func TestResolveCoreReferenceScopedWire(t *testing.T) {
 		t.Fatal("scope widened before RPC")
 	}
 }
+
+func TestDataExportScopeIsOwnerAndWorkspaceBound(t *testing.T) {
+	scope := pluginapi.QueryScope{Resources: []pluginapi.QueryResource{pluginapi.QueryDataExports}, AllSessions: true}
+	if err := scope.Validate(); err != nil || !scope.Allows(pluginapi.QueryDataExports, "") || scope.Allows(pluginapi.QueryDataExports, "session-a") {
+		t.Fatal("export scope invalid")
+	}
+	scope.AllSessions = false
+	scope.SessionIDs = []string{"session-a"}
+	if scope.Validate() == nil {
+		t.Fatal("session scope permitted workspace export")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := json.Marshal(pluginapi.QueryDataExportsData{Exports: []pluginapi.DataExportReceipt{{PluginID: "other.plugin", Path: "core-imports/example.jsonl"}}})
+		_ = json.NewEncoder(w).Encode(pluginapi.QueryResponse{Protocol: 1, Resource: pluginapi.QueryDataExports, Data: data})
+	}))
+	defer server.Close()
+	grant := queryGrant(server.URL)
+	grant.Scope = pluginapi.QueryScope{Resources: []pluginapi.QueryResource{pluginapi.QueryDataExports}, AllSessions: true}
+	client, err := pluginapi.NewQueryClient(grant, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ExportReceipts(context.Background(), 10); err == nil {
+		t.Fatal("accepted another owner's receipts")
+	}
+}

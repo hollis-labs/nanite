@@ -3,6 +3,7 @@ package pluginapi
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -224,4 +225,31 @@ func (receipt DataExportReceipt) Verify(export DataExport) error {
 		return fmt.Errorf("pluginapi: data export checksum differs")
 	}
 	return nil
+}
+
+// QueryDataExportsData lists only receipts owned by the authenticated plugin in
+// the host's current database. The credential cannot choose another owner.
+type QueryDataExportsData struct {
+	Exports []DataExportReceipt `json:"exports"`
+	More    bool                `json:"more"`
+}
+
+func (client *QueryClient) ExportReceipts(ctx context.Context, limit int) (QueryDataExportsData, error) {
+	response, err := client.Query(ctx, QueryRequest{Resource: QueryDataExports, Limit: limit})
+	if err != nil {
+		return QueryDataExportsData{}, err
+	}
+	var data QueryDataExportsData
+	if err := manifest.DecodeExtension(response.Data, &data); err != nil {
+		return QueryDataExportsData{}, err
+	}
+	if data.Exports == nil {
+		return QueryDataExportsData{}, fmt.Errorf("pluginapi: export receipts absent")
+	}
+	for _, receipt := range data.Exports {
+		if receipt.PluginID != client.grant.PluginID || !bundlePath(receipt.Path) {
+			return QueryDataExportsData{}, fmt.Errorf("pluginapi: export receipt owner or path differs")
+		}
+	}
+	return data, nil
 }

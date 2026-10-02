@@ -30,6 +30,7 @@ const (
 	QueryExecutionMetrics  QueryResource = "execution_metrics"
 	QueryContextSlots      QueryResource = "context_slots"
 	QueryMessageReferences QueryResource = "message_refs"
+	QueryDataExports       QueryResource = "data_exports"
 )
 
 const MaxQueryLimit = 100
@@ -51,7 +52,7 @@ type QueryScope struct {
 
 func knownQueryResource(resource QueryResource) bool {
 	switch resource {
-	case QuerySessions, QueryUsage, QueryExecutionMetrics, QueryContextSlots, QueryMessageReferences:
+	case QuerySessions, QueryUsage, QueryExecutionMetrics, QueryContextSlots, QueryMessageReferences, QueryDataExports:
 		return true
 	default:
 		return false
@@ -71,8 +72,8 @@ func validQuerySession(id string) bool {
 }
 
 func (scope QueryScope) Validate() error {
-	if len(scope.Resources) == 0 || len(scope.Resources) > 5 {
-		return fmt.Errorf("pluginapi: query scope requires one to five resources")
+	if len(scope.Resources) == 0 || len(scope.Resources) > 6 {
+		return fmt.Errorf("pluginapi: query scope requires one to six resources")
 	}
 	seen := make(map[QueryResource]bool)
 	for _, resource := range scope.Resources {
@@ -90,6 +91,9 @@ func (scope QueryScope) Validate() error {
 			return fmt.Errorf("pluginapi: invalid or duplicate query session")
 		}
 		ids[id] = true
+	}
+	if seen[QueryDataExports] && !scope.AllSessions {
+		return fmt.Errorf("pluginapi: data exports require explicit workspace scope")
 	}
 	if scope.IncludeContent && !seen[QueryContextSlots] {
 		return fmt.Errorf("pluginapi: include_content requires context_slots")
@@ -113,6 +117,9 @@ func DecodeQueryScope(raw json.RawMessage) (QueryScope, error) {
 func (scope QueryScope) Allows(resource QueryResource, sessionID string) bool {
 	if !knownQueryResource(resource) || !slices.Contains(scope.Resources, resource) {
 		return false
+	}
+	if resource == QueryDataExports {
+		return sessionID == "" && scope.AllSessions
 	}
 	if sessionID == "" {
 		return resource == QuerySessions

@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/plugin-sdk"
-	_ "github.com/hollis-labs/plugin-sdk"
 )
 
 // fakeHost implements plugin.Host for testing SubprocessPlugin.registerManifest.
@@ -285,24 +284,6 @@ func TestMapRPCError(t *testing.T) {
 				t.Errorf("expected code %d, got %d", tt.wantCode, pe.Code)
 			}
 		})
-	}
-}
-
-// TestRingBuffer verifies the stderr ring buffer.
-func TestRingBuffer(t *testing.T) {
-	rb := &ringBuffer{buf: make([]byte, 8)}
-
-	// Write less than capacity.
-	rb.Write([]byte("hello"))
-	if s := rb.String(); s != "hello" {
-		t.Errorf("expected 'hello', got %q", s)
-	}
-
-	// Write wrapping around.
-	rb.Write([]byte("worldXYZ"))
-	s := rb.String()
-	if len(s) != 8 {
-		t.Errorf("expected length 8, got %d: %q", len(s), s)
 	}
 }
 

@@ -41,8 +41,8 @@ func validatePluginID(id string) error {
 }
 
 // SubprocessPlugin implements plugin.Plugin by proxying all operations over
-// JSON-RPC to a plugin running as a separate process. It is backward-compatible
-// with the existing plugin system — the Host sees it as a regular Plugin.
+// JSON-RPC to a plugin running as a separate process. The Host
+// applies Nanite registrations while plugin-host owns the process lifecycle.
 type SubprocessPlugin struct {
 	mu sync.RWMutex
 
@@ -93,6 +93,7 @@ type SubprocessPlugin struct {
 // that are handed to the plugin during plugin/init). Pass "" only from
 // test harnesses that do not need per-plugin directories.
 func NewSubprocessPlugin(pluginDir string, manifestID string, config map[string]string, mgrCfg ManagerConfig) *SubprocessPlugin {
+	mgrCfg.ID = manifestID
 	mgr := NewManager(mgrCfg)
 
 	sp := &SubprocessPlugin{
@@ -180,54 +181,27 @@ func (sp *SubprocessPlugin) Status() plugin.PluginStatus {
 // Load starts the subprocess, performs the init handshake, and registers
 // all capabilities declared in the plugin's load manifest with the host.
 func (sp *SubprocessPlugin) Load(host plugin.Host) error {
-	// Use a separate timeout context for the init handshake only.
-	// The process itself must not be tied to this context — canceling it
-	// would kill the subprocess as soon as Load returns.
-	transport, err := sp.mgr.Start(host.Context())
+	initParams, err := buildInitParams(sp.pluginDir, sp.manifestID, sp.config)
+	if err != nil {
+		return fmt.Errorf("build init params: %w", err)
+	}
+	transport, err := sp.mgr.Start(host.Context(), *initParams)
 	if err != nil {
 		return fmt.Errorf("start subprocess: %w", err)
 	}
-
-	// Short-lived context for the handshake RPCs only.
-	ctx, cancel := context.WithTimeout(host.Context(), sp.mgr.cfg.StartupTimeout)
-	defer cancel()
-
-	// 2. Init handshake — send config, receive identity.
-	initParams, err := buildInitParams(sp.pluginDir, sp.manifestID, sp.config)
-	if err != nil {
-		_ = sp.mgr.Stop() // Preserve the init-parameter error; stopping the just-started process is cleanup.
-		return fmt.Errorf("build init params: %w", err)
+	process := sp.mgr.process()
+	if process == nil {
+		_ = sp.mgr.Stop()
+		return ErrSubprocessGone
 	}
-	initResult, err := CallResult[InitResult](transport, ctx, MethodInit, initParams)
-	if err != nil {
-		_ = sp.mgr.Stop() // Preserve the handshake error; stopping the failed plugin process is cleanup.
-		return fmt.Errorf("init handshake: %w", err)
-	}
-
-	// Enforce protocol version handshake. If the plugin reports a protocol
-	// version different from the host's, fail fast rather than speak a
-	// mismatched dialect and corrupt later RPC calls.
-	if err := checkProtocolVersion(initResult.Protocol); err != nil {
-		_ = sp.mgr.Stop() // Preserve the protocol mismatch; stopping the incompatible process is cleanup.
-		return err
-	}
-
+	initResult := process.Info()
+	loadResult := process.LoadInfo()
 	sp.mu.Lock()
 	sp.id = initResult.ID
 	sp.name = initResult.Name
 	sp.version = initResult.Version
 	sp.description = initResult.Description
-	sp.mu.Unlock()
-
-	// 3. Load — receive registration manifest.
-	loadResult, err := CallResult[LoadResult](transport, ctx, MethodLoad, &LoadParams{})
-	if err != nil {
-		_ = sp.mgr.Stop() // Preserve the load-handshake error; stopping the failed plugin process is cleanup.
-		return fmt.Errorf("load handshake: %w", err)
-	}
-
-	sp.mu.Lock()
-	sp.manifest = loadResult
+	sp.manifest = &loadResult
 	sp.transport = transport
 	sp.mu.Unlock()
 

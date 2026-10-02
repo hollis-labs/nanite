@@ -2,7 +2,7 @@
 // `nanite plugin new` command. Two kinds are supported:
 //
 //   - KindSubprocess: out-of-process plugins that speak JSON-RPC over
-//     stdio via plugin-sdk v0.3.0. The generated directory is a
+//     stdio via plugin-sdk v0.6.0. The generated directory is a
 //     stand-alone Go module + vite UI project with a working Makefile
 //     that produces catalog-installable archives (the BLG-20260414-008
 //     ui/ vs ui/dist/ mismatch is fixed in the generated Makefile and

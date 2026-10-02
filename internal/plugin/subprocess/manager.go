@@ -3,13 +3,11 @@ package subprocess
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"os/exec"
+	"os"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/safego"
+	pluginhost "github.com/hollis-labs/plugin-host"
 )
 
 // ProcessState tracks the current state of a subprocess.
@@ -45,6 +43,8 @@ type ManagerConfig struct {
 	Command string   // executable path
 	Args    []string // command-line arguments
 	Env     []string // explicit host-approved "KEY=VALUE" pairs; never ambient inheritance
+	Secrets []string // resolved secret values scrubbed from diagnostics
+	ID      string   // canonical manifest identity; empty only in harnesses
 	WorkDir string   // working directory (plugin directory)
 
 	// Health check interval. Zero disables periodic health checks.
@@ -81,326 +81,119 @@ func DefaultManagerConfig(command string, workDir string) ManagerConfig {
 	}
 }
 
-// Manager manages the lifecycle of a subprocess plugin process.
+// Manager translates Nanite policy into the shared plugin lifecycle driver.
+// Framing, restart, health, process groups and shutdown belong to plugin-host.
 type Manager struct {
-	cfg ManagerConfig
-
-	mu        sync.Mutex
-	state     ProcessState
-	cmd       *exec.Cmd
-	transport *Transport
-	restarts  int
-	lastStart time.Time
-	waitCh    chan error // closed after cmd.Wait() returns; single waiter
-
-	// healthCancel stops the health check goroutine.
-	healthCancel context.CancelFunc
-
-	// onCrash is called when the process crashes. The manager will attempt
-	// a restart if within limits. Set by SubprocessPlugin.
-	onCrash func(err error)
+	cfg        ManagerConfig
+	mu         sync.Mutex
+	state      ProcessState
+	supervisor *pluginhost.Supervisor
+	transport  *Transport
+	onCrash    func(error)
 }
 
-// NewManager creates a new subprocess manager.
-func NewManager(cfg ManagerConfig) *Manager {
-	return &Manager{
-		cfg:   cfg,
-		state: StateStopped,
-	}
-}
+func NewManager(cfg ManagerConfig) *Manager { return &Manager{cfg: cfg, state: StateStopped} }
 
-// Start launches the subprocess and establishes the JSON-RPC transport.
-// Returns the transport for the caller to perform the init handshake.
-func (m *Manager) Start(ctx context.Context) (*Transport, error) {
+func (m *Manager) Start(ctx context.Context, init InitParams) (*Transport, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.state == StateRunning {
-		return m.transport, nil
+	if m.supervisor != nil {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("plugin manager already started")
 	}
-
 	m.state = StateStarting
-
-	// Do not use CommandContext — that ties the process lifetime to the
-	// caller's context (often a short startup timeout). The process must
-	// outlive the startup phase; shutdown is handled by Stop().
-	cmd := exec.Command(m.cfg.Command, m.cfg.Args...)
-	if m.cfg.WorkDir != "" {
-		cmd.Dir = m.cfg.WorkDir
+	maxRestarts := m.cfg.MaxRestarts
+	if maxRestarts == 0 {
+		maxRestarts = -1
 	}
-	cmd.Env = pluginEnvironment(cmd.Environ(), m.cfg.Env)
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		m.state = StateStopped
-		return nil, fmt.Errorf("stdin pipe: %w", err)
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		m.state = StateStopped
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-
-	// Capture stderr for crash diagnostics (last 4KB).
-	stderr := &ringBuffer{buf: make([]byte, 4096)}
-	cmd.Stderr = stderr
-
-	// Process group + WaitDelay: the subprocess plugin binary may fork
-	// helper processes (language runtimes, e.g. a Node wrapper spawning
-	// its own workers). Setpgid places the whole tree in a new process
-	// group so Stop's -pid SIGKILL below reaches every descendant. The
-	// audit's finding 07 calls this out specifically for orphan
-	// grandchildren that outlive the direct child. WaitDelay bounds
-	// cmd.Wait so a grandchild holding an inherited stdout pipe cannot
-	// pin cmdWait forever.
-	configureSubprocAttr(cmd)
-	cmd.WaitDelay = 10 * time.Second
-
-	if err := cmd.Start(); err != nil {
-		m.state = StateStopped
-		return nil, fmt.Errorf("start %s: %w", m.cfg.Command, err)
-	}
-
-	transport := NewTransport(stdout, stdin)
-
-	waitCh := make(chan error, 1)
-	m.cmd = cmd
+	supervisor := pluginhost.Supervise(pluginhost.Spec{
+		ID: m.cfg.ID, Command: m.cfg.Command, Args: m.cfg.Args, Dir: m.cfg.WorkDir,
+		Env: pluginEnvironment(os.Environ(), m.cfg.Env), Init: init, Secrets: m.cfg.Secrets,
+		HandshakeTimeout: m.cfg.StartupTimeout, UnloadTimeout: m.cfg.ShutdownTimeout,
+	}, pluginhost.SuperviseOptions{
+		Policy:         pluginhost.RestartPolicy{MaxRestarts: maxRestarts, Initial: m.cfg.InitialBackoff, Max: m.cfg.MaxBackoff, Factor: m.cfg.BackoffFactor},
+		HealthInterval: m.cfg.HealthInterval, KillAfterUnhealthy: 1,
+		OnStart: func(p *pluginhost.Process) {
+			if m.cfg.ID != "" && p.Info().ID != m.cfg.ID {
+				_ = p.Kill()
+				m.recordCrash(fmt.Errorf("plugin handshake identity differs from manifest"))
+				return
+			}
+			m.mu.Lock()
+			m.state = StateRunning
+			m.mu.Unlock()
+		},
+		OnExit: func(info pluginhost.ExitInfo, restarting bool) {
+			m.recordCrash(fmt.Errorf("plugin exited: code %d, signal %s", info.Code, info.Signal))
+		},
+		OnGiveUp: m.recordCrash,
+	})
+	m.supervisor = supervisor
+	transport := &Transport{current: func() *pluginhost.Conn {
+		p := supervisor.Current()
+		if p == nil || (m.cfg.ID != "" && p.Info().ID != m.cfg.ID) {
+			return nil
+		}
+		return p.Client().Conn()
+	}}
 	m.transport = transport
-	m.lastStart = time.Now()
-	m.state = StateRunning
-	m.waitCh = waitCh
-
-	// Single goroutine calls cmd.Wait(); both waitForExit and Stop observe waitCh.
-	// Close after the single write so late readers (e.g. Stop arriving after
-	// waitForExit already drained the err) don't block forever — closed-channel
-	// reads return zero immediately. BLG-20260414-005 fixed this way: without
-	// the close, Stop on clean exit deadlocks because waitCh only buffers 1.
-	safego.Go(context.Background(), "plugin.subprocess.manager.cmdWait", func() {
-		waitCh <- cmd.Wait()
-		close(waitCh)
-	})
-	safego.Go(context.Background(), "plugin.subprocess.manager.waitForExit", func() {
-		m.waitForExit(stderr)
-	})
-
-	// Start periodic health checks if configured.
-	if m.cfg.HealthInterval > 0 {
-		hctx, hcancel := context.WithCancel(context.Background())
-		m.healthCancel = hcancel
-		safego.Go(hctx, "plugin.subprocess.manager.healthLoop", func() {
-			m.healthLoop(hctx)
-		})
+	m.mu.Unlock()
+	if err := supervisor.Start(ctx); err != nil {
+		m.recordCrash(err)
+		return nil, err
 	}
-
+	if p := supervisor.Current(); p == nil || (m.cfg.ID != "" && p.Info().ID != m.cfg.ID) {
+		_ = supervisor.Stop(context.Background())
+		return nil, fmt.Errorf("plugin handshake identity differs from manifest")
+	}
 	return transport, nil
 }
 
-// Stop gracefully shuts down the subprocess.
-func (m *Manager) Stop() error {
+func (m *Manager) recordCrash(err error) {
 	m.mu.Lock()
-	if m.state != StateRunning && m.state != StateCrashed {
-		m.mu.Unlock()
-		return nil
+	if m.state != StateStopping && m.state != StateStopped {
+		m.state = StateCrashed
 	}
-	m.state = StateStopping
-
-	// Stop health checks.
-	if m.healthCancel != nil {
-		m.healthCancel()
-		m.healthCancel = nil
-	}
-
-	cmd := m.cmd
-	transport := m.transport
-	waitCh := m.waitCh
+	callback := m.onCrash
 	m.mu.Unlock()
-
-	// Try graceful shutdown via plugin/unload.
-	if transport != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), m.cfg.ShutdownTimeout)
-		_, _ = transport.Call(ctx, MethodUnload, nil)
-		cancel()
+	if callback != nil {
+		callback(err)
 	}
+}
 
-	// Wait for the process to exit, using waitCh from Start(). The channel
-	// is closed after the single write, so reads always unblock even if
-	// waitForExit drained the err value first.
-	select {
-	case <-waitCh:
-		// Exited cleanly (or already observed by waitForExit).
-	case <-time.After(m.cfg.ShutdownTimeout):
-		// Force kill the process group.
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		// Bounded post-kill wait: if the process somehow still hasn't been
-		// reaped (e.g. grandchild pinning the pipe past cmd.WaitDelay), log
-		// and continue rather than hang the caller.
-		select {
-		case <-waitCh:
-		case <-time.After(2 * time.Second):
-			slog.Warn("subprocess: Stop did not observe process exit after SIGKILL; continuing", "command", m.cfg.Command)
-		}
+func (m *Manager) Stop() error { return m.stop(context.Background()) }
+
+func (m *Manager) stop(ctx context.Context) error {
+	m.mu.Lock()
+	supervisor := m.supervisor
+	m.state = StateStopping
+	m.mu.Unlock()
+	var err error
+	if supervisor != nil {
+		err = supervisor.Stop(ctx)
 	}
-
 	m.mu.Lock()
 	m.state = StateStopped
-	m.transport = nil
-	m.cmd = nil
 	m.mu.Unlock()
-
-	return nil
+	return err
 }
 
-// Transport returns the current transport, or nil if not running.
-func (m *Manager) Transport() *Transport {
+func (m *Manager) process() *pluginhost.Process {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.transport
+	supervisor := m.supervisor
+	m.mu.Unlock()
+	if supervisor == nil {
+		return nil
+	}
+	return supervisor.Current()
 }
 
-// State returns the current process state.
-func (m *Manager) State() ProcessState {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.state
-}
-
-// Restarts returns the number of automatic restarts performed.
+func (m *Manager) State() ProcessState { m.mu.Lock(); defer m.mu.Unlock(); return m.state }
 func (m *Manager) Restarts() int {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.restarts
-}
-
-// waitForExit monitors the subprocess and handles unexpected exits.
-func (m *Manager) waitForExit(stderr *ringBuffer) {
-	err := <-m.waitCh
-
-	m.mu.Lock()
-	if m.state == StateStopping || m.state == StateStopped {
-		// Expected shutdown — nothing to do.
-		m.mu.Unlock()
-		return
-	}
-
-	m.state = StateCrashed
-	restarts := m.restarts
-	maxRestarts := m.cfg.MaxRestarts
+	supervisor := m.supervisor
 	m.mu.Unlock()
-
-	exitErr := fmt.Errorf("plugin process exited unexpectedly: %w (stderr: %s)", err, stderr.String())
-	slog.Error("subprocess: exited unexpectedly", "err", exitErr)
-
-	if m.onCrash != nil {
-		safego.Call(context.Background(), "plugin-hook.subprocess.onCrash", func() {
-			m.onCrash(exitErr)
-		})
+	if supervisor == nil {
+		return 0
 	}
-
-	// Attempt restart if within limits.
-	if restarts < maxRestarts {
-		m.attemptRestart(restarts)
-	}
-}
-
-// attemptRestart tries to restart the subprocess with backoff.
-func (m *Manager) attemptRestart(attempt int) {
-	backoff := m.cfg.InitialBackoff
-	for i := 0; i < attempt; i++ {
-		backoff = time.Duration(float64(backoff) * m.cfg.BackoffFactor)
-		if backoff > m.cfg.MaxBackoff {
-			backoff = m.cfg.MaxBackoff
-			break
-		}
-	}
-
-	slog.Warn("subprocess: restarting", "backoff", backoff, "attempt", attempt+1, "max_restarts", m.cfg.MaxRestarts)
-	time.Sleep(backoff)
-
-	ctx, cancel := context.WithTimeout(context.Background(), m.cfg.StartupTimeout)
-	defer cancel()
-
-	_, err := m.Start(ctx)
-	if err != nil {
-		slog.Error("subprocess: restart failed", "err", err)
-		m.mu.Lock()
-		m.state = StateCrashed
-		m.mu.Unlock()
-		return
-	}
-
-	m.mu.Lock()
-	m.restarts++
-	m.mu.Unlock()
-
-	slog.Info("subprocess: restart successful", "attempt", attempt+1, "max_restarts", m.cfg.MaxRestarts)
-}
-
-// healthLoop periodically checks the subprocess health.
-func (m *Manager) healthLoop(ctx context.Context) {
-	ticker := time.NewTicker(m.cfg.HealthInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			m.healthCheck()
-		}
-	}
-}
-
-// healthCheck sends a plugin/health request and handles failures.
-func (m *Manager) healthCheck() {
-	m.mu.Lock()
-	transport := m.transport
-	state := m.state
-	m.mu.Unlock()
-
-	if state != StateRunning || transport == nil {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	result, err := CallResult[HealthResult](transport, ctx, MethodHealth, nil)
-	if err != nil {
-		slog.Warn("subprocess: health check failed", "err", err)
-		return
-	}
-
-	if !result.OK {
-		slog.Warn("subprocess: health check unhealthy", "message", result.Message)
-	}
-}
-
-// ringBuffer is a simple circular buffer for capturing stderr.
-type ringBuffer struct {
-	buf  []byte
-	pos  int
-	full bool
-}
-
-func (rb *ringBuffer) Write(p []byte) (int, error) {
-	for _, b := range p {
-		rb.buf[rb.pos] = b
-		rb.pos++
-		if rb.pos >= len(rb.buf) {
-			rb.pos = 0
-			rb.full = true
-		}
-	}
-	return len(p), nil
-}
-
-func (rb *ringBuffer) String() string {
-	if !rb.full {
-		return string(rb.buf[:rb.pos])
-	}
-	// Wrap around: data from pos..end + 0..pos
-	return string(rb.buf[rb.pos:]) + string(rb.buf[:rb.pos])
+	return supervisor.Restarts()
 }

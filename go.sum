@@ -115,8 +115,10 @@ github.com/hollis-labs/go-workflow v0.1.0 h1:Rose0BcdHySd3RT2+HTuAzD/dELPsEREKmo
 github.com/hollis-labs/go-workflow v0.1.0/go.mod h1:LfBd90u0l4/CBtIaxJPl7RLRm9JYS3XcOyYju8aNfBg=
 github.com/hollis-labs/go-worktree v0.1.0 h1:h4o+FOVVIFzbrg6eWwDj5UgzTHHh1gCgkuHrE7bwgk4=
 github.com/hollis-labs/go-worktree v0.1.0/go.mod h1:LPEfj+AU+57N5UXvHOwN/iGHsVMLAyBokokqKRvg6CA=
-github.com/hollis-labs/plugin-sdk v0.4.0 h1:e7LTkwJQL+n9kRf9IUAUCUeydS11XIdjGIfFjP2PyBg=
-github.com/hollis-labs/plugin-sdk v0.4.0/go.mod h1:+FcTow9tco3OoINjc5LSCkm8RZzWSLNG1tTCzLSQuHs=
+github.com/hollis-labs/plugin-host v0.1.1 h1:vI2/ckYY338YjCMnBYJjtfldh3Zmn790Bxz9eymlUS4=
+github.com/hollis-labs/plugin-host v0.1.1/go.mod h1:BXPfm1aII3cz/gw0hn3kXL31InRddoRGnvmJXNZv3G8=
+github.com/hollis-labs/plugin-sdk v0.6.0 h1:4ZzVEgi57S/ju1hVG+z9Cb66rrx7uOT97capmv9GYPs=
+github.com/hollis-labs/plugin-sdk v0.6.0/go.mod h1:GW8/S59GT15wKNQu62XvGArq7yLsceNDEa5TA3wFud0=
 github.com/hollis-labs/tesseract v0.10.0 h1:KpuwV5ZR2QeA5WwvcOP0D1nY87L+TJO4qjJdMjJ4kQ8=
 github.com/hollis-labs/tesseract v0.10.0/go.mod h1:cWm1MnBZVTTGiASyMwVOv9XKMak5MnlC+3czdBBibfU=
 github.com/invopop/jsonschema v0.14.0 h1:MHQqLhvpNUZfw+hM3AZDYK7jxO8FZoQeQM77g8iyZjg=

@@ -64,7 +64,7 @@ func postToolCall(t *testing.T, a *API, body any) *httptest.ResponseRecorder {
 // is refused — the endpoint runs arbitrary self-tools and is internal-only.
 func TestHandleSelfToolCall_RejectsNonLoopback(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
+	a.SetSelfTools(service.NewSelfToolsTransport(s))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/tools/call", bytes.NewReader([]byte(`{"name":"todo_create"}`)))
 	req.RemoteAddr = "203.0.113.7:40000" // non-loopback
@@ -89,7 +89,7 @@ func TestHandleSelfToolCall_Unavailable(t *testing.T) {
 // TestHandleSelfToolCall_MissingName pins the 400 for a nameless request.
 func TestHandleSelfToolCall_MissingName(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
+	a.SetSelfTools(service.NewSelfToolsTransport(s))
 	rec := postToolCall(t, a, map[string]any{"args": map[string]any{}})
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
@@ -102,7 +102,7 @@ func TestHandleSelfToolCall_MissingName(t *testing.T) {
 // failure. This proves the routing without depending on any wired service.
 func TestHandleSelfToolCall_DispatchesUnknownTool(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
+	a.SetSelfTools(service.NewSelfToolsTransport(s))
 
 	rec := postToolCall(t, a, map[string]any{"name": "definitely_not_a_real_tool"})
 	if rec.Code != http.StatusOK {
@@ -146,7 +146,7 @@ func (r *recordingPanelSink) BroadcastPanelSignal(sessionID, signalType, payload
 // to this fully-wired transport).
 func TestHandleSelfToolCall_PanelOpenReachesWiredSink(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	st := selftools.NewSelfToolsTransport(s)
+	st := service.NewSelfToolsTransport(s)
 	sink := &recordingPanelSink{}
 	st.PresentationTools.SignalSink = sink
 	a.SetSelfTools(st)
@@ -320,7 +320,7 @@ func TestHandleSelfToolCall_CardShowBroadcastsEnvelope(t *testing.T) {
 	envelope.SetupForTesting()
 
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
+	a.SetSelfTools(service.NewSelfToolsTransport(s))
 
 	const sessionID = "sess-cli-cardshow"
 	const msgID = "msg-cli-cardshow"
@@ -379,7 +379,7 @@ func TestHandleSelfToolCall_CardShowBroadcastsEnvelope(t *testing.T) {
 // TodoStore and a session in context) succeeds through it.
 func TestHandleSelfToolCall_StampsSessionAndDispatches(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	st := selftools.NewSelfToolsTransport(s)
+	st := service.NewSelfToolsTransport(s)
 	st.WorkTrackingTools = selftools.NewWorkTrackingTools(s, s, nil)
 	a.SetSelfTools(st)
 

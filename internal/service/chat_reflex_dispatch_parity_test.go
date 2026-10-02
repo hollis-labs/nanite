@@ -12,7 +12,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
@@ -297,7 +296,7 @@ func runSelftoolsReflexDispatchParity(t *testing.T, st *store.Store, sessionID, 
 	t.Helper()
 	assertParityClassification(t, message)
 	spawner := &reflexDispatchParitySpawner{}
-	transport := selftools.NewSelfToolsTransport(st)
+	transport := NewSelfToolsTransport(st)
 	transport.Dispatch = spawner
 	ctx := mcp.WithCallerProfile(mcp.WithSessionID(context.Background(), sessionID), agentID)
 	res, err := transport.CallTool(ctx, "task_execute", map[string]any{

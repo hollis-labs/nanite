@@ -468,7 +468,7 @@ func TestCallSkillGet_ForkDependencyWithoutForkRole_ClearError(t *testing.T) {
 // newSkillGetTransport builds a transport over idx the way production does,
 // with the given vendor (nil allowed).
 func newSkillGetTransport(idx *store.Store, vendor *skillvendor.Store) *SelfToolsTransport {
-	st := NewSelfToolsTransport(idx)
+	st := newTestSelfToolsTransport(idx)
 	st.SkillVendor = vendor
 	return st
 }

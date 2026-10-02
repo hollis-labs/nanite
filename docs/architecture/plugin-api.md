@@ -136,3 +136,20 @@ failure and host shutdown revoke it; revocation cancels active read leases.
 Optional query requests are omitted from init grants when the host URL is
 unavailable, while required requests refuse startup. This route's authority is
 separate from the user's broader loopback tool API and process privileges.
+
+Agent tools are declared in the common manifest's `tools` array. The host
+validates the public `read`, `write` and `destructive` effect vocabulary before
+review; unknown effects refuse the bundle. Its MCP adapter discovers accepted
+names, schemas and behavior hints without consulting subprocess discovery.
+Canonical SDK calls carry the original declared tool name and the current
+host session, independently of arguments. Validated envelopes use the same
+session's stream sink. Unload removes the namespace and marks durable catalog
+rows unavailable, preserving IDs and existing agent grants across upgrades.
+
+`nanite.load_type` supplies a manifest default. Persisted user preferences take
+precedence and publish to the live manager with serialized settings writes.
+Opt-in tools remain in the permission catalog and preferences UI but are hidden
+from selection and server discovery, and both execution paths refuse them until
+explicitly enabled. Enabling visibility does not grant agent roster membership
+or bypass the execution permission engine. Conflicting declared names refuse
+registration before any namespace mutation.

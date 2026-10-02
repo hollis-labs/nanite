@@ -1596,7 +1596,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Loops:               NewLoopService(cfg.Store),
 		Bookmarks:           NewBookmarkService(cfg.Store),
 		Schedules:           NewScheduleService(cfg.Store),
-		Settings:            NewUserSettingsService(cfg.Store),
+		Settings:            newUserSettingsWithToolLoads(cfg.Store, cfg.MCP),
 		MCPServers:          newContainerMCPServerService(cfg.Store, cfg.MCP),
 		Roles:               NewRoleService(cfg.Store),
 		Projects:            NewProjectService(cfg.Store, cfg.Store),

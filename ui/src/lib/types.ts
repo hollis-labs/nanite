@@ -2324,6 +2324,7 @@ export interface PluginInstallReview {
   secrets: Array<{ name: string; environment?: string; required: boolean }>;
   environment: string[];
   tools: Array<{ name: string; effect: string }>;
+  tool_load_type?: "auto" | "opt-in";
 }
 
 export interface PluginInstallReviewResponse {

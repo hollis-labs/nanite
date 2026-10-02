@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 
+	"github.com/hollis-labs/nanite/internal/mcp"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -29,15 +31,31 @@ type userSettingsStore interface {
 // and merge, and the dev-mode check. Store errors are returned unwrapped,
 // because the API echoes some of them verbatim.
 type UserSettingsService struct {
-	store userSettingsStore
+	store        userSettingsStore
+	toolLoadSink func(map[string]string)
+	toolLoadsMu  sync.Mutex // serialize persistence and live preference publication
 }
 
 func NewUserSettingsService(st userSettingsStore) *UserSettingsService {
 	return &UserSettingsService{store: st}
 }
 
+// newUserSettingsWithToolLoads binds the persisted user layer once at startup.
+func newUserSettingsWithToolLoads(st userSettingsStore, manager *mcp.Manager) *UserSettingsService {
+	service := NewUserSettingsService(st)
+	if manager != nil {
+		service.toolLoadSink = manager.SetToolLoadPreferences
+		if preferences, err := service.ToolLoadPreferences(context.Background()); err == nil {
+			service.toolLoadSink(preferences)
+		}
+	}
+	return service
+}
+
 // Get returns the singleton settings row.
 func (s *UserSettingsService) Get(ctx context.Context) (*store.UserSettings, error) {
+	s.toolLoadsMu.Lock()
+	defer s.toolLoadsMu.Unlock()
 	return s.store.GetUserSettings(ctx)
 }
 
@@ -48,7 +66,15 @@ func (s *UserSettingsService) AdminPreferences(ctx context.Context) (*store.Admi
 
 // Update writes the whole settings row.
 func (s *UserSettingsService) Update(ctx context.Context, us *store.UserSettings) error {
-	return s.store.UpdateUserSettings(ctx, us)
+	s.toolLoadsMu.Lock()
+	defer s.toolLoadsMu.Unlock()
+	if err := s.store.UpdateUserSettings(ctx, us); err != nil {
+		return err
+	}
+	if s.toolLoadSink != nil {
+		s.toolLoadSink(us.ToolLoadPreferences)
+	}
+	return nil
 }
 
 // SettingsValidationError reports a caller-supplied value the settings rules
@@ -107,6 +133,8 @@ func ValidateEmbeddingMode(v string) error {
 // ToolLoadPreferences returns the user's per-tool load-type overrides. The
 // map is nil when none are set.
 func (s *UserSettingsService) ToolLoadPreferences(ctx context.Context) (map[string]string, error) {
+	s.toolLoadsMu.Lock()
+	defer s.toolLoadsMu.Unlock()
 	us, err := s.store.GetUserSettings(ctx)
 	if err != nil {
 		return nil, err
@@ -117,9 +145,11 @@ func (s *UserSettingsService) ToolLoadPreferences(ctx context.Context) (map[stri
 // UpdateToolLoadPreferences merges updates into the stored overrides and
 // returns the result. Each value must be "auto", "opt-in", or "" to remove
 // that tool's override; the values are checked before the row is read, and
-// an invalid one is a *SettingsValidationError. Read-then-write, not one
-// transaction.
+// an invalid one is a *SettingsValidationError. Service writes serialize the
+// read/merge/persist/publication sequence so live filtering follows persistence.
 func (s *UserSettingsService) UpdateToolLoadPreferences(ctx context.Context, updates map[string]string) (map[string]string, error) {
+	s.toolLoadsMu.Lock()
+	defer s.toolLoadsMu.Unlock()
 	for tool, lt := range updates {
 		if lt != "" && lt != string(pluginpkg.LoadTypeAuto) && lt != string(pluginpkg.LoadTypeOptIn) {
 			return nil, settingsInvalid("invalid load_type for tool " + tool + ": must be \"auto\", \"opt-in\", or \"\" (remove)")
@@ -142,6 +172,9 @@ func (s *UserSettingsService) UpdateToolLoadPreferences(ctx context.Context, upd
 	}
 	if err := s.store.UpdateUserSettings(ctx, us); err != nil {
 		return nil, err
+	}
+	if s.toolLoadSink != nil {
+		s.toolLoadSink(us.ToolLoadPreferences)
 	}
 	return us.ToolLoadPreferences, nil
 }

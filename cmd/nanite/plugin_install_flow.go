@@ -255,6 +255,9 @@ func reviewPluginInstall(ctx context.Context, review plugin.InstallReview, previ
 	for _, environment := range review.Environment {
 		fmt.Printf("Config environment: %s\n", environment)
 	}
+	if len(review.Tools) > 0 {
+		fmt.Printf("Tool loading: %s\n", review.ToolLoadType.Effective())
+	}
 	for _, tool := range review.Tools {
 		fmt.Printf("Tool: %s (effect: %s)\n", tool.Name, tool.Effect)
 	}
@@ -271,6 +274,9 @@ func reviewPluginInstall(ctx context.Context, review plugin.InstallReview, previ
 
 func installReviewDeclarations(review plugin.InstallReview) map[string]string {
 	declarations := map[string]string{"Executable": fmt.Sprintf("%s %q", review.Entrypoint, review.Arguments)}
+	if len(review.Tools) > 0 {
+		declarations["Tool loading"] = string(review.ToolLoadType.Effective())
+	}
 	for _, capability := range review.Capabilities {
 		declarations["Capability "+capability.Name] = fmt.Sprintf("%s (optional: %t); requested access: %s", capability.Reason, capability.Optional, compactCapabilityMetadata(capability.Metadata))
 	}

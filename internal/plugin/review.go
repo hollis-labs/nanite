@@ -37,6 +37,7 @@ type InstallReview struct {
 	Secrets      []ReviewSecret                 `json:"secrets"`
 	Environment  []string                       `json:"environment"`
 	Tools        []ReviewTool                   `json:"tools"`
+	ToolLoadType LoadType                       `json:"tool_load_type,omitempty"`
 }
 
 type ReviewSecret struct {
@@ -75,6 +76,9 @@ func BuildInstallReview(ctx context.Context, directory string) (InstallReview, e
 		return InstallReview{}, err
 	}
 	common := declared.Shared
+	if err := pluginapi.ValidateAgentTools(common.Tools); err != nil {
+		return InstallReview{}, err
+	}
 	review := InstallReview{ID: common.ID, Name: common.Name, Version: common.Version, Entrypoint: common.Entrypoint.Command, Arguments: append([]string{}, common.Entrypoint.Args...), BundleDigest: digest, Capabilities: []sdkprocess.CapabilityRequest{}, Secrets: []ReviewSecret{}, Environment: []string{}, Tools: []ReviewTool{}}
 	for _, request := range common.Capabilities {
 		if _, known := capabilityEnvironment[request.Name]; !known && !request.Optional {
@@ -94,6 +98,9 @@ func BuildInstallReview(ctx context.Context, directory string) (InstallReview, e
 		if field.Env != "" {
 			review.Environment = append(review.Environment, field.Env)
 		}
+	}
+	if len(common.Tools) > 0 {
+		review.ToolLoadType = declared.LoadType
 	}
 	for _, tool := range common.Tools {
 		review.Tools = append(review.Tools, ReviewTool{Name: tool.Name, Effect: tool.Effect})

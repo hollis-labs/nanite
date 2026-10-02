@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	goplugin "github.com/hollis-labs/plugin-sdk"
+	sdkmanifest "github.com/hollis-labs/plugin-sdk/manifest"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )
@@ -325,6 +326,25 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 				host.logger.Warn("envelope schema load failed",
 					"plugin", pluginID, "type", e.Type, "schema", schemaFile, "error", err.Error())
 			}
+		}
+	}
+
+	if manifest.Shared != nil && len(manifest.Shared.Tools) != 0 {
+		child, ok := p.(*subprocess.SubprocessPlugin)
+		if !ok {
+			return fmt.Errorf("manifest agent tools require a subprocess")
+		}
+		host.mu.RLock()
+		registrar := host.mcpRegistrar
+		host.mu.RUnlock()
+		toolRegistrar, ok := registrar.(interface {
+			AddPluginTools(string, []sdkmanifest.Tool, string, *subprocess.SubprocessPlugin, subprocess.EnvelopeConsumer) error
+		})
+		if !ok {
+			return fmt.Errorf("host agent-tool registration is unavailable")
+		}
+		if err := toolRegistrar.AddPluginTools(pluginID, manifest.Shared.Tools, string(manifest.LoadType), child, host.envelopeConsumerSnapshot()); err != nil {
+			return err
 		}
 	}
 

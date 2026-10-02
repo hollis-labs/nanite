@@ -40,10 +40,10 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Plugin read queries authenticate their connection bearer at the core
+		// Plugin host operations authenticate their connection bearer at the core
 		// handler. Requiring Basic Auth here would disclose the user's broader
 		// credentials to plugins and prevent their scoped grant from working.
-		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/plugin-host/query/") {
+		if (r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/plugin-host/query/")) || (r.Method == http.MethodPost && r.URL.Path == "/api/plugin-host/durable-wake") {
 			next.ServeHTTP(w, r)
 			return
 		}

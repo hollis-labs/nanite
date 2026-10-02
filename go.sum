@@ -131,6 +131,8 @@ github.com/hollis-labs/nanite/pkg/pluginapi v0.1.5 h1:rw5VCMx39q0gLr+WYrL/TW6Lc/
 github.com/hollis-labs/nanite/pkg/pluginapi v0.1.5/go.mod h1:mXUGNw6ZwTRxaam/uTIOdwlj4Jx5PCSX6C4L/OaXnaA=
 github.com/hollis-labs/nanite/pkg/pluginapi v0.1.6 h1:5fGqF39hX09qRE/BoSlQndAwQP/y6xIlpFG+3tTk2nA=
 github.com/hollis-labs/nanite/pkg/pluginapi v0.1.6/go.mod h1:mXUGNw6ZwTRxaam/uTIOdwlj4Jx5PCSX6C4L/OaXnaA=
+github.com/hollis-labs/nanite/pkg/pluginapi v0.1.7 h1:oBpzwTVEtWxktgYKMKRa68UPfuOQNtifuiCd46/fM90=
+github.com/hollis-labs/nanite/pkg/pluginapi v0.1.7/go.mod h1:mXUGNw6ZwTRxaam/uTIOdwlj4Jx5PCSX6C4L/OaXnaA=
 github.com/hollis-labs/plugin-host v0.1.1 h1:vI2/ckYY338YjCMnBYJjtfldh3Zmn790Bxz9eymlUS4=
 github.com/hollis-labs/plugin-host v0.1.1/go.mod h1:BXPfm1aII3cz/gw0hn3kXL31InRddoRGnvmJXNZv3G8=
 github.com/hollis-labs/plugin-host v0.1.2 h1:ZZ+JR8PqaN9eDxgvXhCrsV8UTu9FeljUuhr7aJ/rVtA=

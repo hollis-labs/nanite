@@ -100,6 +100,7 @@ type Host struct {
 	reflexSeeds    ReflexSeedRegistrar
 	queryURL       string
 	queryGrants    map[[32]byte]hostQueryGrant
+	wakeGrants     map[[32]byte]hostDurableWakeGrant
 
 	// lifecycleMu serializes complete load/unload transactions. h.mu still
 	// protects registry state and is deliberately released around plugin

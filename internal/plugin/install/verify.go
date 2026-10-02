@@ -45,6 +45,9 @@ func (v *ChecksumVerifier) Verify(ctx context.Context, h Handle) error {
 	if !info.Mode().IsRegular() {
 		return errors.New("verify: archive must be a regular file")
 	}
+	if h.ExpectedSize > 0 && info.Size() != h.ExpectedSize {
+		return fmt.Errorf("verify: archive size %d differs from catalog %d", info.Size(), h.ExpectedSize)
+	}
 	if info.Size() > max {
 		return fmt.Errorf("verify: archive size %d exceeds cap %d", info.Size(), max)
 	}

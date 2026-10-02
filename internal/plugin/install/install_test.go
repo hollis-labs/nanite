@@ -2,6 +2,8 @@ package install
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -476,5 +478,48 @@ func TestInstaller_NoArchiveInFinalDir(t *testing.T) {
 	if len(foundArchives) > 0 {
 		t.Errorf("found %d .tar.gz file(s) in final plugin directory %q: %v",
 			len(foundArchives), finalDir, foundArchives)
+	}
+}
+
+func TestInstaller_ManifestBindingProtectsExistingInstall(t *testing.T) {
+	for _, kind := range []string{"different identity", "different manifest digest"} {
+		t.Run(kind, func(t *testing.T) {
+			source := setupPlugin(t, validManifest(), map[string]string{"bin/giphy": "#!/bin/sh\n", "envelopes/giphy-modal.schema.json": `{"type":"object"}`})
+			root := t.TempDir()
+			target := filepath.Join(root, "plugins", "giphy")
+			if err := os.MkdirAll(target, 0700); err != nil {
+				t.Fatal(err)
+			}
+			sentinel := filepath.Join(target, "operator-data.txt")
+			if err := os.WriteFile(sentinel, []byte("preserve me"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(filepath.Join(source, "plugin.yaml")) // #nosec G304 -- file inside setupPlugin t.TempDir fixture.
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected := sha256.Sum256(raw)
+			if kind == "different identity" {
+				raw = []byte(strings.Replace(string(raw), `"id":"giphy"`, `"id":"another"`, 1))
+				if writeErr := os.WriteFile(filepath.Join(source, "plugin.yaml"), raw, 0600); writeErr != nil { // #nosec G703 -- mutates only setupPlugin t.TempDir fixture.
+					t.Fatal(writeErr)
+				}
+			} else {
+				expected[0] ^= 1
+			}
+			loader := &fakeLoader{}
+			inst, _ := NewInstaller(BuildOptions{Extractor: &TarGzExtractor{}, Loader: loader, StagingRoot: filepath.Join(root, "staging"), PluginsRoot: filepath.Join(root, "plugins")})
+			_, err = inst.Install(context.Background(), &fakeSource{id: "giphy", handle: Handle{Kind: "directory", Path: source, ExpectedManifestSHA256: hex.EncodeToString(expected[:])}})
+			if err == nil {
+				t.Fatal("mismatched bundle installed")
+			}
+			preserved, readErr := os.ReadFile(sentinel) // #nosec G304 -- sentinel inside t.TempDir proves existing data survived.
+			if readErr != nil || string(preserved) != "preserve me" {
+				t.Fatalf("existing installation changed: %s %v", preserved, readErr)
+			}
+			if loader.called {
+				t.Fatal("loader ran before identity/digest validation")
+			}
+		})
 	}
 }

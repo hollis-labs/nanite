@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	goplugin "github.com/hollis-labs/plugin-sdk"
@@ -117,15 +118,7 @@ func TestLoadDiscovered_SkipsDisabledSubprocess(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `schema_version: 1
-name: ` + name + `
-id: ` + name + `
-version: 0.1.0
-description: disabled subprocess plugin, never actually spawned
-protocol: 1
-runtime: subprocess
-entrypoint: /nonexistent/path/definitely-not-a-real-binary
-`
+	manifest := strings.ReplaceAll(sharedManifestBytes(t), "example.plugin", name)
 	if err := os.WriteFile(filepath.Join(dir, "plugin.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}

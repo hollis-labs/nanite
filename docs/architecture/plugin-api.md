@@ -39,3 +39,22 @@ skipped declarations without sending a second load call.
 The nested module has its own CI gate because the application's root Go test
 pattern excludes nested modules. Changes to the application loader and its
 security boundary must be verified separately when it adopts the contract.
+
+External plugin declarations are generated with `plugin-sdk/manifest.Encode`.
+`plugin.yaml` contains schema-v2 JSON (valid YAML), with host compatibility
+against `pluginapi.Version`. General YAML and legacy Nanite declarations are
+refused at discovery, installation and reload. Execution uses one executable
+inside the bundle and literal arguments; PATH commands and symlink escapes are
+refused.
+
+Catalogs use the released `plugins-catalog` decoder. Canonical `id` identifies
+an install, while `name` is presentation. The host selects the current OS and
+architecture archive; entries without a matching archive can be browsed but
+cannot be installed. SHA-256 checks cover both downloaded archive bytes and
+extracted manifest bytes, and installation checks the declared archive size and
+plugin ID before replacing an existing directory. Checksums establish byte
+integrity, not publisher identity.
+
+Browser bundles are served under `/api/plugins/<id>/bundle/` using the declared
+bundle-relative paths. Envelope schemas use `/api/plugins/<id>/schema/<type>`;
+only the corresponding declared schema file can be read through that route.

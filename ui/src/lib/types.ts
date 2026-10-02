@@ -2312,15 +2312,16 @@ export interface CatalogSource {
 }
 
 export interface CatalogBrowseEntry {
+  id: string;
   name: string;
+  available: boolean;
+  manifest_sha256: string;
+  archive_size?: number;
   version: string;
   description: string;
-  author?: string;
   repo?: string;
   archive_url: string;
   checksum?: string;
-  signature?: string;
-  compat?: string;
   runtime?: string;
   tags?: string[];
   source_id: string;

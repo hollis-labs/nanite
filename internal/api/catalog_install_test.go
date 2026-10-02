@@ -15,9 +15,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/plugin-sdk/manifest"
+	sharedcatalog "github.com/hollis-labs/plugins-catalog"
 
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/install"
@@ -73,23 +77,22 @@ func addCatalogSource(t *testing.T, cs *catalogTestState, srv *httptest.Server) 
 	return src
 }
 
-// minimalCatalogPluginManifest returns a plugin.yaml that satisfies the v1
-// JSON Schema's required fields (schema_version, id, name, version,
-// description, author, license, runtime, protocol, nanite_compat) with a
-// builtin runtime so no entrypoint/registers are needed.
 func minimalCatalogPluginManifest(id string) string {
-	return fmt.Sprintf(`schema_version: 1
-id: %s
-name: Test Plugin
-version: 1.0.0
-description: test plugin
-author: Acme
-license: MIT
-runtime: builtin
-protocol: 1
-nanite_compat:
-  min: "0.9.0"
-`, id)
+	return fmt.Sprintf(`{"schema_version":2,"id":%q,"name":"Test Plugin","version":"1.0.0","description":"test plugin","license":"MIT","runtime":"subprocess","protocol":1,"entrypoint":{"command":"plugin"},"hosts":{"nanite":{"min":"0.1.0"}},"nanite":{}}`, id)
+}
+
+func catalogInstallFixture(t *testing.T, id, url, checksum string, size int64) string {
+	t.Helper()
+	doc := sharedcatalog.Document{SchemaVersion: 2, CatalogVersion: "0.1.0", GeneratedAt: "2026-10-01T00:00:00Z", Plugins: []sharedcatalog.Plugin{}}
+	if id != "" {
+		digest := sha256.Sum256([]byte(minimalCatalogPluginManifest(id)))
+		doc.Plugins = append(doc.Plugins, sharedcatalog.Plugin{ID: id, Name: "Test Plugin", Version: "1.0.0", Hosts: map[string]manifest.HostRange{"nanite": {Min: "0.1.0"}}, Source: sharedcatalog.Source{Type: "git", Repo: "https://github.com/example/plugins", Tag: "v1.0.0"}, Archives: []sharedcatalog.Archive{{Platform: runtime.GOOS + "-" + runtime.GOARCH, URL: url, SHA256: checksum, Size: size}}, ManifestSHA256: hex.EncodeToString(digest[:]), Directory: sharedcatalog.Directory{Status: "active"}})
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }
 
 // TestHandleCatalogInstall_BlocksPrivateArchiveDestination is GO-API-003's
@@ -110,16 +113,12 @@ func TestHandleCatalogInstall_BlocksPrivateArchiveDestination(t *testing.T) {
 		},
 	}
 
-	catalogYAML := `version: 1
-plugins:
-  - name: imdsplug
-    version: "1.0.0"
-    description: malicious archive destination
-    archive_url: http://release.example/imdsplug.tar.gz
-`
+	catalogYAML := catalogInstallFixture(t, "imdsplug", "https://release.example/imdsplug.tar.gz", strings.Repeat("a", 64), 123)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(catalogYAML)) })
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
+	cs.fetcher = naniteplugin.NewCatalogFetcherWithClient(5*time.Minute, filepath.Join(cs.pluginsDir, ".cache"), srv.Client())
+	cs.archiveDownloader.Client = srv.Client()
 	defer srv.Close()
 	addCatalogSource(t, cs, srv)
 
@@ -150,11 +149,16 @@ plugins:
 // own TarGzExtractor contract).
 func buildTarGzArchive(t *testing.T, files map[string]string) []byte {
 	t.Helper()
+	for name := range files {
+		if filepath.Base(name) == "plugin.yaml" {
+			files[filepath.Join(filepath.Dir(name), "plugin")] = "#!/bin/sh\n"
+		}
+	}
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	for name, content := range files {
-		if err := tw.WriteHeader(&tar.Header{Name: name, Size: int64(len(content)), Mode: 0644}); err != nil {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Size: int64(len(content)), Mode: 0755}); err != nil {
 			t.Fatalf("tar header %s: %v", name, err)
 		}
 		if _, err := tw.Write([]byte(content)); err != nil {
@@ -174,10 +178,17 @@ func buildTarGzArchive(t *testing.T, files map[string]string) []byte {
 // archive root.
 func buildZipArchive(t *testing.T, files map[string]string) []byte {
 	t.Helper()
+	for name := range files {
+		if filepath.Base(name) == "plugin.yaml" {
+			files[filepath.Join(filepath.Dir(name), "plugin")] = "#!/bin/sh\n"
+		}
+	}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for name, content := range files {
-		w, err := zw.Create(name)
+		header := &zip.FileHeader{Name: name, Method: zip.Deflate}
+		header.SetMode(0755)
+		w, err := zw.CreateHeader(header)
 		if err != nil {
 			t.Fatalf("zip create %s: %v", name, err)
 		}
@@ -198,16 +209,12 @@ func buildZipArchive(t *testing.T, files map[string]string) []byte {
 func TestHandleCatalogInstall_PathTraversal(t *testing.T) {
 	cs, pluginsDir := setupCatalogTestState(t)
 
-	catalogYAML := `version: 1
-plugins:
-  - name: "../../etc/passwd"
-    version: "1.0.0"
-    description: malicious entry
-    archive_url: http://example.invalid/x.tar.gz
-`
+	catalogYAML := catalogInstallFixture(t, "../../etc/passwd", "https://example.invalid/x.tar.gz", strings.Repeat("a", 64), 123)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
+	cs.fetcher = naniteplugin.NewCatalogFetcherWithClient(5*time.Minute, filepath.Join(cs.pluginsDir, ".cache"), srv.Client())
+	cs.archiveDownloader.Client = srv.Client()
 	defer srv.Close()
 
 	addCatalogSource(t, cs, srv)
@@ -256,17 +263,12 @@ func TestHandleCatalogInstall_Success_TarGz(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/testplug.tar.gz", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
+	cs.fetcher = naniteplugin.NewCatalogFetcherWithClient(5*time.Minute, filepath.Join(cs.pluginsDir, ".cache"), srv.Client())
+	cs.archiveDownloader.Client = srv.Client()
 	defer srv.Close()
 
-	catalogYAML := fmt.Sprintf(`version: 1
-plugins:
-  - name: testplug
-    version: "1.0.0"
-    description: test plugin
-    archive_url: %s/testplug.tar.gz
-    checksum: "sha256:%s"
-`, srv.URL, shaHex)
+	catalogYAML := catalogInstallFixture(t, "testplug", srv.URL+"/testplug.tar.gz", shaHex, int64(len(archive)))
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
 
 	addCatalogSource(t, cs, srv)
@@ -306,17 +308,12 @@ func TestHandleCatalogInstall_Success_Zip(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/zipplug.zip", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
+	cs.fetcher = naniteplugin.NewCatalogFetcherWithClient(5*time.Minute, filepath.Join(cs.pluginsDir, ".cache"), srv.Client())
+	cs.archiveDownloader.Client = srv.Client()
 	defer srv.Close()
 
-	catalogYAML := fmt.Sprintf(`version: 1
-plugins:
-  - name: zipplug
-    version: "1.0.0"
-    description: test zip plugin
-    archive_url: %s/zipplug.zip
-    checksum: "sha256:%s"
-`, srv.URL, shaHex)
+	catalogYAML := catalogInstallFixture(t, "zipplug", srv.URL+"/zipplug.zip", shaHex, int64(len(archive)))
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
 
 	addCatalogSource(t, cs, srv)
@@ -360,17 +357,12 @@ func TestHandleCatalogInstall_Success_WrapperDirectory(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/wrapplug.zip", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
+	cs.fetcher = naniteplugin.NewCatalogFetcherWithClient(5*time.Minute, filepath.Join(cs.pluginsDir, ".cache"), srv.Client())
+	cs.archiveDownloader.Client = srv.Client()
 	defer srv.Close()
 
-	catalogYAML := fmt.Sprintf(`version: 1
-plugins:
-  - name: wrapplug
-    version: "1.0.0"
-    description: test wrapper-directory plugin
-    archive_url: %s/wrapplug.zip
-    checksum: "sha256:%s"
-`, srv.URL, shaHex)
+	catalogYAML := catalogInstallFixture(t, "wrapplug", srv.URL+"/wrapplug.zip", shaHex, int64(len(archive)))
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
 
 	addCatalogSource(t, cs, srv)
@@ -416,16 +408,12 @@ func TestHandleCatalogInstall_AlreadyInstalled(t *testing.T) {
 	cs, pluginsDir := setupCatalogTestState(t)
 	createTestPlugin(t, pluginsDir, "testplug")
 
-	catalogYAML := `version: 1
-plugins:
-  - name: testplug
-    version: "1.0.0"
-    description: test plugin
-    archive_url: http://example.invalid/testplug.tar.gz
-`
+	catalogYAML := catalogInstallFixture(t, "testplug", "https://example.invalid/testplug.tar.gz", strings.Repeat("a", 64), 123)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
+	cs.fetcher = naniteplugin.NewCatalogFetcherWithClient(5*time.Minute, filepath.Join(cs.pluginsDir, ".cache"), srv.Client())
+	cs.archiveDownloader.Client = srv.Client()
 	defer srv.Close()
 
 	addCatalogSource(t, cs, srv)
@@ -448,12 +436,12 @@ plugins:
 func TestHandleCatalogInstall_NotFound(t *testing.T) {
 	cs, _ := setupCatalogTestState(t)
 
-	catalogYAML := `version: 1
-plugins: []
-`
+	catalogYAML := catalogInstallFixture(t, "", "", "", 0)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
+	cs.fetcher = naniteplugin.NewCatalogFetcherWithClient(5*time.Minute, filepath.Join(cs.pluginsDir, ".cache"), srv.Client())
+	cs.archiveDownloader.Client = srv.Client()
 	defer srv.Close()
 
 	addCatalogSource(t, cs, srv)
@@ -480,17 +468,12 @@ func TestHandleCatalogInstall_WrongChecksum(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/testplug.tar.gz", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
+	cs.fetcher = naniteplugin.NewCatalogFetcherWithClient(5*time.Minute, filepath.Join(cs.pluginsDir, ".cache"), srv.Client())
+	cs.archiveDownloader.Client = srv.Client()
 	defer srv.Close()
 
-	catalogYAML := fmt.Sprintf(`version: 1
-plugins:
-  - name: testplug
-    version: "1.0.0"
-    description: test plugin
-    archive_url: %s/testplug.tar.gz
-    checksum: "sha256:%s"
-`, srv.URL, shaHex)
+	catalogYAML := catalogInstallFixture(t, "testplug", srv.URL+"/testplug.tar.gz", shaHex, int64(len(archive)))
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
 
 	addCatalogSource(t, cs, srv)

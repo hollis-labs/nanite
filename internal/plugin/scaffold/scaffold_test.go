@@ -75,36 +75,14 @@ func TestRun_Subprocess_ManifestValid(t *testing.T) {
 		t.Fatalf("read plugin.yaml: %v", err)
 	}
 
-	// Normalize yaml → json so the embedded v1 schema can validate it.
-	var raw any
-	if err := yaml.Unmarshal(yamlBytes, &raw); err != nil {
-		t.Fatalf("parse yaml: %v", err)
-	}
-	jsonBytes, err := json.Marshal(raw)
+	parsed, err := hostplugin.DecodeManifest(bytes.NewReader(yamlBytes))
 	if err != nil {
-		t.Fatalf("marshal json: %v", err)
+		t.Fatalf("shared manifest: %v", err)
 	}
-	var doc any
-	if err := json.NewDecoder(bytes.NewReader(jsonBytes)).Decode(&doc); err != nil {
-		t.Fatalf("decode json: %v", err)
+	if parsed.UI.Entry != "ui/dist/index.js" || parsed.UI.ShadcnVersion == "" || parsed.Shared == nil {
+		t.Fatalf("UI declaration: %+v", parsed.UI)
 	}
 
-	schema, err := hostplugin.SchemaV1()
-	if err != nil {
-		t.Fatalf("load schema: %v", err)
-	}
-	if err := schema.Validate(doc); err != nil {
-		t.Fatalf("manifest fails schema validation:\n%v\n\nyaml:\n%s", err, yamlBytes)
-	}
-
-	// Bundle dir must point at ui/dist (the BLG-20260414-008 fix).
-	if !strings.Contains(string(yamlBytes), "bundle_dir: ui/dist") {
-		t.Errorf("plugin.yaml missing `bundle_dir: ui/dist`:\n%s", yamlBytes)
-	}
-	// shadcn_version must exercise the J.5 compat check.
-	if !strings.Contains(string(yamlBytes), "shadcn_version:") {
-		t.Errorf("plugin.yaml missing ui.shadcn_version:\n%s", yamlBytes)
-	}
 }
 
 func TestRun_Subprocess_ViteExternalsIncludeSharedPrimitives(t *testing.T) {

@@ -165,7 +165,7 @@ func (cs *catalogState) handleBrowseCatalog(w http.ResponseWriter, r *http.Reque
 
 		// Check if installed — filesystem manifest first, then loaded plugin host
 		// (builtin plugins may not have a plugins-dir manifest).
-		manifestPath := filepath.Join(cs.pluginsDir, entry.Name, "plugin.yaml")
+		manifestPath := filepath.Join(cs.pluginsDir, entry.ID, "plugin.yaml")
 		if fileExists(manifestPath) {
 			be.Installed = true
 			if m, err := naniteplugin.ParseManifest(manifestPath); err == nil {
@@ -174,7 +174,7 @@ func (cs *catalogState) handleBrowseCatalog(w http.ResponseWriter, r *http.Reque
 					be.UpdateAvailable = true
 				}
 			}
-		} else if p, ok := cs.pluginHost.GetPlugin(entry.Name); ok {
+		} else if p, ok := cs.pluginHost.GetPlugin(entry.ID); ok {
 			be.Installed = true
 			be.InstalledVersion = p.Version()
 			if p.Version() != entry.Version {
@@ -204,6 +204,11 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if err := install.ValidatePluginID(req.Name); err != nil {
+		cs.errorResp(w, http.StatusBadRequest, "invalid plugin name: "+err.Error())
+		return
+	}
+
 	// Look up in catalog.
 	fetcherSources, err := cs.sources.FetchInputs(r.Context())
 	if err != nil {
@@ -219,7 +224,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 
 	var entry *naniteplugin.MergedCatalogEntry
 	for _, e := range entries {
-		if e.Name == req.Name {
+		if e.ID == req.Name {
 			entry = &e
 			break
 		}
@@ -229,7 +234,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Confine the install target. entry.Name is untrusted — it comes
+	// Confine the install target. entry.ID is untrusted — it comes
 	// straight from a catalog.yaml fetched over HTTP from a configured
 	// (and possibly attacker-influenced) source URL. Validate it against
 	// the SAME allowlist install.DirStaging.Commit enforces internally
@@ -239,30 +244,32 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	// an early exit using the pipeline's own validator, so a bad name is
 	// rejected before any network I/O rather than only late inside Commit
 	// (audit finding GO-PLUGIN-002).
-	if err := install.ValidatePluginID(entry.Name); err != nil {
-		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name %q: %v", entry.Name, err))
+	if err := install.ValidatePluginID(entry.ID); err != nil {
+		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name %q: %v", entry.ID, err))
 		return
 	}
 
-	// Check if already installed. Safe to filepath.Join now that entry.Name
+	// Check if already installed. Safe to filepath.Join now that entry.ID
 	// has passed ValidatePluginID above (no "..", no separators, no
 	// absolute-path prefix are possible in a validated plugin id).
-	target := filepath.Join(cs.pluginsDir, entry.Name)
+	target := filepath.Join(cs.pluginsDir, entry.ID)
 	if fileExists(filepath.Join(target, "plugin.yaml")) {
-		cs.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", entry.Name))
+		cs.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", entry.ID))
 		return
 	}
 
-	if entry.ArchiveURL == "" {
-		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("plugin %q has no archive_url in catalog", entry.Name))
+	if !entry.Available || entry.ArchiveURL == "" {
+		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("plugin %q has no archive_url in catalog", entry.ID))
 		return
 	}
 
 	src := &install.CatalogArchiveSource{
-		ID:         entry.Name,
-		ArchiveURL: entry.ArchiveURL,
-		SHA256:     stripChecksumPrefix(entry.Checksum),
-		Downloader: cs.archiveDownloader,
+		ID:             entry.ID,
+		ArchiveURL:     entry.ArchiveURL,
+		ManifestSHA256: entry.ManifestSHA256,
+		Size:           entry.ArchiveSize,
+		SHA256:         stripChecksumPrefix(entry.Checksum),
+		Downloader:     cs.archiveDownloader,
 	}
 
 	inst, _ := install.NewInstaller(install.BuildOptions{
@@ -274,7 +281,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		}},
 		StagingRoot: filepath.Join(cs.pluginsDir, ".staging"),
 		PluginsRoot: cs.pluginsDir,
-		Emit:        cs.catalogInstallEmit(entry.Name),
+		Emit:        cs.catalogInstallEmit(entry.ID),
 	})
 
 	if _, err := inst.Install(r.Context(), src); err != nil {
@@ -284,10 +291,10 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 
 	cs.jsonResp(w, http.StatusOK, map[string]string{
 		"status":  "installed",
-		"plugin":  entry.Name,
+		"plugin":  entry.ID,
 		"version": entry.Version,
 		"source":  entry.SourceName,
-		"message": fmt.Sprintf("Plugin %q v%s installed from %s.", entry.Name, entry.Version, entry.SourceName),
+		"message": fmt.Sprintf("Plugin %q v%s installed from %s.", entry.ID, entry.Version, entry.SourceName),
 	})
 }
 

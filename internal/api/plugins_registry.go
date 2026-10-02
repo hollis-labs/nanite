@@ -166,6 +166,9 @@ func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) RegistryR
 		}
 		if e.SchemaPath != "" {
 			entry.SchemaURL = path.Join("/api/plugins", e.PluginID, "ui", e.SchemaPath)
+			if declaration := host.GetManifest(e.PluginID); declaration != nil && declaration.Shared != nil {
+				entry.SchemaURL = path.Join("/api/plugins", e.PluginID, "schema", e.Type)
+			}
 		}
 		resp.Envelopes[e.Type] = entry
 	}
@@ -220,6 +223,14 @@ func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) RegistryR
 		}
 		if ui.Stylesheet != "" {
 			entry.StylesheetURL = buildUIURL(pluginID, ui.BundleDir, ui.Stylesheet)
+		}
+		if manifest.Shared != nil {
+			if ui.Entry != "" {
+				entry.BundleURL = path.Join("/api/plugins", pluginID, "bundle", ui.Entry)
+			}
+			if ui.Stylesheet != "" {
+				entry.StylesheetURL = path.Join("/api/plugins", pluginID, "bundle", ui.Stylesheet)
+			}
 		}
 		entry.ReactVersion = ui.ReactVersion
 		// Compute BundleHash from the bundle file's mtime so the frontend gets

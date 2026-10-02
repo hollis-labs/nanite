@@ -179,6 +179,15 @@ linked development directories cannot retain an approval. Runtime calls have a
 30-second host deadline and bounded request/response frames (8 MiB/16 MiB).
 These checks detect changed code; plugins still run with your user's privileges.
 
+Read-only plugin queries require a reviewed `readonly.query` scope and a
+connection bearer credential delivered through subprocess init. Approval shows
+the allowed resources and session IDs (or workspace-wide access); raw captured
+context requires separate `include_content` approval. The query route exposes
+fixed read projections with bounded responses and cancels read leases when the
+connection is revoked. It does not confer SQL, tool or mutation authority.
+Plugins retain their process privileges and access to the user's broader local
+API under the deployment boundary described above.
+
 ## External data processors
 
 Nanite is not local-only once you configure a model provider. What leaves the

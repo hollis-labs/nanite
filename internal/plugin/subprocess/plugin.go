@@ -170,12 +170,19 @@ func (sp *SubprocessPlugin) Status() plugin.PluginStatus {
 
 // Load starts the subprocess, performs the init handshake, and registers
 // all capabilities declared in the plugin's load manifest with the host.
-func (sp *SubprocessPlugin) Load(host plugin.Host) error {
+func (sp *SubprocessPlugin) Load(host plugin.Host) (loadErr error) {
+	defer func() {
+		if loadErr != nil && sp.mgr.cfg.OnUnload != nil {
+			sp.mgr.cfg.OnUnload()
+		}
+	}()
+
 	initParams, err := buildInitParams(sp.pluginDir, sp.manifestID, sp.config)
 	if err != nil {
 		return fmt.Errorf("build init params: %w", err)
 	}
 	initParams.Granted = append([]string(nil), sp.mgr.cfg.Granted...)
+	initParams.Identity = append(json.RawMessage(nil), sp.mgr.cfg.Identity...)
 	transport, err := sp.mgr.Start(host.Context(), *initParams)
 	if err != nil {
 		return fmt.Errorf("start subprocess: %w", err)
@@ -283,6 +290,9 @@ func checkProtocolVersion(got int) error {
 
 // Unload stops the subprocess gracefully.
 func (sp *SubprocessPlugin) Unload() error {
+	if sp.mgr.cfg.OnUnload != nil {
+		sp.mgr.cfg.OnUnload()
+	}
 	sp.mu.Lock()
 	sp.status.Loaded = false
 	sp.mu.Unlock()

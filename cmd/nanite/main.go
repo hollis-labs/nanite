@@ -475,6 +475,9 @@ func cmdServeWithInitializers(
 	// (CW-20260814-0003) — the same "point a subprocess at this live
 	// harness" address CLI-launched agents use.
 	apiBaseURL := fmt.Sprintf("http://127.0.0.1:%d", *port)
+	if queryURLErr := pluginHost.SetHostQueryURL(apiBaseURL); queryURLErr != nil {
+		return fmt.Errorf("configure host query origin: %w", queryURLErr)
+	}
 	tesseractServerName := strings.TrimSpace(cfg.Tesseract.ServerName)
 	if tesseractServerName == "" {
 		tesseractServerName = "tesseract"

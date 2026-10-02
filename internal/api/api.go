@@ -123,6 +123,7 @@ func (a *API) SetWorkflowResponderAuthenticator(authenticate func(*http.Request)
 
 // RegisterRoutes wires all API routes onto the given ServeMux.
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/plugin-host/query/{resource}", a.handlePluginHostQuery)
 	// Projects. Phase 0 item 20 (retire workspaces,
 	// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md): the
 	// in-app `workspaces` table and its 5 CRUD routes are retired in full.

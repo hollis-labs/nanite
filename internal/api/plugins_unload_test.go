@@ -19,9 +19,13 @@ import (
 	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
 )
 
-type apiSubprocessFixture struct{ id, name string }
+type apiSubprocessFixture struct {
+	id, name string
+	identity json.RawMessage
+}
 
-func (p *apiSubprocessFixture) Init(context.Context, sdkprocess.InitParams) (sdkprocess.InitResult, error) {
+func (p *apiSubprocessFixture) Init(_ context.Context, params sdkprocess.InitParams) (sdkprocess.InitResult, error) {
+	p.identity = append(json.RawMessage(nil), params.Identity...)
 	return sdkprocess.InitResult{ID: p.id, Name: p.name, Version: "1.0.0", Protocol: 1}, nil
 }
 func (p *apiSubprocessFixture) Load(context.Context) (sdkprocess.LoadResult, error) {
@@ -29,6 +33,9 @@ func (p *apiSubprocessFixture) Load(context.Context) (sdkprocess.LoadResult, err
 }
 func (p *apiSubprocessFixture) Unload(context.Context) error { return nil }
 func (p *apiSubprocessFixture) MCPCallTool(_ context.Context, request sdkprocess.MCPCallRequest) (sdkprocess.MCPCallResult, error) {
+	if request.ToolName == "identity" {
+		return sdkprocess.MCPCallResult{Content: p.identity}, nil
+	}
 	if request.ToolName == "exit" {
 		os.Exit(3)
 	}

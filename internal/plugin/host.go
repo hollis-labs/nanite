@@ -96,6 +96,9 @@ type crudHandlerEntry struct {
 }
 
 type Host struct {
+	queryURL    string
+	queryGrants map[[32]byte]hostQueryGrant
+
 	// lifecycleMu serializes complete load/unload transactions. h.mu still
 	// protects registry state and is deliberately released around plugin
 	// callbacks, which may re-enter ordinary Host methods.

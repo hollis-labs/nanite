@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -155,5 +156,25 @@ func TestManagerRejectsIdentityDifferentFromManifest(t *testing.T) {
 	}
 	if process := mgr.process(); process != nil {
 		t.Fatal("mismatched child remains supervised")
+	}
+}
+
+func TestManagerReleasesConnectionOnPermanentFailure(t *testing.T) {
+	command, env := pluginhosttest.FixtureCommand(pluginhosttest.BehaviourEcho, t.TempDir())
+	released := make(chan struct{})
+	var once sync.Once
+	manager := NewManager(ManagerConfig{Command: command, Env: env, StartupTimeout: 5 * time.Second, ShutdownTimeout: time.Second, OnUnload: func() { once.Do(func() { close(released) }) }})
+	transport, err := manager.Start(context.Background(), InitParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Stop() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _ = transport.Call(ctx, MethodMCPCallTool, MCPCallRequest{ToolName: "exit"})
+	select {
+	case <-released:
+	case <-ctx.Done():
+		t.Fatal("permanent supervisor failure retained connection")
 	}
 }

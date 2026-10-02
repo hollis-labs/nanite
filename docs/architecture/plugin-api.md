@@ -113,3 +113,26 @@ and refuses conflicting ownership across panels and rail slots; the browser
 and panel store enforce core precedence too. Render errors are contained to the
 plugin view. Error recovery observes the changed export without remounting a
 healthy view when another registry contribution changes.
+
+Read-only queries use a separate `QueryProtocol` and `QueryClient`. A reviewed
+`readonly.query` capability carries a strict scope: one or more of `sessions`,
+`usage`, `execution_metrics` and `context_slots`, with either explicit session
+IDs or `all_sessions` in the current workspace. `include_content` additionally
+authorizes captured context text. CLI and GUI approvals show this metadata and
+its upgrade diff. Unknown fields and malformed scopes refuse review.
+
+After checking accepted bytes, `BeforeSpawn` binds a random connection token;
+init delivers its grant under `identity.nanite_host_query`. The core
+`GET /api/plugin-host/query/{resource}` route authenticates this bearer token,
+checks the approved scope, and calls fixed service projections. Plugins cannot
+supply SQL, tool dispatch or mutation callbacks. Lists are bounded to 100 rows,
+responses to 1 MiB and reads to 30 seconds. Session metadata and metric error
+text, debug snapshots and resolved configuration are excluded. Slot reads use
+only inspector captures; they never assemble context or invoke resolvers.
+
+The host retains token hashes and copied scopes. A supervised restart preserves
+the original accepted grant. Failed initialization, unload, permanent supervisor
+failure and host shutdown revoke it; revocation cancels active read leases.
+Optional query requests are omitted from init grants when the host URL is
+unavailable, while required requests refuse startup. This route's authority is
+separate from the user's broader loopback tool API and process privileges.

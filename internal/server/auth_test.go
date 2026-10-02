@@ -79,3 +79,33 @@ func TestAuthMiddlewareHealthExempt(t *testing.T) {
 		t.Errorf("expected 200 for /api/health without credentials, got %d", w.Code)
 	}
 }
+
+func TestAuthMiddlewarePluginQueryUsesHandlerCredential(t *testing.T) {
+	t.Setenv("NANITE_AUTH_USER", "admin")
+	t.Setenv("NANITE_AUTH_PASSWORD", "secret")
+	handler := basicAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer scoped-connection" {
+			http.Error(w, "query credential required", http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for _, test := range []struct {
+		method, path, credential string
+		status                   int
+	}{
+		{"GET", "/api/plugin-host/query/sessions", "Bearer scoped-connection", 204},
+		{"GET", "/api/plugin-host/query/sessions", "", 401},
+		{"POST", "/api/plugin-host/query/sessions", "Bearer scoped-connection", 401},
+		{"GET", "/api/plugin-host/query-elsewhere/sessions", "Bearer scoped-connection", 401},
+		{"GET", "/api/sessions", "Bearer scoped-connection", 401},
+	} {
+		req := httptest.NewRequest(test.method, test.path, nil)
+		req.Header.Set("Authorization", test.credential)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != test.status {
+			t.Fatalf("%s %s: %d", test.method, test.path, rec.Code)
+		}
+	}
+}

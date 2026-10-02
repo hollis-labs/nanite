@@ -71,6 +71,8 @@ import (
 // Container holds all service instances and shared subsystems. It is the
 // single wiring point — created once in main.go and passed to the API layer.
 type Container struct {
+	PluginQueries *PluginQueryService
+
 	// HarnessProfiles selects and resolves named harness profiles; used by the
 	// session-create handlers to reject an unknown profile early.
 	HarnessProfiles *harnessprofile.Registry
@@ -1587,6 +1589,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentConfig:         agentConfig,
 		AgentMembership:     agentMembership,
 		Usage:               usage,
+		PluginQueries:       NewPluginQueryService(cfg.Store, sessions, usage, inspectorSvc),
 		ProviderConfig:      providerConfig,
 		AgentCapabilities:   NewAgentCapabilitiesService(cfg.Store),
 		Reflexes:            NewReflexService(cfg.Store),

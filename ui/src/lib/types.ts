@@ -2320,7 +2320,7 @@ export interface PluginInstallReview {
   bundle_digest: string;
   entrypoint: string;
   arguments: string[];
-  capabilities: Array<{ name: string; reason: string; optional?: boolean }>;
+  capabilities: Array<{ name: string; reason?: string; optional?: boolean; metadata?: unknown }>;
   secrets: Array<{ name: string; environment?: string; required: boolean }>;
   environment: string[];
   tools: Array<{ name: string; effect: string }>;

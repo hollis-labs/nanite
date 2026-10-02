@@ -27,9 +27,16 @@ type QueryMessageReference struct {
 	CreatedAt string `json:"created_at"`
 }
 
-func (client *QueryClient) ResolveReference(ctx context.Context, reference CoreReference) (QueryMessageReference, error) {
+func (reference CoreReference) Validate() error {
 	if !validQuerySession(reference.SessionID) || !validQuerySession(reference.MessageID) {
-		return QueryMessageReference{}, fmt.Errorf("pluginapi: invalid core reference")
+		return fmt.Errorf("pluginapi: invalid core reference")
+	}
+	return nil
+}
+
+func (client *QueryClient) ResolveReference(ctx context.Context, reference CoreReference) (QueryMessageReference, error) {
+	if err := reference.Validate(); err != nil {
+		return QueryMessageReference{}, err
 	}
 	response, err := client.Query(ctx, QueryRequest{Resource: QueryMessageReferences, SessionID: reference.SessionID, MessageID: reference.MessageID, Limit: 1})
 	if err != nil {

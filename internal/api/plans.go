@@ -19,21 +19,22 @@ func (a *API) handleListPlans(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, plans)
+	a.jsonResp(w, http.StatusOK, planToViews(plans))
 }
 
 func (a *API) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
-	var p store.Plan
-	if err := a.decode(r, &p); err != nil {
+	var req PlanView
+	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
+	p := req.toStore()
 	if err := a.Services.Todos.CreatePlan(r.Context(), &p); err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	a.Services.Streams.BroadcastWorkChanged()
-	a.jsonResp(w, http.StatusCreated, p)
+	a.jsonResp(w, http.StatusCreated, planToView(&p))
 }
 
 func (a *API) handleGetPlan(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +43,7 @@ func (a *API) handleGetPlan(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, p)
+	a.jsonResp(w, http.StatusOK, planToView(p))
 }
 
 func (a *API) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
@@ -57,16 +58,16 @@ func (a *API) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Services.Streams.BroadcastWorkChanged()
-	a.jsonResp(w, http.StatusOK, p)
+	a.jsonResp(w, http.StatusOK, planToView(p))
 }
 
 func (a *API) handleUpdatePlanStep(w http.ResponseWriter, r *http.Request) {
-	var updates store.PlanStep
-	if err := a.decode(r, &updates); err != nil {
+	var req PlanStepView
+	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if err := a.Services.Todos.UpdatePlanStep(r.Context(), r.PathValue("id"), r.PathValue("stepID"), updates); err != nil {
+	if err := a.Services.Todos.UpdatePlanStep(r.Context(), r.PathValue("id"), r.PathValue("stepID"), req.toStore()); err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -77,7 +78,7 @@ func (a *API) handleUpdatePlanStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Services.Streams.BroadcastWorkChanged()
-	a.jsonResp(w, http.StatusOK, p)
+	a.jsonResp(w, http.StatusOK, planToView(p))
 }
 
 func (a *API) handleDeletePlan(w http.ResponseWriter, r *http.Request) {
@@ -101,5 +102,5 @@ func (a *API) handleApprovePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Services.Streams.BroadcastWorkChanged()
-	a.jsonResp(w, http.StatusOK, p)
+	a.jsonResp(w, http.StatusOK, planToView(p))
 }

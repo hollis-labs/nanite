@@ -84,3 +84,38 @@ func (r UpdateMCPServerRequest) toPatch() service.MCPServerPatch {
 		Headers:       r.Headers,
 	}
 }
+
+// CreateMCPServerRequest preserves the create contract without decoding a storage row.
+type CreateMCPServerRequest struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	TransportType string `json:"transport_type"`
+	Command       string `json:"command"`
+	URL           string `json:"url"`
+	Args          string `json:"args"`
+	Env           string `json:"env"`
+	Enabled       bool   `json:"enabled"`
+	TrustTier     string `json:"trust_tier"`
+	EnvAllowlist  string `json:"env_allowlist"`
+	Headers       string `json:"headers"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+func (r CreateMCPServerRequest) toStore() store.MCPServerConfig {
+	return store.MCPServerConfig{
+		ID:            r.ID,
+		Name:          r.Name,
+		TransportType: r.TransportType,
+		Command:       r.Command,
+		URL:           r.URL,
+		Args:          r.Args,
+		Env:           r.Env,
+		Enabled:       r.Enabled,
+		TrustTier:     r.TrustTier,
+		EnvAllowlist:  r.EnvAllowlist,
+		Headers:       r.Headers,
+		CreatedAt:     r.CreatedAt,
+		UpdatedAt:     r.UpdatedAt,
+	}
+}

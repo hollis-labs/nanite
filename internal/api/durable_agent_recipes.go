@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/hollis-labs/nanite/internal/service"
 )
@@ -45,7 +44,7 @@ func (a *API) handleDryRunDurableAgentRecipe(w http.ResponseWriter, r *http.Requ
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, plan)
+	a.jsonResp(w, http.StatusOK, durableAgentRecipePlanToView(plan))
 }
 
 func (a *API) handleApplyDurableAgentRecipe(w http.ResponseWriter, r *http.Request) {
@@ -54,50 +53,28 @@ func (a *API) handleApplyDurableAgentRecipe(w http.ResponseWriter, r *http.Reque
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	serviceReq := durableAgentRecipeRequestToService(req)
-	plan, err := a.Services.DurableAgentRecipes.DryRun(r.Context(), r.PathValue("id"), serviceReq)
-	if errors.Is(err, service.ErrDurableAgentRecipeNotFound) {
-		a.errorResp(w, http.StatusNotFound, "durable agent recipe not found")
-		return
-	}
+	result, err := a.Services.DurableAgentRecipes.Apply(r.Context(), r.PathValue("id"), durableAgentRecipeRequestToService(req))
 	if err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if len(plan.MissingRequirements) > 0 {
-		a.errorResp(w, http.StatusBadRequest, service.ErrDurableAgentRecipeMissingInputs.Error()+": "+strings.Join(plan.MissingRequirements, ", "))
-		return
-	}
-	if len(plan.Unsupported) > 0 {
-		a.errorResp(w, http.StatusConflict, service.ErrDurableAgentRecipeApplyNotReady.Error()+": "+strings.Join(plan.Unsupported, ", "))
-		return
-	}
-	if createErr := a.Services.DurableAgents.Create(r.Context(), &plan.Instance); createErr != nil {
-		a.errorResp(w, http.StatusBadRequest, createErr.Error())
-		return
-	}
-	inst, err := a.Services.DurableAgents.Get(r.Context(), plan.Instance.ID)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	result := &service.DurableAgentRecipeApplyResult{
-		Plan:     *plan,
-		Instance: inst,
-	}
-	if serviceReq.Start {
-		launch, err := a.Services.DurableAgents.Start(r.Context(), inst.ID, service.DurableAgentStartRequest{
-			ProjectID:   serviceReq.ProjectID,
-			WakePayload: plan.WakePayload,
-		})
-		if err != nil {
-			a.errorResp(w, http.StatusConflict, err.Error())
-			return
+		status := http.StatusBadRequest
+		var phase *service.DurableAgentRecipeApplyError
+		switch {
+		case errors.Is(err, service.ErrDurableAgentRecipeNotFound):
+			status = http.StatusNotFound
+		case errors.Is(err, service.ErrDurableAgentRecipeApplyNotReady):
+			status = http.StatusConflict
+		case errors.As(err, &phase):
+			switch phase.Stage {
+			case "read":
+				status = http.StatusInternalServerError
+			case "start":
+				status = http.StatusConflict
+			}
 		}
-		result.Instance = launch.Instance
-		result.LaunchResult = launch
+		a.errorResp(w, status, err.Error())
+		return
 	}
-	a.jsonResp(w, http.StatusCreated, result)
+
+	a.jsonResp(w, http.StatusCreated, durableAgentRecipeApplyResultToView(result))
 }
 
 func durableAgentRecipeRequestToService(req DurableAgentRecipeRequest) service.DurableAgentRecipeRequest {

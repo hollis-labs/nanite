@@ -465,7 +465,7 @@ func (a *API) handleHarnessV1ListDurableAgents(w http.ResponseWriter, r *http.Re
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, instances)
+	a.jsonResp(w, http.StatusOK, durableAgentInstanceToViews(instances))
 }
 
 func (a *API) handleHarnessV1GetDurableAgent(w http.ResponseWriter, r *http.Request) {
@@ -474,7 +474,7 @@ func (a *API) handleHarnessV1GetDurableAgent(w http.ResponseWriter, r *http.Requ
 		a.errorResp(w, http.StatusNotFound, "durable agent not found")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, inst)
+	a.jsonResp(w, http.StatusOK, durableAgentInstanceToView(inst))
 }
 
 func (a *API) handleHarnessV1DurableStart(w http.ResponseWriter, r *http.Request) {

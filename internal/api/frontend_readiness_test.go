@@ -53,7 +53,7 @@ func TestStartSurfaceCapabilities(t *testing.T) {
 	}
 }
 
-func containsDurableAgent(items []store.DurableAgentInstance, id string) bool {
+func containsDurableAgent(items []DurableAgentInstanceView, id string) bool {
 	for _, item := range items {
 		if item.ID == id {
 			return true

@@ -187,6 +187,16 @@ func (s *durableAgentRecipeService) DryRun(_ context.Context, id string, req Dur
 	return &plan, nil
 }
 
+// DurableAgentRecipeApplyError identifies the failed phase so transports can
+// preserve their response status without orchestrating creation and launch.
+type DurableAgentRecipeApplyError struct {
+	Stage string
+	Err   error
+}
+
+func (e *DurableAgentRecipeApplyError) Error() string { return e.Err.Error() }
+func (e *DurableAgentRecipeApplyError) Unwrap() error { return e.Err }
+
 func (s *durableAgentRecipeService) Apply(ctx context.Context, id string, req DurableAgentRecipeRequest) (*DurableAgentRecipeApplyResult, error) {
 	recipe, ok := s.byID[id]
 	if !ok {
@@ -201,16 +211,23 @@ func (s *durableAgentRecipeService) Apply(ctx context.Context, id string, req Du
 	}
 	inst := plan.Instance
 	if err := s.agents.Create(ctx, &inst); err != nil {
-		return nil, err
+		return nil, &DurableAgentRecipeApplyError{Stage: "create", Err: err}
 	}
-	result := &DurableAgentRecipeApplyResult{Plan: plan, Instance: &inst}
+	saved, err := s.agents.Get(ctx, inst.ID)
+	if err != nil {
+		return nil, &DurableAgentRecipeApplyError{Stage: "read", Err: err}
+	}
+	// Creation supplies the identity/defaults that the apply response has
+	// historically included in its plan, before any launch updates.
+	plan.Instance = inst
+	result := &DurableAgentRecipeApplyResult{Plan: plan, Instance: saved}
 	if req.Start {
 		launch, err := s.agents.Start(ctx, inst.ID, DurableAgentStartRequest{
 			ProjectID:   req.ProjectID,
 			WakePayload: plan.WakePayload,
 		})
 		if err != nil {
-			return nil, err
+			return nil, &DurableAgentRecipeApplyError{Stage: "start", Err: err}
 		}
 		result.Instance = launch.Instance
 		result.LaunchResult = launch

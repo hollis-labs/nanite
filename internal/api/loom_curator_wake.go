@@ -136,7 +136,7 @@ func (a *API) handleLoomCuratorWake(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusConflict, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, result)
+	a.jsonResp(w, http.StatusOK, durableAgentWakeResultToView(result))
 }
 
 // buildLoomCuratorWakePrompt renders FE's fragment identity into the real

@@ -22,7 +22,7 @@ type startSurfaceCapabilities struct {
 	WakeReasons         []enumOption                 `json:"wake_reasons"`
 	SessionPolicies     []enumOption                 `json:"session_policies"`
 	Recipes             []service.DurableAgentRecipe `json:"recipes"`
-	DurableAgents       []store.DurableAgentInstance `json:"durable_agents"`
+	DurableAgents       []DurableAgentInstanceView   `json:"durable_agents"`
 	Profiles            []AgentProfileDTO            `json:"profiles"`
 	Providers           []ProviderConfigView         `json:"providers"`
 	Models              []ModelView                  `json:"models"`
@@ -52,20 +52,20 @@ type workRootHint struct {
 }
 
 type sessionDetailsResponse struct {
-	Session              *SessionView                             `json:"session"`
-	PrimaryAgent         *AgentProfileDTO                         `json:"primary_agent,omitempty"`
-	DurableAttachments   []store.DurableAgentInstanceSessionState `json:"durable_attachments"`
-	CurrentDurableAgent  *store.DurableAgentInstance              `json:"current_durable_agent,omitempty"`
-	ActivityState        string                                   `json:"activity_state"`
-	LastActivityAt       string                                   `json:"last_activity_at,omitempty"`
-	LastUsefulActivityAt string                                   `json:"last_useful_activity_at,omitempty"`
-	Halt                 sessionHaltDetail                        `json:"halt"`
-	Usage                *SessionUsageView                        `json:"usage,omitempty"`
-	RecentDurableEvents  []store.DurableAgentEvent                `json:"recent_durable_events"`
-	Runtime              sessionRuntimeDetail                     `json:"runtime"`
-	BootSource           string                                   `json:"boot_source"`
-	ImmutableStartFields []string                                 `json:"immutable_start_fields"`
-	Checkpoint           checkpointDetail                         `json:"checkpoint"`
+	Session              *SessionView                           `json:"session"`
+	PrimaryAgent         *AgentProfileDTO                       `json:"primary_agent,omitempty"`
+	DurableAttachments   []DurableAgentInstanceSessionStateView `json:"durable_attachments"`
+	CurrentDurableAgent  *DurableAgentInstanceView              `json:"current_durable_agent,omitempty"`
+	ActivityState        string                                 `json:"activity_state"`
+	LastActivityAt       string                                 `json:"last_activity_at,omitempty"`
+	LastUsefulActivityAt string                                 `json:"last_useful_activity_at,omitempty"`
+	Halt                 sessionHaltDetail                      `json:"halt"`
+	Usage                *SessionUsageView                      `json:"usage,omitempty"`
+	RecentDurableEvents  []DurableAgentEventView                `json:"recent_durable_events"`
+	Runtime              sessionRuntimeDetail                   `json:"runtime"`
+	BootSource           string                                 `json:"boot_source"`
+	ImmutableStartFields []string                               `json:"immutable_start_fields"`
+	Checkpoint           checkpointDetail                       `json:"checkpoint"`
 }
 
 type sessionRuntimeDetail struct {
@@ -143,7 +143,7 @@ func (a *API) handleStartSurfaceCapabilities(w http.ResponseWriter, r *http.Requ
 		WakeReasons:         wakeReasonOptions(),
 		SessionPolicies:     sessionPolicyOptions(),
 		Recipes:             nonNilSlice(recipes),
-		DurableAgents:       nonNilSlice(durableAgents),
+		DurableAgents:       nonNilSlice(durableAgentInstanceToViews(durableAgents)),
 		Profiles:            nonNilSlice(agentProfilesToDTO(profiles)),
 		Providers:           nonNilSlice(providerConfigsToView(providers)),
 		Models:              nonNilSlice(modelsToView(models)),
@@ -179,6 +179,7 @@ func (a *API) sessionDetails(ctx context.Context, id string) (sessionDetailsResp
 	if err != nil {
 		return sessionDetailsResponse{}, err
 	}
+	var currentInstance *store.DurableAgentInstance
 	details := sessionDetailsResponse{
 		Session:              sessionToViewPtr(sess),
 		Runtime:              sessionRuntimeDetail{State: "none"},
@@ -186,7 +187,7 @@ func (a *API) sessionDetails(ctx context.Context, id string) (sessionDetailsResp
 		LastActivityAt:       sess.LastActivity,
 		LastUsefulActivityAt: sess.LastActivity,
 		Halt:                 sessionHaltDetail{IsHalted: false},
-		RecentDurableEvents:  []store.DurableAgentEvent{},
+		RecentDurableEvents:  []DurableAgentEventView{},
 		BootSource:           inferBootSource(sess),
 		ImmutableStartFields: []string{"provider", "model", "runtime_kind", "recipe", "lifecycle_class", "work_root"},
 		Checkpoint:           checkpointDetail{Status: "unknown"},
@@ -201,12 +202,13 @@ func (a *API) sessionDetails(ctx context.Context, id string) (sessionDetailsResp
 		}
 	}
 	if rels, err := a.Services.DurableAgents.ListSessionStatesForSession(ctx, id); err == nil {
-		details.DurableAttachments = rels
+		details.DurableAttachments = durableAgentInstanceSessionStateToViews(rels)
 		if len(rels) > 0 {
 			if inst, err := a.Services.DurableAgents.Get(ctx, rels[0].InstanceID); err == nil {
-				details.CurrentDurableAgent = inst
+				currentInstance = inst
+				details.CurrentDurableAgent = durableAgentInstanceToView(inst)
 				if events, err := a.Services.DurableAgents.ListEvents(ctx, inst.ID, 5); err == nil {
-					details.RecentDurableEvents = nonNilSlice(events)
+					details.RecentDurableEvents = nonNilSlice(durableAgentEventToViews(events))
 					if len(events) > 0 {
 						details.LastUsefulActivityAt = laterTimestamp(
 							details.LastUsefulActivityAt,
@@ -240,7 +242,7 @@ func (a *API) sessionDetails(ctx context.Context, id string) (sessionDetailsResp
 		}
 		details.LastUsefulActivityAt = laterTimestamp(details.LastUsefulActivityAt, details.Runtime.UpdatedAt)
 	}
-	details.ActivityState = deriveSessionActivityState(sess, details.Runtime.State, details.Halt, details.CurrentDurableAgent)
+	details.ActivityState = deriveSessionActivityState(sess, details.Runtime.State, details.Halt, currentInstance)
 	return details, nil
 }
 

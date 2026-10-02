@@ -25,7 +25,7 @@ func (a *API) handleListDurableAgentDueWake(w http.ResponseWriter, r *http.Reque
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, items)
+	a.jsonResp(w, http.StatusOK, durableAgentWakeDueItemToViews(items))
 }
 
 func (a *API) handleRunDurableAgentDueWake(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +48,7 @@ func (a *API) handleRunDurableAgentDueWake(w http.ResponseWriter, r *http.Reques
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, result)
+	a.jsonResp(w, http.StatusOK, durableAgentWakeRunResultToView(result))
 }
 
 func (a *API) handleDurableAgentWake(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +65,7 @@ func (a *API) handleDurableAgentWake(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusConflict, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, result)
+	a.jsonResp(w, http.StatusOK, durableAgentWakeResultToView(result))
 }
 
 func (a *API) handleListDurableAgentSchedules(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +74,7 @@ func (a *API) handleListDurableAgentSchedules(w http.ResponseWriter, r *http.Req
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, schedules)
+	a.jsonResp(w, http.StatusOK, agentSchedulesToView(schedules))
 }
 
 func (a *API) handlePauseDurableAgentSchedule(w http.ResponseWriter, r *http.Request) {

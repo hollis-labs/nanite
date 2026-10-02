@@ -65,7 +65,7 @@ func (a *API) handleCreateDurableAgent(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, saved)
+	a.jsonResp(w, http.StatusCreated, durableAgentInstanceToView(saved))
 }
 
 // durableMetadataMap validates the durable metadata wire contract. The raw
@@ -88,7 +88,7 @@ func (a *API) handleListDurableAgents(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, instances)
+	a.jsonResp(w, http.StatusOK, durableAgentInstanceToViews(instances))
 }
 
 func (a *API) handleGetDurableAgent(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +101,7 @@ func (a *API) handleGetDurableAgent(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, inst)
+	a.jsonResp(w, http.StatusOK, durableAgentInstanceToView(inst))
 }
 
 func (a *API) handleUpdateDurableAgent(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +133,7 @@ func (a *API) handleUpdateDurableAgent(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, saved)
+	a.jsonResp(w, http.StatusOK, durableAgentInstanceToView(saved))
 }
 
 func (a *API) handleArchiveDurableAgent(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +146,7 @@ func (a *API) handleArchiveDurableAgent(w http.ResponseWriter, r *http.Request) 
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, archived)
+	a.jsonResp(w, http.StatusOK, durableAgentInstanceToView(archived))
 }
 
 func (a *API) handleListDurableAgentEvents(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +171,7 @@ func (a *API) handleListDurableAgentEvents(w http.ResponseWriter, r *http.Reques
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, events)
+	a.jsonResp(w, http.StatusOK, durableAgentEventToViews(events))
 }
 
 func (a *API) handleDurableAgentStartRequest(w http.ResponseWriter, r *http.Request) {
@@ -267,7 +267,7 @@ func (a *API) handleDurableAgentLifecycleRequest(w http.ResponseWriter, r *http.
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, inst)
+	a.jsonResp(w, http.StatusOK, durableAgentInstanceToView(inst))
 }
 
 func (a *API) handleAttachDurableAgentSession(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +293,7 @@ func (a *API) handleListDurableAgentSessions(w http.ResponseWriter, r *http.Requ
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, relations)
+	a.jsonResp(w, http.StatusOK, durableAgentInstanceSessionStateToViews(relations))
 }
 
 func (a *API) writeDurableAgentLaunchResult(w http.ResponseWriter, result *service.DurableAgentLaunchResult, err error) {
@@ -313,7 +313,7 @@ func (a *API) writeDurableAgentLaunchResult(w http.ResponseWriter, result *servi
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, result)
+	a.jsonResp(w, http.StatusOK, durableAgentLaunchResultToView(result))
 }
 
 func durableAgentWakePayloadFromRequest(req DurableAgentWakePayloadRequest) service.DurableAgentWakePayload {

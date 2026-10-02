@@ -109,6 +109,8 @@ github.com/hollis-labs/go-scheduler v0.3.0 h1:SRdgfg5MgbICqC0Gu0GD8GVygNASrV1zN1
 github.com/hollis-labs/go-scheduler v0.3.0/go.mod h1:AGUFE4JK6H87J2E3VqVMgjVPylEBhXTpHcZvmE1w6jU=
 github.com/hollis-labs/go-sqlite v0.1.0 h1:0AQrOxfwHLSCCzuNo7h1LVoJXA2qJC6iZbS3uL5W6JE=
 github.com/hollis-labs/go-sqlite v0.1.0/go.mod h1:T1kbCABjw1annDB+7cwNoPyqL+WDfdmHn8xtKfuZ5LQ=
+github.com/hollis-labs/go-ssekit v0.2.0 h1:li4Oi6iR8EGw3gh9lY1OoYukQ40AVLU/Kp1T5RzdajM=
+github.com/hollis-labs/go-ssekit v0.2.0/go.mod h1:0cbVtvNr1trN787jry9D2hbxtRo5EcsJfQRK0aOYOtM=
 github.com/hollis-labs/go-svcerr v0.1.0 h1:8Wa0cnLPo8Tiw5P3E3rCDXzRu11vjpAy2sxe5tFBMVs=
 github.com/hollis-labs/go-svcerr v0.1.0/go.mod h1:GIpstDn44EB/wFYVb47iRtJyYHN1l0TLwHBy5/HpHkg=
 github.com/hollis-labs/go-tether-client v0.5.1 h1:WhEyU5+Bb3ziOSKxeNmiMedlqn3/qjc7naSgGz6A9k4=

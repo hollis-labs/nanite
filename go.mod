@@ -119,6 +119,7 @@ require (
 	github.com/hollis-labs/go-safefs v0.1.0
 	github.com/hollis-labs/go-scheduler v0.3.0
 	github.com/hollis-labs/go-sqlite v0.1.0
+	github.com/hollis-labs/go-ssekit v0.2.0
 	github.com/hollis-labs/go-svcerr v0.1.0
 	github.com/hollis-labs/go-tether-client v0.8.0
 	github.com/hollis-labs/go-toolresult v0.1.0

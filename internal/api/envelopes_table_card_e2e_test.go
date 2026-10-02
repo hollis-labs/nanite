@@ -76,8 +76,8 @@ func TestTableCardRowAction_E2E(t *testing.T) {
 		EnvelopeType: "table-card",
 		EnvelopeJSON: string(envJSON),
 	}
-	if err := a.Services.Store.CreateEnvelopeInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateEnvelopeInstance: %v", err)
+	if createErr := a.store.CreateEnvelopeInstance(context.Background(), inst); createErr != nil {
+		t.Fatalf("CreateEnvelopeInstance: %v", createErr)
 	}
 
 	// Step 4: the exact wire body TableCard.tsx's onRespond() posts when the
@@ -109,7 +109,7 @@ func TestTableCardRowAction_E2E(t *testing.T) {
 	}
 
 	// Step 6: the envelope instance is now claimed/responded...
-	got, err := a.Services.Store.GetEnvelopeInstance(context.Background(), inst.ID)
+	got, err := a.store.GetEnvelopeInstance(context.Background(), inst.ID)
 	if err != nil {
 		t.Fatalf("GetEnvelopeInstance: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestTableCardRowAction_E2E(t *testing.T) {
 	// SERVER-resolved row content (INC-2), proving the handler read the
 	// row from the persisted envelope rather than trusting a (here,
 	// absent) client-supplied row payload.
-	msgs, err := a.Services.Store.ListMessages(context.Background(), sessID, 10)
+	msgs, err := a.store.ListMessages(context.Background(), sessID, 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}
@@ -164,8 +164,8 @@ func TestTableCardRowAction_E2E_UndeclaredActionRejected(t *testing.T) {
 	}
 	envJSON, _ := json.Marshal(tableData)
 	inst := &store.EnvelopeInstance{SessionID: sessID, EnvelopeType: "table-card", EnvelopeJSON: string(envJSON)}
-	if err := a.Services.Store.CreateEnvelopeInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateEnvelopeInstance: %v", err)
+	if createErr := a.store.CreateEnvelopeInstance(context.Background(), inst); createErr != nil {
+		t.Fatalf("CreateEnvelopeInstance: %v", createErr)
 	}
 
 	body, _ := json.Marshal(chat.ResponseV1{

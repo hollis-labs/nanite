@@ -87,7 +87,7 @@ func (vanishingTeams) UpdateTeam(context.Context, *store.Team) error { return st
 func (vanishingTeams) DeleteTeam(context.Context, string) error      { return nil }
 
 func TestTeams_PatchOfTeamDeletedMidwayIs404(t *testing.T) {
-	a := &API{Services: &service.Container{Teams: service.NewTeamService(vanishingTeams{})}}
+	a := &testAPI{API: &API{Services: &service.Container{Teams: service.NewTeamService(vanishingTeams{})}}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("PATCH /api/teams/{id}", a.handlePatchTeam)
 	w := mcpDo(mux, "PATCH", "/api/teams/t", `{"description":"x"}`)

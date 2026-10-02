@@ -44,10 +44,10 @@ import (
 // newTestAPIWithTeamRunLauncher shape one level up. Returns the registry
 // too (unlike that helper) since these tests need to register plain
 // WorkflowDefinitions directly, not compile one from a Team.
-func newTestAPIWithLoopLauncher(t *testing.T) (*API, *http.ServeMux, *store.Store, *agentworkflow.Registry) {
+func newTestAPIWithLoopLauncher(t *testing.T) (*testAPI, *http.ServeMux, *store.Store, *agentworkflow.Registry) {
 	t.Helper()
 	a, mux := newTestAPI(t)
-	st := a.Services.Store
+	st := a.store
 
 	registry := agentworkflow.NewRegistry(nil)
 	engine := newAPITestWorkflowHost(t, st)
@@ -244,10 +244,10 @@ func TestLoopsAPI_ListGoalEvidence(t *testing.T) {
 	ctx := context.Background()
 
 	goal := store.Goal{Intent: "evidence goal"}
-	if err := a.Services.Store.CreateGoal(ctx, &goal); err != nil {
+	if err := a.store.CreateGoal(ctx, &goal); err != nil {
 		t.Fatalf("CreateGoal: %v", err)
 	}
-	if err := a.Services.Store.RecordGoalEvidence(ctx, &store.GoalEvidence{
+	if err := a.store.RecordGoalEvidence(ctx, &store.GoalEvidence{
 		GoalID: goal.ID, EvidenceType: store.GoalEvidenceTypeTestSuite,
 		RefTable: "workflow_run_steps", RefID: "step-1", Summary: "tests pass",
 	}); err != nil {

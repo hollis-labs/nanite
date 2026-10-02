@@ -39,7 +39,7 @@ func TestPins_HTTP(t *testing.T) {
 	sess := newB2aSession(t, a)
 	ctx := context.Background()
 	sid := sess.ID
-	if err := a.Services.Store.CreatePinnedContent(ctx, store.PinnedContent{ID: "pin-1", SessionID: &sid, Scope: store.PinScopeSession, Content: "remember this", AgentID: "ag"}); err != nil {
+	if err := a.store.CreatePinnedContent(ctx, store.PinnedContent{ID: "pin-1", SessionID: &sid, Scope: store.PinScopeSession, Content: "remember this", AgentID: "ag"}); err != nil {
 		t.Fatalf("CreatePinnedContent: %v", err)
 	}
 	var pins []PinView
@@ -62,7 +62,7 @@ func TestPins_HTTP(t *testing.T) {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
 	}
 	// A session-scoped pin that is listed, then deleted, is gone from the list.
-	if err := a.Services.Store.CreatePinnedContent(ctx, store.PinnedContent{ID: "pin-2", SessionID: &sid, Scope: store.PinScopeSession, Content: "second", AgentID: "ag"}); err != nil {
+	if err := a.store.CreatePinnedContent(ctx, store.PinnedContent{ID: "pin-2", SessionID: &sid, Scope: store.PinScopeSession, Content: "second", AgentID: "ag"}); err != nil {
 		t.Fatalf("CreatePinnedContent: %v", err)
 	}
 	if rec := mcpDo(mux, "GET", "/api/sessions/"+sid+"/pins", ""); !strings.Contains(rec.Body.String(), `"id":"pin-2"`) {
@@ -80,7 +80,7 @@ func TestReminders_HTTP(t *testing.T) {
 	a, mux := newTestAPI(t)
 	sess := newB2aSession(t, a)
 	ctx := context.Background()
-	if err := a.Services.Store.CreateReminder(ctx, store.Reminder{ID: "rem-1", SessionID: sess.ID, Scope: store.ReminderScopeSession, Text: "check in", TriggerJSON: `{"after_turns":1}`}); err != nil {
+	if err := a.store.CreateReminder(ctx, store.Reminder{ID: "rem-1", SessionID: sess.ID, Scope: store.ReminderScopeSession, Text: "check in", TriggerJSON: `{"after_turns":1}`}); err != nil {
 		t.Fatalf("CreateReminder: %v", err)
 	}
 	var rems []ReminderView
@@ -100,7 +100,7 @@ func TestReminders_HTTP(t *testing.T) {
 	if rec := mcpDo(mux, "DELETE", "/api/reminders/rem-1", ""); rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"deleted":true,"id":"rem-1"}` {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
 	}
-	if _, err := a.Services.Store.GetReminder(ctx, "rem-1"); err == nil {
+	if _, err := a.store.GetReminder(ctx, "rem-1"); err == nil {
 		t.Fatal("reminder still readable after delete")
 	}
 }

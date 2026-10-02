@@ -20,9 +20,9 @@ import (
 // avoid the UNIQUE collision with migration 062's `file-backend` seed
 // (SP-20260512-0009 W4, CW-20260512-0113). Mirrors the CW-20260512-0118
 // fix pattern.
-func seedMessageInbox(t *testing.T, a *API) {
+func seedMessageInbox(t *testing.T, a *testAPI) {
 	t.Helper()
-	if err := a.Services.Store.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := a.store.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:   "test-file-backend",
 		Slug: "test-file-backend",
 		Name: "Backend",
@@ -30,7 +30,7 @@ func seedMessageInbox(t *testing.T, a *API) {
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := a.Services.Store.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := a.store.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:   "test-file-frontend",
 		Slug: "test-file-frontend",
 		Name: "Frontend",
@@ -40,7 +40,7 @@ func seedMessageInbox(t *testing.T, a *API) {
 	}
 	// Seed via direct store so we don't need to stand up the sender's
 	// auto-register path — the row is the only thing these tests read.
-	sqlStore := messaging.NewSQLiteStore(a.Services.Store.DB)
+	sqlStore := messaging.NewSQLiteStore(a.store.DB)
 	if _, err := sqlStore.Send(context.Background(), messaging.SendInput{
 		FromSessionID: "sess-other",
 		FromAgentID:   a2a.UserSentinel,

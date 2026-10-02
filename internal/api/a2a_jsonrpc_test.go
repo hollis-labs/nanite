@@ -79,9 +79,9 @@ func TestA2AJSONRPC_MethodRouting(t *testing.T) {
 
 			// Create minimal API instance (would need full mocking for real tests)
 			// This is just a compilation test
-			api := &API{
+			api := &testAPI{API: &API{
 				Services: &service.Container{},
-			}
+			}}
 
 			api.handleA2AJSONRPC(recorder, httpReq)
 
@@ -133,7 +133,7 @@ func newTestTaskManager(t *testing.T) (*store.Store, *service.TaskManager) {
 
 // postJSONRPC sends a JSON-RPC request through the real handler and
 // decodes the envelope.
-func postJSONRPC(t *testing.T, api *API, req a2a.JSONRPCRequest) (*httptest.ResponseRecorder, a2a.JSONRPCResponse) {
+func postJSONRPC(t *testing.T, api *testAPI, req a2a.JSONRPCRequest) (*httptest.ResponseRecorder, a2a.JSONRPCResponse) {
 	t.Helper()
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -158,7 +158,7 @@ func postJSONRPC(t *testing.T, api *API, req a2a.JSONRPCRequest) (*httptest.Resp
 // old hardcoded "not yet implemented" error.
 func TestA2AJSONRPC_HandleTaskCancel_Instance_Success(t *testing.T) {
 	st, tm := newTestTaskManager(t)
-	api := &API{Services: &service.Container{TaskManager: tm}}
+	api := &testAPI{API: &API{Services: &service.Container{TaskManager: tm}}}
 
 	profile := &store.AgentProfile{Name: "A2A JSONRPC Cancel Test Agent", Slug: "a2a-jsonrpc-cancel-test-agent", SystemPrompt: "x"}
 	if err := st.CreateAgent(context.Background(), profile); err != nil {
@@ -217,7 +217,7 @@ func TestA2AJSONRPC_HandleTaskCancel_Instance_Success(t *testing.T) {
 // JSON-RPC error (ErrTaskNotCancelable), not a fake success.
 func TestA2AJSONRPC_HandleTaskCancel_Workflow_Unsupported(t *testing.T) {
 	st, tm := newTestTaskManager(t)
-	api := &API{Services: &service.Container{TaskManager: tm}}
+	api := &testAPI{API: &API{Services: &service.Container{TaskManager: tm}}}
 
 	if err := st.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{
 		ID:             "run-cancel-1",
@@ -297,7 +297,7 @@ func TestA2AJSONRPC_ProvideInputResumesHadronGate(t *testing.T) {
 	}); createErr != nil {
 		t.Fatal(createErr)
 	}
-	api := &API{Services: &service.Container{TaskManager: tm}}
+	api := &testAPI{API: &API{Services: &service.Container{TaskManager: tm}}}
 
 	_, before := postJSONRPC(t, api, a2a.JSONRPCRequest{
 		JSONRPC: a2a.JSONRPCVersion, Method: methodGetTask,

@@ -36,7 +36,7 @@ func TestHandleAssignAgentSkill_RejectsNonexistentAgent(t *testing.T) {
 		t.Fatalf("POST /api/agents/{id}/skills for nonexistent agent: expected 404, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	skills, err := a.Services.Store.ListAgentSkills(context.Background(), "does-not-exist")
+	skills, err := a.store.ListAgentSkills(context.Background(), "does-not-exist")
 	if err != nil {
 		t.Fatalf("ListAgentSkills: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestHandleAssignAgentSkill_RejectsNonexistentAgent(t *testing.T) {
 // "file-<slug>") via the in-memory fileDefs slice before ever touching the
 // DB -- can no longer occur. AgentService.Get/GetBySlug/List are pure DB
 // passthroughs now (no fileDefs registry exists to resolve through), and
-// handleAssignAgentSkill's own direct a.Services.Store.GetAgent check
+// handleAssignAgentSkill's own direct a.store.GetAgent check
 // (unchanged by this task) is still the load-bearing 404 gate --
 // TestHandleAssignAgentSkill_RejectsNonexistentAgent above already covers
 // "no such agent at all" the same way this test would have degenerated to.
@@ -87,7 +87,7 @@ func TestHandleAssignAgentSkill_RejectsNonexistentSkill(t *testing.T) {
 	if msg := errorBody(t, w); msg != "skill not found" {
 		t.Fatalf("error = %q, want %q", msg, "skill not found")
 	}
-	skills, err := a.Services.Store.ListAgentSkills(context.Background(), agent.ID)
+	skills, err := a.store.ListAgentSkills(context.Background(), agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentSkills: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestHandleRevokeAgentSkillGrant_NoGrant(t *testing.T) {
 	a, mux := newTestAPI(t)
 	agent := createTestAgent(t, a, "revoke-no-grant-agent")
 
-	if err := a.Services.Store.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+	if err := a.store.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
 		AgentID:   agent.ID,
 		SkillName: "ungranted",
 		Pinned:    true,

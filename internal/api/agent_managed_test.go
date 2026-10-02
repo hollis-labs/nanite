@@ -86,7 +86,7 @@ func TestManagedAgentLifecycleIsDatabaseOnly(t *testing.T) {
 	if updated.Description != "Curates the atlas knowledge base" || updated.Revision != "" || updated.SourceRef != "" {
 		t.Fatalf("updated agent = %+v", updated)
 	}
-	if got, err := a.Services.Store.GetAgentBySlug(context.Background(), "atlas-curator"); err != nil || got.Description != updated.Description {
+	if got, err := a.store.GetAgentBySlug(context.Background(), "atlas-curator"); err != nil || got.Description != updated.Description {
 		t.Fatalf("database stale after edit: %+v, %v", got, err)
 	}
 	if _, err := os.Stat(projectionDir); !os.IsNotExist(err) {
@@ -97,10 +97,10 @@ func TestManagedAgentLifecycleIsDatabaseOnly(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("delete = %d body=%s", w.Code, body)
 	}
-	if _, err := a.Services.Store.GetAgentBySlug(context.Background(), "atlas-curator"); err == nil {
+	if _, err := a.store.GetAgentBySlug(context.Background(), "atlas-curator"); err == nil {
 		t.Fatal("database row remained after delete")
 	}
-	reflexes, _ := a.Services.Store.ListAgentReflexesForAgent(context.Background(), created.ID, "")
+	reflexes, _ := a.store.ListAgentReflexesForAgent(context.Background(), created.ID, "")
 	if len(reflexes) != 0 {
 		t.Fatalf("reflex FK children remained after delete: %d", len(reflexes))
 	}
@@ -142,7 +142,7 @@ func TestCopyPluginAgentToManagedIsDatabaseOnly(t *testing.T) {
 	a, mux := newTestAPI(t)
 	plugin := storeAgent("giphy-helper", "Giphy Helper", "plugin")
 	plugin.SourceRef = "/path/that/must/not/be/read/giphy-helper.md"
-	if err := a.Services.Store.CreateAgent(context.Background(), plugin); err != nil {
+	if err := a.store.CreateAgent(context.Background(), plugin); err != nil {
 		t.Fatalf("seed plugin agent: %v", err)
 	}
 	w, body := mgReq(t, mux, "PUT", "/api/agents/"+plugin.ID, `{"description":"x"}`)
@@ -169,7 +169,7 @@ func TestCopyInternalAgentToManagedIsRejected(t *testing.T) {
 	a, mux := newTestAPI(t)
 	internal := storeAgent("internal-copy-guard", "Internal Copy Guard", "internal")
 	internal.SourceRef = "/plugin-looking/path/that-must-not-change-ownership.md"
-	if err := a.Services.Store.CreateAgent(context.Background(), internal); err != nil {
+	if err := a.store.CreateAgent(context.Background(), internal); err != nil {
 		t.Fatalf("seed internal agent: %v", err)
 	}
 	w, body := mgReq(t, mux, "POST", "/api/agents/"+internal.ID+"/copy-to-managed", "")
@@ -177,7 +177,7 @@ func TestCopyInternalAgentToManagedIsRejected(t *testing.T) {
 		!strings.Contains(string(body), `"copy_to_managed":false`) {
 		t.Fatalf("internal copy-to-managed = %d body=%s", w.Code, body)
 	}
-	if _, err := a.Services.Store.GetAgentBySlug(context.Background(), "internal-copy-guard-copy"); err == nil {
+	if _, err := a.store.GetAgentBySlug(context.Background(), "internal-copy-guard-copy"); err == nil {
 		t.Fatal("endpoint created a managed copy of an internal profile")
 	}
 }

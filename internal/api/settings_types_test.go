@@ -126,7 +126,7 @@ func (failingSettingsStore) UpdateUserSettings(context.Context, *store.UserSetti
 }
 
 func newFailingSettingsMux() *http.ServeMux {
-	a := &API{Services: &service.Container{Settings: service.NewUserSettingsService(failingSettingsStore{})}}
+	a := &testAPI{API: &API{Services: &service.Container{Settings: service.NewUserSettingsService(failingSettingsStore{})}}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /api/settings", a.handleUpdateSettings)
 	mux.HandleFunc("PUT /api/tools/load-preferences", a.handleUpdateToolLoadPreferences)
@@ -222,7 +222,7 @@ func TestToolLoadPreferences_EmptyDeletes(t *testing.T) {
 func TestHandleGrantAgentTool_Precedence(t *testing.T) {
 	a, mux := newTestAPI(t)
 	agent := createTestAgentForGrant(t, mux, "grant-precedence-agent", nil)
-	toolID, err := a.Services.Store.UpsertKnownTool(context.Background(), "zz_precedence_tool", "builtin", "available", "")
+	toolID, err := a.store.UpsertKnownTool(context.Background(), "zz_precedence_tool", "builtin", "available", "")
 	if err != nil {
 		t.Fatalf("UpsertKnownTool: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestHandleGrantAgentTool_Precedence(t *testing.T) {
 		t.Fatalf("grant: %d %s", w.Code, w.Body.String())
 	}
 	var via string
-	if err := a.Services.Store.DB.QueryRow(`SELECT granted_via FROM agent_tools WHERE agent_id = ? AND tool_id = ?`, agent.ID, toolID).Scan(&via); err != nil {
+	if err := a.store.DB.QueryRow(`SELECT granted_via FROM agent_tools WHERE agent_id = ? AND tool_id = ?`, agent.ID, toolID).Scan(&via); err != nil {
 		t.Fatalf("read grant: %v", err)
 	}
 	if via != "explicit" {

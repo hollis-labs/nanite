@@ -20,7 +20,7 @@ import (
 // broker.Broker so the cancel endpoint can be exercised end-to-end.
 // Distinct from newTestAPI (which omits broker wiring) so tests that
 // don't need the recovery surface don't pay for it.
-func newTestAPIWithRecovery(t *testing.T) (*API, *http.ServeMux, *broker.Broker) {
+func newTestAPIWithRecovery(t *testing.T) (*testAPI, *http.ServeMux, *broker.Broker) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := storetest.New(t, context.Background(), dbPath)
@@ -42,7 +42,7 @@ func newTestAPIWithRecovery(t *testing.T) (*API, *http.ServeMux, *broker.Broker)
 		t.Fatal("Container.Recovery is nil; expected NewContainer to wire the broker")
 	}
 
-	a := New(svc)
+	a := newAPIStoreFixture(svc, s)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
 	return a, mux, svc.Recovery

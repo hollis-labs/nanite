@@ -35,7 +35,7 @@ func TestProjectsAPIRejectsUnsafeRepoPathOnCreate(t *testing.T) {
 func TestProjectsAPIExistingRowsValidateOnRepoPathUpdateOnly(t *testing.T) {
 	a, _ := newTestAPI(t)
 	legacy := &store.Project{ID: "legacy-root", Name: "Legacy", RepoPath: string(filepath.Separator)}
-	if err := a.Services.Store.CreateProject(context.Background(), legacy); err != nil {
+	if err := a.store.CreateProject(context.Background(), legacy); err != nil {
 		t.Fatalf("seed legacy project: %v", err)
 	}
 
@@ -57,7 +57,7 @@ func TestProjectsAPIExistingRowsValidateOnRepoPathUpdateOnly(t *testing.T) {
 		t.Fatalf("repo_path update of legacy row = %d body=%s, want 400", rec.Code, rec.Body.String())
 	}
 
-	got, err := a.Services.Store.GetProject(context.Background(), "legacy-root")
+	got, err := a.store.GetProject(context.Background(), "legacy-root")
 	if err != nil {
 		t.Fatalf("GetProject: %v", err)
 	}

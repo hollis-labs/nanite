@@ -59,7 +59,7 @@ func TestAgentCapabilitiesAPI_KnownToolsCRUD(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("update known tool: %d %s", w.Code, w.Body.String())
 	}
-	row, err := a.Services.Store.GetAgentKnownTool(context.Background(), agentID, "torque_task_create")
+	row, err := a.store.GetAgentKnownTool(context.Background(), agentID, "torque_task_create")
 	if err != nil {
 		t.Fatalf("GetAgentKnownTool: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestAgentCapabilitiesAPI_KnownSkillsCRUD(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("update known skill: %d %s", w.Code, w.Body.String())
 	}
-	row, err := a.Services.Store.GetAgentKnownSkill(context.Background(), agentID, "project_advisor")
+	row, err := a.store.GetAgentKnownSkill(context.Background(), agentID, "project_advisor")
 	if err != nil {
 		t.Fatalf("GetAgentKnownSkill: %v", err)
 	}
@@ -149,13 +149,13 @@ func TestAgentCapabilitiesAPI_CreateKnownSkill_UpsertsOntoBareAssignment(t *test
 	})
 
 	sk := &store.Skill{Name: "Collision Skill", Slug: "collision-skill"}
-	if err := a.Services.Store.CreateSkill(context.Background(), sk); err != nil {
+	if err := a.store.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 
 	// Same-skill assignment via the unrelated /skills endpoint first —
 	// mirrors AgentBuilderWizard.tsx's assignBuilderCapabilities loop.
-	if err := a.Services.Store.AssignSkillToAgent(context.Background(), agentID, sk.ID, ""); err != nil {
+	if err := a.store.AssignSkillToAgent(context.Background(), agentID, sk.ID, ""); err != nil {
 		t.Fatalf("AssignSkillToAgent: %v", err)
 	}
 
@@ -170,7 +170,7 @@ func TestAgentCapabilitiesAPI_CreateKnownSkill_UpsertsOntoBareAssignment(t *test
 		t.Fatalf("create known skill onto bare assignment: got %d, want 201; body=%s", w.Code, w.Body.String())
 	}
 
-	row, err := a.Services.Store.GetAgentKnownSkill(context.Background(), agentID, "collision-skill")
+	row, err := a.store.GetAgentKnownSkill(context.Background(), agentID, "collision-skill")
 	if err != nil {
 		t.Fatalf("GetAgentKnownSkill: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestAgentCapabilitiesAPI_ProceduresCRUD(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("update procedure: %d %s", w.Code, w.Body.String())
 	}
-	row, err := a.Services.Store.GetAgentProcedure(context.Background(), agentID, "checklist")
+	row, err := a.store.GetAgentProcedure(context.Background(), agentID, "checklist")
 	if err != nil {
 		t.Fatalf("GetAgentProcedure: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestAgentCapabilitiesAPI_KnowledgeSeedsCRUDAndMarkApplied(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("mark applied: %d %s", w.Code, w.Body.String())
 	}
-	row, err := a.Services.Store.GetAgentKnowledgeSeed(context.Background(), agentID, "boot-conventions")
+	row, err := a.store.GetAgentKnowledgeSeed(context.Background(), agentID, "boot-conventions")
 	if err != nil {
 		t.Fatalf("GetAgentKnowledgeSeed: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestAgentCapabilitiesAPI_PathBodyMismatchRejected(t *testing.T) {
 		Slug:         "mismatch-agent",
 		SystemPrompt: "x",
 	})
-	if err := a.Services.Store.InsertAgentKnownTool(context.Background(), store.AgentKnownTool{
+	if err := a.store.InsertAgentKnownTool(context.Background(), store.AgentKnownTool{
 		AgentID:  agentID,
 		ToolName: "torque_task_create",
 	}); err != nil {
@@ -384,9 +384,9 @@ func TestAgentCapabilitiesAPI_InternalAgentMutationsConflict(t *testing.T) {
 	}
 }
 
-func seedCapabilityAgent(t *testing.T, a *API, profile store.AgentProfile) string {
+func seedCapabilityAgent(t *testing.T, a *testAPI, profile store.AgentProfile) string {
 	t.Helper()
-	if err := a.Services.Store.CreateAgent(context.Background(), &profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), &profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return profile.ID
@@ -399,7 +399,7 @@ func TestAgentCapabilitiesAPI_ListKnowledgeSeedsResponseShape(t *testing.T) {
 		Slug:         "list-seed-agent",
 		SystemPrompt: "x",
 	})
-	if err := a.Services.Store.InsertAgentKnowledgeSeed(context.Background(), store.AgentKnowledgeSeed{
+	if err := a.store.InsertAgentKnowledgeSeed(context.Background(), store.AgentKnowledgeSeed{
 		AgentID:   agentID,
 		SeedKey:   "alpha",
 		Namespace: "user/demo",

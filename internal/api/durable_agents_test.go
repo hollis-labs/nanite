@@ -37,7 +37,7 @@ func TestDurableAgentsAPI_MissingProfileNamesDatabaseProvisioning(t *testing.T) 
 func TestDurableAgentsAPI_UpdateRejectsSlugTraversal(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Traversal Profile", Slug: "traversal-profile", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestDurableAgentsAPI_UpdateRejectsSlugTraversal(t *testing.T) {
 func TestDurableAgentsAPI_CreateGetPatchArchive(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Durable API Profile", Slug: "durable-api-profile", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -155,7 +155,7 @@ func TestDurableAgentsAPI_CreateGetPatchArchive(t *testing.T) {
 func TestDurableAgentsAPI_LifecycleAndSessionAttachment(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Attach Profile", Slug: "attach-profile", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -164,11 +164,11 @@ func TestDurableAgentsAPI_LifecycleAndSessionAttachment(t *testing.T) {
 		ProfileID:        profile.ID,
 		LaunchSourceType: store.DurableAgentLaunchAPIChat,
 	}
-	if err := a.Services.Store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
+	if err := a.store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 	sess := &store.Session{Title: "attached", Provider: "anthropic", Model: "model-a"}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -224,7 +224,7 @@ func TestDurableAgentsAPI_LifecycleAndSessionAttachment(t *testing.T) {
 func TestDurableAgentsAPI_StartAndResume(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Launch Profile", Slug: "launch-profile", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -236,7 +236,7 @@ func TestDurableAgentsAPI_StartAndResume(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := a.Services.Store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
+	if err := a.store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 
@@ -331,7 +331,7 @@ func TestDurableAgentsAPI_StartAndResume(t *testing.T) {
 func TestDurableAgentsAPI_Wake(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Wake Profile", Slug: "wake-profile", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -345,14 +345,14 @@ func TestDurableAgentsAPI_Wake(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchProcessTick,
 	}
-	if err := a.Services.Store.CreateDurableAgentInstance(context.Background(), process); err != nil {
+	if err := a.store.CreateDurableAgentInstance(context.Background(), process); err != nil {
 		t.Fatalf("CreateDurableAgentInstance process: %v", err)
 	}
 	scopeSession := &store.Session{Provider: "anthropic", Model: "model-a"}
-	if err := a.Services.Store.CreateSession(context.Background(), scopeSession); err != nil {
+	if err := a.store.CreateSession(context.Background(), scopeSession); err != nil {
 		t.Fatalf("CreateSession scope: %v", err)
 	}
-	if err := a.Services.Store.AttachDurableAgentInstanceSession(context.Background(), process.ID, scopeSession.ID, store.DurableAgentSessionRelationWake); err != nil {
+	if err := a.store.AttachDurableAgentInstanceSession(context.Background(), process.ID, scopeSession.ID, store.DurableAgentSessionRelationWake); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession process: %v", err)
 	}
 
@@ -381,7 +381,7 @@ func TestDurableAgentsAPI_Wake(t *testing.T) {
 func TestDurableAgentsAPI_ListEventsLimitAndCap(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Events Profile", Slug: "events-profile", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -394,7 +394,7 @@ func TestDurableAgentsAPI_ListEventsLimitAndCap(t *testing.T) {
 		t.Fatalf("Create durable agent: %v", err)
 	}
 	for i := 0; i < 205; i++ {
-		if err := a.Services.Store.CreateDurableAgentEvent(context.Background(), &store.DurableAgentEvent{
+		if err := a.store.CreateDurableAgentEvent(context.Background(), &store.DurableAgentEvent{
 			InstanceID:   inst.ID,
 			EventType:    store.DurableAgentEventUpdated,
 			StatusBefore: store.DurableAgentStatusSleeping,
@@ -450,7 +450,7 @@ func TestDurableAgentsAPI_ListEventsLimitAndCap(t *testing.T) {
 func TestDurableAgentsAPI_UnsupportedLaunchPolicy(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "PTY Profile", Slug: "pty-profile", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
+	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -460,7 +460,7 @@ func TestDurableAgentsAPI_UnsupportedLaunchPolicy(t *testing.T) {
 		RuntimeKind:      "pty",
 		LaunchSourceType: store.DurableAgentLaunchCLIHarness,
 	}
-	if err := a.Services.Store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
+	if err := a.store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 	req := httptest.NewRequest("GET", "/api/durable-agents/"+inst.ID+"/launch-plan", nil)

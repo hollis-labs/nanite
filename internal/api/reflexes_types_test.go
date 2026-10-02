@@ -99,7 +99,7 @@ func TestPatchAgentReflexPrecedenceBeforeBodyDecode(t *testing.T) {
 	a, mux := newTestAPI(t)
 	owner := createTestAgent(t, a, "reflex-owner-agent")
 	caller := createTestAgent(t, a, "reflex-caller-agent")
-	id, err := a.Services.Store.InsertAgentReflex(context.Background(), store.AgentReflex{
+	id, err := a.store.InsertAgentReflex(context.Background(), store.AgentReflex{
 		AgentID:     owner.ID,
 		Name:        "owned",
 		TriggerKind: store.ReflexTriggerPredicate,

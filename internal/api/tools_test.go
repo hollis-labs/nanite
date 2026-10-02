@@ -27,7 +27,7 @@ func TestHandleListAgentTools_DBBackedAgentUsesAgentTools(t *testing.T) {
 	// Wire a ToolClient with a small builtin catalog -- newTestAPI's
 	// container doesn't wire one by default (no MCP/config in this
 	// lightweight harness).
-	tc := toolclient.New(mcp.NewManager(), a.Services.Store, nil)
+	tc := toolclient.New(mcp.NewManager(), a.store, nil)
 	tc.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "Read a file"},
 		{Name: "dev_write", Description: "Write a file"},
@@ -37,11 +37,11 @@ func TestHandleListAgentTools_DBBackedAgentUsesAgentTools(t *testing.T) {
 
 	agent := createTestAgentForGrant(t, mux, "list-tools-db-agent", nil)
 
-	toolID, err := a.Services.Store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
+	toolID, err := a.store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
 	if err != nil {
 		t.Fatalf("UpsertKnownTool: %v", err)
 	}
-	if err := a.Services.Store.GrantAgentTool(ctx, agent.ID, toolID, "explicit"); err != nil {
+	if err := a.store.GrantAgentTool(ctx, agent.ID, toolID, "explicit"); err != nil {
 		t.Fatalf("GrantAgentTool: %v", err)
 	}
 
@@ -89,7 +89,7 @@ func TestHandleListAgentTools_DBBackedAgentUsesAgentTools(t *testing.T) {
 func TestHandleListAgentTools_UnknownAgentDeniesAll(t *testing.T) {
 	a, mux := newTestAPI(t)
 
-	tc := toolclient.New(mcp.NewManager(), a.Services.Store, nil)
+	tc := toolclient.New(mcp.NewManager(), a.store, nil)
 	tc.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "Read a file"},
 		{Name: "dev_write", Description: "Write a file"},
@@ -127,7 +127,7 @@ func TestHandleListAgentTools_ResolvesKnownToolID(t *testing.T) {
 	a, mux := newTestAPI(t)
 	ctx := context.Background()
 
-	tc := toolclient.New(mcp.NewManager(), a.Services.Store, nil)
+	tc := toolclient.New(mcp.NewManager(), a.store, nil)
 	tc.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "Read a file"},
 		{Name: "dev_unsynced", Description: "Not yet in known_tools"},
@@ -136,7 +136,7 @@ func TestHandleListAgentTools_ResolvesKnownToolID(t *testing.T) {
 
 	agent := createTestAgentForGrant(t, mux, "list-tools-id-agent", nil)
 
-	toolID, err := a.Services.Store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
+	toolID, err := a.store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
 	if err != nil {
 		t.Fatalf("UpsertKnownTool: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestHandleListAgentTools_ReportsMCPServerOrigin(t *testing.T) {
 		t.Fatalf("DiscoverTools: %v", err)
 	}
 
-	tc := toolclient.New(mgr, a.Services.Store, nil)
+	tc := toolclient.New(mgr, a.store, nil)
 	tc.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "Read a file"},
 	})

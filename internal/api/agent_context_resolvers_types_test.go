@@ -25,12 +25,12 @@ func TestContextResolverViewJSON(t *testing.T) {
 	assertSameJSON(t, "nil list", contextResolversToView(nil), []store.AgentContextResolver(nil))
 }
 
-func resolverAgents(t *testing.T, a *API) (*store.AgentProfile, *store.AgentProfile) {
+func resolverAgents(t *testing.T, a *testAPI) (*store.AgentProfile, *store.AgentProfile) {
 	t.Helper()
 	agentA := &store.AgentProfile{Name: "Resolver A", Slug: "b3a-resolver-a", SystemPrompt: "x", Class: "advisor"}
 	agentB := &store.AgentProfile{Name: "Resolver B", Slug: "b3a-resolver-b", SystemPrompt: "x", Class: "advisor"}
 	for _, ag := range []*store.AgentProfile{agentA, agentB} {
-		if err := a.Services.Store.CreateAgent(context.Background(), ag); err != nil {
+		if err := a.store.CreateAgent(context.Background(), ag); err != nil {
 			t.Fatalf("CreateAgent: %v", err)
 		}
 	}

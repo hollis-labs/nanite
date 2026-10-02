@@ -37,10 +37,10 @@ func TestSearchResultViewJSON(t *testing.T) {
 	assertSameJSON(t, "nil list", searchResultsToView(nil), []store.SearchResult(nil))
 }
 
-func newB2aSession(t *testing.T, a *API) *store.Session {
+func newB2aSession(t *testing.T, a *testAPI) *store.Session {
 	t.Helper()
 	sess := &store.Session{Provider: "anthropic", Model: "m", Status: "active", Title: "B2a"}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	return sess
@@ -85,7 +85,7 @@ func TestDrawerCards_HTTP(t *testing.T) {
 func TestSearch_HTTP(t *testing.T) {
 	a, mux := newTestAPI(t)
 	sess := newB2aSession(t, a)
-	if err := a.Services.Store.CreateMessage(context.Background(), &store.Message{SessionID: sess.ID, Role: "user", Content: "find the zzb2aneedle here"}); err != nil {
+	if err := a.store.CreateMessage(context.Background(), &store.Message{SessionID: sess.ID, Role: "user", Content: "find the zzb2aneedle here"}); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 	if w := mcpDo(mux, "GET", "/api/search", ""); w.Code != http.StatusBadRequest {
@@ -108,7 +108,7 @@ func TestSessionEvents_StoredMessageOwnership(t *testing.T) {
 	owner := newB2aSession(t, a)
 	other := newB2aSession(t, a)
 	msg := &store.Message{SessionID: owner.ID, Role: "assistant", Content: "done"}
-	if err := a.Services.Store.CreateMessage(context.Background(), msg); err != nil {
+	if err := a.store.CreateMessage(context.Background(), msg); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 	if w := mcpDo(mux, "GET", "/api/harness/v1/sessions/"+other.ID+"/events?message_id="+msg.ID, ""); w.Code != http.StatusNotFound || errorBody(t, w) != "message not found for session" {
@@ -134,7 +134,7 @@ func TestExecuteCommand_PersistsMessage(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || res.Action != "message" || res.MessageID == "" {
 		t.Fatalf("result %s: %v", w.Body.String(), err)
 	}
-	msg, err := a.Services.Store.GetMessage(context.Background(), res.MessageID)
+	msg, err := a.store.GetMessage(context.Background(), res.MessageID)
 	if err != nil || msg.SessionID != sess.ID || msg.Role != "system" {
 		t.Fatalf("persisted message = %+v, %v", msg, err)
 	}
@@ -149,9 +149,9 @@ func TestCreateDurableAgent_UnknownProfile(t *testing.T) {
 }
 
 func TestSessionModel_NoSessionService(t *testing.T) {
-	for name, a := range map[string]*API{
-		"no services":        {Services: nil},
-		"no session service": {Services: &service.Container{}},
+	for name, a := range map[string]*testAPI{
+		"no services":        {API: &API{Services: nil}},
+		"no session service": {API: &API{Services: &service.Container{}}},
 	} {
 		if got := a.sessionModel(context.Background(), "x"); got != "" {
 			t.Fatalf("sessionModel with %s = %q", name, got)

@@ -32,19 +32,19 @@ func TestHandleGetSession_InterruptedTurn(t *testing.T) {
 		return resp.InterruptedTurn, resp.InterruptedTurn != nil
 	}
 
-	seed := func(t *testing.T, a *API, sessID string, lastRole string) {
+	seed := func(t *testing.T, a *testAPI, sessID string, lastRole string) {
 		t.Helper()
 		sess := &store.Session{ID: sessID, Title: "t"}
-		if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+		if err := a.store.CreateSession(context.Background(), sess); err != nil {
 			t.Fatalf("CreateSession: %v", err)
 		}
-		if err := a.Services.Store.CreateMessage(context.Background(), &store.Message{
+		if err := a.store.CreateMessage(context.Background(), &store.Message{
 			ID: sessID + "-m0", SessionID: sessID, Role: "user", Content: "hello",
 		}); err != nil {
 			t.Fatalf("CreateMessage user: %v", err)
 		}
 		if lastRole == "assistant" {
-			if err := a.Services.Store.CreateMessage(context.Background(), &store.Message{
+			if err := a.store.CreateMessage(context.Background(), &store.Message{
 				ID: sessID + "-m1", SessionID: sessID, Role: "assistant", Content: "hi",
 			}); err != nil {
 				t.Fatalf("CreateMessage assistant: %v", err)
@@ -73,7 +73,7 @@ func TestHandleGetSession_InterruptedTurn(t *testing.T) {
 		// A real event_log row lands with reasoning metadata — not just a
 		// bare event-type string (CW-20260518-0084 postmortem extension,
 		// TASKS/phase-3/03-extend-event-log-to-recovery-mechanisms.md).
-		events, err := a.Services.Store.ListEvents(context.Background(), "recovery", 50)
+		events, err := a.store.ListEvents(context.Background(), "recovery", 50)
 		if err != nil {
 			t.Fatalf("ListEvents: %v", err)
 		}
@@ -109,7 +109,7 @@ func TestHandleGetSession_InterruptedTurn(t *testing.T) {
 		if _, ok := getInterrupted(t, mux, "interrupt-b"); ok {
 			t.Errorf("expected interrupted_turn to be null for a completed turn")
 		}
-		events, err := a.Services.Store.ListEvents(context.Background(), "recovery", 50)
+		events, err := a.store.ListEvents(context.Background(), "recovery", 50)
 		if err != nil {
 			t.Fatalf("ListEvents: %v", err)
 		}
@@ -131,7 +131,7 @@ func TestHandleGetSession_InterruptedTurn(t *testing.T) {
 		if _, ok := getInterrupted(t, mux, "interrupt-c"); ok {
 			t.Errorf("expected interrupted_turn to be null while a live stream exists")
 		}
-		events, err := a.Services.Store.ListEvents(context.Background(), "recovery", 50)
+		events, err := a.store.ListEvents(context.Background(), "recovery", 50)
 		if err != nil {
 			t.Fatalf("ListEvents: %v", err)
 		}

@@ -1333,6 +1333,8 @@ func (s *chatServiceImpl) maybeCreateAutoArtifact(sessionID, messageID, agentID 
 // retryEnvelopeCorrection sends a correction prompt for malformed envelopes.
 func (s *chatServiceImpl) retryEnvelopeCorrection(
 	ctx context.Context,
+	run *runState,
+	providerName string,
 	sessionID string,
 	session *store.Session,
 	prov llmcontracts.Provider,
@@ -1372,6 +1374,8 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 		retryCtx = provider.WithSandboxDir(retryCtx, sbDir)
 	}
 
+	accounting := s.startUsageCall(run, providerName, model)
+	defer accounting.finish()
 	correctionMsgs := []llmtypes.ChatMessage{{Role: "user", Content: correction}}
 	retryCh, err := prov.StreamChat(retryCtx, llmtypes.ChatRequest{
 		Messages:   correctionMsgs,
@@ -1386,6 +1390,8 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 	var retryContent strings.Builder
 	for evt := range retryCh {
 		switch evt.Type {
+		case llmtypes.EventUsage:
+			accounting.consumeSupplemental(evt)
 		case "delta":
 			retryContent.WriteString(evt.Content)
 			// Envelope corrections are post-loop responses; always final.
@@ -1695,6 +1701,8 @@ const earlyStopSynthesisPrompt = "You've reached the maximum number of steps. Pr
 // after invoking this helper.
 func (s *chatServiceImpl) earlyStopSynthesis(
 	ctx context.Context,
+	run *runState,
+	providerName string,
 	prov llmcontracts.Provider,
 	model string,
 	systemPrompt string,
@@ -1731,6 +1739,8 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 		Content: earlyStopSynthesisPrompt,
 	}
 
+	accounting := s.startUsageCall(run, providerName, model)
+	defer accounting.finish()
 	synthCh, err := prov.StreamChat(ctx, llmtypes.ChatRequest{
 		SystemPrompt: systemPrompt,
 		SlotBlocks:   slotBlocksFor(slotResult),
@@ -1746,6 +1756,8 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 
 	for evt := range synthCh {
 		switch evt.Type {
+		case llmtypes.EventUsage:
+			accounting.consumeSupplemental(evt)
 		case "delta":
 			fullContent.WriteString(evt.Content)
 			if finalContent != nil {
@@ -1756,8 +1768,7 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 		case "error":
 			slog.Warn("chat-service: early-stop synthesis stream error", "err", evt.Error)
 		}
-		// usage / done / status events are intentionally discarded — the
-		// main-loop token accounting has already closed.
+		// done/status events are not forwarded; billed usage stays on the turn.
 	}
 }
 

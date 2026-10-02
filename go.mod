@@ -115,6 +115,7 @@ require (
 	github.com/hollis-labs/go-materialize v0.1.0
 	github.com/hollis-labs/go-mcp v0.14.1
 	github.com/hollis-labs/go-messaging v0.7.0
+	github.com/hollis-labs/go-modelsdev-catalog-helpers v0.1.0
 	github.com/hollis-labs/go-permission v0.1.0
 	github.com/hollis-labs/go-runtime-events v0.2.1
 	github.com/hollis-labs/go-safefs v0.1.0
@@ -124,7 +125,9 @@ require (
 	github.com/hollis-labs/go-svcerr v0.1.0
 	github.com/hollis-labs/go-tether-client v0.8.0
 	github.com/hollis-labs/go-toolresult v0.1.0
+
 	github.com/hollis-labs/go-transportparity v0.1.0
+	github.com/hollis-labs/go-usage-ledger v0.1.0
 	github.com/hollis-labs/go-workflow v0.1.0
 	github.com/hollis-labs/go-worktree v0.1.0
 	github.com/hollis-labs/nanite/pkg/pluginapi v0.1.7

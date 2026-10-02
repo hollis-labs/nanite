@@ -10,6 +10,8 @@ import "github.com/hollis-labs/nanite/internal/store"
 
 // SessionUsageView is a session's token usage totals.
 type SessionUsageView struct {
+	ReasoningTokens     int     `json:"reasoning_tokens"`
+	PartialRows         int     `json:"partial_rows"`
 	InputTokens         int     `json:"input_tokens"`
 	OutputTokens        int     `json:"output_tokens"`
 	TotalTokens         int     `json:"total_tokens"`
@@ -22,6 +24,7 @@ type SessionUsageView struct {
 
 func sessionUsageToView(u *store.SessionUsageSummary) SessionUsageView {
 	return SessionUsageView{
+		ReasoningTokens: u.ReasoningTokens, PartialRows: u.PartialRows,
 		InputTokens:         u.InputTokens,
 		OutputTokens:        u.OutputTokens,
 		TotalTokens:         u.TotalTokens,
@@ -45,6 +48,7 @@ func sessionUsageToViewPtr(u *store.SessionUsageSummary) *SessionUsageView {
 
 // ModelUsageView is one model's share of the usage summary.
 type ModelUsageView struct {
+	PartialRows      int     `json:"partial_rows"`
 	Model            string  `json:"model"`
 	InputTokens      int     `json:"input_tokens"`
 	OutputTokens     int     `json:"output_tokens"`
@@ -54,6 +58,7 @@ type ModelUsageView struct {
 
 // UsageSummaryView is token usage across all sessions.
 type UsageSummaryView struct {
+	PartialRows int              `json:"partial_rows"`
 	TotalInput  int              `json:"total_input"`
 	TotalOutput int              `json:"total_output"`
 	TotalTokens int              `json:"total_tokens"`
@@ -63,6 +68,7 @@ type UsageSummaryView struct {
 
 func usageSummaryToView(u *store.UsageSummary) UsageSummaryView {
 	out := UsageSummaryView{
+		PartialRows: u.PartialRows,
 		TotalInput:  u.TotalInput,
 		TotalOutput: u.TotalOutput,
 		TotalTokens: u.TotalTokens,
@@ -72,6 +78,7 @@ func usageSummaryToView(u *store.UsageSummary) UsageSummaryView {
 		out.ByModel = make([]ModelUsageView, 0, len(u.ByModel))
 		for _, m := range u.ByModel {
 			out.ByModel = append(out.ByModel, ModelUsageView{
+				PartialRows:      m.PartialRows,
 				Model:            m.Model,
 				InputTokens:      m.InputTokens,
 				OutputTokens:     m.OutputTokens,

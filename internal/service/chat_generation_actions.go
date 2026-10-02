@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	ledger "github.com/hollis-labs/go-usage-ledger"
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
@@ -444,6 +445,7 @@ type runState struct {
 	narrationContent strings.Builder
 	finalContent     strings.Builder
 	finalUsage       *chat.Usage
+	usageCalls       []ledger.Row
 	breakdown        *chat.TokenBreakdown
 	thinkingBlocks   []llmtypes.ThinkingBlock
 	providerOutput   *llmtypes.ContentBlock
@@ -461,6 +463,7 @@ type providerTurn struct {
 }
 
 type providerAttempt struct {
+	accounting *providerCallAccounting
 	events     <-chan llmtypes.StreamEvent
 	cancel     context.CancelFunc
 	span       trace.Span
@@ -545,7 +548,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 		// synthesis trigger left is the runaway hard circuit-breaker
 		// below.
 		if code == TerminationRunawayToolFailures {
-			s.earlyStopSynthesis(ctx, prov, model, extraSystemPrefix, slotResult, run.chatMessages, ch, &run.fullContent, &run.finalContent)
+			s.earlyStopSynthesis(ctx, run, providerName, prov, model, extraSystemPrefix, slotResult, run.chatMessages, ch, &run.fullContent, &run.finalContent)
 		}
 
 		// CW-20260417-0485: emit a typed `chat-loop-terminated` envelope
@@ -823,6 +826,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 	// second time is exactly the "matched in N places, expected to
 	// stay in sync by convention" pattern architecture/
 	// 02-agent-launching.md's runtime_kind field replaces.
+	attempt.accounting = s.startUsageCall(run, providerName, model)
 	if prov == nil {
 		provCh, err = s.driveBootSession(provCtx, sessionID, session, agent, slotResult, userContent, run.loop.iteration, providerName)
 	} else {
@@ -1042,6 +1046,12 @@ func (s *chatServiceImpl) consumeProviderIteration(
 	providerName := setup.providerName
 	slotResult := setup.slotResult
 	defer attempt.close()
+	accounting := attempt.accounting
+	if accounting == nil {
+		// Isolated consumer tests may supply a stream without a request phase.
+		accounting = s.startUsageCall(run, providerName, model)
+	}
+	defer accounting.finish()
 
 	// --- Consume provider stream ---
 	var turnContent strings.Builder
@@ -1170,6 +1180,7 @@ streamLoop:
 			}
 
 		case "usage":
+			accounting.consume(evt)
 			if evt.Usage != nil {
 				if run.finalUsage == nil {
 					run.finalUsage = &chat.Usage{}
@@ -1602,7 +1613,7 @@ func (s *chatServiceImpl) finalizeRun(
 			}
 		}
 		if hasFatal {
-			retryEnvelopes := s.retryEnvelopeCorrection(ctx, sessionID, session, prov, model, envErrors, ch)
+			retryEnvelopes := s.retryEnvelopeCorrection(ctx, run, providerName, sessionID, session, prov, model, envErrors, ch)
 			envelopes = append(envelopes, retryEnvelopes...)
 		}
 	}
@@ -1789,14 +1800,18 @@ func (s *chatServiceImpl) finalizeRun(
 	// callers don't break; removal is a follow-up.
 
 	// Record token usage.
-	if run.finalUsage != nil && (run.finalUsage.InputTokens > 0 || run.finalUsage.OutputTokens > 0) {
+	if len(run.usageCalls) > 0 {
+		usage := run.finalUsage
+		if usage == nil {
+			usage = &chat.Usage{}
+		}
 		toolInputTokens := 0
 		if run.breakdown != nil {
 			toolInputTokens = run.breakdown.Tools
 		}
-		if err := s.store.RecordUsage(persistCtx, sessionID, assistantMsgID, model,
-			run.finalUsage.InputTokens, run.finalUsage.OutputTokens, toolInputTokens,
-			run.finalUsage.CacheCreationTokens, run.finalUsage.CacheReadTokens); err != nil {
+		if err := s.store.RecordUsageSnapshot(persistCtx, sessionID, assistantMsgID, model,
+			usage.InputTokens, usage.OutputTokens, toolInputTokens,
+			usage.CacheCreationTokens, usage.CacheReadTokens, run.usageCalls); err != nil {
 			slog.Warn("chat-service: failed to record token usage", "err", err)
 		}
 	}
@@ -1844,11 +1859,15 @@ func (s *chatServiceImpl) finalizeRun(
 	lifecycle.ptyTurnSucceeded = true
 
 	// Stream end.
-	ch <- chat.StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: run.finalUsage, AgentID: agent.ID, Envelope: envelopeJSON}
+	streamUsage := run.finalUsage
+	if streamUsage != nil && streamUsage.InputTokens == 0 && streamUsage.OutputTokens == 0 {
+		streamUsage = nil
+	}
+	ch <- chat.StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: streamUsage, AgentID: agent.ID, Envelope: envelopeJSON}
 
 	// Post-response events.
-	if s.events != nil && run.finalUsage != nil {
-		s.events.EmitResponseComplete(ctx, sessionID, agent.ID, model, run.finalUsage.InputTokens, run.finalUsage.OutputTokens)
+	if s.events != nil && streamUsage != nil {
+		s.events.EmitResponseComplete(ctx, sessionID, agent.ID, model, streamUsage.InputTokens, streamUsage.OutputTokens)
 	}
 	if s.events != nil {
 		elapsed := time.Since(lifecycle.startTime).Milliseconds()

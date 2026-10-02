@@ -239,6 +239,7 @@ describe("SessionDetailsPanel", () => {
           cache_creation_tokens: 0,
           cache_read_tokens: 10,
           estimated_cost_usd: 0.1234,
+          partial_rows: 1,
           message_count: 2,
         },
         boot_source: "legacy_cli",
@@ -272,7 +273,7 @@ describe("SessionDetailsPanel", () => {
     expect(screen.getByText("/tmp/workspace")).toBeTruthy();
     expect(screen.getByText("/tmp/boot")).toBeTruthy();
     expect(screen.getByText("Runtime exited before ready.")).toBeTruthy();
-    expect(screen.getByText("$0.1234")).toBeTruthy();
+    expect(screen.getByText("$0.1234 (partial)")).toBeTruthy();
   });
 
   it("renders durable-agent attachment and current instance", async () => {

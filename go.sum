@@ -89,6 +89,8 @@ github.com/hollis-labs/go-messaging v0.7.0 h1:VDvodrSgeYbH3ElwoTXWU7VjsPjUeHgXke
 github.com/hollis-labs/go-messaging v0.7.0/go.mod h1:KLv+81DP4Zktb4/ZnCg5dlzxjaI3u9jAm/tWOZxqHq0=
 github.com/hollis-labs/go-modelsdev v0.3.0 h1:nGsGPpr6/Op37F0BrcHRgOVn0YEpFlcA94nZO1dPtb8=
 github.com/hollis-labs/go-modelsdev v0.3.0/go.mod h1:/scTnxJppW1p33PVaQ6iXvmc+zYYHoo+VnTgbmSA6TM=
+github.com/hollis-labs/go-modelsdev-catalog-helpers v0.1.0 h1:3PJ2hdeRNybPM0rUo+uPRR1NawhIQ5OwQ6Iqxyclra0=
+github.com/hollis-labs/go-modelsdev-catalog-helpers v0.1.0/go.mod h1:LZdzR9NsaS/te2Xt72kiIX4rJDurr4W+n4Pwon6pY+0=
 github.com/hollis-labs/go-otel v0.10.0 h1:5p+JeX2FqTEATnTV0qJ5QLrDtg+rUQjhbHMRNuhCSVY=
 github.com/hollis-labs/go-otel v0.10.0/go.mod h1:cm2TSPhd42xsC3HOdwju83tUBSWmzDWCBsxYAnHM8n4=
 github.com/hollis-labs/go-permission v0.1.0 h1:eOlb2pPmEkh9D5zlVgWwOd4ryycEQYiLT1cLMEG6y2c=
@@ -121,8 +123,11 @@ github.com/hollis-labs/go-tether-client v0.8.0 h1:20axAfaqixLnWs7n+DY0JqrUnOfHMy
 github.com/hollis-labs/go-tether-client v0.8.0/go.mod h1:xg8sxCZefI592F6m/0rO0w+td3Sz32PCycnolki9Qxk=
 github.com/hollis-labs/go-toolresult v0.1.0 h1:g9GVGYdGLUOkWgFGKBhP5Dr/FJHfsfYBdYEP2rVtSv0=
 github.com/hollis-labs/go-toolresult v0.1.0/go.mod h1:MG+vPliOnDm8paEzeYDfVOdw229YbS8N7zW+Gi/b+F4=
+
 github.com/hollis-labs/go-transportparity v0.1.0 h1:Rl2yiu1KvdeUc6rd7iU1Q2m11I8LudwzQNjKD+uMco0=
 github.com/hollis-labs/go-transportparity v0.1.0/go.mod h1:v0eqibiGstnt5kwrMitEEgegS4QamzotWnrbgZNzFVE=
+github.com/hollis-labs/go-usage-ledger v0.1.0 h1:shsT6euSdkGwBnH8PlIrZCr0nNYy6U+a9o+Q9f0yhHM=
+github.com/hollis-labs/go-usage-ledger v0.1.0/go.mod h1:6zlbMMvsvguBlaI9C/AjJXmNZo+vg5cBPZX/AXSsTTw=
 github.com/hollis-labs/go-workflow v0.1.0 h1:Rose0BcdHySd3RT2+HTuAzD/dELPsEREKmosg+3SySg=
 github.com/hollis-labs/go-workflow v0.1.0/go.mod h1:LfBd90u0l4/CBtIaxJPl7RLRm9JYS3XcOyYju8aNfBg=
 github.com/hollis-labs/go-worktree v0.1.0 h1:h4o+FOVVIFzbrg6eWwDj5UgzTHHh1gCgkuHrE7bwgk4=

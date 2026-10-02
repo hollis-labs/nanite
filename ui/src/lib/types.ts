@@ -1343,6 +1343,8 @@ export interface ContextBreakdown {
 // --- Token Usage ---
 
 export interface SessionUsageSummary {
+  reasoning_tokens?: number;
+  partial_rows?: number;
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
@@ -1354,6 +1356,7 @@ export interface SessionUsageSummary {
 }
 
 export interface ModelUsage {
+  partial_rows?: number;
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -1362,6 +1365,7 @@ export interface ModelUsage {
 }
 
 export interface GlobalUsageSummary {
+  partial_rows?: number;
   total_input: number;
   total_output: number;
   total_tokens: number;

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	ledger "github.com/hollis-labs/go-usage-ledger"
+
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -392,6 +394,10 @@ func (stubToolStore) SetCatalogSourcePublicKey(context.Context, string, string) 
 func (stubToolStore) DeleteCatalogSource(context.Context, string) error               { return nil }
 
 type stubUsageStore struct{}
+
+func (stubUsageStore) RecordUsageSnapshot(context.Context, string, string, string, int, int, int, int, int, []ledger.Row) error {
+	return nil
+}
 
 func (stubUsageStore) RecordUsage(context.Context, string, string, string, int, int, int, int, int) error {
 	return nil

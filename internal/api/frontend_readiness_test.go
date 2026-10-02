@@ -134,7 +134,7 @@ func TestSessionDetailsContract(t *testing.T) {
 	if details.Runtime.State != "running" || details.Runtime.RuntimeKind != "streaming-stdio" || details.Runtime.PID != 1234 {
 		t.Fatalf("runtime details = %+v", details.Runtime)
 	}
-	if details.ActivityState != "online" || details.Usage == nil || details.Usage.TotalTokens != 22 {
+	if details.ActivityState != "online" || details.Usage == nil || details.Usage.TotalTokens != 25 || details.Usage.PartialRows != 1 {
 		t.Fatalf("observability details = %+v", details)
 	}
 	if len(details.RecentDurableEvents) != 1 || details.RecentDurableEvents[0].EventType != store.DurableAgentEventStartSucceeded {

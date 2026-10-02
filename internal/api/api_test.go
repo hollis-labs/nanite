@@ -20,7 +20,18 @@ import (
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
-func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
+// testAPI keeps fixture setup separate from the production service container.
+// Embedding API lets tests call handlers while retaining the store they opened.
+type testAPI struct {
+	*API
+	store *store.Store
+}
+
+func newAPIStoreFixture(services *service.Container, st *store.Store) *testAPI {
+	return &testAPI{API: New(services), store: st}
+}
+
+func newTestAPI(t *testing.T) (*testAPI, *http.ServeMux) {
 	t.Helper()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -69,7 +80,7 @@ func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	}
 	t.Cleanup(func() { svc.Shutdown() })
 
-	a := New(svc)
+	a := newAPIStoreFixture(svc, s)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +184,7 @@ func TestCreateAndListSessions(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	// Seed an agent so EnsureSessionAgent doesn't fail on FK constraint.
-	if err := a.Services.Store.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := a.store.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "mentat-001",
 		Name:         "Mentat",
 		Slug:         "mentat",

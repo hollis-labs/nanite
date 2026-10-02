@@ -19,16 +19,16 @@ import (
 // seeded via config; this lightweight test DB runs neither). Returns the minted model row's id (the models.id PK,
 // agent_profiles.model_id's FK target -- distinct from models.model_id,
 // the wire model identifier string).
-func seedTestModel(t *testing.T, a *API) string {
+func seedTestModel(t *testing.T, a *testAPI) string {
 	t.Helper()
-	if _, err := a.Services.Store.DB.Exec(
+	if _, err := a.store.DB.Exec(
 		`INSERT INTO providers (id, name, provider_type) VALUES (?, ?, ?)`,
 		"prov-composition-test", "Test Provider", "anthropic",
 	); err != nil {
 		t.Fatalf("seed provider: %v", err)
 	}
 	modelID := "model-composition-test"
-	if _, err := a.Services.Store.DB.Exec(
+	if _, err := a.store.DB.Exec(
 		`INSERT INTO models (id, provider_id, model_id, display_name) VALUES (?, ?, ?, ?)`,
 		modelID, "prov-composition-test", "claude-test-model", "Claude Test Model",
 	); err != nil {
@@ -45,7 +45,7 @@ func TestHandleCreateAgent_SetsCompositionFields(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	role := &store.Role{Slug: "composition-role", Name: "Composition Role", SystemPrompt: "You help."}
-	if err := a.Services.Store.CreateRole(context.Background(), role); err != nil {
+	if err := a.store.CreateRole(context.Background(), role); err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
 	modelID := seedTestModel(t, a)
@@ -132,7 +132,7 @@ func TestHandleUpdateAgent_SetsAndClearsCompositionFields(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	role := &store.Role{Slug: "composition-role-2", Name: "Composition Role 2", SystemPrompt: "You help."}
-	if err := a.Services.Store.CreateRole(context.Background(), role); err != nil {
+	if err := a.store.CreateRole(context.Background(), role); err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
 

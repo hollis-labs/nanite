@@ -25,15 +25,15 @@ func TestBookmarkViewJSONKeys(t *testing.T) {
 	}
 }
 
-func seedBookmarkMessage(t *testing.T, a *API) (*store.Session, *store.Message) {
+func seedBookmarkMessage(t *testing.T, a *testAPI) (*store.Session, *store.Message) {
 	t.Helper()
 	ctx := context.Background()
 	sess := &store.Session{}
-	if err := a.Services.Store.CreateSession(ctx, sess); err != nil {
+	if err := a.store.CreateSession(ctx, sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	msg := &store.Message{SessionID: sess.ID, Role: "user", Content: "remember this"}
-	if err := a.Services.Store.CreateMessage(ctx, msg); err != nil {
+	if err := a.store.CreateMessage(ctx, msg); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 	return sess, msg

@@ -49,7 +49,7 @@ func (s *activitySink) count(eventType, entityID string) int {
 // and a stream manager. It deliberately avoids service.NewContainer, whose
 // background model-catalog refresher can outlive the test and race its
 // temp-dir cleanup.
-func newArchiveTestAPI(t *testing.T) (*API, *http.ServeMux, *activitySink) {
+func newArchiveTestAPI(t *testing.T) (*testAPI, *http.ServeMux, *activitySink) {
 	t.Helper()
 	sink := &activitySink{}
 	srv := httptest.NewServer(sink)
@@ -70,21 +70,20 @@ func newArchiveTestAPI(t *testing.T) (*API, *http.ServeMux, *activitySink) {
 		Settings:    st,
 		Events:      service.NewCompositeEmitter(activity, nil, nil),
 	})
-	a := &API{Services: &service.Container{
-		Store:    st,
+	a := newAPIStoreFixture(&service.Container{
 		Sessions: sessions,
 		Streams:  service.NewStreamManager(),
 		Activity: activity,
-	}}
+	}, st)
 	mux := http.NewServeMux()
 	mux.HandleFunc("DELETE /api/sessions/{id}", a.handleDeleteSession)
 	return a, mux, sink
 }
 
-func createArchiveTestSession(t *testing.T, a *API) *store.Session {
+func createArchiveTestSession(t *testing.T, a *testAPI) *store.Session {
 	t.Helper()
 	sess := &store.Session{Provider: "anthropic", Model: "m", Status: "active"}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	return sess
@@ -124,7 +123,7 @@ func TestDeleteSessionRunsArchiveHook(t *testing.T) {
 	if len(closed) != 1 || closed[0] != sess.ID {
 		t.Fatalf("archive hook calls = %v, want exactly [%s]", closed, sess.ID)
 	}
-	got, err := a.Services.Store.GetSession(context.Background(), sess.ID)
+	got, err := a.store.GetSession(context.Background(), sess.ID)
 	if err != nil || got.Status != "archived" {
 		t.Fatalf("session after DELETE = %+v, %v; want archived", got, err)
 	}

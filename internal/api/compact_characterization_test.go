@@ -43,10 +43,10 @@ type compactResponse struct {
 	Mode          string   `json:"mode"`
 }
 
-func seedCompactSession(t *testing.T, a *API, id string, messages int) {
+func seedCompactSession(t *testing.T, a *testAPI, id string, messages int) {
 	t.Helper()
 	ctx := context.Background()
-	if err := a.Services.Store.CreateSession(ctx, &store.Session{ID: id, Title: "Compact characterization"}); err != nil {
+	if err := a.store.CreateSession(ctx, &store.Session{ID: id, Title: "Compact characterization"}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	for i := 0; i < messages; i++ {
@@ -54,7 +54,7 @@ func seedCompactSession(t *testing.T, a *API, id string, messages int) {
 		if i%2 == 1 {
 			role = "assistant"
 		}
-		if err := a.Services.Store.CreateMessage(ctx, &store.Message{
+		if err := a.store.CreateMessage(ctx, &store.Message{
 			ID: fmt.Sprintf("%s-msg-%d", id, i), SessionID: id, Role: role, Content: strings.Repeat("filler ", 40),
 		}); err != nil {
 			t.Fatalf("CreateMessage: %v", err)
@@ -146,7 +146,7 @@ func TestCompactCharacterization_ResponseEventsBroadcastAndRecord(t *testing.T) 
 	}
 
 	// The compaction is recorded for the session.
-	ce, err := a.Services.Store.GetLatestCompactionEvent(context.Background(), sid)
+	ce, err := a.store.GetLatestCompactionEvent(context.Background(), sid)
 	if err != nil || ce == nil || ce.SummaryMode != "general" || !reflect.DeepEqual(ce.StagesApplied, []string{"drop_enrichment"}) {
 		t.Fatalf("compaction event = %+v, %v", ce, err)
 	}

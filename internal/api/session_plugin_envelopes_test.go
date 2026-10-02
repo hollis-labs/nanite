@@ -14,7 +14,7 @@ func TestListSessionPluginEnvelopes_RehydratesPendingStandaloneCards(t *testing.
 	a, mux := newTestAPI(t)
 
 	sess := &store.Session{}
-	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
+	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -24,7 +24,7 @@ func TestListSessionPluginEnvelopes_RehydratesPendingStandaloneCards(t *testing.
 		EnvelopeType: "subagent-spawn-approval",
 		EnvelopeJSON: `{"run_id":"r-1","role":"worker","prompt":"fix it","mode":"interactive"}`,
 	}
-	if err := a.Services.Store.CreateEnvelopeInstance(context.Background(), pending); err != nil {
+	if err := a.store.CreateEnvelopeInstance(context.Background(), pending); err != nil {
 		t.Fatalf("CreateEnvelopeInstance pending: %v", err)
 	}
 
@@ -34,10 +34,10 @@ func TestListSessionPluginEnvelopes_RehydratesPendingStandaloneCards(t *testing.
 		EnvelopeType: "elicitation-prompt",
 		EnvelopeJSON: `{"elicitation_id":"e-1","message":"Need input","schema_type":"string","origin":"server","timeout_at":"2026-05-17T00:00:00Z"}`,
 	}
-	if err := a.Services.Store.CreateEnvelopeInstance(context.Background(), responded); err != nil {
+	if err := a.store.CreateEnvelopeInstance(context.Background(), responded); err != nil {
 		t.Fatalf("CreateEnvelopeInstance responded: %v", err)
 	}
-	if err := a.Services.Store.RecordResponse(context.Background(), responded.ID, "submitted", `{"status":"submitted"}`); err != nil {
+	if err := a.store.RecordResponse(context.Background(), responded.ID, "submitted", `{"status":"submitted"}`); err != nil {
 		t.Fatalf("RecordResponse responded: %v", err)
 	}
 
@@ -47,7 +47,7 @@ func TestListSessionPluginEnvelopes_RehydratesPendingStandaloneCards(t *testing.
 		EnvelopeType: "approval-card",
 		EnvelopeJSON: `{"prompt":"inline only"}`,
 	}
-	if err := a.Services.Store.CreateEnvelopeInstance(context.Background(), ignored); err != nil {
+	if err := a.store.CreateEnvelopeInstance(context.Background(), ignored); err != nil {
 		t.Fatalf("CreateEnvelopeInstance ignored: %v", err)
 	}
 

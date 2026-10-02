@@ -10,7 +10,7 @@ import (
 )
 
 func TestProviderManageAndPluginConfigMalformedJSONUsesSharedDecode(t *testing.T) {
-	a := &API{}
+	a := &testAPI{API: &API{}}
 	tests := []struct {
 		name    string
 		method  string

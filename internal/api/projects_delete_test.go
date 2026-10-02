@@ -16,7 +16,7 @@ import (
 func TestDeleteProject_LiveSessionIs409ThenArchivedOnlyDeletes(t *testing.T) {
 	a, mux := newTestAPI(t)
 	ctx := context.Background()
-	st := a.Services.Store
+	st := a.store
 	if err := st.CreateProject(ctx, &store.Project{ID: "proj-del", Name: "Delete me"}); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}

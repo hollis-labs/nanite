@@ -97,7 +97,7 @@ func TestAgentImportInstallLandsExternalAndReadOnly(t *testing.T) {
 // class is a 409 naming that class, and the incumbent is untouched.
 func TestAgentImportInstallRefusesSlugItDoesNotOwn(t *testing.T) {
 	a, mux := newTestAPI(t)
-	if err := a.Services.Store.CreateAgent(t.Context(), &store.AgentProfile{
+	if err := a.store.CreateAgent(t.Context(), &store.AgentProfile{
 		Name: "Incumbent", Slug: "imported-reviewer", SystemPrompt: "incumbent", Source: "internal",
 	}); err != nil {
 		t.Fatalf("seed incumbent: %v", err)
@@ -120,7 +120,7 @@ func TestAgentImportInstallRefusesSlugItDoesNotOwn(t *testing.T) {
 		t.Error("an internal profile offers no copy path; saying it does would be worse than saying nothing")
 	}
 
-	row, err := a.Services.Store.GetAgentBySlug(t.Context(), "imported-reviewer")
+	row, err := a.store.GetAgentBySlug(t.Context(), "imported-reviewer")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestAgentImportSyncRoundTrip(t *testing.T) {
 	if resp, body := postAgentImport(t, mux, "/api/agents/install", map[string]string{"path": src}); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("install = %d; body: %s", resp.StatusCode, body)
 	}
-	first, err := a.Services.Store.GetAgentBySlug(t.Context(), "imported-reviewer")
+	first, err := a.store.GetAgentBySlug(t.Context(), "imported-reviewer")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestAgentImportSyncRoundTrip(t *testing.T) {
 		t.Fatalf("response = %+v", out)
 	}
 
-	second, err := a.Services.Store.GetAgentBySlug(t.Context(), "imported-reviewer")
+	second, err := a.store.GetAgentBySlug(t.Context(), "imported-reviewer")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestAgentImportSyncRefusesNonImportedThroughWriteNotManaged(t *testing.T) {
 		t.Run(tc.source, func(t *testing.T) {
 			a, mux := newTestAPI(t)
 			slug := "incumbent-" + tc.source
-			if err := a.Services.Store.CreateAgent(t.Context(), &store.AgentProfile{
+			if err := a.store.CreateAgent(t.Context(), &store.AgentProfile{
 				Name: "Incumbent", Slug: slug, SystemPrompt: "x",
 				Source: tc.source, SourceRef: "/provenance/only.md",
 			}); err != nil {
@@ -239,7 +239,7 @@ func TestAgentImportSyncGuards(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("sync unknown slug = %d, want 404; body: %s", resp.StatusCode, body)
 	}
-	if _, err := a.Services.Store.GetAgentBySlug(t.Context(), "never-imported"); err == nil {
+	if _, err := a.store.GetAgentBySlug(t.Context(), "never-imported"); err == nil {
 		t.Error("a refused sync created the agent anyway")
 	}
 
@@ -254,10 +254,10 @@ func TestAgentImportSyncGuards(t *testing.T) {
 	if mismatch.StatusCode != http.StatusConflict {
 		t.Fatalf("mismatched sync = %d, want 409; body: %s", mismatch.StatusCode, mismatchBody)
 	}
-	if _, err := a.Services.Store.GetAgentBySlug(t.Context(), "other-agent"); err == nil {
+	if _, err := a.store.GetAgentBySlug(t.Context(), "other-agent"); err == nil {
 		t.Error("a rejected sync target still wrote the mismatched definition")
 	}
-	row, _ := a.Services.Store.GetAgentBySlug(t.Context(), "imported-reviewer")
+	row, _ := a.store.GetAgentBySlug(t.Context(), "imported-reviewer")
 	if row.SystemPrompt != "Imported system prompt." {
 		t.Errorf("the sync target changed despite the refusal: %q", row.SystemPrompt)
 	}
@@ -300,7 +300,7 @@ func TestAgentImportThroughTheClaudeAdapter(t *testing.T) {
 		t.Fatalf("response = %+v", out)
 	}
 
-	row, err := a.Services.Store.GetAgentBySlug(t.Context(), "code-reviewer")
+	row, err := a.store.GetAgentBySlug(t.Context(), "code-reviewer")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestUpdateAnImportedAgentIsRefused(t *testing.T) {
 	if resp, body := postAgentImport(t, mux, "/api/agents/install", map[string]string{"path": src}); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("install = %d; body: %s", resp.StatusCode, body)
 	}
-	row, err := a.Services.Store.GetAgentBySlug(t.Context(), "imported-reviewer")
+	row, err := a.store.GetAgentBySlug(t.Context(), "imported-reviewer")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestUpdateAnImportedAgentIsRefused(t *testing.T) {
 		t.Errorf("refusal = %v, want external with a copy path", got)
 	}
 
-	after, _ := a.Services.Store.GetAgentBySlug(t.Context(), "imported-reviewer")
+	after, _ := a.store.GetAgentBySlug(t.Context(), "imported-reviewer")
 	if after.Description != "Came from outside" {
 		t.Errorf("the refused edit landed: %q", after.Description)
 	}

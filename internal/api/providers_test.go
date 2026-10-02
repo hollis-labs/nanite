@@ -47,7 +47,7 @@ func TestListProviders_NoBootCatalog_OnlyDBRows(t *testing.T) {
 // newTestAPIWithSeededProviders spins up a Container backed by a seeded
 // DB (no boot-profile catalog, no ProviderCatalog) so DB-only-shape
 // assertions can fire.
-func newTestAPIWithSeededProviders(t *testing.T) (*API, *http.ServeMux) {
+func newTestAPIWithSeededProviders(t *testing.T) (*testAPI, *http.ServeMux) {
 	t.Helper()
 	s := newSeededStore(t)
 
@@ -60,7 +60,7 @@ func newTestAPIWithSeededProviders(t *testing.T) (*API, *http.ServeMux) {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
 	t.Cleanup(func() { svc.Shutdown() })
-	a := New(svc)
+	a := newAPIStoreFixture(svc, s)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
 	return a, mux
@@ -110,7 +110,7 @@ func TestListProviders_CatalogConfigured_SurfacesAllEntries(t *testing.T) {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
 	t.Cleanup(func() { svc.Shutdown() })
-	a := New(svc)
+	a := newAPIStoreFixture(svc, s)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
 
@@ -166,7 +166,7 @@ func TestListProviders_CatalogHidesDuplicateDBRow(t *testing.T) {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
 	t.Cleanup(func() { svc.Shutdown() })
-	a := New(svc)
+	a := newAPIStoreFixture(svc, s)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
 
@@ -209,7 +209,7 @@ func TestListProviders_NilCatalog_FallsBackToDB(t *testing.T) {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
 	t.Cleanup(func() { svc.Shutdown() })
-	a := New(svc)
+	a := newAPIStoreFixture(svc, s)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
 

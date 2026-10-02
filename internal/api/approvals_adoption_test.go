@@ -14,7 +14,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/service"
 )
 
-func respondApprovalForTest(a *API, session, requestID, decision, scope string) int {
+func respondApprovalForTest(a *testAPI, session, requestID, decision, scope string) int {
 	r := httptest.NewRequest(http.MethodPost, "/approvals", strings.NewReader(fmt.Sprintf(`{"decision":%q,"scope":%q}`, decision, scope)))
 	r.SetPathValue("id", session)
 	r.SetPathValue("requestId", requestID)
@@ -25,7 +25,7 @@ func respondApprovalForTest(a *API, session, requestID, decision, scope string) 
 
 func TestRespondApproval_SharedEngineSessionBinding(t *testing.T) {
 	e := permissionlib.NewEngine(permissionlib.ModeDefault, nil)
-	a := &API{Services: &service.Container{Permissions: e}}
+	a := &testAPI{API: &API{Services: &service.Container{Permissions: e}}}
 	req := e.RequestApproval("owner", "shell", nil, "test")
 	for _, session := range []string{"", "other"} {
 		if code := respondApprovalForTest(a, session, req.ID, "allow", "session"); code != http.StatusNotFound {
@@ -55,7 +55,7 @@ func TestRespondApproval_SharedEngineSessionBinding(t *testing.T) {
 
 func TestRespondApproval_ConcurrentDenialsCannotBecomeGrant(t *testing.T) {
 	e := permissionlib.NewEngine(permissionlib.ModeDefault, nil)
-	a := &API{Services: &service.Container{Permissions: e}}
+	a := &testAPI{API: &API{Services: &service.Container{Permissions: e}}}
 	req := e.RequestApproval("owner", "shell", nil, "test")
 	var accepted atomic.Int32
 	var wg sync.WaitGroup
@@ -87,7 +87,7 @@ func TestRespondApproval_ConcurrentDenialsCannotBecomeGrant(t *testing.T) {
 
 func TestRespondApproval_CanceledRequestCannotGrant(t *testing.T) {
 	e := permissionlib.NewEngine(permissionlib.ModeDefault, nil)
-	a := &API{Services: &service.Container{Permissions: e}}
+	a := &testAPI{API: &API{Services: &service.Container{Permissions: e}}}
 	req := e.RequestApproval("owner", "shell", nil, "test")
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

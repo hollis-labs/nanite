@@ -171,7 +171,7 @@ func TestHandleDeleteConsumer_RejectsWhileReferenced(t *testing.T) {
 	}
 
 	// Sanity: verify against the store directly too.
-	if _, err := a.Services.Store.GetConsumer(context.Background(), consumer.ID); err != nil {
+	if _, err := a.store.GetConsumer(context.Background(), consumer.ID); err != nil {
 		t.Fatalf("GetConsumer after failed delete: %v", err)
 	}
 }

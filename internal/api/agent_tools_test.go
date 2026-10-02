@@ -52,7 +52,7 @@ func TestAgentToolsGrantRevoke_EndToEnd(t *testing.T) {
 
 	agent := createTestAgentForGrant(t, mux, "grant-revoke-agent", nil)
 
-	toolID, err := a.Services.Store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
+	toolID, err := a.store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
 	if err != nil {
 		t.Fatalf("UpsertKnownTool: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestAgentToolsGrantRevoke_EndToEnd(t *testing.T) {
 		t.Fatalf("grant response tool_names = %v, want [dev_read]", grantResp.ToolNames)
 	}
 
-	names, err := a.Services.Store.ListAgentToolNames(ctx, agent.ID)
+	names, err := a.store.ListAgentToolNames(ctx, agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentToolNames: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestAgentToolsGrantRevoke_EndToEnd(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("DELETE /api/agents/{id}/tools/{toolId}: expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
-	names, err = a.Services.Store.ListAgentToolNames(ctx, agent.ID)
+	names, err = a.store.ListAgentToolNames(ctx, agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentToolNames after revoke: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestHandleGrantAgentTool_RejectsNonexistentTool(t *testing.T) {
 		t.Fatalf("POST /api/agents/{id}/tools with bad tool_id: expected 404, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	names, err := a.Services.Store.ListAgentToolNames(context.Background(), agent.ID)
+	names, err := a.store.ListAgentToolNames(context.Background(), agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentToolNames: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestHandleGrantAgentTool_RejectsNonexistentAgent(t *testing.T) {
 	a, mux := newTestAPI(t)
 	ctx := context.Background()
 
-	toolID, err := a.Services.Store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
+	toolID, err := a.store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
 	if err != nil {
 		t.Fatalf("UpsertKnownTool: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestHandleGrantAgentTool_SucceedsDespiteStaleDenyList(t *testing.T) {
 		t.Fatalf("setup: expected tool_permissions to be set, got empty")
 	}
 
-	toolID, err := a.Services.Store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
+	toolID, err := a.store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
 	if err != nil {
 		t.Fatalf("UpsertKnownTool: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestHandleGrantAgentTool_SucceedsDespiteStaleDenyList(t *testing.T) {
 		t.Fatalf("POST /api/agents/{id}/tools: expected 201 (tool_permissions no longer vetoes grants), got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	names, err := a.Services.Store.ListAgentToolNames(ctx, agent.ID)
+	names, err := a.store.ListAgentToolNames(ctx, agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentToolNames: %v", err)
 	}

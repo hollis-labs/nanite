@@ -14,7 +14,7 @@ import (
 func TestReflexesAPI_CreatePatchDeleteAgentReflex(t *testing.T) {
 	a, mux := newTestAPI(t)
 	agent := &store.AgentProfile{Name: "Reflex Agent", Slug: "reflex-agent", SystemPrompt: "x", Class: "advisor"}
-	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
+	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -62,7 +62,7 @@ func TestReflexesAPI_CreatePatchDeleteAgentReflex(t *testing.T) {
 func TestReflexesAPI_RecurrenceOverrideSecondsSetPatchClear(t *testing.T) {
 	a, mux := newTestAPI(t)
 	agent := &store.AgentProfile{Name: "Recurrence Agent", Slug: "recurrence-agent", SystemPrompt: "x", Class: "advisor"}
-	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
+	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -131,7 +131,7 @@ func TestReflexesAPI_RecurrenceOverrideSecondsSetPatchClear(t *testing.T) {
 func TestReflexesAPI_ListWorksForInternalBuiltinAgent(t *testing.T) {
 	a, mux := newTestAPI(t)
 
-	defaultAgent, err := a.Services.Store.GetAgentBySlug(context.Background(), "default")
+	defaultAgent, err := a.store.GetAgentBySlug(context.Background(), "default")
 	if err != nil || defaultAgent == nil {
 		t.Fatalf("GetAgentBySlug(default): %v", err)
 	}
@@ -154,7 +154,7 @@ func TestReflexesAPI_ListWorksForInternalBuiltinAgent(t *testing.T) {
 
 func TestReflexesAPI_PendingReviewAndValidate(t *testing.T) {
 	a, mux := newTestAPI(t)
-	pendingID, err := a.Services.Store.InsertPendingReflex(context.Background(), store.PendingReflex{
+	pendingID, err := a.store.InsertPendingReflex(context.Background(), store.PendingReflex{
 		ProposedBy:  "test",
 		Name:        "proposed",
 		TriggerKind: store.ReflexTriggerPredicate,
@@ -217,11 +217,11 @@ func TestReflexesAPI_OptOutOfClassWideReflex(t *testing.T) {
 	a, mux := newTestAPI(t)
 	ctx := context.Background()
 	agent := &store.AgentProfile{Name: "Opt Out Agent", Slug: "opt-out-agent", SystemPrompt: "x", Class: "advisor"}
-	if err := a.Services.Store.CreateAgent(ctx, agent); err != nil {
+	if err := a.store.CreateAgent(ctx, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	optable, err := a.Services.Store.InsertAgentReflex(ctx, store.AgentReflex{
+	optable, err := a.store.InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:      "advisor",
 		Name:          "class-wide-optable",
 		TriggerKind:   store.ReflexTriggerPredicate,
@@ -234,7 +234,7 @@ func TestReflexesAPI_OptOutOfClassWideReflex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertAgentReflex(optable): %v", err)
 	}
-	notOptable, err := a.Services.Store.InsertAgentReflex(ctx, store.AgentReflex{
+	notOptable, err := a.store.InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:      "advisor",
 		Name:          "class-wide-not-optable",
 		TriggerKind:   store.ReflexTriggerPredicate,

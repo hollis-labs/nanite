@@ -76,7 +76,7 @@ func TestHandleUpdateAgent_InternalRejectedAsHarnessOwned(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	// Seed an internal-source row with deliberately empty source_ref.
-	if err := a.Services.Store.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := a.store.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "test-internal-empty-ref",
 		Name:         "Test Internal",
 		Slug:         "test-internal-empty-ref",

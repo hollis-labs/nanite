@@ -113,7 +113,7 @@ func TestSanitizeUploadFilename_Accepts(t *testing.T) {
 // newArtifactTestAPI builds an API wired to a real on-disk store + a
 // temp artifacts root configured via AppConfig. Suitable for exercising
 // upload/download handlers end-to-end.
-func newArtifactTestAPI(t *testing.T) (*API, string) {
+func newArtifactTestAPI(t *testing.T) (*testAPI, string) {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
@@ -149,7 +149,7 @@ func newArtifactTestAPI(t *testing.T) (*API, string) {
 		t.Fatalf("seed session: %v", err)
 	}
 
-	return New(svc), artifactsRoot
+	return newAPIStoreFixture(svc, s), artifactsRoot
 }
 
 // TestUploadRejectsTraversalFilename verifies the upload handler rejects
@@ -223,7 +223,7 @@ func TestDownloadDoesNotLeakAbsoluteEscapingPath(t *testing.T) {
 		SizeBytes:   int64(len("SENSITIVE-ABC")),
 		StoragePath: outside, // absolute — pathsafe re-roots under artifactsRoot
 	}
-	if err := a.Services.Store.CreateArtifact(context.Background(), art); err != nil {
+	if err := a.store.CreateArtifact(context.Background(), art); err != nil {
 		t.Fatalf("create artifact: %v", err)
 	}
 
@@ -253,7 +253,7 @@ func TestDownloadRejectsRelativeTraversalStoragePath(t *testing.T) {
 		SizeBytes:   0,
 		StoragePath: "../../etc/passwd",
 	}
-	if err := a.Services.Store.CreateArtifact(context.Background(), art); err != nil {
+	if err := a.store.CreateArtifact(context.Background(), art); err != nil {
 		t.Fatalf("create artifact: %v", err)
 	}
 
@@ -287,7 +287,7 @@ func TestPlaceArtifactRejectsEscapingStoragePath(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for escaping storage_path, got %d: %s", rec.Code, rec.Body.String())
 	}
-	artifacts, err := a.Services.Store.ListArtifacts(context.Background(), "sess1")
+	artifacts, err := a.store.ListArtifacts(context.Background(), "sess1")
 	if err != nil {
 		t.Fatalf("ListArtifacts: %v", err)
 	}
@@ -418,7 +418,7 @@ func TestUploadCloseFailurePreservesFinalPathAndDoesNotPersist(t *testing.T) {
 	if _, statErr := os.Stat(tempPath); !os.IsNotExist(statErr) {
 		t.Fatalf("staging file still exists after close failure: err=%v", statErr)
 	}
-	artifacts, err := a.Services.Store.ListArtifacts(context.Background(), "sess1")
+	artifacts, err := a.store.ListArtifacts(context.Background(), "sess1")
 	if err != nil {
 		t.Fatalf("ListArtifacts: %v", err)
 	}

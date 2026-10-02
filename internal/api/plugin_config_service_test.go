@@ -19,10 +19,10 @@ func TestPluginConfigHTTP_MergeAndDefaults(t *testing.T) {
 	if rr.Code != http.StatusOK || rr.Body.String() != `{"plugin_id":"missing","schema":[],"settings":{}}`+"\n" {
 		t.Fatalf("defaults: %d %s", rr.Code, rr.Body.String())
 	}
-	if err := a.Services.Store.UpsertPluginSchema(t.Context(), "probe", []store.ConfigField{{Key: "label", Type: "string", Label: "Label", Default: "default", Required: true, Options: []string{"first", "second"}, Component: "picker"}}); err != nil {
+	if err := a.store.UpsertPluginSchema(t.Context(), "probe", []store.ConfigField{{Key: "label", Type: "string", Label: "Label", Default: "default", Required: true, Options: []string{"first", "second"}, Component: "picker"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Services.Store.UpsertPluginSettings(t.Context(), "probe", map[string]any{"keep": "retained", "label": "old"}); err != nil {
+	if err := a.store.UpsertPluginSettings(t.Context(), "probe", map[string]any{"keep": "retained", "label": "old"}); err != nil {
 		t.Fatal(err)
 	}
 	rr = httptest.NewRecorder()
@@ -37,7 +37,7 @@ func TestPluginConfigHTTP_MergeAndDefaults(t *testing.T) {
 	if got.PluginID != "probe" || got.Settings["keep"] != "retained" || got.Settings["label"] != "new" || got.Schema[0].Component != "picker" || !got.Schema[0].Required {
 		t.Fatalf("response: %+v", got)
 	}
-	stored, err := a.Services.Store.GetPluginSettings(t.Context(), "probe")
+	stored, err := a.store.GetPluginSettings(t.Context(), "probe")
 	if err != nil || stored.Settings["label"] != "new" {
 		t.Fatalf("stored: %+v %v", stored, err)
 	}

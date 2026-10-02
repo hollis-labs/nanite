@@ -234,7 +234,7 @@ export default function SettingsPage() {
       default: {
         const pluginEntry = pluginTabs.find((e) => e.id === activeSection);
         if (pluginEntry?.component) {
-          const PluginComponent = getSlotComponent(pluginEntry.component);
+          const PluginComponent = getSlotComponent(pluginEntry.component, pluginEntry.plugin_id, pluginEntry.id);
           if (PluginComponent) {
             return (
               <Suspense fallback={<Skeleton className="h-32 w-full" />}>

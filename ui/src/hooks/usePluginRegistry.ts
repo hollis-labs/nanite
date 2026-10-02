@@ -10,7 +10,7 @@
  * WidgetRenderer, slot renderers) piggyback on the loader's
  * subscribeRegistry/getRegistryVersion useSyncExternalStore pattern.
  */
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { syncPluginRegistry, clearDynamicRegistry } from '@/lib/plugin-loader'
@@ -19,6 +19,7 @@ import { useSettings } from './useSettings'
 export function usePluginRegistry() {
   const { data: settings } = useSettings()
   const recoverMode = settings?.recover_mode ?? false
+  const [syncError, setSyncError] = useState<Error | null>(null)
 
   const query = useQuery({
     queryKey: ['plugins', 'registry'],
@@ -33,13 +34,13 @@ export function usePluginRegistry() {
       return
     }
     if (query.data) {
-      void syncPluginRegistry(query.data)
+      void syncPluginRegistry(query.data).then(() => setSyncError(null)).catch((error: unknown) => setSyncError(error instanceof Error ? error : new Error(String(error))))
     }
   }, [query.data, recoverMode])
 
   return {
-    ready: !recoverMode && !!query.data,
-    error: query.error,
+    ready: !recoverMode && !!query.data && !syncError,
+    error: syncError ?? query.error,
     refetch: query.refetch,
   }
 }

@@ -37,6 +37,7 @@ export function usePluginAction() {
             new CustomEvent("plugin-modal", {
               detail: {
                 id: entry.id,
+                plugin_id: entry.plugin_id,
                 component: entry.component,
                 props: entry.props,
               },

@@ -547,3 +547,31 @@ func (p *manifestProviderPlugin) Status() goplugin.PluginStatus {
 	return goplugin.PluginStatus{Loaded: p.loaded, Enabled: true}
 }
 func (p *manifestProviderPlugin) Manifest() *PluginManifest { return p.manifest }
+
+func TestPluginCannotDisplaceCoreUIComponentOrSlot(t *testing.T) {
+	host := NewHost(http.NewServeMux(), NewLogger("test"))
+	if err := host.RegisterUIComponent(goplugin.UIComponent{ID: "core-widget", Name: "Core widget", Type: goplugin.UIComponentTypeWidget}); err != nil {
+		t.Fatal(err)
+	}
+	coreSlot := UISlotEntry{ID: "core-slot", Slot: "test-slot", Label: "Core slot", Component: "Core"}
+	if err := host.RegisterSlot(coreSlot); err != nil {
+		t.Fatal(err)
+	}
+	claimant := &fakePlugin{id: "claimant"}
+	widgetManifest := &PluginManifest{ID: claimant.id, Registers: ManifestRegisters{Components: []ComponentRegistration{{Name: "core-widget", Type: "widget"}}}}
+	if err := applyManifestRegistrations(host, widgetManifest, claimant, ""); err == nil {
+		t.Fatal("plugin displaced core widget")
+	}
+	slotManifest := &PluginManifest{ID: claimant.id, Registers: ManifestRegisters{Slots: []SlotRegistration{{ID: "core-slot", Slot: "test-slot", Component: "Claimant"}}}}
+	if err := applyManifestRegistrations(host, slotManifest, claimant, ""); err == nil {
+		t.Fatal("plugin displaced core slot")
+	}
+	widgets := host.GetUIComponentsWithOwners()
+	if len(widgets) != 1 || widgets[0].PluginID != "" || widgets[0].Name != "Core widget" {
+		t.Fatalf("core widget changed: %+v", widgets)
+	}
+	slots := host.GetSlotEntries("test-slot")
+	if len(slots) != 1 || slots[0].PluginID != "" || slots[0].Component != "Core" {
+		t.Fatalf("core slot changed: %+v", slots)
+	}
+}

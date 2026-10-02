@@ -23,9 +23,10 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
-import type { CatalogBrowseEntry } from "@/lib/types";
+import { api, PluginReviewRequiredError } from "@/lib/api";
+import type { CatalogBrowseEntry, PluginInstallReviewResponse } from "@/lib/types";
 import { PluginInstallProgress } from "./PluginInstallProgress";
+import { PluginReviewDialog } from "./PluginReviewDialog";
 
 type Tier = "all" | "core" | "default" | "available";
 
@@ -60,6 +61,7 @@ export function CatalogBrowser({
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<Tier>("all");
+  const [review, setReview] = useState<(PluginInstallReviewResponse & { upgrade: boolean }) | null>(null);
   const [installingName, setInstallingName] = useState<string | null>(null);
   const rowRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const queryClient = useQueryClient();
@@ -91,8 +93,8 @@ export function CatalogBrowser({
   });
 
   const installMutation = useMutation({
-    mutationFn: api.catalogInstall,
-    onMutate: (name) => setInstallingName(name),
+    mutationFn: ({ name, approvedDigest, upgrade }: { name: string; approvedDigest?: string; upgrade: boolean }) => api.catalogInstall(name, approvedDigest, upgrade),
+    onMutate: ({ name, approvedDigest }) => { if (approvedDigest) setInstallingName(name); },
     onSuccess: (data) => {
       addToast(data.message || "Plugin installed.", "success");
       // Intentionally keep installingName set so PluginInstallProgress stays
@@ -102,7 +104,12 @@ export function CatalogBrowser({
       void queryClient.invalidateQueries({ queryKey: ["plugins"] });
       void queryClient.invalidateQueries({ queryKey: ["plugins-for-esm"] });
     },
-    onError: (err: Error) => {
+    onError: (err: Error, variables) => {
+      if (err instanceof PluginReviewRequiredError) {
+        setInstallingName(null);
+        setReview({ ...err.review, upgrade: variables.upgrade });
+        return;
+      }
       addToast(`Install failed: ${err.message}`, "error");
       // Same as onSuccess — let PluginInstallProgress render its terminal
       // state and self-close. If no SSE events arrive, its 10s fallback +
@@ -156,6 +163,9 @@ export function CatalogBrowser({
 
   return (
     <div className="space-y-4">
+      <PluginReviewDialog review={review} busy={installMutation.isPending}
+        onCancel={() => setReview(null)}
+        onApprove={() => { if (!review) return; const accepted = review; setReview(null); installMutation.mutate({ name: accepted.review.id, approvedDigest: accepted.review_digest, upgrade: accepted.upgrade }); }} />
       {/* Tier filter row */}
       <div className="flex items-center gap-1">
         {tiers.map((t) => {
@@ -307,7 +317,7 @@ export function CatalogBrowser({
               key={`${entry.source_id}-${entry.id}`}
               entry={entry}
               installing={installingName === entry.id}
-              onInstall={() => installMutation.mutate(entry.id)}
+              onInstall={() => installMutation.mutate({ name: entry.id, upgrade: entry.installed })}
               rowRef={(el) => {
                 if (el) rowRefs.current.set(entry.id, el);
                 else rowRefs.current.delete(entry.id);
@@ -412,7 +422,7 @@ function CatalogEntryCard({
               v{entry.installed_version} &rarr; v{entry.version}
             </span>
           )}
-          {!isInstalled && (
+          {(!isInstalled || hasUpdate) && (
             <button
               onClick={onInstall}
               disabled={installing || !entry.available}
@@ -423,7 +433,7 @@ function CatalogEntryCard({
               ) : (
                 <Download className="w-3 h-3" />
               )}
-              {entry.available ? "Install" : "Unavailable for this platform"}
+              {entry.available ? (hasUpdate ? "Review update" : "Review install") : "Unavailable for this platform"}
             </button>
           )}
         </div>

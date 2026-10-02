@@ -11,9 +11,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hollis-labs/go-safefs/pathsafe"
 	"github.com/hollis-labs/nanite/internal/brand"
@@ -306,65 +306,8 @@ func (pms *pluginManagerState) resolvePluginTargetOrBadRequest(w http.ResponseWr
 }
 
 func (pms *pluginManagerState) handleInstall(w http.ResponseWriter, r *http.Request) {
-	var req pluginActionReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		pms.errorResp(w, http.StatusBadRequest, "name is required")
-		return
-	}
-
-	// Confine the plugin target path under pluginsDir. A name like
-	// "../../etc/passwd" would otherwise place the cloned repo outside the
-	// plugins directory (audit finding: Critical — path traversal in install).
-	target, ok := pms.resolvePluginTargetOrBadRequest(w, req.Name)
-	if !ok {
-		return
-	}
-
-	// Check if already installed.
-	if _, err := os.Stat(filepath.Join(target, "plugin.yaml")); err == nil {
-		pms.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", req.Name))
-		return
-	}
-
-	if err := os.MkdirAll(pms.pluginsDir, 0o755); err != nil {
-		pms.errorResp(w, http.StatusInternalServerError, "failed to create plugins directory: "+err.Error())
-		return
-	}
-
-	// Determine repo URL — check repos.yaml first, fall back to default org.
-	repoURL := fmt.Sprintf("git@github.com:hollis-labs/%s.git", req.Name)
-	if repos, err := naniteplugin.LoadRepos(pms.reposPath); err == nil {
-		for _, repo := range repos {
-			if repo.Name == req.Name {
-				repoURL = fmt.Sprintf("git@github.com:%s.git", repo.Repo)
-				break
-			}
-		}
-	}
-
-	cmd := exec.Command("git", "clone", "--depth", "1", repoURL, target)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		pms.errorResp(w, http.StatusInternalServerError,
-			fmt.Sprintf("clone failed: %v — %s", err, string(output)))
-		return
-	}
-
-	// Verify plugin.yaml exists in the cloned repo.
-	if _, err := os.Stat(filepath.Join(target, "plugin.yaml")); err != nil {
-		_ = os.RemoveAll(target) // The invalid checkout is already rejected; removal only cleans partial state.
-		pms.errorResp(w, http.StatusBadRequest, "cloned repo does not contain plugin.yaml")
-		return
-	}
-
-	// Hot-load the plugin into the running host so agent profile appears immediately.
-	pms.runPluginLoadIntoHost(filepath.Join(target, "plugin.yaml"), target)
-
-	pms.jsonResp(w, http.StatusOK, map[string]string{
-		"status":  "installed",
-		"plugin":  req.Name,
-		"message": fmt.Sprintf("Plugin %q installed and activated.", req.Name),
-	})
+	state := &catalogState{store: pms.store, fetcher: naniteplugin.NewCatalogFetcher(time.Minute, filepath.Join(pms.pluginsDir, ".cache")), pluginsDir: pms.pluginsDir, pluginHost: pms.pluginHost}
+	state.handleCatalogInstall(w, r)
 }
 
 // handleInstallLocal installs a plugin from a local directory path.
@@ -416,15 +359,13 @@ func (pms *pluginManagerState) handleInstallLocal(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Copy the directory tree.
-	if err := copyDir(srcDir, target); err != nil {
-		_ = os.RemoveAll(target) // Preserve the copy failure; removal only cleans a partial install.
-		pms.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("copy failed: %v", err))
+	if _, err := pms.installReviewedDirectory(r.Context(), srcDir, pluginID, req.ApprovedDigest); err != nil {
+		if writeInstallReview(w, err) {
+			return
+		}
+		pms.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	// Hot-load into running host.
-	pms.runPluginLoadIntoHost(filepath.Join(target, "plugin.yaml"), target)
 
 	pms.jsonResp(w, http.StatusOK, map[string]string{
 		"status":  "installed",
@@ -531,14 +472,13 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 		return
 	}
 
-	if err := copyDir(pluginRoot, target); err != nil {
-		_ = os.RemoveAll(target) // Preserve the copy failure; removal only cleans a partial install.
-		pms.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("copy failed: %v", err))
+	if _, err := pms.installReviewedDirectory(r.Context(), pluginRoot, pluginID, r.FormValue("approved_digest")); err != nil {
+		if writeInstallReview(w, err) {
+			return
+		}
+		pms.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	// Hot-load into running host.
-	pms.runPluginLoadIntoHost(filepath.Join(target, "plugin.yaml"), target)
 
 	pms.jsonResp(w, http.StatusOK, map[string]string{
 		"status":  "installed",
@@ -862,7 +802,7 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 
 	if manifest.Runtime == "subprocess" {
 		var buildErr error
-		p, buildErr = naniteplugin.NewSubprocessPluginFromManifest(naniteplugin.DiscoveredPlugin{Manifest: manifest, Dir: pluginDir})
+		p, buildErr = naniteplugin.NewSubprocessPluginFromManifest(pms.pluginHost.Context(), naniteplugin.DiscoveredPlugin{Manifest: manifest, Dir: pluginDir}, pms.pluginHost)
 		if buildErr != nil {
 			slog.Warn("plugin-api: subprocess preparation failed", "id", manifest.ID, "err", buildErr)
 			return false

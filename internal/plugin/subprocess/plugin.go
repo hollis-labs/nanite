@@ -175,6 +175,7 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 	if err != nil {
 		return fmt.Errorf("build init params: %w", err)
 	}
+	initParams.Granted = append([]string(nil), sp.mgr.cfg.Granted...)
 	transport, err := sp.mgr.Start(host.Context(), *initParams)
 	if err != nil {
 		return fmt.Errorf("start subprocess: %w", err)

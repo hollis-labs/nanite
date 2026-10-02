@@ -30,6 +30,7 @@ import type {
   AttachDurableAgentSessionRequest,
   Bookmark,
   CatalogBrowseEntry,
+  PluginInstallReviewResponse,
   CatalogSource,
   CLIDetectionResult,
   ProviderTestResult,
@@ -125,6 +126,15 @@ import type {
 } from "./types";
 
 const API_BASE = "/api";
+
+export class PluginReviewRequiredError extends Error {
+  readonly review: PluginInstallReviewResponse;
+  constructor(review: PluginInstallReviewResponse) {
+    super("Review this plugin before installing it.");
+    this.name = "PluginReviewRequiredError";
+    this.review = review;
+  }
+}
 
 /**
  * Thrown by api.pinDrawerCard when the backend returns 409 because the 10-pin
@@ -2803,6 +2813,8 @@ export const api = {
 
   catalogInstall: async (
     name: string,
+    approvedDigest?: string,
+    upgrade = false,
   ): Promise<{
     status: string;
     plugin: string;
@@ -2813,12 +2825,13 @@ export const api = {
     const res = await fetch(`${API_BASE}/plugins/catalog/install`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, approved_digest: approvedDigest, upgrade }),
     });
     if (!res.ok) {
       const err = await res
         .json()
         .catch(() => ({ error: `Install failed: ${res.status}` }));
+      if (err.status === "review_required") throw new PluginReviewRequiredError(err);
       throw new Error(err.error || `Install failed: ${res.status}`);
     }
     return res.json();

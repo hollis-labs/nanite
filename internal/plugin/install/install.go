@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/plugin-sdk/manifest"
 )
 
@@ -19,14 +20,15 @@ import (
 type State string
 
 const (
-	StateNotInstalled State = "not_installed"
-	StateDownloading  State = "downloading"
-	StateVerifying    State = "verifying"
-	StateExtracting   State = "extracting"
-	StateValidating   State = "validating"
-	StateLoading      State = "loading"
-	StateReady        State = "ready"
-	StateFailed       State = "failed"
+	StateNotInstalled   State = "not_installed"
+	StateDownloading    State = "downloading"
+	StateVerifying      State = "verifying"
+	StateExtracting     State = "extracting"
+	StateValidating     State = "validating"
+	StateAwaitingReview State = "awaiting_review"
+	StateLoading        State = "loading"
+	StateReady          State = "ready"
+	StateFailed         State = "failed"
 )
 
 // Event is emitted on each transition and on progress updates within a state.
@@ -122,6 +124,7 @@ type Installer struct {
 	Loader    Loader
 	Staging   Staging
 	Emit      EventFunc
+	Review    func(context.Context, string, string) (func() error, error)
 
 	mu    sync.Mutex
 	state State
@@ -152,7 +155,7 @@ func (i *Installer) setState(s State) {
 // Returns (finalDir, nil) on success, ("", err) on failure. A successful
 // return means the plugin directory is in place under the staging root's
 // sibling plugins dir and has been handed to the Loader.
-func (i *Installer) Install(ctx context.Context, src Source) (string, error) {
+func (i *Installer) Install(ctx context.Context, src Source) (installedDir string, returnErr error) {
 	if src == nil {
 		return "", errors.New("install: Source is nil")
 	}
@@ -179,9 +182,13 @@ func (i *Installer) Install(ctx context.Context, src Source) (string, error) {
 		return "", i.fail(pluginID, StateNotInstalled, fmt.Errorf("staging begin: %w", err))
 	}
 	rolledBack := false
+	var rollbackApproval func() error
 	defer func() {
 		if !rolledBack {
 			return
+		}
+		if rollbackApproval != nil {
+			returnErr = errors.Join(returnErr, rollbackApproval())
 		}
 		cleanup()
 	}()
@@ -194,11 +201,14 @@ func (i *Installer) Install(ctx context.Context, src Source) (string, error) {
 		return "", i.fail(pluginID, StateDownloading, fmt.Errorf("download: %w", err))
 	}
 
-	// Directory handles (local --link, dev flow) skip verify + extract and
-	// treat the handle path as the "extracted" plugin dir directly. The
-	// staging dir itself is still used as the swap source; extraction for
-	// directory handles is a symlink placement done in the Extractor impl.
+	// Directory sources are copied into private staging before review.
 	isArchive := handle.Kind == "archive"
+	if isArchive && handle.Path != "" {
+		archiveDir := filepath.Dir(handle.Path)
+		if strings.HasPrefix(filepath.Base(archiveDir), "nanite-plugin-download-") {
+			defer func() { _ = os.RemoveAll(archiveDir) }()
+		}
+	}
 
 	// Verifying.
 	if isArchive {
@@ -222,18 +232,6 @@ func (i *Installer) Install(ctx context.Context, src Source) (string, error) {
 	if err := i.Extractor.Extract(ctx, handle, stagingDir, i.Emit); err != nil {
 		rolledBack = true
 		return "", i.fail(pluginID, StateExtracting, fmt.Errorf("extract: %w", err))
-	}
-
-	// Clean up the downloaded archive after successful extraction. For
-	// archive handles, the archive was downloaded to a temp directory and
-	// should be removed to avoid leaking disk space.
-	if isArchive && handle.Path != "" {
-		archiveDir := filepath.Dir(handle.Path)
-		// Only remove if it looks like our temp directory to avoid
-		// accidentally removing user data in case of future refactoring.
-		if strings.Contains(archiveDir, "nanite-plugin-download-") {
-			_ = os.RemoveAll(archiveDir)
-		}
 	}
 
 	// Validating.
@@ -267,6 +265,18 @@ func (i *Installer) Install(ctx context.Context, src Source) (string, error) {
 		if !strings.EqualFold(hex.EncodeToString(digest[:]), handle.ExpectedManifestSHA256) {
 			rolledBack = true
 			return "", i.fail(pluginID, StateValidating, errors.New("manifest checksum differs from catalog"))
+		}
+	}
+
+	if i.Review != nil {
+		rollbackApproval, err = i.Review(ctx, stagingDir, pluginID)
+		if err != nil {
+			rolledBack = true
+			if errors.Is(err, plugin.ErrInstallReviewRequired) {
+				i.transition(pluginID, StateAwaitingReview, "awaiting install review")
+				return "", err
+			}
+			return "", i.fail(pluginID, StateValidating, err)
 		}
 	}
 

@@ -24,8 +24,7 @@ const (
 
 // TarGzExtractor materializes a Handle into targetDir. Archive handles are
 // extracted from tar.gz with adversarial guards. Directory handles are
-// copied in (no symlinks — that path is reserved for the explicit --link
-// flag plumbed through the CLI, not this extractor).
+// copied into private staging; symlinks are refused.
 //
 // Zero value is usable; all limits default to the constants above.
 type TarGzExtractor struct {
@@ -33,6 +32,7 @@ type TarGzExtractor struct {
 	MaxFileBytes              int64
 	MaxEntries                int
 	MaxCompressionRatio       int64
+	SkipDevelopmentFiles      bool
 }
 
 // Extract materializes h into targetDir. targetDir must already exist.
@@ -238,6 +238,18 @@ func (e *TarGzExtractor) copyDirectory(ctx context.Context, srcDir, targetDir st
 		return fmt.Errorf("extract: source %q is not a directory", srcDir)
 	}
 	cleanSrc := filepath.Clean(srcDir)
+	maxFile, maxTotal, maxEntries := e.MaxFileBytes, e.MaxTotalUncompressedBytes, e.MaxEntries
+	if maxFile <= 0 {
+		maxFile = DefaultMaxFileBytes
+	}
+	if maxTotal <= 0 {
+		maxTotal = DefaultMaxTotalUncompressedBytes
+	}
+	if maxEntries <= 0 {
+		maxEntries = DefaultMaxEntries
+	}
+	var total int64
+	entries := 0
 
 	return filepath.Walk(cleanSrc, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -254,6 +266,20 @@ func (e *TarGzExtractor) copyDirectory(ctx context.Context, srcDir, targetDir st
 		}
 		if rel == "." {
 			return nil
+		}
+		if e.SkipDevelopmentFiles {
+			name := filepath.Base(rel)
+			skip := name == ".git" || name == "node_modules" || name == ".DS_Store" || rel == "dist"
+			if skip {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+		entries++
+		if entries > maxEntries {
+			return fmt.Errorf("extract: source exceeds entry cap")
 		}
 		dest := filepath.Join(targetDir, rel)
 
@@ -272,29 +298,40 @@ func (e *TarGzExtractor) copyDirectory(ctx context.Context, srcDir, targetDir st
 			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 				return err
 			}
-			return copyFile(path, dest, mode.Perm()&0o777)
+			limit := min(maxFile, maxTotal-total)
+			if lst.Size() > limit {
+				return fmt.Errorf("extract: source file %q exceeds byte cap", rel)
+			}
+			count, err := copyFile(ctx, path, dest, mode.Perm()&0777, limit)
+			total += count
+			return err
 		default:
 			return fmt.Errorf("extract: unsupported file type for %q", rel)
 		}
 	})
 }
 
-func copyFile(src, dst string, mode os.FileMode) error {
+func copyFile(ctx context.Context, src, dst string, mode os.FileMode, limit int64) (int64, error) {
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() {
 		_ = in.Close() // Input-file close is best-effort cleanup; read errors are handled separately.
 	}()
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	count, err := io.Copy(out, io.LimitReader(&contextReader{ctx: ctx, reader: in}, limit+1))
+	if err != nil {
 		_ = out.Close()
 		_ = os.Remove(dst)
-		return err
+		return 0, err
 	}
-	return out.Close()
+	if count > limit {
+		_ = out.Close()
+		return count, fmt.Errorf("extract: source file grew past byte cap")
+	}
+	return count, out.Close()
 }

@@ -158,7 +158,7 @@ func (d *HTTPDownloader) secureHTTPClient() *http.Client {
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
 		innerDial = dialer.DialContext
 	}
-	client.Transport = &http.Transport{
+	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
@@ -174,6 +174,10 @@ func (d *HTTPDownloader) secureHTTPClient() *http.Client {
 		ResponseHeaderTimeout: 30 * time.Second,
 		DisableKeepAlives:     true,
 	}
+	if configured, ok := client.Transport.(*http.Transport); ok && configured.TLSClientConfig != nil {
+		transport.TLSClientConfig = configured.TLSClientConfig.Clone()
+	}
+	client.Transport = transport
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return errors.New("download: too many redirects")

@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"regexp"
 	"sync"
 	"time"
+
+	"github.com/hollis-labs/plugin-sdk/manifest"
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/slogx"
@@ -17,25 +18,14 @@ import (
 	"github.com/hollis-labs/plugin-sdk"
 )
 
-// safePluginIDRE mirrors the manifest schema (internal/plugin/schemas/
-// plugin.schema.v1.json) so buildInitParams cannot be coerced into
-// assembling a DataDir/CacheDir outside the user's brand directory when
-// the caller passes an attacker-controlled id (e.g. a malicious
-// plugin.yaml with id: "../../etc"). The regex is intentionally a
-// strict subset — any id rejected here should also be rejected at
-// install time by the manifest validator.
-var safePluginIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]{1,62}$`)
-
-// validatePluginID returns an error if id does not match the safe
-// plugin-id pattern. Empty ids are allowed so buildInitParams retains
-// its "no per-plugin dirs" fallback; callers that require an id must
-// check separately.
+// validatePluginID applies the shared identity rule before assembling host
+// data/cache directories. An empty ID is only used by pipe-based harnesses.
 func validatePluginID(id string) error {
 	if id == "" {
 		return nil
 	}
-	if !safePluginIDRE.MatchString(id) {
-		return fmt.Errorf("invalid plugin id %q: must match %s", id, safePluginIDRE)
+	if len(id) > 63 || !manifest.ValidID(id) {
+		return fmt.Errorf("invalid plugin id %q", id)
 	}
 	return nil
 }

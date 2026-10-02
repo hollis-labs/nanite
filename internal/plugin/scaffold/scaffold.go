@@ -20,15 +20,20 @@ package scaffold
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
 	"unicode"
+
+	"github.com/hollis-labs/nanite/pkg/pluginapi"
+	"github.com/hollis-labs/plugin-sdk/manifest"
 )
 
 // pluginIDPattern mirrors the v1 manifest schema's id regex so scaffold
@@ -88,6 +93,8 @@ type templateData struct {
 	ModulePath        string
 	Year              string
 	EnvelopeType      string // "<name>-card"
+	SharedManifest    string
+	NaniteBlock       string
 	EnvelopeComponent string // "<PascalName>Card"
 }
 
@@ -122,6 +129,19 @@ func Run(opts Options) error {
 		return fmt.Errorf("unknown plugin kind %q (want subprocess or builtin)", opts.Kind)
 	}
 
+	if opts.Kind == KindSubprocess {
+		block, err := pluginapi.EncodeBlock(pluginapi.Block{LoadType: "opt-in", UI: pluginapi.UI{Bundle: "ui/dist/index.js", ReactVersion: "^18.0.0", ShadcnVersion: "^1.0.0"}, Registers: pluginapi.Registrations{Envelopes: []pluginapi.Envelope{{Type: data.EnvelopeType, Component: data.EnvelopeComponent, Version: 1, Schema: "envelopes/example.schema.json"}}, Commands: []pluginapi.Command{{Name: data.Name, Description: "Echo the provided arguments"}}}})
+		if err != nil {
+			return err
+		}
+		data.NaniteBlock = string(block)
+		common := manifest.Manifest{SchemaVersion: 2, ID: data.Name, Name: data.DisplayName, Version: "0.1.0", Description: data.Description, License: "MIT", Runtime: "subprocess", Protocol: 1, Entrypoint: manifest.Entrypoint{Command: data.Name}, Hosts: map[string]manifest.HostRange{"nanite": {Min: pluginapi.Version}}, Nanite: block, Tools: []manifest.Tool{{Name: "echo", Description: "Echo text", InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`), Effect: "read"}}}
+		var encoded strings.Builder
+		if err := manifest.Encode(&encoded, common); err != nil {
+			return err
+		}
+		data.SharedManifest = encoded.String()
+	}
 	return renderTree(root, opts.OutputDir, data)
 }
 
@@ -200,7 +220,7 @@ func renderTree(root, dst string, data templateData) error {
 		}
 
 		if strings.HasSuffix(path, ".tmpl") {
-			tmpl, err := template.New(filepath.Base(path)).Parse(string(content))
+			tmpl, err := template.New(filepath.Base(path)).Funcs(template.FuncMap{"quote": strconv.Quote}).Parse(string(content))
 			if err != nil {
 				return fmt.Errorf("parse %s: %w", path, err)
 			}

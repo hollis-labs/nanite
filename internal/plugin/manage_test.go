@@ -8,6 +8,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	goplugin "github.com/hollis-labs/plugin-sdk"
@@ -121,15 +122,7 @@ func TestManage_SubprocessDisableEnable(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `schema_version: 1
-name: ` + name + `
-id: ` + name + `
-version: 0.1.0
-description: test subprocess plugin
-protocol: 1
-runtime: subprocess
-entrypoint: ./fake-entrypoint
-`
+	manifest := strings.ReplaceAll(sharedManifestBytes(t), "example.plugin", name)
 	if err := os.WriteFile(filepath.Join(dir, "plugin.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -174,15 +167,7 @@ func TestManage_LegacyDisabledManifestMigration(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `schema_version: 1
-name: ` + name + `
-id: ` + name + `
-version: 0.1.0
-description: legacy disabled test plugin
-protocol: 1
-runtime: subprocess
-entrypoint: ./fake-entrypoint
-`
+	manifest := strings.ReplaceAll(sharedManifestBytes(t), "example.plugin", name)
 	if err := os.WriteFile(filepath.Join(dir, "plugin.yaml.disabled"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}

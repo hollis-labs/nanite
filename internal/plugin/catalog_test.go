@@ -2,241 +2,146 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
+	"runtime"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/plugin-sdk/manifest"
+	sharedcatalog "github.com/hollis-labs/plugins-catalog"
 )
 
-const testCatalogYAML = `version: 1
-plugins:
-  - name: hello-plugin
-    version: "1.0.0"
-    description: A hello world plugin
-    author: Test Author
-    archive_url: https://example.com/hello-plugin-1.0.0.tar.gz
-    checksum: "sha256:abcdef1234567890"
-    runtime: subprocess
-  - name: goodbye-plugin
-    version: "2.1.0"
-    description: A goodbye plugin
-    archive_url: https://example.com/goodbye-plugin-2.1.0.tar.gz
-`
+func catalogFixture(t *testing.T, ids ...string) []byte {
+	t.Helper()
+	doc := sharedcatalog.Document{SchemaVersion: 2, CatalogVersion: "0.1.0", GeneratedAt: "2026-10-01T00:00:00Z", Plugins: []sharedcatalog.Plugin{}}
+	for _, id := range ids {
+		doc.Plugins = append(doc.Plugins, sharedcatalog.Plugin{
+			ID: id, Name: "Display " + id, Version: "1.0.0",
+			Hosts:          map[string]manifest.HostRange{"nanite": {Min: "0.1.0"}},
+			Source:         sharedcatalog.Source{Type: "git", Repo: "https://github.com/example/plugins", Tag: "v1.0.0"},
+			Archives:       []sharedcatalog.Archive{{Platform: runtime.GOOS + "-" + runtime.GOARCH, URL: "https://example.com/plugin.tar.gz", SHA256: strings.Repeat("a", 64), Size: 123}},
+			ManifestSHA256: strings.Repeat("b", 64), Directory: sharedcatalog.Directory{Status: "active"},
+		})
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sharedcatalog.Decode(raw); err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
 
 func TestCatalogFetcher_FetchAndMerge(t *testing.T) {
-	// Source 1: serves two plugins.
-	srv1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(testCatalogYAML))
-	}))
-	defer srv1.Close()
-
-	// Source 2: serves one plugin that overlaps with source 1.
-	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`version: 1
-plugins:
-  - name: hello-plugin
-    version: "1.1.0"
-    description: Updated hello from custom source
-    archive_url: https://custom.example.com/hello-1.1.0.tar.gz
-  - name: custom-only
-    version: "0.5.0"
-    description: Only in custom source
-    archive_url: https://custom.example.com/custom-only-0.5.0.tar.gz
-`))
-	}))
-	defer srv2.Close()
-
-	cacheDir := t.TempDir()
-	fetcher := NewCatalogFetcher(1*time.Minute, cacheDir)
-
+	raw := catalogFixture(t, "hello.plugin")
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.Write(raw) }))
+	defer server.Close()
+	fetcher := NewCatalogFetcher(time.Hour, t.TempDir())
 	sources := []CatalogSource{
-		{ID: "official", Name: "Official", URL: srv1.URL, Priority: 100, Enabled: true},
-		{ID: "custom", Name: "Custom", URL: srv2.URL, Priority: 50, Enabled: true},
+		{ID: "z", Name: "lower", URL: server.URL, Priority: 10, Enabled: true},
+		{ID: "a", Name: "higher", URL: server.URL, Priority: 20, Enabled: true},
 	}
-
 	entries, err := fetcher.Fetch(context.Background(), sources)
 	if err != nil {
-		t.Fatalf("Fetch: %v", err)
+		t.Fatal(err)
 	}
-
-	// Should have 3 unique plugins: hello-plugin (from official, higher priority),
-	// goodbye-plugin (from official), custom-only (from custom).
-	if len(entries) != 3 {
-		t.Fatalf("expected 3 entries, got %d", len(entries))
+	if len(entries) != 1 || entries[0].SourceID != "a" || entries[0].ID != "hello.plugin" || entries[0].Name != "Display hello.plugin" || !entries[0].Available {
+		t.Fatalf("entries: %+v", entries)
 	}
-
-	byName := make(map[string]MergedCatalogEntry)
-	for _, e := range entries {
-		byName[e.Name] = e
+	if _, cachedErr := fetcher.Fetch(context.Background(), sources); cachedErr != nil {
+		t.Fatal(cachedErr)
 	}
-
-	// hello-plugin should come from official (priority 100 > 50).
-	hello, ok := byName["hello-plugin"]
-	if !ok {
-		t.Fatal("hello-plugin not found")
+	if calls.Load() != 2 {
+		t.Fatalf("cache missed: %d", calls.Load())
 	}
-	if hello.Version != "1.0.0" {
-		t.Errorf("hello-plugin version: expected 1.0.0, got %s", hello.Version)
+	// Changing priority must invalidate the view even inside its TTL.
+	sources[0].Priority = 30
+	entries, err = fetcher.Fetch(context.Background(), sources)
+	if err != nil || len(entries) != 1 || entries[0].SourceID != "z" {
+		t.Fatalf("changed sources: %+v, %v", entries, err)
 	}
-	if hello.SourceName != "Official" {
-		t.Errorf("hello-plugin source: expected Official, got %s", hello.SourceName)
-	}
-
-	// goodbye-plugin from official.
-	goodbye, ok := byName["goodbye-plugin"]
-	if !ok {
-		t.Fatal("goodbye-plugin not found")
-	}
-	if goodbye.Version != "2.1.0" {
-		t.Errorf("goodbye-plugin version: expected 2.1.0, got %s", goodbye.Version)
-	}
-
-	// custom-only from custom.
-	custom, ok := byName["custom-only"]
-	if !ok {
-		t.Fatal("custom-only not found")
-	}
-	if custom.SourceName != "Custom" {
-		t.Errorf("custom-only source: expected Custom, got %s", custom.SourceName)
+	// Disabling every source must never return stale enabled entries.
+	sources[0].Enabled, sources[1].Enabled = false, false
+	entries, err = fetcher.Fetch(context.Background(), sources)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("disabled sources: %+v, %v", entries, err)
 	}
 }
 
-func TestCatalogFetcher_Cache(t *testing.T) {
-	callCount := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		w.Write([]byte(testCatalogYAML))
-	}))
-	defer srv.Close()
-
-	fetcher := NewCatalogFetcher(5*time.Minute, t.TempDir())
-	sources := []CatalogSource{
-		{ID: "test", Name: "Test", URL: srv.URL, Priority: 100, Enabled: true},
-	}
-
-	// First fetch should hit the server.
-	fetcher.Fetch(context.Background(), sources)
-	if callCount != 1 {
-		t.Errorf("expected 1 call, got %d", callCount)
-	}
-
-	// Second fetch should use cache.
-	fetcher.Fetch(context.Background(), sources)
-	if callCount != 1 {
-		t.Errorf("expected still 1 call after cache hit, got %d", callCount)
-	}
-
-	// Invalidate and fetch again.
-	fetcher.Invalidate()
-	fetcher.Fetch(context.Background(), sources)
-	if callCount != 2 {
-		t.Errorf("expected 2 calls after invalidate, got %d", callCount)
-	}
-}
-
-func TestCatalogFetcher_DisabledSource(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("disabled source should not be fetched")
-	}))
-	defer srv.Close()
-
-	fetcher := NewCatalogFetcher(1*time.Minute, t.TempDir())
-	sources := []CatalogSource{
-		{ID: "disabled", Name: "Disabled", URL: srv.URL, Priority: 100, Enabled: false},
-	}
-
-	entries, err := fetcher.Fetch(context.Background(), sources)
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Errorf("expected 0 entries from disabled source, got %d", len(entries))
+func TestCatalogFetcher_TiesAreDeterministic(t *testing.T) {
+	fetcher := NewCatalogFetcher(0, "")
+	entry := CatalogEntry{ID: "example", Name: "Display"}
+	a := fetchResult{source: CatalogSource{ID: "a", Priority: 1}, catalog: &CatalogFile{Plugins: []CatalogEntry{entry}}}
+	z := fetchResult{source: CatalogSource{ID: "z", Priority: 1}, catalog: a.catalog}
+	for _, results := range [][]fetchResult{{a, z}, {z, a}} {
+		got := fetcher.merge(results)
+		if len(got) != 1 || got[0].SourceID != "a" {
+			t.Fatalf("unstable winner: %+v", got)
+		}
 	}
 }
 
 func TestCatalogFetcher_DiskCacheFallback(t *testing.T) {
-	cacheDir := t.TempDir()
-	fetcher := NewCatalogFetcher(0, cacheDir) // TTL=0 so we always fetch
-
-	// Pre-populate disk cache.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(testCatalogYAML))
-	}))
-	sources := []CatalogSource{
-		{ID: "fallback-test", Name: "Fallback", URL: srv.URL, Priority: 100, Enabled: true},
+	raw := catalogFixture(t, "cached.plugin")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(raw) }))
+	fetcher := NewCatalogFetcher(0, t.TempDir())
+	sources := []CatalogSource{{ID: "cache", URL: server.URL, Enabled: true}}
+	if _, cachedErr := fetcher.Fetch(context.Background(), sources); cachedErr != nil {
+		t.Fatal(cachedErr)
 	}
-	// Fetch once to populate disk cache.
-	fetcher.Fetch(context.Background(), sources)
-	srv.Close() // Stop the server.
-
-	// Now fetch again — server is gone, should fall back to disk cache.
-	fetcher.Invalidate()
+	server.Close()
 	entries, err := fetcher.Fetch(context.Background(), sources)
-	if err != nil {
-		t.Fatalf("Fetch with fallback: %v", err)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("fallback: %+v %v", entries, err)
 	}
-	if len(entries) != 2 {
-		t.Errorf("expected 2 entries from disk cache, got %d", len(entries))
+	// A new URL with the same source ID must not reuse the previous URL's cache.
+	sources[0].URL = server.URL + "/other"
+	if _, err := fetcher.Fetch(context.Background(), sources); err == nil {
+		t.Fatal("reused cache for changed URL")
 	}
 }
 
-func TestCatalogFetcher_PriorityOverride(t *testing.T) {
-	// Custom source has HIGHER priority and should override official.
-	srv1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`version: 1
-plugins:
-  - name: shared-plugin
-    version: "1.0.0"
-    description: From official
-    archive_url: https://official.example.com/shared-1.0.0.tar.gz
-`))
-	}))
-	defer srv1.Close()
-
-	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`version: 1
-plugins:
-  - name: shared-plugin
-    version: "1.5.0"
-    description: From custom fork
-    archive_url: https://custom.example.com/shared-1.5.0.tar.gz
-`))
-	}))
-	defer srv2.Close()
-
-	fetcher := NewCatalogFetcher(1*time.Minute, t.TempDir())
-	sources := []CatalogSource{
-		{ID: "official", Name: "Official", URL: srv1.URL, Priority: 50, Enabled: true},
-		{ID: "custom", Name: "Custom Fork", URL: srv2.URL, Priority: 200, Enabled: true},
+func TestCatalogFetcher_RejectsLegacyAndCancels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("version: 1\nplugins: []\n")) }))
+	defer server.Close()
+	fetcher := NewCatalogFetcher(time.Hour, t.TempDir())
+	sources := []CatalogSource{{ID: "legacy", URL: server.URL, Enabled: true}}
+	if _, err := fetcher.Fetch(context.Background(), sources); err == nil {
+		t.Fatal("accepted legacy catalog")
 	}
-
-	entries, err := fetcher.Fetch(context.Background(), sources)
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if entries[0].Version != "1.5.0" {
-		t.Errorf("expected version 1.5.0 from higher-priority source, got %s", entries[0].Version)
-	}
-	if entries[0].SourceName != "Custom Fork" {
-		t.Errorf("expected source 'Custom Fork', got %s", entries[0].SourceName)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := fetcher.Fetch(ctx, sources); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation: %v", err)
 	}
 }
 
-func TestCatalogDiskCachePath(t *testing.T) {
-	fetcher := NewCatalogFetcher(1*time.Minute, "/tmp/test-cache")
-	path := fetcher.diskCachePath("my-source-id")
-	if !filepath.IsAbs(path) {
-		t.Errorf("expected absolute path, got %q", path)
+func TestDecodeCatalog_PlatformAndHostSelection(t *testing.T) {
+	raw := catalogFixture(t, "example")
+	var doc sharedcatalog.Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
 	}
-
-	// Empty cache dir returns empty path.
-	fetcher2 := NewCatalogFetcher(1*time.Minute, "")
-	if fetcher2.diskCachePath("x") != "" {
-		t.Error("expected empty path for empty cacheDir")
+	doc.Plugins[0].Archives[0].Platform = "windows-arm64"
+	if runtime.GOOS == "windows" && runtime.GOARCH == "arm64" {
+		doc.Plugins[0].Archives[0].Platform = "linux-amd64"
+	}
+	raw, _ = json.Marshal(doc)
+	decoded, err := DecodeCatalog(raw)
+	if err != nil || len(decoded.Plugins) != 1 || decoded.Plugins[0].Available || decoded.Plugins[0].ArchiveURL != "" {
+		t.Fatalf("unsupported platform: %+v %v", decoded, err)
+	}
+	doc.Plugins[0].Hosts = map[string]manifest.HostRange{"cerberus": {Min: "0.1.0"}}
+	raw, _ = json.Marshal(doc)
+	decoded, err = DecodeCatalog(raw)
+	if err != nil || len(decoded.Plugins) != 0 {
+		t.Fatalf("other host: %+v %v", decoded, err)
 	}
 }

@@ -2,41 +2,42 @@ package plugin
 
 import (
 	"context"
-	"crypto/sha256"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
-	"github.com/hollis-labs/go-safefs/atomicfile"
 	catalogfetch "github.com/hollis-labs/nanite/internal/plugin/catalog"
 	"github.com/hollis-labs/nanite/internal/safego"
+	sharedcatalog "github.com/hollis-labs/plugins-catalog"
 )
 
 // CatalogEntry represents a single plugin in a remote catalog.
 type CatalogEntry struct {
-	Name        string   `yaml:"name"        json:"name"`
-	Version     string   `yaml:"version"     json:"version"`
-	Description string   `yaml:"description" json:"description"`
-	Author      string   `yaml:"author"      json:"author,omitempty"`
-	Repo        string   `yaml:"repo"        json:"repo,omitempty"`     // e.g. "hollis-labs/nanite-plugin-git"
-	ArchiveURL  string   `yaml:"archive_url" json:"archive_url"`        // download URL for .tar.gz
-	Checksum    string   `yaml:"checksum"    json:"checksum,omitempty"` // "sha256:hex..."
-	Compat      string   `yaml:"compat"      json:"compat,omitempty"`   // semver range, e.g. ">=0.2.0"
-	Runtime     string   `yaml:"runtime"     json:"runtime,omitempty"`  // "builtin" or "subprocess"
-	Tags        []string `yaml:"tags"      json:"tags,omitempty"`
+	ID             string                `json:"id"`
+	Name           string                `json:"name"`
+	Version        string                `json:"version"`
+	Description    string                `json:"description"`
+	Repo           string                `json:"repo,omitempty"`
+	ArchiveURL     string                `json:"archive_url,omitempty"`
+	Checksum       string                `json:"checksum,omitempty"`
+	ArchiveSize    int64                 `json:"archive_size,omitempty"`
+	ManifestSHA256 string                `json:"manifest_sha256"`
+	Runtime        string                `json:"runtime"`
+	Tags           []string              `json:"tags,omitempty"`
+	Available      bool                  `json:"available"`
+	Summary        sharedcatalog.Summary `json:"summary"`
 }
 
 // CatalogFile is the top-level structure of a catalog.yaml served by a source.
 type CatalogFile struct {
-	Version int            `yaml:"version"` // catalog format version (1)
-	Plugins []CatalogEntry `yaml:"plugins"`
+	SchemaVersion  int            `json:"schema_version"`
+	CatalogVersion string         `json:"catalog_version"`
+	Plugins        []CatalogEntry `json:"plugins"`
 }
 
 // CatalogSource is a minimal view of a catalog source (URL and priority).
@@ -65,29 +66,42 @@ type fetchResult struct {
 
 // CatalogFetcher fetches and merges plugin catalogs from multiple sources.
 type CatalogFetcher struct {
-	mu       sync.RWMutex
-	cache    []MergedCatalogEntry
-	cacheAt  time.Time
-	cacheTTL time.Duration
-	cacheDir string       // local disk cache for catalog files
-	client   *http.Client // injectable for testing
+	mu           sync.RWMutex
+	cache        []MergedCatalogEntry
+	cacheAt      time.Time
+	cacheSources string
+	cacheTTL     time.Duration
+	cacheDir     string       // local disk cache for catalog files
+	client       *http.Client // injectable for testing
 }
 
 // NewCatalogFetcher creates a new fetcher with the given cache TTL.
 func NewCatalogFetcher(cacheTTL time.Duration, cacheDir string) *CatalogFetcher {
-	return &CatalogFetcher{
-		cacheTTL: cacheTTL,
-		cacheDir: cacheDir,
-		client:   &http.Client{Timeout: 15 * time.Second},
+	return NewCatalogFetcherWithClient(cacheTTL, cacheDir, &http.Client{Timeout: 15 * time.Second})
+}
+
+// NewCatalogFetcherWithClient accepts host-controlled HTTPS roots and timeouts.
+func NewCatalogFetcherWithClient(cacheTTL time.Duration, cacheDir string, client *http.Client) *CatalogFetcher {
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second}
 	}
+	return &CatalogFetcher{cacheTTL: cacheTTL, cacheDir: cacheDir, client: client}
 }
 
 // Fetch retrieves and merges catalogs from all enabled sources.
 // Returns cached results if within TTL. Sources are fetched in parallel;
 // failures are logged but don't block other sources.
 func (cf *CatalogFetcher) Fetch(ctx context.Context, sources []CatalogSource) ([]MergedCatalogEntry, error) {
+	sourceBytes, err := json.Marshal(sources)
+	if err != nil {
+		return nil, err
+	}
+	fingerprint := string(sourceBytes)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	cf.mu.RLock()
-	if cf.cache != nil && time.Since(cf.cacheAt) < cf.cacheTTL {
+	if cf.cacheSources == fingerprint && cf.cache != nil && time.Since(cf.cacheAt) < cf.cacheTTL {
 		result := cf.cache
 		cf.mu.RUnlock()
 		return result, nil
@@ -117,14 +131,32 @@ func (cf *CatalogFetcher) Fetch(ctx context.Context, sources []CatalogSource) ([
 		}
 	}
 	for i := 0; i < enabledCount; i++ {
-		catalogs = append(catalogs, <-results)
+		select {
+		case result := <-results:
+			catalogs = append(catalogs, result)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
-	// Merge: higher priority sources win on name conflicts.
+	var failures []error
+	successes := 0
+	for _, result := range catalogs {
+		if result.err != nil {
+			failures = append(failures, fmt.Errorf("catalog %q: %w", result.source.ID, result.err))
+		} else {
+			successes++
+		}
+	}
+	if enabledCount > 0 && successes == 0 {
+		return nil, errors.Join(failures...)
+	}
+	// Merge: higher priority sources win on ID conflicts.
 	merged := cf.merge(catalogs)
 
 	cf.mu.Lock()
 	cf.cache = merged
+	cf.cacheSources = fingerprint
 	cf.cacheAt = time.Now()
 	cf.mu.Unlock()
 
@@ -141,47 +173,19 @@ func (cf *CatalogFetcher) Invalidate() {
 // fetchSource downloads and parses a single catalog source.
 // Falls back to a local disk cache if the network fetch fails.
 func (cf *CatalogFetcher) fetchSource(ctx context.Context, src CatalogSource) (*CatalogFile, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", src.URL, nil)
+	fetcher := &catalogfetch.Fetcher{Client: cf.client, CacheDir: cf.cacheDir}
+	fetched, err := fetcher.Fetch(ctx, src.URL)
 	if err != nil {
-		return cf.loadDiskCache(src.ID)
+		return nil, err
 	}
-
-	resp, err := cf.client.Do(req)
-	if err != nil {
-		slog.Warn("catalog: fetch failed (using cache)", "name", src.Name, "err", err)
-		return cf.loadDiskCache(src.ID)
-	}
-	defer func() {
-		_ = resp.Body.Close() // Response-body close is best-effort cleanup after the request result is read.
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		slog.Warn("catalog: fetch returned error (using cache)", "name", src.Name, "status", resp.StatusCode)
-		return cf.loadDiskCache(src.ID)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, catalogfetch.MaxCatalogBytes+1))
-	if err != nil {
-		return cf.loadDiskCache(src.ID)
-	}
-
-	if int64(len(body)) > catalogfetch.MaxCatalogBytes {
-		return nil, fmt.Errorf("catalog body exceeds size cap")
-	}
-	var catalog CatalogFile
-	if err := yaml.Unmarshal(body, &catalog); err != nil {
-		return nil, fmt.Errorf("parse catalog from %s: %w", src.Name, err)
-	}
-
-	// Save to disk cache for offline fallback.
-	cf.saveDiskCache(src.ID, body)
-
-	return &catalog, nil
+	return DecodeCatalog(fetched.YAML)
 }
 
 // merge combines catalogs from multiple sources. Higher priority wins on name conflict.
 func (cf *CatalogFetcher) merge(results []fetchResult) []MergedCatalogEntry {
-	// Map: plugin name → best entry (highest source priority).
+	// Sort ties by source ID so network completion order cannot choose a winner.
+	slices.SortFunc(results, func(a, b fetchResult) int { return strings.Compare(a.source.ID, b.source.ID) })
+	// Map: canonical plugin ID → best entry (highest source priority).
 	best := make(map[string]MergedCatalogEntry)
 	bestPriority := make(map[string]int)
 
@@ -190,14 +194,14 @@ func (cf *CatalogFetcher) merge(results []fetchResult) []MergedCatalogEntry {
 			continue
 		}
 		for _, entry := range r.catalog.Plugins {
-			existing, exists := bestPriority[entry.Name]
+			existing, exists := bestPriority[entry.ID]
 			if !exists || r.source.Priority > existing {
-				best[entry.Name] = MergedCatalogEntry{
+				best[entry.ID] = MergedCatalogEntry{
 					CatalogEntry: entry,
 					SourceID:     r.source.ID,
 					SourceName:   r.source.Name,
 				}
-				bestPriority[entry.Name] = r.source.Priority
+				bestPriority[entry.ID] = r.source.Priority
 			}
 		}
 	}
@@ -207,49 +211,6 @@ func (cf *CatalogFetcher) merge(results []fetchResult) []MergedCatalogEntry {
 	for _, entry := range best {
 		merged = append(merged, entry)
 	}
+	slices.SortFunc(merged, func(a, b MergedCatalogEntry) int { return strings.Compare(a.ID, b.ID) })
 	return merged
-}
-
-// --- Disk cache helpers ---
-
-func (cf *CatalogFetcher) diskCachePath(sourceID string) string {
-	if cf.cacheDir == "" {
-		return ""
-	}
-	// Hash the source ID for a safe filename.
-	h := sha256.Sum256([]byte(sourceID))
-	return filepath.Join(cf.cacheDir, fmt.Sprintf("catalog-%x.yaml", h[:8]))
-}
-
-func (cf *CatalogFetcher) saveDiskCache(sourceID string, data []byte) {
-	path := cf.diskCachePath(sourceID)
-	if path == "" {
-		return
-	}
-	_ = os.MkdirAll(cf.cacheDir, 0o700)         // The disk cache is optional; network fetch remains authoritative.
-	_ = atomicfile.WriteFile(path, data, 0o600) // The disk cache is optional; network fetch remains authoritative.
-}
-
-func (cf *CatalogFetcher) loadDiskCache(sourceID string) (*CatalogFile, error) {
-	path := cf.diskCachePath(sourceID)
-	if path == "" {
-		return nil, fmt.Errorf("no disk cache configured")
-	}
-	file, err := os.Open(path) // #nosec G304 -- path is an ID hash within the configured cache directory.
-	if err != nil {
-		return nil, fmt.Errorf("no cached catalog for source %s", sourceID)
-	}
-	defer func() { _ = file.Close() }()
-	data, err := io.ReadAll(io.LimitReader(file, catalogfetch.MaxCatalogBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read cached catalog: %w", err)
-	}
-	if int64(len(data)) > catalogfetch.MaxCatalogBytes {
-		return nil, fmt.Errorf("cached catalog exceeds size cap")
-	}
-	var catalog CatalogFile
-	if err := yaml.Unmarshal(data, &catalog); err != nil {
-		return nil, fmt.Errorf("parse cached catalog: %w", err)
-	}
-	return &catalog, nil
 }

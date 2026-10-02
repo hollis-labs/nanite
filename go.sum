@@ -97,6 +97,8 @@ github.com/hollis-labs/go-providers v0.42.0 h1:nlZUTQJR6mlDqNQXNIRip8Ajab5khRudX
 github.com/hollis-labs/go-providers v0.42.0/go.mod h1:WR4UJzbsvtzb53L2tW8jT28dqq6h4CP4mNkA7gJLpuc=
 github.com/hollis-labs/go-queue v0.2.1 h1:q3ZJ+G+2UaVArfcHzlMle+qva0sdrJioOKSeQwGyPYo=
 github.com/hollis-labs/go-queue v0.2.1/go.mod h1:zdxTBgcujUxan/emeTvODifi+LGeERKmDGM3E5XAYmU=
+github.com/hollis-labs/go-reflexes v0.1.0 h1:lYwn1tYNsfUyEYQa0Is/OP78thQUOpoLMGdcF7Fku7M=
+github.com/hollis-labs/go-reflexes v0.1.0/go.mod h1:7WFLu9Rk0q7BCQJui1CY0fSo6odmjtxxHgsZUZbgJsw=
 github.com/hollis-labs/go-runner v0.8.2 h1:f15VFjGvbykf1zsi6KV66rHzCwsWAKtjYVl91Zsr5uI=
 github.com/hollis-labs/go-runner v0.8.2/go.mod h1:eKfG17Zulw2kYOruTxBLbT5RT8AYE7zJXvHqQD9ltOE=
 github.com/hollis-labs/go-runtime-events v0.2.1 h1:ik7AxHU5pPLvNXPIfYYC10czm3zoueKrPvsD2bFrISs=

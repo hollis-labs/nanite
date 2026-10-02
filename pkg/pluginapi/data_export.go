@@ -73,7 +73,8 @@ func (cell DataCell) Value() (any, error) {
 	}
 }
 
-// DataExport includes a checksum of the canonical snapshot encoding. Importers
+// DataExport includes a checksum of canonical header/row lines (excluding the
+// checksum field itself). Importers
 // also compare the committed host receipt to PluginID, Feature, SourceID, digest
 // and row count before changing their database in one transaction.
 type DataExport struct {
@@ -103,14 +104,24 @@ func (snapshot DataSnapshot) Validate() error {
 		}
 		seen[column] = true
 	}
+	totalBytes := 0
 	for _, row := range snapshot.Rows {
+		rowBytes := 16
 		if len(row) != len(snapshot.Columns) {
 			return fmt.Errorf("pluginapi: data row width differs from columns")
 		}
 		for _, cell := range row {
+			rowBytes += len(cell.Text) + len(cell.Kind) + 32
+			if rowBytes > manifest.MaxBytes {
+				return fmt.Errorf("pluginapi: data row exceeds limit")
+			}
 			if _, err := cell.Value(); err != nil {
 				return fmt.Errorf("pluginapi: invalid data cell: %w", err)
 			}
+		}
+		totalBytes += rowBytes
+		if totalBytes > MaxDataExportBytes {
+			return fmt.Errorf("pluginapi: data export exceeds limit")
 		}
 	}
 	return nil
@@ -123,7 +134,7 @@ type dataExportHeader struct {
 	SourceID string   `json:"source_id"`
 	Columns  []string `json:"columns"`
 	RowCount int      `json:"row_count"`
-	SHA256   string   `json:"sha256"`
+	SHA256   string   `json:"sha256,omitempty"`
 }
 type dataExportRow struct {
 	Cells []DataCell `json:"cells"`
@@ -133,12 +144,29 @@ func snapshotDigest(snapshot DataSnapshot) (string, error) {
 	if err := snapshot.Validate(); err != nil {
 		return "", err
 	}
-	payload, err := json.Marshal(snapshot)
+
+	header := dataExportHeader{Protocol: snapshot.Protocol, PluginID: snapshot.PluginID, Feature: snapshot.Feature, SourceID: snapshot.SourceID, Columns: snapshot.Columns, RowCount: len(snapshot.Rows)}
+	raw, err := json.Marshal(header)
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(payload)
-	return hex.EncodeToString(sum[:]), nil
+	digest := sha256.New()
+	_, _ = digest.Write(raw)
+	_, _ = digest.Write([]byte{'\n'})
+	totalBytes := len(raw) + 128
+	for _, row := range snapshot.Rows {
+		raw, err = json.Marshal(dataExportRow{Cells: row})
+		if err != nil {
+			return "", err
+		}
+		totalBytes += len(raw) + 1
+		if len(raw) > manifest.MaxBytes || totalBytes > MaxDataExportBytes {
+			return "", fmt.Errorf("pluginapi: data export exceeds limit")
+		}
+		_, _ = digest.Write(raw)
+		_, _ = digest.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 // EncodeDataExport emits JSON Lines: a bounded strict header followed by one
@@ -186,6 +214,9 @@ func DecodeDataExport(reader io.Reader) (DataExport, error) {
 		return DataExport{}, fmt.Errorf("pluginapi: invalid data export row count")
 	}
 	result := DataExport{SHA256: header.SHA256, Snapshot: DataSnapshot{Protocol: header.Protocol, PluginID: header.PluginID, Feature: header.Feature, SourceID: header.SourceID, Columns: header.Columns, Rows: make([][]DataCell, 0)}}
+	if err := result.Snapshot.Validate(); err != nil {
+		return DataExport{}, err
+	}
 	for scanner.Scan() {
 		if len(result.Snapshot.Rows) >= header.RowCount {
 			return DataExport{}, fmt.Errorf("pluginapi: data export has excess rows")

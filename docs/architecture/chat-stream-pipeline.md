@@ -54,7 +54,7 @@ Nanite's internal message object is Anthropic-shaped: `llmtypes.ContentBlock` ty
 | `session_id` | `SessionID` |
 | `openai_response_output` (Nanite-local) | `Content` = JSON array of raw Responses output items |
 
-The shared Usage type has no reasoning-token or field-presence fields. Nanite HTTP adapters preserve these in an internal accounting payload (`internal/usagecost`), consumed before UI events; remove the bridge after CW-20261002-0112. End of stream = channel close. The consumer (`consumeProviderIteration` in `internal/service/chat_generation_actions.go`) sums `usage` per field, treats `done` and `session_id` as no-ops, and has no default case.
+The shared Usage type has no reasoning-token or field-presence fields. Nanite HTTP adapters preserve these in an internal accounting payload (`internal/usagecost`), consumed before UI events; remove the bridge when the shared Usage type carries equivalent fields. End of stream = channel close. The consumer (`consumeProviderIteration` in `internal/service/chat_generation_actions.go`) sums `usage` per field, treats `done` and `session_id` as no-ops, and has no default case.
 
 ### 2.3 Mapping
 
@@ -94,7 +94,7 @@ Not consumed: `refusal`, `logprobs`, annotations, `role`, `function_call`, non-f
 | `response.failed`, `response.incomplete` | `usage` (`max_tokens` if `max_output_tokens`, else `error`), then `error` |
 | `error` | `error` |
 
-Not consumed: every other event (`created`, `output_item.*`, `content_part.*`, `function_call_arguments.*`, `reasoning_text`, annotations, tool-search events), reasoning token counts. A stream that ends before `response.completed` → `error`. Requests set `include: reasoning.encrypted_content` and `store: false`; the raw output items are kept for the tool loop and replayed verbatim; they are never rendered.
+Not consumed: every other event (`created`, `output_item.*`, `content_part.*`, `function_call_arguments.*`, `reasoning_text`, annotations, tool-search events). Reasoning token counts remain in the internal accounting payload. A stream that ends before `response.completed` → `error`. Requests set `include: reasoning.encrypted_content` and `store: false`; the raw output items are kept for the tool loop and replayed verbatim; they are never rendered.
 
 **CLI and ACP**
 

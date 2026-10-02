@@ -3,6 +3,7 @@ package usagecost
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
@@ -19,6 +20,8 @@ type Report struct {
 	CacheRead  *int64 `json:"cache_read,omitempty"`
 	CacheWrite *int64 `json:"cache_write,omitempty"`
 	Reasoning  *int64 `json:"reasoning,omitempty"`
+	// models.dev exposes one cache-write rate, not the higher 1h TTL rate.
+	CacheWriteRateUnknown bool `json:"cache_write_rate_unknown,omitempty"`
 }
 
 type payload struct {
@@ -28,7 +31,8 @@ type payload struct {
 
 // Content carries adapter-only metadata on EventUsage. It is consumed before
 // chat events reach the UI; go-llm-types v0.5.1 cannot express these fields.
-// Remove this side channel once CW-20261002-0112 publishes equivalent fields.
+// Remove this side channel when the shared Usage type carries count presence
+// and reasoning tokens; the upstream follow-up is tracked in Torque.
 func Content(r Report) string {
 	data, _ := json.Marshal(payload{Version: 1, Report: r})
 	return string(data)
@@ -41,6 +45,7 @@ func Parse(content string) (Report, bool) {
 }
 
 func (r *Report) Merge(next Report) {
+	r.CacheWriteRateUnknown = r.CacheWriteRateUnknown || next.CacheWriteRateUnknown
 	for _, pair := range []struct {
 		dst **int64
 		src *int64
@@ -76,6 +81,11 @@ func FromRaw(provider, raw string) Report {
 	if provider == "anthropic" {
 		r := Report{Input: number(fields, "input_tokens"), Output: number(fields, "output_tokens"), CacheRead: number(fields, "cache_read_input_tokens"), CacheWrite: number(fields, "cache_creation_input_tokens")}
 		r.Reasoning = number(details("output_tokens_details"), "thinking_tokens")
+		// Anthropic SDK Usage.CacheCreation distinguishes 5m and 1h writes.
+		// https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+		if oneHour := number(details("cache_creation"), "ephemeral_1h_input_tokens"); oneHour != nil && *oneHour > 0 {
+			r.CacheWriteRateUnknown = true
+		}
 		return r
 	}
 	input, output, inDetails, outDetails := "input_tokens", "output_tokens", "input_tokens_details", "output_tokens_details"
@@ -114,21 +124,48 @@ func (r Report) Usage(provider string) ledger.Usage {
 	u.CacheReadTokens = component(r.CacheRead)
 	u.CacheWriteTokens = component(r.CacheWrite)
 	u.ReasoningTokens = component(r.Reasoning)
-	// OpenAI input includes cached reads/writes. Anthropic input excludes both.
-	if provider == "openai" && r.Input != nil {
-		u.UncachedInputTokens.Tokens -= u.CacheReadTokens.Tokens + u.CacheWriteTokens.Tokens
+	// Captured go-providers v0.42.0 codex/app_server_turn.transcript.jsonl:
+	// totalTokens=14248 = inputTokens=14242 + outputTokens=6, with
+	// cachedInputTokens=13056 included in input. pty_codex_events.go passes
+	// those inclusive input counts and cached counts through separately.
+	cli := strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(provider, "pty-"), "sub-"), "acp-")
+	inputIncludesCache := provider == "openai" || cli == "codex"
+	if inputIncludesCache && r.Input != nil {
+		cache := u.CacheReadTokens.Tokens + u.CacheWriteTokens.Tokens
+		if cache > *r.Input {
+			// Keep the inclusive input count, but the impossible subdivisions
+			// are unknown. Never emit negatives or lose the entire usage row.
+			u.CacheReadTokens = component(nil)
+			u.CacheWriteTokens = component(nil)
+		} else {
+			u.UncachedInputTokens.Tokens -= cache
+		}
 		if r.CacheRead == nil || r.CacheWrite == nil {
 			u.UncachedInputTokens.Provenance = ledger.ProvenanceEstimated
 		}
 	}
 	// Both HTTP providers bill reasoning within output. Separate it once.
-	if (provider == "openai" || provider == "anthropic") && r.Output != nil {
-		u.OutputTokens.Tokens -= u.ReasoningTokens.Tokens
+	if (provider == "openai" || provider == "anthropic" || cli == "codex") && r.Output != nil {
+		if u.ReasoningTokens.Tokens > *r.Output {
+			u.ReasoningTokens = component(nil)
+		} else {
+			u.OutputTokens.Tokens -= u.ReasoningTokens.Tokens
+		}
 		if r.Reasoning == nil {
 			u.OutputTokens.Provenance = ledger.ProvenanceEstimated
 		}
 	}
 	return u
+}
+
+// Apply retains measured counts while withholding an unsupported cache tariff.
+func (r Report) Apply(row *ledger.Row) {
+	row.Usage = r.Usage(row.Provider)
+	if r.CacheWriteRateUnknown && row.Price != nil {
+		price := *row.Price
+		price.CacheWritePerMillion = 0
+		row.Price = &price
+	}
 }
 
 // NewRow snapshots prices once per call. Only archived registry entries are a
@@ -146,7 +183,7 @@ func NewRow(cat costcalc.Catalog, provider, model string) ledger.Row {
 			found = true
 		}
 	}
-	if found {
+	if found && (snap.InputPerMillion != 0 || snap.OutputPerMillion != 0 || snap.CacheReadPerMillion != 0 || snap.CacheWritePerMillion != 0 || snap.ReasoningPerMillion != 0) {
 		// Reasoning is billed at output rates by these providers. The catalog's
 		// optional zero cannot distinguish an omitted reasoning rate from free.
 		if snap.ReasoningPerMillion == 0 && (provider == "openai" || provider == "anthropic") {
@@ -185,7 +222,7 @@ func Freeze(calls []ledger.Row) (Snapshot, float64, error) {
 		// Optional catalog zeroes are ambiguous. A reported nonzero component
 		// without a known rate must never be represented as fully priced.
 		if row.Price != nil {
-			if (row.Usage.CacheReadTokens.Tokens > 0 && row.Price.CacheReadPerMillion == 0) || (row.Usage.CacheWriteTokens.Tokens > 0 && row.Price.CacheWritePerMillion == 0) || (row.Usage.ReasoningTokens.Tokens > 0 && row.Price.ReasoningPerMillion == 0) {
+			if (row.Usage.UncachedInputTokens.Tokens > 0 && row.Price.InputPerMillion == 0) || (row.Usage.OutputTokens.Tokens > 0 && row.Price.OutputPerMillion == 0) || (row.Usage.CacheReadTokens.Tokens > 0 && row.Price.CacheReadPerMillion == 0) || (row.Usage.CacheWriteTokens.Tokens > 0 && row.Price.CacheWritePerMillion == 0) || (row.Usage.ReasoningTokens.Tokens > 0 && row.Price.ReasoningPerMillion == 0) {
 				snapshot.Status = "PARTIAL"
 			}
 		}

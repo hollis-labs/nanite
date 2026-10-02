@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
+
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	ledger "github.com/hollis-labs/go-usage-ledger"
 )
@@ -103,10 +105,61 @@ func TestSnapshotPriceRefreshAndLegacy(t *testing.T) {
 	}
 }
 
-func TestInconsistentProviderCountsRejected(t *testing.T) {
+func TestInconsistentProviderCountsBecomePartial(t *testing.T) {
 	row := NewRow(nil, "openai", "fixture")
 	row.Usage = FromRaw("openai", `{"input_tokens":10,"input_tokens_details":{"cached_tokens":20},"output_tokens":5,"output_tokens_details":{"reasoning_tokens":10}}`).Usage("openai")
-	if _, _, err := Freeze([]ledger.Row{row}); err == nil {
-		t.Fatal("overlapping counts exceeding inclusive total accepted")
+	snapshot, _, err := Freeze([]ledger.Row{row})
+	if err != nil || snapshot.Status != "PARTIAL" || row.Usage.TotalTokens() != 15 || row.Usage.CacheReadTokens.Provenance != ledger.ProvenanceUnknown || row.Usage.ReasoningTokens.Provenance != ledger.ProvenanceUnknown {
+		t.Fatalf("invalid overlap lost known counts or partial evidence: %+v %+v %v", row.Usage, snapshot, err)
+	}
+}
+
+// Captured go-providers v0.42.0 fixtures/codex/app_server_turn.transcript.jsonl
+// reports totalTokens=inputTokens+outputTokens even with cachedInputTokens>0.
+func TestCodexAliasesIncludeCachedInput(t *testing.T) {
+	for _, provider := range []string{"codex", "pty-codex", "sub-codex", "acp-codex"} {
+		t.Run(provider, func(t *testing.T) {
+			r := Fallback(&llmtypes.Usage{InputTokens: 1000, OutputTokens: 200, CacheReadTokens: 800})
+			u := r.Usage(provider)
+			if u.UncachedInputTokens.Tokens != 200 || u.TotalTokens() != 1200 {
+				t.Fatalf("cached input counted twice: %+v", u)
+			}
+			row := NewRow(nil, provider, "codex-runtime")
+			row.Usage = u
+			snap, _, err := Freeze([]ledger.Row{row})
+			if err != nil || snap.Status != "PARTIAL" {
+				t.Fatalf("shared omissions disappeared: %+v %v", snap, err)
+			}
+		})
+	}
+}
+func TestZeroCatalogRatesAreUnpriced(t *testing.T) {
+	row := NewRow(&testCatalog{modelsdev.Pricing{}}, "openai", "fixture")
+	row.Usage = FromRaw("openai", `{"input_tokens":1000,"output_tokens":300,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}`).Usage("openai")
+	snap, cost, err := Freeze([]ledger.Row{row})
+	if err != nil || snap.Status != "PARTIAL" || snap.Costs[0].Priced || row.Price != nil || cost != 0 {
+		t.Fatalf("absent/zero cost block marked free: %+v %v %v", snap, cost, err)
+	}
+}
+func TestAnthropicCacheWriteTTL(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, status string
+		writeCost         float64
+	}{
+		{"5m", `{"input_tokens":1000,"output_tokens":300,"cache_read_input_tokens":0,"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":100,"ephemeral_1h_input_tokens":0},"output_tokens_details":{"thinking_tokens":0}}`, "COMPLETE", .00025},
+		{"1h", `{"input_tokens":1000,"output_tokens":300,"cache_read_input_tokens":0,"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100},"output_tokens_details":{"thinking_tokens":0}}`, "PARTIAL", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, ok := Parse(Content(FromRaw("anthropic", tc.raw)))
+			if !ok {
+				t.Fatal("TTL evidence lost")
+			}
+			row := NewRow(&testCatalog{modelsdev.Pricing{Input: 2, Output: 8, CacheWrite: 2.5}}, "anthropic", "fixture")
+			r.Apply(&row)
+			snap, _, err := Freeze([]ledger.Row{row})
+			if err != nil || snap.Status != tc.status || row.Usage.CacheWriteTokens.Tokens != 100 || snap.Costs[0].CacheWriteUSD != tc.writeCost {
+				t.Fatalf("cache TTL mispriced: %+v %+v %v", row, snap, err)
+			}
+		})
 	}
 }

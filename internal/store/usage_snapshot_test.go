@@ -6,11 +6,18 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	ledger "github.com/hollis-labs/go-usage-ledger"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/usagecost"
 )
+
+type mutableUsageCatalog struct{ rates modelsdev.Pricing }
+
+func (c *mutableUsageCatalog) Get(_, _ string) (modelsdev.Model, bool) {
+	return modelsdev.Model{Cost: c.rates}, true
+}
 
 func TestUsageSnapshotPersistenceAndPartialSummaries(t *testing.T) {
 	ctx := t.Context()
@@ -23,12 +30,18 @@ func TestUsageSnapshotPersistenceAndPartialSummaries(t *testing.T) {
 	if err := st.CreateSession(ctx, session); err != nil {
 		t.Fatal(err)
 	}
-	row := ledger.Row{Provider: "openai", Model: "test-model", Usage: usagecost.FromRaw("openai", `{"input_tokens":1000,"output_tokens":300,"input_tokens_details":{"cached_tokens":250,"cache_write_tokens":100},"output_tokens_details":{"reasoning_tokens":200}}`).Usage("openai"), Price: &ledger.PriceSnapshot{InputPerMillion: 2, OutputPerMillion: 8, CacheReadPerMillion: .2, CacheWritePerMillion: 2.5, ReasoningPerMillion: 8}}
+	catalog := &mutableUsageCatalog{rates: modelsdev.Pricing{Input: 2, Output: 8, CacheRead: .2, CacheWrite: 2.5}}
+	row := usagecost.NewRow(catalog, "openai", "test-model")
+	row.Usage = usagecost.FromRaw("openai", `{"input_tokens":1000,"output_tokens":300,"input_tokens_details":{"cached_tokens":250,"cache_write_tokens":100},"output_tokens_details":{"reasoning_tokens":200}}`).Usage("openai")
 	if err := st.RecordUsageSnapshot(ctx, session.ID, "measured", row.Model, 1000, 300, 0, 100, 250, []ledger.Row{row}); err != nil {
 		t.Fatal(err)
 	}
 	// Mutating the caller's price after recording cannot alter stored history.
 	row.Price.OutputPerMillion = 800
+	catalog.rates = modelsdev.Pricing{Input: 200, Output: 800, CacheRead: 20, CacheWrite: 250}
+	if newRow := usagecost.NewRow(catalog, "openai", "test-model"); newRow.Price.OutputPerMillion != 800 {
+		t.Fatal("catalog refresh fixture did not change prices")
+	}
 	var raw, status string
 	var cost float64
 	var total, reasoning int64
@@ -63,6 +76,50 @@ func TestUsageSnapshotPersistenceAndPartialSummaries(t *testing.T) {
 	}
 	if metrics.EstimatedCostUSD != cost {
 		t.Fatal("chat execution cost disagrees with frozen ledger")
+	}
+	var metricsCost float64
+	if err := st.DB.QueryRowContext(ctx, `SELECT estimated_cost_usd FROM execution_metrics WHERE message_id=?`, "measured").Scan(&metricsCost); err != nil {
+		t.Fatal(err)
+	}
+	if metricsCost != cost {
+		t.Fatal("persisted execution cost disagrees with frozen ledger")
+	}
+}
+
+func TestImpossibleUsageOverlapPersistsPartialRow(t *testing.T) {
+	ctx := t.Context()
+	st, openErr := storetest.New(t, ctx, filepath.Join(t.TempDir(), "invalid-overlap.db"))
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	defer st.Close(ctx)
+	session := &store.Session{}
+	if err := st.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	row := usagecost.NewRow(&mutableUsageCatalog{rates: modelsdev.Pricing{Input: 2, Output: 8}}, "openai", "test-model")
+	row.Usage = usagecost.FromRaw("openai", `{"prompt_tokens":10,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":20,"cache_write_tokens":0},"completion_tokens_details":{"reasoning_tokens":10}}`).Usage("openai")
+	if err := st.RecordUsageSnapshot(ctx, session.ID, "overlap", row.Model, 10, 5, 0, 0, 20, []ledger.Row{row}); err != nil {
+		t.Fatal(err)
+	}
+	var total int
+	var raw, status string
+	if err := st.DB.QueryRowContext(ctx, `SELECT total_tokens,cost_status,cost_snapshot FROM token_usage WHERE message_id=?`, "overlap").Scan(&total, &status, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var snapshot usagecost.Snapshot
+	if err := json.Unmarshal([]byte(raw), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if total != 15 || status != "PARTIAL" || snapshot.Calls[0].Usage.CacheReadTokens.Provenance != ledger.ProvenanceUnknown || snapshot.Calls[0].Usage.ReasoningTokens.Provenance != ledger.ProvenanceUnknown {
+		t.Fatalf("invalid overlap lost row or evidence: %s %d %+v", status, total, snapshot)
+	}
+	summary, err := st.GetSessionUsage(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.PartialRows != 1 || summary.MessageCount != 1 {
+		t.Fatalf("invalid overlap disappeared: %+v", summary)
 	}
 }
 

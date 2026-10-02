@@ -119,7 +119,7 @@ func TestEarlyStopSynthesis_StreamsDeltasToChannel(t *testing.T) {
 
 	var finalContent strings.Builder
 	svc.earlyStopSynthesis(
-		context.Background(),
+		context.Background(), nil, "",
 		prov,
 		"test-model",
 		"system prompt",
@@ -163,7 +163,7 @@ func TestEarlyStopSynthesis_NoToolsForwarded(t *testing.T) {
 	var fullContent strings.Builder
 
 	svc.earlyStopSynthesis(
-		context.Background(),
+		context.Background(), nil, "",
 		prov,
 		"test-model",
 		"",
@@ -197,7 +197,7 @@ func TestEarlyStopSynthesis_PromptInjected(t *testing.T) {
 	}
 
 	svc.earlyStopSynthesis(
-		context.Background(),
+		context.Background(), nil, "",
 		prov,
 		"test-model",
 		"",
@@ -320,7 +320,7 @@ func TestEarlyStopSynthesis_FinalContentPopulated(t *testing.T) {
 	var finalContent strings.Builder
 
 	svc.earlyStopSynthesis(
-		context.Background(),
+		context.Background(), nil, "",
 		prov,
 		"test-model",
 		"system",
@@ -359,7 +359,7 @@ func TestEarlyStopSynthesis_DeltasTaggedFinal(t *testing.T) {
 	var fullContent strings.Builder
 
 	svc.earlyStopSynthesis(
-		context.Background(),
+		context.Background(), nil, "",
 		prov,
 		"test-model",
 		"",

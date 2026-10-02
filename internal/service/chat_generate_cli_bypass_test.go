@@ -201,7 +201,7 @@ func TestEarlyStopSynthesis_NilProvIsNoOp(t *testing.T) {
 		}
 	}()
 
-	s.earlyStopSynthesis(context.Background(), nil, "model", "sysprompt", nil,
+	s.earlyStopSynthesis(context.Background(), nil, "", nil, "model", "sysprompt", nil,
 		[]llmtypes.ChatMessage{{Role: "user", Content: "hi"}}, ch, &full, &final)
 
 	if got := full.String(); got != "" {

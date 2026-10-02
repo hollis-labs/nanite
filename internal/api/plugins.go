@@ -19,7 +19,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/brand"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/service"
 	fplugin "github.com/hollis-labs/plugin-sdk"
 )
 
@@ -71,16 +71,16 @@ type SkippedRegistrationInfo struct {
 type pluginManagerState struct {
 	pluginsDir string
 	reposPath  string
-	store      *store.Store
+	cleanup    *service.PluginCleanupService
 	pluginHost *naniteplugin.Host
 }
 
 // RegisterPluginManagementRoutes adds plugin management endpoints to the mux.
-func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *store.Store, host *naniteplugin.Host) {
+func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, cleanup *service.PluginCleanupService, host *naniteplugin.Host) {
 	pms := &pluginManagerState{
 		pluginsDir: pluginsDir,
 		reposPath:  filepath.Join(pluginsDir, "repos.yaml"),
-		store:      s,
+		cleanup:    cleanup,
 		pluginHost: host,
 	}
 
@@ -779,21 +779,9 @@ func fileExists(path string) bool {
 // SweepPluginAgentProfiles the way it skips the Uninstallable branch below
 // when there's no compiled-in constructor (e.g. a subprocess plugin).
 func (pms *pluginManagerState) runPluginUninstallCleanup(manifestPath string) {
-	manifest, err := naniteplugin.ParseManifest(manifestPath)
-	if err != nil {
-		return
+	if pms.cleanup != nil {
+		pms.cleanup.Uninstall(manifestPath)
 	}
-	if constructor, ok := naniteplugin.LookupConstructor(manifest.Name); ok {
-		p := constructor()
-		if u, ok := p.(fplugin.Uninstallable); ok {
-			// Use a minimal host backed by the live store
-			host := naniteplugin.NewHostWithStore(pms.store)
-			if err := u.Uninstall(host); err != nil {
-				slog.Warn("plugin-api: uninstall cleanup failed", "name", manifest.Name, "err", err)
-			}
-		}
-	}
-	naniteplugin.NewHostWithStore(pms.store).SweepPluginAgentProfiles(manifest.Identifier())
 }
 
 // unloadPluginFromHost removes a plugin from the running host's registry so

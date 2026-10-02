@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,8 +20,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-const pluginGitOrg = "hollis-labs"
-
 // noRestart is set via the --no-restart flag. It still gates every restart
 // path exactly as it always did: builtin install/update/enable, and
 // uninstall/disable (both plugin kinds — see the rationale comments on
@@ -33,15 +30,14 @@ const pluginGitOrg = "hollis-labs"
 // install/update/enable no longer restart by default at all.
 var noRestart bool
 
-// installLink is set via the --link flag to symlink the source directory
-// into the plugins dir instead of copying. Only meaningful for local-path
-// install.
+// installLink remembers the removed --link flag so the CLI can refuse it.
+// Linked directories cannot retain an accepted bundle digest.
 var installLink bool
 
 func cmdPlugin(args []string) {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr, "usage: %s plugin <command> [--no-restart]\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: new, install <name|path> [--link], update <name>, uninstall, list, disable, enable, logs, reload, watch, release")
+		fmt.Fprintln(os.Stderr, "commands: new, install <id|path>, update <name>, uninstall, list, disable, enable, logs, reload, watch, release")
 		os.Exit(1)
 	}
 
@@ -70,10 +66,10 @@ func cmdPlugin(args []string) {
 		return
 	case "install":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: "+brand.BinaryName+" plugin install <name|path> [--link]")
-			fmt.Fprintln(os.Stderr, "  <name>  clone github.com/"+pluginGitOrg+"/<name>.git")
+			fmt.Fprintln(os.Stderr, "usage: "+brand.BinaryName+" plugin install <id|path>")
+			fmt.Fprintln(os.Stderr, "  <id>    install a reviewed catalog bundle")
 			fmt.Fprintln(os.Stderr, "  <path>  install from a local directory (./, ../, /, or existing dir name)")
-			fmt.Fprintln(os.Stderr, "  --link  symlink source into plugins dir instead of copying (local path only)")
+
 			os.Exit(1)
 		}
 		pluginInstall(args[1])
@@ -283,7 +279,7 @@ func triggerActivation(name string, manifest *plugin.PluginManifest) {
 }
 
 // isLocalPath returns true if arg refers to a local filesystem path
-// rather than a plugin name to clone from GitHub. Explicit path
+// rather than a catalog plugin ID. Explicit path
 // prefixes (./, ../, /) are always local; a bare token is local if it
 // names an existing directory (so `nanite plugin install my-plugin`
 // works from a parent dir that has a my-plugin checkout).
@@ -316,7 +312,7 @@ func validatePluginIDOrExit(id string) {
 }
 
 // pluginInstallLocal installs a plugin from a local directory by
-// copying (or symlinking with --link) its contents into the resolved
+// staging and reviewing a copy of its contents in the resolved
 // plugins dir under the canonical id from plugin.yaml.
 func pluginInstallLocal(src string) {
 	absSrc, err := filepath.Abs(src)
@@ -354,19 +350,15 @@ func pluginInstallLocal(src string) {
 	}
 
 	if installLink {
-		fmt.Printf("Linking %s → %s...\n", absSrc, target)
-		if err := os.Symlink(absSrc, target); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to symlink: %v\n", err)
-			os.Exit(1)
-		}
-	} else {
-		fmt.Printf("Copying %s → %s...\n", absSrc, target)
-		if err := copyPluginDir(absSrc, target); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to copy: %v\n", err)
-			_ = os.RemoveAll(target) // Preserve the copy failure; removal only cleans a partial install.
-			os.Exit(1)
-		}
+		fmt.Fprintln(os.Stderr, "--link cannot preserve an accepted bundle; install a reviewed copy instead")
+		os.Exit(1)
 	}
+	final, err := installLocalFromStateMachine(context.Background(), absSrc, id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Install failed: %v\n", err)
+		os.Exit(1)
+	}
+	target = final
 
 	if _, ok := plugin.LookupConstructor(id); ok {
 		fmt.Printf("Found compiled-in code for %q\n", id)
@@ -378,158 +370,30 @@ func pluginInstallLocal(src string) {
 	triggerActivation(id, manifest)
 }
 
-// pluginInstallRemote installs a plugin. Tries the signed catalog first;
-// if the plugin is not listed there, falls back to the legacy git-clone
-// flow at github.com/hollis-labs/<name>.git.
+// pluginInstallRemote installs a reviewed catalog bundle.
 func pluginInstallRemote(name string) {
 	validatePluginIDOrExit(name)
-	dir := resolvePluginsDir()
-	target := filepath.Join(dir, name)
-
-	// Check if already installed
-	if _, err := os.Stat(filepath.Join(target, "plugin.yaml")); err == nil {
-		fmt.Printf("Plugin %q is already installed at %s\n", name, target)
+	target := filepath.Join(resolvePluginsDir(), name)
+	if _, err := os.Lstat(target); err == nil { // #nosec G703 -- canonical ID validated immediately above before joining the configured plugins root.
+		fmt.Fprintf(os.Stderr, "Plugin %q is already installed\n", name)
 		os.Exit(1)
 	}
-
-	// Try catalog first.
-	if os.Getenv(brand.Env("PLUGIN_SKIP_CATALOG")) == "" {
-		fmt.Printf("Resolving %q in catalog (%s)...\n", name, resolveCatalogURL())
-		final, found, err := installFromCatalog(context.Background(), name)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Catalog install failed: %v\n", err)
-			os.Exit(1)
-		}
-		if found {
-			fmt.Printf("\nPlugin %q installed from catalog to %s\n", name, final)
-			installedManifest, merr := plugin.ParseManifest(filepath.Join(final, "plugin.yaml"))
-			if merr != nil {
-				installedManifest = nil
-			}
-			triggerActivation(name, installedManifest)
-			return
-		}
-		fmt.Printf("  %q not in catalog — falling back to git clone.\n", name)
-	}
-
-	// Ensure plugins dir exists
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create plugins directory: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Clone from GitHub
-	repoURL := fmt.Sprintf("git@github.com:%s/%s.git", pluginGitOrg, name)
-	fmt.Printf("Installing %s from %s...\n", name, repoURL)
-
-	cmd := exec.Command("git", "clone", "--depth", "1", repoURL, target)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to clone: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Verify plugin.yaml exists
-	if _, err := os.Stat(filepath.Join(target, "plugin.yaml")); err != nil {
-		fmt.Fprintf(os.Stderr, "Cloned repo does not contain plugin.yaml — not a valid plugin\n")
-		_ = os.RemoveAll(target) // The invalid checkout is already rejected; removal only cleans partial state.
-		os.Exit(1)
-	}
-
-	// Parse manifest
-	manifest, err := plugin.ParseManifest(filepath.Join(target, "plugin.yaml"))
+	final, found, err := installFromCatalog(context.Background(), name)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse plugin.yaml: %v\n", err)
-		_ = os.RemoveAll(target) // Preserve the manifest error; removal only cleans the invalid checkout.
+		fmt.Fprintf(os.Stderr, "Catalog install failed: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Check for compiled-in constructor
-	if _, ok := plugin.LookupConstructor(manifest.Name); !ok {
-		fmt.Printf("Warning: no compiled-in code for %q — plugin will need to be added to the binary\n", manifest.Name)
-	} else {
-		fmt.Printf("Found compiled-in code for %q\n", manifest.Name)
+	if !found {
+		fmt.Fprintf(os.Stderr, "Plugin %q is absent from the catalog\n", name)
+		os.Exit(1)
 	}
-
-	fmt.Printf("\nPlugin %q installed to %s\n", name, target)
-	triggerActivation(name, manifest)
-}
-
-// skipCopyNames are entry names (directories or files) that are never
-// copied during a local plugin install. Build artifacts, git state,
-// OS metadata — never part of a plugin's runtime surface.
-var skipCopyNames = map[string]bool{
-	".git":         true,
-	"node_modules": true,
-	"dist":         true,
-	".DS_Store":    true,
-}
-
-// copyPluginDir recursively copies src to dst, skipping directories
-// listed in skipCopyDirs and preserving file modes. Symlinks inside
-// src are recreated as symlinks in dst (not resolved).
-func copyPluginDir(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return os.MkdirAll(dst, 0755)
-		}
-		if skipCopyNames[d.Name()] {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		target := filepath.Join(dst, rel)
-		switch {
-		case d.IsDir():
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
-			return os.MkdirAll(target, info.Mode()&os.ModePerm)
-		case d.Type()&fs.ModeSymlink != 0:
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
-		default:
-			return copyFile(path, target)
-		}
-	})
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+	declaration, err := plugin.ParseManifest(filepath.Join(final, "plugin.yaml"))
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "Installed manifest: %v\n", err)
+		os.Exit(1)
 	}
-	defer func() {
-		_ = in.Close() // Input-file close is best-effort cleanup; read errors are handled separately.
-	}()
-	info, err := in.Stat()
-	if err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode()&os.ModePerm)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		if cerr := out.Close(); cerr != nil {
-			return fmt.Errorf("copy %s: %w (close: %w)", src, err, cerr)
-		}
-		return err
-	}
-	return out.Close()
+	fmt.Printf("Plugin %q installed to %s\n", name, final)
+	triggerActivation(name, declaration)
 }
 
 func pluginUninstall(name string) {
@@ -886,7 +750,7 @@ func pluginNew(args []string) {
 		fmt.Printf("  1. cd %s\n", opts.OutputDir)
 		fmt.Println("  2. (optional) edit go.mod module path and README")
 		fmt.Println("  3. make build            # native binary + UI bundle")
-		fmt.Printf("  4. %s plugin install ./ --link\n", brand.BinaryName)
+		fmt.Printf("  4. %s plugin install ./\n", brand.BinaryName)
 		fmt.Printf("  5. %s plugin release .   # cross-platform archives for catalog\n", brand.BinaryName)
 	case scaffold.KindBuiltin:
 		pkg := strings.ReplaceAll(strings.ReplaceAll(name, "-", ""), "_", "")

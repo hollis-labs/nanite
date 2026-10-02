@@ -40,12 +40,14 @@ func (s ProcessState) String() string {
 
 // ManagerConfig configures the subprocess manager.
 type ManagerConfig struct {
-	Command string   // executable path
-	Args    []string // command-line arguments
-	Env     []string // explicit host-approved "KEY=VALUE" pairs; never ambient inheritance
-	Secrets []string // resolved secret values scrubbed from diagnostics
-	ID      string   // canonical manifest identity; empty only in harnesses
-	WorkDir string   // working directory (plugin directory)
+	Command     string                      // executable path
+	Args        []string                    // command-line arguments
+	Env         []string                    // explicit host-approved "KEY=VALUE" pairs; never ambient inheritance
+	Secrets     []string                    // resolved secret values scrubbed from diagnostics
+	Granted     []string                    // only capabilities accepted by the host
+	BeforeSpawn func(context.Context) error // checks accepted bytes on every start/restart
+	ID          string                      // canonical manifest identity; empty only in harnesses
+	WorkDir     string                      // working directory (plugin directory)
 
 	// Health check interval. Zero disables periodic health checks.
 	HealthInterval time.Duration
@@ -109,6 +111,8 @@ func (m *Manager) Start(ctx context.Context, init InitParams) (*Transport, error
 		ID: m.cfg.ID, Command: m.cfg.Command, Args: m.cfg.Args, Dir: m.cfg.WorkDir,
 		Env: pluginEnvironment(os.Environ(), m.cfg.Env), Init: init, Secrets: m.cfg.Secrets,
 		HandshakeTimeout: m.cfg.StartupTimeout, UnloadTimeout: m.cfg.ShutdownTimeout,
+		BeforeSpawn: m.cfg.BeforeSpawn,
+		ConnOptions: []pluginhost.ConnOption{pluginhost.WithDefaultTimeout(MaxCallDuration), pluginhost.WithMaxFrame(8 << 20), pluginhost.WithMaxInboundFrame(16 << 20)},
 	}, pluginhost.SuperviseOptions{
 		Policy:         pluginhost.RestartPolicy{MaxRestarts: maxRestarts, Initial: m.cfg.InitialBackoff, Max: m.cfg.MaxBackoff, Factor: m.cfg.BackoffFactor},
 		HealthInterval: m.cfg.HealthInterval, KillAfterUnhealthy: 1,
@@ -128,7 +132,7 @@ func (m *Manager) Start(ctx context.Context, init InitParams) (*Transport, error
 		OnGiveUp: m.recordCrash,
 	})
 	m.supervisor = supervisor
-	transport := &Transport{current: func() *pluginhost.Conn {
+	transport := &Transport{secrets: append([]string(nil), m.cfg.Secrets...), current: func() *pluginhost.Conn {
 		p := supervisor.Current()
 		if p == nil || (m.cfg.ID != "" && p.Info().ID != m.cfg.ID) {
 			return nil
@@ -139,7 +143,7 @@ func (m *Manager) Start(ctx context.Context, init InitParams) (*Transport, error
 	m.mu.Unlock()
 	if err := supervisor.Start(ctx); err != nil {
 		m.recordCrash(err)
-		return nil, err
+		return nil, redactPluginError(err, m.cfg.Secrets)
 	}
 	if p := supervisor.Current(); p == nil || (m.cfg.ID != "" && p.Info().ID != m.cfg.ID) {
 		_ = supervisor.Stop(context.Background())
@@ -149,6 +153,7 @@ func (m *Manager) Start(ctx context.Context, init InitParams) (*Transport, error
 }
 
 func (m *Manager) recordCrash(err error) {
+	err = redactPluginError(err, m.cfg.Secrets)
 	m.mu.Lock()
 	if m.state != StateStopping && m.state != StateStopped {
 		m.state = StateCrashed

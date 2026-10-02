@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -189,7 +190,7 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 
 		if dp.IsSubprocess() {
 			// Subprocess plugin: create a SubprocessPlugin that bridges via JSON-RPC.
-			sp, err := NewSubprocessPluginFromManifest(dp)
+			sp, err := NewSubprocessPluginFromManifest(host.Context(), dp, host)
 			if err != nil {
 				wrapped := fmt.Errorf("create subprocess plugin %s: %w", pluginID, err)
 				errs = append(errs, wrapped)
@@ -264,8 +265,15 @@ type ManifestProvider interface {
 
 // NewSubprocessPluginFromManifest creates a SubprocessPlugin from a discovered
 // plugin manifest with runtime: subprocess.
-func NewSubprocessPluginFromManifest(dp DiscoveredPlugin) (*subprocess.SubprocessPlugin, error) {
+func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, host *Host) (*subprocess.SubprocessPlugin, error) {
 	m := dp.Manifest
+	fresh, err := ParseManifest(filepath.Join(dp.Dir, "plugin.yaml"))
+	if err != nil {
+		return nil, err
+	}
+	if !reflect.DeepEqual(m.Shared, fresh.Shared) {
+		return nil, fmt.Errorf("manifest changed during loading; rediscover the plugin")
+	}
 
 	if m.Shared == nil {
 		return nil, fmt.Errorf("subprocess plugin requires a shared manifest")
@@ -276,24 +284,28 @@ func NewSubprocessPluginFromManifest(dp DiscoveredPlugin) (*subprocess.Subproces
 	}
 	args := append([]string(nil), m.Shared.Entrypoint.Args...)
 
-	// Resolve config values for the subprocess.
-	config := make(map[string]string)
-	for key, entry := range m.Config {
-		if entry.EnvVar != "" {
-			if v := os.Getenv(entry.EnvVar); v != "" {
-				config[key] = v
-				continue
-			}
-		}
-		if entry.Default != "" {
-			config[key] = entry.Default
+	if _, approvalErr := VerifyInstallApproval(ctx, dp.Dir); approvalErr != nil {
+		return nil, approvalErr
+	}
+	var overrides map[string]string
+	if host != nil {
+		overrides, err = host.prepareReviewedSettings(ctx, m.Shared)
+		if err != nil {
+			return nil, err
 		}
 	}
-
+	launch, err := ResolveReviewedLaunch(ctx, dp.Dir, overrides)
+	if err != nil {
+		return nil, err
+	}
 	mgrCfg := subprocess.DefaultManagerConfig(command, dp.Dir)
 	mgrCfg.Args = args
+	mgrCfg.Secrets = launch.Secrets
+	mgrCfg.Env = launch.Environment
+	mgrCfg.Granted = launch.Granted
+	mgrCfg.BeforeSpawn = func(ctx context.Context) error { return CheckAcceptedBundle(ctx, dp.Dir, launch.ReviewDigest) }
 
-	return subprocess.NewSubprocessPlugin(dp.Dir, m.Identifier(), config, mgrCfg), nil
+	return subprocess.NewSubprocessPlugin(dp.Dir, m.Identifier(), launch.Config, mgrCfg), nil
 }
 
 // LoadRegisteredBuiltins loads all registered plugin constructors that are not

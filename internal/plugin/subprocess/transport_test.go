@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -253,4 +254,50 @@ func TestTransport_CallTimeoutDoesNotKillConnection(t *testing.T) {
 
 	pluginInW.Close()
 	pluginOutW.Close()
+}
+
+func TestTransportHostDeadlineBoundsLongCallerDeadline(t *testing.T) {
+	inputR, inputW := io.Pipe()
+	outputR, outputW := io.Pipe()
+	defer inputR.Close()
+	defer inputW.Close()
+	defer outputR.Close()
+	defer outputW.Close()
+	go func() { _, _ = io.Copy(io.Discard, inputR) }()
+	transport := NewTransport(outputR, inputW)
+	defer transport.Close()
+	transport.callLimit = 25 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	started := time.Now()
+	_, err := transport.Call(ctx, "never/responds", nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("call: %v", err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("caller deadline overrode host limit")
+	}
+}
+
+func TestTransportRedactsPluginErrorAndPreservesErrorCode(t *testing.T) {
+	inputR, inputW := io.Pipe()
+	outputR, outputW := io.Pipe()
+	defer inputR.Close()
+	defer inputW.Close()
+	defer outputR.Close()
+	defer outputW.Close()
+	go mockPlugin(inputR, outputW, map[string]func(json.RawMessage) (any, *RPCError){"secret/fail": func(json.RawMessage) (any, *RPCError) {
+		return nil, &RPCError{Code: ErrCodeNotFound, Message: "failed with host-secret-value"}
+	}})
+	transport := NewTransport(outputR, inputW)
+	defer transport.Close()
+	transport.secrets = []string{"host-secret-value"}
+	_, err := transport.Call(context.Background(), "secret/fail", nil)
+	if err == nil || strings.Contains(err.Error(), "host-secret-value") {
+		t.Fatalf("secret leaked: %v", err)
+	}
+	var rpcErr *RPCError
+	if !errors.As(err, &rpcErr) || rpcErr.Code != ErrCodeNotFound {
+		t.Fatalf("error identity lost: %v", err)
+	}
 }

@@ -58,3 +58,22 @@ integrity, not publisher identity.
 Browser bundles are served under `/api/plugins/<id>/bundle/` using the declared
 bundle-relative paths. Envelope schemas use `/api/plugins/<id>/schema/<type>`;
 only the corresponding declared schema file can be read through that route.
+
+Installation uses a staged review before directory commit. CLI operators enter
+the canonical ID; API clients first receive `409` with `status: review_required`,
+actual declarations, `review_digest`, and the previous receipt when present.
+They resubmit `approved_digest`; catalog upgrades also set `upgrade: true`.
+Changed bytes require a fresh review. Receipts live in `.approvals/<id>.json`
+beside installed bundles, independent of plugin data/cache. Installs from CLI
+and API use `.install-locks/<id>.lock` under their common plugins root. A failed
+commit restores the previous approval. A failed hot-load leaves accepted files
+installed and reports a failure so configuration and reload can be retried.
+
+Subprocess startup resolves only declared configuration/secrets. Secret keys
+are `plugin:<id>:<name>` in the OS keychain; named environment variables take
+precedence. Required missing secrets refuse loading. Accepted capability names
+control additional connection variables and init grants. The shared lifecycle
+host's `BeforeSpawn` callback revalidates the receipt before each spawn and
+pins supervised restarts to the original review. Transport calls always apply
+the host deadline, even when callers supplied a longer one; request and response
+frames have independent caps. `SECURITY.md` documents the execution boundary.

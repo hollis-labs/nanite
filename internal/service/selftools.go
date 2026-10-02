@@ -17,7 +17,7 @@ func NewSelfToolsTransport(st *store.Store) *selftools.SelfToolsTransport {
 		Procedures: NewAgentCapabilitiesService(st),
 		Handoffs:   NewHandoffService(st),
 	}, selftools.WriteServices{
-		Pins: NewPinService(st), Reminders: NewReminderService(st), Schedules: NewScheduleService(st),
+		Pins: NewPinService(st), Schedules: NewScheduleService(st),
 		Membership: NewAgentMembershipService(st, st), Dispatch: &selfToolDispatchService{store: st, reflexes: NewReflexService(st)}, Events: &selfToolEventService{store: st},
 	})
 	if st != nil {

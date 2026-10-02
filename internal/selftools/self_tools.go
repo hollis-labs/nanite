@@ -1065,55 +1065,6 @@ the current turn for subsequent writes.
 				"required": []string{"mode"},
 			},
 		},
-		// --- Reminders + Pin (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
-		{
-			Name: "reminder_set",
-			Description: "Set a deterministic reminder that fires at a future time or after N turns, " +
-				"injecting your reminder text into context as a <system-reminder> block.\n\n" +
-				"**When to use:** When you want to remember to do something later — e.g. 'don't forget to file a ticket', " +
-				"'review the plan after 5 turns', 'check status at 3pm'.\n\n" +
-				"**Trigger shapes (v1):**\n" +
-				"- Time-based: `{\"type\":\"time\",\"at\":\"<RFC3339>\"}` — fires when the clock reaches the given time.\n" +
-				"- Turn-count: `{\"type\":\"turn_count\",\"n\":5}` — fires N turns after this call.\n\n" +
-				"**Scope (D1, CW-20260428-0014):**\n" +
-				"- `turn`: fires within the same turn it was created in.\n" +
-				"- `session` (default): fires only in the originating session.\n" +
-				"- `project`: fires in any session of the same project; requires project_id (resolved from the current session's project when omitted).\n\n" +
-				"**When NOT to use:** Do not use for calendar events, cross-system notifications, or anything requiring " +
-				"an LLM to decide when to fire — triggers are always deterministic in v1.\n\n" +
-				"**Reminder display:** When a reminder fires, its text is injected as `<system-reminder>` into the next turn's " +
-				"context and surfaced in the I1 dev-mode inspector. There is no UI toast in v1.\n\n" +
-				"**Output shape:** `{reminder_id, scope, status: 'set', trigger}`.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"text": map[string]any{
-						"type":        "string",
-						"description": "The reminder text to inject when the trigger fires.",
-					},
-					"trigger": map[string]any{
-						"type":        "object",
-						"description": "Trigger condition. v1 shapes: {type:'time',at:'<RFC3339>'} or {type:'turn_count',n:<N>}.",
-						"properties": map[string]any{
-							"type": map[string]any{"type": "string", "enum": []string{"time", "turn_count"}},
-							"at":   map[string]any{"type": "string", "description": "RFC3339 fire time (for type=time)"},
-							"n":    map[string]any{"type": "integer", "description": "Number of turns to wait (for type=turn_count)"},
-						},
-						"required": []string{"type"},
-					},
-					"scope": map[string]any{
-						"type":        "string",
-						"enum":        []string{"turn", "session", "project"},
-						"description": "Reminder lifetime. Default: session.",
-					},
-					"project_id": map[string]any{
-						"type":        "string",
-						"description": "Project ID — required when scope=project. Auto-resolved from the current session's project when omitted.",
-					},
-				},
-				"required": []string{"text", "trigger"},
-			},
-		},
 		{
 			Name: "context_pin",
 			Description: "Pin content so the system keeps it in context across turns (session scope) or across sessions in a project (project scope). " +

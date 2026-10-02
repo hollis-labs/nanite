@@ -115,11 +115,6 @@ func TestSelfToolsWriteServiceWiring(t *testing.T) {
 	if err != nil || len(pins) != 0 {
 		t.Fatalf("unpin: %+v %v", pins, err)
 	}
-	call("reminder_set", map[string]any{"text": "wired reminder", "scope": "project", "trigger": map[string]any{"type": "turn_count", "n": 3}})
-	rows, err := st.ListUnfiredReminders(ctx, session.ID)
-	if err != nil || len(rows) != 1 || rows[0].ProjectID != project.ID || rows[0].Text != "wired reminder" {
-		t.Fatalf("reminders: %+v %v", rows, err)
-	}
 	call("schedule_create", map[string]any{"name": "wired schedule", "message": "wake me", "kind": "one_shot"})
 	schedules, err := st.ListAgentSchedules(ctx, agent.ID)
 	if err != nil || len(schedules) != 1 || schedules[0].NextRun == "" || !strings.HasPrefix(schedules[0].ID, "self-sched-") {

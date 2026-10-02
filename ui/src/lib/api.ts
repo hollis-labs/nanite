@@ -97,7 +97,6 @@ import type {
   Project,
   ProviderConfig,
   ProviderStatus,
-  Reminder,
   SearchResult,
   ServerInfo,
   Session,
@@ -1768,42 +1767,6 @@ export const api = {
         .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to update pin scope: ${res.status}`);
     }
-  },
-
-  // Reminders (D1/D2, CW-20260428-0014/0015)
-  listReminders: async (sessionId: string): Promise<Reminder[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/reminders`);
-    if (!res.ok) throw new Error(`Failed to list reminders: ${res.status}`);
-    return res.json();
-  },
-
-  deleteReminder: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/reminders/${id}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) throw new Error(`Failed to delete reminder: ${res.status}`);
-  },
-
-  /** D2 — promote/demote a reminder between session and project scope. */
-  updateReminderScope: async (
-    id: string,
-    scope: AgentStateScope,
-    projectId?: string,
-  ): Promise<Reminder> => {
-    const res = await fetch(`${API_BASE}/reminders/${id}/scope`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scope, project_id: projectId ?? "" }),
-    });
-    if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(
-        err.error || `Failed to update reminder scope: ${res.status}`,
-      );
-    }
-    return res.json();
   },
 
   // Compact

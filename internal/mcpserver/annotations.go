@@ -156,9 +156,8 @@ var toolAnnotations = map[string]gmcpserver.ToolAnnotations{
 	// idempotent, not an error.
 	"scratchpad_clear": {IdempotentHint: true},
 
-	// --- reminders / pins ---
-	"reminder_set": {},
-	"context_pin":  {},
+	// --- pins ---
+	"context_pin": {},
 	// Delete-by-id; ordinarily idempotent at the SQL layer.
 	"context_unpin": {DestructiveHint: true, IdempotentHint: true},
 

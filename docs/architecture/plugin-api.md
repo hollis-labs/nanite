@@ -236,3 +236,24 @@ when the reviewed bookmarks plugin first loads.
 Deployment must restart every older reader of the retired table before the new
 binary loads the plugin. A running old process retains compiled queries against
 `bookmarks`, even though the new binary no longer exposes that feature in core.
+
+## Reminder extraction
+
+`nanite.reminders` owns time and turn-count reminders, its working-drawer tab,
+MCP tools, HTTP routes and `reminders` context source. `PluginCoreData` also
+allows this owner to transfer the `reminders` table through the same committed,
+verified export transaction. No core reminder tool, API, store method or
+in-process trigger engine remains. Historical schema migrations still create
+an empty legacy table until a reviewed plugin first activates.
+
+Plugin context reads leave reminders pending. An agent calls `reminders_ack`,
+or a user acknowledges in the plugin drawer, to stop injection. Budget omission
+and failed turns therefore do not consume reminder records. New turn-count
+reminders persist the current session message count as their creation baseline;
+legacy rows retain the former engine's zero baseline because that information
+was never stored. Project scope resolves from core session metadata, and
+session/project identities cannot be supplied to the plugin's agent tools.
+
+All older readers of the retired table must restart before deploying the
+adoption binary and enabling the plugin. Disabled, rejected or absent plugins
+leave core rows retained for a later committed transfer.

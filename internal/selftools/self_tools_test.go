@@ -421,10 +421,6 @@ func TestSelfToolsTransport_ProjectScopeAutofillCharacterization(t *testing.T) {
 		args map[string]any
 	}{
 		{name: "todo_create", args: map[string]any{"title": "project todo", "scope": store.TodoScopeProject}},
-		{name: "reminder_set", args: map[string]any{
-			"text": "project reminder", "scope": store.ReminderScopeProject,
-			"trigger": map[string]any{"type": "turn_count", "n": 1},
-		}},
 		{name: "context_pin", args: map[string]any{"content": "project pin", "scope": store.PinScopeProject}},
 	} {
 		res, err := st.CallTool(ctx, call.name, call.args)
@@ -436,10 +432,6 @@ func TestSelfToolsTransport_ProjectScopeAutofillCharacterization(t *testing.T) {
 	todos, err := fixtureStore(st).ListTodos(t.Context(), store.TodoFilter{Scope: store.TodoScopeProject, ProjectID: project.ID})
 	if err != nil || len(todos) != 1 || todos[0].ProjectID != project.ID || todos[0].ScopeID != project.ID {
 		t.Fatalf("project todo autofill = %#v (err=%v), want project_id/scope_id %q", todos, err, project.ID)
-	}
-	reminders, err := fixtureStore(st).ListUnfiredReminders(t.Context(), session.ID)
-	if err != nil || len(reminders) != 1 || reminders[0].ProjectID != project.ID {
-		t.Fatalf("project reminder autofill = %#v (err=%v), want project_id %q", reminders, err, project.ID)
 	}
 	pins, err := fixtureStore(st).ListPinnedContent(t.Context(), session.ID)
 	if err != nil || len(pins) != 1 || pins[0].ProjectID != project.ID {

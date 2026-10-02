@@ -1966,22 +1966,6 @@ export interface DynamicCardTab {
   createdAt: number;
 }
 
-// --- Reminders (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
-
-export interface Reminder {
-  id: string;
-  session_id: string;
-  scope: AgentStateScope;
-  /** Project ID — populated when scope='project'. */
-  project_id?: string;
-  text: string;
-  /** Raw JSON trigger blob — see internal/reminders.Trigger. */
-  trigger_json: string;
-  fired_at?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 // --- Tool Call Display ---
 
 export type ToolCallDisplayMode = "indicator" | "minimal" | "compact" | "full";

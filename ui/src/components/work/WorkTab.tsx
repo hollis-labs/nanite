@@ -7,13 +7,11 @@ import { useAppStore } from '@/stores/useAppStore'
 import { useWorkStore } from '@/stores/useWorkStore'
 import { useTodos, useCreateTodo, useToggleTodo, useUpdateTodo, useUpdateTodoScope } from '@/hooks/useTodos'
 import { usePlans, useCreatePlan, useUpdatePlan, useTogglePlanStep } from '@/hooks/usePlans'
-import { useReminders, useDeleteReminder, useUpdateReminderScope } from '@/hooks/useReminders'
 import { useWorkSync } from '@/hooks/useWorkSync'
 import { TodoList } from './TodoList'
 import { PlanCard } from './PlanCard'
 import { AddItemInput } from './AddItemInput'
 import { ScopeFilterChip } from './ScopeChip'
-import { ReminderItem } from './ReminderItem'
 import { arrayMove } from '@dnd-kit/sortable'
 import type { Todo } from '@/lib/types'
 
@@ -23,9 +21,9 @@ import type { Todo } from '@/lib/types'
  * Surface:
  *   - Scope filter chip: All / Session / Project.
  *   - "All" view renders both "This Session" and "This Project" sections
- *     for todos and reminders side by side, each with scope chips on rows.
+ *     for todos and plans side by side, each with scope chips on rows.
  *   - "Session" / "Project" filters render only the matching section.
- *   - Each todo / reminder row exposes promote-to-project and
+ *   - Each todo row exposes promote-to-project and
  *     demote-to-session inline actions (visible on hover).
  */
 export function WorkTab() {
@@ -58,12 +56,6 @@ export function WorkTab() {
     scope_id: activeProjectId ?? undefined,
   })
 
-  // Reminders — listed once for the active session; the API auto-includes
-  // project-scoped reminders for the session's project.
-  const { data: reminders = [] } = useReminders(activeSessionId)
-  const sessionReminders = reminders.filter((r) => r.scope !== 'project')
-  const projectReminders = reminders.filter((r) => r.scope === 'project')
-
   const createTodo = useCreateTodo()
   const createPlan = useCreatePlan()
   const updatePlan = useUpdatePlan()
@@ -71,12 +63,9 @@ export function WorkTab() {
   const updateTodo = useUpdateTodo()
   const updateTodoScope = useUpdateTodoScope()
   const togglePlanStep = useTogglePlanStep()
-  const deleteReminder = useDeleteReminder(activeSessionId)
-  const updateReminderScope = useUpdateReminderScope(activeSessionId)
 
   const [todosOpen, setTodosOpen] = useState(true)
   const [plansOpen, setPlansOpen] = useState(true)
-  const [remindersOpen, setRemindersOpen] = useState(true)
 
   // Stable sort by metadata.sort_order then created_at.
   const sortTodos = (todos: Todo[]) =>
@@ -166,7 +155,7 @@ export function WorkTab() {
     [sessionPlans, projectPlans, updatePlan],
   )
 
-  // Promote/demote handlers for both todos and reminders. We use mutateAsync
+  // Promote/demote handlers for todos. We use mutateAsync
   // (not mutate) so the row components can await the mutation lifecycle and
   // keep their `busy` flag set until the request actually settles — prevents
   // double-submits on slow networks. We swallow errors here because the
@@ -191,27 +180,6 @@ export function WorkTab() {
     },
     [updateTodoScope],
   )
-  const promoteReminder = useCallback(
-    async (id: string, projectId: string) => {
-      try {
-        await updateReminderScope.mutateAsync({ id, scope: 'project', projectId })
-      } catch {
-        /* surfaced via mutation onError */
-      }
-    },
-    [updateReminderScope],
-  )
-  const demoteReminder = useCallback(
-    async (id: string) => {
-      try {
-        await updateReminderScope.mutateAsync({ id, scope: 'session', projectId: '' })
-      } catch {
-        /* surfaced via mutation onError */
-      }
-    },
-    [updateReminderScope],
-  )
-
   const isLoading =
     (showSessionSection && (sessionTodosLoading || sessionPlansLoading)) ||
     (showProjectSection && (projectTodosLoading || projectPlansLoading))
@@ -220,10 +188,8 @@ export function WorkTab() {
     !isLoading &&
     sessionTodos.length === 0 &&
     sessionPlans.length === 0 &&
-    sessionReminders.length === 0 &&
     projectTodos.length === 0 &&
-    projectPlans.length === 0 &&
-    projectReminders.length === 0
+    projectPlans.length === 0
 
   const scopeActions = {
     activeProjectId,
@@ -311,44 +277,6 @@ export function WorkTab() {
                 ) : (
                   <p className="text-xs text-fg-faint italic">No project context.</p>
                 )}
-              </ScopeSection>
-            )}
-          </SectionToggle>
-        )}
-
-        {/* Reminders block — always rendered but split by scope per filter. */}
-        {!isLoading && reminders.length > 0 && (
-          <SectionToggle title="Reminders" open={remindersOpen} onToggle={() => setRemindersOpen((v) => !v)} count={reminders.length}>
-            {showSessionSection && sessionReminders.length > 0 && (
-              <ScopeSection label="This Session">
-                <div className="space-y-1">
-                  {sessionReminders.map((r) => (
-                    <ReminderItem
-                      key={r.id}
-                      reminder={r}
-                      activeProjectId={activeProjectId}
-                      onDelete={(id) => deleteReminder.mutate(id)}
-                      onPromote={promoteReminder}
-                      onDemote={(id) => demoteReminder(id)}
-                    />
-                  ))}
-                </div>
-              </ScopeSection>
-            )}
-            {showProjectSection && projectReminders.length > 0 && (
-              <ScopeSection label="This Project">
-                <div className="space-y-1">
-                  {projectReminders.map((r) => (
-                    <ReminderItem
-                      key={r.id}
-                      reminder={r}
-                      activeProjectId={activeProjectId}
-                      onDelete={(id) => deleteReminder.mutate(id)}
-                      onPromote={promoteReminder}
-                      onDemote={(id) => demoteReminder(id)}
-                    />
-                  ))}
-                </div>
               </ScopeSection>
             )}
           </SectionToggle>

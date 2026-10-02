@@ -49,7 +49,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	"github.com/hollis-labs/nanite/internal/recovery/orphansweep"
-	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/skillinstall"
@@ -120,9 +119,8 @@ type Container struct {
 	Artifacts *ArtifactService
 	// Shell owns the policy for running a user's shell command in a session.
 	Shell *ShellService
-	// Pins owns pinned-content rows; Reminders owns reminder rows.
-	Pins      *PinService
-	Reminders *ReminderService
+	// Pins owns pinned-content rows.
+	Pins *PinService
 	// Consumers owns consumer rows; Documents owns a session's context
 	// documents and context prompt.
 	Consumers *ConsumerService
@@ -312,11 +310,6 @@ type Container struct {
 	// LoopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
 	// Always non-nil; instantiated once at container boot.
 	LoopDetector *loopdetect.Detector
-
-	// ReminderEngine is the deterministic trigger engine for agent-set reminders
-	// (J11, CW-20260426-0009). Always non-nil; per-session state is keyed
-	// by sessionID inside the Engine.
-	ReminderEngine *reminders.Engine
 
 	// ReflexEngine is the FU-30 DB-backed agent reflex engine, constructed
 	// inside NewContainer and also handed to NewChatService via
@@ -1103,13 +1096,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	loopDetector := loopdetect.New()
 	slog.Info("service container: loop detector enabled (I2, fingerprint-based)")
 
-	// J11 (CW-20260426-0009): reminder engine — deterministic trigger evaluation.
-	// A single engine is shared across sessions; per-session state lives inside
-	// the engine (keyed by sessionID / reminderID). Always instantiated so the
-	// SelfToolsTransport can register creation turns even before the first eval.
-	reminderEngine := reminders.NewEngine(cfg.Store)
-	slog.Info("service container: reminder engine enabled (J11, CW-20260426-0009)")
-
 	// FU-30 reflex engine. Built before the chat service so per-turn
 	// generation can evaluate DB-backed agent reflexes and inject just-in-time
 	// reminders / forced tool choices. Plugin hooks (nil-safe) let plugins
@@ -1235,8 +1221,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// I2 (CW-20260420-0029): loop detector — always-on.
 		LoopDetector: loopDetector,
 		// J11 (CW-20260426-0009): reminder engine — always-on.
-		ReminderEngine: reminderEngine,
-		ReflexEngine:   reflexEngine,
+		ReflexEngine: reflexEngine,
 		// Phase 4c.1 (CW-20260508-0002): agent-runtime composition root.
 		AgentDeps:           agentDeps,
 		AgentSessionManager: agentManager,
@@ -1585,7 +1570,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Recovery:            recoveryBrokerOrNil(agentDeps),
 		Inspector:           inspectorSvc,
 		LoopDetector:        loopDetector,
-		ReminderEngine:      reminderEngine,
 		ReflexEngine:        reflexEngine,
 		RunStore:            runStore,
 		WorkflowBroadcaster: workflowBroadcaster,
@@ -1607,7 +1591,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		DrawerCards:         NewDrawerCardService(cfg.Store),
 		Shell:               NewShellService(cfg.Store),
 		Pins:                NewPinService(cfg.Store),
-		Reminders:           NewReminderService(cfg.Store),
 		Consumers:           NewConsumerService(cfg.Store),
 		Documents:           NewDocumentService(cfg.Store),
 		Teams:               NewTeamService(cfg.Store),

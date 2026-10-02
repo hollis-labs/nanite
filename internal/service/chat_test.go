@@ -163,7 +163,6 @@ type minimalStore struct {
 	stubHandoffStashStore
 	stubCompactionEventStore
 	stubEnvelopeStore
-	stubReminderStore
 	stubPinnedContentStore
 	stubSubagentRunsReader
 }
@@ -212,21 +211,6 @@ func (stubEnvelopeStore) CreateEnvelopeInstance(ctx context.Context, inst *store
 func (stubEnvelopeStore) GetEnvelopeInstance(ctx context.Context, id string) (*store.EnvelopeInstance, error) {
 	return nil, fmt.Errorf("not found")
 }
-
-type stubReminderStore struct{}
-
-func (stubReminderStore) CreateReminder(context.Context, store.Reminder) error { return nil }
-func (stubReminderStore) GetReminder(context.Context, string) (store.Reminder, error) {
-	return store.Reminder{}, nil
-}
-func (stubReminderStore) ListUnfiredReminders(context.Context, string) ([]store.Reminder, error) {
-	return nil, nil
-}
-func (stubReminderStore) MarkReminderFired(context.Context, string) error { return nil }
-func (stubReminderStore) UpdateReminderScope(context.Context, string, string, string) error {
-	return nil
-}
-func (stubReminderStore) DeleteReminder(context.Context, string) error { return nil }
 
 type stubPinnedContentStore struct{}
 

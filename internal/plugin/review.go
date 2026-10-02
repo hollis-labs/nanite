@@ -62,6 +62,7 @@ var capabilityEnvironment = map[string][]string{
 	pluginapi.CapabilityReadOnlyQuery: {},
 	pluginapi.CapabilityContextSource: {},
 	pluginapi.CapabilityReflexSeed:    {},
+	pluginapi.CapabilityDurableWake:   {},
 	"ssh_agent":                       {"SSH_AUTH_SOCK"},
 	"docker_socket":                   {"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"},
 }
@@ -86,6 +87,11 @@ func BuildInstallReview(ctx context.Context, directory string) (InstallReview, e
 	for _, request := range common.Capabilities {
 		if _, known := capabilityEnvironment[request.Name]; !known && !request.Optional {
 			return InstallReview{}, fmt.Errorf("unknown required capability %q", request.Name)
+		}
+		if request.Name == pluginapi.CapabilityDurableWake {
+			if _, scopeErr := pluginapi.DecodeDurableWakeScope(request.Metadata); scopeErr != nil {
+				return InstallReview{}, fmt.Errorf("durable_agent.wake scope: %w", scopeErr)
+			}
 		}
 		if request.Name == pluginapi.CapabilityReadOnlyQuery {
 			if _, scopeErr := pluginapi.DecodeQueryScope(request.Metadata); scopeErr != nil {
@@ -297,6 +303,8 @@ func VerifyInstallApproval(ctx context.Context, directory string) (*InstallAppro
 type ReviewedLaunch struct {
 	QueryScope    *pluginapi.QueryScope
 	QueryOptional bool
+	WakeScope     *pluginapi.DurableWakeScope
+	WakeOptional  bool
 	Config        map[string]string
 	Secrets       []string
 	Environment   []string
@@ -357,6 +365,14 @@ func ResolveReviewedLaunch(ctx context.Context, directory string, overrides ...m
 		keys, known := capabilityEnvironment[request.Name]
 		if !known {
 			continue
+		}
+		if request.Name == pluginapi.CapabilityDurableWake {
+			scope, scopeErr := pluginapi.DecodeDurableWakeScope(request.Metadata)
+			if scopeErr != nil {
+				return ReviewedLaunch{}, scopeErr
+			}
+			result.WakeScope = &scope
+			result.WakeOptional = request.Optional
 		}
 		if request.Name == pluginapi.CapabilityReadOnlyQuery {
 			scope, scopeErr := pluginapi.DecodeQueryScope(request.Metadata)

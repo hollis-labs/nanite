@@ -191,3 +191,20 @@ that receipt against the retained file before an idempotent transaction in their
 own database. The host never accepts table names, export owners or SQL through
 this API. Feature-specific extraction invokes the helper only after release,
 adoption and the reader cutover; adding the helper retires no core table itself.
+
+## Durable wake integration
+
+`durable_agent.wake` requires a reviewed explicit `agent_slugs` allowlist.
+The slugs resolve durable instances already provisioned in the database; the
+capability grants no profile edits, provisioning or scheduling. Init receives
+`identity.nanite_durable_wake` with its own connection credential, independent
+of any read grant. The fixed POST `/api/plugin-host/durable-wake` route checks
+the live connection, strict bounded input and target scope before calling the
+existing durable-agent wake service. Unload cancels its lease and in-flight
+requests. Both scoped routes enforce their own credentials when Basic Auth is
+enabled; plugin bundles never receive the user's broader password.
+
+The plugin supplies translation into a bounded nonempty prompt and optional
+identity facts. Core owns instance resolution, session creation and prompt
+delivery. A successful projection reports `queued`, not completed execution;
+skipped or failed wakes return a conflict. Clients never retry an uncertain wake.

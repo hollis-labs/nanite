@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"slices"
 
@@ -35,7 +34,7 @@ func (h *Host) SetHostQueryURL(origin string) error {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if len(h.queryGrants) != 0 {
+	if len(h.queryGrants) != 0 || len(h.wakeGrants) != 0 {
 		return fmt.Errorf("cannot change host query origin while grants exist")
 	}
 	h.queryURL = origin
@@ -127,10 +126,4 @@ func (h *Host) AuthorizeHostQuery(token string) (HostQueryPermit, bool) {
 		return HostQueryPermit{}, false
 	}
 	return HostQueryPermit{PluginID: grant.owner, Scope: cloneQueryScope(grant.scope), Context: grant.ctx}, true
-}
-
-func queryGrantIdentity(grant pluginapi.QueryGrant) (json.RawMessage, error) {
-	return json.Marshal(struct {
-		Grant pluginapi.QueryGrant `json:"nanite_host_query"`
-	}{Grant: grant})
 }

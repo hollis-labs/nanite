@@ -99,6 +99,10 @@ func TestAuthMiddlewarePluginQueryUsesHandlerCredential(t *testing.T) {
 		{"POST", "/api/plugin-host/query/sessions", "Bearer scoped-connection", 401},
 		{"GET", "/api/plugin-host/query-elsewhere/sessions", "Bearer scoped-connection", 401},
 		{"GET", "/api/sessions", "Bearer scoped-connection", 401},
+		{"POST", "/api/plugin-host/durable-wake", "Bearer scoped-connection", 204},
+		{"POST", "/api/plugin-host/durable-wake", "", 401},
+		{"GET", "/api/plugin-host/durable-wake", "Bearer scoped-connection", 401},
+		{"POST", "/api/plugin-host/durable-wake/other", "Bearer scoped-connection", 401},
 	} {
 		req := httptest.NewRequest(test.method, test.path, nil)
 		req.Header.Set("Authorization", test.credential)

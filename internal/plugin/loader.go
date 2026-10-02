@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -305,13 +306,10 @@ func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, h
 	mgrCfg.Secrets = launch.Secrets
 	mgrCfg.Env = launch.Environment
 	mgrCfg.Granted = launch.Granted
-	mgrCfg.OnUnload = func() {
-		if host != nil {
-			host.removePluginContextSources(m.Identifier())
-			host.removePluginReflexSeeds(m.Identifier())
-		}
-	}
+
 	var queryGrant *pluginapi.QueryGrant
+	var wakeGrant *pluginapi.DurableWakeGrant
+	identity := map[string]any{}
 	if launch.QueryScope != nil {
 		var grant pluginapi.QueryGrant
 		var grantErr error
@@ -326,26 +324,65 @@ func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, h
 			}
 			mgrCfg.Granted = slices.DeleteFunc(mgrCfg.Granted, func(name string) bool { return name == pluginapi.CapabilityReadOnlyQuery })
 		} else {
-			identity, identityErr := queryGrantIdentity(grant)
-			if identityErr != nil {
-				return nil, identityErr
-			}
 			queryGrant = &grant
-			mgrCfg.Identity = identity
+			identity["nanite_host_query"] = grant
 			mgrCfg.Secrets = append(mgrCfg.Secrets, grant.Token)
-			mgrCfg.OnUnload = func() {
-				host.revokeHostQueryGrant(grant.Token)
-				host.removePluginContextSources(m.Identifier())
-				host.removePluginReflexSeeds(m.Identifier())
-			}
 		}
+	}
+	if launch.WakeScope != nil {
+		var grant pluginapi.DurableWakeGrant
+		var grantErr error
+		if host == nil {
+			grantErr = fmt.Errorf("host durable wakes are unavailable")
+		} else {
+			grant, grantErr = host.prepareHostDurableWakeGrant(m.Identifier(), *launch.WakeScope)
+		}
+		if grantErr != nil {
+			if !launch.WakeOptional {
+				return nil, grantErr
+			}
+			mgrCfg.Granted = slices.DeleteFunc(mgrCfg.Granted, func(name string) bool { return name == pluginapi.CapabilityDurableWake })
+		} else {
+			wakeGrant = &grant
+			identity["nanite_durable_wake"] = grant
+			mgrCfg.Secrets = append(mgrCfg.Secrets, grant.Token)
+		}
+	}
+	if len(identity) > 0 {
+		mgrCfg.Identity, err = json.Marshal(identity)
+		if err != nil {
+			return nil, err
+		}
+	}
+	mgrCfg.OnUnload = func() {
+		if host == nil {
+			return
+		}
+		if queryGrant != nil {
+			host.revokeHostQueryGrant(queryGrant.Token)
+		}
+		if wakeGrant != nil {
+			host.revokeHostDurableWakeGrant(wakeGrant.Token)
+		}
+		host.removePluginContextSources(m.Identifier())
+		host.removePluginReflexSeeds(m.Identifier())
 	}
 	mgrCfg.BeforeSpawn = func(ctx context.Context) error {
 		if checkErr := CheckAcceptedBundle(ctx, dp.Dir, launch.ReviewDigest); checkErr != nil {
 			return checkErr
 		}
 		if queryGrant != nil {
-			return host.bindHostQueryGrant(ctx, *queryGrant)
+			if checkErr := host.bindHostQueryGrant(ctx, *queryGrant); checkErr != nil {
+				return checkErr
+			}
+		}
+		if wakeGrant != nil {
+			if checkErr := host.bindHostDurableWakeGrant(ctx, *wakeGrant); checkErr != nil {
+				if queryGrant != nil {
+					host.revokeHostQueryGrant(queryGrant.Token)
+				}
+				return checkErr
+			}
 		}
 		return nil
 	}

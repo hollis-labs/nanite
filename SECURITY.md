@@ -229,3 +229,11 @@ machine:
 These are constraints of a local single-user tool, not hidden roadmap
 promises. Operate within them, or place Nanite behind controls that provide
 the missing boundary.
+
+Plugin integrations requesting `durable_agent.wake` may submit prompts to an
+explicit reviewed allowlist of existing durable instance slugs. This can start
+real agent turns with those agents' own tool permissions. The capability grants
+no provisioning, profile edits or scheduling. It uses a separate connection
+bearer credential; read credentials cannot wake agents. The host bounds and
+validates input and cancels the lease on unload. Success reports queued work,
+not completion. Plugins remain unsandboxed subprocesses under the desktop user.

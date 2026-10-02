@@ -16,6 +16,7 @@ import (
 	sdkmanifest "github.com/hollis-labs/plugin-sdk/manifest"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
+	"github.com/hollis-labs/nanite/pkg/pluginapi"
 )
 
 // maxPluginHTTPBodyBytes caps incoming request bodies on subprocess
@@ -291,6 +292,32 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		host.activePlugin = prev
 		host.mu.Unlock()
 	}()
+
+	if manifest.Shared != nil {
+		block, err := pluginapi.DecodeBlock(manifest.Shared.Nanite)
+		if err != nil {
+			return err
+		}
+		scope, err := pluginapi.ContextScopeFor(block, manifest.Shared.Capabilities)
+		if err != nil {
+			return err
+		}
+		if len(block.Registers.ContextSources) != 0 {
+			child, ok := p.(*subprocess.SubprocessPlugin)
+			if !ok {
+				return fmt.Errorf("plugin context sources require a subprocess")
+			}
+			host.mu.RLock()
+			registrar := host.contextSources
+			host.mu.RUnlock()
+			if registrar == nil {
+				return fmt.Errorf("plugin context sources are unavailable")
+			}
+			if err := registrar.AddPluginContextSources(pluginID, block.Registers.ContextSources, scope, child); err != nil {
+				return err
+			}
+		}
+	}
 
 	reg := manifest.Registers
 

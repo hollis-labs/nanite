@@ -47,6 +47,19 @@ func (p *apiSubprocessFixture) MCPCallTool(_ context.Context, request sdkprocess
 	return sdkprocess.MCPCallResult{Content: raw}, nil
 }
 
+func (p *apiSubprocessFixture) HTTPHandle(_ context.Context, request sdkprocess.HTTPRequest) (sdkprocess.HTTPResponse, error) {
+	if request.Path != pluginapi.ContextFetchPath {
+		return sdkprocess.HTTPResponse{Status: 404}, nil
+	}
+	decoded, err := pluginapi.DecodeContextRequest(&request)
+	if err != nil {
+		return sdkprocess.HTTPResponse{}, err
+	}
+	content, _ := json.Marshal(decoded)
+	body, _ := json.Marshal(pluginapi.ContextResponse{Protocol: pluginapi.ContextProtocol, Items: []pluginapi.ContextItem{{Key: "context-one", Content: string(content), Relevance: 1}}})
+	return sdkprocess.HTTPResponse{Status: 200, Body: body}, nil
+}
+
 func TestAPISubprocessChild(t *testing.T) {
 	for i, arg := range os.Args {
 		if arg == "--nanite-plugin-child" && i+2 < len(os.Args) {

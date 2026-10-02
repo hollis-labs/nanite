@@ -351,6 +351,17 @@ func (sp *SubprocessPlugin) CallTool(ctx context.Context, req *MCPCallRequest) (
 	return result, nil
 }
 
+// CallHTTP uses the SDK's canonical http/handle wire on the current child.
+func (sp *SubprocessPlugin) CallHTTP(ctx context.Context, request *HTTPRequest) (*HTTPResponse, error) {
+	sp.mu.RLock()
+	transport := sp.transport
+	sp.mu.RUnlock()
+	if transport == nil {
+		return nil, fmt.Errorf("subprocess HTTP transport not ready")
+	}
+	return CallResult[HTTPResponse](transport, ctx, MethodHTTPHandle, request)
+}
+
 // Migrate invokes plugin/migrate on the subprocess. Callers pass the
 // installed-manifest version (FromVersion) and the target version
 // (ToVersion). An empty result is equivalent to "no-op migration

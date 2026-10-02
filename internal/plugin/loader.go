@@ -305,6 +305,11 @@ func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, h
 	mgrCfg.Secrets = launch.Secrets
 	mgrCfg.Env = launch.Environment
 	mgrCfg.Granted = launch.Granted
+	mgrCfg.OnUnload = func() {
+		if host != nil {
+			host.removePluginContextSources(m.Identifier())
+		}
+	}
 	var queryGrant *pluginapi.QueryGrant
 	if launch.QueryScope != nil {
 		var grant pluginapi.QueryGrant
@@ -327,7 +332,10 @@ func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, h
 			queryGrant = &grant
 			mgrCfg.Identity = identity
 			mgrCfg.Secrets = append(mgrCfg.Secrets, grant.Token)
-			mgrCfg.OnUnload = func() { host.revokeHostQueryGrant(grant.Token) }
+			mgrCfg.OnUnload = func() {
+				host.revokeHostQueryGrant(grant.Token)
+				host.removePluginContextSources(m.Identifier())
+			}
 		}
 	}
 	mgrCfg.BeforeSpawn = func(ctx context.Context) error {

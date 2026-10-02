@@ -153,3 +153,20 @@ from selection and server discovery, and both execution paths refuse them until
 explicitly enabled. Enabling visibility does not grant agent roster membership
 or bypass the execution permission engine. Conflicting declared names refuse
 registration before any namespace mutation.
+
+Context sources are declared in `nanite.registers.context_sources` and require a
+matching, non-optional `context.source` capability. Its reviewed metadata permits
+specific sessions or all workspace sessions; `include_query` separately permits
+user text and extracted keywords. The host does not forward project paths.
+Retrieval uses the public typed context wire over SDK `http/handle` at a private
+child path, without registering a browser HTTP route.
+
+The service container adds one permanent context-broker adapter at construction.
+It snapshots plugin-owned sources for each fetch, bounds the combined retrieval
+to three seconds and each child call to two, divides the allocated token budget,
+and assigns source names and conservative estimates from observed content. It
+rejects invalid or oversized output before assembly. Contributions enter the
+existing dynamic Context slot; fixed ordering, the Universal slot and cache
+markers retain their slot invariants. Unload, shutdown, failed launch and terminal
+restart failure remove source ownership and cancel active calls. Publication
+checks the source lifetime so a response cannot survive unload and replacement.

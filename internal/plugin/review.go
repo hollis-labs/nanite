@@ -59,6 +59,7 @@ type InstallApproval struct {
 // Capability vocabulary belongs to the host, not to the shared SDK.
 var capabilityEnvironment = map[string][]string{
 	pluginapi.CapabilityReadOnlyQuery: {},
+	pluginapi.CapabilityContextSource: {},
 	"ssh_agent":                       {"SSH_AUTH_SOCK"},
 	"docker_socket":                   {"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"},
 }

@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 
 	svcerr "github.com/hollis-labs/go-svcerr"
 )
@@ -14,6 +15,11 @@ func ServiceErrorResult(err error) *ToolResult {
 	var typed *svcerr.Error
 	if errors.As(err, &typed) && typed != nil {
 		code, message, field = typed.Code, typed.Message, typed.Field
+	}
+	if typed != nil && typed.Err != nil {
+		slog.Error("mcp: service operation failed", "code", typed.Code, "cause", typed.Err)
+	} else if typed == nil {
+		slog.Error("mcp: service operation failed", "cause", err)
 	}
 	body := struct {
 		Code    svcerr.Code `json:"code"`

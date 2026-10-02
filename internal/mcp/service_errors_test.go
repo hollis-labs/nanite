@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -19,5 +21,20 @@ func TestServiceErrorResultKeepsCausePrivate(t *testing.T) {
 		if strings.Contains(result.Content[0].Text, cause.Error()) {
 			t.Fatalf("leaked cause: %s", result.Content[0].Text)
 		}
+	}
+}
+
+func TestServiceErrorResultLogsWrappedCause(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	cause := errors.New("SQLITE_BUSY: private query and database path")
+	result := ServiceErrorResult(fmt.Errorf("operation: %w", svcerr.Wrap(cause, svcerr.CodeInternal, "failed to write agent")))
+	if !strings.Contains(logs.String(), cause.Error()) {
+		t.Fatalf("missing cause in log: %s", logs.String())
+	}
+	if !result.IsError || strings.Contains(result.Content[0].Text, cause.Error()) || !strings.Contains(result.Content[0].Text, `"message":"failed to write agent"`) {
+		t.Fatalf("unsafe response: %+v", result)
 	}
 }

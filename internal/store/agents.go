@@ -262,18 +262,24 @@ func validateAgentMultiAgentFields(a *AgentProfile) error {
 	// Protocol/Transport (TASKS/agent-host-acp/11) also carry a real
 	// DB-level CHECK (migration 134), mirrored here for the same clean-
 	// Go-error-instead-of-raw-CHECK-failure reason as runtime_kind above.
-	switch a.Protocol {
+	return ValidateAgentACPFields(a.Protocol, a.Transport)
+}
+
+// ValidateAgentACPFields is the canonical protocol/transport validation used
+// by profile and assignment writes before SQL constraints are involved.
+func ValidateAgentACPFields(protocol, transport string) error {
+	switch protocol {
 	case "", "claude-stream-json", "codex-app-server", "opencode-native", "acp":
 	default:
-		return fmt.Errorf("protocol %q invalid: must be '', 'claude-stream-json', 'codex-app-server', 'opencode-native', or 'acp'", a.Protocol)
+		return fmt.Errorf("protocol %q invalid: must be '', 'claude-stream-json', 'codex-app-server', 'opencode-native', or 'acp'", protocol)
 	}
-	switch a.Transport {
+	switch transport {
 	case "", "stdio", "tcp":
 	default:
-		return fmt.Errorf("transport %q invalid: must be '', 'stdio', or 'tcp'", a.Transport)
+		return fmt.Errorf("transport %q invalid: must be '', 'stdio', or 'tcp'", transport)
 	}
-	if a.Transport != "" && a.Protocol != "acp" {
-		return fmt.Errorf("transport %q is only valid when protocol is 'acp' (got protocol %q)", a.Transport, a.Protocol)
+	if transport != "" && protocol != "acp" {
+		return fmt.Errorf("transport %q is only valid when protocol is 'acp' (got protocol %q)", transport, protocol)
 	}
 	return nil
 }

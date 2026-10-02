@@ -579,8 +579,11 @@ func (at *AgentProfileTools) callCreateAgent(args map[string]any) (*mcp.ToolResu
 	// callUpdateAgent instead).
 	if existing, err := at.Store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug); err == nil && existing != nil {
 		if class := at.classifyAgent(existing); !class.Editable() {
-			return mcp.ErrorResult(agentNotEditableError(existing.Slug, class)), nil
+			return mcp.ServiceErrorResult(svcerr.New(svcerr.CodePermission, agentNotEditableError(existing.Slug, class))), nil
 		}
+		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodeConflict, "a managed agent with this slug already exists")), nil
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent")), nil
 	}
 
 	a := &store.AgentProfile{
@@ -592,7 +595,7 @@ func (at *AgentProfileTools) callCreateAgent(args map[string]any) (*mcp.ToolResu
 	}
 
 	if err := at.Store.CreateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("create agent: %v", err)), nil
+		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to create agent")), nil
 	}
 
 	out, _ := json.Marshal(selfToolAgentProfileToView(a))
@@ -662,7 +665,7 @@ func (at *AgentProfileTools) callUpdateAgent(args map[string]any) (*mcp.ToolResu
 	}
 
 	if err := at.Store.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("update agent: %v", err)), nil
+		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to update agent")), nil
 	}
 	return mcp.TextResult(fmt.Sprintf("Updated agent %q (id=%s)", a.Name, a.ID)), nil
 }

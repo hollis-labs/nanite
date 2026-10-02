@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	svcerr "github.com/hollis-labs/go-svcerr"
+
 	"github.com/oklog/ulid/v2"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -26,8 +28,8 @@ func NewScheduleService(st *store.Store) *ScheduleService {
 }
 
 // ScheduleWriteError wraps a caller-correctable rejection: a row that fails
-// store.ValidateAgentSchedule, an empty status or on_fail in a patch, or a
-// store write rejection. Its message is the underlying one.
+// store.ValidateAgentSchedule, or an empty status or on_fail in a patch.
+// Database write failures use a typed internal error instead.
 type ScheduleWriteError struct {
 	Err error
 }
@@ -72,7 +74,7 @@ func (s *ScheduleService) Get(ctx context.Context, id string) (*store.AgentSched
 }
 
 // Create assigns row a new id, validates it, computes its first next_run and
-// inserts it. Validation and insert rejections are *ScheduleWriteError; the
+// inserts it. Validation rejections are *ScheduleWriteError; the
 // store applies its usual defaults to unset optional columns.
 func (s *ScheduleService) Create(ctx context.Context, row store.AgentSchedule) (*store.AgentSchedule, error) {
 	row.ID = "sched-" + ulid.Make().String()
@@ -83,7 +85,7 @@ func (s *ScheduleService) Create(ctx context.Context, row store.AgentSchedule) (
 		row.NextRun = next.UTC().Format(time.RFC3339)
 	}
 	if err := s.store.InsertAgentSchedule(ctx, row); err != nil {
-		return nil, &ScheduleWriteError{Err: err}
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to create schedule")
 	}
 	return s.store.GetAgentSchedule(ctx, row.ID)
 }
@@ -153,7 +155,7 @@ func (s *ScheduleService) Patch(ctx context.Context, id string, p SchedulePatch)
 	}
 
 	if err := s.store.InsertAgentSchedule(ctx, updated); err != nil {
-		return nil, &ScheduleWriteError{Err: err}
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to update schedule")
 	}
 	return s.store.GetAgentSchedule(ctx, id)
 }

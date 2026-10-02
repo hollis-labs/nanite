@@ -1,0 +1,150 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/service"
+	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
+)
+
+func serviceErrorRoutes(t *testing.T) (*store.Store, http.Handler) {
+	t.Helper()
+	st, err := storetest.New(t, context.Background(), filepath.Join(t.TempDir(), "errors.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close(context.Background()) })
+	svc := &service.Container{Agents: service.NewAgentService(service.AgentServiceConfig{Agents: st, Writers: st}), AgentConfig: service.NewAgentConfigService(st, agent.Classification{}, nil), Todos: service.NewTodoService(service.TodoServiceConfig{Todos: st, Plans: st}), Schedules: service.NewScheduleService(st), Streams: service.NewStreamManager()}
+	mux := http.NewServeMux()
+	New(svc).RegisterRoutes(mux)
+	return st, mux
+}
+func serviceErrorRequest(t *testing.T, h http.Handler, method, path, body string, want int) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+	if rec.Code != want {
+		t.Fatalf("%s %s = %d %s, want %d", method, path, rec.Code, rec.Body.String(), want)
+	}
+	var wire struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Error == "" || strings.Contains(wire.Error, "internal:") || strings.Contains(wire.Error, "not_found:") || strings.Contains(wire.Error, "conflict:") || strings.Contains(wire.Error, "permission:") || strings.Contains(wire.Error, "write_secret") || strings.Contains(wire.Error, "sql:") {
+		t.Fatalf("unsafe flat error: %s", rec.Body.String())
+	}
+	return wire.Error
+}
+func TestServiceErrorRoutesClassifyExpectedFailures(t *testing.T) {
+	st, h := serviceErrorRoutes(t)
+	row := &store.AgentProfile{ID: "managed", Name: "Managed", Slug: "managed", SystemPrompt: "fixture", Source: "user"}
+	if err := st.CreateAgent(context.Background(), row); err != nil {
+		t.Fatal(err)
+	}
+	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Duplicate","slug":"managed","system_prompt":"fixture"}`, 409)
+	serviceErrorRequest(t, h, "POST", "/api/agents/managed/copy-to-managed", `{}`, 409)
+	serviceErrorRequest(t, h, "POST", "/api/agents/missing/copy-to-managed", `{}`, 404)
+	serviceErrorRequest(t, h, "PATCH", "/api/todos/missing/scope", `{"scope":"session","scope_id":"fixture"}`, 404)
+	serviceErrorRequest(t, h, "PATCH", "/api/todos/missing/scope", `{"scope":"bad"}`, 400)
+	serviceErrorRequest(t, h, "POST", "/api/schedules", `{"agent_id":"missing"}`, 404)
+}
+func TestServiceErrorRoutesAgentWriteCausesStayInLogs(t *testing.T) {
+	for _, op := range []string{"create", "update", "copy"} {
+		t.Run(op, func(t *testing.T) {
+			st, h := serviceErrorRoutes(t)
+			source := "user"
+			if op == "copy" {
+				source = "plugin"
+			}
+			if err := st.CreateAgent(context.Background(), &store.AgentProfile{ID: "target", Name: "Target", Slug: "target", SystemPrompt: "fixture", Source: source}); err != nil {
+				t.Fatal(err)
+			}
+			statement := "INSERT"
+			if op == "update" {
+				statement = "UPDATE"
+			}
+			if _, err := st.DB.Exec(`CREATE TRIGGER fail_agent_write BEFORE ` + statement + ` ON agent_profiles BEGIN SELECT RAISE(ABORT, 'write_secret SQLITE_BUSY private query'); END`); err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			method, path, body := "POST", "/api/agents", `{"name":"Fresh","slug":"fresh","system_prompt":"fixture"}`
+			if op == "update" {
+				method, path, body = "PUT", "/api/agents/target", `{"name":"Changed"}`
+			}
+			if op == "copy" {
+				path, body = "/api/agents/target/copy-to-managed", `{}`
+			}
+			serviceErrorRequest(t, h, method, path, body, 500)
+			if !strings.Contains(logs.String(), "write_secret") {
+				t.Fatalf("write cause absent from log: %s", logs.String())
+			}
+		})
+	}
+}
+func TestServiceErrorRoutesClosedDBIsInternal(t *testing.T) {
+	st, h := serviceErrorRoutes(t)
+	if err := st.DB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{"POST", "/api/agents", `{"name":"Fresh","slug":"fresh","system_prompt":"fixture"}`},
+		{"PUT", "/api/agents/target", `{"name":"Changed"}`},
+		{"POST", "/api/agents/target/copy-to-managed", `{}`},
+		{"PATCH", "/api/todos/missing/scope", `{"scope":"session","scope_id":"fixture"}`},
+		{"POST", "/api/schedules", `{"agent_id":"target"}`},
+	} {
+		serviceErrorRequest(t, h, c.method, c.path, c.body, 500)
+	}
+}
+
+func TestServiceErrorRoutesScheduleWriteFailure(t *testing.T) {
+	st, h := serviceErrorRoutes(t)
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{ID: "schedule-agent", Slug: "schedule-agent", Name: "Schedule", SystemPrompt: "fixture", Source: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.Exec(`CREATE TRIGGER fail_schedule_write BEFORE INSERT ON agent_schedules BEGIN SELECT RAISE(ABORT, 'write_secret SQLITE_BUSY private schedule query'); END`); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	serviceErrorRequest(t, h, "POST", "/api/schedules", `{"agent_id":"schedule-agent","name":"Fixture","schedule_kind":"one_shot","schedule_spec":"2099-01-01T00:00:00Z","body":"fixture"}`, 500)
+	if !strings.Contains(logs.String(), "write_secret") {
+		t.Fatalf("schedule cause absent from log: %s", logs.String())
+	}
+}
+
+func TestServiceErrorRoutesAssignmentsKeepValidationSeparateFromWriteFailure(t *testing.T) {
+	st, h := serviceErrorRoutes(t)
+	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Invalid Role","slug":"invalid-role","system_prompt":"fixture","role_id":"missing"}`, 400)
+	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Invalid Protocol","slug":"invalid-protocol","system_prompt":"fixture","protocol":"made-up"}`, 400)
+	if _, err := st.DB.Exec(`CREATE TRIGGER fail_assignment_write BEFORE UPDATE OF role_id ON agent_profiles BEGIN SELECT RAISE(ABORT, 'write_secret SQLITE_BUSY private assignment query'); END`); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Assignment","slug":"assignment","system_prompt":"fixture","role_id":"missing"}`, 500)
+	if !strings.Contains(logs.String(), "write_secret") {
+		t.Fatalf("assignment cause absent from log: %s", logs.String())
+	}
+}

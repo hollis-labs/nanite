@@ -150,19 +150,19 @@ func (s *todoServiceImpl) UpdateTodo(_ context.Context, id string, updates TodoU
 // Powers the "Promote to project" / "Demote to session" actions in D2.
 func (s *todoServiceImpl) UpdateTodoScope(_ context.Context, id, scope, scopeID, projectID string) (*store.Todo, error) {
 	if !validScope(scope) {
-		return nil, fmt.Errorf("invalid scope %q: must be turn, session, or project", scope)
+		return nil, svcerr.New(svcerr.CodeInvalid, fmt.Sprintf("invalid scope %q: must be turn, session, or project", scope), svcerr.WithField("scope"))
 	}
 	if scope == store.TodoScopeProject && projectID == "" {
-		return nil, fmt.Errorf("project_id is required for scope=project")
+		return nil, svcerr.New(svcerr.CodeInvalid, "project_id is required for scope=project", svcerr.WithField("project_id"))
 	}
 	if scope != store.TodoScopeProject && scopeID == "" {
-		return nil, fmt.Errorf("scope_id is required for scope=%q", scope)
+		return nil, svcerr.New(svcerr.CodeInvalid, fmt.Sprintf("scope_id is required for scope=%q", scope), svcerr.WithField("scope_id"))
 	}
 	if scope == store.TodoScopeProject && scopeID == "" {
 		scopeID = projectID
 	}
 	if err := s.todos.UpdateTodoScope(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, scope, scopeID, projectID); err != nil {
-		return nil, err
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to update todo scope")
 	}
 	row, err := s.todos.GetTodo(context.TODO(), id)
 	return row, todoReadError(err)

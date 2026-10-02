@@ -16,8 +16,10 @@ func (a *API) serviceError(w http.ResponseWriter, err error) {
 	if errors.As(err, &typed) && typed != nil {
 		message = typed.Message
 	}
-	if svcerr.CodeFor(err) == "" || svcerr.CodeFor(err) == svcerr.CodeInternal {
-		slog.Error("api: service operation failed", "err", err)
+	if typed != nil && typed.Err != nil {
+		slog.Error("api: service operation failed", "code", typed.Code, "cause", typed.Err)
+	} else if typed == nil {
+		slog.Error("api: service operation failed", "cause", err)
 	}
 	a.errorResp(w, svcerr.StatusFor(err, http.StatusInternalServerError), message)
 }

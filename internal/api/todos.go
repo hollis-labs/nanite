@@ -43,7 +43,7 @@ func (a *API) handleUpdateTodoScope(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := a.Services.Todos.UpdateTodoScope(r.Context(), r.PathValue("id"), req.Scope, req.ScopeID, req.ProjectID)
 	if err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 	a.Services.Streams.BroadcastWorkChanged()

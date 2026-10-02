@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	svcerr "github.com/hollis-labs/go-svcerr"
-
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agentvalidation"
 	"github.com/hollis-labs/nanite/internal/safego"
+
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -44,7 +44,7 @@ func visibleAgentSlugs() map[string]bool {
 func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	agents, err := a.Services.Agents.List(r.Context())
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 	// The management surface (Admin > Agents) passes ?manageable=1 to exclude
@@ -166,11 +166,7 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	res, err := a.Services.AgentConfig.Create(agent, nil)
 	if err != nil {
-		if errors.Is(err, service.ErrManagedSlugExists) {
-			a.errorResp(w, http.StatusConflict, err.Error())
-			return
-		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 
@@ -185,7 +181,7 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		Transport:  ptrOrNilString(req.Transport),
 	})
 	if err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 
@@ -357,7 +353,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrAgentNotManaged):
 			a.writeNotManaged(w, &original, a.Services.AgentConfig.Classify(&original))
 		default:
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
+			a.serviceError(w, err)
 		}
 		return
 	}
@@ -374,7 +370,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		Transport:  req.Transport,
 	})
 	if err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 
@@ -413,7 +409,7 @@ func (a *API) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	existing, err := a.Services.Agents.Get(r.Context(), id)
 	if err != nil {
-		a.errorResp(w, http.StatusNotFound, "agent not found")
+		a.serviceError(w, err)
 		return
 	}
 	if class := a.Services.AgentConfig.Classify(existing); !class.Editable() {
@@ -425,7 +421,7 @@ func (a *API) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 			a.writeNotManaged(w, existing, a.Services.AgentConfig.Classify(existing))
 			return
 		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted", "slug": existing.Slug})
@@ -438,13 +434,13 @@ func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	source, err := a.Services.Agents.Get(r.Context(), id)
 	if err != nil {
-		a.errorResp(w, http.StatusNotFound, "agent not found")
+		a.serviceError(w, err)
 		return
 	}
 	class := a.Services.AgentConfig.Classify(source)
 	if !class.CopyToManagedAllowed() {
 		if class.Editable() {
-			a.errorResp(w, http.StatusConflict, service.ErrAgentAlreadyManaged.Error())
+			a.serviceError(w, svcerr.Wrap(service.ErrAgentAlreadyManaged, svcerr.CodeConflict, "agent is already a managed config"))
 		} else {
 			a.writeNotManaged(w, source, class)
 		}
@@ -452,15 +448,10 @@ func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.Services.AgentConfig.CopyToManaged(source, nil)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAgentAlreadyManaged):
-			a.errorResp(w, http.StatusConflict, err.Error())
-		case errors.Is(err, service.ErrAgentNotManaged):
+		if errors.Is(err, service.ErrAgentNotManaged) {
 			a.writeNotManaged(w, source, class)
-		case errors.Is(err, service.ErrManagedSlugExists):
-			a.errorResp(w, http.StatusConflict, err.Error())
-		default:
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
+		} else {
+			a.serviceError(w, err)
 		}
 		return
 	}
@@ -471,7 +462,7 @@ func (a *API) handleListSessionAgents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	agents, err := a.Services.AgentMembership.ListSessionAgents(r.Context(), sessionID)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, sessionAgentsToView(agents))
@@ -492,7 +483,7 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Verify agent exists.
 	if _, err := a.Services.Agents.Get(r.Context(), req.AgentID); err != nil {
-		a.errorResp(w, http.StatusNotFound, "agent not found")
+		a.serviceError(w, err)
 		return
 	}
 
@@ -503,7 +494,7 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	// comes back so we can emit agent.switched.
 	previousAgentID, err := a.Services.AgentMembership.SetSessionAgent(r.Context(), sessionID, req.AgentID, mode, isPrimary)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 
@@ -517,7 +508,7 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	// Return the updated agents list.
 	agents, err := a.Services.AgentMembership.ListSessionAgents(r.Context(), sessionID)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 	a.jsonResp(w, http.StatusCreated, sessionAgentsToView(agents))
@@ -540,7 +531,7 @@ func (a *API) handleListAgentProjects(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 	projects, err := a.Services.AgentMembership.ListAgentProjects(r.Context(), agentID)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, projectsToView(projects))
@@ -564,18 +555,18 @@ func (a *API) handleAddAgentProject(w http.ResponseWriter, r *http.Request) {
 	// FK to agent_profiles(id) (Phase 1 #05), so reject up front rather than
 	// letting the INSERT fail deeper in the store layer.
 	if _, err := a.Services.Agents.Get(r.Context(), agentID); err != nil {
-		a.errorResp(w, http.StatusNotFound, "agent not found")
+		a.serviceError(w, err)
 		return
 	}
 
 	if err := a.Services.AgentMembership.AddAgentProject(r.Context(), agentID, req.ProjectID); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 
 	projects, err := a.Services.AgentMembership.ListAgentProjects(r.Context(), agentID)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 	a.jsonResp(w, http.StatusCreated, projectsToView(projects))
@@ -596,7 +587,7 @@ func (a *API) handleListProjectAgents(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
 	agents, err := a.Services.AgentMembership.ListProjectAgents(r.Context(), projectID)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 	views := make([]AgentProfileView, 0, len(agents))

@@ -4,7 +4,9 @@ Service error categories use `github.com/hollis-labs/go-svcerr`. Services
 choose an explicit code and safe message; a wrapped store error remains a
 server-side cause. Missing rows are identified through `errors.Is` against
 the store sentinel or `sql.ErrNoRows`, never by matching error text. An
-infrastructure failure must not become a missing-resource response.
+infrastructure failure must not become a missing-resource response. The HTTP
+and MCP mappers log the carrier's wrapped cause separately from its safe message;
+`Error()` intentionally omits that cause.
 
 HTTP owns its wire format. `API.serviceError` in `internal/api/service_errors.go`
 uses `StatusFor` and the carrier's safe message to write the flat
@@ -31,7 +33,18 @@ return the updated todo; MCP carries its JSON in text content.
 and MCP SDK `tools/call` requests, then uses the test-only
 `github.com/hollis-labs/go-transportparity` assertions. The comparisons
 cover todo update values, validation, absence, infrastructure failures,
-agent editability refusals, decoded request fields and MCP discovery schema.
+agent editability refusals, agent create/update write failures, decoded request
+fields and MCP discovery schema. SQLite abort triggers exercise write failures
+after successful reads; closed-store cases exercise infrastructure failures.
 Generated update timestamps are omitted from successful-value comparison.
 This suite is a set of named operations, not a claim that every HTTP and
 MCP operation has a matching door.
+
+Agent configuration create/update/copy failures use the HTTP mapper, including
+conflicts. Their composition/protocol assignment step keeps invalid references
+and protocol values separate from infrastructure failures; both use the mapper.
+Todo scope changes distinguish invalid input, absent todos and store
+failures. Schedule creation maps a missing agent to 404 and an unreadable store
+to 500; schedule validation remains 400, while database write failures are
+internal errors. These categories describe the named service seams, rather than
+an exhaustive conversion of legacy API error paths.

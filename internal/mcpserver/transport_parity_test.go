@@ -1,11 +1,14 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	svcerr "github.com/hollis-labs/go-svcerr"
@@ -37,7 +40,7 @@ func parityDoors(t *testing.T) (*store.Store, http.Handler, *sdk.ClientSession) 
 	}
 	mux := http.NewServeMux()
 	api.New(services).RegisterRoutes(mux)
-	server := New(st, "parity-session", nil, "", []string{"todo_update", "agent_update"})
+	server := New(st, "parity-session", nil, "", []string{"todo_update", "agent_update", "agent_create"})
 	return st, mux, connectClient(t, server)
 }
 
@@ -239,4 +242,61 @@ func TestTransportParityInfrastructureFailure(t *testing.T) {
 		t.Fatalf("want internal failure: %s / %s", a, b)
 	}
 	tp.AssertSameOutcome(t, "closed database agent", a, b)
+}
+
+func TestAgentWriteFailureParityLogsCauses(t *testing.T) {
+	for _, op := range []string{"create", "update"} {
+		t.Run(op, func(t *testing.T) {
+			st, h, cs := parityDoors(t)
+			if err := st.CreateAgent(context.Background(), &store.AgentProfile{ID: "write-target", Name: "Target", Slug: "write-target", SystemPrompt: "fixture", Source: "user"}); err != nil {
+				t.Fatal(err)
+			}
+			statement := "INSERT"
+			if op == "update" {
+				statement = "UPDATE"
+			}
+			if _, err := st.DB.Exec(`CREATE TRIGGER fail_agent_write BEFORE ` + statement + ` ON agent_profiles BEGIN SELECT RAISE(ABORT, 'write_secret SQLITE_BUSY private query'); END`); err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			method, path, tool := http.MethodPost, "/api/agents", "agent_create"
+			args := map[string]any{"name": "Fresh", "slug": "fresh", "system_prompt": "fixture"}
+			if op == "update" {
+				method, path, tool = http.MethodPut, "/api/agents/write-target", "agent_update"
+				args = map[string]any{"id": "write-target", "name": "Changed"}
+			}
+			a := httpOutcome(t, h, method, path, args)
+			b := mcpOutcome(t, cs, tool, args)
+			if a.Category != svcerr.CodeInternal || b.Category != svcerr.CodeInternal {
+				t.Fatalf("want internal: %s / %s", a, b)
+			}
+			tp.AssertSameOutcome(t, "agent write failure", a, b)
+			if strings.Contains(a.Detail, "write_secret") || strings.Contains(b.Detail, "write_secret") {
+				t.Fatalf("leaked write cause: %s / %s", a, b)
+			}
+			if strings.Count(logs.String(), "write_secret") != 2 {
+				t.Fatalf("both doors must log the write cause: %s", logs.String())
+			}
+		})
+	}
+}
+
+func TestAgentCreateClosedDBParity(t *testing.T) {
+	st, h, cs := parityDoors(t)
+	if err := st.DB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	args := map[string]any{"name": "Fresh", "slug": "fresh", "system_prompt": "fixture"}
+	a := httpOutcome(t, h, http.MethodPost, "/api/agents", args)
+	b := mcpOutcome(t, cs, "agent_create", args)
+	if a.Category != svcerr.CodeInternal || b.Category != svcerr.CodeInternal {
+		t.Fatalf("want internal: %s / %s", a, b)
+	}
+	tp.AssertSameOutcome(t, "closed DB create", a, b)
+	if strings.Contains(a.Detail, "database is closed") || strings.Contains(b.Detail, "database is closed") {
+		t.Fatal("closed DB cause leaked")
+	}
 }

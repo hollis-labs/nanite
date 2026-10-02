@@ -25,7 +25,14 @@ func adminReadOnly() error {
 // NewAdminHandler declares a read-only application adapter. authenticate must
 // require both configured operator credentials; caller identity headers are not
 // authentication. Discovery does not read settings or probe process activity.
-func (a *API) NewAdminHandler(authenticate func(*http.Request) (string, bool)) (http.Handler, error) {
+func (a *API) NewAdminHandler(authenticate func(*http.Request) (string, bool), allowedOrigins ...string) (http.Handler, error) {
+	allowedOrigins = append([]string(nil), allowedOrigins...)
+	protect := func(r *http.Request) error {
+		if !AdminOriginAllowed(r, allowedOrigins) {
+			return &admin.Failure{Code: admin.Forbidden, Message: "An approved Origin is required."}
+		}
+		return nil
+	}
 	revision := "nanite.admin.v1.preferences"
 	if a.adminTracker() != nil {
 		revision += ".processes"
@@ -93,12 +100,12 @@ func (a *API) NewAdminHandler(authenticate func(*http.Request) (string, bool)) (
 	}
 	handler, err := adminhttp.NewHandler(adminhttp.Config{BasePath: "/api", Authorize: authorize,
 		Resolve:        func(*http.Request) (*admin.Registry, error) { return registry, nil },
-		ProtectCommand: func(*http.Request) error { return adminReadOnly() },
+		ProtectCommand: protect,
 	})
 	if err != nil {
 		return nil, err
 	}
-	// Host policy denies every POST, including unknown routes, before body reads.
+	// Host policy checks every POST, including unknown routes, before body reads.
 	// It also preserves the Basic challenge independently of optional global auth.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if authErr := authorize(r, adminhttp.Resource{}); authErr != nil {
@@ -106,8 +113,8 @@ func (a *API) NewAdminHandler(authenticate func(*http.Request) (string, bool)) (
 			writeAdminPolicyFailure(w, http.StatusUnauthorized, admin.Unauthenticated, "Authentication is required.")
 			return
 		}
-		if r.Method == http.MethodPost {
-			writeAdminPolicyFailure(w, http.StatusForbidden, admin.Forbidden, "This admin adapter is read-only.")
+		if r.Method == http.MethodPost && protect(r) != nil {
+			writeAdminPolicyFailure(w, http.StatusForbidden, admin.Forbidden, "An approved Origin is required.")
 			return
 		}
 		handler.ServeHTTP(w, r)

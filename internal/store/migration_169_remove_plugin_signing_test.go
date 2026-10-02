@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-func TestMigration168PreservesCatalogsAndSettings(t *testing.T) {
+func TestMigration169PreservesCatalogsAndSettings(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	provider := migration147Provider(t, s)
-	if _, err := provider.DownTo(ctx, 167); err != nil {
+	if _, err := provider.DownTo(ctx, 168); err != nil {
 		t.Fatal(err)
 	}
 	source, createErr := s.CreateCatalogSource(ctx, "Operator Catalog", "https://example.com/plugins.json", "custom", 73)
@@ -58,7 +58,7 @@ func TestMigration168PreservesCatalogsAndSettings(t *testing.T) {
 	if err := s.UpdateUserSettings(ctx, settings); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.DownTo(ctx, 167); err != nil {
+	if _, err := provider.DownTo(ctx, 168); err != nil {
 		t.Fatal(err)
 	}
 	var key string

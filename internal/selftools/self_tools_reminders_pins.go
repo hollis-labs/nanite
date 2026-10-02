@@ -59,7 +59,7 @@ func (st *SelfToolsTransport) callSetReminder(ctx context.Context, args map[stri
 	projectID := strArg(args, "project_id", "")
 	if scope == store.ReminderScopeProject {
 		if projectID == "" {
-			projectID = resolveProjectIDFromSession(st.Store, sessionID)
+			projectID = resolveSelfToolProjectID(st.Reads.Sessions, sessionID)
 		}
 		if projectID == "" {
 			return mcp.ErrorResult("set_reminder: scope=project requires project_id (current session has no project)"), nil
@@ -75,7 +75,7 @@ func (st *SelfToolsTransport) callSetReminder(ctx context.Context, args map[stri
 		Text:        text,
 		TriggerJSON: triggerJSON,
 	}
-	if err := st.Store.CreateReminder(ctx, r); err != nil {
+	if err := st.Writes.Reminders.Create(ctx, r); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("set_reminder: %v", err)), nil
 	}
 
@@ -123,7 +123,7 @@ func (st *SelfToolsTransport) callPin(ctx context.Context, args map[string]any) 
 	projectID := strArg(args, "project_id", "")
 	if scope == store.PinScopeProject {
 		if projectID == "" {
-			projectID = resolveProjectIDFromSession(st.Store, sessionID)
+			projectID = resolveSelfToolProjectID(st.Reads.Sessions, sessionID)
 		}
 		if projectID == "" {
 			return mcp.ErrorResult("pin: scope=project requires project_id (current session has no project)"), nil
@@ -148,7 +148,7 @@ func (st *SelfToolsTransport) callPin(ctx context.Context, args map[string]any) 
 	// pin is project-scoped — UI displays it under "by <session>".
 	p.SessionID = &sessionID
 
-	if err := st.Store.CreatePinnedContent(ctx, p); err != nil {
+	if err := st.Writes.Pins.Create(ctx, p); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("pin: %v", err)), nil
 	}
 
@@ -163,7 +163,7 @@ func (st *SelfToolsTransport) callUnpin(_ context.Context, args map[string]any) 
 	if id == "" {
 		return mcp.ErrorResult("pin_id is required"), nil
 	}
-	if err := st.Store.DeletePinnedContent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err != nil {
+	if err := st.Writes.Pins.Delete(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("unpin: %v", err)), nil
 	}
 	return mcp.TextResult(fmt.Sprintf(`{"pin_id":%q,"status":"unpinned"}`, id)), nil
@@ -179,4 +179,15 @@ func (st *SelfToolsTransport) currentTurnCount(_ string) int {
 	// 0 as "unknown creation turn" and will use session start as fallback.
 	// A future integration point is to pass the turn counter through the ctx.
 	return 0
+}
+
+func resolveSelfToolProjectID(reader SessionReader, sessionID string) string {
+	if reader == nil || sessionID == "" {
+		return ""
+	}
+	sess, err := reader.Get(context.TODO(), sessionID)
+	if err != nil || sess == nil {
+		return ""
+	}
+	return sess.ProjectID
 }

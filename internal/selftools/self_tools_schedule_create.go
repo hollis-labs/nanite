@@ -161,7 +161,7 @@ func (st *SelfToolsTransport) callScheduleCreate(ctx context.Context, args map[s
 	if err != nil {
 		return mcp.ErrorResult("schedule_create: " + err.Error()), nil //nolint:nilerr // Tool errors travel in the MCP result payload.
 	}
-	if st.Store == nil {
+	if st.Writes.Schedules == nil {
 		return mcp.ErrorResult("schedule_create: store not configured"), nil
 	}
 
@@ -186,7 +186,7 @@ func (st *SelfToolsTransport) callScheduleCreate(ctx context.Context, args map[s
 		return mcp.ErrorResult("schedule_create: could not compute next_run for the given kind/cron_expr"), nil
 	}
 	row.NextRun = nextRun.Format(time.RFC3339)
-	if err := st.Store.InsertAgentSchedule(ctx, row); err != nil {
+	if err := st.Writes.Schedules.InsertPrepared(ctx, row); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("schedule_create: %v", err)), nil //nolint:nilerr // Persistence failures travel in the MCP result payload.
 	}
 
@@ -245,10 +245,10 @@ func (st *SelfToolsTransport) resolveSelfScheduleAgentID(ctx context.Context) (s
 	if sessionID == "" {
 		return "", errors.New("no calling-agent identity in context (neither an H1 caller profile nor a session id is stamped) -- not callable outside a real agent session")
 	}
-	if st.Store == nil {
+	if st.Writes.Membership == nil {
 		return "", errors.New("store not configured")
 	}
-	sa, err := st.Store.GetSessionPrimaryAgent(ctx, sessionID)
+	sa, err := st.Writes.Membership.GetSessionPrimaryAgent(ctx, sessionID)
 	if err != nil {
 		return "", fmt.Errorf("resolve calling agent from session %s: %w", sessionID, err)
 	}

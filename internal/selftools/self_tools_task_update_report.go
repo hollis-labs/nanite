@@ -90,7 +90,7 @@ func (st *SelfToolsTransport) callTaskUpdateReport(ctx context.Context, args map
 	// deliberate, documented gap left for future work, the same posture
 	// 05's own Work Log already took for EmitReactionTrace's session_id
 	// (see this task's own Work Log for the full reasoning).
-	if traceErr := reactions.EmitReactionTrace(ctx, st.Store, "", result); traceErr != nil {
+	if traceErr := reactions.EmitReactionTrace(ctx, st.Writes.Events, "", result); traceErr != nil {
 		slog.Warn("task_update_report: emit reaction trace failed", "err", traceErr)
 	}
 

@@ -24,7 +24,7 @@ func TestAgentSourceResolve_RoundTrip(t *testing.T) {
 		Description:  "scouts the codebase",
 		DefaultModel: "claude-sonnet",
 	}
-	if err := st.Store.CreateAgent(context.Background(), seed); err != nil {
+	if err := fixtureStore(st).CreateAgent(context.Background(), seed); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 
@@ -70,7 +70,7 @@ func TestAgentSourceResolve_ResolvesByID(t *testing.T) {
 		Slug:         "by-id-agent",
 		SystemPrompt: "resolve me by id",
 	}
-	if err := st.Store.CreateAgent(context.Background(), seed); err != nil {
+	if err := fixtureStore(st).CreateAgent(context.Background(), seed); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 

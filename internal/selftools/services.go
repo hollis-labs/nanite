@@ -3,6 +3,8 @@ package selftools
 import (
 	"context"
 
+	"github.com/hollis-labs/nanite/internal/agent/reflexes"
+
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -30,4 +32,35 @@ type ProcedureReader interface {
 type HandoffService interface {
 	Upsert(context.Context, store.HandoffStash) error
 	Get(context.Context, string, string) (store.HandoffStash, error)
+}
+
+// WriteServices keep dispatch state and mutations behind service collaborators.
+type WriteServices struct {
+	Pins       PinWriter
+	Reminders  ReminderWriter
+	Schedules  ScheduleWriter
+	Membership PrimaryAgentReader
+	Dispatch   DispatchReader
+	Events     reflexes.TraceStore
+}
+type PinWriter interface {
+	Create(context.Context, store.PinnedContent) error
+	Delete(context.Context, string) error
+}
+type ReminderWriter interface {
+	Create(context.Context, store.Reminder) error
+}
+type ScheduleWriter interface {
+	InsertPrepared(context.Context, store.AgentSchedule) error
+}
+type PrimaryAgentReader interface {
+	GetSessionPrimaryAgent(context.Context, string) (*store.SessionAgent, error)
+}
+type DispatchReader interface {
+	IsSubagentSession(context.Context, string) (bool, error)
+	GetAgent(context.Context, string) (*store.AgentProfile, error)
+	ListAgentReflexesForAgent(context.Context, string, string) ([]store.AgentReflex, error)
+	ResolveWorkflowRunIDForSession(context.Context, string) (string, bool, error)
+	ListAgentReflexesForWorkflowRun(context.Context, string, string, string) ([]store.AgentReflex, error)
+	GetReflexActionKind(context.Context, string) (*store.ReflexActionKind, error)
 }

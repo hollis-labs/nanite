@@ -1026,7 +1026,8 @@ type ExecuteCommandRequest struct {
 // --- Plugins ---
 
 type InstallLocalRequest struct {
-	Path string `json:"path"`
+	ApprovedDigest string `json:"approved_digest,omitempty"`
+	Path           string `json:"path"`
 }
 
 // --- Catalog ---
@@ -1045,7 +1046,9 @@ type UpdateSourceRequest struct {
 }
 
 type CatalogInstallRequest struct {
-	Name string `json:"name"`
+	Upgrade        bool   `json:"upgrade,omitempty"`
+	ApprovedDigest string `json:"approved_digest,omitempty"`
+	Name           string `json:"name"`
 }
 
 // --- Provider Management ---

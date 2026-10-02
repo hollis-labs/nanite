@@ -208,6 +208,10 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if cs.sources == nil {
+		cs.errorResp(w, http.StatusServiceUnavailable, "catalog sources are unavailable")
+		return
+	}
 	// Look up in catalog.
 	fetcherSources, err := cs.sources.FetchInputs(r.Context())
 	if err != nil {
@@ -252,7 +256,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	// has passed ValidatePluginID above (no "..", no separators, no
 	// absolute-path prefix are possible in a validated plugin id).
 	target := filepath.Join(cs.pluginsDir, entry.ID)
-	if fileExists(filepath.Join(target, "plugin.yaml")) {
+	if fileExists(filepath.Join(target, "plugin.yaml")) && !req.Upgrade {
 		cs.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", entry.ID))
 		return
 	}
@@ -281,9 +285,13 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		StagingRoot: filepath.Join(cs.pluginsDir, ".staging"),
 		PluginsRoot: cs.pluginsDir,
 		Emit:        cs.catalogInstallEmit(entry.ID),
+		Review:      acceptedInstallReview(req.ApprovedDigest),
 	})
 
 	if _, err := inst.Install(r.Context(), src); err != nil {
+		if writeInstallReview(w, err) {
+			return
+		}
 		cs.errorResp(w, catalogInstallErrorStatus(err), fmt.Sprintf("install failed: %v", err))
 		return
 	}

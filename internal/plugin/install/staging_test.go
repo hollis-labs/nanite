@@ -44,7 +44,7 @@ func TestStaging_BeginCommit_HappyPath(t *testing.T) {
 		t.Errorf("plugin.yaml missing: %v", err)
 	}
 	// Lock released.
-	if _, err := os.Stat(filepath.Join(stagingRoot, "giphy.lock")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(pluginsRoot, ".install-locks", "giphy.lock")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("lock still exists: %v", err)
 	}
 	// cleanup is a no-op on success.
@@ -65,7 +65,7 @@ func TestStaging_Begin_ConcurrentLock(t *testing.T) {
 }
 
 func TestStaging_Cleanup_RemovesStagingAndLock(t *testing.T) {
-	s, stagingRoot, _ := newStaging(t)
+	s, _, pluginsRoot := newStaging(t)
 	dir, cleanup, err := s.Begin(context.Background(), "giphy")
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestStaging_Cleanup_RemovesStagingAndLock(t *testing.T) {
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("staging dir still exists: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(stagingRoot, "giphy.lock")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(pluginsRoot, ".install-locks", "giphy.lock")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("lock still exists: %v", err)
 	}
 }
@@ -171,4 +171,25 @@ func TestIsCrossDeviceError(t *testing.T) {
 	if isCrossDeviceError(errors.New("other")) {
 		t.Error("false positive")
 	}
+}
+
+func TestDirStagingSerializesDifferentStagingRoots(t *testing.T) {
+	root := t.TempDir()
+	first := &DirStaging{StagingRoot: filepath.Join(root, "cli"), PluginsRoot: filepath.Join(root, "plugins")}
+	second := &DirStaging{StagingRoot: filepath.Join(root, "api"), PluginsRoot: first.PluginsRoot}
+	_, cleanup, err := first.Begin(context.Background(), "example.plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if _, release, lockErr := second.Begin(context.Background(), "example.plugin"); lockErr == nil {
+		release()
+		t.Fatal("parallel install acquired same plugin")
+	}
+	cleanup()
+	_, release, err := second.Begin(context.Background(), "example.plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
 }

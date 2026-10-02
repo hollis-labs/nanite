@@ -18,7 +18,11 @@ import (
 // first place (docs/audits/2026-08-21-go-quality/REPORT.md §8.6,
 // GO-PLUGIN-003; AD-04 item 6,
 // TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md).
+// Reviewer returns the digest the operator explicitly accepted.
+type Reviewer func(context.Context, plugin.InstallReview, *plugin.InstallApproval) (string, error)
+
 type BuildOptions struct {
+	Review Reviewer
 	// Extractor materializes a downloaded/local Handle into the staging
 	// dir. Required — callers differ (CLI: tar.gz only via
 	// TarGzExtractor; API: a format-dispatching zip/tar.gz extractor, see
@@ -55,6 +59,37 @@ func NewInstaller(opts BuildOptions) (*Installer, *DirStaging) {
 		Loader:    opts.Loader,
 		Staging:   staging,
 		Emit:      opts.Emit,
+		Review: func(ctx context.Context, directory, id string) (func() error, error) {
+			review, err := plugin.BuildInstallReview(ctx, directory)
+			if err != nil {
+				return nil, err
+			}
+			if review.ID != id {
+				return nil, fmt.Errorf("review identity differs from install target")
+			}
+			previous, err := plugin.ReadInstallApproval(opts.PluginsRoot, id)
+			if err != nil && !os.IsNotExist(err) {
+				return nil, err
+			}
+			if opts.Review == nil {
+				return nil, fmt.Errorf("installation requires an explicit review")
+			}
+			accepted, err := opts.Review(ctx, review, previous)
+			if err != nil {
+				return nil, err
+			}
+			if contextErr := ctx.Err(); contextErr != nil {
+				return nil, contextErr
+			}
+			current, err := plugin.BuildInstallReview(ctx, directory)
+			if err != nil {
+				return nil, err
+			}
+			if current.Digest() != review.Digest() {
+				return nil, fmt.Errorf("staged bundle changed during review")
+			}
+			return plugin.ReplaceInstallApproval(opts.PluginsRoot, review, accepted)
+		},
 	}
 	return inst, staging
 }

@@ -1,7 +1,7 @@
 package plugin
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -341,31 +341,35 @@ func NewPluginConfig(pluginID, pluginDir string) (*PluginConfig, error) {
 
 	// Parse plugin.yaml for schema.
 	manifestPath := filepath.Join(pluginDir, "plugin.yaml")
-	file, err := os.Open(manifestPath) // #nosec G304 -- fixed plugin.yaml under the host-configured plugin directory; bounded read.
-	var data []byte
-	if err == nil {
-		defer func() { _ = file.Close() }()
-		data, err = io.ReadAll(io.LimitReader(file, manifest.MaxBytes+1))
-	}
+	parsed, err := ParseManifest(manifestPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return pc, nil // no manifest — empty config
+			return pc, nil
 		}
-		return nil, fmt.Errorf("read plugin.yaml: %w", err)
-	}
-
-	parsed, decodeErr := DecodeManifest(bytes.NewReader(data))
-	if decodeErr != nil {
-		return nil, fmt.Errorf("parse plugin.yaml: %w", decodeErr)
+		return nil, fmt.Errorf("parse plugin.yaml: %w", err)
 	}
 	pc.schema = parsed.Config
 
 	// Load optional per-plugin config.yaml overrides.
-	configPath := filepath.Join(pluginDir, "config.yaml")
-	if cfgData, err := os.ReadFile(configPath); err == nil {
-		var overrides map[string]string
-		if err := yaml.Unmarshal(cfgData, &overrides); err == nil {
-			pc.overrides = overrides
+	configPath, resolveErr := ResolveBundleFile(pluginDir, "config.yaml", false)
+	if resolveErr != nil && !errors.Is(resolveErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("config.yaml: %w", resolveErr)
+	}
+	if resolveErr == nil {
+		file, openErr := os.Open(configPath) // #nosec G304 -- regular config resolved within the plugin bundle.
+		if openErr != nil {
+			return nil, openErr
+		}
+		cfgData, readErr := io.ReadAll(io.LimitReader(file, manifest.MaxBytes+1))
+		_ = file.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if len(cfgData) > manifest.MaxBytes {
+			return nil, fmt.Errorf("config.yaml exceeds size limit")
+		}
+		if decodeErr := yaml.Unmarshal(cfgData, &pc.overrides); decodeErr != nil {
+			return nil, fmt.Errorf("config.yaml: %w", decodeErr)
 		}
 	}
 
@@ -374,7 +378,11 @@ func NewPluginConfig(pluginID, pluginDir string) (*PluginConfig, error) {
 
 // ParseManifest reads and parses a plugin.yaml file.
 func ParseManifest(path string) (*PluginManifest, error) {
-	file, err := os.Open(path) // #nosec G304 -- caller-selected manifest file; decoder performs a bounded data-only read.
+	resolved, err := ResolveBundleFile(filepath.Dir(path), filepath.Base(path), false)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.Open(resolved) // #nosec G304 -- existing regular manifest resolved inside its containing directory.
 	if err != nil {
 		return nil, err
 	}

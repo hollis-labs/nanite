@@ -2,12 +2,16 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
@@ -24,6 +28,13 @@ func (p *apiSubprocessFixture) Load(context.Context) (sdkprocess.LoadResult, err
 	return sdkprocess.LoadResult{}, nil
 }
 func (p *apiSubprocessFixture) Unload(context.Context) error { return nil }
+func (p *apiSubprocessFixture) MCPCallTool(_ context.Context, request sdkprocess.MCPCallRequest) (sdkprocess.MCPCallResult, error) {
+	if request.ToolName == "exit" {
+		os.Exit(3)
+	}
+	raw, _ := json.Marshal(map[string]int{"pid": os.Getpid()})
+	return sdkprocess.MCPCallResult{Content: raw}, nil
+}
 
 func TestAPISubprocessChild(t *testing.T) {
 	for i, arg := range os.Args {
@@ -65,8 +76,8 @@ func writeAPIPluginBundle(t *testing.T, dir, id, name string, block pluginapi.Bl
 	for _, envelope := range block.Registers.Envelopes {
 		if envelope.Schema != "" {
 			path := filepath.Join(dir, envelope.Schema)
-			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-				t.Fatal(err)
+			if checkErr := os.MkdirAll(filepath.Dir(path), 0700); checkErr != nil {
+				t.Fatal(checkErr)
 			}
 			if err := os.WriteFile(path, []byte(`{"type":"object"}`), 0600); err != nil {
 				t.Fatal(err)
@@ -79,12 +90,19 @@ func writeAPIPluginBundle(t *testing.T, dir, id, name string, block pluginapi.Bl
 	}
 	declaration := manifest.Manifest{SchemaVersion: 2, ID: id, Name: name, Version: "1.0.0", Protocol: 1, Runtime: "subprocess", Entrypoint: manifest.Entrypoint{Command: "plugin", Args: []string{"-test.run=^TestAPISubprocessChild$", "--", "--nanite-plugin-child", id, name}}, Hosts: map[string]manifest.HostRange{"nanite": {Min: "0.1.0"}}, Nanite: ext}
 	var raw strings.Builder
-	if err := manifest.Encode(&raw, declaration); err != nil {
-		t.Fatal(err)
+	if checkErr := manifest.Encode(&raw, declaration); checkErr != nil {
+		t.Fatal(checkErr)
 	}
 	path := filepath.Join(dir, "plugin.yaml")
-	if err := os.WriteFile(path, []byte(raw.String()), 0600); err != nil {
+	if checkErr := os.WriteFile(path, []byte(raw.String()), 0600); checkErr != nil {
+		t.Fatal(checkErr)
+	}
+	review, err := naniteplugin.BuildInstallReview(context.Background(), dir)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if checkErr := naniteplugin.SaveInstallApproval(filepath.Dir(dir), review, review.Digest()); checkErr != nil {
+		t.Fatal(checkErr)
 	}
 	return path
 }
@@ -142,5 +160,57 @@ func TestRunPluginLoadIntoHost_RollbackUsesPluginID(t *testing.T) {
 	}
 	if !pms.unloadPluginFromHost(path) {
 		t.Fatal("unload failed")
+	}
+}
+
+func TestReviewedPluginRefusesChangedBundleOnLoadAndRestart(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, "reviewed.plugin")
+	if checkErr := os.MkdirAll(directory, 0700); checkErr != nil {
+		t.Fatal(checkErr)
+	}
+	path := writeAPIPluginBundle(t, directory, "reviewed.plugin", "Reviewed", pluginapi.Block{})
+	parsed, err := naniteplugin.ParseManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := naniteplugin.NewHost(http.NewServeMux(), naniteplugin.NewLogger("test"))
+	plugin, err := naniteplugin.NewSubprocessPluginFromManifest(context.Background(), naniteplugin.DiscoveredPlugin{Dir: directory, Manifest: parsed}, host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The builder already accepted the bundle. Spawn must independently check it.
+	asset := filepath.Join(directory, "added.txt")
+	if checkErr := os.WriteFile(asset, []byte("changed"), 0600); checkErr != nil {
+		t.Fatal(checkErr)
+	}
+	if checkErr := host.LoadPlugin(plugin); checkErr == nil {
+		t.Fatal("changed bundle spawned after construction")
+	}
+	if checkErr := os.Remove(asset); checkErr != nil {
+		t.Fatal(checkErr)
+	}
+	plugin, err = naniteplugin.NewSubprocessPluginFromManifest(context.Background(), naniteplugin.DiscoveredPlugin{Dir: directory, Manifest: parsed}, host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checkErr := host.LoadPlugin(plugin); checkErr != nil {
+		t.Fatal(checkErr)
+	}
+	t.Cleanup(func() { _ = host.UnloadPlugin("reviewed.plugin") })
+	if _, err := plugin.CallTool(context.Background(), &subprocess.MCPCallRequest{ToolName: "pid"}); err != nil {
+		t.Fatal(err)
+	}
+	if checkErr := os.WriteFile(asset, []byte("changed"), 0600); checkErr != nil {
+		t.Fatal(checkErr)
+	}
+	_, _ = plugin.CallTool(context.Background(), &subprocess.MCPCallRequest{ToolName: "exit"})
+	// First supervised restart is due after one second; accepted bytes remain
+	// changed throughout the attempt, so the original manager must have no child.
+	time.Sleep(1500 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := plugin.CallTool(ctx, &subprocess.MCPCallRequest{ToolName: "pid"}); err == nil {
+		t.Fatal("changed bundle restarted")
 	}
 }

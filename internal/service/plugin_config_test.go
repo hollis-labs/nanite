@@ -10,6 +10,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
+const fixtureSecretValue = "legacy-db-value" //nolint:gosec // Deliberately fake value for masking tests.
+
 type pluginConfigFixture struct {
 	row               *store.PluginSettings
 	reads             int
@@ -64,7 +66,7 @@ func (e pluginConfigEvents) EmitConfigChanged(id, key, value string) {
 
 func TestPluginConfigService_MergeSecretsAndEvents(t *testing.T) {
 	ctx := t.Context()
-	f := &pluginConfigFixture{row: &store.PluginSettings{PluginID: "probe", Settings: map[string]any{"keep": "retained", "replace": "old", "token": "legacy-db-value"}, Schema: []store.ConfigField{{Key: "token", Type: "secret"}, {Key: "replace", Type: "string"}}, Icon: "icon", UpdatedAt: "stamp"}}
+	f := &pluginConfigFixture{row: &store.PluginSettings{PluginID: "probe", Settings: map[string]any{"keep": "retained", "replace": "old", "token": fixtureSecretValue}, Schema: []store.ConfigField{{Key: "token", Type: "secret"}, {Key: "replace", Type: "string"}}, Icon: "icon", UpdatedAt: "stamp"}}
 	svc := NewPluginConfigService(f, nil)
 	secrets := map[string]string{}
 	svc.hasSecret = func(key string) bool { return secrets[key] != "" }

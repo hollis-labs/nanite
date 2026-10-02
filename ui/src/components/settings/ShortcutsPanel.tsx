@@ -16,7 +16,6 @@ export const SHORTCUT_DEFS = [
   { key: "search", group: "sessions", label: "Search Chats", description: "Quick search for chats (double-tap Shift)", default: "shift+shift" },
   { key: "command_palette", group: "sessions", label: "Command Palette", description: "Open the command palette", default: "mod+k" },
   { key: "focus_composer", group: "actions", label: "Focus Composer", description: "Jump to the message input", default: "mod+l" },
-  { key: "bookmark_last", group: "actions", label: "Bookmark Last", description: "Save the last assistant response", default: "mod+d" },
 ] as const;
 
 const SHORTCUT_GROUPS = [

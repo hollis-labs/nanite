@@ -1,7 +1,7 @@
 import { Suspense, Component, useSyncExternalStore, type ReactNode } from 'react'
 import { AlertTriangle, Puzzle } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
-import { getWidgetComponent } from '@/generated/plugin-widgets'
+import { getWidgetComponent } from '@/lib/builtin-widgets'
 import { subscribeRegistry, getRegistryVersion } from '@/lib/plugin-loader'
 import type { PluginUIComponent } from '@/lib/types'
 

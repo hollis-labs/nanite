@@ -155,7 +155,6 @@ type minimalStore struct {
 	stubToolStore
 	stubUsageStore
 	stubProjectStore
-	stubBookmarkStore
 	stubArtifactStore
 	stubSkillStore
 	stubProviderStore
@@ -436,21 +435,6 @@ func (stubProjectStore) GetProject(context.Context, string) (*store.Project, err
 func (stubProjectStore) CreateProject(context.Context, *store.Project) error        { return nil }
 func (stubProjectStore) UpdateProject(context.Context, *store.Project) error        { return nil }
 func (stubProjectStore) DeleteProject(context.Context, string) error                { return nil }
-
-type stubBookmarkStore struct{}
-
-func (stubBookmarkStore) ListBookmarks(context.Context, string) ([]store.Bookmark, error) {
-	return nil, nil
-}
-func (stubBookmarkStore) GetBookmark(context.Context, string) (*store.Bookmark, error) {
-	return nil, nil
-}
-func (stubBookmarkStore) GetBookmarkByMessage(context.Context, string) (*store.Bookmark, error) {
-	return nil, nil
-}
-func (stubBookmarkStore) CreateBookmark(context.Context, *store.Bookmark) error    { return nil }
-func (stubBookmarkStore) DeleteBookmark(context.Context, string) error             { return nil }
-func (stubBookmarkStore) UpdateBookmarkNote(context.Context, string, string) error { return nil }
 
 type stubArtifactStore struct{}
 

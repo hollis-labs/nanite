@@ -208,3 +208,31 @@ The plugin supplies translation into a bounded nonempty prompt and optional
 identity facts. Core owns instance resolution, session creation and prompt
 delivery. A successful projection reports `queued`, not completed execution;
 skipped or failed wakes return a conflict. Clients never retry an uncertain wake.
+
+## Core feature data adoption
+
+`PluginCoreData`, in `internal/service/plugin_core_data.go`, owns a fixed
+feature-to-table allowlist. A plugin cannot request an arbitrary core table.
+Bookmarked messages remain core references; bookmark rows belong to the external
+`nanite.bookmarks` plugin. There are no core bookmark API routes, service, store
+methods, widget, or keyboard binding.
+
+After a reviewed subprocess and all its manifest registrations load, the host
+transfers any retired bookmarks table through `dataexport.ExportAndDrop` in one
+write transaction. The export lives under the same `brand.PluginDataDir` used by
+subprocess initialization. The helper synchronizes and verifies every typed row
+before committing the export receipt and table removal together. Failed export
+leaves the table and rows intact. Disabled, rejected or absent plugins do not
+transfer data.
+
+The plugin imports only the current workspace's committed receipt, verifying its
+owner, source, checksum and row count. Rows and its replay checkpoint commit
+atomically in plugin storage. Subsequent loads keep operator edits and deleted
+rows; a moved database keeps the original receipt source. Missing core references
+remain plugin data. Historical schema migrations remain immutable, so a fresh
+workspace initially creates the legacy table and transfers its empty snapshot
+when the reviewed bookmarks plugin first loads.
+
+Deployment must restart every older reader of the retired table before the new
+binary loads the plugin. A running old process retains compiled queries against
+`bookmarks`, even though the new binary no longer exposes that feature in core.

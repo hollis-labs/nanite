@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import { useSettings, useSettingsMutation } from '@/hooks/useSettings'
 import { PluginConfigPanel } from './PluginConfigPanel'
 import { WidgetDetailView } from './WidgetDetailView'
-import { DEVELOPER_ONLY_WIDGETS, isValidWidgetId } from '@/generated/plugin-widgets'
+import { DEVELOPER_ONLY_WIDGETS, isValidWidgetId } from '@/lib/builtin-widgets'
 import { buildWidgetOrder } from '@/lib/widget-order'
 import type { PluginUIComponent } from '@/lib/types'
 

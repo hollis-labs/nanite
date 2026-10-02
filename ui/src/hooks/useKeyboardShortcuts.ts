@@ -22,7 +22,6 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   search: 'shift+shift',
   next_session: 'mod+]',
   prev_session: 'mod+[',
-  bookmark_last: 'mod+d',
   toggle_artifacts: 'mod+.',
 }
 
@@ -36,7 +35,6 @@ export const SHORTCUT_LABELS: Record<string, string> = {
   search: 'Search chats',
   next_session: 'Next session',
   prev_session: 'Previous session',
-  bookmark_last: 'Bookmark last message',
   toggle_artifacts: 'Toggle artifacts',
 }
 
@@ -101,20 +99,6 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
       console.error('Failed to create session:', err)
     }
   }, [queryClient, setActiveSession, userSettings])
-
-  const handleBookmarkLast = useCallback(async () => {
-    if (!activeSessionId) return
-    try {
-      const messages = await api.getMessages(activeSessionId, 50)
-      const lastAssistant = [...(messages ?? [])].reverse().find((m) => m.role === 'assistant')
-      if (lastAssistant) {
-        await api.toggleBookmark(lastAssistant.id, activeSessionId)
-        void queryClient.invalidateQueries({ queryKey: ['bookmarks', activeSessionId] })
-      }
-    } catch (err) {
-      console.error('Failed to bookmark:', err)
-    }
-  }, [activeSessionId, queryClient])
 
   const navigateSession = useCallback(
     (direction: 'next' | 'prev') => {
@@ -185,9 +169,6 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
       } else if (matchesBinding(e, bindings.prev_session)) {
         e.preventDefault()
         navigateSession('prev')
-      } else if (matchesBinding(e, bindings.bookmark_last)) {
-        e.preventDefault()
-        void handleBookmarkLast()
       } else if (matchesBinding(e, bindings.toggle_artifacts)) {
         e.preventDefault()
         toggleArtifactsDrawer()
@@ -224,7 +205,6 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     toggleHeaderChips,
     focusComposer,
     handleNewSession,
-    handleBookmarkLast,
     navigateSession,
     navPop,
     navDepth,

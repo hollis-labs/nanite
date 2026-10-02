@@ -28,7 +28,6 @@ import type {
   ApprovalScope,
   Artifact,
   AttachDurableAgentSessionRequest,
-  Bookmark,
   CatalogBrowseEntry,
   PluginInstallReviewResponse,
   CatalogSource,
@@ -1597,32 +1596,6 @@ export const api = {
       body: JSON.stringify({ is_pinned: pinned }),
     });
     if (!res.ok) throw new Error(`Failed to pin session: ${res.status}`);
-    return res.json();
-  },
-
-  // Bookmarks
-  listBookmarks: async (sessionId: string): Promise<Bookmark[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/bookmarks`);
-    if (!res.ok) throw new Error(`Failed to list bookmarks: ${res.status}`);
-    return res.json();
-  },
-
-  toggleBookmark: async (
-    messageId: string,
-    sessionId: string,
-  ): Promise<void> => {
-    await fetch(`${API_BASE}/messages/${messageId}/bookmark`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId }),
-    });
-  },
-
-  autotitleBookmark: async (bookmarkId: string): Promise<{ title: string }> => {
-    const res = await fetch(`${API_BASE}/bookmarks/${bookmarkId}/autotitle`, {
-      method: "POST",
-    });
-    if (!res.ok) throw new Error(`Failed to autotitle bookmark: ${res.status}`);
     return res.json();
   },
 

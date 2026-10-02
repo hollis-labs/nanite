@@ -1861,17 +1861,6 @@ export interface CLIActiveInfo {
   lastSeen: string;
 }
 
-// --- Bookmarks ---
-
-export interface Bookmark {
-  id: string;
-  message_id: string;
-  session_id: string;
-  note: string;
-  tags: string[];
-  created_at: string;
-}
-
 // --- Artifacts ---
 
 export interface Artifact {

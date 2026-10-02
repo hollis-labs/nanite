@@ -495,6 +495,21 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 			return err
 		}
 	}
+	if manifest.Shared != nil {
+		host.mu.RLock()
+		adopter := host.coreDataAdopter
+		host.mu.RUnlock()
+		if adopter != nil {
+			if pluginID == "nanite.bookmarks" {
+				if _, ok := p.(*subprocess.SubprocessPlugin); !ok {
+					return fmt.Errorf("core data adoption requires reviewed subprocess")
+				}
+			}
+			if err := adopter.AdoptPluginCoreData(context.Background(), pluginID); err != nil {
+				return fmt.Errorf("adopt plugin core data: %w", err)
+			}
+		}
+	}
 	if skipped > 0 {
 		host.logger.Info("manifest registrations applied (subset)", "plugin", pluginID, "deferred", skipped)
 	}

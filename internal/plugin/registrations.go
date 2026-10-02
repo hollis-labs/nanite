@@ -416,8 +416,7 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 	}
 	// 7. Panels (J9 — CW-20260426-0007). Register plugin-declared right-rail
 	// panels into the host panel registry. Plugin panels are cataloged here at
-	// load time; the render function is a placeholder in v1 (plugin panel
-	// rendering is deferred to a follow-up ticket). Built-in panels are
+	// load time; explicit exports reach the shared browser registry. Built-in panels are
 	// registered by the host at startup (tier=0); these land at tier=1 and
 	// cannot override built-in panel IDs.
 	if len(reg.Panels) > 0 {

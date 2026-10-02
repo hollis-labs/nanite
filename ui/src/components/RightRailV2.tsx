@@ -9,10 +9,9 @@
  * Registration: all panels (built-ins, plugins, J8 agent opens) go through
  * usePanelRegistry. Built-ins self-register below via useEffect on mount.
  *
- * Plugin panels: registered when usePanelRegistry receives declarations from
- * the plugin manifest `panels` field (wired by usePluginPanelSync, below).
- * The actual render function for plugin panels is a placeholder in v1 — real
- * rendering is a follow-up (plugin panel rendering deferral per J9 scope).
+ * Plugin panels: usePluginPanels reconciles loaded manifest and slot exports
+ * from the shared browser registry into usePanelRegistry.
+ * Loaded panel exports render through the released browser registry.
  *
  * J8 seams exposed:
  *   - layout store: setPanelOpen(id), setRightRail(false) for open/close
@@ -22,7 +21,7 @@
  * CW-20260426-0007
  */
 
-import { Suspense, useEffect, useCallback, useState } from 'react'
+import { useEffect, useCallback, useState } from 'react'
 import {
   LayoutGrid,
   Mail,
@@ -53,14 +52,13 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Tooltip } from '@/components/ui/tooltip'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useQuery } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useSettings, useSettingsMutation } from '@/hooks/useSettings'
-import { usePluginSlots } from '@/hooks/usePluginSlots'
-import { resolveIcon } from '@/lib/icons'
-import { getSlotComponent } from '@/lib/plugin-slot-lookup'
+import { usePluginPanels } from '@/hooks/usePluginPanels'
+import { PluginPanelBody } from '@/components/plugins/PluginPanelBody'
+import { useAppStore } from '@/stores/useAppStore'
 import type { UserSettings } from '@/lib/types'
 import { WidgetRenderer } from './widgets/WidgetRenderer'
 import { DEVELOPER_ONLY_WIDGETS } from '@/generated/plugin-widgets'
@@ -132,42 +130,6 @@ function SortableWidgetRow({
   )
 }
 
-// ---- Plugin panel sync hook -----------------------------------------------
-
-/**
- * Syncs plugin-contributed right-rail-tab slots into the panel registry.
- * This bridges the existing slot system (used by legacy plugins) with the new
- * panel registry. New plugins should declare panels via the manifest `panels`
- * field instead (wired through the Go backend + api.listPanels).
- *
- * Plugin panel rendering in v1 = placeholder. Real render function is a
- * follow-up (plugin panel rendering deferral, CW-20260426-0007 scope note).
- */
-function usePluginPanelSync() {
-  const pluginTabs = usePluginSlots('right-rail-tab')
-  const { register } = usePanelRegistry()
-
-  useEffect(() => {
-    // Register each plugin tab slot entry as a panel
-    for (const entry of pluginTabs) {
-      register({
-        id: entry.id,
-        label: entry.label ?? entry.id,
-        icon: resolveIcon(entry.icon),
-        source: 'plugin',
-        pluginId: entry.id, // slot entry id doubles as plugin indicator
-        order: 100 + (entry.priority ?? 0),
-        defaultVisible: false,
-      })
-    }
-    // Note: unregister on unmount is handled by the slot system. We don't
-    // need to clean up here because usePanelRegistry entries persist and get
-    // refreshed on the next usePluginSlots update cycle.
-  }, [pluginTabs, register])
-
-  return pluginTabs
-}
-
 // ---- Main component -------------------------------------------------------
 
 interface RightRailV2Props {
@@ -175,6 +137,8 @@ interface RightRailV2Props {
 }
 
 export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props) {
+  const activeSessionId = useAppStore((state) => state.activeSessionId)
+  const pluginPanels = usePluginPanels()
   const open = useLayoutStore((s) => s.rightRailOpen)
   const activeTab = useLayoutStore((s) => s.rightRailTab)
   const setRightRailTab = useLayoutStore((s) => s.setRightRailTab)
@@ -182,7 +146,7 @@ export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props)
   const panelPrefs = useLayoutStore((s) => s.panelPrefs)
   const markPanelDismissed = useLayoutStore((s) => s.markPanelDismissed)
 
-  const { panels, orderedIds, register, unregister: _unregister } = usePanelRegistry()
+  const { panels, orderedIds, register } = usePanelRegistry()
   const { data: settings } = useSettings()
   const settingsMutation = useSettingsMutation()
   const recoverMode = settings?.recover_mode ?? false
@@ -252,9 +216,6 @@ export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props)
     }
   }, [register])
 
-  // Sync plugin slot tabs into the panel registry
-  usePluginPanelSync()
-
   // Compute the visible panels list applying user enable prefs
   const visiblePanelIds = orderedIds.filter((id) => {
     const def = panels[id]
@@ -264,7 +225,7 @@ export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props)
       return panelPrefs.panelEnabled[id] !== false
     }
     // Plugin panels: hidden by default unless user explicitly enabled
-    return panelPrefs.panelEnabled[id] === true || def.defaultVisible === true
+    return panelPrefs.panelEnabled[id] ?? def.defaultVisible ?? false
   })
 
   // Apply user custom ordering on top of registry order
@@ -306,8 +267,6 @@ export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props)
     : panels[resolvedActiveTab]?.label ?? resolvedActiveTab
 
   // Plugin slot tabs (for content rendering — backward compat)
-  const pluginTabs = usePluginSlots('right-rail-tab')
-  const pluginTabMap = new Map(pluginTabs.map((e) => [e.id, e]))
 
   return (
     <aside
@@ -423,31 +382,13 @@ export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props)
           <InboxContent agentId={inboxAgentId} />
         </div>
 
-        {/* Plugin tab panels — lazily mounted on first activation, then kept alive */}
-        {pluginTabs.map((entry) => {
-          const PluginComponent = entry.component ? getSlotComponent(entry.component, entry.plugin_id, entry.id) : null
-          if (!PluginComponent) return null
-          return (
-            <div key={entry.id} className={resolvedActiveTab === entry.id ? 'flex flex-1 min-h-0 flex-col' : 'hidden'}>
-              <Suspense fallback={<Skeleton className="h-32 w-full m-3" />}>
-                <PluginComponent {...(entry.props ?? {})} />
-              </Suspense>
-            </div>
-          )
-        })}
-
-        {/* Plugin panels from manifest declarations (v1: placeholder render) */}
-        {orderedIds
-          .filter((id) => panels[id]?.source === 'plugin' && !pluginTabMap.has(id))
-          .map((id) => (
-            <div key={id} className={resolvedActiveTab === id ? 'flex flex-1 min-h-0 flex-col items-center justify-center' : 'hidden'}>
-              <p className="text-xs text-fg-muted p-4 text-center">
-                Plugin panel <code className="font-mono">{id}</code> registered.
-                <br />
-                Render function pending (follow-up ticket).
-              </p>
-            </div>
-          ))}
+        {/* Loaded plugin exports share the rail's panel preferences and ordering. */}
+        {pluginPanels.map((panel) => (
+          <div key={`${panel.definition.pluginId}:${panel.definition.id}`}
+            className={resolvedActiveTab === panel.definition.id ? 'flex flex-1 min-h-0 flex-col' : 'hidden'}>
+            <PluginPanelBody panel={panel} sessionId={activeSessionId} />
+          </div>
+        ))}
 
       </div>
     </aside>

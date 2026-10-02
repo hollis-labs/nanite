@@ -203,6 +203,7 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		ctxCancel:          cancel,
 	}
 	h.filters = NewFilterRegistry()
+	h.registerBuiltinPanels()
 	return h
 }
 
@@ -250,6 +251,7 @@ func NewHostWithStore(s *store.Store) *Host {
 		ctxCancel:          cancel,
 	}
 	h.filters = NewFilterRegistry()
+	h.registerBuiltinPanels()
 	h.services["store"] = s
 	h.store = s
 	return h
@@ -1045,6 +1047,13 @@ func (h *Host) RegisterSlot(entry UISlotEntry) error {
 		entry.PluginID = h.activePlugin
 	}
 
+	if entry.Slot == "right-rail-tab" {
+		for _, panel := range h.panels.snapshot() {
+			if panel.ID == entry.ID && (panel.tier == 0 && entry.PluginID != "" || panel.PluginID != entry.PluginID) {
+				return fmt.Errorf("slot entry %q conflicts with panel owned by %q", entry.ID, panel.PluginID)
+			}
+		}
+	}
 	// Replace existing entry with same ID, or append.
 	entries := h.slots[entry.Slot]
 	replaced := false

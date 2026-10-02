@@ -162,3 +162,9 @@ func (s *ScheduleService) Patch(ctx context.Context, id string, p SchedulePatch)
 func (s *ScheduleService) Delete(ctx context.Context, id string) error {
 	return s.store.DeleteAgentSchedule(ctx, id)
 }
+
+// InsertPrepared preserves the self-tool's identity, retry policy and computed
+// next_run. Unlike operator Create, it does not replace the caller-assigned ID.
+func (s *ScheduleService) InsertPrepared(ctx context.Context, row store.AgentSchedule) error {
+	return s.store.InsertAgentSchedule(ctx, row)
+}

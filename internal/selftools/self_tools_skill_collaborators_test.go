@@ -102,7 +102,7 @@ func TestCallSkillDelete_UsesSkillUninstallIndexField(t *testing.T) {
 // A transport built without the constructor, with a Store but no skill
 // fields, reports the unwired store rather than dereferencing nil.
 func TestCallSkillGet_UnsetSkillFields_ClearError(t *testing.T) {
-	transport := &SelfToolsTransport{Store: newSkillGetTestStore(t), SkillVendor: newSkillGetTestVendor(t)}
+	transport := &SelfToolsTransport{SkillVendor: newSkillGetTestVendor(t)}
 	res, err := transport.CallTool(context.Background(), "skill_get", map[string]any{"slug": "anything"})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)

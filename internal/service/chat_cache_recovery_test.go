@@ -13,7 +13,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/toolclient"
@@ -176,7 +175,7 @@ func TestChatCacheRecovery_SearchThenFetchHiddenEvidence(t *testing.T) {
 				t.Fatal(err)
 			}
 			manager := mcp.NewManager()
-			self := selftools.NewSelfToolsTransport(f.st)
+			self := NewSelfToolsTransport(f.st)
 			if err := manager.AddServer("self", self, mcp.TierBuiltin); err != nil {
 				t.Fatal(err)
 			}

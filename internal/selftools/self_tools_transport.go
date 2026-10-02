@@ -44,7 +44,8 @@ type SelfToolsTransport struct {
 	// a hidden tool still answers with its handler's own error.
 	HideUnwired bool
 
-	Store             *store.Store
+	Reads             ReadServices
+	Writes            WriteServices
 	BuilderRegistry   *builders.Registry
 	BuilderSessions   *builders.SessionManager
 	MessagingTools    *MessagingTools
@@ -128,7 +129,7 @@ type SelfToolsTransport struct {
 	// internal/promptrouter in full and moved its phrase catalog onto
 	// DB-backed dispatch_to_agent agent_reflexes rows (seeds.go). Since
 	// the DB is already authoritative here, callExecuteTask reads live
-	// dispatch_to_agent rows directly off st.Store (see
+	// dispatch_to_agent rows through st.Writes.Dispatch (see
 	// matchDispatchToAgentReflex in self_tools_dispatch.go) instead of a
 	// pre-merged in-memory slice — no separate load-and-merge boot step
 	// needed. The ~/.nanite/reflexes/*.yaml user-override convention is
@@ -140,7 +141,7 @@ type SelfToolsTransport struct {
 	// 06-unified-reflex-telemetry.md — matchDispatchToAgentReflex's
 	// firings now go through the same unified reflexes.EmitFirings sink
 	// (event_log) every other reflex firing does, via the Plugins field
-	// below plus st.Store directly. See that task's Work Log for the "no
+	// below plus st.Writes.Events. See that task's Work Log for the "no
 	// real reader of playbook_match_log" confirmation behind this
 	// removal — the table/migrations are left in place, only the
 	// now-fully-dead Go write path (this field, the ReflexMatchLogger
@@ -240,9 +241,10 @@ type SelfToolsTransport struct {
 }
 
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
-func NewSelfToolsTransport(s *store.Store) *SelfToolsTransport {
+func NewSelfToolsTransport(s *store.Store, reads ReadServices, writes WriteServices) *SelfToolsTransport {
 	return &SelfToolsTransport{
-		Store:               s,
+		Writes:              writes,
+		Reads:               reads,
 		SkillIndex:          s,
 		SkillUninstallIndex: s,
 		SkillGrants:         s,
@@ -463,7 +465,7 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 // them is gone here.
 
 func (st *SelfToolsTransport) callListSkills(args map[string]any) (*mcp.ToolResult, error) {
-	skills, err := st.Store.ListSkills(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+	skills, err := st.Reads.Skills.List(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("list skills: %v", err)), nil
 	}
@@ -526,7 +528,7 @@ func (st *SelfToolsTransport) callDeleteSkill(args map[string]any) (*mcp.ToolRes
 		return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil
 	}
 	if sk == nil {
-		sk, err = st.Store.GetSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, ref)
+		sk, err = st.Reads.Skills.Get(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, ref)
 		if err != nil {
 			return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil
 		}
@@ -1643,7 +1645,7 @@ func (st *SelfToolsTransport) recoverSyncSummary(run *subagent.Run) (string, err
 		// No child session to scan — legitimately empty, not an error.
 		return "", nil
 	}
-	msgs, err := st.Store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, run.ChildSessionID, 20)
+	msgs, err := st.Reads.Sessions.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, run.ChildSessionID, 20)
 	if err != nil {
 		// Store lookup failure — surface to caller so the envelope can
 		// emit ErrorKindInternal instead of the misleading

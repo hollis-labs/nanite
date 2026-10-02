@@ -48,7 +48,7 @@ func seedAgent(t *testing.T, s *store.Store, name, slug, source, sourceRef strin
 
 func TestAgentProfileTools_UsesInjectedClassifier(t *testing.T) {
 	st := newSelfTools(t)
-	seeded := seedAgent(t, st.Store, "Managed by fallback", "injected-classifier", "", "")
+	seeded := seedAgent(t, fixtureStore(st), "Managed by fallback", "injected-classifier", "", "")
 	classifier := &recordingAgentClassifier{class: agent.ManageClassPlugin}
 	st.AgentProfileTools.Classifier = classifier
 
@@ -103,7 +103,7 @@ func TestSelfToolsTransport_UpdateAgent_RejectsNonEditableClasses(t *testing.T) 
 			st := newSelfTools(t)
 			ctx := context.Background()
 
-			seeded := seedAgent(t, st.Store, "Seed Agent", "seed-"+tc.name, tc.source, tc.sourceRef)
+			seeded := seedAgent(t, fixtureStore(st), "Seed Agent", "seed-"+tc.name, tc.source, tc.sourceRef)
 
 			result, err := st.CallTool(ctx, "agent_update", map[string]any{
 				"id":            seeded.ID,
@@ -124,7 +124,7 @@ func TestSelfToolsTransport_UpdateAgent_RejectsNonEditableClasses(t *testing.T) 
 			}
 
 			// Verify the write never happened.
-			after, err := st.Store.GetAgent(context.Background(), seeded.ID)
+			after, err := fixtureStore(st).GetAgent(context.Background(), seeded.ID)
 			if err != nil {
 				t.Fatalf("get agent after rejected update: %v", err)
 			}
@@ -144,7 +144,7 @@ func TestSelfToolsTransport_UpdateAgent_AllowsManagedClass(t *testing.T) {
 
 	// Empty source/source_ref classifies ManageClassManaged (DB-only
 	// operator agent) per internal/agent.Classification.Classify.
-	seeded := seedAgent(t, st.Store, "Managed Agent", "managed-agent", "", "")
+	seeded := seedAgent(t, fixtureStore(st), "Managed Agent", "managed-agent", "", "")
 
 	result, err := st.CallTool(ctx, "agent_update", map[string]any{
 		"id":            seeded.ID,
@@ -158,7 +158,7 @@ func TestSelfToolsTransport_UpdateAgent_AllowsManagedClass(t *testing.T) {
 		t.Fatalf("expected managed-class update to succeed, got error: %s", result.Content[0].Text)
 	}
 
-	after, err := st.Store.GetAgent(context.Background(), seeded.ID)
+	after, err := fixtureStore(st).GetAgent(context.Background(), seeded.ID)
 	if err != nil {
 		t.Fatalf("get agent after update: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestSelfToolsTransport_CreateAgent_RejectsSlugCollisionWithNonEditableClass
 			ctx := context.Background()
 
 			slug := "collide-" + tc.name
-			seeded := seedAgent(t, st.Store, "Seed Agent", slug, tc.source, tc.sourceRef)
+			seeded := seedAgent(t, fixtureStore(st), "Seed Agent", slug, tc.source, tc.sourceRef)
 
 			result, err := st.CallTool(ctx, "agent_create", map[string]any{
 				"name":          "Fabricated Agent",
@@ -221,7 +221,7 @@ func TestSelfToolsTransport_CreateAgent_RejectsSlugCollisionWithNonEditableClass
 
 			// Verify no fabricated profile was written and the original is
 			// untouched.
-			after, err := st.Store.GetAgent(context.Background(), seeded.ID)
+			after, err := fixtureStore(st).GetAgent(context.Background(), seeded.ID)
 			if err != nil {
 				t.Fatalf("get agent after rejected create: %v", err)
 			}
@@ -242,7 +242,7 @@ func TestSelfToolsTransport_CreateAgent_ManagedCollisionNotBlockedByGate(t *test
 	ctx := context.Background()
 
 	slug := "collide-managed"
-	seedAgent(t, st.Store, "Seed Agent", slug, "", "")
+	seedAgent(t, fixtureStore(st), "Seed Agent", slug, "", "")
 
 	result, err := st.CallTool(ctx, "agent_create", map[string]any{
 		"name":          "Duplicate Slug Agent",

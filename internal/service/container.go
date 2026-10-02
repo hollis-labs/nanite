@@ -106,7 +106,8 @@ type Container struct {
 	Settings *UserSettingsService
 	// MCPServers owns the persisted MCP server configs, keeps the MCP
 	// manager registered with them, and owns header redaction.
-	MCPServers *MCPServerService
+	MCPServers   *MCPServerService
+	PluginConfig *PluginConfigService
 	// Roles owns role rows.
 	Roles *RoleService
 	// Projects owns project rows, the AD-27 repository-path rule, and the
@@ -1543,6 +1544,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Providers:           cfg.Providers,
 		Commands:            commands,
 		Plugins:             cfg.Plugins,
+		PluginConfig:        NewPluginConfigService(cfg.Store, cfg.Plugins),
 		MCP:                 cfg.MCP,
 		Messaging:           messagingSvc,
 		Subagent:            subagentSvc,

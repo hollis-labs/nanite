@@ -152,13 +152,13 @@ func (st *SelfToolsTransport) callHandoffStash(ctx context.Context, args map[str
 		return mcp.ErrorResult(fmt.Sprintf("handoff_stash: %v", err)), nil
 	}
 	stashID := uuid.New().String()
-	if err := st.Store.UpsertHandoffStash(ctx, store.HandoffStash{
+	if writeErr := st.Reads.Handoffs.Upsert(ctx, store.HandoffStash{
 		ID:        stashID,
 		SessionID: sessionID,
 		Payload:   string(envelopeBytes),
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-	}); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("handoff_stash: %v", err)), nil
+	}); writeErr != nil {
+		return mcp.ErrorResult(fmt.Sprintf("handoff_stash: %v", writeErr)), nil
 	}
 
 	resp := struct {
@@ -191,7 +191,7 @@ func (st *SelfToolsTransport) callHandoffPointersExpand(ctx context.Context, arg
 		return mcp.ErrorResult("cache_key is required"), nil
 	}
 
-	row, err := st.Store.GetHandoffStash(ctx, sessionID, cacheKey)
+	row, err := st.Reads.Handoffs.Get(ctx, sessionID, cacheKey)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("handoff_pointers_expand: %v", err)), nil
 	}

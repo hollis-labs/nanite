@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,12 +15,13 @@ import (
 
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/install"
-	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/service"
 )
 
 // catalogState holds dependencies for catalog API handlers.
 type catalogState struct {
-	store             *store.Store
+	sources           *service.CatalogSourceService
+	cleanup           *service.PluginCleanupService
 	fetcher           *naniteplugin.CatalogFetcher
 	pluginsDir        string
 	pluginHost        *naniteplugin.Host
@@ -27,12 +29,12 @@ type catalogState struct {
 }
 
 // RegisterCatalogRoutes adds catalog management endpoints to the mux.
-func RegisterCatalogRoutes(mux *http.ServeMux, s *store.Store, pluginsDir string, host *naniteplugin.Host) *naniteplugin.CatalogFetcher {
+func RegisterCatalogRoutes(mux *http.ServeMux, sources *service.CatalogSourceService, cleanup *service.PluginCleanupService, pluginsDir string, host *naniteplugin.Host) *naniteplugin.CatalogFetcher {
 	cacheDir := filepath.Join(pluginsDir, ".cache")
 	fetcher := naniteplugin.NewCatalogFetcher(5*time.Minute, cacheDir)
 
 	cs := &catalogState{
-		store:      s,
+		sources: sources, cleanup: cleanup,
 		fetcher:    fetcher,
 		pluginsDir: pluginsDir,
 		pluginHost: host,
@@ -67,12 +69,12 @@ func (cs *catalogState) errorResp(w http.ResponseWriter, status int, msg string)
 // --- Source management ---
 
 func (cs *catalogState) handleListSources(w http.ResponseWriter, r *http.Request) {
-	sources, err := cs.store.ListCatalogSources(r.Context())
+	sources, err := cs.sources.List(r.Context())
 	if err != nil {
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	cs.jsonResp(w, http.StatusOK, sources)
+	cs.jsonResp(w, http.StatusOK, catalogSourceViews(sources))
 }
 
 func (cs *catalogState) handleAddSource(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +88,7 @@ func (cs *catalogState) handleAddSource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	src, err := cs.store.CreateCatalogSource(r.Context(), req.Name, req.URL, "custom", req.Priority)
+	src, err := cs.sources.Create(r.Context(), req.Name, req.URL, req.Priority)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
 			cs.errorResp(w, http.StatusConflict, "a source with that URL already exists")
@@ -97,7 +99,7 @@ func (cs *catalogState) handleAddSource(w http.ResponseWriter, r *http.Request) 
 	}
 
 	cs.fetcher.Invalidate()
-	cs.jsonResp(w, http.StatusCreated, src)
+	cs.jsonResp(w, http.StatusCreated, catalogSourceView(src))
 }
 
 func (cs *catalogState) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
@@ -108,32 +110,13 @@ func (cs *catalogState) handleUpdateSource(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Load current to fill in unchanged fields.
-	existing, err := cs.store.GetCatalogSource(r.Context(), id)
-	if err != nil {
-		cs.errorResp(w, http.StatusNotFound, "source not found")
-		return
-	}
-
-	name := existing.Name
-	if req.Name != "" {
-		name = req.Name
-	}
-	url := existing.URL
-	if req.URL != "" {
-		url = req.URL
-	}
-	enabled := existing.Enabled
-	if req.Enabled != nil {
-		enabled = *req.Enabled
-	}
-	priority := existing.Priority
-	if req.Priority != nil {
-		priority = *req.Priority
-	}
-
-	if err := cs.store.UpdateCatalogSource(r.Context(), id, name, url, enabled, priority); err != nil {
-		cs.errorResp(w, http.StatusInternalServerError, err.Error())
+	if err := cs.sources.Patch(r.Context(), id, service.CatalogSourcePatch{Name: req.Name, URL: req.URL, Enabled: req.Enabled, Priority: req.Priority}); err != nil {
+		var missing *service.CatalogSourceMissingError
+		if errors.As(err, &missing) {
+			cs.errorResp(w, http.StatusNotFound, "source not found")
+		} else {
+			cs.errorResp(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 
@@ -143,7 +126,7 @@ func (cs *catalogState) handleUpdateSource(w http.ResponseWriter, r *http.Reques
 
 func (cs *catalogState) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := cs.store.DeleteCatalogSource(r.Context(), id); err != nil {
+	if err := cs.sources.Delete(r.Context(), id); err != nil {
 		cs.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -162,18 +145,10 @@ type catalogBrowseEntry struct {
 }
 
 func (cs *catalogState) handleBrowseCatalog(w http.ResponseWriter, r *http.Request) {
-	sources, err := cs.store.ListCatalogSources(r.Context())
+	fetcherSources, err := cs.sources.FetchInputs(r.Context())
 	if err != nil {
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-
-	// Convert store model to fetcher model.
-	fetcherSources := make([]naniteplugin.CatalogSource, len(sources))
-	for i, s := range sources {
-		fetcherSources[i] = naniteplugin.CatalogSource{
-			ID: s.ID, Name: s.Name, URL: s.URL, Priority: s.Priority, Enabled: s.Enabled,
-		}
 	}
 
 	entries, err := cs.fetcher.Fetch(r.Context(), fetcherSources)
@@ -238,16 +213,10 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// Look up in catalog.
-	sources, err := cs.store.ListCatalogSources(r.Context())
+	fetcherSources, err := cs.sources.FetchInputs(r.Context())
 	if err != nil {
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	fetcherSources := make([]naniteplugin.CatalogSource, len(sources))
-	for i, s := range sources {
-		fetcherSources[i] = naniteplugin.CatalogSource{
-			ID: s.ID, Name: s.Name, URL: s.URL, Priority: s.Priority, Enabled: s.Enabled,
-		}
 	}
 
 	entries, err := cs.fetcher.Fetch(r.Context(), fetcherSources)
@@ -311,7 +280,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		Loader: hostLoader{pms: &pluginManagerState{
 			pluginsDir: cs.pluginsDir,
 			pluginHost: cs.pluginHost,
-			store:      cs.store,
+			cleanup:    cs.cleanup,
 		}},
 		StagingRoot: filepath.Join(cs.pluginsDir, ".staging"),
 		PluginsRoot: cs.pluginsDir,

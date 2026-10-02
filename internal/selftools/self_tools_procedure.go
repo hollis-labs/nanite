@@ -24,7 +24,7 @@ import (
 // REST API for external management) but no read-back into a running
 // agent's tool surface. This closes that gap.
 func (st *SelfToolsTransport) callProcedureGet(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-	if st.Store == nil {
+	if st.Reads.Procedures == nil {
 		return mcp.ErrorResult("procedure_get: no store configured"), nil
 	}
 
@@ -38,7 +38,7 @@ func (st *SelfToolsTransport) callProcedureGet(ctx context.Context, args map[str
 		return mcp.ErrorResult("procedure_get: no calling agent in context"), nil
 	}
 
-	proc, err := st.Store.GetAgentProcedure(ctx, agentID, name)
+	proc, err := st.Reads.Procedures.GetProcedure(ctx, agentID, name)
 	if err != nil {
 		if errors.Is(err, store.ErrAgentProcedureNotFound) {
 			return mcp.ErrorResult(fmt.Sprintf("procedure %q not found for this agent", name)), nil

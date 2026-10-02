@@ -15,7 +15,7 @@ import (
 // not just present in the table.
 func TestProcedureGet_HappyPath(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	if err := s.CreateAgent(context.Background(), &store.AgentProfile{ID: "agent-pm-1", Slug: "test-pm-1", Status: "active"}); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -47,7 +47,7 @@ func TestProcedureGet_HappyPath(t *testing.T) {
 // the agent from context, not from a caller-suppliable ID.
 func TestProcedureGet_ScopedToCallingAgent(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	if err := s.CreateAgent(context.Background(), &store.AgentProfile{ID: "agent-pm-1", Slug: "test-pm-2", Status: "active"}); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -77,7 +77,7 @@ func TestProcedureGet_ScopedToCallingAgent(t *testing.T) {
 // success) when the named procedure doesn't exist for the calling agent.
 func TestProcedureGet_NotFound(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	ctx := mcp.WithCallerProfile(context.Background(), "agent-pm-1")
 	res, err := st.CallTool(ctx, "procedure_get", map[string]any{"name": "nonexistent"})
@@ -93,7 +93,7 @@ func TestProcedureGet_NotFound(t *testing.T) {
 // before any store lookup.
 func TestProcedureGet_MissingName(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	ctx := mcp.WithCallerProfile(context.Background(), "agent-pm-1")
 	res, err := st.CallTool(ctx, "procedure_get", map[string]any{})

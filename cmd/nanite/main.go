@@ -1191,7 +1191,7 @@ func initMCP(s *store.Store, cfg *config.RuntimeConfig, appCfg *config.TunablesC
 	if err := mcpManager.AddBuiltinServer(mcp.CodeServerName, mcp.NewCodeExecTransport("")); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", mcp.CodeServerName, "err", err)
 	}
-	selfTools := selftools.NewSelfToolsTransport(s)
+	selfTools := service.NewSelfToolsTransport(s)
 	// E1 (CW-20260419-0027; migrated off internal/promptrouter by
 	// TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md): the reflex
 	// catalog itself no longer needs a boot-time load-and-merge step —

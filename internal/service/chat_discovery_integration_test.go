@@ -10,7 +10,6 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
@@ -53,7 +52,7 @@ func TestChatDiscovery_DescribeLoadAndExecute(t *testing.T) {
 			}
 			f.context.inner = NewContextService(ContextServiceConfig{Client: chat.NewContextClient(f.st), SlotStasher: &fakeArtifactStasher{}})
 			mgr := mcp.NewManager()
-			self := selftools.NewSelfToolsTransport(f.st)
+			self := NewSelfToolsTransport(f.st)
 			self.Inventory = mgr
 			if err := mgr.AddServer("self", self, mcp.TierBuiltin); err != nil {
 				t.Fatal(err)

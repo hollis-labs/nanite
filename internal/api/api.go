@@ -665,7 +665,8 @@ func (a *API) jsonResp(w http.ResponseWriter, status int, data any) {
 	}
 }
 
-// errorResp writes a JSON error response.
+// errorResp writes Nanite's flat error envelope. The optional go-svcerr
+// nested envelope is deliberately not this API's wire contract.
 func (a *API) errorResp(w http.ResponseWriter, status int, msg string) {
 	a.jsonResp(w, status, map[string]string{"error": msg})
 }

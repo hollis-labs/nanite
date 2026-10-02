@@ -197,8 +197,8 @@ func TestSchedulesAPI_CreateRejectsUnknownAgent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/schedules", bytes.NewBufferString(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("create with unknown agent_id = %d, want 400 body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("create with unknown agent_id = %d, want 404 body=%s", w.Code, w.Body.String())
 	}
 }
 

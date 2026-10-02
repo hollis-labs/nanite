@@ -115,12 +115,17 @@ github.com/hollis-labs/go-sqlite v0.1.0 h1:0AQrOxfwHLSCCzuNo7h1LVoJXA2qJC6iZbS3u
 github.com/hollis-labs/go-sqlite v0.1.0/go.mod h1:T1kbCABjw1annDB+7cwNoPyqL+WDfdmHn8xtKfuZ5LQ=
 github.com/hollis-labs/go-ssekit v0.2.0 h1:li4Oi6iR8EGw3gh9lY1OoYukQ40AVLU/Kp1T5RzdajM=
 github.com/hollis-labs/go-ssekit v0.2.0/go.mod h1:0cbVtvNr1trN787jry9D2hbxtRo5EcsJfQRK0aOYOtM=
+github.com/hollis-labs/go-svcerr v0.1.0 h1:8Wa0cnLPo8Tiw5P3E3rCDXzRu11vjpAy2sxe5tFBMVs=
+github.com/hollis-labs/go-svcerr v0.1.0/go.mod h1:GIpstDn44EB/wFYVb47iRtJyYHN1l0TLwHBy5/HpHkg=
 github.com/hollis-labs/go-tether-client v0.5.1 h1:WhEyU5+Bb3ziOSKxeNmiMedlqn3/qjc7naSgGz6A9k4=
 github.com/hollis-labs/go-tether-client v0.5.1/go.mod h1:xg8sxCZefI592F6m/0rO0w+td3Sz32PCycnolki9Qxk=
 github.com/hollis-labs/go-tether-client v0.8.0 h1:20axAfaqixLnWs7n+DY0JqrUnOfHMyt4KxRRzWau5e0=
 github.com/hollis-labs/go-tether-client v0.8.0/go.mod h1:xg8sxCZefI592F6m/0rO0w+td3Sz32PCycnolki9Qxk=
 github.com/hollis-labs/go-toolresult v0.1.0 h1:g9GVGYdGLUOkWgFGKBhP5Dr/FJHfsfYBdYEP2rVtSv0=
 github.com/hollis-labs/go-toolresult v0.1.0/go.mod h1:MG+vPliOnDm8paEzeYDfVOdw229YbS8N7zW+Gi/b+F4=
+
+github.com/hollis-labs/go-transportparity v0.1.0 h1:Rl2yiu1KvdeUc6rd7iU1Q2m11I8LudwzQNjKD+uMco0=
+github.com/hollis-labs/go-transportparity v0.1.0/go.mod h1:v0eqibiGstnt5kwrMitEEgegS4QamzotWnrbgZNzFVE=
 github.com/hollis-labs/go-usage-ledger v0.1.0 h1:shsT6euSdkGwBnH8PlIrZCr0nNYy6U+a9o+Q9f0yhHM=
 github.com/hollis-labs/go-usage-ledger v0.1.0/go.mod h1:6zlbMMvsvguBlaI9C/AjJXmNZo+vg5cBPZX/AXSsTTw=
 github.com/hollis-labs/go-workflow v0.1.0 h1:Rose0BcdHySd3RT2+HTuAzD/dELPsEREKmosg+3SySg=

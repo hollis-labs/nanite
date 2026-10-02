@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
+
+	svcerr "github.com/hollis-labs/go-svcerr"
 
 	"github.com/hollis-labs/nanite/internal/agent/override"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -81,7 +85,14 @@ func NewAgentService(cfg AgentServiceConfig) AgentService {
 }
 
 func (s *agentServiceImpl) Get(ctx context.Context, id string) (*store.AgentProfile, error) {
-	return s.agents.GetAgent(ctx, id)
+	row, err := s.agents.GetAgent(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, svcerr.Wrap(err, svcerr.CodeNotFound, "agent not found")
+	}
+	if err != nil {
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent")
+	}
+	return row, nil
 }
 
 func (s *agentServiceImpl) GetBySlug(ctx context.Context, slug string) (*store.AgentProfile, error) {

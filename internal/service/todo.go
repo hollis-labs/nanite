@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+
+	svcerr "github.com/hollis-labs/go-svcerr"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -99,7 +103,8 @@ func (s *todoServiceImpl) CreateTodo(_ context.Context, t *store.Todo) error {
 }
 
 func (s *todoServiceImpl) GetTodo(_ context.Context, id string) (*store.Todo, error) {
-	return s.todos.GetTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+	row, err := s.todos.GetTodo(context.TODO(), id)
+	return row, todoReadError(err)
 }
 
 func (s *todoServiceImpl) ListTodos(_ context.Context, f store.TodoFilter) ([]store.Todo, error) {
@@ -109,7 +114,7 @@ func (s *todoServiceImpl) ListTodos(_ context.Context, f store.TodoFilter) ([]st
 func (s *todoServiceImpl) UpdateTodo(_ context.Context, id string, updates TodoUpdates) (*store.Todo, error) {
 	existing, err := s.todos.GetTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
-		return nil, fmt.Errorf("todo not found: %w", err)
+		return nil, todoReadError(err)
 	}
 	if updates.Title != nil {
 		existing.Title = *updates.Title
@@ -119,13 +124,13 @@ func (s *todoServiceImpl) UpdateTodo(_ context.Context, id string, updates TodoU
 	}
 	if updates.Status != nil {
 		if !validTodoStatus(*updates.Status) {
-			return nil, fmt.Errorf("invalid status %q", *updates.Status)
+			return nil, svcerr.New(svcerr.CodeInvalid, fmt.Sprintf("invalid status %q", *updates.Status), svcerr.WithField("status"))
 		}
 		existing.Status = *updates.Status
 	}
 	if updates.Priority != nil {
 		if !validPriority(*updates.Priority) {
-			return nil, fmt.Errorf("invalid priority %q", *updates.Priority)
+			return nil, svcerr.New(svcerr.CodeInvalid, fmt.Sprintf("invalid priority %q", *updates.Priority), svcerr.WithField("priority"))
 		}
 		existing.Priority = *updates.Priority
 	}
@@ -136,7 +141,7 @@ func (s *todoServiceImpl) UpdateTodo(_ context.Context, id string, updates TodoU
 		existing.Metadata = *updates.Metadata
 	}
 	if err := s.todos.UpdateTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, existing); err != nil {
-		return nil, err
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to update todo")
 	}
 	return existing, nil
 }
@@ -145,21 +150,22 @@ func (s *todoServiceImpl) UpdateTodo(_ context.Context, id string, updates TodoU
 // Powers the "Promote to project" / "Demote to session" actions in D2.
 func (s *todoServiceImpl) UpdateTodoScope(_ context.Context, id, scope, scopeID, projectID string) (*store.Todo, error) {
 	if !validScope(scope) {
-		return nil, fmt.Errorf("invalid scope %q: must be turn, session, or project", scope)
+		return nil, svcerr.New(svcerr.CodeInvalid, fmt.Sprintf("invalid scope %q: must be turn, session, or project", scope), svcerr.WithField("scope"))
 	}
 	if scope == store.TodoScopeProject && projectID == "" {
-		return nil, fmt.Errorf("project_id is required for scope=project")
+		return nil, svcerr.New(svcerr.CodeInvalid, "project_id is required for scope=project", svcerr.WithField("project_id"))
 	}
 	if scope != store.TodoScopeProject && scopeID == "" {
-		return nil, fmt.Errorf("scope_id is required for scope=%q", scope)
+		return nil, svcerr.New(svcerr.CodeInvalid, fmt.Sprintf("scope_id is required for scope=%q", scope), svcerr.WithField("scope_id"))
 	}
 	if scope == store.TodoScopeProject && scopeID == "" {
 		scopeID = projectID
 	}
 	if err := s.todos.UpdateTodoScope(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, scope, scopeID, projectID); err != nil {
-		return nil, err
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to update todo scope")
 	}
-	return s.todos.GetTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+	row, err := s.todos.GetTodo(context.TODO(), id)
+	return row, todoReadError(err)
 }
 
 func (s *todoServiceImpl) DeleteTodo(_ context.Context, id string) error {
@@ -304,4 +310,16 @@ func validPriority(s string) bool {
 
 func validPlanStatus(s string) bool {
 	return s == "proposed" || s == "approved" || s == "in_progress" || s == "complete" || s == "abandoned"
+}
+
+// todoReadError distinguishes absence from an infrastructure failure without
+// consulting the error text. The original store cause remains reachable.
+func todoReadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return svcerr.Wrap(err, svcerr.CodeNotFound, "todo not found")
+	}
+	return svcerr.Wrap(err, svcerr.CodeInternal, "failed to read todo")
 }

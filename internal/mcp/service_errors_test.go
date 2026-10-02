@@ -58,3 +58,27 @@ func TestServiceErrorResultLogSeverity(t *testing.T) {
 		})
 	}
 }
+
+func TestServiceErrorResultWithoutCauseLogsToolContext(t *testing.T) {
+	for _, code := range []svcerr.Code{svcerr.CodeInvalid, svcerr.CodeUnavailable} {
+		t.Run(string(code), func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			ServiceErrorResult(svcerr.New(code, "safe message"), "tool", "todo_update", "id", "todo-fixture")
+			level := "WARN"
+			if code == svcerr.CodeUnavailable {
+				level = "ERROR"
+			}
+			for _, want := range []string{"level=" + level, "code=" + string(code), `message="safe message"`, "tool=todo_update", "id=todo-fixture"} {
+				if !strings.Contains(logs.String(), want) {
+					t.Fatalf("missing %q: %s", want, logs.String())
+				}
+			}
+			if strings.Contains(logs.String(), "cause=") {
+				t.Fatalf("unexpected cause: %s", logs.String())
+			}
+		})
+	}
+}

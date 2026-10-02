@@ -109,6 +109,7 @@ func TestServiceErrorRoutesClosedDBIsInternal(t *testing.T) {
 		{"POST", "/api/agents", `{"name":"Fresh","slug":"fresh","system_prompt":"fixture"}`},
 		{"POST", "/api/durable-agents", `{"slug":"fixture","profile_id":"target"}`},
 		{"DELETE", "/api/agents/target/projects/project", ""},
+		{"DELETE", "/api/sessions/session/agents/target", ""},
 		{"GET", "/api/agents/target", ""},
 		{"GET", "/api/agents/target/known-tools", ""},
 		{"DELETE", "/api/agents/target", ""},
@@ -160,7 +161,10 @@ func TestServiceErrorRoutesAssignmentsKeepValidationSeparateFromWriteFailure(t *
 
 func TestServiceErrorRoutesDurableAgentMissingProfile(t *testing.T) {
 	_, h := serviceErrorRoutes(t)
-	serviceErrorRequest(t, h, "POST", "/api/durable-agents", `{"slug":"fixture","profile_id":"missing"}`, 404)
+	message := serviceErrorRequest(t, h, "POST", "/api/durable-agents", `{"slug":"fixture","profile_id":"missing"}`, 404)
+	if !strings.Contains(message, "create or import it through the agent API first") {
+		t.Fatalf("missing profile guidance: %q", message)
+	}
 }
 func TestServiceErrorRoutesAgentBehaviorValidation(t *testing.T) {
 	st, h := serviceErrorRoutes(t)
@@ -179,5 +183,54 @@ func TestServiceErrorRoutesAgentBehaviorValidation(t *testing.T) {
 				t.Fatalf("missing field in safe message: %s", message)
 			}
 		}
+	}
+}
+
+func TestServiceErrorRoutesMembershipRemoval(t *testing.T) {
+	for _, kind := range []string{"project", "session"} {
+		t.Run(kind, func(t *testing.T) {
+			st, h := serviceErrorRoutes(t)
+			ctx := context.Background()
+			if err := st.CreateAgent(ctx, &store.AgentProfile{ID: "member", Name: "Member", Slug: "member", Source: "user"}); err != nil {
+				t.Fatal(err)
+			}
+			path, table := "/api/agents/member/projects/project", "agent_projects"
+			if kind == "project" {
+				if err := st.CreateProject(ctx, &store.Project{ID: "project", Name: "Project"}); err != nil {
+					t.Fatal(err)
+				}
+				if err := st.AddAgentProject(ctx, "member", "project"); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				path, table = "/api/sessions/session/agents/member", "session_agents"
+				if err := st.CreateSession(ctx, &store.Session{ID: "session", Title: "Session"}); err != nil {
+					t.Fatal(err)
+				}
+				if err := st.EnsureSessionAgent(ctx, "session", "member", "collaborate", false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			if _, err := st.DB.Exec("CREATE TRIGGER fail_membership_delete BEFORE DELETE ON " + table + " BEGIN SELECT RAISE(ABORT, 'write_secret private membership query'); END"); err != nil {
+				t.Fatal(err)
+			}
+			serviceErrorRequest(t, h, "DELETE", path, "", 500)
+			if !strings.Contains(logs.String(), "write_secret") || !strings.Contains(logs.String(), "route=") || !strings.Contains(logs.String(), "member") {
+				t.Fatalf("missing private cause or route/id: %s", logs.String())
+			}
+			if _, err := st.DB.Exec("DROP TRIGGER fail_membership_delete"); err != nil {
+				t.Fatal(err)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest("DELETE", path, nil))
+			if rec.Code != 200 {
+				t.Fatalf("first delete = %d %s", rec.Code, rec.Body.String())
+			}
+			serviceErrorRequest(t, h, "DELETE", path, "", 404)
+		})
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	svcerr "github.com/hollis-labs/go-svcerr"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -47,7 +48,11 @@ func (a *API) handleCreateDurableAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := a.Services.Agents.Get(r.Context(), inst.ProfileID); err != nil {
-		a.serviceError(w, err)
+		var typed *svcerr.Error
+		if errors.As(err, &typed) && typed.Code == svcerr.CodeNotFound {
+			err = svcerr.Wrap(err, svcerr.CodeNotFound, "agent profile not found in agent_profiles; create or import it through the agent API first")
+		}
+		a.serviceError(w, r, err)
 		return
 	}
 	err := a.Services.DurableAgents.Create(r.Context(), inst)

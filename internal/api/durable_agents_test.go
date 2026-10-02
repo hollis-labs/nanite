@@ -24,7 +24,7 @@ func TestDurableAgentsAPI_MissingProfileIsNotFound(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "agent not found") {
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "create or import it through the agent API first") {
 		t.Fatalf("missing profile = %d body=%s", w.Code, w.Body.String())
 	}
 }

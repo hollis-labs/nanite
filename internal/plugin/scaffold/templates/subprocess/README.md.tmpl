@@ -20,7 +20,7 @@ rebuilds (`make build`) take effect on the next plugin reload.
 
 ## Layout
 
-- `main.go` — subprocess entrypoint (speaks JSON-RPC over stdio via plugin-sdk v0.3.0).
+- `main.go` — subprocess entrypoint (speaks JSON-RPC over stdio via plugin-sdk v0.6.0).
 - `plugin.yaml` — manifest; declares the `{{.Name}}` command and `echo` MCP tool.
 - `ui/src/index.tsx` — React envelope components, bundled into `ui/dist/index.js`.
 - `envelopes/` — JSON Schemas for emitted envelopes.

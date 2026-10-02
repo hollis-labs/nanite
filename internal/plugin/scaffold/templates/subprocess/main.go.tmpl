@@ -1,6 +1,6 @@
 // {{.DisplayName}} is a Nanite subprocess plugin scaffolded by
 // `nanite plugin new --subprocess {{.Name}}`. It speaks JSON-RPC over
-// stdio to the Nanite host via the plugin-sdk v0.3.0 subprocess server.
+// stdio to the Nanite host via the plugin-sdk v0.6.0 subprocess server.
 package main
 
 import (
@@ -60,7 +60,7 @@ func (p *{{.StructName}}) Command(ctx context.Context, req subprocess.CommandReq
 // `registers.mcp_servers[].tools` — the host enumerates tools from the
 // manifest, not by sending `mcp/list_tools` to the plugin.
 //
-// NOTE (BLG-20260414-012): plugin-sdk v0.3.0's subprocess server does
+// NOTE (BLG-20260414-012): plugin-sdk v0.6.0's subprocess server does
 // NOT dispatch the `mcp/list_tools` protocol method — tool listing is
 // yaml-authoritative. If a future SDK adds a ListTools capability
 // interface, reimplement it here and keep plugin.yaml in sync.

@@ -175,7 +175,10 @@ func TestTransport_Notify(t *testing.T) {
 		readCh <- buf[:n]
 	}()
 
-	transport := NewTransport(nil, pluginInW)
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	transport := NewTransport(reader, pluginInW)
+	defer transport.Close()
 
 	// Notification should not block (no response expected).
 	err := transport.Notify("event/handle", map[string]string{"type": "test"})

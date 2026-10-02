@@ -188,8 +188,8 @@ func TestRun_Subprocess_MainGoReferencesSDK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	if !strings.Contains(string(gomod), "github.com/hollis-labs/plugin-sdk v0.3.0") {
-		t.Errorf("go.mod missing plugin-sdk v0.3.0 pin:\n%s", gomod)
+	if !strings.Contains(string(gomod), "github.com/hollis-labs/plugin-sdk v0.6.0") {
+		t.Errorf("go.mod missing plugin-sdk v0.6.0 pin:\n%s", gomod)
 	}
 }
 

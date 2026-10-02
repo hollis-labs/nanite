@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/plugin-host/pluginhosttest"
 )
 
 func TestPluginEnvironmentAllowlist(t *testing.T) {
@@ -26,18 +28,10 @@ func TestManagerLaunchFiltersActualChildEnvironment(t *testing.T) {
 	t.Setenv("NANITE_ENV_PRIVATE_TEST", "parent-only-value")
 	t.Setenv("SSH_AUTH_SOCK", "/tmp/test-agent-socket")
 	t.Setenv("DOCKER_HOST", "unix:///tmp/test-daemon")
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	output := filepath.Join(t.TempDir(), "environment.json")
-	mgr := NewManager(ManagerConfig{
-		Command:         executable,
-		Args:            []string{"-test.run=^TestPluginEnvironmentHelper$"},
-		Env:             []string{"NANITE_ENV_HELPER=1", "NANITE_ENV_OUTPUT=" + output, "NANITE_ENV_APPROVED=declared-value"},
-		ShutdownTimeout: time.Second,
-	})
-	if _, startErr := mgr.Start(context.Background()); startErr != nil {
+	command, env := pluginhosttest.FixtureCommand(pluginhosttest.BehaviourEcho, t.TempDir(), "NANITE_ENV_APPROVED=declared-value")
+	mgr := NewManager(ManagerConfig{Command: command, Env: env, ShutdownTimeout: time.Second})
+	transport, startErr := mgr.Start(context.Background(), InitParams{})
+	if startErr != nil {
 		t.Fatal(startErr)
 	}
 	t.Cleanup(func() {
@@ -45,21 +39,18 @@ func TestManagerLaunchFiltersActualChildEnvironment(t *testing.T) {
 			t.Error(stopErr)
 		}
 	})
-	mgr.mu.Lock()
-	wait := mgr.waitCh
-	mgr.mu.Unlock()
-	select {
-	case <-wait:
-	case <-time.After(5 * time.Second):
-		t.Fatal("environment helper did not exit")
+	result, callErr := CallResult[MCPCallResult](transport, context.Background(), MethodMCPCallTool, MCPCallRequest{ToolName: "env"})
+	if callErr != nil {
+		t.Fatal(callErr)
 	}
-	data, err := os.ReadFile(output) // #nosec G304 -- output is a fixed filename inside t.TempDir.
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got map[string]string
-	if decodeErr := json.Unmarshal(data, &got); decodeErr != nil {
+	var entries []string
+	if decodeErr := json.Unmarshal(result.Content, &entries); decodeErr != nil {
 		t.Fatal(decodeErr)
+	}
+	got := map[string]string{}
+	for _, entry := range entries {
+		key, value, _ := strings.Cut(entry, "=")
+		got[key] = value
 	}
 	for _, key := range []string{"NANITE_ENV_PRIVATE_TEST", "SSH_AUTH_SOCK", "DOCKER_HOST"} {
 		if got[key] != "" {
@@ -74,22 +65,4 @@ func TestManagerLaunchFiltersActualChildEnvironment(t *testing.T) {
 	if got["NANITE_ENV_APPROVED"] != "declared-value" {
 		t.Error("explicit host-approved environment entry did not reach child")
 	}
-}
-
-func TestPluginEnvironmentHelper(t *testing.T) {
-	if os.Getenv("NANITE_ENV_HELPER") != "1" {
-		return
-	}
-	values := map[string]string{}
-	for _, key := range []string{"PATH", "HOME", "NANITE_ENV_PRIVATE_TEST", "SSH_AUTH_SOCK", "DOCKER_HOST", "NANITE_ENV_APPROVED"} {
-		values[key] = os.Getenv(key)
-	}
-	data, err := json.Marshal(values)
-	if err != nil {
-		os.Exit(1)
-	}
-	if err := os.WriteFile(os.Getenv("NANITE_ENV_OUTPUT"), data, 0o600); err != nil { // #nosec G703 -- this test-only helper receives a parent-owned temporary file path.
-		os.Exit(1)
-	}
-	os.Exit(0)
 }

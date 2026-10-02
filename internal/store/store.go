@@ -57,6 +57,12 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 		_ = db.Close() // Preserve the migration error; closing a failed-to-initialize store is best-effort cleanup.
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// Initialize upgraded singleton rows before returning a usable store. Seed's
+	// existing-row fast path cannot do this; fresh inserts use the DB trigger.
+	if err := s.initializeAdminPreferencesVersion(ctx); err != nil {
+		_ = db.Close() // Preserve the bootstrap error; closing is best-effort cleanup.
+		return nil, err
+	}
 	// TASKS/scheduling/01-schema-schedule-kind-collapse-and-retry-columns.md:
 	// migration 127 adds agent_schedules.next_run but deliberately leaves
 	// it NULL for pre-existing rows (real cron computation needs

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestMigration169PreservesCatalogsAndSettings(t *testing.T) {
+func TestMigration170PreservesCatalogsAndSettings(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	provider := migration147Provider(t, s)

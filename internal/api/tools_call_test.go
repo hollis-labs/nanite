@@ -380,7 +380,7 @@ func TestHandleSelfToolCall_CardShowBroadcastsEnvelope(t *testing.T) {
 func TestHandleSelfToolCall_StampsSessionAndDispatches(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
 	st := service.NewSelfToolsTransport(s)
-	st.WorkTrackingTools = selftools.NewWorkTrackingTools(s, s, nil)
+	st.WorkTrackingTools = service.NewWorkTrackingTools(s, nil)
 	a.SetSelfTools(st)
 
 	rec := postToolCall(t, a, map[string]any{

@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+
+	svcerr "github.com/hollis-labs/go-svcerr"
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -51,12 +54,13 @@ func notManagedError(p *store.AgentProfile, class agent.ManageClass, verb string
 	if p != nil {
 		slug = p.Slug
 	}
+	var message string
 	if class.CopyToManagedAllowed() {
-		return fmt.Errorf("%w: %q is %s and read-only in place; copy it to the managed layer (CopyToManaged) and %s the copy",
-			ErrAgentNotManaged, slug, class.Describe(), verb)
+		message = fmt.Sprintf("agent is not an editable database config: %q is %s and read-only in place; copy it to the managed layer (CopyToManaged) and %s the copy", slug, class.Describe(), verb)
+	} else {
+		message = fmt.Sprintf("agent is not an editable database config: %q is %s, which Nanite manages; there is no copy-to-managed path for it", slug, class.Describe())
 	}
-	return fmt.Errorf("%w: %q is %s, which Nanite manages; there is no copy-to-managed path for it",
-		ErrAgentNotManaged, slug, class.Describe())
+	return svcerr.Wrap(ErrAgentNotManaged, svcerr.CodePermission, message, svcerr.WithStatus(http.StatusConflict))
 }
 
 // AgentConfigResult retains Revision for wire compatibility. It is always
@@ -95,7 +99,7 @@ func (s *AgentConfigService) Create(profile *store.AgentProfile, procedures []ag
 		return nil, err
 	}
 	if existing, err := s.store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile.Slug); err == nil && existing != nil {
-		return nil, ErrManagedSlugExists
+		return nil, svcerr.Wrap(ErrManagedSlugExists, svcerr.CodeConflict, "a managed agent with this slug already exists")
 	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -219,7 +223,7 @@ func (s *AgentConfigService) CopyToManaged(source *store.AgentProfile, procedure
 	}
 	class := s.Classify(source)
 	if class.Editable() {
-		return nil, ErrAgentAlreadyManaged
+		return nil, svcerr.Wrap(ErrAgentAlreadyManaged, svcerr.CodeConflict, "agent is already a managed config")
 	}
 	if !class.CopyToManagedAllowed() {
 		return nil, notManagedError(source, class, "copy")

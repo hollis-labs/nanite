@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	svcerr "github.com/hollis-labs/go-svcerr"
+
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agentvalidation"
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -213,7 +215,7 @@ func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ag, err := a.Services.Agents.Get(r.Context(), id)
 	if err != nil {
-		a.errorResp(w, http.StatusNotFound, "agent not found")
+		a.serviceError(w, err)
 		return
 	}
 
@@ -229,7 +231,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// database ownership classification below.
 	existing, err := a.Services.Agents.Get(r.Context(), id)
 	if err != nil {
-		a.errorResp(w, http.StatusNotFound, "agent not found")
+		a.serviceError(w, err)
 		return
 	}
 
@@ -393,7 +395,7 @@ func (a *API) writeNotManaged(w http.ResponseWriter, ag *store.AgentProfile, cla
 	case agentpkg.ManageClassExternal:
 		msg = "agent has external/imported provenance (read-only); copy it to the managed layer to edit"
 	}
-	a.jsonResp(w, http.StatusConflict, map[string]any{
+	a.jsonResp(w, svcerr.StatusFor(svcerr.New(svcerr.CodePermission, msg, svcerr.WithStatus(http.StatusConflict)), http.StatusInternalServerError), map[string]any{
 		"error":           "agent_not_managed",
 		"message":         msg,
 		"manage_class":    string(class),

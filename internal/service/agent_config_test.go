@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	svcerr "github.com/hollis-labs/go-svcerr"
+
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
@@ -304,5 +306,30 @@ func TestAgentConfigUpdateDoesNotRevokeSkillApproval(t *testing.T) {
 	}
 	if got.GrantedBy != "operator@example.com" {
 		t.Errorf("granted_by lost on update: %q", got.GrantedBy)
+	}
+}
+
+func TestAgentConfigTypedErrorsPreserveDistinctSentinels(t *testing.T) {
+	svc, _, _ := newAgentConfigTestService(t)
+	created, err := svc.Create(&store.AgentProfile{Name: "Managed", Slug: "typed-errors", SystemPrompt: "x"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, duplicate := svc.Create(&store.AgentProfile{Name: "Duplicate", Slug: created.Profile.Slug, SystemPrompt: "x"}, nil)
+	_, alreadyManaged := svc.CopyToManaged(created.Profile, nil)
+	for _, tc := range []struct {
+		err        error
+		own, other error
+	}{
+		{duplicate, ErrManagedSlugExists, ErrAgentAlreadyManaged},
+		{alreadyManaged, ErrAgentAlreadyManaged, ErrManagedSlugExists},
+	} {
+		if svcerr.CodeFor(tc.err) != svcerr.CodeConflict || !errors.Is(tc.err, tc.own) || errors.Is(tc.err, tc.other) {
+			t.Fatalf("category lost sentinel identity: %v", tc.err)
+		}
+	}
+	_, denied := svc.Update(&store.AgentProfile{Source: "internal", Slug: "internal"}, &store.AgentProfile{}, nil, "")
+	if svcerr.CodeFor(denied) != svcerr.CodePermission || !errors.Is(denied, ErrAgentNotManaged) {
+		t.Fatalf("permission error lost sentinel: %v", denied)
 	}
 }

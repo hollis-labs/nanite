@@ -171,3 +171,7 @@ func TestAgentCapabilitiesListAlwaysAllowedToolNames(t *testing.T) {
 		t.Errorf("tool without always_included listed: %v", names)
 	}
 }
+
+func (f *fakeUserSettingsStore) GetAdminPreferences(context.Context) (*store.AdminPreferences, error) {
+	return nil, errors.New("settings unavailable")
+}

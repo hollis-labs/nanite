@@ -135,3 +135,23 @@ documented in [the engine boundary](docs/architecture/workflow-engine.md) and
 Embedded-memory and external MCP operators upgrading to Tesseract v0.10
 should follow
 [Nanite's Tesseract v0.10 migration guide](docs/tesseract-v0.10-migration.md).
+
+## Read-only admin API
+
+The admin API at `/api/admin/manifest` is off unless both `NANITE_AUTH_USER`
+and `NANITE_AUTH_PASSWORD` are configured. Every request requires matching
+Basic credentials, including requests from loopback. Caller identity headers
+never grant admin access. Follow [the deployment boundary](SECURITY.md) when
+exposing Nanite beyond loopback.
+
+It reports the persisted tool stream behavior and tool drawer retention
+preferences. Reads include an opaque ETag that changes when either preference
+changes through existing writers. The adapter supports reads only; all POST
+requests are denied. Change preferences through the existing preferences UI.
+Apply state is unknown; the API offers no restart or apply action.
+
+When a process tracker is present, the API also reports a tracked CLI process
+count and output inactivity observation. The latter uses the existing
+five-minute inactivity heuristic; it does not verify OS process liveness or
+whole-application health. Process identities are excluded. A declared provider
+that becomes unavailable returns an error rather than a fabricated sample.

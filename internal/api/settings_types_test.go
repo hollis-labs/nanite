@@ -265,3 +265,7 @@ func TestHandleGrantAgentTool_Precedence(t *testing.T) {
 		t.Fatalf("revoke: %d %s", w.Code, w.Body.String())
 	}
 }
+
+func (f failingSettingsStore) GetAdminPreferences(context.Context) (*store.AdminPreferences, error) {
+	return nil, errors.New("settings unavailable")
+}

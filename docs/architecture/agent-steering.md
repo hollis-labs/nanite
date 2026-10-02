@@ -110,3 +110,21 @@ composition this document describes: signposting, hints, just-in-time
 information, context in error messages, skills, tools. `halt_session` is the
 exception that proves it — the one `deny_overrides` kind, and the only place
 steering stops a turn outright.
+
+## Ownership and plugin contributions
+
+Nanite owns the reflex subsystem: durable definitions, candidate scopes, state
+collection, validation and provenance, pending-review writes, action adapters,
+and dispatch/loop lifecycle. Moving a feature into a plugin moves its feature
+seed definitions with it; it does not give the plugin an independent steering
+engine, a core table, or authority to install system-tier reflexes. Contributions
+must remain explicitly scoped and pass the host's canonical validation at plugin
+provenance. Their lifecycle must preserve user edits and firing history while
+preventing an inactive plugin's seeds from executing.
+
+A shared steering library can replace the database-agnostic evaluation,
+arbitration, cooldown and handler-registry implementation. Its adapters still
+belong to Nanite, and adoption requires a released module plus behavioral parity
+against real Nanite traces, including failure ordering and persisted effects.
+Transcribed library goldens alone do not establish that equivalence. Library
+adoption and feature seed extraction therefore keep separate ownership and gates.

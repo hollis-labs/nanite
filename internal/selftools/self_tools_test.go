@@ -2,6 +2,7 @@ package selftools
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -129,6 +130,15 @@ func TestSelfToolsTransport_CreateAgent(t *testing.T) {
 		t.Errorf("expected creation confirmation, got: %s", result.Content[0].Text)
 	}
 
+	_, createdJSON, ok := strings.Cut(result.Content[0].Text, "\n")
+	var created map[string]any
+	if !ok || json.Unmarshal([]byte(createdJSON), &created) != nil {
+		t.Fatalf("agent_create JSON missing: %s", result.Content[0].Text)
+	}
+	if created["name"] != "Test Agent" || created["slug"] != "test-agent" || created["system_prompt"] != "You are a helpful test agent." || created["default_model"] != "claude-3-haiku" || (created["id"] == nil || created["id"] == "") {
+		t.Fatalf("agent_create wire attributes: %#v", created)
+	}
+
 	// List agents and verify.
 	listResult, err := st.CallTool(ctx, "agent_list", map[string]any{})
 	if err != nil {
@@ -212,6 +222,15 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 	}
 	if b.calls != 1 {
 		t.Fatalf("expected 1 broadcast after todo_create, got %d", b.calls)
+	}
+
+	_, todoJSON, ok := strings.Cut(r.Content[0].Text, "\n")
+	var created map[string]any
+	if !ok || json.Unmarshal([]byte(todoJSON), &created) != nil {
+		t.Fatalf("todo_create JSON missing: %s", r.Content[0].Text)
+	}
+	if created["title"] != "wire test" || created["scope"] != "session" || created["scope_id"] != "sess-wire" || created["created_by"] != "agent" || (created["id"] == nil || created["id"] == "") {
+		t.Fatalf("todo_create wire attributes: %#v", created)
 	}
 	todos, err := fixtureStore(st).ListTodos(context.Background(), store.TodoFilter{Scope: "session", ScopeID: "sess-wire"})
 	if err != nil || len(todos) != 1 {
@@ -690,6 +709,14 @@ func TestSelfToolsTransport_PlanCRUD(t *testing.T) {
 	getResult, _ := st.CallTool(ctx, "plan_get", map[string]any{"id": planID})
 	if getResult.IsError || !strings.Contains(getResult.Content[0].Text, planID) {
 		t.Fatalf("plan_get did not return plan: %s", getResult.Content[0].Text)
+	}
+
+	var gotPlan map[string]any
+	if json.Unmarshal([]byte(getResult.Content[0].Text), &gotPlan) != nil {
+		t.Fatalf("plan_get JSON missing: %s", getResult.Content[0].Text)
+	}
+	if gotPlan["title"] != "UAT Plan" || gotPlan["scope"] != "session" || gotPlan["scope_id"] != "sess-1" || gotPlan["created_by"] != "agent" {
+		t.Fatalf("plan_get wire attributes: %#v", gotPlan)
 	}
 
 	delResult, _ := st.CallTool(ctx, "plan_delete", map[string]any{"id": planID})

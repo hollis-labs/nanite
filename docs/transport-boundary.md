@@ -103,6 +103,7 @@ Plugin configuration keeps secret routing, masking and change notification below
 the handler; catalog installation uses the shared plugin install pipeline.
 Durable-agent, wake, plan, todo, project-conflict and MCP-create wire shapes
 are also explicitly translated, including records nested inside service results.
+Self-tool agent, todo and plan JSON text results have consumer-owned views too.
 Recipe application delegates to the recipe service; typed phase errors retain
 the HTTP status for creation, follow-up reads and launch failures.
 This completion does not adopt R2 or R3, or change scheduler storage.

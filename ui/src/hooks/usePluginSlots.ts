@@ -1,3 +1,5 @@
+import { usePluginRegistryVersion } from "@hollis-labs/plugin-registry/react";
+import { browserPluginRegistry } from "@/lib/plugin-loader";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { UISlotEntry, UISlotName } from "@/lib/types";
@@ -10,6 +12,7 @@ import type { UISlotEntry, UISlotName } from "@/lib/types";
  * change rarely (only on plugin load/unload).
  */
 export function usePluginSlots(slotName: UISlotName): UISlotEntry[] {
+  usePluginRegistryVersion(browserPluginRegistry);
   const { data } = useQuery({
     queryKey: ["plugin-ui-slots"],
     queryFn: api.listUISlots,

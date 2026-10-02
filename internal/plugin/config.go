@@ -200,6 +200,8 @@ type CommandArgDecl struct {
 
 // SlotRegistration declares a UI slot contribution.
 type SlotRegistration struct {
+	Title     string                 `yaml:"title"`
+	Icon      string                 `yaml:"icon"`
 	Slot      string                 `yaml:"slot"`
 	ID        string                 `yaml:"id"`
 	Component string                 `yaml:"component"`

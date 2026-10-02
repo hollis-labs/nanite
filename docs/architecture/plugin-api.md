@@ -95,3 +95,11 @@ with `NANITE_PLUGIN_BROWSER_SMOKE_READY` naming a new private readiness file.
 It serves a real loaded SDK subprocess and bundle from an isolated test host.
 Pass the recorded origin as `VITE_NANITE_PLUGIN_SMOKE_URL` to the frontend
 `plugin-loader.test.tsx` test; its final request stops the fixture.
+
+Chat drawer tabs use `drawer.primary.tabs` and `drawer.working.tabs`. The host
+preserves each declaration's title, icon, priority and props. Both drawers
+render resolved exports from the shared browser registry, with owner-qualified
+tab IDs separate from built-in and pinned-card IDs. `session_id` always reflects
+the active session and overrides a stale value in manifest props. Unload removes
+the plugin tab immediately; a selected unloaded tab shows an unavailable message
+until another tab is selected. A failed render is contained to that tab.

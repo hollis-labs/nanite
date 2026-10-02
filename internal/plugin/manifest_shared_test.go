@@ -81,3 +81,27 @@ func TestPublicHostRangeIsIndependentOfApplicationVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedDrawerSlotPresentationReachesHost(t *testing.T) {
+	block, err := pluginapi.EncodeBlock(pluginapi.Block{UI: pluginapi.UI{Bundle: "ui.js"}, Registers: pluginapi.Registrations{Slots: []pluginapi.Slot{{Slot: pluginapi.SlotPrimaryDrawer, ID: "docs", Title: "Documents", Icon: "file-text", Component: "Docs", Priority: 20}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var object map[string]json.RawMessage
+	if decodeErr := json.Unmarshal([]byte(sharedManifestBytes(t)), &object); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	object["nanite"] = block
+	raw, err := json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := DecodeManifest(strings.NewReader(string(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot := parsed.Registers.Slots[0]
+	if slot.Slot != pluginapi.SlotPrimaryDrawer || slot.Title != "Documents" || slot.Icon != "file-text" || slot.Priority != 20 {
+		t.Fatalf("slot = %+v", slot)
+	}
+}

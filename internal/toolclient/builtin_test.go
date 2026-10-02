@@ -127,3 +127,21 @@ func TestRegisterBuiltins_OverwritesCategory(t *testing.T) {
 		t.Errorf("expected 2 tools after re-register, got %d", reg.Count())
 	}
 }
+
+func TestGetBuiltins_DeterministicCategoryOrder(t *testing.T) {
+	for _, order := range [][]string{{"z", "a"}, {"a", "z"}} {
+		reg := NewBuiltinToolRegistry()
+		for _, category := range order {
+			reg.RegisterBuiltins(category, []llmtypes.ToolDefinition{{Name: category + "_second"}, {Name: category + "_first"}})
+		}
+		for i := 0; i < 50; i++ {
+			got := reg.GetBuiltins()
+			want := []string{"a_second", "a_first", "z_second", "z_first"}
+			for j, name := range want {
+				if got[j].Name != name {
+					t.Fatalf("registration %v: tool %d = %q, want %q", order, j, got[j].Name, name)
+				}
+			}
+		}
+	}
+}

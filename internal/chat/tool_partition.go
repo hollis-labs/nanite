@@ -274,7 +274,7 @@ func RecentlyUsedToolNames(msgs []llmtypes.ChatMessage, n int) []string {
 // when len(lazy) > 0. Format is locked per the implementer-prompt:
 //
 //	Tool catalog (lazy): N tools available. Use `request_tools` with
-//	{names: [...]} to retrieve specific tool schemas.
+//	{tool_names: [...]} to retrieve specific tool schemas.
 //	Available tools: <name1>, <name2>, ...
 //
 // Names are emitted in input order (which mirrors broker ranking) so
@@ -289,7 +289,7 @@ func RenderToolLazyHint(lazy []llmtypes.ToolDefinition) string {
 		names[i] = t.Name
 	}
 	return fmt.Sprintf(
-		"[Tool catalog (lazy): %d tools available. Use `request_tools` with {names:[...]} to retrieve specific tool schemas.\nAvailable tools: %s]",
+		"[Tool catalog (lazy): %d tools available. Use `request_tools` with {tool_names:[...]} to retrieve specific tool schemas.\nAvailable tools: %s]",
 		len(lazy),
 		strings.Join(names, ", "),
 	)

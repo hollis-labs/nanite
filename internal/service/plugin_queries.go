@@ -16,6 +16,8 @@ var ErrPluginQueryDenied = errors.New("plugin query exceeds granted scope")
 var ErrPluginQueryNotFound = errors.New("plugin query session not found")
 
 type pluginQueryStore interface {
+	ReadPluginQueryReferences(context.Context, string, string, int) ([]store.Message, error)
+	ReadPluginExportReceipts(context.Context, string, int) ([]store.PluginCoreExport, error)
 	ReadPluginQuerySessions(context.Context, []string, bool, int) ([]store.Session, error)
 	ReadPluginQueryMetrics(context.Context, string, int) ([]store.ExecutionMetrics, error)
 }
@@ -45,6 +47,11 @@ func (service *PluginQueryService) Read(ctx context.Context, scope pluginapi.Que
 	}
 	if query.Limit < 0 || query.Limit > pluginapi.MaxQueryLimit {
 		return nil, fmt.Errorf("invalid plugin query limit")
+	}
+	if query.MessageID != "" {
+		if query.Resource != pluginapi.QueryMessageReferences || (pluginapi.CoreReference{SessionID: query.SessionID, MessageID: query.MessageID}).Validate() != nil {
+			return nil, ErrPluginQueryDenied
+		}
 	}
 	limit := query.Limit
 	if limit == 0 {
@@ -76,6 +83,19 @@ func (service *PluginQueryService) Read(ctx context.Context, scope pluginapi.Que
 		data := pluginapi.QuerySessionsData{Sessions: make([]pluginapi.QuerySession, 0), More: len(rows) > limit}
 		for _, row := range rows[:min(len(rows), limit)] {
 			data.Sessions = append(data.Sessions, querySessionView(row))
+		}
+		return data, nil
+	case pluginapi.QueryMessageReferences:
+		rows, err := service.reads.ReadPluginQueryReferences(ctx, query.SessionID, query.MessageID, limit+1)
+		if err != nil {
+			return nil, err
+		}
+		if query.MessageID != "" && len(rows) == 0 {
+			return nil, ErrPluginQueryNotFound
+		}
+		data := pluginapi.QueryMessageReferencesData{References: make([]pluginapi.QueryMessageReference, 0), More: len(rows) > limit}
+		for _, row := range rows[:min(len(rows), limit)] {
+			data.References = append(data.References, pluginapi.QueryMessageReference{MessageID: row.ID, SessionID: row.SessionID, Role: row.Role, CreatedAt: row.CreatedAt})
 		}
 		return data, nil
 	case pluginapi.QueryUsage:
@@ -128,4 +148,28 @@ func (service *PluginQueryService) Read(ctx context.Context, scope pluginapi.Que
 	default:
 		return nil, ErrPluginQueryDenied
 	}
+}
+
+// ReadExports receives the owner from the authenticated connection, never from
+// a URL parameter. Session-specific scopes cannot grant workspace export access.
+func (service *PluginQueryService) ReadExports(ctx context.Context, owner string, scope pluginapi.QueryScope, query pluginapi.QueryRequest) (any, error) {
+	if owner == "" || scope.Validate() != nil || query.Resource != pluginapi.QueryDataExports || !scope.Allows(query.Resource, query.SessionID) || query.MessageID != "" || query.Limit < 0 || query.Limit > pluginapi.MaxQueryLimit {
+		return nil, ErrPluginQueryDenied
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	limit := query.Limit
+	if limit == 0 {
+		limit = 50
+	}
+	rows, err := service.reads.ReadPluginExportReceipts(ctx, owner, limit+1)
+	if err != nil {
+		return nil, err
+	}
+	data := pluginapi.QueryDataExportsData{Exports: make([]pluginapi.DataExportReceipt, 0), More: len(rows) > limit}
+	for _, row := range rows[:min(len(rows), limit)] {
+		data.Exports = append(data.Exports, pluginapi.DataExportReceipt{PluginID: row.PluginID, Feature: row.Feature, SourceID: row.SourceID, Path: row.Path, SHA256: row.SHA256, RowCount: row.RowCount})
+	}
+	return data, nil
 }

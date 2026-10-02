@@ -123,7 +123,7 @@ require (
 	github.com/hollis-labs/go-toolresult v0.1.0
 	github.com/hollis-labs/go-workflow v0.1.0
 	github.com/hollis-labs/go-worktree v0.1.0
-	github.com/hollis-labs/nanite/pkg/pluginapi v0.1.3
+	github.com/hollis-labs/nanite/pkg/pluginapi v0.1.4
 	github.com/hollis-labs/plugin-host v0.1.2
 	github.com/hollis-labs/plugins-catalog v0.1.0
 	github.com/hollis-labs/tesseract v0.10.0

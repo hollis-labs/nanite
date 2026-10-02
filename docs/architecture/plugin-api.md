@@ -170,3 +170,24 @@ existing dynamic Context slot; fixed ordering, the Universal slot and cache
 markers retain their slot invariants. Unload, shutdown, failed launch and terminal
 restart failure remove source ownership and cancel active calls. Publication
 checks the source lifetime so a response cannot survive unload and replacement.
+
+Extracted features retain core session/message IDs as references. The reviewed
+`message_refs` query verifies identity within a permitted session and returns
+role/creation metadata without message content. A missing core reference leaves
+plugin-owned data intact; callers decide how to show the missing source.
+
+The extraction helper `dataexport.ExportAndDrop` runs inside the caller's SQLite
+write transaction. It preserves every column and SQLite storage class in a
+bounded JSON Lines snapshot under the plugin DataDir. A source ID separates
+workspace databases sharing that directory. Content-addressed files are published
+without replacing existing files, synced, re-read and checked against source row
+counts and checksums before a receipt and table drop enter the same transaction.
+A savepoint removes provisional receipts on failure. Transaction rollback can
+leave a durable file, which does not authorize import.
+
+The `data_exports` read requires explicit workspace scope and filters committed
+`plugin_core_exports` receipts by the authenticated plugin owner. Importers verify
+that receipt against the retained file before an idempotent transaction in their
+own database. The host never accepts table names, export owners or SQL through
+this API. Feature-specific extraction invokes the helper only after release,
+adoption and the reader cutover; adding the helper retires no core table itself.

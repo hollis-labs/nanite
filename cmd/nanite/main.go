@@ -403,7 +403,7 @@ func cmdServeWithInitializers(
 	}
 
 	// Finish plugin host wiring now that the MCP and toolclient dependencies exist.
-	pluginHost.SetMCPRegistrar(mcpManager)
+	pluginHost.SetMCPRegistrar(service.NewPluginToolRegistrar(mcpManager, s))
 	pluginHost.RegisterService("store", s)
 	pluginHost.RegisterService("mcp", mcpManager)
 	pluginHost.RegisterService("toolclient", tb)

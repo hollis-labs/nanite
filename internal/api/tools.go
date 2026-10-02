@@ -255,8 +255,16 @@ func (a *API) handleListToolsWithLoadType(w http.ResponseWriter, r *http.Request
 	for k, v := range prefs {
 		userOverrides[k] = pluginpkg.LoadType(v)
 	}
+	manifestDefaults := make(map[string]pluginpkg.LoadType)
+	for _, tool := range allTools {
+		value, source := a.Services.MCP.ToolLoadType(tool.Name)
+		if source == "manifest" {
+			manifestDefaults[tool.Name] = pluginpkg.LoadType(value)
+		}
+	}
 	resolver := pluginpkg.NewLoadTypeResolver(
 		pluginpkg.LoadTypeLayer{Name: "user", Overrides: userOverrides},
+		pluginpkg.LoadTypeLayer{Name: "manifest", Overrides: manifestDefaults},
 	)
 
 	type toolLoadItem struct {

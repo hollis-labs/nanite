@@ -157,3 +157,13 @@ func TestInstallReviewQueryScopeUpgradeDiff(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallReviewToolLoadingUpgradeDiff(t *testing.T) {
+	before := plugin.InstallReview{Tools: []plugin.ReviewTool{{Name: "query", Effect: "read"}}, ToolLoadType: plugin.LoadTypeOptIn}
+	after := before
+	after.ToolLoadType = plugin.LoadTypeAuto
+	changes := strings.Join(installReviewChanges(before, after), "\n")
+	if !strings.Contains(changes, "Changed Tool loading: opt-in → auto") {
+		t.Fatalf("tool activation hidden: %s", changes)
+	}
+}

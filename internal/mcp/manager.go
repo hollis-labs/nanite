@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	gmcpclient "github.com/hollis-labs/go-mcp/client"
 	feotel "github.com/hollis-labs/go-otel"
@@ -59,6 +60,8 @@ type Manager struct {
 	tools                  []*toolEntry            // all discovered tools with server association (pointer slice: entries are mutated in place post-insertion by collision-rename, so a later append reallocating this slice must never orphan an outstanding uniformIndex pointer — see assignUniformNameLocked)
 	uniformIndex           map[string]*toolEntry   // uniform name → entry (owns the *toolEntry)
 	discoveryWarnings      []DiscoveryWarning      // tools rejected during discovery
+	pluginToolLoadTypes    map[string]string       // owned manifest defaults by server
+	toolLoadPreferences    atomic.Value            // user overrides by uniform tool name
 	LoadChecker            ToolLoadChecker         // optional loadType filter
 	mu                     sync.RWMutex
 
@@ -187,6 +190,18 @@ func (m *Manager) AddBuiltinServer(name string, transport MCPTransport) error {
 func (m *Manager) DiscoverServerTools(ctx context.Context, serverName string) ([]Tool, error) {
 	m.mu.RLock()
 	transport, ok := m.servers[serverName]
+	if _, declared := m.pluginToolLoadTypes[serverName]; declared {
+		var visible []Tool
+		for _, entry := range m.tools {
+			if entry.serverName == serverName {
+				if value, _ := m.toolLoadTypeLocked(entry.uniformName); value != "opt-in" {
+					visible = append(visible, entry.tool)
+				}
+			}
+		}
+		m.mu.RUnlock()
+		return visible, nil
+	}
 	m.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("server %q not found", serverName)
@@ -205,6 +220,7 @@ func (m *Manager) RemoveServer(name string) {
 
 	delete(m.servers, name)
 	delete(m.serverTiers, name)
+	delete(m.pluginToolLoadTypes, name)
 	delete(m.firstPartyBuiltinNames, name)
 
 	// Remove tools that belonged to this server (in both the slice view
@@ -686,6 +702,9 @@ func (m *Manager) GetAllTools() []llmtypes.ToolDefinition {
 func (m *Manager) getAllToolsLocked() []llmtypes.ToolDefinition {
 	defs := make([]llmtypes.ToolDefinition, 0, len(m.tools))
 	for _, entry := range m.tools {
+		if value, _ := m.toolLoadTypeLocked(entry.uniformName); value == "opt-in" {
+			continue
+		}
 		if m.LoadChecker != nil && !m.LoadChecker.IsToolEnabled(entry.uniformName) {
 			continue
 		}
@@ -957,6 +976,10 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 		ok         bool
 	)
 	if found {
+		if value, _ := m.toolLoadTypeLocked(name); value == "opt-in" {
+			m.mu.RUnlock()
+			return "", fmt.Errorf("plugin tool %q requires explicit opt-in", name)
+		}
 		serverName = entry.serverName
 		toolName = entry.tool.Name
 		transport, ok = m.servers[serverName]
@@ -1025,6 +1048,16 @@ func (m *Manager) ExecuteToolOnServer(ctx context.Context, serverName, toolName 
 	m.mu.RLock()
 	transport, ok := m.servers[serverName]
 	tier := m.tierForLocked(serverName)
+	if _, declared := m.pluginToolLoadTypes[serverName]; declared {
+		for _, entry := range m.tools {
+			if entry.serverName == serverName && entry.tool.Name == toolName {
+				if value, _ := m.toolLoadTypeLocked(entry.uniformName); value == "opt-in" {
+					m.mu.RUnlock()
+					return "", fmt.Errorf("plugin tool %q requires explicit opt-in", toolName)
+				}
+			}
+		}
+	}
 	m.mu.RUnlock()
 	if !ok {
 		err := fmt.Errorf("unknown MCP server: %s", serverName)

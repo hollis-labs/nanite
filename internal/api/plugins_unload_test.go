@@ -33,6 +33,10 @@ func (p *apiSubprocessFixture) Load(context.Context) (sdkprocess.LoadResult, err
 }
 func (p *apiSubprocessFixture) Unload(context.Context) error { return nil }
 func (p *apiSubprocessFixture) MCPCallTool(_ context.Context, request sdkprocess.MCPCallRequest) (sdkprocess.MCPCallResult, error) {
+	if request.ToolName == "declared_echo" {
+		raw, _ := json.Marshal(map[string]any{"tool_name": request.ToolName, "session_id": request.SessionID, "arguments": request.Arguments})
+		return sdkprocess.MCPCallResult{Content: raw}, nil
+	}
 	if request.ToolName == "identity" {
 		return sdkprocess.MCPCallResult{Content: p.identity}, nil
 	}

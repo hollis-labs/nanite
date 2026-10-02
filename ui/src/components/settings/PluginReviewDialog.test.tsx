@@ -32,3 +32,17 @@ it("shows scope widening and content access before approval", () => {
   fireEvent.click(screen.getByRole("button", { name: "Approve and install" }));
   expect(onApprove).toHaveBeenCalledOnce();
 });
+
+it("shows tool activation changes before approval", () => {
+  const before: PluginInstallReview = {
+    id: "tool-reader", name: "Tool reader", version: "1.0.0",
+    bundle_digest: "old", entrypoint: "plugin", arguments: [],
+    capabilities: [], secrets: [], environment: [],
+    tools: [{ name: "bookmarks_list", effect: "read" }], tool_load_type: "opt-in",
+  };
+  const after: PluginInstallReview = { ...before, version: "2.0.0", tool_load_type: "auto" };
+  render(<PluginReviewDialog review={{ status: "review_required", review: after, review_digest: "reviewed", previous: { review: before, review_digest: "old" } }} busy={false} onCancel={vi.fn()} onApprove={vi.fn()} />);
+  expect(screen.getByText("Tool loading · Changed")).toBeTruthy();
+  expect(screen.getByText("Before: opt-in")).toBeTruthy();
+  expect(screen.getByText("After: auto")).toBeTruthy();
+});

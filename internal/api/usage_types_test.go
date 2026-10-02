@@ -9,11 +9,13 @@ import (
 )
 
 var sessionUsageViewKeys = []string{
+	"reasoning_tokens", "partial_rows",
 	"input_tokens", "output_tokens", "total_tokens", "tool_input_tokens",
 	"cache_creation_tokens", "cache_read_tokens", "estimated_cost_usd", "message_count",
 }
 
-var usageSummaryViewKeys = []string{"total_input", "total_output", "total_tokens", "total_cost", "by_model"}
+var usageSummaryViewKeys = []string{
+	"partial_rows", "total_input", "total_output", "total_tokens", "total_cost", "by_model"}
 
 // executionMetricsViewKeys is the full key set; debug_snapshots and the
 // three harness-profile keys drop out when empty.

@@ -27,7 +27,7 @@ func HandleHTTP(ctx context.Context, pluginID string, handler http.Handler, call
 		return sdkprocess.HTTPResponse{}, fmt.Errorf("pluginapi: invalid HTTP adapter input")
 	}
 	prefix := "/api/plugins/" + pluginID
-	if !strings.HasPrefix(call.Path, prefix+"/") || strings.ContainsAny(call.Path, "\x00\r\n?#") {
+	if !strings.HasPrefix(call.Path, prefix+"/") || strings.ContainsAny(call.Path, "\x00\r\n") {
 		return sdkprocess.HTTPResponse{}, fmt.Errorf("pluginapi: HTTP path outside plugin namespace")
 	}
 	localPath := strings.TrimPrefix(call.Path, prefix)

@@ -15,7 +15,7 @@ import (
 
 // Version identifies the public host contract, independently of the Nanite
 // application version. A plugin declares this range in hosts.nanite.
-const Version = "0.1.0"
+const Version = "0.1.6"
 
 // Drawer slots are host-owned browser contribution locations.
 const (
@@ -249,6 +249,9 @@ func (b Block) Validate() error {
 		normalized := path.Clean(r.Path)
 		if strings.HasSuffix(r.Path, "/") {
 			normalized += "/"
+		}
+		if normalized != r.Path {
+			return fmt.Errorf("nanite: route path %q must use canonical segments", r.Path)
 		}
 		key := "route:" + r.Method + ":" + normalized
 		if seen[key] {

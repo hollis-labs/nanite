@@ -250,6 +250,9 @@ func (b Block) Validate() error {
 		if strings.HasSuffix(r.Path, "/") {
 			normalized += "/"
 		}
+		if normalized != r.Path {
+			return fmt.Errorf("nanite: route path %q must use canonical segments", r.Path)
+		}
 		key := "route:" + r.Method + ":" + normalized
 		if seen[key] {
 			return fmt.Errorf("nanite: duplicate route %q", key)

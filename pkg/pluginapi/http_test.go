@@ -80,3 +80,12 @@ func TestHandleHTTPEscapedDelimitersRemainPathData(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPDeclarationsRefuseUnservableAliases(t *testing.T) {
+	for _, route := range []string{"items//", "./items", "items/./", "items/.", "items///"} {
+		block := Block{Registers: Registrations{HTTPRoutes: []Route{{Method: "GET", Path: route}}}}
+		if err := block.Validate(); err == nil {
+			t.Fatalf("accepted noncanonical declaration %q", route)
+		}
+	}
+}

@@ -268,17 +268,17 @@ func TestHandleInstallArchive_TarGz(t *testing.T) {
 	}
 }
 
-// TestHandleInstall_PathTraversal asserts that handleInstall rejects names
+// TestHandleInstall_PathTraversal asserts that catalog install rejects names
 // that would resolve outside pluginsDir via ".." segments. Regression for
 // the audit Critical finding: plugin install target was joined raw.
 func TestHandleInstall_PathTraversal(t *testing.T) {
-	pms, _ := setupPluginTestState(t)
+	cs := &catalogState{}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/plugins/install", pms.handleInstall)
+	mux.HandleFunc("POST /api/plugins/catalog/install", cs.handleCatalogInstall)
 
 	body, _ := json.Marshal(map[string]string{"name": "../../etc/passwd"})
-	req := httptest.NewRequest("POST", "/api/plugins/install", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/plugins/catalog/install", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -614,7 +614,7 @@ func TestExtractZip_RejectsOversizedFile(t *testing.T) {
 
 // TestExtractZip_RejectsTraversal asserts that pathsafe.ResolveUnder
 // rejects zip entries whose names contain .. segments. Complements the
-// TestHandleInstall_PathTraversal test that hits handleInstall.
+// TestHandleInstall_PathTraversal test that hits catalog install.
 func TestExtractZip_RejectsTraversal(t *testing.T) {
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "trav.zip")

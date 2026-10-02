@@ -208,8 +208,8 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if cs.store == nil {
-		cs.errorResp(w, http.StatusServiceUnavailable, "catalog store is unavailable")
+	if cs.sources == nil {
+		cs.errorResp(w, http.StatusServiceUnavailable, "catalog sources are unavailable")
 		return
 	}
 	// Look up in catalog.

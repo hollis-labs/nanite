@@ -2716,15 +2716,6 @@ export const api = {
     return res.json();
   },
 
-  installPlugin: async (name: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/plugins/install`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok) throw new Error(`Failed to install plugin: ${res.status}`);
-  },
-
   uninstallPlugin: async (name: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/plugins/uninstall`, {
       method: "POST",

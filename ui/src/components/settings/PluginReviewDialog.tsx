@@ -6,6 +6,7 @@ import type { PluginInstallReview, PluginInstallReviewResponse } from "@/lib/typ
 
 function declarations(review: PluginInstallReview): Map<string, string> {
   return new Map([
+    ["Executable", `${review.entrypoint} ${JSON.stringify(review.arguments)}`],
     ...review.capabilities.map((cap) => [`Capability: ${cap.name}`, `${cap.reason}${cap.optional ? " (optional)" : ""}`] as const),
     ...review.secrets.map((secret) => [`Secret: ${secret.name}`, `${secret.environment || "Plugin keychain"}${secret.required ? " (required)" : " (optional)"}`] as const),
     ...review.environment.map((name) => [`Configuration environment: ${name}`, name] as const),
@@ -34,8 +35,7 @@ export function PluginReviewDialog({ review, busy, onCancel, onApprove }: {
         </AlertDialogHeader>
         <div className="max-h-[55vh] overflow-y-auto space-y-3 text-sm">
           {review.previous && <p className="text-fg-muted">Updating v{review.previous.review.version} → v{review.review.version}.</p>}
-          <p>Executable: <code>{review.review.entrypoint} {review.review.arguments.join(" ")}</code></p>
-          {names.length === 0 && <p>No capabilities, secrets, or tools declared.</p>}
+          {review.review.capabilities.length + review.review.secrets.length + review.review.tools.length === 0 && <p>No capabilities, secrets, or tools declared.</p>}
           {names.map((name) => {
             const before = previous.get(name);
             const after = current.get(name);

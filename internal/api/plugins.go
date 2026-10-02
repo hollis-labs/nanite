@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/hollis-labs/go-safefs/pathsafe"
 	"github.com/hollis-labs/nanite/internal/brand"
@@ -85,7 +84,6 @@ func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, clean
 	}
 
 	mux.HandleFunc("GET /api/plugins/managed", pms.handleListManaged)
-	mux.HandleFunc("POST /api/plugins/install", pms.handleInstall)
 	mux.HandleFunc("POST /api/plugins/install-local", pms.handleInstallLocal)
 	mux.HandleFunc("POST /api/plugins/install-archive", pms.handleInstallArchive)
 	mux.HandleFunc("POST /api/plugins/uninstall", pms.handleUninstall)
@@ -305,15 +303,6 @@ func (pms *pluginManagerState) resolvePluginTargetOrBadRequest(w http.ResponseWr
 	return target, true
 }
 
-func (pms *pluginManagerState) handleInstall(w http.ResponseWriter, r *http.Request) {
-	state := &catalogState{store: pms.store, fetcher: naniteplugin.NewCatalogFetcher(time.Minute, filepath.Join(pms.pluginsDir, ".cache")), pluginsDir: pms.pluginsDir, pluginHost: pms.pluginHost}
-	state.handleCatalogInstall(w, r)
-}
-
-// handleInstallLocal installs a plugin from a local directory path.
-// POST /api/plugins/install-local {"path": "/absolute/path/to/plugin"}
-// The directory must contain a plugin.yaml. Contents are copied (not symlinked)
-// into the plugins directory. No signature verification (local trust model).
 func (pms *pluginManagerState) handleInstallLocal(w http.ResponseWriter, r *http.Request) {
 	var req InstallLocalRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {

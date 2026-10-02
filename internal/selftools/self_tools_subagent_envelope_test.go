@@ -38,7 +38,7 @@ func gatedSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfTools
 	emitter := &gatedApprovalEmitter{}
 	settings := gatedSettingsReader{us: store.UserSettings{SubagentApprovalRequired: true}}
 	svc := subagent.NewService(s.DB, runner, nil, emitter, settings)
-	return &SelfToolsTransport{Store: s, Subagent: svc}
+	return &SelfToolsTransport{Reads: testReadServices(s), Store: s, Subagent: svc}
 }
 
 // gatedSettingsReader forces SubagentApprovalRequired=true so the
@@ -76,7 +76,7 @@ func newSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfToolsTr
 	}
 	t.Cleanup(func() { _ = s.Close(context.Background()); _ = os.Remove(dbPath) })
 	svc := subagent.NewService(s.DB, runner, nil, nil, nil)
-	return &SelfToolsTransport{Store: s, Subagent: svc}
+	return &SelfToolsTransport{Reads: testReadServices(s), Store: s, Subagent: svc}
 }
 
 // failingRunner returns the configured error from Run — used to drive
@@ -474,7 +474,7 @@ func TestRecoverSyncSummary_StoreError_ReturnsError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Remove(dbPath) })
 
-	st := &SelfToolsTransport{Store: s}
+	st := &SelfToolsTransport{Reads: testReadServices(s), Store: s}
 
 	// Run row pointing at a child session — recoverSyncSummary will
 	// call Store.ListMessages with this child session ID.
@@ -515,7 +515,7 @@ func TestSyncSubagentEnvelope_RecoverSummaryError_EmitsInternalNotEmptyReply(t *
 	t.Cleanup(func() { _ = os.Remove(dbPath) })
 
 	svc := subagent.NewService(s.DB, subagent.EchoRunner{}, nil, nil, nil)
-	st := &SelfToolsTransport{Store: s, Subagent: svc}
+	st := &SelfToolsTransport{Reads: testReadServices(s), Store: s, Subagent: svc}
 
 	// Build a completed run directly via the service Spawn path
 	// (Spawn returns the run ID synchronously in sync mode). Use a

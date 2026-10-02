@@ -83,7 +83,7 @@ func TestCallTaskUpdateReport_FullChain_RenderCardAndInternalAPICall(t *testing.
 		t.Fatalf("insert internal_api_call reaction: %v", err)
 	}
 
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 	st.Reactions = reactions.NewEngine(s, apiSrv.Client(), nil)
 
 	result, err := st.CallTool(ctx, taskUpdateReportToolName, map[string]any{
@@ -227,7 +227,7 @@ func TestCallTaskUpdateReport_NoReactionsWired_StillConfirms(t *testing.T) {
 func TestCallTaskUpdateReport_NoReactionsConfigured_StillConfirmsAndNoEvents(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 	st.Reactions = reactions.NewEngine(s, nil, nil)
 
 	result, err := st.CallTool(ctx, taskUpdateReportToolName, map[string]any{

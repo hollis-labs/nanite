@@ -26,7 +26,7 @@ func newTestStore(t *testing.T) *store.Store {
 func newSelfTools(t *testing.T) *SelfToolsTransport {
 	t.Helper()
 	s := newTestStore(t)
-	return NewSelfToolsTransport(s)
+	return newTestSelfToolsTransport(s)
 }
 
 // TestSelfToolsTransport_ListTools verifies all expected tools are returned.

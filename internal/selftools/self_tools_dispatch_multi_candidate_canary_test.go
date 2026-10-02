@@ -81,7 +81,7 @@ func TestMatchDispatchToAgentReflex_KindLookupDegraded_LogsMultiCandidateCanary(
 		t.Fatalf("re-enable foreign_keys: %v", err)
 	}
 
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const msg = "probe-multi-candidate-token please route this"
 

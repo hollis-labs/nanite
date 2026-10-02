@@ -10,10 +10,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/service"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
@@ -95,7 +96,7 @@ func TestForwardingServer_AdvertisesTodaysSetPerScope(t *testing.T) {
 		}
 		t.Cleanup(func() { s.Close(context.Background()) })
 		var want []string
-		self, _ := selftools.NewSelfToolsTransport(s).ListTools(context.Background())
+		self, _ := service.NewSelfToolsTransport(s).ListTools(context.Background())
 		dev, _ := condmcp.NewDevToolsTransport(nil).ListTools(context.Background())
 		for _, tool := range append(self, dev...) {
 			want = append(want, tool.Name)

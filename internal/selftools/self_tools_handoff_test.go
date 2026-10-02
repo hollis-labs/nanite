@@ -15,7 +15,7 @@ import (
 // it omits the arg and the context value carries it.
 func TestHandoffStash_ResolvesSessionFromContext(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const sessID = "sess-handoff-ctx"
 	seedSession(t, s, sessID)
@@ -52,7 +52,7 @@ func TestHandoffStash_ResolvesSessionFromContext(t *testing.T) {
 // (a real session row) succeeds.
 func TestHandoffStash_ContextWinsOverArg(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const sessID = "sess-handoff-ctxwins"
 	seedSession(t, s, sessID)
@@ -75,7 +75,7 @@ func TestHandoffStash_ContextWinsOverArg(t *testing.T) {
 // context nor the args carry a session id.
 func TestHandoffStash_NoSessionAnywhere(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	result, err := st.CallTool(context.Background(), "handoff_stash", map[string]any{
 		"session_intent":   "no session",
@@ -93,7 +93,7 @@ func TestHandoffStash_NoSessionAnywhere(t *testing.T) {
 // handoff_pointers_expand, with both calls resolving the session from context.
 func TestHandoffStash_RoundTrip(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	const sessID = "sess-handoff-roundtrip"
 	seedSession(t, s, sessID)
@@ -148,7 +148,7 @@ func TestHandoffToolDefinitions_SessionIDOptional(t *testing.T) {
 // where there is no chat-loop turn state.
 func TestScratchpadTools_ClearErrorViaTransport(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	for _, name := range []string{"scratchpad_write", "scratchpad_read", "scratchpad_clear"} {
 		result, err := st.CallTool(context.Background(), name, map[string]any{})

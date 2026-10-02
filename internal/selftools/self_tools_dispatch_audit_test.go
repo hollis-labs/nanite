@@ -32,7 +32,7 @@ func TestCallExecuteTask_ReflexMatch_EmitsUnifiedTraceRecord(t *testing.T) {
 	}
 
 	spawner := &recordingSpawner{result: &dispatch.SpawnResult{Summary: "worker done"}}
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 	st.Dispatch = spawner
 
 	// "Implement" is a worker-execute migrated phrase

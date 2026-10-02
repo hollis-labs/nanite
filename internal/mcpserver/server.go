@@ -8,12 +8,13 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/service"
+
 	gmcpserver "github.com/hollis-labs/go-mcp/server"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/version"
 )
@@ -86,7 +87,7 @@ func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot 
 	// harness wires would answer every call with "… not configured", so
 	// leave them out of the listing (CW-20261001-0017). An explicit
 	// allowlist is the launcher naming its exact surface, and stands.
-	local := selftools.NewSelfToolsTransport(s)
+	local := service.NewSelfToolsTransport(s)
 	local.HideUnwired = srv.toolAllowlist == nil
 	srv.self = local
 	return srv

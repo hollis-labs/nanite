@@ -49,7 +49,7 @@ func makeTestSessionWithPrimaryAgent(t *testing.T, s *store.Store, agentID strin
 // own hardcoded retry-policy defaults.
 func TestCallScheduleCreate_CallerProfileContext_CronRow(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 	agentA := makeTestAgentProfile(t, s, "sched-tool-a")
 
 	ctx := mcp.WithCallerProfile(context.Background(), agentA.ID)
@@ -138,7 +138,7 @@ func TestCallScheduleCreate_CallerProfileContext_CronRow(t *testing.T) {
 // default before it reaches the shared domain validator.
 func TestCallScheduleCreate_OneShot_DueNow(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 	agent := makeTestAgentProfile(t, s, "sched-tool-oneshot")
 
 	before := time.Now().UTC()
@@ -183,7 +183,7 @@ func TestCallScheduleCreate_OneShot_DueNow(t *testing.T) {
 // store.GetSessionPrimaryAgent, and scopes the inserted row to it.
 func TestCallScheduleCreate_SessionFallback_ResolvesPrimaryAgent(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 	agent := makeTestAgentProfile(t, s, "sched-tool-session-fallback")
 	sess := makeTestSessionWithPrimaryAgent(t, s, agent.ID)
 
@@ -222,7 +222,7 @@ func TestCallScheduleCreate_SessionFallback_ResolvesPrimaryAgent(t *testing.T) {
 // doesn't advertise the field" on paper.
 func TestCallScheduleCreate_CannotTargetAnotherAgent(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 	agentA := makeTestAgentProfile(t, s, "sched-tool-victim")
 	agentB := makeTestAgentProfile(t, s, "sched-tool-attacker")
 
@@ -267,7 +267,7 @@ func TestCallScheduleCreate_CannotTargetAnotherAgent(t *testing.T) {
 // than falling back to a blank/empty agent_id.
 func TestCallScheduleCreate_NoIdentityInContext(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	res, err := st.CallTool(context.Background(), scheduleCreateToolName, map[string]any{
 		"kind":    "one_shot",
@@ -289,7 +289,7 @@ func TestCallScheduleCreate_NoIdentityInContext(t *testing.T) {
 // one_shot, and missing message.
 func TestCallScheduleCreate_ValidationErrors(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 	agent := makeTestAgentProfile(t, s, "sched-tool-validation")
 	ctx := mcp.WithCallerProfile(context.Background(), agent.ID)
 

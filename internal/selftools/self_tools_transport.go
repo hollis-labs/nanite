@@ -45,6 +45,7 @@ type SelfToolsTransport struct {
 	HideUnwired bool
 
 	Store             *store.Store
+	Reads             ReadServices
 	BuilderRegistry   *builders.Registry
 	BuilderSessions   *builders.SessionManager
 	MessagingTools    *MessagingTools
@@ -240,9 +241,10 @@ type SelfToolsTransport struct {
 }
 
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
-func NewSelfToolsTransport(s *store.Store) *SelfToolsTransport {
+func NewSelfToolsTransport(s *store.Store, reads ReadServices) *SelfToolsTransport {
 	return &SelfToolsTransport{
 		Store:               s,
+		Reads:               reads,
 		SkillIndex:          s,
 		SkillUninstallIndex: s,
 		SkillGrants:         s,
@@ -463,7 +465,7 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 // them is gone here.
 
 func (st *SelfToolsTransport) callListSkills(args map[string]any) (*mcp.ToolResult, error) {
-	skills, err := st.Store.ListSkills(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+	skills, err := st.Reads.Skills.List(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("list skills: %v", err)), nil
 	}
@@ -526,7 +528,7 @@ func (st *SelfToolsTransport) callDeleteSkill(args map[string]any) (*mcp.ToolRes
 		return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil
 	}
 	if sk == nil {
-		sk, err = st.Store.GetSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, ref)
+		sk, err = st.Reads.Skills.Get(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, ref)
 		if err != nil {
 			return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil
 		}
@@ -1643,7 +1645,7 @@ func (st *SelfToolsTransport) recoverSyncSummary(run *subagent.Run) (string, err
 		// No child session to scan — legitimately empty, not an error.
 		return "", nil
 	}
-	msgs, err := st.Store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, run.ChildSessionID, 20)
+	msgs, err := st.Reads.Sessions.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, run.ChildSessionID, 20)
 	if err != nil {
 		// Store lookup failure — surface to caller so the envelope can
 		// emit ErrorKindInternal instead of the misleading

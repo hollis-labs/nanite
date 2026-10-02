@@ -12,7 +12,6 @@ import (
 	toolresult "github.com/hollis-labs/go-toolresult"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/truncate"
@@ -132,7 +131,7 @@ func TestPresentSelfToolResult_BudgetFollowsSessionModel(t *testing.T) {
 // recover it — scoped to the session.
 func TestHandleSelfToolCall_CacheNavigationRoundTrip(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
+	a.SetSelfTools(service.NewSelfToolsTransport(s))
 	mkSession(t, s, "sess-a", "")
 	mkSession(t, s, "sess-b", "")
 	body := strings.Repeat("filler line\n", 20_000) + "NEEDLE-42\n"
@@ -169,7 +168,7 @@ func TestHandleSelfToolCall_CacheNavigationRoundTrip(t *testing.T) {
 // sessionless calls are not, and persistence never affects the response.
 func TestHandleSelfToolCall_PersistsRedactedArguments(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
+	a.SetSelfTools(service.NewSelfToolsTransport(s))
 	mkSession(t, s, "sess-a", "")
 
 	rec := postToolCall(t, a, map[string]any{"session_id": "sess-a", "name": "whoami",
@@ -313,7 +312,7 @@ func TestCLISessionSizingModelOrder(t *testing.T) {
 // CW-20260929-0021: the stored tool_call_id is unique per call, not per tool.
 func TestHandleSelfToolCall_ToolCallIDIsPerCall(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
+	a.SetSelfTools(service.NewSelfToolsTransport(s))
 	mkSession(t, s, "sess-a", "")
 
 	for i := 0; i < 3; i++ {
@@ -342,7 +341,7 @@ func TestHandleSelfToolCall_ToolCallIDIsPerCall(t *testing.T) {
 // it is not.
 func TestHandleSelfToolCall_CallerCallID(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
+	a.SetSelfTools(service.NewSelfToolsTransport(s))
 	mkSession(t, s, "sess-a", "")
 
 	postToolCall(t, a, map[string]any{"session_id": "sess-a", "name": "whoami", "call_id": "toolu_01AbC-9.x:y"})

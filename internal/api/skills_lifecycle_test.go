@@ -18,7 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/selftools"
+	"github.com/hollis-labs/nanite/internal/service"
+
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -229,7 +230,7 @@ func TestSkillDelete_RESTAndSelfTool_SameEndState(t *testing.T) {
 		t.Fatalf("REST delete: expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	transport := selftools.NewSelfToolsTransport(a.Services.Store)
+	transport := service.NewSelfToolsTransport(a.Services.Store)
 	transport.SkillVendor = a.Services.SkillVendor
 	toolResult, err := transport.CallTool(context.Background(), "skill_delete", map[string]any{"slug": toolInstalled.Skill.Slug})
 	if err != nil {

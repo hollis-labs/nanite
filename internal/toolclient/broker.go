@@ -473,7 +473,33 @@ func (tb *ToolClient) HandleRequestToolsForAgent(ctx context.Context, agentID st
 		return nil, fmt.Sprintf("permission denied: request_tools arguments contain escalation pattern (\"..\") for agent %q", agentID)
 	}
 
-	merged, summary := tb.HandleRequestTools(input)
+	// Snapshot the existing visibility rules once: intent search may examine
+	// thousands of tools before applying the limit.
+	grants := make(map[string]bool)
+	if tb.Store != nil {
+		names, err := tb.Store.ListAgentToolNames(ctx, agentID)
+		if err != nil {
+			slog.Warn("toolclient: agent_tools lookup failed — denying non-escape-hatch tool", "agent", agentID, "err", err)
+		} else {
+			for _, name := range names {
+				grants[name] = true
+			}
+		}
+		always, err := tb.Store.ListAlwaysIncludedKnownTools(ctx)
+		if err != nil {
+			slog.Warn("toolclient: list always_included known_tools failed — denying", "agent", agentID, "err", err)
+		} else {
+			for _, tool := range always {
+				if tool.Status == "available" {
+					grants[tool.Name] = true
+				}
+			}
+		}
+	}
+	allowed := func(name string) bool {
+		return tb.Store == nil || name == "fetch_tool_result" || name == "search_tool_result" || grants[name]
+	}
+	merged, summary := tb.handleRequestTools(input, allowed)
 	if len(merged) == 0 {
 		return merged, summary
 	}
@@ -483,7 +509,7 @@ func (tb *ToolClient) HandleRequestToolsForAgent(ctx context.Context, agentID st
 	for _, t := range merged {
 		// Chat owns these session-scoped readers and always supplies their
 		// schemas. A redundant request_tools call must agree with that surface.
-		if t.Name == "fetch_tool_result" || t.Name == "search_tool_result" || tb.isToolGrantedToAgent(ctx, agentID, t.Name) {
+		if allowed(t.Name) {
 			permitted = append(permitted, t)
 			continue
 		}

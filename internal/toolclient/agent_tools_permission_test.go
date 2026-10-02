@@ -2,6 +2,7 @@ package toolclient
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,6 +34,14 @@ func TestHandleRequestToolsForAgent_CacheNavigationRemainsAvailable(t *testing.T
 	}
 	if !seen["fetch_tool_result"] || !seen["search_tool_result"] || seen["ordinary_source"] {
 		t.Fatalf("cache schema discovery disagrees with chat execution rights: %v (%s)", seen, summary)
+	}
+	permitted, summary = tb.HandleRequestToolsForAgent(ctx, agent.ID, map[string]any{"intent": "cached result"})
+	seen = map[string]bool{}
+	for _, def := range permitted {
+		seen[def.Name] = true
+	}
+	if !seen["fetch_tool_result"] || !seen["search_tool_result"] || seen["ordinary_source"] {
+		t.Fatalf("intent filtering dropped session-owned cache readers: %v (%s)", seen, summary)
 	}
 }
 
@@ -184,5 +193,49 @@ func TestHandleRequestToolsForAgent_AgentToolsDeniesUngrantedInnerName(t *testin
 	}
 	if !strings.Contains(summary, "dev_bash") {
 		t.Errorf("expected summary to mention denied dev_bash, got: %s", summary)
+	}
+}
+
+func TestHandleRequestToolsForAgent_GrantsBeforeIntentLimit(t *testing.T) {
+	s := newStoreForPermTest(t)
+	ctx := context.Background()
+	agent := &store.AgentProfile{Name: "Intent reader", Slug: "intent-reader", SystemPrompt: "test"}
+	if err := s.CreateAgent(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.UpsertKnownTool(ctx, "allowed_low_score", "builtin", "available", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.GrantAgentTool(ctx, agent.ID, id, "explicit"); err != nil {
+		t.Fatal(err)
+	}
+	tools := []llmtypes.ToolDefinition{{Name: "allowed_low_score", Description: "Task"}}
+	for i := 0; i < DefaultMaxIntentResults+1; i++ {
+		tools = append(tools, llmtypes.ToolDefinition{Name: fmt.Sprintf("task_create_%d", i), Description: "Create task backlog"})
+	}
+	tb := New(nil, s, DefaultConfig())
+	tb.Builtins.RegisterBuiltins("test", tools)
+	got, summary := tb.HandleRequestToolsForAgent(ctx, agent.ID, map[string]any{"intent": "create task backlog"})
+	if len(got) != 1 || got[0].Name != "allowed_low_score" {
+		t.Fatalf("ungranted top-ranked tools hid granted match: %+v (%s)", got, summary)
+	}
+	for i := range tools {
+		id, err := s.UpsertKnownTool(ctx, tools[i].Name, "builtin", "available", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.GrantAgentTool(ctx, agent.ID, id, "explicit"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ = tb.HandleRequestToolsForAgent(ctx, agent.ID, map[string]any{"intent": "create task backlog"})
+	if len(got) != DefaultMaxIntentResults {
+		t.Fatalf("intent limit changed: %d", len(got))
+	}
+	for _, tool := range got {
+		if tool.Name == "allowed_low_score" {
+			t.Fatal("existing rank order was not retained")
+		}
 	}
 }

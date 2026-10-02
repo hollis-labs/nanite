@@ -17,6 +17,11 @@ const MinIntentScore = 1
 // description) and returns the top maxTools results sorted by relevance.
 // If no tool scores above MinIntentScore, an empty slice is returned.
 func (tb *ToolClient) SelectByIntent(intent string, maxTools int) []llmtypes.ToolDefinition {
+	return tb.selectByIntent(intent, maxTools, nil)
+}
+
+// selectByIntent applies visibility before scoring and the result limit.
+func (tb *ToolClient) selectByIntent(intent string, maxTools int, allowed func(string) bool) []llmtypes.ToolDefinition {
 	allTools := tb.ListTools()
 	if len(allTools) == 0 || intent == "" {
 		return nil
@@ -35,6 +40,9 @@ func (tb *ToolClient) SelectByIntent(intent string, maxTools int) []llmtypes.Too
 
 	var candidates []scored
 	for _, t := range allTools {
+		if allowed != nil && !allowed(t.Name) {
+			continue
+		}
 		s := scoreToolAgainstIntent(t, intentWords)
 		if s >= MinIntentScore {
 			candidates = append(candidates, scored{tool: t, score: s})

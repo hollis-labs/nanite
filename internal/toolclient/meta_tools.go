@@ -47,6 +47,10 @@ const DefaultMaxIntentResults = 10
 // It resolves tools by exact name and/or by intent scoring, returning the
 // matched tool definitions as a JSON-encoded result string.
 func (tb *ToolClient) HandleRequestTools(input map[string]any) ([]llmtypes.ToolDefinition, string) {
+	return tb.handleRequestTools(input, nil)
+}
+
+func (tb *ToolClient) handleRequestTools(input map[string]any, allowed func(string) bool) ([]llmtypes.ToolDefinition, string) {
 	var byName []llmtypes.ToolDefinition
 	var byIntent []llmtypes.ToolDefinition
 
@@ -68,7 +72,7 @@ func (tb *ToolClient) HandleRequestTools(input map[string]any) ([]llmtypes.ToolD
 	// Resolve by intent.
 	if intentStr, ok := input["intent"]; ok {
 		if s, ok := intentStr.(string); ok && s != "" {
-			byIntent = tb.SelectByIntent(s, DefaultMaxIntentResults)
+			byIntent = tb.selectByIntent(s, DefaultMaxIntentResults, allowed)
 			slog.Info("toolclient: request_tools matched", "intent", s, "count", len(byIntent))
 		}
 	}

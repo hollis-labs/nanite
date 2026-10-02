@@ -1,6 +1,7 @@
 package toolclient
 
 import (
+	"sort"
 	"sync"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
@@ -29,14 +30,20 @@ func (r *BuiltinToolRegistry) RegisterBuiltins(category string, tools []llmtypes
 	r.tools[category] = tools
 }
 
-// GetBuiltins returns all registered built-in tools across all categories.
+// GetBuiltins returns categories in lexical order, preserving the registered
+// tool order within each category so prompt prefixes stay stable.
 func (r *BuiltinToolRegistry) GetBuiltins() []llmtypes.ToolDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var all []llmtypes.ToolDefinition
-	for _, tools := range r.tools {
-		all = append(all, tools...)
+	categories := make([]string, 0, len(r.tools))
+	for category := range r.tools {
+		categories = append(categories, category)
+	}
+	sort.Strings(categories)
+	for _, category := range categories {
+		all = append(all, r.tools[category]...)
 	}
 	return all
 }

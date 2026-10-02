@@ -9,6 +9,7 @@ import (
 	"time"
 
 	gmcpclient "github.com/hollis-labs/go-mcp/client"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // defaultCallTimeout is the safety-net context deadline applied to a
@@ -65,17 +66,17 @@ func (t *remoteTransport) ListTools(ctx context.Context) ([]Tool, error) {
 	callCtx, cancel := t.withCallTimeout(ctx)
 	defer cancel()
 
-	res, err := t.pool.ListTools(callCtx, t.name)
+	tools, err := t.listToolPages(callCtx)
 	if err != nil {
 		t.pool.Invalidate(t.name)
-		res, err = t.pool.ListTools(callCtx, t.name)
+		tools, err = t.listToolPages(callCtx)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("tools/list: %w", err)
 	}
 
-	out := make([]Tool, 0, len(res.Tools))
-	for _, tool := range res.Tools {
+	out := make([]Tool, 0, len(tools))
+	for _, tool := range tools {
 		if tool == nil {
 			continue
 		}
@@ -86,6 +87,43 @@ func (t *remoteTransport) ListTools(ctx context.Context) ([]Tool, error) {
 		out = append(out, converted)
 	}
 	return out, nil
+}
+
+// listToolPages keeps cursors on the session that issued them. A failed page
+// discards the whole listing; ListTools reconnects and retries from page one.
+func (t *remoteTransport) listToolPages(ctx context.Context) ([]*sdkmcp.Tool, error) {
+	page, err := t.pool.ListTools(ctx, t.name)
+	if err != nil {
+		return nil, err
+	}
+	client, err := t.pool.Get(t.name)
+	if err != nil {
+		return nil, err
+	}
+	session := client.SDKSession()
+	var tools []*sdkmcp.Tool
+	seen := make(map[string]bool)
+	for {
+		if page == nil {
+			return nil, fmt.Errorf("server returned no tools/list result")
+		}
+		tools = append(tools, page.Tools...)
+		cursor := page.NextCursor
+		if cursor == "" {
+			return tools, nil
+		}
+		if seen[cursor] {
+			return nil, fmt.Errorf("server repeated tools/list cursor %q", cursor)
+		}
+		seen[cursor] = true
+		if session == nil {
+			return nil, fmt.Errorf("tools/list session closed before next page")
+		}
+		page, err = session.ListTools(ctx, &sdkmcp.ListToolsParams{Cursor: cursor})
+		if err != nil {
+			return nil, err
+		}
+	}
 }
 
 // CallTool invokes a tool and converts the result.

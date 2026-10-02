@@ -239,7 +239,7 @@ func TestRenderToolLazyHint_FormatLockedPerPrompt(t *testing.T) {
 	if !strings.Contains(got, "Tool catalog (lazy): 3 tools available") {
 		t.Errorf("hint missing count phrase; got %q", got)
 	}
-	if !strings.Contains(got, "request_tools") {
+	if !strings.Contains(got, "request_tools` with {tool_names:[...]}") {
 		t.Errorf("hint missing request_tools reference; got %q", got)
 	}
 	if !strings.Contains(got, "foo, bar, baz") {

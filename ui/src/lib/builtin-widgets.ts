@@ -82,14 +82,6 @@ const CORE_ENTRIES: Record<string, WidgetRegistryEntry> = {
     ),
     source: "core",
   },
-  bookmarks: {
-    component: lazy(() =>
-      import("@/components/plugins/bookmarks/BookmarksWidget").then((m) => ({
-        default: m.BookmarksWidget,
-      })),
-    ),
-    source: "bookmarks",
-  },
   "slot-inspector": {
     component: lazy(() =>
       import("@/components/plugins/debug/SlotInspectorWidget").then((m) => ({
@@ -116,7 +108,6 @@ export const WIDGET_REGISTRY: Record<string, WidgetRegistryEntry> = {
 // Default widget order — used when user has no saved preference. Core-only.
 export const DEFAULT_WIDGET_ORDER: string[] = [
   "session-info",
-  "bookmarks",
   "context-budget",
   "token-usage",
   "observability",

@@ -25,9 +25,7 @@ const (
 	EventMessageSent     = "message.sent"
 	EventMessageReceived = "message.received"
 	// planned-v2: needed once message delete API handler is added
-	EventMessageDeleted      = "message.deleted"
-	EventMessageBookmarked   = "message.bookmarked"
-	EventMessageUnbookmarked = "message.unbookmarked"
+	EventMessageDeleted = "message.deleted"
 
 	// planned-v2: needed once runtime scope transitions are tracked
 	EventScopeChanged = "scope.changed"
@@ -465,26 +463,6 @@ func (h *Host) EmitAgentLoaded(sessionID, agentID, agentName, version string) {
 		AgentName:    agentName,
 		AgentVersion: version,
 	})
-	h.EmitEvent(event)
-}
-
-// EmitMessageBookmarked emits a message.bookmarked event after a bookmark is created.
-func (h *Host) EmitMessageBookmarked(sessionID, messageID, bookmarkID string) {
-	event := NewEvent(EventMessageBookmarked, brand.ID, EventData{
-		SessionID: sessionID,
-		MessageID: messageID,
-	})
-	event.Data["bookmark_id"] = bookmarkID
-	h.EmitEvent(event)
-}
-
-// EmitMessageUnbookmarked emits a message.unbookmarked event after a bookmark is removed.
-func (h *Host) EmitMessageUnbookmarked(sessionID, messageID, bookmarkID string) {
-	event := NewEvent(EventMessageUnbookmarked, brand.ID, EventData{
-		SessionID: sessionID,
-		MessageID: messageID,
-	})
-	event.Data["bookmark_id"] = bookmarkID
 	h.EmitEvent(event)
 }
 

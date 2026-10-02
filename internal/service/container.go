@@ -95,8 +95,6 @@ type Container struct {
 	// Loops owns goal CRUD, goal evidence and loop-run reads; launching and
 	// resolving loop runs is loop.LoopLauncher's, wired into the API.
 	Loops *LoopService
-	// Bookmarks owns message bookmarks.
-	Bookmarks *BookmarkService
 	// Schedules owns operator CRUD on agent_schedules; Engine fires them.
 	Schedules *ScheduleService
 	Skills    SkillService
@@ -515,6 +513,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	var pluginSink PluginEventSink
 	if cfg.Plugins != nil {
 		pluginSink = cfg.Plugins
+		cfg.Plugins.SetCoreDataAdopter(NewPluginCoreData(cfg.Store))
 	}
 	events := NewCompositeEmitter(cfg.Activity, pluginSink, chatLifecycle)
 
@@ -1600,7 +1599,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentCapabilities:   NewAgentCapabilitiesService(cfg.Store),
 		Reflexes:            NewReflexService(cfg.Store),
 		Loops:               NewLoopService(cfg.Store),
-		Bookmarks:           NewBookmarkService(cfg.Store),
 		Schedules:           NewScheduleService(cfg.Store),
 		Settings:            newUserSettingsWithToolLoads(cfg.Store, cfg.MCP),
 		MCPServers:          newContainerMCPServerService(cfg.Store, cfg.MCP),

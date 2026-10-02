@@ -120,16 +120,6 @@ type ProjectStore interface {
 	DeleteProject(ctx context.Context, id string) error
 }
 
-// BookmarkStore provides access to message bookmarks.
-type BookmarkStore interface {
-	ListBookmarks(ctx context.Context, sessionID string) ([]store.Bookmark, error)
-	GetBookmark(ctx context.Context, id string) (*store.Bookmark, error)
-	GetBookmarkByMessage(ctx context.Context, messageID string) (*store.Bookmark, error)
-	CreateBookmark(ctx context.Context, b *store.Bookmark) error
-	DeleteBookmark(ctx context.Context, id string) error
-	UpdateBookmarkNote(ctx context.Context, id, note string) error
-}
-
 // ArtifactStore provides access to session artifacts.
 type ArtifactStore interface {
 	ListArtifacts(ctx context.Context, sessionID string) ([]store.Artifact, error)
@@ -268,7 +258,6 @@ type Store interface {
 	UsageStore
 	SettingsStore
 	ProjectStore
-	BookmarkStore
 	ArtifactStore
 	SkillStore
 	ProviderStore

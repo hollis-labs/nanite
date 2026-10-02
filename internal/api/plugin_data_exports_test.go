@@ -36,8 +36,7 @@ func TestPluginHostExportReceiptsAndCoreReferences(t *testing.T) {
 	if checkErr := st.CreateMessage(ctx, message); checkErr != nil {
 		t.Fatal(checkErr)
 	}
-	bookmark := &store.Bookmark{SessionID: session.ID, MessageID: message.ID, Note: "Saved", Tags: `["star"]`}
-	if checkErr := st.CreateBookmark(ctx, bookmark); checkErr != nil {
+	if _, checkErr := st.DB.ExecContext(ctx, `INSERT INTO bookmarks(id,session_id,message_id,note,tags) VALUES (?,?,?,?,?)`, "export-fixture-bookmark", session.ID, message.ID, "Saved", `["star"]`); checkErr != nil {
 		t.Fatal(checkErr)
 	}
 	sessions := service.NewSessionService(service.SessionServiceDeps{Sessions: st})
@@ -164,10 +163,10 @@ func TestPluginHostExportReceiptsAndCoreReferences(t *testing.T) {
 	}
 	snapshot, err := pluginapi.DecodeDataExport(file)
 	_ = file.Close()
-	if err != nil || receipt.Verify(snapshot) != nil || snapshot.Snapshot.Rows[0][0].Text != bookmark.ID {
+	if err != nil || receipt.Verify(snapshot) != nil || snapshot.Snapshot.Rows[0][0].Text != "export-fixture-bookmark" {
 		t.Fatal("bookmark export differs from actual store row")
 	}
-	expected := map[string]string{"id": bookmark.ID, "session_id": session.ID, "message_id": message.ID, "note": bookmark.Note, "tags": bookmark.Tags, "created_at": bookmark.CreatedAt}
+	expected := map[string]string{"id": "export-fixture-bookmark", "session_id": session.ID, "message_id": message.ID, "note": "Saved", "tags": `["star"]`}
 	for index, column := range snapshot.Snapshot.Columns {
 		if value, known := expected[column]; known && snapshot.Snapshot.Rows[0][index].Text != value {
 			t.Fatalf("bookmark field %s differs", column)

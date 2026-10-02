@@ -335,13 +335,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/harness/v1/durable-agents/{id}/resume", a.handleHarnessV1DurableResume)
 	mux.HandleFunc("POST /api/harness/v1/durable-agents/{id}/wake", a.handleHarnessV1DurableWake)
 
-	// Bookmarks
-	mux.HandleFunc("GET /api/sessions/{id}/bookmarks", a.handleListBookmarks)
-	mux.HandleFunc("POST /api/bookmarks", a.handleCreateBookmark)
-	mux.HandleFunc("DELETE /api/bookmarks/{id}", a.handleDeleteBookmark)
-	mux.HandleFunc("POST /api/messages/{id}/bookmark", a.handleToggleBookmark)
-	mux.HandleFunc("POST /api/bookmarks/{id}/autotitle", a.handleAutotitleBookmark)
-
 	// Artifacts
 	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifactsByOrigin) // supports ?origin= filter
 	// F4 (CW-20260429-0004): project-inherited artifacts for the right-rail

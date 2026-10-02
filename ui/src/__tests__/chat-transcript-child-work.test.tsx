@@ -6,8 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/api", () => ({
   api: {
     getSettings: vi.fn().mockResolvedValue({ recover_mode: false }),
-    listBookmarks: vi.fn().mockResolvedValue([]),
-    toggleBookmark: vi.fn().mockResolvedValue({}),
     listUISlots: vi.fn().mockResolvedValue({}),
   },
 }));

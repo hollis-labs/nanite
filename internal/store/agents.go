@@ -945,6 +945,9 @@ func (s *Store) ListSessionAgents(ctx context.Context, sessionID string) ([]Sess
 	return out, rows.Err()
 }
 
+// ErrSessionAgentNotFound denotes an absent session-agent membership.
+var ErrSessionAgentNotFound = errors.New("session agent not found")
+
 // DeleteSessionAgent removes an agent from a session.
 // Returns an error if the row does not exist.
 func (s *Store) DeleteSessionAgent(ctx context.Context, sessionID, agentID string) error {
@@ -960,7 +963,7 @@ func (s *Store) DeleteSessionAgent(ctx context.Context, sessionID, agentID strin
 		return fmt.Errorf("delete session agent rows affected: %w", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("session agent not found")
+		return ErrSessionAgentNotFound
 	}
 	return nil
 }

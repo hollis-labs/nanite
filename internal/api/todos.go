@@ -43,7 +43,7 @@ func (a *API) handleUpdateTodoScope(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := a.Services.Todos.UpdateTodoScope(r.Context(), r.PathValue("id"), req.Scope, req.ScopeID, req.ProjectID)
 	if err != nil {
-		a.serviceError(w, err)
+		a.serviceError(w, r, err)
 		return
 	}
 	a.Services.Streams.BroadcastWorkChanged()
@@ -68,7 +68,7 @@ func (a *API) handleCreateTodo(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleGetTodo(w http.ResponseWriter, r *http.Request) {
 	t, err := a.Services.Todos.GetTodo(r.Context(), r.PathValue("id"))
 	if err != nil {
-		a.serviceError(w, err)
+		a.serviceError(w, r, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, todoToView(t))
@@ -82,7 +82,7 @@ func (a *API) handleUpdateTodo(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := a.Services.Todos.UpdateTodo(r.Context(), r.PathValue("id"), updates)
 	if err != nil {
-		a.serviceError(w, err)
+		a.serviceError(w, r, err)
 		return
 	}
 	a.Services.Streams.BroadcastWorkChanged()

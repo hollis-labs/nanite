@@ -579,11 +579,11 @@ func (at *AgentProfileTools) callCreateAgent(args map[string]any) (*mcp.ToolResu
 	// callUpdateAgent instead).
 	if existing, err := at.Store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug); err == nil && existing != nil {
 		if class := at.classifyAgent(existing); !class.Editable() {
-			return mcp.ServiceErrorResult(svcerr.New(svcerr.CodePermission, agentNotEditableError(existing.Slug, class))), nil
+			return mcp.ServiceErrorResult(svcerr.New(svcerr.CodePermission, agentNotEditableError(existing.Slug, class)), "tool", "agent_create", "id", existing.ID, "slug", slug), nil
 		}
-		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodeConflict, "a managed agent with this slug already exists")), nil
+		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodeConflict, "a managed agent with this slug already exists"), "tool", "agent_create", "id", existing.ID, "slug", slug), nil
 	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent")), nil
+		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent"), "tool", "agent_create", "slug", slug), nil
 	}
 
 	a := &store.AgentProfile{
@@ -595,7 +595,7 @@ func (at *AgentProfileTools) callCreateAgent(args map[string]any) (*mcp.ToolResu
 	}
 
 	if err := at.Store.CreateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
-		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to create agent")), nil
+		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to create agent"), "tool", "agent_create", "slug", slug), nil
 	}
 
 	out, _ := json.Marshal(selfToolAgentProfileToView(a))
@@ -634,9 +634,9 @@ func (at *AgentProfileTools) callUpdateAgent(args map[string]any) (*mcp.ToolResu
 	a, err := at.Store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeNotFound, "agent not found")), nil
+			return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeNotFound, "agent not found"), "tool", "agent_update", "id", strArg(args, "id", "")), nil
 		}
-		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent")), nil
+		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent"), "tool", "agent_update", "id", strArg(args, "id", "")), nil
 	}
 
 	// Task 34: reject writes against non-editable (internal/plugin/external)
@@ -645,7 +645,7 @@ func (at *AgentProfileTools) callUpdateAgent(args map[string]any) (*mcp.ToolResu
 	// REST layer. Classify the target's *current* class (source/source_ref
 	// as loaded, before any of the args below could mutate it).
 	if class := at.classifyAgent(a); !class.Editable() {
-		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodePermission, agentNotEditableError(a.Slug, class))), nil
+		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodePermission, agentNotEditableError(a.Slug, class)), "tool", "agent_update", "id", strArg(args, "id", "")), nil
 	}
 
 	if v, ok := args["name"].(string); ok && v != "" {
@@ -665,7 +665,7 @@ func (at *AgentProfileTools) callUpdateAgent(args map[string]any) (*mcp.ToolResu
 	}
 
 	if err := at.Store.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
-		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to update agent")), nil
+		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to update agent"), "tool", "agent_update", "id", strArg(args, "id", "")), nil
 	}
 	return mcp.TextResult(fmt.Sprintf("Updated agent %q (id=%s)", a.Name, a.ID)), nil
 }
@@ -966,23 +966,23 @@ func (wt *WorkTrackingTools) callTodoCreate(ctx context.Context, args map[string
 
 func (wt *WorkTrackingTools) callTodoUpdate(args map[string]any) (*mcp.ToolResult, error) {
 	if wt == nil || wt.Updater == nil {
-		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodeUnavailable, "todo service not available")), nil
+		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodeUnavailable, "todo service not available"), "tool", "todo_update", "id", strArg(args, "id", "")), nil
 	}
 	id := strArg(args, "id", "")
 	if id == "" {
-		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodeInvalid, "id is required", svcerr.WithField("id"))), nil
+		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodeInvalid, "id is required", svcerr.WithField("id")), "tool", "todo_update", "id", strArg(args, "id", "")), nil
 	}
 	raw, marshalErr := json.Marshal(args)
 	if marshalErr != nil {
-		return mcp.ServiceErrorResult(svcerr.Wrap(marshalErr, svcerr.CodeInvalid, "invalid todo update")), nil
+		return mcp.ServiceErrorResult(svcerr.Wrap(marshalErr, svcerr.CodeInvalid, "invalid todo update"), "tool", "todo_update", "id", strArg(args, "id", "")), nil
 	}
 	var fields TodoUpdateFields
 	if decodeErr := json.Unmarshal(raw, &fields); decodeErr != nil {
-		return mcp.ServiceErrorResult(svcerr.Wrap(decodeErr, svcerr.CodeInvalid, "invalid todo update fields")), nil
+		return mcp.ServiceErrorResult(svcerr.Wrap(decodeErr, svcerr.CodeInvalid, "invalid todo update fields"), "tool", "todo_update", "id", strArg(args, "id", "")), nil
 	}
 	t, err := wt.Updater.UpdateTodoFields(context.TODO(), id, fields)
 	if err != nil {
-		return mcp.ServiceErrorResult(err), nil
+		return mcp.ServiceErrorResult(err, "tool", "todo_update", "id", strArg(args, "id", "")), nil
 	}
 	wt.notifyWorkChanged()
 	out, _ := json.Marshal(selfToolTodoToView(t))

@@ -2,9 +2,13 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
+
+// ErrAgentProjectNotFound denotes an absent agent-project membership.
+var ErrAgentProjectNotFound = errors.New("agent-project link not found")
 
 // AgentProject represents an agent-to-project assignment.
 type AgentProject struct {
@@ -88,9 +92,12 @@ func (s *Store) RemoveAgentProject(ctx context.Context, agentID, projectID strin
 	if err != nil {
 		return fmt.Errorf("remove agent project: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("remove agent project rows affected: %w", err)
+	}
 	if n == 0 {
-		return fmt.Errorf("agent-project link not found")
+		return ErrAgentProjectNotFound
 	}
 	return nil
 }

@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 
+	svcerr "github.com/hollis-labs/go-svcerr"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -55,7 +57,14 @@ func (s *AgentMembershipService) SetSessionAgent(ctx context.Context, sessionID,
 // RemoveSessionAgent unbinds an agent from a session. It returns an error
 // when no such binding exists.
 func (s *AgentMembershipService) RemoveSessionAgent(ctx context.Context, sessionID, agentID string) error {
-	return s.writers.DeleteSessionAgent(ctx, sessionID, agentID)
+	err := s.writers.DeleteSessionAgent(ctx, sessionID, agentID)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, store.ErrSessionAgentNotFound) {
+		return svcerr.Wrap(err, svcerr.CodeNotFound, "session agent not found")
+	}
+	return svcerr.Wrap(err, svcerr.CodeInternal, "failed to remove agent membership")
 }
 
 // ListAgentProjects returns the projects an agent is scoped to.
@@ -70,7 +79,14 @@ func (s *AgentMembershipService) AddAgentProject(ctx context.Context, agentID, p
 
 // RemoveAgentProject removes an agent's scope to a project.
 func (s *AgentMembershipService) RemoveAgentProject(ctx context.Context, agentID, projectID string) error {
-	return s.writers.RemoveAgentProject(ctx, agentID, projectID)
+	err := s.writers.RemoveAgentProject(ctx, agentID, projectID)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, store.ErrAgentProjectNotFound) {
+		return svcerr.Wrap(err, svcerr.CodeNotFound, "agent-project link not found")
+	}
+	return svcerr.Wrap(err, svcerr.CodeInternal, "failed to remove agent membership")
 }
 
 // ListProjectAgents returns the agents scoped to a project.

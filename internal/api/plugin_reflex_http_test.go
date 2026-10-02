@@ -79,6 +79,15 @@ func TestPluginReflexHTTPApprovedSDKLifecycle(t *testing.T) {
 			t.Fatalf("escaped item ID lost: %+v", captured)
 		}
 	}
+	delimiters := httptest.NewRecorder()
+	mux.ServeHTTP(delimiters, httptest.NewRequest("GET", "/api/plugins/nanite.feature/items/one%3Ftwo%23three?real=query", nil))
+	var item struct {
+		ID       string `json:"id"`
+		RawQuery string `json:"raw_query"`
+	}
+	if checkErr := json.Unmarshal(delimiters.Body.Bytes(), &item); checkErr != nil || delimiters.Code != 200 || item.ID != "one?two#three" || item.RawQuery != "real=query" {
+		t.Fatalf("escaped delimiters changed routing: %+v status=%d error=%v", item, delimiters.Code, checkErr)
+	}
 	bad := httptest.NewRecorder()
 	mux.ServeHTTP(bad, httptest.NewRequest("GET", "/api/plugins/nanite.feature/items/invalid-status", nil))
 	if bad.Code != 502 {

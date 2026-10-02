@@ -382,6 +382,10 @@ func TestAdminBackendErrorRedaction(t *testing.T) {
 
 type adminFailingStore struct{}
 
+func (adminFailingStore) WithAdminPreferencesTransaction(context.Context, func(*store.PreferencesTransaction) error) error {
+	return errors.New("SECRET at /private/database")
+}
+
 func (adminFailingStore) GetUserSettings(context.Context) (*store.UserSettings, error) {
 	return nil, errors.New("unused")
 }

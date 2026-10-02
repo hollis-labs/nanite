@@ -21,6 +21,10 @@ type fakeUserSettingsStore struct {
 	written *store.UserSettings
 }
 
+func (f *fakeUserSettingsStore) WithAdminPreferencesTransaction(context.Context, func(*store.PreferencesTransaction) error) error {
+	return errors.New("unused transaction")
+}
+
 func (f *fakeUserSettingsStore) GetUserSettings(context.Context) (*store.UserSettings, error) {
 	f.gets++
 	if f.getErr != nil {

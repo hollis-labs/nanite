@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 )
 
@@ -31,8 +32,16 @@ func (s *Store) initializeAdminPreferencesVersion(ctx context.Context) error {
 // writers to either preference invalidate the version through DB triggers in
 // their own transaction. This does not supply CAS or repair legacy stale writes.
 func (s *Store) GetAdminPreferences(ctx context.Context) (*AdminPreferences, error) {
+	return readAdminPreferences(ctx, s.DB)
+}
+
+type preferencesReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func readAdminPreferences(ctx context.Context, reader preferencesReader) (*AdminPreferences, error) {
 	var p AdminPreferences
-	if err := s.DB.QueryRowContext(ctx, `SELECT tool_stream_behavior,
+	if err := reader.QueryRowContext(ctx, `SELECT tool_stream_behavior,
         tool_drawer_retention, admin_preferences_version
         FROM user_settings WHERE id = 1`).Scan(
 		&p.ToolStreamBehavior, &p.ToolDrawerRetention, &p.Version); err != nil {
@@ -42,6 +51,59 @@ func (s *Store) GetAdminPreferences(ctx context.Context) (*AdminPreferences, err
 		return nil, fmt.Errorf("admin preferences version unavailable")
 	}
 	return &p, nil
+}
+
+// PreferencesTransaction holds the existing SQLite BEGIN IMMEDIATE writer lock.
+// Current and Stage use this transaction, never the single-connection DB pool.
+// Its methods are valid only during WithAdminPreferencesTransaction's callback.
+type PreferencesTransaction struct {
+	tx  *sql.Tx
+	ctx context.Context
+}
+
+// WithAdminPreferencesTransaction calls fn once, synchronously. Callback errors,
+// cancellation and commit failures never release a successful staged result.
+// The opener's _txlock=immediate makes BeginTx acquire SQLite's writer lock.
+func (s *Store) WithAdminPreferencesTransaction(ctx context.Context, fn func(*PreferencesTransaction) error) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin preferences transaction: %w", err)
+	}
+	defer rollbackUnlessCommitted(tx)
+	if err := fn(&PreferencesTransaction{tx: tx, ctx: ctx}); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit preferences transaction: %w", err)
+	}
+	return nil
+}
+
+func (t *PreferencesTransaction) Current() (*AdminPreferences, error) {
+	return readAdminPreferences(t.ctx, t.tx)
+}
+
+// Stage persists only the declared preference columns. The trigger mints the
+// generation in this same transaction; a true no-op does not UPDATE any column.
+// Version in candidate is ignored: callers must compare preconditions against
+// Current inside the callback before staging. Stage does not commit or apply.
+func (t *PreferencesTransaction) Stage(candidate AdminPreferences) (*AdminPreferences, error) {
+	current, err := t.Current()
+	if err != nil {
+		return nil, err
+	}
+	if current.ToolStreamBehavior == candidate.ToolStreamBehavior && current.ToolDrawerRetention == candidate.ToolDrawerRetention {
+		return current, nil
+	}
+	if _, err := t.tx.ExecContext(t.ctx, `UPDATE user_settings
+        SET tool_stream_behavior=?, tool_drawer_retention=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=1`, candidate.ToolStreamBehavior, candidate.ToolDrawerRetention); err != nil {
+		return nil, fmt.Errorf("stage admin preferences: %w", err)
+	}
+	return t.Current()
 }
 
 func validAdminPreferencesVersion(version string) bool {

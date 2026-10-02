@@ -25,10 +25,11 @@ const CapabilityReadOnlyQuery = "readonly.query"
 type QueryResource string
 
 const (
-	QuerySessions         QueryResource = "sessions"
-	QueryUsage            QueryResource = "usage"
-	QueryExecutionMetrics QueryResource = "execution_metrics"
-	QueryContextSlots     QueryResource = "context_slots"
+	QuerySessions          QueryResource = "sessions"
+	QueryUsage             QueryResource = "usage"
+	QueryExecutionMetrics  QueryResource = "execution_metrics"
+	QueryContextSlots      QueryResource = "context_slots"
+	QueryMessageReferences QueryResource = "message_refs"
 )
 
 const MaxQueryLimit = 100
@@ -50,7 +51,7 @@ type QueryScope struct {
 
 func knownQueryResource(resource QueryResource) bool {
 	switch resource {
-	case QuerySessions, QueryUsage, QueryExecutionMetrics, QueryContextSlots:
+	case QuerySessions, QueryUsage, QueryExecutionMetrics, QueryContextSlots, QueryMessageReferences:
 		return true
 	default:
 		return false
@@ -70,8 +71,8 @@ func validQuerySession(id string) bool {
 }
 
 func (scope QueryScope) Validate() error {
-	if len(scope.Resources) == 0 || len(scope.Resources) > 4 {
-		return fmt.Errorf("pluginapi: query scope requires one to four resources")
+	if len(scope.Resources) == 0 || len(scope.Resources) > 5 {
+		return fmt.Errorf("pluginapi: query scope requires one to five resources")
 	}
 	seen := make(map[QueryResource]bool)
 	for _, resource := range scope.Resources {
@@ -173,7 +174,8 @@ func (grant QueryGrant) Validate() error {
 type QueryRequest struct {
 	Resource  QueryResource
 	SessionID string
-	Limit     int // zero uses the host default; otherwise 1–100
+	MessageID string // optional narrowing for message_refs only
+	Limit     int    // zero uses the host default; otherwise 1–100
 }
 
 type QueryResponse struct {
@@ -211,9 +213,15 @@ func (client *QueryClient) Query(ctx context.Context, query QueryRequest) (Query
 	if !client.grant.Scope.Allows(query.Resource, query.SessionID) || query.Limit < 0 || query.Limit > MaxQueryLimit {
 		return QueryResponse{}, fmt.Errorf("pluginapi: query exceeds the granted scope or limit")
 	}
+	if query.MessageID != "" && (query.Resource != QueryMessageReferences || !validQuerySession(query.MessageID)) {
+		return QueryResponse{}, fmt.Errorf("pluginapi: invalid message reference query")
+	}
 	parameters := url.Values{}
 	if query.SessionID != "" {
 		parameters.Set("session_id", query.SessionID)
+	}
+	if query.MessageID != "" {
+		parameters.Set("message_id", query.MessageID)
 	}
 	if query.Limit != 0 {
 		parameters.Set("limit", strconv.Itoa(query.Limit))

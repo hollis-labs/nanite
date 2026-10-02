@@ -114,3 +114,17 @@ Return HTTP 200 with a JSON `ContextResponse` using `ContextProtocol`; an empty
 UTF-8, and relevance is finite in [0,1]. Hosts assign source ownership and token
 estimates. The wire bounds each response to 1 MiB and 128 items. Hosts additionally
 apply retrieval deadlines, token budgets, scope checks and unload cancellation.
+
+Extracted features preserve core session/message IDs as `CoreReference` values.
+Request `message_refs` in the reviewed read-only query scope and call
+`QueryClient.ResolveReference` to verify that a message belongs to its session.
+The projection contains identity, role and creation time, without message text.
+A missing reference does not authorize deleting the plugin's own record.
+
+Core-table exports use `EncodeDataExport`/`DecodeDataExport`: JSON Lines with a
+strict bounded header and one strict row per line, preserving SQLite NULL,
+integer precision, real values, blobs and text bytes. `SourceID` separates
+workspaces sharing a plugin DataDir. `DataExportReceipt.Verify` checks ownership,
+workspace, row count and checksum. Import only a receipt committed by the host
+with its schema change; an orphan file left by a rolled-back transaction is not
+an import request. Keep the export after an idempotent transactional import.

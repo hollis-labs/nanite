@@ -100,7 +100,15 @@ func TestRemoteTransportListTools_RestartsAfterLaterPageFailure(t *testing.T) {
 func TestRemoteTransportListTools_LaterPageErrorsReturnNoPartialList(t *testing.T) {
 	for _, mode := range []string{"error", "cycle"} {
 		t.Run(mode, func(t *testing.T) {
+			var mu sync.Mutex
+			requests := 0
 			tr := paginatedTransport(t, func(_ context.Context, cursor string) (*sdkmcp.ListToolsResult, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				requests++
+				if requests > 4 {
+					return nil, errors.New("fixture request limit exceeded")
+				}
 				if cursor == "" {
 					return toolPage("first", "next"), nil
 				}
@@ -112,6 +120,11 @@ func TestRemoteTransportListTools_LaterPageErrorsReturnNoPartialList(t *testing.
 			got, err := tr.ListTools(context.Background())
 			if err == nil || got != nil {
 				t.Fatalf("partial success: %+v, %v", got, err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if requests != 4 {
+				t.Fatalf("want two bounded pages per attempt and one reconnect, got %d requests", requests)
 			}
 			if mode == "cycle" && !strings.Contains(err.Error(), "repeated tools/list cursor") {
 				t.Fatal(err)

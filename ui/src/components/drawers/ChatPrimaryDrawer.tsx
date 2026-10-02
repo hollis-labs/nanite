@@ -34,6 +34,8 @@ import { ToolCallItem } from "@/components/chat/ToolCallItem";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ScopeChip, type ScopeFilter, ScopeFilterChip } from "@/components/work/ScopeChip";
 import { api } from "@/lib/api";
+import { resolveIcon } from "@/lib/icons";
+import { PluginDrawerTabBody, usePluginDrawerTabs } from "./PluginDrawerTab";
 import type {
   AgentStateScope,
   Document,
@@ -53,6 +55,7 @@ export function ChatPrimaryDrawer() {
   const toolCalls = useToolCalls();
   const isStreaming = useIsStreaming();
   const queryClient = useQueryClient();
+  const pluginTabs = usePluginDrawerTabs("drawer.primary.tabs");
 
   const activeTab = drawer.activeTab === "reports" || drawer.activeTab === "diffs"
     ? "documents"
@@ -65,8 +68,6 @@ export function ChatPrimaryDrawer() {
     queryFn: () => api.listDrawerCards(activeSessionId!),
     enabled: !!activeSessionId,
   });
-
-  if (!activeSessionId) return null;
 
   // Pull-tab drag mechanics — top-drawer variant. The drag-handle row is
   // always visible at the bottom of the drawer. Drag DOWN to grow (body
@@ -94,6 +95,8 @@ export function ChatPrimaryDrawer() {
     setDrawer({ open: !drawer.open, height: drawer.height || 240 });
   };
 
+  if (!activeSessionId) return null;
+
   return (
     <div className="max-w-3xl w-full mx-auto relative">
       {/* Body — top of drawer, opens downward toward the transcript when
@@ -103,7 +106,9 @@ export function ChatPrimaryDrawer() {
           className="overflow-hidden border-x border-t border-border bg-bg-elevated"
           style={{ height: drawer.height }}
         >
-          <DrawerBody activeTab={activeTab} pinnedCards={pinnedCards} />
+          {activeTab.startsWith("plugin:") ? (
+            <PluginDrawerTabBody entry={pluginTabs.find((tab) => tab.tabId === activeTab)} sessionId={activeSessionId} />
+          ) : <DrawerBody activeTab={activeTab} pinnedCards={pinnedCards} />}
         </div>
       )}
 
@@ -133,6 +138,18 @@ export function ChatPrimaryDrawer() {
               label="Pins"
               onClick={() => setDrawer({ activeTab: "pins" })}
             />
+            {pluginTabs.map((entry) => {
+              const Icon = resolveIcon(entry.icon);
+              return (
+                <PrimaryTabButton
+                  key={entry.tabId}
+                  active={activeTab === entry.tabId}
+                  icon={<Icon className="w-3.5 h-3.5" />}
+                  label={entry.label || entry.id}
+                  onClick={() => setDrawer({ activeTab: entry.tabId })}
+                />
+              );
+            })}
             {pinnedCards.length > 0 && (
               <div className="w-px h-4 bg-border mx-1 shrink-0" aria-hidden="true" />
             )}

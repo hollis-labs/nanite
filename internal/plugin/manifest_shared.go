@@ -53,7 +53,7 @@ func DecodeManifest(reader io.Reader) (*PluginManifest, error) {
 				return nil, err
 			}
 		}
-		result.Registers.Slots = append(result.Registers.Slots, SlotRegistration{Slot: slot.Slot, ID: slot.ID, Component: slot.Component, Priority: slot.Priority, Props: props})
+		result.Registers.Slots = append(result.Registers.Slots, SlotRegistration{Slot: slot.Slot, ID: slot.ID, Title: slot.Title, Icon: slot.Icon, Component: slot.Component, Priority: slot.Priority, Props: props})
 	}
 	for _, panel := range block.Registers.Panels {
 		result.Registers.Panels = append(result.Registers.Panels, PanelRegistration{ID: panel.ID, Title: panel.Title, Component: panel.Component, Icon: panel.Icon, Description: panel.Description, DefaultVisible: panel.DefaultVisible, Order: panel.Order})

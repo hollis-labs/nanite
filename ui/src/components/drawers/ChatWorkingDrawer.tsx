@@ -37,6 +37,8 @@ import { ArtifactsContent } from '@/components/drawers/ArtifactsContent'
 import { useHostRuntimeFeed } from '@/hooks/useHostRuntimeFeed'
 import { useSettings } from '@/hooks/useSettings'
 import { api, DrawerPinCapError } from '@/lib/api'
+import { resolveIcon } from '@/lib/icons'
+import { PluginDrawerTabBody, usePluginDrawerTabs } from './PluginDrawerTab'
 import { CHAT_DRAWER_PIN_CAP } from '@/lib/constants'
 import type { HostRuntimeFeedState } from '@/lib/host-runtime-feed'
 import type { DynamicCardTab, Envelope } from '@/lib/types'
@@ -101,6 +103,7 @@ export function ChatWorkingDrawer({
   const panelEnvelopes = useLayoutStore((s) => s.panelEnvelopes)
   const clearPanelEnvelopes = useLayoutStore((s) => s.clearPanelEnvelopes)
   const queryClient = useQueryClient()
+  const pluginTabs = usePluginDrawerTabs('drawer.working.tabs')
   const { data: settings } = useSettings()
   const developerMode = settings?.developer_mode ?? false
   // Lazy subscription: only connect when the drawer is open and the runtime tab is active.
@@ -152,10 +155,11 @@ export function ChatWorkingDrawer({
         pinnable: true,
         pinned: c.pinned,
       }))
-    return [...fixed, ...dynamic]
-  }, [visibleFixedTabs, cardTabs, drawer.activeTab])
-
-  if (!activeSessionId) return null
+    const plugins = pluginTabs.map((entry) => ({
+      id: entry.tabId, label: entry.label || entry.id, active: drawer.activeTab === entry.tabId,
+    }))
+    return [...fixed, ...plugins, ...dynamic]
+  }, [visibleFixedTabs, pluginTabs, cardTabs, drawer.activeTab])
 
   // ── Alert overlay state machine ─────────────────────────────────────────────
   // When any alert becomes active, snapshot the drawer's open state so we can
@@ -294,6 +298,8 @@ export function ChatWorkingDrawer({
     }
   }, [cardTabs, activeSessionId, removeCardTab, queryClient, showChatToast])
 
+  if (!activeSessionId) return null
+
   return (
     // Outer wrapper: column-width container. -mb-1.5 lets the in-flow
     // spacer's bottom tuck under the composer by ~6px, which (because the
@@ -347,53 +353,60 @@ export function ChatWorkingDrawer({
                 }`}
               >
                 <main className="flex-1 min-w-0 overflow-hidden">
-                  <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} runtimeFeed={runtimeFeed} />
+                  {drawer.activeTab.startsWith('plugin:') ? (
+                    <PluginDrawerTabBody entry={pluginTabs.find((tab) => tab.tabId === drawer.activeTab)} sessionId={activeSessionId} />
+                  ) : <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} runtimeFeed={runtimeFeed} />}
                 </main>
 
                 <aside className="w-[140px] shrink-0 border-l border-border-subtle bg-surface/30 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   <div className="flex flex-col gap-0.5 p-1.5">
-                    {tabs.map((t) => (
-                      <div
-                        key={t.id}
-                        className={`group relative flex items-center gap-1 px-2 py-1.5 rounded-[4px] font-mono text-[11px] tracking-wide transition-colors ${
-                          t.active
-                            ? 'bg-bg-elevated text-fg shadow-sm'
-                            : 'text-fg-muted hover:bg-bg-elevated/60 hover:text-fg-secondary'
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setDrawer({ activeTab: t.id })}
-                          title={t.label}
-                          className="flex-1 min-w-0 flex items-center gap-1.5 outline-none text-left"
+                    {tabs.map((t) => {
+                      const pluginTab = pluginTabs.find((entry) => entry.tabId === t.id)
+                      const Icon = pluginTab ? resolveIcon(pluginTab.icon) : null
+                      return (
+                        <div
+                          key={t.id}
+                          className={`group relative flex items-center gap-1 px-2 py-1.5 rounded-[4px] font-mono text-[11px] tracking-wide transition-colors ${
+                            t.active
+                              ? 'bg-bg-elevated text-fg shadow-sm'
+                              : 'text-fg-muted hover:bg-bg-elevated/60 hover:text-fg-secondary'
+                          }`}
                         >
-                          <span className="truncate">{t.label}</span>
-                          {t.runningPip && (
-                            <span className="h-1.5 w-1.5 rounded-full bg-warning animate-pulse shrink-0" />
+                          <button
+                            type="button"
+                            onClick={() => setDrawer({ activeTab: t.id })}
+                            title={t.label}
+                            className="flex-1 min-w-0 flex items-center gap-1.5 outline-none text-left"
+                          >
+                            {Icon && <Icon size={12} />}
+                            <span className="truncate">{t.label}</span>
+                            {t.runningPip && (
+                              <span className="h-1.5 w-1.5 rounded-full bg-warning animate-pulse shrink-0" />
+                            )}
+                          </button>
+                          {t.pinnable && (
+                            <button
+                              type="button"
+                              onClick={() => onPinToggle(t.id)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                              aria-label={t.pinned ? 'Unpin tab' : 'Pin tab'}
+                            >
+                              {t.pinned ? <PinOff size={10} /> : <Pin size={10} />}
+                            </button>
                           )}
-                        </button>
-                        {t.pinnable && (
-                          <button
-                            type="button"
-                            onClick={() => onPinToggle(t.id)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                            aria-label={t.pinned ? 'Unpin tab' : 'Pin tab'}
-                          >
-                            {t.pinned ? <PinOff size={10} /> : <Pin size={10} />}
-                          </button>
-                        )}
-                        {t.closeable && (
-                          <button
-                            type="button"
-                            onClick={() => removeCardTab(t.id, activeSessionId)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                            aria-label="Close tab"
-                          >
-                            <X size={10} />
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                          {t.closeable && (
+                            <button
+                              type="button"
+                              onClick={() => removeCardTab(t.id, activeSessionId)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                              aria-label="Close tab"
+                            >
+                              <X size={10} />
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </aside>
               </div>

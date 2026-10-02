@@ -2243,6 +2243,8 @@ export interface SlashCommandDef {
 
 export type UISlotName =
   | "nav-rail"
+  | "drawer.primary.tabs"
+  | "drawer.working.tabs"
   | "settings-tab"
   | "right-rail-tab"
   | "composer-toolbar"

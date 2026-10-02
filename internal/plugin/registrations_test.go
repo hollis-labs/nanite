@@ -102,7 +102,7 @@ func TestApplyManifestRegistrations_Slots(t *testing.T) {
 		Name: p.id,
 		Registers: ManifestRegisters{
 			Slots: []SlotRegistration{
-				{Slot: "composer-toolbar", ID: "slot-a", Component: "SlotA", Priority: 5},
+				{Slot: "composer-toolbar", ID: "slot-a", Title: "Friendly title", Icon: "file-text", Component: "SlotA", Priority: 5},
 			},
 		},
 	}
@@ -111,7 +111,7 @@ func TestApplyManifestRegistrations_Slots(t *testing.T) {
 	}
 
 	entries := host.GetSlotEntries("composer-toolbar")
-	if len(entries) != 1 || entries[0].ID != "slot-a" || entries[0].PluginID != "slot-plug" || entries[0].Priority != 5 {
+	if len(entries) != 1 || entries[0].ID != "slot-a" || entries[0].PluginID != "slot-plug" || entries[0].Priority != 5 || entries[0].Label != "Friendly title" || entries[0].Icon != "file-text" {
 		t.Fatalf("unexpected slot entries: %+v", entries)
 	}
 }

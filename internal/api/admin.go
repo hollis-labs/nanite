@@ -13,16 +13,11 @@ import (
 	"github.com/hollis-labs/nanite/internal/service"
 )
 
-const adminReadOnlyReason = "This admin adapter is read-only; use the existing preferences UI."
-
 func adminUnavailable() error {
 	return &admin.Failure{Code: admin.BackendUnavailable, Message: "The admin backend is unavailable."}
 }
-func adminReadOnly() error {
-	return &admin.Failure{Code: admin.Forbidden, Message: "This admin adapter is read-only."}
-}
 
-// NewAdminHandler declares a read-only application adapter. authenticate must
+// NewAdminHandler declares the two-preference application adapter. authenticate must
 // require both configured operator credentials; caller identity headers are not
 // authentication. Discovery does not read settings or probe process activity.
 func (a *API) NewAdminHandler(authenticate func(*http.Request) (string, bool), allowedOrigins ...string) (http.Handler, error) {
@@ -33,7 +28,7 @@ func (a *API) NewAdminHandler(authenticate func(*http.Request) (string, bool), a
 		}
 		return nil
 	}
-	revision := "nanite.admin.v1.preferences"
+	revision := "nanite.admin.v2.preferences"
 	if a.adminTracker() != nil {
 		revision += ".processes"
 	}
@@ -53,14 +48,16 @@ func (a *API) NewAdminHandler(authenticate func(*http.Request) (string, bool), a
 		}
 		retentionEnum = append(retentionEnum, scalar)
 	}
+	streamDefault, _ := admin.String("streaming")
+	retentionDefault, _ := admin.Integer(15)
 	definition := admin.Definition{
 		App: admin.App{ID: "nanite", Label: "Nanite"}, Revision: revision, BasePath: "/api",
 		Groups: []admin.Group{{ID: "preferences", Label: "Preferences", Scope: admin.Scope{Kind: "app", ID: "nanite"},
 			Fields: []admin.Field{
-				{Key: "tool_stream_behavior", Type: admin.StringType, Title: "Tool stream behavior", Required: true, Enum: streamEnum, ReadOnlyReason: adminReadOnlyReason},
-				{Key: "tool_drawer_retention", Type: admin.IntegerType, Title: "Tool drawer retention", Required: true, Enum: retentionEnum, ReadOnlyReason: adminReadOnlyReason},
-			}, Resolution: admin.Resolution{Precedence: []admin.SourceKind{admin.OverrideSource}},
-			Capabilities: admin.Capabilities{CanRead: true}, Backend: adminPreferencesBackend{api: a, revision: revision},
+				{Key: "tool_stream_behavior", Type: admin.StringType, Title: "Tool stream behavior", Required: true, Enum: streamEnum, Default: &streamDefault, Editable: true},
+				{Key: "tool_drawer_retention", Type: admin.IntegerType, Title: "Tool drawer retention", Required: true, Enum: retentionEnum, Default: &retentionDefault, Editable: true},
+			}, Resolution: admin.Resolution{Precedence: []admin.SourceKind{admin.OverrideSource, admin.DefaultSource}, WriteLayer: admin.OverrideSource},
+			Capabilities: admin.Capabilities{CanRead: true, CanValidate: true, CanUpdate: true, CanReset: true}, Backend: adminPreferencesBackend{api: a, revision: revision},
 		}},
 	}
 	if a.adminTracker() != nil {
@@ -153,43 +150,4 @@ func adminProcessActivity(processes []chat.ProcessHealth) admin.HealthObservatio
 	return admin.HealthObservation{ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Status: status,
 		Checks: []admin.HealthCheck{{ID: "output-inactivity", Label: "Tracked output inactivity", Status: status, Message: message}},
 	}
-}
-
-type adminPreferencesBackend struct {
-	api      *API
-	revision string
-}
-
-func (b adminPreferencesBackend) Read(ctx context.Context) (admin.State, error) {
-	if b.api == nil || b.api.Services == nil || b.api.Services.Settings == nil {
-		return admin.State{}, adminUnavailable()
-	}
-	preferences, err := b.api.Services.Settings.AdminPreferences(ctx)
-	if err != nil {
-		return admin.State{}, err
-	}
-	if preferences == nil {
-		return admin.State{}, adminUnavailable()
-	}
-	stream, err := admin.String(preferences.ToolStreamBehavior)
-	if err != nil {
-		return admin.State{}, err
-	}
-	retention, err := admin.Integer(int64(preferences.ToolDrawerRetention))
-	if err != nil {
-		return admin.State{}, err
-	}
-	value := func(s admin.Scalar) admin.ResolvedValue {
-		return admin.ResolvedValue{Present: true, Value: s,
-			Source: &admin.Source{Kind: admin.OverrideSource, Label: "Persisted application preference"}, HasOverride: true, ReadOnlyReason: adminReadOnlyReason, ApplyState: admin.UnknownApply}
-	}
-	return admin.State{Revision: b.revision, Version: preferences.Version, Values: map[string]admin.ResolvedValue{
-		"tool_stream_behavior": value(stream), "tool_drawer_retention": value(retention),
-	}}, nil
-}
-func (adminPreferencesBackend) Preview(context.Context, admin.Changes) (admin.State, error) {
-	return admin.State{}, &admin.Failure{Code: admin.Unsupported, Message: "This admin adapter is read-only."}
-}
-func (adminPreferencesBackend) WithTransaction(context.Context, func(admin.GroupTransaction) error) error {
-	return &admin.Failure{Code: admin.Unsupported, Message: "This admin adapter is read-only."}
 }

@@ -136,7 +136,7 @@ Embedded-memory and external MCP operators upgrading to Tesseract v0.10
 should follow
 [Nanite's Tesseract v0.10 migration guide](docs/tesseract-v0.10-migration.md).
 
-## Read-only admin API
+## Admin preferences API
 
 The admin API at `/api/admin/manifest` is off unless both `NANITE_AUTH_USER`
 and `NANITE_AUTH_PASSWORD` are configured. Every request requires matching
@@ -144,11 +144,46 @@ Basic credentials, including requests from loopback. Caller identity headers
 never grant admin access. Follow [the deployment boundary](SECURITY.md) when
 exposing Nanite beyond loopback.
 
-It reports the persisted tool stream behavior and tool drawer retention
-preferences. Reads include an opaque ETag that changes when either preference
-changes through existing writers. The adapter supports reads only; all POST
-requests are denied. Change preferences through the existing preferences UI.
-Apply state is unknown; the API offers no restart or apply action.
+The preferences group reads, validates, updates and resets only tool stream
+behavior and tool drawer retention. Fetch its schema and revision from the
+manifest, then GET `/api/admin/settings/preferences` for the values and strong
+ETag. POST `/api/admin/settings/preferences/validate` previews a complete
+candidate without saving. Update and reset require that exact ETag in
+`If-Match`; a missing precondition returns 428, a stale or weak ETag returns
+412, and a changed manifest revision returns 409. Refetch and reconcile intent
+before retrying. ETags are opaque revision-qualified generations, not value
+hashes; a no-op preserves the ETag and the stored row.
+
+Update accepts `{ "revision": "<revision>", "set": { "tool_stream_behavior":
+"hidden" }, "unset": [] }`. Reset accepts `{ "revision": "<revision>",
+"keys": ["tool_stream_behavior"] }` and affects only named keys; update's
+`unset` has the same keyed-reset semantics. The declared defaults are
+`streaming` and `15`. A persisted value equal to its baseline represents no
+logical override; another value represents an override. Explicitly setting a
+default and resetting therefore produce the same state. This is a canonical
+representation policy, not a claim about historical provenance. Changing a
+baseline requires a deliberate data/representation migration.
+
+Every POST, including validation, requires exactly one well-formed HTTP(S)
+`Origin`, checked before decoding. Use Nanite's actual scheme and authority or
+an exact finite `cors_allowed_origins` entry; wildcards and forwarded headers
+never grant admin access. CLI clients must also supply an approved Origin
+(for example `-H 'Origin: http://localhost:8080'` when addressing that local
+HTTP authority). Behind TLS termination, explicitly allow the external HTTPS
+Origin in configuration. Admin CORS admits `If-Match` and exposes `ETag`;
+legacy route CORS and authentication are independent.
+
+Admin writes are atomic and compare the revision and ETag inside the SQLite
+transaction. A changed preference from legacy `PUT /api/settings` invalidates
+an admin ETag. A stale whole-row legacy PUT committing **after** an admin
+success can still overwrite it: the admin transaction does not repair the
+legacy interface's lost updates.
+
+A successful write reports persistence, with unknown apply state, no restart
+requirement and no apply targets. It offers no restart/apply action or live
+client-cache invalidation. Drawer retention is consumed after a fresh settings
+read and a relevant session switch; tool stream behavior has no identified UI
+behavior consumer. Saving does not promise an immediate UI effect.
 
 When a process tracker is present, the API also reports a tracked CLI process
 count and output inactivity observation. The latter uses the existing

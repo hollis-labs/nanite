@@ -1,2 +1,4 @@
 github.com/hollis-labs/plugin-sdk v0.6.0 h1:4ZzVEgi57S/ju1hVG+z9Cb66rrx7uOT97capmv9GYPs=
 github.com/hollis-labs/plugin-sdk v0.6.0/go.mod h1:GW8/S59GT15wKNQu62XvGArq7yLsceNDEa5TA3wFud0=
+github.com/hollis-labs/plugin-sdk v0.6.1 h1:h661bJZNrFSYcebWRy/2h+SbQqGxpzCxMBhcgwSxWs0=
+github.com/hollis-labs/plugin-sdk v0.6.1/go.mod h1:GW8/S59GT15wKNQu62XvGArq7yLsceNDEa5TA3wFud0=

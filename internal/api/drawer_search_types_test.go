@@ -143,7 +143,7 @@ func TestExecuteCommand_PersistsMessage(t *testing.T) {
 func TestCreateDurableAgent_UnknownProfile(t *testing.T) {
 	_, mux := newTestAPI(t)
 	w := mcpDo(mux, "POST", "/api/durable-agents", `{"name":"d","slug":"b2a-durable","profile_id":"no-such-profile"}`)
-	if w.Code != http.StatusBadRequest || !strings.Contains(errorBody(t, w), "agent profile no-such-profile not found in agent_profiles") {
+	if w.Code != http.StatusNotFound || errorBody(t, w) != "agent not found" {
 		t.Fatalf("unknown profile: %d %s", w.Code, w.Body.String())
 	}
 }

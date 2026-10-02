@@ -2,6 +2,7 @@ package selftools
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -30,6 +31,7 @@ func listedNames(t *testing.T, st *SelfToolsTransport) []string {
 func TestHideUnwired_MatchesHandlerGuards(t *testing.T) {
 	st := newSelfTools(t)
 	st.HideUnwired = true
+	st.WorkTrackingTools.Updater = nil
 	listed := listedNames(t, st)
 	hidden := st.HiddenTools()
 
@@ -63,6 +65,34 @@ func TestHideUnwired_MatchesHandlerGuards(t *testing.T) {
 	}
 	if len(listed)+len(hidden) != len(catalog) {
 		t.Errorf("listed %d + hidden %d != catalog %d", len(listed), len(hidden), len(catalog))
+	}
+
+	for _, wired := range []bool{false, true} {
+		t.Run(map[bool]string{false: "store-set-updater-nil", true: "store-nil-updater-set"}[wired], func(t *testing.T) {
+			transport := newSelfTools(t)
+			transport.HideUnwired = true
+			if wired {
+				transport.WorkTrackingTools.Store = nil
+			} else {
+				transport.WorkTrackingTools.Updater = nil
+			}
+			if got := slices.Contains(listedNames(t, transport), "todo_update"); got != wired {
+				t.Fatalf("todo_update listed=%v, want %v", got, wired)
+			}
+			result, err := transport.CallTool(context.Background(), "todo_update", map[string]any{})
+			if err != nil || result == nil || !result.IsError {
+				t.Fatalf("guard probe: %+v %v", result, err)
+			}
+			var failure struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal([]byte(result.Content[0].Text), &failure); err != nil {
+				t.Fatal(err)
+			}
+			if unavailable := failure.Code == "unavailable"; unavailable == wired {
+				t.Fatalf("handler guard disagrees with listing: %s", result.Content[0].Text)
+			}
+		})
 	}
 }
 

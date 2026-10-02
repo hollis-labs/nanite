@@ -31,9 +31,10 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
+
+	svcerr "github.com/hollis-labs/go-svcerr"
 
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -118,11 +119,11 @@ func (a *API) scheduleError(w http.ResponseWriter, err error) {
 	var writeErr *service.ScheduleWriteError
 	switch {
 	case errors.Is(err, store.ErrAgentScheduleNotFound):
-		a.errorResp(w, http.StatusNotFound, "schedule not found")
+		a.serviceError(w, svcerr.Wrap(err, svcerr.CodeNotFound, "schedule not found"))
 	case errors.As(err, &writeErr):
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.serviceError(w, svcerr.Wrap(writeErr, svcerr.CodeInvalid, writeErr.Err.Error()))
 	default:
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 	}
 }
 
@@ -134,7 +135,7 @@ func (a *API) scheduleError(w http.ResponseWriter, err error) {
 func (a *API) handleListSchedules(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.Services.Schedules.List(r.Context(), r.URL.Query().Get("agent_id"))
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, agentSchedulesToView(rows))
@@ -169,7 +170,7 @@ func (a *API) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := a.Services.Agents.Get(r.Context(), req.AgentID); err != nil {
-		a.errorResp(w, http.StatusBadRequest, fmt.Sprintf("agent_id %q does not resolve to a known agent: %v", req.AgentID, err))
+		a.serviceError(w, err)
 		return
 	}
 	row := store.AgentSchedule{

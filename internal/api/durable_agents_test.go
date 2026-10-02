@@ -15,7 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func TestDurableAgentsAPI_MissingProfileNamesDatabaseProvisioning(t *testing.T) {
+func TestDurableAgentsAPI_MissingProfileIsNotFound(t *testing.T) {
 	_, mux := newTestAPI(t)
 	body, _ := json.Marshal(CreateDurableAgentRequest{
 		Name: "Missing", Slug: "missing", ProfileID: "does-not-exist",
@@ -24,7 +24,7 @@ func TestDurableAgentsAPI_MissingProfileNamesDatabaseProvisioning(t *testing.T) 
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "create or import it through the agent API") {
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "agent not found") {
 		t.Fatalf("missing profile = %d body=%s", w.Code, w.Body.String())
 	}
 }

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,11 +47,7 @@ func (a *API) handleCreateDurableAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := a.Services.Agents.Get(r.Context(), inst.ProfileID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			a.errorResp(w, http.StatusBadRequest, fmt.Sprintf("agent profile %s not found in agent_profiles; create or import it through the agent API first", inst.ProfileID))
-			return
-		}
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.serviceError(w, err)
 		return
 	}
 	err := a.Services.DurableAgents.Create(r.Context(), inst)

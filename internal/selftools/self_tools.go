@@ -345,19 +345,20 @@ func selfToolDefinitions() []mcp.Tool {
 		},
 		{
 			Name: "todo_update",
-			Description: "Update a todo's status, priority, title, or description. Partial update — only provided fields change.\n\n" +
+			Description: "Update a todo's title, description, status, priority, labels, or metadata. Omitted or null fields stay unchanged. An empty string clears the field, except status and priority, where an empty string is invalid. Labels must be a JSON array encoded as a string; a labels array argument is rejected.\n\n" +
 				"**When to use:** When the user marks a task done, blocks it, changes its priority, or renames it. Typical status transitions: pending → in_progress → done, or → blocked.\n\n" +
 				"**Required context:** You need the todo ID. Get it from todo_list if you don't have it.\n\n" +
-				"**Output shape:** \"Updated todo <id>\" on success.",
+				"**Output shape:** Updated todo JSON on success.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"id":          map[string]any{"type": "string", "description": "Todo ID to update"},
-					"title":       map[string]any{"type": "string", "description": "New title (optional)"},
-					"description": map[string]any{"type": "string", "description": "New description (optional)"},
-					"status":      map[string]any{"type": "string", "description": "New status: pending, in_progress, done, blocked (optional)"},
-					"priority":    map[string]any{"type": "string", "description": "New priority: low, medium, high, critical (optional)"},
-					"labels":      map[string]any{"type": "string", "description": "New labels JSON array (optional)"},
+					"title":       map[string]any{"type": []string{"string", "null"}, "description": "New title (optional)"},
+					"description": map[string]any{"type": []string{"string", "null"}, "description": "New description (optional)"},
+					"status":      map[string]any{"type": []string{"string", "null"}, "description": "New status: pending, in_progress, done, blocked (optional)"},
+					"priority":    map[string]any{"type": []string{"string", "null"}, "description": "New priority: low, medium, high, critical (optional)"},
+					"metadata":    map[string]any{"type": []string{"string", "null"}, "description": "New metadata JSON object (optional)"},
+					"labels":      map[string]any{"type": []string{"string", "null"}, "description": "New labels JSON array (optional)"},
 				},
 				"required": []string{"id"},
 			},

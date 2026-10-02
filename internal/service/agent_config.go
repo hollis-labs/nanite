@@ -8,6 +8,11 @@ import (
 	"fmt"
 	"strings"
 
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
+
+	svcerr "github.com/hollis-labs/go-svcerr"
+
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -51,12 +56,13 @@ func notManagedError(p *store.AgentProfile, class agent.ManageClass, verb string
 	if p != nil {
 		slug = p.Slug
 	}
+	var message string
 	if class.CopyToManagedAllowed() {
-		return fmt.Errorf("%w: %q is %s and read-only in place; copy it to the managed layer (CopyToManaged) and %s the copy",
-			ErrAgentNotManaged, slug, class.Describe(), verb)
+		message = fmt.Sprintf("agent is not an editable database config: %q is %s and read-only in place; copy it to the managed layer (CopyToManaged) and %s the copy", slug, class.Describe(), verb)
+	} else {
+		message = fmt.Sprintf("agent is not an editable database config: %q is %s, which Nanite manages; there is no copy-to-managed path for it", slug, class.Describe())
 	}
-	return fmt.Errorf("%w: %q is %s, which Nanite manages; there is no copy-to-managed path for it",
-		ErrAgentNotManaged, slug, class.Describe())
+	return svcerr.Wrap(ErrAgentNotManaged, svcerr.CodePermission, message)
 }
 
 // AgentConfigResult retains Revision for wire compatibility. It is always
@@ -92,12 +98,15 @@ func (s *AgentConfigService) Create(profile *store.AgentProfile, procedures []ag
 		return nil, fmt.Errorf("profile is required")
 	}
 	if err := agent.ValidateSlug(profile.Slug); err != nil {
-		return nil, err
+		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField("slug"))
+	}
+	if field, err := store.ValidateAgentBehaviorFields(profile); err != nil {
+		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField(field))
 	}
 	if existing, err := s.store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile.Slug); err == nil && existing != nil {
-		return nil, ErrManagedSlugExists
+		return nil, svcerr.Wrap(ErrManagedSlugExists, svcerr.CodeConflict, "a managed agent with this slug already exists")
 	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to create agent")
 	}
 
 	profile.ID = ""
@@ -106,11 +115,11 @@ func (s *AgentConfigService) Create(profile *store.AgentProfile, procedures []ag
 	profile.ImportedAt = ""
 	profile.OriginSystem = ""
 	if err := s.store.CreateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile); err != nil {
-		return nil, err
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to create agent")
 	}
 	if _, err := s.store.DB.ExecContext(context.TODO(), /* TODO(ctx-sweep): no ctx available at this call site */
 		`UPDATE agent_profiles SET default_trust_tier = 'untrusted' WHERE id = ?`, profile.ID); err != nil {
-		return nil, fmt.Errorf("set operator agent trust tier: %w", err)
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to set agent trust tier")
 	}
 	seedRoleToolsFromIngest(context.Background(), s.store, profile.ID, jsonNameList(profile.RoleTools))
 	seedRoleSkillsFromIngest(context.Background(), s.store, profile.ID, jsonNameList(profile.RoleSkills))
@@ -133,7 +142,10 @@ func (s *AgentConfigService) Update(existing, updated *store.AgentProfile, proce
 		updated.Slug = existing.Slug
 	}
 	if err := agent.ValidateSlug(updated.Slug); err != nil {
-		return nil, err
+		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField("slug"))
+	}
+	if field, err := store.ValidateAgentBehaviorFields(updated); err != nil {
+		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField(field))
 	}
 	updated.ID = existing.ID
 	updated.Source = existing.Source
@@ -144,7 +156,7 @@ func (s *AgentConfigService) Update(existing, updated *store.AgentProfile, proce
 	// once edited through the canonical API it must not round-trip to disk.
 	updated.SourceRef = ""
 	if err := s.store.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, updated); err != nil {
-		return nil, err
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to update agent")
 	}
 	seedRoleToolsFromIngest(context.Background(), s.store, updated.ID, jsonNameList(updated.RoleTools))
 	seedRoleSkillsFromIngest(context.Background(), s.store, updated.ID, jsonNameList(updated.RoleSkills))
@@ -182,9 +194,9 @@ type AgentAssignments struct {
 
 // ApplyAssignments writes the non-nil assignments for profile and returns
 // the profile re-read after each write. Composition is written before
-// protocol/transport. A write error is returned unwrapped so its message
-// reaches the caller as the store phrased it; a failed re-read is not an
-// error and leaves the profile as it was.
+// protocol/transport. Invalid assignments use a safe invalid-input error;
+// infrastructure failures retain their cause in a typed internal error.
+// A failed re-read leaves the profile as it was.
 //
 // These writes run after Create/Update, not in the same transaction, so a
 // rejected assignment leaves the profile write in place.
@@ -194,21 +206,41 @@ func (s *AgentConfigService) ApplyAssignments(ctx context.Context, profile *stor
 	}
 	if a.RoleID != nil || a.ConsumerID != nil || a.ModelID != nil {
 		if err := s.store.UpdateAgentComposition(ctx, profile.ID, a.RoleID, a.ConsumerID, a.ModelID); err != nil {
-			return profile, err
+			return profile, agentAssignmentWriteError(err)
 		}
 		if refreshed, err := s.store.GetAgent(ctx, profile.ID); err == nil {
 			profile = refreshed
 		}
 	}
 	if a.Protocol != nil || a.Transport != nil {
+		protocol, transport := profile.Protocol, profile.Transport
+		if a.Protocol != nil {
+			protocol = *a.Protocol
+		}
+		if a.Transport != nil {
+			transport = *a.Transport
+		}
+		if err := store.ValidateAgentACPFields(protocol, transport); err != nil {
+			return profile, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error())
+		}
 		if err := s.store.UpdateAgentACPConfig(ctx, profile.ID, a.Protocol, a.Transport); err != nil {
-			return profile, err
+			return profile, agentAssignmentWriteError(err)
 		}
 		if refreshed, err := s.store.GetAgent(ctx, profile.ID); err == nil {
 			profile = refreshed
 		}
 	}
 	return profile, nil
+}
+
+// Only a foreign-key rejection identifies a caller-correctable composition
+// reference. Busy, abort, IO and closed-store failures remain infrastructure.
+func agentAssignmentWriteError(err error) error {
+	var dbErr *sqlite.Error
+	if errors.As(err, &dbErr) && dbErr.Code() == sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY {
+		return svcerr.Wrap(err, svcerr.CodeInvalid, "agent assignment does not reference an existing role, consumer, or model")
+	}
+	return svcerr.Wrap(err, svcerr.CodeInternal, "failed to update agent assignments")
 }
 
 // CopyToManaged forks plugin or explicitly external provenance into a fresh
@@ -219,7 +251,7 @@ func (s *AgentConfigService) CopyToManaged(source *store.AgentProfile, procedure
 	}
 	class := s.Classify(source)
 	if class.Editable() {
-		return nil, ErrAgentAlreadyManaged
+		return nil, svcerr.Wrap(ErrAgentAlreadyManaged, svcerr.CodeConflict, "agent is already a managed config")
 	}
 	if !class.CopyToManagedAllowed() {
 		return nil, notManagedError(source, class, "copy")
@@ -227,7 +259,7 @@ func (s *AgentConfigService) CopyToManaged(source *store.AgentProfile, procedure
 	if procedures == nil {
 		rows, err := s.store.ListAgentProcedures(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, source.ID)
 		if err != nil {
-			return nil, fmt.Errorf("list source agent procedures: %w", err)
+			return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to read source agent procedures")
 		}
 		procedures = make([]agent.ProcedureDefinition, 0, len(rows))
 		for _, row := range rows {
@@ -259,7 +291,7 @@ func (s *AgentConfigService) CopyToManaged(source *store.AgentProfile, procedure
 func (s *AgentConfigService) result(slug, action string) (*AgentConfigResult, error) {
 	saved, err := s.store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug)
 	if err != nil {
-		return nil, err
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to read saved agent")
 	}
 	s.emit(slug, action)
 	return &AgentConfigResult{Profile: saved, Class: s.classification.Classify(saved.Source)}, nil

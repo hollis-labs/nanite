@@ -847,7 +847,7 @@ func cmdServeWithInitializers(
 
 	// Replace the nil-safe work-tracking collaborator once persistence and
 	// stream broadcasting are both available.
-	selfTools.WorkTrackingTools = selftools.NewWorkTrackingTools(s, s, container.Streams)
+	selfTools.WorkTrackingTools = service.NewWorkTrackingTools(s, container.Streams)
 	// Messaging + its directive-elicitation policy are one collaborator;
 	// replace the constructor's nil-safe instance once runtime services exist.
 	selfTools.MessagingTools = selftools.NewMessagingTools(container.Messaging, container.Elicitation)

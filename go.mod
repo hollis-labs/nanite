@@ -21,6 +21,7 @@ require (
 	github.com/hollis-labs/go-modelsdev v0.3.0
 	github.com/hollis-labs/go-otel v0.10.0
 	github.com/hollis-labs/go-providers v0.42.0
+	github.com/hollis-labs/go-reflexes v0.1.0
 	github.com/hollis-labs/go-sandbox v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/oklog/ulid/v2 v2.1.2

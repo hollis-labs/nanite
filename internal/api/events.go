@@ -2,10 +2,10 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
+	ssekit "github.com/hollis-labs/go-ssekit"
 	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
@@ -13,7 +13,7 @@ import (
 // that combines presence events, plugin lifecycle events, and work updates into
 // one stream, preventing HTTP/1.1 connection starvation in browsers.
 func (a *API) handleUnifiedEvents(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		a.errorResp(w, http.StatusInternalServerError, "streaming not supported")
 		return
@@ -36,24 +36,25 @@ func (a *API) handleUnifiedEvents(w http.ResponseWriter, r *http.Request) {
 		pluginCh = ch
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	clearSSEWriteDeadline(w)
+	stream, err := newSSEWriter(w, true)
+	if err != nil {
+		return
+	}
 
 	// Initial comment establishes connection and flushes headers
-	fmt.Fprint(w, ": unified event stream open\n\n")
+	if err := stream.Comment("unified event stream open"); err != nil {
+		return
+	}
 
 	// Replay current active presence state
 	for _, evt := range a.Services.Streams.ActivePresenceState() {
 		data, err := json.Marshal(evt)
 		if err == nil {
-			fmt.Fprintf(w, "event: presence\ndata: %s\n\n", data)
+			if err := stream.Send(ssekit.Event{Name: "presence", Data: data}); err != nil {
+				return
+			}
 		}
 	}
-	flusher.Flush()
 
 	keepalive := time.NewTicker(sseKeepaliveInterval)
 	defer keepalive.Stop()
@@ -65,8 +66,9 @@ func (a *API) handleUnifiedEvents(w http.ResponseWriter, r *http.Request) {
 			return
 
 		case <-keepalive.C:
-			fmt.Fprint(w, ": keepalive\n\n")
-			flusher.Flush()
+			if err := stream.Comment("keepalive"); err != nil {
+				return
+			}
 
 		case pEvt, ok := <-presenceEvents:
 			if !ok {
@@ -74,8 +76,9 @@ func (a *API) handleUnifiedEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			data, err := json.Marshal(pEvt)
 			if err == nil {
-				fmt.Fprintf(w, "event: presence\ndata: %s\n\n", data)
-				flusher.Flush()
+				if err := stream.Send(ssekit.Event{Name: "presence", Data: data}); err != nil {
+					return
+				}
 			}
 
 		case plEvt, ok := <-pluginCh:
@@ -88,8 +91,9 @@ func (a *API) handleUnifiedEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			data, err := json.Marshal(plEvt)
 			if err == nil {
-				fmt.Fprintf(w, "event: plugin\ndata: %s\n\n", data)
-				flusher.Flush()
+				if err := stream.Send(ssekit.Event{Name: "plugin", Data: data}); err != nil {
+					return
+				}
 			}
 		}
 	}

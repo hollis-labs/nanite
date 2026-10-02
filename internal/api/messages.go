@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	ssekit "github.com/hollis-labs/go-ssekit"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/effort"
 )
@@ -241,24 +242,21 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 	}
 	defer a.Services.Streams.UnregisterSSE(messageID, sseDone)
 
-	flusher, ok := w.(http.Flusher)
+	_, ok = w.(http.Flusher)
 	if !ok {
 		a.errorResp(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
-	clearSSEWriteDeadline(w)
-	flusher.Flush()
+	stream, err := newSSEWriter(w, false)
+	if err != nil {
+		return
+	}
 
 	writeTakeover := func() {
 		evt := chat.StreamEvent{Type: "session_takeover", Content: "This session is now active in another tab"}
 		data, _ := json.Marshal(evt)
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
-		flusher.Flush()
+		_ = stream.Send(ssekit.Event{Name: evt.Type, Data: data})
 	}
 
 	ctx := r.Context()
@@ -287,12 +285,13 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 			// CW-20260419-0014. Zero-EventID events (synthetic, pre-pump)
 			// are emitted without an id: line so they don't clobber the
 			// browser's stored id.
+			id := ""
 			if evt.EventID > 0 {
-				fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", evt.EventID, evt.Type, data)
-			} else {
-				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
+				id = strconv.FormatUint(evt.EventID, 10)
 			}
-			flusher.Flush()
+			if err := stream.Send(ssekit.Event{ID: id, Name: evt.Type, Data: data}); err != nil {
+				return
+			}
 		}
 	}
 }

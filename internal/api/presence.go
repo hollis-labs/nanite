@@ -2,23 +2,22 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
+
+	ssekit "github.com/hollis-labs/go-ssekit"
 )
 
 func (a *API) handlePresenceStream(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		a.errorResp(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
-	clearSSEWriteDeadline(w)
-	flusher.Flush()
+	stream, err := newSSEWriter(w, false)
+	if err != nil {
+		return
+	}
 
 	// Register this client for presence events.
 	clientID, events := a.Services.Streams.RegisterPresenceClient()
@@ -27,9 +26,10 @@ func (a *API) handlePresenceStream(w http.ResponseWriter, r *http.Request) {
 	// Send current state — all currently-streaming sessions.
 	for _, evt := range a.Services.Streams.ActivePresenceState() {
 		data, _ := json.Marshal(evt)
-		fmt.Fprintf(w, "data: %s\n\n", data)
+		if err := stream.Send(ssekit.Event{Data: data}); err != nil {
+			return
+		}
 	}
-	flusher.Flush()
 
 	// Stream events until client disconnects.
 	ctx := r.Context()
@@ -42,8 +42,9 @@ func (a *API) handlePresenceStream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			data, _ := json.Marshal(evt)
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
+			if err := stream.Send(ssekit.Event{Data: data}); err != nil {
+				return
+			}
 		}
 	}
 }

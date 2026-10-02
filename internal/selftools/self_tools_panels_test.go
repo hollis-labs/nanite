@@ -293,7 +293,7 @@ func TestSelfToolsTransport_PresentationRoutesToOwner(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &fakePanelSink{}
-			st := NewSelfToolsTransport(s)
+			st := newTestSelfToolsTransport(s)
 			st.PresentationTools = NewPresentationTools(sink, nil, nil)
 			ctx := mcp.WithSessionID(context.Background(), "sess-route")
 

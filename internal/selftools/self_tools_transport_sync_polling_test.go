@@ -86,7 +86,7 @@ func newSyncPollingTestService(t *testing.T, delay time.Duration) (*subagent.Ser
 
 	runner := &delayedCompletionRunner{db: s.DB, delay: delay}
 	svc := subagent.NewService(s.DB, runner, nil, nil, nil)
-	return svc, &SelfToolsTransport{Store: s, Subagent: svc}
+	return svc, &SelfToolsTransport{Reads: testReadServices(s), Store: s, Subagent: svc}
 }
 
 // TestSyncSubagentEnvelope_ModeSyncAlreadyTerminal pins the realistic
@@ -225,7 +225,7 @@ func TestSyncSubagentEnvelope_StatusError_ReturnsInternal(t *testing.T) {
 
 	runner := &delayedCompletionRunner{db: s.DB, delay: 100 * time.Millisecond}
 	svc := subagent.NewService(s.DB, runner, nil, nil, nil)
-	st := &SelfToolsTransport{Store: s, Subagent: svc}
+	st := &SelfToolsTransport{Reads: testReadServices(s), Store: s, Subagent: svc}
 
 	id, err := svc.Spawn(context.Background(), subagent.SpawnRequest{
 		ParentSessionID: "sess-db-error-test",

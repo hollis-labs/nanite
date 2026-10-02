@@ -26,7 +26,7 @@ func seedSessionByID(t *testing.T, st *SelfToolsTransport, id string) string {
 // in chronological order with text unwrapped.
 func TestChatGet_BasicHappyPath(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	code := seedSessionByID(t, st, "sess-cg-1")
 	seedMessage(t, s, "sess-cg-1", "user", "first message", false)
@@ -65,7 +65,7 @@ func TestChatGet_BasicHappyPath(t *testing.T) {
 // TestChatGet_ShortCodeNormalisation: c248, #c248, C248, #C248 all resolve.
 func TestChatGet_ShortCodeNormalisation(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	code := seedSessionByID(t, st, "sess-norm")
 	seedMessage(t, s, "sess-norm", "user", "hello", false)
@@ -87,7 +87,7 @@ func TestChatGet_ShortCodeNormalisation(t *testing.T) {
 // TestChatGet_BySessionID: passing a UUID directly works.
 func TestChatGet_BySessionID(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	_ = seedSessionByID(t, st, "sess-uuid")
 	seedMessage(t, s, "sess-uuid", "user", "hi", false)
@@ -105,7 +105,7 @@ func TestChatGet_BySessionID(t *testing.T) {
 // TestChatGet_UnknownShortCode: friendly error, not a stack trace.
 func TestChatGet_UnknownShortCode(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	ctx := mcp.WithCallerProfile(context.Background(), "agent-A")
 	res, _ := st.CallTool(ctx, "chat_get", map[string]any{"target": "c9999"})
@@ -129,7 +129,7 @@ func TestChatGet_MissingTarget(t *testing.T) {
 // TestChatGet_Pagination: limit + offset works against a small page.
 func TestChatGet_Pagination(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	code := seedSessionByID(t, st, "sess-page")
 	for i := 0; i < 5; i++ {
@@ -162,7 +162,7 @@ func TestChatGet_Pagination(t *testing.T) {
 // TestChatGet_IncludeCompactedFalse: compacted blobs filtered when requested.
 func TestChatGet_IncludeCompactedFalse(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	code := seedSessionByID(t, st, "sess-comp")
 	seedMessage(t, s, "sess-comp", "user", "active one", false)
@@ -187,7 +187,7 @@ func TestChatGet_IncludeCompactedFalse(t *testing.T) {
 // TestChatSearch_CrossSessionByShortCode: search a sibling chat by short code.
 func TestChatSearch_CrossSessionByShortCode(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	// Caller's session (current).
 	seedSession(t, s, "sess-caller")
@@ -229,7 +229,7 @@ func TestChatSearch_CrossSessionByShortCode(t *testing.T) {
 // the snippet shape stays minimal).
 func TestChatSearch_TargetSameSession_NoCrossFlag(t *testing.T) {
 	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
+	st := newTestSelfToolsTransport(s)
 
 	code := seedSessionByID(t, st, "sess-self")
 	seedMessage(t, s, "sess-self", "user", "needle in haystack", false)

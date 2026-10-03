@@ -19,8 +19,8 @@ import (
 //
 // Without always-ship owners, preserve the historic batch and unconditional Ack.
 // With an owner, deliver messages separately: exact surviving text is Ack'd;
-// transient losses remain unread without blocking later messages. A message
-// larger than the empty slot can hold is Ack'd after one truncated delivery,
+// losses that fit the available byte headroom remain unread. A message
+// larger than the currently free headroom is Ack'd after one truncated delivery,
 // retaining the historic oversized-result behavior rather than wedging the inbox.
 func (s *chatServiceImpl) evaluateAndInjectSubagentResults(ctx context.Context, sessionID, agentID string, slotResult *SlotAssemblyResult) []messaging.Message {
 	if s.subagentInbox == nil || slotResult == nil || slotResult.Window == nil {
@@ -53,12 +53,13 @@ func (s *chatServiceImpl) evaluateAndInjectSubagentResults(ctx context.Context, 
 		injection := formatSubagentResultInjection([]messaging.Message{m})
 		slot := slotResult.Window.Slot(ctxpkg.SlotUserContext)
 		before := slot.Content
+		freeBytes := subagentResultHeadroomBytes(slot)
 		if appendUserContext(slotResult, injection) {
 			ack(m)
 			continue
 		}
-		if slot.MaxTokens > 0 && len(injection) > slot.MaxTokens*4 {
-			// Cannot fit even with an empty slot. Keep this truncated delivery
+		if slot.MaxTokens > 0 && len(injection) > freeBytes {
+			// Cannot fit the currently free space. Keep this truncated delivery
 			// and Ack once, allowing queued results through on later turns.
 			slog.Warn("chat-service: oversized subagent result delivered truncated", "session_id", sessionID, "message_id", m.ID)
 			ack(m)
@@ -72,6 +73,16 @@ func (s *chatServiceImpl) evaluateAndInjectSubagentResults(ctx context.Context, 
 		slog.Warn("chat-service: subagent result truncated; leaving message unread", "session_id", sessionID, "message_id", m.ID)
 	}
 	return pending
+}
+
+// Match Window's existing byte clamp, counting appendUserContext's separator.
+// Compute before the append: Assemble mutates the slot on truncation.
+func subagentResultHeadroomBytes(slot *ctxpkg.Slot) int {
+	separator := 0
+	if slot.Content != "" {
+		separator = 2
+	}
+	return max(0, slot.MaxTokens*4-len(slot.Content)-separator)
 }
 
 func formatSubagentResultInjection(messages []messaging.Message) string {

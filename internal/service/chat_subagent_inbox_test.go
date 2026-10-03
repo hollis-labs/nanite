@@ -93,18 +93,6 @@ func TestSubagentGiantResultDoesNotWedgeInbox(t *testing.T) {
 	}
 }
 
-func TestSubagentPerMessageDeliveryBypassesTransientLoss(t *testing.T) {
-	pending := []messaging.Message{{ID: "large", FromAgentID: "worker", Body: strings.Repeat("L", 1000)}, {ID: "small", FromAgentID: "worker", Body: "SMALL"}}
-	fake := &drainingSubagentInbox{fakeSubagentInbox: fakeSubagentInbox{msgs: pending}}
-	window := ctxpkg.NewContextWindow(200000, nil)
-	window.SetContent(ctxpkg.SlotUserContext, strings.Repeat("c", 7800))
-	result := &SlotAssemblyResult{Window: window, AlwaysShipActive: true}
-	(&chatServiceImpl{subagentInbox: fake}).evaluateAndInjectSubagentResults(context.Background(), "s", "a", result)
-	if ids := fake.ackedIDs(); len(ids) != 1 || ids[0] != "small" || !strings.Contains(result.SystemPrompt, "SMALL") || strings.Contains(result.SystemPrompt, "LLLL") {
-		t.Fatal("transiently lost message blocked smaller result", ids)
-	}
-}
-
 func (f *fakeSubagentInbox) Inbox(_ context.Context, _, _ string, _ messaging.InboxFilter, _, _ string) ([]messaging.Message, error) {
 	if f.inboxErr != nil {
 		return nil, f.inboxErr
@@ -272,12 +260,10 @@ func TestEvaluateAndInjectSubagentResults_AckFailure_StillReturnsPending(t *test
 	}
 }
 
-func TestSubagentAckRequiresWholeAppendedBatch(t *testing.T) {
+func TestSubagentAppendRequiresWholeAppendedText(t *testing.T) {
 	for _, mode := range []string{"survives", "lost", "old-duplicate"} {
 		t.Run(mode, func(t *testing.T) {
 			pending := []messaging.Message{{ID: "msg", FromAgentID: "worker", Body: "DONE"}}
-			fake := &fakeSubagentInbox{msgs: pending}
-			s := &chatServiceImpl{subagentInbox: fake}
 			result := newTestSlotResult(t, "s")
 			result.AlwaysShipActive = true
 			before := "core"
@@ -288,9 +274,8 @@ func TestSubagentAckRequiresWholeAppendedBatch(t *testing.T) {
 				before = formatSubagentResultInjection(pending) + strings.Repeat("c", 7900)
 			}
 			result.Window.SetContent("user_context", before)
-			s.evaluateAndInjectSubagentResults(context.Background(), "s", "a", result)
-			if (len(fake.ackedIDs()) != 0) != (mode == "survives") {
-				t.Fatal("ack did not reflect exact appended delivery", mode, fake.ackedIDs())
+			if got := appendUserContext(result, formatSubagentResultInjection(pending)); got != (mode == "survives") {
+				t.Fatal("exact append survival check changed", mode, got)
 			}
 		})
 	}

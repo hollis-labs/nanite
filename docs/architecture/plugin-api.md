@@ -193,7 +193,12 @@ Titles still owned by core, including Session Documents, refuse installation and
 fetch until their core renderer is adopted. The host admits at most four owners
 and four sources; install review reserves capacity against accepted installed
 bundles (including disabled ones), with runtime enforcement as a defense. Updates
-replace their own reservation. Titles are unique across owners after lowercasing
+replace their own reservation. Concurrent installs of different owners use
+per-plugin-ID locks, so both can pass the install-time check and exceed the cap;
+runtime registration is the backstop and refuses the excess plugin's load.
+An unreadable approval in the installed inventory blocks a new always-ship
+install rather than assuming the existing owner has no reservation.
+Titles are unique across owners after lowercasing
 and collapsing runs of spaces, dots, underscores and hyphens; the first owner to
 register keeps the title and later registration fails with an operator diagnostic.
 The host orders Pinned Context ahead of other plugin titles, then sorts
@@ -221,7 +226,13 @@ line naming owner/source and list tool. Revoked or unapproved loaded leases
 contribute nothing: no fetch or fallback, with one operator diagnostic per approval
 transition. Final
 publication rechecks approval and the original lease, preventing stale replies
-from an unloaded/replaced owner.
+from an unloaded/replaced owner. A successful source currently performs four
+full-bundle approval checks per turn: before core budgeting, at composition
+entry, before its owned fetch, and before publication. The pre-collection and
+publication checks use the parent context outside the two-second child and
+three-second collection deadlines. This is a known hashing-cost limitation and
+follow-up: about 50 ms per warm 64 MiB bundle can add roughly 0.8 seconds per
+turn for four owners of that size.
 
 Stash failure preserves the existing inline-core behavior and logs an operator
 diagnostic if plugin fallback/headroom cannot fit. In that exceptional case the
@@ -236,10 +247,13 @@ in its own body; the host cannot detect completeness from opaque text. List tool
 must accept an initial call without required arguments, but remain subject to
 per-agent grants and transport availability, including CLI MCP reach. Without active owners, late subagent delivery and unconditional batch Ack remain
 byte-identical to the previous path. With an owner, inject messages individually
-and Ack exact surviving appends; transient losses stay unread without blocking
-smaller later results. A single message too large for an otherwise empty
-user-context slot is Acked after one truncated delivery, preserving the historic
-oversized-result behavior.
+and Ack exact surviving appends. Free headroom is the slot's byte capacity
+(`MaxTokens * 4`) minus already composed bytes and the append separator.
+A message exceeding that currently free headroom is Acked after one truncated
+delivery, preserving the historic truncated-result behavior even for 2–8 KiB
+messages that could fit an empty slot. An append that fits that headroom but
+fails exact assembly remains unread; zero-owner batches retain their old bytes
+and unconditional Ack.
 
 Extracted features retain core session/message IDs as references. The reviewed
 `message_refs` query verifies identity within a permitted session and returns

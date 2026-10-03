@@ -19,24 +19,23 @@ import (
 
 const workflowValueIDPrefix = "values-"
 
-// WorkflowStateStore is Nanite's SQLite-backed graph-native runtime adapter.
-// It is adapted from Hadron's production adapter at cfce3b0. Canonical engine
-// state and Nanite's compatibility projections share the same database and
-// transaction boundary.
-type WorkflowStateStore struct {
-	db      *sql.DB
-	product *nanitestore.Store
+// WorkflowStateStore is the production facade over the released SQL store.
+type WorkflowStateStore = SQLWorkflowStateStore
+
+// legacyWorkflowStateStore retains the reference canonical writer until PR3.
+// Production construction never returns this implementation.
+type legacyWorkflowStateStore struct{ *SQLWorkflowStateStore }
+
+func NewWorkflowStateStore(store *nanitestore.Store) (*WorkflowStateStore, error) {
+	return NewSQLWorkflowStateStore(store)
 }
 
-var _ workflowruntime.StateStore = (*WorkflowStateStore)(nil)
-
-// NewWorkflowStateStore wraps an open Nanite persistence store. The returned
-// adapter shares the store's database lifetime and must not outlive it.
-func NewWorkflowStateStore(store *nanitestore.Store) (*WorkflowStateStore, error) {
-	if store == nil || store.DB == nil {
-		return nil, fmt.Errorf("workflow state store requires an open persistence store")
+func newLegacyWorkflowStateStore(store *nanitestore.Store) (*legacyWorkflowStateStore, error) {
+	shared, err := NewSQLWorkflowStateStore(store)
+	if err != nil {
+		return nil, err
 	}
-	return &WorkflowStateStore{db: store.DB, product: store}, nil
+	return &legacyWorkflowStateStore{SQLWorkflowStateStore: shared}, nil
 }
 
 type workflowSQL interface {
@@ -53,7 +52,7 @@ func closeRows(rows *sql.Rows) {
 	_ = rows.Close()
 }
 
-func (s *WorkflowStateStore) write(ctx context.Context, operation string, fn func(workflowSQL) error) error {
+func (s *legacyWorkflowStateStore) write(ctx context.Context, operation string, fn func(workflowSQL) error) error {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return err
 	}

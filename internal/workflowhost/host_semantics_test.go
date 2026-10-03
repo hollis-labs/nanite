@@ -137,6 +137,9 @@ func TestGoWorkflowIdentityAndPilotAliasRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if preflightErr := PreflightWorkflowStorage(t.Context(), product); preflightErr != nil {
+		t.Fatal(preflightErr)
+	}
 	completed, err := restarted.ResumeWait(t.Context(), ResumeWaitRequest{
 		WaitID: string(wait.Ref.ID), Payload: "approved", ResponderKind: "operator", ResponderReference: "operator",
 		IdempotencyKey: "pilot-approval", ReceivedAt: wait.CreatedAt.Add(time.Second),
@@ -217,6 +220,9 @@ func TestLoopWaitPersistsCorrelationAndRecoversAfterRestart(t *testing.T) {
 	if updateErr := product.UpdateLoopRunStatus(t.Context(), host.id, nanitestore.LoopRunStatusCompleted, &completedAt); updateErr != nil {
 		t.Fatal(updateErr)
 	}
+	if preflightErr := PreflightWorkflowStorage(t.Context(), product); preflightErr != nil {
+		t.Fatal(preflightErr)
+	}
 	restarted, _ := NewEngine(state)
 	restarted.WithLoopStepHost(host).WithWaitCoordinator(&workflowruntime.WaitCoordinator{Store: state, Authorizer: NaniteResponderAuthorizer{}})
 	var wg sync.WaitGroup
@@ -276,6 +282,9 @@ func TestOrdinaryResumeReconcilesTerminalLoopWait(t *testing.T) {
 	completedAt := time.Now().UTC()
 	if updateErr := product.UpdateLoopRunStatus(t.Context(), host.id, nanitestore.LoopRunStatusCompleted, &completedAt); updateErr != nil {
 		t.Fatal(updateErr)
+	}
+	if preflightErr := PreflightWorkflowStorage(t.Context(), product); preflightErr != nil {
+		t.Fatal(preflightErr)
 	}
 	restarted, _ := NewEngine(state)
 	restarted.WithLoopStepHost(host).WithWaitCoordinator(&workflowruntime.WaitCoordinator{Store: state, Authorizer: NaniteResponderAuthorizer{}})

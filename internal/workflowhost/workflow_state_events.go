@@ -10,7 +10,7 @@ import (
 )
 
 // AppendEvent implements runtime.StateStore with an atomic per-run sequence.
-func (s *WorkflowStateStore) AppendEvent(ctx context.Context, request workflowruntime.AppendEventRequest) (workflowruntime.Event, error) {
+func (s *legacyWorkflowStateStore) AppendEvent(ctx context.Context, request workflowruntime.AppendEventRequest) (workflowruntime.Event, error) {
 	var result workflowruntime.Event
 	err := s.write(ctx, "append workflow event", func(query workflowSQL) error {
 		candidate := workflowruntime.Event{
@@ -121,7 +121,7 @@ INSERT INTO workflow_events(
 }
 
 // ListEvents implements runtime.StateStore in ascending per-run sequence.
-func (s *WorkflowStateStore) ListEvents(ctx context.Context, query workflowruntime.EventQuery) ([]workflowruntime.Event, error) {
+func (s *legacyWorkflowStateStore) ListEvents(ctx context.Context, query workflowruntime.EventQuery) ([]workflowruntime.Event, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}

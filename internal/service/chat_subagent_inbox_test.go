@@ -18,6 +18,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/chat"
+	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
@@ -31,6 +32,77 @@ type fakeSubagentInbox struct {
 	inboxErr error
 	ackErr   error
 	acked    []string
+}
+
+type drainingSubagentInbox struct{ fakeSubagentInbox }
+
+func (f *drainingSubagentInbox) Inbox(_ context.Context, _, _ string, _ messaging.InboxFilter, _, _ string) ([]messaging.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var unread []messaging.Message
+	for _, m := range f.msgs {
+		found := false
+		for _, id := range f.acked {
+			found = found || id == m.ID
+		}
+		if !found {
+			unread = append(unread, m)
+		}
+	}
+	return unread, nil
+}
+
+func TestSubagentGiantResultDoesNotWedgeInbox(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		name := "no owners"
+		if active {
+			name = "active owner"
+		}
+		t.Run(name, func(t *testing.T) {
+			giant := messaging.Message{ID: "giant", FromAgentID: "worker", Body: strings.Repeat("G", 9000)}
+			fake := &drainingSubagentInbox{fakeSubagentInbox: fakeSubagentInbox{msgs: []messaging.Message{giant}}}
+			s := &chatServiceImpl{subagentInbox: fake}
+			assemble := func() *SlotAssemblyResult {
+				window := ctxpkg.NewContextWindow(200000, nil)
+				if active {
+					window.SetContent(ctxpkg.SlotUserContext, "## Pinned Context\n[pinned] note")
+				}
+				return &SlotAssemblyResult{Window: window, AlwaysShipActive: active}
+			}
+			first := assemble()
+			s.evaluateAndInjectSubagentResults(context.Background(), "s", "a", first)
+			if ids := fake.ackedIDs(); len(ids) != 1 || ids[0] != "giant" || !strings.Contains(first.SystemPrompt, "[truncated]") {
+				t.Fatal("giant result not delivered and Acked once", ids, first.SystemPrompt)
+			}
+			if !active {
+				injection := formatSubagentResultInjection([]messaging.Message{giant})
+				if first.Window.Slot(ctxpkg.SlotUserContext).Content != injection[:8000]+"\n[truncated]" {
+					t.Fatal("zero-owner bytes changed from base")
+				}
+			}
+			fake.msgs = append(fake.msgs, messaging.Message{ID: "small", FromAgentID: "worker", Body: "SMALL DELIVERED"})
+			second := assemble()
+			s.evaluateAndInjectSubagentResults(context.Background(), "s", "a", second)
+			if ids := fake.ackedIDs(); len(ids) != 2 || ids[1] != "small" || !strings.Contains(second.SystemPrompt, "SMALL DELIVERED") {
+				t.Fatal("small result behind giant not delivered", ids)
+			}
+			if got := s.evaluateAndInjectSubagentResults(context.Background(), "s", "a", assemble()); len(got) != 0 || len(fake.ackedIDs()) != 2 {
+				t.Fatal("oversized result repeated", got)
+			}
+		})
+	}
+}
+
+func TestSubagentPerMessageDeliveryBypassesTransientLoss(t *testing.T) {
+	pending := []messaging.Message{{ID: "large", FromAgentID: "worker", Body: strings.Repeat("L", 1000)}, {ID: "small", FromAgentID: "worker", Body: "SMALL"}}
+	fake := &drainingSubagentInbox{fakeSubagentInbox: fakeSubagentInbox{msgs: pending}}
+	window := ctxpkg.NewContextWindow(200000, nil)
+	window.SetContent(ctxpkg.SlotUserContext, strings.Repeat("c", 7800))
+	result := &SlotAssemblyResult{Window: window, AlwaysShipActive: true}
+	(&chatServiceImpl{subagentInbox: fake}).evaluateAndInjectSubagentResults(context.Background(), "s", "a", result)
+	if ids := fake.ackedIDs(); len(ids) != 1 || ids[0] != "small" || !strings.Contains(result.SystemPrompt, "SMALL") || strings.Contains(result.SystemPrompt, "LLLL") {
+		t.Fatal("transiently lost message blocked smaller result", ids)
+	}
 }
 
 func (f *fakeSubagentInbox) Inbox(_ context.Context, _, _ string, _ messaging.InboxFilter, _, _ string) ([]messaging.Message, error) {
@@ -207,6 +279,7 @@ func TestSubagentAckRequiresWholeAppendedBatch(t *testing.T) {
 			fake := &fakeSubagentInbox{msgs: pending}
 			s := &chatServiceImpl{subagentInbox: fake}
 			result := newTestSlotResult(t, "s")
+			result.AlwaysShipActive = true
 			before := "core"
 			if mode == "lost" {
 				before = strings.Repeat("c", 8000)

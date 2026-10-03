@@ -143,7 +143,7 @@ func TestAlwaysShipRevocationUnloadAndReload(t *testing.T) {
 				return alwaysShipReply("STALE"), nil
 			}), check)
 			out := r.compose(context.Background(), r.snapshot("s"), "", contextbroker.Intent{SessionID: "s"}, ctxpkg.DefaultEstimator{}, 2000)
-			if strings.Contains(out, "STALE") || !strings.Contains(out, "pins/pins: use pins_list") {
+			if strings.Contains(out, "STALE") || (mode == "revoked" && out != "") || (mode != "revoked" && !strings.Contains(out, "pins/pins: use pins_list")) {
 				t.Fatal("stale lifetime published", out)
 			}
 			if mode == "unloaded" && len(r.snapshot("s")) != 0 {
@@ -230,7 +230,7 @@ func TestAlwaysShipAssembleSlotsIntentExemptions(t *testing.T) {
 			registry := NewPluginAlwaysShipSources()
 			addAlwaysShip(t, registry, "pins", "Pinned Context", contextCallerFunc(func(_ context.Context, req *sdkprocess.HTTPRequest) (*sdkprocess.HTTPResponse, error) {
 				decoded, requestErr := pluginapi.DecodeAlwaysShipRequest(req)
-				if requestErr != nil || decoded.Intent != tc.intent {
+				if requestErr != nil || decoded.Intent != tc.intent || decoded.AgentID != "a" {
 					t.Fatal(decoded, requestErr)
 				}
 				return alwaysShipReply("[pinned] EXACT\r\nbytes"), nil
@@ -239,6 +239,9 @@ func TestAlwaysShipAssembleSlotsIntentExemptions(t *testing.T) {
 			result, err := service.AssembleSlots(context.Background(), session, &store.AgentProfile{ID: "a", Slug: "test"}, nil, "", 200000, "")
 			if err != nil {
 				t.Fatal(err)
+			}
+			if !result.AlwaysShipActive {
+				t.Fatal("active owner did not select conditional late delivery")
 			}
 			wanted := "## Pinned Context\n[pinned] EXACT\r\nbytes"
 			if composeUserPayload(result, "USER") != wanted+"\n\nUSER" {
@@ -331,7 +334,7 @@ func TestAlwaysShipCoreDecisionPrecedesComposition(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Window.Slot(ctxpkg.SlotUserContext).Content != "## Session Context\n"+prompt {
+			if result.AlwaysShipActive || result.Window.Slot(ctxpkg.SlotUserContext).Content != "## Session Context\n"+prompt {
 				t.Fatal("inactive registry reduced core threshold")
 			}
 		})

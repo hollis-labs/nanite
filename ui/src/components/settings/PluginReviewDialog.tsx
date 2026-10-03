@@ -26,7 +26,7 @@ export function PluginReviewDialog({ review, busy, onCancel, onApprove }: {
   if (!review) return null;
   const current = declarations(review.review);
   const previous = review.previous ? declarations(review.previous.review) : new Map<string, string>();
-  const names = Array.from(new Set([...current.keys(), ...previous.keys()])).sort();
+  const names = Array.from(new Set([...current.keys(), ...previous.keys()])).sort((a, b) => a === "Persistent context warning" ? -1 : b === "Persistent context warning" ? 1 : a.localeCompare(b));
   return (
     <AlertDialog open onOpenChange={(open) => { if (!open && !busy) onCancel(); }}>
       <AlertDialogContent>
@@ -43,7 +43,7 @@ export function PluginReviewDialog({ review, busy, onCancel, onApprove }: {
             const before = previous.get(name);
             const after = current.get(name);
             const changed = review.previous !== null && before !== after;
-            return <div key={name} className="rounded-md border p-2">
+            return <div key={name} className={name === "Persistent context warning" ? "rounded-md border-2 border-amber-500 bg-amber-500/10 p-3" : "rounded-md border p-2"}>
               <p className="font-medium">{name}{changed ? (before === undefined ? " · Added" : after === undefined ? " · Removed" : " · Changed") : ""}</p>
               {changed && before !== undefined && <p className="text-fg-muted whitespace-pre-wrap break-words">Before: {before}</p>}
               {after !== undefined && <p className="whitespace-pre-wrap break-words">{changed ? "After: " : ""}{after}</p>}

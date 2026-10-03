@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
@@ -20,7 +21,6 @@ import (
 
 const alwaysShipLateReserve = 256
 const alwaysShipOwnerTokens = 1500
-const maxAlwaysShipOwners = 4
 
 // PluginAlwaysShipSources owns reviewed leases independently of intent-skipped
 // dynamic retrieval. Each turn snapshots leases; publication rechecks identity.
@@ -36,6 +36,7 @@ type alwaysShipSource struct {
 	check       func(context.Context) error
 	lifetime    context.Context
 	cancel      context.CancelFunc
+	approved    *atomic.Bool
 }
 
 func NewPluginAlwaysShipSources() *PluginAlwaysShipSources {
@@ -79,12 +80,18 @@ func (r *PluginAlwaysShipSources) add(owner string, declarations []pluginapi.Alw
 	if owners[owner] {
 		return fmt.Errorf("always-ship owner already registered")
 	}
-	if len(owners) >= maxAlwaysShipOwners || len(r.sources)+len(declarations) > pluginapi.MaxAlwaysShipSources {
-		return fmt.Errorf("always-ship active owner/source limit reached")
+	existing := map[string][]pluginapi.AlwaysShipSource{}
+	for _, source := range r.sources {
+		existing[source.owner] = append(existing[source.owner], source.declaration)
 	}
+	if err := plugin.CheckAlwaysShipAdmission(owner, declarations, existing); err != nil {
+		return err
+	}
+	approval := &atomic.Bool{}
+	approval.Store(true)
 	for _, declaration := range declarations {
 		lifetime, cancel := context.WithCancel(context.Background())
-		r.sources[owner+"/"+declaration.ID] = &alwaysShipSource{owner: owner, declaration: declaration, scope: scope, caller: caller, check: check, lifetime: lifetime, cancel: cancel}
+		r.sources[owner+"/"+declaration.ID] = &alwaysShipSource{owner: owner, declaration: declaration, scope: scope, caller: caller, check: check, lifetime: lifetime, cancel: cancel, approved: approval}
 	}
 	return nil
 }
@@ -112,7 +119,7 @@ func (r *PluginAlwaysShipSources) snapshot(sessionID string) []*alwaysShipSource
 		}
 	}
 	rank := func(title string) int {
-		title = strings.Join(strings.FieldsFunc(strings.ToLower(title), func(r rune) bool { return r == ' ' || r == '.' || r == '_' || r == '-' }), " ")
+		title = plugin.NormalizeAlwaysShipTitle(title)
 		switch title {
 		case "session documents":
 			return 0
@@ -132,6 +139,36 @@ func (r *PluginAlwaysShipSources) snapshot(sessionID string) []*alwaysShipSource
 		return strings.Compare(a.declaration.ID, b.declaration.ID)
 	})
 	return sources
+}
+
+// Filter revoked authority before reserving core space or naming a fallback.
+// A shared owner flag emits one diagnostic per approval transition, even when
+// that owner declares multiple sources. Caller cancellation is not revocation.
+func approvedAlwaysShipSources(ctx context.Context, sources []*alwaysShipSource) []*alwaysShipSource {
+	active := make([]*alwaysShipSource, 0, len(sources))
+	for _, source := range sources {
+		err := source.check(ctx)
+		if err != nil && ctx.Err() == nil {
+			if source.approved.Swap(false) {
+				slog.Warn("context-service: always-ship approval unavailable", "owner", source.owner, "err", err)
+			}
+			continue
+		}
+		if err == nil && !source.approved.Swap(true) {
+			slog.Info("context-service: always-ship approval restored", "owner", source.owner)
+		}
+		active = append(active, source)
+	}
+	return active
+}
+
+func hasActiveAlwaysShipOwner(sources []*alwaysShipSource) bool {
+	for _, source := range sources {
+		if source.approved.Load() && source.lifetime.Err() == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func alwaysShipFallback(sources []*alwaysShipSource) string {
@@ -204,6 +241,7 @@ func (source *alwaysShipSource) fetch(ctx context.Context, intent contextbroker.
 // compose runs after core's stash decision. Every non-admitted source retains
 // its fallback; bodies never acquire ordinary tool grants or a cache marker.
 func (r *PluginAlwaysShipSources) compose(ctx context.Context, sources []*alwaysShipSource, core string, intent contextbroker.Intent, est ctxpkg.TokenEstimator, budget int) string {
+	sources = approvedAlwaysShipSources(ctx, sources)
 	if len(sources) == 0 {
 		return core
 	}
@@ -252,14 +290,9 @@ func (r *PluginAlwaysShipSources) compose(ctx context.Context, sources []*always
 	}
 	// Approval may have been revoked during another owner's fetch. Check it
 	// again before publication, outside the registry lock.
-	for _, source := range sources {
-		if _, ok := replies[source]; !ok {
-			continue
-		}
-		if err := source.check(fetchCtx); err != nil {
-			delete(replies, source)
-		}
-	}
+	// The fetch deadline bounds collection, not publication of already-collected
+	// bodies. The parent context still honors cancellation and shutdown.
+	sources = approvedAlwaysShipSources(ctx, sources)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	pending := slices.Clone(sources)

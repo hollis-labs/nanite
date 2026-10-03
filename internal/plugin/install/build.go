@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/pkg/pluginapi"
 )
 
 // BuildOptions bundles the entry-point-specific pieces every install caller
@@ -67,6 +68,17 @@ func NewInstaller(opts BuildOptions) (*Installer, *DirStaging) {
 			if review.ID != id {
 				return nil, fmt.Errorf("review identity differs from install target")
 			}
+			declared, err := plugin.ParseManifest(filepath.Join(directory, "plugin.yaml"))
+			if err != nil {
+				return nil, err
+			}
+			block, err := pluginapi.DecodeBlock(declared.Shared.Nanite)
+			if err != nil {
+				return nil, err
+			}
+			if err = plugin.CheckAlwaysShipInstall(ctx, opts.PluginsRoot, id, block.Registers.AlwaysShipSources); err != nil {
+				return nil, err
+			}
 			previous, err := plugin.ReadInstallApproval(opts.PluginsRoot, id)
 			if err != nil && !os.IsNotExist(err) {
 				return nil, err
@@ -87,6 +99,9 @@ func NewInstaller(opts BuildOptions) (*Installer, *DirStaging) {
 			}
 			if current.Digest() != review.Digest() {
 				return nil, fmt.Errorf("staged bundle changed during review")
+			}
+			if err = plugin.CheckAlwaysShipInstall(ctx, opts.PluginsRoot, id, block.Registers.AlwaysShipSources); err != nil {
+				return nil, err
 			}
 			return plugin.ReplaceInstallApproval(opts.PluginsRoot, review, accepted)
 		},

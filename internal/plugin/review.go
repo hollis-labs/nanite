@@ -126,9 +126,11 @@ func BuildInstallReview(ctx context.Context, directory string) (InstallReview, e
 	if len(block.Registers.AlwaysShipSources) != 0 {
 		var instructions []string
 		for _, source := range block.Registers.AlwaysShipSources {
-			instructions = append(instructions, source.ID+": "+source.ListTool+" (declared read effect, callable without arguments)")
+			instructions = append(instructions, source.ID+": "+source.Title+" -> "+source.ListTool+" (declared read effect, callable without arguments)")
 		}
-		review.HostNotice = fmt.Sprintf("Plugin %s (%s) may add text to the system prompt on API-agent turns and prepend context to CLI-agent user messages on every turn. This text survives compaction and is exempt from intent skipping on review, recall and resume turns. It competes with your own context within the shared 2,000-token budget, costing up to 1500 uncached tokens per turn per owner. List tools: %s. Naming a tool does not grant access; per-agent tool grants and transport availability still apply.", common.Name, common.ID, strings.Join(instructions, "; "))
+		// Rewording this notice changes the review digest and intentionally
+		// requires re-approval of every always-ship plugin.
+		review.HostNotice = fmt.Sprintf("Plugin %s may add text to the system prompt on API-agent turns and prepend context to CLI-agent user messages on every turn. This text survives compaction and is exempt from intent skipping on review, recall and resume turns. It competes with your own context within the shared 2,000-token budget, costing up to 1500 uncached tokens per turn per owner. List tools: %s. Naming a tool does not grant access; per-agent tool grants and transport availability still apply.", common.ID, strings.Join(instructions, "; "))
 	}
 	review.ReflexSeeds = block.Registers.ReflexSeeds
 	slices.SortFunc(review.Secrets, func(a, b ReviewSecret) int { return strings.Compare(a.Name, b.Name) })

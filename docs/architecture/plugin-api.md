@@ -171,18 +171,48 @@ markers retain their slot invariants. Unload, shutdown, failed launch and termin
 restart failure remove source ownership and cancel active calls. Publication
 checks the source lifetime so a response cannot survive unload and replacement.
 
-### Known behavior change after extraction: plugin context sources
+### Persistent and dynamic plugin context
 
-Plugin-provided context, including pins after extraction and documents or other
-sources when adopted, enters the compactable `SlotContext`. The broker's
-`shouldSkipForIntent` in `internal/contextbroker/assembly.go` skips that slot for
-`review_session`, `recall_decision` and `resume_task` intents. Sources share the
-plugin context budget; `PluginContextSources.Fetch` and `pluginContextSource.fetch`
-in `internal/service/plugin_context_sources.go` omit whole items that exceed
-their share, with no host pointer fallback unless the plugin implements one.
-Core pinned content previously used `buildUserContextSlot` in
-`internal/chat/context_client.go` and the separate, non-compactable
-`SlotUserContext` path. Context-source parity is tracked in CW-20261002-0110.
+Ordinary `context.source` contributions enter compactable `SlotContext` and
+remain subject to intent skipping for `review_session`, `recall_decision` and
+`resume_task`, with whole-item omission when their dynamic share is exhausted.
+Plugins that need persistent placement must declare `always_ship_sources` and
+obtain the separate reviewed `context.always_ship` grant. The host-owned review
+notice describes system-prompt authority, up to 1500 uncached tokens per owner
+per turn, and competition with the user's own context. It is part of the accepted
+approval digest and is shown by both CLI and GUI installers.
+
+`PluginAlwaysShipSources` composes plugin-rendered bodies after the core
+UserContext stash decision in `ContextService.AssembleSlots`. The class survives
+compaction and bypasses dynamic intent skipping. It does not grant tool access.
+Titles still owned by core, including Session Documents, refuse installation and
+fetch until their core renderer is adopted. The host admits at most four owners
+and four sources, orders Pinned Context ahead of other plugin titles, then sorts
+by owner/source. Documents adoption gives Session Documents first rank when its
+core reservation is removed.
+
+The 2,000-token slot ceiling is shared. With an owner active, core's oversize
+threshold reserves 256 tokens for late injections plus the measured complete
+fallback line. Owner body bytes share its reviewed `max_bytes` allowance; each
+owner's rendered sections also fit 1500 estimated tokens. Headings, separators
+and pending fallback entries count toward the final slot budget. Fetches run
+sequentially through private owned stdio with two-second child and three-second
+turn deadlines. Failures, oversized responses, unloads and revoked approvals
+retain a deterministic section fallback naming the owner and list tool. Final
+publication rechecks approval and the original lease, preventing stale replies
+from an unloaded/replaced owner.
+
+Stash failure preserves the existing inline-core behavior and logs an operator
+diagnostic if plugin fallback/headroom cannot fit. In that exceptional case the
+final Window clamp can consume the entire slot; plugin context and fallback are
+not guaranteed. No turn error or new core truncation policy is introduced.
+Window's existing truncation suffix and byte heuristic remain approximate token
+accounting. A plugin returning a partial inventory must explain the omitted items
+in its own body; the host cannot detect completeness from opaque text. List tools
+must accept an initial call without required arguments, but remain subject to
+per-agent grants and transport availability, including CLI MCP reach. Very large
+late subagent batches may remain unread across turns: acknowledgment occurs only
+when the exact appended batch survives final assembly.
 
 Extracted features retain core session/message IDs as references. The reviewed
 `message_refs` query verifies identity within a permitted session and returns

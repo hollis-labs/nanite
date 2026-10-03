@@ -199,3 +199,26 @@ func TestEvaluateAndInjectSubagentResults_AckFailure_StillReturnsPending(t *test
 		t.Fatalf("expected injection to still succeed despite Ack failure, got %d messages", len(got))
 	}
 }
+
+func TestSubagentAckRequiresWholeAppendedBatch(t *testing.T) {
+	for _, mode := range []string{"survives", "lost", "old-duplicate"} {
+		t.Run(mode, func(t *testing.T) {
+			pending := []messaging.Message{{ID: "msg", FromAgentID: "worker", Body: "DONE"}}
+			fake := &fakeSubagentInbox{msgs: pending}
+			s := &chatServiceImpl{subagentInbox: fake}
+			result := newTestSlotResult(t, "s")
+			before := "core"
+			if mode == "lost" {
+				before = strings.Repeat("c", 8000)
+			}
+			if mode == "old-duplicate" {
+				before = formatSubagentResultInjection(pending) + strings.Repeat("c", 7900)
+			}
+			result.Window.SetContent("user_context", before)
+			s.evaluateAndInjectSubagentResults(context.Background(), "s", "a", result)
+			if (len(fake.ackedIDs()) != 0) != (mode == "survives") {
+				t.Fatal("ack did not reflect exact appended delivery", mode, fake.ackedIDs())
+			}
+		})
+	}
+}

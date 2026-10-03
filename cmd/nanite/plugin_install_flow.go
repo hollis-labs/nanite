@@ -261,6 +261,9 @@ func reviewPluginInstall(ctx context.Context, review plugin.InstallReview, previ
 	for _, tool := range review.Tools {
 		fmt.Printf("Tool: %s (effect: %s)\n", tool.Name, tool.Effect)
 	}
+	if review.HostNotice != "" {
+		fmt.Printf("\nPersistent context warning: %s\n", review.HostNotice)
+	}
 	for _, seed := range review.ReflexSeeds {
 		raw, _ := json.Marshal(seed)
 		fmt.Printf("Reflex reminder default: %s\n", raw)
@@ -278,6 +281,9 @@ func reviewPluginInstall(ctx context.Context, review plugin.InstallReview, previ
 
 func installReviewDeclarations(review plugin.InstallReview) map[string]string {
 	declarations := map[string]string{"Executable": fmt.Sprintf("%s %q", review.Entrypoint, review.Arguments)}
+	if review.HostNotice != "" {
+		declarations["Persistent context warning"] = review.HostNotice
+	}
 	if len(review.Tools) > 0 {
 		declarations["Tool loading"] = string(review.ToolLoadType.Effective())
 	}

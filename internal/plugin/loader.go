@@ -306,6 +306,7 @@ func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, h
 	mgrCfg.Secrets = launch.Secrets
 	mgrCfg.Env = launch.Environment
 	mgrCfg.Granted = launch.Granted
+	mgrCfg.ReviewDigest = launch.ReviewDigest
 
 	var queryGrant *pluginapi.QueryGrant
 	var wakeGrant *pluginapi.DurableWakeGrant
@@ -365,6 +366,7 @@ func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, h
 			host.revokeHostDurableWakeGrant(wakeGrant.Token)
 		}
 		host.removePluginContextSources(m.Identifier())
+		host.removePluginAlwaysShipSources(m.Identifier())
 		host.removePluginReflexSeeds(m.Identifier())
 	}
 	mgrCfg.BeforeSpawn = func(ctx context.Context) error {

@@ -6,6 +6,7 @@ import type { PluginInstallReview, PluginInstallReviewResponse } from "@/lib/typ
 
 function declarations(review: PluginInstallReview): Map<string, string> {
   return new Map([
+    ...(review.host_notice ? [["Persistent context warning", review.host_notice] as const] : []),
     ["Executable", `${review.entrypoint} ${JSON.stringify(review.arguments)}`],
     ...(review.tools.length > 0 ? [["Tool loading", review.tool_load_type || "auto"] as const] : []),
     ...review.capabilities.map((cap) => [`Capability: ${cap.name}`, `${cap.reason ?? ""}${cap.optional ? " (optional)" : ""}${cap.metadata !== undefined ? `\nRequested access:\n${JSON.stringify(cap.metadata, null, 2)}` : ""}`] as const),

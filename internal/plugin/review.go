@@ -27,6 +27,7 @@ const MaxBundleFiles = 10000
 
 // InstallReview describes actual staged bytes. It never contains resolved values.
 type InstallReview struct {
+	HostNotice   string                         `json:"host_notice,omitempty"`
 	ID           string                         `json:"id"`
 	Name         string                         `json:"name"`
 	Version      string                         `json:"version"`
@@ -59,12 +60,13 @@ type InstallApproval struct {
 
 // Capability vocabulary belongs to the host, not to the shared SDK.
 var capabilityEnvironment = map[string][]string{
-	pluginapi.CapabilityReadOnlyQuery: {},
-	pluginapi.CapabilityContextSource: {},
-	pluginapi.CapabilityReflexSeed:    {},
-	pluginapi.CapabilityDurableWake:   {},
-	"ssh_agent":                       {"SSH_AUTH_SOCK"},
-	"docker_socket":                   {"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"},
+	pluginapi.CapabilityReadOnlyQuery:     {},
+	pluginapi.CapabilityContextSource:     {},
+	pluginapi.CapabilityContextAlwaysShip: {},
+	pluginapi.CapabilityReflexSeed:        {},
+	pluginapi.CapabilityDurableWake:       {},
+	"ssh_agent":                           {"SSH_AUTH_SOCK"},
+	"docker_socket":                       {"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"},
 }
 
 func BuildInstallReview(ctx context.Context, directory string) (InstallReview, error) {
@@ -117,6 +119,16 @@ func BuildInstallReview(ctx context.Context, directory string) (InstallReview, e
 	block, blockErr := pluginapi.DecodeBlock(common.Nanite)
 	if blockErr != nil {
 		return InstallReview{}, blockErr
+	}
+	if _, err := pluginapi.AlwaysShipScopeFor(block, common.Capabilities, common.Tools); err != nil {
+		return InstallReview{}, err
+	}
+	if len(block.Registers.AlwaysShipSources) != 0 {
+		var instructions []string
+		for _, source := range block.Registers.AlwaysShipSources {
+			instructions = append(instructions, source.ID+": "+source.ListTool+" (declared read effect, callable without arguments)")
+		}
+		review.HostNotice = fmt.Sprintf("Plugin %s (%s) may add text to the system prompt on API-agent turns and prepend context to CLI-agent user messages on every turn. This text survives compaction and is exempt from intent skipping on review, recall and resume turns. It competes with your own context within the shared 2,000-token budget, costing up to 1500 uncached tokens per turn per owner. List tools: %s. Naming a tool does not grant access; per-agent tool grants and transport availability still apply.", common.Name, common.ID, strings.Join(instructions, "; "))
 	}
 	review.ReflexSeeds = block.Registers.ReflexSeeds
 	slices.SortFunc(review.Secrets, func(a, b ReviewSecret) int { return strings.Compare(a.Name, b.Name) })

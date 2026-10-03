@@ -16,7 +16,7 @@ import (
 // helper reflexes and reminders use, and returns what was injected so the
 // caller can decide whether to refresh its local systemPrompt copy.
 //
-// Messages are Ack'd immediately after formatting so a later turn never
+// Messages are Ack'd only after the entire appended batch survives assembly, so a later turn never
 // re-injects them — the sole idempotency guarantee this needs, since
 // nothing else marks kind=subagent_result rows read. An Ack failure is
 // logged but not fatal: worst case a message is re-surfaced next turn,
@@ -37,7 +37,10 @@ func (s *chatServiceImpl) evaluateAndInjectSubagentResults(ctx context.Context, 
 	}
 
 	injection := formatSubagentResultInjection(pending)
-	appendUserContext(slotResult, injection)
+	if !appendUserContext(slotResult, injection) {
+		slog.Warn("chat-service: subagent results truncated; leaving messages unread", "session_id", sessionID)
+		return pending
+	}
 
 	for _, m := range pending {
 		if ackErr := s.subagentInbox.Ack(ctx, sessionID, agentID, m.ID); ackErr != nil {

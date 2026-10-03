@@ -129,6 +129,7 @@ require (
 	github.com/hollis-labs/go-transportparity v0.1.0
 	github.com/hollis-labs/go-usage-ledger v0.1.0
 	github.com/hollis-labs/go-workflow v0.1.0
+	github.com/hollis-labs/go-workflow-host v0.1.0
 	github.com/hollis-labs/go-worktree v0.1.0
 	github.com/hollis-labs/nanite/pkg/pluginapi v0.1.7
 	github.com/hollis-labs/plugin-host v0.1.2

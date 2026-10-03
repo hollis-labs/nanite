@@ -128,6 +128,8 @@ github.com/hollis-labs/go-usage-ledger v0.1.0 h1:shsT6euSdkGwBnH8PlIrZCr0nNYy6U+
 github.com/hollis-labs/go-usage-ledger v0.1.0/go.mod h1:6zlbMMvsvguBlaI9C/AjJXmNZo+vg5cBPZX/AXSsTTw=
 github.com/hollis-labs/go-workflow v0.1.0 h1:Rose0BcdHySd3RT2+HTuAzD/dELPsEREKmosg+3SySg=
 github.com/hollis-labs/go-workflow v0.1.0/go.mod h1:LfBd90u0l4/CBtIaxJPl7RLRm9JYS3XcOyYju8aNfBg=
+github.com/hollis-labs/go-workflow-host v0.1.0 h1:CMZtjVPilnxalBFUB2l+/xqo65twCbiT5jZomkefCY8=
+github.com/hollis-labs/go-workflow-host v0.1.0/go.mod h1:P8WyL0SIgY7GlsPf+iwPHspfIDW+IF/5bcxUSQ0u5hQ=
 github.com/hollis-labs/go-worktree v0.1.0 h1:h4o+FOVVIFzbrg6eWwDj5UgzTHHh1gCgkuHrE7bwgk4=
 github.com/hollis-labs/go-worktree v0.1.0/go.mod h1:LPEfj+AU+57N5UXvHOwN/iGHsVMLAyBokokqKRvg6CA=
 github.com/hollis-labs/nanite/pkg/pluginapi v0.1.0 h1:HNdN80B39f/d7KXZwPnNJK3e9QuxzahVxyK3PnfHHSE=

@@ -22,7 +22,7 @@ const workflowValueIDPrefix = "values-"
 // WorkflowStateStore is the production facade over the released SQL store.
 type WorkflowStateStore = SQLWorkflowStateStore
 
-// legacyWorkflowStateStore retains the reference canonical writer until PR3.
+// legacyWorkflowStateStore retains the reference canonical writer for parity qualification.
 // Production construction never returns this implementation.
 type legacyWorkflowStateStore struct{ *SQLWorkflowStateStore }
 

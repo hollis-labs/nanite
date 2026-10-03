@@ -23,18 +23,28 @@ definition publication and external receipts use the released transaction owner.
 Nanite migrations remain the only schema owner; startup never calls library DDL.
 
 Before seeding or starting workers, startup checks the qualified schema and
-migration ledger, foreign keys, engine identities, immutable source/catalog/host
-material and exact revision bindings, persisted runtime records, claim generations,
-and idempotency replay data. Drift fails startup without repair or replay. The
-legacy cutover coordinator then applies explicitly supplied, audited disposition
-choices before workers start. Terminal legacy history remains queryable.
+migration ledger, scoped workflow foreign keys, persisted runtime records,
+values, claim generations and idempotency replay data. Resumable runs also need
+exact frozen source/catalog/host identity, an installed executable plan and an
+immutable revision binding. Terminal history retains structural validation;
+its compatibility findings and orphan product steps are nonfatal warnings.
+Material, installed identity and compiled-plan checks are cached by plan digest
+for the snapshot. Rows stream through validation, with progress logged every
+thousand rows. Refusal names the table, row and expected/actual values, and never
+repairs or replays data. Keep the service stopped, roll back to the previous
+binary or restore the verified backup. The legacy cutover coordinator owns its
+separate audited disposition choices before workers start.
 
 Storage replacement requires a maintenance window: stop the service, verify that
 no other Nanite writer process is running, swap the binary, and start it on the
 same database. The preflight transaction protects its snapshot; process exclusion
-is a deployment responsibility. Old and new storage implementations share the
-same row and lease protocol. Schema changes affecting qualified workflow objects
-must update the preflight expectations after qualification.
+is a deployment responsibility. Canonical operations use BEGIN IMMEDIATE,
+row-generation compare-and-swap, persisted lease owner/token/expiry and claim
+generation, and saved request/results for idempotent replay. Product projections
+run inside the owning transaction. Disable chat autostart and supervisor restart
+policies during the window. Schema changes affecting qualified workflow objects
+must update the preflight expectations after qualification; an older binary
+refuses incompatible newer schema.
 
 ## Durable identity
 

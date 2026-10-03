@@ -59,16 +59,15 @@ func TestSQLStoragePreflightPopulatedOldSchema(t *testing.T) {
 
 func TestSQLStoragePreflightRejectsDriftWithoutRepair(t *testing.T) {
 	for name, statement := range map[string]string{
-		"column":            "ALTER TABLE workflow_runs ADD COLUMN unqualified TEXT",
-		"index":             "DROP INDEX idx_workflow_definition_revisions_exact_plan",
-		"trigger":           "DROP TRIGGER workflow_plan_materials_no_update",
-		"identity":          "UPDATE workflow_runs SET engine_contract_version='unknown'",
-		"revision":          "UPDATE workflow_runs SET definition_revision_id=NULL",
-		"generation":        "UPDATE workflow_runs SET runtime_generation=0",
-		"source":            "UPDATE workflow_runs SET definition_name='wrong-source'",
-		"idempotency":       "UPDATE workflow_run_start_idempotency SET result_json='{}'",
-		"event-cursor":      `INSERT INTO workflow_event_sequences(run_id,last_sequence) VALUES('host-run',17)`,
-		"product-reference": `INSERT INTO workflow_run_steps(id,workflow_run_id,step_id,kind) VALUES('orphan','missing','work','tool')`,
+		"column":       "ALTER TABLE workflow_runs ADD COLUMN unqualified TEXT",
+		"index":        "DROP INDEX idx_workflow_definition_revisions_exact_plan",
+		"trigger":      "DROP TRIGGER workflow_plan_materials_no_update",
+		"identity":     "UPDATE workflow_runs SET engine_contract_version='unknown'",
+		"revision":     "UPDATE workflow_runs SET definition_revision_id=NULL",
+		"generation":   "UPDATE workflow_runs SET runtime_generation=0",
+		"source":       "UPDATE workflow_runs SET definition_name='wrong-source'",
+		"idempotency":  "UPDATE workflow_run_start_idempotency SET result_json='{}'",
+		"event-cursor": `INSERT INTO workflow_event_sequences(run_id,last_sequence) VALUES('host-run',17)`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newSQLFacadeFixture(t, false, true)
@@ -392,9 +391,17 @@ func TestSQLStoragePreflightCanceledStartupReleasesTransaction(t *testing.T) {
 	_, _, _ = sqlFacadeStartAttempt(t, f)
 	before := sqlFacadeSnapshot(t, f)
 	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if checkErr := PreflightWorkflowStorage(ctx, f.product); checkErr == nil {
-		t.Fatal("canceled startup accepted")
+	entered := false
+	checkErr := f.host.SQLWorkflowStateStore.write(ctx, "mid-transaction cancellation", func(tx workflowSQL) error {
+		entered = true
+		if err := preflightWorkflowSchema(ctx, tx); err != nil {
+			return err
+		}
+		cancel()
+		return preflightWorkflowSnapshot(ctx, tx)
+	})
+	if !entered || !errors.Is(checkErr, context.Canceled) {
+		t.Fatalf("callback entered=%v error=%v", entered, checkErr)
 	}
 	if checkErr := PreflightWorkflowStorage(t.Context(), f.product); checkErr != nil {
 		t.Fatal(checkErr)
@@ -682,13 +689,13 @@ func TestSQLFacadeCompensationAuthoringRetainsReversibilityFloor(t *testing.T) {
 	}
 	before := sqlFacadeSnapshot(t, f)
 	preflightErr := PreflightWorkflowStorage(t.Context(), f.product)
-	if preflightErr == nil || !strings.Contains(preflightErr.Error(), `run "host-run" blocked`) || !strings.Contains(preflightErr.Error(), "HADR-SOURCE-038") || !strings.Contains(preflightErr.Error(), "explicit audited disposition") {
+	if preflightErr == nil || !strings.Contains(preflightErr.Error(), `run "host-run" blocked`) || !strings.Contains(preflightErr.Error(), "HADR-SOURCE-038") || !strings.Contains(preflightErr.Error(), "roll back to the previous binary") {
 		t.Fatalf("unsupported row diagnostic: %v", preflightErr)
 	}
 	assertSQLFacadeEqual(t, before, sqlFacadeSnapshot(t, f))
 }
 
-func TestSQLFacadeOldSchemaCompensationRecoveryRequiresFrozenMaterial(t *testing.T) {
+func TestSQLFacadeOldSchemaCompensationRecoveryRetainsTerminalWarnings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "compensation-old-schema.db")
 	_, state := openWorkflowStateTest(t, path)
 	// This existing host-neutral fixture persists a saga, closes the database,
@@ -720,9 +727,11 @@ func TestSQLFacadeOldSchemaCompensationRecoveryRequiresFrozenMaterial(t *testing
 	if !reflect.DeepEqual(newLedger, oldLedger) || newLedger.Outcome != workflowruntime.CompensationOutcomeSucceeded {
 		t.Fatalf("compensation cross-reader: old=%+v new=%+v", oldLedger, newLedger)
 	}
-	// A host-neutral fixture has no exact authored Nanite source. The production
-	// startup boundary must refuse it, even after its canonical saga is terminal.
-	if preflightErr := PreflightWorkflowStorage(t.Context(), reopened); preflightErr == nil {
-		t.Fatal("startup fabricated missing frozen compensation material")
+	// Terminal host-neutral history remains readable without fabricating source.
+	report := newWorkflowPreflight(true)
+	if preflightErr := current.write(t.Context(), "terminal compensation preflight", func(tx workflowSQL) error {
+		return preflightWorkflowSnapshot(context.WithValue(t.Context(), workflowPreflightKey{}, report), tx)
+	}); preflightErr != nil || report.warnings == 0 {
+		t.Fatalf("terminal compensation warnings=%d error=%v", report.warnings, preflightErr)
 	}
 }

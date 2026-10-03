@@ -4,6 +4,7 @@
 //
 //   - internal/store.SeedProviders       — rows written to the models table
 //   - internal/usagecost.NewRow         — archived-model fallback for frozen usage prices
+//   - internal/store.estimateCost       — utility execution metrics through models.Pricing
 //   - internal/chat.InferProvider        — model → provider routing
 //
 // Runtime code should reach for ModelByID, ProviderFor, Pricing, or

@@ -1859,13 +1859,13 @@ func (s *chatServiceImpl) finalizeRun(
 
 	// Stream end.
 	streamUsage := run.finalUsage
-	if streamUsage != nil && streamUsage.InputTokens == 0 && streamUsage.OutputTokens == 0 {
+	if streamUsage != nil && *streamUsage == (chat.Usage{}) {
 		streamUsage = nil
 	}
 	ch <- chat.StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: streamUsage, AgentID: agent.ID, Envelope: envelopeJSON}
 
 	// Post-response events.
-	if s.events != nil && streamUsage != nil {
+	if s.events != nil && streamUsage != nil && (streamUsage.InputTokens > 0 || streamUsage.OutputTokens > 0) {
 		s.events.EmitResponseComplete(ctx, sessionID, agent.ID, model, streamUsage.InputTokens, streamUsage.OutputTokens)
 	}
 	if s.events != nil {

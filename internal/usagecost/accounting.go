@@ -176,6 +176,10 @@ func NewRow(cat costcalc.Catalog, provider, model string) ledger.Row {
 	var found bool
 	if cat != nil {
 		snap, found = costcalc.SnapshotPrice(cat, provider, model)
+		// An absent/all-zero cost block is a miss, not a free tariff.
+		if snap == (ledger.PriceSnapshot{}) {
+			found = false
+		}
 	}
 	if !found {
 		if m, ok := models.ByModelID(model); ok && m.IsLegacy && m.Provider == provider {

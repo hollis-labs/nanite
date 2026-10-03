@@ -394,8 +394,53 @@ grep -n 'func modelSupportsInterleavedThinking' internal/llm/anthropic/client.go
 
 ## Usage cost snapshots
 
-Each completed chat turn records a versioned `cost_snapshot` ON its `token_usage` row, with per-provider-call `go-usage-ledger` components, provenance, provider/model identity, catalog price snapshots, and five component dollar amounts calculated by `go-modelsdev-catalog-helpers`. Prices freeze before consuming each call. Catalog refreshes never change persisted cost or past summaries. `cost_status` is `PARTIAL` if any call omits any component, contains estimates, lacks a model price, or reports a nonzero component with an ambiguous optional zero rate. Reported zero and omitted are distinct. Session/global/model summaries expose `partial_rows`; cost displays label partial totals.
+Each completed chat turn records a versioned `cost_snapshot` ON its
+`token_usage` row. It retains per-provider-call `go-usage-ledger` components,
+provenance, provider/model identity, catalog price snapshots, and five component
+dollar amounts calculated by `go-modelsdev-catalog-helpers`. Prices freeze before
+dispatch for the main stream, early-stop synthesis, and envelope correction.
+Supplemental calls keep their own evidence and add positive reported counts to
+the turn totals. A dispatch failure before a stream is established adds no
+ledger call; an established stream with missing usage retains unknown components.
+Catalog refreshes never change persisted cost or past summaries.
 
-[OpenAI accounting](https://developers.openai.com/api/docs/guides/agents-api/observability) includes cached input within input and reasoning within output; normalization subtracts those counts once to create disjoint components. [Claude caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) reports uncached input separately from cache reads/writes. [Claude thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking) is included in output; its final `output_tokens_details.thinking_tokens`, when present, is split once. Both providers bill reasoning at the output tariff when the catalog omits its optional reasoning rate. Missing reasoning breakdown remains unknown; inclusive output can still provide a partial estimate without adding guessed reasoning. Anthropic cumulative message deltas replace earlier counts within a call rather than charging them repeatedly.
+`cost_status` is `PARTIAL` if any call omits a component, contains estimates,
+lacks a model price, or reports a positive component without a supported tariff.
+Reported zero and omitted are distinct. Session/global/model summaries expose
+`partial_rows`. Terminal `stream_end` retains reported stop reasons and cache-only
+usage even when input/output are zero; a truly empty usage object and a 0/0
+`response_complete` notification are suppressed.
 
-CLI/ACP streams whose upstream shared Usage has already lost presence and reasoning cannot recover it locally: positive counts are retained, zero counts remain unknown, and unresolved runtime provider/catalog identities remain unpriced and partial. No subscription bill or provider figure is inferred. Catalog misses fall back only to matching `IsLegacy` registry entries for archived model ids, retaining known input/output prices and explicit partial status for missing dimensions. Pre-migration estimates stay unchanged and are marked partial without invented snapshots. Utility-only execution metrics and context-budget projections retain their existing estimators; completed chat execution metrics use the frozen chat-row cost.
+[OpenAI accounting](https://developers.openai.com/api/docs/guides/agents-api/observability)
+includes cached input within input and reasoning within output; normalization
+subtracts those counts once to create disjoint components. Codex CLI input also
+includes cached input, as captured in the released `go-providers` Codex transcript
+fixtures, and receives the same normalization through its runtime aliases.
+[Claude caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+reports uncached input separately from cache reads/writes.
+[Claude thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking)
+is included in output; its final `output_tokens_details.thinking_tokens`, when
+present, is split once. Both HTTP providers bill reasoning at the output tariff
+when the catalog omits its reasoning rate. Missing reasoning breakdown remains
+unknown; inclusive output can still provide a partial estimate without adding
+guessed reasoning. Anthropic cumulative message deltas replace earlier counts
+within a call rather than charging them repeatedly.
+
+If cache subdivisions exceed inclusive input, or reasoning exceeds inclusive
+output, normalization retains the known inclusive total and marks the impossible
+subdivisions unknown. It never emits negative counts or drops the entire row.
+Anthropic's reported nonzero 1h cache writes retain measured write counts, but
+withhold the unsupported cache-write tariff: the catalog exposes a single rate
+without the 1h distinction. Those calls remain partial rather than inventing a
+1h price.
+
+CLI/ACP streams whose upstream shared Usage has already lost presence and
+reasoning cannot recover it locally: positive counts are retained, zero counts
+remain unknown, and unresolved runtime provider/catalog identities remain
+unpriced and partial. No subscription bill or provider figure is inferred.
+Catalog misses, including all-zero cost blocks, fall back only to matching
+`IsLegacy` registry entries for archived model ids, retaining known input/output
+prices and explicit partial status for missing dimensions. Pre-migration estimates
+stay unchanged and are marked partial without invented snapshots. Utility-only
+execution metrics and context-budget projections retain their existing estimators;
+completed chat execution metrics use the frozen chat-row cost.

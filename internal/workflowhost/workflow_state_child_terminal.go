@@ -8,9 +8,9 @@ import (
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
 )
 
-var _ workflowruntime.ChildTerminalWaitStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.ChildTerminalWaitStore = (*legacyWorkflowStateStore)(nil)
 
-func (s *WorkflowStateStore) RecoverChildTerminalWaits(ctx context.Context, limit int) ([]workflowruntime.ChildTerminalWait, error) {
+func (s *legacyWorkflowStateStore) RecoverChildTerminalWaits(ctx context.Context, limit int) ([]workflowruntime.ChildTerminalWait, error) {
 	if limit < 0 || limit > workflowruntime.MaximumRunQueryLimit {
 		return nil, workflowInvalid(errors.New("child terminal recovery limit is invalid"))
 	}

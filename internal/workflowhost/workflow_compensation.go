@@ -15,7 +15,7 @@ import (
 	"github.com/hollis-labs/go-workflow/values"
 )
 
-var _ workflowruntime.CompensationStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.CompensationStore = (*legacyWorkflowStateStore)(nil)
 
 func workflowRunAllowsCompensationExecution(ctx context.Context, query workflowSQL, run workflowruntime.RunSnapshot, node workflowruntime.NodeInvocationSnapshot) (bool, error) {
 	if run.Status.Active() {
@@ -222,13 +222,13 @@ func insertWorkflowCompensationReplay(ctx context.Context, query workflowSQL, ke
 	return err
 }
 
-func (s *WorkflowStateStore) LoadCompensationLedger(ctx context.Context, runID workflowruntime.RunID) (workflowruntime.CompensationLedgerSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadCompensationLedger(ctx context.Context, runID workflowruntime.RunID) (workflowruntime.CompensationLedgerSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.CompensationLedgerSnapshot{}, err
 	}
 	return loadWorkflowCompensationLedger(ctx, s.db, runID)
 }
-func (s *WorkflowStateStore) ListCompensationEntries(ctx context.Context, runID workflowruntime.RunID) ([]workflowruntime.CompensationEntrySnapshot, error) {
+func (s *legacyWorkflowStateStore) ListCompensationEntries(ctx context.Context, runID workflowruntime.RunID) ([]workflowruntime.CompensationEntrySnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}
@@ -237,7 +237,7 @@ func (s *WorkflowStateStore) ListCompensationEntries(ctx context.Context, runID 
 	}
 	return listWorkflowCompensationEntries(ctx, s.db, runID)
 }
-func (s *WorkflowStateStore) LoadCompensationEntryByHandler(ctx context.Context, id workflowruntime.NodeInvocationID) (workflowruntime.CompensationEntrySnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadCompensationEntryByHandler(ctx context.Context, id workflowruntime.NodeInvocationID) (workflowruntime.CompensationEntrySnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.CompensationEntrySnapshot{}, err
 	}
@@ -252,7 +252,7 @@ func (s *WorkflowStateStore) LoadCompensationEntryByHandler(ctx context.Context,
 	return loadWorkflowCompensationEntry(ctx, s.db, id.RunID, entryID)
 }
 
-func (s *WorkflowStateStore) FinishCompensableAttempt(ctx context.Context, request workflowruntime.FinishCompensableAttemptRequest) (workflowruntime.FinishCompensableAttemptResult, error) {
+func (s *legacyWorkflowStateStore) FinishCompensableAttempt(ctx context.Context, request workflowruntime.FinishCompensableAttemptRequest) (workflowruntime.FinishCompensableAttemptResult, error) {
 	if err := validateWorkflowFinishAttempt(request.Finish); err != nil {
 		return workflowruntime.FinishCompensableAttemptResult{}, workflowInvalid(err)
 	}
@@ -552,7 +552,7 @@ func finishWorkflowNodeAttemptForCompensation(ctx context.Context, query workflo
 
 // FreezeCompensation and the remaining transitions use snapshot_json as the
 // semantic source and exact generation predicates as their CAS boundary.
-func (s *WorkflowStateStore) FreezeCompensation(ctx context.Context, r workflowruntime.FreezeCompensationRequest) (workflowruntime.FreezeCompensationResult, error) {
+func (s *legacyWorkflowStateStore) FreezeCompensation(ctx context.Context, r workflowruntime.FreezeCompensationRequest) (workflowruntime.FreezeCompensationResult, error) {
 	var out workflowruntime.FreezeCompensationResult
 	err := s.write(ctx, "freeze workflow compensation", func(q workflowSQL) error {
 		if r.ExpectedRunGeneration == 0 || r.ExpectedIntentGeneration == 0 || r.At.IsZero() || strings.TrimSpace(r.IdempotencyKey) == "" || !r.Trigger.Valid() || r.Trigger == graph.CompensationManual || !r.OriginalStatus.Terminal() {
@@ -709,7 +709,7 @@ func (s *WorkflowStateStore) FreezeCompensation(ctx context.Context, r workflowr
 	return out, err
 }
 
-func (s *WorkflowStateStore) BeginManualCompensation(ctx context.Context, r workflowruntime.BeginManualCompensationRequest) (workflowruntime.FreezeCompensationResult, error) {
+func (s *legacyWorkflowStateStore) BeginManualCompensation(ctx context.Context, r workflowruntime.BeginManualCompensationRequest) (workflowruntime.FreezeCompensationResult, error) {
 	var out workflowruntime.FreezeCompensationResult
 	err := s.write(ctx, "begin manual workflow compensation", func(q workflowSQL) error {
 		if r.ExpectedRunGeneration == 0 || r.At.IsZero() || strings.TrimSpace(r.IdempotencyKey) == "" || values.ValidateDigest(r.Authorization) != nil || r.OriginalStatus != workflowruntime.RunSucceeded {
@@ -865,7 +865,7 @@ func workflowCompensationPrerequisites(entry workflowruntime.CompensationEntrySn
 	return result
 }
 
-func (s *WorkflowStateStore) ActivateCompensationEntry(ctx context.Context, r workflowruntime.ActivateCompensationEntryRequest) (workflowruntime.ActivateCompensationEntryResult, error) {
+func (s *legacyWorkflowStateStore) ActivateCompensationEntry(ctx context.Context, r workflowruntime.ActivateCompensationEntryRequest) (workflowruntime.ActivateCompensationEntryResult, error) {
 	var out workflowruntime.ActivateCompensationEntryResult
 	err := s.write(ctx, "activate workflow compensation", func(q workflowSQL) error {
 		if err := values.ValidatePersistableSet(r.Inputs); err != nil || r.At.IsZero() {
@@ -972,7 +972,7 @@ func (s *WorkflowStateStore) ActivateCompensationEntry(ctx context.Context, r wo
 	return out, err
 }
 
-func (s *WorkflowStateStore) FailCompensationEntry(ctx context.Context, r workflowruntime.FailCompensationEntryRequest) (workflowruntime.SealCompensationEntryResult, error) {
+func (s *legacyWorkflowStateStore) FailCompensationEntry(ctx context.Context, r workflowruntime.FailCompensationEntryRequest) (workflowruntime.SealCompensationEntryResult, error) {
 	var out workflowruntime.SealCompensationEntryResult
 	err := s.write(ctx, "fail workflow compensation entry", func(q workflowSQL) error {
 		if r.At.IsZero() || r.Failure.Retryable {
@@ -1114,7 +1114,7 @@ func completeWorkflowCompensationLedger(ledger *workflowruntime.CompensationLedg
 	return true
 }
 
-func (s *WorkflowStateStore) SealCompensationEntry(ctx context.Context, r workflowruntime.SealCompensationEntryRequest) (workflowruntime.SealCompensationEntryResult, error) {
+func (s *legacyWorkflowStateStore) SealCompensationEntry(ctx context.Context, r workflowruntime.SealCompensationEntryRequest) (workflowruntime.SealCompensationEntryResult, error) {
 	var out workflowruntime.SealCompensationEntryResult
 	err := s.write(ctx, "seal workflow compensation", func(q workflowSQL) error {
 		ledger, err := loadWorkflowCompensationLedger(ctx, q, r.RunID)
@@ -1203,7 +1203,7 @@ func (s *WorkflowStateStore) SealCompensationEntry(ctx context.Context, r workfl
 	return out, err
 }
 
-func (s *WorkflowStateStore) CancelCompensation(ctx context.Context, r workflowruntime.CancelCompensationRequest) (workflowruntime.CompensationLedgerSnapshot, error) {
+func (s *legacyWorkflowStateStore) CancelCompensation(ctx context.Context, r workflowruntime.CancelCompensationRequest) (workflowruntime.CompensationLedgerSnapshot, error) {
 	var out workflowruntime.CompensationLedgerSnapshot
 	err := s.write(ctx, "cancel workflow compensation", func(q workflowSQL) error {
 		if r.ExpectedLedgerGeneration == 0 || strings.TrimSpace(r.IdempotencyKey) == "" || strings.TrimSpace(r.Reason) == "" || r.At.IsZero() {
@@ -1320,7 +1320,7 @@ func (s *WorkflowStateStore) CancelCompensation(ctx context.Context, r workflowr
 	return out, err
 }
 
-func (s *WorkflowStateStore) RetryCompensation(ctx context.Context, r workflowruntime.RetryCompensationRequest) (workflowruntime.CompensationLedgerSnapshot, error) {
+func (s *legacyWorkflowStateStore) RetryCompensation(ctx context.Context, r workflowruntime.RetryCompensationRequest) (workflowruntime.CompensationLedgerSnapshot, error) {
 	var out workflowruntime.CompensationLedgerSnapshot
 	err := s.write(ctx, "retry workflow compensation", func(q workflowSQL) error {
 		if r.ExpectedLedgerGeneration == 0 || strings.TrimSpace(r.IdempotencyKey) == "" || values.ValidateDigest(r.Attestation) != nil || r.At.IsZero() {
@@ -1408,7 +1408,7 @@ func (s *WorkflowStateStore) RetryCompensation(ctx context.Context, r workflowru
 	})
 	return out, err
 }
-func (s *WorkflowStateStore) RecoverCompensation(ctx context.Context, limit int) ([]workflowruntime.CompensationLedgerSnapshot, error) {
+func (s *legacyWorkflowStateStore) RecoverCompensation(ctx context.Context, limit int) ([]workflowruntime.CompensationLedgerSnapshot, error) {
 	if limit < 0 {
 		return nil, workflowInvalid(errors.New("recovery limit must not be negative"))
 	}

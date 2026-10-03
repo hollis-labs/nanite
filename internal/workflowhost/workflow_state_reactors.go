@@ -11,11 +11,11 @@ import (
 	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 )
 
-var _ workflowruntime.ReactorStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.ReactorStore = (*legacyWorkflowStateStore)(nil)
 
 const workflowReactorSelect = `SELECT snapshot_json,reactor_id,registration_id,registration_generation,correlation,current_generation,current_run_id,continue_after_events,event_count,status,generation,created_at,updated_at FROM workflow_reactors`
 
-func (s *WorkflowStateStore) BeginReactorDelivery(ctx context.Context, request workflowruntime.BeginReactorDeliveryRequest) (workflowruntime.ReactorSnapshot, workflowruntime.ReactorDeliverySnapshot, workflowruntime.IdempotencyOutcome, error) {
+func (s *legacyWorkflowStateStore) BeginReactorDelivery(ctx context.Context, request workflowruntime.BeginReactorDeliveryRequest) (workflowruntime.ReactorSnapshot, workflowruntime.ReactorDeliverySnapshot, workflowruntime.IdempotencyOutcome, error) {
 	request.At, request.Delivery.OccurredAt, request.Delivery.ReceivedAt = request.At.UTC(), request.Delivery.OccurredAt.UTC(), request.Delivery.ReceivedAt.UTC()
 	if err := request.Identity.Validate(); err != nil || request.InitialRunID == "" || request.ContinueAfterEvents == 0 || request.ContinueAfterEvents > 1_000_000 || request.Delivery.ReactorID != request.Identity.ID || request.At.IsZero() {
 		return workflowruntime.ReactorSnapshot{}, workflowruntime.ReactorDeliverySnapshot{}, "", workflowInvalid(errors.New("begin reactor delivery is malformed"))
@@ -88,11 +88,11 @@ func (s *WorkflowStateStore) BeginReactorDelivery(ctx context.Context, request w
 	return reactor, delivery, outcome, err
 }
 
-func (s *WorkflowStateStore) LoadReactor(ctx context.Context, id string) (workflowruntime.ReactorSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadReactor(ctx context.Context, id string) (workflowruntime.ReactorSnapshot, error) {
 	return loadWorkflowReactor(ctx, s.db, id)
 }
 
-func (s *WorkflowStateStore) MarkReactorWaiting(ctx context.Context, id string, expected uint64, at time.Time) (workflowruntime.ReactorSnapshot, error) {
+func (s *legacyWorkflowStateStore) MarkReactorWaiting(ctx context.Context, id string, expected uint64, at time.Time) (workflowruntime.ReactorSnapshot, error) {
 	at = at.UTC()
 	var result workflowruntime.ReactorSnapshot
 	err := s.write(ctx, "mark reactor waiting", func(query workflowSQL) error {
@@ -131,11 +131,11 @@ func (s *WorkflowStateStore) MarkReactorWaiting(ctx context.Context, id string, 
 	return result, err
 }
 
-func (s *WorkflowStateStore) LoadReactorDelivery(ctx context.Context, reactorID, key string) (workflowruntime.ReactorDeliverySnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadReactorDelivery(ctx context.Context, reactorID, key string) (workflowruntime.ReactorDeliverySnapshot, error) {
 	return loadWorkflowReactorDelivery(ctx, s.db, reactorID, key)
 }
 
-func (s *WorkflowStateStore) ClaimReactorDelivery(ctx context.Context, request workflowruntime.ClaimReactorDeliveryRequest) (workflowruntime.ReactorDeliverySnapshot, error) {
+func (s *legacyWorkflowStateStore) ClaimReactorDelivery(ctx context.Context, request workflowruntime.ClaimReactorDeliveryRequest) (workflowruntime.ReactorDeliverySnapshot, error) {
 	request.At = request.At.UTC()
 	if request.ReactorID == "" || request.IdempotencyKey == "" || request.ExpectedGeneration == 0 || request.At.IsZero() {
 		return workflowruntime.ReactorDeliverySnapshot{}, workflowInvalid(errors.New("reactor delivery claim is malformed"))
@@ -202,7 +202,7 @@ func (s *WorkflowStateStore) ClaimReactorDelivery(ctx context.Context, request w
 	return result, err
 }
 
-func (s *WorkflowStateStore) ReleaseReactorDelivery(ctx context.Context, request workflowruntime.ReleaseReactorDeliveryRequest) (workflowruntime.ReactorDeliverySnapshot, error) {
+func (s *legacyWorkflowStateStore) ReleaseReactorDelivery(ctx context.Context, request workflowruntime.ReleaseReactorDeliveryRequest) (workflowruntime.ReactorDeliverySnapshot, error) {
 	request.At = request.At.UTC()
 	if request.ReactorID == "" || request.IdempotencyKey == "" || request.ExpectedGeneration == 0 || request.At.IsZero() {
 		return workflowruntime.ReactorDeliverySnapshot{}, workflowInvalid(errors.New("reactor delivery release is malformed"))
@@ -238,7 +238,7 @@ func (s *WorkflowStateStore) ReleaseReactorDelivery(ctx context.Context, request
 	return result, err
 }
 
-func (s *WorkflowStateStore) CompleteReactorDelivery(ctx context.Context, request workflowruntime.CompleteReactorDeliveryRequest) (workflowruntime.ReactorSnapshot, workflowruntime.ReactorDeliverySnapshot, error) {
+func (s *legacyWorkflowStateStore) CompleteReactorDelivery(ctx context.Context, request workflowruntime.CompleteReactorDeliveryRequest) (workflowruntime.ReactorSnapshot, workflowruntime.ReactorDeliverySnapshot, error) {
 	request.At = request.At.UTC()
 	if request.Status != workflowruntime.ReactorDeliveryApplied {
 		return workflowruntime.ReactorSnapshot{}, workflowruntime.ReactorDeliverySnapshot{}, workflowInvalid(errors.New("reactor delivery terminal status is invalid"))
@@ -328,7 +328,7 @@ func (s *WorkflowStateStore) CompleteReactorDelivery(ctx context.Context, reques
 	return reactor, delivery, err
 }
 
-func (s *WorkflowStateStore) FailReactor(ctx context.Context, request workflowruntime.FailReactorRequest) (workflowruntime.ReactorSnapshot, error) {
+func (s *legacyWorkflowStateStore) FailReactor(ctx context.Context, request workflowruntime.FailReactorRequest) (workflowruntime.ReactorSnapshot, error) {
 	request.At = request.At.UTC()
 	if err := request.Validate(); err != nil {
 		return workflowruntime.ReactorSnapshot{}, workflowInvalid(err)
@@ -442,7 +442,7 @@ func (s *WorkflowStateStore) FailReactor(ctx context.Context, request workflowru
 	return result, err
 }
 
-func (s *WorkflowStateStore) RecoverReactorDeliveries(ctx context.Context, limit int) ([]workflowruntime.ReactorDeliverySnapshot, error) {
+func (s *legacyWorkflowStateStore) RecoverReactorDeliveries(ctx context.Context, limit int) ([]workflowruntime.ReactorDeliverySnapshot, error) {
 	if limit < 0 || limit > workflowruntime.MaximumReactorRecoveryLimit {
 		return nil, workflowInvalid(errors.New("reactor delivery recovery limit is invalid"))
 	}
@@ -468,7 +468,7 @@ func (s *WorkflowStateStore) RecoverReactorDeliveries(ctx context.Context, limit
 	return result, rows.Err()
 }
 
-func (s *WorkflowStateStore) RecoverReactors(ctx context.Context, limit int) ([]workflowruntime.ReactorSnapshot, error) {
+func (s *legacyWorkflowStateStore) RecoverReactors(ctx context.Context, limit int) ([]workflowruntime.ReactorSnapshot, error) {
 	if limit < 0 || limit > workflowruntime.MaximumReactorRecoveryLimit {
 		return nil, workflowInvalid(errors.New("reactor recovery limit is invalid"))
 	}
@@ -494,7 +494,7 @@ func (s *WorkflowStateStore) RecoverReactors(ctx context.Context, limit int) ([]
 	return result, rows.Err()
 }
 
-func (s *WorkflowStateStore) BeginReactorContinuation(ctx context.Context, request workflowruntime.ReactorContinuationRequest) (workflowruntime.ReactorSnapshot, workflowruntime.ReactorContinuationSnapshot, workflowruntime.IdempotencyOutcome, error) {
+func (s *legacyWorkflowStateStore) BeginReactorContinuation(ctx context.Context, request workflowruntime.ReactorContinuationRequest) (workflowruntime.ReactorSnapshot, workflowruntime.ReactorContinuationSnapshot, workflowruntime.IdempotencyOutcome, error) {
 	request.At = request.At.UTC()
 	if err := request.Validate(); err != nil {
 		return workflowruntime.ReactorSnapshot{}, workflowruntime.ReactorContinuationSnapshot{}, "", workflowInvalid(err)
@@ -581,7 +581,7 @@ func (s *WorkflowStateStore) BeginReactorContinuation(ctx context.Context, reque
 	return reactor, continuation, outcome, err
 }
 
-func (s *WorkflowStateStore) CompleteReactorContinuation(ctx context.Context, key string, expected uint64, at time.Time) (workflowruntime.ReactorSnapshot, workflowruntime.ReactorContinuationSnapshot, error) {
+func (s *legacyWorkflowStateStore) CompleteReactorContinuation(ctx context.Context, key string, expected uint64, at time.Time) (workflowruntime.ReactorSnapshot, workflowruntime.ReactorContinuationSnapshot, error) {
 	at = at.UTC()
 	var reactor workflowruntime.ReactorSnapshot
 	var continuation workflowruntime.ReactorContinuationSnapshot
@@ -677,7 +677,7 @@ func (s *WorkflowStateStore) CompleteReactorContinuation(ctx context.Context, ke
 	return reactor, continuation, err
 }
 
-func (s *WorkflowStateStore) RecoverReactorContinuations(ctx context.Context, limit int) ([]workflowruntime.ReactorContinuationSnapshot, error) {
+func (s *legacyWorkflowStateStore) RecoverReactorContinuations(ctx context.Context, limit int) ([]workflowruntime.ReactorContinuationSnapshot, error) {
 	if limit < 0 || limit > workflowruntime.MaximumReactorRecoveryLimit {
 		return nil, workflowInvalid(errors.New("reactor continuation recovery limit is invalid"))
 	}

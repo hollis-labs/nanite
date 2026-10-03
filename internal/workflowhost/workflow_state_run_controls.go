@@ -10,9 +10,9 @@ import (
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
 )
 
-var _ workflowruntime.RunControlStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.RunControlStore = (*legacyWorkflowStateStore)(nil)
 
-func (s *WorkflowStateStore) QueryRunState(ctx context.Context, request workflowruntime.RunStateQuery) (workflowruntime.RunStateView, error) {
+func (s *legacyWorkflowStateStore) QueryRunState(ctx context.Context, request workflowruntime.RunStateQuery) (workflowruntime.RunStateView, error) {
 	if err := request.Validate(); err != nil {
 		return workflowruntime.RunStateView{}, workflowInvalid(err)
 	}
@@ -79,7 +79,7 @@ func (s *WorkflowStateStore) QueryRunState(ctx context.Context, request workflow
 	return view, err
 }
 
-func (s *WorkflowStateStore) FindOpenSignalWait(ctx context.Context, selector workflowruntime.SignalSelector) (workflowruntime.WaitSnapshot, error) {
+func (s *legacyWorkflowStateStore) FindOpenSignalWait(ctx context.Context, selector workflowruntime.SignalSelector) (workflowruntime.WaitSnapshot, error) {
 	if err := selector.Validate(); err != nil {
 		return workflowruntime.WaitSnapshot{}, workflowInvalid(err)
 	}
@@ -114,7 +114,7 @@ func (s *WorkflowStateStore) FindOpenSignalWait(ctx context.Context, selector wo
 	}
 }
 
-func (s *WorkflowStateStore) FindSignalWait(ctx context.Context, selector workflowruntime.SignalSelector, idempotencyKey string) (workflowruntime.WaitSnapshot, error) {
+func (s *legacyWorkflowStateStore) FindSignalWait(ctx context.Context, selector workflowruntime.SignalSelector, idempotencyKey string) (workflowruntime.WaitSnapshot, error) {
 	if err := selector.Validate(); err != nil || idempotencyKey == "" {
 		return workflowruntime.WaitSnapshot{}, workflowInvalid(errors.New("named signal replay lookup is malformed"))
 	}
@@ -153,7 +153,7 @@ func (s *WorkflowStateStore) FindSignalWait(ctx context.Context, selector workfl
 	return matches[0], nil
 }
 
-func (s *WorkflowStateStore) BeginRunUpdate(ctx context.Context, request workflowruntime.BeginRunUpdateRequest) (workflowruntime.RunUpdateSnapshot, workflowruntime.IdempotencyOutcome, error) {
+func (s *legacyWorkflowStateStore) BeginRunUpdate(ctx context.Context, request workflowruntime.BeginRunUpdateRequest) (workflowruntime.RunUpdateSnapshot, workflowruntime.IdempotencyOutcome, error) {
 	request.ReceivedAt = request.ReceivedAt.UTC()
 	if err := request.Validate(); err != nil {
 		return workflowruntime.RunUpdateSnapshot{}, "", workflowInvalid(err)
@@ -198,7 +198,7 @@ func (s *WorkflowStateStore) BeginRunUpdate(ctx context.Context, request workflo
 	return result, outcome, err
 }
 
-func (s *WorkflowStateStore) CompleteRunUpdate(ctx context.Context, request workflowruntime.CompleteRunUpdateRequest) (workflowruntime.RunUpdateSnapshot, error) {
+func (s *legacyWorkflowStateStore) CompleteRunUpdate(ctx context.Context, request workflowruntime.CompleteRunUpdateRequest) (workflowruntime.RunUpdateSnapshot, error) {
 	request.At = request.At.UTC()
 	if request.IdempotencyKey == "" || request.ExpectedGeneration == 0 || (request.Status != workflowruntime.RunUpdateApplied && request.Status != workflowruntime.RunUpdateClosed) || request.At.IsZero() {
 		return workflowruntime.RunUpdateSnapshot{}, workflowInvalid(errors.New("run update completion is malformed"))
@@ -246,11 +246,11 @@ func (s *WorkflowStateStore) CompleteRunUpdate(ctx context.Context, request work
 	return result, err
 }
 
-func (s *WorkflowStateStore) LoadRunUpdate(ctx context.Context, key string) (workflowruntime.RunUpdateSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadRunUpdate(ctx context.Context, key string) (workflowruntime.RunUpdateSnapshot, error) {
 	return loadWorkflowRunUpdate(ctx, s.db, key)
 }
 
-func (s *WorkflowStateStore) RecoverRunUpdates(ctx context.Context, limit int) ([]workflowruntime.RunUpdateSnapshot, error) {
+func (s *legacyWorkflowStateStore) RecoverRunUpdates(ctx context.Context, limit int) ([]workflowruntime.RunUpdateSnapshot, error) {
 	if limit < 0 || limit > workflowruntime.MaximumRunQueryLimit {
 		return nil, workflowInvalid(errors.New("run update recovery limit is invalid"))
 	}

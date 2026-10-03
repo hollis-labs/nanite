@@ -133,6 +133,18 @@ func (s *WorkflowStateStore) LoadRecoveryPlan(ctx context.Context, run workflowr
 }
 
 func loadPlanMaterial(ctx context.Context, query workflowSQL, digest string) (PlanMaterial, error) {
+	material, err := readPlanMaterial(ctx, query, digest)
+	if err != nil {
+		return PlanMaterial{}, err
+	}
+	if err := validatePlanMaterial(material); err != nil {
+		return PlanMaterial{}, workflowInvalid(err)
+	}
+	return material, nil
+}
+
+// Decoding is separate so a storage scan can memoize expensive material checks.
+func readPlanMaterial(ctx context.Context, query workflowSQL, digest string) (PlanMaterial, error) {
 	var (
 		material                                            PlanMaterial
 		planJSON, visibilityJSON, catalogJSON, verifierJSON string
@@ -180,9 +192,6 @@ FROM workflow_plan_materials WHERE plan_digest = ?`, digest).Scan(
 	}
 	if material.Plan.Digest != digest {
 		return PlanMaterial{}, workflowInvalid(errors.New("workflow plan material row key differs from plan digest"))
-	}
-	if err := validatePlanMaterial(material); err != nil {
-		return PlanMaterial{}, workflowInvalid(err)
 	}
 	return material, nil
 }

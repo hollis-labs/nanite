@@ -219,6 +219,9 @@ func TestHadronEngineWorkerReviewerGateRestartResumeAndIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reopened.Close(context.Background()) })
+	if preflightErr := PreflightWorkflowStorage(t.Context(), reopened); preflightErr != nil {
+		t.Fatal(preflightErr)
+	}
 	restartedState, err := NewWorkflowStateStore(reopened)
 	if err != nil {
 		t.Fatal(err)
@@ -280,6 +283,9 @@ func TestHadronEngineCancelWaitingRunSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reopened.Close(context.Background()) })
+	if preflightErr := PreflightWorkflowStorage(t.Context(), reopened); preflightErr != nil {
+		t.Fatal(preflightErr)
+	}
 	restartedState, _ := NewWorkflowStateStore(reopened)
 	restarted, _ := NewEngine(restartedState)
 	afterRestart, err := restarted.Resume(t.Context(), waiting.RunID, executor)
@@ -403,6 +409,9 @@ steps:
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reopened.Close(context.Background()) })
+	if preflightErr := PreflightWorkflowStorage(t.Context(), reopened); preflightErr != nil {
+		t.Fatal(preflightErr)
+	}
 	restartedState, err := NewWorkflowStateStore(reopened)
 	if err != nil {
 		t.Fatal(err)

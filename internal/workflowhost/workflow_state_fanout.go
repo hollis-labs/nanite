@@ -12,9 +12,9 @@ import (
 	"github.com/hollis-labs/go-workflow/values"
 )
 
-var _ workflowruntime.FanOutStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.FanOutStore = (*legacyWorkflowStateStore)(nil)
 
-func (s *WorkflowStateStore) LoadFanOut(ctx context.Context, parent workflowruntime.NodeInvocationID) (workflowruntime.FanOutSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadFanOut(ctx context.Context, parent workflowruntime.NodeInvocationID) (workflowruntime.FanOutSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.FanOutSnapshot{}, err
 	}
@@ -42,7 +42,7 @@ func loadWorkflowFanOut(ctx context.Context, query workflowSQL, parent workflowr
 	return snapshot, nil
 }
 
-func (s *WorkflowStateStore) LoadFanOutItemResults(ctx context.Context, parent workflowruntime.NodeInvocationID) ([]workflowruntime.FanOutItemResult, error) {
+func (s *legacyWorkflowStateStore) LoadFanOutItemResults(ctx context.Context, parent workflowruntime.NodeInvocationID) ([]workflowruntime.FanOutItemResult, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func (s *WorkflowStateStore) LoadFanOutItemResults(ctx context.Context, parent w
 	return result, nil
 }
 
-func (s *WorkflowStateStore) ExpandFanOut(ctx context.Context, request workflowruntime.ExpandFanOutRequest) (workflowruntime.ExpandFanOutResult, error) {
+func (s *legacyWorkflowStateStore) ExpandFanOut(ctx context.Context, request workflowruntime.ExpandFanOutRequest) (workflowruntime.ExpandFanOutResult, error) {
 	if err := request.Validate(); err != nil {
 		return workflowruntime.ExpandFanOutResult{}, workflowInvalid(err)
 	}
@@ -186,7 +186,7 @@ func (s *WorkflowStateStore) ExpandFanOut(ctx context.Context, request workflowr
 	return result, nil
 }
 
-func (s *WorkflowStateStore) CompleteFanOut(ctx context.Context, request workflowruntime.CompleteFanOutRequest) (workflowruntime.CompleteFanOutResult, error) {
+func (s *legacyWorkflowStateStore) CompleteFanOut(ctx context.Context, request workflowruntime.CompleteFanOutRequest) (workflowruntime.CompleteFanOutResult, error) {
 	if err := request.Validate(); err != nil {
 		return workflowruntime.CompleteFanOutResult{}, workflowInvalid(err)
 	}

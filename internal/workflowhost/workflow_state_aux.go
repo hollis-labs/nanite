@@ -15,7 +15,7 @@ import (
 
 // SaveValues implements runtime.StateStore with an immutable, digest-bound
 // value-set row. SQLite assigns the opaque reference identity.
-func (s *WorkflowStateStore) SaveValues(ctx context.Context, request workflowruntime.SaveValuesRequest) (values.ValueSetRef, error) {
+func (s *legacyWorkflowStateStore) SaveValues(ctx context.Context, request workflowruntime.SaveValuesRequest) (values.ValueSetRef, error) {
 	if err := request.Owner.Validate(); err != nil {
 		return values.ValueSetRef{}, workflowInvalid(err)
 	}
@@ -60,7 +60,7 @@ func (s *WorkflowStateStore) SaveValues(ctx context.Context, request workflowrun
 
 // LoadValues implements runtime.StateStore and verifies both the caller's
 // digest and the immutable row's content digest before returning decoded data.
-func (s *WorkflowStateStore) LoadValues(ctx context.Context, ref values.ValueSetRef) (values.ValueSet, error) {
+func (s *legacyWorkflowStateStore) LoadValues(ctx context.Context, ref values.ValueSetRef) (values.ValueSet, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ SELECT digest, values_json FROM workflow_value_sets WHERE sequence = ?`, sequenc
 
 // PutCacheEntry implements runtime.StateStore. A cache key is a mutable index
 // to immutable output values, so a later valid entry replaces the prior row.
-func (s *WorkflowStateStore) PutCacheEntry(ctx context.Context, entry workflowruntime.CacheEntry) error {
+func (s *legacyWorkflowStateStore) PutCacheEntry(ctx context.Context, entry workflowruntime.CacheEntry) error {
 	if err := entry.Validate(); err != nil {
 		return workflowInvalid(err)
 	}
@@ -170,7 +170,7 @@ ON CONFLICT(cache_key) DO UPDATE SET
 
 // GetCacheEntry implements runtime.StateStore. Expired rows are retained for
 // later maintenance but are never returned as cache hits.
-func (s *WorkflowStateStore) GetCacheEntry(ctx context.Context, key string, now time.Time) (workflowruntime.CacheEntry, bool, error) {
+func (s *legacyWorkflowStateStore) GetCacheEntry(ctx context.Context, key string, now time.Time) (workflowruntime.CacheEntry, bool, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.CacheEntry{}, false, err
 	}
@@ -223,7 +223,7 @@ FROM workflow_cache_entries WHERE cache_key = ?`, key).Scan(
 
 // PutPinnedValue implements runtime.StateStore. Pin keys are mutable stable
 // names, while their target value-set references remain immutable.
-func (s *WorkflowStateStore) PutPinnedValue(ctx context.Context, pin workflowruntime.PinnedValue) error {
+func (s *legacyWorkflowStateStore) PutPinnedValue(ctx context.Context, pin workflowruntime.PinnedValue) error {
 	if err := pin.Validate(); err != nil {
 		return workflowInvalid(err)
 	}
@@ -249,7 +249,7 @@ ON CONFLICT(pin_key) DO UPDATE SET
 }
 
 // GetPinnedValue implements runtime.StateStore and excludes expired pins.
-func (s *WorkflowStateStore) GetPinnedValue(ctx context.Context, key string, now time.Time) (workflowruntime.PinnedValue, bool, error) {
+func (s *legacyWorkflowStateStore) GetPinnedValue(ctx context.Context, key string, now time.Time) (workflowruntime.PinnedValue, bool, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.PinnedValue{}, false, err
 	}
@@ -299,7 +299,7 @@ FROM workflow_pinned_values WHERE pin_key = ?`, key).Scan(
 }
 
 // ListPinnedValues implements runtime.StateStore in stable key order.
-func (s *WorkflowStateStore) ListPinnedValues(ctx context.Context, now time.Time) ([]workflowruntime.PinnedValue, error) {
+func (s *legacyWorkflowStateStore) ListPinnedValues(ctx context.Context, now time.Time) ([]workflowruntime.PinnedValue, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}
@@ -354,7 +354,7 @@ func scanWorkflowPinnedValue(row workflowScanner) (workflowruntime.PinnedValue, 
 // RecordExternalActivation implements runtime.StateStore. One activation
 // declaration may fire repeatedly; idempotency_key, not activation_id, is the
 // immutable firing identity.
-func (s *WorkflowStateStore) RecordExternalActivation(ctx context.Context, request workflowruntime.ExternalActivationRequest) (workflowruntime.ExternalActivationSnapshot, workflowruntime.IdempotencyOutcome, error) {
+func (s *legacyWorkflowStateStore) RecordExternalActivation(ctx context.Context, request workflowruntime.ExternalActivationRequest) (workflowruntime.ExternalActivationSnapshot, workflowruntime.IdempotencyOutcome, error) {
 	if err := validateWorkflowActivation(request); err != nil {
 		return workflowruntime.ExternalActivationSnapshot{}, "", workflowInvalid(err)
 	}
@@ -420,7 +420,7 @@ INSERT INTO workflow_external_activations(
 
 // Recovery implements runtime.StateStore with deterministic, independently
 // limited categories. Categories are persisted facts and may overlap.
-func (s *WorkflowStateStore) Recovery(ctx context.Context, query workflowruntime.RecoveryQuery) (workflowruntime.RecoverySnapshot, error) {
+func (s *legacyWorkflowStateStore) Recovery(ctx context.Context, query workflowruntime.RecoveryQuery) (workflowruntime.RecoverySnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.RecoverySnapshot{}, err
 	}
@@ -434,7 +434,7 @@ func (s *WorkflowStateStore) Recovery(ctx context.Context, query workflowruntime
 	return result, nil
 }
 
-func (s *WorkflowStateStore) loadWorkflowRecovery(ctx context.Context, query workflowruntime.RecoveryQuery) (workflowruntime.RecoverySnapshot, error) {
+func (s *legacyWorkflowStateStore) loadWorkflowRecovery(ctx context.Context, query workflowruntime.RecoveryQuery) (workflowruntime.RecoverySnapshot, error) {
 	var result workflowruntime.RecoverySnapshot
 	runSQL := workflowRunSelect + ` WHERE r.runtime_status IN (?, ?, ?)`
 	runArgs := []any{workflowruntime.RunPending, workflowruntime.RunRunning, workflowruntime.RunWaiting}

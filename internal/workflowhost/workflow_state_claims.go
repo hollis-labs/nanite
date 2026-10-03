@@ -11,7 +11,7 @@ import (
 // ClaimNode implements runtime.StateStore. Only ready nodes are eligible;
 // non-ready nodes and ready nodes with a live lease return an idempotently
 // persisted Acquired=false result after claim-generation CAS succeeds.
-func (s *WorkflowStateStore) ClaimNode(ctx context.Context, request workflowruntime.ClaimNodeRequest) (workflowruntime.ClaimResult, error) {
+func (s *legacyWorkflowStateStore) ClaimNode(ctx context.Context, request workflowruntime.ClaimNodeRequest) (workflowruntime.ClaimResult, error) {
 	if err := validateWorkflowClaim(request); err != nil {
 		return workflowruntime.ClaimResult{}, workflowInvalid(err)
 	}
@@ -135,7 +135,7 @@ VALUES (?, ?, ?)`, key, requestJSON, resultJSON); err != nil {
 // extension-only expiry update in one transaction. Renewal is deliberately a
 // lease-only mutation: it must not advance the semantic node generation or
 // updated_at and invalidate a dispatcher's in-flight lifecycle CAS.
-func (s *WorkflowStateStore) RenewNodeLease(ctx context.Context, request workflowruntime.RenewLeaseRequest) (workflowruntime.ClaimLease, error) {
+func (s *legacyWorkflowStateStore) RenewNodeLease(ctx context.Context, request workflowruntime.RenewLeaseRequest) (workflowruntime.ClaimLease, error) {
 	if err := validateWorkflowRenew(request); err != nil {
 		return workflowruntime.ClaimLease{}, workflowInvalid(err)
 	}
@@ -185,7 +185,7 @@ func (s *WorkflowStateStore) RenewNodeLease(ctx context.Context, request workflo
 
 // ReleaseNodeClaim implements runtime.StateStore with lease fencing and a node
 // record generation CAS in one transaction.
-func (s *WorkflowStateStore) ReleaseNodeClaim(ctx context.Context, request workflowruntime.ReleaseClaimRequest) error {
+func (s *legacyWorkflowStateStore) ReleaseNodeClaim(ctx context.Context, request workflowruntime.ReleaseClaimRequest) error {
 	if err := validateWorkflowRelease(request); err != nil {
 		return workflowInvalid(err)
 	}

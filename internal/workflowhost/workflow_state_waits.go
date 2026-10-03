@@ -10,7 +10,7 @@ import (
 )
 
 // LoadWait implements runtime.StateStore.
-func (s *WorkflowStateStore) LoadWait(ctx context.Context, id workflowruntime.WaitID) (workflowruntime.WaitSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadWait(ctx context.Context, id workflowruntime.WaitID) (workflowruntime.WaitSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.WaitSnapshot{}, err
 	}
@@ -19,7 +19,7 @@ func (s *WorkflowStateStore) LoadWait(ctx context.Context, id workflowruntime.Wa
 
 // LoadWaitContinuation returns the single resumed wait bound to exactly id.
 // Open, timed-out, canceled, and safely-unbound legacy rows never qualify.
-func (s *WorkflowStateStore) LoadWaitContinuation(ctx context.Context, id workflowruntime.AttemptID) (workflowruntime.WaitSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadWaitContinuation(ctx context.Context, id workflowruntime.AttemptID) (workflowruntime.WaitSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.WaitSnapshot{}, err
 	}

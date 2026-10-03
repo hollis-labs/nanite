@@ -14,9 +14,9 @@ import (
 	"github.com/hollis-labs/go-workflow/values"
 )
 
-var _ workflowruntime.ServiceStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.ServiceStore = (*legacyWorkflowStateStore)(nil)
 
-func (s *WorkflowStateStore) LoadService(ctx context.Context, start workflowruntime.NodeInvocationID) (workflowruntime.ServiceSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadService(ctx context.Context, start workflowruntime.NodeInvocationID) (workflowruntime.ServiceSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.ServiceSnapshot{}, err
 	}
@@ -26,7 +26,7 @@ func (s *WorkflowStateStore) LoadService(ctx context.Context, start workflowrunt
 	return loadWorkflowService(ctx, s.db, start)
 }
 
-func (s *WorkflowStateStore) PrepareServiceStart(ctx context.Context, request workflowruntime.PrepareServiceStartRequest) (workflowruntime.ServiceSnapshot, error) {
+func (s *legacyWorkflowStateStore) PrepareServiceStart(ctx context.Context, request workflowruntime.PrepareServiceStartRequest) (workflowruntime.ServiceSnapshot, error) {
 	request.At = request.At.UTC()
 	if request.Service.Status != workflowruntime.ServiceLaunching || request.Service.Generation != 0 || request.At.IsZero() || request.ExpectedNodeGeneration == 0 || request.ExpectedAttemptGeneration == 0 {
 		return workflowruntime.ServiceSnapshot{}, workflowInvalid(errors.New("service start intent is invalid"))
@@ -69,7 +69,7 @@ func (s *WorkflowStateStore) PrepareServiceStart(ctx context.Context, request wo
 	return result, err
 }
 
-func (s *WorkflowStateStore) SuspendServiceStart(ctx context.Context, request workflowruntime.SuspendServiceStartRequest) (workflowruntime.SuspendServiceStartResult, error) {
+func (s *legacyWorkflowStateStore) SuspendServiceStart(ctx context.Context, request workflowruntime.SuspendServiceStartRequest) (workflowruntime.SuspendServiceStartResult, error) {
 	request.At = request.At.UTC()
 	var result workflowruntime.SuspendServiceStartResult
 	writeErr := s.write(ctx, "suspend workflow service start", func(query workflowSQL) error {
@@ -116,7 +116,7 @@ func (s *WorkflowStateStore) SuspendServiceStart(ctx context.Context, request wo
 	return result, writeErr
 }
 
-func (s *WorkflowStateStore) RecoverServiceStart(ctx context.Context, request workflowruntime.RecoverServiceStartRequest) (workflowruntime.SuspendServiceStartResult, error) {
+func (s *legacyWorkflowStateStore) RecoverServiceStart(ctx context.Context, request workflowruntime.RecoverServiceStartRequest) (workflowruntime.SuspendServiceStartResult, error) {
 	request.At = request.At.UTC()
 	var result workflowruntime.SuspendServiceStartResult
 	writeErr := s.write(ctx, "recover workflow service start", func(query workflowSQL) error {
@@ -159,7 +159,7 @@ func (s *WorkflowStateStore) RecoverServiceStart(ctx context.Context, request wo
 	return result, writeErr
 }
 
-func (s *WorkflowStateStore) ApplyServiceReady(ctx context.Context, request workflowruntime.ApplyServiceReadyRequest) (workflowruntime.ApplyServiceReadyResult, error) {
+func (s *legacyWorkflowStateStore) ApplyServiceReady(ctx context.Context, request workflowruntime.ApplyServiceReadyRequest) (workflowruntime.ApplyServiceReadyResult, error) {
 	request.At, request.ObservedAt, request.HeartbeatAt = request.At.UTC(), request.ObservedAt.UTC(), request.HeartbeatAt.UTC()
 	var result workflowruntime.ApplyServiceReadyResult
 	writeErr := s.write(ctx, "apply workflow service readiness", func(query workflowSQL) error {
@@ -243,7 +243,7 @@ func (s *WorkflowStateStore) ApplyServiceReady(ctx context.Context, request work
 	return result, writeErr
 }
 
-func (s *WorkflowStateStore) ApplyServiceHeartbeat(ctx context.Context, request workflowruntime.ApplyServiceHeartbeatRequest) (workflowruntime.ServiceSnapshot, error) {
+func (s *legacyWorkflowStateStore) ApplyServiceHeartbeat(ctx context.Context, request workflowruntime.ApplyServiceHeartbeatRequest) (workflowruntime.ServiceSnapshot, error) {
 	request.At, request.ObservedAt, request.HeartbeatAt = request.At.UTC(), request.ObservedAt.UTC(), request.HeartbeatAt.UTC()
 	var result workflowruntime.ServiceSnapshot
 	writeErr := s.write(ctx, "apply workflow service heartbeat", func(query workflowSQL) error {
@@ -289,7 +289,7 @@ func (s *WorkflowStateStore) ApplyServiceHeartbeat(ctx context.Context, request 
 	return result, writeErr
 }
 
-func (s *WorkflowStateStore) SuspendServiceTeardown(ctx context.Context, request workflowruntime.SuspendServiceTeardownRequest) (workflowruntime.SuspendServiceTeardownResult, error) {
+func (s *legacyWorkflowStateStore) SuspendServiceTeardown(ctx context.Context, request workflowruntime.SuspendServiceTeardownRequest) (workflowruntime.SuspendServiceTeardownResult, error) {
 	request.At = request.At.UTC()
 	var result workflowruntime.SuspendServiceTeardownResult
 	writeErr := s.write(ctx, "suspend workflow service teardown", func(query workflowSQL) error {
@@ -348,7 +348,7 @@ func (s *WorkflowStateStore) SuspendServiceTeardown(ctx context.Context, request
 	return result, writeErr
 }
 
-func (s *WorkflowStateStore) ApplyServiceStop(ctx context.Context, request workflowruntime.ApplyServiceStopRequest) (workflowruntime.ApplyServiceStopResult, error) {
+func (s *legacyWorkflowStateStore) ApplyServiceStop(ctx context.Context, request workflowruntime.ApplyServiceStopRequest) (workflowruntime.ApplyServiceStopResult, error) {
 	request.At, request.ObservedAt, request.HeartbeatAt = request.At.UTC(), request.ObservedAt.UTC(), request.HeartbeatAt.UTC()
 	var result workflowruntime.ApplyServiceStopResult
 	writeErr := s.write(ctx, "apply workflow service stop", func(query workflowSQL) error {
@@ -427,7 +427,7 @@ func (s *WorkflowStateStore) ApplyServiceStop(ctx context.Context, request workf
 	return result, writeErr
 }
 
-func (s *WorkflowStateStore) RecoverServices(ctx context.Context, query workflowruntime.ServiceQuery) ([]workflowruntime.ServiceSnapshot, error) {
+func (s *legacyWorkflowStateStore) RecoverServices(ctx context.Context, query workflowruntime.ServiceQuery) ([]workflowruntime.ServiceSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}

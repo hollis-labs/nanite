@@ -11,9 +11,9 @@ import (
 	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 )
 
-var _ workflowruntime.SchedulerResourceStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.SchedulerResourceStore = (*legacyWorkflowStateStore)(nil)
 
-func (s *WorkflowStateStore) AdmitNode(ctx context.Context, request workflowruntime.AdmitNodeRequest) (workflowruntime.AdmitNodeResult, error) {
+func (s *legacyWorkflowStateStore) AdmitNode(ctx context.Context, request workflowruntime.AdmitNodeRequest) (workflowruntime.AdmitNodeResult, error) {
 	request.Claim.Now = request.Claim.Now.UTC()
 	request.Claim.LeaseUntil = request.Claim.LeaseUntil.UTC()
 	request.EnqueuedAt = request.EnqueuedAt.UTC()
@@ -171,7 +171,7 @@ func validateWorkflowSchedulerReplayHolders(ctx context.Context, query workflowS
 	return nil
 }
 
-func (s *WorkflowStateStore) InspectSchedulerResources(ctx context.Context, request workflowruntime.SchedulerResourceQuery) (workflowruntime.SchedulerResourceState, error) {
+func (s *legacyWorkflowStateStore) InspectSchedulerResources(ctx context.Context, request workflowruntime.SchedulerResourceQuery) (workflowruntime.SchedulerResourceState, error) {
 	if request.RunID != "" {
 		if err := (workflowruntime.NodeInvocationID{RunID: request.RunID, NodeID: "valid"}).Validate(); err != nil {
 			return workflowruntime.SchedulerResourceState{}, workflowInvalid(err)

@@ -17,13 +17,13 @@ import (
 
 type sqlFacadeFixture struct {
 	product  *nanitestore.Store
-	host     *WorkflowStateStore
+	host     *legacyWorkflowStateStore
 	state    workflowruntime.StateStore
 	material PlanMaterial
 	revision string
 }
 
-func newSQLFacadeFixture(t *testing.T, shared bool, publish bool) sqlFacadeFixture {
+func newSQLFacadeFixture(t *testing.T, shared bool, publish bool, mapping ...PlanNodeProjection) sqlFacadeFixture {
 	t.Helper()
 	product, err := storetest.New(t, t.Context(), filepath.Join(t.TempDir(), "host.db"))
 	if err != nil {
@@ -32,7 +32,7 @@ func newSQLFacadeFixture(t *testing.T, shared bool, publish bool) sqlFacadeFixtu
 	t.Cleanup(func() { _ = product.Close(context.Background()) })
 	// Every hook read and write must fit on the transaction's only connection.
 	product.DB.SetMaxOpenConns(1)
-	host, err := NewWorkflowStateStore(product)
+	host, err := newLegacyWorkflowStateStore(product)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,9 +50,10 @@ func newSQLFacadeFixture(t *testing.T, shared bool, publish bool) sqlFacadeFixtu
 		t.Fatal(err)
 	}
 	// Use a distinct product identity to catch node-ID/step-ID conflation.
-	if err := host.RecordPlanNodeProjections(t.Context(), planRef(material.Plan), []PlanNodeProjection{
-		{NodeID: "work", ProductStepID: "product-work", ProductKind: "tool"},
-	}); err != nil {
+	if len(mapping) == 0 {
+		mapping = []PlanNodeProjection{{NodeID: "work", ProductStepID: "product-work", ProductKind: "tool"}}
+	}
+	if err := host.RecordPlanNodeProjections(t.Context(), planRef(material.Plan), mapping); err != nil {
 		t.Fatal(err)
 	}
 	f := sqlFacadeFixture{product: product, host: host, state: host, material: material}
@@ -174,8 +175,22 @@ func TestSQLFacadeFrozenRevisionAndProductParity(t *testing.T) {
 		if err := f.host.RecordPlanMaterial(ctx, next); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.host.publishDefinition(ctx, next); err != nil {
+		newRevision, err := f.host.publishDefinition(ctx, next)
+		if err != nil {
 			t.Fatal(err)
+		}
+		request := f.createRequest()
+		request.ID, request.StartIdempotencyKey, request.Plan = "newer-run", "newer-start", planRef(next.Plan)
+		newer, _, err := f.state.CreateRun(ctx, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var bound string
+		if err := f.product.DB.QueryRowContext(ctx, `SELECT definition_revision_id FROM workflow_runs WHERE id=?`, newer.ID).Scan(&bound); err != nil {
+			t.Fatal(err)
+		}
+		if bound != newRevision.RevisionID {
+			t.Fatalf("newer run bound %q, want exact newer revision %q", bound, newRevision.RevisionID)
 		}
 	}
 	for i, f := range fixtures {
@@ -519,7 +534,42 @@ func TestSQLFacadeConstructionPreservesLegacyHistory(t *testing.T) {
 	if err != nil || loaded.DefinitionName != legacy.DefinitionName || loaded.InputJSON != legacy.InputJSON || loaded.Status != "completed" {
 		t.Fatalf("legacy view changed: %+v %v", loaded, err)
 	}
-	if facade.DB() != f.product.DB {
+	if facade.db != f.product.DB {
 		t.Fatal("facade created a second database authority")
+	}
+}
+
+// Infrastructure failures are retryable operational errors, not invalid
+// authored records. Missing tables exercise both hook query error branches.
+func TestSQLFacadeInfrastructureErrorCategory(t *testing.T) {
+	for _, table := range []string{"workflow_plan_materials", "workflow_definition_revisions"} {
+		t.Run(table, func(t *testing.T) {
+			f := newSQLFacadeFixture(t, true, true)
+			if _, err := f.product.DB.ExecContext(t.Context(), `ALTER TABLE `+table+` RENAME TO unavailable_`+table); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err := f.state.CreateRun(t.Context(), f.createRequest())
+			if err == nil || errors.Is(err, workflowruntime.ErrInvalidRecord) || errors.Is(err, workflowruntime.ErrNotFound) {
+				t.Fatalf("infrastructure error changed category: %v", err)
+			}
+			var count int
+			if err := f.product.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM workflow_runs`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatalf("failed hook left %d runs", count)
+			}
+		})
+	}
+}
+
+func TestSQLFacadeNoTransactionEscape(t *testing.T) {
+	f := newSQLFacadeFixture(t, true, true)
+	facade := f.state.(*SQLWorkflowStateStore)
+	if _, ok := any(facade).(interface{ DB() *sql.DB }); ok {
+		t.Fatal("facade exposes raw database")
+	}
+	if _, ok := reflect.TypeOf(facade).MethodByName("WriteTx"); ok {
+		t.Fatal("facade exposes unhooked transaction")
 	}
 }

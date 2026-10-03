@@ -13,9 +13,9 @@ import (
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
 )
 
-var _ workflowruntime.WaitStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.WaitStore = (*legacyWorkflowStateStore)(nil)
 
-func (s *WorkflowStateStore) SuspendNodeWait(ctx context.Context, request workflowruntime.SuspendNodeWaitRequest) (workflowruntime.SuspendWaitResult, error) {
+func (s *legacyWorkflowStateStore) SuspendNodeWait(ctx context.Context, request workflowruntime.SuspendNodeWaitRequest) (workflowruntime.SuspendWaitResult, error) {
 	request.At = request.At.UTC()
 	request.Wait.CreatedAt, request.Wait.UpdatedAt = request.At, request.At
 	if !request.Wait.Deadline.IsZero() {
@@ -139,7 +139,7 @@ func (s *WorkflowStateStore) SuspendNodeWait(ctx context.Context, request workfl
 	return result, writeErr
 }
 
-func (s *WorkflowStateStore) ResumeNodeWait(ctx context.Context, request workflowruntime.ResumeNodeWaitRequest) (workflowruntime.ResumeWaitResult, error) {
+func (s *legacyWorkflowStateStore) ResumeNodeWait(ctx context.Context, request workflowruntime.ResumeNodeWaitRequest) (workflowruntime.ResumeWaitResult, error) {
 	request.ReceivedAt = request.ReceivedAt.UTC()
 	if err := request.Validate(); err != nil {
 		return workflowruntime.ResumeWaitResult{}, workflowInvalid(err)
@@ -306,7 +306,7 @@ func (s *WorkflowStateStore) ResumeNodeWait(ctx context.Context, request workflo
 	return result, writeErr
 }
 
-func (s *WorkflowStateStore) TimeoutWait(ctx context.Context, request workflowruntime.TimeoutWaitRequest) (workflowruntime.WaitTimeoutResult, error) {
+func (s *legacyWorkflowStateStore) TimeoutWait(ctx context.Context, request workflowruntime.TimeoutWaitRequest) (workflowruntime.WaitTimeoutResult, error) {
 	request.Deadline, request.Now = request.Deadline.UTC(), request.Now.UTC()
 	if err := request.Validate(); err != nil {
 		return workflowruntime.WaitTimeoutResult{}, workflowInvalid(err)
@@ -444,7 +444,7 @@ func (s *WorkflowStateStore) TimeoutWait(ctx context.Context, request workflowru
 	return result, writeErr
 }
 
-func (s *WorkflowStateStore) RecoverOpenWaits(ctx context.Context, query workflowruntime.OpenWaitQuery) ([]workflowruntime.WaitSnapshot, error) {
+func (s *legacyWorkflowStateStore) RecoverOpenWaits(ctx context.Context, query workflowruntime.OpenWaitQuery) ([]workflowruntime.WaitSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}

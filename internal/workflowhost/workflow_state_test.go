@@ -332,7 +332,7 @@ func workflowTestTime() time.Time {
 	return time.Date(2026, time.September, 4, 12, 0, 0, 123456789, time.UTC)
 }
 
-func createWorkflowTestRun(t *testing.T, state *WorkflowStateStore, id string, at time.Time) workflowruntime.RunSnapshot {
+func createWorkflowTestRun(t *testing.T, state workflowruntime.StateStore, id string, at time.Time) workflowruntime.RunSnapshot {
 	t.Helper()
 	run, outcome, err := state.CreateRun(context.Background(), workflowruntime.CreateRunRequest{
 		ID: workflowruntime.RunID(id), Plan: workflowTestPlan(id), Status: workflowruntime.RunPending,
@@ -344,7 +344,7 @@ func createWorkflowTestRun(t *testing.T, state *WorkflowStateStore, id string, a
 	return run
 }
 
-func createWorkflowTestNode(t *testing.T, state *WorkflowStateStore, runID workflowruntime.RunID, nodeID string, at time.Time) workflowruntime.NodeInvocationSnapshot {
+func createWorkflowTestNode(t *testing.T, state workflowruntime.StateStore, runID workflowruntime.RunID, nodeID string, at time.Time) workflowruntime.NodeInvocationSnapshot {
 	t.Helper()
 	node, err := state.CreateNodeInvocation(context.Background(), workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{
 		ID:     workflowruntime.NodeInvocationID{RunID: runID, NodeID: nodeID},
@@ -366,7 +366,12 @@ type workflowSQLiteWaitFixture struct {
 	request     workflowruntime.SuspendNodeWaitRequest
 }
 
-func prepareWorkflowSQLiteWait(t *testing.T, state *WorkflowStateStore, suffix string, base time.Time, timeout time.Duration) workflowSQLiteWaitFixture {
+type workflowWaitFixtureStore interface {
+	workflowruntime.StateStore
+	RecordPlanNodeProjections(context.Context, workflowruntime.PlanRef, []PlanNodeProjection) error
+}
+
+func prepareWorkflowSQLiteWait(t *testing.T, state workflowWaitFixtureStore, suffix string, base time.Time, timeout time.Duration) workflowSQLiteWaitFixture {
 	t.Helper()
 	run := createWorkflowTestRun(t, state, "run-wait-"+suffix, base)
 	running, err := state.TransitionRun(context.Background(), workflowruntime.RunTransitionRequest{

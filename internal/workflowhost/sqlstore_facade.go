@@ -14,9 +14,40 @@ import (
 // SQLWorkflowStateStore binds the released runtime store to Nanite's existing
 // tables and transactional product projections. Nanite owns schema migration,
 // frozen material, definition publication, and the database lifetime.
-// Production construction continues to use WorkflowStateStore until startup
-// compatibility and exclusive writer ownership are qualified.
-type SQLWorkflowStateStore struct{ *sqlstore.Store }
+type SQLWorkflowStateStore struct {
+	releasedRuntimeStore
+	shared  *sqlstore.Store
+	db      *sql.DB
+	product *nanitestore.Store
+}
+
+// The private interface exposes canonical operations but never the released
+// store's raw DB or transaction escape hatch. Callers cannot replace it.
+type releasedRuntimeStore interface {
+	workflowruntime.StateStore
+	workflowruntime.WaitStore
+	workflowruntime.WaitTimeoutStore
+	workflowruntime.RecoveryStore
+	workflowruntime.ChildTerminalWaitStore
+	workflowruntime.ControlFlowStore
+	workflowruntime.MemoStore
+	workflowruntime.PinStore
+	workflowruntime.OutputReuseStore
+	workflowruntime.ValueRecordStore
+	workflowruntime.ReactorStore
+	workflowruntime.ReplayStore
+	workflowruntime.NodeInputStore
+	workflowruntime.RunControlStore
+	workflowruntime.RunPolicyStore
+	workflowruntime.SchedulerResourceStore
+	workflowruntime.ServiceStore
+	workflowruntime.CompensationStore
+}
+
+// Host-owned writes share the released store's BEGIN IMMEDIATE owner.
+func (s *SQLWorkflowStateStore) write(ctx context.Context, operation string, fn func(workflowSQL) error) error {
+	return s.shared.WriteTx(ctx, operation, func(tx sqlstore.DBTX) error { return fn(tx) })
+}
 
 // NewSQLWorkflowStateStore shares an already migrated product database. It
 // neither applies library DDL nor starts workers. Hooks are mandatory and cannot
@@ -35,7 +66,7 @@ func NewSQLWorkflowStateStore(product *nanitestore.Store) (*SQLWorkflowStateStor
 	if err != nil {
 		return nil, err
 	}
-	return &SQLWorkflowStateStore{Store: shared}, nil
+	return &SQLWorkflowStateStore{releasedRuntimeStore: shared, shared: shared, db: product.DB, product: product}, nil
 }
 
 // Hooks use only tx: opening another connection here breaks atomicity and can

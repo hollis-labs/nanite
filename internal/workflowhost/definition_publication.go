@@ -38,40 +38,47 @@ func (s *WorkflowStateStore) publishDefinition(ctx context.Context, material Pla
 		Engine:              nanitestore.WorkflowEngineIdentityShared,
 		RegisteredBy:        workflowDefinitionPublisher,
 	}
-	persisted, err := s.product.CreateWorkflowDefinitionRevision(ctx, revision)
-	if err != nil {
-		return nanitestore.WorkflowDefinitionRevision{}, fmt.Errorf("publish workflow definition revision: %w", err)
-	}
+	var result nanitestore.WorkflowDefinitionRevision
+	err = s.write(ctx, "publish workflow definition", func(tx workflowSQL) error {
+		catalog := &nanitestore.WorkflowDefinitionCatalog{DB: tx}
+		persisted, publicationErr := catalog.CreateWorkflowDefinitionRevision(ctx, revision)
+		if publicationErr != nil {
+			return fmt.Errorf("publish workflow definition revision: %w", publicationErr)
+		}
 
-	// Definition heads are mutable CAS selectors over immutable revisions. A
-	// concurrent publisher may advance the same name, so retry only the bounded
-	// CAS read/update sequence. The run itself binds by its exact compiled plan,
-	// not by whichever revision remains the latest head after this returns.
-	for attempts := 0; attempts < 8; attempts++ {
-		head, loadErr := s.product.GetWorkflowDefinitionHead(ctx, revision.DefinitionName)
-		expected := int64(0)
-		switch {
-		case loadErr == nil:
-			if head.RevisionID == revision.RevisionID {
-				return persisted, nil
+		// Definition heads are mutable CAS selectors over immutable revisions. A
+		// concurrent publisher may advance the same name, so retry only the bounded
+		// CAS read/update sequence. The run itself binds by its exact compiled plan,
+		// not by whichever revision remains the latest head after this returns.
+		for attempts := 0; attempts < 8; attempts++ {
+			head, loadErr := catalog.GetWorkflowDefinitionHead(ctx, revision.DefinitionName)
+			expected := int64(0)
+			switch {
+			case loadErr == nil:
+				if head.RevisionID == revision.RevisionID {
+					result = persisted
+					return nil
+				}
+				expected = head.Generation
+			case errors.Is(loadErr, nanitestore.ErrWorkflowDefinitionHeadNotFound):
+			default:
+				return fmt.Errorf("publish workflow definition head: load: %w", loadErr)
 			}
-			expected = head.Generation
-		case errors.Is(loadErr, nanitestore.ErrWorkflowDefinitionHeadNotFound):
-		default:
-			return nanitestore.WorkflowDefinitionRevision{}, fmt.Errorf("publish workflow definition head: load: %w", loadErr)
+			_, setErr := catalog.SetWorkflowDefinitionHead(ctx, nanitestore.SetWorkflowDefinitionHeadRequest{
+				DefinitionName: revision.DefinitionName, RevisionID: revision.RevisionID,
+				ExpectedGeneration: expected, At: material.CreatedAt,
+			})
+			if setErr == nil {
+				result = persisted
+				return nil
+			}
+			if !errors.Is(setErr, nanitestore.ErrWorkflowDefinitionHeadConflict) {
+				return fmt.Errorf("publish workflow definition head: %w", setErr)
+			}
 		}
-		_, setErr := s.product.SetWorkflowDefinitionHead(ctx, nanitestore.SetWorkflowDefinitionHeadRequest{
-			DefinitionName: revision.DefinitionName, RevisionID: revision.RevisionID,
-			ExpectedGeneration: expected, At: material.CreatedAt,
-		})
-		if setErr == nil {
-			return persisted, nil
-		}
-		if !errors.Is(setErr, nanitestore.ErrWorkflowDefinitionHeadConflict) {
-			return nanitestore.WorkflowDefinitionRevision{}, fmt.Errorf("publish workflow definition head: %w", setErr)
-		}
-	}
-	return nanitestore.WorkflowDefinitionRevision{}, fmt.Errorf("publish workflow definition head: %w", nanitestore.ErrWorkflowDefinitionHeadConflict)
+		return fmt.Errorf("publish workflow definition head: %w", nanitestore.ErrWorkflowDefinitionHeadConflict)
+	})
+	return result, err
 }
 
 // workflowDefinitionRevisionID is derived from the exact, source-bound plan

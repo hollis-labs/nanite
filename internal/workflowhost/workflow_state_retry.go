@@ -12,9 +12,9 @@ import (
 	"github.com/hollis-labs/go-workflow/values"
 )
 
-var _ workflowruntime.RetryStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.RetryStore = (*legacyWorkflowStateStore)(nil)
 
-func (s *WorkflowStateStore) LoadRetryActivation(ctx context.Context, id string) (workflowruntime.RetryActivationSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadRetryActivation(ctx context.Context, id string) (workflowruntime.RetryActivationSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.RetryActivationSnapshot{}, err
 	}
@@ -39,7 +39,7 @@ func loadWorkflowRetryActivation(ctx context.Context, query workflowSQL, id stri
 	return snapshot, nil
 }
 
-func (s *WorkflowStateStore) ScheduleNodeRetry(ctx context.Context, request workflowruntime.ScheduleNodeRetryRequest) (workflowruntime.ScheduleNodeRetryResult, error) {
+func (s *legacyWorkflowStateStore) ScheduleNodeRetry(ctx context.Context, request workflowruntime.ScheduleNodeRetryRequest) (workflowruntime.ScheduleNodeRetryResult, error) {
 	if err := request.Validate(); err != nil {
 		return workflowruntime.ScheduleNodeRetryResult{}, workflowInvalid(err)
 	}
@@ -171,7 +171,7 @@ INSERT INTO workflow_retry_activations(
 	return result, nil
 }
 
-func (s *WorkflowStateStore) ActivateNodeRetry(ctx context.Context, request workflowruntime.ActivateNodeRetryRequest) (workflowruntime.ActivateNodeRetryResult, error) {
+func (s *legacyWorkflowStateStore) ActivateNodeRetry(ctx context.Context, request workflowruntime.ActivateNodeRetryRequest) (workflowruntime.ActivateNodeRetryResult, error) {
 	if err := request.Validate(); err != nil {
 		return workflowruntime.ActivateNodeRetryResult{}, workflowInvalid(err)
 	}
@@ -312,7 +312,7 @@ WHERE activation_id = ? AND generation = ?`, nextActivation.Status, nextActivati
 	return result, nil
 }
 
-func (s *WorkflowStateStore) RecoverRetryActivations(ctx context.Context, query workflowruntime.RetryActivationQuery) ([]workflowruntime.RetryActivationSnapshot, error) {
+func (s *legacyWorkflowStateStore) RecoverRetryActivations(ctx context.Context, query workflowruntime.RetryActivationQuery) ([]workflowruntime.RetryActivationSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}

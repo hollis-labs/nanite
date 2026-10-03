@@ -12,6 +12,30 @@ external-framework StepKinds, SQLite adapters, go-scheduler activations, and
 artifact storage. A StepKind may call a Nanite service, but it may not choose the
 next workflow node or maintain a second workflow state machine.
 
+## Storage and startup
+
+The Nanite facade delegates canonical runtime operations to the released
+`go-workflow-host/sqlstore` over the existing physical `workflow_*` tables.
+Mandatory hooks project run and node changes in the same transaction. The
+facade exposes runtime interfaces, without exposing the underlying database or
+an unhooked transaction API. Nanite-owned material, projection metadata,
+definition publication and external receipts use the released transaction owner.
+Nanite migrations remain the only schema owner; startup never calls library DDL.
+
+Before seeding or starting workers, startup checks the qualified schema and
+migration ledger, foreign keys, engine identities, immutable source/catalog/host
+material and exact revision bindings, persisted runtime records, claim generations,
+and idempotency replay data. Drift fails startup without repair or replay. The
+legacy cutover coordinator then applies explicitly supplied, audited disposition
+choices before workers start. Terminal legacy history remains queryable.
+
+Storage replacement requires a maintenance window: stop the service, verify that
+no other Nanite writer process is running, swap the binary, and start it on the
+same database. The preflight transaction protects its snapshot; process exclusion
+is a deployment responsibility. Old and new storage implementations share the
+same row and lease protocol. Schema changes affecting qualified workflow objects
+must update the preflight expectations after qualification.
+
 ## Durable identity
 
 Every new run records the engine identity

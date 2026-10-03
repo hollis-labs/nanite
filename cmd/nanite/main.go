@@ -275,6 +275,44 @@ func cmdServeWithInitializers(
 	}
 	defer closeStoreBestEffort(otelCtx, s)
 
+	// Qualify the existing workflow database before seeding, background workers,
+	// cutover mutations, or launch surfaces. Deployment owns writer exclusion.
+	if preflightErr := workflowhost.PreflightWorkflowStorage(otelCtx, s); preflightErr != nil {
+		return fmt.Errorf("workflow storage startup preflight: %w", preflightErr)
+	}
+
+	// Complete the one-way cutover before publishing any launch surface. Active
+	// legacy rows are never assigned fabricated plans: the coordinator returns
+	// their immutable audit cohort and startup stops for explicit disposition.
+	cutover, err := workflowcompat.NewCutoverCoordinator(s)
+	if err != nil {
+		return fmt.Errorf("construct Agent Workflows cutover coordinator: %w", err)
+	}
+	cutoverHost, _ := os.Hostname()
+	cutoverRequest := workflowcompat.CutoverRequest{
+		Owner: fmt.Sprintf("nanite:%s:%d", cutoverHost, os.Getpid()),
+		Token: fmt.Sprintf("startup-%d", time.Now().UTC().UnixNano()),
+		Now:   time.Now().UTC(), LeaseDuration: 30 * time.Second,
+	}
+	var cutoverReport workflowcompat.CutoverReport
+	if rawPlan := strings.TrimSpace(os.Getenv("NANITE_WORKFLOW_LEGACY_DISPOSITIONS")); rawPlan != "" {
+		var decisions []workflowcompat.LegacyDispositionDecision
+		if parseErr := json.Unmarshal([]byte(rawPlan), &decisions); parseErr != nil {
+			return fmt.Errorf("parse NANITE_WORKFLOW_LEGACY_DISPOSITIONS: %w", parseErr)
+		}
+		cutoverReport, err = cutover.PrepareSharedStartupWithDecisions(context.Background(), cutoverRequest, decisions)
+	} else {
+		cutoverReport, err = cutover.PrepareSharedStartup(context.Background(), cutoverRequest)
+	}
+	if err != nil {
+		pending := make([]string, 0, len(cutoverReport.PendingLegacy))
+		for _, disposition := range cutoverReport.PendingLegacy {
+			pending = append(pending, disposition.RunID)
+		}
+		return fmt.Errorf("prepare Agent Workflows shared cutover (pending legacy runs %v): %w", pending, err)
+	}
+	slog.Info("Agent Workflows shared cutover ready", "phase", cutoverReport.State.Phase, "generation", cutoverReport.State.Generation)
+
 	// Seed default data.
 	if err := s.Seed(otelCtx); err != nil {
 		slog.Error("failed to seed database", "err", err)
@@ -572,38 +610,6 @@ func cmdServeWithInitializers(
 	}
 	slog.Info("workflow definitions registry loaded",
 		"path", resolveWorkflowDefinitionsPath(cfg), "count", len(workflowDefinitionsRegistry.Names()))
-
-	// Complete the one-way cutover before publishing any launch surface. Active
-	// legacy rows are never assigned fabricated plans: the coordinator returns
-	// their immutable audit cohort and startup stops for explicit disposition.
-	cutover, err := workflowcompat.NewCutoverCoordinator(s)
-	if err != nil {
-		return fmt.Errorf("construct Agent Workflows cutover coordinator: %w", err)
-	}
-	cutoverHost, _ := os.Hostname()
-	cutoverRequest := workflowcompat.CutoverRequest{
-		Owner: fmt.Sprintf("nanite:%s:%d", cutoverHost, os.Getpid()),
-		Token: fmt.Sprintf("startup-%d", time.Now().UTC().UnixNano()),
-		Now:   time.Now().UTC(), LeaseDuration: 30 * time.Second,
-	}
-	var cutoverReport workflowcompat.CutoverReport
-	if rawPlan := strings.TrimSpace(os.Getenv("NANITE_WORKFLOW_LEGACY_DISPOSITIONS")); rawPlan != "" {
-		var decisions []workflowcompat.LegacyDispositionDecision
-		if parseErr := json.Unmarshal([]byte(rawPlan), &decisions); parseErr != nil {
-			return fmt.Errorf("parse NANITE_WORKFLOW_LEGACY_DISPOSITIONS: %w", parseErr)
-		}
-		cutoverReport, err = cutover.PrepareSharedStartupWithDecisions(context.Background(), cutoverRequest, decisions)
-	} else {
-		cutoverReport, err = cutover.PrepareSharedStartup(context.Background(), cutoverRequest)
-	}
-	if err != nil {
-		pending := make([]string, 0, len(cutoverReport.PendingLegacy))
-		for _, disposition := range cutoverReport.PendingLegacy {
-			pending = append(pending, disposition.RunID)
-		}
-		return fmt.Errorf("prepare Agent Workflows shared cutover (pending legacy runs %v): %w", pending, err)
-	}
-	slog.Info("Agent Workflows shared cutover ready", "phase", cutoverReport.State.Phase, "generation", cutoverReport.State.Generation)
 
 	workflowState, err := workflowhost.NewWorkflowStateStore(s)
 	if err != nil {

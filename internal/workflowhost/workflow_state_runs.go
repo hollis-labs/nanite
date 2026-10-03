@@ -11,14 +11,14 @@ import (
 )
 
 // RecordPlan implements runtime.StateStore.
-func (s *WorkflowStateStore) RecordPlan(ctx context.Context, plan workflowruntime.PlanRef) error {
+func (s *legacyWorkflowStateStore) RecordPlan(ctx context.Context, plan workflowruntime.PlanRef) error {
 	return s.write(ctx, "record workflow plan", func(query workflowSQL) error {
 		return ensureWorkflowPlan(ctx, query, plan)
 	})
 }
 
 // LoadPlan implements runtime.StateStore.
-func (s *WorkflowStateStore) LoadPlan(ctx context.Context, digest string) (workflowruntime.PlanRef, error) {
+func (s *legacyWorkflowStateStore) LoadPlan(ctx context.Context, digest string) (workflowruntime.PlanRef, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.PlanRef{}, err
 	}
@@ -27,7 +27,7 @@ func (s *WorkflowStateStore) LoadPlan(ctx context.Context, digest string) (workf
 
 // CreateRun implements runtime.StateStore and records its plan reference and
 // start idempotency outcome in the same transaction.
-func (s *WorkflowStateStore) CreateRun(ctx context.Context, request workflowruntime.CreateRunRequest) (workflowruntime.RunSnapshot, workflowruntime.IdempotencyOutcome, error) {
+func (s *legacyWorkflowStateStore) CreateRun(ctx context.Context, request workflowruntime.CreateRunRequest) (workflowruntime.RunSnapshot, workflowruntime.IdempotencyOutcome, error) {
 	if err := validateWorkflowCreateRun(request); err != nil {
 		return workflowruntime.RunSnapshot{}, "", workflowInvalid(err)
 	}
@@ -110,7 +110,7 @@ VALUES (?, ?, ?)`, request.StartIdempotencyKey, requestJSON, resultJSON); err !=
 }
 
 // LoadRun implements runtime.StateStore.
-func (s *WorkflowStateStore) LoadRun(ctx context.Context, id workflowruntime.RunID) (workflowruntime.RunSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadRun(ctx context.Context, id workflowruntime.RunID) (workflowruntime.RunSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.RunSnapshot{}, err
 	}
@@ -119,7 +119,7 @@ func (s *WorkflowStateStore) LoadRun(ctx context.Context, id workflowruntime.Run
 
 // SaveRun implements runtime.StateStore and rejects lifecycle bypasses before
 // executing its SQL generation CAS.
-func (s *WorkflowStateStore) SaveRun(ctx context.Context, request workflowruntime.SaveRunRequest) (workflowruntime.RunSnapshot, error) {
+func (s *legacyWorkflowStateStore) SaveRun(ctx context.Context, request workflowruntime.SaveRunRequest) (workflowruntime.RunSnapshot, error) {
 	var result workflowruntime.RunSnapshot
 	writeErr := s.write(ctx, "save workflow run", func(query workflowSQL) error {
 		current, loadErr := loadWorkflowRun(ctx, query, request.Snapshot.ID)
@@ -169,7 +169,7 @@ func (s *WorkflowStateStore) SaveRun(ctx context.Context, request workflowruntim
 }
 
 // TransitionRun implements runtime.StateStore with atomic state/event writes.
-func (s *WorkflowStateStore) TransitionRun(ctx context.Context, request workflowruntime.RunTransitionRequest) (workflowruntime.RunTransitionResult, error) {
+func (s *legacyWorkflowStateStore) TransitionRun(ctx context.Context, request workflowruntime.RunTransitionRequest) (workflowruntime.RunTransitionResult, error) {
 	if err := validateWorkflowRunTransition(request); err != nil {
 		return workflowruntime.RunTransitionResult{}, workflowInvalid(err)
 	}
@@ -245,7 +245,7 @@ func (s *WorkflowStateStore) TransitionRun(ctx context.Context, request workflow
 }
 
 // CreateNodeInvocation implements runtime.StateStore.
-func (s *WorkflowStateStore) CreateNodeInvocation(ctx context.Context, request workflowruntime.CreateNodeInvocationRequest) (workflowruntime.NodeInvocationSnapshot, error) {
+func (s *legacyWorkflowStateStore) CreateNodeInvocation(ctx context.Context, request workflowruntime.CreateNodeInvocationRequest) (workflowruntime.NodeInvocationSnapshot, error) {
 	next := cloneWorkflowNode(request.Snapshot)
 	if next.Phase != workflowruntime.InvocationForward {
 		return workflowruntime.NodeInvocationSnapshot{}, workflowInvalid(errors.New("compensation nodes require atomic saga materialization"))
@@ -289,7 +289,7 @@ func (s *WorkflowStateStore) CreateNodeInvocation(ctx context.Context, request w
 }
 
 // LoadNodeInvocation implements runtime.StateStore.
-func (s *WorkflowStateStore) LoadNodeInvocation(ctx context.Context, id workflowruntime.NodeInvocationID) (workflowruntime.NodeInvocationSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadNodeInvocation(ctx context.Context, id workflowruntime.NodeInvocationID) (workflowruntime.NodeInvocationSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.NodeInvocationSnapshot{}, err
 	}
@@ -298,7 +298,7 @@ func (s *WorkflowStateStore) LoadNodeInvocation(ctx context.Context, id workflow
 
 // SaveNodeInvocation implements runtime.StateStore and rejects lifecycle,
 // attempt, value, and claim bypasses before its SQL generation CAS.
-func (s *WorkflowStateStore) SaveNodeInvocation(ctx context.Context, request workflowruntime.SaveNodeInvocationRequest) (workflowruntime.NodeInvocationSnapshot, error) {
+func (s *legacyWorkflowStateStore) SaveNodeInvocation(ctx context.Context, request workflowruntime.SaveNodeInvocationRequest) (workflowruntime.NodeInvocationSnapshot, error) {
 	var result workflowruntime.NodeInvocationSnapshot
 	writeErr := s.write(ctx, "save workflow node", func(query workflowSQL) error {
 		current, loadErr := loadWorkflowNode(ctx, query, request.Snapshot.ID)

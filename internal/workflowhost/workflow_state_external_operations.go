@@ -17,7 +17,7 @@ import (
 	"github.com/hollis-labs/go-workflow/values"
 )
 
-var _ workflowruntime.ExternalOperationStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.ExternalOperationStore = (*legacyWorkflowStateStore)(nil)
 
 const workflowExternalOperationSelect = `
 SELECT run_id, node_id, iteration, attempt_number, ref_json, invocation_json,
@@ -26,7 +26,7 @@ SELECT run_id, node_id, iteration, attempt_number, ref_json, invocation_json,
        generation, created_at, updated_at
 FROM workflow_external_operations`
 
-func (s *WorkflowStateStore) LoadExternalOperation(ctx context.Context, id workflowruntime.AttemptID) (workflowruntime.ExternalOperationSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadExternalOperation(ctx context.Context, id workflowruntime.AttemptID) (workflowruntime.ExternalOperationSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.ExternalOperationSnapshot{}, err
 	}
@@ -36,7 +36,7 @@ func (s *WorkflowStateStore) LoadExternalOperation(ctx context.Context, id workf
 	return loadWorkflowExternalOperation(ctx, s.db, id)
 }
 
-func (s *WorkflowStateStore) SuspendExternalOperation(ctx context.Context, request workflowruntime.SuspendExternalOperationRequest) (workflowruntime.SuspendExternalOperationResult, error) {
+func (s *legacyWorkflowStateStore) SuspendExternalOperation(ctx context.Context, request workflowruntime.SuspendExternalOperationRequest) (workflowruntime.SuspendExternalOperationResult, error) {
 	request.At = request.At.UTC()
 	if err := request.Validate(); err != nil {
 		return workflowruntime.SuspendExternalOperationResult{}, workflowInvalid(err)
@@ -117,7 +117,7 @@ func (s *WorkflowStateStore) SuspendExternalOperation(ctx context.Context, reque
 	return result, writeErr
 }
 
-func (s *WorkflowStateStore) RequestExternalOperationCancel(ctx context.Context, request workflowruntime.RequestExternalOperationCancelRequest) (workflowruntime.RequestExternalOperationCancelResult, error) {
+func (s *legacyWorkflowStateStore) RequestExternalOperationCancel(ctx context.Context, request workflowruntime.RequestExternalOperationCancelRequest) (workflowruntime.RequestExternalOperationCancelResult, error) {
 	request.At = request.At.UTC()
 	if err := request.Validate(); err != nil {
 		return workflowruntime.RequestExternalOperationCancelResult{}, workflowInvalid(err)
@@ -180,7 +180,7 @@ func (s *WorkflowStateStore) RequestExternalOperationCancel(ctx context.Context,
 	return result, writeErr
 }
 
-func (s *WorkflowStateStore) ApplyExternalOperation(ctx context.Context, request workflowruntime.ApplyExternalOperationRequest) (workflowruntime.ApplyExternalOperationResult, error) {
+func (s *legacyWorkflowStateStore) ApplyExternalOperation(ctx context.Context, request workflowruntime.ApplyExternalOperationRequest) (workflowruntime.ApplyExternalOperationResult, error) {
 	request.At, request.HeartbeatAt = request.At.UTC(), request.HeartbeatAt.UTC()
 	if err := request.Validate(); err != nil {
 		return workflowruntime.ApplyExternalOperationResult{}, workflowInvalid(err)
@@ -351,7 +351,7 @@ func workflowHasPendingExternalCancellation(ctx context.Context, query workflowS
 	return intent.Status == workflowruntime.CancellationPending && intent.RunID == attempt.Invocation.RunID && intent.Kind == workflowruntime.CancellationExternalOperation && intent.Attempt != nil && *intent.Attempt == attempt, nil
 }
 
-func (s *WorkflowStateStore) RecoverExternalOperations(ctx context.Context, query workflowruntime.ExternalOperationQuery) ([]workflowruntime.ExternalOperationSnapshot, error) {
+func (s *legacyWorkflowStateStore) RecoverExternalOperations(ctx context.Context, query workflowruntime.ExternalOperationQuery) ([]workflowruntime.ExternalOperationSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}

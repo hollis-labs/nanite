@@ -14,7 +14,7 @@ import (
 	"github.com/hollis-labs/go-workflow/values"
 )
 
-var _ workflowruntime.ControlFlowStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.ControlFlowStore = (*legacyWorkflowStateStore)(nil)
 
 const workflowControlDecisionSelect = `
 SELECT run_id, node_id, iteration, kind, outcome, source_generation,
@@ -27,7 +27,7 @@ SELECT run_id, intended_status, status, idempotency_key, generation,
        immutable_json, snapshot_json
 FROM workflow_terminal_intents`
 
-func (s *WorkflowStateStore) LoadControlDecision(ctx context.Context, id workflowruntime.ControlDecisionID) (workflowruntime.ControlDecisionSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadControlDecision(ctx context.Context, id workflowruntime.ControlDecisionID) (workflowruntime.ControlDecisionSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.ControlDecisionSnapshot{}, err
 	}
@@ -37,7 +37,7 @@ func (s *WorkflowStateStore) LoadControlDecision(ctx context.Context, id workflo
 	return loadWorkflowControlDecision(ctx, s.db, id)
 }
 
-func (s *WorkflowStateStore) RecordControlDecision(ctx context.Context, request workflowruntime.RecordControlDecisionRequest) (workflowruntime.RecordControlDecisionResult, error) {
+func (s *legacyWorkflowStateStore) RecordControlDecision(ctx context.Context, request workflowruntime.RecordControlDecisionRequest) (workflowruntime.RecordControlDecisionResult, error) {
 	request.At = request.At.UTC()
 	if request.ExpectedSourceGeneration == 0 || request.At.IsZero() || request.Decision.Error != nil {
 		return workflowruntime.RecordControlDecisionResult{}, workflowInvalid(errors.New("control decision requires source generation, timestamp, and a store-managed error reference"))
@@ -202,14 +202,14 @@ INSERT INTO workflow_control_decisions(
 	return result, nil
 }
 
-func (s *WorkflowStateStore) LoadTerminalIntent(ctx context.Context, runID workflowruntime.RunID) (workflowruntime.TerminalIntentSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadTerminalIntent(ctx context.Context, runID workflowruntime.RunID) (workflowruntime.TerminalIntentSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.TerminalIntentSnapshot{}, err
 	}
 	return loadWorkflowTerminalIntent(ctx, s.db, runID)
 }
 
-func (s *WorkflowStateStore) BeginTerminalIntent(ctx context.Context, request workflowruntime.BeginTerminalIntentRequest) (workflowruntime.BeginTerminalIntentResult, error) {
+func (s *legacyWorkflowStateStore) BeginTerminalIntent(ctx context.Context, request workflowruntime.BeginTerminalIntentRequest) (workflowruntime.BeginTerminalIntentResult, error) {
 	request.At = request.At.UTC()
 	if len(request.Finalizers) == 0 && !request.CompensationRequired {
 		return workflowruntime.BeginTerminalIntentResult{}, workflowInvalid(errors.New("public terminal intent requires at least one finalizer"))
@@ -378,7 +378,7 @@ INSERT INTO workflow_terminal_intents(
 	return workflowruntime.BeginTerminalIntentResult{Outcome: workflowruntime.IdempotencyApplied, Run: nextRun, Intent: cloneWorkflowTerminalIntent(candidate), Event: &eventCopy}, nil
 }
 
-func (s *WorkflowStateStore) CompleteTerminalIntent(ctx context.Context, request workflowruntime.CompleteTerminalIntentRequest) (workflowruntime.CompleteTerminalIntentResult, error) {
+func (s *legacyWorkflowStateStore) CompleteTerminalIntent(ctx context.Context, request workflowruntime.CompleteTerminalIntentRequest) (workflowruntime.CompleteTerminalIntentResult, error) {
 	request.At = request.At.UTC()
 	request.Outputs = cloneWorkflowValueRef(request.Outputs)
 	if request.Outputs != nil {
@@ -522,7 +522,7 @@ WHERE run_id = ? AND generation = ? AND status = ?`,
 	return result, nil
 }
 
-func (s *WorkflowStateStore) RequestRunCancellationWithFinalizers(ctx context.Context, request workflowruntime.RequestRunCancellationWithFinalizersRequest) (workflowruntime.RequestRunCancellationWithFinalizersResult, error) {
+func (s *legacyWorkflowStateStore) RequestRunCancellationWithFinalizers(ctx context.Context, request workflowruntime.RequestRunCancellationWithFinalizersRequest) (workflowruntime.RequestRunCancellationWithFinalizersResult, error) {
 	request.Cancellation.At = request.Cancellation.At.UTC()
 	if err := request.Validate(); err != nil {
 		return workflowruntime.RequestRunCancellationWithFinalizersResult{}, workflowInvalid(err)

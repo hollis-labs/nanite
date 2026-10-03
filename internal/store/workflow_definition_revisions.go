@@ -66,7 +66,7 @@ func scanWorkflowDefinitionRevision(scanner interface{ Scan(...any) error }) (Wo
 // CreateWorkflowDefinitionRevision inserts immutable definition material.
 // Replaying the same revision identity and exact content is idempotent;
 // reusing that identity for different material is rejected.
-func (s *Store) CreateWorkflowDefinitionRevision(ctx context.Context, revision WorkflowDefinitionRevision) (WorkflowDefinitionRevision, error) {
+func (s *WorkflowDefinitionCatalog) CreateWorkflowDefinitionRevision(ctx context.Context, revision WorkflowDefinitionRevision) (WorkflowDefinitionRevision, error) {
 	createdAtSupplied := !revision.CreatedAt.IsZero()
 	if err := validateWorkflowDefinitionRevision(revision); err != nil {
 		return WorkflowDefinitionRevision{}, err
@@ -140,7 +140,7 @@ func equalWorkflowDefinitionRevision(persisted, requested WorkflowDefinitionRevi
 	return !compareCreatedAt || persisted.CreatedAt.Equal(requested.CreatedAt)
 }
 
-func (s *Store) GetWorkflowDefinitionRevision(ctx context.Context, revisionID string) (WorkflowDefinitionRevision, error) {
+func (s *WorkflowDefinitionCatalog) GetWorkflowDefinitionRevision(ctx context.Context, revisionID string) (WorkflowDefinitionRevision, error) {
 	revision, err := scanWorkflowDefinitionRevision(s.DB.QueryRowContext(ctx,
 		`SELECT `+workflowDefinitionRevisionColumns+` FROM workflow_definition_revisions WHERE revision_id = ?`,
 		revisionID,
@@ -154,7 +154,7 @@ func (s *Store) GetWorkflowDefinitionRevision(ctx context.Context, revisionID st
 	return revision, nil
 }
 
-func (s *Store) ListWorkflowDefinitionRevisions(ctx context.Context, definitionName string) ([]WorkflowDefinitionRevision, error) {
+func (s *WorkflowDefinitionCatalog) ListWorkflowDefinitionRevisions(ctx context.Context, definitionName string) ([]WorkflowDefinitionRevision, error) {
 	if strings.TrimSpace(definitionName) == "" {
 		return nil, fmt.Errorf("list workflow definition revisions: definition name is required")
 	}
@@ -204,7 +204,7 @@ func scanWorkflowDefinitionHead(scanner interface{ Scan(...any) error }) (Workfl
 	return head, nil
 }
 
-func (s *Store) GetWorkflowDefinitionHead(ctx context.Context, definitionName string) (WorkflowDefinitionHead, error) {
+func (s *WorkflowDefinitionCatalog) GetWorkflowDefinitionHead(ctx context.Context, definitionName string) (WorkflowDefinitionHead, error) {
 	head, err := scanWorkflowDefinitionHead(s.DB.QueryRowContext(ctx,
 		`SELECT `+workflowDefinitionHeadColumns+` FROM workflow_definition_heads WHERE definition_name = ?`,
 		definitionName,
@@ -228,7 +228,7 @@ type SetWorkflowDefinitionHeadRequest struct {
 // SetWorkflowDefinitionHead selects an immutable revision using generation
 // CAS. Selecting the already-active revision is an idempotent replay. Selecting
 // an older immutable revision is the supported definition rollback mechanism.
-func (s *Store) SetWorkflowDefinitionHead(ctx context.Context, request SetWorkflowDefinitionHeadRequest) (WorkflowDefinitionHead, error) {
+func (s *WorkflowDefinitionCatalog) SetWorkflowDefinitionHead(ctx context.Context, request SetWorkflowDefinitionHeadRequest) (WorkflowDefinitionHead, error) {
 	if strings.TrimSpace(request.DefinitionName) == "" || strings.TrimSpace(request.RevisionID) == "" || request.ExpectedGeneration < 0 {
 		return WorkflowDefinitionHead{}, fmt.Errorf("set workflow definition head: definition, revision, and non-negative expected generation are required")
 	}
@@ -298,7 +298,7 @@ WHERE definition_name = ? AND generation = ?`, request.RevisionID,
 	return head, nil
 }
 
-func (s *Store) GetActiveWorkflowDefinitionRevision(ctx context.Context, definitionName string) (WorkflowDefinitionRevision, WorkflowDefinitionHead, error) {
+func (s *WorkflowDefinitionCatalog) GetActiveWorkflowDefinitionRevision(ctx context.Context, definitionName string) (WorkflowDefinitionRevision, WorkflowDefinitionHead, error) {
 	head, err := s.GetWorkflowDefinitionHead(ctx, definitionName)
 	if err != nil {
 		return WorkflowDefinitionRevision{}, WorkflowDefinitionHead{}, err
@@ -325,4 +325,34 @@ func validWorkflowSHA256Digest(digest string) bool {
 	}
 	_, err := hex.DecodeString(hexValue)
 	return err == nil
+}
+
+// WorkflowDefinitionQuery allows the catalog to participate in its caller's
+// transaction without opening another connection or owning its commit.
+type WorkflowDefinitionQuery interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+type WorkflowDefinitionCatalog struct{ DB WorkflowDefinitionQuery }
+
+func (s *Store) CreateWorkflowDefinitionRevision(ctx context.Context, revision WorkflowDefinitionRevision) (WorkflowDefinitionRevision, error) {
+	return (&WorkflowDefinitionCatalog{DB: s.DB}).CreateWorkflowDefinitionRevision(ctx, revision)
+}
+func (s *Store) GetWorkflowDefinitionRevision(ctx context.Context, id string) (WorkflowDefinitionRevision, error) {
+	return (&WorkflowDefinitionCatalog{DB: s.DB}).GetWorkflowDefinitionRevision(ctx, id)
+}
+func (s *Store) ListWorkflowDefinitionRevisions(ctx context.Context, name string) ([]WorkflowDefinitionRevision, error) {
+	return (&WorkflowDefinitionCatalog{DB: s.DB}).ListWorkflowDefinitionRevisions(ctx, name)
+}
+func (s *Store) GetWorkflowDefinitionHead(ctx context.Context, name string) (WorkflowDefinitionHead, error) {
+	return (&WorkflowDefinitionCatalog{DB: s.DB}).GetWorkflowDefinitionHead(ctx, name)
+}
+func (s *Store) SetWorkflowDefinitionHead(ctx context.Context, request SetWorkflowDefinitionHeadRequest) (WorkflowDefinitionHead, error) {
+	return (&WorkflowDefinitionCatalog{DB: s.DB}).SetWorkflowDefinitionHead(ctx, request)
+}
+
+func (s *Store) GetActiveWorkflowDefinitionRevision(ctx context.Context, name string) (WorkflowDefinitionRevision, WorkflowDefinitionHead, error) {
+	return (&WorkflowDefinitionCatalog{DB: s.DB}).GetActiveWorkflowDefinitionRevision(ctx, name)
 }

@@ -55,7 +55,10 @@ BEGIN SELECT RAISE(ABORT, 'injected crash after external receipt'); END`); err !
 		t.Fatal(closeErr)
 	}
 
-	_, reopened := openWorkflowStateTest(t, path)
+	reopenedProduct, reopened := openWorkflowStateTest(t, path)
+	if preflightErr := PreflightWorkflowStorage(t.Context(), reopenedProduct); preflightErr != nil {
+		t.Fatal(preflightErr)
+	}
 	restarted, err := NewEngine(reopened)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +178,10 @@ func TestExternalOperationCrashRestartsAmbiguousAndProductionResolutionContinues
 		t.Fatal(closeErr)
 	}
 
-	_, reopened := openWorkflowStateTest(t, path)
+	reopenedProduct, reopened := openWorkflowStateTest(t, path)
+	if preflightErr := PreflightWorkflowStorage(t.Context(), reopenedProduct); preflightErr != nil {
+		t.Fatal(preflightErr)
+	}
 	restarted, err := NewEngine(reopened)
 	if err != nil {
 		t.Fatal(err)

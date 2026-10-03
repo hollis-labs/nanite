@@ -11,16 +11,16 @@ import (
 	"github.com/hollis-labs/go-workflow/values"
 )
 
-var _ workflowruntime.RunPolicyStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.RunPolicyStore = (*legacyWorkflowStateStore)(nil)
 
-func (s *WorkflowStateStore) LoadRunPolicyDecision(ctx context.Context, runID workflowruntime.RunID) (workflowruntime.RunPolicyDecisionSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadRunPolicyDecision(ctx context.Context, runID workflowruntime.RunID) (workflowruntime.RunPolicyDecisionSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.RunPolicyDecisionSnapshot{}, err
 	}
 	return loadWorkflowRunPolicyDecision(ctx, s.db, runID)
 }
 
-func (s *WorkflowStateStore) ApplyRunFailurePolicy(ctx context.Context, request workflowruntime.ApplyRunFailurePolicyRequest) (workflowruntime.ApplyRunFailurePolicyResult, error) {
+func (s *legacyWorkflowStateStore) ApplyRunFailurePolicy(ctx context.Context, request workflowruntime.ApplyRunFailurePolicyRequest) (workflowruntime.ApplyRunFailurePolicyResult, error) {
 	request.At = request.At.UTC()
 	if err := request.Validate(); err != nil {
 		return workflowruntime.ApplyRunFailurePolicyResult{}, workflowInvalid(err)

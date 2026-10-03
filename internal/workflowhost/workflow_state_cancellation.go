@@ -15,9 +15,9 @@ import (
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
 )
 
-var _ workflowruntime.CancellationStore = (*WorkflowStateStore)(nil)
+var _ workflowruntime.CancellationStore = (*legacyWorkflowStateStore)(nil)
 
-func (s *WorkflowStateStore) RecordChildRun(ctx context.Context, link workflowruntime.ChildRunLink) error {
+func (s *legacyWorkflowStateStore) RecordChildRun(ctx context.Context, link workflowruntime.ChildRunLink) error {
 	if validationErr := link.Validate(); validationErr != nil {
 		return workflowInvalid(validationErr)
 	}
@@ -66,7 +66,7 @@ func (s *WorkflowStateStore) RecordChildRun(ctx context.Context, link workflowru
 	})
 }
 
-func (s *WorkflowStateStore) ListChildRuns(ctx context.Context, parent workflowruntime.RunID) ([]workflowruntime.ChildRunLink, error) {
+func (s *legacyWorkflowStateStore) ListChildRuns(ctx context.Context, parent workflowruntime.RunID) ([]workflowruntime.ChildRunLink, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (s *WorkflowStateStore) ListChildRuns(ctx context.Context, parent workflowr
 	return result, rows.Err()
 }
 
-func (s *WorkflowStateStore) RequestRunCancellation(ctx context.Context, request workflowruntime.RequestRunCancellationRequest) (workflowruntime.RequestRunCancellationResult, error) {
+func (s *legacyWorkflowStateStore) RequestRunCancellation(ctx context.Context, request workflowruntime.RequestRunCancellationRequest) (workflowruntime.RequestRunCancellationResult, error) {
 	if err := request.Validate(); err != nil {
 		return workflowruntime.RequestRunCancellationResult{}, workflowInvalid(err)
 	}
@@ -542,7 +542,7 @@ func loadWorkflowCancellationIntent(ctx context.Context, query workflowSQL, id s
 	return intent, nil
 }
 
-func (s *WorkflowStateStore) ResolveCancellationIntent(ctx context.Context, request workflowruntime.ResolveCancellationIntentRequest) (workflowruntime.ResolveCancellationIntentResult, error) {
+func (s *legacyWorkflowStateStore) ResolveCancellationIntent(ctx context.Context, request workflowruntime.ResolveCancellationIntentRequest) (workflowruntime.ResolveCancellationIntentResult, error) {
 	if err := request.Validate(); err != nil {
 		return workflowruntime.ResolveCancellationIntentResult{}, workflowInvalid(err)
 	}
@@ -657,7 +657,7 @@ func (s *WorkflowStateStore) ResolveCancellationIntent(ctx context.Context, requ
 	return result, nil
 }
 
-func (s *WorkflowStateStore) RecoverCancellationIntents(ctx context.Context, query workflowruntime.CancellationIntentQuery) ([]workflowruntime.CancellationIntentSnapshot, error) {
+func (s *legacyWorkflowStateStore) RecoverCancellationIntents(ctx context.Context, query workflowruntime.CancellationIntentQuery) ([]workflowruntime.CancellationIntentSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}

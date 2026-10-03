@@ -65,10 +65,8 @@ github.com/hollis-labs/go-egress-proxy v0.2.3 h1:4T3Wv4W4Ek8xXKXg/J6rsLLcEgjpg3n
 github.com/hollis-labs/go-egress-proxy v0.2.3/go.mod h1:awKn1o5SIRU36m8CwVE4QIl7d59qaMziXXK9QUwudLg=
 github.com/hollis-labs/go-embed-contracts v0.1.1 h1:PGpgBvFpNwz7dHLRWJ3ewlbOLzsg8rauEpfpcwh3+Lw=
 github.com/hollis-labs/go-embed-contracts v0.1.1/go.mod h1:3sLCY4JVhL1oFwqjCBOuC4J5xnJCvpUrlkHvMDRWndo=
-github.com/hollis-labs/go-envelopes v0.4.0 h1:kmMZLWQrz4lYvKtYAaRiU85cNK2f84MXpbcb+QefAeI=
-github.com/hollis-labs/go-envelopes v0.4.0/go.mod h1:v45Dt4l4kYVuUf2oTcxXYh1bBRXSND+Bi6CAM/OxwKY=
-github.com/hollis-labs/go-envelopes v0.4.1-0.20261002032617-66ddb53dbde0 h1:cPrs5GORcx2s48hTzHhVUQpUB9UP99C77GciZOxhZ9M=
-github.com/hollis-labs/go-envelopes v0.4.1-0.20261002032617-66ddb53dbde0/go.mod h1:v45Dt4l4kYVuUf2oTcxXYh1bBRXSND+Bi6CAM/OxwKY=
+github.com/hollis-labs/go-envelopes v0.5.0 h1:HiOVja6Z8scWx6U1p1lputf7xB+ersWXAxMLZkkUhpw=
+github.com/hollis-labs/go-envelopes v0.5.0/go.mod h1:cToqpRww4JGko3LS5oZ73SOb7dqnN9i3iypueeOOlVk=
 github.com/hollis-labs/go-harness-filters v0.1.1 h1:uTAF+ejKhje+rXMEOwTHsO7ig2fCAQnkANXgZBAyYZA=
 github.com/hollis-labs/go-harness-filters v0.1.1/go.mod h1:84dThT2Ro93bk7Lzpr9KNsRDY4hUcIvYoBtmIB6IEzM=
 github.com/hollis-labs/go-hooks v0.1.0 h1:gasPcEgX3W/U+DOB04x08ZYAej2N9cjcP59AeUjkGFE=

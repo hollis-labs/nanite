@@ -1,0 +1,78 @@
+{
+  "approval-card": {
+    "component": "components/chat/envelopes/ApprovalCard",
+    "export": "ApprovalCard",
+    "props": "envelope"
+  },
+  "artifact-mini": {
+    "component": "components/chat/envelopes/ArtifactMiniCard",
+    "export": "ArtifactMiniCard"
+  },
+  "chat-loop-terminated": {
+    "component": "components/chat/envelopes/ChatLoopTerminatedCard",
+    "export": "ChatLoopTerminatedCard"
+  },
+  "confirmation-card": {
+    "component": "components/chat/envelopes/primitives/ConfirmationCard",
+    "export": "ConfirmationCard",
+    "props": "envelope"
+  },
+  "diff-card": {
+    "component": "components/chat/envelopes/primitives/DiffCard",
+    "export": "DiffCard"
+  },
+  "document-viewer": {
+    "component": "components/chat/envelopes/DocumentViewerCard",
+    "export": "DocumentViewerCard"
+  },
+  "elicitation-prompt": {
+    "component": "components/chat/envelopes/ElicitationPromptCard",
+    "export": "ElicitationPromptCard",
+    "props": "envelope"
+  },
+  "error-report": {
+    "component": "components/chat/envelopes/ErrorCard",
+    "export": "ErrorCard"
+  },
+  "info-card": {
+    "component": "components/chat/envelopes/primitives/InfoCard",
+    "export": "InfoCard"
+  },
+  "list-card": {
+    "component": "components/chat/envelopes/primitives/ListCard",
+    "export": "ListCard"
+  },
+  "metric-card": {
+    "component": "components/chat/envelopes/primitives/MetricCard",
+    "export": "MetricCard"
+  },
+  "progress-card": {
+    "component": "components/chat/envelopes/primitives/ProgressCard",
+    "export": "ProgressCard"
+  },
+  "proposal-card": {
+    "component": "components/chat/envelopes/ProposalCard",
+    "export": "ProposalCard",
+    "props": "envelope"
+  },
+  "report-card": {
+    "component": "components/chat/envelopes/ReportCard",
+    "export": "ReportCard"
+  },
+  "session-task": {
+    "backendOnly": true
+  },
+  "subagent-spawn-approval": {
+    "component": "components/chat/envelopes/ApprovalCard",
+    "export": "ApprovalCard",
+    "props": "envelope"
+  },
+  "table-card": {
+    "component": "components/chat/envelopes/primitives/TableCard",
+    "export": "TableCard"
+  },
+  "timeline-card": {
+    "component": "components/chat/envelopes/primitives/TimelineCard",
+    "export": "TimelineCard"
+  }
+}

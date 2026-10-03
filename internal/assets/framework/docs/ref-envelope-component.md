@@ -26,11 +26,11 @@ Agents emit JSON in a `nanite-envelope` fence:
 
 1. Add the definition and schema to the go-envelopes module's `manifest/envelopes.yaml` and `manifest/schemas/`, validate it against `manifest/envelopes.schema.json`, then release that module.
 2. Bump Nanite's pinned `github.com/hollis-labs/go-envelopes` version.
-3. Add the React component under `ui/src/components/chat/envelopes/` and keep its data props aligned with the released schema. Put the normal `component`, `export`, and `props` mapping in the upstream manifest; use `CORE_OVERRIDES` only for an intentional Nanite-only deviation.
-4. Run `make generate-envelopes`; `scripts/generate-envelope-types.mjs` invokes `github.com/hollis-labs/go-envelopes/cmd/envelopes-export` for module-owned TypeScript. Run `npm run generate:plugins` from `ui/`; `scripts/generate-plugin-imports.mjs` uses the same public exporter for catalog/import metadata and owns `ui/src/generated/plugin-envelopes.ts`.
+3. Add the React component under `ui/src/components/chat/envelopes/` and keep its data props aligned with the released schema. Declare the Nanite-owned `component`, `export`, and `props` mapping in `scripts/lib/core-envelope-bindings.json`; give backend-only types an explicit `backendOnly` disposition.
+4. Run `make generate-envelopes`; `scripts/generate-envelope-types.mjs` invokes `github.com/hollis-labs/go-envelopes/cmd/envelopes-export` for module-owned TypeScript. Run `npm run generate:plugins` from `ui/`; `scripts/generate-plugin-imports.mjs` uses the same public exporter for wire types and Nanite-owned bindings for imports and owns `ui/src/generated/plugin-envelopes.ts`.
 5. Run `make check-envelopes`, then exercise the live SSE streaming and persisted-message reload paths.
 
-Never hand-edit generated registries. The manifest and component are authored inputs; generators own derived files.
+Never hand-edit generated registries. The upstream wire manifest, host bindings and component are authored inputs; generators own derived files.
 
 ## Component contract
 
@@ -46,6 +46,7 @@ Keep interactions narrow. An envelope should submit a clear user intent back thr
 | Core manifest schema | go-envelopes `manifest/envelopes.schema.json` |
 | Released catalog and type exporter | `github.com/hollis-labs/go-envelopes/cmd/envelopes-export` |
 | Envelope parser | `internal/chat/envelope.go` |
+| Host renderer bindings | `scripts/lib/core-envelope-bindings.json` |
 | React renderers | `ui/src/components/chat/envelopes/` |
 | Message rendering | `ui/src/components/chat/ChatMessage.tsx` |
 | Exporter adapter | `scripts/lib/envelope-catalog.mjs` |

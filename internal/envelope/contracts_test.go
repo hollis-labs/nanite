@@ -8,7 +8,7 @@ import (
 )
 
 // knownTypes is the authoritative list of envelope types from the backend registry.
-// This list must stay in sync with internal/chat/envelope.go registeredTypes.
+// Retired plugin-owned schemas are not core library resources.
 var knownTypes = []string{
 	// Core primitives
 	"session-task",
@@ -30,13 +30,6 @@ var knownTypes = []string{
 	"diff-card",
 	// C2 — compact downloadable-artifact card
 	"artifact-mini",
-	// Plugin: giphy
-	"giphy-modal",
-	// KB + ticket primitives
-	"kb-result",
-	"ticket-form",
-	"ticket-confirmation",
-	"resolution-capture",
 	// CW-20260417-0485 — chat-loop terminal pause envelope.
 	"chat-loop-terminated",
 	// CW-20260420-0018 — MCP elicitation/create mid-tool user prompt.
@@ -167,53 +160,6 @@ var examplePayloads = map[string]string{
 		"mime_type": "application/zip",
 		"size_bytes": 1024,
 		"origin": "auto"
-	}`,
-	"giphy-modal": `{
-		"title": "Great Job!",
-		"gif_url": "https://media.giphy.com/media/example/giphy.gif",
-		"source": "GIPHY",
-		"query": "celebration"
-	}`,
-	"kb-result": `{
-		"results": [
-			{
-				"id": "KB-001",
-				"title": "VPN Connection Drops",
-				"category": "networking",
-				"severity": "medium",
-				"tags": ["vpn", "connectivity"],
-				"body": "Try resetting the VPN client...",
-				"source": "helix"
-			}
-		],
-		"query": "vpn keeps disconnecting",
-		"total_results": 1
-	}`,
-	"ticket-form": `{
-		"prefilled": {
-			"title": "VPN issue",
-			"category": "networking",
-			"priority": "medium"
-		},
-		"categories": ["networking", "hardware", "software", "access"]
-	}`,
-	"ticket-confirmation": `{
-		"ticket": {
-			"id": "TKT-2026-0042",
-			"title": "VPN drops repeatedly",
-			"description": "VPN disconnects every 15 minutes.",
-			"category": "networking",
-			"priority": "medium",
-			"status": "open",
-			"requester": "user@example.com",
-			"routing": "IT Service Desk — Network Team",
-			"created_at": "2026-04-05T10:30:00Z"
-		}
-	}`,
-	"resolution-capture": `{
-		"ticket_id": "TKT-2026-0042",
-		"issue_summary": "VPN drops repeatedly during video calls",
-		"categories": ["networking", "hardware", "software", "access"]
 	}`,
 	"subagent-spawn-approval": `{"run_id":"r-1","role":"file-backend","prompt":"summarize messaging","mode":"interactive"}`,
 	"chat-loop-terminated": `{

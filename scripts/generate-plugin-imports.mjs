@@ -14,15 +14,9 @@ const OUTPUT_FILE = join(ROOT, 'ui', 'src', 'generated', 'plugin-envelopes.ts');
 const UI_SRC = join(ROOT, 'ui', 'src');
 const CHECK_MODE = process.argv.includes('--check');
 
-// These interactive cards need the complete wrapper so persisted responses
-// hydrate after reload. This is a Nanite renderer policy, not schema metadata.
-const CORE_OVERRIDES = {
-  'approval-card': { props: 'envelope' },
-  'proposal-card': { props: 'envelope' },
-  'confirmation-card': { props: 'envelope' },
-  'subagent-spawn-approval': { props: 'envelope' },
-  'elicitation-prompt': { props: 'envelope' },
-};
+// Nanite owns renderer locations and prop shapes. The wire catalog only
+// declares types; every core type needs an explicit host disposition here.
+const CORE_BINDINGS = JSON.parse(readFileSync(join(ROOT, 'scripts', 'lib', 'core-envelope-bindings.json'), 'utf8'));
 
 const VALID_PROPS = new Set(['approval', 'proposal', 'envelope']);
 
@@ -31,13 +25,13 @@ function coreEntries(catalog) {
     if (entry.source !== 'core') {
       throw new Error(`build-time catalog unexpectedly contains non-core type ${entry.name}`);
     }
-    const metadata = entry.typescript?.import ?? {};
-    return {
-      type: entry.name,
-      component: metadata.component,
-      export: metadata.export,
-      props: CORE_OVERRIDES[entry.name]?.props ?? metadata.props,
-    };
+    const binding = CORE_BINDINGS[entry.name];
+    if (!binding || (binding.backendOnly === true
+      ? Boolean(binding.component || binding.export || binding.props)
+      : !binding.component || !binding.export)) {
+      throw new Error(`envelope ${entry.name}: explicit host renderer or backendOnly binding required`);
+    }
+    return { type: entry.name, ...binding };
   });
 }
 
@@ -99,7 +93,7 @@ export interface EnvelopeRegistryEntry {
   props?: "approval" | "proposal" | "envelope";
 }
 
-// --- CORE ENVELOPES (generated from the released go-envelopes catalog) ---
+// --- CORE ENVELOPES (wire types from go-envelopes; renderer bindings owned by Nanite) ---
 const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {${backendOnly}
 ${withComponents.map(generateLazyImport).join('\n')}
 };

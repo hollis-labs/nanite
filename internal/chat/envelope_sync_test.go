@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,8 +12,8 @@ import (
 	envelopes "github.com/hollis-labs/go-envelopes"
 )
 
-// TestEnvelopeRegistrySync verifies that every core component declared by the
-// released go-envelopes catalog has a matching generated frontend entry.
+// TestEnvelopeRegistrySync verifies that every core component declared in the
+// host bindings has a matching generated frontend entry for a live core type.
 func TestEnvelopeRegistrySync(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -33,12 +34,26 @@ func TestEnvelopeRegistrySync(t *testing.T) {
 	}
 	registryContent := string(registryData)
 
-	// Check that every manifest entry with a component appears in the TS registry.
+	bindingsData, err := os.ReadFile(filepath.Join(projectRoot, "scripts", "lib", "core-envelope-bindings.json")) //nolint:gosec // Trusted repository path derived from this test's source location.
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bindings map[string]struct {
+		Component   string `json:"component"`
+		BackendOnly bool   `json:"backendOnly"`
+	}
+	if err := json.Unmarshal(bindingsData, &bindings); err != nil {
+		t.Fatal(err)
+	}
 	var missing []string
 	for _, spec := range registry.All() {
-		component := spec.TypeScript.Import.Component
-		if component == "" {
-			continue // backend-only type, no frontend component expected
+		binding, ok := bindings[spec.Name]
+		if !ok || (binding.Component == "" && !binding.BackendOnly) {
+			t.Errorf("core type %s has no explicit host renderer disposition", spec.Name)
+			continue
+		}
+		if binding.BackendOnly {
+			continue
 		}
 		needle := `"` + spec.Name + `"`
 		if !strings.Contains(registryContent, needle) {

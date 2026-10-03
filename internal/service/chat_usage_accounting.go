@@ -49,8 +49,16 @@ func (a *providerCallAccounting) consumeSupplemental(evt llmtypes.StreamEvent) {
 	if a.run.finalUsage == nil {
 		a.run.finalUsage = &chat.Usage{}
 	}
-	a.run.finalUsage.InputTokens += evt.Usage.InputTokens
-	a.run.finalUsage.OutputTokens += evt.Usage.OutputTokens
-	a.run.finalUsage.CacheReadTokens += evt.Usage.CacheReadTokens
-	a.run.finalUsage.CacheCreationTokens += evt.Usage.CacheCreationTokens
+	if evt.Usage.InputTokens > 0 {
+		a.run.finalUsage.InputTokens += evt.Usage.InputTokens
+	}
+	if evt.Usage.OutputTokens > 0 {
+		a.run.finalUsage.OutputTokens += evt.Usage.OutputTokens
+	}
+	if evt.Usage.CacheReadTokens > 0 {
+		a.run.finalUsage.CacheReadTokens += evt.Usage.CacheReadTokens
+	}
+	if evt.Usage.CacheCreationTokens > 0 {
+		a.run.finalUsage.CacheCreationTokens += evt.Usage.CacheCreationTokens
+	}
 }

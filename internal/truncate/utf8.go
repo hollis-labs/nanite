@@ -12,8 +12,9 @@ import "unicode/utf8"
 // (go-toolresult.Preview) or internal/truncate.OutputForModel.
 //
 // A raw byte cut remains acceptable only where the bytes are never rendered as
-// text: equality-only comparisons (reflexes head1KB), log/diagnostic lines
-// (mcp truncateForLog, recover trimForLog, the panic stack cap), and slicing a
+// text: equality-only comparisons (go-reflexes head1KB; Nanite's test-only
+// referenceHead1KB), log/diagnostic lines (mcp truncateForLog, recover trimForLog,
+// the panic stack cap), and slicing a
 // list of items rather than text. Those sites are listed in
 // docs/architecture/truncation-policy.md.
 

@@ -19,7 +19,7 @@ package loop
 // LoopRun row, not just a bool a function happened to return.
 //
 // The trigger-true/trigger-false split below uses a "scope_tier" predicate
-// node (internal/agent/reflexes/evaluator.go's evalStringEquals) rather
+// node (go-reflexes' evalStringEquals) rather
 // than an "event" trigger: TickResumeBridge.Resume builds a headless
 // reflexes.State{} internally (see tick_resume.go's own doc comment for
 // why -- no live chat session, no external event feed wired into this call
@@ -28,7 +28,7 @@ package loop
 // signature the way reflex_resume_test.go's direct
 // service.EvaluateLoopRunResumeReflexes call could. A "scope_tier"
 // predicate compared against "" genuinely, trivially matches an unset
-// (also "") State.ScopeTier -- evalStringEquals's own doc comment
+// (also "") State.ScopeTier -- go-reflexes' evalStringEquals doc comment
 // documents this exact trivial-match behavior -- giving a real,
 // unmodified-EvaluateTrigger-code way to author a trigger that
 // deterministically evaluates true (or, with any non-empty value, false)
@@ -119,7 +119,7 @@ func TestTickResumeBridge_AttachedReflexTriggerFalse_DoesNotResume(t *testing.T)
 		ClassTag:    "process",
 		TriggerKind: store.ReflexTriggerPredicate,
 		// scope_tier != "" against an unset (empty) State.ScopeTier is
-		// false -- see evalStringEquals's own doc comment.
+		// false -- see go-reflexes' evalStringEquals doc comment.
 		TriggerSpec: `{"kind":"scope_tier","value":"some-tier-that-will-never-match"}`,
 		ActionKind:  store.ReflexActionResumeLoopRun,
 		ActionSpec:  `{"loop_run_id":"` + loopRunID + `"}`,

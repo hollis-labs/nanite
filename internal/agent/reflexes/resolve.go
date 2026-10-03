@@ -24,10 +24,8 @@ package reflexes
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
-	"sort"
 
+	shared "github.com/hollis-labs/go-reflexes"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -182,171 +180,43 @@ func Resolve(
 	cooldownFn CooldownFunc,
 	kindLookup ActionKindLookup,
 ) (AppliedActions, []CandidateOutcome, error) {
-	out := AppliedActions{
-		Actions:       make([]AppliedAction, 0),
-		FiredReflexes: make([]store.AgentReflex, 0),
+	var cooldown shared.CooldownFunc
+	if cooldownFn != nil {
+		cooldown = func(r shared.Reflex) bool { return cooldownFn(store.AgentReflex(r)) }
 	}
+	var lookup shared.ActionKindLookup
+	if kindLookup != nil {
+		lookup = func(ctx context.Context, kind string) (*shared.ActionKind, error) {
+			k, err := kindLookup(ctx, kind)
+			if k == nil {
+				return nil, err
+			}
+			v := shared.ActionKind(*k)
+			return &v, err
+		}
+	}
+	// Resolve invokes the library evaluator directly, so apply the same host
+	// vocabulary gate here as in EvaluateTrigger. Rejected rows still occupy
+	// their original outcome positions and appear as non-fired alternatives.
+	rows := make([]shared.Reflex, 0, len(candidates))
+	indexes := make([]int, 0, len(candidates))
 	outcomes := make([]CandidateOutcome, len(candidates))
-
-	if exec == nil {
-		return out, outcomes, fmt.Errorf("reflexes.Resolve: nil Executor")
-	}
-
-	// Step 1+2: evaluate every candidate's trigger, then its cooldown
-	// eligibility. eligibleByKind preserves the candidates slice's own
-	// given order within each kind's bucket.
-	eligibleByKind := make(map[string][]int)
 	for i, r := range candidates {
-		oc := CandidateOutcome{
-			ReflexID:   r.ID,
-			ReflexName: r.Name,
-			ActionKind: r.ActionKind,
-			Priority:   r.Priority,
-			CreatedAt:  r.CreatedAt,
-		}
-		fired, evalErr := EvaluateTrigger(r.TriggerKind, r.TriggerSpec, state)
-		if evalErr != nil {
-			oc.TriggerError = evalErr.Error()
-			outcomes[i] = oc
-			continue
-		}
-		oc.TriggerFired = fired
-		if !fired {
-			outcomes[i] = oc
-			continue
-		}
-		if cooldownFn != nil && cooldownFn(r) {
-			oc.CooldownSuppressed = true
-			outcomes[i] = oc
-			continue
-		}
-		oc.Eligible = true
-		outcomes[i] = oc
-		eligibleByKind[r.ActionKind] = append(eligibleByKind[r.ActionKind], i)
-	}
-
-	if len(eligibleByKind) == 0 {
-		return out, outcomes, nil
-	}
-
-	// Resolve each present kind's combining_algorithm (and, TASKS/
-	// reflex-taxonomy/06-unified-reflex-telemetry.md, its category)
-	// exactly once.
-	algoByKind := make(map[string]string, len(eligibleByKind))
-	for kind := range eligibleByKind {
-		algo := "all_applicable"
-		category := ""
-		if kindLookup != nil {
-			switch k, err := kindLookup(ctx, kind); {
-			case err != nil:
-				// TASKS/reflex-taxonomy/08-fix-resolve-fail-open-visibility.md:
-				// a kindLookup error (e.g. engine.go's kindLookup closure's
-				// own "action kind %q not cached") used to be swallowed
-				// here with zero logging anywhere in the chain. Surfaced
-				// now so a transient cache/DB hiccup that fails a
-				// deny_overrides kind (halt_session) open to
-				// all_applicable is operator-visible, not silent.
-				slog.Warn("reflexes.Resolve: action-kind lookup failed, defaulting combining_algorithm to all_applicable",
-					"session_id", state.SessionID,
-					"action_kind", kind,
-					"err", err,
-				)
-			case k == nil || k.CombiningAlgorithm == "":
-				// Same fail-open, different cause: the lookup succeeded
-				// but returned no usable combining_algorithm (e.g. a
-				// reflex_action_kinds row edited directly with an empty
-				// value — no CRUD surface validates this column).
-				slog.Warn("reflexes.Resolve: action-kind resolved with empty combining_algorithm, defaulting to all_applicable",
-					"session_id", state.SessionID,
-					"action_kind", kind,
-				)
-				if k != nil {
-					category = k.Category
-				}
-			default:
-				algo = k.CombiningAlgorithm
-				category = k.Category
+		// A nil executor is a caller error checked before trigger evaluation.
+		if exec != nil {
+			if err := unsupportedHostPredicate(r.TriggerKind, r.TriggerSpec); err != nil {
+				outcomes[i] = CandidateOutcome{ReflexID: r.ID, ReflexName: r.Name,
+					ActionKind: r.ActionKind, Priority: r.Priority, CreatedAt: r.CreatedAt,
+					TriggerError: err.Error()}
+				continue
 			}
 		}
-		algoByKind[kind] = algo
-		for _, i := range eligibleByKind[kind] {
-			outcomes[i].CombiningAlgorithm = algo
-			outcomes[i].Category = category
-		}
+		rows = append(rows, shared.Reflex(r))
+		indexes = append(indexes, i)
 	}
-
-	tieBreakLess := func(a, b store.AgentReflex) bool {
-		if a.Priority != b.Priority {
-			return a.Priority > b.Priority
-		}
-		return a.CreatedAt < b.CreatedAt
+	applied, considered, err := shared.Resolve(ctx, rows, libraryState(state), libraryExecutor(exec, state), cooldown, lookup)
+	for i, oc := range considered {
+		outcomes[indexes[i]] = CandidateOutcome(oc)
 	}
-
-	// Step 3a: deny_overrides short-circuit — collected across every
-	// deny_overrides kind present this pass (only halt_session is seeded
-	// as deny_overrides today, but this generalizes correctly if a future
-	// kind is too: the single highest-priority candidate among the whole
-	// union wins outright and nothing else this pass applies).
-	var denyIdx []int
-	for kind, idxs := range eligibleByKind {
-		if algoByKind[kind] == "deny_overrides" {
-			denyIdx = append(denyIdx, idxs...)
-		}
-	}
-	if len(denyIdx) > 0 {
-		sort.SliceStable(denyIdx, func(a, b int) bool {
-			return tieBreakLess(candidates[denyIdx[a]], candidates[denyIdx[b]])
-		})
-		winner := denyIdx[0]
-		applyOne(ctx, exec, candidates[winner], state, &out, outcomes, winner)
-		return out, outcomes, nil
-	}
-
-	// Step 3b: no deny_overrides kind fired — first_applicable /
-	// all_applicable selection, per kind.
-	selected := make(map[int]bool, len(candidates))
-	for kind, idxs := range eligibleByKind {
-		switch algoByKind[kind] {
-		case "first_applicable":
-			sorted := append([]int(nil), idxs...)
-			sort.SliceStable(sorted, func(a, b int) bool {
-				return tieBreakLess(candidates[sorted[a]], candidates[sorted[b]])
-			})
-			selected[sorted[0]] = true
-		default:
-			// all_applicable, and any unrecognized/legacy value — fail
-			// open the same way an unresolvable kind does above.
-			for _, i := range idxs {
-				selected[i] = true
-			}
-		}
-	}
-
-	// Step 4: apply every selected candidate, in the candidates slice's
-	// own given order (matching every existing call site's prior
-	// behavior of applying fired reflexes in priority-then-created_at
-	// order regardless of action_kind).
-	for i := range candidates {
-		if selected[i] {
-			applyOne(ctx, exec, candidates[i], state, &out, outcomes, i)
-		}
-	}
-	return out, outcomes, nil
-}
-
-// applyOne calls exec.Apply for a selected candidate and records the
-// result — either appending to out.Actions/out.FiredReflexes and marking
-// outcomes[idx].Selected, or recording outcomes[idx].ApplyError. An apply
-// failure is per-candidate and does not propagate as a Resolve() error,
-// matching every existing call site's own "log a warning and continue"
-// handling of an Executor.Apply failure.
-func applyOne(ctx context.Context, exec *Executor, r store.AgentReflex, state State, out *AppliedActions, outcomes []CandidateOutcome, idx int) {
-	action, err := exec.Apply(ctx, r, state)
-	if err != nil {
-		outcomes[idx].ApplyError = err.Error()
-		return
-	}
-	outcomes[idx].Selected = true
-	out.Actions = append(out.Actions, action)
-	out.FiredReflexes = append(out.FiredReflexes, r)
+	return hostApplied(applied), outcomes, err
 }

@@ -1375,7 +1375,6 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 	}
 
 	accounting := s.startUsageCall(run, providerName, model)
-	defer accounting.finish()
 	correctionMsgs := []llmtypes.ChatMessage{{Role: "user", Content: correction}}
 	retryCh, err := prov.StreamChat(retryCtx, llmtypes.ChatRequest{
 		Messages:   correctionMsgs,
@@ -1386,6 +1385,8 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 		slog.Warn("chat-service: envelope retry stream error", "err", err)
 		return nil
 	}
+
+	defer accounting.finish()
 
 	var retryContent strings.Builder
 	for evt := range retryCh {
@@ -1740,7 +1741,6 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 	}
 
 	accounting := s.startUsageCall(run, providerName, model)
-	defer accounting.finish()
 	synthCh, err := prov.StreamChat(ctx, llmtypes.ChatRequest{
 		SystemPrompt: systemPrompt,
 		SlotBlocks:   slotBlocksFor(slotResult),
@@ -1753,6 +1753,8 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 		slog.Warn("chat-service: early-stop synthesis call failed", "err", err, "model", model)
 		return
 	}
+
+	defer accounting.finish()
 
 	for evt := range synthCh {
 		switch evt.Type {

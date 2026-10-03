@@ -19,9 +19,9 @@ const maxHTTPHeaders = 64 << 10
 
 // HandleHTTP adapts an SDK request to a plugin-local net/http handler. A route
 // registered as "bookmarks/" reaches the handler as "/bookmarks/<id>".
-// Dispatch private operations such as ContextFetchPath before calling this
-// adapter. The supplied context retains cancellation; SessionID and Identity
-// stay on the SDK request for the plugin to consume explicitly.
+// Dispatch private operations such as ContextFetchPath and AlwaysShipFetchPath
+// before calling this adapter. The supplied context retains cancellation;
+// SessionID and Identity stay on the SDK request for the plugin to consume explicitly.
 func HandleHTTP(ctx context.Context, pluginID string, handler http.Handler, call sdkprocess.HTTPRequest) (sdkprocess.HTTPResponse, error) {
 	if !manifest.ValidID(pluginID) || len(pluginID) > 63 || handler == nil || len(call.Body) > MaxHTTPBody {
 		return sdkprocess.HTTPResponse{}, fmt.Errorf("pluginapi: invalid HTTP adapter input")

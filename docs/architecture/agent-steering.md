@@ -4,7 +4,8 @@ Steering is how Nanite decides what an agent should do moment to moment, and it
 runs on three stages: **sense**, **integrate**, **act**. Several mechanisms feed
 the first stage and several carry out the third, but they all pass through one
 decision primitive in the middle — `reflexes.Resolve()`
-(`internal/agent/reflexes/resolve.go`). Reading any single call site hides that,
+(`internal/agent/reflexes/resolve.go`), a host adapter over `go-reflexes`.
+Reading any single call site hides that,
 which is why this document is organized on the stages rather than on the parts.
 
 The purpose is to put knowledge in front of the agent as close as possible to
@@ -21,8 +22,12 @@ Three paths reach the decision layer, and they see different things.
 `internal/agent/reflexes/engine.go`)
 assembles a `State` from committed rows: the last five assistant messages with
 their token and tool-call counts, recent user messages, unread mail count, a
-50-row slice of `event_log`, and the session tick. Predicates in
-`evaluator.go` run against that.
+50-row slice of `event_log`, and the session tick. The `EvaluateTrigger` adapter in
+`evaluator.go` passes those signals to `go-reflexes` without rewriting stored
+trigger JSON. Nanite rejects the library's generic `attr` predicate at every
+level under `AND`/`OR` before delegation; this vocabulary guard also runs in
+`Resolve`, which preserves rejected candidates' trigger errors and outcome
+positions without firing them.
 
 Because it reads committed rows, this path is **lagged by design — it cannot see
 the turn it is running inside**. Two `State` fields, `ScopeTier` and
@@ -122,12 +127,29 @@ must remain explicitly scoped and pass the host's canonical validation at plugin
 provenance. Their lifecycle must preserve user edits and firing history while
 preventing an inactive plugin's seeds from executing.
 
-A shared steering library can replace the database-agnostic evaluation,
-arbitration, cooldown and handler-registry implementation. Its adapters still
-belong to Nanite, and adoption requires a released module plus behavioral parity
-against real Nanite traces, including failure ordering and persisted effects.
-Transcribed library goldens alone do not establish that equivalence. Library
-adoption and feature seed extraction therefore keep separate ownership and gates.
+`go-reflexes` supplies predicate evaluation, arbitration, cooldown calculations
+and firing trace construction through the host's `EvaluateTrigger`, `Resolve`,
+`EffectiveCooldown`/`RecentlyFired` and `EmitFirings` adapters. Candidate rows and
+kind facets cross the seam as compatible structs; live `ScopeTier` and
+`ExecutionPattern` signals retain their first-class fields and top-level trace
+placement. Nanite keeps its state and action types at plugin boundaries.
+
+The host executor registers its halt, schedule and message effects for the
+library's resolve phase, using the same parsed spec map so callback edits reach
+the returned action and trace. Hook failures are logged while the firing remains
+selected. Dispatch and loop resume remain staged outputs; their dedicated call
+sites control execution and lifecycle. Plugin state/action filters run in the
+host before telemetry; the emission adapter forwards firing observers in order.
+
+The qualification harness compares a test-only pre-adoption Nanite reference,
+the released library and the production adapters using independent isolated
+stores. It compares selected actions, candidate outcomes, actual persisted
+metadata, firing increments and effect ordering, including dispatch, cooldown,
+parse failures and plugin source eligibility. Exact wall-clock timestamps are
+excluded. This fixture guard does not exercise live provider calls or the full
+dispatch/loop runtime. A module upgrade requires replay qualification; library
+goldens alone do not establish host equivalence. Feature seed extraction keeps
+its separate ownership and gates.
 
 Reviewed `reflex.seed` declarations contribute reminder defaults for explicit
 agent slugs. `PluginReflexSeeds` validates the public predicate subset and core

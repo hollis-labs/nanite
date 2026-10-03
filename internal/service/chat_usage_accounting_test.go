@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -179,12 +180,27 @@ func (e *usageResponseEmitter) EmitResponseComplete(context.Context, string, str
 	e.calls++
 }
 
-func TestMissingUsagePersistsPartialWithoutInventingWireUsage(t *testing.T) {
-	for _, zeroEvent := range []bool{false, true} {
-		t.Run(fmt.Sprint(zeroEvent), func(t *testing.T) {
+// Before the snapshot adoption, finalizeRun passed finalUsage directly into
+// stream_end (8df76cf9). Preserve stop reasons and cache-only counts while
+// suppressing a truly empty object and a 0/0 response_complete notification.
+func TestTerminalUsagePreservesStopReasonAndCacheOnlyCounts(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		usage         *llmtypes.Usage
+		want          *chat.Usage
+		tokens        int
+		notifications int
+	}{
+		{name: "no usage event"},
+		{name: "truly empty usage", usage: &llmtypes.Usage{}},
+		{name: "positive input/output control", usage: &llmtypes.Usage{InputTokens: 3, OutputTokens: 4}, want: &chat.Usage{InputTokens: 3, OutputTokens: 4}, tokens: 7, notifications: 1},
+		{name: "stop reason only", usage: &llmtypes.Usage{StopReason: "end_turn"}, want: &chat.Usage{StopReason: "end_turn"}},
+		{name: "cache only", usage: &llmtypes.Usage{CacheReadTokens: 11, CacheCreationTokens: 7}, want: &chat.Usage{CacheReadTokens: 11, CacheCreationTokens: 7}, tokens: 18},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			events := []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: "answer"}}
-			if zeroEvent {
-				events = append(events, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: "end_turn"}})
+			if tc.usage != nil {
+				events = append(events, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: tc.usage})
 			}
 			f := newCharacterizationFixture(t, []characterizationProviderStep{{events: events}})
 			emitter := &usageResponseEmitter{}
@@ -194,21 +210,76 @@ func TestMissingUsagePersistsPartialWithoutInventingWireUsage(t *testing.T) {
 			for _, event := range stream {
 				if event.Type == "stream_end" {
 					found = true
-					if event.Usage != nil {
-						t.Fatalf("invented zero wire usage: %+v", event.Usage)
+					if (event.Usage == nil) != (tc.want == nil) || (tc.want != nil && *event.Usage != *tc.want) {
+						t.Fatalf("terminal usage=%+v want=%+v", event.Usage, tc.want)
 					}
 				}
 			}
-			if !found || emitter.calls != 0 {
+			if !found || emitter.calls != tc.notifications {
 				t.Fatalf("missing end or invented response_complete: %v %d", found, emitter.calls)
 			}
 			summary, err := f.st.GetSessionUsage(t.Context(), f.session)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if summary.MessageCount != 1 || summary.PartialRows != 1 || summary.TotalTokens != 0 {
-				t.Fatalf("missing partial row: %+v", summary)
+			if summary.MessageCount != 1 || summary.PartialRows != 1 || summary.TotalTokens != tc.tokens {
+				t.Fatalf("missing partial evidence: %+v", summary)
 			}
 		})
+	}
+}
+
+func TestSupplementalDispatchFailureDoesNotAddUnknownCall(t *testing.T) {
+	for _, path := range []string{"synthesis", "correction"} {
+		t.Run(path, func(t *testing.T) {
+			f := newCharacterizationFixture(t, nil)
+			f.svc.modelCatalog, _ = usageCatalogFixture(t, "characterization", "fixture")
+			row := usagecost.NewRow(f.svc.modelCatalog, "characterization", "fixture")
+			usagecost.FromRaw("openai", `{"input_tokens":1000,"output_tokens":300,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}`).Apply(&row)
+			run := &runState{usageCalls: []ledger.Row{row}}
+			prov := &characterizationProvider{steps: []characterizationProviderStep{{err: errors.New("dispatch failed")}}}
+			ch := make(chan chat.StreamEvent, 32)
+			if path == "synthesis" {
+				var full, final strings.Builder
+				f.svc.earlyStopSynthesis(t.Context(), run, "characterization", prov, "fixture", "", nil, nil, ch, &full, &final)
+			} else {
+				session, err := f.st.GetSession(t.Context(), f.session)
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.svc.retryEnvelopeCorrection(t.Context(), run, "characterization", f.session, session, prov, "fixture", []chat.EnvelopeError{{Reason: "invalid_json"}}, ch)
+			}
+			if prov.callCount() != 1 || len(run.usageCalls) != 1 || run.finalUsage != nil {
+				t.Fatalf("failed dispatch changed accounting: calls=%d ledger=%+v usage=%+v", prov.callCount(), run.usageCalls, run.finalUsage)
+			}
+			snap, cost, err := usagecost.Freeze(run.usageCalls)
+			if err != nil || snap.Status != "COMPLETE" || math.Abs(cost-.0044) > 1e-12 {
+				t.Fatalf("failed dispatch degraded previous evidence: %+v cost=%v err=%v", snap, cost, err)
+			}
+		})
+	}
+}
+
+func TestMainDispatchFailureDoesNotRecordUsage(t *testing.T) {
+	f := newCharacterizationFixture(t, []characterizationProviderStep{{err: errors.New("dispatch failed")}})
+	f.run(t, "assistant-dispatch-failed")
+	var count int
+	if err := f.st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM token_usage WHERE message_id=?`, "assistant-dispatch-failed").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if f.provider.callCount() != 1 || count != 0 {
+		t.Fatalf("failed main dispatch calls=%d ledger rows=%d", f.provider.callCount(), count)
+	}
+}
+
+func TestSupplementalUsageIgnoresNonpositiveDeltas(t *testing.T) {
+	run := &runState{finalUsage: &chat.Usage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 30, CacheCreationTokens: 40}}
+	a := &providerCallAccounting{run: run}
+	a.consumeSupplemental(llmtypes.StreamEvent{Usage: &llmtypes.Usage{InputTokens: -5, OutputTokens: -6, CacheReadTokens: -7, CacheCreationTokens: -8}})
+	a.consumeSupplemental(llmtypes.StreamEvent{Usage: &llmtypes.Usage{}})
+	a.consumeSupplemental(llmtypes.StreamEvent{Usage: &llmtypes.Usage{InputTokens: 1, OutputTokens: 2, CacheReadTokens: 3, CacheCreationTokens: 4}})
+	want := chat.Usage{InputTokens: 11, OutputTokens: 22, CacheReadTokens: 33, CacheCreationTokens: 44}
+	if *run.finalUsage != want {
+		t.Fatalf("nonpositive deltas changed totals: %+v want=%+v", run.finalUsage, want)
 	}
 }

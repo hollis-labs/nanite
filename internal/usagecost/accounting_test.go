@@ -163,3 +163,15 @@ func TestAnthropicCacheWriteTTL(t *testing.T) {
 		})
 	}
 }
+
+func TestZeroCatalogHitUsesArchivedRegistryPrice(t *testing.T) {
+	row := NewRow(&testCatalog{modelsdev.Pricing{}}, "anthropic", "claude-sonnet-4-20250514")
+	if row.Price == nil || row.Price.InputPerMillion != 3 || row.Price.OutputPerMillion != 15 {
+		t.Fatalf("zero catalog hit hid archived price: %+v", row)
+	}
+	FromRaw("anthropic", `{"input_tokens":1000,"output_tokens":300,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens_details":{"thinking_tokens":0}}`).Apply(&row)
+	snap, cost, err := Freeze([]ledger.Row{row})
+	if err != nil || snap.Status != "COMPLETE" || math.Abs(cost-.0075) > 1e-12 {
+		t.Fatalf("archived fallback cost=%v snapshot=%+v err=%v", cost, snap, err)
+	}
+}

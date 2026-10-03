@@ -291,25 +291,6 @@ func (e *Engine) EvaluateState(ctx context.Context, agentID, agentClass string, 
 	return out, nil
 }
 
-func reflexEventData(agentID, agentClass string, reflex store.AgentReflex, action AppliedAction, state State) map[string]any {
-	return map[string]any{
-		"agent_id":          agentID,
-		"agent_class":       agentClass,
-		"reflex_id":         reflex.ID,
-		"reflex_name":       reflex.Name,
-		"trigger_kind":      reflex.TriggerKind,
-		"action_kind":       reflex.ActionKind,
-		"priority":          reflex.Priority,
-		"action":            action,
-		"messages":          len(state.Messages),
-		"user_messages":     len(state.UserMessages),
-		"events":            len(state.Events),
-		"mail_unread_count": state.MailUnreadCount,
-		"tick_n":            state.TickN,
-		"prefix_tokens":     state.PrefixTokens,
-	}
-}
-
 // RecentlyFired's implementation lives in recurrence.go, alongside
 // EffectiveCooldown and DefaultReflexCooldown (TASKS/reflex-taxonomy/
 // 02-recurrence-cascade.md) — kept in this file's neighborhood

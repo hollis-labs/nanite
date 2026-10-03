@@ -48,6 +48,12 @@ func (e *Executor) Apply(ctx context.Context, reflex store.AgentReflex, state St
 			return AppliedAction{}, fmt.Errorf("parse action_spec: %w", err)
 		}
 	}
+	return e.applySpec(ctx, reflex, state, spec)
+}
+
+// applySpec applies Nanite-owned effects to the already parsed library action.
+// Spec is shared with the staged output, preserving callback edits in traces.
+func (e *Executor) applySpec(ctx context.Context, reflex store.AgentReflex, state State, spec map[string]interface{}) (AppliedAction, error) {
 	applied := AppliedAction{
 		ReflexID:   reflex.ID,
 		ReflexName: reflex.Name,

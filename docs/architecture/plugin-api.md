@@ -171,6 +171,19 @@ markers retain their slot invariants. Unload, shutdown, failed launch and termin
 restart failure remove source ownership and cancel active calls. Publication
 checks the source lifetime so a response cannot survive unload and replacement.
 
+### Known behavior change after extraction: plugin context sources
+
+Plugin-provided context, including pins after extraction and documents or other
+sources when adopted, enters the compactable `SlotContext`. The broker's
+`shouldSkipForIntent` in `internal/contextbroker/assembly.go` skips that slot for
+`review_session`, `recall_decision` and `resume_task` intents. Sources share the
+plugin context budget; `PluginContextSources.Fetch` and `pluginContextSource.fetch`
+in `internal/service/plugin_context_sources.go` omit whole items that exceed
+their share, with no host pointer fallback unless the plugin implements one.
+Core pinned content previously used `buildUserContextSlot` in
+`internal/chat/context_client.go` and the separate, non-compactable
+`SlotUserContext` path. Context-source parity is tracked in CW-20261002-0110.
+
 Extracted features retain core session/message IDs as references. The reviewed
 `message_refs` query verifies identity within a permitted session and returns
 role/creation metadata without message content. A missing core reference leaves

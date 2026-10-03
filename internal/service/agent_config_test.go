@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	svcerr "github.com/hollis-labs/go-svcerr"
 
@@ -351,5 +352,58 @@ func TestAgentConfigBehaviorValidationField(t *testing.T) {
 		if !errors.As(err, &typed) || typed.Code != svcerr.CodeInvalid || typed.Field != field {
 			t.Fatalf("%s: %+v", field, err)
 		}
+	}
+}
+
+func TestAgentConfigNotifiesOnlyCommittedWrites(t *testing.T) {
+	st := newConfigTestStore(t)
+	var notifications []string
+	svc := NewAgentConfigService(st, agent.NewClassification(), func(slug, action string) {
+		// With the store's single connection, this read can succeed only after
+		// the writing transaction has committed and released its connection.
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		profile, err := st.GetAgentBySlug(ctx, slug)
+		if err != nil {
+			t.Fatalf("notify before committed profile is readable: %v", err)
+		}
+		procedures, err := st.ListAgentProcedures(ctx, profile.ID)
+		if err != nil || len(procedures) != 1 || procedures[0].Body != action {
+			t.Fatalf("notify before committed seeds are readable: %+v, %v", procedures, err)
+		}
+		notifications = append(notifications, slug+":"+action)
+	})
+	created, err := svc.Create(&store.AgentProfile{Name: "Notify", Slug: "notify", SystemPrompt: "fixture"},
+		[]agent.ProcedureDefinition{{Name: "fixture", Body: "created"}})
+	if err != nil || len(notifications) != 1 || notifications[0] != "notify:created" {
+		t.Fatalf("create notifications=%v err=%v", notifications, err)
+	}
+	if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER fail_notify_seed BEFORE INSERT ON agent_procedures BEGIN SELECT RAISE(ABORT,'fixture rollback'); END`); err != nil {
+		t.Fatal(err)
+	}
+	_, failedCreate := svc.Create(&store.AgentProfile{Name: "Failed", Slug: "failed-notify", SystemPrompt: "fixture"},
+		[]agent.ProcedureDefinition{{Name: "fixture", Body: "created"}})
+	updated := *created.Profile
+	updated.Slug = "renamed-notify"
+	_, failedUpdate := svc.Update(created.Profile, &updated,
+		[]agent.ProcedureDefinition{{Name: "fixture", Body: "updated"}}, "")
+	if failedCreate == nil || failedUpdate == nil || len(notifications) != 1 {
+		t.Fatalf("rolled-back writes notified: %v; create=%v update=%v", notifications, failedCreate, failedUpdate)
+	}
+	if _, err := st.GetAgentBySlug(t.Context(), "failed-notify"); err == nil {
+		t.Fatal("failed create survived rollback")
+	}
+	if _, err := st.GetAgentBySlug(t.Context(), created.Profile.Slug); err != nil {
+		t.Fatalf("failed update changed profile: %v", err)
+	}
+	if _, err := st.DB.ExecContext(t.Context(), `DROP TRIGGER fail_notify_seed`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Update(created.Profile, &updated,
+		[]agent.ProcedureDefinition{{Name: "fixture", Body: "updated"}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 2 || notifications[1] != "renamed-notify:updated" {
+		t.Fatalf("update notifications=%v", notifications)
 	}
 }

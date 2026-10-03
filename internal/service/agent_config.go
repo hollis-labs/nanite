@@ -10,6 +10,7 @@ import (
 
 	svcerr "github.com/hollis-labs/go-svcerr"
 
+	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -102,6 +103,9 @@ func (s *AgentConfigService) CreateWithAssignments(ctx context.Context, profile 
 	if err := agent.ValidateSlug(profile.Slug); err != nil {
 		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField("slug"))
 	}
+	if profile.Slug == a2a.UserSentinel {
+		return nil, svcerr.New(svcerr.CodeInvalid, "slug \"user\" is reserved for messaging", svcerr.WithField("slug"))
+	}
 	if field, err := store.ValidateAgentBehaviorFields(profile); err != nil {
 		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField(field))
 	}
@@ -190,24 +194,6 @@ func (s *AgentConfigService) Delete(profile *store.AgentProfile) error {
 // protocol/transport pair. Each field is a pointer: nil leaves the column
 // untouched, a pointer to "" clears it, a non-empty value sets it.
 type AgentAssignments = store.AgentAssignments
-
-// ApplyAssignments atomically edits only the supplied assignment columns.
-func (s *AgentConfigService) ApplyAssignments(ctx context.Context, profile *store.AgentProfile, a AgentAssignments) (*store.AgentProfile, error) {
-	if profile == nil {
-		return nil, fmt.Errorf("profile is required")
-	}
-	if a.RoleID == nil && a.ConsumerID == nil && a.ModelID == nil && a.Protocol == nil && a.Transport == nil {
-		return profile, nil
-	}
-	if err := validateAssignmentACP(profile, a); err != nil {
-		return profile, err
-	}
-	saved, err := s.store.ApplyAgentAssignments(ctx, profile.ID, a)
-	if err != nil {
-		return profile, agentAssignmentWriteError(err)
-	}
-	return saved, nil
-}
 
 func validateAssignmentACP(p *store.AgentProfile, a AgentAssignments) error {
 	protocol, transport := p.Protocol, p.Transport

@@ -143,34 +143,6 @@ func (s *Store) writeAgentConfig(ctx context.Context, p *AgentProfile, a AgentAs
 	return saved, nil
 }
 
-// ApplyAgentAssignments is also atomic for callers that only edit the DB-only
-// assignment columns; it never leaves the first assignment step half-applied.
-func (s *Store) ApplyAgentAssignments(ctx context.Context, id string, a AgentAssignments) (*AgentProfile, error) {
-	tx, beginErr := s.DB.BeginTx(ctx, nil)
-	if beginErr != nil {
-		return nil, beginErr
-	}
-	defer rollbackUnlessCommitted(tx)
-	p, readErr := getAgent(ctx, tx, id)
-	if readErr != nil {
-		return nil, readErr
-	}
-	if err := validateAgentAssignments(ctx, tx, p, a); err != nil {
-		return nil, err
-	}
-	if err := writeAgentAssignments(ctx, tx, id, a); err != nil {
-		return nil, err
-	}
-	saved, err := getAgent(ctx, tx, id)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return saved, nil
-}
-
 func writeAgentAssignments(ctx context.Context, db agentConfigDB, id string, a AgentAssignments) error {
 	if err := updateAgentComposition(ctx, db, id, a.RoleID, a.ConsumerID, a.ModelID); err != nil {
 		return err

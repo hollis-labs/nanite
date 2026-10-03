@@ -76,8 +76,8 @@ spelling cannot reach the other server's credentials.
 
 ## Skills: a catalog entry is not a grant
 
-`role_skills` seeds `agent_known_skills` through `seedRoleSkillsFromIngest`,
-one pinned row per slug with `reason='role_seed'`. That row makes the skill
+`role_skills` adds one pinned catalog row per known skill slug, with
+`reason='role_seed'`. That row makes the skill
 **discoverable** — it renders in the agent's catalog block as name plus
 description, and `skill_get` can be pointed at it.
 
@@ -106,11 +106,10 @@ Two consequences worth stating plainly:
   `skill_list` are ordinary tools and must be in `role_tools`. They are not in
   `always_included`, which holds only `request_tools`, `tool_describe` and
   `tool_list`.
-- **Seeding never overwrites an existing row.** The seeder runs again on every
-  update, and `InsertAgentKnownSkill` is `INSERT OR REPLACE`, so re-seeding a
-  granted slug would blank its approval columns — revoking a skill because
-  somebody edited a description. `seedRoleSkillsFromIngest` skips a slug that
-  already has a row for that reason.
+- **Seeding never overwrites an existing row.** Seeding runs again on every
+  update. Replacing a granted skill would clear its approval — revoking a
+  skill because somebody edited a description. Skills already in the agent's
+  catalog are skipped to preserve their approval state.
 
 ## Executable agents and subagent targets
 

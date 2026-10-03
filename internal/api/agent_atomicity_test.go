@@ -266,3 +266,33 @@ func TestAgentConcurrentCreateAddsOneProfile(t *testing.T) {
 		t.Fatalf("concurrent persisted rows=%d err=%v", count, err)
 	}
 }
+
+func TestAgentCreateReservedSlugRejectedBeforeWrite(t *testing.T) {
+	st, h := serviceErrorRoutes(t)
+	if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER forbid_reserved_insert BEFORE INSERT ON agent_profiles BEGIN SELECT RAISE(ABORT,'write_secret insertion before validation'); END`); err != nil {
+		t.Fatal(err)
+	}
+	message := serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Reserved","slug":"user","system_prompt":"fixture"}`, 400)
+	if message != `slug "user" is reserved for messaging` {
+		t.Fatalf("reserved slug error = %q", message)
+	}
+	if _, err := st.GetAgentBySlug(t.Context(), "user"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("reserved slug persisted: %v", err)
+	}
+	if _, err := st.DB.ExecContext(t.Context(), `DROP TRIGGER forbid_reserved_insert`); err != nil {
+		t.Fatal(err)
+	}
+	atomicAgentRequest(t, h, "POST", "/api/agents", map[string]any{"name": "Corrected", "slug": "corrected-user", "system_prompt": "fixture"}, 201)
+}
+
+func TestAgentCreateInvalidACPPrecedesDuplicateSlug(t *testing.T) {
+	_, h := serviceErrorRoutes(t)
+	atomicAgentRequest(t, h, "POST", "/api/agents", map[string]any{"name": "Existing", "slug": "existing-acp", "system_prompt": "fixture"}, 201)
+	for _, field := range []string{"protocol", "transport"} {
+		body := fmt.Sprintf(`{"name":"Invalid","slug":"existing-acp","system_prompt":"fixture",%q:"invalid"}`, field)
+		message := serviceErrorRequest(t, h, "POST", "/api/agents", body, 400)
+		if !strings.Contains(message, field) {
+			t.Fatalf("invalid %s message: %s", field, message)
+		}
+	}
+}

@@ -394,8 +394,8 @@ grep -n 'func modelSupportsInterleavedThinking' internal/llm/anthropic/client.go
 
 ## Usage cost snapshots
 
-Each completed chat turn records a versioned `cost_snapshot` ON its
-`token_usage` row. It retains per-provider-call `go-usage-ledger` components,
+Each chat turn with an established provider call records a versioned
+`cost_snapshot` on its `token_usage` row. It retains per-provider-call `go-usage-ledger` components,
 provenance, provider/model identity, catalog price snapshots, and five component
 dollar amounts calculated by `go-modelsdev-catalog-helpers`. Prices freeze before
 dispatch for the main stream, early-stop synthesis, and envelope correction.
@@ -403,6 +403,14 @@ Supplemental calls keep their own evidence and add positive reported counts to
 the turn totals. A dispatch failure before a stream is established adds no
 ledger call; an established stream with missing usage retains unknown components.
 Catalog refreshes never change persisted cost or past summaries.
+
+Normal finalization and the generation coordinator's deferred fallback share one
+best-effort persistence attempt. Early termination, cancellation, and panic
+unwinding retain the calls ledgered so far in the same single turn/message row;
+provider-call accounting finishes before the fallback runs. The write uses a
+context detached from turn cancellation and never replaces the original error.
+A failed or ambiguous write is logged and is not retried by the fallback, avoiding
+a duplicate row. Turns that never establish a provider stream add no usage row.
 
 `cost_status` is `PARTIAL` if any call omits a component, contains estimates,
 lacks a model price, or reports a positive component without a supported tariff.

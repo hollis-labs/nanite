@@ -189,6 +189,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		return
 	}
 	run := initializeResult.run
+	// Cover every return and panic unwind after a run exists. Call accounting
+	// defers finish before this turn-level fallback; finalize shares its guard.
+	defer s.persistRunUsage(ctx, sessionID, assistantMsgID, setup.model, run)
 	if run.startCancel != nil {
 		defer run.startCancel()
 	}

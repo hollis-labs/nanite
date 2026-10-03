@@ -449,6 +449,8 @@ type runState struct {
 	thinkingBlocks   []llmtypes.ThinkingBlock
 	providerOutput   *llmtypes.ContentBlock
 	startCancel      context.CancelFunc
+
+	usagePersistenceAttempted bool
 }
 
 type initializeRunResult struct {
@@ -1798,22 +1800,8 @@ func (s *chatServiceImpl) finalizeRun(
 	// The ContextService interface method remains for one release so out-of-tree
 	// callers don't break; removal is a follow-up.
 
-	// Record token usage.
-	if len(run.usageCalls) > 0 {
-		usage := run.finalUsage
-		if usage == nil {
-			usage = &chat.Usage{}
-		}
-		toolInputTokens := 0
-		if run.breakdown != nil {
-			toolInputTokens = run.breakdown.Tools
-		}
-		if err := s.store.RecordUsageSnapshot(persistCtx, sessionID, assistantMsgID, model,
-			usage.InputTokens, usage.OutputTokens, toolInputTokens,
-			usage.CacheCreationTokens, usage.CacheReadTokens, run.usageCalls); err != nil {
-			slog.Warn("chat-service: failed to record token usage", "err", err)
-		}
-	}
+	// Record token usage through the same guard as the termination fallback.
+	s.persistRunUsage(persistCtx, sessionID, assistantMsgID, model, run)
 
 	// Record execution metrics.
 	adapterType := "http"

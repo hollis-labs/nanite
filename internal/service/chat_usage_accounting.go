@@ -1,6 +1,9 @@
 package service
 
 import (
+	"context"
+	"log/slog"
+
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	costcalc "github.com/hollis-labs/go-modelsdev-catalog-helpers"
 	ledger "github.com/hollis-labs/go-usage-ledger"
@@ -60,5 +63,30 @@ func (a *providerCallAccounting) consumeSupplemental(evt llmtypes.StreamEvent) {
 	}
 	if evt.Usage.CacheCreationTokens > 0 {
 		a.run.finalUsage.CacheCreationTokens += evt.Usage.CacheCreationTokens
+	}
+}
+
+// persistRunUsage is best-effort outcome bookkeeping on the generation
+// coordinator. One attempt serves normal finalization and the deferred fallback
+// on early returns/panic unwinds; failure never replaces the turn's error.
+func (s *chatServiceImpl) persistRunUsage(ctx context.Context, sessionID, messageID, model string, run *runState) {
+	if run == nil || run.usagePersistenceAttempted || len(run.usageCalls) == 0 {
+		return
+	}
+	// Mark before writing: an ambiguous write failure must not cause a second
+	// insertion when the fallback runs. No other goroutine mutates this run.
+	run.usagePersistenceAttempted = true
+	usage := run.finalUsage
+	if usage == nil {
+		usage = &chat.Usage{}
+	}
+	toolInputTokens := 0
+	if run.breakdown != nil {
+		toolInputTokens = run.breakdown.Tools
+	}
+	if err := s.store.RecordUsageSnapshot(context.WithoutCancel(ctx), sessionID, messageID, model,
+		usage.InputTokens, usage.OutputTokens, toolInputTokens,
+		usage.CacheCreationTokens, usage.CacheReadTokens, run.usageCalls); err != nil {
+		slog.Warn("chat-service: failed to record token usage", "err", err)
 	}
 }

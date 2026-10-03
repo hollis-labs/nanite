@@ -28,7 +28,6 @@ import type {
   ApprovalScope,
   Artifact,
   AttachDurableAgentSessionRequest,
-  Bookmark,
   CatalogBrowseEntry,
   PluginInstallReviewResponse,
   CatalogSource,
@@ -81,7 +80,6 @@ import type {
   MessagePage,
   ModelRecord,
   PermissionMode,
-  PinnedContent,
   Plan,
   PlanFilter,
   PlanStep,
@@ -98,7 +96,6 @@ import type {
   Project,
   ProviderConfig,
   ProviderStatus,
-  Reminder,
   SearchResult,
   ServerInfo,
   Session,
@@ -1600,32 +1597,6 @@ export const api = {
     return res.json();
   },
 
-  // Bookmarks
-  listBookmarks: async (sessionId: string): Promise<Bookmark[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/bookmarks`);
-    if (!res.ok) throw new Error(`Failed to list bookmarks: ${res.status}`);
-    return res.json();
-  },
-
-  toggleBookmark: async (
-    messageId: string,
-    sessionId: string,
-  ): Promise<void> => {
-    await fetch(`${API_BASE}/messages/${messageId}/bookmark`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId }),
-    });
-  },
-
-  autotitleBookmark: async (bookmarkId: string): Promise<{ title: string }> => {
-    const res = await fetch(`${API_BASE}/bookmarks/${bookmarkId}/autotitle`, {
-      method: "POST",
-    });
-    if (!res.ok) throw new Error(`Failed to autotitle bookmark: ${res.status}`);
-    return res.json();
-  },
-
   // Artifacts
   listArtifacts: async (sessionId: string): Promise<Artifact[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/artifacts`);
@@ -1729,18 +1700,6 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to set context prompt: ${res.status}`);
   },
 
-  // Pinned content (J11, CW-20260426-0009; D1/D2, CW-20260428-0014/0015)
-  listPins: async (sessionId: string): Promise<PinnedContent[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/pins`);
-    if (!res.ok) throw new Error(`Failed to list pins: ${res.status}`);
-    return res.json();
-  },
-
-  deletePin: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/pins/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`Failed to delete pin: ${res.status}`);
-  },
-
   // Bottom-drawer pinned cards (C1, CW-20260428-0012)
   // Returns 409 when the 10-pin cap is exceeded — surfaced as DrawerPinCapError
   // so callers can render the "10-tab limit; unpin one first" toast.
@@ -1776,61 +1735,6 @@ export const api = {
       method: "DELETE",
     });
     if (!res.ok) throw new Error(`Failed to unpin drawer card: ${res.status}`);
-  },
-
-  /** D2 — promote/demote a pin between session and project scope. */
-  updatePinScope: async (
-    id: string,
-    scope: AgentStateScope,
-    projectId?: string,
-  ): Promise<void> => {
-    const res = await fetch(`${API_BASE}/pins/${id}/scope`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scope, project_id: projectId ?? "" }),
-    });
-    if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to update pin scope: ${res.status}`);
-    }
-  },
-
-  // Reminders (D1/D2, CW-20260428-0014/0015)
-  listReminders: async (sessionId: string): Promise<Reminder[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/reminders`);
-    if (!res.ok) throw new Error(`Failed to list reminders: ${res.status}`);
-    return res.json();
-  },
-
-  deleteReminder: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/reminders/${id}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) throw new Error(`Failed to delete reminder: ${res.status}`);
-  },
-
-  /** D2 — promote/demote a reminder between session and project scope. */
-  updateReminderScope: async (
-    id: string,
-    scope: AgentStateScope,
-    projectId?: string,
-  ): Promise<Reminder> => {
-    const res = await fetch(`${API_BASE}/reminders/${id}/scope`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scope, project_id: projectId ?? "" }),
-    });
-    if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(
-        err.error || `Failed to update reminder scope: ${res.status}`,
-      );
-    }
-    return res.json();
   },
 
   // Compact

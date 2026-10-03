@@ -3,7 +3,7 @@ import type { ComponentType, LazyExoticComponent } from 'react'
 import { createReactPluginRegistry } from '@hollis-labs/plugin-registry/react'
 import type { AdoptedContribution, PluginRegistryOptions, PluginRegistryResponse } from '@hollis-labs/plugin-registry'
 import { ENVELOPE_REGISTRY } from '@/generated/plugin-envelopes'
-import { WIDGET_REGISTRY } from '@/generated/plugin-widgets'
+import { WIDGET_REGISTRY } from '@/lib/builtin-widgets'
 
 export type { PluginRegistryResponse } from '@hollis-labs/plugin-registry'
 

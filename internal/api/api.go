@@ -297,18 +297,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/loops/{id}/resolve", a.handleResolveLoopEscalation)
 	mux.HandleFunc("GET /api/loops/{id}/iterations", a.handleListLoopIterations)
 
-	// CW-20260816-0020: Fragments Engine's `callback` destination (fifth
-	// destination type, loom-architecture.md §4) POSTs an opaque
-	// {generator, fragment:{...}} body here, fire-and-forget, whenever a
-	// fragment routes into the `nanite` wiki bundle. This is a
-	// purpose-built decode target rather than the generic
-	// /api/durable-agents/{id}/wake above (whose DurableAgentStartRequest
-	// shape does not match FE's payload at all — see handler doc comment)
-	// and it resolves Loom Curator's durable-agent instance by slug
-	// internally, so this URL stays fixed and version-controlled
-	// regardless of the instance's DB-minted UUID.
-	mux.HandleFunc("POST /api/loom/curator-wake", a.handleLoomCuratorWake)
-
 	// Durable agent recipes and builder.
 	mux.HandleFunc("GET /api/durable-agent-recipes", a.handleListDurableAgentRecipes)
 	mux.HandleFunc("GET /api/durable-agent-recipes/{id}", a.handleGetDurableAgentRecipe)
@@ -335,13 +323,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/harness/v1/durable-agents/{id}/resume", a.handleHarnessV1DurableResume)
 	mux.HandleFunc("POST /api/harness/v1/durable-agents/{id}/wake", a.handleHarnessV1DurableWake)
 
-	// Bookmarks
-	mux.HandleFunc("GET /api/sessions/{id}/bookmarks", a.handleListBookmarks)
-	mux.HandleFunc("POST /api/bookmarks", a.handleCreateBookmark)
-	mux.HandleFunc("DELETE /api/bookmarks/{id}", a.handleDeleteBookmark)
-	mux.HandleFunc("POST /api/messages/{id}/bookmark", a.handleToggleBookmark)
-	mux.HandleFunc("POST /api/bookmarks/{id}/autotitle", a.handleAutotitleBookmark)
-
 	// Artifacts
 	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifactsByOrigin) // supports ?origin= filter
 	// F4 (CW-20260429-0004): project-inherited artifacts for the right-rail
@@ -362,19 +343,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Session context prompt (J10, CW-20260426-0008)
 	mux.HandleFunc("GET /api/sessions/{id}/context-prompt", a.handleGetSessionContextPrompt)
 	mux.HandleFunc("PUT /api/sessions/{id}/context-prompt", a.handleSetSessionContextPrompt)
-
-	// Pinned content (J11, CW-20260426-0009)
-	mux.HandleFunc("GET /api/sessions/{id}/pins", a.handleListPins)
-	mux.HandleFunc("DELETE /api/pins/{id}", a.handleDeletePin)
-	// D2 (CW-20260428-0015): pin scope promote/demote.
-	mux.HandleFunc("PATCH /api/pins/{id}/scope", a.handleUpdatePinScope)
-
-	// Reminders (D1 / D2, CW-20260428-0014/0015) — exposes session +
-	// project-scoped reminders so the FE Work panel can list / promote /
-	// demote / delete them. Originating tool surface is reminder_set.
-	mux.HandleFunc("GET /api/sessions/{id}/reminders", a.handleListReminders)
-	mux.HandleFunc("DELETE /api/reminders/{id}", a.handleDeleteReminder)
-	mux.HandleFunc("PATCH /api/reminders/{id}/scope", a.handleUpdateReminderScope)
 
 	// Bottom-drawer pinned cards (C1, CW-20260428-0012)
 	mux.HandleFunc("GET /api/sessions/{id}/drawer-cards", a.handleListBottomDrawerCards)

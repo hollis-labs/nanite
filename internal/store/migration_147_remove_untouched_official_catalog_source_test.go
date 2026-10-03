@@ -113,6 +113,10 @@ func TestMigration147DownDoesNotOverwriteExistingOfficialRow(t *testing.T) {
 	ctx := context.Background()
 	provider := migration147Provider(t, s)
 
+	if _, err := provider.DownTo(ctx, 147); err != nil {
+		t.Fatalf("restore historical schema: %v", err)
+	}
+
 	_, insertErr := s.DB.ExecContext(ctx, `
 		INSERT INTO catalog_sources
 		    (id, name, url, type, enabled, priority, public_key, created_at, updated_at)

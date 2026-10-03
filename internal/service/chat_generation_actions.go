@@ -31,7 +31,6 @@ import (
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
@@ -2198,43 +2197,6 @@ func (s *chatServiceImpl) prepareTurn(
 	chatMessages := slotResult.Messages
 	systemPrompt := slotResult.SystemPrompt // legacy concat — for budget enforcer + telemetry
 
-	// J11 (CW-20260426-0009): evaluate reminder triggers and inject any that
-	// fired into SlotUserContext. Uses session.MessageCount as the monotonic
-	// session turn counter (no new schema field needed). Must run before the
-	// inspector records slots so the inspector sees the injected content.
-	//
-	// CW-20260501-0002: after mutating SlotUserContext we MUST refresh
-	// slotResult.Blocks (consumed by slotBlocksFor → ChatRequest.SlotBlocks,
-	// the actual LLM payload) and slotResult.SystemPrompt (used by budget
-	// enforcer, inspector telemetry, and EmitContextAssembled). Without the
-	// refresh, EvalTurn marks the reminder fired in the DB but the agent's
-	// next turn never sees the <system-reminder> block — the bug from c121.
-	var firedReminders []store.Reminder
-	if s.reminderEngine != nil && slotResult.Window != nil {
-		if fired, evalErr := s.reminderEngine.EvalTurn(sessionID, session.MessageCount); evalErr != nil {
-			slog.Warn("chat-service: reminder engine eval failed", "session_id", sessionID, "err", evalErr)
-		} else if len(fired) > 0 {
-			firedReminders = fired
-			injection := reminders.FormatInjection(fired)
-			existing := ""
-			if slot := slotResult.Window.Slot(ctxpkg.SlotUserContext); slot != nil {
-				existing = slot.Content
-			}
-			if existing != "" {
-				slotResult.Window.SetContent(ctxpkg.SlotUserContext, existing+"\n\n"+injection)
-			} else {
-				slotResult.Window.SetContent(ctxpkg.SlotUserContext, injection)
-			}
-			// Refresh derived views so the reminder reaches the LLM. The
-			// Window mutation alone only updates the in-place slot map;
-			// Blocks (already Assembled) and SystemPrompt (already concat'd)
-			// are stale until rebuilt.
-			slotResult.Blocks = slotResult.Window.Assemble()
-			slotResult.SystemPrompt = rebuildLegacySystemPrompt(slotResult.Window)
-			systemPrompt = slotResult.SystemPrompt
-		}
-	}
-
 	// FU-30: evaluate DB-backed agent reflexes for this turn and inject any
 	// staged actions (e.g. inject_reminder) into SlotUserContext. nil-safe via
 	// the engine guard inside evaluateAndInjectReflexes.
@@ -2297,20 +2259,6 @@ func (s *chatServiceImpl) prepareTurn(
 			s.recordInspectorSlots(sessionID, inspectorTurnID, slotResult)
 		}
 		s.recordInspectorLLMMessages(sessionID, inspectorTurnID, chatMessages, systemPrompt)
-		// J11 (CW-20260426-0009): record fired reminders so the I1 dev-mode panel
-		// can surface them. No-op when no reminders fired this turn.
-		if len(firedReminders) > 0 {
-			rec := inspectsvc.RemindersRecord{}
-			for _, r := range firedReminders {
-				rec.FiredThisTurn = append(rec.FiredThisTurn, inspectsvc.ReminderItem{
-					ID:          r.ID,
-					Text:        r.Text,
-					TriggerJSON: r.TriggerJSON,
-					Scope:       r.Scope,
-				})
-			}
-			s.inspector.RecordReminders(sessionID, inspectorTurnID, rec)
-		}
 	}
 
 	// S3b — emit a tools-variant slot_changed envelope when the classifier

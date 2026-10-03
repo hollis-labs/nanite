@@ -127,10 +127,6 @@ var declaredToolConcurrencySafety = map[string]bool{
 	"panel_close": false, // UI drawer signal — order-sensitive
 	"signal_mode": false, // UI mode signal — order-sensitive
 
-	"reminder_set":  false,
-	"context_pin":   false,
-	"context_unpin": false,
-
 	"tool_describe": true,
 	"tool_list":     true,
 	"tool_validate": true, // pre-flight schema check only — never invokes the target tool

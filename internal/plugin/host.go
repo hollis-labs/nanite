@@ -96,11 +96,12 @@ type crudHandlerEntry struct {
 }
 
 type Host struct {
-	contextSources ContextSourceRegistrar
-	reflexSeeds    ReflexSeedRegistrar
-	queryURL       string
-	queryGrants    map[[32]byte]hostQueryGrant
-	wakeGrants     map[[32]byte]hostDurableWakeGrant
+	coreDataAdopter CoreDataAdopter
+	contextSources  ContextSourceRegistrar
+	reflexSeeds     ReflexSeedRegistrar
+	queryURL        string
+	queryGrants     map[[32]byte]hostQueryGrant
+	wakeGrants      map[[32]byte]hostDurableWakeGrant
 
 	// lifecycleMu serializes complete load/unload transactions. h.mu still
 	// protects registry state and is deliberately released around plugin
@@ -1121,7 +1122,6 @@ var coreKeybindings = map[string]bool{
 	"shift+shift": true, // search
 	"mod+]":       true, // next session
 	"mod+[":       true, // prev session
-	"mod+d":       true, // bookmark
 	"mod+.":       true, // toggle artifacts
 }
 

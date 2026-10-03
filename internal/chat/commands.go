@@ -68,7 +68,6 @@ func NewCommandRegistry() *CommandRegistry {
 		{SlashCommand{Name: "new", Description: "Create new chat session", Category: "session", Source: "builtin"}, nil},
 		{SlashCommand{Name: "fork", Description: "Fork current session with history", Category: "session", Source: "builtin"}, nil},
 		{SlashCommand{Name: "clone", Description: "Clone session (empty)", Category: "session", Source: "builtin"}, nil},
-		{SlashCommand{Name: "bookmark", Description: "Bookmark the last message", Category: "session", Source: "builtin"}, nil},
 		{SlashCommand{Name: "compact", Description: "Compact session context", Category: "session", Source: "builtin"}, nil},
 		{SlashCommand{Name: "agent", Description: "Switch primary agent", Category: "agent", Source: "builtin"}, nil},
 		{SlashCommand{Name: "model", Description: "Switch model", Category: "config", Source: "builtin"}, nil},

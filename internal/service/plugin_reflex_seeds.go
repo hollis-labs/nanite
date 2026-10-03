@@ -18,8 +18,9 @@ import (
 )
 
 type pluginSeedLease struct {
-	ids    []string
-	active bool
+	ids      []string
+	active   bool
+	existing []store.ExistingPluginReflexSeed
 }
 type pluginSeedSnapshot map[string]string
 
@@ -86,6 +87,22 @@ func (r *PluginReflexSeeds) PreparePluginReflexSeeds(owner string, seeds []plugi
 		}
 		definitions = append(definitions, store.PluginReflexSeed{SeedID: seed.ID, Definition: row})
 	}
+	if owner == "nanite.loom" {
+		names := map[string]struct{ slug, name string }{"check-before-answer": {"loom-weaver", "check_before_answer"}, "weaver-capture-on-discovery": {"loom-weaver", "capture_on_discovery"}, "curator-capture-on-discovery": {"loom-curator", "capture_on_discovery"}}
+		lease := pluginSeedLease{}
+		if len(seeds) != len(names) {
+			return fmt.Errorf("loom adoption requires its three known pilot seeds")
+		}
+		for i, seed := range seeds {
+			source, known := names[seed.ID]
+			if !known || source.slug != seed.AgentSlug {
+				return fmt.Errorf("unknown Loom pilot seed adoption target")
+			}
+			lease.existing = append(lease.existing, store.ExistingPluginReflexSeed{SeedID: seed.ID, AgentID: definitions[i].Definition.AgentID, LegacyName: source.name})
+		}
+		r.owners[owner] = lease
+		return nil
+	}
 	rows, err := r.store.BindPluginReflexSeeds(ctx, owner, definitions)
 	if err != nil {
 		return err
@@ -103,6 +120,18 @@ func (r *PluginReflexSeeds) ActivatePluginReflexSeeds(owner string) error {
 	lease, ok := r.owners[owner]
 	if !ok {
 		return fmt.Errorf("plugin reflex seeds not prepared")
+	}
+	if len(lease.existing) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		rows, err := r.store.BindExistingPluginReflexSeeds(ctx, owner, lease.existing)
+		if err != nil {
+			return err
+		}
+		lease.ids = nil
+		for _, row := range rows {
+			lease.ids = append(lease.ids, row.ID)
+		}
 	}
 	lease.active = true
 	r.owners[owner] = lease

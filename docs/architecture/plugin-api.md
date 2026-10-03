@@ -171,6 +171,19 @@ markers retain their slot invariants. Unload, shutdown, failed launch and termin
 restart failure remove source ownership and cancel active calls. Publication
 checks the source lifetime so a response cannot survive unload and replacement.
 
+### Known behavior change after extraction: plugin context sources
+
+Plugin-provided context, including pins after extraction and documents or other
+sources when adopted, enters the compactable `SlotContext`. The broker's
+`shouldSkipForIntent` in `internal/contextbroker/assembly.go` skips that slot for
+`review_session`, `recall_decision` and `resume_task` intents. Sources share the
+plugin context budget; `PluginContextSources.Fetch` and `pluginContextSource.fetch`
+in `internal/service/plugin_context_sources.go` omit whole items that exceed
+their share, with no host pointer fallback unless the plugin implements one.
+Core pinned content previously used `buildUserContextSlot` in
+`internal/chat/context_client.go` and the separate, non-compactable
+`SlotUserContext` path. Context-source parity is tracked in CW-20261002-0110.
+
 Extracted features retain core session/message IDs as references. The reviewed
 `message_refs` query verifies identity within a permitted session and returns
 role/creation metadata without message content. A missing core reference leaves
@@ -208,3 +221,94 @@ The plugin supplies translation into a bounded nonempty prompt and optional
 identity facts. Core owns instance resolution, session creation and prompt
 delivery. A successful projection reports `queued`, not completed execution;
 skipped or failed wakes return a conflict. Clients never retry an uncertain wake.
+
+The `nanite.loom` integration owns Fragments Engine callback translation at
+`/api/plugins/nanite.loom/curator-wake` and three explicit Curator/Weaver reminder
+declarations. The previous core callback route has no compatibility alias.
+Its host service defers pilot ownership transfer until final activation, after
+all accepted registrations succeed. A single transaction binds each uniquely
+identified system pilot reminder to its original definition ID and changes only
+its ownership/provenance markers. Edits, status, timestamps, firing history and
+opt-outs remain attached. Ambiguous or non-system sources refuse the handoff.
+Missing source definitions receive binding tombstones and are never recreated
+by reload; desired new reminders can be defined through the host editor.
+The normal reflex editor cannot change provenance; this host-controlled handoff
+is the narrow exception for existing feature definitions. No evaluator,
+resolver, executor or scheduling implementation moves into the plugin.
+
+## Core feature data adoption
+
+`PluginCoreData`, in `internal/service/plugin_core_data.go`, owns a fixed
+feature-to-table allowlist. A plugin cannot request an arbitrary core table.
+Bookmarked messages remain core references; bookmark rows belong to the external
+`nanite.bookmarks` plugin. There are no core bookmark API routes, service, store
+methods, widget, or keyboard binding.
+
+After a reviewed subprocess and all its manifest registrations load, the host
+transfers any retired bookmarks table through `dataexport.ExportAndDrop` in one
+write transaction. The export lives under the same `brand.PluginDataDir` used by
+subprocess initialization. The helper synchronizes and verifies every typed row
+before committing the export receipt and table removal together. Failed export
+leaves the table and rows intact. Disabled, rejected or absent plugins do not
+transfer data.
+
+The plugin imports only the current workspace's committed receipt, verifying its
+owner, source, checksum and row count. Rows and its replay checkpoint commit
+atomically in plugin storage. Subsequent loads keep operator edits and deleted
+rows; a moved database keeps the original receipt source. Missing core references
+remain plugin data. Historical schema migrations remain immutable, so a fresh
+workspace initially creates the legacy table and transfers its empty snapshot
+when the reviewed bookmarks plugin first loads.
+
+Deployment must restart every older reader of the retired table before the new
+binary loads the plugin. A running old process retains compiled queries against
+`bookmarks`, even though the new binary no longer exposes that feature in core.
+
+## Reminder extraction
+
+`nanite.reminders` owns time and turn-count reminders, its working-drawer tab,
+MCP tools, HTTP routes and `reminders` context source. `PluginCoreData` also
+allows this owner to transfer the `reminders` table through the same committed,
+verified export transaction. No core reminder tool, API, store method or
+in-process trigger engine remains. Historical schema migrations still create
+an empty legacy table until a reviewed plugin first activates.
+
+Plugin context reads leave reminders pending. An agent calls `reminders_ack`,
+or a user acknowledges in the plugin drawer, to stop injection. Budget omission
+and failed turns therefore do not consume reminder records. New turn-count
+reminders persist the current session message count as their creation baseline;
+legacy rows retain the former engine's zero baseline because that information
+was never stored. Project scope resolves from core session metadata, and
+session/project identities cannot be supplied to the plugin's agent tools.
+
+All older readers of the retired table must restart before deploying the
+adoption binary and enabling the plugin. Disabled, rejected or absent plugins
+leave core rows retained for a later committed transfer.
+
+## Pins extraction
+
+The released `nanite.pins` plugin owns durable pinned content, its working-drawer
+UI, tools, HTTP routes and bounded E3 context source. Core pin readers/writers,
+`context_pin`/`context_unpin` and pin REST routes are retired. Generic pinned
+envelope cards remain a separate host feature.
+
+After every required registration succeeds, the host's fixed allowlist maps
+owner `nanite.pins`, feature `pins`, to table `pinned_content`. E1 exports all
+columns and typed cells into the host-supplied DataDir, fsyncs the export, then
+commits its receipt and table drop together. Failed activation/export leaves
+core rows intact. Operators must refresh older compiled table readers before
+cutover. Reconnects use the existing receipt, including its original source ID
+when the database moves. Orphan exports grant no write authority.
+
+Session/project pins persist until explicit deletion; project identity is
+resolved from the authoritative session. Edits and deletion survive import
+replay. Null-origin legacy project pins cannot be demoted into an invented
+session. New turn scope is rejected because the old core tool neither persisted
+nor injected it; legacy turn rows remain stored but do not enter context unless
+promoted. Legacy agent attribution remains intact; new pins leave it empty
+because SDK calls carry session identity but no agent identity.
+
+The read-only query grant includes session metadata and export receipts only.
+The context source excludes query text and uses the existing broker budget and
+slot assembly. Slot positions, cache boundaries and compaction invariants remain
+unchanged. Context reads never consume or delete pins.

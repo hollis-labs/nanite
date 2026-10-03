@@ -1,11 +1,8 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -100,134 +97,6 @@ func TestLoomCuratorInstanceProvisionedInDatabase(t *testing.T) {
 // internal/ingest/destination_writer.go:461-519) and wakes Curator
 // successfully on the very first call — no prior session/workspace
 // bootstrap required.
-func TestLoomCuratorWake_FEPayloadShape(t *testing.T) {
-	a, mux := newTestAPIWithLoomCurator(t)
-
-	body := `{
-		"generator": "wiki_page",
-		"fragment": {
-			"id": "frag-123",
-			"source": "claude-code",
-			"source_type": "chat",
-			"source_id": "sess-abc",
-			"title": "Nanite envelope system",
-			"canonical_path": "nanite/envelope-system"
-		}
-	}`
-	req := httptest.NewRequest(http.MethodPost, "/api/loom/curator-wake", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("wake = %d body=%s", w.Code, w.Body.String())
-	}
-
-	var resp service.DurableAgentWakeResult
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v body=%s", err, w.Body.String())
-	}
-	if resp.Skipped {
-		t.Fatalf("wake was skipped: %s (first-ever wake must not skip on 'workspace unavailable')", resp.SkipReason)
-	}
-	if resp.WakeReason != "callback:wiki_page" {
-		t.Fatalf("wake_reason = %q, want callback:wiki_page", resp.WakeReason)
-	}
-
-	inst, err := a.store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
-	if err != nil {
-		t.Fatalf("get instance: %v", err)
-	}
-	if inst.Status != store.DurableAgentStatusActive {
-		t.Fatalf("instance status after wake = %q, want %q", inst.Status, store.DurableAgentStatusActive)
-	}
-}
-
-// TestLoomCuratorWake_DeliversRealTurn is the regression test for the
-// CW-20260817 finding: CW-20260816-0020 was reported done, but the wake
-// handler only ever populated WakePayload.Facts, which nothing downstream
-// of Wake()/Start() reads — deliverWakePrompt (durable_agents.go) only fires
-// a real ChatService.HandleMessage turn when WakePayload.Prompt is
-// non-empty. That meant every callback wake created a session and marked
-// the instance active without ever actually asking the agent to do
-// anything: no message, no async generation, no classify/compile. This test
-// asserts the fragment identity actually reaches the launched session as a
-// real persisted user message (the same mechanism CW-20260816-0021's
-// scheduled tick fix relies on), which is the only way Curator's
-// classify_and_compile_fragment procedure can ever fire from this endpoint.
-func TestLoomCuratorWake_DeliversRealTurn(t *testing.T) {
-	a, mux := newTestAPIWithLoomCurator(t)
-
-	body := `{
-		"generator": "wiki_page",
-		"fragment": {
-			"id": "frag-456",
-			"source": "claude-code",
-			"source_type": "chat",
-			"source_id": "sess-def",
-			"title": "Envelope system notes",
-			"canonical_path": "nanite/envelope-system"
-		}
-	}`
-	req := httptest.NewRequest(http.MethodPost, "/api/loom/curator-wake", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("wake = %d body=%s", w.Code, w.Body.String())
-	}
-
-	var resp service.DurableAgentWakeResult
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v body=%s", err, w.Body.String())
-	}
-	if resp.LaunchResult == nil || resp.LaunchResult.Session == nil {
-		t.Fatalf("wake result missing launch_result/session: %+v", resp)
-	}
-
-	messages, err := a.store.ListMessages(context.Background(), resp.LaunchResult.Session.ID, 10)
-	if err != nil {
-		t.Fatalf("ListMessages: %v", err)
-	}
-	var userMsg *store.Message
-	for i := range messages {
-		if messages[i].Role == "user" {
-			userMsg = &messages[i]
-		}
-	}
-	if userMsg == nil {
-		t.Fatalf("no user message delivered into wake session %s — wake created a session but never actually asked Curator to do anything; messages=%+v", resp.LaunchResult.Session.ID, messages)
-	}
-	if !strings.Contains(userMsg.Content, "frag-456") {
-		t.Fatalf("delivered turn missing fragment_id: %q", userMsg.Content)
-	}
-	if !strings.Contains(userMsg.Content, "classify_and_compile_fragment") {
-		t.Fatalf("delivered turn doesn't point Curator at its classify_and_compile_fragment procedure: %q", userMsg.Content)
-	}
-}
-
-// TestLoomCuratorWake_MissingFragmentID checks the 400 validation path.
-func TestLoomCuratorWake_MissingFragmentID(t *testing.T) {
-	_, mux := newTestAPIWithLoomCurator(t)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/loom/curator-wake", bytes.NewBufferString(`{"generator":"wiki_page","fragment":{}}`))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
-	}
-}
-
-// TestLoomCuratorDatabaseScheduleRuns proves the provisioned schedule is keyed
-// correctly (agent_id = the *profile* ID, not the instance ID —
-// ListDue/ListSchedules in durable_wake.go look it up via inst.ProfileID),
-// that ListDue/RunDue find it due at an appropriate simulated time, and that
-// firing it does not error. This is the other half of CW-20260816-0020's "no
-// scheduling mechanism exists yet" gap that CW-20260816-0021 was scoped to
-// close.
 func TestLoomCuratorDatabaseScheduleRuns(t *testing.T) {
 	a, _ := newTestAPIWithLoomCurator(t)
 	ctx := context.Background()
@@ -321,19 +190,4 @@ func TestLoomCuratorDatabaseScheduleRuns(t *testing.T) {
 	// this test is proving: the schedule fires through the real
 	// ListDue -> RunDue -> Wake chain without the pipeline erroring.
 	t.Logf("scheduled tick result: skipped=%v skip_reason=%q", result.Skipped, result.SkipReason)
-}
-
-// TestLoomCuratorWake_InstanceNotProvisioned checks the 503 path on a plain
-// container where no operator provisioned the Loom Curator database rows.
-func TestLoomCuratorWake_InstanceNotProvisioned(t *testing.T) {
-	_, mux := newTestAPI(t)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/loom/curator-wake", bytes.NewBufferString(`{"generator":"wiki_page","fragment":{"id":"f1"}}`))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d body=%s", w.Code, w.Body.String())
-	}
 }

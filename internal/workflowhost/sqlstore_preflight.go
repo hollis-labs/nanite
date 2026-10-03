@@ -25,29 +25,36 @@ func PreflightWorkflowStorage(ctx context.Context, product *nanitestore.Store) e
 		return err
 	}
 	return s.write(ctx, "workflow storage preflight", func(tx workflowSQL) error {
-		if checkErr := preflightWorkflowSchema(ctx, tx); checkErr != nil {
-			return checkErr
-		}
-		if checkErr := preflightWorkflowReferences(ctx, tx); checkErr != nil {
-			return checkErr
-		}
-		if checkErr := preflightWorkflowRecords(ctx, tx); checkErr != nil {
-			return checkErr
-		}
-		if checkErr := preflightWorkflowEnvelopes(ctx, tx); checkErr != nil {
-			return checkErr
-		}
-		ids, err := preflightStrings(ctx, tx, `SELECT id FROM workflow_runs ORDER BY id`)
-		if err != nil {
-			return err
-		}
-		for _, id := range ids {
-			if checkErr := preflightWorkflowRun(ctx, tx, workflowruntime.RunID(id)); checkErr != nil {
-				return fmt.Errorf("workflow storage preflight: run %q blocked: %w; operator: keep the service stopped and restore verified original frozen material from backup, or escalate this run for explicit audited disposition before restarting", id, checkErr)
-			}
-		}
-		return preflightWorkflowIdempotency(ctx, tx)
+		return preflightWorkflowSnapshot(ctx, tx)
 	})
+}
+
+// Both startup and the read-only rehearsal command use this exact validator.
+func preflightWorkflowSnapshot(ctx context.Context, tx workflowSQL) error {
+	if checkErr := preflightWorkflowSchema(ctx, tx); checkErr != nil {
+		return checkErr
+	}
+	if checkErr := preflightWorkflowReferences(ctx, tx); checkErr != nil {
+		return checkErr
+	}
+	if checkErr := preflightWorkflowRecords(ctx, tx); checkErr != nil {
+		return checkErr
+	}
+	if checkErr := preflightWorkflowEnvelopes(ctx, tx); checkErr != nil {
+		return checkErr
+	}
+	ids, err := preflightStrings(ctx, tx, `SELECT id FROM workflow_runs ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	preflightScanned(ctx, "run-bindings", 0)
+	for _, id := range ids {
+		preflightScanned(ctx, "run-bindings", 1)
+		if checkErr := preflightWorkflowRun(ctx, tx, workflowruntime.RunID(id)); checkErr != nil {
+			return fmt.Errorf("workflow storage preflight: run %q blocked: %w; operator: keep the service stopped and restore verified original frozen material from backup, or escalate this run for explicit audited disposition before restarting", id, checkErr)
+		}
+	}
+	return preflightWorkflowIdempotency(ctx, tx)
 }
 
 // Schema validation has already attested these identifiers. Check parked
@@ -87,11 +94,12 @@ func preflightWorkflowEnvelopes(ctx context.Context, tx workflowSQL) error {
 		if len(predicates) == 0 {
 			continue
 		}
-		var invalid int
-		statement := `SELECT EXISTS(SELECT 1 FROM "` + table + `" WHERE ` + strings.Join(predicates, ` OR `) + `)`
-		if queryErr := tx.QueryRowContext(ctx, statement).Scan(&invalid); queryErr != nil {
+		var scanned, invalid int64
+		statement := `SELECT count(*),coalesce(sum(CASE WHEN ` + strings.Join(predicates, ` OR `) + ` THEN 1 ELSE 0 END),0) FROM "` + table + `"`
+		if queryErr := tx.QueryRowContext(ctx, statement).Scan(&scanned, &invalid); queryErr != nil {
 			return queryErr
 		}
+		preflightScanned(ctx, "envelopes:"+table, scanned)
 		if invalid != 0 {
 			return fmt.Errorf("workflow storage preflight: malformed persisted envelope or generation in %s", table)
 		}
@@ -107,10 +115,11 @@ func preflightWorkflowSchema(ctx context.Context, tx workflowSQL) error {
 	if foreignKeys != 1 {
 		return fmt.Errorf("workflow storage preflight: foreign key enforcement is disabled")
 	}
-	var version int64
-	if checkErr := tx.QueryRowContext(ctx, `SELECT max(version_id) FROM goose_db_version WHERE is_applied=1`).Scan(&version); checkErr != nil {
+	var version, ledgerRows int64
+	if checkErr := tx.QueryRowContext(ctx, `SELECT max(version_id),count(*) FROM goose_db_version WHERE is_applied=1`).Scan(&version, &ledgerRows); checkErr != nil {
 		return fmt.Errorf("workflow migration ledger: %w", checkErr)
 	}
+	preflightScanned(ctx, "migration-ledger", ledgerRows)
 	if version < 172 {
 		return fmt.Errorf("workflow storage preflight: migration ledger stops at %d", version)
 	}
@@ -119,12 +128,14 @@ func preflightWorkflowSchema(ctx context.Context, tx workflowSQL) error {
 		return err
 	}
 	defer closeRows(rows)
+	preflightScanned(ctx, "schema-shape", 0)
 	seen := make(map[string]bool)
 	for rows.Next() {
 		var kind, name, statement string
 		if checkErr := rows.Scan(&kind, &name, &statement); checkErr != nil {
 			return checkErr
 		}
+		preflightScanned(ctx, "schema-shape", 1)
 		key := kind + ":" + name
 		digest := fmt.Sprintf("%x", sha256.Sum256([]byte(statement)))
 		if workflowStorageSchema[key] != digest {
@@ -148,19 +159,42 @@ func preflightWorkflowReferences(ctx context.Context, tx workflowSQL) error {
 	if err != nil {
 		return err
 	}
-	defer closeRows(rows)
+	var violation error
 	for rows.Next() {
 		var table, parent string
 		var rowID sql.NullInt64
 		var constraint int
 		if checkErr := rows.Scan(&table, &rowID, &parent, &constraint); checkErr != nil {
+			closeRows(rows)
 			return checkErr
 		}
-		if strings.HasPrefix(table, "workflow_") {
-			return fmt.Errorf("workflow storage preflight: broken reference from %s to %s", table, parent)
+		if violation == nil && strings.HasPrefix(table, "workflow_") {
+			violation = fmt.Errorf("workflow storage preflight: broken reference from %s to %s", table, parent)
 		}
 	}
-	return rows.Err()
+	err = rows.Err()
+	closeRows(rows)
+	if err != nil {
+		return err
+	}
+	// PRAGMA checks references inside SQLite. Coverage counts its logical source
+	// rows, not only the returned violations (zero on a healthy populated DB).
+	if coverage, _ := ctx.Value(preflightCoverageKey{}).(*preflightCoverage); coverage != nil {
+		tables, err := preflightStrings(ctx, tx, `SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'workflow_%' ORDER BY name`)
+		if err != nil {
+			return err
+		}
+		preflightScanned(ctx, "foreign-keys", 0)
+		for _, table := range tables {
+			var count int64
+			statement := `SELECT count(*) FROM "` + strings.ReplaceAll(table, `"`, `""`) + `"`
+			if err := tx.QueryRowContext(ctx, statement).Scan(&count); err != nil {
+				return err
+			}
+			preflightScanned(ctx, "foreign-keys", count)
+		}
+	}
+	return violation
 }
 
 func preflightStrings(ctx context.Context, tx workflowSQL, statement string, args ...any) ([]string, error) {
@@ -318,7 +352,9 @@ func preflightWorkflowIdempotency(ctx context.Context, tx workflowSQL) error {
 		return err
 	}
 	defer closeRows(rows)
+	preflightScanned(ctx, "run-start-replay", 0)
 	for rows.Next() {
+		preflightScanned(ctx, "run-start-replay", 1)
 		var requestJSON, resultJSON string
 		if checkErr := rows.Scan(&requestJSON, &resultJSON); checkErr != nil {
 			return checkErr
@@ -353,7 +389,9 @@ func preflightWorkflowIdempotency(ctx context.Context, tx workflowSQL) error {
 		return err
 	}
 	defer closeRows(claims)
+	preflightScanned(ctx, "claim-replay", 0)
 	for claims.Next() {
+		preflightScanned(ctx, "claim-replay", 1)
 		var requestJSON, resultJSON string
 		if checkErr := claims.Scan(&requestJSON, &resultJSON); checkErr != nil {
 			return checkErr
@@ -387,22 +425,25 @@ func preflightWorkflowIdempotency(ctx context.Context, tx workflowSQL) error {
 // envelope alone does not prove a runtime record can be read after restart.
 func preflightWorkflowRecords(ctx context.Context, tx workflowSQL) error {
 	checks := []struct {
+		name      string
 		statement string
 		scan      func(workflowScanner) error
 	}{
-		{workflowNodeSelect, func(row workflowScanner) error { _, err := scanWorkflowNode(row); return err }},
-		{workflowAttemptSelect, func(row workflowScanner) error { _, err := scanWorkflowAttempt(row); return err }},
-		{workflowWaitSelect, func(row workflowScanner) error { _, err := scanWorkflowWait(row); return err }},
-		{workflowEventSelect, func(row workflowScanner) error { _, err := scanWorkflowEvent(row); return err }},
-		{workflowReactorSelect, func(row workflowScanner) error { _, err := scanWorkflowReactor(row); return err }},
-		{workflowExternalOperationSelect, func(row workflowScanner) error { _, err := scanWorkflowExternalOperation(row); return err }},
+		{"records:nodes", workflowNodeSelect, func(row workflowScanner) error { _, err := scanWorkflowNode(row); return err }},
+		{"records:attempts", workflowAttemptSelect, func(row workflowScanner) error { _, err := scanWorkflowAttempt(row); return err }},
+		{"records:waits", workflowWaitSelect, func(row workflowScanner) error { _, err := scanWorkflowWait(row); return err }},
+		{"records:events", workflowEventSelect, func(row workflowScanner) error { _, err := scanWorkflowEvent(row); return err }},
+		{"records:reactors", workflowReactorSelect, func(row workflowScanner) error { _, err := scanWorkflowReactor(row); return err }},
+		{"records:external-operations", workflowExternalOperationSelect, func(row workflowScanner) error { _, err := scanWorkflowExternalOperation(row); return err }},
 	}
 	for _, check := range checks {
+		preflightScanned(ctx, check.name, 0)
 		rows, err := tx.QueryContext(ctx, check.statement)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
+			preflightScanned(ctx, check.name, 1)
 			if checkErr := check.scan(rows); checkErr != nil {
 				closeRows(rows)
 				return fmt.Errorf("workflow storage preflight: unreadable persisted record: %w", checkErr)
@@ -414,28 +455,32 @@ func preflightWorkflowRecords(ctx context.Context, tx workflowSQL) error {
 			return err
 		}
 	}
-	var broken int
-	if checkErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM workflow_node_invocations n JOIN workflow_node_leases l USING(run_id,node_id,iteration) WHERE n.claim_generation != l.generation`).Scan(&broken); checkErr != nil {
+	var scanned, broken int64
+	if checkErr := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(CASE WHEN n.claim_generation != l.generation THEN 1 ELSE 0 END),0) FROM workflow_node_invocations n JOIN workflow_node_leases l USING(run_id,node_id,iteration)`).Scan(&scanned, &broken); checkErr != nil {
 		return checkErr
 	}
+	preflightScanned(ctx, "claim-lease-generations", scanned)
 	if broken != 0 {
 		return fmt.Errorf("workflow storage preflight: node claim and lease generations differ")
 	}
-	if checkErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM workflow_events e LEFT JOIN workflow_event_sequences s USING(run_id) WHERE s.last_sequence IS NULL OR e.sequence>s.last_sequence`).Scan(&broken); checkErr != nil {
+	if checkErr := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(CASE WHEN s.last_sequence IS NULL OR e.sequence>s.last_sequence THEN 1 ELSE 0 END),0) FROM workflow_events e LEFT JOIN workflow_event_sequences s USING(run_id)`).Scan(&scanned, &broken); checkErr != nil {
 		return checkErr
 	}
+	preflightScanned(ctx, "event-cursor-bindings", scanned)
 	if broken != 0 {
 		return fmt.Errorf("workflow storage preflight: event sequence ledger differs from events")
 	}
-	if checkErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM workflow_event_sequences s WHERE s.last_sequence != COALESCE((SELECT max(e.sequence) FROM workflow_events e WHERE e.run_id=s.run_id),0)`).Scan(&broken); checkErr != nil {
+	if checkErr := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(CASE WHEN s.last_sequence != COALESCE((SELECT max(e.sequence) FROM workflow_events e WHERE e.run_id=s.run_id),0) THEN 1 ELSE 0 END),0) FROM workflow_event_sequences s`).Scan(&scanned, &broken); checkErr != nil {
 		return checkErr
 	}
+	preflightScanned(ctx, "event-cursor-ledger", scanned)
 	if broken != 0 {
 		return fmt.Errorf("workflow storage preflight: event sequence ledger contains an uncommitted cursor")
 	}
-	if checkErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM workflow_run_steps s LEFT JOIN workflow_runs r ON r.id=s.workflow_run_id WHERE r.id IS NULL`).Scan(&broken); checkErr != nil {
+	if checkErr := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(CASE WHEN r.id IS NULL THEN 1 ELSE 0 END),0) FROM workflow_run_steps s LEFT JOIN workflow_runs r ON r.id=s.workflow_run_id`).Scan(&scanned, &broken); checkErr != nil {
 		return checkErr
 	}
+	preflightScanned(ctx, "product-step-references", scanned)
 	if broken != 0 {
 		return fmt.Errorf("workflow storage preflight: product step references a missing run")
 	}
@@ -458,7 +503,9 @@ func preflightWorkflowRecords(ctx context.Context, tx workflowSQL) error {
 	if err != nil {
 		return err
 	}
+	preflightScanned(ctx, "value-sets", 0)
 	for _, ref := range refs {
+		preflightScanned(ctx, "value-sets", 1)
 		if _, checkErr := loadWorkflowValues(ctx, tx, ref); checkErr != nil {
 			return checkErr
 		}
@@ -467,7 +514,9 @@ func preflightWorkflowRecords(ctx context.Context, tx workflowSQL) error {
 	if err != nil {
 		return err
 	}
+	preflightScanned(ctx, "frozen-material", 0)
 	for _, digest := range digests {
+		preflightScanned(ctx, "frozen-material", 1)
 		material, err := loadPlanMaterial(ctx, tx, digest)
 		if err != nil {
 			return err
@@ -480,24 +529,27 @@ func preflightWorkflowRecords(ctx context.Context, tx workflowSQL) error {
 		}
 	}
 	for _, check := range []struct {
+		name      string
 		statement string
 		load      func(string) error
 	}{
-		{`SELECT run_id FROM workflow_compensation_ledgers`, func(id string) error {
+		{"compensation-ledgers", `SELECT run_id FROM workflow_compensation_ledgers`, func(id string) error {
 			_, err := loadWorkflowCompensationLedger(ctx, tx, workflowruntime.RunID(id))
 			return err
 		}},
-		{`SELECT run_id FROM workflow_terminal_intents`, func(id string) error {
+		{"terminal-intents", `SELECT run_id FROM workflow_terminal_intents`, func(id string) error {
 			_, err := loadWorkflowTerminalIntent(ctx, tx, workflowruntime.RunID(id))
 			return err
 		}},
-		{`SELECT idempotency_key FROM workflow_reactor_continuations`, func(id string) error { _, err := loadWorkflowReactorContinuation(ctx, tx, id); return err }},
+		{"reactor-continuations", `SELECT idempotency_key FROM workflow_reactor_continuations`, func(id string) error { _, err := loadWorkflowReactorContinuation(ctx, tx, id); return err }},
 	} {
 		ids, err := preflightStrings(ctx, tx, check.statement)
 		if err != nil {
 			return err
 		}
+		preflightScanned(ctx, check.name, 0)
 		for _, id := range ids {
+			preflightScanned(ctx, check.name, 1)
 			if checkErr := check.load(id); checkErr != nil {
 				return checkErr
 			}

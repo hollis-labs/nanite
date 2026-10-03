@@ -91,3 +91,27 @@ Playbooks are parameterized session-context templates. An LLM interprets their
 rendered text; they do not sequence Agent Workflow nodes and are not an
 execution engine. A Playbook can instruct an agent to launch a named workflow,
 but the resulting run still executes exclusively through the shared host.
+
+### Offline storage rehearsal
+
+`nanite workflow preflight --db /path/to/offline-copy.db` runs the same storage
+validators as startup without migrating, seeding, running cutover, or starting
+workers or a server. It prints each reached validation and its logical rows
+scanned to stdout, followed by a PASS line on success (exit 0). Refusal exits 1
+with the same named startup diagnostic and operator disposition on stderr;
+stdout contains coverage reached before refusal, without a PASS line. Counts
+include repeated scans when different validations inspect the same records.
+
+Use a stable database copy: either copy the DB and its `-wal` together while
+Nanite and all other writers are stopped, or obtain a consistent copy with
+`sqlite3 /path/to/source.db '.backup /path/to/offline-copy.db'`. A main-file-only
+copy of an uncheckpointed WAL database omits committed rows. An actively
+changing file copy and a pending rollback journal are not supported.
+
+The rehearsal stages DB/WAL bytes privately, then opens that staging copy with
+`mode=ro`, query-only enforcement and a rolled-back read transaction. SQLite
+may reconstruct WAL shared memory only in private staging; the supplied DB,
+WAL and SHM files are never opened by SQLite and remain unchanged. Another
+read-only process may keep the supplied copy open. Temporary staging is removed
+when validation finishes. A rehearsal pass does not apply legacy cutover
+dispositions or replace the startup preflight during deployment.

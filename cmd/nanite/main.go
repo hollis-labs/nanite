@@ -87,7 +87,7 @@ func loadServeRuntimeConfig(load serveRuntimeConfigLoader) (*config.RuntimeConfi
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, chat, plugin, mcp, skill, profile, agent, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, workflow, chat, plugin, mcp, skill, profile, agent, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 
@@ -100,6 +100,11 @@ func main() {
 			// anywhere. The error already carries the context (it is wrapped
 			// all the way down); it just never reached anyone.
 			fmt.Fprintf(os.Stderr, "%s serve: %v\n", brand.BinaryName, err)
+			os.Exit(1)
+		}
+	case "workflow":
+		if err := cmdWorkflow(context.Background(), os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintf(os.Stderr, "%s workflow: %v\n", brand.BinaryName, err)
 			os.Exit(1)
 		}
 	case "chat":

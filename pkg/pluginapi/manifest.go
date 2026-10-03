@@ -15,7 +15,7 @@ import (
 
 // Version identifies the public host contract, independently of the Nanite
 // application version. A plugin declares this range in hosts.nanite.
-const Version = "0.1.7"
+const Version = "0.1.8"
 
 // Drawer slots are host-owned browser contribution locations.
 const (
@@ -48,15 +48,16 @@ type UI struct {
 }
 
 type Registrations struct {
-	Slots          []Slot          `json:"slots,omitempty"`
-	Panels         []Panel         `json:"panels,omitempty"`
-	Envelopes      []Envelope      `json:"envelopes,omitempty"`
-	Commands       []Command       `json:"commands,omitempty"`
-	Events         []Event         `json:"events,omitempty"`
-	CRUD           []Resource      `json:"crud,omitempty"`
-	HTTPRoutes     []Route         `json:"http_routes,omitempty"`
-	ContextSources []ContextSource `json:"context_sources,omitempty"`
-	ReflexSeeds    []ReflexSeed    `json:"reflex_seeds,omitempty"`
+	Slots             []Slot             `json:"slots,omitempty"`
+	Panels            []Panel            `json:"panels,omitempty"`
+	Envelopes         []Envelope         `json:"envelopes,omitempty"`
+	Commands          []Command          `json:"commands,omitempty"`
+	Events            []Event            `json:"events,omitempty"`
+	CRUD              []Resource         `json:"crud,omitempty"`
+	HTTPRoutes        []Route            `json:"http_routes,omitempty"`
+	ContextSources    []ContextSource    `json:"context_sources,omitempty"`
+	AlwaysShipSources []AlwaysShipSource `json:"always_ship_sources,omitempty"`
+	ReflexSeeds       []ReflexSeed       `json:"reflex_seeds,omitempty"`
 }
 
 // Component names refer directly to named exports of UI.Bundle.
@@ -224,6 +225,18 @@ func (b Block) Validate() error {
 		}
 		if len(source.ID) > 64 {
 			return fmt.Errorf("nanite: context source id exceeds limit")
+		}
+	}
+	if len(b.Registers.AlwaysShipSources) > MaxAlwaysShipSources {
+		return fmt.Errorf("nanite: too many always-ship sources")
+	}
+	for _, source := range b.Registers.AlwaysShipSources {
+		// One source cannot acquire both weaker and persistent placement.
+		if err := check("context-source", source.ID); err != nil {
+			return err
+		}
+		if err := source.Validate(); err != nil {
+			return err
 		}
 	}
 	if len(b.Registers.ReflexSeeds) > MaxReflexSeeds {

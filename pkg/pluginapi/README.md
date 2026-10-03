@@ -162,3 +162,87 @@ optional identity facts. Prompt delivery starts a real agent turn through the
 core wake service. This capability grants no provisioning, profile edits,
 arbitrary tool calls or scheduling. The client refuses redirects and environment
 proxies, limits request/response sizes, and never retries an uncertain wake.
+
+## Persistent user context
+
+Declare `nanite.registers.always_ship_sources` and a separate required
+`context.always_ship` capability to request persistent user-context placement.
+This is stronger than `context.source`: the host places its bounded text in
+`SlotUserContext`, which survives compaction and is exempt from dynamic-context
+intent skipping on review, recall and resume turns. It competes with the user's
+own context inside the existing 2,000-token slot ceiling. API agents receive
+this text in the system prompt; CLI agents receive it before their user message.
+The slot carries no cache marker. The host must explicitly review this power,
+enforce the accepted scope on every fetch and revoke owned sources on unload.
+
+`AlwaysShipScope.MaxBytes` caps **body bytes across all sources of one owner**,
+not tokens or bytes per source. It must be positive and at most 6,000 bytes.
+Host accounting additionally charges headings, separators and fallback text to
+the shared token budget, and may assign less space. Like `ContextScope`, choose
+either `session_ids` or `all_sessions`; no query text or keywords are permitted.
+One to four declared source IDs must exactly match one nonoptional capability.
+The same ID cannot occur in both the ordinary and always-ship source tables.
+
+Each `AlwaysShipSource` has an ID, a bounded ASCII `title`, and `list_tool`.
+The title becomes `## Title\n`; the plugin supplies the remaining body and
+its deterministic item ordering. `Session Context` is reserved. The host also
+reserves titles it still renders itself, such as `Session Documents`, and
+refuses duplicate ownership before adopting core data.
+
+`list_tool` is the public name of a read-effect tool in the **same shared
+manifest**. It must support an initial inventory call in the calling session
+and describe any pagination. Call `AlwaysShipScopeFor(block, capabilities,
+tools)` after validating the common manifest to check that declaration. This
+capability neither grants that tool to an agent nor makes it always included.
+Normal tool grants, selection and execution checks still apply. Hosts must
+document transport limitations rather than claiming a tool is available merely
+because a fallback names it.
+
+For example, this context-only manifest requests persistent pins:
+
+```json
+{
+  "schema_version": 2,
+  "id": "nanite.pins",
+  "name": "Pins",
+  "version": "0.2.0",
+  "protocol": 1,
+  "runtime": "subprocess",
+  "entrypoint": {"command": "bin/pins"},
+  "hosts": {"nanite": {"min": "0.1.8"}},
+  "tools": [{
+    "name": "pins_list",
+    "description": "List visible pin inventory in the calling session",
+    "effect": "read",
+    "input_schema": {"type": "object", "additionalProperties": false}
+  }],
+  "capabilities": [{
+    "name": "context.always_ship",
+    "reason": "Retain user-selected pins on review, recall and resume turns",
+    "metadata": {"source_ids": ["pins"], "all_sessions": true, "max_bytes": 6000}
+  }],
+  "nanite": {"registers": {"always_ship_sources": [{
+    "id": "pins", "title": "Pinned Context", "list_tool": "pins_list"
+  }]}}
+}
+```
+
+Handle private SDK `http/handle` POST requests to `AlwaysShipFetchPath` with
+`DecodeAlwaysShipRequest`. `AlwaysShipRequest` carries protocol 1, source and
+session IDs, an optional host routing agent ID, intent, and `max_bytes`.
+The decoder checks the outer SDK session matches; it is not an authorization
+check. Return HTTP 200 with `AlwaysShipResponse{Protocol: AlwaysShipProtocol,
+Body: body}`. Body is required; an empty string explicitly means no contribution.
+`DecodeAlwaysShipResponse(raw, maxBytes)` refuses bodies beyond the assigned
+allowance, invalid UTF-8, NUL, missing/null bodies and ambiguous fields. The
+JSON wire ceiling is 64 KiB, independently of the 6,000-byte decoded body cap.
+
+The host must use a deterministic section fallback naming the owner/source and
+its `list_tool` when a fetch fails or the section cannot fit. If a plugin returns
+only part of its own inventory, its body must say content remains and how to
+list/read it; an opaque body gives the host no item-completeness signal.
+Document and pin bodies can preserve historical core formatting byte for byte;
+oldest-pin demotion is a separately defined consumer budget policy. Headings and
+fallbacks are host-owned, while item rendering and inventory recovery remain
+plugin-owned. This public declaration does not implement host composition,
+review notices or agent tool transport.

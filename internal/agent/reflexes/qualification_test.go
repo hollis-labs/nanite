@@ -1,9 +1,9 @@
 package reflexes
 
 // Qualification replays Nanite-authored fixtures through both implementations.
-// The released library is test-only: no trigger rewrite, engine replacement or
-// migration is hidden in these adapters. Full results, including persisted
-// metadata and effects, must match; a changed result requires requalification.
+// The independent pre-adoption algorithms live only in *_reference_*_test.go.
+// Both the released library and production host wrappers must match their full
+// persisted metadata and effects; no trace normalization masks a divergence.
 import (
 	"context"
 	"encoding/json"
@@ -149,7 +149,7 @@ func qualificationCandidates(t *testing.T, st *store.Store, scope string) []stor
 func qualificationReplay(t *testing.T, candidates []store.AgentReflex, state State, scope string, failHook bool) (qualificationResult, qualificationResult) {
 	t.Helper()
 	state.SessionID, state.AgentID, state.AgentClass = "qual-session", "qual-agent", "advisor"
-	ns, ls := qualificationStore(t, candidates), qualificationStore(t, candidates)
+	ns, ls, ps := qualificationStore(t, candidates), qualificationStore(t, candidates), qualificationStore(t, candidates)
 	nr, lr := qualificationCandidates(t, ns, scope), qualificationCandidates(t, ls, scope)
 	if qualificationJSON(t, nr) != qualificationJSON(t, lr) {
 		t.Fatal("different host candidate inputs")
@@ -157,28 +157,34 @@ func qualificationReplay(t *testing.T, candidates []store.AgentReflex, state Sta
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.Background()
 	neffects, leffects := []string{}, []string{}
-	nx := &Executor{Logger: logger}
-	nx.Halt = func(context.Context, string, string, map[string]interface{}) error {
-		neffects = append(neffects, "halt_session")
-		if failHook {
-			return errors.New("fixture failure")
+	newHostExecutor := func(effects *[]string) *Executor {
+		nx := &Executor{Logger: logger}
+		nx.Halt = func(context.Context, string, string, map[string]interface{}) error {
+			*effects = append(*effects, "halt_session")
+			if failHook {
+				return errors.New("fixture failure")
+			}
+			return nil
 		}
-		return nil
-	}
-	nx.Schedule = func(context.Context, string, map[string]interface{}) error {
-		neffects = append(neffects, "add_schedule")
-		if failHook {
-			return errors.New("fixture failure")
+		nx.Schedule = func(context.Context, string, map[string]interface{}) error {
+			*effects = append(*effects, "add_schedule")
+			if failHook {
+				return errors.New("fixture failure")
+			}
+			return nil
 		}
-		return nil
-	}
-	nx.SendMessage = func(context.Context, string, map[string]interface{}) error {
-		neffects = append(neffects, "send_message")
-		if failHook {
-			return errors.New("fixture failure")
+		nx.SendMessage = func(context.Context, string, map[string]interface{}) error {
+			*effects = append(*effects, "send_message")
+			if failHook {
+				return errors.New("fixture failure")
+			}
+			return nil
 		}
-		return nil
+		return nx
 	}
+	nx := newHostExecutor(&neffects)
+	peffects := []string{}
+	px := newHostExecutor(&peffects)
 	lx := shared.NewExecutor(logger)
 	// These adapters are host-owned in both versions. resume_loop_run is a
 	// staged decision at Resolve, with the real runtime effect at its call site.
@@ -209,7 +215,7 @@ func qualificationReplay(t *testing.T, candidates []store.AgentReflex, state Sta
 		if err == nil && k != nil {
 			d = k.DefaultRecurrenceSeconds
 		}
-		return RecentlyFired(r, qualificationNow, EffectiveCooldown(d, r.RecurrenceOverrideSeconds))
+		return referenceRecentlyFired(r, qualificationNow, referenceEffectiveCooldown(d, r.RecurrenceOverrideSeconds))
 	}
 	lc := func(r shared.Reflex) bool {
 		k, err := lk(ctx, r.ActionKind)
@@ -219,7 +225,7 @@ func qualificationReplay(t *testing.T, candidates []store.AgentReflex, state Sta
 		}
 		return shared.RecentlyFired(r, qualificationNow, shared.EffectiveCooldown(d, r.RecurrenceOverrideSeconds))
 	}
-	na, no, err := Resolve(ctx, nr, state, nx, nc, nk)
+	na, no, err := referenceResolve(ctx, nr, state, nx, nc, nk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,9 +233,27 @@ func qualificationReplay(t *testing.T, candidates []store.AgentReflex, state Sta
 	if err != nil {
 		t.Fatal(err)
 	}
-	EmitFirings(ctx, ns, nil, na, no, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, logger)
+	referenceEmitFirings(ctx, ns, nil, na, no, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, logger)
 	shared.EmitFirings(ctx, ls, nil, la, lo, qualificationState(t, state), shared.FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, logger)
-	return qualificationPersisted(t, ns, na.Actions, no, neffects), qualificationPersisted(t, ls, la.Actions, lo, leffects)
+	pr := qualificationCandidates(t, ps, scope)
+	pa, po, err := Resolve(ctx, pr, state, px, func(r store.AgentReflex) bool {
+		k, lookupErr := ps.GetReflexActionKind(ctx, r.ActionKind)
+		var d *int64
+		if lookupErr == nil && k != nil {
+			d = k.DefaultRecurrenceSeconds
+		}
+		return RecentlyFired(r, qualificationNow, EffectiveCooldown(d, r.RecurrenceOverrideSeconds))
+	}, ps.GetReflexActionKind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	EmitFirings(ctx, ps, nil, pa, po, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, logger)
+	n := qualificationPersisted(t, ns, na.Actions, no, neffects)
+	production := qualificationPersisted(t, ps, pa.Actions, po, peffects)
+	if qualificationJSON(t, n) != qualificationJSON(t, production) {
+		t.Fatalf("production adapter divergence input=%s state=%s reference=%s production=%s", qualificationJSON(t, pr), qualificationJSON(t, state), qualificationJSON(t, n), qualificationJSON(t, production))
+	}
+	return n, qualificationPersisted(t, ls, la.Actions, lo, leffects)
 }
 
 func TestGoReflexesQualification_ResolveTraces(t *testing.T) {
@@ -313,8 +337,12 @@ func TestGoReflexesQualification_SeedPredicates(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			kind, spec := seedTriggerSpec(t, c.class, c.seed)
-			n, ne := EvaluateTrigger(kind, spec, c.state)
+			n, ne := referenceEvaluateTrigger(kind, spec, c.state)
 			l, le := shared.EvaluateTrigger(kind, spec, qualificationState(t, c.state))
+			pv, perr := EvaluateTrigger(kind, spec, c.state)
+			if pv != n || perr != nil {
+				t.Fatalf("production adapter input=%s spec=%s reference=%v/%v production=%v/%v", qualificationJSON(t, c.state), spec, n, ne, pv, perr)
+			}
 			if ne != nil || le != nil || n != c.want || l != n {
 				t.Fatalf("input=%s spec=%s nanite=%v/%v lib=%v/%v", qualificationJSON(t, c.state), spec, n, ne, l, le)
 			}
@@ -348,8 +376,12 @@ func TestGoReflexesQualification_DispatchEquivalence(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			state := State{SessionID: "qual-session", AgentID: "qual-agent", AgentClass: "advisor", ScopeTier: "open", ExecutionPattern: "subagent"}
-			n, ne := EvaluateTrigger(kind, c.spec, state)
+			n, ne := referenceEvaluateTrigger(kind, c.spec, state)
 			l, le := shared.EvaluateTrigger(kind, c.spec, qualificationState(t, state))
+			pv, perr := EvaluateTrigger(kind, c.spec, state)
+			if pv != n || perr != nil {
+				t.Fatalf("production adapter input=%s spec=%s reference=%v/%v production=%v/%v", qualificationJSON(t, state), c.spec, n, ne, pv, perr)
+			}
 			if !n || ne != nil || l != n || le != nil {
 				t.Fatalf("input=%s spec=%s nanite=%v/%v lib=%v/%v", qualificationJSON(t, state), c.spec, n, ne, l, le)
 			}
@@ -444,8 +476,12 @@ func TestGoReflexesQualification_ScalarPredicateEquivalence(t *testing.T) {
 					state.ScopeTier = "other"
 				}
 				spec := `{"kind":"` + kind + `",` + c.args + `}`
-				n, ne := EvaluateTrigger("predicate", spec, state)
+				n, ne := referenceEvaluateTrigger("predicate", spec, state)
 				l, le := shared.EvaluateTrigger("predicate", spec, qualificationState(t, state))
+				pv, perr := EvaluateTrigger("predicate", spec, state)
+				if pv != n || perr != nil {
+					t.Fatalf("production adapter input=%s spec=%s reference=%v/%v production=%v/%v", qualificationJSON(t, state), spec, n, ne, pv, perr)
+				}
 				if ne != nil || le != nil || n != c.want || l != n {
 					t.Fatalf("input=%s spec=%s nanite=%v/%v lib=%v/%v want=%v", qualificationJSON(t, state), spec, n, ne, l, le, c.want)
 				}
@@ -498,9 +534,9 @@ func TestGoReflexesQualification_CollectedStateEngineTrace(t *testing.T) {
 	r.ActionSpec = `{"body":"original"}`
 	dispatch := qualificationReflex("excluded-dispatch", "dispatch_to_agent", 20)
 	resume := qualificationReflex("excluded-resume", "resume_loop_run", 30)
-	ns, ls := qualificationStore(t, []store.AgentReflex{r, dispatch, resume}), qualificationStore(t, []store.AgentReflex{r, dispatch, resume})
+	ns, ls, ps := qualificationStore(t, []store.AgentReflex{r, dispatch, resume}), qualificationStore(t, []store.AgentReflex{r, dispatch, resume}), qualificationStore(t, []store.AgentReflex{r, dispatch, resume})
 	ctx := context.Background()
-	for _, st := range []*store.Store{ns, ls} {
+	for _, st := range []*store.Store{ns, ls, ps} {
 		for _, msg := range []store.Message{
 			{ID: "u1", SessionID: "qual-session", Role: "user", Content: "Let's document that and create ticket NAN-128.", CreatedAt: "2026-09-30 00:00:01"},
 			{ID: "a1", SessionID: "qual-session", Role: "assistant", Content: `{"v":1,"text":"Done.","tool_calls":[{"name":"torque_task_create"}],"envelopes":[{"type":"options"}]}`, CreatedAt: "2026-09-30 00:00:02"},
@@ -532,7 +568,7 @@ func TestGoReflexesQualification_CollectedStateEngineTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	na, err := ne.EvaluateState(ctx, "qual-agent", "advisor", state)
+	na, err := ne.referenceEvaluateState(ctx, "qual-agent", "advisor", state)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -542,6 +578,18 @@ func TestGoReflexesQualification_CollectedStateEngineTrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	n, l := qualificationPersisted(t, ns, na.Actions, nil, nil), qualificationPersisted(t, ls, la.Applied.Actions, nil, nil)
+	ph := &fakeReflexPluginHooks{}
+	pe := NewEngine(ps, logger)
+	pe.SetPluginHooks(ph)
+	pa, err := pe.EvaluateState(ctx, "qual-agent", "advisor", state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	production := qualificationPersisted(t, ps, pa.Actions, nil, nil)
+	if qualificationJSON(t, n) != qualificationJSON(t, production) || *nh != *ph {
+		t.Fatalf("production collected input=%s reference=%s production=%s filters=%+v/%+v", qualificationJSON(t, state), qualificationJSON(t, n), qualificationJSON(t, production), nh, ph)
+	}
+
 	if qualificationJSON(t, n) != qualificationJSON(t, l) {
 		t.Fatalf("input=%s nanite=%s lib=%s", qualificationJSON(t, state), qualificationJSON(t, n), qualificationJSON(t, l))
 	}
@@ -634,5 +682,145 @@ func TestGoReflexesQualification_PluginCandidateEligibility(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// Observer payloads must retain Nanite's concrete action type as well as their
+// JSON shape and Fired-before-Staged ordering across the library seam.
+type qualificationObservers struct {
+	fakeReflexPluginHooks
+	t       *testing.T
+	records []string
+}
+
+func (h *qualificationObservers) record(phase, sessionID string, data map[string]any) {
+	h.t.Helper()
+	if _, ok := data["action"].(AppliedAction); !ok {
+		h.t.Fatalf("%s observer action type = %T", phase, data["action"])
+	}
+	h.records = append(h.records, phase+":"+sessionID+":"+qualificationJSON(h.t, data))
+}
+func (h *qualificationObservers) EmitReflexFired(sessionID string, data map[string]any) {
+	h.record("fired", sessionID, data)
+}
+func (h *qualificationObservers) EmitReflexActionStaged(sessionID string, data map[string]any) {
+	h.record("staged", sessionID, data)
+}
+
+func TestGoReflexesQualification_HostEffectsAndObservers(t *testing.T) {
+	for _, kind := range []string{"halt_session", "add_schedule", "send_message"} {
+		t.Run(kind, func(t *testing.T) {
+			row := qualificationReflex("effect", kind, 10)
+			row.ActionSpec = `{"body":"before"}`
+			state := State{SessionID: "qual-session", AgentID: "qual-agent", AgentClass: "advisor", Events: []EventSignal{{EventType: "probe"}}}
+			results := []qualificationResult{}
+			observations := [][]string{}
+			for _, useReference := range []bool{true, false} {
+				st := qualificationStore(t, []store.AgentReflex{row})
+				ctx := context.Background()
+				effects := []string{}
+				executor := &Executor{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+				executor.Halt = func(_ context.Context, session, reason string, evidence map[string]interface{}) error {
+					effects = append(effects, session+":"+reason+":"+qualificationJSON(t, evidence))
+					return errors.New("halt fixture failure")
+				}
+				mutate := func(_ context.Context, agentID string, spec map[string]interface{}) error {
+					effects = append(effects, agentID+":"+qualificationJSON(t, spec))
+					spec["body"] = "callback-edited"
+					return errors.New("effect fixture failure")
+				}
+				executor.Schedule, executor.SendMessage = mutate, mutate
+				resolve := Resolve
+				emit := EmitFirings
+				if useReference {
+					resolve = referenceResolve
+					emit = referenceEmitFirings
+				}
+				rows := qualificationCandidates(t, st, "")
+				applied, outcomes, err := resolve(ctx, rows, state, executor, noCooldown, st.GetReflexActionKind)
+				if err != nil {
+					t.Fatal(err)
+				}
+				hooks := &qualificationObservers{t: t}
+				emit(ctx, st, hooks, applied, outcomes, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass, ExtraMetadata: map[string]any{"matched_input_excerpt": "audit"}}, executor.Logger)
+				results = append(results, qualificationPersisted(t, st, applied.Actions, outcomes, effects))
+				observations = append(observations, hooks.records)
+			}
+			if qualificationJSON(t, results[0]) != qualificationJSON(t, results[1]) || !reflect.DeepEqual(observations[0], observations[1]) {
+				t.Fatalf("input=%s state=%s reference=%s production=%s observers=%v", qualificationJSON(t, row), qualificationJSON(t, state), qualificationJSON(t, results[0]), qualificationJSON(t, results[1]), observations)
+			}
+			if len(observations[1]) != 2 || results[1].Counts[row.ID] != 1 {
+				t.Fatal("failed effect must still emit Fired/Staged and count the firing")
+			}
+			if kind != "halt_session" && qualificationCopy[[]AppliedAction](t, results[1].Actions)[0].Spec["body"] != "callback-edited" {
+				t.Fatal("callback spec edits lost")
+			}
+		})
+	}
+}
+
+// attr is a library extension outside Nanite's contract. These authored
+// predicates were rejected before adoption and must never gain a live effect.
+func TestGoReflexesQualification_UnsupportedAttr(t *testing.T) {
+	specs := []struct{ name, spec string }{
+		{"top-level", `{"kind":"attr","key":"region","op":"!=","value":"private"}`},
+		{"and", `{"kind":"AND","clauses":[{"kind":"scope_tier","value":"open"},{"kind":"attr","key":"region","op":"!=","value":"private"}]}`},
+		{"or", `{"kind":"OR","clauses":[{"kind":"attr","key":"region","op":"!=","value":"private"},{"kind":"scope_tier","value":"closed"}]}`},
+		{"deep", `{"kind":"AND","clauses":[{"kind":"scope_tier","value":"open"},{"kind":"OR","clauses":[{"kind":"AND","clauses":[{"kind":"attr","key":"region","op":"!=","value":"private"}]}]}]}`},
+	}
+	for _, c := range specs {
+		t.Run(c.name, func(t *testing.T) {
+			state := State{SessionID: "qual-session", AgentID: "qual-agent", AgentClass: "advisor", ScopeTier: "open"}
+			n, ne := referenceEvaluateTrigger("predicate", c.spec, state)
+			p, pe := EvaluateTrigger("predicate", c.spec, state)
+			l, le := shared.EvaluateTrigger("predicate", c.spec, qualificationState(t, state))
+			const wantError = `unknown predicate kind "attr"`
+			if n || p || ne == nil || pe == nil || ne.Error() != wantError || pe.Error() != wantError || !l || le != nil {
+				t.Fatalf("input=%s spec=%s reference=%v/%v production=%v/%v library=%v/%v", qualificationJSON(t, state), c.spec, n, ne, p, pe, l, le)
+			}
+			bad := qualificationReflex("unsupported", "dispatch_to_agent", 99)
+			bad.TriggerKind, bad.TriggerSpec, bad.ActionSpec = "predicate", c.spec, `{"agent_slug":"planner"}`
+			good := qualificationReflex("supported", "dispatch_to_agent", 10)
+			good.TriggerKind, good.TriggerSpec, good.ActionSpec = "predicate", `{"kind":"scope_tier","value":"open"}`, `{"agent_slug":"planner"}`
+			results := []qualificationResult{}
+			for _, useReference := range []bool{true, false} {
+				st := qualificationStore(t, []store.AgentReflex{bad, good})
+				ctx := context.Background()
+				resolve, emit := Resolve, EmitFirings
+				if useReference {
+					resolve, emit = referenceResolve, referenceEmitFirings
+				}
+				applied, outcomes, err := resolve(ctx, qualificationCandidates(t, st, ""), state, testExecutor(), noCooldown, st.GetReflexActionKind)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(outcomes) != 2 || outcomes[0].ReflexID != bad.ID || outcomes[0].TriggerError != wantError || outcomes[0].TriggerFired || outcomes[0].Selected {
+					t.Fatalf("rejection outcome=%+v", outcomes)
+				}
+				emit(ctx, st, nil, applied, outcomes, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, slog.Default())
+				results = append(results, qualificationPersisted(t, st, applied.Actions, outcomes, nil))
+			}
+			if qualificationJSON(t, results[0]) != qualificationJSON(t, results[1]) {
+				t.Fatalf("input=%s reference=%s production=%s", c.spec, qualificationJSON(t, results[0]), qualificationJSON(t, results[1]))
+			}
+			if results[1].Counts[bad.ID] != 0 || results[1].Counts[good.ID] != 1 {
+				t.Fatal("unsupported candidate fired or suppressed supported candidate")
+			}
+			t.Logf("host rejection preserved input=%s reference=%s production=%s; direct library accepts attr=true", c.spec, qualificationJSON(t, results[0]), qualificationJSON(t, results[1]))
+		})
+	}
+}
+
+func TestEvaluateTrigger_RejectsAttrInShortCircuitedBranches(t *testing.T) {
+	// Vocabulary rejection happens before delegation, even when another clause
+	// would otherwise short-circuit. It must not depend on current signal values.
+	for _, spec := range []string{
+		`{"kind":"OR","clauses":[{"kind":"scope_tier","value":"open"},{"kind":"attr","key":"region","op":"!=","value":"private"}]}`,
+		`{"kind":"AND","clauses":[{"kind":"scope_tier","value":"closed"},{"kind":"attr","key":"region","op":"!=","value":"private"}]}`,
+	} {
+		fired, err := EvaluateTrigger("predicate", spec, State{ScopeTier: "open"})
+		if fired || err == nil || err.Error() != `unknown predicate kind "attr"` {
+			t.Fatalf("spec=%s fired=%v err=%v", spec, fired, err)
+		}
 	}
 }

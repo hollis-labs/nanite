@@ -40,6 +40,10 @@ func scanAgentKnownTool(scanner interface{ Scan(...any) error }, t *AgentKnownTo
 // (agent_id, tool_name) so re-inserting the same pair replaces the row.
 // Empty AddedAt is filled by the column default via DEFAULT VALUES coalescing.
 func (s *Store) InsertAgentKnownTool(ctx context.Context, row AgentKnownTool) error {
+	return insertAgentKnownTool(ctx, s.DB, row)
+}
+
+func insertAgentKnownTool(ctx context.Context, db agentConfigDB, row AgentKnownTool) error {
 	if row.AgentID == "" {
 		return fmt.Errorf("insert agent_known_tools: agent_id is required")
 	}
@@ -53,7 +57,7 @@ func (s *Store) InsertAgentKnownTool(ctx context.Context, row AgentKnownTool) er
 	if row.TTLSeconds > 0 {
 		ttl = row.TTLSeconds
 	}
-	_, err := s.DB.ExecContext(ctx,
+	_, err := db.ExecContext(ctx,
 		`INSERT OR REPLACE INTO agent_known_tools
 		    (agent_id, tool_name, pinned, sort_order, activation_count, last_used_at,
 		     added_at, ttl_seconds, reason)

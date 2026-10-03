@@ -23,8 +23,11 @@ under a different slug.
 
 So the `.md` install path is for importing somebody else's definition, not for
 authoring your own. Authoring goes through `POST /api/agents`, where
-`AgentConfigService.Create` forces `source = "user"` regardless of what the
-caller sent.
+`AgentConfigService.CreateWithAssignments` forces `source = "user"` regardless
+of what the caller sent. Protocol/transport and composition references are
+validated before the first write. The profile, assignments, trust tier, and
+role tool/skill seeds commit in one transaction: a failed create leaves no
+agent row, and a failed edit leaves the existing profile and children unchanged.
 
 `.md` frontmatter is also the smaller surface: it carries no `roleSkills` and no
 `canExecute` (only `permissionMode: yolo`, which sets that flag as a side
@@ -38,13 +41,14 @@ checks the same table again at execution time. **Zero grants means zero tools**
 — the empty set is a deny, not a pass — so an agent with no grants reaches the
 model holding only the `always_included` escape hatches.
 
-Grants come from `role_tools` on the create request. `AgentConfigService.Create`
-hands it to `seedRoleToolsFromIngest`, which writes both an `agent_known_tools`
-row and an `agent_tools` grant per name.
+Grants come from `role_tools` on the create request. The agent config
+transaction writes an `agent_known_tools` row per name and an `agent_tools`
+grant for each name that resolves in the tool catalog. Database failures roll
+back the profile and seeds together; a missing catalog entry remains tolerated.
 
 Two things follow from how that seeder resolves names:
 
-- **A name absent from `known_tools` is skipped, silently but for a warning.**
+- **A name absent from `known_tools` receives no grant.**
   The create still succeeds; the agent is simply short a tool.
 - **`known_tools` learns MCP tools only at boot.** `SyncKnownTools` runs once
   from the service container against the live catalog. Registering an MCP

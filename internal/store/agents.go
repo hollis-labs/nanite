@@ -92,15 +92,16 @@ type AgentProfile struct {
 	ParentDispatchAllowlist string `json:"parent_dispatch_allowlist"`
 
 	// RoleTools is a JSON array of tool-name patterns this agent should be
-	// pre-seeded with at create time. The CreateAgent API handler reads
-	// this field, parses the JSON array, and inserts one agent_known_tools
+	// pre-seeded with at create time. The agent config transaction parses
+	// this field and inserts one agent_known_tools
 	// row per entry with pinned=1, reason='role_seed'. Empty "[]" means no
 	// seed. Added by FU-7a (migration 066).
 	//
 	// DEPRECATED as of Phase 1 item 04
 	// (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md): its names
 	// now also produce real agent_tools grant rows (granted_via='role_seed',
-	// internal/service/ingest.go's seedRoleToolsFromIngest), on top of the
+	// seedAgentConfig for operator writes, seedRoleToolsFromIngest for ingest),
+	// on top of the
 	// agent_known_tools seeding described above, which is unchanged.
 	// Existing agents' current values were carried into agent_tools once
 	// by this task's backfill (internal/service/known_tools_backfill.go).
@@ -109,7 +110,7 @@ type AgentProfile struct {
 	// RoleSkills is a JSON array of skill slugs this agent should be
 	// pre-seeded with at create time. AgentConfigService.Create/Update seed
 	// one agent_known_skills row per entry with pinned=1, reason='role_seed'
-	// (service.seedRoleSkillsFromIngest). Empty "[]" means no seed.
+	// (seedAgentConfig for config writes). Empty "[]" means no seed.
 	//
 	// The seeded row is a CATALOG ENTRY, not a capability grant: it carries
 	// no ApprovedContentHash, so internal/skill/gate.go still refuses
@@ -433,8 +434,12 @@ func (s *Store) GetAgentBySlug(ctx context.Context, slug string) (*AgentProfile,
 
 // GetAgent returns an agent profile by ID.
 func (s *Store) GetAgent(ctx context.Context, id string) (*AgentProfile, error) {
+	return getAgent(ctx, s.DB, id)
+}
+
+func getAgent(ctx context.Context, db agentConfigDB, id string) (*AgentProfile, error) {
 	var a AgentProfile
-	row := s.DB.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE id = ?`, id)
+	row := db.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE id = ?`, id)
 	if err := scanAgent(row, &a); err != nil {
 		return nil, fmt.Errorf("get agent %s: %w", id, err)
 	}
@@ -443,6 +448,10 @@ func (s *Store) GetAgent(ctx context.Context, id string) (*AgentProfile, error) 
 
 // CreateAgent inserts a new agent profile.
 func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
+	return createAgent(ctx, s.DB, a)
+}
+
+func createAgent(ctx context.Context, db agentConfigDB, a *AgentProfile) error {
 	if a.Slug == a2a.UserSentinel {
 		return fmt.Errorf("agent slug %q is reserved (messaging user sentinel)", a.Slug)
 	}
@@ -540,7 +549,7 @@ func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
 		return fmt.Errorf("create agent: %w", err)
 	}
 
-	_, err := s.DB.ExecContext(ctx,
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO agent_profiles (id, name, slug, avatar, system_prompt, description,
 		                              modes, default_model, default_provider,
 		                              mcp_servers, tool_permissions, can_execute, settings,
@@ -675,6 +684,10 @@ func (s *Store) DeleteAgent(ctx context.Context, slug string) error {
 // UpdateAgent updates mutable fields on an agent profile.
 // It recomputes agent_hash and bumps version if content fields changed.
 func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
+	return updateAgent(ctx, s.DB, a)
+}
+
+func updateAgent(ctx context.Context, db agentConfigDB, a *AgentProfile) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Recompute hash; bump version if content changed.
@@ -719,7 +732,7 @@ func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
 	// Wave 2 cleanup (CW-20260512-0112: DELETE WHERE source != 'internal')
 	// would wipe rows whose body was re-synced from internal/agent/builtin/
 	// profiles/*.md but whose source column never flipped.
-	_, err := s.DB.ExecContext(ctx,
+	_, err := db.ExecContext(ctx,
 		`UPDATE agent_profiles SET name = ?, slug = ?, avatar = ?, system_prompt = ?, description = ?,
 		        modes = ?, default_model = ?, default_provider = ?,
 		        mcp_servers = ?, tool_permissions = ?, can_execute = ?, settings = ?,
@@ -777,6 +790,10 @@ func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
 // enforced by the column's own FK constraint (this codebase runs with
 // PRAGMA foreign_keys=1) and surfaced here as a wrapped error.
 func (s *Store) UpdateAgentComposition(ctx context.Context, agentID string, roleID, consumerID, modelID *string) error {
+	return updateAgentComposition(ctx, s.DB, agentID, roleID, consumerID, modelID)
+}
+
+func updateAgentComposition(ctx context.Context, db agentConfigDB, agentID string, roleID, consumerID, modelID *string) error {
 	if agentID == "" {
 		return fmt.Errorf("update agent composition: agent_id is required")
 	}
@@ -799,7 +816,7 @@ func (s *Store) UpdateAgentComposition(ctx context.Context, agentID string, role
 	}
 	args = append(args, agentID)
 	query := "UPDATE agent_profiles SET " + strings.Join(sets, ", ") + " WHERE id = ?"
-	res, err := s.DB.ExecContext(ctx, query, args...)
+	res, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update agent composition: %w", err)
 	}
@@ -824,11 +841,15 @@ func (s *Store) UpdateAgentComposition(ctx context.Context, agentID string, role
 // for an invalid value (or an explicit transport set without protocol=
 // "acp") instead of a raw CHECK-constraint failure.
 func (s *Store) UpdateAgentACPConfig(ctx context.Context, agentID string, protocol, transport *string) error {
+	return updateAgentACPConfig(ctx, s.DB, agentID, protocol, transport)
+}
+
+func updateAgentACPConfig(ctx context.Context, db agentConfigDB, agentID string, protocol, transport *string) error {
 	if agentID == "" {
 		return fmt.Errorf("update agent acp config: agent_id is required")
 	}
 	if protocol != nil || transport != nil {
-		existing, err := s.GetAgent(ctx, agentID)
+		existing, err := getAgent(ctx, db, agentID)
 		if err != nil {
 			return fmt.Errorf("update agent acp config: %w", err)
 		}
@@ -859,7 +880,7 @@ func (s *Store) UpdateAgentACPConfig(ctx context.Context, agentID string, protoc
 	}
 	args = append(args, agentID)
 	query := "UPDATE agent_profiles SET " + strings.Join(sets, ", ") + " WHERE id = ?"
-	res, err := s.DB.ExecContext(ctx, query, args...)
+	res, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update agent acp config: %w", err)
 	}

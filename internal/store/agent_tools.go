@@ -17,6 +17,10 @@ import (
 // so re-granting an already-granted tool never changes its original
 // provenance tag.
 func (s *Store) GrantAgentTool(ctx context.Context, agentID, toolID, grantedVia string) error {
+	return grantAgentTool(ctx, s.DB, agentID, toolID, grantedVia)
+}
+
+func grantAgentTool(ctx context.Context, db agentConfigDB, agentID, toolID, grantedVia string) error {
 	if agentID == "" || toolID == "" {
 		return fmt.Errorf("grant agent_tools: agent_id and tool_id are required")
 	}
@@ -24,7 +28,7 @@ func (s *Store) GrantAgentTool(ctx context.Context, agentID, toolID, grantedVia 
 		grantedVia = "explicit"
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.ExecContext(ctx,
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO agent_tools (agent_id, tool_id, granted_via, created_at) VALUES (?, ?, ?, ?)
 		 ON CONFLICT(agent_id, tool_id) DO NOTHING`,
 		agentID, toolID, grantedVia, now,

@@ -91,6 +91,10 @@ func scanAgentKnownSkill(scanner interface{ Scan(...any) error }, t *AgentKnownS
 // InsertAgentKnownSkill upserts an agent_known_skills row. PK is
 // (agent_id, skill_name).
 func (s *Store) InsertAgentKnownSkill(ctx context.Context, row AgentKnownSkill) error {
+	return insertAgentKnownSkill(ctx, s.DB, row)
+}
+
+func insertAgentKnownSkill(ctx context.Context, db agentConfigDB, row AgentKnownSkill) error {
 	if row.AgentID == "" {
 		return fmt.Errorf("insert agent_known_skills: agent_id is required")
 	}
@@ -101,7 +105,7 @@ func (s *Store) InsertAgentKnownSkill(ctx context.Context, row AgentKnownSkill) 
 	if row.TTLSeconds > 0 {
 		ttl = row.TTLSeconds
 	}
-	_, err := s.DB.ExecContext(ctx,
+	_, err := db.ExecContext(ctx,
 		`INSERT OR REPLACE INTO agent_known_skills
 		    (agent_id, skill_name, pinned, activation_count, last_used_at,
 		     added_at, ttl_seconds, reason,

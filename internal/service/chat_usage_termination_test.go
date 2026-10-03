@@ -290,3 +290,56 @@ func TestTurnWithoutProviderCallDoesNotPersistUsage(t *testing.T) {
 		})
 	}
 }
+
+// A held connection must not indefinitely postpone stream cleanup or replace
+// the original failure/panic. An already-canceled turn still gets a fresh,
+// bounded bookkeeping context rather than abandoning its usage immediately.
+func TestTerminatedTurnUsageWriteTimeout(t *testing.T) {
+	for _, path := range []string{"error", "panic"} {
+		t.Run(path, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			events := []llmtypes.StreamEvent{terminationUsage("end_turn"), {Type: llmtypes.EventError, Error: "original provider failure"}}
+			if path == "panic" {
+				events = terminationToolEvents("request_tools")
+			}
+			f := newCharacterizationFixture(t, []characterizationProviderStep{{events: events, beforeReturn: cancel}}, "request_tools")
+			blocked := &timeoutUsageStore{Store: f.svc.store}
+			f.svc.store = blocked
+			var emitted []chat.StreamEvent
+			var recovered any
+			func() { defer func() { recovered = recover() }(); emitted = f.runCtx(ctx, t, "assistant-termination") }()
+			if blocked.attempts != 1 || !errors.Is(blocked.writeError, context.DeadlineExceeded) {
+				t.Fatalf("blocked write: attempts=%d err=%v; want one abandoned write at its deadline", blocked.attempts, blocked.writeError)
+			}
+			if path == "panic" {
+				if recovered != "characterizationTools.HandleRequestTools: unexpected call" {
+					t.Fatalf("original panic changed: %v", recovered)
+				}
+			} else {
+				if recovered != nil {
+					t.Fatalf("unexpected panic: %v", recovered)
+				}
+				assertTerminationError(t, emitted, "original provider failure")
+			}
+		})
+	}
+}
+
+type timeoutUsageStore struct {
+	Store
+	attempts   int
+	writeError error
+}
+
+func (s *timeoutUsageStore) RecordUsageSnapshot(ctx context.Context, _, _, _ string, _, _, _, _, _ int, _ []ledger.Row) error {
+	s.attempts++
+	// Fail immediately against the unbounded implementation instead of hanging
+	// the regression itself. With a deadline, emulate a blocked pool acquisition.
+	if _, ok := ctx.Deadline(); !ok {
+		return errors.New("usage write context has no deadline")
+	}
+	<-ctx.Done()
+	s.writeError = ctx.Err()
+	return s.writeError
+}

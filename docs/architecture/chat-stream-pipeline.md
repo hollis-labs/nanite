@@ -143,8 +143,8 @@ The CLI runtime-to-loop path sends non-blocking and drops events when its buffer
 1. Handler (`handleSendMessage` legacy, `handleHarnessV1SendTurn` harness) validates, calls `HandleMessage`, and returns 202 `{message_id, stream_url}` before generation starts.
 2. `HandleMessage` writes the user message row; `CreateStream` allocates `produce` and starts the pump goroutine; `launchGeneration` starts the generation goroutine on a context detached from the HTTP request and cancels any earlier generation on the session.
 3. Generation emits `stream_start`, then loops: provider iteration → consume → tool settle.
-4. `finalizeRun`: output filters, envelope parse, one `CreateMessage` INSERT, usage and metrics rows, then `stream_end`.
-5. Deferred on return: `close(produce)`, `ScheduleCleanup` (60 s), presence `stream_end`.
+4. `finalizeRun`: output filters, envelope parse, one `CreateMessage` INSERT, a shared best-effort usage write, metrics rows, then `stream_end`.
+5. Deferred on return or panic unwind: provider-call accounting finishes, then a guarded usage-write fallback retains calls if finalization did not attempt the write. That attempt has a three-second deadline. Next: `close(produce)`, `ScheduleCleanup` (60 s), presence `stream_end`.
 
 ### 3.2 Channels and buffers
 
@@ -395,20 +395,23 @@ grep -n 'func modelSupportsInterleavedThinking' internal/llm/anthropic/client.go
 ## Usage cost snapshots
 
 Each chat turn with an established provider call records a versioned
-`cost_snapshot` on its `token_usage` row. It retains per-provider-call `go-usage-ledger` components,
-provenance, provider/model identity, catalog price snapshots, and five component
-dollar amounts calculated by `go-modelsdev-catalog-helpers`. Prices freeze before
-dispatch for the main stream, early-stop synthesis, and envelope correction.
-Supplemental calls keep their own evidence and add positive reported counts to
-the turn totals. A dispatch failure before a stream is established adds no
-ledger call; an established stream with missing usage retains unknown components.
-Catalog refreshes never change persisted cost or past summaries.
+`cost_snapshot` on its `token_usage` row. It retains per-provider-call
+`go-usage-ledger` components, provenance, provider/model identity, catalog price
+snapshots, and five component dollar amounts calculated by
+`go-modelsdev-catalog-helpers`. Prices freeze before dispatch for the main
+stream, early-stop synthesis, and envelope correction. Supplemental calls keep
+their own evidence and add positive reported counts to the turn totals. A dispatch
+failure before a stream is established adds no ledger call; an established stream
+with missing usage retains unknown components. Catalog refreshes never change
+persisted cost or past summaries.
 
 Normal finalization and the generation coordinator's deferred fallback share one
 best-effort persistence attempt. Early termination, cancellation, and panic
 unwinding retain the calls ledgered so far in the same single turn/message row;
 provider-call accounting finishes before the fallback runs. The write uses a
-context detached from turn cancellation and never replaces the original error.
+context detached from turn cancellation with a three-second deadline, so this
+write cannot indefinitely delay stream cleanup. Write failures, including
+timeouts, are logged with session/message IDs and never replace the original error.
 A failed or ambiguous write is logged and is not retried by the fallback, avoiding
 a duplicate row. Turns that never establish a provider stream add no usage row.
 

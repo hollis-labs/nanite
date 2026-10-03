@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	costcalc "github.com/hollis-labs/go-modelsdev-catalog-helpers"
@@ -66,6 +67,9 @@ func (a *providerCallAccounting) consumeSupplemental(evt llmtypes.StreamEvent) {
 	}
 }
 
+// Bound bookkeeping before stream cleanup even when the DB pool is held.
+const usagePersistenceTimeout = 3 * time.Second
+
 // persistRunUsage is best-effort outcome bookkeeping on the generation
 // coordinator. One attempt serves normal finalization and the deferred fallback
 // on early returns/panic unwinds; failure never replaces the turn's error.
@@ -84,9 +88,11 @@ func (s *chatServiceImpl) persistRunUsage(ctx context.Context, sessionID, messag
 	if run.breakdown != nil {
 		toolInputTokens = run.breakdown.Tools
 	}
-	if err := s.store.RecordUsageSnapshot(context.WithoutCancel(ctx), sessionID, messageID, model,
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), usagePersistenceTimeout)
+	defer cancel()
+	if err := s.store.RecordUsageSnapshot(persistCtx, sessionID, messageID, model,
 		usage.InputTokens, usage.OutputTokens, toolInputTokens,
 		usage.CacheCreationTokens, usage.CacheReadTokens, run.usageCalls); err != nil {
-		slog.Warn("chat-service: failed to record token usage", "err", err)
+		slog.Warn("chat-service: failed to record token usage", "session_id", sessionID, "message_id", messageID, "err", err)
 	}
 }

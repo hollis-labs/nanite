@@ -48,22 +48,11 @@ func testReadServices(st *store.Store) ReadServices {
 	return ReadServices{Skills: testSkillReader{st}, Sessions: testSessionReader{st}, Procedures: testProcedureReader{st}, Handoffs: testHandoffService{st}}
 }
 func newTestSelfToolsTransport(st *store.Store) *SelfToolsTransport {
-	return NewSelfToolsTransport(st, testReadServices(st), testWriteServices(st))
-}
-
-type testPinWriter struct{ *store.Store }
-
-func (s testPinWriter) Create(ctx context.Context, pin store.PinnedContent) error {
-	return s.CreatePinnedContent(ctx, pin)
-}
-func (s testPinWriter) Delete(ctx context.Context, id string) error {
-	return s.DeletePinnedContent(ctx, id)
-}
-
-type testReminderWriter struct{ *store.Store }
-
-func (s testReminderWriter) Create(ctx context.Context, row store.Reminder) error {
-	return s.CreateReminder(ctx, row)
+	transport := NewSelfToolsTransport(st, testReadServices(st), testWriteServices(st))
+	if st != nil {
+		transport.WorkTrackingTools.Updater = testTodoUpdater{st}
+	}
+	return transport
 }
 
 type testScheduleWriter struct{ *store.Store }
@@ -75,10 +64,43 @@ func testWriteServices(st *store.Store) WriteServices {
 	if st == nil {
 		return WriteServices{}
 	}
-	return WriteServices{Pins: testPinWriter{st}, Reminders: testReminderWriter{st}, Schedules: testScheduleWriter{st}, Membership: st, Dispatch: st, Events: st}
+	return WriteServices{Schedules: testScheduleWriter{st}, Membership: st, Dispatch: st, Events: st}
 }
 
 // fixtureStore is only for seeding and inspecting package-local test fixtures.
 func fixtureStore(st *SelfToolsTransport) *store.Store {
 	return st.Reads.Sessions.(testSessionReader).Store
+}
+
+// Package-local transport fixture only; real service validation is exercised
+// by the MCP/HTTP transport parity suite in internal/mcpserver.
+type testTodoUpdater struct{ *store.Store }
+
+func (s testTodoUpdater) UpdateTodoFields(ctx context.Context, id string, fields TodoUpdateFields) (*store.Todo, error) {
+	row, err := s.GetTodo(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if fields.Title != nil {
+		row.Title = *fields.Title
+	}
+	if fields.Description != nil {
+		row.Description = *fields.Description
+	}
+	if fields.Status != nil {
+		row.Status = *fields.Status
+	}
+	if fields.Priority != nil {
+		row.Priority = *fields.Priority
+	}
+	if fields.Labels != nil {
+		row.Labels = *fields.Labels
+	}
+	if fields.Metadata != nil {
+		row.Metadata = *fields.Metadata
+	}
+	if err := s.UpdateTodo(ctx, row); err != nil {
+		return nil, err
+	}
+	return row, nil
 }

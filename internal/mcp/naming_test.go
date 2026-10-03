@@ -187,7 +187,7 @@ func TestManager_UniformIndex_CollisionDisambiguates(t *testing.T) {
 // the namespace defense was first added without exempting the self server.
 //
 // Post-rename (CW-20260508-0017): self-tools now use bare concept names
-// (`panel_open`, `todo_list`, `context_pin`) instead of the legacy
+// (`panel_open`, `todo_list`, `schedule_create`) instead of the legacy
 // `nanite_*` prefix; the defense is server-scoped so this test is a
 // drop-in shape match.
 func TestManager_UniformIndex_SelfServerKeepsBareName(t *testing.T) {
@@ -195,7 +195,7 @@ func TestManager_UniformIndex_SelfServerKeepsBareName(t *testing.T) {
 	tools := []Tool{
 		{Name: "panel_open"},
 		{Name: "todo_list"},
-		{Name: "context_pin"},
+		{Name: "schedule_create"},
 	}
 	if err := mgr.AddServer(SelfServerName, &fakeTieredTransport{tools: tools}, TierBuiltin); err != nil {
 		t.Fatalf("AddServer self: %v", err)
@@ -204,7 +204,7 @@ func TestManager_UniformIndex_SelfServerKeepsBareName(t *testing.T) {
 		t.Fatalf("DiscoverTools: %v", err)
 	}
 
-	for _, want := range []string{"panel_open", "todo_list", "context_pin"} {
+	for _, want := range []string{"panel_open", "todo_list", "schedule_create"} {
 		srv, orig, ok := mgr.ToolAttribution(want)
 		if !ok {
 			t.Errorf("%s: missing from uniform index — self-tools must keep bare names", want)
@@ -214,7 +214,7 @@ func TestManager_UniformIndex_SelfServerKeepsBareName(t *testing.T) {
 			t.Errorf("%s: attribution = (%q, %q), want (%q, %q)", want, srv, orig, SelfServerName, want)
 		}
 	}
-	for _, forbidden := range []string{"self_panel_open", "self_todo_list", "self_context_pin"} {
+	for _, forbidden := range []string{"self_panel_open", "self_todo_list", "self_schedule_create"} {
 		if _, _, ok := mgr.ToolAttribution(forbidden); ok {
 			t.Errorf("%s should not exist — self-server tools take the bare slot", forbidden)
 		}

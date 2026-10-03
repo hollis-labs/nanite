@@ -847,7 +847,7 @@ func cmdServeWithInitializers(
 
 	// Replace the nil-safe work-tracking collaborator once persistence and
 	// stream broadcasting are both available.
-	selfTools.WorkTrackingTools = selftools.NewWorkTrackingTools(s, s, container.Streams)
+	selfTools.WorkTrackingTools = service.NewWorkTrackingTools(s, container.Streams)
 	// Messaging + its directive-elicitation policy are one collaborator;
 	// replace the constructor's nil-safe instance once runtime services exist.
 	selfTools.MessagingTools = selftools.NewMessagingTools(container.Messaging, container.Elicitation)
@@ -899,10 +899,6 @@ func cmdServeWithInitializers(
 		return ids
 	}
 	selfTools.PresentationTools = selftools.NewPresentationTools(container.Streams, panelLookup, s)
-	// J11 (CW-20260426-0009): wire the reminder engine so RegisterTurnCount
-	// calls from reminder_set hit the correct shared Engine instance.
-	selfTools.ReminderEngine = container.ReminderEngine
-
 	// D1 (CW-20260429-0009): wire the Tesseract-backed learning recorder
 	// + recaller used by lesson_capture and the lesson-recall slot
 	// extension. memory.Service satisfies the learnings.LearningStore

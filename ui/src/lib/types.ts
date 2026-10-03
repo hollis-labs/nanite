@@ -1343,6 +1343,8 @@ export interface ContextBreakdown {
 // --- Token Usage ---
 
 export interface SessionUsageSummary {
+  reasoning_tokens?: number;
+  partial_rows?: number;
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
@@ -1354,6 +1356,7 @@ export interface SessionUsageSummary {
 }
 
 export interface ModelUsage {
+  partial_rows?: number;
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -1362,6 +1365,7 @@ export interface ModelUsage {
 }
 
 export interface GlobalUsageSummary {
+  partial_rows?: number;
   total_input: number;
   total_output: number;
   total_tokens: number;
@@ -1857,17 +1861,6 @@ export interface CLIActiveInfo {
   lastSeen: string;
 }
 
-// --- Bookmarks ---
-
-export interface Bookmark {
-  id: string;
-  message_id: string;
-  session_id: string;
-  note: string;
-  tags: string[];
-  created_at: string;
-}
-
 // --- Artifacts ---
 
 export interface Artifact {
@@ -1899,25 +1892,11 @@ export interface Document {
   updated_at: string;
 }
 
-// --- Pinned content (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
+// Shared scopes for agent work state.
 
 export type AgentStateScope = "turn" | "session" | "project";
 
-export interface PinnedContent {
-  id: string;
-  session_id?: string | null;
-  scope: AgentStateScope;
-  /** Project ID — populated when scope='project'. */
-  project_id?: string;
-  content: string;
-  agent_id: string;
-  created_at: string;
-  updated_at: string;
-}
-
-// --- Bottom drawer pinned cards (C1, CW-20260428-0012) ---
-//
-// User-pinned cards in the bottom chat drawer. Distinct from PinnedContent
+// User-pinned cards in the bottom chat drawer. Separate from durable plugin pins
 // (J11) which is the agent-context slot pin feature. card_type is one of
 // 'markdown' | 'diff' | 'image' | 'scratchpad' | 'artifact-mini' |
 // 'agent-envelope' (forward-compat strings tolerated). content_ref is a
@@ -1971,22 +1950,6 @@ export interface DynamicCardTab {
   pinned: boolean;
   /** Epoch ms. Used for stable sort order in the tab strip. */
   createdAt: number;
-}
-
-// --- Reminders (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
-
-export interface Reminder {
-  id: string;
-  session_id: string;
-  scope: AgentStateScope;
-  /** Project ID — populated when scope='project'. */
-  project_id?: string;
-  text: string;
-  /** Raw JSON trigger blob — see internal/reminders.Trigger. */
-  trigger_json: string;
-  fired_at?: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 // --- Tool Call Display ---

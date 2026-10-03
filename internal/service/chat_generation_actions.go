@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	ledger "github.com/hollis-labs/go-usage-ledger"
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
@@ -30,7 +31,6 @@ import (
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
@@ -444,6 +444,7 @@ type runState struct {
 	narrationContent strings.Builder
 	finalContent     strings.Builder
 	finalUsage       *chat.Usage
+	usageCalls       []ledger.Row
 	breakdown        *chat.TokenBreakdown
 	thinkingBlocks   []llmtypes.ThinkingBlock
 	providerOutput   *llmtypes.ContentBlock
@@ -461,6 +462,7 @@ type providerTurn struct {
 }
 
 type providerAttempt struct {
+	accounting *providerCallAccounting
 	events     <-chan llmtypes.StreamEvent
 	cancel     context.CancelFunc
 	span       trace.Span
@@ -545,7 +547,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 		// synthesis trigger left is the runaway hard circuit-breaker
 		// below.
 		if code == TerminationRunawayToolFailures {
-			s.earlyStopSynthesis(ctx, prov, model, extraSystemPrefix, slotResult, run.chatMessages, ch, &run.fullContent, &run.finalContent)
+			s.earlyStopSynthesis(ctx, run, providerName, prov, model, extraSystemPrefix, slotResult, run.chatMessages, ch, &run.fullContent, &run.finalContent)
 		}
 
 		// CW-20260417-0485: emit a typed `chat-loop-terminated` envelope
@@ -823,6 +825,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 	// second time is exactly the "matched in N places, expected to
 	// stay in sync by convention" pattern architecture/
 	// 02-agent-launching.md's runtime_kind field replaces.
+	attempt.accounting = s.startUsageCall(run, providerName, model)
 	if prov == nil {
 		provCh, err = s.driveBootSession(provCtx, sessionID, session, agent, slotResult, userContent, run.loop.iteration, providerName)
 	} else {
@@ -1042,6 +1045,12 @@ func (s *chatServiceImpl) consumeProviderIteration(
 	providerName := setup.providerName
 	slotResult := setup.slotResult
 	defer attempt.close()
+	accounting := attempt.accounting
+	if accounting == nil {
+		// Isolated consumer tests may supply a stream without a request phase.
+		accounting = s.startUsageCall(run, providerName, model)
+	}
+	defer accounting.finish()
 
 	// --- Consume provider stream ---
 	var turnContent strings.Builder
@@ -1170,6 +1179,7 @@ streamLoop:
 			}
 
 		case "usage":
+			accounting.consume(evt)
 			if evt.Usage != nil {
 				if run.finalUsage == nil {
 					run.finalUsage = &chat.Usage{}
@@ -1602,7 +1612,7 @@ func (s *chatServiceImpl) finalizeRun(
 			}
 		}
 		if hasFatal {
-			retryEnvelopes := s.retryEnvelopeCorrection(ctx, sessionID, session, prov, model, envErrors, ch)
+			retryEnvelopes := s.retryEnvelopeCorrection(ctx, run, providerName, sessionID, session, prov, model, envErrors, ch)
 			envelopes = append(envelopes, retryEnvelopes...)
 		}
 	}
@@ -1789,14 +1799,18 @@ func (s *chatServiceImpl) finalizeRun(
 	// callers don't break; removal is a follow-up.
 
 	// Record token usage.
-	if run.finalUsage != nil && (run.finalUsage.InputTokens > 0 || run.finalUsage.OutputTokens > 0) {
+	if len(run.usageCalls) > 0 {
+		usage := run.finalUsage
+		if usage == nil {
+			usage = &chat.Usage{}
+		}
 		toolInputTokens := 0
 		if run.breakdown != nil {
 			toolInputTokens = run.breakdown.Tools
 		}
-		if err := s.store.RecordUsage(persistCtx, sessionID, assistantMsgID, model,
-			run.finalUsage.InputTokens, run.finalUsage.OutputTokens, toolInputTokens,
-			run.finalUsage.CacheCreationTokens, run.finalUsage.CacheReadTokens); err != nil {
+		if err := s.store.RecordUsageSnapshot(persistCtx, sessionID, assistantMsgID, model,
+			usage.InputTokens, usage.OutputTokens, toolInputTokens,
+			usage.CacheCreationTokens, usage.CacheReadTokens, run.usageCalls); err != nil {
 			slog.Warn("chat-service: failed to record token usage", "err", err)
 		}
 	}
@@ -1844,11 +1858,15 @@ func (s *chatServiceImpl) finalizeRun(
 	lifecycle.ptyTurnSucceeded = true
 
 	// Stream end.
-	ch <- chat.StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: run.finalUsage, AgentID: agent.ID, Envelope: envelopeJSON}
+	streamUsage := run.finalUsage
+	if streamUsage != nil && streamUsage.InputTokens == 0 && streamUsage.OutputTokens == 0 {
+		streamUsage = nil
+	}
+	ch <- chat.StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: streamUsage, AgentID: agent.ID, Envelope: envelopeJSON}
 
 	// Post-response events.
-	if s.events != nil && run.finalUsage != nil {
-		s.events.EmitResponseComplete(ctx, sessionID, agent.ID, model, run.finalUsage.InputTokens, run.finalUsage.OutputTokens)
+	if s.events != nil && streamUsage != nil {
+		s.events.EmitResponseComplete(ctx, sessionID, agent.ID, model, streamUsage.InputTokens, streamUsage.OutputTokens)
 	}
 	if s.events != nil {
 		elapsed := time.Since(lifecycle.startTime).Milliseconds()
@@ -2179,43 +2197,6 @@ func (s *chatServiceImpl) prepareTurn(
 	chatMessages := slotResult.Messages
 	systemPrompt := slotResult.SystemPrompt // legacy concat — for budget enforcer + telemetry
 
-	// J11 (CW-20260426-0009): evaluate reminder triggers and inject any that
-	// fired into SlotUserContext. Uses session.MessageCount as the monotonic
-	// session turn counter (no new schema field needed). Must run before the
-	// inspector records slots so the inspector sees the injected content.
-	//
-	// CW-20260501-0002: after mutating SlotUserContext we MUST refresh
-	// slotResult.Blocks (consumed by slotBlocksFor → ChatRequest.SlotBlocks,
-	// the actual LLM payload) and slotResult.SystemPrompt (used by budget
-	// enforcer, inspector telemetry, and EmitContextAssembled). Without the
-	// refresh, EvalTurn marks the reminder fired in the DB but the agent's
-	// next turn never sees the <system-reminder> block — the bug from c121.
-	var firedReminders []store.Reminder
-	if s.reminderEngine != nil && slotResult.Window != nil {
-		if fired, evalErr := s.reminderEngine.EvalTurn(sessionID, session.MessageCount); evalErr != nil {
-			slog.Warn("chat-service: reminder engine eval failed", "session_id", sessionID, "err", evalErr)
-		} else if len(fired) > 0 {
-			firedReminders = fired
-			injection := reminders.FormatInjection(fired)
-			existing := ""
-			if slot := slotResult.Window.Slot(ctxpkg.SlotUserContext); slot != nil {
-				existing = slot.Content
-			}
-			if existing != "" {
-				slotResult.Window.SetContent(ctxpkg.SlotUserContext, existing+"\n\n"+injection)
-			} else {
-				slotResult.Window.SetContent(ctxpkg.SlotUserContext, injection)
-			}
-			// Refresh derived views so the reminder reaches the LLM. The
-			// Window mutation alone only updates the in-place slot map;
-			// Blocks (already Assembled) and SystemPrompt (already concat'd)
-			// are stale until rebuilt.
-			slotResult.Blocks = slotResult.Window.Assemble()
-			slotResult.SystemPrompt = rebuildLegacySystemPrompt(slotResult.Window)
-			systemPrompt = slotResult.SystemPrompt
-		}
-	}
-
 	// FU-30: evaluate DB-backed agent reflexes for this turn and inject any
 	// staged actions (e.g. inject_reminder) into SlotUserContext. nil-safe via
 	// the engine guard inside evaluateAndInjectReflexes.
@@ -2278,20 +2259,6 @@ func (s *chatServiceImpl) prepareTurn(
 			s.recordInspectorSlots(sessionID, inspectorTurnID, slotResult)
 		}
 		s.recordInspectorLLMMessages(sessionID, inspectorTurnID, chatMessages, systemPrompt)
-		// J11 (CW-20260426-0009): record fired reminders so the I1 dev-mode panel
-		// can surface them. No-op when no reminders fired this turn.
-		if len(firedReminders) > 0 {
-			rec := inspectsvc.RemindersRecord{}
-			for _, r := range firedReminders {
-				rec.FiredThisTurn = append(rec.FiredThisTurn, inspectsvc.ReminderItem{
-					ID:          r.ID,
-					Text:        r.Text,
-					TriggerJSON: r.TriggerJSON,
-					Scope:       r.Scope,
-				})
-			}
-			s.inspector.RecordReminders(sessionID, inspectorTurnID, rec)
-		}
 	}
 
 	// S3b — emit a tools-variant slot_changed envelope when the classifier

@@ -11,15 +11,34 @@ import (
 // NewSelfToolsTransport wires both daemon and standalone MCP tools through
 // domain services without importing service back into selftools.
 func NewSelfToolsTransport(st *store.Store) *selftools.SelfToolsTransport {
-	return selftools.NewSelfToolsTransport(st, selftools.ReadServices{
+	transport := selftools.NewSelfToolsTransport(st, selftools.ReadServices{
 		Skills:     NewSkillService(SkillServiceConfig{Skills: st}),
 		Sessions:   &selfToolSessionReader{sessions: NewSessionService(SessionServiceDeps{Sessions: st}), shortCodes: st},
 		Procedures: NewAgentCapabilitiesService(st),
 		Handoffs:   NewHandoffService(st),
 	}, selftools.WriteServices{
-		Pins: NewPinService(st), Reminders: NewReminderService(st), Schedules: NewScheduleService(st),
+		Schedules:  NewScheduleService(st),
 		Membership: NewAgentMembershipService(st, st), Dispatch: &selfToolDispatchService{store: st, reflexes: NewReflexService(st)}, Events: &selfToolEventService{store: st},
 	})
+	if st != nil {
+		transport.WorkTrackingTools.Updater = &selfToolTodoUpdater{NewTodoService(TodoServiceConfig{Todos: st, Plans: st})}
+	}
+	return transport
+}
+
+// NewWorkTrackingTools wires todo updates through the same service as HTTP.
+func NewWorkTrackingTools(st *store.Store, broadcaster selftools.WorkBroadcaster) *selftools.WorkTrackingTools {
+	tools := selftools.NewWorkTrackingTools(st, st, broadcaster)
+	if st != nil {
+		tools.Updater = &selfToolTodoUpdater{NewTodoService(TodoServiceConfig{Todos: st, Plans: st})}
+	}
+	return tools
+}
+
+type selfToolTodoUpdater struct{ todos TodoService }
+
+func (s *selfToolTodoUpdater) UpdateTodoFields(ctx context.Context, id string, fields selftools.TodoUpdateFields) (*store.Todo, error) {
+	return s.todos.UpdateTodo(ctx, id, TodoUpdates(fields))
 }
 
 type selfToolSessionReader struct {

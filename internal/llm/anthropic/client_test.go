@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/nanite/internal/usagecost"
 )
 
 func TestClient_ImplementsContracts(t *testing.T) {
@@ -352,4 +354,69 @@ func newStreamingTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 		option.WithMiddleware(rateAwareMiddleware(c.RateTracker, c.CircuitBreaker, &c.calibrated)),
 	)
 	return c
+}
+
+func TestStreamChatPreservesCumulativeAccounting(t *testing.T) {
+	c := newStreamingTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, event := range []string{
+			`{"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"usage":{"input_tokens":100,"output_tokens":0,"cache_read_input_tokens":10,"cache_creation_input_tokens":0}}}`,
+			`{"type":"message_delta","delta":{"stop_reason":null},"usage":{"output_tokens":10}}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":30,"output_tokens_details":{"thinking_tokens":20}}}`,
+			`{"type":"message_stop"}`,
+		} {
+			var named struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal([]byte(event), &named); err != nil {
+				t.Error(err)
+				return
+			}
+			_, _ = io.WriteString(w, "event: "+named.Type+"\ndata: "+event+"\n\n")
+		}
+	})
+	events, err := c.StreamChat(t.Context(), llmtypes.ChatRequest{Model: "claude-sonnet-4-5", Messages: []llmtypes.ChatMessage{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report usagecost.Report
+	var output int
+	for event := range events {
+		if event.Type == llmtypes.EventUsage {
+			next, ok := usagecost.Parse(event.Content)
+			if !ok {
+				t.Fatal("missing accounting payload")
+			}
+			report.Merge(next)
+			output += event.Usage.OutputTokens
+		}
+	}
+	normalized := report.Usage("anthropic")
+	if output != 30 || normalized.OutputTokens.Tokens != 10 || normalized.ReasoningTokens.Tokens != 20 || normalized.UncachedInputTokens.Tokens != 100 || normalized.CacheReadTokens.Tokens != 10 || report.CacheWrite == nil || *report.CacheWrite != 0 {
+		t.Fatalf("SDK cumulative accounting: output=%d report=%+v usage=%+v", output, report, normalized)
+	}
+}
+
+func TestStreamChatWithoutFinalUsageKeepsOutputUnknown(t *testing.T) {
+	c := newStreamingTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: message_start\ndata: "+`{"type":"message_start","message":{"id":"msg_partial","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"usage":{"input_tokens":100,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":20,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":20}}}}`+"\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	})
+	events, err := c.StreamChat(t.Context(), llmtypes.ChatRequest{Model: "claude-sonnet-4-5", Messages: []llmtypes.ChatMessage{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report usagecost.Report
+	for event := range events {
+		if event.Type == llmtypes.EventUsage {
+			r, ok := usagecost.Parse(event.Content)
+			if !ok {
+				t.Fatal("missing accounting payload")
+			}
+			report.Merge(r)
+		}
+	}
+	if report.Output != nil || report.Reasoning != nil || !report.CacheWriteRateUnknown {
+		t.Fatalf("provisional output became billed usage or TTL evidence lost: %+v", report)
+	}
 }

@@ -77,7 +77,7 @@ func describeTaskExecute(_ context.Context, caller describer.CallerAgent) string
 const toolListBaseDescription = "Lists registered built-in and connected MCP tools by name and one-line summary. Returns the full inventory regardless of caller — actual reachability for any specific tool is governed by agent permissions, the dev-mode gate, and project/session policy, not by this output.\n\n" +
 	"**Contract:** input `{filter?: string}` (optional case-insensitive substring matched against BOTH name and summary). Output `{tools: [{name, summary}], count}`.\n\n" +
 	"**When to use:** Browse the catalog when you're not sure which tool to reach for, or confirm a tool name exists before calling it. Use `tool_describe` next for the full schema of a specific tool, and `request_tools` to load a tool for use in the current turn.\n\n" +
-	"**Example:** `tool_list({filter:\"reminder\"}) → {tools:[{name:\"reminder_set\", summary:\"Schedule a reminder for the user at a specific time.\"}], count:1}`.\n\n" +
+	"**Example:** `tool_list({filter:\"schedule_create\"}) → {tools:[{name:\"schedule_create\", summary:\"Create an agent schedule.\"}], count:1}`.\n\n" +
 	"**See also:** `tool_describe(name=\"<tool>\")` for the full contract (schema, golden examples, related tools) of any single tool returned here."
 
 // describeToolList renders tool_list's description per caller. When the

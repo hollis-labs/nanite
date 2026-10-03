@@ -15,6 +15,7 @@ import (
 
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/nanite/internal/usagecost"
 )
 
 func reasoningContext(budget int) context.Context {
@@ -261,5 +262,32 @@ func TestResponsesCancellationClosesTransport(t *testing.T) {
 		t.Fatal("HTTP stream did not close")
 	}
 	for range events {
+	}
+}
+
+func TestResponsesPreservesAccountingPresence(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Errorf("path=%s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeResponseEvent(w, "response.completed", `{"type":"response.completed","response":{"id":"resp_accounting","status":"completed","output":[],"usage":{"input_tokens":100,"output_tokens":30,"input_tokens_details":{"cached_tokens":10,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":20}}}}`)
+	})
+	events, err := c.StreamChat(reasoningContext(8000), llmtypes.ChatRequest{Model: "gpt-5.6", Messages: []llmtypes.ChatMessage{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for event := range events {
+		if event.Type == llmtypes.EventUsage {
+			found = true
+			report, ok := usagecost.Parse(event.Content)
+			if !ok || report.Reasoning == nil || *report.Reasoning != 20 || report.CacheRead == nil || *report.CacheRead != 10 || report.CacheWrite == nil || *report.CacheWrite != 0 {
+				t.Fatalf("Responses SDK accounting: %+v", report)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no Responses accounting usage event")
 	}
 }

@@ -103,6 +103,7 @@ export function ContextBudgetWidget() {
               <span>Tokens used</span>
               <span className={`font-mono text-[11px] ${PCT_TEXT[tokenTone]}`}>
                 {formatTokens(totalTokens)} · {formatCost(cost)}
+                {(usage?.partial_rows ?? 0) > 0 ? " (partial)" : ""}
               </span>
             </div>
             <Bar pct={tokenPct} tone={tokenTone} />

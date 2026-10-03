@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	ledger "github.com/hollis-labs/go-usage-ledger"
+
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -153,7 +155,6 @@ type minimalStore struct {
 	stubToolStore
 	stubUsageStore
 	stubProjectStore
-	stubBookmarkStore
 	stubArtifactStore
 	stubSkillStore
 	stubProviderStore
@@ -162,8 +163,6 @@ type minimalStore struct {
 	stubHandoffStashStore
 	stubCompactionEventStore
 	stubEnvelopeStore
-	stubReminderStore
-	stubPinnedContentStore
 	stubSubagentRunsReader
 }
 
@@ -211,35 +210,6 @@ func (stubEnvelopeStore) CreateEnvelopeInstance(ctx context.Context, inst *store
 func (stubEnvelopeStore) GetEnvelopeInstance(ctx context.Context, id string) (*store.EnvelopeInstance, error) {
 	return nil, fmt.Errorf("not found")
 }
-
-type stubReminderStore struct{}
-
-func (stubReminderStore) CreateReminder(context.Context, store.Reminder) error { return nil }
-func (stubReminderStore) GetReminder(context.Context, string) (store.Reminder, error) {
-	return store.Reminder{}, nil
-}
-func (stubReminderStore) ListUnfiredReminders(context.Context, string) ([]store.Reminder, error) {
-	return nil, nil
-}
-func (stubReminderStore) MarkReminderFired(context.Context, string) error { return nil }
-func (stubReminderStore) UpdateReminderScope(context.Context, string, string, string) error {
-	return nil
-}
-func (stubReminderStore) DeleteReminder(context.Context, string) error { return nil }
-
-type stubPinnedContentStore struct{}
-
-func (stubPinnedContentStore) CreatePinnedContent(context.Context, store.PinnedContent) error {
-	return nil
-}
-func (stubPinnedContentStore) ListPinnedContent(context.Context, string) ([]store.PinnedContent, error) {
-	return nil, nil
-}
-func (stubPinnedContentStore) DeletePinnedContent(context.Context, string) error { return nil }
-func (stubPinnedContentStore) UpdatePinScope(context.Context, string, string, string) error {
-	return nil
-}
-func (stubPinnedContentStore) ClearSessionPins(context.Context, string) error { return nil }
 
 type stubHandoffStashStore struct{}
 
@@ -393,6 +363,10 @@ func (stubToolStore) DeleteCatalogSource(context.Context, string) error         
 
 type stubUsageStore struct{}
 
+func (stubUsageStore) RecordUsageSnapshot(context.Context, string, string, string, int, int, int, int, int, []ledger.Row) error {
+	return nil
+}
+
 func (stubUsageStore) RecordUsage(context.Context, string, string, string, int, int, int, int, int) error {
 	return nil
 }
@@ -430,21 +404,6 @@ func (stubProjectStore) GetProject(context.Context, string) (*store.Project, err
 func (stubProjectStore) CreateProject(context.Context, *store.Project) error        { return nil }
 func (stubProjectStore) UpdateProject(context.Context, *store.Project) error        { return nil }
 func (stubProjectStore) DeleteProject(context.Context, string) error                { return nil }
-
-type stubBookmarkStore struct{}
-
-func (stubBookmarkStore) ListBookmarks(context.Context, string) ([]store.Bookmark, error) {
-	return nil, nil
-}
-func (stubBookmarkStore) GetBookmark(context.Context, string) (*store.Bookmark, error) {
-	return nil, nil
-}
-func (stubBookmarkStore) GetBookmarkByMessage(context.Context, string) (*store.Bookmark, error) {
-	return nil, nil
-}
-func (stubBookmarkStore) CreateBookmark(context.Context, *store.Bookmark) error    { return nil }
-func (stubBookmarkStore) DeleteBookmark(context.Context, string) error             { return nil }
-func (stubBookmarkStore) UpdateBookmarkNote(context.Context, string, string) error { return nil }
 
 type stubArtifactStore struct{}
 

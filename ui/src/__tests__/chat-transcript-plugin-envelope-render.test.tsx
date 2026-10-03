@@ -47,15 +47,13 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---- Mock the API surface BEFORE importing the component under test ----
-// useSettings + the bookmarks query both fire as soon as ChatTranscript
+// useSettings fires as soon as ChatTranscript
 // mounts; without these stubs they hit `fetch` and litter the console.
 vi.mock("@/lib/api", () => ({
   api: {
     getSettings: vi.fn().mockResolvedValue({
       recover_mode: false,
     }),
-    listBookmarks: vi.fn().mockResolvedValue([]),
-    toggleBookmark: vi.fn().mockResolvedValue({}),
     // ChatMessage transitively pulls in usePluginSlots → api.listUISlots.
     // Stub it to keep the React Query layer quiet in test runs.
     listUISlots: vi.fn().mockResolvedValue({}),

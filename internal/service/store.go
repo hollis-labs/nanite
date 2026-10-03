@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 
+	ledger "github.com/hollis-labs/go-usage-ledger"
+
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -84,6 +86,7 @@ type ToolStore interface {
 // UsageStore provides access to token usage, execution metrics, and event logs.
 type UsageStore interface {
 	RecordUsage(ctx context.Context, sessionID, messageID, model string, inputTokens, outputTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens int) error
+	RecordUsageSnapshot(ctx context.Context, sessionID, messageID, model string, inputTokens, outputTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens int, calls []ledger.Row) error
 	GetSessionUsage(ctx context.Context, sessionID string) (*store.SessionUsageSummary, error)
 	GetUsageSummary(ctx context.Context) (*store.UsageSummary, error)
 	RecordExecutionMetrics(ctx context.Context, m *store.ExecutionMetrics) error
@@ -118,16 +121,6 @@ type ProjectStore interface {
 	CreateProject(ctx context.Context, p *store.Project) error
 	UpdateProject(ctx context.Context, p *store.Project) error
 	DeleteProject(ctx context.Context, id string) error
-}
-
-// BookmarkStore provides access to message bookmarks.
-type BookmarkStore interface {
-	ListBookmarks(ctx context.Context, sessionID string) ([]store.Bookmark, error)
-	GetBookmark(ctx context.Context, id string) (*store.Bookmark, error)
-	GetBookmarkByMessage(ctx context.Context, messageID string) (*store.Bookmark, error)
-	CreateBookmark(ctx context.Context, b *store.Bookmark) error
-	DeleteBookmark(ctx context.Context, id string) error
-	UpdateBookmarkNote(ctx context.Context, id, note string) error
 }
 
 // ArtifactStore provides access to session artifacts.
@@ -212,25 +205,6 @@ type HandoffStashStore interface {
 	GetLatestStashForSession(ctx context.Context, sessionID string) (store.HandoffStash, error)
 }
 
-// ReminderStore covers reminder persistence (J11, CW-20260426-0009; D1, CW-20260428-0014).
-type ReminderStore interface {
-	CreateReminder(ctx context.Context, r store.Reminder) error
-	GetReminder(ctx context.Context, id string) (store.Reminder, error)
-	ListUnfiredReminders(ctx context.Context, sessionID string) ([]store.Reminder, error)
-	MarkReminderFired(ctx context.Context, id string) error
-	UpdateReminderScope(ctx context.Context, id, scope, projectID string) error
-	DeleteReminder(ctx context.Context, id string) error
-}
-
-// PinnedContentStore covers pinned content persistence (J11, CW-20260426-0009; D1, CW-20260428-0014).
-type PinnedContentStore interface {
-	CreatePinnedContent(ctx context.Context, p store.PinnedContent) error
-	ListPinnedContent(ctx context.Context, sessionID string) ([]store.PinnedContent, error)
-	DeletePinnedContent(ctx context.Context, id string) error
-	UpdatePinScope(ctx context.Context, id, scope, projectID string) error
-	ClearSessionPins(ctx context.Context, sessionID string) error
-}
-
 // CompactionEventStore covers structured compaction-event persistence and
 // retrieval (P8 CompactionContract — write side CW-20260420-0027 Part C,
 // read side CW-20260420-0025 Part A disclosure injection).
@@ -268,7 +242,6 @@ type Store interface {
 	UsageStore
 	SettingsStore
 	ProjectStore
-	BookmarkStore
 	ArtifactStore
 	SkillStore
 	ProviderStore
@@ -277,8 +250,6 @@ type Store interface {
 	HandoffStashStore
 	CompactionEventStore
 	EnvelopeStore
-	ReminderStore
-	PinnedContentStore
 	SubagentRunsReader
 
 	// AgentRuntimeProviderSessionID returns the captured provider session id

@@ -3,7 +3,7 @@
 // capability flags. It is the single source of truth consumed by:
 //
 //   - internal/store.SeedProviders       — rows written to the models table
-//   - internal/store.estimateCost        — pricing for usage records
+//   - internal/usagecost.NewRow         — archived-model fallback for frozen usage prices
 //   - internal/chat.InferProvider        — model → provider routing
 //
 // Runtime code should reach for ModelByID, ProviderFor, Pricing, or

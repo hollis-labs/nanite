@@ -7,7 +7,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { WIDGET_REGISTRY } from "@/generated/plugin-widgets";
+import { WIDGET_REGISTRY } from "@/lib/builtin-widgets";
 import type { PluginUIComponent } from "@/lib/types";
 
 // ─── Props ──────────────────────────────────────────────────────────

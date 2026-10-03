@@ -1,4 +1,4 @@
-import { DEFAULT_WIDGET_ORDER, DEVELOPER_ONLY_WIDGETS } from '@/generated/plugin-widgets'
+import { DEFAULT_WIDGET_ORDER, DEVELOPER_ONLY_WIDGETS } from '@/lib/builtin-widgets'
 import type { PluginUIComponent } from '@/lib/types'
 
 /**

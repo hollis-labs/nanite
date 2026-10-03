@@ -776,14 +776,6 @@ type SelectToolsRequest struct {
 	Hints  []string `json:"hints"`
 }
 
-// --- Bookmarks ---
-
-type CreateBookmarkRequest struct {
-	MessageID string `json:"message_id"`
-	SessionID string `json:"session_id"`
-	Note      string `json:"note"`
-}
-
 // --- Plans ---
 
 type ApprovePlanRequest struct {

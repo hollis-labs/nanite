@@ -21,6 +21,7 @@ require (
 	github.com/hollis-labs/go-modelsdev v0.3.0
 	github.com/hollis-labs/go-otel v0.10.0
 	github.com/hollis-labs/go-providers v0.42.0
+	github.com/hollis-labs/go-reflexes v0.1.0
 	github.com/hollis-labs/go-sandbox v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/oklog/ulid/v2 v2.1.2
@@ -114,14 +115,19 @@ require (
 	github.com/hollis-labs/go-materialize v0.1.0
 	github.com/hollis-labs/go-mcp v0.14.1
 	github.com/hollis-labs/go-messaging v0.7.0
+	github.com/hollis-labs/go-modelsdev-catalog-helpers v0.1.0
 	github.com/hollis-labs/go-permission v0.1.0
 	github.com/hollis-labs/go-runtime-events v0.2.1
 	github.com/hollis-labs/go-safefs v0.1.0
 	github.com/hollis-labs/go-scheduler v0.3.0
 	github.com/hollis-labs/go-sqlite v0.1.0
 	github.com/hollis-labs/go-ssekit v0.2.0
+	github.com/hollis-labs/go-svcerr v0.1.0
 	github.com/hollis-labs/go-tether-client v0.8.0
 	github.com/hollis-labs/go-toolresult v0.1.0
+
+	github.com/hollis-labs/go-transportparity v0.1.0
+	github.com/hollis-labs/go-usage-ledger v0.1.0
 	github.com/hollis-labs/go-workflow v0.1.0
 	github.com/hollis-labs/go-worktree v0.1.0
 	github.com/hollis-labs/nanite/pkg/pluginapi v0.1.7

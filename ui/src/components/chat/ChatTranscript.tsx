@@ -1,9 +1,8 @@
-import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating } from "@tanstack/react-query";
 import { ArrowDown, Bot, Info, Loader2, Sparkles } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranscriptScroll } from "@/hooks/useTranscriptScroll";
-import { api } from "@/lib/api";
 import { shouldRenderStandalonePluginEnvelope } from "@/lib/envelope-lane";
 import { messageProviderFailure } from "@/lib/provider-failure";
 import type { Message } from "@/lib/types";
@@ -92,7 +91,6 @@ export function ChatTranscript({
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const modelUpdatePending = useIsMutating({ mutationKey: ["chat-model", sessionId ?? activeSessionId] }) > 0;
   const pluginEnvelopes = usePluginEnvelopes(activeSessionId);
-  const queryClient = useQueryClient();
   const [dismissedFailures, setDismissedFailures] = useState<Set<string>>(() => new Set());
   const chooseModel = () => window.dispatchEvent(new CustomEvent("open-chat-model-picker", {
     detail: { sessionId: sessionId ?? activeSessionId },
@@ -166,32 +164,6 @@ export function ChatTranscript({
   useLayoutEffect(() => {
     prevMessagesLengthRef.current = messages.length;
   }, [messages.length]);
-
-  const { data: bookmarks = [] } = useQuery({
-    queryKey: ["bookmarks", activeSessionId],
-    queryFn: () => api.listBookmarks(activeSessionId!),
-    enabled: !!activeSessionId,
-  });
-
-  const bookmarkedMessageIds = useMemo(
-    () => new Set(bookmarks.map((b) => b.message_id)),
-    [bookmarks],
-  );
-
-  const toggleBookmarkMutation = useMutation({
-    mutationFn: (messageId: string) => api.toggleBookmark(messageId, activeSessionId!),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["bookmarks", activeSessionId] });
-    },
-  });
-
-  const handleToggleBookmark = useCallback(
-    (messageId: string) => {
-      if (!activeSessionId) return;
-      toggleBookmarkMutation.mutate(messageId);
-    },
-    [activeSessionId, toggleBookmarkMutation],
-  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the stable viewport ref is read when the jump runs.
   useEffect(() => {
@@ -336,8 +308,6 @@ export function ChatTranscript({
               {showCompactionDivider && <CompactionDivider />}
               {(!failure || failure.partial) && <ChatMessage
                 message={msg}
-                isBookmarked={bookmarkedMessageIds.has(msg.id)}
-                onToggleBookmark={handleToggleBookmark}
                 {...(onSendMessage && { onSendMessage })}
                 userMessageCount={userMessageCount}
               />}

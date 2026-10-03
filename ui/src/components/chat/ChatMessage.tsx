@@ -1,4 +1,4 @@
-import { BookmarkCheck, Bot, ChevronDown, ChevronRight, User } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, User } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
   ContextMenu,
@@ -86,8 +86,6 @@ function agentColorIndex(agentId: string): number {
 
 interface ChatMessageProps {
   message: Message;
-  isBookmarked?: boolean;
-  onToggleBookmark?: (messageId: string) => void;
   onSendMessage?: (content: string) => void;
   agentName?: string;
   isMultiAgent?: boolean;
@@ -96,8 +94,6 @@ interface ChatMessageProps {
 
 export function ChatMessage({
   message,
-  isBookmarked = false,
-  onToggleBookmark,
   onSendMessage,
   agentName,
   isMultiAgent = false,
@@ -298,8 +294,6 @@ export function ChatMessage({
           {hovered && (
             <span className="text-xs text-fg-faint">{formatRelativeTime(message.created_at)}</span>
           )}
-          {/* Persistent bookmark indicator */}
-          {isBookmarked && !hovered && <BookmarkCheck className="w-3.5 h-3.5 text-warning" />}
           {/* message-header slot — plugin badges/tags */}
           {messageHeaderSlots.length > 0 &&
             messageHeaderSlots.map((entry) => {
@@ -402,9 +396,6 @@ export function ChatMessage({
         {!isUser && (
           <ContentActions
             content={displayText}
-            messageId={message.id}
-            isBookmarked={isBookmarked}
-            onToggleBookmark={onToggleBookmark}
             visible={hovered}
             className="mt-1"
           />

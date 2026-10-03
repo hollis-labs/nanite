@@ -187,17 +187,6 @@ export function ChatComposer({
           void queryClient.invalidateQueries({ queryKey: ["sessions"] });
           return;
         }
-        case "bookmark": {
-          if (!activeSessionId) return;
-          const session = await api.getSession(activeSessionId);
-          const messages = session.messages || [];
-          const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-          if (lastAssistant) {
-            await api.toggleBookmark(lastAssistant.id, activeSessionId);
-            void queryClient.invalidateQueries({ queryKey: ["bookmarks", activeSessionId] });
-          }
-          return;
-        }
         case "compact": {
           if (!activeSessionId) return;
           await api.compactSession(activeSessionId);

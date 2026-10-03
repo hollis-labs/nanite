@@ -260,7 +260,7 @@ function SessionDetailsBody({
           />
           <Fact
             label="Estimated cost"
-            value={formatCurrency(details.usage?.estimated_cost_usd)}
+            value={`${formatCurrency(details.usage?.estimated_cost_usd)}${(details.usage?.partial_rows ?? 0) > 0 ? " (partial)" : ""}`}
             mono
           />
           <Fact

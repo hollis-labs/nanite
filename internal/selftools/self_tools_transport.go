@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	svcerr "github.com/hollis-labs/go-svcerr"
+
 	"github.com/hollis-labs/agentkit/broker"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
@@ -23,7 +25,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/skill"
@@ -173,13 +174,6 @@ type SelfToolsTransport struct {
 	// Set post-construction; nil causes sandbox tool calls to error.
 	// CW-20260420-0019 (D6).
 	PythonDispatcher PythonToolDispatcher
-
-	// ReminderEngine is the deterministic trigger engine for agent-set reminders
-	// (J11, CW-20260426-0009). When set, reminder_set calls register the
-	// creation turn with the engine so turn_count triggers compute correctly.
-	// Nil-safe — without the engine, reminders are persisted but turn_count
-	// triggers fall back to turn 0 as the creation baseline.
-	ReminderEngine *reminders.Engine
 
 	// SchemaLookup is the cross-server tool-schema registry used by
 	// tool_validate (B1, CW-20260429-0006). When set, the validator can
@@ -406,12 +400,6 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	case "signal_mode":
 		return st.PresentationTools.callSignalMode(ctx, args)
 	// --- Reminders + Pin (J11, CW-20260426-0009) ---
-	case "reminder_set":
-		return st.callSetReminder(ctx, args)
-	case "context_pin":
-		return st.callPin(ctx, args)
-	case "context_unpin":
-		return st.callUnpin(ctx, args)
 	// --- Discovery / introspection (CW-20260429-0005, A1) ---
 	case "tool_describe":
 		return st.callToolDescribe(ctx, args)
@@ -577,8 +565,11 @@ func (at *AgentProfileTools) callCreateAgent(args map[string]any) (*mcp.ToolResu
 	// callUpdateAgent instead).
 	if existing, err := at.Store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug); err == nil && existing != nil {
 		if class := at.classifyAgent(existing); !class.Editable() {
-			return mcp.ErrorResult(agentNotEditableError(existing.Slug, class)), nil
+			return mcp.ServiceErrorResult(svcerr.New(svcerr.CodePermission, agentNotEditableError(existing.Slug, class)), "tool", "agent_create", "id", existing.ID, "slug", slug), nil
 		}
+		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodeConflict, "a managed agent with this slug already exists"), "tool", "agent_create", "id", existing.ID, "slug", slug), nil
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent"), "tool", "agent_create", "slug", slug), nil
 	}
 
 	a := &store.AgentProfile{
@@ -590,7 +581,7 @@ func (at *AgentProfileTools) callCreateAgent(args map[string]any) (*mcp.ToolResu
 	}
 
 	if err := at.Store.CreateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("create agent: %v", err)), nil
+		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to create agent"), "tool", "agent_create", "slug", slug), nil
 	}
 
 	out, _ := json.Marshal(selfToolAgentProfileToView(a))
@@ -628,7 +619,10 @@ func (at *AgentProfileTools) callUpdateAgent(args map[string]any) (*mcp.ToolResu
 
 	a, err := at.Store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("get agent: %v", err)), nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeNotFound, "agent not found"), "tool", "agent_update", "id", strArg(args, "id", "")), nil
+		}
+		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent"), "tool", "agent_update", "id", strArg(args, "id", "")), nil
 	}
 
 	// Task 34: reject writes against non-editable (internal/plugin/external)
@@ -637,7 +631,7 @@ func (at *AgentProfileTools) callUpdateAgent(args map[string]any) (*mcp.ToolResu
 	// REST layer. Classify the target's *current* class (source/source_ref
 	// as loaded, before any of the args below could mutate it).
 	if class := at.classifyAgent(a); !class.Editable() {
-		return mcp.ErrorResult(agentNotEditableError(a.Slug, class)), nil
+		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodePermission, agentNotEditableError(a.Slug, class)), "tool", "agent_update", "id", strArg(args, "id", "")), nil
 	}
 
 	if v, ok := args["name"].(string); ok && v != "" {
@@ -657,7 +651,7 @@ func (at *AgentProfileTools) callUpdateAgent(args map[string]any) (*mcp.ToolResu
 	}
 
 	if err := at.Store.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("update agent: %v", err)), nil
+		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to update agent"), "tool", "agent_update", "id", strArg(args, "id", "")), nil
 	}
 	return mcp.TextResult(fmt.Sprintf("Updated agent %q (id=%s)", a.Name, a.ID)), nil
 }
@@ -957,41 +951,28 @@ func (wt *WorkTrackingTools) callTodoCreate(ctx context.Context, args map[string
 }
 
 func (wt *WorkTrackingTools) callTodoUpdate(args map[string]any) (*mcp.ToolResult, error) {
-	if wt == nil || wt.Store == nil {
-		return mcp.ErrorResult("todo service not available"), nil
+	if wt == nil || wt.Updater == nil {
+		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodeUnavailable, "todo service not available"), "tool", "todo_update", "id", strArg(args, "id", "")), nil
 	}
 	id := strArg(args, "id", "")
 	if id == "" {
-		return mcp.ErrorResult("id is required"), nil
+		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodeInvalid, "id is required", svcerr.WithField("id")), "tool", "todo_update", "id", strArg(args, "id", "")), nil
 	}
-
-	t, err := wt.Store.GetTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
+	raw, marshalErr := json.Marshal(args)
+	if marshalErr != nil {
+		return mcp.ServiceErrorResult(svcerr.Wrap(marshalErr, svcerr.CodeInvalid, "invalid todo update"), "tool", "todo_update", "id", strArg(args, "id", "")), nil
+	}
+	var fields TodoUpdateFields
+	if decodeErr := json.Unmarshal(raw, &fields); decodeErr != nil {
+		return mcp.ServiceErrorResult(svcerr.Wrap(decodeErr, svcerr.CodeInvalid, "invalid todo update fields"), "tool", "todo_update", "id", strArg(args, "id", "")), nil
+	}
+	t, err := wt.Updater.UpdateTodoFields(context.TODO(), id, fields)
 	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("get todo: %v", err)), nil
+		return mcp.ServiceErrorResult(err, "tool", "todo_update", "id", strArg(args, "id", "")), nil
 	}
-
-	if v, ok := args["title"].(string); ok && v != "" {
-		t.Title = v
-	}
-	if v, ok := args["description"].(string); ok && v != "" {
-		t.Description = v
-	}
-	if v, ok := args["status"].(string); ok && v != "" {
-		t.Status = v
-	}
-	if v, ok := args["priority"].(string); ok && v != "" {
-		t.Priority = v
-	}
-	if v, ok := args["labels"].(string); ok && v != "" {
-		t.Labels = v
-	}
-
-	if err := wt.Store.UpdateTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, t); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("update todo: %v", err)), nil
-	}
-
 	wt.notifyWorkChanged()
-	return mcp.TextResult(fmt.Sprintf("Updated todo %q (id=%s, status=%s, priority=%s)", t.Title, t.ID, t.Status, t.Priority)), nil
+	out, _ := json.Marshal(selfToolTodoToView(t))
+	return mcp.TextResult(string(out)), nil
 }
 
 func (wt *WorkTrackingTools) callTodoList(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {

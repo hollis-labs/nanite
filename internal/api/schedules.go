@@ -31,9 +31,10 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
+
+	svcerr "github.com/hollis-labs/go-svcerr"
 
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -114,15 +115,15 @@ type scheduleEngineStatusResponse struct {
 
 // scheduleError writes the response for a ScheduleService error: not found
 // is 404, a rejected row or write is 400, anything else 500.
-func (a *API) scheduleError(w http.ResponseWriter, err error) {
+func (a *API) scheduleError(w http.ResponseWriter, r *http.Request, err error) {
 	var writeErr *service.ScheduleWriteError
 	switch {
 	case errors.Is(err, store.ErrAgentScheduleNotFound):
-		a.errorResp(w, http.StatusNotFound, "schedule not found")
+		a.serviceError(w, r, svcerr.Wrap(err, svcerr.CodeNotFound, "schedule not found"))
 	case errors.As(err, &writeErr):
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.serviceError(w, r, svcerr.Wrap(writeErr, svcerr.CodeInvalid, writeErr.Err.Error()))
 	default:
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, r, err)
 	}
 }
 
@@ -134,7 +135,7 @@ func (a *API) scheduleError(w http.ResponseWriter, err error) {
 func (a *API) handleListSchedules(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.Services.Schedules.List(r.Context(), r.URL.Query().Get("agent_id"))
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, r, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, agentSchedulesToView(rows))
@@ -146,7 +147,7 @@ func (a *API) handleListSchedules(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
 	row, err := a.Services.Schedules.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
-		a.scheduleError(w, err)
+		a.scheduleError(w, r, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, agentScheduleToView(row))
@@ -169,7 +170,7 @@ func (a *API) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := a.Services.Agents.Get(r.Context(), req.AgentID); err != nil {
-		a.errorResp(w, http.StatusBadRequest, fmt.Sprintf("agent_id %q does not resolve to a known agent: %v", req.AgentID, err))
+		a.serviceError(w, r, err)
 		return
 	}
 	row := store.AgentSchedule{
@@ -192,7 +193,7 @@ func (a *API) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 
 	created, err := a.Services.Schedules.Create(r.Context(), row)
 	if err != nil {
-		a.scheduleError(w, err)
+		a.scheduleError(w, r, err)
 		return
 	}
 	a.jsonResp(w, http.StatusCreated, agentScheduleToView(created))
@@ -208,7 +209,7 @@ func (a *API) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	// A missing schedule is reported before the body is read.
 	if _, err := a.Services.Schedules.Get(r.Context(), id); err != nil {
-		a.scheduleError(w, err)
+		a.scheduleError(w, r, err)
 		return
 	}
 
@@ -231,7 +232,7 @@ func (a *API) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 		JobPayload:   req.JobPayload,
 	})
 	if err != nil {
-		a.scheduleError(w, err)
+		a.scheduleError(w, r, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, agentScheduleToView(saved))
@@ -243,7 +244,7 @@ func (a *API) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := a.Services.Schedules.Delete(r.Context(), id); err != nil {
-		a.scheduleError(w, err)
+		a.scheduleError(w, r, err)
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})

@@ -42,6 +42,7 @@ type WorkTrackingTools struct {
 	Store       WorkTrackingStore
 	Projects    SessionProjectLookup
 	Broadcaster WorkBroadcaster
+	Updater     TodoUpdater
 }
 
 func NewWorkTrackingTools(store WorkTrackingStore, projects SessionProjectLookup, broadcaster WorkBroadcaster) *WorkTrackingTools {
@@ -65,4 +66,21 @@ func resolveProjectIDFromSession(lookup SessionProjectLookup, sessionID string) 
 		return ""
 	}
 	return sess.ProjectID
+}
+
+// TodoUpdateFields is the MCP update payload, excluding the addressing id.
+// Pointer fields distinguish omission from explicitly clearing a value.
+type TodoUpdateFields struct {
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	Status      *string `json:"status"`
+	Priority    *string `json:"priority"`
+	Labels      *string `json:"labels"`
+	Metadata    *string `json:"metadata"`
+}
+
+// TodoUpdater is supplied by the service composition root; selftools cannot
+// import service because service wires this transport.
+type TodoUpdater interface {
+	UpdateTodoFields(context.Context, string, TodoUpdateFields) (*store.Todo, error)
 }

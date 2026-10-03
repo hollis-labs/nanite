@@ -549,7 +549,7 @@ func (a *API) requireAgent(w http.ResponseWriter, r *http.Request) (*store.Agent
 	}
 	agent, err := a.Services.Agents.Get(r.Context(), id)
 	if err != nil {
-		a.errorResp(w, http.StatusNotFound, "agent not found")
+		a.serviceError(w, r, err)
 		return nil, false
 	}
 	return agent, true

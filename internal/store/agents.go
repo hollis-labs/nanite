@@ -234,20 +234,32 @@ type AgentProfile struct {
 // is retired as a valid value; every pre-existing row was migrated to
 // 'fresh-per-wake' in lockstep.
 func validateAgentMultiAgentFields(a *AgentProfile) error {
+	if _, err := ValidateAgentBehaviorFields(a); err != nil {
+		return err
+	}
+
+	// Protocol/Transport (TASKS/agent-host-acp/11) also carry a real
+	// DB-level CHECK (migration 134), mirrored here for the same clean-
+	// Go-error-instead-of-raw-CHECK-failure reason as runtime_kind above.
+	return ValidateAgentACPFields(a.Protocol, a.Transport)
+}
+
+// ValidateAgentBehaviorFields validates profile enums and identifies an invalid field.
+func ValidateAgentBehaviorFields(a *AgentProfile) (string, error) {
 	switch a.ActivationMode {
 	case "", "singleton", "fresh-per-wake", "concurrent":
 	default:
-		return fmt.Errorf("activation_mode %q invalid: must be 'singleton', 'fresh-per-wake', or 'concurrent'", a.ActivationMode)
+		return "activation_mode", fmt.Errorf("activation_mode %q invalid: must be 'singleton', 'fresh-per-wake', or 'concurrent'", a.ActivationMode)
 	}
 	switch a.Class {
 	case "", "advisor", "process", "template", "harness":
 	default:
-		return fmt.Errorf("class %q invalid: must be 'advisor', 'process', 'template', or 'harness'", a.Class)
+		return "class", fmt.Errorf("class %q invalid: must be 'advisor', 'process', 'template', or 'harness'", a.Class)
 	}
 	switch a.DefaultState {
 	case "", "sleeping", "active":
 	default:
-		return fmt.Errorf("default_state %q invalid: must be 'sleeping' or 'active'", a.DefaultState)
+		return "default_state", fmt.Errorf("default_state %q invalid: must be 'sleeping' or 'active'", a.DefaultState)
 	}
 	// runtime_kind also carries a real DB-level CHECK (migration 117,
 	// unlike the three enums above), but validating it here too gives API
@@ -257,23 +269,26 @@ func validateAgentMultiAgentFields(a *AgentProfile) error {
 	switch a.RuntimeKind {
 	case "", "cli", "api":
 	default:
-		return fmt.Errorf("runtime_kind %q invalid: must be 'cli' or 'api'", a.RuntimeKind)
+		return "runtime_kind", fmt.Errorf("runtime_kind %q invalid: must be 'cli' or 'api'", a.RuntimeKind)
 	}
-	// Protocol/Transport (TASKS/agent-host-acp/11) also carry a real
-	// DB-level CHECK (migration 134), mirrored here for the same clean-
-	// Go-error-instead-of-raw-CHECK-failure reason as runtime_kind above.
-	switch a.Protocol {
+	return "", nil
+}
+
+// ValidateAgentACPFields is the canonical protocol/transport validation used
+// by profile and assignment writes before SQL constraints are involved.
+func ValidateAgentACPFields(protocol, transport string) error {
+	switch protocol {
 	case "", "claude-stream-json", "codex-app-server", "opencode-native", "acp":
 	default:
-		return fmt.Errorf("protocol %q invalid: must be '', 'claude-stream-json', 'codex-app-server', 'opencode-native', or 'acp'", a.Protocol)
+		return fmt.Errorf("protocol %q invalid: must be '', 'claude-stream-json', 'codex-app-server', 'opencode-native', or 'acp'", protocol)
 	}
-	switch a.Transport {
+	switch transport {
 	case "", "stdio", "tcp":
 	default:
-		return fmt.Errorf("transport %q invalid: must be '', 'stdio', or 'tcp'", a.Transport)
+		return fmt.Errorf("transport %q invalid: must be '', 'stdio', or 'tcp'", transport)
 	}
-	if a.Transport != "" && a.Protocol != "acp" {
-		return fmt.Errorf("transport %q is only valid when protocol is 'acp' (got protocol %q)", a.Transport, a.Protocol)
+	if transport != "" && protocol != "acp" {
+		return fmt.Errorf("transport %q is only valid when protocol is 'acp' (got protocol %q)", transport, protocol)
 	}
 	return nil
 }
@@ -930,6 +945,9 @@ func (s *Store) ListSessionAgents(ctx context.Context, sessionID string) ([]Sess
 	return out, rows.Err()
 }
 
+// ErrSessionAgentNotFound denotes an absent session-agent membership.
+var ErrSessionAgentNotFound = errors.New("session agent not found")
+
 // DeleteSessionAgent removes an agent from a session.
 // Returns an error if the row does not exist.
 func (s *Store) DeleteSessionAgent(ctx context.Context, sessionID, agentID string) error {
@@ -945,7 +963,7 @@ func (s *Store) DeleteSessionAgent(ctx context.Context, sessionID, agentID strin
 		return fmt.Errorf("delete session agent rows affected: %w", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("session agent not found")
+		return ErrSessionAgentNotFound
 	}
 	return nil
 }

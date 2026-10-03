@@ -105,24 +105,52 @@ func TestSelfToolsWriteServiceWiring(t *testing.T) {
 		}
 		return result.Content[0].Text
 	}
-	call("context_pin", map[string]any{"content": "wired pin", "scope": "project"})
-	pins, err := st.ListPinnedContent(ctx, session.ID)
-	if err != nil || len(pins) != 1 || pins[0].ProjectID != project.ID || pins[0].Content != "wired pin" {
-		t.Fatalf("pins: %+v %v", pins, err)
-	}
-	call("context_unpin", map[string]any{"pin_id": pins[0].ID})
-	pins, err = st.ListPinnedContent(ctx, session.ID)
-	if err != nil || len(pins) != 0 {
-		t.Fatalf("unpin: %+v %v", pins, err)
-	}
-	call("reminder_set", map[string]any{"text": "wired reminder", "scope": "project", "trigger": map[string]any{"type": "turn_count", "n": 3}})
-	rows, err := st.ListUnfiredReminders(ctx, session.ID)
-	if err != nil || len(rows) != 1 || rows[0].ProjectID != project.ID || rows[0].Text != "wired reminder" {
-		t.Fatalf("reminders: %+v %v", rows, err)
-	}
 	call("schedule_create", map[string]any{"name": "wired schedule", "message": "wake me", "kind": "one_shot"})
 	schedules, err := st.ListAgentSchedules(ctx, agent.ID)
 	if err != nil || len(schedules) != 1 || schedules[0].NextRun == "" || !strings.HasPrefix(schedules[0].ID, "self-sched-") {
 		t.Fatalf("schedules: %+v %v", schedules, err)
+	}
+}
+
+func TestSelfToolsTodoUpdateListedAndCallable(t *testing.T) {
+	ctx := t.Context()
+	st, openErr := storetest.New(t, ctx, filepath.Join(t.TempDir(), "todo-update.db"))
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
+	transport := NewSelfToolsTransport(st)
+	transport.HideUnwired = true
+	if transport.WorkTrackingTools.Store != nil || transport.WorkTrackingTools.Updater == nil {
+		t.Fatal("expected production service-only todo updater wiring")
+	}
+	tools, err := transport.ListTools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := false
+	for _, tool := range tools {
+		if tool.Name == "todo_update" {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Fatal("todo_update missing from production transport discovery")
+	}
+	row := &store.Todo{Title: "Original", Scope: "session", ScopeID: "fixture"}
+	if createErr := st.CreateTodo(ctx, row); createErr != nil {
+		t.Fatal(createErr)
+	}
+	result, err := transport.CallTool(ctx, "todo_update", map[string]any{"id": row.ID, "title": "Updated"})
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("todo_update: %+v %v", result, err)
+	}
+	var updated store.Todo
+	if decodeErr := json.Unmarshal([]byte(result.Content[0].Text), &updated); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	persisted, err := st.GetTodo(ctx, row.ID)
+	if err != nil || updated.Title != "Updated" || persisted.Title != "Updated" {
+		t.Fatalf("update not applied: %+v %+v %v", updated, persisted, err)
 	}
 }

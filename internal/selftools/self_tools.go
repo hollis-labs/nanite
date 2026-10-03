@@ -345,19 +345,20 @@ func selfToolDefinitions() []mcp.Tool {
 		},
 		{
 			Name: "todo_update",
-			Description: "Update a todo's status, priority, title, or description. Partial update — only provided fields change.\n\n" +
+			Description: "Update a todo's title, description, status, priority, labels, or metadata. Omitted or null fields stay unchanged. An empty string clears the field, except status and priority, where an empty string is invalid. Labels must be a JSON array encoded as a string; a labels array argument is rejected.\n\n" +
 				"**When to use:** When the user marks a task done, blocks it, changes its priority, or renames it. Typical status transitions: pending → in_progress → done, or → blocked.\n\n" +
 				"**Required context:** You need the todo ID. Get it from todo_list if you don't have it.\n\n" +
-				"**Output shape:** \"Updated todo <id>\" on success.",
+				"**Output shape:** Updated todo JSON on success.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"id":          map[string]any{"type": "string", "description": "Todo ID to update"},
-					"title":       map[string]any{"type": "string", "description": "New title (optional)"},
-					"description": map[string]any{"type": "string", "description": "New description (optional)"},
-					"status":      map[string]any{"type": "string", "description": "New status: pending, in_progress, done, blocked (optional)"},
-					"priority":    map[string]any{"type": "string", "description": "New priority: low, medium, high, critical (optional)"},
-					"labels":      map[string]any{"type": "string", "description": "New labels JSON array (optional)"},
+					"title":       map[string]any{"type": []string{"string", "null"}, "description": "New title (optional)"},
+					"description": map[string]any{"type": []string{"string", "null"}, "description": "New description (optional)"},
+					"status":      map[string]any{"type": []string{"string", "null"}, "description": "New status: pending, in_progress, done, blocked (optional)"},
+					"priority":    map[string]any{"type": []string{"string", "null"}, "description": "New priority: low, medium, high, critical (optional)"},
+					"metadata":    map[string]any{"type": []string{"string", "null"}, "description": "New metadata JSON object (optional)"},
+					"labels":      map[string]any{"type": []string{"string", "null"}, "description": "New labels JSON array (optional)"},
 				},
 				"required": []string{"id"},
 			},
@@ -1062,106 +1063,6 @@ the current turn for subsequent writes.
 					},
 				},
 				"required": []string{"mode"},
-			},
-		},
-		// --- Reminders + Pin (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
-		{
-			Name: "reminder_set",
-			Description: "Set a deterministic reminder that fires at a future time or after N turns, " +
-				"injecting your reminder text into context as a <system-reminder> block.\n\n" +
-				"**When to use:** When you want to remember to do something later — e.g. 'don't forget to file a ticket', " +
-				"'review the plan after 5 turns', 'check status at 3pm'.\n\n" +
-				"**Trigger shapes (v1):**\n" +
-				"- Time-based: `{\"type\":\"time\",\"at\":\"<RFC3339>\"}` — fires when the clock reaches the given time.\n" +
-				"- Turn-count: `{\"type\":\"turn_count\",\"n\":5}` — fires N turns after this call.\n\n" +
-				"**Scope (D1, CW-20260428-0014):**\n" +
-				"- `turn`: fires within the same turn it was created in.\n" +
-				"- `session` (default): fires only in the originating session.\n" +
-				"- `project`: fires in any session of the same project; requires project_id (resolved from the current session's project when omitted).\n\n" +
-				"**When NOT to use:** Do not use for calendar events, cross-system notifications, or anything requiring " +
-				"an LLM to decide when to fire — triggers are always deterministic in v1.\n\n" +
-				"**Reminder display:** When a reminder fires, its text is injected as `<system-reminder>` into the next turn's " +
-				"context and surfaced in the I1 dev-mode inspector. There is no UI toast in v1.\n\n" +
-				"**Output shape:** `{reminder_id, scope, status: 'set', trigger}`.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"text": map[string]any{
-						"type":        "string",
-						"description": "The reminder text to inject when the trigger fires.",
-					},
-					"trigger": map[string]any{
-						"type":        "object",
-						"description": "Trigger condition. v1 shapes: {type:'time',at:'<RFC3339>'} or {type:'turn_count',n:<N>}.",
-						"properties": map[string]any{
-							"type": map[string]any{"type": "string", "enum": []string{"time", "turn_count"}},
-							"at":   map[string]any{"type": "string", "description": "RFC3339 fire time (for type=time)"},
-							"n":    map[string]any{"type": "integer", "description": "Number of turns to wait (for type=turn_count)"},
-						},
-						"required": []string{"type"},
-					},
-					"scope": map[string]any{
-						"type":        "string",
-						"enum":        []string{"turn", "session", "project"},
-						"description": "Reminder lifetime. Default: session.",
-					},
-					"project_id": map[string]any{
-						"type":        "string",
-						"description": "Project ID — required when scope=project. Auto-resolved from the current session's project when omitted.",
-					},
-				},
-				"required": []string{"text", "trigger"},
-			},
-		},
-		{
-			Name: "context_pin",
-			Description: "Pin content so the system keeps it in context across turns (session scope) or across sessions in a project (project scope). " +
-				"Pinned content rides in the SlotUserContext budget and is visible in the bottom drawer Pins tab.\n\n" +
-				"**When to use:** When you want to keep a piece of context visible throughout the conversation or across sessions — " +
-				"e.g. a key decision, a reference snippet, a current task description.\n\n" +
-				"**Scopes (D1, CW-20260428-0014):**\n" +
-				"- `turn`: ephemeral, cleared after the current turn (not stored in DB).\n" +
-				"- `session` (default): survives compaction, cleared at session end.\n" +
-				"- `project`: persists for the project; surfaces in any session of the same project. Requires project_id (resolved from the current session's project when omitted).\n\n" +
-				"**Budget:** Pinned content shares the 2000-token SlotUserContext budget. " +
-				"Oldest pins truncate first when over budget. Keep pins thin.\n\n" +
-				"**Output shape:** `{pin_id, scope, status: 'pinned'}`.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"content": map[string]any{
-						"type":        "string",
-						"description": "Content to pin. Keep thin — shares the 2000-token SlotUserContext budget.",
-					},
-					"scope": map[string]any{
-						"type":        "string",
-						"enum":        []string{"turn", "session", "project"},
-						"description": "Pin lifetime. Default: session.",
-					},
-					"project_id": map[string]any{
-						"type":        "string",
-						"description": "Project ID — required when scope=project. Auto-resolved from the current session's project when omitted.",
-					},
-				},
-				"required": []string{"content"},
-			},
-		},
-		{
-			Name: "context_unpin",
-			Description: "Remove a pinned item by ID, freeing its context budget.\n\n" +
-				"**When to use:** When pinned content is no longer needed — after the user acknowledges it, " +
-				"after the task it describes is complete, or when the budget needs freeing.\n\n" +
-				"**Required context:** pin_id from a prior context_pin call.\n\n" +
-				"**Output shape:** `{pin_id, status: 'unpinned'}`.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"pin_id": map[string]any{
-						"type":        "string",
-						"description": "Pin ID to remove (from prior context_pin call).",
-					},
-				},
-				"required": []string{"pin_id"},
 			},
 		},
 		// --- executeTask dispatch primitive (CW-20260421-0010, B3) ---

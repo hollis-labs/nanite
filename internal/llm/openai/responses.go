@@ -8,6 +8,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/llm/toolargs"
+	"github.com/hollis-labs/nanite/internal/usagecost"
 	"github.com/openai/openai-go/v3/responses"
 )
 
@@ -91,7 +92,7 @@ func (c *Client) streamResponse(ctx context.Context, req llmtypes.ChatRequest) (
 				if event.Response.IncompleteDetails.Reason == "max_output_tokens" {
 					stopReason = "max_tokens"
 				}
-				emit(llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: responseUsage(event.Response, stopReason)})
+				emit(llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: responseUsage(event.Response, stopReason), Content: usagecost.Content(usagecost.FromRaw("openai", event.Response.Usage.RawJSON()))})
 				err := responseFailure(event.Response)
 				if err == nil {
 					err = fmt.Errorf("openai: %s", event.Type)
@@ -135,7 +136,7 @@ func (c *Client) streamResponse(ctx context.Context, req llmtypes.ChatRequest) (
 						return
 					}
 				}
-				if emit(llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: responseUsage(event.Response, stopReason)}) {
+				if emit(llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: responseUsage(event.Response, stopReason), Content: usagecost.Content(usagecost.FromRaw("openai", event.Response.Usage.RawJSON()))}) {
 					emit(llmtypes.StreamEvent{Type: llmtypes.EventDone})
 				}
 				return

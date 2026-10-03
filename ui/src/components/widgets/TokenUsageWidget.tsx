@@ -78,7 +78,10 @@ export function TokenUsageWidget() {
               {formatTokens(total)}
             </WidgetRow>
             <WidgetRow label="Cost">
-              <span className="font-mono text-[11px] text-warning">{formatCost(cost)}</span>
+              <span className="font-mono text-[11px] text-warning">
+                {formatCost(cost)}
+                {(sessionUsage?.partial_rows ?? 0) > 0 ? " (partial)" : ""}
+              </span>
             </WidgetRow>
             <WidgetRow label="Messages" mono>
               {String(messages)}
@@ -99,6 +102,7 @@ export function TokenUsageWidget() {
             <WidgetRow label="Total cost">
               <span className="font-mono text-[11px] text-warning opacity-70">
                 {formatCost(globalCost)}
+                {(globalUsage?.partial_rows ?? 0) > 0 ? " (partial)" : ""}
               </span>
             </WidgetRow>
           </div>

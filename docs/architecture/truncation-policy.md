@@ -21,8 +21,9 @@ Three idioms exist. Pick by what the cut is for:
 
 A raw byte cut is acceptable only when the bytes are never rendered as text:
 
-- **Equality-only comparison.** `head1KB` in `internal/agent/reflexes/evaluator.go`
-  cuts both sides identically before comparing.
+- **Equality-only comparison.** `head1KB` in the `go-reflexes` evaluator
+  cuts both sides identically before comparing; Nanite's test-only
+  `referenceHead1KB` preserves that comparison in the qualification guard.
 - **Log and diagnostic lines.** `truncateForLog` in `internal/mcp/validate.go`,
   `trimForLog` in `internal/recover/repair.go`, the recovered-panic stack cap in
   `internal/server/server.go`, the eval scorer's `truncate`.

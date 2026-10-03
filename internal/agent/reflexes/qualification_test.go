@@ -758,3 +758,69 @@ func TestGoReflexesQualification_HostEffectsAndObservers(t *testing.T) {
 		})
 	}
 }
+
+// attr is a library extension outside Nanite's contract. These authored
+// predicates were rejected before adoption and must never gain a live effect.
+func TestGoReflexesQualification_UnsupportedAttr(t *testing.T) {
+	specs := []struct{ name, spec string }{
+		{"top-level", `{"kind":"attr","key":"region","op":"!=","value":"private"}`},
+		{"and", `{"kind":"AND","clauses":[{"kind":"scope_tier","value":"open"},{"kind":"attr","key":"region","op":"!=","value":"private"}]}`},
+		{"or", `{"kind":"OR","clauses":[{"kind":"attr","key":"region","op":"!=","value":"private"},{"kind":"scope_tier","value":"closed"}]}`},
+		{"deep", `{"kind":"AND","clauses":[{"kind":"scope_tier","value":"open"},{"kind":"OR","clauses":[{"kind":"AND","clauses":[{"kind":"attr","key":"region","op":"!=","value":"private"}]}]}]}`},
+	}
+	for _, c := range specs {
+		t.Run(c.name, func(t *testing.T) {
+			state := State{SessionID: "qual-session", AgentID: "qual-agent", AgentClass: "advisor", ScopeTier: "open"}
+			n, ne := referenceEvaluateTrigger("predicate", c.spec, state)
+			p, pe := EvaluateTrigger("predicate", c.spec, state)
+			l, le := shared.EvaluateTrigger("predicate", c.spec, qualificationState(t, state))
+			const wantError = `unknown predicate kind "attr"`
+			if n || p || ne == nil || pe == nil || ne.Error() != wantError || pe.Error() != wantError || !l || le != nil {
+				t.Fatalf("input=%s spec=%s reference=%v/%v production=%v/%v library=%v/%v", qualificationJSON(t, state), c.spec, n, ne, p, pe, l, le)
+			}
+			bad := qualificationReflex("unsupported", "dispatch_to_agent", 99)
+			bad.TriggerKind, bad.TriggerSpec, bad.ActionSpec = "predicate", c.spec, `{"agent_slug":"planner"}`
+			good := qualificationReflex("supported", "dispatch_to_agent", 10)
+			good.TriggerKind, good.TriggerSpec, good.ActionSpec = "predicate", `{"kind":"scope_tier","value":"open"}`, `{"agent_slug":"planner"}`
+			results := []qualificationResult{}
+			for _, useReference := range []bool{true, false} {
+				st := qualificationStore(t, []store.AgentReflex{bad, good})
+				ctx := context.Background()
+				resolve, emit := Resolve, EmitFirings
+				if useReference {
+					resolve, emit = referenceResolve, referenceEmitFirings
+				}
+				applied, outcomes, err := resolve(ctx, qualificationCandidates(t, st, ""), state, testExecutor(), noCooldown, st.GetReflexActionKind)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(outcomes) != 2 || outcomes[0].ReflexID != bad.ID || outcomes[0].TriggerError != wantError || outcomes[0].TriggerFired || outcomes[0].Selected {
+					t.Fatalf("rejection outcome=%+v", outcomes)
+				}
+				emit(ctx, st, nil, applied, outcomes, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, slog.Default())
+				results = append(results, qualificationPersisted(t, st, applied.Actions, outcomes, nil))
+			}
+			if qualificationJSON(t, results[0]) != qualificationJSON(t, results[1]) {
+				t.Fatalf("input=%s reference=%s production=%s", c.spec, qualificationJSON(t, results[0]), qualificationJSON(t, results[1]))
+			}
+			if results[1].Counts[bad.ID] != 0 || results[1].Counts[good.ID] != 1 {
+				t.Fatal("unsupported candidate fired or suppressed supported candidate")
+			}
+			t.Logf("host rejection preserved input=%s reference=%s production=%s; direct library accepts attr=true", c.spec, qualificationJSON(t, results[0]), qualificationJSON(t, results[1]))
+		})
+	}
+}
+
+func TestEvaluateTrigger_RejectsAttrInShortCircuitedBranches(t *testing.T) {
+	// Vocabulary rejection happens before delegation, even when another clause
+	// would otherwise short-circuit. It must not depend on current signal values.
+	for _, spec := range []string{
+		`{"kind":"OR","clauses":[{"kind":"scope_tier","value":"open"},{"kind":"attr","key":"region","op":"!=","value":"private"}]}`,
+		`{"kind":"AND","clauses":[{"kind":"scope_tier","value":"closed"},{"kind":"attr","key":"region","op":"!=","value":"private"}]}`,
+	} {
+		fired, err := EvaluateTrigger("predicate", spec, State{ScopeTier: "open"})
+		if fired || err == nil || err.Error() != `unknown predicate kind "attr"` {
+			t.Fatalf("spec=%s fired=%v err=%v", spec, fired, err)
+		}
+	}
+}

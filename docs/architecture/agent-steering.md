@@ -24,7 +24,10 @@ assembles a `State` from committed rows: the last five assistant messages with
 their token and tool-call counts, recent user messages, unread mail count, a
 50-row slice of `event_log`, and the session tick. The `EvaluateTrigger` adapter in
 `evaluator.go` passes those signals to `go-reflexes` without rewriting stored
-trigger JSON.
+trigger JSON. Nanite rejects the library's generic `attr` predicate at every
+level under `AND`/`OR` before delegation; this vocabulary guard also runs in
+`Resolve`, which preserves rejected candidates' trigger errors and outcome
+positions without firing them.
 
 Because it reads committed rows, this path is **lagged by design — it cannot see
 the turn it is running inside**. Two `State` fields, `ScopeTier` and

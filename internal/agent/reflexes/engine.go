@@ -290,11 +290,3 @@ func (e *Engine) EvaluateState(ctx context.Context, agentID, agentClass string, 
 
 	return out, nil
 }
-
-// RecentlyFired's implementation lives in recurrence.go, alongside
-// EffectiveCooldown and DefaultReflexCooldown (TASKS/reflex-taxonomy/
-// 02-recurrence-cascade.md) — kept in this file's neighborhood
-// conceptually (it started life here, unexported, as engine.go's own
-// 15-minute debounce helper) but the exported version is now shared by
-// the two dispatch_to_agent call sites too, so it moved to its own file
-// rather than staying engine.go-private.

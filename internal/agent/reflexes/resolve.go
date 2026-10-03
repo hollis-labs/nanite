@@ -195,10 +195,28 @@ func Resolve(
 			return &v, err
 		}
 	}
-	applied, considered, err := shared.Resolve(ctx, libraryReflexes(candidates), libraryState(state), libraryExecutor(exec, state), cooldown, lookup)
-	outcomes := make([]CandidateOutcome, len(considered))
+	// Resolve invokes the library evaluator directly, so apply the same host
+	// vocabulary gate here as in EvaluateTrigger. Rejected rows still occupy
+	// their original outcome positions and appear as non-fired alternatives.
+	rows := make([]shared.Reflex, 0, len(candidates))
+	indexes := make([]int, 0, len(candidates))
+	outcomes := make([]CandidateOutcome, len(candidates))
+	for i, r := range candidates {
+		// A nil executor is a caller error checked before trigger evaluation.
+		if exec != nil {
+			if err := unsupportedHostPredicate(r.TriggerKind, r.TriggerSpec); err != nil {
+				outcomes[i] = CandidateOutcome{ReflexID: r.ID, ReflexName: r.Name,
+					ActionKind: r.ActionKind, Priority: r.Priority, CreatedAt: r.CreatedAt,
+					TriggerError: err.Error()}
+				continue
+			}
+		}
+		rows = append(rows, shared.Reflex(r))
+		indexes = append(indexes, i)
+	}
+	applied, considered, err := shared.Resolve(ctx, rows, libraryState(state), libraryExecutor(exec, state), cooldown, lookup)
 	for i, oc := range considered {
-		outcomes[i] = CandidateOutcome(oc)
+		outcomes[indexes[i]] = CandidateOutcome(oc)
 	}
 	return hostApplied(applied), outcomes, err
 }

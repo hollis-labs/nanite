@@ -96,7 +96,7 @@ func TestAlwaysShipDeclarationBounds(t *testing.T) {
 	}
 	block, _, _ = alwaysShipFixture(t)
 	for _, id := range []string{"a", "b", "c", "d"} {
-		block.Registers.AlwaysShipSources = append(block.Registers.AlwaysShipSources, pluginapi.AlwaysShipSource{ID: id, Title: "Pins", ListTool: "pins_list"})
+		block.Registers.AlwaysShipSources = append(block.Registers.AlwaysShipSources, pluginapi.AlwaysShipSource{ID: id, Title: "Pins " + id, ListTool: "pins_list"})
 	}
 	if block.Validate() == nil {
 		t.Fatal("accepted excess sources")
@@ -271,5 +271,200 @@ func TestAlwaysShipResponseIsExplicitAndBounded(t *testing.T) {
 	raw, _ := json.Marshal(pluginapi.AlwaysShipResponse{Protocol: 1, Body: body})
 	if got, err := pluginapi.DecodeAlwaysShipResponse(raw, 6000); err != nil || got.Body != body {
 		t.Fatal("valid escaped maximum body failed", err)
+	}
+}
+
+func TestAlwaysShipLiteralWireContract(t *testing.T) {
+	if pluginapi.CapabilityContextAlwaysShip != "context.always_ship" || pluginapi.AlwaysShipFetchPath != "/__nanite/context/always-ship/fetch" || pluginapi.AlwaysShipProtocol != 1 || pluginapi.MaxAlwaysShipWireBytes != 65536 || pluginapi.MaxAlwaysShipBodyBytes != 6000 || pluginapi.MaxAlwaysShipSources != 4 {
+		t.Fatal("public always-ship constants changed")
+	}
+	blockJSON := `{"registers":{"always_ship_sources":[{"id":"pins","title":"Pinned Context","list_tool":"pins_list"}]}}`
+	block, err := pluginapi.DecodeBlock(json.RawMessage(blockJSON))
+	if err != nil || len(block.Registers.AlwaysShipSources) != 1 || block.Registers.AlwaysShipSources[0] != (pluginapi.AlwaysShipSource{ID: "pins", Title: "Pinned Context", ListTool: "pins_list"}) {
+		t.Fatal("literal block changed", block, err)
+	}
+	encoded, err := pluginapi.EncodeBlock(block)
+	if err != nil || string(encoded) != blockJSON {
+		t.Fatal("block wire changed", string(encoded), err)
+	}
+	encoded, err = pluginapi.EncodeBlock(pluginapi.Block{Registers: pluginapi.Registrations{ContextSources: []pluginapi.ContextSource{{ID: "ordinary"}}}})
+	if err != nil || string(encoded) != `{"registers":{"context_sources":[{"id":"ordinary"}]}}` {
+		t.Fatal("ordinary block gained always_ship_sources", string(encoded), err)
+	}
+	for _, scopeJSON := range []string{
+		`{"source_ids":["pins"],"session_ids":["session-one"],"max_bytes":6000}`,
+		`{"source_ids":["pins"],"all_sessions":true,"max_bytes":6000}`,
+	} {
+		scope, scopeErr := pluginapi.DecodeAlwaysShipScope(json.RawMessage(scopeJSON))
+		if scopeErr != nil || len(scope.SourceIDs) != 1 || scope.SourceIDs[0] != "pins" || scope.MaxBytes != 6000 || !scope.Allows("pins", "session-one") || scope.AllSessions != strings.Contains(scopeJSON, "all_sessions") || (!scope.AllSessions && (len(scope.SessionIDs) != 1 || scope.SessionIDs[0] != "session-one")) {
+			t.Fatal("literal scope changed", scope, scopeErr)
+		}
+		raw, marshalErr := json.Marshal(scope)
+		if marshalErr != nil || string(raw) != scopeJSON {
+			t.Fatal("scope wire changed", string(raw), marshalErr)
+		}
+	}
+	capJSON := `{"name":"context.always_ship","metadata":{"source_ids":["pins"],"session_ids":["session-one"],"max_bytes":6000}}`
+	var capRequest sdkprocess.CapabilityRequest
+	if err = json.Unmarshal([]byte(capJSON), &capRequest); err != nil {
+		t.Fatal(err)
+	}
+	_, _, tools := alwaysShipFixture(t)
+	if _, err = pluginapi.AlwaysShipScopeFor(block, []sdkprocess.CapabilityRequest{capRequest}, tools); err != nil {
+		t.Fatal("literal capability rejected", err)
+	}
+	requestJSON := `{"protocol":1,"source_id":"pins","session_id":"session-one","agent_id":"agent-one","intent":"review_session","max_bytes":10}`
+	request, err := pluginapi.DecodeAlwaysShipRequest(&sdkprocess.HTTPRequest{Method: "POST", Path: "/__nanite/context/always-ship/fetch", SessionID: "session-one", Body: []byte(requestJSON)})
+	wantRequest := pluginapi.AlwaysShipRequest{Protocol: 1, SourceID: "pins", SessionID: "session-one", AgentID: "agent-one", Intent: "review_session", MaxBytes: 10}
+	if err != nil || request != wantRequest {
+		t.Fatal("literal request changed", request, err)
+	}
+	raw, err := json.Marshal(request)
+	if err != nil || string(raw) != requestJSON {
+		t.Fatal("request wire changed", string(raw), err)
+	}
+	request.AgentID = ""
+	raw, err = json.Marshal(request)
+	if err != nil || string(raw) != `{"protocol":1,"source_id":"pins","session_id":"session-one","intent":"review_session","max_bytes":10}` {
+		t.Fatal("optional agent_id wire changed", string(raw), err)
+	}
+	responseJSON := `{"protocol":1,"body":"[pinned] X"}`
+	response, err := pluginapi.DecodeAlwaysShipResponse([]byte(responseJSON), 10)
+	if err != nil || response != (pluginapi.AlwaysShipResponse{Protocol: 1, Body: "[pinned] X"}) {
+		t.Fatal("literal response changed", response, err)
+	}
+	raw, err = json.Marshal(response)
+	if err != nil || string(raw) != responseJSON {
+		t.Fatal("response wire changed", string(raw), err)
+	}
+}
+
+func TestAlwaysShipTitleRules(t *testing.T) {
+	for _, title := range []string{" P", "P ", ".P", "-P", "P\nP", "P#P", "P[P", "P]P", "P`P", "P\tP", "P\x00P", "P\x01P", strings.Repeat("P", 65), "session context", "SESSION CONTEXT", "Session  Context", "Session.Context", "Session_Context", "Session-Context", "Session._- Context"} {
+		t.Run(title, func(t *testing.T) {
+			if err := (pluginapi.AlwaysShipSource{ID: "pins", Title: title, ListTool: "pins_list"}).Validate(); err == nil {
+				t.Fatal("accepted invalid or reserved title")
+			}
+		})
+	}
+	for _, title := range []string{"P", strings.Repeat("P", 64), "Session Documents", "session_documents"} {
+		if err := (pluginapi.AlwaysShipSource{ID: "pins", Title: title, ListTool: "pins_list"}).Validate(); err != nil {
+			t.Fatal("rejected allowed title", title, err)
+		}
+	}
+	for _, title := range []string{"Pinned Context", "pinned context", "PINNED CONTEXT", "Pinned  Context", "Pinned.Context", "Pinned_Context", "Pinned-Context", "Pinned._- Context"} {
+		block, _, _ := alwaysShipFixture(t)
+		block.Registers.AlwaysShipSources = append(block.Registers.AlwaysShipSources, pluginapi.AlwaysShipSource{ID: "other", Title: title, ListTool: "pins_list"})
+		if err := block.Validate(); err == nil {
+			t.Fatal("accepted ambiguous titles", title)
+		}
+	}
+	// Similar but distinct headings remain legal, and the source count reaches
+	// its independent boundary without duplicate titles masking the result.
+	block, _, _ := alwaysShipFixture(t)
+	for _, id := range []string{"a", "b", "c"} {
+		block.Registers.AlwaysShipSources = append(block.Registers.AlwaysShipSources, pluginapi.AlwaysShipSource{ID: id, Title: "Pins " + id, ListTool: "pins_list"})
+	}
+	if err := block.Validate(); err != nil {
+		t.Fatal("four distinct sources rejected", err)
+	}
+	block.Registers.AlwaysShipSources = append(block.Registers.AlwaysShipSources, pluginapi.AlwaysShipSource{ID: "d", Title: "Pins d", ListTool: "pins_list"})
+	if err := block.Validate(); err == nil {
+		t.Fatal("fifth source accepted")
+	}
+}
+
+func TestAlwaysShipScopeRuleBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*pluginapi.Block, *sdkprocess.CapabilityRequest, *[]manifest.Tool)
+	}{
+		{"invalid block", func(b *pluginapi.Block, _ *sdkprocess.CapabilityRequest, _ *[]manifest.Tool) {
+			b.Registers.AlwaysShipSources[0].Title = "#Bad"
+		}},
+		{"invalid unrelated tool", func(_ *pluginapi.Block, _ *sdkprocess.CapabilityRequest, tools *[]manifest.Tool) {
+			*tools = append(*tools, manifest.Tool{Name: "unrelated", Effect: "unknown", InputSchema: json.RawMessage(`{"type":"object"}`)})
+		}},
+		{"more scope IDs than declarations", func(_ *pluginapi.Block, capRequest *sdkprocess.CapabilityRequest, _ *[]manifest.Tool) {
+			capRequest.Metadata = json.RawMessage(`{"source_ids":["pins","extra"],"all_sessions":true,"max_bytes":6000}`)
+		}},
+		{"required list argument", func(_ *pluginapi.Block, _ *sdkprocess.CapabilityRequest, tools *[]manifest.Tool) {
+			(*tools)[0].InputSchema = json.RawMessage(`{"type":"object","properties":{"page":{"type":"integer"}},"required":["page"]}`)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			block, capRequest, tools := alwaysShipFixture(t)
+			tc.change(&block, &capRequest, &tools)
+			if _, err := pluginapi.AlwaysShipScopeFor(block, []sdkprocess.CapabilityRequest{capRequest}, tools); err == nil {
+				t.Fatal("accepted invalid scope or list tool")
+			}
+		})
+	}
+	block, capRequest, tools := alwaysShipFixture(t)
+	tools[0].InputSchema = json.RawMessage(`{"type":"object","properties":{"page":{"type":"integer"}},"required":[]}`)
+	if _, err := pluginapi.AlwaysShipScopeFor(block, []sdkprocess.CapabilityRequest{capRequest}, tools); err != nil {
+		t.Fatal("optional pagination rejected", err)
+	}
+	valid := `{"source_ids":["pins"],"all_sessions":true,"max_bytes":6000}`
+	atLimit := strings.Repeat(" ", 16384-len(valid)) + valid
+	if _, err := pluginapi.DecodeAlwaysShipScope(json.RawMessage(atLimit)); err != nil {
+		t.Fatal("16 KiB scope rejected", err)
+	}
+	if scope, err := pluginapi.DecodeAlwaysShipScope(json.RawMessage(" " + atLimit)); err == nil || len(scope.SourceIDs) != 0 || scope.MaxBytes != 0 || scope.AllSessions {
+		t.Fatal("16 KiB+1 scope accepted or nonzero on failure", scope, err)
+	}
+	for _, invalid := range []string{`{"source_ids":["pins"],"all_sessions":true,"max_bytes":0}`, `{"source_ids":["pins"],"max_bytes":6000}`, `{"source_ids":["../pins"],"all_sessions":true,"max_bytes":6000}`, `{"source_ids":["pins"],"session_ids":["../s"],"max_bytes":6000}`} {
+		scope, err := pluginapi.DecodeAlwaysShipScope(json.RawMessage(invalid))
+		if err == nil || len(scope.SourceIDs) != 0 || len(scope.SessionIDs) != 0 || scope.AllSessions || scope.MaxBytes != 0 || !strings.Contains(err.Error(), "always-ship scope") || strings.Contains(err.Error(), "context scope") {
+			t.Fatal("invalid scope returned authority or wrong diagnostic", scope, err)
+		}
+	}
+	scope, err := pluginapi.DecodeAlwaysShipScope(json.RawMessage(valid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range []string{"../s", "s/s", "s s", "s\n", "s\x00", "☃", "", strings.Repeat("s", 129)} {
+		if scope.Allows("pins", session) {
+			t.Fatal("invalid session authorized", session)
+		}
+		raw, marshalErr := json.Marshal(pluginapi.AlwaysShipRequest{Protocol: 1, SourceID: "pins", SessionID: session, Intent: "review_session", MaxBytes: 10})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		if _, err := pluginapi.DecodeAlwaysShipRequest(&sdkprocess.HTTPRequest{Method: "POST", Path: "/__nanite/context/always-ship/fetch", SessionID: session, Body: raw}); err == nil {
+			t.Fatal("invalid request session accepted", session)
+		}
+	}
+}
+
+func TestAlwaysShipHintsRejectControlsButBodyPreservesText(t *testing.T) {
+	for control := rune(0); control <= 0x9f; control++ {
+		if control > 0x1f && control < 0x7f {
+			continue
+		}
+		for _, field := range []string{"agent_id", "intent"} {
+			request := pluginapi.AlwaysShipRequest{Protocol: 1, SourceID: "pins", SessionID: "s", AgentID: "agent", Intent: "review_session", MaxBytes: 10}
+			if field == "agent_id" {
+				request.AgentID = "a" + string(control) + "b"
+			} else {
+				request.Intent = "a" + string(control) + "b"
+			}
+			raw, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pluginapi.DecodeAlwaysShipRequest(&sdkprocess.HTTPRequest{Method: "POST", Path: "/__nanite/context/always-ship/fetch", SessionID: "s", Body: raw}); err == nil {
+				t.Fatalf("accepted %s control U+%04X", field, control)
+			}
+		}
+	}
+	for _, body := range []string{"\x1b[31mred\x1b[0m", "one\r\ntwo", "\n## X"} {
+		raw, err := json.Marshal(pluginapi.AlwaysShipResponse{Protocol: 1, Body: body})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := pluginapi.DecodeAlwaysShipResponse(raw, len(body)); err != nil || got.Body != body {
+			t.Fatal("body was sanitized", got, err)
+		}
 	}
 }

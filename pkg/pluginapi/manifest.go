@@ -230,6 +230,7 @@ func (b Block) Validate() error {
 	if len(b.Registers.AlwaysShipSources) > MaxAlwaysShipSources {
 		return fmt.Errorf("nanite: too many always-ship sources")
 	}
+	alwaysShipTitles := make(map[string]bool)
 	for _, source := range b.Registers.AlwaysShipSources {
 		// One source cannot acquire both weaker and persistent placement.
 		if err := check("context-source", source.ID); err != nil {
@@ -238,6 +239,11 @@ func (b Block) Validate() error {
 		if err := source.Validate(); err != nil {
 			return err
 		}
+		title := normalizedAlwaysShipTitle(source.Title)
+		if alwaysShipTitles[title] {
+			return fmt.Errorf("nanite: duplicate always-ship title")
+		}
+		alwaysShipTitles[title] = true
 	}
 	if len(b.Registers.ReflexSeeds) > MaxReflexSeeds {
 		return fmt.Errorf("nanite: too many reflex seeds")

@@ -165,6 +165,8 @@ proxies, limits request/response sizes, and never retries an uncertain wake.
 
 ## Persistent user context
 
+Host support lands in the follow-up host PR; released hosts do not yet implement this placement.
+
 Declare `nanite.registers.always_ship_sources` and a separate required
 `context.always_ship` capability to request persistent user-context placement.
 This is stronger than `context.source`: the host places its bounded text in
@@ -185,13 +187,16 @@ The same ID cannot occur in both the ordinary and always-ship source tables.
 
 Each `AlwaysShipSource` has an ID, a bounded ASCII `title`, and `list_tool`.
 The title becomes `## Title\n`; the plugin supplies the remaining body and
-its deterministic item ordering. `Session Context` is reserved. The host also
+its deterministic item ordering. Titles normalize to lowercase with runs of spaces,
+periods, underscores and hyphens collapsed to one space for reservation and
+within-block uniqueness checks. `Session Context` and its normalized variants are reserved. The host also
 reserves titles it still renders itself, such as `Session Documents`, and
 refuses duplicate ownership before adopting core data.
 
 `list_tool` is the public name of a read-effect tool in the **same shared
 manifest**. It must support an initial inventory call in the calling session
-and describe any pagination. Call `AlwaysShipScopeFor(block, capabilities,
+without arguments (no nonempty `required` schema array) and describe any pagination.
+The read effect is self-declared; host review must show the tool and its effect. Call `AlwaysShipScopeFor(block, capabilities,
 tools)` after validating the common manifest to check that declaration. This
 capability neither grants that tool to an agent nor makes it always included.
 Normal tool grants, selection and execution checks still apply. Hosts must

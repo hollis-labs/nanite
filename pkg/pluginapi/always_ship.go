@@ -6,21 +6,37 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/hollis-labs/plugin-sdk/manifest"
 	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
 )
 
+// CapabilityContextAlwaysShip requests reviewed persistent user-context placement.
 const CapabilityContextAlwaysShip = "context.always_ship"
+
+// AlwaysShipProtocol identifies the private always-ship fetch wire format.
 const AlwaysShipProtocol = 1
+
+// MaxAlwaysShipSources bounds declared sources per owner.
 const MaxAlwaysShipSources = 4
+
+// MaxAlwaysShipBodyBytes bounds decoded body bytes across an owner's sources.
 const MaxAlwaysShipBodyBytes = 6000
+
+// MaxAlwaysShipWireBytes bounds each encoded fetch request or response.
 const MaxAlwaysShipWireBytes = 64 << 10
 
 // AlwaysShipFetchPath is a private host-to-child http/handle operation over
 // owned stdio, not a public HTTP route or a plugin-to-host authority surface.
 const AlwaysShipFetchPath = "/__nanite/context/always-ship/fetch"
+
+var alwaysShipTitleSeparators = regexp.MustCompile(`[ ._-]+`)
+
+func normalizedAlwaysShipTitle(title string) string {
+	return alwaysShipTitleSeparators.ReplaceAllString(strings.ToLower(title), " ")
+}
 
 var alwaysShipTitle = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9 ._-]{0,62}[A-Za-z0-9])?$`)
 
@@ -38,7 +54,7 @@ func (source AlwaysShipSource) Validate() error {
 	if !slug.MatchString(source.ID) || len(source.ID) > 64 {
 		return fmt.Errorf("pluginapi: invalid always-ship source ID")
 	}
-	if !alwaysShipTitle.MatchString(source.Title) || source.Title == "Session Context" {
+	if !alwaysShipTitle.MatchString(source.Title) || normalizedAlwaysShipTitle(source.Title) == "session context" {
 		return fmt.Errorf("pluginapi: invalid or reserved always-ship title")
 	}
 	if !agentToolName.MatchString(source.ListTool) {
@@ -60,9 +76,13 @@ type AlwaysShipScope struct {
 
 func (scope AlwaysShipScope) Validate() error {
 	if len(scope.SourceIDs) == 0 || len(scope.SourceIDs) > MaxAlwaysShipSources || scope.MaxBytes <= 0 || scope.MaxBytes > MaxAlwaysShipBodyBytes {
-		return fmt.Errorf("pluginapi: invalid always-ship sources or byte cap")
+		return fmt.Errorf("pluginapi: invalid always-ship scope sources or byte cap")
 	}
-	return (ContextScope{SourceIDs: scope.SourceIDs, SessionIDs: scope.SessionIDs, AllSessions: scope.AllSessions}).Validate()
+	if err := (ContextScope{SourceIDs: scope.SourceIDs, SessionIDs: scope.SessionIDs, AllSessions: scope.AllSessions}).Validate(); err != nil {
+		detail := strings.ReplaceAll(err.Error(), "context scope", "always-ship scope")
+		return fmt.Errorf("%s", strings.ReplaceAll(detail, "context ", "always-ship scope "))
+	}
+	return nil
 }
 
 func DecodeAlwaysShipScope(raw json.RawMessage) (AlwaysShipScope, error) {
@@ -73,9 +93,14 @@ func DecodeAlwaysShipScope(raw json.RawMessage) (AlwaysShipScope, error) {
 	if err := manifest.DecodeExtension(raw, &scope); err != nil {
 		return AlwaysShipScope{}, fmt.Errorf("pluginapi: invalid always-ship scope: %w", err)
 	}
-	return scope, scope.Validate()
+	if err := scope.Validate(); err != nil {
+		return AlwaysShipScope{}, err
+	}
+	return scope, nil
 }
 
+// Allows checks source membership and a valid session ID against declared scope.
+// It does not establish host approval or grant lifetime.
 func (scope AlwaysShipScope) Allows(sourceID, sessionID string) bool {
 	return slices.Contains(scope.SourceIDs, sourceID) && validQuerySession(sessionID) && (scope.AllSessions || slices.Contains(scope.SessionIDs, sessionID))
 }
@@ -84,8 +109,9 @@ func (scope AlwaysShipScope) Allows(sourceID, sessionID string) bool {
 // requests and tools from the same validated shared manifest that owns block.
 // Hosts must separately enforce accepted approval, session scope, lifetime and
 // contextual title reservations (e.g. Session Documents while core owns it).
-// A list tool must support a current-session inventory call; availability and
-// execution still depend on the caller's ordinary agent_tools grants.
+// A list tool must support a current-session inventory call without arguments.
+// Its read effect is self-declared; host review must show the tool and its effect.
+// Availability and execution still depend on ordinary agent_tools grants.
 func AlwaysShipScopeFor(block Block, requests []sdkprocess.CapabilityRequest, tools []manifest.Tool) (AlwaysShipScope, error) {
 	var scope AlwaysShipScope
 	found := false
@@ -118,16 +144,23 @@ func AlwaysShipScopeFor(block Block, requests []sdkprocess.CapabilityRequest, to
 	if err := ValidateAgentTools(tools); err != nil {
 		return AlwaysShipScope{}, err
 	}
-	toolEffects := make(map[string]string, len(tools))
+	declaredTools := make(map[string]manifest.Tool, len(tools))
 	for _, tool := range tools {
-		if _, duplicate := toolEffects[tool.Name]; duplicate {
+		if _, duplicate := declaredTools[tool.Name]; duplicate {
 			return AlwaysShipScope{}, fmt.Errorf("pluginapi: duplicate always-ship manifest tool")
 		}
-		toolEffects[tool.Name] = tool.Effect
+		declaredTools[tool.Name] = tool
 	}
 	for _, source := range block.Registers.AlwaysShipSources {
-		if !slices.Contains(scope.SourceIDs, source.ID) || toolEffects[source.ListTool] != ToolEffectRead {
+		tool, declared := declaredTools[source.ListTool]
+		if !slices.Contains(scope.SourceIDs, source.ID) || !declared || tool.Effect != ToolEffectRead {
 			return AlwaysShipScope{}, fmt.Errorf("pluginapi: always-ship source requires reviewed scope and a declared read list tool")
+		}
+		var schema struct {
+			Required []string `json:"required"`
+		}
+		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil || len(schema.Required) != 0 {
+			return AlwaysShipScope{}, fmt.Errorf("pluginapi: always-ship list tool must be callable without arguments")
 		}
 	}
 	return scope, nil
@@ -164,7 +197,7 @@ func DecodeAlwaysShipRequest(request *sdkprocess.HTTPRequest) (AlwaysShipRequest
 	if result.Protocol != AlwaysShipProtocol || !slug.MatchString(result.SourceID) || len(result.SourceID) > 64 || !validQuerySession(result.SessionID) || result.SessionID != request.SessionID || result.MaxBytes <= 0 || result.MaxBytes > MaxAlwaysShipBodyBytes {
 		return AlwaysShipRequest{}, fmt.Errorf("pluginapi: invalid always-ship request fields")
 	}
-	if len(result.AgentID) > 128 || len(result.Intent) > 64 || !utf8.ValidString(result.AgentID) || !utf8.ValidString(result.Intent) || strings.ContainsRune(result.AgentID, 0) || strings.ContainsRune(result.Intent, 0) {
+	if len(result.AgentID) > 128 || len(result.Intent) > 64 || !utf8.ValidString(result.AgentID) || !utf8.ValidString(result.Intent) || strings.ContainsFunc(result.AgentID, unicode.IsControl) || strings.ContainsFunc(result.Intent, unicode.IsControl) {
 		return AlwaysShipRequest{}, fmt.Errorf("pluginapi: invalid always-ship routing hints")
 	}
 	return result, nil
@@ -173,6 +206,8 @@ func DecodeAlwaysShipRequest(request *sdkprocess.HTTPRequest) (AlwaysShipRequest
 // DecodeAlwaysShipResponse checks the assigned body-byte allowance as well as
 // the wire ceiling. maxBytes may be zero to accept only an empty body. Unknown,
 // duplicate, missing/null body and malformed text are refused, never truncated.
+// Body rejects NUL and invalid UTF-8 only; other controls (including ESC and
+// CRLF) and headings remain intact. Reviewed body content is not sanitized.
 func DecodeAlwaysShipResponse(raw []byte, maxBytes int) (AlwaysShipResponse, error) {
 	var wire struct {
 		Protocol int     `json:"protocol"`

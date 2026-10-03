@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -34,7 +35,7 @@ func NewSQLStoreAdapter(host *store.Store, logger *slog.Logger) (*SQLStoreAdapte
 }
 
 func (a *SQLStoreAdapter) ListDueSchedules(ctx context.Context, now time.Time, limit int) ([]gosched.Schedule, error) {
-	rows, err := a.Store.ListDueSchedules(ctx, now, -1)
+	rows, err := a.SchedulerSQLStore.ListDueSchedules(ctx, now, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -46,6 +47,10 @@ func (a *SQLStoreAdapter) ListDueSchedules(ctx context.Context, now time.Time, l
 		}
 		if family == "agent" {
 			row, err := a.GetAgentSchedule(ctx, sch.ID)
+			if errors.Is(err, store.ErrAgentScheduleNotFound) {
+				a.legacy.logConversionSkip(sch.ID, "", sch.JobType, err)
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}

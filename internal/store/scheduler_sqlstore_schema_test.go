@@ -2,13 +2,12 @@ package store
 
 import (
 	"context"
-	"io/fs"
-	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/pressly/goose/v3"
+	"github.com/hollis-labs/go-scheduler/sqlstore"
 )
 
 // The additive schema is removable only while it carries no material. Once
@@ -17,23 +16,56 @@ func TestSchedulerSQLSchemaRollbackGuard(t *testing.T) {
 	for _, material := range []string{"empty", "schedule", "fire", "authority"} {
 		t.Run(material, func(t *testing.T) {
 			ctx := context.Background()
-			host, err := New(ctx, filepath.Join(t.TempDir(), "schema.db"))
-			if err != nil {
-				t.Fatal(err)
+			host := newTestStore(t)
+			provider := newMigrationProvider(t, host)
+			if _, downErr := provider.DownTo(ctx, 172); downErr != nil {
+				t.Fatal(downErr)
 			}
-			defer func() {
-				if operationErr := host.Close(ctx); operationErr != nil {
-					t.Error(operationErr)
+			agent := makeTestAgentRawSQL(t, host, "history")
+			at := time.Date(2026, 3, 4, 5, 6, 7, 123456789, time.UTC)
+			scheduleID := makeTestSchedule(t, host, agent.ID, "historical", at)
+			creation := testFireCreation(scheduleID, "legacy-fire", at)
+			creation.Fire.ID = "legacy-row-alias"
+			if ok, createErr := host.CreateScheduleFire(ctx, creation); createErr != nil || !ok {
+				t.Fatalf("history: %v %v", ok, createErr)
+			}
+			historical, historyErr := host.GetAgentSchedule(ctx, scheduleID)
+			if historyErr != nil {
+				t.Fatal(historyErr)
+			}
+			fire, fireErr := host.GetScheduleFire(ctx, "legacy-fire")
+			if fireErr != nil {
+				t.Fatal(fireErr)
+			}
+			assertHistory := func() {
+				t.Helper()
+				got, readErr := host.GetAgentSchedule(ctx, scheduleID)
+				if readErr != nil {
+					t.Fatal(readErr)
 				}
-			}()
+				gotFire, readErr := host.GetScheduleFire(ctx, "legacy-fire")
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if !reflect.DeepEqual(got, historical) || !reflect.DeepEqual(gotFire, fire) {
+					t.Fatalf("legacy rows changed: schedule=%+v fire=%+v", got, gotFire)
+				}
+			}
+			if _, upErr := provider.UpTo(ctx, 173); upErr != nil {
+				t.Fatal(upErr)
+			}
+			assertHistory()
 			shared, err := NewSchedulerSQLStore(host)
 			if err != nil {
 				t.Fatal(err)
 			}
-			at := time.Date(2026, 3, 4, 5, 6, 7, 123456789, time.UTC)
 			switch material {
 			case "schedule":
-				if operationErr := shared.CreateSchedule(ctx, gosched.Schedule{ID: "retained", NextRun: at, Enabled: true}); operationErr != nil {
+				raw, rawErr := sqlstore.New(host.DB)
+				if rawErr != nil {
+					t.Fatal(rawErr)
+				}
+				if operationErr := raw.CreateSchedule(ctx, gosched.Schedule{ID: "retained", NextRun: at, Enabled: true}); operationErr != nil {
 					t.Fatal(operationErr)
 				}
 			case "fire":
@@ -45,15 +77,7 @@ func TestSchedulerSQLSchemaRollbackGuard(t *testing.T) {
 					t.Fatal(operationErr)
 				}
 			}
-			migrations, err := fs.Sub(migrationsFS, "migrations")
-			if err != nil {
-				t.Fatal(err)
-			}
-			provider, err := goose.NewProvider(goose.DialectSQLite3, host.DB, migrations)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = provider.Down(ctx)
+			_, err = provider.DownTo(ctx, 172)
 			if material == "empty" {
 				if err != nil {
 					t.Fatal(err)
@@ -61,10 +85,20 @@ func TestSchedulerSQLSchemaRollbackGuard(t *testing.T) {
 				if _, operationErr := shared.ListSchedules(ctx); operationErr == nil {
 					t.Fatal("empty Down left lifecycle schema installed")
 				}
+				assertHistory()
+				if _, upErr := provider.UpTo(ctx, 173); upErr != nil {
+					t.Fatal(upErr)
+				}
+				assertHistory()
+				if _, replayErr := provider.UpTo(ctx, 173); replayErr != nil {
+					t.Fatal(replayErr)
+				}
+				assertHistory()
 			} else {
 				if err == nil {
 					t.Fatal("destructive Down accepted durable material")
 				}
+				assertHistory()
 				if _, err := shared.ListSchedules(ctx); err != nil {
 					t.Fatalf("failed Down damaged schema: %v", err)
 				}

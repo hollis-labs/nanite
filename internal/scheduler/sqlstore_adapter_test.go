@@ -1,11 +1,14 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -13,14 +16,28 @@ import (
 
 	gosched "github.com/hollis-labs/go-scheduler"
 	"github.com/hollis-labs/go-scheduler/conformance"
+	"github.com/hollis-labs/go-scheduler/sqlstore"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
+// Only tests expose raw seeding and a DB handle for fixtures/fault injection.
+// Production callers see only the sealed host facade.
+type testSQLAdapter struct {
+	*SQLStoreAdapter
+	raw *sqlstore.Store
+	db  *sql.DB
+}
+
+func (a *testSQLAdapter) CreateSchedule(ctx context.Context, sch gosched.Schedule) error {
+	return a.raw.CreateSchedule(ctx, sch)
+}
+func (a *testSQLAdapter) DB() *sql.DB { return a.db }
+
 var sqlstoreAt = time.Date(2026, 3, 4, 5, 6, 7, 123456789, time.UTC)
 
-func newSQLAdapter(t *testing.T, path string, projections bool) (*SQLStoreAdapter, *store.Store) {
+func newSQLAdapter(t *testing.T, path string, projections bool) (*testSQLAdapter, *store.Store) {
 	t.Helper()
 	host, err := storetest.New(t, context.Background(), path)
 	if err != nil {
@@ -36,25 +53,29 @@ func newSQLAdapter(t *testing.T, path string, projections bool) (*SQLStoreAdapte
 		t.Fatal(err)
 	}
 	if projections {
-		tx, err := host.DB.BeginTx(context.Background(), nil)
-		if err != nil {
-			t.Fatal(err)
+		tx, stepErr := host.DB.BeginTx(context.Background(), nil)
+		if stepErr != nil {
+			t.Fatal(stepErr)
 		}
-		if err := store.InstallSchedulerProjections(context.Background(), tx); err != nil {
+		if checkedErr := store.InstallSchedulerProjections(context.Background(), tx); checkedErr != nil {
 			_ = tx.Rollback()
-			t.Fatal(err)
+			t.Fatal(checkedErr)
 		}
-		if err := tx.Commit(); err != nil {
-			t.Fatal(err)
+		if checkedErr := tx.Commit(); checkedErr != nil {
+			t.Fatal(checkedErr)
 		}
 	}
-	return adapter, host
+	raw, err := sqlstore.New(host.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &testSQLAdapter{SQLStoreAdapter: adapter, raw: raw, db: host.DB}, host
 }
 
 func TestSQLStoreConformance(t *testing.T) {
 	conformance.Run(t, func(t *testing.T) gosched.Store {
 		a, _ := newSQLAdapter(t, filepath.Join(t.TempDir(), "bare.db"), false)
-		return a.Store
+		return a.raw
 	})
 }
 func TestSQLStoreAdapterConformance(t *testing.T) {
@@ -64,7 +85,7 @@ func TestSQLStoreAdapterConformance(t *testing.T) {
 	})
 }
 
-func sqlstoreClaimed(t *testing.T, a *SQLStoreAdapter, id string) gosched.Fire {
+func sqlstoreClaimed(t *testing.T, a *testSQLAdapter, id string) gosched.Fire {
 	t.Helper()
 	ctx := context.Background()
 	sch := gosched.Schedule{ID: id, Enabled: true, NextRun: sqlstoreAt, JobType: JobTypeCommandRun, Payload: []byte(`{"command":"echo","agent_id":"test"}`)}
@@ -82,7 +103,7 @@ func sqlstoreClaimed(t *testing.T, a *SQLStoreAdapter, id string) gosched.Fire {
 	return f
 }
 
-func recoverSQLFire(t *testing.T, a *SQLStoreAdapter, f gosched.Fire) gosched.Fire {
+func recoverSQLFire(t *testing.T, a *testSQLAdapter, f gosched.Fire) gosched.Fire {
 	t.Helper()
 	got, ok, err := a.ClaimFire(context.Background(), gosched.FireClaim{FireID: f.ID, ExpectedStatus: gosched.FireClaimed, ExpectedAttempt: f.Attempt, ExpectedFiredAt: f.FiredAt, ClaimedAt: f.FiredAt.Add(time.Minute), ClaimExpiresAt: f.FiredAt.Add(2 * time.Minute)})
 	if err != nil || !ok {
@@ -230,7 +251,7 @@ func sqlAgentSchedule(t *testing.T, host *store.Store, id string) store.AgentSch
 	agent := makeAdapterTestAgent(t, host, id)
 	return store.AgentSchedule{ID: id, AgentID: agent.ID, Name: id, Body: "body", ScheduleKind: store.ScheduleKindCron, ScheduleSpec: "* * * * *", NextRun: sqlstoreAt.Format(time.RFC3339Nano), JobType: JobTypeCommandRun, JobPayload: `{ "command": "echo", "agent_id": "test", "opaque": "☃" }`, FiredCount: 7}
 }
-func sqlCreateHostFire(t *testing.T, a *SQLStoreAdapter, sch gosched.Schedule, next time.Time) gosched.Fire {
+func sqlCreateHostFire(t *testing.T, a *testSQLAdapter, sch gosched.Schedule, next time.Time) gosched.Fire {
 	t.Helper()
 	f := gosched.Fire{ID: gosched.DeriveFireID(sch.ID, sch.NextRun), ScheduleID: sch.ID, ScheduledAt: sch.NextRun, NextAttemptAt: sch.NextRun, Status: gosched.FirePending, JobType: sch.JobType, Payload: sch.Payload, Retry: sch.Retry}
 	ok, err := a.CreateFire(context.Background(), gosched.FireCreation{ScheduleID: sch.ID, ExpectedNext: sch.NextRun, NextRun: next, Fire: f})
@@ -513,8 +534,8 @@ func TestSQLStoreConditionalProducerConcurrent(t *testing.T) {
 	wg.Add(2)
 	var inserted [2]bool
 	var errs [2]error
-	for i, adapter := range []*SQLStoreAdapter{a, b} {
-		go func(i int, adapter *SQLStoreAdapter) {
+	for i, adapter := range []*testSQLAdapter{a, b} {
+		go func(i int, adapter *testSQLAdapter) {
 			defer wg.Done()
 			<-start
 			candidate := row
@@ -548,22 +569,161 @@ func TestSQLStoreConditionalProducerConcurrent(t *testing.T) {
 	}
 }
 
-func TestSQLStoreReceiptJobFamilies(t *testing.T) {
-	for _, jobType := range []string{JobTypeDurableAgentWake, JobTypeAgentWorkflowRun, JobTypeCommandRun, JobTypeReflexDispatch, JobTypeLoopRunTick, JobTypeWorkflowActivation} {
-		t.Run(jobType, func(t *testing.T) {
-			a, _ := newSQLAdapter(t, filepath.Join(t.TempDir(), "family.db"), false)
-			f := sqlstoreClaimed(t, a, jobType)
-			if _, err := a.DB().ExecContext(context.Background(), `UPDATE gosched_fires SET job_type=? WHERE id=?`, jobType, f.ID); err != nil {
-				t.Fatal(err)
-			}
-			if ok, err := a.MarkScheduleFireDispatchAccepted(context.Background(), f.ID, f.Attempt, f.FiredAt, sqlstoreAt); err != nil || !ok {
-				t.Fatalf("family receipt: %v %v", ok, err)
-			}
-			runner := &RunnerAdapter{Dispatches: a}
-			err := runner.Enqueue(context.Background(), gosched.Job{FireID: f.ID, JobType: jobType})
-			if !errors.Is(err, gosched.ErrDuplicateJob) {
-				t.Fatalf("accepted family redispatched: %v", err)
-			}
-		})
+func TestSQLStoreMissingMetadataDoesNotBlockDispatchOrRecovery(t *testing.T) {
+	ctx := context.Background()
+	a, host := newSQLAdapter(t, filepath.Join(t.TempDir(), "orphan.db"), true)
+	var logs bytes.Buffer
+	a.legacy.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	orphan := sqlAgentSchedule(t, host, "orphan")
+	if err := a.InsertAgentSchedule(ctx, orphan); err != nil {
+		t.Fatal(err)
+	}
+	if err := host.DeleteAgentByID(ctx, orphan.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	valid := sqlAgentSchedule(t, host, "valid")
+	if err := a.InsertAgentSchedule(ctx, valid); err != nil {
+		t.Fatal(err)
+	}
+	recovered := sqlstoreClaimed(t, a, "recover")
+	runner := &sequenceRunner{}
+	engine := gosched.New(a.SQLStoreAdapter, runner, gosched.WithClock(&schedulerTestClock{now: sqlstoreAt.Add(2 * time.Minute)}))
+	if err := engine.TickNow(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, job := range runner.snapshot() {
+		seen[job.ScheduleID] = true
+	}
+	if !seen[valid.ID] || !seen[recovered.ScheduleID] || seen[orphan.ID] {
+		t.Fatalf("orphan blocked tick: %+v", runner.snapshot())
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := a.ListDueSchedules(ctx, sqlstoreAt.Add(2*time.Minute), 100); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if strings.Count(logs.String(), "level=WARN") != 1 || !strings.Contains(logs.String(), "schedule_id=orphan") {
+		t.Fatalf("orphan warning not deduplicated: %s", logs.String())
+	}
+}
+
+func TestSQLStoreManualFireCount(t *testing.T) {
+	ctx := context.Background()
+	a, host := newSQLAdapter(t, filepath.Join(t.TempDir(), "manual.db"), true)
+	row := sqlAgentSchedule(t, host, "manual")
+	if err := a.InsertAgentSchedule(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	manualAt := sqlstoreAt.Add(time.Second)
+	if err := a.BumpAgentScheduleFireCount(ctx, row.ID, manualAt); err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.GetAgentSchedule(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FiredCount != 8 || got.LastFiredAt != manualAt.Format(time.RFC3339Nano) {
+		t.Fatalf("manual count: %+v", got)
+	}
+	fires, err := a.ListDueFires(ctx, manualAt, 100)
+	if err != nil || len(fires) != 0 {
+		t.Fatalf("manual bump materialized fire: %+v %v", fires, err)
+	}
+	sch, _, err := a.GetSchedule(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlCreateHostFire(t, a, sch, sqlstoreAt.Add(time.Minute))
+	got, err = a.GetAgentSchedule(ctx, row.ID)
+	if err != nil || got.FiredCount != 9 {
+		t.Fatalf("projection double-counted manual bump: %+v %v", got, err)
+	}
+	before := *got
+	if _, stepErr := host.DB.ExecContext(ctx, `CREATE TRIGGER fail_manual_count BEFORE UPDATE OF fired_count ON agent_schedules BEGIN SELECT RAISE(ABORT,'injected counter failure'); END`); stepErr != nil {
+		t.Fatal(stepErr)
+	}
+	if stepErr := a.BumpAgentScheduleFireCount(ctx, row.ID, manualAt.Add(time.Second)); stepErr == nil {
+		t.Fatal("counter failure accepted")
+	}
+	after, err := a.GetAgentSchedule(ctx, row.ID)
+	if err != nil || *after != before {
+		t.Fatalf("failed bump changed state: %+v %v", after, err)
+	}
+	if _, stepErr := host.DB.ExecContext(ctx, `DROP TRIGGER fail_manual_count`); stepErr != nil {
+		t.Fatal(stepErr)
+	}
+	if _, stepErr := host.DB.ExecContext(ctx, `DELETE FROM agent_schedules WHERE id=?`, row.ID); stepErr != nil {
+		t.Fatal(stepErr)
+	}
+	sharedBefore, _, err := a.GetSchedule(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stepErr := a.BumpAgentScheduleFireCount(ctx, row.ID, manualAt.Add(time.Second)); !errors.Is(stepErr, store.ErrAgentScheduleNotFound) {
+		t.Fatalf("missing metadata bump: %v", stepErr)
+	}
+	sharedAfter, _, err := a.GetSchedule(ctx, row.ID)
+	if err != nil || !sharedAfter.LastRun.Equal(sharedBefore.LastRun) {
+		t.Fatalf("orphan bump committed lifecycle: %+v %v", sharedAfter, err)
+	}
+}
+
+func TestSQLStoreWorkflowIntoAgentCollision(t *testing.T) {
+	ctx := context.Background()
+	a, host := newSQLAdapter(t, filepath.Join(t.TempDir(), "collision.db"), true)
+	row := sqlAgentSchedule(t, host, "collision")
+	row.ID = store.WorkflowActivationScheduleID("collision")
+	if err := a.InsertAgentSchedule(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	before, _, err := a.GetSchedule(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation := store.WorkflowActivationSchedule{ScheduleID: row.ID, ActivationID: "collision", ActivationJSON: `{"kind":"timer"}`, FireAt: row.NextRun, NextRun: row.NextRun}
+	if stepErr := a.ScheduleWorkflowActivation(ctx, activation); stepErr == nil {
+		t.Fatal("workflow took an agent identity")
+	}
+	after, _, err := a.GetSchedule(ctx, row.ID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("collision changed agent lifecycle: %+v %v", after, err)
+	}
+	if _, stepErr := host.GetWorkflowActivationSchedule(ctx, row.ID); !errors.Is(stepErr, store.ErrWorkflowActivationScheduleNotFound) {
+		t.Fatalf("collision committed workflow metadata: %v", stepErr)
+	}
+	family, err := a.ScheduleFamily(ctx, row.ID)
+	if err != nil || family != "agent" {
+		t.Fatalf("collision retargeted family: %s %v", family, err)
+	}
+}
+
+func TestSQLStoreDueFiresNonPositiveLimit(t *testing.T) {
+	a, _ := newSQLAdapter(t, filepath.Join(t.TempDir(), "limit.db"), false)
+	sqlstoreClaimed(t, a, "due")
+	for _, limit := range []int{0, -1} {
+		due, err := a.ListDueFires(context.Background(), sqlstoreAt.Add(2*time.Minute), limit)
+		if err != nil || len(due) != 1 {
+			t.Fatalf("limit %d returned %+v %v", limit, due, err)
+		}
+	}
+}
+
+func TestSQLStoreFacadeSealsRawWriters(t *testing.T) {
+	a, _ := newSQLAdapter(t, filepath.Join(t.TempDir(), "sealed.db"), false)
+	for _, surface := range []any{a.SQLStoreAdapter, a.SchedulerSQLStore} {
+		if _, ok := surface.(interface{ DB() *sql.DB }); ok {
+			t.Fatalf("%T exposes raw DB", surface)
+		}
+		if _, ok := surface.(interface {
+			CreateSchedule(context.Context, gosched.Schedule) error
+		}); ok {
+			t.Fatalf("%T bypasses producer identities", surface)
+		}
+		if _, ok := surface.(interface {
+			DeleteSchedule(context.Context, string) error
+		}); ok {
+			t.Fatalf("%T bypasses history deletion restrictions", surface)
+		}
 	}
 }

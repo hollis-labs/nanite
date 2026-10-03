@@ -19,10 +19,10 @@ func schedulerTime(t time.Time) string { return t.UTC().Format(SchedulerTimeLayo
 
 // SchedulerSQLStore adds host producers and fenced dispatch receipts to the
 // released lifecycle store on the same database. Construction applies no DDL
-// and changes no authority. Callers must use the host producer methods for
-// Nanite schedules; raw CreateSchedule is only the neutral library surface.
+// and changes no authority. The reference store is private so callers cannot
+// bypass host producer identities or deletion restrictions.
 type SchedulerSQLStore struct {
-	*sqlstore.Store
+	shared *sqlstore.Store
 }
 
 func NewSchedulerSQLStore(host *Store) (*SchedulerSQLStore, error) {
@@ -33,12 +33,12 @@ func NewSchedulerSQLStore(host *Store) (*SchedulerSQLStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SchedulerSQLStore{Store: shared}, nil
+	return &SchedulerSQLStore{shared: shared}, nil
 }
 
 func (s *SchedulerSQLStore) IsScheduleFireDispatchAccepted(ctx context.Context, id string) (bool, error) {
 	var accepted bool
-	err := s.DB().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduler_dispatch_receipts WHERE fire_id = ?)`, id).Scan(&accepted)
+	err := s.shared.DB().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduler_dispatch_receipts WHERE fire_id = ?)`, id).Scan(&accepted)
 	return accepted, err
 }
 
@@ -47,7 +47,7 @@ func (s *SchedulerSQLStore) IsScheduleFireDispatchAccepted(ctx context.Context, 
 // stale owners cannot create OR update a receipt. Cancellation policy belongs
 // to the caller (RunnerAdapter uses WithoutCancel after target acceptance).
 func (s *SchedulerSQLStore) MarkScheduleFireDispatchAccepted(ctx context.Context, id string, attempt int, claimedAt, acceptedAt time.Time) (bool, error) {
-	result, err := s.DB().ExecContext(ctx, `INSERT INTO scheduler_dispatch_receipts(fire_id, accepted_at)
+	result, err := s.shared.DB().ExecContext(ctx, `INSERT INTO scheduler_dispatch_receipts(fire_id, accepted_at)
  SELECT id, ? FROM gosched_fires WHERE id = ? AND status = 'claimed' AND attempt = ? AND fired_at = ?
  ON CONFLICT(fire_id) DO UPDATE SET accepted_at = scheduler_dispatch_receipts.accepted_at`, schedulerTime(acceptedAt), id, attempt, schedulerTime(claimedAt))
 	if err != nil {
@@ -88,7 +88,10 @@ END;`)
 // ListDueFires keeps Nanite's next-attempt/scheduled-time ordering, including
 // recovered claims. Filtering and LIMIT happen in one authoritative query.
 func (s *SchedulerSQLStore) ListDueFires(ctx context.Context, now time.Time, limit int) ([]gosched.Fire, error) {
-	rows, err := s.DB().QueryContext(ctx, `SELECT id, schedule_id, scheduled_at, fired_at, claim_expires_at,
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.shared.DB().QueryContext(ctx, `SELECT id, schedule_id, scheduled_at, fired_at, claim_expires_at,
  attempt, status, next_attempt_at, last_error, retry_json, job_type, payload FROM gosched_fires
  WHERE (status IN ('pending','retrying') AND next_attempt_at <= ?) OR (status = 'claimed' AND claim_expires_at <= ?)
  ORDER BY CASE WHEN next_attempt_at = ? THEN scheduled_at ELSE next_attempt_at END, id LIMIT ?`,
@@ -151,4 +154,34 @@ func writeScheduleIdentity(ctx context.Context, tx *sql.Tx, id, family, sourceID
 		return fmt.Errorf("scheduler identity %q conflicts with %s/%s", id, gotFamily, gotSource)
 	}
 	return nil
+}
+
+// ListDueSchedules reads neutral lifecycle; the scheduler adapter adds dynamic
+// host payload resolution. Raw schedule creation/deletion is not exposed.
+func (s *SchedulerSQLStore) ListDueSchedules(ctx context.Context, now time.Time, limit int) ([]gosched.Schedule, error) {
+	return s.shared.ListDueSchedules(ctx, now, limit)
+}
+func (s *SchedulerSQLStore) GetSchedule(ctx context.Context, id string) (gosched.Schedule, bool, error) {
+	return s.shared.GetSchedule(ctx, id)
+}
+func (s *SchedulerSQLStore) GetFire(ctx context.Context, id string) (gosched.Fire, bool, error) {
+	return s.shared.GetFire(ctx, id)
+}
+func (s *SchedulerSQLStore) ListSchedules(ctx context.Context) ([]gosched.Schedule, error) {
+	return s.shared.ListSchedules(ctx)
+}
+func (s *SchedulerSQLStore) CreateFire(ctx context.Context, c gosched.FireCreation) (bool, error) {
+	return s.shared.CreateFire(ctx, c)
+}
+func (s *SchedulerSQLStore) ClaimFire(ctx context.Context, c gosched.FireClaim) (gosched.Fire, bool, error) {
+	return s.shared.ClaimFire(ctx, c)
+}
+func (s *SchedulerSQLStore) TransitionFire(ctx context.Context, c gosched.FireTransition) (bool, error) {
+	return s.shared.TransitionFire(ctx, c)
+}
+
+// DisableSchedule is the engine's required surface; host metadata is projected
+// inside the same statement by the installed cutover triggers.
+func (s *SchedulerSQLStore) DisableSchedule(ctx context.Context, id string) error {
+	return s.shared.DisableSchedule(ctx, id)
 }

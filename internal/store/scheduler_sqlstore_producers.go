@@ -49,7 +49,7 @@ func (s *SchedulerSQLStore) insertAgentSchedule(ctx context.Context, row AgentSc
 	if row.ScheduleKind == ScheduleKindCron {
 		sch.CronExpr = row.ScheduleSpec
 	}
-	tx, err := s.DB().BeginTx(ctx, nil)
+	tx, err := s.shared.DB().BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
@@ -94,7 +94,7 @@ func (s *SchedulerSQLStore) insertAgentSchedule(ctx context.Context, row AgentSc
 func (s *SchedulerSQLStore) GetAgentSchedule(ctx context.Context, id string) (*AgentSchedule, error) {
 	var row AgentSchedule
 	// A single statement observes metadata and lifecycle from one SQLite snapshot.
-	err := scanAgentSchedule(s.DB().QueryRowContext(ctx, `SELECT a.id,a.agent_id,COALESCE(a.session_id,''),a.name,a.schedule_kind,
+	err := scanAgentSchedule(s.shared.DB().QueryRowContext(ctx, `SELECT a.id,a.agent_id,COALESCE(a.session_id,''),a.name,a.schedule_kind,
  a.schedule_spec,a.body,a.priority,a.status,COALESCE(a.expires_at,''),a.fired_count,g.last_run,
  a.created_at,a.created_by,a.max_retries,a.on_fail,g.next_run,a.job_type,a.job_payload
  FROM agent_schedules a JOIN scheduler_schedule_identity i ON i.family='agent' AND i.source_id=a.id
@@ -131,7 +131,7 @@ func (s *SchedulerSQLStore) UpdateAgentScheduleStatus(ctx context.Context, id, s
 	default:
 		return fmt.Errorf("invalid schedule status %q", status)
 	}
-	tx, err := s.DB().BeginTx(ctx, nil)
+	tx, err := s.shared.DB().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -157,7 +157,7 @@ func (s *SchedulerSQLStore) UpdateAgentScheduleStatus(ctx context.Context, id, s
 // DeleteAgentSchedule preserves Nanite's restriction against deleting history,
 // including new shared fires. Receipts and fire identities are never purged.
 func (s *SchedulerSQLStore) DeleteAgentSchedule(ctx context.Context, id string) error {
-	tx, err := s.DB().BeginTx(ctx, nil)
+	tx, err := s.shared.DB().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -206,7 +206,7 @@ func (s *SchedulerSQLStore) ScheduleWorkflowActivation(ctx context.Context, row 
 	}
 	row.UpdatedAt = row.CreatedAt
 	row.Status = "active"
-	tx, err := s.DB().BeginTx(ctx, nil)
+	tx, err := s.shared.DB().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -259,7 +259,7 @@ func (s *SchedulerSQLStore) CancelWorkflowActivation(ctx context.Context, activa
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	tx, err := s.DB().BeginTx(ctx, nil)
+	tx, err := s.shared.DB().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func (s *SchedulerSQLStore) CancelWorkflowActivation(ctx context.Context, activa
 // BumpAgentScheduleFireCount preserves the manual RunDue behavior. It does not
 // create a durable fire or receipt and is not an automatic engine claim.
 func (s *SchedulerSQLStore) BumpAgentScheduleFireCount(ctx context.Context, id string, at time.Time) error {
-	tx, err := s.DB().BeginTx(ctx, nil)
+	tx, err := s.shared.DB().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -303,8 +303,16 @@ func (s *SchedulerSQLStore) BumpAgentScheduleFireCount(ctx context.Context, id s
 	if n == 0 {
 		return ErrAgentScheduleNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_schedules SET fired_count=fired_count+1 WHERE id=?`, id); err != nil {
+	result, err = tx.ExecContext(ctx, `UPDATE agent_schedules SET fired_count=fired_count+1 WHERE id=?`, id)
+	if err != nil {
 		return err
+	}
+	n, err = result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrAgentScheduleNotFound
 	}
 	return tx.Commit()
 }
@@ -313,7 +321,7 @@ func (s *SchedulerSQLStore) BumpAgentScheduleFireCount(ctx context.Context, id s
 // library fixtures have no host identity; production producers always do.
 func (s *SchedulerSQLStore) ScheduleFamily(ctx context.Context, id string) (string, error) {
 	var family string
-	err := s.DB().QueryRowContext(ctx, `SELECT family FROM scheduler_schedule_identity WHERE schedule_id=?`, id).Scan(&family)
+	err := s.shared.DB().QueryRowContext(ctx, `SELECT family FROM scheduler_schedule_identity WHERE schedule_id=?`, id).Scan(&family)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

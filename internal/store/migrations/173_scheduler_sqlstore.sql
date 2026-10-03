@@ -1,7 +1,7 @@
 -- +goose Up
 -- Reference DDL from released go-scheduler v0.3.0, owned by Nanite goose.
--- Reference schema for go-scheduler's sqlstore. Every statement is idempotent
--- so Migrate can be run on each start. Timestamps are UTC, fixed-width text
+-- Shared schema is managed by Nanite's migration chain, not library Migrate.
+-- Timestamps are UTC, fixed-width text
 -- (2006-01-02T15:04:05.000000000Z) so lexicographic order equals time order
 -- and nanosecond precision round-trips exactly for compare-and-swap.
 

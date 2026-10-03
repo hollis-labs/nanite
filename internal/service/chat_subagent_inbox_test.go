@@ -18,6 +18,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/chat"
+	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
@@ -31,6 +32,65 @@ type fakeSubagentInbox struct {
 	inboxErr error
 	ackErr   error
 	acked    []string
+}
+
+type drainingSubagentInbox struct{ fakeSubagentInbox }
+
+func (f *drainingSubagentInbox) Inbox(_ context.Context, _, _ string, _ messaging.InboxFilter, _, _ string) ([]messaging.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var unread []messaging.Message
+	for _, m := range f.msgs {
+		found := false
+		for _, id := range f.acked {
+			found = found || id == m.ID
+		}
+		if !found {
+			unread = append(unread, m)
+		}
+	}
+	return unread, nil
+}
+
+func TestSubagentGiantResultDoesNotWedgeInbox(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		name := "no owners"
+		if active {
+			name = "active owner"
+		}
+		t.Run(name, func(t *testing.T) {
+			giant := messaging.Message{ID: "giant", FromAgentID: "worker", Body: strings.Repeat("G", 9000)}
+			fake := &drainingSubagentInbox{fakeSubagentInbox: fakeSubagentInbox{msgs: []messaging.Message{giant}}}
+			s := &chatServiceImpl{subagentInbox: fake}
+			assemble := func() *SlotAssemblyResult {
+				window := ctxpkg.NewContextWindow(200000, nil)
+				if active {
+					window.SetContent(ctxpkg.SlotUserContext, "## Pinned Context\n[pinned] note")
+				}
+				return &SlotAssemblyResult{Window: window, AlwaysShipActive: active}
+			}
+			first := assemble()
+			s.evaluateAndInjectSubagentResults(context.Background(), "s", "a", first)
+			if ids := fake.ackedIDs(); len(ids) != 1 || ids[0] != "giant" || !strings.Contains(first.SystemPrompt, "[truncated]") {
+				t.Fatal("giant result not delivered and Acked once", ids, first.SystemPrompt)
+			}
+			if !active {
+				injection := formatSubagentResultInjection([]messaging.Message{giant})
+				if first.Window.Slot(ctxpkg.SlotUserContext).Content != injection[:8000]+"\n[truncated]" {
+					t.Fatal("zero-owner bytes changed from base")
+				}
+			}
+			fake.msgs = append(fake.msgs, messaging.Message{ID: "small", FromAgentID: "worker", Body: "SMALL DELIVERED"})
+			second := assemble()
+			s.evaluateAndInjectSubagentResults(context.Background(), "s", "a", second)
+			if ids := fake.ackedIDs(); len(ids) != 2 || ids[1] != "small" || !strings.Contains(second.SystemPrompt, "SMALL DELIVERED") {
+				t.Fatal("small result behind giant not delivered", ids)
+			}
+			if got := s.evaluateAndInjectSubagentResults(context.Background(), "s", "a", assemble()); len(got) != 0 || len(fake.ackedIDs()) != 2 {
+				t.Fatal("oversized result repeated", got)
+			}
+		})
+	}
 }
 
 func (f *fakeSubagentInbox) Inbox(_ context.Context, _, _ string, _ messaging.InboxFilter, _, _ string) ([]messaging.Message, error) {
@@ -197,5 +257,26 @@ func TestEvaluateAndInjectSubagentResults_AckFailure_StillReturnsPending(t *test
 	got := s.evaluateAndInjectSubagentResults(context.Background(), "sess-ack-fail", "agent-1", slotResult)
 	if len(got) != 1 {
 		t.Fatalf("expected injection to still succeed despite Ack failure, got %d messages", len(got))
+	}
+}
+
+func TestSubagentAppendRequiresWholeAppendedText(t *testing.T) {
+	for _, mode := range []string{"survives", "lost", "old-duplicate"} {
+		t.Run(mode, func(t *testing.T) {
+			pending := []messaging.Message{{ID: "msg", FromAgentID: "worker", Body: "DONE"}}
+			result := newTestSlotResult(t, "s")
+			result.AlwaysShipActive = true
+			before := "core"
+			if mode == "lost" {
+				before = strings.Repeat("c", 8000)
+			}
+			if mode == "old-duplicate" {
+				before = formatSubagentResultInjection(pending) + strings.Repeat("c", 7900)
+			}
+			result.Window.SetContent("user_context", before)
+			if got := appendUserContext(result, formatSubagentResultInjection(pending)); got != (mode == "survives") {
+				t.Fatal("exact append survival check changed", mode, got)
+			}
+		})
 	}
 }

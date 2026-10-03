@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	messaging "github.com/hollis-labs/go-messaging/mailbox"
+	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
@@ -16,11 +17,11 @@ import (
 // helper reflexes and reminders use, and returns what was injected so the
 // caller can decide whether to refresh its local systemPrompt copy.
 //
-// Messages are Ack'd immediately after formatting so a later turn never
-// re-injects them — the sole idempotency guarantee this needs, since
-// nothing else marks kind=subagent_result rows read. An Ack failure is
-// logged but not fatal: worst case a message is re-surfaced next turn,
-// which is a duplicate nudge, not a correctness bug.
+// Without always-ship owners, preserve the historic batch and unconditional Ack.
+// With an owner, deliver messages separately: exact surviving text is Ack'd;
+// losses that fit the available byte headroom remain unread. A message
+// larger than the currently free headroom is Ack'd after one truncated delivery,
+// retaining the historic oversized-result behavior rather than wedging the inbox.
 func (s *chatServiceImpl) evaluateAndInjectSubagentResults(ctx context.Context, sessionID, agentID string, slotResult *SlotAssemblyResult) []messaging.Message {
 	if s.subagentInbox == nil || slotResult == nil || slotResult.Window == nil {
 		return nil
@@ -36,15 +37,52 @@ func (s *chatServiceImpl) evaluateAndInjectSubagentResults(ctx context.Context, 
 		return nil
 	}
 
-	injection := formatSubagentResultInjection(pending)
-	appendUserContext(slotResult, injection)
-
-	for _, m := range pending {
+	ack := func(m messaging.Message) {
 		if ackErr := s.subagentInbox.Ack(ctx, sessionID, agentID, m.ID); ackErr != nil {
 			slog.Warn("chat-service: ack subagent result message failed", "session_id", sessionID, "message_id", m.ID, "err", ackErr)
 		}
 	}
+	if !slotResult.AlwaysShipActive {
+		appendUserContext(slotResult, formatSubagentResultInjection(pending))
+		for _, m := range pending {
+			ack(m)
+		}
+		return pending
+	}
+	for _, m := range pending {
+		injection := formatSubagentResultInjection([]messaging.Message{m})
+		slot := slotResult.Window.Slot(ctxpkg.SlotUserContext)
+		before := slot.Content
+		freeBytes := subagentResultHeadroomBytes(slot)
+		if appendUserContext(slotResult, injection) {
+			ack(m)
+			continue
+		}
+		if slot.MaxTokens > 0 && len(injection) > freeBytes {
+			// Cannot fit the currently free space. Keep this truncated delivery
+			// and Ack once, allowing queued results through on later turns.
+			slog.Warn("chat-service: oversized subagent result delivered truncated", "session_id", sessionID, "message_id", m.ID)
+			ack(m)
+			continue
+		}
+		// Restore the failed append so smaller later messages can use the
+		// remaining space; an old duplicate does not prove this delivery.
+		slotResult.Window.SetContent(ctxpkg.SlotUserContext, before)
+		slotResult.Blocks = slotResult.Window.Assemble()
+		slotResult.SystemPrompt = rebuildLegacySystemPrompt(slotResult.Window)
+		slog.Warn("chat-service: subagent result truncated; leaving message unread", "session_id", sessionID, "message_id", m.ID)
+	}
 	return pending
+}
+
+// Match Window's existing byte clamp, counting appendUserContext's separator.
+// Compute before the append: Assemble mutates the slot on truncation.
+func subagentResultHeadroomBytes(slot *ctxpkg.Slot) int {
+	separator := 0
+	if slot.Content != "" {
+		separator = 2
+	}
+	return max(0, slot.MaxTokens*4-len(slot.Content)-separator)
 }
 
 func formatSubagentResultInjection(messages []messaging.Message) string {

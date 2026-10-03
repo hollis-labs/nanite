@@ -317,6 +317,38 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 				return err
 			}
 		}
+		alwaysScope, err := pluginapi.AlwaysShipScopeFor(block, manifest.Shared.Capabilities, manifest.Shared.Tools)
+		if err != nil {
+			return err
+		}
+		if titleErr := CheckAlwaysShipCoreTitles(block.Registers.AlwaysShipSources); titleErr != nil {
+			return titleErr
+		}
+		if len(block.Registers.AlwaysShipSources) != 0 {
+			child, ok := p.(*subprocess.SubprocessPlugin)
+			if !ok {
+				return fmt.Errorf("always-ship sources require a subprocess")
+			}
+			approval, approvalErr := VerifyInstallApproval(context.Background(), pluginDir)
+			if approvalErr != nil {
+				return approvalErr
+			}
+			if child.AcceptedReviewDigest() == "" || approval.ReviewDigest != child.AcceptedReviewDigest() {
+				return fmt.Errorf("always-ship approval differs from the running child's accepted review")
+			}
+			host.mu.RLock()
+			registrar := host.alwaysShip
+			host.mu.RUnlock()
+			if registrar == nil {
+				return fmt.Errorf("always-ship sources are unavailable")
+			}
+			check := func(ctx context.Context) error {
+				return CheckAcceptedBundle(ctx, pluginDir, child.AcceptedReviewDigest())
+			}
+			if registrationErr := registrar.AddPluginAlwaysShipSources(pluginID, block.Registers.AlwaysShipSources, alwaysScope, child, check); registrationErr != nil {
+				return registrationErr
+			}
+		}
 		scope, err := pluginapi.ContextScopeFor(block, manifest.Shared.Capabilities)
 		if err != nil {
 			return err

@@ -177,3 +177,12 @@ func TestInstallReviewReflexDefaultUpgradeDiff(t *testing.T) {
 		t.Fatalf("seed changes hidden: %v", changes)
 	}
 }
+
+func TestInstallReviewAlwaysShipWarningDiff(t *testing.T) {
+	before := plugin.InstallReview{}
+	after := plugin.InstallReview{HostNotice: "Pins may add text to the system prompt; 1500 uncached tokens per turn; use pins_list"}
+	changes := installReviewChanges(before, after)
+	if len(changes) != 1 || !strings.Contains(changes[0], "system prompt") || !strings.Contains(changes[0], "pins_list") {
+		t.Fatal("host notice missing from CLI review diff", changes)
+	}
+}

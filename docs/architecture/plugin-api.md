@@ -171,18 +171,89 @@ markers retain their slot invariants. Unload, shutdown, failed launch and termin
 restart failure remove source ownership and cancel active calls. Publication
 checks the source lifetime so a response cannot survive unload and replacement.
 
-### Known behavior change after extraction: plugin context sources
+### Persistent and dynamic plugin context
 
-Plugin-provided context, including pins after extraction and documents or other
-sources when adopted, enters the compactable `SlotContext`. The broker's
-`shouldSkipForIntent` in `internal/contextbroker/assembly.go` skips that slot for
-`review_session`, `recall_decision` and `resume_task` intents. Sources share the
-plugin context budget; `PluginContextSources.Fetch` and `pluginContextSource.fetch`
-in `internal/service/plugin_context_sources.go` omit whole items that exceed
-their share, with no host pointer fallback unless the plugin implements one.
-Core pinned content previously used `buildUserContextSlot` in
-`internal/chat/context_client.go` and the separate, non-compactable
-`SlotUserContext` path. Context-source parity is tracked in CW-20261002-0110.
+Ordinary `context.source` contributions enter compactable `SlotContext` and
+remain subject to intent skipping for `review_session`, `recall_decision` and
+`resume_task`, with whole-item omission when their dynamic share is exhausted.
+The extracted pins and documents plugins still lack core context parity until
+they adopt the always-ship class. Plugins that need persistent placement must declare `always_ship_sources` and
+obtain the separate reviewed `context.always_ship` grant. The host-owned review
+notice describes system-prompt authority, up to 1500 uncached tokens per owner
+per turn, and competition with the user's own context. It is part of the accepted
+approval digest and is shown by both CLI and GUI installers. Rewording it
+requires fresh approval for each always-ship plugin. The notice shows the validated
+plugin ID and each source title/list tool, not a plugin-controlled name in the
+host-authored warning sentence.
+
+`PluginAlwaysShipSources` composes plugin-rendered bodies after the core
+UserContext stash decision in `ContextService.AssembleSlots`. The class survives
+compaction and bypasses dynamic intent skipping. It does not grant tool access.
+Titles still owned by core, including Session Documents, refuse installation and
+fetch until their core renderer is adopted. The host admits at most four owners
+and four sources; install review reserves capacity against accepted installed
+bundles (including disabled ones), with runtime enforcement as a defense. Updates
+replace their own reservation. Concurrent installs of different owners use
+per-plugin-ID locks, so both can pass the install-time check and exceed the cap;
+runtime registration is the backstop and refuses the excess plugin's load.
+An unreadable approval in the installed inventory blocks a new always-ship
+install rather than assuming the existing owner has no reservation.
+Titles are unique across owners after lowercasing
+and collapsing runs of spaces, dots, underscores and hyphens; the first owner to
+register keeps the title and later registration fails with an operator diagnostic.
+The host orders Pinned Context ahead of other plugin titles, then sorts
+by owner/source. Documents adoption gives Session Documents first rank when its
+core reservation is removed.
+
+The 2,000-token slot ceiling is shared. With an owner active, core's oversize
+threshold reserves 256 tokens for late injections plus the measured complete
+fallback line. This reserve tax applies even to empty successful responses:
+about 290 tokens for a typical single owner and about 460 for four owners
+with long names. At all three name limits (63-byte owner, 64-byte source and
+64-byte tool), the default conservative estimator reserves 482 tokens, leaving
+a core threshold of 1518. A typical pins/pins -> pins_list fallback reserves
+289, leaving 1711. After stash failure, the inline-core plus fallback fit band
+therefore starts at 1712 core tokens for that example, already below 2000;
+1745 is inside the band, not its starting boundary. Names and the estimator
+change these measured thresholds. Owner body bytes share its reviewed `max_bytes` allowance; each
+owner's rendered sections also fit 1500 estimated tokens. Headings, separators
+and pending fallback entries count toward the final slot budget. Fetches run
+sequentially through private owned stdio with two-second child and three-second
+turn collection deadlines. Bodies collected before the deadline remain eligible
+for publication; approval is rechecked with the parent context. Approved active
+owners that fail, time out or do not fit retain one deterministic merged fallback
+line naming owner/source and list tool. Revoked or unapproved loaded leases
+contribute nothing: no fetch or fallback, with one operator diagnostic per approval
+transition. Final
+publication rechecks approval and the original lease, preventing stale replies
+from an unloaded/replaced owner. A successful source currently performs four
+full-bundle approval checks per turn: before core budgeting, at composition
+entry, before its owned fetch, and before publication. The pre-collection and
+publication checks use the parent context outside the two-second child and
+three-second collection deadlines. This is a known hashing-cost limitation and
+follow-up: about 50 ms per warm 64 MiB bundle can add roughly 0.8 seconds per
+turn for four owners of that size.
+
+Stash failure preserves the existing inline-core behavior and logs an operator
+diagnostic if plugin fallback/headroom cannot fit. In that exceptional case the
+final Window clamp can consume the entire slot; plugin context and fallback are
+not guaranteed. No turn error or new core truncation policy is introduced.
+Window's existing truncation suffix and byte heuristic remain approximate token
+accounting. Plugin bodies remain verbatim, including Markdown headings and even
+text resembling the host fallback prefix; user pins can legitimately contain
+these. The host owns the outer heading, not the meaning or sanitization of trusted
+plugin text. A plugin returning a partial inventory must explain the omitted items
+in its own body; the host cannot detect completeness from opaque text. List tools
+must accept an initial call without required arguments, but remain subject to
+per-agent grants and transport availability, including CLI MCP reach. Without active owners, late subagent delivery and unconditional batch Ack remain
+byte-identical to the previous path. With an owner, inject messages individually
+and Ack exact surviving appends. Free headroom is the slot's byte capacity
+(`MaxTokens * 4`) minus already composed bytes and the append separator.
+A message exceeding that currently free headroom is Acked after one truncated
+delivery, preserving the historic truncated-result behavior even for 2–8 KiB
+messages that could fit an empty slot. An append that fits that headroom but
+fails exact assembly remains unread; zero-owner batches retain their old bytes
+and unconditional Ack.
 
 Extracted features retain core session/message IDs as references. The reviewed
 `message_refs` query verifies identity within a permitted session and returns

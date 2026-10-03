@@ -2277,6 +2277,7 @@ export interface CatalogSource {
 }
 
 export interface PluginInstallReview {
+  host_notice?: string;
   id: string;
   name: string;
   version: string;

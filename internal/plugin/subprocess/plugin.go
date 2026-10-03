@@ -132,6 +132,10 @@ func NewSubprocessPluginForTest(id string, transport *Transport) *SubprocessPlug
 
 // --- plugin.Plugin interface ---
 
+// AcceptedReviewDigest pins declarations to the acceptance that launched this
+// child; replacing a receipt cannot authorize an older running manager.
+func (sp *SubprocessPlugin) AcceptedReviewDigest() string { return sp.mgr.cfg.ReviewDigest }
+
 func (sp *SubprocessPlugin) ID() string {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()

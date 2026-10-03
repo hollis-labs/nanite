@@ -65,3 +65,23 @@ it("shows reflex target, reminder and predicate changes before approval", () => 
   expect(changed).toContain("tool_calls_window");
   expect(onApprove).not.toHaveBeenCalled();
 });
+
+it("shows the host-authored persistent context warning before approval", () => {
+  const before: PluginInstallReview = {
+    id: "nanite.pins", name: "Pins", version: "1.0.0", bundle_digest: "old",
+    entrypoint: "pins", arguments: [], capabilities: [], secrets: [], environment: [], tools: [],
+  };
+  const after: PluginInstallReview = { ...before, capabilities: [{ name: "context.always_ship" }], host_notice: "Pins adds text to the system prompt; up to 1500 uncached tokens per turn; use pins_list." };
+  const onApprove = vi.fn();
+  render(<PluginReviewDialog review={{ status: "review_required", review: after, review_digest: "new", previous: { review: before, review_digest: "old" } }} busy={false} onCancel={vi.fn()} onApprove={onApprove} />);
+  const warning = screen.getByText("Persistent context warning · Added");
+  expect(warning).toBeTruthy();
+  const capability = screen.getByText("Capability: context.always_ship · Added");
+  expect(warning.compareDocumentPosition(capability) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(warning.parentElement?.className).toContain("border-2");
+  expect(warning.parentElement?.className).toContain("amber");
+  expect(screen.getByText(/After: Pins adds text/).textContent).toContain("system prompt");
+  expect(screen.getByText(/After: Pins adds text/).textContent).toContain("1500 uncached tokens");
+  expect(screen.getByText(/After: Pins adds text/).textContent).toContain("pins_list");
+  expect(onApprove).not.toHaveBeenCalled();
+});

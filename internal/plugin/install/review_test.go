@@ -2,9 +2,11 @@ package install
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/plugin"
@@ -94,5 +96,36 @@ func TestDirectoryExtractionBoundsAndCancellation(t *testing.T) {
 	cancel()
 	if err := (&TarGzExtractor{}).Extract(ctx, Handle{Kind: "directory", Path: t.TempDir()}, t.TempDir(), nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation: %v", err)
+	}
+}
+
+func TestInstallerCarriesAlwaysShipHostNotice(t *testing.T) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(validManifest()), &object); err != nil {
+		t.Fatal(err)
+	}
+	object["tools"] = json.RawMessage(`[{"name":"pins_list","description":"Inventory","effect":"read","input_schema":{"type":"object"}}]`)
+	object["capabilities"] = json.RawMessage(`[{"name":"context.always_ship","metadata":{"source_ids":["pins"],"all_sessions":true,"max_bytes":6000}}]`)
+	object["nanite"] = json.RawMessage(strings.Replace(string(object["nanite"]), `"registers":{`, `"registers":{"always_ship_sources":[{"id":"pins","title":"Pinned Context","list_tool":"pins_list"}],`, 1))
+	encoded, err := json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(encoded)
+	source := setupPlugin(t, raw, map[string]string{"bin/giphy": "#!/bin/sh\n", "envelopes/giphy-modal.schema.json": "{}"})
+	root := t.TempDir()
+	seen := false
+	options := BuildOptions{Extractor: &TarGzExtractor{}, Loader: &fakeLoader{}, PluginsRoot: filepath.Join(root, "plugins"), StagingRoot: filepath.Join(root, "staging"), Review: func(_ context.Context, review plugin.InstallReview, _ *plugin.InstallApproval) (string, error) {
+		seen = strings.Contains(review.HostNotice, "system prompt") && strings.Contains(review.HostNotice, "pins_list")
+		return review.Digest(), nil
+	}}
+	installer, _ := NewInstaller(options)
+	directory, err := installer.Install(context.Background(), &fakeSource{id: "giphy", handle: Handle{Kind: "directory", Path: source}})
+	if err != nil || !seen {
+		t.Fatal("installer lost reviewed host warning", seen, err)
+	}
+	approval, err := plugin.VerifyInstallApproval(context.Background(), directory)
+	if err != nil || !strings.Contains(approval.Review.HostNotice, "1500 uncached tokens") {
+		t.Fatal("approval lost host warning", approval, err)
 	}
 }

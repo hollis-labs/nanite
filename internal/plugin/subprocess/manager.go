@@ -41,8 +41,9 @@ func (s ProcessState) String() string {
 
 // ManagerConfig configures the subprocess manager.
 type ManagerConfig struct {
-	Identity json.RawMessage // opaque host-verified init claims
-	OnUnload func()          // release host-owned connection resources on unload or failed init
+	ReviewDigest string          // original accepted bundle; immutable for this manager lifetime
+	Identity     json.RawMessage // opaque host-verified init claims
+	OnUnload     func()          // release host-owned connection resources on unload or failed init
 
 	Command     string                      // executable path
 	Args        []string                    // command-line arguments

@@ -53,6 +53,8 @@ type SlotAssemblyResult struct {
 	SystemPrompt    string                 // convenience: content of the system slot
 	Messages        []llmtypes.ChatMessage // convenience: parsed from conversation slot
 	NeedsCompaction bool
+	// AlwaysShipActive selects the stricter per-message late-delivery policy.
+	AlwaysShipActive bool
 	// ToolCache describes this turn's tool-slot outcome. Nil when the S3b
 	// tool-cache pipeline is inactive (deps missing or setting disabled).
 	ToolCache *ToolCacheOutcome
@@ -140,12 +142,14 @@ type contextServiceImpl struct {
 	// when nil the decider's NopStasher fallback ships oversized slots
 	// inline instead of emitting a pointer to nowhere.
 	slotStasher contextbroker.SlotStasher
+	alwaysShip  *PluginAlwaysShipSources
 }
 
 // ContextServiceConfig holds dependencies for constructing a ContextService.
 type ContextServiceConfig struct {
-	Client    *chat.ContextClient
-	Estimator ctxpkg.TokenEstimator // nil = DefaultEstimator
+	AlwaysShip *PluginAlwaysShipSources
+	Client     *chat.ContextClient
+	Estimator  ctxpkg.TokenEstimator // nil = DefaultEstimator
 
 	// S3b — optional. Together these enable the tool-slot cache-and-pointer
 	// path. If any is nil, AssembleSlots uses the S3a path (always hydrate).
@@ -177,6 +181,7 @@ func NewContextService(cfg ContextServiceConfig) ContextService {
 		overrides:    cfg.Overrides,
 		settingsFunc: cfg.SettingsFunc,
 		slotStasher:  cfg.SlotStasher,
+		alwaysShip:   cfg.AlwaysShip,
 	}
 }
 
@@ -250,15 +255,32 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 	// comment: "used today only as a passthrough signal; future deciders
 	// may gate slots on mode" — it never drove real DecideAssembly logic).
 	slotSources := slotSourceMap(sources, toolsContent)
+	alwaysSources := approvedAlwaysShipSources(ctx, s.alwaysShip.snapshot(session.ID))
+	budgets := ctxpkg.DefaultBudgets()
+	budgets[ctxpkg.SlotUserContext] = max(1, budgets[ctxpkg.SlotUserContext]-alwaysShipReserve(alwaysSources, s.estimator))
 	plan := contextbroker.DecideAssembly(ctx, contextbroker.AssemblyInput{
 		Intent:    sources.Intent,
 		SlotOrder: ctxpkg.SlotOrder,
 		Sources:   slotSources,
-		Budgets:   ctxpkg.DefaultBudgets(),
+		Budgets:   budgets,
 		AgentID:   agent.ID,
 		SessionID: session.ID,
 		Stasher:   s.slotStasher,
 	})
+
+	for i := range plan.Decisions {
+		decision := &plan.Decisions[i]
+		if decision.SlotName == ctxpkg.SlotUserContext && len(alwaysSources) != 0 {
+			fetchIntent := sources.Intent
+			fetchIntent.SessionID, fetchIntent.AgentID = session.ID, agent.ID
+			decision.Content = s.alwaysShip.compose(ctx, alwaysSources, decision.Content, fetchIntent, s.estimator, ctxpkg.DefaultBudgets()[ctxpkg.SlotUserContext])
+			if decision.Content != "" && decision.Action == contextbroker.ActionSkip {
+				decision.Action = contextbroker.ActionShip
+				// ReasonTag describes the core decision; skipped_no_content can
+				// remain here when plugin text subsequently supplies the slot.
+			}
+		}
+	}
 
 	cw := ctxpkg.NewContextWindowWithBudgetPct(providerWindowSize, s.contextBudgetPct(), s.estimator)
 	for _, d := range plan.Decisions {
@@ -304,13 +326,14 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 		"plan", contextbroker.DecisionSummary(plan))
 
 	return &SlotAssemblyResult{
-		Blocks:          blocks,
-		Window:          cw,
-		SystemPrompt:    systemPrompt,
-		Messages:        sources.Messages,
-		NeedsCompaction: cw.NeedsCompaction(),
-		ToolCache:       outcome,
-		Plan:            plan,
+		Blocks:           blocks,
+		Window:           cw,
+		SystemPrompt:     systemPrompt,
+		Messages:         sources.Messages,
+		NeedsCompaction:  cw.NeedsCompaction(),
+		AlwaysShipActive: hasActiveAlwaysShipOwner(alwaysSources),
+		ToolCache:        outcome,
+		Plan:             plan,
 	}, nil
 }
 

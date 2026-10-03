@@ -94,13 +94,17 @@ func reflexForceIsHard(spec map[string]interface{}) bool {
 	return false
 }
 
-func appendUserContext(slotResult *SlotAssemblyResult, content string) {
+func appendUserContext(slotResult *SlotAssemblyResult, content string) bool {
 	if slotResult == nil || slotResult.Window == nil || strings.TrimSpace(content) == "" {
-		return
+		return false
 	}
 	existing := ""
 	if slot := slotResult.Window.Slot(ctxpkg.SlotUserContext); slot != nil {
 		existing = slot.Content
+	}
+	expected := content
+	if existing != "" {
+		expected = existing + "\n\n" + content
 	}
 	if existing != "" {
 		slotResult.Window.SetContent(ctxpkg.SlotUserContext, existing+"\n\n"+content)
@@ -109,4 +113,5 @@ func appendUserContext(slotResult *SlotAssemblyResult, content string) {
 	}
 	slotResult.Blocks = slotResult.Window.Assemble()
 	slotResult.SystemPrompt = rebuildLegacySystemPrompt(slotResult.Window)
+	return slotResult.Window.Slot(ctxpkg.SlotUserContext).Content == expected
 }

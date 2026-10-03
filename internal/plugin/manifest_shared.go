@@ -31,6 +31,12 @@ func DecodeManifest(reader io.Reader) (*PluginManifest, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, scopeErr := pluginapi.AlwaysShipScopeFor(block, common.Capabilities, common.Tools); scopeErr != nil {
+		return nil, scopeErr
+	}
+	if titleErr := CheckAlwaysShipCoreTitles(block.Registers.AlwaysShipSources); titleErr != nil {
+		return nil, titleErr
+	}
 	if _, scopeErr := pluginapi.ContextScopeFor(block, common.Capabilities); scopeErr != nil {
 		return nil, scopeErr
 	}

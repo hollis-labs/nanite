@@ -930,6 +930,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		return project.RepoPath, nil
 	}
 
+	var alwaysShip *PluginAlwaysShipSources
 	// --- ContextBroker: universal context retrieval ---
 	{
 		var sources []contextbroker.ContextSource
@@ -968,6 +969,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 		if cfg.Plugins != nil {
 			adapter := NewPluginContextSources()
+			alwaysShip = NewPluginAlwaysShipSources()
+			cfg.Plugins.SetAlwaysShipRegistrar(alwaysShip)
 			cfg.Plugins.SetContextSourceRegistrar(adapter)
 			cfg.Plugins.SetReflexSeedRegistrar(NewPluginReflexSeeds(cfg.Store))
 			sources = append(sources, adapter)
@@ -1000,6 +1003,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	}
 
 	ctxService := NewContextService(ContextServiceConfig{
+		AlwaysShip:   alwaysShip,
 		Client:       contextClient,
 		StashManager: stashManager,
 		Classifier:   classifier,

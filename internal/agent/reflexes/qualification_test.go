@@ -2,8 +2,8 @@ package reflexes
 
 // Qualification replays Nanite-authored fixtures through both implementations.
 // The released library is test-only: no trigger rewrite, engine replacement or
-// migration is hidden in these adapters. Known divergences are assertions, not
-// ignored failures; a changed result requires renewed qualification.
+// migration is hidden in these adapters. Full results, including persisted
+// metadata and effects, must match; a changed result requires requalification.
 import (
 	"context"
 	"encoding/json"
@@ -38,14 +38,10 @@ func qualificationCopy[T any](t *testing.T, v any) T {
 	return out
 }
 
-// Only signal representation changes: authored trigger_spec stays byte-for-byte
-// intact. The library's generic attributes receive both live Nanite signals.
+// State JSON transfers the first-class live signals without rewriting authored
+// trigger_spec or inserting classification into generic library attributes.
 func qualificationState(t *testing.T, state State) shared.State {
-	s := qualificationCopy[shared.State](t, state)
-	if state.ScopeTier != "" || state.ExecutionPattern != "" {
-		s.Attrs = map[string]string{"scope_tier": state.ScopeTier, "execution_pattern": state.ExecutionPattern}
-	}
-	return s
+	return qualificationCopy[shared.State](t, state)
 }
 
 type qualificationResult struct {
@@ -301,18 +297,22 @@ func TestGoReflexesQualification_ResolveTraces(t *testing.T) {
 func TestGoReflexesQualification_SeedPredicates(t *testing.T) {
 	// Reuse Nanite's authored regression states rather than library goldens.
 	cases := []struct {
-		name, seed string
-		state      State
-		want       bool
+		name, class, seed string
+		state             State
+		want              bool
 	}{
-		{"echo", "drift_detector_echo", fixtureEchoState(), true},
-		{"healthy-compression", "drift_detector_echo", fixtureHealthyCompressionState(), false},
-		{"runaway", "runaway_superlative_detector", fixtureSuperlativeState(), true},
-		{"single-superlative", "runaway_superlative_detector", fixtureSingleSuperlativeState(), false},
+		{"echo", "process", "drift_detector_echo", fixtureEchoState(), true},
+		{"healthy-compression", "process", "drift_detector_echo", fixtureHealthyCompressionState(), false},
+		{"runaway", "process", "runaway_superlative_detector", fixtureSuperlativeState(), true},
+		{"single-superlative", "process", "runaway_superlative_detector", fixtureSingleSuperlativeState(), false},
+		{"open-subagent", "advisor", "dispatch_to_agent_open_subagent", State{ScopeTier: "open", ExecutionPattern: "subagent"}, true},
+		{"closed-subagent", "advisor", "dispatch_to_agent_open_subagent", State{ScopeTier: "small", ExecutionPattern: "subagent"}, false},
+		{"open-inline", "advisor", "dispatch_to_agent_open_subagent", State{ScopeTier: "open", ExecutionPattern: "inline"}, false},
+		{"unclassified", "advisor", "dispatch_to_agent_open_subagent", State{}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			kind, spec := seedTriggerSpec(t, "process", c.seed)
+			kind, spec := seedTriggerSpec(t, c.class, c.seed)
 			n, ne := EvaluateTrigger(kind, spec, c.state)
 			l, le := shared.EvaluateTrigger(kind, spec, qualificationState(t, c.state))
 			if ne != nil || le != nil || n != c.want || l != n {
@@ -321,7 +321,7 @@ func TestGoReflexesQualification_SeedPredicates(t *testing.T) {
 			r := qualificationReflex(c.seed, "halt_session", 10)
 			r.TriggerKind, r.TriggerSpec = kind, spec
 			for _, seed := range BaseSeeds() {
-				if seed.Name == c.seed && seed.ClassTag == "process" {
+				if seed.Name == c.seed && seed.ClassTag == c.class {
 					r.ActionKind = seed.ActionKind
 					r.ActionSpec = qualificationJSON(t, seed.ActionSpec)
 					r.ProvenanceTier = "system"
@@ -336,22 +336,22 @@ func TestGoReflexesQualification_SeedPredicates(t *testing.T) {
 	}
 }
 
-func TestGoReflexesQualification_KnownDispatchDivergences(t *testing.T) {
+func TestGoReflexesQualification_DispatchEquivalence(t *testing.T) {
 	// Real dispatch seed from TestAttemptReflexDispatch_RealSeededReflex_
 	// ScopeTierOpenSubagent_RoutesToPlanner. No translation of stored predicates.
 	kind, spec := seedTriggerSpec(t, "advisor", "dispatch_to_agent_open_subagent")
-	cases := []struct{ name, spec, err string }{
-		{"scope-tier", `{"kind":"scope_tier","value":"open"}`, `unknown predicate kind "scope_tier"`},
-		{"execution-pattern", `{"kind":"execution_pattern","value":"subagent"}`, `unknown predicate kind "execution_pattern"`},
-		{"real-open-subagent-seed", spec, `unknown predicate kind "scope_tier"`},
+	cases := []struct{ name, spec string }{
+		{"scope-tier", `{"kind":"scope_tier","value":"open"}`},
+		{"execution-pattern", `{"kind":"execution_pattern","value":"subagent"}`},
+		{"real-open-subagent-seed", spec},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			state := State{SessionID: "qual-session", AgentID: "qual-agent", AgentClass: "advisor", ScopeTier: "open", ExecutionPattern: "subagent"}
 			n, ne := EvaluateTrigger(kind, c.spec, state)
 			l, le := shared.EvaluateTrigger(kind, c.spec, qualificationState(t, state))
-			if !n || ne != nil || l || le == nil || le.Error() != c.err {
-				t.Fatalf("qualification changed: nanite=%v/%v lib=%v/%v", n, ne, l, le)
+			if !n || ne != nil || l != n || le != nil {
+				t.Fatalf("input=%s spec=%s nanite=%v/%v lib=%v/%v", qualificationJSON(t, state), c.spec, n, ne, l, le)
 			}
 			r := qualificationReflex("dispatch", "dispatch_to_agent", 10)
 			r.TriggerKind, r.TriggerSpec, r.ActionSpec = kind, c.spec, `{"agent_slug":"planner"}`
@@ -366,42 +366,91 @@ func TestGoReflexesQualification_KnownDispatchDivergences(t *testing.T) {
 				}
 			}
 			nr, lr := qualificationReplay(t, []store.AgentReflex{r}, state, "", false)
-			if len(qualificationCopy[[]AppliedAction](t, nr.Actions)) != 1 || len(qualificationCopy[[]AppliedAction](t, lr.Actions)) != 0 || nr.Counts[r.ID] != 1 || lr.Counts[r.ID] != 0 || len(nr.Traces) != 1 || len(lr.Traces) != 0 {
-				t.Fatal("known dispatch divergence changed")
+			if qualificationJSON(t, nr) != qualificationJSON(t, lr) {
+				t.Fatalf("input=%s state=%s nanite=%s lib=%s", qualificationJSON(t, r), qualificationJSON(t, state), qualificationJSON(t, nr), qualificationJSON(t, lr))
 			}
-			t.Logf("DIVERGENCE input=%s state=%s nanite=%s lib=%s; Nanite is right: current authored predicates must route", qualificationJSON(t, r), qualificationJSON(t, state), qualificationJSON(t, nr), qualificationJSON(t, lr))
+			if len(qualificationCopy[[]AppliedAction](t, nr.Actions)) != 1 || nr.Counts[r.ID] != 1 || len(nr.Traces) != 1 {
+				t.Fatal("dispatch must select and count one planner action")
+			}
+			t.Logf("equivalent input=%s state=%s nanite=%s lib=%s", qualificationJSON(t, r), qualificationJSON(t, state), qualificationJSON(t, nr), qualificationJSON(t, lr))
 		})
 	}
 }
 
-func TestGoReflexesQualification_KnownTraceDivergence(t *testing.T) {
-	// An existing event dispatch still fires on both sides, isolating the trace
-	// schema difference from the unsupported-predicate divergence above.
+func TestGoReflexesQualification_TraceEquivalence(t *testing.T) {
+	// Event dispatch isolates trace placement from classification predicates.
 	r := qualificationReflex("dispatch-event", "dispatch_to_agent", 10)
 	r.ActionSpec = `{"agent_slug":"planner"}`
-	state := State{SessionID: "qual-session", AgentID: "qual-agent", AgentClass: "advisor", ScopeTier: "open", ExecutionPattern: "subagent", Events: []EventSignal{{EventType: "probe"}}}
-	n, l := qualificationReplay(t, []store.AgentReflex{r}, state, "", false)
-	if len(n.Traces) != 1 || len(l.Traces) != 1 {
-		t.Fatal("missing real trace")
+	for _, c := range []struct{ name, scope, pattern string }{
+		{"both", "open", "subagent"}, {"scope-only", "Open", ""},
+		{"pattern-only", "", "Background"}, {"unset", "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			state := State{ScopeTier: c.scope, ExecutionPattern: c.pattern, Events: []EventSignal{{EventType: "probe"}}}
+			n, l := qualificationReplay(t, []store.AgentReflex{r}, state, "", false)
+			if qualificationJSON(t, n) != qualificationJSON(t, l) {
+				t.Fatalf("input=%s state=%s nanite=%s lib=%s", qualificationJSON(t, r), qualificationJSON(t, state), qualificationJSON(t, n), qualificationJSON(t, l))
+			}
+			if len(n.Traces) != 1 {
+				t.Fatal("missing real trace")
+			}
+			for key, want := range map[string]string{"scope_tier": c.scope, "execution_pattern": c.pattern} {
+				got, present := n.Traces[0][key]
+				if present != (want != "") || present && got != want {
+					t.Fatalf("signal %s=%v present=%v, want %q", key, got, present, want)
+				}
+			}
+			if _, present := l.Traces[0]["attrs"]; present {
+				t.Fatal("classification must not be duplicated into attrs")
+			}
+			t.Logf("equivalent input=%s state=%s nanite=%s lib=%s", qualificationJSON(t, r), qualificationJSON(t, state), qualificationJSON(t, n), qualificationJSON(t, l))
+		})
 	}
-	if n.Traces[0]["scope_tier"] != "open" || n.Traces[0]["execution_pattern"] != "subagent" {
-		t.Fatal("Nanite signal trace changed")
-	}
-	attrs := qualificationCopy[map[string]string](t, l.Traces[0]["attrs"])
-	if attrs["scope_tier"] != "open" || attrs["execution_pattern"] != "subagent" {
-		t.Fatal("library attribute trace changed")
-	}
-	if _, ok := l.Traces[0]["scope_tier"]; ok {
-		t.Fatal("library divergence changed: requalify")
-	}
-	t.Logf("DIVERGENCE input=%s state=%s nanite=%s lib=%s; Nanite is right for its persisted trace contract", qualificationJSON(t, r), qualificationJSON(t, state), qualificationJSON(t, n), qualificationJSON(t, l))
-	// Remove only the explicitly asserted known differing keys to detect any
-	// additional mismatch; the reported results above retain the full records.
-	delete(n.Traces[0], "scope_tier")
-	delete(n.Traces[0], "execution_pattern")
-	delete(l.Traces[0], "attrs")
-	if qualificationJSON(t, n) != qualificationJSON(t, l) {
-		t.Fatal("additional divergence beyond trace signal placement")
+}
+
+func TestGoReflexesQualification_ScalarPredicateEquivalence(t *testing.T) {
+	for _, kind := range []string{"scope_tier", "execution_pattern"} {
+		for _, c := range []struct {
+			name, signal, args string
+			want               bool
+		}{
+			{"default", "open", `"value":"open"`, true},
+			{"equals", "open", `"op":"=","value":"open"`, true},
+			{"double-equals", "open", `"op":"==","value":"open"`, true},
+			{"empty-op", "open", `"op":"","value":"open"`, true},
+			{"non-string-op", "open", `"op":42,"value":"open"`, true},
+			{"different", "open", `"value":"large"`, false},
+			{"not-equal", "open", `"op":"!=","value":"large"`, true},
+			{"not-equal-same", "open", `"op":"!=","value":"open"`, false},
+			{"case", "Open", `"value":"open"`, false},
+			{"unknown-op", "open", `"op":"contains","value":"open"`, false},
+			{"unset", "", `"value":"open"`, false},
+			{"unset-not-equal", "", `"op":"!=","value":"open"`, true},
+			{"empty-value", "", `"value":""`, true},
+			{"missing-value", "", `"window":99`, true},
+			{"non-string-value", "", `"value":42`, true},
+			{"null-value", "", `"value":null`, true},
+			{"set-missing-value", "open", `"window":99`, false},
+			{"set-non-string-value", "open", `"value":42`, false},
+			{"no-history-guard", "open", `"window":99,"value":"open"`, true},
+		} {
+			t.Run(kind+"/"+c.name, func(t *testing.T) {
+				state := State{}
+				if kind == "scope_tier" {
+					state.ScopeTier = c.signal
+					state.ExecutionPattern = "other"
+				} else {
+					state.ExecutionPattern = c.signal
+					state.ScopeTier = "other"
+				}
+				spec := `{"kind":"` + kind + `",` + c.args + `}`
+				n, ne := EvaluateTrigger("predicate", spec, state)
+				l, le := shared.EvaluateTrigger("predicate", spec, qualificationState(t, state))
+				if ne != nil || le != nil || n != c.want || l != n {
+					t.Fatalf("input=%s spec=%s nanite=%v/%v lib=%v/%v want=%v", qualificationJSON(t, state), spec, n, ne, l, le, c.want)
+				}
+			})
+		}
 	}
 }
 

@@ -72,8 +72,8 @@ func TestEnvelopeGenerationHasNoSiblingTreeOrEmbeddedSchemaCoupling(t *testing.T
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	if !strings.Contains(string(goMod), "\tgithub.com/hollis-labs/go-envelopes v0.4.1-0.20261002213710-fb886c3e1b4d\n") {
-		t.Fatal("go.mod does not pin the reviewed go-envelopes main pseudo-version")
+	if !strings.Contains(string(goMod), "\tgithub.com/hollis-labs/go-envelopes v0.5.0\n") {
+		t.Fatal("go.mod does not pin the released go-envelopes version")
 	}
 	if strings.Contains(string(goMod), "replace github.com/hollis-labs/go-envelopes") {
 		t.Fatal("go.mod replaces go-envelopes instead of consuming the released module")
@@ -106,7 +106,7 @@ func TestEnvelopeGenerationHasNoSiblingTreeOrEmbeddedSchemaCoupling(t *testing.T
 	if err != nil {
 		t.Fatalf("read generated plugin registry: %v", err)
 	}
-	if !strings.Contains(string(generatedRegistry), "Source: github.com/hollis-labs/go-envelopes@v0.4.1-0.20261002213710-fb886c3e1b4d; manifest sha256:") {
+	if !strings.Contains(string(generatedRegistry), "Source: github.com/hollis-labs/go-envelopes@v0.5.0; manifest sha256:") {
 		t.Fatal("generated plugin registry does not identify the reviewed module pin and manifest")
 	}
 

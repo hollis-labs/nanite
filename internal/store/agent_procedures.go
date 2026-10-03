@@ -36,6 +36,10 @@ func scanAgentProcedure(scanner interface{ Scan(...any) error }, p *AgentProcedu
 // re-inserting the same pair updates the body / scope and refreshes
 // updated_at.
 func (s *Store) InsertAgentProcedure(ctx context.Context, row AgentProcedure) error {
+	return insertAgentProcedure(ctx, s.DB, row)
+}
+
+func insertAgentProcedure(ctx context.Context, db agentConfigDB, row AgentProcedure) error {
 	if row.AgentID == "" {
 		return fmt.Errorf("insert agent_procedures: agent_id is required")
 	}
@@ -48,7 +52,7 @@ func (s *Store) InsertAgentProcedure(ctx context.Context, row AgentProcedure) er
 	// ON CONFLICT lets us preserve the original created_at while bumping
 	// updated_at. INSERT OR REPLACE would reset created_at, which is the
 	// wrong semantic for a named procedure.
-	_, err := s.DB.ExecContext(ctx,
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO agent_procedures (agent_id, name, body, scope, created_at, updated_at)
 		 VALUES (?, ?, ?, ?,
 		         COALESCE(NULLIF(?, ''), datetime('now')),

@@ -153,7 +153,11 @@ func TestServiceErrorRoutesAssignmentsKeepValidationSeparateFromWriteFailure(t *
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
-	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Assignment","slug":"assignment","system_prompt":"fixture","role_id":"missing"}`, 500)
+	role := &store.Role{Slug: "assignment-role", Name: "Assignment Role", SystemPrompt: "fixture"}
+	if err := st.CreateRole(t.Context(), role); err != nil {
+		t.Fatal(err)
+	}
+	serviceErrorRequest(t, h, "POST", "/api/agents", fmt.Sprintf(`{"name":"Assignment","slug":"assignment","system_prompt":"fixture","role_id":%q}`, role.ID), 500)
 	if !strings.Contains(logs.String(), "write_secret") {
 		t.Fatalf("assignment cause absent from log: %s", logs.String())
 	}

@@ -164,26 +164,14 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	res, err := a.Services.AgentConfig.Create(agent, nil)
-	if err != nil {
-		a.serviceError(w, r, err)
-		return
-	}
-
-	// role_id/consumer_id/model_id use the composition writer so pointer/FK
-	// validation remains shared with the assignment API; protocol/transport
-	// (TASKS/agent-host-acp/11) have the same DB-only shape.
-	profile, err := a.Services.AgentConfig.ApplyAssignments(r.Context(), res.Profile, service.AgentAssignments{
-		RoleID:     ptrOrNilString(req.RoleID),
-		ConsumerID: ptrOrNilString(req.ConsumerID),
-		ModelID:    ptrOrNilString(req.ModelID),
-		Protocol:   ptrOrNilString(req.Protocol),
-		Transport:  ptrOrNilString(req.Transport),
+	res, err := a.Services.AgentConfig.CreateWithAssignments(r.Context(), agent, nil, service.AgentAssignments{
+		RoleID: ptrOrNilString(req.RoleID), ConsumerID: ptrOrNilString(req.ConsumerID), ModelID: ptrOrNilString(req.ModelID), Protocol: ptrOrNilString(req.Protocol), Transport: ptrOrNilString(req.Transport),
 	})
 	if err != nil {
 		a.serviceError(w, r, err)
 		return
 	}
+	profile := res.Profile
 
 	view := a.agentView(*profile)
 	a.jsonResp(w, http.StatusCreated, view)
@@ -347,7 +335,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Procedures are relational capability rows and are untouched by profile
 	// edits; no filesystem round-trip is needed to preserve them.
-	res, err := a.Services.AgentConfig.Update(&original, existing, nil, req.Revision)
+	res, err := a.Services.AgentConfig.UpdateWithAssignments(r.Context(), &original, existing, nil, req.Revision, service.AgentAssignments{RoleID: req.RoleID, ConsumerID: req.ConsumerID, ModelID: req.ModelID, Protocol: req.Protocol, Transport: req.Transport})
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrAgentNotManaged):
@@ -358,21 +346,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// role_id/consumer_id/model_id and protocol/transport -- see
-	// handleCreateAgent's matching comment. Pointer semantics here (nil =
-	// untouched, non-nil = set or clear) match every other partial-update
-	// field on UpdateAgentRequest.
-	profile, err := a.Services.AgentConfig.ApplyAssignments(r.Context(), res.Profile, service.AgentAssignments{
-		RoleID:     req.RoleID,
-		ConsumerID: req.ConsumerID,
-		ModelID:    req.ModelID,
-		Protocol:   req.Protocol,
-		Transport:  req.Transport,
-	})
-	if err != nil {
-		a.serviceError(w, r, err)
-		return
-	}
+	profile := res.Profile
 
 	a.jsonResp(w, http.StatusOK, a.agentView(*profile))
 }

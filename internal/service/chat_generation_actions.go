@@ -11,6 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/substrate/agent/runloop"
+	agentturn "github.com/hollis-labs/substrate/agent/turn"
+
 	hooks "github.com/hollis-labs/go-hooks"
 
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
@@ -26,7 +29,6 @@ import (
 
 	ledger "github.com/hollis-labs/go-usage-ledger"
 	"github.com/hollis-labs/nanite/internal/chat"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/effort"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
@@ -35,16 +37,7 @@ import (
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
-)
-
-type generationDirective uint8
-
-const (
-	generationProceed generationDirective = iota
-	generationRetryIteration
-	generationContinueIteration
-	generationFinishRun
-	generationTerminate
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 type generationLifecycle struct {
@@ -142,7 +135,7 @@ func (s *chatServiceImpl) settleToolTurn(
 		run.finalContent.WriteString(run.loop.directReturn)
 		ch <- chat.StreamEvent{Type: "replace_content", Content: run.loop.directReturn}
 		diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "done:direct_return=subagent_literal", len(run.loop.toolCallRefs), ch)
-		return settleToolTurnResult{directive: generationFinishRun}
+		return settleToolTurnResult{directive: runloop.Finish}
 	}
 
 	// Append tool results as user message.
@@ -195,10 +188,10 @@ func (s *chatServiceImpl) settleToolTurn(
 			Content: "Provider rate limited. Tool-use loop stopped. Would you like to retry?",
 		}
 		diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "circuit_open", len(run.loop.toolCallRefs), ch)
-		return settleToolTurnResult{directive: generationFinishRun}
+		return settleToolTurnResult{directive: runloop.Finish}
 	}
 
-	return settleToolTurnResult{directive: generationContinueIteration}
+	return settleToolTurnResult{directive: runloop.Continue}
 }
 
 func (s *chatServiceImpl) initializeRun(
@@ -383,7 +376,7 @@ func (s *chatServiceImpl) initializeRun(
 	var thinkingBlocks []llmtypes.ThinkingBlock
 
 	return initializeRunResult{
-		directive: generationProceed,
+		directive: runloop.Proceed,
 		run: &runState{
 			loop:             ls,
 			chatMessages:     chatMessages,
@@ -431,7 +424,7 @@ type turnSetup struct {
 }
 
 type prepareTurnResult struct {
-	directive generationDirective
+	directive runloop.Directive
 	setup     *turnSetup
 }
 
@@ -455,7 +448,7 @@ type runState struct {
 }
 
 type initializeRunResult struct {
-	directive generationDirective
+	directive runloop.Directive
 	run       *runState
 }
 
@@ -497,17 +490,17 @@ func (a *providerAttempt) close() {
 }
 
 type consumeProviderIterationResult struct {
-	directive generationDirective
+	directive runloop.Directive
 	turn      providerTurn
 }
 
 type requestProviderIterationResult struct {
-	directive generationDirective
+	directive runloop.Directive
 	attempt   *providerAttempt
 }
 
 type settleToolTurnResult struct {
-	directive generationDirective
+	directive runloop.Directive
 }
 
 func (s *chatServiceImpl) requestProviderIteration(
@@ -561,7 +554,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 		s.emitChatLoopTerminated(sessionID, run.loop, code, reason, ch)
 		ch <- chat.StreamEvent{Type: "status", Content: fmt.Sprintf("Stopped: %s", reason)}
 		diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "shouldStop:"+string(code), len(run.loop.toolCallRefs), ch)
-		return requestProviderIterationResult{directive: generationFinishRun}
+		return requestProviderIterationResult{directive: runloop.Finish}
 	}
 	// Context cancellation.
 	//
@@ -593,7 +586,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 		slog.Info("generateResponse canceled", "err", ctxErr, "session_id", sessionID)
 		ch <- chat.StreamEvent{Type: "status", Content: "Stopped: canceled"}
 		s.persistPartialAssistantCanceled(sessionID, assistantMsgID, agentID, run.fullContent.String())
-		return requestProviderIterationResult{directive: generationTerminate}
+		return requestProviderIterationResult{directive: runloop.Terminate}
 	}
 
 	// Token budget enforcement.
@@ -634,7 +627,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 				"tools":   run.breakdown.Tools,
 			})
 		s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, budgetErr) // CW-20260419-0019, CW-20260512-0001
-		return requestProviderIterationResult{directive: generationTerminate}
+		return requestProviderIterationResult{directive: runloop.Terminate}
 	}
 	// Log compaction continuation if budget enforcement reduced context.
 	if len(run.chatMessages) < preBudgetMsgCount || len(run.tools) < preBudgetToolCount {
@@ -700,7 +693,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 			run.fullContent.WriteString(blockMsg)
 			run.finalContent.WriteString(blockMsg)
 			diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "plugin_cancel:message.sending", len(run.loop.toolCallRefs), ch)
-			return requestProviderIterationResult{directive: generationFinishRun}
+			return requestProviderIterationResult{directive: runloop.Finish}
 		}
 	}
 
@@ -894,7 +887,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 				run.chatMessages = newMsgs
 				run.tools = newTools
 				run.systemPrompt = slotResult.SystemPrompt
-				return requestProviderIterationResult{directive: generationRetryIteration}
+				return requestProviderIterationResult{directive: runloop.Retry}
 			}
 			// Recovery refused (flag off / no summarizer / no stages).
 			// Exhaust attempts so the same request can't loop back
@@ -939,12 +932,12 @@ func (s *chatServiceImpl) requestProviderIteration(
 					// to step the iteration counter so the retry isn't
 					// counted as a fresh turn. Mirrors the recovery-ok
 					// path above.
-					return requestProviderIterationResult{directive: generationRetryIteration}
+					return requestProviderIterationResult{directive: runloop.Retry}
 				}
 				// Pause emitted with user_action_needed; end the turn
 				// cleanly without a fatal envelope.
 				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001
-				return requestProviderIterationResult{directive: generationTerminate}
+				return requestProviderIterationResult{directive: runloop.Terminate}
 			}
 			var msg string
 			switch triggerKind {
@@ -955,12 +948,12 @@ func (s *chatServiceImpl) requestProviderIteration(
 			}
 			details := map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind}
 			if s.surfaceErrorOrSuppress(ch, sessionID, "recovery_refused", msg, details, run.fullContent.String()) {
-				return requestProviderIterationResult{directive: generationTerminate}
+				return requestProviderIterationResult{directive: runloop.Terminate}
 			}
 			// surfaceErrorOrSuppress already classified above; use the pre-classified
 			// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
 			s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
-			return requestProviderIterationResult{directive: generationTerminate}
+			return requestProviderIterationResult{directive: runloop.Terminate}
 		}
 		attempt.span.RecordError(err)
 		attempt.span.SetStatus(codes.Error, err.Error())
@@ -1002,19 +995,19 @@ func (s *chatServiceImpl) requestProviderIteration(
 			// Glass-6's scope is rate-budget only.
 			if errors.Is(err, llmcontracts.ErrRequestExceedsRateBudget) {
 				if s.pauseAndMaybeRetryRateBudget(ctx, sessionID, prov, ch, err, compactTriggerRateBudget, &run.loop.rateBudgetPauseAttempts) {
-					return requestProviderIterationResult{directive: generationRetryIteration}
+					return requestProviderIterationResult{directive: runloop.Retry}
 				}
 				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001
-				return requestProviderIterationResult{directive: generationTerminate}
+				return requestProviderIterationResult{directive: runloop.Terminate}
 			}
 			msg := "Context is still too large after compaction. Use `/clear` or split the request."
 			if s.surfaceErrorOrSuppress(ch, sessionID, "compact_failed_after_retry", msg, map[string]interface{}{"recovery": "failed_after_retry"}, run.fullContent.String()) {
-				return requestProviderIterationResult{directive: generationTerminate}
+				return requestProviderIterationResult{directive: runloop.Terminate}
 			}
 			// surfaceErrorOrSuppress already classified above; use the pre-classified
 			// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
 			s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
-			return requestProviderIterationResult{directive: generationTerminate}
+			return requestProviderIterationResult{directive: runloop.Terminate}
 		}
 		// Provider stream error (general) — classifier-driven error code,
 		// not necessarily ErrorCodeInternal. Subagent suppression still
@@ -1023,14 +1016,14 @@ func (s *chatServiceImpl) requestProviderIteration(
 		// confuses the user. The classifier-driven code is preserved
 		// for the non-subagent branch.
 		if s.suppressSurfaceIfSubagentCaused(sessionID, "provider_stream_error", run.fullContent.String()) {
-			return requestProviderIterationResult{directive: generationTerminate}
+			return requestProviderIterationResult{directive: runloop.Terminate}
 		}
 		s.surfaceProviderFailure(ctx, ch, sessionID, assistantMsgID, agentID, run.fullContent.String(), model, providerName, agent.Slug, err, map[string]interface{}{"tools": len(run.tools)})
-		return requestProviderIterationResult{directive: generationTerminate}
+		return requestProviderIterationResult{directive: runloop.Terminate}
 	}
 
 	attempt.events = provCh
-	return requestProviderIterationResult{directive: generationProceed, attempt: attempt}
+	return requestProviderIterationResult{directive: runloop.Proceed, attempt: attempt}
 }
 
 func (s *chatServiceImpl) consumeProviderIteration(
@@ -1059,7 +1052,6 @@ func (s *chatServiceImpl) consumeProviderIteration(
 	var turnContent strings.Builder
 	var toolUseBlocks []llmtypes.ToolUseBlock
 	var stopReason string
-	providerTerminal := false
 	var lastPTYToolPending string
 	// T9 — set by the mid-stream overflow handler when the outer loop
 	// should retry with a compacted request instead of terminating.
@@ -1107,37 +1099,25 @@ func (s *chatServiceImpl) consumeProviderIteration(
 	// so we reuse the chat loop's existing liveness budget rather than
 	// inventing a parallel one.
 	streamInactivityWindow := run.loop.limits.idleTimeout
-	streamIdle := time.NewTimer(streamInactivityWindow)
+	streamReader, readerErr := agentturn.NewReaderWithOptions(ctx, attempt.events, streamInactivityWindow, agentturn.ReaderOptions{DrainBufferedOnCancel: true})
+	if readerErr != nil {
+		s.surfaceProviderFailure(ctx, ch, sessionID, assistantMsgID, agentID, run.fullContent.String(), model, providerName, agent.Slug, readerErr, nil)
+		return consumeProviderIterationResult{directive: runloop.Terminate}
+	}
+	defer streamReader.Close()
 	streamStalled := false
 
 streamLoop:
 	for {
-		var evt llmtypes.StreamEvent
-		var ok bool
-		select {
-		case evt, ok = <-attempt.events:
-			if !ok {
-				// Channel closed — normal end of stream.
-				break streamLoop
-			}
-			// An event arrived: the provider is alive. Reset the
-			// inactivity window. Stop-then-drain-then-reset is the
-			// race-free Timer reset idiom.
-			if !streamIdle.Stop() {
-				select {
-				case <-streamIdle.C:
-				default:
-				}
-			}
-			streamIdle.Reset(streamInactivityWindow)
-		case <-streamIdle.C:
-			// No provider event for the full inactivity window — a
-			// silent stall. Cancel the stream context so the adapter
-			// tears down the HTTP connection, then fall through to the
-			// post-loop `streamStalled` handler.
-			streamStalled = true
+		evt, ok, streamErr := streamReader.Next()
+		if streamErr != nil {
+			streamStalled = errors.Is(streamErr, agentturn.ErrTurnStalled)
 			break streamLoop
 		}
+		if !ok {
+			break streamLoop
+		}
+
 		diagProvEventCount++
 		switch evt.Type {
 		case "delta":
@@ -1236,27 +1216,27 @@ streamLoop:
 			// CW-20260517-0036 — the loop is about to exit on a
 			// mid-stream provider error; release the per-iteration
 			// stream context before any return path below.
-			streamIdle.Stop()
+			streamReader.Close()
 			attempt.cancelStream()
 			if ctxpkg.IsContextOverflowMessage(evt.Error) && run.loop.compactRecoverableAttempts >= maxCompactRecoverableAttempts {
 				msg := "Context is still too large after compaction. Use `/clear` or split the request."
 				errDetails["recovery"] = "failed_after_retry"
 				if s.surfaceErrorOrSuppress(ch, sessionID, "midstream_failed_after_retry", msg, errDetails, run.fullContent.String()) {
-					return consumeProviderIterationResult{directive: generationTerminate}
+					return consumeProviderIterationResult{directive: runloop.Terminate}
 				}
 				// surfaceErrorOrSuppress already classified above; use the pre-classified
 				// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
 				s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
-				return consumeProviderIterationResult{directive: generationTerminate}
+				return consumeProviderIterationResult{directive: runloop.Terminate}
 			}
 			// Mid-stream provider error (general). Same suppression rule
 			// as the pre-stream provider error above: if a subagent is
 			// active, the FE shouldn't see this surface.
 			if s.suppressSurfaceIfSubagentCaused(sessionID, "midstream_provider_error", run.fullContent.String()) {
-				return consumeProviderIterationResult{directive: generationTerminate}
+				return consumeProviderIterationResult{directive: runloop.Terminate}
 			}
 			s.surfaceProviderFailure(ctx, ch, sessionID, assistantMsgID, agentID, run.fullContent.String(), model, providerName, agent.Slug, fmt.Errorf("%s", evt.Error), nil)
-			return consumeProviderIterationResult{directive: generationTerminate}
+			return consumeProviderIterationResult{directive: runloop.Terminate}
 
 		case "session_id":
 			// Phase 4c.6 (CW-20260508-0002): persistCLISessionID
@@ -1291,7 +1271,7 @@ streamLoop:
 			}
 
 		case "done":
-			providerTerminal = true
+			// The core reader records the normalized terminal signal.
 		}
 	}
 
@@ -1300,7 +1280,7 @@ streamLoop:
 	// exited on a closed channel or a labeled break), and cancel the
 	// stream context so a still-running provider goroutine is torn down
 	// rather than leaking to the next iteration.
-	streamIdle.Stop()
+	streamReader.Close()
 	attempt.cancelStream()
 
 	// CW-20260517-0036 — provider-stream inactivity timeout fired.
@@ -1333,7 +1313,7 @@ streamLoop:
 		// branches). The subagent run still fails — drainCapture sees
 		// the error event below.
 		if s.suppressSurfaceIfSubagentCaused(sessionID, "provider_stream_stalled", run.fullContent.String()) {
-			return consumeProviderIterationResult{directive: generationTerminate}
+			return consumeProviderIterationResult{directive: runloop.Terminate}
 		}
 		stallDetails := map[string]interface{}{
 			"raw":               stallErr.Error(),
@@ -1344,16 +1324,16 @@ streamLoop:
 		ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(stallErr), "Provider stream stalled — no response", stallDetails)
 		ch <- chat.ErrorEvent(chat.ClassifyError(stallErr), "Provider stream stalled — no response", stallDetails)
 		s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, stallErr)
-		return consumeProviderIterationResult{directive: generationTerminate}
+		return consumeProviderIterationResult{directive: runloop.Terminate}
 	}
 
 	// A closed provider channel is a transport boundary, not proof that the
 	// cognitive turn completed. Require its normalized terminal signal.
-	if isCognitiveTurn(ctx) && !providerTerminal && !contextOverflowRecovered && ctx.Err() == nil {
-		truncated := fmt.Errorf("upstream provider stream ended without a terminal signal")
+	if isCognitiveTurn(ctx) && !streamReader.TerminalSeen() && !contextOverflowRecovered && ctx.Err() == nil {
+		truncated := agentturn.ErrTurnTruncated
 		ch <- chat.ErrorEvent(chat.ErrorCode("upstream_truncated"), "Provider stream ended before completion", nil)
 		s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, truncated)
-		return consumeProviderIterationResult{directive: generationTerminate}
+		return consumeProviderIterationResult{directive: runloop.Terminate}
 	}
 
 	// CW-20260418-0043 diagnostic — provider stream closed.
@@ -1406,7 +1386,7 @@ streamLoop:
 	// continue.
 	if contextOverflowRecovered {
 		attempt.close()
-		return consumeProviderIterationResult{directive: generationRetryIteration}
+		return consumeProviderIterationResult{directive: runloop.Retry}
 	}
 
 	// Resolve remaining PTY tool presence.
@@ -1468,7 +1448,7 @@ streamLoop:
 
 			run.loop.touchActivity()
 			run.loop.continueWith(ContinuePreambleNudge, "promissory preamble nudge")
-			return consumeProviderIterationResult{directive: generationContinueIteration}
+			return consumeProviderIterationResult{directive: runloop.Continue}
 		}
 
 		// D-34: a reply that reports a completed write citing an id is checked
@@ -1511,7 +1491,7 @@ streamLoop:
 						llmtypes.ChatMessage{Role: "user", ContentBlocks: []llmtypes.ContentBlock{{Type: "text", Text: writeClaimNudge(decision)}}})
 					run.loop.touchActivity()
 					run.loop.continueWith(ContinueWriteClaimGuard, "write-claim guard: unbacked write claim sent back")
-					return consumeProviderIterationResult{directive: generationContinueIteration}
+					return consumeProviderIterationResult{directive: runloop.Continue}
 				case "footer_after_retry":
 					run.loop.wcFooter = writeClaimFooter(decision.Finding.Ungrounded)
 					ch <- chat.StreamEvent{Type: "status", Content: out.SystemMessage}
@@ -1534,17 +1514,17 @@ streamLoop:
 			})
 		}
 		diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "done:stop_reason="+stopReason, len(run.loop.toolCallRefs), ch)
-		return consumeProviderIterationResult{directive: generationFinishRun}
+		return consumeProviderIterationResult{directive: runloop.Finish}
 	}
 
 	return consumeProviderIterationResult{
-		directive: generationProceed,
+		directive: runloop.Proceed,
 		turn:      providerTurn{content: turnContent.String(), toolUseBlocks: toolUseBlocks},
 	}
 }
 
 type finalizeRunResult struct {
-	directive generationDirective
+	directive runloop.Directive
 }
 
 func (s *chatServiceImpl) finalizeRun(
@@ -1804,7 +1784,7 @@ func (s *chatServiceImpl) finalizeRun(
 	if err := s.store.CreateMessage(persistCtx, assistantMsg); err != nil {
 		slog.Error("chat-service: failed to save assistant message", "err", err)
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to save response", map[string]interface{}{"raw": err.Error()})
-		return finalizeRunResult{directive: generationTerminate}
+		return finalizeRunResult{directive: runloop.Terminate}
 	}
 
 	// PruneAfterTurn retired in Phase 3 S3a — slot compaction supersedes.
@@ -1858,7 +1838,7 @@ func (s *chatServiceImpl) finalizeRun(
 
 	// Stream end.
 	if isCognitiveTurn(ctx) {
-		s.streams.CognitiveTurns().setUsage(assistantMsgID, canonicalRunUsage(run.usageCalls))
+		s.streams.CognitiveTurns().SetUsage(assistantMsgID, canonicalRunUsage(run.usageCalls))
 	}
 	streamUsage := run.finalUsage
 	if streamUsage != nil && *streamUsage == (chat.Usage{}) {
@@ -1889,7 +1869,7 @@ func (s *chatServiceImpl) finalizeRun(
 		s.autoTags(bgCtx, sessionID)
 	})
 
-	return finalizeRunResult{directive: generationProceed}
+	return finalizeRunResult{directive: runloop.Proceed}
 }
 
 func (s *chatServiceImpl) prepareTurn(
@@ -1901,14 +1881,14 @@ func (s *chatServiceImpl) prepareTurn(
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to load session", map[string]interface{}{"raw": err.Error()})
-		return prepareTurnResult{directive: generationTerminate}
+		return prepareTurnResult{directive: runloop.Terminate}
 	}
 
 	// --- Resolve agent ---
 	agent, err := s.agents.ResolveForSession(ctx, sessionID)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to resolve agent", map[string]interface{}{"raw": err.Error()})
-		return prepareTurnResult{directive: generationTerminate}
+		return prepareTurnResult{directive: runloop.Terminate}
 	}
 	if isCognitiveTurn(ctx) {
 		copyAgent := *agent
@@ -1932,7 +1912,7 @@ func (s *chatServiceImpl) prepareTurn(
 				var cfg ChatDefinitionConfig
 				if json.Unmarshal([]byte(record.ChatConfigJSON), &cfg) != nil {
 					ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Invalid verified chat configuration", nil)
-					return prepareTurnResult{directive: generationTerminate}
+					return prepareTurnResult{directive: runloop.Terminate}
 				}
 				copyAgent := *agent
 				agent = &copyAgent
@@ -1951,7 +1931,7 @@ func (s *chatServiceImpl) prepareTurn(
 				session.Metadata = "{}"
 			} else if !errors.Is(readErr, sql.ErrNoRows) {
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to read verified chat configuration", nil)
-				return prepareTurnResult{directive: generationTerminate}
+				return prepareTurnResult{directive: runloop.Terminate}
 			}
 		}
 	}
@@ -1960,7 +1940,7 @@ func (s *chatServiceImpl) prepareTurn(
 	// Block disabled agents.
 	if agent.Status == "disabled" {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, fmt.Sprintf("Agent %q is disabled", agent.Name), nil)
-		return prepareTurnResult{directive: generationTerminate}
+		return prepareTurnResult{directive: runloop.Terminate}
 	}
 
 	// Parse agent constraints (schema v2).
@@ -2007,7 +1987,7 @@ func (s *chatServiceImpl) prepareTurn(
 			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
 				"No default model configured. Set providers.default_model or user_settings.default_model.",
 				map[string]interface{}{"raw": resolveErr.Error()})
-			return prepareTurnResult{directive: generationTerminate}
+			return prepareTurnResult{directive: runloop.Terminate}
 		}
 		model = resolved
 	}
@@ -2019,7 +1999,7 @@ func (s *chatServiceImpl) prepareTurn(
 	harness, harnessErr := s.resolveHarness(ctx, session, constraints, model)
 	if harnessErr != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, harnessErr.Error(), nil)
-		return prepareTurnResult{directive: generationTerminate}
+		return prepareTurnResult{directive: runloop.Terminate}
 	}
 
 	// --- Resolve provider ---
@@ -2056,12 +2036,12 @@ func (s *chatServiceImpl) prepareTurn(
 			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
 				fmt.Sprintf("CLI provider %q has no runtime adapter registered.", providerName),
 				map[string]interface{}{"raw": fmt.Sprintf("CLI provider %q cannot launch: %v", providerName, runtimeagent.LaunchError(providerName))})
-			return prepareTurnResult{directive: generationTerminate}
+			return prepareTurnResult{directive: runloop.Terminate}
 		default:
 			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
 				fmt.Sprintf("Provider %q not available — check configuration and restart the server.", providerName),
 				map[string]interface{}{"raw": fmt.Sprintf("provider %q not registered", providerName)})
-			return prepareTurnResult{directive: generationTerminate}
+			return prepareTurnResult{directive: runloop.Terminate}
 		}
 	}
 
@@ -2239,7 +2219,7 @@ func (s *chatServiceImpl) prepareTurn(
 	// --- Assemble context (slot-based) ---
 	slotResult, err := s.assembleTurnContext(ctx, session, agent, tools, extraSystemPrefix, providerName, model, ch, toolsLazyHint)
 	if err != nil {
-		return prepareTurnResult{directive: generationTerminate}
+		return prepareTurnResult{directive: runloop.Terminate}
 	}
 	chatMessages := slotResult.Messages
 	systemPrompt := slotResult.SystemPrompt // legacy concat — for budget enforcer + telemetry
@@ -2281,7 +2261,7 @@ func (s *chatServiceImpl) prepareTurn(
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal,
 			fmt.Sprintf("Session halted: %s", reason),
 			map[string]interface{}{"reflex": action.ReflexName, "reason": reason})
-		return prepareTurnResult{directive: generationTerminate}
+		return prepareTurnResult{directive: runloop.Terminate}
 	}
 
 	// CW-20260512-0019: surface pending subagent completions at turn
@@ -2320,7 +2300,7 @@ func (s *chatServiceImpl) prepareTurn(
 	}
 
 	return prepareTurnResult{
-		directive: generationProceed,
+		directive: runloop.Proceed,
 		setup: &turnSetup{
 			session:            session,
 			agent:              agent,

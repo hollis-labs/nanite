@@ -11,6 +11,22 @@ view has native work in flight. Mailbox and subagent wakeups for defined views
 use the same pinned, tracked native path, with background caller identity and
 idle-only admission; their retained inbox/result records remain available.
 
+## Core ownership
+
+Nanite embeds `github.com/hollis-labs/substrate/agent`. The library owns native
+iteration ordering, provider event observation, bounded tool scheduling,
+once-bound approvals, child lifecycle, canonical reduction and per-run HTTP
+encoding. `internal/service/cognitive_turns.go` projects Nanite producer events
+and committed `store.Message` output into the neutral service ports;
+`internal/subagent/adapter.go` supplies database-backed settings/profiles, the
+existing trust resolver, liveness configuration and panic observation.
+
+Nanite owns definition resolution and model authorization, permission posture,
+tool grants and execution, transcript/output commits, admission and shutdown.
+HTTP handlers retain authenticated view/run lookup before passing a subscription
+to the library writer. Transport extraction does not provision subprocess
+credentials or widen the off-box host boundary.
+
 ## Definition and model binding
 
 `POST /sessions` requires `definition_ref` with `definition_id`, `revision` and
@@ -104,3 +120,12 @@ loopback. CLI JSON and event requests disable redirects and use explicitly
 configured credentials. The self-tool proxy forwards an explicitly available
 token only to its authenticated loopback host endpoint, without redirects.
 Subprocess credential provisioning is separate host adoption work.
+
+Snapshot storage failures produce a live `persistence_failed` terminal and the
+host logs the typed library mutation error once per turn. This includes initial
+snapshot creation. An initial creation failure closes the accepted producer before
+provider/tool dispatch and keeps the failed turn ID discoverable. If both the
+normal save and failure save fail, that live
+terminal cannot be claimed durable: after recovery a fresh process sees the last
+committed snapshot (`process_lost` if unfinished), or no snapshot if creation
+never committed. Canonical replay remains process-local.

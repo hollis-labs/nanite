@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	messaging "github.com/hollis-labs/go-messaging/mailbox"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // evaluateAndInjectSubagentResults surfaces pending kind=subagent_result

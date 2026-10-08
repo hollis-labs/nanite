@@ -135,6 +135,7 @@ require (
 	github.com/hollis-labs/nanite/pkg/pluginapi v0.1.8
 	github.com/hollis-labs/plugin-host v0.1.2
 	github.com/hollis-labs/plugins-catalog v0.1.0
+	github.com/hollis-labs/substrate/agent v0.1.0
 	github.com/hollis-labs/substrate/mesh v0.1.0
 	github.com/hollis-labs/tesseract v0.10.0
 	github.com/openai/openai-go/v3 v3.61.0

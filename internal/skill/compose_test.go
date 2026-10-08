@@ -26,7 +26,8 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // composeFixturesDir reuses the same testdata root resolver_test.go
@@ -161,7 +162,7 @@ func TestMaterializeSkill_Fork_DelegatesToRealSubagentAndFoldsBackResult(t *test
 	installFixture(t, idx, vendor, filepath.Join(composeFixturesDir, "compose-fork-parent"))
 
 	runner := &capturingRunner{}
-	svc := subagent.NewService(idx.DB, runner, nil, nil, nil)
+	svc := subagenthost.NewService(idx.DB, runner, nil, nil, nil)
 
 	parent := parseFixtureDef(t, "compose-fork-parent")
 
@@ -253,7 +254,7 @@ func TestMaterializeSkill_Fork_MissingParentSessionID_FailsClearly(t *testing.T)
 	installFixture(t, idx, vendor, filepath.Join(composeFixturesDir, "compose-fork-parent"))
 
 	runner := &capturingRunner{}
-	svc := subagent.NewService(idx.DB, runner, nil, nil, nil)
+	svc := subagenthost.NewService(idx.DB, runner, nil, nil, nil)
 	parent := parseFixtureDef(t, "compose-fork-parent")
 
 	_, err := MaterializeSkill(context.Background(), MaterializerDeps{
@@ -287,7 +288,7 @@ func TestMaterializeSkill_MultiLevelProvenanceChain_CrossesInlineAndFork(t *test
 	installFixture(t, idx, vendor, filepath.Join(composeFixturesDir, "compose-multilevel-root"))
 
 	runner := &capturingRunner{}
-	svc := subagent.NewService(idx.DB, runner, nil, nil, nil)
+	svc := subagenthost.NewService(idx.DB, runner, nil, nil, nil)
 	root := parseFixtureDef(t, "compose-multilevel-root")
 
 	result, err := MaterializeSkill(context.Background(), MaterializerDeps{
@@ -388,7 +389,7 @@ func TestMaterializeSkill_Fork_PendingApproval_ReturnsDistinguishableError(t *te
 	runner := &gatedNotCalledRunner{t: t}
 	emitter := &gatedApprovalEmitter{}
 	settings := gatedSettingsReader{us: store.UserSettings{SubagentApprovalRequired: true}}
-	svc := subagent.NewService(idx.DB, runner, nil, emitter, settings)
+	svc := subagenthost.NewService(idx.DB, runner, nil, emitter, settings)
 
 	parent := parseFixtureDef(t, "compose-fork-parent")
 

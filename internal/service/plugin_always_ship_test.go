@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
 	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 func alwaysShipReply(body string) *sdkprocess.HTTPResponse {

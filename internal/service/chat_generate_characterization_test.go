@@ -20,13 +20,13 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/chat"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	sdkplugin "github.com/hollis-labs/plugin-sdk"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 type characterizationSessions struct{ st *store.Store }

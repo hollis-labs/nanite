@@ -181,17 +181,7 @@ func TestListProjectsEmpty(t *testing.T) {
 }
 
 func TestCreateAndListSessions(t *testing.T) {
-	a, mux := newTestAPI(t)
-
-	// Seed an agent so EnsureSessionAgent doesn't fail on FK constraint.
-	if err := a.store.CreateAgent(context.Background(), &store.AgentProfile{
-		ID:           "mentat-001",
-		Name:         "Mentat",
-		Slug:         "mentat",
-		SystemPrompt: "test",
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
+	_, mux := newTestAPI(t)
 
 	// POST /api/sessions
 	body, _ := json.Marshal(map[string]string{})

@@ -1,5 +1,5 @@
 # lefthook.yml — Fragments Engine shared pre-commit/pre-push hooks
-# Reference copy lives in mentat repo; copied to all FE projects.
+# Reference copy lives in nanite repo; copied to all FE projects.
 #
 # THIS FILE ENFORCES NOTHING UNTIL `lefthook install` HAS RUN IN THE CLONE.
 # A tracked lefthook.yml installs no git hooks by itself. Fresh clones must run
@@ -12,7 +12,7 @@
 # staged-files-only:
 #   go-format         staged files only
 #   migration-purity  staged files only
-#   frontend-lint     staged files only — `skip: true`, see its own note
+#   frontend-lint     staged files only — pinned ui/ Biome
 #
 # No pre-commit command can fail for a reason outside the diff being committed.
 # That is deliberate and it is the whole design: `--no-verify` is all-or-
@@ -25,7 +25,7 @@
 # lands, before pushing a branch you care about, and before dispatching the
 # full-repo quality gate. Not on every commit.
 #
-# Cost, measured on nanite @ 9591c1a6 (2026-08-24) across three real
+# Historical cost before the frontend repair, measured on nanite @ 9591c1a6 (2026-08-24) across three real
 # `git commit` attempts with one staged .go file, reading lefthook's own
 # summary each time:
 #   pre-commit total   0.17s / 0.06s / 0.06s
@@ -149,31 +149,13 @@ pre-commit:
     # Safe to leave in Go-only repos — skip conditions prevent errors.
 
     frontend-lint:
-      # DISABLED 2026-08-24 — this command does not work in this repo, and was
-      # only ever inert because no hooks were installed. Now that they are, it
-      # had to be either fixed or switched off honestly; fixing it is tracked
-      # as CW-20260816-0087 and is not this task's scope.
-      #
-      # Measured from the repo root, which is where lefthook runs it:
-      #   npx --no-install biome --version        -> 0.3.3   (an unrelated
-      #                                              package; the project's is
-      #                                              Biome 2.4.7, resolvable
-      #                                              only from ui/)
-      #   ui/node_modules/.bin/biome check <clean tracked file>   -> exit 1
-      #   ...           same, plus --config-path ui               -> exit 1
-      # So the original line silently runs the WRONG binary, and the obvious
-      # repairs still fail on a known-clean file. biome's config lives at
-      # ui/biome.json and it resolves paths against its own cwd, so a working
-      # version has to run from ui/ with ui-relative paths — real work, not a
-      # flag. A hook that greenlights a commit by invoking an unrelated program
-      # is the exact "looks like a gate, is not" state this file was activated
-      # to end, so it stays off until it genuinely works.
-      #
-      # ui/package.json's own scripts remain the real check in the meantime.
-      skip: true
+      # Run the pinned, lockfile-installed Biome from its package directory.
+      # root makes staged paths package-relative; missing npm ci fails loudly.
+      root: "ui/"
       glob: "*.{ts,tsx,js,jsx}"
       skip_empty: true
-      run: npx biome check --no-errors-on-unmatched {staged_files}
+      run: ./node_modules/.bin/biome check --no-errors-on-unmatched {staged_files}
+
 
 pre-push:
   commands:

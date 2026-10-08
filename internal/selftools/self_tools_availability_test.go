@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 func listedNames(t *testing.T, st *SelfToolsTransport) []string {

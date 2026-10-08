@@ -16,7 +16,7 @@ import (
 	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/agent/override"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 type messagingWakeReactor struct {

@@ -141,6 +141,8 @@ github.com/hollis-labs/plugin-sdk v0.6.1 h1:h661bJZNrFSYcebWRy/2h+SbQqGxpzCxMBhc
 github.com/hollis-labs/plugin-sdk v0.6.1/go.mod h1:GW8/S59GT15wKNQu62XvGArq7yLsceNDEa5TA3wFud0=
 github.com/hollis-labs/plugins-catalog v0.1.0 h1:LTY21EkCDTeqn/l8zZ/11yY4T0FrRy4seQ6Xr8CUG0U=
 github.com/hollis-labs/plugins-catalog v0.1.0/go.mod h1:mPH7usmULvgjsbZ14bwWfwn+CQUg8PZOR+9eZaj5vxM=
+github.com/hollis-labs/substrate/agent v0.1.0 h1:KAf3hQOe1EO88KU08V29UmyViHnVfY98m5dqXRV7G3c=
+github.com/hollis-labs/substrate/agent v0.1.0/go.mod h1:NGtnJ+6am7s5SpR7mnoYnb3bOLhysCphSiXh/aNlelk=
 github.com/hollis-labs/substrate/mesh v0.1.0 h1:CkUvYdoXSGVcSlXhVgc+0AYzyhXdd49c+AV47z0XvOs=
 github.com/hollis-labs/substrate/mesh v0.1.0/go.mod h1:akUYHGaDVmF2Gwyr784nk8HuNr0KBsl1x97ApvTxcAM=
 github.com/hollis-labs/tesseract v0.10.0 h1:KpuwV5ZR2QeA5WwvcOP0D1nY87L+TJO4qjJdMjJ4kQ8=

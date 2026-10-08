@@ -1,7 +1,7 @@
 # Context assembly
 
 Every LLM turn Nanite dispatches is assembled from a fixed, ordered list of
-named slots. The list is `SlotOrder` in `internal/context/slot.go`, and the
+named slots. The list is `SlotOrder` in the pinned substrate agent module’s `context/slot.go`, and the
 Context Broker emits one decision per slot, in that order, on every turn.
 
 The thing to understand before changing any of it is that **the order and the
@@ -59,7 +59,7 @@ documented state rather than a bug to fix.
 
 ## The contract, and where it actually lives
 
-`internal/context/INVARIANTS.md` is the contract — seven invariants, each stated
+The pinned substrate agent module’s `context/INVARIANTS.md` is the contract — seven invariants, each stated
 with what relies on it and which test pins it. Every one is enforced by
 `internal/service/slot_invariants_test.go`, which also carries
 deliberate-violation tests, so each assertion is shown to catch a real break
@@ -156,7 +156,8 @@ invariants rather than from the slot content.
 
 ```bash
 # which slots the plan carries, in order
-grep -n -A18 'var SlotOrder' internal/context/slot.go
+agent_module=$(go list -m -f '{{.Dir}}' github.com/hollis-labs/substrate/agent)
+grep -n -A18 'var SlotOrder' "$agent_module/context/slot.go"
 # what the CLI boot prompt is built from
 grep -n 'func composeSystemPrompt\|func ResolveSystemPrompt\|func withCLINarration' internal/runtime/agent/prompt.go
 # the CLI re-plant: slot-hash check, rewrite of boot-dir files, launch-time blocks

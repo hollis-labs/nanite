@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/hollis-labs/nanite/internal/chat"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 // WriteGlass4Handoff validates and persists a self-authored Glass-4 handoff

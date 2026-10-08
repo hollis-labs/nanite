@@ -50,7 +50,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/skillvendor"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // maxCompositionDepth mirrors internal/skillinstall.DefaultMaxDependencyDepth

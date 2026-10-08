@@ -13,6 +13,10 @@ import (
 	"sync"
 	"time"
 
+	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
+
+	"github.com/hollis-labs/substrate/agent/approval"
+
 	embedcontracts "github.com/hollis-labs/go-embed-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-loopdetect"
@@ -29,7 +33,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/coordination"
 	"github.com/hollis-labs/nanite/internal/elicitation"
@@ -55,7 +58,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
-	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/tool/stash"
@@ -64,6 +66,8 @@ import (
 	workflowapi "github.com/hollis-labs/nanite/internal/workflowapi"
 	"github.com/hollis-labs/nanite/internal/workspace"
 	"github.com/hollis-labs/nanite/pkg/models"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	"github.com/hollis-labs/substrate/agent/subagent"
 	"github.com/hollis-labs/tesseract"
 )
 
@@ -267,7 +271,7 @@ type Container struct {
 
 	// Permissions is the per-invocation permission engine. nil = permissions disabled.
 	Permissions        *permissionlib.Engine
-	CognitiveApprovals *CognitiveApprovals
+	CognitiveApprovals *approval.Registry
 
 	// PathGrants tracks session-scoped explicit-mention path grants for
 	// the trust-agent permission redesign (CW-20260430-0009). Always
@@ -1206,7 +1210,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		"agent_protected_dirs", cfg.AgentControlPlane.Dirs,
 		"agent_writable_exceptions", cfg.AgentControlPlane.Writable)
 
-	cognitiveApprovals := NewCognitiveApprovals(permissions)
+	cognitiveApprovals := approval.New(permissions)
 	resultCache := buildResultCache(cfg.Store)
 	chatSvc := NewChatService(ChatServiceConfig{
 		HarnessProfiles:    cfg.HarnessProfiles,
@@ -1311,7 +1315,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	legacyRunner := NewChatRunner(chatSvcImpl, agentReader, cfg.Store, cfg.Store.DB, pathGrants)
 	subagentRunner := NewBootRunner(agentDeps, agentBridge, agentReader, cfg.Store, cfg.Store.DB, pathGrants, legacyRunner)
 	approvalEmitter := NewApprovalEmitter(cfg.Store, streams)
-	subagentSvc := subagent.NewService(cfg.Store.DB, subagentRunner, messagingSvc, approvalEmitter, cfg.Store)
+	subagentSvc := subagenthost.NewService(cfg.Store.DB, subagentRunner, messagingSvc, approvalEmitter, cfg.Store)
 	subagentSvc.SetStreamSink(&subagentStreamSink{streams: streams})
 	// CW-20260520-0001 (Layer 2): react to a subagent completion by
 	// possibly triggering a harness turn on the parent session per its
@@ -1339,7 +1343,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// ordering constraint as SetWakeReactor immediately above).
 	messagingSvc.SetAsyncRunner(chatSvcImpl.lifecycle)
 	// H1 (CW-20260421-0014): wire trust resolver + audit event logger.
-	subagentSvc.SetTrustResolver(cfg.Store)
+	subagentSvc.SetSpawnAuthorizer(subagenthost.Authorizer{Resolver: cfg.Store})
 	subagentSvc.SetEventLogger(cfg.Store)
 	// CW-20260516-0066: wire the recursion-depth cap. A caller that is
 	// itself a subagent (appears as a child_session_id) is rejected
@@ -1349,7 +1353,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// roles (no profile) and can_execute=false-outside-whitelist roles
 	// are rejected with a structured config error instead of falling
 	// through to the orphan reaper / inactivity stall path.
-	subagentSvc.SetProfileResolver(cfg.Store)
+	subagentSvc.SetProfileResolver(subagenthost.ProfileAdapter{Reader: cfg.Store})
 
 	// CW-20260512-0002 (b)+(c): subagent reaper — background goroutine
 	// sweeps subagent_runs for timed-out and orphan rows so a hung
@@ -1357,7 +1361,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Bound to a dedicated cancel func so Shutdown can stop it before
 	// the DB closes; goroutine exits on ctx.Done OR Reaper.Stop.
 	reaperCtx, stopReaper := context.WithCancel(context.Background())
-	subagentReaper := subagent.NewReaper(cfg.Store.DB, subagent.ReaperOptions{})
+	subagentReaper := subagentSvc.NewReaper(subagent.ReaperOptions{})
 	defer func() {
 		if !containerCommitted {
 			// Stop, not just cancel: it blocks until the loop has returned,

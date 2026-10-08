@@ -161,7 +161,7 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 		"": true, "system": true, "seed": true, "api": true, "nanite": true,
 		"crewai": true, "autogen": true, "import": true,
 		"builtin": true, "file": true, "cli": true, "project": true,
-		"user": true, "plugin": true, "claude": true, "agentrc": true,
+		"user": true, "plugin": true, "claude": true, "agentrc": true, "managed_file": true,
 	}
 	if !validSources[agent.Source] {
 		result.Errors = append(result.Errors, fmt.Sprintf("invalid agent source %q", agent.Source))

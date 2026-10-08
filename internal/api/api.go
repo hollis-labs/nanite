@@ -175,6 +175,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents", a.handleCreateAgent)
 	mux.HandleFunc("GET /api/agents/{id}", a.handleGetAgent)
 	mux.HandleFunc("PUT /api/agents/{id}", a.handleUpdateAgent)
+	mux.HandleFunc("GET /api/agents/{id}/revisions", a.handleListAgentRevisions)
+	mux.HandleFunc("POST /api/agents/{id}/revisions/{revisionId}/restore", a.handleRestoreAgentRevision)
 	mux.HandleFunc("DELETE /api/agents/{id}", a.handleDeleteAgent)
 	mux.HandleFunc("POST /api/agents/{id}/copy-to-managed", a.handleCopyAgentToManaged)
 	// CW-20260910-0013: agent import/sync — the REST twin of

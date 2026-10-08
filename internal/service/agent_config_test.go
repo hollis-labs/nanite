@@ -48,8 +48,8 @@ func TestAgentConfigCreateIsDatabaseOnly(t *testing.T) {
 	if res.Profile.ID == "" || res.Profile.Source != "user" || res.Profile.SourceRef != "" {
 		t.Fatalf("created profile = %#v", res.Profile)
 	}
-	if res.Revision != "" || svc.Revision(res.Profile) != "" {
-		t.Fatalf("database profile unexpectedly has a file revision: %#v", res)
+	if res.Revision == "" || svc.Revision(res.Profile) != res.Revision {
+		t.Fatalf("database profile is missing its persisted revision: %#v", res)
 	}
 	if _, statErr := os.Stat(filepath.Join(root, ".nanite", "agents")); !os.IsNotExist(statErr) {
 		t.Fatalf("create wrote an agent projection directory: %v", statErr)
@@ -78,7 +78,7 @@ func TestAgentConfigUpdateRenamePreservesIdentityAndCapabilities(t *testing.T) {
 	updated.Slug = "atlas-curator"
 	updated.Description = "renamed in the database"
 	updated.SourceRef = "/tmp/legacy-authority-must-not-be-written.md"
-	res, err := svc.Update(created.Profile, &updated, nil, "obsolete-file-revision")
+	res, err := svc.Update(created.Profile, &updated, nil, created.Revision)
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}

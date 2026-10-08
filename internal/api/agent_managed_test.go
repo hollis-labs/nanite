@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,8 +57,8 @@ func TestManagedAgentLifecycleIsDatabaseOnly(t *testing.T) {
 	if created.ManageClass != "managed" || !created.Editable || created.ID == "" {
 		t.Fatalf("created agent = %+v", created)
 	}
-	if created.SourceRef != "" || created.Revision != "" {
-		t.Fatalf("created agent retained filesystem authority: %+v", created)
+	if created.SourceRef != "" || created.Revision == "" {
+		t.Fatalf("created agent has invalid database metadata: %+v", created)
 	}
 	projectionDir := filepath.Join(a.Services.WorkingDir, ".nanite", "agents")
 	if _, err := os.Stat(projectionDir); !os.IsNotExist(err) {
@@ -73,9 +74,9 @@ func TestManagedAgentLifecycleIsDatabaseOnly(t *testing.T) {
 		t.Fatalf("create reflex = %d body=%s", w.Code, body)
 	}
 
-	w, body = mgReq(t, mux, "PUT", "/api/agents/"+created.ID, `{
-		"description":"Curates the atlas knowledge base","revision":"obsolete"
-	}`)
+	w, body = mgReq(t, mux, "PUT", "/api/agents/"+created.ID, fmt.Sprintf(`{
+		"description":"Curates the atlas knowledge base","revision":%q
+	}`, created.Revision))
 	if w.Code != http.StatusOK {
 		t.Fatalf("update = %d body=%s", w.Code, body)
 	}
@@ -83,7 +84,7 @@ func TestManagedAgentLifecycleIsDatabaseOnly(t *testing.T) {
 	if err := json.Unmarshal(body, &updated); err != nil {
 		t.Fatalf("decode updated: %v", err)
 	}
-	if updated.Description != "Curates the atlas knowledge base" || updated.Revision != "" || updated.SourceRef != "" {
+	if updated.Description != "Curates the atlas knowledge base" || updated.Revision == "" || updated.Revision == created.Revision || updated.SourceRef != "" {
 		t.Fatalf("updated agent = %+v", updated)
 	}
 	if got, err := a.store.GetAgentBySlug(context.Background(), "atlas-curator"); err != nil || got.Description != updated.Description {

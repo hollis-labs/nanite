@@ -14,6 +14,8 @@ import (
 
 // AgentProfile represents an agent profile record.
 type AgentProfile struct {
+	// Revision is an opaque identity for the complete persisted profile and assignments.
+	Revision        string `json:"-"`
 	ID              string `json:"id"`
 	Name            string `json:"name"`
 	Slug            string `json:"slug"`
@@ -395,7 +397,7 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
         COALESCE(role_id,''), COALESCE(model_id,''), COALESCE(runtime_kind,'api'),
         COALESCE(protocol,''), COALESCE(transport,''),
         COALESCE(plugin_id,''),
-        COALESCE(tether_managed,0), COALESCE(tether_urn,'')`
+        COALESCE(tether_managed,0), COALESCE(tether_urn,''), revision`
 
 // scanAgent scans a row into an AgentProfile using the canonical column order.
 func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
@@ -418,7 +420,7 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.RoleID, &a.ModelID, &a.RuntimeKind,
 		&a.Protocol, &a.Transport,
 		&a.PluginID,
-		&a.TetherManaged, &a.TetherURN,
+		&a.TetherManaged, &a.TetherURN, &a.Revision,
 	)
 }
 
@@ -448,7 +450,7 @@ func getAgent(ctx context.Context, db agentConfigDB, id string) (*AgentProfile, 
 
 // CreateAgent inserts a new agent profile.
 func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
-	return createAgent(ctx, s.DB, a)
+	return s.writeAgentRow(ctx, a, true)
 }
 
 func createAgent(ctx context.Context, db agentConfigDB, a *AgentProfile) error {
@@ -684,7 +686,7 @@ func (s *Store) DeleteAgent(ctx context.Context, slug string) error {
 // UpdateAgent updates mutable fields on an agent profile.
 // It recomputes agent_hash and bumps version if content fields changed.
 func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
-	return updateAgent(ctx, s.DB, a)
+	return s.writeAgentRow(ctx, a, false)
 }
 
 func updateAgent(ctx context.Context, db agentConfigDB, a *AgentProfile) error {

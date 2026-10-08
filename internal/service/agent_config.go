@@ -12,6 +12,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/agentvalidation"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -63,8 +64,7 @@ func notManagedError(p *store.AgentProfile, class agent.ManageClass, verb string
 	return svcerr.Wrap(ErrAgentNotManaged, svcerr.CodePermission, message)
 }
 
-// AgentConfigResult retains Revision for wire compatibility. It is always
-// empty now that the database, rather than a file-content hash, is canonical.
+// AgentConfigResult returns the opaque revision of the complete persisted row.
 type AgentConfigResult struct {
 	Profile  *store.AgentProfile
 	Class    agent.ManageClass
@@ -74,6 +74,9 @@ type AgentConfigResult struct {
 func (s *AgentConfigService) Classify(p *store.AgentProfile) agent.ManageClass {
 	if p == nil {
 		return agent.ManageClassExternal
+	}
+	if p.PluginID != "" {
+		return agent.ManageClassPlugin
 	}
 	return s.classification.Classify(p.Source)
 }
@@ -86,7 +89,12 @@ func (s *AgentConfigService) Persisted(p *store.AgentProfile) bool {
 	return err == nil && row != nil && row.ID == p.ID
 }
 
-func (*AgentConfigService) Revision(*store.AgentProfile) string { return "" }
+func (*AgentConfigService) Revision(p *store.AgentProfile) string {
+	if p == nil {
+		return ""
+	}
+	return p.Revision
+}
 
 // Create inserts a new operator-owned profile directly into agent_profiles.
 // The procedures argument remains as an API compatibility seam and seeds the
@@ -128,27 +136,23 @@ func (s *AgentConfigService) CreateWithAssignments(ctx context.Context, profile 
 		return nil, agentConfigWriteError(err, "failed to create agent")
 	}
 	s.emit(saved.Slug, "created")
-	return &AgentConfigResult{Profile: saved, Class: s.Classify(saved)}, nil
+	return &AgentConfigResult{Profile: saved, Class: s.Classify(saved), Revision: saved.Revision}, nil
 }
 
 // Update persists a managed profile directly in the database. Procedures are
 // relational data and remain untouched unless explicitly supplied. The former
-// revision token is accepted for wire compatibility but has no filesystem
-// concurrency meaning.
+// revision token identifies the full database row for optimistic concurrency.
 func (s *AgentConfigService) Update(existing, updated *store.AgentProfile, procedures []agent.ProcedureDefinition, revision string) (*AgentConfigResult, error) {
 	return s.UpdateWithAssignments(context.Background(), existing, updated, procedures, revision, AgentAssignments{})
 }
 
 // UpdateWithAssignments keeps rejected edits from changing the profile or children.
-func (s *AgentConfigService) UpdateWithAssignments(ctx context.Context, existing, updated *store.AgentProfile, procedures []agent.ProcedureDefinition, _ string, a AgentAssignments) (*AgentConfigResult, error) {
+func (s *AgentConfigService) UpdateWithAssignments(ctx context.Context, existing, updated *store.AgentProfile, procedures []agent.ProcedureDefinition, revision string, a AgentAssignments) (*AgentConfigResult, error) {
 	if existing == nil || updated == nil {
 		return nil, fmt.Errorf("existing and updated profiles are required")
 	}
 	if class := s.Classify(existing); !class.Editable() {
 		return nil, notManagedError(existing, class, "update")
-	}
-	if strings.TrimSpace(updated.Slug) == "" {
-		updated.Slug = existing.Slug
 	}
 	if err := agent.ValidateSlug(updated.Slug); err != nil {
 		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField("slug"))
@@ -161,18 +165,29 @@ func (s *AgentConfigService) UpdateWithAssignments(ctx context.Context, existing
 	}
 	updated.ID = existing.ID
 	updated.Source = existing.Source
-	if updated.Source == "" {
-		updated.Source = "user"
+	updated.SourceRef = existing.SourceRef
+	updated.ImportedAt = existing.ImportedAt
+	updated.OriginSystem = existing.OriginSystem
+	updated.Format = existing.Format
+	updated.PluginID = existing.PluginID
+	updated.Kind = existing.Kind
+	updated.CreatedAt = existing.CreatedAt
+	if err := validateEditableAgent(updated); err != nil {
+		return nil, err
 	}
-	// A legacy SourceRef may explain where a row was first imported from, but
-	// once edited through the canonical API it must not round-trip to disk.
-	updated.SourceRef = ""
-	saved, err := s.store.UpdateAgentConfig(ctx, updated, a, agentConfigSeeds(updated, procedures))
+	if revision != "" && revision != existing.Revision {
+		return nil, agentRevisionConflict()
+	}
+	// Declarations are not an approved grant change. Never replay role seeds
+	// during an edit, including unchanged declarations after a tool was revoked.
+	seeds := agentConfigSeeds(updated, procedures)
+	seeds.PreserveToolGrants = true
+	saved, err := s.store.UpdateAgentConfigRevision(ctx, updated, a, seeds, existing.Revision, "")
 	if err != nil {
 		return nil, agentConfigWriteError(err, "failed to update agent")
 	}
 	s.emit(saved.Slug, "updated")
-	return &AgentConfigResult{Profile: saved, Class: s.Classify(saved)}, nil
+	return &AgentConfigResult{Profile: saved, Class: s.Classify(saved), Revision: saved.Revision}, nil
 }
 
 func (s *AgentConfigService) Delete(profile *store.AgentProfile) error {
@@ -218,6 +233,12 @@ func agentConfigSeeds(p *store.AgentProfile, procedures []agent.ProcedureDefinit
 }
 
 func agentConfigWriteError(err error, fallback string) error {
+	if store.IsForeignKeyViolation(err) {
+		return agentAssignmentWriteError(err)
+	}
+	if errors.Is(err, store.ErrAgentRevisionConflict) {
+		return agentRevisionConflict()
+	}
 	var stage *store.AgentConfigWriteError
 	if errors.As(err, &stage) {
 		switch stage.Step {
@@ -287,6 +308,7 @@ func (s *AgentConfigService) CopyToManaged(source *store.AgentProfile, procedure
 	clone.OriginSystem = ""
 	clone.AgentHash = ""
 	clone.Version = 0
+	clone.Revision = ""
 	clone.Slug = s.uniqueManagedSlug(source.Slug + "-copy")
 	if clone.Name != "" {
 		clone.Name = source.Name + " (copy)"
@@ -322,4 +344,113 @@ func (s *AgentConfigService) emit(slug, action string) {
 	if s.notify != nil {
 		s.notify(slug, action)
 	}
+}
+
+func agentRevisionConflict() error {
+	return svcerr.Wrap(store.ErrAgentRevisionConflict, svcerr.CodeConflict, "agent changed since this revision; read the current profile before retrying")
+}
+
+func validateEditableAgent(p *store.AgentProfile) error {
+	for _, f := range []struct{ name, value string }{{"name", p.Name}, {"slug", p.Slug}, {"system_prompt", p.SystemPrompt}} {
+		if strings.TrimSpace(f.value) == "" {
+			return svcerr.New(svcerr.CodeInvalid, f.name+" must not be empty", svcerr.WithField(f.name))
+		}
+	}
+	if err := agent.ValidateSlug(p.Slug); err != nil {
+		return svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField("slug"))
+	}
+	if p.Slug == a2a.UserSentinel {
+		return svcerr.New(svcerr.CodeInvalid, "slug user is reserved for messaging", svcerr.WithField("slug"))
+	}
+	// Empty optional JSON strings retain the legacy default behavior; supplied
+	// non-empty values must have their documented shape, never JSON null.
+	for _, f := range []struct{ name, value string }{{"modes", p.Modes}, {"mcp_servers", p.MCPServers}, {"tools", p.Tools}, {"directories", p.Directories}, {"tags", p.Tags}, {"parent_dispatch_allowlist", p.ParentDispatchAllowlist}, {"role_tools", p.RoleTools}, {"role_skills", p.RoleSkills}} {
+		if f.value == "" {
+			continue
+		}
+		var values []string
+		if err := json.Unmarshal([]byte(f.value), &values); err != nil || values == nil {
+			return svcerr.New(svcerr.CodeInvalid, f.name+" must be a JSON string array", svcerr.WithField(f.name))
+		}
+	}
+	for _, f := range []struct{ name, value string }{{"settings", p.Settings}, {"constraints", p.Constraints}, {"context_policy", p.ContextPolicy}} {
+		if f.value == "" {
+			continue
+		}
+		var values map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(f.value), &values); err != nil || values == nil {
+			return svcerr.New(svcerr.CodeInvalid, f.name+" must be a JSON object", svcerr.WithField(f.name))
+		}
+	}
+	if vr := agentvalidation.ValidateAgentConfig(p); !vr.OK() {
+		return svcerr.New(svcerr.CodeInvalid, strings.Join(vr.Errors, "; "))
+	}
+	if field, err := store.ValidateAgentBehaviorFields(p); err != nil {
+		return svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField(field))
+	}
+	if err := store.ValidateAgentACPFields(p.Protocol, p.Transport); err != nil {
+		return svcerr.Wrap(err, svcerr.CodeInvalid, err.Error())
+	}
+	return nil
+}
+
+func (s *AgentConfigService) ListRevisions(ctx context.Context, id string, limit, offset int) ([]store.AgentRevision, error) {
+	if _, err := s.store.GetAgent(ctx, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, svcerr.Wrap(err, svcerr.CodeNotFound, "agent not found")
+		}
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent")
+	}
+	rows, err := s.store.ListAgentRevisions(ctx, id, limit, offset)
+	if err != nil {
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to list agent revisions")
+	}
+	return rows, nil
+}
+
+// RestoreRevision is deliberately partial. It restores editable configuration
+// and composition/ACP assignments, never capability children, grants, trust,
+// provenance, registry identity or plugin/system ownership.
+func (s *AgentConfigService) RestoreRevision(ctx context.Context, id, historicalID, revision string) (*AgentConfigResult, error) {
+	current, err := s.store.GetAgent(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, svcerr.Wrap(err, svcerr.CodeNotFound, "agent not found")
+		}
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent")
+	}
+	if class := s.Classify(current); !class.Editable() {
+		return nil, notManagedError(current, class, "restore")
+	}
+	if revision != "" && revision != current.Revision {
+		return nil, agentRevisionConflict()
+	}
+	historical, err := s.store.GetAgentRevision(ctx, id, historicalID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, svcerr.Wrap(err, svcerr.CodeNotFound, "agent revision not found")
+		}
+		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent revision")
+	}
+	p := *current
+	old := historical.Profile
+	p.Name, p.Slug, p.Avatar, p.SystemPrompt, p.Description = old.Name, old.Slug, old.Avatar, old.SystemPrompt, old.Description
+	p.Modes, p.DefaultModel, p.DefaultProvider, p.MCPServers = old.Modes, old.DefaultModel, old.DefaultProvider, old.MCPServers
+	p.ToolPermissions, p.CanExecute, p.Settings, p.Tools = old.ToolPermissions, old.CanExecute, old.Settings, old.Tools
+	p.Directories, p.Constraints, p.Tags, p.Status, p.Icon = old.Directories, old.Constraints, old.Tags, old.Status, old.Icon
+	p.ParentDispatchAllowlist, p.RoleTools, p.RoleSkills, p.ContextPolicy = old.ParentDispatchAllowlist, old.RoleTools, old.RoleSkills, old.ContextPolicy
+	p.Durable, p.ActivationMode, p.Class, p.DefaultState = old.Durable, old.ActivationMode, old.Class, old.DefaultState
+	p.RoleID, p.ConsumerID, p.ModelID, p.RuntimeKind = old.RoleID, old.ConsumerID, old.ModelID, old.RuntimeKind
+	p.Protocol, p.Transport = old.Protocol, old.Transport
+	// TetherURN is identity, while TetherManaged is an editable opt-in setting.
+	p.TetherManaged = old.TetherManaged
+	if err = validateEditableAgent(&p); err != nil {
+		return nil, err
+	}
+	saved, err := s.store.UpdateAgentConfigRevision(ctx, &p, AgentAssignments{}, store.AgentConfigSeeds{}, current.Revision, historicalID)
+	if err != nil {
+		return nil, agentConfigWriteError(err, "failed to restore agent revision")
+	}
+	s.emit(saved.Slug, "restored_partial")
+	return &AgentConfigResult{Profile: saved, Class: s.Classify(saved), Revision: saved.Revision}, nil
 }

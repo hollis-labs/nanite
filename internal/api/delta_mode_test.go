@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +13,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// Both turn endpoints accept delta_mode and hand it to HandleMessage on the
+// The turn endpoint accepts delta_mode and hand it to HandleMessage on the
 // request context. That context is the only place it can travel — see
 // chat.WithDeltaMode — so the assertion is on what HandleMessage receives.
 func TestTurnEndpointsCarryDeltaMode(t *testing.T) {
@@ -26,7 +25,7 @@ func TestTurnEndpointsCarryDeltaMode(t *testing.T) {
 
 	var calls int
 	var gotMode chat.DeltaMode
-	a.Services.Chat = &harnessChatStub{
+	a.Services.Chat = &agentChatStub{
 		handleMessageFn: func(ctx context.Context, _, _ string) (string, error) {
 			calls++
 			gotMode = chat.DeltaModeFromContext(ctx)
@@ -39,11 +38,8 @@ func TestTurnEndpointsCarryDeltaMode(t *testing.T) {
 		name, path string
 		body       func(deltaField string) string
 	}{
-		{"messages", "/api/messages", func(f string) string {
-			return fmt.Sprintf(`{"session_id":%q,"content":"hi"%s}`, sess.ID, f)
-		}},
-		{"harness turns", "/api/harness/v1/sessions/" + sess.ID + "/turns", func(f string) string {
-			return `{"content":"hi"` + f + `}`
+		{"agent turns", "/api/agent/v1/sessions/" + sess.ID + "/turns", func(f string) string {
+			return `{"content":[{"kind":"text","text":"hi"}],"delivery":"at_idle"` + f + `}`
 		}},
 	}
 	modes := []struct {
@@ -86,16 +82,16 @@ func TestTurnEndpointsCarryDeltaMode(t *testing.T) {
 	}
 }
 
-func TestHarnessV1CapabilitiesAdvertiseDeltaMode(t *testing.T) {
+func TestAgentV1CapabilitiesAdvertiseDeltaMode(t *testing.T) {
 	_, mux := newTestAPI(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/harness/v1/capabilities", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/agent/v1/capabilities", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("capabilities = %d body=%s", w.Code, w.Body.String())
 	}
-	var caps harnessV1CapabilitiesResponse
+	var caps agentV1CapabilitiesResponse
 	if err := json.NewDecoder(w.Body).Decode(&caps); err != nil {
 		t.Fatalf("decode capabilities: %v", err)
 	}

@@ -2,13 +2,17 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/store"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-loopdetect"
@@ -165,13 +169,41 @@ func (s *chatServiceImpl) preCheckTools(
 		}
 
 		// Permission check.
-		if s.permissions != nil {
+		if s.permissions != nil || isCognitiveTurn(ctx) {
 			meta := permissionlib.ToolMeta{}
 			if toolInfo, ok := s.tools.GetToolMeta(ctx, tu.Name); ok {
 				meta.IsReadOnly = toolInfo.IsReadOnly
 				meta.IsDestructive = toolInfo.IsDestructive
 			}
-			permResult := s.permissions.Check(ctx, sessionID, tu.Name, tu.Input, meta)
+			permResult := permissionlib.CheckResult{Decision: permissionlib.DecisionDeny, Reason: "host permission engine unavailable"}
+			if s.permissions != nil {
+				permResult = s.permissions.Check(ctx, sessionID, tu.Name, tu.Input, meta)
+			}
+			if isCognitiveTurn(ctx) {
+				posture := "default"
+				if reader, ok := s.store.(interface {
+					GetCognitiveView(context.Context, string) (store.CognitiveViewRecord, error)
+				}); ok {
+					if record, err := reader.GetCognitiveView(ctx, sessionID); err == nil {
+						var cfg ChatDefinitionConfig
+						if json.Unmarshal([]byte(record.ChatConfigJSON), &cfg) != nil {
+							posture = "read-only"
+						} else {
+							posture = cfg.PermissionProfile
+						}
+					} else if !errors.Is(err, sql.ErrNoRows) {
+						permResult = permissionlib.CheckResult{Decision: permissionlib.DecisionDeny, Reason: "verified permission posture unavailable"}
+					}
+				}
+				mode := permissionlib.ModeDefault
+				if posture == "read-only" {
+					mode = permissionlib.ModePlan
+				}
+				intrinsic := permissionlib.NewEngine(mode, nil).Check(ctx, sessionID, tu.Name, tu.Input, meta)
+				if intrinsic.Decision == permissionlib.DecisionDeny || (permResult.Decision == permissionlib.DecisionAllow && intrinsic.Decision == permissionlib.DecisionAsk) {
+					permResult = intrinsic
+				}
+			}
 			switch permResult.Decision {
 			case permissionlib.DecisionAllow:
 				// Allow: fall through to tool execution below.
@@ -194,16 +226,26 @@ func (s *chatServiceImpl) preCheckTools(
 
 			case permissionlib.DecisionAsk:
 				// Emit approval request and block until user responds.
-				req := s.permissions.RequestApproval(sessionID, tu.Name, tu.Input, permResult.Reason)
-				approvalData, _ := json.Marshal(chat.ApprovalRequestPayload{
-					RequestID: req.ID,
-					Tool:      tu.Name,
-					Input:     tu.Input,
-					Reason:    permResult.Reason,
-				})
+				payload := chat.ApprovalRequestPayload{
+					Tool:   tu.Name,
+					Input:  tu.Input,
+					Reason: permResult.Reason,
+				}
+				var req *permissionlib.ApprovalRequest
+				if gen := generationFromContext(ctx); gen != nil && s.cognitiveApprovals != nil {
+					req = s.cognitiveApprovals.Request(sessionID, gen.msgID, tu.ID, tu.Name, tu.Input, permResult.Reason)
+					payload.RunID, payload.CallID = gen.msgID, tu.ID
+					payload.SupportedScopes = []string{"once"}
+				} else {
+					req = s.permissions.RequestApproval(sessionID, tu.Name, tu.Input, permResult.Reason)
+				}
+				payload.RequestID = req.ID
+				payload.ExpiresAt = req.CreatedAt.Add(permissionlib.DefaultApprovalTimeout)
+				approvalData, _ := json.Marshal(payload)
 				ch <- chat.StreamEvent{Type: "approval_request", Data: string(approvalData)}
 
 				resp := s.permissions.WaitForApproval(ctx, req)
+				s.cognitiveApprovals.Finish(req.ID)
 				if resp.Decision != permissionlib.DecisionAllow {
 					ls.recordToolCall(tu.Name, false)
 					denyReason := "user denied"

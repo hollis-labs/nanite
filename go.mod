@@ -105,6 +105,7 @@ require (
 	github.com/hollis-labs/agent-contracts-leaf v0.3.0
 	github.com/hollis-labs/go-agent-wrapper v0.25.6
 	github.com/hollis-labs/go-apppaths v0.3.0
+	github.com/hollis-labs/go-chatstream v0.1.0
 	github.com/hollis-labs/go-egress-proxy v0.2.3
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-hooks v0.1.0
@@ -122,10 +123,10 @@ require (
 	github.com/hollis-labs/go-scheduler v0.3.0
 	github.com/hollis-labs/go-sqlite v0.1.0
 	github.com/hollis-labs/go-ssekit v0.2.0
+	github.com/hollis-labs/go-streamhub v0.1.0
 	github.com/hollis-labs/go-svcerr v0.1.0
 	github.com/hollis-labs/go-tether-client v0.8.0
 	github.com/hollis-labs/go-toolresult v0.1.0
-
 	github.com/hollis-labs/go-transportparity v0.1.0
 	github.com/hollis-labs/go-usage-ledger v0.1.0
 	github.com/hollis-labs/go-workflow v0.1.0
@@ -134,6 +135,7 @@ require (
 	github.com/hollis-labs/nanite/pkg/pluginapi v0.1.8
 	github.com/hollis-labs/plugin-host v0.1.2
 	github.com/hollis-labs/plugins-catalog v0.1.0
+	github.com/hollis-labs/substrate/mesh v0.1.0
 	github.com/hollis-labs/tesseract v0.10.0
 	github.com/openai/openai-go/v3 v3.61.0
 	github.com/pressly/goose/v3 v3.28.0

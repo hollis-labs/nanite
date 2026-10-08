@@ -7,7 +7,8 @@ import (
 	"testing"
 )
 
-// Expectations were exercised against the unmodified middleware at 3c3112ba.
+// Retained Basic-auth responses remain stable; tools/call is deliberately
+// authenticated rather than exempt.
 // The table verifies response bytes/headers and admission, including partially
 // configured credentials (which the legacy middleware intentionally accepts).
 func TestBasicAuthLegacyResponseCompatibility(t *testing.T) {
@@ -21,7 +22,7 @@ func TestBasicAuthLegacyResponseCompatibility(t *testing.T) {
 	}{
 		{"GET", "/api/settings", false}, {"PUT", "/api/settings", false},
 		{"GET", "/api/sessions", false}, {"GET", "/api/health", true},
-		{"GET", "/api/health/", false}, {"POST", "/api/tools/call", true},
+		{"GET", "/api/health/", false}, {"POST", "/api/tools/call", false},
 		{"GET", "/", true}, {"GET", "/api", true},
 		{"GET", "/api/adminish/manifest", false},
 	}

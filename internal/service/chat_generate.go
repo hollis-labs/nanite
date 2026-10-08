@@ -160,6 +160,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	defer func() {
 		diagLogDeferReached(sessionID, assistantMsgID, diagCurrentIter, "")
+		if isCognitiveTurn(ctx) {
+			s.streams.CognitiveTurns().ending(assistantMsgID, ctx.Err() != nil)
+		}
 		close(ch)
 		// CW-20260418-0100: hold the stream's ring buffer for a grace
 		// window after completion so an SSE client that was disconnected

@@ -1,9 +1,11 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	permissionlib "github.com/hollis-labs/go-permission"
+	"github.com/hollis-labs/nanite/internal/service"
 )
 
 // handleRespondApproval handles POST /api/sessions/{id}/approvals/{requestId}.
@@ -44,8 +46,22 @@ func (a *API) handleRespondApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok := a.Services.Permissions.Respond(requestID, decision, scope, sessionID)
-	if !ok {
+	if a.Services.CognitiveApprovals != nil {
+		if err := a.Services.CognitiveApprovals.RespondRetained(r.Context(), sessionID, requestID, decision, scope); err != nil {
+			switch {
+			case errors.Is(err, service.ErrCognitiveApprovalScope):
+				a.agentV1Error(w, http.StatusUnprocessableEntity, err.Error())
+			case errors.Is(err, service.ErrCognitiveApprovalConflict):
+				a.agentV1Error(w, http.StatusConflict, err.Error())
+			case errors.Is(err, service.ErrCognitiveApprovalNotFound):
+				a.errorResp(w, http.StatusNotFound, "approval request not found in this session")
+			default:
+				a.errorResp(w, http.StatusInternalServerError, "approval response failed")
+			}
+			return
+		}
+	} else if !a.Services.Permissions.Respond(requestID, decision, scope, sessionID) {
+		// Without a native registry this engine hosts only retained requests.
 		a.errorResp(w, http.StatusNotFound, "approval request not found or already resolved")
 		return
 	}

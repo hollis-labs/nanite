@@ -8,48 +8,7 @@ import (
 
 	ssekit "github.com/hollis-labs/go-ssekit"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/effort"
 )
-
-func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
-	var req SendMessageRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if req.SessionID == "" || req.Content == "" {
-		a.errorResp(w, http.StatusBadRequest, "session_id and content are required")
-		return
-	}
-
-	// F1 (CW-20260420-0014): parse effort scalar from the request and carry it
-	// into the context so generateResponse can apply the budget multiplier and
-	// reasoning-block config without changing the HandleMessage signature.
-	// Unknown / empty values resolve to effort.Default (EffortNormal).
-	e := effort.Parse(req.Effort)
-	if !e.IsValid() {
-		e = effort.Default
-	}
-	ctx := effort.WithContext(r.Context(), e)
-
-	deltaMode, err := chat.ParseDeltaMode(req.DeltaMode)
-	if err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	ctx = chat.WithDeltaMode(ctx, deltaMode)
-
-	msgID, err := a.Services.Chat.HandleMessage(ctx, req.SessionID, req.Content)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	a.jsonResp(w, http.StatusAccepted, map[string]string{
-		"message_id": msgID,
-		"stream_url": fmt.Sprintf("/api/stream/%s", msgID),
-	})
-}
 
 func (a *API) handleAgentMessage(w http.ResponseWriter, r *http.Request) {
 	toSessionID := r.PathValue("id")
@@ -61,6 +20,9 @@ func (a *API) handleAgentMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.FromSessionID == "" || req.Content == "" {
 		a.errorResp(w, http.StatusBadRequest, "from_session_id and content are required")
+		return
+	}
+	if !a.allowRetainedChatOperation(w, r, toSessionID) {
 		return
 	}
 
@@ -146,6 +108,9 @@ func (a *API) handleRetryStream(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "session_id is required")
 		return
 	}
+	if !a.allowRetainedChatOperation(w, r, sessionID) {
+		return
+	}
 
 	msgID, err := a.Services.Chat.RetryLastMessage(r.Context(), sessionID)
 	if err != nil {
@@ -211,7 +176,7 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 	// message_id — but the assistant Message row itself is only persisted
 	// later, inside the async generateResponse goroutine. A caller that
 	// opens the events stream immediately after a turn response (the
-	// harness-v1 turn+events flow any non-browser client is expected to
+	// agent-v1 turn+events flow any non-browser client is expected to
 	// use) can therefore race the DB write and see a false "message not
 	// found" 404 even though the stream already exists and belongs to the
 	// caller's session. Falling back to the Message store only when the

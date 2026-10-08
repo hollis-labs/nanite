@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,6 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
+	"github.com/hollis-labs/nanite/internal/effort"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
@@ -140,7 +142,8 @@ type ChatServiceConfig struct {
 	UtilityModel    string
 
 	// Permissions engine — nil-safe (permissions disabled).
-	Permissions *permissionlib.Engine
+	Permissions        *permissionlib.Engine
+	CognitiveApprovals *CognitiveApprovals
 
 	// PathGrants tracks session-scoped explicit-mention path grants for
 	// the trust-agent permission redesign (CW-20260430-0009). nil-safe.
@@ -223,14 +226,16 @@ type ChatServiceConfig struct {
 
 // chatServiceImpl is the concrete ChatService implementation.
 type chatServiceImpl struct {
-	sessions  SessionService
-	agents    AgentService
-	tools     ToolService
-	streams   *StreamManager
-	context   ContextService
-	events    EventEmitter
-	providers *provider.Registry
-	store     Store
+	cognitiveAdmissionMu     sync.Mutex
+	cognitiveAdmissionClosed bool
+	sessions                 SessionService
+	agents                   AgentService
+	tools                    ToolService
+	streams                  *StreamManager
+	context                  ContextService
+	events                   EventEmitter
+	providers                *provider.Registry
+	store                    Store
 
 	orchestrator *chat.Orchestrator
 	// maxConcurrentTools overrides the harness profile's max_concurrent_tools
@@ -246,10 +251,11 @@ type chatServiceImpl struct {
 	sessionEventWriter SessionEventWriter
 	subagentInbox      SubagentResultInbox
 
-	utilityProvider string
-	utilityModel    string
-	permissions     *permissionlib.Engine
-	pathGrants      *permission.PathGrants
+	utilityProvider    string
+	utilityModel       string
+	permissions        *permissionlib.Engine
+	cognitiveApprovals *CognitiveApprovals
+	pathGrants         *permission.PathGrants
 
 	// argValidator caches compiled JSON Schemas for tool InputSchema validation.
 	argValidator *argValidator
@@ -595,6 +601,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		utilityProvider:        up,
 		utilityModel:           um,
 		permissions:            cfg.Permissions,
+		cognitiveApprovals:     cfg.CognitiveApprovals,
 		pathGrants:             cfg.PathGrants,
 		argValidator:           newArgValidator(),
 		resultCache:            cfg.ResultCache,
@@ -1188,12 +1195,16 @@ func (s *chatServiceImpl) cancelGenerationChain(sessionID string, gen *inFlightG
 // deltaMode is the caller's per-turn choice of how text deltas reach the
 // stream (chat.DeltaMode). It is passed explicitly, like callerType, because
 // genCtx below is deliberately detached from the request context.
-func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, deltaMode chat.DeltaMode) {
+func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, deltaMode chat.DeltaMode, turnEffort effort.Effort, cognitive bool, nativeModel ...ModelSelection) {
 	// Build cancel BEFORE launching so a near-simultaneous retry cannot
 	// register its own cancel before this one — the window would let the
 	// retry cancel itself. context.Background() is deliberate: lifecycle
 	// shutdown is bridged in below.
-	genCtx, cancel := context.WithCancel(context.Background())
+	var selected ModelSelection
+	if len(nativeModel) > 0 {
+		selected = nativeModel[0]
+	}
+	genCtx, cancel := context.WithCancel(context.WithValue(context.WithValue(effort.WithContext(context.Background(), turnEffort), cognitiveTurnContextKey{}, cognitive), cognitiveModelContextKey{}, selected))
 
 	prev, current := s.registerGeneration(sessionID, assistantMsgID, cancel)
 	if prev != nil {
@@ -1241,10 +1252,16 @@ func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID,
 			if genCtx.Err() != nil && generationResolvedSafe(predecessor) {
 				// Canceled while queued: this turn never ran, and its
 				// predecessor's boundary resolved safely.
+				if isCognitiveTurn(genCtx) {
+					s.streams.CognitiveTurns().ending(assistantMsgID, true)
+				}
 				close(ch)
 				return
 			}
 			s.retainUnsafePredecessor(sessionID, current, predecessor)
+			if isCognitiveTurn(genCtx) {
+				s.streams.CognitiveTurns().ending(assistantMsgID, genCtx.Err() != nil)
+			}
 			close(ch)
 			return
 		}
@@ -1261,6 +1278,9 @@ func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID,
 		}
 
 		// CW-20260512-0121: route through the single dispatcher door.
+		if isCognitiveTurn(genCtx) {
+			s.streams.CognitiveTurns().working(assistantMsgID)
+		}
 		// On dispatcher validation failure (programmer error — should
 		// be unreachable in production), close the channel so the
 		// caller's defer doesn't deadlock waiting for a stream that
@@ -1314,15 +1334,45 @@ func waitForPredecessor(genCtx, ownerCtx context.Context, predecessor *inFlightG
 
 // HandleMessage implements ChatService.
 func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content string) (string, error) {
-	// Persist user message.
+	selected := cognitiveModelFromContext(ctx)
+	if !isCognitiveTurn(ctx) {
+		if err := requireLegacyTarget(ctx, s.store, sessionID); err != nil {
+			return "", err
+		}
+	} else if selected.Provider == "" || selected.Model == "" {
+		// Resolve before admission. Once the transaction commits, setup no
+		// longer depends on the HTTP request's cancellation or database reads.
+		session, err := s.sessions.Get(ctx, sessionID)
+		if err != nil {
+			return "", err
+		}
+		selected = ModelSelection{session.Provider, session.Model}
+		ctx = context.WithValue(ctx, cognitiveModelContextKey{}, selected)
+	}
+	// Persist user message and native admission atomically.
+	assistantMsgID := uuid.New().String()
 	userMsg := &store.Message{
 		ID:        uuid.New().String(),
 		SessionID: sessionID,
 		Role:      "user",
 		Content:   content,
 	}
-	if err := s.store.CreateMessage(ctx, userMsg); err != nil {
-		return "", fmt.Errorf("create user message: %w", err)
+	var persistErr error
+	if isCognitiveTurn(ctx) {
+		initial := CognitiveTurnSnapshot{SessionViewID: sessionID, TurnID: assistantMsgID, RunID: assistantMsgID, OutputMessageID: assistantMsgID, State: "submitted", DeltaMode: chat.DeltaModeFromContext(ctx), Effort: effort.FromContext(ctx).String()}
+		data, _ := json.Marshal(initial)
+		writer, ok := s.store.(interface {
+			CreateCognitiveTurn(context.Context, *store.Message, string, string) error
+		})
+		if !ok {
+			return "", fmt.Errorf("atomic cognitive admission unavailable")
+		}
+		persistErr = writer.CreateCognitiveTurn(ctx, userMsg, assistantMsgID, string(data))
+	} else {
+		persistErr = s.store.CreateMessage(ctx, userMsg)
+	}
+	if persistErr != nil {
+		return "", fmt.Errorf("create user message: %w", persistErr)
 	}
 
 	// Trust-agent path-mention parser (CW-20260430-0009 Q1-Q3). Scan the
@@ -1334,16 +1384,16 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	// Only a CallerChat turn registers (CW-20261001-0232). A background turn,
 	// such as a durable-agent wake prompt, carries text a program wrote, and
 	// gets no grants; nor does a subagent's turn. Chat is not
-	// proof of a person either: the message and harness APIs are on an
-	// unauthenticated loopback. So the registration itself refuses sensitive
+	// proof of a person either: the agent API authenticates an operator,
+	// not the authorship of every submitted message. Registration refuses sensitive
 	// paths, their ancestors and, in production, anything outside $HOME and
 	// the allowed bases (permission.MentionPolicy), and the grants it does
 	// make serve the in-process dev_* tools only, never a CLI launch's
 	// writable roots (bootdir.go).
 	//
 	// HandleMessage is shared by two real callers with two different
-	// correct CallerType values: internal/api/harness_v1.go and
-	// internal/api/messages.go (real end-user HTTP handlers — always
+	// correct CallerType values: internal/api/agent_v1.go and
+	// native callers (real end-user HTTP handlers — always
 	// CallerChat, and they stamp nothing on ctx) and
 	// chatDurableAgentRuntimeController.SendMessage (a durable agent's
 	// scheduled wake delivery — background work, not a user typing into
@@ -1385,28 +1435,33 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 		})
 	}
 
-	// Create assistant message ID and stream.
-	assistantMsgID := uuid.New().String()
-	ch := s.streams.CreateStream(assistantMsgID, sessionID)
+	// Create the already-admitted assistant stream.
+	var ch chan chat.StreamEvent
+	if isCognitiveTurn(ctx) {
+		run := s.streams.CognitiveTurns().create(sessionID, assistantMsgID, selected.Provider, selected.Model, chat.DeltaModeFromContext(ctx), effort.FromContext(ctx).String(), func() (*store.Message, error) { return s.store.GetMessage(context.Background(), assistantMsgID) })
+		ch = s.streams.createCognitiveStream(assistantMsgID, sessionID, run)
+	} else {
+		ch = s.streams.CreateStream(assistantMsgID, sessionID)
+	}
 
-	// Start async generation on a per-session cancellable ctx. If a prior
-	// generateResponse is still running for this session it will be
-	// canceled — concurrent loops on the same session fight over the
-	// provider rate-limit budget and look like stalls from the UI
-	// (CW-20260418-0043). The lifecycle manager's shutdown ctx is bridged
-	// inside launchGeneration so process Shutdown still drains cleanly.
+	// Start async generation on a per-session cancellable context. A prior
+	// turn completes before this queued turn runs. Lifecycle shutdown is
+	// bridged inside launchGeneration so process Shutdown drains cleanly.
 	//
 	// The caller type was resolved above, where the path-mention grants needed
 	// it, and is what the generation is dispatched with.
 	// The delta mode arrives the same way: stamped on ctx by the API handler,
 	// absent for durable-agent wakes (which get the phased default).
-	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, callerType, chat.DeltaModeFromContext(ctx))
+	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, callerType, chat.DeltaModeFromContext(ctx), effort.FromContext(ctx), isCognitiveTurn(ctx), cognitiveModelFromContext(ctx))
 
 	return assistantMsgID, nil
 }
 
 // RetryLastMessage implements ChatService.
 func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string) (string, error) {
+	if err := requireLegacyTarget(ctx, s.store, sessionID); err != nil {
+		return "", err
+	}
 	// Reset circuit breaker on the session's provider.
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err == nil {
@@ -1443,13 +1498,16 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	s.launchGeneration("retryLastMessage.generateResponse", sessionID, assistantMsgID, userContent, ch, dispatcher.CallerChat, chat.DeltaModePhased)
+	s.launchGeneration("retryLastMessage.generateResponse", sessionID, assistantMsgID, userContent, ch, dispatcher.CallerChat, chat.DeltaModePhased, effort.FromContext(ctx), false)
 
 	return assistantMsgID, nil
 }
 
 // SendAgentMessage implements ChatService.
 func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, toSessionID, content string) (string, error) {
+	if err := requireLegacyTarget(ctx, s.store, toSessionID); err != nil {
+		return "", err
+	}
 	// Look up the sending agent.
 	fromAgentID := "unknown"
 	if agent, err := s.agents.ResolveForSession(ctx, fromSessionID); err == nil {
@@ -1473,7 +1531,7 @@ func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, t
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, toSessionID)
 
-	s.launchGeneration("sendAgentMessage.generateResponse", toSessionID, assistantMsgID, content, ch, dispatcher.CallerChat, chat.DeltaModePhased)
+	s.launchGeneration("sendAgentMessage.generateResponse", toSessionID, assistantMsgID, content, ch, dispatcher.CallerChat, chat.DeltaModePhased, effort.FromContext(ctx), false)
 
 	return assistantMsgID, nil
 }
@@ -1520,6 +1578,17 @@ func (s *chatServiceImpl) IsGenerating(sessionID string) bool {
 // row's Metadata JSON is prose-only ("source":"harness" is enough there
 // to keep it out of user-authored-message heuristics).
 func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, reason, runID string) (string, error) {
+	if defined, err := definedCognitiveTarget(ctx, s.store, sessionID); err != nil {
+		return "", err
+	} else if defined {
+		content := "A dispatched subagent has completed. Review the result below and summarize it for the user, noting any concerns."
+		id, submitErr := s.submitCognitiveTurn(dispatcher.WithCallerType(ctx, dispatcher.CallerBackground), sessionID, content, true)
+		if submitErr == nil && s.sessionEventWriter != nil {
+			payload := fmt.Sprintf(`{"triggered_by":%q,"run_id":%q,"assistant_msg_id":%q}`, reason, runID, id)
+			s.sessionEventWriter.WriteSessionEvent(ctx, sessionID, EventHarnessTriggeredTurn, "", payload)
+		}
+		return id, submitErr
+	}
 	assistantMsgID := uuid.New().String()
 	genCtx, cancel := context.WithCancel(context.Background())
 	current, registered := s.registerGenerationIfIdle(sessionID, assistantMsgID, cancel)
@@ -1579,6 +1648,17 @@ func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, rea
 // inbox (message_inbox/message_thread) either way, so nothing is lost,
 // only the proactive nudge is skipped.
 func (s *chatServiceImpl) TriggerMessageWake(ctx context.Context, sessionID string, msg *messaging.Message) (string, error) {
+	if defined, err := definedCognitiveTarget(ctx, s.store, sessionID); err != nil {
+		return "", err
+	} else if defined {
+		content := fmt.Sprintf("New message from agent %q (session %s):\n\n%s", msg.FromAgentID, msg.FromSessionID, msg.Body)
+		id, submitErr := s.submitCognitiveTurn(dispatcher.WithCallerType(ctx, dispatcher.CallerBackground), sessionID, content, true)
+		if submitErr == nil && s.sessionEventWriter != nil {
+			payload := fmt.Sprintf(`{"triggered_by":"a2a_message","message_id":%q,"assistant_msg_id":%q}`, msg.ID, id)
+			s.sessionEventWriter.WriteSessionEvent(ctx, sessionID, EventHarnessTriggeredTurn, "", payload)
+		}
+		return id, submitErr
+	}
 	assistantMsgID := uuid.New().String()
 	genCtx, cancel := context.WithCancel(context.Background())
 	current, registered := s.registerGenerationIfIdle(sessionID, assistantMsgID, cancel)
@@ -1629,6 +1709,11 @@ func (s *chatServiceImpl) Shutdown() error {
 }
 
 func (s *chatServiceImpl) shutdownWithMaxWait(maxWait time.Duration) error {
+	// An admitted native turn finishes tracking/launch while holding this
+	// mutex; close admission before shutting down the lifecycle scheduler.
+	s.cognitiveAdmissionMu.Lock()
+	s.cognitiveAdmissionClosed = true
+	s.cognitiveAdmissionMu.Unlock()
 	var shutdownErrs []error
 	sessions := s.runtimeSessions()
 	if sessions != nil {

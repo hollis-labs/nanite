@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { CanonicalTurnStream } from "@/lib/canonicalTurnStream";
 import { shouldRenderStandalonePluginEnvelope } from "@/lib/envelope-lane";
 import { applyEnvelopePanelEffects, applyPanelSignal } from "@/lib/panel-signal";
 import type {
@@ -104,7 +105,7 @@ export function useChat(sessionId: string | null) {
     oldestOffset: number;
   } | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const eventSourceRef = useRef<EventSource | CanonicalTurnStream | null>(null);
   const lastStreamActivityAtRef = useRef(0);
   const reconcileInFlightRef = useRef(false);
   const generationRef = useRef(0);
@@ -354,19 +355,22 @@ export function useChat(sessionId: string | null) {
   const hasOlderMessages = paginationState != null && paginationState.oldestOffset > 0;
 
   // Jump to a specific message (for search results). Loads a window around it.
-  const jumpToMessage = useCallback(async (targetSessionId: string, messageId: string) => {
-    if (!targetSessionId || targetSessionId !== sessionId) return;
-    const generation = generationRef.current;
-    try {
-      const page = await api.getMessagesAround(targetSessionId, messageId);
-      if (generation !== generationRef.current) return;
-      setLoadedSessionId(targetSessionId);
-      setMessages(page.messages ?? []);
-      setPaginationState({ total: page.total, oldestOffset: 0 }); // approximate
-    } catch (err) {
-      console.error("Failed to jump to message:", err);
-    }
-  }, [sessionId]);
+  const jumpToMessage = useCallback(
+    async (targetSessionId: string, messageId: string) => {
+      if (!targetSessionId || targetSessionId !== sessionId) return;
+      const generation = generationRef.current;
+      try {
+        const page = await api.getMessagesAround(targetSessionId, messageId);
+        if (generation !== generationRef.current) return;
+        setLoadedSessionId(targetSessionId);
+        setMessages(page.messages ?? []);
+        setPaginationState({ total: page.total, oldestOffset: 0 }); // approximate
+      } catch (err) {
+        console.error("Failed to jump to message:", err);
+      }
+    },
+    [sessionId],
+  );
 
   // Load messages when sessionId changes.
   //
@@ -497,7 +501,7 @@ export function useChat(sessionId: string | null) {
       store().setStreaming(sessionId, true);
       markStreamActivity();
       const cursor = lastEventIdRef.current;
-      const es = new EventSource(`/api/stream/${message_id}${cursor ? `?from=${cursor}` : ""}`);
+      const es = new CanonicalTurnStream(sessionId, message_id, cursor);
       eventSourceRef.current = es;
       let accumulated = resume ? saved.streamingFinal : "";
       let pendingNarration = "";
@@ -802,18 +806,23 @@ export function useChat(sessionId: string | null) {
           }
         }
         // Finalize the stream with whatever we have.
-        const errorMsg: Message | undefined = accumulated || providerFailure
-          ? {
-              id: message_id,
-              session_id: sessionId,
-              agent_id: "",
-              role: "assistant",
-              content: accumulated || providerFailure?.message || "",
-              envelope: null,
-              metadata: JSON.stringify({ had_error: true, provider_error: providerFailure, partial_output: !!accumulated }),
-              created_at: new Date().toISOString(),
-            }
-          : undefined;
+        const errorMsg: Message | undefined =
+          accumulated || providerFailure
+            ? {
+                id: message_id,
+                session_id: sessionId,
+                agent_id: "",
+                role: "assistant",
+                content: accumulated || providerFailure?.message || "",
+                envelope: null,
+                metadata: JSON.stringify({
+                  had_error: true,
+                  provider_error: providerFailure,
+                  partial_output: !!accumulated,
+                }),
+                created_at: new Date().toISOString(),
+              }
+            : undefined;
         if (errorMsg) {
           setMessages((prev) => [...prev.filter((msg) => msg.id !== errorMsg.id), errorMsg]);
         }
@@ -909,6 +918,7 @@ export function useChat(sessionId: string | null) {
   );
 
   const stopStreaming = useCallback(() => {
+    const turnId = currentMessageIdRef.current;
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
@@ -924,12 +934,17 @@ export function useChat(sessionId: string | null) {
       // with stream end), network errors are non-fatal — the FE has
       // already closed its EventSource so the worst case is the BE
       // finishes the current turn on its own.
-      void api.cancelChatStream(sessionId);
+      if (turnId) void api.cancelAgentTurn(sessionId, turnId);
     }
   }, [sessionId]);
 
   const retryStream = useCallback(async () => {
-    if (!sessionId || sendPendingRef.current || queryClient.isMutating({ mutationKey: ["chat-model", sessionId] })) return;
+    if (
+      !sessionId ||
+      sendPendingRef.current ||
+      queryClient.isMutating({ mutationKey: ["chat-model", sessionId] })
+    )
+      return;
     const generation = generationRef.current;
     sendPendingRef.current = true;
     const closeStream = () => {
@@ -957,7 +972,14 @@ export function useChat(sessionId: string | null) {
       console.error("Retry failed:", err);
       closeStream();
       store().clearStreaming(sessionId);
-      store().addChatError(sessionId, makeChatError("internal_error", "Nanite could not restart the request. Your conversation is saved; please try again.", { raw: String(err) }));
+      store().addChatError(
+        sessionId,
+        makeChatError(
+          "internal_error",
+          "Nanite could not restart the request. Your conversation is saved; please try again.",
+          { raw: String(err) },
+        ),
+      );
       currentMessageIdRef.current = null;
     }
   }, [connectStream, queryClient, sessionId]);

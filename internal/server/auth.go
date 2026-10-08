@@ -30,12 +30,8 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Exempt /api/tools/call: it is the CLI-launch self-tools proxy
-		// target, called by a same-host `nanite mcp` subprocess that has no
-		// credentials. The handler itself enforces a loopback-only check
-		// (see api.handleSelfToolCall), so the loopback gate — not basic
-		// auth — is this route's trust boundary.
-		if r.URL.Path == "/api/tools/call" {
+		// A verified agent bearer has already authenticated this operator.
+		if authenticated, _ := r.Context().Value(agentBearerPrincipalKey{}).(bool); authenticated {
 			next.ServeHTTP(w, r)
 			return
 		}

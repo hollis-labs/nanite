@@ -290,7 +290,7 @@ func TestDurableAgentRecipeDryRun_ProductShapes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DryRun web-chat-agent: %v", err)
 	}
-	if !strings.Contains(webPlan.Instance.MetadataJSON, `"exposure_surface":"harness_v1"`) ||
+	if !strings.Contains(webPlan.Instance.MetadataJSON, `"exposure_surface":"durable_agent_admin"`) ||
 		!strings.Contains(webPlan.Instance.MetadataJSON, `"integration_status":"web_widget_operator_managed"`) {
 		t.Fatalf("web metadata = %s", webPlan.Instance.MetadataJSON)
 	}

@@ -44,8 +44,7 @@ export const DURABLE_AGENT_LIFECYCLE_CLASSES = [
   "template",
   "harness",
 ] as const;
-export type DurableAgentLifecycleClass =
-  (typeof DURABLE_AGENT_LIFECYCLE_CLASSES)[number];
+export type DurableAgentLifecycleClass = (typeof DURABLE_AGENT_LIFECYCLE_CLASSES)[number];
 
 export const DURABLE_AGENT_STATUSES = [
   "sleeping",
@@ -69,8 +68,7 @@ export const DURABLE_AGENT_LAUNCH_SOURCES = [
   "process_tick",
   "task_template_run",
 ] as const;
-export type DurableAgentLaunchSource =
-  (typeof DURABLE_AGENT_LAUNCH_SOURCES)[number];
+export type DurableAgentLaunchSource = (typeof DURABLE_AGENT_LAUNCH_SOURCES)[number];
 
 export const DURABLE_AGENT_ATTACHMENT_RELATIONS = [
   "primary",
@@ -81,8 +79,7 @@ export const DURABLE_AGENT_ATTACHMENT_RELATIONS = [
   "attached",
   "spawned",
 ] as const;
-export type DurableAgentAttachmentRelation =
-  (typeof DURABLE_AGENT_ATTACHMENT_RELATIONS)[number];
+export type DurableAgentAttachmentRelation = (typeof DURABLE_AGENT_ATTACHMENT_RELATIONS)[number];
 
 export const RUNTIME_KINDS = [
   "api",
@@ -100,8 +97,7 @@ export const DURABLE_AGENT_RECIPE_KINDS = [
   "process_monitor",
   "template_worker",
 ] as const;
-export type DurableAgentRecipeKind =
-  (typeof DURABLE_AGENT_RECIPE_KINDS)[number];
+export type DurableAgentRecipeKind = (typeof DURABLE_AGENT_RECIPE_KINDS)[number];
 
 export const DURABLE_AGENT_RECIPE_INPUT_TYPES = [
   "string",
@@ -114,8 +110,7 @@ export const DURABLE_AGENT_RECIPE_INPUT_TYPES = [
   "model",
   "runtime_kind",
 ] as const;
-export type DurableAgentRecipeInputType =
-  (typeof DURABLE_AGENT_RECIPE_INPUT_TYPES)[number];
+export type DurableAgentRecipeInputType = (typeof DURABLE_AGENT_RECIPE_INPUT_TYPES)[number];
 
 export const DURABLE_AGENT_WAKE_REASONS = [
   "manual",
@@ -125,8 +120,7 @@ export const DURABLE_AGENT_WAKE_REASONS = [
   "scheduled_wake",
   "external_message",
 ] as const;
-export type DurableAgentWakeReason =
-  (typeof DURABLE_AGENT_WAKE_REASONS)[number];
+export type DurableAgentWakeReason = (typeof DURABLE_AGENT_WAKE_REASONS)[number];
 
 export const DURABLE_AGENT_SESSION_POLICIES = [
   "reuse_latest_or_create",
@@ -134,8 +128,7 @@ export const DURABLE_AGENT_SESSION_POLICIES = [
   "fresh_one_shot",
   "reuse_managed",
 ] as const;
-export type DurableAgentSessionPolicy =
-  (typeof DURABLE_AGENT_SESSION_POLICIES)[number];
+export type DurableAgentSessionPolicy = (typeof DURABLE_AGENT_SESSION_POLICIES)[number];
 
 export const DURABLE_AGENT_EVENT_TYPES = [
   "created",
@@ -163,14 +156,9 @@ export const DURABLE_AGENT_EVENT_TYPES = [
 export type DurableAgentEventType = (typeof DURABLE_AGENT_EVENT_TYPES)[number];
 
 export const DURABLE_AGENT_EVENT_SOURCES = ["api", "runtime"] as const;
-export type DurableAgentEventSource =
-  (typeof DURABLE_AGENT_EVENT_SOURCES)[number];
+export type DurableAgentEventSource = (typeof DURABLE_AGENT_EVENT_SOURCES)[number];
 
-export type SessionBootSource =
-  | "api_default"
-  | "legacy_cli"
-  | "durable_agent"
-  | "unknown";
+export type SessionBootSource = "api_default" | "legacy_cli" | "durable_agent" | "unknown";
 
 export type ImmutableStartField =
   | "provider"
@@ -254,8 +242,7 @@ export interface DurableAgentSessionAttachment {
   detached_at?: string | null;
 }
 
-export interface DurableAgentSessionAttachmentState
-  extends DurableAgentSessionAttachment {
+export interface DurableAgentSessionAttachmentState extends DurableAgentSessionAttachment {
   session_status: string;
   provider: string;
   model: string;
@@ -498,24 +485,25 @@ export interface SessionDetailsResponse {
   checkpoint: CheckpointDetail;
 }
 
-export interface HarnessPermissionSupport {
+export interface AgentPermissionSupport {
   support_level: string;
   approval_response_route?: string;
   notes?: string[];
 }
 
-export interface HarnessRouteHints {
+export interface AgentRouteHints {
   capabilities: string;
   sessions: string;
-  session_events: string;
-  session_cancel: string;
+  turn_events: string;
+  turn_status: string;
+  turn_cancel: string;
   session_approvals: string;
-  durable_agents: string;
-  durable_agent_start: string;
-  durable_agent_wake: string;
 }
 
-export interface HarnessInitializeResponse {
+export interface AgentInitializeResponse {
+  default_definition_ref: DefinitionRef;
+  stream_encodings: string[];
+  session_stream_supported: boolean;
   schema_version: number;
   protocol_version: string;
   route_prefix: string;
@@ -527,17 +515,24 @@ export interface HarnessInitializeResponse {
   operations: string[];
   stream_transports: string[];
   supported_event_types: string[];
-  permission_requests: HarnessPermissionSupport;
-  route_hints: HarnessRouteHints;
+  permission_requests: AgentPermissionSupport;
+  route_hints: AgentRouteHints;
   unsupported: string[];
 }
 
-export interface HarnessFieldSupport {
+export interface AgentFieldSupport {
   supported: string[];
   unsupported: string[];
 }
 
-export interface HarnessCapabilitiesResponse {
+export interface AgentCapabilitiesResponse {
+  default_definition_ref: DefinitionRef;
+  stream_encodings: string[];
+  session_stream_supported: boolean;
+  event_retention: number;
+  event_grace_seconds: number;
+  queue_limit: number;
+  supported_permission_profiles: string[];
   schema_version: number;
   protocol_version: string;
   route_prefix: string;
@@ -549,71 +544,76 @@ export interface HarnessCapabilitiesResponse {
   operations: string[];
   stream_transports: string[];
   runtime_kinds: RuntimeKindOption[];
-  lifecycle_classes: EnumOption<DurableAgentLifecycleClass>[];
-  durable_statuses: EnumOption<DurableAgentStatus>[];
-  attachment_relations: EnumOption<DurableAgentAttachmentRelation>[];
-  wake_reasons: EnumOption<DurableAgentWakeReason>[];
-  session_activity_states: EnumOption[];
+  turn_states: EnumOption[];
   supported_event_types: EnumOption[];
-  session_create_fields: HarnessFieldSupport;
-  turn_send_fields: HarnessFieldSupport;
-  turn_delivery: HarnessTurnDelivery;
-  permission_requests: HarnessPermissionSupport;
-  route_hints: HarnessRouteHints;
+  session_create_fields: AgentFieldSupport;
+  turn_send_fields: AgentFieldSupport;
+  turn_delivery: AgentTurnDelivery;
+  permission_requests: AgentPermissionSupport;
+  route_hints: AgentRouteHints;
 }
 
 /** What a turn sent mid-run does; `mid_run` is "queue" (CW-20261001-0072). */
-export interface HarnessTurnDelivery {
+export interface AgentTurnDelivery {
   mid_run: string;
   interrupt: string;
   notes?: string[];
 }
 
-export interface HarnessSessionRoutes {
+export interface AgentSessionRoutes {
   self: string;
-  events: string;
-  cancel: string;
+  history: string;
+  turns: string;
   approvals: string;
 }
 
-export interface HarnessSessionResponse {
+export interface AgentSessionResponse {
   session: Session;
-  details: SessionDetailsResponse;
+  session_view_id: string;
+  definition_ref: DefinitionRef | null;
+  current_turn_id: string | null;
+  parent_session_view_id: string | null;
+  fork_message_id: string | null;
+  host_subject: unknown;
   stream_transport: string;
-  route_hints: HarnessSessionRoutes;
+  route_hints: AgentSessionRoutes;
 }
 
-export interface HarnessCreateSessionRequest {
+export interface DefinitionRef {
+  definition_id: string;
+  revision: string;
+  semantic_digest: string;
+}
+export interface AgentCreateSessionRequest {
+  definition_ref: DefinitionRef;
+  model_selection?: { provider: string; model: string };
   project_id?: string;
-  provider?: string;
-  model?: string;
-  agent_id?: string;
   title?: string;
   metadata?: Record<string, unknown>;
-  mode_id?: string;
-  runtime_kind?: string;
-  work_root?: string;
-  durable_agent_id?: string;
 }
-
-export interface HarnessTurnRequest {
-  content: string;
-  cycle_kind?: string;
+export interface AgentTurnRequest {
+  content: Array<{ kind: "text"; text: string }>;
+  delivery: "at_idle";
   effort?: string;
+  delta_mode?: "phased" | "live";
 }
-
-export interface HarnessTurnResponse {
-  session_id: string;
-  message_id: string;
+export interface AgentTurnResponse {
+  session_view_id: string;
+  output_message_id: string;
+  turn_id: string;
+  run_id: string;
   stream_url: string;
-  raw_stream_url: string;
   event_transport: string;
-  initial_activity_state: string;
+  state: string;
+  effort: string;
+  delta_mode: "phased" | "live";
+  links: { status: string; snapshot: string; events: string; cancel: string };
 }
-
-export interface HarnessCancelResponse {
-  session_id: string;
-  status: "canceled" | "idle" | string;
+export interface AgentCancelResponse {
+  session_view_id: string;
+  turn_id: string;
+  state: string;
+  cancel_requested: boolean;
 }
 
 export interface StartSurfacePrefill {
@@ -740,10 +740,7 @@ export interface AgentProfile {
   revision?: string;
 }
 
-export type CreateAgentProfileRequest = Pick<
-  AgentProfile,
-  "name" | "slug" | "system_prompt"
-> &
+export type CreateAgentProfileRequest = Pick<AgentProfile, "name" | "slug" | "system_prompt"> &
   Partial<
     Pick<
       AgentProfile,
@@ -975,11 +972,7 @@ export interface AgentBuilderDryRunResponse {
 }
 
 export interface AgentBuilderDraft {
-  mode:
-    | "create_profile"
-    | "create_profile_and_instance"
-    | "update_profile"
-    | string;
+  mode: "create_profile" | "create_profile_and_instance" | "update_profile" | string;
   profile: AgentBuilderProfileInput;
   capabilities: AgentBuilderCapabilitiesInput;
   durable_instance: AgentBuilderDurableInstanceInput;
@@ -1032,11 +1025,7 @@ export interface AgentBuilderReviewResponse {
 }
 
 export type AgentReflexStatus = "active" | "paused" | "expired" | string;
-export type AgentReflexTriggerKind =
-  | "predicate"
-  | "event"
-  | "interval"
-  | string;
+export type AgentReflexTriggerKind = "predicate" | "event" | "interval" | string;
 export type AgentReflexActionKind =
   | "inject_reminder"
   | "halt_session"
@@ -1242,11 +1231,7 @@ export interface AgentKnowledgeSeedUpsertRequest {
 
 // --- Chat Errors ---
 
-export type ChatErrorCode =
-  | "rate_limit"
-  | "tool_error"
-  | "provider_error"
-  | "internal_error";
+export type ChatErrorCode = "rate_limit" | "tool_error" | "provider_error" | "internal_error";
 
 export interface ChatError {
   id: string;
@@ -1489,11 +1474,7 @@ export interface UserSettings {
   embedding_model: string;
   embedding_mode: "disabled" | "explicit";
   // Computed server-side; not persisted. Reflects live credential / reachability.
-  embedding_status?:
-    | "active"
-    | "disabled"
-    | "missing_credentials"
-    | "unreachable";
+  embedding_status?: "active" | "disabled" | "missing_credentials" | "unreachable";
 }
 
 export interface EmbeddingProviderInfo {
@@ -1567,6 +1548,9 @@ export type ApprovalScope = "once" | "session";
 
 export interface ApprovalRequest {
   request_id: string;
+  run_id?: string;
+  call_id?: string;
+  supported_scopes?: ApprovalScope[];
   tool: string;
   input: Record<string, unknown>;
   reason: string;
@@ -1795,11 +1779,7 @@ export type AgentMessageType =
   | "directive"
   | "status_update"
   | "handoff";
-export type AgentMessageStatus =
-  | "unread"
-  | "read"
-  | "acknowledged"
-  | "resolved";
+export type AgentMessageStatus = "unread" | "read" | "acknowledged" | "resolved";
 export type AgentMessageChannel = "chat" | "inbox" | "alert";
 export type AgentMessageKind = "request" | "reply" | "notification" | "handoff";
 
@@ -2067,12 +2047,7 @@ export interface FragmentsBacklogItem {
 
 export type TodoStatus = "pending" | "in_progress" | "done" | "blocked";
 export type TodoPriority = "low" | "medium" | "high" | "critical";
-export type PlanStatus =
-  | "proposed"
-  | "approved"
-  | "in_progress"
-  | "complete"
-  | "abandoned";
+export type PlanStatus = "proposed" | "approved" | "in_progress" | "complete" | "abandoned";
 export type PlanStepStatus = "pending" | "in_progress" | "done" | "skipped";
 
 export interface Todo {
@@ -2153,12 +2128,7 @@ export interface WorkDiff {
 // --- Workers (background orchestration) ---
 
 export type WorkerType = "full" | "light";
-export type WorkerStatus =
-  | "spawning"
-  | "running"
-  | "completed"
-  | "failed"
-  | "canceled";
+export type WorkerStatus = "spawning" | "running" | "completed" | "failed" | "canceled";
 
 export interface Worker {
   id: string;
@@ -2289,7 +2259,13 @@ export interface PluginInstallReview {
   environment: string[];
   tools: Array<{ name: string; effect: string }>;
   tool_load_type?: "auto" | "opt-in";
-  reflex_seeds?: Array<{ id: string; agent_slug: string; trigger: unknown; reminder: string; priority?: number }>;
+  reflex_seeds?: Array<{
+    id: string;
+    agent_slug: string;
+    trigger: unknown;
+    reminder: string;
+    priority?: number;
+  }>;
 }
 
 export interface PluginInstallReviewResponse {
@@ -2398,19 +2374,8 @@ export interface PipelineInfo {
   step_count: number;
 }
 
-export type RunStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "canceled";
-export type StepStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped"
-  | "canceled";
+export type RunStatus = "pending" | "running" | "completed" | "failed" | "canceled";
+export type StepStatus = "pending" | "running" | "completed" | "failed" | "skipped" | "canceled";
 
 export interface StepState {
   step_id: string;
@@ -2449,12 +2414,7 @@ export interface WorkflowRun {
 
 // --- Memory ---
 
-export type MemoryOrigin =
-  | "user"
-  | "feedback"
-  | "project"
-  | "reference"
-  | "observation";
+export type MemoryOrigin = "user" | "feedback" | "project" | "reference" | "observation";
 export type MemoryStatus = "draft" | "reviewed" | "canonical" | "deprecated";
 export type MemoryScope = "session" | "project" | "user";
 

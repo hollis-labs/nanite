@@ -52,10 +52,13 @@ To land a change, open a pull request; a maintainer will review it.
 
 ## Boundaries
 
-Agent profiles and durable instances are database-backed. There is no project
-agent catalog — no `.nanite/`, no `config/agents/`, no file that defines a
-runtime agent. The profiles under `internal/agent/builtin/profiles/` are
-first-run seeds.
+Retained operator agent profiles and durable instances are database-backed.
+Native `/api/agent/v1` creates cognitive views from a verified agentdef v2 pin.
+`NANITE_AGENTDEF_DIR` selects a host-owned directory of Markdown definitions;
+one default definition is embedded under `internal/service/definitions/`.
+Those files are source of truth for this native API. They do not import or
+replace retained profiles, enroll actors, or grant tools. The older profiles
+under `internal/agent/builtin/profiles/` remain first-run database seeds.
 
 `TASKS/`, `adr/`, `docs/engineering/` and `docs/audits/` were archived out of
 this repo at `b58db1fa`. Many Go comments, script headers and `Makefile`

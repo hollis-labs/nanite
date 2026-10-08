@@ -12,17 +12,13 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// errSessionTakeover is the sentinel error runChatTurn returns when a
-// session_takeover event cuts a turn short — the caller must not treat this
-// the same as a normal completion.
-var errSessionTakeover = errors.New("session taken over by another client")
-
 // cmdChat is the entry point for `nanite chat` — a CLI client of Nanite's
-// own harness, driven over the existing GUI-agnostic /api/harness/v1
-// control plane (internal/api/harness_v1.go). It talks to an already-running
+// own harness, driven over the existing GUI-agnostic /api/agent/v1
+// control plane (internal/api/agent_v1.go). It talks to an already-running
 // `nanite serve` process; it does not start its own server or touch the
 // database directly.
 //
@@ -34,7 +30,9 @@ func cmdChat(args []string) {
 	fs := flag.NewFlagSet("chat", flag.ExitOnError)
 	url := fs.String("url", "", "harness API base URL (default: "+apiBaseURL()+"; also honors NANITE_API_URL/NANITE_PORT)")
 	project := fs.String("project", "", "project_id for a new session")
-	agentID := fs.String("agent", "", "agent_id for a new session")
+	definitionID := fs.String("definition-id", "", "definition ID for a new session (requires revision and digest)")
+	definitionRevision := fs.String("definition-revision", "", "pinned definition revision")
+	definitionDigest := fs.String("definition-digest", "", "pinned semantic digest")
 	sessionID := fs.String("session", "", "resume an existing session id instead of creating a new one")
 	title := fs.String("title", "", "title for a new session")
 	noAutostart := fs.Bool("no-autostart", false, "fail fast instead of auto-starting `nanite serve` if it isn't already running")
@@ -51,12 +49,12 @@ func cmdChat(args []string) {
 		os.Exit(1)
 	}
 
-	client := newHarnessClient(*url)
+	client := newAgentClient(*url)
 
-	sess, err := resolveChatSession(ctx, client, *sessionID, harnessCreateSessionRequest{
-		ProjectID: *project,
-		AgentID:   *agentID,
-		Title:     *title,
+	sess, err := resolveChatSession(ctx, client, *sessionID, agentCreateSessionRequest{
+		ProjectID:     *project,
+		DefinitionRef: service.DefinitionRef{DefinitionID: *definitionID, Revision: *definitionRevision, SemanticDigest: *definitionDigest},
+		Title:         *title,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "chat: %v\n", err)
@@ -94,15 +92,13 @@ func cmdChat(args []string) {
 		turnCtx, stop := signal.NotifyContext(ctx, os.Interrupt)
 		err := runChatTurn(turnCtx, client, sess.ID, line)
 		stop()
-		if err != nil && !errors.Is(err, errSessionTakeover) {
-			// errSessionTakeover already printed its own distinct message
-			// inside runChatTurn; avoid reporting the same condition twice.
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "chat: %v\n", err)
 		}
 	}
 }
 
-func resolveChatSession(ctx context.Context, client *harnessClient, sessionID string, createReq harnessCreateSessionRequest) (*store.Session, error) {
+func resolveChatSession(ctx context.Context, client *agentClient, sessionID string, createReq agentCreateSessionRequest) (*store.Session, error) {
 	if sessionID != "" {
 		return client.GetSession(ctx, sessionID)
 	}
@@ -114,26 +110,32 @@ func resolveChatSession(ctx context.Context, client *harnessClient, sessionID st
 // as one-line markers. Rich envelope rendering (report cards, etc.) is a
 // GUI-only concern — the CLI surfaces plugin_envelope events only as a
 // terse marker, not a rendered card.
-func runChatTurn(ctx context.Context, client *harnessClient, sessionID, content string) error {
+func runChatTurn(ctx context.Context, client *agentClient, sessionID, content string) error {
 	turn, err := client.SendTurn(ctx, sessionID, content)
 	if err != nil {
 		return err
 	}
-	events, err := client.StreamEvents(ctx, turn.StreamURL)
+	if turn.TurnID == "" {
+		return errors.New("accepted turn has no turn_id")
+	}
+	defer func() {
+		if ctx.Err() != nil {
+			if _, cancelErr := client.Cancel(context.Background(), sessionID, turn.TurnID); cancelErr != nil {
+				fmt.Fprintf(os.Stderr, "chat: cancel failed: %v\n", cancelErr)
+			}
+		}
+	}()
+	events, err := client.StreamEvents(ctx, turn.StreamURL, turn.TurnID)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return err
 	}
 	for {
 		select {
 		case <-ctx.Done():
-			// The turn-scoped ctx (see cmdChat) was canceled — a Ctrl-C
-			// during this turn. Tell the server to stop generating, then
-			// return; StreamEvents' own goroutine notices the same ctx and
-			// exits on its own, so no explicit drain is needed here.
-			if _, cancelErr := client.Cancel(context.Background(), sessionID); cancelErr != nil {
-				fmt.Fprintf(os.Stderr, "chat: cancel failed: %v\n", cancelErr)
-			}
-			fmt.Print("\nturn canceled\n")
+			fmt.Print("\nturn cancellation requested\n")
 			return nil
 		case evt, ok := <-events:
 			if !ok {
@@ -142,6 +144,8 @@ func runChatTurn(ctx context.Context, client *harnessClient, sessionID, content 
 			switch evt.Type {
 			case "delta":
 				fmt.Print(evt.Content)
+			case "replace_content":
+				fmt.Printf("\n[updated answer] %s", evt.Content)
 			case "tool_call":
 				label := evt.Tool
 				if evt.Detail != "" {
@@ -160,20 +164,17 @@ func runChatTurn(ctx context.Context, client *harnessClient, sessionID, content 
 					fmt.Println("\n[approval requested] respond via the GUI — could not parse the request id from the event payload")
 					continue
 				}
-				fmt.Printf("\n[approval requested] tool=%s reason=%q — respond via the GUI, or POST /api/harness/v1/sessions/%s/approvals/%s\n",
+				fmt.Printf("\n[approval requested] tool=%s reason=%q — respond via the GUI, or POST /api/agent/v1/sessions/%s/approvals/%s/responses (once scope)\n",
 					payload.Tool, payload.Reason, sessionID, payload.RequestID)
 			case "plugin_envelope":
 				fmt.Printf("\n[envelope: %s]\n", evt.PluginID)
-			case "session_takeover":
-				fmt.Print("\n[session taken over by another client — this turn was interrupted]\n")
-				return errSessionTakeover
 			case "error":
 				// By the time an "error" event reaches here, StreamEvents has
 				// already opened the connection (CW-20260813-0008's retry
 				// only covers connection establishment, not this point
 				// onward), so this is never retried — resuming is the user's
 				// job, not the client's.
-				fmt.Printf("\n[error] %s\nresume this conversation with `nanite chat --session %s`\n", evt.Error, sessionID)
+				return fmt.Errorf("%s; inspect turn %s status before submitting again (session %s)", evt.Error, turn.TurnID, sessionID)
 			case "stream_end":
 				fmt.Println()
 			}

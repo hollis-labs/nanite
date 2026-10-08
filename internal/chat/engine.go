@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/truncate"
 
@@ -158,10 +159,14 @@ type ToolWarningPayload struct {
 
 // ApprovalRequestPayload is the JSON payload for approval_request SSE events.
 type ApprovalRequestPayload struct {
-	RequestID string         `json:"request_id"`
-	Tool      string         `json:"tool"`
-	Input     map[string]any `json:"input,omitempty"`
-	Reason    string         `json:"reason"`
+	ExpiresAt       time.Time      `json:"expires_at,omitempty"`
+	RequestID       string         `json:"request_id"`
+	RunID           string         `json:"run_id,omitempty"`
+	CallID          string         `json:"call_id,omitempty"`
+	SupportedScopes []string       `json:"supported_scopes,omitempty"`
+	Tool            string         `json:"tool"`
+	Input           map[string]any `json:"input,omitempty"`
+	Reason          string         `json:"reason"`
 }
 
 // Delta phase constants for StreamEvent.Phase (F4 / CW-20260419-0029).

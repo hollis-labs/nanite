@@ -83,6 +83,9 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 	if err != nil {
 		return nil, fmt.Errorf("resolve HTTP config: %w", err)
 	}
+	if err := validateAgentBind(resolvedHTTPConfig.BindAddress, agentAuthToken()); err != nil {
+		return nil, err
+	}
 	resolvedHTTPConfig.CORSAllowedOrigins = append([]string(nil), resolvedHTTPConfig.CORSAllowedOrigins...)
 	mux := http.NewServeMux()
 	srv := &Server{
@@ -203,13 +206,13 @@ func (s *Server) handlerChain() http.Handler {
 	return s.recoverMiddleware(
 		s.loggingMiddleware(
 			s.corsMiddleware(
-				basicAuthMiddleware(
+				agentAuthMiddleware(basicAuthMiddleware(
 					callerIdentityMiddleware(
 						s.apiCacheMiddleware(
 							s.bodyLimitMiddleware(s.mux),
 						),
 					),
-				),
+				)),
 			),
 		),
 	)

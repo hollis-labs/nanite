@@ -46,15 +46,21 @@ vi.mock("@/lib/api", () => ({
     getMessagePage: mockGetMessagePage,
     getSessionPluginEnvelopes: mockGetSessionPluginEnvelopes,
     getMessagesAround: mockGetMessagesAround,
-    cancelChatStream: mockCancelChatStream,
+    cancelAgentTurn: mockCancelChatStream,
     getSession: mockGetSession,
     retryStream: mockRetryStream,
   },
 }));
 
+vi.mock("@/lib/canonicalTurnStream", () => ({
+  CanonicalTurnStream: function mockCanonical(view:string,turn:string){
+    return new FakeEventSource(`/api/agent/v1/sessions/${encodeURIComponent(view)}/turns/${encodeURIComponent(turn)}/events`);
+  },
+}));
+
 import { useChat } from "@/hooks/useChat";
-import { useChatStore } from "@/stores/useChatStore";
 import { messageProviderFailure } from "@/lib/provider-failure";
+import { useChatStore } from "@/stores/useChatStore";
 
 const SESSION_A = "sess-a";
 const SESSION_B = "sess-b";
@@ -131,7 +137,7 @@ beforeEach(() => {
 
   mockSendMessage.mockResolvedValue({
     message_id: ASSISTANT_ID,
-    stream_url: `/api/stream/${ASSISTANT_ID}`,
+    stream_url: `/api/agent/v1/sessions/${SESSION_A}/turns/${ASSISTANT_ID}/events`,
   });
   mockGetMessagePage.mockResolvedValue({ messages: [], total: 0, has_more: false });
   mockGetSessionPluginEnvelopes.mockResolvedValue([]);
@@ -190,7 +196,7 @@ describe("stream recovery", () => {
     view.rerender(<HookHarness sessionId={SESSION_A} />);
     await flushAsync();
     const resumed = lastStream();
-    expect(resumed.url).toBe(`/api/stream/${ASSISTANT_ID}?from=1`);
+    expect(resumed.url).toBe(`/api/agent/v1/sessions/${SESSION_A}/turns/${ASSISTANT_ID}/events`);
     act(() => {
       resumed.emit("delta", { event_id: 1, content: "Hello " });
       resumed.emit("delta", { event_id: 2, content: "again" });
@@ -208,7 +214,7 @@ describe("stream recovery", () => {
     renderHarness(SESSION_A);
     await flushAsync();
     const stream = lastStream();
-    expect(stream.url).toBe(`/api/stream/${ASSISTANT_ID}`);
+    expect(stream.url).toBe(`/api/agent/v1/sessions/${SESSION_A}/turns/${ASSISTANT_ID}/events`);
     const complete = {
       id: ASSISTANT_ID,
       session_id: SESSION_A,
@@ -245,11 +251,18 @@ describe("stream recovery", () => {
   it("keeps provider recovery choices across reload and retries only on request", async () => {
     const view = renderHarness(SESSION_A);
     await flushAsync();
-    await act(async () => { await latestHook?.sendMessage("Review the inbox"); });
+    await act(async () => {
+      await latestHook?.sendMessage("Review the inbox");
+    });
     const failure = {
       code: "provider_error",
       message: "The provider rejected the request settings. Choose another model.",
-      details: { source: "nanite", message_id: ASSISTANT_ID, request_rejected: true, model: "gpt-6-astra" },
+      details: {
+        source: "nanite",
+        message_id: ASSISTANT_ID,
+        request_rejected: true,
+        model: "gpt-6-astra",
+      },
       timestamp: "2026-09-12T23:53:20Z",
     };
     act(() => lastStream().emit("error", { event_id: 1, structured_error: failure }));
@@ -266,9 +279,11 @@ describe("stream recovery", () => {
     const restored = latestHook?.messages.at(-1);
     expect(restored && messageProviderFailure(restored)?.error.message).toBe(failure.message);
     expect(mockRetryStream).not.toHaveBeenCalled();
-    await act(async () => { await latestHook?.retryStream(); });
+    await act(async () => {
+      await latestHook?.retryStream();
+    });
     expect(mockRetryStream).toHaveBeenCalledWith(SESSION_A);
-    expect(lastStream().url).toBe("/api/stream/retry-message");
+    expect(lastStream().url).toBe(`/api/agent/v1/sessions/${SESSION_A}/turns/retry-message/events`);
     expect(latestHook?.isStreaming).toBe(true);
   });
 
@@ -280,7 +295,10 @@ describe("stream recovery", () => {
           resolvePage = resolve;
         }),
     );
-    mockGetSession.mockImplementation(async (id: string) => ({ messages: [], active_message_id: id === SESSION_A ? ASSISTANT_ID : null }));
+    mockGetSession.mockImplementation(async (id: string) => ({
+      messages: [],
+      active_message_id: id === SESSION_A ? ASSISTANT_ID : null,
+    }));
     const view = renderHarness(SESSION_A);
     view.rerender(<HookHarness sessionId={SESSION_B} />);
     await flushAsync();

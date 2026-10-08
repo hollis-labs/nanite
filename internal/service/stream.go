@@ -9,12 +9,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/store"
 	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // StreamManager owns the concurrent state for message streams, SSE
 // connections, and presence. Extracted from Engine's 6 sync.Map fields.
 type StreamManager struct {
+	turnsOnce      sync.Once
+	turns          *CognitiveTurns
+	turnStore      *store.Store
 	sseMu          sync.Mutex // serialize connection takeover with subscriber replacement
 	streams        sync.Map   // messageID -> *messageStream (CW-20260418-0100)
 	msgToSession   sync.Map   // messageID -> sessionID
@@ -54,6 +58,7 @@ const ringBufferCapacity = 256
 //
 // CW-20260418-0100.
 type messageStream struct {
+	cognitive *cognitiveRun
 	messageID string
 	sessionID string
 
@@ -80,12 +85,15 @@ type messageStream struct {
 
 // newMessageStream starts a pump goroutine for a fresh message. The caller
 // receives the producer channel via CreateStream.
-func newMessageStream(messageID, sessionID string) *messageStream {
+func newMessageStream(messageID, sessionID string, cognitive ...*cognitiveRun) *messageStream {
 	ms := &messageStream{
 		messageID: messageID,
 		sessionID: sessionID,
 		produce:   make(chan chat.StreamEvent, 128),
 		nextID:    1,
+	}
+	if len(cognitive) > 0 {
+		ms.cognitive = cognitive[0]
 	}
 	go ms.pump()
 	return ms
@@ -102,6 +110,9 @@ func newMessageStream(messageID, sessionID string) *messageStream {
 // the overflow path and drop the slow subscriber under the same lock.
 func (ms *messageStream) pump() {
 	for evt := range ms.produce {
+		if ms.cognitive != nil {
+			ms.cognitive.consume(evt)
+		}
 		ms.mu.Lock()
 		evt.EventID = ms.nextID
 		ms.nextID++
@@ -134,6 +145,9 @@ func (ms *messageStream) pump() {
 				"message_id", ms.messageID, "event_id", evt.EventID, "type", evt.Type)
 			close(slowSub)
 		}
+	}
+	if ms.cognitive != nil {
+		ms.cognitive.end()
 	}
 
 	// Producer closed. Mark closed and close the current subscriber so the
@@ -220,8 +234,27 @@ type sseConn struct {
 }
 
 // NewStreamManager creates a new StreamManager.
-func NewStreamManager() *StreamManager {
-	return &StreamManager{}
+func NewStreamManager(backing ...*store.Store) *StreamManager {
+	sm := &StreamManager{}
+	if len(backing) > 0 {
+		sm.turnStore = backing[0]
+	}
+	return sm
+}
+
+// CognitiveTurns is the native per-run command/status/subscription source.
+// Retained product streams keep their existing delivery path.
+func (sm *StreamManager) CognitiveTurns() *CognitiveTurns {
+	sm.turnsOnce.Do(func() { sm.turns = NewCognitiveTurns(sm.turnStore) })
+	return sm.turns
+}
+
+func (sm *StreamManager) createCognitiveStream(messageID, sessionID string, run *cognitiveRun) chan chat.StreamEvent {
+	ms := newMessageStream(messageID, sessionID, run)
+	sm.streams.Store(messageID, ms)
+	sm.msgToSession.Store(messageID, sessionID)
+	sm.addSessionMessage(sessionID, messageID)
+	return ms.produce
 }
 
 // --- Message streams ---

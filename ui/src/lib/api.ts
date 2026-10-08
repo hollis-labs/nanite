@@ -62,13 +62,13 @@ import type {
   FragmentsTask,
   GlobalUsageSummary,
   GrantAgentToolRequest,
-  HarnessCapabilitiesResponse,
-  HarnessCancelResponse,
-  HarnessCreateSessionRequest,
-  HarnessInitializeResponse,
-  HarnessSessionResponse,
-  HarnessTurnRequest,
-  HarnessTurnResponse,
+  AgentCapabilitiesResponse,
+  AgentCancelResponse,
+  AgentCreateSessionRequest,
+  AgentInitializeResponse,
+  AgentSessionResponse,
+  AgentTurnRequest,
+  AgentTurnResponse,
   InspectorTurnSnapshot,
   InspectorTurnsResponse,
   MCPServerConfig,
@@ -216,12 +216,10 @@ function serializePlanPayload(
   return out;
 }
 
-async function readAPIError(
-  res: Response,
-  fallback: string,
-): Promise<Error> {
+async function readAPIError(res: Response, fallback: string): Promise<Error> {
   try {
-    const err = (await res.json()) as { error?: string };
+    const err = (await res.json()) as { error?: string | { message?: string } };
+    if (typeof err.error === "object" && err.error?.message) return new Error(err.error.message);
     if (typeof err.error === "string" && err.error.trim() !== "") {
       return new Error(err.error);
     }
@@ -232,133 +230,62 @@ async function readAPIError(
 }
 
 export const api = {
-  getHarnessInitialize: async (): Promise<HarnessInitializeResponse> => {
-    const res = await fetch(`${API_BASE}/harness/v1/initialize`);
+  getAgentInitialize: async (): Promise<AgentInitializeResponse> => {
+    const res = await fetch(`${API_BASE}/agent/v1/initialize`);
     if (!res.ok)
-      throw new Error(`Failed to get harness initialize: ${res.status}`);
+      throw new Error(`Failed to get agent initialize: ${res.status}`);
     return res.json();
   },
 
-  getHarnessCapabilities: async (): Promise<HarnessCapabilitiesResponse> => {
-    const res = await fetch(`${API_BASE}/harness/v1/capabilities`);
+  getAgentCapabilities: async (): Promise<AgentCapabilitiesResponse> => {
+    const res = await fetch(`${API_BASE}/agent/v1/capabilities`);
     if (!res.ok)
-      throw new Error(`Failed to get harness capabilities: ${res.status}`);
+      throw new Error(`Failed to get agent capabilities: ${res.status}`);
     return res.json();
   },
 
-  createHarnessSession: async (
-    data: HarnessCreateSessionRequest,
-  ): Promise<HarnessSessionResponse> => {
-    const res = await fetch(`${API_BASE}/harness/v1/sessions`, {
+  createAgentSession: async (
+    data: AgentCreateSessionRequest,
+  ): Promise<AgentSessionResponse> => {
+    const res = await fetch(`${API_BASE}/agent/v1/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
     if (!res.ok)
-      throw new Error(`Failed to create harness session: ${res.status}`);
+      throw new Error(`Failed to create agent session: ${res.status}`);
     return res.json();
   },
 
-  getHarnessSession: async (id: string): Promise<HarnessSessionResponse> => {
-    const res = await fetch(`${API_BASE}/harness/v1/sessions/${encodeURIComponent(id)}`);
+  getAgentSession: async (id: string): Promise<AgentSessionResponse> => {
+    const res = await fetch(`${API_BASE}/agent/v1/sessions/${encodeURIComponent(id)}`);
     if (!res.ok)
-      throw new Error(`Failed to get harness session: ${res.status}`);
+      throw new Error(`Failed to get agent session: ${res.status}`);
     return res.json();
   },
 
-  sendHarnessTurn: async (
+  sendAgentTurn: async (
     id: string,
-    data: HarnessTurnRequest,
-  ): Promise<HarnessTurnResponse> => {
+    data: AgentTurnRequest,
+  ): Promise<AgentTurnResponse> => {
     const res = await fetch(
-      `${API_BASE}/harness/v1/sessions/${encodeURIComponent(id)}/turns`,
+      `${API_BASE}/agent/v1/sessions/${encodeURIComponent(id)}/turns`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       },
     );
-    if (!res.ok) throw new Error(`Failed to send harness turn: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to send agent turn: ${res.status}`);
     return res.json();
   },
 
-  cancelHarnessTurn: async (id: string): Promise<HarnessCancelResponse> => {
+  cancelAgentTurn: async (id: string, turnId: string): Promise<AgentCancelResponse> => {
     const res = await fetch(
-      `${API_BASE}/harness/v1/sessions/${encodeURIComponent(id)}/cancel`,
+      `${API_BASE}/agent/v1/sessions/${encodeURIComponent(id)}/turns/${encodeURIComponent(turnId)}/cancel`,
       { method: "POST" },
     );
-    if (!res.ok)
-      throw new Error(`Failed to cancel harness turn: ${res.status}`);
-    return res.json();
-  },
-
-  listHarnessDurableAgents: async (
-    includeArchived = false,
-  ): Promise<DurableAgentInstance[]> => {
-    const query = includeArchived ? "?include_archived=true" : "";
-    const res = await fetch(`${API_BASE}/harness/v1/durable-agents${query}`);
-    if (!res.ok)
-      throw new Error(`Failed to list harness durable agents: ${res.status}`);
-    return res.json();
-  },
-
-  getHarnessDurableAgent: async (id: string): Promise<DurableAgentInstance> => {
-    const res = await fetch(
-      `${API_BASE}/harness/v1/durable-agents/${encodeURIComponent(id)}`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to get harness durable agent: ${res.status}`);
-    return res.json();
-  },
-
-  startHarnessDurableAgent: async (
-    id: string,
-    data: DurableAgentStartRequest,
-  ): Promise<DurableAgentLaunchResult> => {
-    const res = await fetch(
-      `${API_BASE}/harness/v1/durable-agents/${encodeURIComponent(id)}/start`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to start harness durable agent: ${res.status}`);
-    return res.json();
-  },
-
-  resumeHarnessDurableAgent: async (
-    id: string,
-    data: DurableAgentStartRequest,
-  ): Promise<DurableAgentLaunchResult> => {
-    const res = await fetch(
-      `${API_BASE}/harness/v1/durable-agents/${encodeURIComponent(id)}/resume`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to resume harness durable agent: ${res.status}`);
-    return res.json();
-  },
-
-  wakeHarnessDurableAgent: async (
-    id: string,
-    data: DurableAgentStartRequest,
-  ): Promise<DurableAgentWakeResult> => {
-    const res = await fetch(
-      `${API_BASE}/harness/v1/durable-agents/${encodeURIComponent(id)}/wake`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to wake harness durable agent: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to cancel agent turn: ${res.status}`);
     return res.json();
   },
 
@@ -403,6 +330,16 @@ export const api = {
     model?: string;
     agent_id?: string;
   }): Promise<Session> => {
+    if (!data.agent_id) {
+      const initialized = await api.getAgentInitialize();
+      const response = await api.createAgentSession({
+        definition_ref: initialized.default_definition_ref,
+        project_id: data.project_id,
+        model_selection:
+          data.provider && data.model ? { provider: data.provider, model: data.model } : undefined,
+      });
+      return response.session;
+    }
     const res = await fetch(`${API_BASE}/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -452,23 +389,32 @@ export const api = {
     // Values: "low" | "normal" | "high" | "max". Omit or empty → "normal".
     effort?: string;
   }): Promise<{ message_id: string; stream_url: string }> => {
-    const res = await fetch(`${API_BASE}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(`Failed to send message: ${res.status}`);
-    return res.json();
+    const res = await fetch(
+      `${API_BASE}/agent/v1/sessions/${encodeURIComponent(data.session_id)}/turns`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: [{ kind: "text", text: data.content }],
+          delivery: "at_idle",
+          effort: data.effort,
+        }),
+      },
+    );
+    if (!res.ok) throw await readAPIError(res, `Failed to send message: ${res.status}`);
+    const turn = (await res.json()) as AgentTurnResponse;
+    return { message_id: turn.output_message_id, stream_url: turn.stream_url };
   },
 
-  retryStream: async (
-    sessionId: string,
-  ): Promise<{ message_id: string; stream_url: string }> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/retry`, {
-      method: "POST",
-    });
-    if (!res.ok) throw new Error(`Failed to retry: ${res.status}`);
-    return res.json();
+  retryStream: async (sessionId: string): Promise<{ message_id: string; stream_url: string }> => {
+    const response = await fetch(
+      `${API_BASE}/agent/v1/sessions/${encodeURIComponent(sessionId)}/messages?limit=200`,
+    );
+    if (!response.ok) throw await readAPIError(response, "Failed to load retry input");
+    const history = (await response.json()) as { items: Message[] };
+    const user = [...history.items].reverse().find((message) => message.role === "user");
+    if (!user) throw new Error("No user input available to retry");
+    return api.sendMessage({ session_id: sessionId, content: user.content });
   },
 
   /**
@@ -2989,6 +2935,24 @@ export const api = {
 
   // --- vNext: Permissions & Approvals ---
 
+  respondToAgentApproval: async (
+    sessionId: string,
+    requestId: string,
+    decision: ApprovalDecision,
+  ): Promise<{ approval_id: string; run_id: string; call_id: string; decision: ApprovalDecision; scope: "once"; session_view_id: string }> => {
+    const res = await fetch(
+      `${API_BASE}/agent/v1/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(requestId)}/responses`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision, scope: "once" }),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to respond to native approval: ${res.status}`);
+    return res.json();
+  },
+
   respondToApproval: async (
     sessionId: string,
     requestId: string,
@@ -2996,7 +2960,7 @@ export const api = {
     scope?: ApprovalScope,
   ): Promise<{ status: string }> => {
     const res = await fetch(
-      `${API_BASE}/sessions/${sessionId}/approvals/${requestId}`,
+      `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(requestId)}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -1,6 +1,11 @@
 package api
 
-import "net/http"
+import (
+	"errors"
+	"net/http"
+
+	"github.com/hollis-labs/nanite/internal/service"
+)
 
 // handleCancelChat handles POST /api/sessions/{id}/chat/cancel.
 //
@@ -37,8 +42,26 @@ func (a *API) handleCancelChat(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "missing session id")
 		return
 	}
+	if !a.allowRetainedChatOperation(w, r, sessionID) {
+		return
+	}
 
-	if !a.Services.Chat.CancelActiveGeneration(sessionID) {
+	var canceled bool
+	if canceler, ok := a.Services.Chat.(service.RetainedChatCancellation); ok {
+		var err error
+		canceled, err = canceler.CancelRetainedChat(r.Context(), sessionID)
+		if err != nil {
+			if errors.Is(err, service.ErrDefinedViewOperation) {
+				a.errorResp(w, http.StatusUnprocessableEntity, "native turns require per-turn cancellation")
+			} else {
+				a.errorResp(w, http.StatusInternalServerError, "view cancellation unavailable")
+			}
+			return
+		}
+	} else {
+		canceled = a.Services.Chat.CancelActiveGeneration(sessionID)
+	}
+	if !canceled {
 		a.errorResp(w, http.StatusNotFound, "no active generation")
 		return
 	}

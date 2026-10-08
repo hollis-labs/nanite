@@ -44,8 +44,14 @@ vi.mock("@/lib/api", () => ({
     getMessagePage: mockGetMessagePage,
     getSessionPluginEnvelopes: mockGetSessionPluginEnvelopes,
     getMessagesAround: mockGetMessagesAround,
-    cancelChatStream: mockCancelChatStream,
+    cancelAgentTurn: mockCancelChatStream,
     getSession: mockGetSession,
+  },
+}));
+
+vi.mock("@/lib/canonicalTurnStream", () => ({
+  CanonicalTurnStream: function mockCanonical(view:string,turn:string){
+    return new FakeEventSource(`/api/agent/v1/sessions/${encodeURIComponent(view)}/turns/${encodeURIComponent(turn)}/events`);
   },
 }));
 
@@ -73,7 +79,7 @@ class FakeEventSource {
     const fn =
       typeof listener === "function"
         ? (listener as (event: MessageEvent) => void)
-        : ((event: MessageEvent) => listener.handleEvent(event));
+        : (event: MessageEvent) => listener.handleEvent(event);
     const bucket = this.listeners.get(type) ?? [];
     bucket.push(fn);
     this.listeners.set(type, bucket);
@@ -84,7 +90,7 @@ class FakeEventSource {
     const fn =
       typeof listener === "function"
         ? (listener as (event: MessageEvent) => void)
-        : ((event: MessageEvent) => listener.handleEvent(event));
+        : (event: MessageEvent) => listener.handleEvent(event);
     this.listeners.set(
       type,
       current.filter((item) => item !== fn),
@@ -134,7 +140,10 @@ beforeEach(() => {
     cliActiveSessions: new Map(),
   });
 
-  mockSendMessage.mockResolvedValue({ message_id: ASSISTANT_ID, stream_url: `/api/stream/${ASSISTANT_ID}` });
+  mockSendMessage.mockResolvedValue({
+    message_id: ASSISTANT_ID,
+    stream_url: `/api/agent/v1/sessions/${SESSION_ID}/turns/${ASSISTANT_ID}/events`,
+  });
   mockGetMessagesAround.mockResolvedValue({ messages: [], total: 0, has_more: false });
   mockCancelChatStream.mockResolvedValue(undefined);
   // Default: backend reports no interrupted turn.
@@ -171,9 +180,7 @@ describe("useChat stalled-stream reconciliation", () => {
     mockGetMessagePage
       .mockResolvedValueOnce({ messages: [], total: 0, has_more: false })
       .mockResolvedValueOnce({ messages: [assistantMessage], total: 2, has_more: false });
-    mockGetSessionPluginEnvelopes
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([lateEnvelope]);
+    mockGetSessionPluginEnvelopes.mockResolvedValueOnce([]).mockResolvedValueOnce([lateEnvelope]);
 
     renderHarness();
     await flushAsync();

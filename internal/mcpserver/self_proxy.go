@@ -6,10 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/brand"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
@@ -56,7 +61,7 @@ func newSelfToolProxy(apiURL, sessionID string, scope SelfToolScope) *selfToolPr
 		// isn't canceled, while still bounding a genuinely wedged harness.
 		// The per-call ctx threaded into the request remains the primary
 		// cancellation path.
-		client: &http.Client{Timeout: 10 * time.Minute},
+		client: &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}
 	all, _ := (&selftools.SelfToolsTransport{}).ListTools(context.Background())
 	if scope == ScopeStore {
@@ -123,6 +128,19 @@ func (p *selfToolProxy) CallTool(ctx context.Context, name string, args map[stri
 		return nil, fmt.Errorf("self-tool %q: build request: %w", name, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token := os.Getenv(brand.Env("AUTH_TOKEN")); token != "" {
+		// This proxy is a local host bridge. Never forward the operator token
+		// to a remote destination, URL credentials, or an alternate base path.
+		endpoint, parseErr := url.Parse(p.apiURL)
+		if parseErr != nil || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" || (endpoint.Path != "" && endpoint.Path != "/") || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
+			return nil, fmt.Errorf("self-tool %q: invalid authenticated host endpoint", name)
+		}
+		ip := net.ParseIP(endpoint.Hostname())
+		if ip == nil || !ip.IsLoopback() {
+			return nil, fmt.Errorf("self-tool %q: authenticated host endpoint must use a loopback IP", name)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {

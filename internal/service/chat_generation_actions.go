@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1058,6 +1059,7 @@ func (s *chatServiceImpl) consumeProviderIteration(
 	var turnContent strings.Builder
 	var toolUseBlocks []llmtypes.ToolUseBlock
 	var stopReason string
+	providerTerminal := false
 	var lastPTYToolPending string
 	// T9 — set by the mid-stream overflow handler when the outer loop
 	// should retry with a compacted request instead of terminating.
@@ -1289,7 +1291,7 @@ streamLoop:
 			}
 
 		case "done":
-			// handled below
+			providerTerminal = true
 		}
 	}
 
@@ -1342,6 +1344,15 @@ streamLoop:
 		ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(stallErr), "Provider stream stalled — no response", stallDetails)
 		ch <- chat.ErrorEvent(chat.ClassifyError(stallErr), "Provider stream stalled — no response", stallDetails)
 		s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, stallErr)
+		return consumeProviderIterationResult{directive: generationTerminate}
+	}
+
+	// A closed provider channel is a transport boundary, not proof that the
+	// cognitive turn completed. Require its normalized terminal signal.
+	if isCognitiveTurn(ctx) && !providerTerminal && !contextOverflowRecovered && ctx.Err() == nil {
+		truncated := fmt.Errorf("upstream provider stream ended without a terminal signal")
+		ch <- chat.ErrorEvent(chat.ErrorCode("upstream_truncated"), "Provider stream ended before completion", nil)
+		s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, run.fullContent.String(), providerName, agent.Slug, truncated)
 		return consumeProviderIterationResult{directive: generationTerminate}
 	}
 
@@ -1846,6 +1857,9 @@ func (s *chatServiceImpl) finalizeRun(
 	lifecycle.ptyTurnSucceeded = true
 
 	// Stream end.
+	if isCognitiveTurn(ctx) {
+		s.streams.CognitiveTurns().setUsage(assistantMsgID, canonicalRunUsage(run.usageCalls))
+	}
 	streamUsage := run.finalUsage
 	if streamUsage != nil && *streamUsage == (chat.Usage{}) {
 		streamUsage = nil
@@ -1895,6 +1909,51 @@ func (s *chatServiceImpl) prepareTurn(
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to resolve agent", map[string]interface{}{"raw": err.Error()})
 		return prepareTurnResult{directive: generationTerminate}
+	}
+	if isCognitiveTurn(ctx) {
+		copyAgent := *agent
+		agent = &copyAgent
+		copySession := *session
+		session = &copySession
+		selected := cognitiveModelFromContext(ctx)
+		if selected.Provider != "" {
+			session.Provider = selected.Provider
+			session.Model = selected.Model
+			agent.RuntimeKind = "api"
+		}
+		session.Metadata = "{}"
+		// Definition content is applied from a dedicated verified record. Mutable
+		// session metadata and retained profile defaults cannot override it.
+		if reader, ok := s.store.(interface {
+			GetCognitiveView(context.Context, string) (store.CognitiveViewRecord, error)
+		}); ok {
+			record, readErr := reader.GetCognitiveView(ctx, sessionID)
+			if readErr == nil {
+				var cfg ChatDefinitionConfig
+				if json.Unmarshal([]byte(record.ChatConfigJSON), &cfg) != nil {
+					ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Invalid verified chat configuration", nil)
+					return prepareTurnResult{directive: generationTerminate}
+				}
+				copyAgent := *agent
+				agent = &copyAgent
+				agent.SystemPrompt = cfg.Instructions
+				agent.DefaultProvider = cfg.Model.Provider
+				agent.DefaultModel = cfg.Model.Model
+				agent.RuntimeKind = "api"
+				agent.Constraints = "{}"
+				agent.Settings = "{}"
+				agent.Tags = "[]"
+				agent.Tools = "[]"
+				copySession := *session
+				session = &copySession
+				session.Provider = cfg.Model.Provider
+				session.Model = cfg.Model.Model
+				session.Metadata = "{}"
+			} else if !errors.Is(readErr, sql.ErrNoRows) {
+				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to read verified chat configuration", nil)
+				return prepareTurnResult{directive: generationTerminate}
+			}
+		}
 	}
 	agentID := agent.ID
 

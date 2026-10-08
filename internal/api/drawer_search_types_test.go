@@ -101,9 +101,9 @@ func TestSearch_HTTP(t *testing.T) {
 	}
 }
 
-// With no live stream for a message, the stream endpoint falls back to the
-// stored message to check it belongs to the requested session.
-func TestSessionEvents_StoredMessageOwnership(t *testing.T) {
+// Turn lookup does not infer an accepted run from a retained transcript row.
+// Unknown and wrong-owner runs receive the typed native lookup refusal.
+func TestAgentTurnStatusDoesNotInferRunFromMessage(t *testing.T) {
 	a, mux := newTestAPI(t)
 	owner := newB2aSession(t, a)
 	other := newB2aSession(t, a)
@@ -111,10 +111,10 @@ func TestSessionEvents_StoredMessageOwnership(t *testing.T) {
 	if err := a.store.CreateMessage(context.Background(), msg); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if w := mcpDo(mux, "GET", "/api/harness/v1/sessions/"+other.ID+"/events?message_id="+msg.ID, ""); w.Code != http.StatusNotFound || errorBody(t, w) != "message not found for session" {
+	if w := mcpDo(mux, "GET", "/api/agent/v1/sessions/"+other.ID+"/turns/"+msg.ID, ""); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), `"code":"not_found"`) {
 		t.Fatalf("other session: %d %s", w.Code, w.Body.String())
 	}
-	if w := mcpDo(mux, "GET", "/api/harness/v1/sessions/"+owner.ID+"/events?message_id=nope", ""); w.Code != http.StatusNotFound || errorBody(t, w) != "message not found" {
+	if w := mcpDo(mux, "GET", "/api/agent/v1/sessions/"+owner.ID+"/turns/nope", ""); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), `"code":"not_found"`) {
 		t.Fatalf("unknown message: %d %s", w.Code, w.Body.String())
 	}
 }

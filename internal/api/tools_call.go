@@ -58,9 +58,9 @@ type selfToolCallRequest struct {
 // restricted to loopback callers — the `nanite mcp` subprocess always
 // reaches it via http://127.0.0.1. The HTTP server can bind non-loopback
 // interfaces, so this in-handler check is the actual boundary. The route is
-// also exempt from basicAuthMiddleware: the loopback gate is the trust
-// boundary for this internal-only path, so the subprocess needs no
-// credentials planted into its boot dir.
+// authenticated by the HTTP host's bearer middleware as well as this
+// loopback check. Forwarding subprocesses supply NANITE_AUTH_TOKEN through
+// their environment; credentials are never embedded in route links.
 func (a *API) handleSelfToolCall(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRequest(r) {
 		a.errorResp(w, http.StatusForbidden, "tool-call endpoint is loopback-only")

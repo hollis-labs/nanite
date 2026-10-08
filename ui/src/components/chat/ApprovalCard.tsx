@@ -22,21 +22,28 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
     return Math.max(0, AUTO_DENY_SECONDS - elapsed);
   });
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const nativeApproval = Boolean(approval.run_id);
+  const allowSessionScope = !nativeApproval && (approval.supported_scopes?.includes("session") ?? true);
 
   const handleDecision = useCallback(
     async (decision: ApprovalDecision, scope?: ApprovalScope) => {
       if (!activeSessionId || submitting || approval.resolved) return;
       setSubmitting(true);
       try {
-        await api.respondToApproval(activeSessionId, approval.request_id, decision, scope);
-        resolvePendingApproval(activeSessionId, approval.request_id, { decision, scope });
+        if (nativeApproval) {
+          const response = await api.respondToAgentApproval(activeSessionId, approval.request_id, decision);
+          resolvePendingApproval(activeSessionId, approval.request_id, { decision: response.decision, scope: response.scope });
+        } else {
+          await api.respondToApproval(activeSessionId, approval.request_id, decision, scope);
+          resolvePendingApproval(activeSessionId, approval.request_id, { decision, scope });
+        }
       } catch (err) {
         console.error("[ApprovalCard] Failed to respond:", err);
       } finally {
         setSubmitting(false);
       }
     },
-    [activeSessionId, approval.request_id, approval.resolved, submitting, resolvePendingApproval],
+    [activeSessionId, approval.request_id, approval.resolved, nativeApproval, submitting, resolvePendingApproval],
   );
 
   // Countdown timer
@@ -141,15 +148,17 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
         >
           Allow Once
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={submitting}
-          onClick={() => handleDecision("allow", "session")}
-          className="text-[11px] h-6 px-2 text-fg-secondary hover:text-fg"
-        >
-          Allow for Session
-        </Button>
+        {allowSessionScope && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={submitting}
+            onClick={() => handleDecision("allow", "session")}
+            className="text-[11px] h-6 px-2 text-fg-secondary hover:text-fg"
+          >
+            Allow for Session
+          </Button>
+        )}
         <div className="flex-1" />
         <Button
           variant="ghost"

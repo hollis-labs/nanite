@@ -363,7 +363,7 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			},
 			Metadata: map[string]string{
 				"product_story":      "architect_advisor",
-				"exposure_surface":   "internal_chat_and_harness_v1",
+				"exposure_surface":   "durable_agent_admin",
 				"integration_status": "operator_managed",
 			},
 			Injections: []RecipeInjectionPlan{{
@@ -420,7 +420,7 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			},
 			Metadata: map[string]string{
 				"product_story":      "conductor",
-				"exposure_surface":   "internal_chat_and_harness_v1",
+				"exposure_surface":   "durable_agent_admin",
 				"integration_status": "operator_managed",
 				"role_boundary":      "delegates_and_relays_never_dispatches_or_executes",
 			},
@@ -448,7 +448,7 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			SchemaVersion:    DurableAgentRecipeSchemaVersion,
 			Kind:             DurableAgentRecipeKindProjectAdvisor,
 			Name:             "External Company Agent Endpoint",
-			Description:      "A durable API-backed advisor prepared for another company system to drive through the harness v1 API.",
+			Description:      "A durable API-backed advisor prepared through the durable-agent admin surface for a separate company adapter.",
 			LifecycleClass:   store.DurableAgentClassAdvisor,
 			ProfileRule:      "operator_selected",
 			Provider:         "anthropic",
@@ -463,7 +463,7 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			},
 			Metadata: map[string]string{
 				"product_story":       "external_company_agent",
-				"exposure_surface":    "harness_v1",
+				"exposure_surface":    "durable_agent_admin",
 				"integration_status":  "company_adapter_operator_managed",
 				"permissions_posture": "review_required",
 				"adapter_status":      "recipe_prepares_agent_only",
@@ -500,7 +500,7 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			SchemaVersion:    DurableAgentRecipeSchemaVersion,
 			Kind:             DurableAgentRecipeKindManagedCLIHarness,
 			Name:             "Managed CLI Harness",
-			Description:      "A durable managed CLI harness session for local tool-backed work controlled through Nanite chat and harness APIs.",
+			Description:      "A durable managed CLI harness session for local tool-backed work controlled through Nanite durable-agent administration.",
 			LifecycleClass:   store.DurableAgentClassHarness,
 			ProfileRule:      "operator_selected",
 			Provider:         "pty-claude",
@@ -509,12 +509,12 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			LaunchSourceType: store.DurableAgentLaunchCLIHarness,
 			WakeDefaults: DurableAgentWakePayload{
 				Reason: DurableAgentWakeManual,
-				Facts:  map[string]string{"substrate": "managed-cli", "control_surface": "chat_and_harness_v1"},
+				Facts:  map[string]string{"substrate": "managed-cli", "control_surface": "durable_agent_admin"},
 			},
 			Metadata: map[string]string{
 				"product_story":      "managed_cli_harness",
 				"tui_support":        "not_supported",
-				"exposure_surface":   "chat_and_harness_v1",
+				"exposure_surface":   "durable_agent_admin",
 				"integration_status": "operator_managed",
 			},
 			Injections: []RecipeInjectionPlan{{
@@ -561,7 +561,7 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			},
 			Metadata: map[string]string{
 				"product_story":      "orchestrator",
-				"exposure_surface":   "internal_chat_and_harness_v1",
+				"exposure_surface":   "durable_agent_admin",
 				"integration_status": "operator_managed",
 				"role_boundary":      "polls_torque_task_status_dispatches_via_workflow_run_or_subagent_spawn",
 			},
@@ -696,7 +696,7 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			},
 			Metadata: map[string]string{
 				"product_story":      "project_advisor",
-				"exposure_surface":   "chat_and_harness_v1",
+				"exposure_surface":   "durable_agent_admin",
 				"integration_status": "operator_managed",
 			},
 			Inputs: []DurableAgentRecipeInput{
@@ -739,7 +739,7 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			},
 			Metadata: map[string]string{
 				"product_story":      "project_manager",
-				"exposure_surface":   "internal_chat_and_harness_v1",
+				"exposure_surface":   "durable_agent_admin",
 				"integration_status": "operator_managed",
 				"role_boundary":      "coordinates_only_no_dispatch",
 			},
@@ -787,7 +787,7 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			Metadata: map[string]string{
 				"product_story":      "proxima_relay",
 				"relay_status":       "operator_routed",
-				"exposure_surface":   "chat_and_harness_v1",
+				"exposure_surface":   "durable_agent_admin",
 				"integration_status": "mailbox_and_auto_routing_preview_only",
 			},
 			Injections: []RecipeInjectionPlan{{
@@ -997,7 +997,7 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			SchemaVersion:    DurableAgentRecipeSchemaVersion,
 			Kind:             DurableAgentRecipeKindProjectAdvisor,
 			Name:             "Web Chat Agent",
-			Description:      "A durable advisor prepared to back a web chat experience through Nanite sessions and the harness v1 API.",
+			Description:      "A durable advisor prepared through durable-agent administration for a separate web chat integration.",
 			LifecycleClass:   store.DurableAgentClassAdvisor,
 			ProfileRule:      "operator_selected",
 			Provider:         "anthropic",
@@ -1012,7 +1012,7 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			},
 			Metadata: map[string]string{
 				"product_story":      "web_chat_agent",
-				"exposure_surface":   "harness_v1",
+				"exposure_surface":   "durable_agent_admin",
 				"integration_status": "web_widget_operator_managed",
 				"session_reuse":      DurableAgentSessionPolicyReuseLatestOrCreate,
 			},

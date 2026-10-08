@@ -35,29 +35,26 @@ afterEach(() => {
 });
 
 describe("phase 9 API route wiring", () => {
-  it("wires harness runtime API endpoints", async () => {
+  it("wires agent cognition API endpoints", async () => {
     const fetchMock = installFetch({});
 
-    await api.getHarnessInitialize();
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/harness/v1/initialize",
-      undefined,
-    ]);
+    await api.getAgentInitialize();
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/agent/v1/initialize", undefined]);
 
-    await api.getHarnessCapabilities();
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/harness/v1/capabilities",
-      undefined,
-    ]);
+    await api.getAgentCapabilities();
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/agent/v1/capabilities", undefined]);
 
     const createBody = {
-      provider: "anthropic",
-      model: "claude-sonnet-4",
+      definition_ref: {
+        definition_id: "def:test",
+        revision: "1",
+        semantic_digest: "sha256:" + "a".repeat(64),
+      },
       title: "External session",
     };
-    await api.createHarnessSession(createBody);
+    await api.createAgentSession(createBody);
     expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/harness/v1/sessions",
+      "/api/agent/v1/sessions",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -65,16 +62,17 @@ describe("phase 9 API route wiring", () => {
       },
     ]);
 
-    await api.getHarnessSession("session/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/harness/v1/sessions/session%2F1",
-      undefined,
-    ]);
+    await api.getAgentSession("session/1");
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/agent/v1/sessions/session%2F1", undefined]);
 
-    const turnBody = { content: "hello", cycle_kind: "wake", effort: "high" };
-    await api.sendHarnessTurn("session/1", turnBody);
+    const turnBody = {
+      content: [{ kind: "text" as const, text: "hello" }],
+      delivery: "at_idle" as const,
+      effort: "high",
+    };
+    await api.sendAgentTurn("session/1", turnBody);
     expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/harness/v1/sessions/session%2F1/turns",
+      "/api/agent/v1/sessions/session%2F1/turns",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -82,54 +80,33 @@ describe("phase 9 API route wiring", () => {
       },
     ]);
 
-    await api.cancelHarnessTurn("session/1");
+    await api.cancelAgentTurn("session/1", "turn/1");
     expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/harness/v1/sessions/session%2F1/cancel",
+      "/api/agent/v1/sessions/session%2F1/turns/turn%2F1/cancel",
       { method: "POST" },
     ]);
+  });
 
-    await api.listHarnessDurableAgents();
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/harness/v1/durable-agents",
-      undefined,
-    ]);
+  it("answers native approvals once while retaining separate admin scope", async () => {
+    const fetchMock = installFetch({});
 
-    await api.getHarnessDurableAgent("agent/1");
+    await api.respondToAgentApproval("session/1", "approval/1", "allow");
     expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/harness/v1/durable-agents/agent%2F1",
-      undefined,
-    ]);
-
-    const durableBody = {
-      wake_payload: { reason: "manual" },
-    };
-    await api.startHarnessDurableAgent("agent/1", durableBody);
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/harness/v1/durable-agents/agent%2F1/start",
+      "/api/agent/v1/sessions/session%2F1/approvals/approval%2F1/responses",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(durableBody),
+        body: JSON.stringify({ decision: "allow", scope: "once" }),
       },
     ]);
 
-    await api.resumeHarnessDurableAgent("agent/1", durableBody);
+    await api.respondToApproval("session/1", "approval/1", "allow", "session");
     expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/harness/v1/durable-agents/agent%2F1/resume",
+      "/api/sessions/session%2F1/approvals/approval%2F1",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(durableBody),
-      },
-    ]);
-
-    await api.wakeHarnessDurableAgent("agent/1", durableBody);
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/harness/v1/durable-agents/agent%2F1/wake",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(durableBody),
+        body: JSON.stringify({ decision: "allow", scope: "session" }),
       },
     ]);
   });
@@ -138,26 +115,17 @@ describe("phase 9 API route wiring", () => {
     const fetchMock = installFetch({});
 
     await api.getStartSurfaceCapabilities();
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/start-surface/capabilities",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/start-surface/capabilities", undefined]);
 
     await api.getSessionDetails("session/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/sessions/session%2F1/details",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/sessions/session%2F1/details", undefined]);
   });
 
   it("wires durable-agent instance endpoints", async () => {
     const fetchMock = installFetch({});
 
     await api.listDurableAgents();
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/durable-agents",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/durable-agents", undefined]);
 
     await api.listDurableAgents(true);
     expect(lastFetchCall(fetchMock)).toEqual([
@@ -166,10 +134,7 @@ describe("phase 9 API route wiring", () => {
     ]);
 
     await api.getDurableAgent("agent/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/durable-agents/agent%2F1",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/durable-agents/agent%2F1", undefined]);
 
     const createBody = {
       id: "agent-1",
@@ -271,10 +236,7 @@ describe("phase 9 API route wiring", () => {
     ]);
 
     await api.listDurableAgentSessions("agent-1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/durable-agents/agent-1/sessions",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/durable-agents/agent-1/sessions", undefined]);
 
     await api.listDurableAgentEvents("agent/1", 25);
     expect(lastFetchCall(fetchMock)).toEqual([
@@ -298,16 +260,12 @@ describe("phase 9 API route wiring", () => {
     const fetchMock = installFetch({});
 
     await api.listAgentReflexes("agent/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/reflexes",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/agents/agent%2F1/reflexes", undefined]);
 
     const createBody = {
       name: "clean-status-without-tools",
       trigger_kind: "predicate",
-      trigger_spec:
-        '{"kind":"tool_calls_window","window":2,"op":"=","value":0}',
+      trigger_spec: '{"kind":"tool_calls_window","window":2,"op":"=","value":0}',
       action_kind: "inject_reminder",
       action_spec: '{"body":"Ground yourself."}',
       priority: 75,
@@ -357,16 +315,10 @@ describe("phase 9 API route wiring", () => {
     ]);
 
     await api.listPendingReflexes();
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/pending/reflexes",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/pending/reflexes", undefined]);
 
     await api.listPendingReflexes("pending");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/pending/reflexes?status=pending",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/pending/reflexes?status=pending", undefined]);
 
     await api.approvePendingReflex("pending/1", { reviewed_by: "operator-ui" });
     expect(lastFetchCall(fetchMock)).toEqual([
@@ -507,10 +459,7 @@ describe("phase 9 API route wiring", () => {
     const fetchMock = installFetch({});
 
     await api.listAgentKnownTools("agent/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/known-tools",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/agents/agent%2F1/known-tools", undefined]);
 
     await api.getAgentKnownTool("agent/1", "tool/name");
     expect(lastFetchCall(fetchMock)).toEqual([
@@ -558,10 +507,7 @@ describe("phase 9 API route wiring", () => {
       reason: "manual",
     };
     await api.listAgentKnownSkills("agent/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/known-skills",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/agents/agent%2F1/known-skills", undefined]);
 
     await api.getAgentKnownSkill("agent/1", "advisor");
     expect(lastFetchCall(fetchMock)).toEqual([
@@ -597,10 +543,7 @@ describe("phase 9 API route wiring", () => {
 
     const procedureBody = { name: "checklist", body: "Step 1", scope: "agent" };
     await api.listAgentProcedures("agent/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/procedures",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/agents/agent%2F1/procedures", undefined]);
 
     await api.getAgentProcedure("agent/1", "checklist");
     expect(lastFetchCall(fetchMock)).toEqual([
@@ -641,10 +584,7 @@ describe("phase 9 API route wiring", () => {
       tags: ["shell"],
     };
     await api.listAgentKnowledgeSeeds("agent/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/knowledge-seeds",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/agents/agent%2F1/knowledge-seeds", undefined]);
 
     await api.getAgentKnowledgeSeed("agent/1", "boot/conventions");
     expect(lastFetchCall(fetchMock)).toEqual([
@@ -689,10 +629,7 @@ describe("phase 9 API route wiring", () => {
     const fetchMock = installFetch({});
 
     await api.listDurableAgentRecipes();
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/durable-agent-recipes",
-      undefined,
-    ]);
+    expect(lastFetchCall(fetchMock)).toEqual(["/api/durable-agent-recipes", undefined]);
 
     await api.getDurableAgentRecipe("project/advisor");
     expect(lastFetchCall(fetchMock)).toEqual([
@@ -825,17 +762,13 @@ describe("phase 9 response shape fixtures", () => {
       ],
       recipe_kinds: [{ value: "project_advisor", label: "Project advisor" }],
       wake_reasons: [{ value: "manual", label: "Manual" }],
-      session_policies: [
-        { value: "reuse_latest_or_create", label: "Reuse latest or create" },
-      ],
+      session_policies: [{ value: "reuse_latest_or_create", label: "Reuse latest or create" }],
       recipes: [recipe],
       durable_agents: [durableAgent],
       profiles: [],
       providers: [],
       models: [],
-      work_root_hints: [
-        { id: "operator-provided", label: "Operator provided" },
-      ],
+      work_root_hints: [{ id: "operator-provided", label: "Operator provided" }],
     };
 
     const details: SessionDetailsResponse = {

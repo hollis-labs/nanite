@@ -112,7 +112,7 @@ func checkHealth(ctx context.Context, baseURL string) (bool, error) {
 		return false, err
 	}
 	// Same NANITE_AUTH_USER/NANITE_AUTH_PASSWORD convention as
-	// harnessClient.newRequest — a no-op when unset, since basicAuthMiddleware
+	// agentClient.newRequest — a no-op when unset, since basicAuthMiddleware
 	// is also a no-op then.
 	if user := os.Getenv(brand.Env("AUTH_USER")); user != "" {
 		req.SetBasicAuth(user, os.Getenv(brand.Env("AUTH_PASSWORD")))

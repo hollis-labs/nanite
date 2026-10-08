@@ -21,6 +21,7 @@ func TestAdminMountedFailClosed(t *testing.T) {
 			for _, path := range []string{"/api/admin", "/api/admin/manifest", "/api/admin/unknown"} {
 				for _, authenticated := range []bool{false, true} {
 					request := httptest.NewRequest(http.MethodGet, path, nil)
+					request.RemoteAddr = "127.0.0.1:12345"
 					if authenticated {
 						request.SetBasicAuth(cfg.user, cfg.password)
 					}

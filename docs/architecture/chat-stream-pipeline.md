@@ -1,6 +1,6 @@
 # Chat stream pipeline
 
-How a model's streamed output becomes what an `/api/harness/v1` (or legacy) subscriber receives, what is stored on the way, and where it differs from the public provider streaming specifications: Anthropic Messages streaming, OpenAI Chat Completions streaming, OpenAI Responses streaming, and WHATWG Server-Sent Events.
+How a model's streamed output becomes what a native `/api/agent/v1` or retained product subscriber receives, what is stored on the way, and where it differs from the public provider streaming specifications: Anthropic Messages streaming, OpenAI Chat Completions streaming, OpenAI Responses streaming, and WHATWG Server-Sent Events.
 
 Citations are `symbol` in `path` (Nanite-repo-relative; libraries by module name). "Verify" commands at the end re-find the load-bearing claims.
 
@@ -8,7 +8,7 @@ Citations are `symbol` in `path` (Nanite-repo-relative; libraries by module name
 
 ```
  provider ──A──▶ adapter ──B──▶ generation loop ──C──▶ StreamManager ──D──▶ SSE subscriber
- (HTTPS SSE,     (llmtypes.       (chat.StreamEvent      (ring + 1             (harness v1 or
+ (HTTPS SSE,     (llmtypes.       (chat.StreamEvent      (ring + 1             (native canonical or
   stdio, RPC)     StreamEvent)     on `produce`)          subscriber)           legacy route)
                                         └──▶ SQLite (assistant row, usage) at end of turn
 ```
@@ -18,7 +18,7 @@ Citations are `symbol` in `path` (Nanite-repo-relative; libraries by module name
 | A | provider → adapter | HTTPS SSE (Anthropic, OpenAI); stdio NDJSON (Claude CLI, Codex CLI); stdout text (OpenCode CLI); JSON-RPC over stdio (ACP) | provider-native | `internal/llm/anthropic`, `internal/llm/openai`; go-providers, go-agent-wrapper |
 | B | adapter → loop | Go channel `<-chan llmtypes.StreamEvent` | 7 types + 1 Nanite-local (§2.2) | go-llm-types, go-llm-contracts |
 | C | loop → StreamManager | Go channel `produce` (capacity 128) | `chat.StreamEvent` | `chat.StreamEvent` in `internal/chat/engine.go` |
-| D | StreamManager → subscriber | HTTP SSE | `chat.StreamEvent` as JSON | `streamMessageEvents` in `internal/api/messages.go` |
+| D | StreamManager → subscriber | HTTP SSE | native: `go-chatstream/v1`; retained product: `chat.StreamEvent` | `handleAgentV1TurnEvents` in `internal/api/agent_v1_turns.go`; `streamMessageEvents` in `internal/api/messages.go` |
 
 Channel 1 (LLM ↔ Nanite) = A + B (§2). Channel 2 (Nanite → subscribers) = C + D (§3). A separate SSE feed, `host_runtime.v1`, is documented in `docs/architecture/host-runtime-feed.md`.
 
@@ -227,38 +227,70 @@ Promissory-preamble nudge (iteration 0, once, non-CLI: synthetic assistant and u
 - JSON marshaling remains at the transport boundary, where marshal errors are still ignored. Write and flush errors end the handler immediately; request cancellation also ends it. Neither path cancels the generation producer.
 - On channel close the handler returns with no terminal marker.
 
-### 3.9 Routes: legacy messages API vs harness v1
+### 3.9 Native per-run transport
 
-Both write through the same `streamMessageEvents`; harness v1 does not filter or transform events.
+`CognitiveTurns` in `internal/service/cognitive_turns.go` taps the generation
+producer before the retained product ring fans out. It maps text/reasoning parts,
+tool calls/results, bound inband approvals, replacement activities, product
+activities and final outcomes to `go-chatstream/v1`. There is no mesh envelope.
+`hubbind` assigns the event sequence; the shared native sink writes one complete
+canonical event per SSE frame. `Last-Event-ID` is the only resume cursor. A `gap`
+frame has sequence zero and never advances a client's checkpoint.
 
-| | Legacy | Harness v1 (`/api/harness/v1`) |
+The shared hub has independent observers and a bounded in-process log
+(`CognitiveEventRetention`, `CognitiveEventGrace`). Closing or overflowing an
+observer cannot cancel execution. A cursor outside the retained range produces
+an explicit gap. A slow consumer must reload the snapshot or resume; the
+transport does not invent an execution outcome when its connection ends.
+Keepalive comments use `CognitiveKeepalive`; cache headers are
+`private, no-store, no-transform`.
+
+The authoritative snapshot contains the reduced canonical message, effective
+presentation content, state, revision and event checkpoint. The single JSON
+record commits that state/checkpoint together before event fan-out, while the
+publisher lock prevents a status reader from seeing a half-published revision.
+Assistant-row persistence precedes a completed terminal. A failed response save
+produces `run.error`; cancellation produces `run.abort` after partial-output
+persistence, or without an assistant row when canceled before execution.
+
+The event log is volatile. Persisted snapshots survive log expiry and reopen;
+a new process preserves committed outcomes and marks an unfinished native turn
+`failed` with `process_lost`. It does not resume a lost execution or claim that
+its old events can be replayed. `Content` applies replacement activities;
+`Message` preserves the canonical reduction and its activity history.
+
+### 3.10 Control and retained product routes
+
+| Operation | Native `/api/agent/v1` | Retained product |
 |---|---|---|
-| Create session | `POST /api/sessions` `{project_id, model, provider, agent_id}` → 201 Session; default agent from user settings, then slug `default` | `POST /sessions` `{project_id, provider, model, agent_id, title, metadata}` → 201 `{session, details, stream_transport, route_hints}`; no default agent; 422 for `runtime_kind`, `work_root`, `durable_agent_id`; 404 for an unknown `project_id` and 422 for a project whose `repo_path` is set but not an existing directory |
-| Send | `POST /api/messages` `{session_id, content, cycle_kind, effort, delta_mode}` → 202 `{message_id, stream_url}` | `POST /sessions/{id}/turns` `{content, cycle_kind, effort, delta_mode}` → 202 `{session_id, message_id, stream_url, raw_stream_url, event_transport, initial_activity_state}`; 404 before body decode |
-| Stream | `GET /api/stream/{messageID}` | `GET /sessions/{id}/events?message_id=` (required); 404 if the message belongs to another session |
-| Resume | `?from=` / `Last-Event-ID` | same code; `stream_url` carries no cursor |
-| Approval | `POST /api/sessions/{id}/approvals/{requestId}` `{decision, scope}` | same handler under the harness prefix |
-| Cancel | `POST …/chat/cancel` (404 when idle) | `POST …/cancel` (200 `idle` when idle) |
-| Recover | `/recover`, `/agent/reboot`, `/recovery/cancel` | `/recover` |
-| Retry, list, history, fork, delete, `active_message_id`, `interrupted_turn` | present | absent |
-| Discovery | `GET /api/start-surface/capabilities` | `GET /initialize`, `GET /capabilities` (operations, event types, field support) |
-| Durable agents | full | list, get, start, resume, wake |
-| Auth | Basic auth when `NANITE_AUTH_USER` or `NANITE_AUTH_PASSWORD` is set | same middleware |
+| Create | `POST /sessions` with required `definition_ref` | `/api/sessions` retains profile/admin semantics |
+| List/get/history | `GET /sessions`, `/sessions/{id}`, `/sessions/{id}/messages` with bounded cursor pages | product session and history readers |
+| Submit | `POST /sessions/{id}/turns`, text parts and `delivery: at_idle` | `POST /api/messages` is removed |
+| Status/snapshot | `GET /sessions/{id}/turns/{turnId}` | product readers remain separate |
+| Events | `GET /sessions/{id}/turns/{turnId}/events` | `/api/stream/{messageID}` retains its product encoding |
+| Cancel | `POST /sessions/{id}/turns/{turnId}/cancel` targets one turn | product session cancellation remains an admin operation |
+| Approval | `POST /sessions/{id}/approvals/{requestId}/responses`, once scope | bound prompts use the same registry across both facades; genuinely unbound admin prompts retain their scope rules |
 
-`cycle_kind` is accepted and advertised on both and read by no code. Unknown JSON fields are ignored on both.
+Discovery lists only the canonical encoding. Session-level events, AG-UI,
+legacy wire negotiation, actor lifecycle, raw process logs and cancel-all are
+not native API operations. Removed `/api/harness/v1` paths have no aliases.
+Unknown request fields fail strict decoding. Models and permissions are governed
+by the host; see [native-agent-api.md](native-agent-api.md).
 
-### 3.10 Advertised vs emitted event types
+### 3.11 Client behavior
 
-`harnessV1EventTypes` (in `internal/api/harness_v1.go`) advertises: `stream_start`, `delta`, `replace_content`, `tool_call`, `tool_result`, `approval_request`, `tool_warning`, `notify_pause`, `plugin_envelope`, `message_received`, `subagent_run_status_changed`, `mode_suggestion`, `status`, `error`, `stream_end`, `session_takeover`.
-Emitted but not advertised: `circuit_open`, `rate_budget_pause`, `handoff_loaded`, `panel_signal`, `slot_changed`. Advertised with no emitter: `mode_suggestion`.
+`nanite chat` reads canonical events through shared framing/reduction. It retries
+only connection establishment and never retries a turn submission. EOF without
+a terminal directs the user to inspect the accepted turn. Ctrl-C cancels that
+turn's identifier, including when the event connection has not finished opening.
+A server requiring credentials returns a definitive 401 when no token is supplied.
 
-### 3.11 Client behaviors that matter to the stream
-
-| Client | Surface | Reconnect / cursor |
-|---|---|---|
-| `nanite chat` (CLI) | harness v1 only | connection retries at establishment only; no cursor; a mid-stream failure becomes an `error` event |
-| Browser GUI (extracted GUI repo; the copy of `ui/` still tracked in Nanite) | legacy messages + `/api/stream/{id}?from=cursor`; harness client methods exist with no non-test caller | cursor per message, de-dup by `event_id`, native `EventSource` reconnect, reattach via `active_message_id`; 13 event types handled |
-| Other HTTP clients | vary | native `EventSource` or none |
+The browser's `CanonicalTurnStream` converts canonical events to presentation
+notifications for the chat hook. It recovers a gap or EOF through the authoritative
+snapshot and resumes with `Last-Event-ID`. It restores only the snapshot's pending
+approval and preserves per-view cursor/content across navigation. Its Stop action
+targets the displayed turn. The native approval card sends once scope; retained
+unbound admin cards retain their separate behavior.
 
 ## 4. Persistence
 

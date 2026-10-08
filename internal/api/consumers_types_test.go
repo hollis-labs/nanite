@@ -1,9 +1,6 @@
 package api
 
 import (
-	"context"
-	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"sort"
 	"testing"
@@ -32,13 +29,6 @@ type sessionDetailsResponseBefore struct {
 	BootSource           string                                   `json:"boot_source"`
 	ImmutableStartFields []string                                 `json:"immutable_start_fields"`
 	Checkpoint           checkpointDetail                         `json:"checkpoint"`
-}
-
-type harnessV1SessionResponseBefore struct {
-	Session         *store.Session               `json:"session"`
-	Details         sessionDetailsResponseBefore `json:"details"`
-	StreamTransport string                       `json:"stream_transport"`
-	RouteHints      harnessV1SessionRoutes       `json:"route_hints"`
 }
 
 type startSurfaceCapabilitiesBefore struct {
@@ -120,11 +110,6 @@ func TestSessionDetailsResponseMatchesStoreEncoding(t *testing.T) {
 			t.Errorf("%s: session details JSON differs from the store-typed encoding\n got: %s\nwant: %s", name, got, want)
 		}
 
-		v1Before := harnessV1SessionResponseBefore{Session: before.Session, Details: before, StreamTransport: "sse", RouteHints: harnessV1SessionRoutesForSession(sess.ID)}
-		v1After := harnessV1SessionResponse{Session: after.Session, Details: after, StreamTransport: "sse", RouteHints: harnessV1SessionRoutesForSession(sess.ID)}
-		if got, want := mustJSON(t, v1After), mustJSON(t, v1Before); string(got) != string(want) {
-			t.Errorf("%s: harness v1 session JSON differs from the store-typed encoding\n got: %s\nwant: %s", name, got, want)
-		}
 	}
 }
 
@@ -151,21 +136,5 @@ func TestStartSurfaceCapabilitiesMatchesStoreEncoding(t *testing.T) {
 	// The handler wraps profiles in nonNilSlice, so an empty list stays [].
 	if got := string(mustJSON(t, nonNilSlice(agentProfilesToDTO(nil)))); got != "[]" {
 		t.Fatalf("empty profiles = %s, want []", got)
-	}
-}
-
-// TestHarnessV1RecoverSessionLookupErrorIs500 covers the other half of the
-// recover route's errors.Is(sql.ErrNoRows) split: Sessions.Get wraps its
-// error, and a lookup failure that is not a missing row must stay a 500
-// rather than read as "session not found".
-func TestHarnessV1RecoverSessionLookupErrorIs500(t *testing.T) {
-	_, mux := newTestAPI(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	req := httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions/any/recover", nil).WithContext(ctx)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("recover with a failing lookup = %d body=%s; want 500", w.Code, w.Body.String())
 	}
 }

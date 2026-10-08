@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	chatstream "github.com/hollis-labs/go-chatstream"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -32,87 +34,82 @@ func (t *flakyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.inner.RoundTrip(req)
 }
 
-// newTestHarnessServer wires a minimal stand-in for internal/api/harness_v1.go's
-// routes, just enough to exercise harnessClient's request/response and SSE
+// newTestAgentServer wires a minimal stand-in for internal/api/agent_v1.go's
+// routes, just enough to exercise agentClient's request/response and SSE
 // parsing without pulling in the full service.Container.
-func newTestHarnessServer(t *testing.T) (*httptest.Server, *string) {
+func newTestAgentServer(t *testing.T) (*httptest.Server, *string) {
 	t.Helper()
 	var lastAuth string
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("POST /api/harness/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/agent/v1/initialize", func(w http.ResponseWriter, r *http.Request) {
+		d, err := service.EmbeddedDefinition()
+		if err != nil {
+			t.Fatal(err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"default_definition_ref": d.Ref})
+	})
+	mux.HandleFunc("POST /api/agent/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if u, _, ok := r.BasicAuth(); ok {
 			lastAuth = u
 		}
-		var req harnessCreateSessionRequest
+		var req agentCreateSessionRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(harnessSessionResponse{
+		json.NewEncoder(w).Encode(agentSessionResponse{
 			Session: &store.Session{ID: "sess-1", Title: req.Title},
 		})
 	})
 
-	mux.HandleFunc("GET /api/harness/v1/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/agent/v1/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "missing" {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
 		}
-		json.NewEncoder(w).Encode(harnessSessionResponse{
+		json.NewEncoder(w).Encode(agentSessionResponse{
 			Session: &store.Session{ID: id},
 		})
 	})
 
-	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/turns", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/agent/v1/sessions/{id}/turns", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(harnessTurnResponse{
+		json.NewEncoder(w).Encode(agentTurnResponse{
 			SessionID: id,
-			MessageID: "msg-1",
-			StreamURL: fmt.Sprintf("/api/harness/v1/sessions/%s/events?message_id=msg-1", id),
+			MessageID: "msg-1", TurnID: "msg-1",
+			StreamURL: fmt.Sprintf("/api/agent/v1/sessions/%s/turns/msg-1/events", id),
 		})
 	})
 
-	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(harnessCancelResponse{SessionID: r.PathValue("id"), Status: "canceled"})
+	mux.HandleFunc("POST /api/agent/v1/sessions/{id}/turns/{turnId}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(agentCancelResponse{SessionID: r.PathValue("id"), Status: "canceled"})
 	})
 
-	mux.HandleFunc("GET /api/harness/v1/sessions/{id}/events", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("message_id") == "" {
-			http.Error(w, "message_id query parameter is required", http.StatusBadRequest)
-			return
-		}
+	mux.HandleFunc("GET /api/agent/v1/sessions/{id}/turns/{turnId}/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			t.Fatal("test server response writer does not support flushing")
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		for _, evt := range []string{
-			`{"type":"delta","content":"hello "}`,
-			`{"type":"delta","content":"world"}`,
-			`{"type":"tool_call","tool":"grep","detail":"pattern"}`,
-			`{"type":"stream_end"}`,
-		} {
-			fmt.Fprintf(w, "data: %s\n\n", evt)
-			flusher.Flush()
-		}
+		writeAgentCanonicalFixture(w, true)
+		flusher.Flush()
 	})
 
 	return httptest.NewServer(mux), &lastAuth
 }
 
-func TestHarnessClient_CreateAndGetSession(t *testing.T) {
-	srv, _ := newTestHarnessServer(t)
+func TestAgentClient_CreateAndGetSession(t *testing.T) {
+	srv, _ := newTestAgentServer(t)
 	defer srv.Close()
 
-	client := newHarnessClient(srv.URL)
+	client := newAgentClient(srv.URL)
 	ctx := context.Background()
 
-	sess, err := client.CreateSession(ctx, harnessCreateSessionRequest{Title: "test"})
+	sess, err := client.CreateSession(ctx, agentCreateSessionRequest{Title: "test"})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -133,16 +130,16 @@ func TestHarnessClient_CreateAndGetSession(t *testing.T) {
 	}
 }
 
-// TestHarnessClient_CreateSession_RequiresWorkspace was removed by Phase 0
+// TestAgentClient_CreateSession_RequiresWorkspace was removed by Phase 0
 // item 20 (retire workspaces,
 // TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md):
 // workspace_id is no longer required (or accepted) on session creation.
 
-func TestHarnessClient_SendTurnAndStreamEvents(t *testing.T) {
-	srv, _ := newTestHarnessServer(t)
+func TestAgentClient_SendTurnAndStreamEvents(t *testing.T) {
+	srv, _ := newTestAgentServer(t)
 	defer srv.Close()
 
-	client := newHarnessClient(srv.URL)
+	client := newAgentClient(srv.URL)
 	ctx := context.Background()
 
 	turn, err := client.SendTurn(ctx, "sess-1", "hi")
@@ -153,7 +150,7 @@ func TestHarnessClient_SendTurnAndStreamEvents(t *testing.T) {
 		t.Fatalf("unexpected message id: %q", turn.MessageID)
 	}
 
-	events, err := client.StreamEvents(ctx, turn.StreamURL)
+	events, err := client.StreamEvents(ctx, turn.StreamURL, turn.TurnID)
 	if err != nil {
 		t.Fatalf("StreamEvents: %v", err)
 	}
@@ -189,15 +186,15 @@ done:
 	}
 }
 
-// TestHarnessClient_StreamEvents_SurfacesScanError pins a Copilot PR#221
+// TestAgentClient_StreamEvents_SurfacesScanError pins a Copilot PR#221
 // review finding: a scan failure (network read error, or here
 // bufio.ErrTooLong from a token exceeding the decoder's max buffer)
 // otherwise terminated the parsing goroutine silently — the channel just
 // closed with no hint why. It must now surface as a synthetic "error"
 // stream event instead.
-func TestHarnessClient_StreamEvents_SurfacesScanError(t *testing.T) {
+func TestAgentClient_StreamEvents_SurfacesScanError(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/agent/v1/sessions/sess-1/turns/msg-1/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			t.Fatal("test server response writer does not support flushing")
@@ -226,8 +223,8 @@ func TestHarnessClient_StreamEvents_SurfacesScanError(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	client := newHarnessClient(srv.URL)
-	events, err := client.StreamEvents(context.Background(), "/events")
+	client := newAgentClient(srv.URL)
+	events, err := client.StreamEvents(context.Background(), "/api/agent/v1/sessions/sess-1/turns/msg-1/events", "msg-1")
 	if err != nil {
 		t.Fatalf("StreamEvents: %v", err)
 	}
@@ -249,14 +246,14 @@ func TestHarnessClient_StreamEvents_SurfacesScanError(t *testing.T) {
 	}
 }
 
-// TestHarnessClient_StreamEvents_SurfacesMalformedEvent pins CW-20260813-0004
+// TestAgentClient_StreamEvents_SurfacesMalformedEvent pins CW-20260813-0004
 // item 2: a json.Unmarshal failure on a data: payload must surface as a
 // synthetic "error" stream event — mirroring how a decoder read failure
 // already surfaces — rather than being silently dropped. The stream must
 // keep going afterward so a single malformed frame doesn't kill the turn.
-func TestHarnessClient_StreamEvents_SurfacesMalformedEvent(t *testing.T) {
+func TestAgentClient_StreamEvents_SurfacesMalformedEvent(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/agent/v1/sessions/sess-1/turns/msg-1/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			t.Fatal("test server response writer does not support flushing")
@@ -270,15 +267,15 @@ func TestHarnessClient_StreamEvents_SurfacesMalformedEvent(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	client := newHarnessClient(srv.URL)
-	events, err := client.StreamEvents(context.Background(), "/events")
+	client := newAgentClient(srv.URL)
+	events, err := client.StreamEvents(context.Background(), "/api/agent/v1/sessions/sess-1/turns/msg-1/events", "msg-1")
 	if err != nil {
 		t.Fatalf("StreamEvents: %v", err)
 	}
 
 	deadline := time.After(5 * time.Second)
 	var got []string
-	for len(got) < 2 {
+	for len(got) < 1 {
 		select {
 		case evt, ok := <-events:
 			if !ok {
@@ -292,7 +289,7 @@ func TestHarnessClient_StreamEvents_SurfacesMalformedEvent(t *testing.T) {
 			t.Fatalf("timed out waiting for events, got %v so far", got)
 		}
 	}
-	want := []string{"error", "delta"}
+	want := []string{"error"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("event[%d] = %q, want %q (got %v)", i, got[i], want[i], got)
@@ -300,12 +297,12 @@ func TestHarnessClient_StreamEvents_SurfacesMalformedEvent(t *testing.T) {
 	}
 }
 
-func TestHarnessClient_Cancel(t *testing.T) {
-	srv, _ := newTestHarnessServer(t)
+func TestAgentClient_Cancel(t *testing.T) {
+	srv, _ := newTestAgentServer(t)
 	defer srv.Close()
 
-	client := newHarnessClient(srv.URL)
-	resp, err := client.Cancel(context.Background(), "sess-1")
+	client := newAgentClient(srv.URL)
+	resp, err := client.Cancel(context.Background(), "sess-1", "msg-1")
 	if err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
@@ -314,15 +311,15 @@ func TestHarnessClient_Cancel(t *testing.T) {
 	}
 }
 
-func TestHarnessClient_BasicAuth(t *testing.T) {
-	srv, lastAuth := newTestHarnessServer(t)
+func TestAgentClient_BasicAuth(t *testing.T) {
+	srv, lastAuth := newTestAgentServer(t)
 	defer srv.Close()
 
 	t.Setenv("NANITE_AUTH_USER", "alice")
 	t.Setenv("NANITE_AUTH_PASSWORD", "secret")
 
-	client := newHarnessClient(srv.URL)
-	if _, err := client.CreateSession(context.Background(), harnessCreateSessionRequest{}); err != nil {
+	client := newAgentClient(srv.URL)
+	if _, err := client.CreateSession(context.Background(), agentCreateSessionRequest{}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	if *lastAuth != "alice" {
@@ -330,40 +327,33 @@ func TestHarnessClient_BasicAuth(t *testing.T) {
 	}
 }
 
-// TestHarnessClient_SendTurn_RetriesOnConnectionFailure pins CW-20260813-0008:
-// a transient failure to reach the server on SendTurn's initial POST
-// (network blip, server restart mid-session) must be retried rather than
-// surfacing as a hard error on the first hiccup.
-func TestHarnessClient_SendTurn_RetriesOnConnectionFailure(t *testing.T) {
-	srv, _ := newTestHarnessServer(t)
+// An unsuccessful POST has an uncertain outcome: never repeat it automatically.
+func TestAgentClient_SendTurn_DoesNotRetryTransportFailure(t *testing.T) {
+	srv, _ := newTestAgentServer(t)
 	defer srv.Close()
-
-	client := &harnessClient{
-		baseURL: srv.URL,
-		http:    &http.Client{Transport: &flakyTransport{failCount: 2, inner: http.DefaultTransport}},
+	transport := &flakyTransport{failCount: 2, inner: http.DefaultTransport}
+	client := &agentClient{baseURL: srv.URL, http: &http.Client{Transport: transport}}
+	_, err := client.SendTurn(context.Background(), "sess-1", "hi")
+	if err == nil || !strings.Contains(err.Error(), "uncertain") {
+		t.Fatalf("SendTurn = %v, want uncertain outcome", err)
 	}
-
-	turn, err := client.SendTurn(context.Background(), "sess-1", "hi")
-	if err != nil {
-		t.Fatalf("SendTurn: %v", err)
-	}
-	if turn.MessageID != "msg-1" {
-		t.Fatalf("unexpected message id: %q", turn.MessageID)
+	if transport.failCount != 1 {
+		t.Fatalf("POST was retried: remaining failures %d", transport.failCount)
 	}
 }
 
-// TestHarnessClient_StreamEvents_RetriesConnectionOpen mirrors the SendTurn
+// TestAgentClient_StreamEvents_RetriesConnectionOpen mirrors the SendTurn
 // case for StreamEvents' initial GET that opens the SSE connection.
-func TestHarnessClient_StreamEvents_RetriesConnectionOpen(t *testing.T) {
-	srv, _ := newTestHarnessServer(t)
+func TestAgentClient_StreamEvents_RetriesConnectionOpen(t *testing.T) {
+	srv, _ := newTestAgentServer(t)
 	defer srv.Close()
 
-	client := &harnessClient{
+	client := &agentClient{
 		baseURL: srv.URL,
 		http:    &http.Client{Transport: &flakyTransport{failCount: 2, inner: http.DefaultTransport}},
 	}
 
-	events, err := client.StreamEvents(context.Background(), "/api/harness/v1/sessions/sess-1/events?message_id=msg-1")
+	events, err := client.StreamEvents(context.Background(), "/api/agent/v1/sessions/sess-1/turns/msg-1/events", "msg-1")
 	if err != nil {
 		t.Fatalf("StreamEvents: %v", err)
 	}
@@ -385,11 +375,11 @@ func TestHarnessClient_StreamEvents_RetriesConnectionOpen(t *testing.T) {
 	}
 }
 
-// TestHarnessClient_SendTurn_GivesUpAfterMaxAttempts pins the "bounded
+// TestAgentClient_SendTurn_GivesUpAfterMaxAttempts pins the "bounded
 // number of retries, not infinite" requirement: a connection that never
 // succeeds must fail with a clear error in bounded time, not hang.
-func TestHarnessClient_SendTurn_GivesUpAfterMaxAttempts(t *testing.T) {
-	client := &harnessClient{
+func TestAgentClient_SendTurn_GivesUpAfterMaxAttempts(t *testing.T) {
+	client := &agentClient{
 		baseURL: "http://127.0.0.1:1",
 		http:    &http.Client{Transport: &flakyTransport{failCount: 1000, inner: http.DefaultTransport}},
 	}
@@ -404,21 +394,21 @@ func TestHarnessClient_SendTurn_GivesUpAfterMaxAttempts(t *testing.T) {
 	}
 }
 
-// TestHarnessClient_SendTurn_DoesNotRetryServerError pins the other half of
+// TestAgentClient_SendTurn_DoesNotRetryServerError pins the other half of
 // the CW-20260813-0008 distinction: a definitive response from the server
 // (even an error one) means the connection was established — it must not
 // be retried, since the server may have already acted on the request.
-func TestHarnessClient_SendTurn_DoesNotRetryServerError(t *testing.T) {
+func TestAgentClient_SendTurn_DoesNotRetryServerError(t *testing.T) {
 	var calls int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/turns", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/agent/v1/sessions/{id}/turns", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&calls, 1)
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	client := newHarnessClient(srv.URL)
+	client := newAgentClient(srv.URL)
 	if _, err := client.SendTurn(context.Background(), "sess-1", "hi"); err == nil {
 		t.Fatal("SendTurn: expected an error for a 500 response, got nil")
 	}
@@ -427,15 +417,15 @@ func TestHarnessClient_SendTurn_DoesNotRetryServerError(t *testing.T) {
 	}
 }
 
-// TestHarnessClient_StreamEvents_DoesNotRetryMidStreamFailure pins the core
+// TestAgentClient_StreamEvents_DoesNotRetryMidStreamFailure pins the core
 // distinction CW-20260813-0008 is about: once StreamEvents has opened the
 // connection and started delivering events, a failure (here, the server
 // dropping the connection mid-stream) must surface as a synthetic error
 // event, never as a reopened/retried connection.
-func TestHarnessClient_StreamEvents_DoesNotRetryMidStreamFailure(t *testing.T) {
+func TestAgentClient_StreamEvents_DoesNotRetryMidStreamFailure(t *testing.T) {
 	var calls int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/agent/v1/sessions/sess-1/turns/msg-1/events", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&calls, 1)
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -443,7 +433,7 @@ func TestHarnessClient_StreamEvents_DoesNotRetryMidStreamFailure(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "data: {\"type\":\"delta\",\"content\":\"hi\"}\n\n")
+		writeAgentCanonicalFixture(w, false)
 		flusher.Flush()
 
 		hj, ok := w.(http.Hijacker)
@@ -459,8 +449,8 @@ func TestHarnessClient_StreamEvents_DoesNotRetryMidStreamFailure(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	client := newHarnessClient(srv.URL)
-	events, err := client.StreamEvents(context.Background(), "/events")
+	client := newAgentClient(srv.URL)
+	events, err := client.StreamEvents(context.Background(), "/api/agent/v1/sessions/sess-1/turns/msg-1/events", "msg-1")
 	if err != nil {
 		t.Fatalf("StreamEvents: %v", err)
 	}
@@ -492,5 +482,20 @@ loop:
 	}
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("GET /events called %d times, want exactly 1 (mid-stream failures must not retry the connection)", got)
+	}
+}
+
+func writeAgentCanonicalFixture(w io.Writer, terminal bool) {
+	events := []chatstream.Event{{Verb: chatstream.VerbRunStart}, {Verb: chatstream.VerbMessageStart, MessageID: "msg-1", Role: "assistant"}, {Verb: chatstream.VerbPartStart, PartID: "text", Kind: "text"}, {Verb: chatstream.VerbPartDelta, PartID: "text", Text: "hello "}, {Verb: chatstream.VerbPartDelta, PartID: "text", Text: "world"}}
+	if terminal {
+		events = append(events, chatstream.Event{Verb: chatstream.VerbPartEnd, PartID: "text"}, chatstream.Event{Verb: chatstream.VerbPartStart, PartID: "tool", Kind: "tool_call", Meta: map[string]json.RawMessage{"name": json.RawMessage(`"grep"`), "detail": json.RawMessage(`"pattern"`)}}, chatstream.Event{Verb: chatstream.VerbPartEnd, PartID: "tool"}, chatstream.Event{Verb: chatstream.VerbMessageEnd, MessageID: "msg-1"}, chatstream.Event{Verb: chatstream.VerbRunFinish, Reason: "stop"})
+	}
+	for i, event := range events {
+		event.V = "1"
+		event.Seq = uint64(i + 1)
+		event.RunID = "msg-1"
+		event.Time = time.Now().UTC()
+		data, _ := json.Marshal(event)
+		fmt.Fprintf(w, "event: %s\nid: %d\ndata: %s\n\n", event.Verb, event.Seq, data)
 	}
 }

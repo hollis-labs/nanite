@@ -28,9 +28,8 @@ type CreateSessionOpts struct {
 	SubagentRuntime string
 	// SkipAgentBinding makes Create stop after the insert and runtime write:
 	// no agent resolution, no primary binding, and AgentID is ignored. The
-	// harness v1 create uses it because it binds only an explicitly
-	// requested agent, itself, and answers 400 when that binding fails —
-	// where Create's own binding falls back to a default and is best-effort.
+	// caller owns binding when it uses this option. Cognitive API creation
+	// uses its own atomic transaction rather than this best-effort path.
 	SkipAgentBinding bool
 }
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 // API holds dependencies for HTTP handlers.
 type API struct {
 	Services *service.Container
+	// agentCursorKey signs process-local pagination tokens for the single operator.
+	agentCursorKey []byte
 	// embedderSelectDeps is injected for embedding_status computation. Defaults
 	// to service.DefaultEmbedderSelectDeps. Tests override via
 	// SetEmbedderSelectDeps.
@@ -61,8 +64,11 @@ type API struct {
 // New creates a new API instance from a service container.
 func New(svc *service.Container) *API {
 	deps := service.DefaultEmbedderSelectDeps()
+	key := make([]byte, 32)
+	rand.Read(key)
 	return &API{
 		Services:           svc,
+		agentCursorKey:     key,
 		embedderSelectDeps: deps,
 		agentBuilder:       deterministicAgentBuilderAdvisor{},
 	}
@@ -151,7 +157,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}/runtime-events", a.handleHostRuntimeFeed)
 
 	// Messages
-	mux.HandleFunc("POST /api/messages", a.handleSendMessage)
 
 	// SSE stream
 	mux.HandleFunc("GET /api/stream/{messageID}", a.handleStream)
@@ -306,22 +311,19 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agent-builder/draft", a.handleAgentBuilderDraft)
 	mux.HandleFunc("POST /api/agent-builder/review", a.handleAgentBuilderReview)
 
-	// Frontend-readiness and external harness control plane.
+	// Product readiness and native agent cognition.
 	mux.HandleFunc("GET /api/start-surface/capabilities", a.handleStartSurfaceCapabilities)
-	mux.HandleFunc("GET /api/harness/v1/initialize", a.handleHarnessV1Initialize)
-	mux.HandleFunc("GET /api/harness/v1/capabilities", a.handleHarnessV1Capabilities)
-	mux.HandleFunc("POST /api/harness/v1/sessions", a.handleHarnessV1CreateSession)
-	mux.HandleFunc("GET /api/harness/v1/sessions/{id}", a.handleHarnessV1GetSession)
-	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/turns", a.handleHarnessV1SendTurn)
-	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/cancel", a.handleHarnessV1CancelTurn)
-	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/recover", a.handleHarnessV1RecoverSession)
-	mux.HandleFunc("GET /api/harness/v1/sessions/{id}/events", a.handleHarnessV1SessionEvents)
-	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/approvals/{requestId}", a.handleRespondApproval)
-	mux.HandleFunc("GET /api/harness/v1/durable-agents", a.handleHarnessV1ListDurableAgents)
-	mux.HandleFunc("GET /api/harness/v1/durable-agents/{id}", a.handleHarnessV1GetDurableAgent)
-	mux.HandleFunc("POST /api/harness/v1/durable-agents/{id}/start", a.handleHarnessV1DurableStart)
-	mux.HandleFunc("POST /api/harness/v1/durable-agents/{id}/resume", a.handleHarnessV1DurableResume)
-	mux.HandleFunc("POST /api/harness/v1/durable-agents/{id}/wake", a.handleHarnessV1DurableWake)
+	mux.HandleFunc("GET /api/agent/v1/initialize", a.agentV1Handler(a.handleAgentV1Initialize))
+	mux.HandleFunc("GET /api/agent/v1/capabilities", a.agentV1Handler(a.handleAgentV1Capabilities))
+	mux.HandleFunc("POST /api/agent/v1/sessions", a.agentV1Handler(a.handleAgentV1CreateSession))
+	mux.HandleFunc("GET /api/agent/v1/sessions", a.agentV1Handler(a.handleAgentV1ListSessions))
+	mux.HandleFunc("GET /api/agent/v1/sessions/{id}/messages", a.agentV1Handler(a.handleAgentV1History))
+	mux.HandleFunc("GET /api/agent/v1/sessions/{id}", a.agentV1Handler(a.handleAgentV1GetSession))
+	mux.HandleFunc("GET /api/agent/v1/sessions/{id}/turns/{turnId}", a.agentV1Handler(a.handleAgentV1GetTurn))
+	mux.HandleFunc("POST /api/agent/v1/sessions/{id}/turns", a.agentV1Handler(a.handleAgentV1SendTurn))
+	mux.HandleFunc("POST /api/agent/v1/sessions/{id}/turns/{turnId}/cancel", a.agentV1Handler(a.handleAgentV1CancelTurn))
+	mux.HandleFunc("GET /api/agent/v1/sessions/{id}/turns/{turnId}/events", a.agentV1Handler(a.handleAgentV1TurnEvents))
+	mux.HandleFunc("POST /api/agent/v1/sessions/{id}/approvals/{requestId}/responses", a.agentV1Handler(a.handleAgentV1ApprovalResponse))
 
 	// Artifacts
 	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifactsByOrigin) // supports ?origin= filter

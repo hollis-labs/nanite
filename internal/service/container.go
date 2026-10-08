@@ -77,9 +77,10 @@ type Container struct {
 	HarnessProfiles *harnessprofile.Registry
 	// ResultCache is the session-scoped tool-result cache shared by the chat
 	// loop and the self-tool HTTP proxy (POST /api/tools/call).
-	ResultCache *tool.ResultCache
-	Sessions    SessionService
-	Agents      AgentService
+	ResultCache    *tool.ResultCache
+	Sessions       SessionService
+	CognitiveViews *CognitiveViews
+	Agents         AgentService
 	// AgentConfig is the shared database write path for operator-managed
 	// profiles (GUI/API/CLI/MCP all route mutations through it).
 	AgentConfig *AgentConfigService
@@ -265,7 +266,8 @@ type Container struct {
 	ModelSelector *provider.StaticModelSelector
 
 	// Permissions is the per-invocation permission engine. nil = permissions disabled.
-	Permissions *permissionlib.Engine
+	Permissions        *permissionlib.Engine
+	CognitiveApprovals *CognitiveApprovals
 
 	// PathGrants tracks session-scoped explicit-mention path grants for
 	// the trust-agent permission redesign (CW-20260430-0009). Always
@@ -376,12 +378,15 @@ type Container struct {
 // ContainerConfig holds all the external dependencies needed to construct
 // a Container. Everything that main.go sets up before wiring goes here.
 type ContainerConfig struct {
-	Store      *store.Store
-	Providers  *provider.Registry
-	MCP        *mcp.Manager
-	ToolClient *toolclient.ToolClient
-	Plugins    *plugin.Host
-	AppConfig  *config.TunablesConfig
+	DefinitionResolver   DefinitionResolver
+	ModelAuthorizer      ModelAuthorizer
+	DefaultDefinitionRef DefinitionRef
+	Store                *store.Store
+	Providers            *provider.Registry
+	MCP                  *mcp.Manager
+	ToolClient           *toolclient.ToolClient
+	Plugins              *plugin.Host
+	AppConfig            *config.TunablesConfig
 	// HarnessProfiles is the harness profile registry (D-33). nil means the
 	// embedded built-in profiles only.
 	HarnessProfiles *harnessprofile.Registry
@@ -486,6 +491,27 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	if cfg.Providers == nil {
 		return nil, fmt.Errorf("service.NewContainer: Providers is required")
 	}
+	resolver := cfg.DefinitionResolver
+	if resolver == nil {
+		var err error
+		resolver, err = NewFileDefinitionResolver(os.Getenv("NANITE_AGENTDEF_DIR"))
+		if err != nil {
+			return nil, err
+		}
+	}
+	defaultRef := cfg.DefaultDefinitionRef
+	if defaultRef.DefinitionID == "" {
+		embedded, err := EmbeddedDefinition()
+		if err != nil {
+			return nil, err
+		}
+		defaultRef = embedded.Ref
+	}
+	models := cfg.ModelAuthorizer
+	if models == nil {
+		models = configuredNativeModel(cfg.Store, cfg.Providers)
+	}
+	cognitiveViews := &CognitiveViews{Store: cfg.Store, Resolver: resolver, Models: models, DefaultDefinitionRef: defaultRef}
 	workingDir := cfg.WorkingDir
 	if workingDir == "" {
 		workingDir = "."
@@ -838,7 +864,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	// --- Orchestration (Wave 2) ---
 
-	streams := NewStreamManager()
+	streams := NewStreamManager(cfg.Store)
 	if cfg.AppConfig != nil && cfg.AppConfig.Presence.CLIActiveThrottleSeconds > 0 {
 		streams.CLIActiveThrottleInterval = time.Duration(cfg.AppConfig.Presence.CLIActiveThrottleSeconds) * time.Second
 	}
@@ -1180,6 +1206,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		"agent_protected_dirs", cfg.AgentControlPlane.Dirs,
 		"agent_writable_exceptions", cfg.AgentControlPlane.Writable)
 
+	cognitiveApprovals := NewCognitiveApprovals(permissions)
 	resultCache := buildResultCache(cfg.Store)
 	chatSvc := NewChatService(ChatServiceConfig{
 		HarnessProfiles:    cfg.HarnessProfiles,
@@ -1200,6 +1227,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		UtilityProvider:    cfg.UtilityProvider,
 		UtilityModel:       cfg.UtilityModel,
 		Permissions:        permissions,
+		CognitiveApprovals: cognitiveApprovals,
 		PathGrants:         pathGrants,
 		Tasks:              tasks,
 		ResultCache:        resultCache,
@@ -1514,6 +1542,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	container := &Container{
 		Sessions:            sessions,
+		CognitiveViews:      cognitiveViews,
 		Agents:              agents,
 		Skills:              skills,
 		SkillVendor:         skillVendor,
@@ -1556,6 +1585,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		UtilityModel:        cfg.UtilityModel,
 		ModelSelector:       modelSelector,
 		Permissions:         permissions,
+		CognitiveApprovals:  cognitiveApprovals,
 		PathGrants:          pathGrants,
 		AdapterRegistry:     adapterRegistry,
 		ProviderCatalog:     cfg.ProviderCatalog,

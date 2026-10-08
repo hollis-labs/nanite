@@ -56,6 +56,7 @@ func TestAdminMountedPreferencesWriteAndPolicy(t *testing.T) {
 	}
 	h := s.handlerChain()
 	r := httptest.NewRequest("GET", "http://nanite.test/api/admin/settings/preferences", nil)
+	r.RemoteAddr = "127.0.0.1:12345"
 	r.SetBasicAuth("operator", "fixture-password")
 	read := httptest.NewRecorder()
 	h.ServeHTTP(read, r)
@@ -75,6 +76,7 @@ func TestAdminMountedPreferencesWriteAndPolicy(t *testing.T) {
 		for _, operation := range []string{"validate", "update", "reset"} {
 			unread := &mountedUnreadBody{}
 			request := httptest.NewRequest("POST", "http://nanite.test/api/admin/settings/preferences/"+operation, unread)
+			request.RemoteAddr = "127.0.0.1:12345"
 			request.SetBasicAuth("operator", "fixture-password")
 			request.Header.Set("Origin", origin)
 			request.Header.Set("If-Match", read.Header().Get("ETag"))
@@ -87,6 +89,7 @@ func TestAdminMountedPreferencesWriteAndPolicy(t *testing.T) {
 		}
 		for _, path := range []string{"/api/admin", "/api/admin/", "/api/settings"} {
 			request := httptest.NewRequest("OPTIONS", "http://nanite.test"+path, nil)
+			request.RemoteAddr = "127.0.0.1:12345"
 			request.Header.Set("Origin", origin)
 			w := httptest.NewRecorder()
 			access := counted.access.Load()
@@ -116,6 +119,7 @@ func TestAdminMountedPreferencesWriteAndPolicy(t *testing.T) {
 			t.Run(tc.name+"/"+operation, func(t *testing.T) {
 				unread := &mountedUnreadBody{}
 				request := httptest.NewRequest("POST", "http://nanite.test/api/admin/settings/preferences/"+operation, unread)
+				request.RemoteAddr = "127.0.0.1:12345"
 				request.Header["Origin"] = tc.origins
 				request.Header.Set("If-Match", read.Header().Get("ETag"))
 				request.Header.Set("Content-Type", "application/json")
@@ -133,6 +137,7 @@ func TestAdminMountedPreferencesWriteAndPolicy(t *testing.T) {
 		}
 	}
 	request := httptest.NewRequest("POST", "http://nanite.test/api/admin/settings/preferences/update", strings.NewReader(body))
+	request.RemoteAddr = "127.0.0.1:12345"
 	request.SetBasicAuth("operator", "fixture-password")
 	request.Header.Set("Origin", "http://localhost:5173")
 	request.Header.Set("If-Match", read.Header().Get("ETag"))
@@ -152,6 +157,7 @@ func TestAdminMountedPreferencesWriteAndPolicy(t *testing.T) {
 			command = `{"revision":"` + snapshot.Revision + `","keys":[]}`
 		}
 		commandRequest := httptest.NewRequest("POST", "http://nanite.test/api/admin/settings/preferences/"+operation, strings.NewReader(command))
+		commandRequest.RemoteAddr = "127.0.0.1:12345"
 		commandRequest.SetBasicAuth("operator", "fixture-password")
 		commandRequest.Header.Set("Origin", "http://localhost:5173")
 		commandRequest.Header.Set("If-Match", w.Header().Get("ETag"))

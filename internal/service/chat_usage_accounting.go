@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"time"
 
+	chatstream "github.com/hollis-labs/go-chatstream"
+
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	costcalc "github.com/hollis-labs/go-modelsdev-catalog-helpers"
 	ledger "github.com/hollis-labs/go-usage-ledger"
@@ -95,4 +97,24 @@ func (s *chatServiceImpl) persistRunUsage(ctx context.Context, sessionID, messag
 		usage.CacheCreationTokens, usage.CacheReadTokens, run.usageCalls); err != nil {
 		slog.Warn("chat-service: failed to record token usage", "session_id", sessionID, "message_id", messageID, "err", err)
 	}
+}
+
+// Missing dimensions stay omitted; the ledger remains the source for provenance.
+// Never reinterpret the old provider aggregate input as uncached input.
+func canonicalRunUsage(rows []ledger.Row) *chatstream.Usage {
+	if len(rows) == 0 {
+		return nil
+	}
+	u := &chatstream.Usage{Scope: chatstream.UsageFinal}
+	for _, row := range rows {
+		if row.Usage.UncachedInputTokens.Provenance == ledger.ProvenanceUnknown || row.Usage.OutputTokens.Provenance == ledger.ProvenanceUnknown {
+			return nil
+		}
+		u.UncachedInput += int(row.Usage.UncachedInputTokens.Tokens)
+		u.CacheRead += int(row.Usage.CacheReadTokens.Tokens)
+		u.CacheWrite += int(row.Usage.CacheWriteTokens.Tokens)
+		u.Output += int(row.Usage.OutputTokens.Tokens)
+		u.Reasoning += int(row.Usage.ReasoningTokens.Tokens)
+	}
+	return u
 }

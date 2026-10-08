@@ -212,7 +212,7 @@ func TestFormatPacket(t *testing.T) {
 	packet := &ContextPacket{
 		Items: []ContextItem{
 			{Source: "tesseract", Key: "app/test", Content: "test data"},
-			{Source: "pcc", Key: "mentat/00_project.md", Content: "project info"},
+			{Source: "pcc", Key: "00_project.md", Content: "project info"},
 		},
 	}
 

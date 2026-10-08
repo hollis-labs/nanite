@@ -11,14 +11,14 @@ import (
 func TestPCCSource_Fetch(t *testing.T) {
 	// Create temp PCC directory structure.
 	tmpDir := t.TempDir()
-	projectDir := filepath.Join(tmpDir, "mentat")
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
+	projectDir, err := os.MkdirTemp(tmpDir, "")
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Write sample PCC files.
 	files := map[string]string{
-		"00_project.md":      "# Mentat\nMentat is the meta-agent.",
+		"00_project.md":      "project info",
 		"01_conventions.md":  "# Conventions\nUse Go conventions.",
 		"02_architecture.md": "# Architecture\nGo backend + React frontend.",
 	}
@@ -31,7 +31,7 @@ func TestPCCSource_Fetch(t *testing.T) {
 	src := NewPCCSource(tmpDir)
 	items, err := src.Fetch(context.Background(), Intent{
 		Type:  IntentWriteCode,
-		Scope: "mentat",
+		Scope: filepath.Base(projectDir),
 	}, 10000)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -49,8 +49,8 @@ func TestPCCSource_Fetch(t *testing.T) {
 
 func TestPCCSource_NoScope(t *testing.T) {
 	tmpDir := t.TempDir()
-	projectDir := filepath.Join(tmpDir, "mentat")
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
+	projectDir, err := os.MkdirTemp(tmpDir, "")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "00_project.md"), []byte("test"), 0644); err != nil {
@@ -86,8 +86,8 @@ func TestPCCSource_NoScopePropagatesReadDirError(t *testing.T) {
 
 func TestPCCSource_BudgetRespected(t *testing.T) {
 	tmpDir := t.TempDir()
-	projectDir := filepath.Join(tmpDir, "mentat")
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
+	projectDir, err := os.MkdirTemp(tmpDir, "")
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,7 +106,7 @@ func TestPCCSource_BudgetRespected(t *testing.T) {
 	src := NewPCCSource(tmpDir)
 	items, err := src.Fetch(context.Background(), Intent{
 		Type:  IntentCustom,
-		Scope: "mentat",
+		Scope: filepath.Base(projectDir),
 	}, 10) // Very tight budget — only 10 tokens
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

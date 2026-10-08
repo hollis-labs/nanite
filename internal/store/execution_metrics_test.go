@@ -15,7 +15,6 @@ func TestRecordExecutionMetrics(t *testing.T) {
 		Adapter:         "http",
 		Model:           "claude-sonnet-4-20250514",
 		AgentID:         "agent-1",
-		AgentSlug:       "mentat",
 		Mode:            "default",
 		DurationMs:      1500,
 		ContextMessages: 10,

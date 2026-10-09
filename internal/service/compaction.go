@@ -27,6 +27,13 @@ type ManualCompactionResult struct {
 // CompactSession assembles the session context, forces compaction, records its
 // metadata, and publishes the resulting lifecycle and stream events.
 func (c *Container) CompactSession(ctx context.Context, sessionID string) (*ManualCompactionResult, error) {
+	if locker, ok := c.Chat.(ConversationLocker); ok {
+		release, lockErr := locker.LockConversation(ctx, sessionID)
+		if lockErr != nil {
+			return nil, lockErr
+		}
+		defer release()
+	}
 	session, err := c.Sessions.Get(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

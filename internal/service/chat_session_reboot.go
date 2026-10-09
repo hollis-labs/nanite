@@ -74,6 +74,11 @@ type RebootResult struct {
 // the flag and treats the resulting process exit as deliberate rather than
 // dispatching a crash replacement.
 func (s *chatServiceImpl) RebootSessionAgent(ctx context.Context, sessionID string) (RebootResult, error) {
+	release, err := s.LockConversation(ctx, sessionID)
+	if err != nil {
+		return RebootResult{}, err
+	}
+	defer release()
 	return s.rebootRuntime(ctx, sessionID, true)
 }
 
@@ -82,6 +87,11 @@ func (s *chatServiceImpl) RebootSessionAgent(ctx context.Context, sessionID stri
 // pack + provider resume). CW-20260525-0001 Slice 2 — explicit user-triggered
 // recovery, distinct from a clean Reboot.
 func (s *chatServiceImpl) RecoverSession(ctx context.Context, sessionID string) (RebootResult, error) {
+	release, err := s.LockConversation(ctx, sessionID)
+	if err != nil {
+		return RebootResult{}, err
+	}
+	defer release()
 	return s.rebootRuntime(ctx, sessionID, false)
 }
 

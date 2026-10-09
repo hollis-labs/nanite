@@ -180,3 +180,29 @@ grep -rn 'UniversalRulesBlock()' --include='*.go' internal | grep -v '_test\|//'
   order, is its own subject.
 - **Provider specifics.** The caching model described here is the one Nanite
   targets; the wire details belong with the provider integration.
+
+## Manual conversation clear
+
+`/clear` calls `Container.ClearSession` through `POST /api/sessions/{id}/clear`.
+It resets the working conversation, keeping the full transcript and adding a
+“Conversation cleared here” message. Boot/system context, included documents,
+session pins, verified definitions and host grants survive. The default removes
+that session's Glass4 handoff stash; `/clear --keep-handoff` retains it for the
+handoff injection path. Undo is outside this command's contract.
+
+An active or queued turn requires explicit confirmation. The first request
+returns `409 clear_confirmation_required` with `active_turn_ids`. A confirmed
+request supplies `confirm_cancel: true` and the exact `expected_turn_ids`; a
+changed set requires new confirmation. The service fences session admissions,
+cancels each captured turn through its existing cancellation owner, and waits
+for safe settlement before stopping the provider runtime. A refused or timed-out
+reset retains the transcript and stash; cancellation or runtime stop may already
+have happened, so this is not an atomic rollback of provider effects.
+
+The durable cut lives in `session_events`, independently of presentation
+metadata. The marker, event, optional stash removal and provider resume-ID reset
+commit in one transaction. Context assembly, intent, retry and restart recovery
+read messages after that cut; transcript browsing, search and export retain the
+full history. A transcript-copying fork carries the cut with its new marker ID.
+Equal-second timestamps are ordered by the retained message rows, and the cut
+is re-resolved from its marker ID after reopening the database.

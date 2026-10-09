@@ -230,6 +230,7 @@ type ChatServiceConfig struct {
 
 // chatServiceImpl is the concrete ChatService implementation.
 type chatServiceImpl struct {
+	conversationGates        sync.Map // session ID -> context-aware admission/clear gate
 	cognitiveAdmissionMu     sync.Mutex
 	cognitiveAdmissionClosed bool
 	sessions                 SessionService
@@ -1356,6 +1357,17 @@ func waitForPredecessor(genCtx, ownerCtx context.Context, predecessor *inFlightG
 
 // HandleMessage implements ChatService.
 func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content string) (string, error) {
+	release, gateErr := s.LockConversation(ctx, sessionID)
+	if gateErr != nil {
+		return "", gateErr
+	}
+	defer release()
+	return s.handleMessage(ctx, sessionID, content)
+}
+
+// handleMessage requires the conversation admission gate. Native submission
+// also holds cognitiveAdmissionMu through persistence and generation tracking.
+func (s *chatServiceImpl) handleMessage(ctx context.Context, sessionID, content string) (string, error) {
 	selected := cognitiveModelFromContext(ctx)
 	if !isCognitiveTurn(ctx) {
 		if err := requireLegacyTarget(ctx, s.store, sessionID); err != nil {
@@ -1491,6 +1503,11 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 
 // RetryLastMessage implements ChatService.
 func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string) (string, error) {
+	release, gateErr := s.LockConversation(ctx, sessionID)
+	if gateErr != nil {
+		return "", gateErr
+	}
+	defer release()
 	if err := requireLegacyTarget(ctx, s.store, sessionID); err != nil {
 		return "", err
 	}
@@ -1510,7 +1527,7 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 	}
 
 	// Find the last user message.
-	msgs, err := s.store.ListMessages(ctx, sessionID, 50)
+	msgs, err := listWorkingMessages(ctx, s.store, sessionID, 50)
 	if err != nil {
 		return "", fmt.Errorf("list messages for retry: %w", err)
 	}
@@ -1537,6 +1554,11 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 
 // SendAgentMessage implements ChatService.
 func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, toSessionID, content string) (string, error) {
+	release, gateErr := s.LockConversation(ctx, toSessionID)
+	if gateErr != nil {
+		return "", gateErr
+	}
+	defer release()
 	if err := requireLegacyTarget(ctx, s.store, toSessionID); err != nil {
 		return "", err
 	}
@@ -1621,6 +1643,11 @@ func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, rea
 		}
 		return id, submitErr
 	}
+	release, gateErr := s.LockConversation(ctx, sessionID)
+	if gateErr != nil {
+		return "", gateErr
+	}
+	defer release()
 	assistantMsgID := uuid.New().String()
 	genCtx, cancel := context.WithCancel(context.Background())
 	current, registered := s.registerGenerationIfIdle(sessionID, assistantMsgID, cancel)
@@ -1691,6 +1718,11 @@ func (s *chatServiceImpl) TriggerMessageWake(ctx context.Context, sessionID stri
 		}
 		return id, submitErr
 	}
+	release, gateErr := s.LockConversation(ctx, sessionID)
+	if gateErr != nil {
+		return "", gateErr
+	}
+	defer release()
 	assistantMsgID := uuid.New().String()
 	genCtx, cancel := context.WithCancel(context.Background())
 	current, registered := s.registerGenerationIfIdle(sessionID, assistantMsgID, cancel)

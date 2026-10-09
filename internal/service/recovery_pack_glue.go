@@ -59,7 +59,7 @@ func (s *chatServiceImpl) buildSessionRecoveryPrefix(sessionID string, session *
 	if s.store == nil {
 		return ""
 	}
-	msgs, err := s.store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, recoveryHistoryMessages+2)
+	msgs, err := listWorkingMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s.store, sessionID, recoveryHistoryMessages+2)
 	if err != nil {
 		slog.Warn("recovery: list messages failed", "session_id", sessionID, "err", err)
 		return ""

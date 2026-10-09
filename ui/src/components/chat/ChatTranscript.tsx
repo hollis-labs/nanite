@@ -6,6 +6,7 @@ import { useTranscriptScroll } from "@/hooks/useTranscriptScroll";
 import { shouldRenderStandalonePluginEnvelope } from "@/lib/envelope-lane";
 import { messageProviderFailure } from "@/lib/provider-failure";
 import type { Message } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/useAppStore";
 import {
   useChatErrors,
@@ -18,7 +19,6 @@ import {
   useToolCalls,
   useToolWarnings,
 } from "@/stores/useChatStore";
-import { cn } from "@/lib/utils";
 import { ChatMessage } from "./ChatMessage";
 import { CompactionDivider } from "./CompactionDivider";
 import { ErrorBanner } from "./ErrorBanner";
@@ -69,6 +69,9 @@ interface ChatTranscriptProps {
   loadingOlder?: boolean;
 }
 
+// MessageContent consumes a model message role, not a DOM ARIA role.
+const assistantMessageRole = "assistant" as const;
+
 export function ChatTranscript({
   sessionId,
   messagesReady = true,
@@ -89,12 +92,16 @@ export function ChatTranscript({
   const chatErrors = useChatErrors();
   const dismissChatError = useChatStore((s) => s.dismissChatError);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
-  const modelUpdatePending = useIsMutating({ mutationKey: ["chat-model", sessionId ?? activeSessionId] }) > 0;
+  const modelUpdatePending =
+    useIsMutating({ mutationKey: ["chat-model", sessionId ?? activeSessionId] }) > 0;
   const pluginEnvelopes = usePluginEnvelopes(activeSessionId);
   const [dismissedFailures, setDismissedFailures] = useState<Set<string>>(() => new Set());
-  const chooseModel = () => window.dispatchEvent(new CustomEvent("open-chat-model-picker", {
-    detail: { sessionId: sessionId ?? activeSessionId },
-  }));
+  const chooseModel = () =>
+    window.dispatchEvent(
+      new CustomEvent("open-chat-model-picker", {
+        detail: { sessionId: sessionId ?? activeSessionId },
+      }),
+    );
 
   const currentSessionId = sessionId ?? activeSessionId;
   const toolCalls = useToolCalls(currentSessionId);
@@ -221,7 +228,8 @@ export function ChatTranscript({
   const userMessageCount = messages.filter((m) => m.role === "user").length;
 
   /* ─────────────────── Empty state ─────────────────── */
-  if (!messagesReady) return <div className="flex-1" role="status" aria-label="Loading conversation" />;
+  if (!messagesReady)
+    return <div className="flex-1" role="status" aria-label="Loading conversation" />;
 
   if (messages.length === 0 && !isStreaming) {
     return (
@@ -254,7 +262,10 @@ export function ChatTranscript({
   }
 
   return (
-    <ScrollArea className="relative flex-1 overflow-x-hidden overscroll-x-none no-scrollbar px-4 py-6" ref={scrollRef}>
+    <ScrollArea
+      className="relative flex-1 overflow-x-hidden overscroll-x-none no-scrollbar px-4 py-6"
+      ref={scrollRef}
+    >
       <div className="mx-auto max-w-3xl w-full min-w-0 space-y-5">
         {/* Sentinel for loading older messages */}
         {hasOlderMessages && (
@@ -292,6 +303,24 @@ export function ChatTranscript({
 
         {messages.map((msg, idx) => {
           const failure = messageProviderFailure(msg);
+          let clearBoundary: { keep_handoff?: boolean } | undefined;
+          try {
+            if (msg.role === "system")
+              clearBoundary = JSON.parse(msg.metadata || "{}").conversation_cleared;
+          } catch {
+            /* message metadata is optional */
+          }
+          if (clearBoundary)
+            return (
+              <div
+                key={msg.id}
+                data-clear-boundary="true"
+                className="my-4 text-center text-xs text-text-muted"
+              >
+                Conversation cleared here
+                {clearBoundary.keep_handoff ? " · handoff kept" : " · handoff dropped"}
+              </div>
+            );
           const canRecover = idx === messages.length - 1;
           let showCompactionDivider = false;
           if (idx > 0) {
@@ -306,18 +335,22 @@ export function ChatTranscript({
           return (
             <div key={msg.id} {...(failure ? { "data-message-id": msg.id } : {})}>
               {showCompactionDivider && <CompactionDivider />}
-              {(!failure || failure.partial) && <ChatMessage
-                message={msg}
-                {...(onSendMessage && { onSendMessage })}
-                userMessageCount={userMessageCount}
-              />}
-              {failure && !dismissedFailures.has(msg.id) && <ErrorBanner
-                error={failure.error}
-                onDismiss={(id) => setDismissedFailures((previous) => new Set([...previous, id]))}
-                onRetry={canRecover ? onRetry : undefined}
-                onChooseModel={canRecover ? chooseModel : undefined}
-                busy={isStreaming || modelUpdatePending}
-              />}
+              {(!failure || failure.partial) && (
+                <ChatMessage
+                  message={msg}
+                  {...(onSendMessage && { onSendMessage })}
+                  userMessageCount={userMessageCount}
+                />
+              )}
+              {failure && !dismissedFailures.has(msg.id) && (
+                <ErrorBanner
+                  error={failure.error}
+                  onDismiss={(id) => setDismissedFailures((previous) => new Set([...previous, id]))}
+                  onRetry={canRecover ? onRetry : undefined}
+                  onChooseModel={canRecover ? chooseModel : undefined}
+                  busy={isStreaming || modelUpdatePending}
+                />
+              )}
             </div>
           );
         })}
@@ -396,7 +429,7 @@ export function ChatTranscript({
               {/* Final answer area — renders as it arrives */}
               {streamingFinal && (
                 <div className="min-w-0 max-w-full w-full">
-                  <MessageContent content={streamingFinal} role="assistant" />
+                  <MessageContent content={streamingFinal} role={assistantMessageRole} />
                 </div>
               )}
 
@@ -415,15 +448,26 @@ export function ChatTranscript({
                             : "border-border-subtle bg-surface text-fg-muted",
                         )}
                       >
-                        <Loader2 className={cn("h-3.5 w-3.5 animate-spin shrink-0", isSubagent ? "text-primary" : "text-warning")} />
-                        <span className={cn("font-mono text-[10px] uppercase font-semibold shrink-0", isSubagent ? "text-primary" : "text-fg-secondary")}>
+                        <Loader2
+                          className={cn(
+                            "h-3.5 w-3.5 animate-spin shrink-0",
+                            isSubagent ? "text-primary" : "text-warning",
+                          )}
+                        />
+                        <span
+                          className={cn(
+                            "font-mono text-[10px] uppercase font-semibold shrink-0",
+                            isSubagent ? "text-primary" : "text-fg-secondary",
+                          )}
+                        >
                           {isSubagent ? "Subagent" : "Tool"}
                         </span>
-                        <code className="font-mono text-[11px] text-fg shrink-0">
-                          {tc.tool}
-                        </code>
+                        <code className="font-mono text-[11px] text-fg shrink-0">{tc.tool}</code>
                         {tc.detail && (
-                          <span className="text-[11px] text-fg-muted truncate font-mono min-w-0" title={tc.detail}>
+                          <span
+                            className="text-[11px] text-fg-muted truncate font-mono min-w-0"
+                            title={tc.detail}
+                          >
                             {tc.detail}
                           </span>
                         )}
@@ -459,8 +503,14 @@ export function ChatTranscript({
         )}
 
         {chatErrors
-          .filter((e) => !e.dismissed && (!e.details?.message_id || !messages.some((msg) =>
-            messageProviderFailure(msg)?.error.id === e.details?.message_id)))
+          .filter(
+            (e) =>
+              !e.dismissed &&
+              (!e.details?.message_id ||
+                !messages.some(
+                  (msg) => messageProviderFailure(msg)?.error.id === e.details?.message_id,
+                )),
+          )
           .map((error) => (
             <ErrorBanner
               key={error.id}

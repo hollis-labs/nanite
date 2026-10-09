@@ -1,0 +1,68 @@
+name: Profile workflows
+
+on:
+  pull_request:
+    paths:
+      - 'internal/store/agents.go'
+      - 'internal/store/profile_retirement*.go'
+      - 'internal/service/agent_config*.go'
+      - 'internal/service/definition_resolver*.go'
+      - 'internal/service/logical_agent_provision*.go'
+      - 'internal/service/profile_retirement*.go'
+      - 'internal/api/api.go'
+      - 'internal/api/logical_agent_provision*.go'
+      - 'internal/api/profile_retirement*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/profile-workflows.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'internal/store/agents.go'
+      - 'internal/store/profile_retirement*.go'
+      - 'internal/service/agent_config*.go'
+      - 'internal/service/definition_resolver*.go'
+      - 'internal/service/logical_agent_provision*.go'
+      - 'internal/service/profile_retirement*.go'
+      - 'internal/api/api.go'
+      - 'internal/api/logical_agent_provision*.go'
+      - 'internal/api/profile_retirement*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/profile-workflows.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  private-workflows:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      GOWORK: 'off'
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Isolated fixture and build files
+        shell: bash
+        run: |
+          fixture_root=$(mktemp -d)
+          chmod 700 "$fixture_root"
+          echo "TMPDIR=$fixture_root" >> "$GITHUB_ENV"
+          echo "GOTMPDIR=$fixture_root" >> "$GITHUB_ENV"
+      - name: Vet affected packages
+        run: go vet ./internal/store ./internal/service ./internal/api
+      - name: Exercise private profile workflow boundaries
+        run: >-
+          go test -race -count=20 -timeout=5m
+          ./internal/store ./internal/service ./internal/api
+          -run '^(TestProfileRetirement|TestLogicalGeneralChatProvision)'

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestProfileRetirementProtectedHostAuthentication(t *testing.T) {
+func TestProtectedProfileRetirementHostAuthentication(t *testing.T) {
 	t.Setenv("NANITE_AUTH_USER", "operator")
 	t.Setenv("NANITE_AUTH_PASSWORD", "fixture-password")
 	t.Setenv("NANITE_AUTH_TOKEN", "fixture-token")

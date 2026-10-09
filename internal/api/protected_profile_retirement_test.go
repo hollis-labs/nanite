@@ -12,7 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func TestProfileRetirementProtectedPublicRoutes(t *testing.T) {
+func TestProtectedProfileRetirementPublicRoutes(t *testing.T) {
 	a, mux := newTestAPI(t)
 	verified, err := service.EmbeddedDefinition()
 	if err != nil {

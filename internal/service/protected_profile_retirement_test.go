@@ -31,7 +31,7 @@ func protectedRetirementFixture(t *testing.T, source, plugin string) (*AgentConf
 	return svc, st, root, host, p, req
 }
 
-func TestProfileRetirementProtectedExportAuditAndExactKeep(t *testing.T) {
+func TestProtectedProfileRetirementExportAuditAndExactKeep(t *testing.T) {
 	for _, tc := range []struct{ source, plugin string }{{"builtin", ""}, {"internal", ""}, {"system", ""}, {"plugin", "plugin-fixture"}, {"external", ""}, {"user", "plugin-fixture"}} {
 		t.Run(tc.source, func(t *testing.T) {
 			svc, st, root, host, p, req := protectedRetirementFixture(t, tc.source, tc.plugin)
@@ -96,7 +96,7 @@ func TestProfileRetirementProtectedExportAuditAndExactKeep(t *testing.T) {
 	}
 }
 
-func TestProfileRetirementProtectedRefusesAuthorityAndStaleExports(t *testing.T) {
+func TestProtectedProfileRetirementRefusesAuthorityAndStaleExports(t *testing.T) {
 	for _, mutation := range []string{"acknowledgement", "actor", "reason", "keep-target", "keep-unprovisioned", "keep-changed", "child-type", "wrong-attribution", "missing-export", "editable-export"} {
 		t.Run(mutation, func(t *testing.T) {
 			svc, st, _, host, p, req := protectedRetirementFixture(t, "system", "")
@@ -170,7 +170,7 @@ func TestProfileRetirementProtectedRefusesAuthorityAndStaleExports(t *testing.T)
 	}
 }
 
-func TestProfileRetirementProtectedCleanupRollsBackSuppression(t *testing.T) {
+func TestProtectedProfileRetirementCleanupRollsBackSuppression(t *testing.T) {
 	svc, st, _, host, p, req := protectedRetirementFixture(t, "internal", "")
 	ctx := t.Context()
 	if _, checkErr := st.DB.ExecContext(ctx, `CREATE TRIGGER fixture_retirement_refusal BEFORE DELETE ON agent_profiles BEGIN SELECT RAISE(ABORT,'fixture rollback'); END`); checkErr != nil {
@@ -192,7 +192,7 @@ func TestProfileRetirementProtectedCleanupRollsBackSuppression(t *testing.T) {
 	}
 }
 
-func TestProfileRetirementProtectedReceiptFailureReconcilesAudit(t *testing.T) {
+func TestProtectedProfileRetirementReceiptFailureReconcilesAudit(t *testing.T) {
 	svc, st, root, host, p, req := protectedRetirementFixture(t, "internal", "")
 	ctx := t.Context()
 	r, err := svc.ExportProtectedProfile(ctx, host, p.ID, req)
@@ -219,7 +219,7 @@ func TestProfileRetirementProtectedReceiptFailureReconcilesAudit(t *testing.T) {
 	}
 }
 
-func TestProfileRetirementProtectedRefusesRunningProcessesAndDurableInstances(t *testing.T) {
+func TestProtectedProfileRetirementRefusesRunningProcessesAndDurableInstances(t *testing.T) {
 	for _, mode := range []string{"durable", "runtime-id", "runtime-slug"} {
 		t.Run(mode, func(t *testing.T) {
 			svc, st, _, host, p, req := protectedRetirementFixture(t, "system", "")
@@ -249,7 +249,7 @@ func TestProfileRetirementProtectedRefusesRunningProcessesAndDurableInstances(t 
 	}
 }
 
-func TestProfileRetirementProtectedRestartCannotResurrectSeeds(t *testing.T) {
+func TestProtectedProfileRetirementRestartCannotResurrectSeeds(t *testing.T) {
 	svc, st, _, host, p, req := protectedRetirementFixture(t, "builtin", "")
 	ctx := t.Context()
 	r, err := svc.ExportProtectedProfile(ctx, host, p.ID, req)
@@ -299,7 +299,7 @@ func TestProfileRetirementProtectedRestartCannotResurrectSeeds(t *testing.T) {
 	}
 }
 
-func TestProfileRetirementProtectedExportsLinkedRoleAndRefusesChangedParent(t *testing.T) {
+func TestProtectedProfileRetirementExportsLinkedRoleAndRefusesChangedParent(t *testing.T) {
 	svc, st, root, host, p, req := protectedRetirementFixture(t, "plugin", "fixture-plugin")
 	ctx := t.Context()
 	role := &store.Role{Name: "Plugin role", Slug: "private-plugin-role", SystemPrompt: "private role instructions"}
@@ -372,7 +372,7 @@ func TestProfileRetirementProtectedExportsLinkedRoleAndRefusesChangedParent(t *t
 	}
 }
 
-func TestProfileRetirementProtectedRefusesCustomChatCompatibleKeepDefinition(t *testing.T) {
+func TestProtectedProfileRetirementRefusesCustomChatCompatibleKeepDefinition(t *testing.T) {
 	for _, mutation := range []string{"other-id", "unapproved-revision"} {
 		t.Run(mutation, func(t *testing.T) {
 			svc, st, _, host, p, req := protectedRetirementFixture(t, "system", "")

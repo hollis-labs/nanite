@@ -448,6 +448,21 @@ func getAgent(ctx context.Context, db agentConfigDB, id string) (*AgentProfile, 
 	return &a, nil
 }
 
+// GetHistoricalAgentProfile is exclusively for retained export/history/retirement.
+// It is not a runtime resolution fallback or an actor binding.
+func (s *Store) GetHistoricalAgentProfile(ctx context.Context, id string) (*AgentProfile, error) {
+	return getHistoricalAgentProfile(ctx, s.DB, id)
+}
+
+func getHistoricalAgentProfile(ctx context.Context, db agentConfigDB, id string) (*AgentProfile, error) {
+	var a AgentProfile
+	row := db.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE id = ?`, id)
+	if err := scanAgent(row, &a); err != nil {
+		return nil, fmt.Errorf("get agent %s: %w", id, err)
+	}
+	return &a, nil
+}
+
 // CreateAgent inserts a new agent profile.
 func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
 	return s.writeAgentRow(ctx, a, true)

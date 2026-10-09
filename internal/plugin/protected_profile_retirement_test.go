@@ -12,7 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
-func TestProfileRetirementProtectedPluginReloadCannotResurrect(t *testing.T) {
+func TestProtectedProfileRetirementPluginReloadCannotResurrect(t *testing.T) {
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "retired-plugin.db")
 	st, err := storetest.New(t, ctx, path)

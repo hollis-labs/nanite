@@ -42,7 +42,7 @@ func (s *AgentConfigService) protectedRetirementAuthority(ctx context.Context, h
 	if !req.Acknowledge || req.KeepProfileID == "" || req.KeepProfileID == id {
 		return authority, store.ErrProtectedRetirementAuthority
 	}
-	keep, err := s.store.GetAgent(ctx, req.KeepProfileID)
+	keep, err := s.store.GetHistoricalAgentProfile(ctx, req.KeepProfileID)
 	if err != nil {
 		return authority, err
 	}

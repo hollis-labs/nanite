@@ -82,5 +82,14 @@ jobs:
       - name: Exercise private profile workflow boundaries
         run: >-
           go test -race -count=20 -timeout=10m
-          ./internal/store ./internal/service ./internal/api ./internal/plugin ./internal/server
+          ./internal/store ./internal/service ./internal/api
           -run '^(TestProfileRetirement|TestLogicalGeneralChatProvision)'
+      - name: Exercise protected export, refusal, restart, reload and authentication
+        run: >-
+          go test -race -count=1 -timeout=5m
+          ./internal/store ./internal/service ./internal/api ./internal/plugin ./internal/server
+          -run '^TestProtectedProfileRetirement'
+      - name: Exercise competing protected retirement transactions
+        run: >-
+          go test -race -count=20 -timeout=5m ./internal/service
+          -run '^TestProtectedProfileRetirementConcurrentExportsCommitOneAudit$'

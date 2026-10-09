@@ -33,14 +33,14 @@ func protectedRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string, aut
 	if checkErr := authority.Validate(id); checkErr != nil {
 		return ProfileRetirementExport{}, checkErr
 	}
-	keep, err := getAgent(ctx, tx, authority.KeepProfileID)
+	keep, err := getHistoricalAgentProfile(ctx, tx, authority.KeepProfileID)
 	if err != nil {
 		return ProfileRetirementExport{}, err
 	}
 	if keep.Revision != authority.KeepRevision || !retirementEditable(keep) {
 		return ProfileRetirementExport{}, ErrProfileRetirementConflict
 	}
-	p, err := getAgent(ctx, tx, id)
+	p, err := getHistoricalAgentProfile(ctx, tx, id)
 	if err != nil {
 		return ProfileRetirementExport{}, err
 	}
@@ -157,7 +157,7 @@ func (s *Store) RetireExportedProtectedProfile(ctx context.Context, id, exportID
 	if actual != digest {
 		return ErrProfileRetirementConflict
 	}
-	p, err := getAgent(ctx, tx, id)
+	p, err := getHistoricalAgentProfile(ctx, tx, id)
 	if err != nil {
 		return err
 	}

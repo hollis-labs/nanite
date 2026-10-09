@@ -248,7 +248,7 @@ func TestMCPServerService_NoManager(t *testing.T) {
 // A container without an MCP manager must leave the registrar unset, not
 // holding a typed-nil *mcp.Manager that would pass the nil checks and panic.
 func TestNewContainerMCPServerService_NilManager(t *testing.T) {
-	svc := newContainerMCPServerService(nil, nil)
+	svc := newContainerMCPServerService(nil, nil, nil)
 	if svc.registrar != nil || svc.discover != nil {
 		t.Fatalf("registrar = %v, discover set = %v; want both unset", svc.registrar, svc.discover != nil)
 	}

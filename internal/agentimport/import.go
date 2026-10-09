@@ -106,10 +106,12 @@ type ProfileStore interface {
 }
 
 // ChildSeeder writes a definition's relational children (procedures,
-// roleTools) for a row that was just created or synced. It is injected
+// roleTools) for a row that was just created or synced. created distinguishes
+// initial grant authority from a content sync. Errors are reported to the
+// importing caller. It is injected
 // rather than implemented here so this package reuses internal/service's
 // existing, tested seeders instead of growing a second copy of them.
-type ChildSeeder func(ctx context.Context, agentID string, def *agent.Definition)
+type ChildSeeder func(ctx context.Context, agentID string, def *agent.Definition, created bool) error
 
 // Outcome is what happened to one parsed definition.
 type Outcome struct {
@@ -384,7 +386,7 @@ func (i *Importer) write(ctx context.Context, def *agent.Definition) (Outcome, e
 		if err := i.Store.CreateAgent(ctx, profile); err != nil {
 			return Outcome{}, fmt.Errorf("create agent %q: %w", def.Slug, err)
 		}
-		if err := i.afterWrite(ctx, profile, def); err != nil {
+		if err := i.afterWrite(ctx, profile, def, true); err != nil {
 			return Outcome{}, err
 		}
 		return Outcome{Slug: def.Slug, Name: def.Name, Action: ActionCreated, Profile: profile}, nil
@@ -434,7 +436,7 @@ func (i *Importer) write(ctx context.Context, def *agent.Definition) (Outcome, e
 	if err := i.Store.UpdateAgent(ctx, profile); err != nil {
 		return Outcome{}, fmt.Errorf("update agent %q: %w", def.Slug, err)
 	}
-	if err := i.afterWrite(ctx, profile, def); err != nil {
+	if err := i.afterWrite(ctx, profile, def, false); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Slug: def.Slug, Name: def.Name, Action: ActionSynced, Profile: profile}, nil
@@ -442,7 +444,7 @@ func (i *Importer) write(ctx context.Context, def *agent.Definition) (Outcome, e
 
 // afterWrite applies the trust tier and seeds relational children for a row
 // that was just created or synced.
-func (i *Importer) afterWrite(ctx context.Context, profile *store.AgentProfile, def *agent.Definition) error {
+func (i *Importer) afterWrite(ctx context.Context, profile *store.AgentProfile, def *agent.Definition, created bool) error {
 	// Imported content arrives untrusted, matching AutoIngestAgents' H1
 	// treatment of user/plugin-dropped definitions and
 	// AgentConfigService.Create's treatment of a fresh operator profile.
@@ -453,7 +455,9 @@ func (i *Importer) afterWrite(ctx context.Context, profile *store.AgentProfile, 
 		return fmt.Errorf("set trust tier for %q: %w", def.Slug, err)
 	}
 	if i.SeedChildren != nil {
-		i.SeedChildren(ctx, profile.ID, def)
+		if err := i.SeedChildren(ctx, profile.ID, def, created); err != nil {
+			return fmt.Errorf("seed children for %q: %w", def.Slug, err)
+		}
 	}
 	return nil
 }

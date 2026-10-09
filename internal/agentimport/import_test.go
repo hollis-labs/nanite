@@ -347,11 +347,12 @@ prompt
 	var seededAgentID string
 	imp := &Importer{
 		Store: st,
-		SeedChildren: func(_ context.Context, agentID string, def *agent.Definition) {
+		SeedChildren: func(_ context.Context, agentID string, def *agent.Definition, _ bool) error {
 			seededAgentID = agentID
 			if len(def.Procedures) != 1 || def.Procedures[0].Name != "triage" {
 				t.Errorf("seeder received unexpected procedures: %+v", def.Procedures)
 			}
+			return nil
 		},
 	}
 	if _, err := imp.Import(context.Background(), Source{Path: writeDef(t, "reviewer.md", body)}); err != nil {
@@ -406,5 +407,28 @@ func TestImport_MultiDefinitionPathReportsPerDefinition(t *testing.T) {
 	}
 	if !res.Skipped() {
 		t.Error("Skipped() must report the refusal so the CLI can exit non-zero")
+	}
+}
+
+func TestImport_ChildSeederDistinguishesInstallFromSyncAndReturnsFailure(t *testing.T) {
+	st := newTestStore(t)
+	path := writeDef(t, "agent.md", "---\nname: Agent\nslug: agent\n---\nPrompt.\n")
+	var modes []bool
+	seedFailure := errors.New("grant persistence unavailable")
+	importer := &Importer{Store: st, SeedChildren: func(_ context.Context, _ string, _ *agent.Definition, created bool) error {
+		modes = append(modes, created)
+		if !created {
+			return seedFailure
+		}
+		return nil
+	}}
+	if _, err := importer.Import(context.Background(), Source{Path: path}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importer.Import(context.Background(), Source{Path: path}); !errors.Is(err, seedFailure) {
+		t.Fatalf("lost seeder failure: %v", err)
+	}
+	if len(modes) != 2 || !modes[0] || modes[1] {
+		t.Fatalf("install/sync modes %v", modes)
 	}
 }

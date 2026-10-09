@@ -99,6 +99,11 @@ func (m *Manager) RenewGrants(ctx context.Context, proposed capability.GrantSet)
 	if ack.Sequence != sequence || ack.Incarnation != owner || ack.RenewalVersion != sdksub.GrantsRenewalVersion {
 		return fence(fmt.Errorf("grant renewal acknowledgment mismatch"))
 	}
+	// Caller cancellation propagates into permit through AfterFunc, whose
+	// callback may still be pending when an acknowledgment arrives.
+	if callerErr := ctx.Err(); callerErr != nil {
+		return fence(callerErr)
+	}
 	if callErr := call.Err(); callErr != nil {
 		return fence(callErr)
 	}
@@ -112,14 +117,32 @@ func (m *Manager) RenewGrants(ctx context.Context, proposed capability.GrantSet)
 		m.mu.Unlock()
 		return fence(ErrGrantLeaseEnded)
 	}
+	if callerErr := ctx.Err(); callerErr != nil {
+		m.mu.Unlock()
+		return fence(callerErr)
+	}
 	// ValidateRenewal runs again inside Renew while the old lease is still live;
 	// current state and the host replacement commit share this manager lock.
-	err = lease.Renew(call, next)
+	err = lease.Renew(renewalCommitContext{Context: call, caller: ctx}, next)
 	m.mu.Unlock()
 	if err != nil {
 		return fence(err)
 	}
 	return nil
+}
+
+// The lease performs its final check under its own lock. Check both request
+// contexts there; caller cancellation may precede its AfterFunc propagation.
+type renewalCommitContext struct {
+	context.Context
+	caller context.Context
+}
+
+func (c renewalCommitContext) Err() error {
+	if err := c.caller.Err(); err != nil {
+		return err
+	}
+	return c.Context.Err()
 }
 
 // RevokeIncarnation fences only the owner observed by the host's failed policy

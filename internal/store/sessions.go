@@ -466,7 +466,7 @@ func (s *Store) ListMessages(ctx context.Context, sessionID string, limit int) (
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
 		        COALESCE(parent_id,''), is_compacted, created_at
 		 FROM messages WHERE session_id = ?
-		 ORDER BY created_at DESC LIMIT ?`,
+		 ORDER BY created_at DESC, rowid DESC LIMIT ?`,
 		sessionID, limit,
 	)
 	if err != nil {
@@ -518,7 +518,7 @@ func (s *Store) ListMessagesPaginated(ctx context.Context, sessionID string, lim
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
 		        COALESCE(parent_id,''), is_compacted, created_at
 		 FROM messages WHERE session_id = ?
-		 ORDER BY created_at ASC
+		 ORDER BY created_at ASC, rowid ASC
 		 LIMIT ? OFFSET ?`,
 		sessionID, limit, offset,
 	)
@@ -800,15 +800,21 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 	// Copy messages inside the same tx. Bulk-insert one statement per row,
 	// but all under a single tx + single final message_count update.
 	if copyMessages && len(msgs) > 0 {
+		copiedIDs := make(map[string]string, len(msgs))
 		for _, m := range msgs {
+			copiedID := uuid.NewString()
+			copiedIDs[m.ID] = copiedID
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO messages (id, session_id, agent_id, role, content, envelope, metadata, parent_id, is_compacted, created_at)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				uuid.New().String(), newSess.ID, nullIfEmpty(m.AgentID), m.Role, m.Content,
+				copiedID, newSess.ID, nullIfEmpty(m.AgentID), m.Role, m.Content,
 				nullIfEmpty(m.Envelope), m.Metadata, nullIfEmpty(m.ParentID), m.IsCompacted, now,
 			); err != nil {
 				return nil, fmt.Errorf("copy message: %w", err)
 			}
+		}
+		if copyErr := copyConversationClear(ctx, tx, sourceID, newSess.ID, copiedIDs, now); copyErr != nil {
+			return nil, copyErr
 		}
 		// One UPDATE to set message_count to the actual copied count, avoiding
 		// N separate +1 updates.
@@ -875,17 +881,23 @@ func (s *Store) CopyMessages(ctx context.Context, sourceSessionID, targetSession
 	defer rollbackUnlessCommitted(tx)
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	copiedIDs := make(map[string]string, len(msgs))
 	for _, m := range msgs {
+		copiedID := uuid.NewString()
+		copiedIDs[m.ID] = copiedID
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO messages (id, session_id, agent_id, role, content, envelope, metadata, parent_id, is_compacted, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			uuid.New().String(), targetSessionID, nullIfEmpty(m.AgentID), m.Role, m.Content,
+			copiedID, targetSessionID, nullIfEmpty(m.AgentID), m.Role, m.Content,
 			nullIfEmpty(m.Envelope), m.Metadata, nullIfEmpty(m.ParentID), m.IsCompacted, now,
 		); err != nil {
 			return fmt.Errorf("copy message: %w", err)
 		}
 	}
 
+	if copyErr := copyConversationClear(ctx, tx, sourceSessionID, targetSessionID, copiedIDs, now); copyErr != nil {
+		return copyErr
+	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE sessions SET message_count = message_count + ?, last_activity = ?, updated_at = ? WHERE id = ?`,
 		len(msgs), now, now, targetSessionID,

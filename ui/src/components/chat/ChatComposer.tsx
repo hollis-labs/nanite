@@ -11,6 +11,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { useShellMode } from "@/hooks/useShellMode";
 import { useWorkSync } from "@/hooks/useWorkSync";
 import { api } from "@/lib/api";
+import { clearConversation } from "@/lib/clearConversation";
 import { resolveIcon } from "@/lib/icons";
 import type { SlashCommandDef } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
@@ -113,9 +114,7 @@ export function ChatComposer({
   // new ChatWorkingDrawer's Terminal-1 tab can subscribe. The composer
   // now SETS these; reading happens in Terminal1Tab.
   const setShellRunning = useShellStore((s) => s.setShellRunning);
-  const setPendingShellCommand = useShellStore(
-    (s) => s.setPendingShellCommand,
-  );
+  const setPendingShellCommand = useShellStore((s) => s.setPendingShellCommand);
   const appendShellOutput = useShellStore((s) => s.appendShellOutput);
   const pendingShellCommand = useShellStore((s) =>
     activeSessionId ? (s.sessions[activeSessionId]?.pendingShellCommand ?? null) : null,
@@ -140,7 +139,7 @@ export function ChatComposer({
     handleDrop,
     handleFileUpload: handleFileUploadFromHook,
   } = useArtifactUpload(activeSessionId);
-  const dropRef = useRef<HTMLDivElement>(null);
+  const dropRef = useRef<HTMLFieldSetElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = useCallback(
@@ -187,6 +186,23 @@ export function ChatComposer({
           void queryClient.invalidateQueries({ queryKey: ["sessions"] });
           return;
         }
+        case "clear": {
+          if (!activeSessionId) return;
+          try {
+            if (
+              await clearConversation(activeSessionId, cmdArgs, (message) =>
+                window.confirm(message),
+              )
+            ) {
+              reloadMessages?.();
+              void queryClient.invalidateQueries({ queryKey: ["session", activeSessionId] });
+              void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+            }
+          } catch (error) {
+            window.alert(error instanceof Error ? error.message : "Could not clear conversation");
+          }
+          return;
+        }
         case "compact": {
           if (!activeSessionId) return;
           await api.compactSession(activeSessionId);
@@ -208,10 +224,13 @@ export function ChatComposer({
         case "scratch":
         case "pad":
         case "scratchpad": {
-          useLayoutStore.getState().setChatWorkingDrawer({
-            open: true,
-            activeTab: "scratchpad",
-          }, activeSessionId ?? undefined);
+          useLayoutStore.getState().setChatWorkingDrawer(
+            {
+              open: true,
+              activeTab: "scratchpad",
+            },
+            activeSessionId ?? undefined,
+          );
           return;
         }
         default: {
@@ -373,7 +392,7 @@ export function ChatComposer({
   const [hasContent, setHasContent] = useState(false);
 
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || activeSessionId !== useAppStore.getState().activeSessionId) return;
     const current = editor.getText();
     if (current === composerDraft) return;
     editor.commands.setContent(composerDraft);
@@ -454,13 +473,7 @@ export function ChatComposer({
         setIsShellInput(false);
       }
     },
-    [
-      activeSessionId,
-      appendShellOutput,
-      reloadMessages,
-      setPendingShellCommand,
-      setShellRunning,
-    ],
+    [activeSessionId, appendShellOutput, reloadMessages, setPendingShellCommand, setShellRunning],
   );
 
   const handleShellExec = useCallback(
@@ -552,9 +565,10 @@ export function ChatComposer({
 
       {drawer}
 
-      <div
+      <fieldset
+        aria-label="Chat composer"
         ref={dropRef}
-        className={`relative overflow-hidden border bg-bg-elevated shadow-lg transition-colors ${
+        className={`relative min-w-0 overflow-hidden border bg-bg-elevated shadow-lg transition-colors ${
           drawer ? "rounded-b-[10px] rounded-t-none border-t-0" : "rounded-[10px]"
         } ${
           dragOver
@@ -621,14 +635,14 @@ export function ChatComposer({
         {chatToast && (
           <div
             className={`flex items-center gap-2 border-b border-border-subtle bg-surface px-3 py-2 text-xs ${
-              chatToast.tone === 'success'
-                ? 'shadow-[inset_3px_0_0_0_var(--color-success)]'
-                : 'shadow-[inset_3px_0_0_0_var(--color-info)]'
+              chatToast.tone === "success"
+                ? "shadow-[inset_3px_0_0_0_var(--color-success)]"
+                : "shadow-[inset_3px_0_0_0_var(--color-info)]"
             }`}
           >
             <span
               className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-white ${
-                chatToast.tone === 'success' ? 'bg-success' : 'bg-info'
+                chatToast.tone === "success" ? "bg-success" : "bg-info"
               }`}
             >
               <Check className="h-2.5 w-2.5" />
@@ -675,7 +689,9 @@ export function ChatComposer({
         )}
 
         {/* Editor */}
-        <div className={`bg-bg-elevated px-[14px] pt-[10px] pb-2 ${developerMode ? 'pr-[88px]' : ''}`}>
+        <div
+          className={`bg-bg-elevated px-[14px] pt-[10px] pb-2 ${developerMode ? "pr-[88px]" : ""}`}
+        >
           <input
             ref={fileInputRef}
             type="file"
@@ -701,7 +717,7 @@ export function ChatComposer({
           onCycleShell={cycleShellMode}
           uploading={uploading}
         />
-      </div>
+      </fieldset>
 
       {composerBelowSlots.length > 0 && (
         <div className="mt-1 flex items-center gap-1">

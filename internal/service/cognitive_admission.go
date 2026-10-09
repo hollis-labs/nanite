@@ -39,6 +39,11 @@ func (s *chatServiceImpl) SubmitCognitiveTurn(ctx context.Context, viewID, conte
 }
 
 func (s *chatServiceImpl) submitCognitiveTurn(ctx context.Context, viewID, content string, onlyIdle bool) (string, error) {
+	release, gateErr := s.LockConversation(ctx, viewID)
+	if gateErr != nil {
+		return "", gateErr
+	}
+	defer release()
 	s.cognitiveAdmissionMu.Lock()
 	defer s.cognitiveAdmissionMu.Unlock()
 	if s.cognitiveAdmissionClosed || (s.lifecycle != nil && s.lifecycle.Context().Err() != nil) {
@@ -111,5 +116,5 @@ func (s *chatServiceImpl) submitCognitiveTurn(ctx context.Context, viewID, conte
 		return "", ErrCognitiveQueueFull
 	}
 	ctx = context.WithValue(ctx, cognitiveModelContextKey{}, ModelSelection{providerID, model})
-	return s.HandleMessage(context.WithValue(ctx, cognitiveTurnContextKey{}, true), viewID, content)
+	return s.handleMessage(context.WithValue(ctx, cognitiveTurnContextKey{}, true), viewID, content)
 }

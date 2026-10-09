@@ -48,6 +48,10 @@ func renderCompactionDisclosure(s *store.Store, sessionID string) string {
 	if evt == nil {
 		return ""
 	}
+	cut, cutErr := s.LatestConversationClear(ctx, sessionID)
+	if cutErr != nil || (cut != nil && cut.CompactionEventID == evt.ID) {
+		return ""
+	}
 	if !isCompactionEventFresh(s, sessionID, evt.CreatedAt) {
 		return ""
 	}
@@ -64,7 +68,7 @@ func isCompactionEventFresh(s *store.Store, sessionID, eventCreatedAt string) bo
 	}
 	// 200 is a generous limit — assistant messages are sparse relative to
 	// the limit, and we only need the timestamp of the latest one.
-	msgs, err := s.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, 200)
+	msgs, err := s.ListWorkingMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, 200)
 	if err != nil {
 		slog.Warn("chat: ListMessages failed during disclosure freshness check",
 			"err", err, "session_id", sessionID)

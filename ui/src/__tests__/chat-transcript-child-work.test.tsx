@@ -30,7 +30,9 @@ const STUB_MESSAGES: Message[] = [
   },
 ];
 
-function renderTranscript(props: Partial<Parameters<typeof ChatTranscript>[0]> = {}): ReturnType<typeof render> {
+function renderTranscript(
+  props: Partial<Parameters<typeof ChatTranscript>[0]> = {},
+): ReturnType<typeof render> {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -58,6 +60,33 @@ describe("ChatTranscript — child work visibility and intermediate output (CW-2
   afterEach(() => {
     cleanup();
     useChatStore.setState({ sessions: new Map() });
+  });
+
+  it("retains prior messages around a clear boundary", () => {
+    const prior = STUB_MESSAGES[0];
+    if (!prior) throw new Error("missing prior fixture message");
+    renderTranscript({
+      isStreaming: false,
+      streamingContent: "",
+      messages: [
+        prior,
+        {
+          ...prior,
+          id: "clear",
+          role: "system",
+          content: "Conversation cleared here",
+          metadata: JSON.stringify({
+            conversation_cleared: { message_id: "clear", keep_handoff: false },
+          }),
+        },
+        { ...prior, id: "after", content: "Fresh conversation" },
+      ],
+    });
+    expect(screen.getByText("Review inbox items")).toBeDefined();
+    expect(screen.getByText("Conversation cleared here · handoff dropped").textContent).toContain(
+      "Conversation cleared here · handoff dropped",
+    );
+    expect(screen.getByText("Fresh conversation")).toBeDefined();
   });
 
   it("renders active subagent running card with detail when subagent_spawn is in flight", () => {

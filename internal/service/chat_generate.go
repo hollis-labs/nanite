@@ -1592,7 +1592,7 @@ func (s *chatServiceImpl) autoTags(ctx context.Context, sessionID string) {
 		return
 	}
 
-	msgs, err := s.store.ListMessages(ctx, sessionID, 10)
+	msgs, err := listWorkingMessages(ctx, s.store, sessionID, 10)
 	if err != nil || len(msgs) < 2 {
 		return
 	}

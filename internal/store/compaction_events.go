@@ -148,7 +148,7 @@ func (s *Store) GetLatestCompactionEvent(ctx context.Context, sessionID string) 
 		 preserved_sources, summary_mode, summary_token_count, original_token_count,
 		 handoff_stash_id, stages_applied, created_at
 		 FROM compaction_events WHERE session_id = ?
-		 ORDER BY created_at DESC LIMIT 1`,
+		 ORDER BY created_at DESC, rowid DESC LIMIT 1`,
 		sessionID,
 	).Scan(
 		&e.ID, &e.SessionID, &e.CoverageWindowStart, &e.CoverageWindowEnd,

@@ -257,7 +257,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	}
 
 	// Conversation messages.
-	messages, err := cb.Store.ListMessages(ctx, session.ID, 200)
+	messages, err := cb.Store.ListWorkingMessages(ctx, session.ID, 200)
 	if err != nil {
 		return nil, err
 	}
@@ -509,7 +509,7 @@ func (cb *ContextClient) buildWorkspaceSlotContent(ctx context.Context, session 
 // "explicitly off" (skip).
 func (cb *ContextClient) deriveIntent(session *store.Session, agent *store.AgentProfile) contextbroker.Intent {
 	var msgs []store.Message
-	if loaded, err := cb.Store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, session.ID, 5); err == nil {
+	if loaded, err := cb.Store.ListWorkingMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, session.ID, 5); err == nil {
 		msgs = loaded
 	}
 	return cb.deriveIntentFromMessages(session, agent, msgs)

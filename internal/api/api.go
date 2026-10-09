@@ -228,6 +228,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Session compaction
 	mux.HandleFunc("POST /api/sessions/{id}/compact", a.handleCompactSession)
+	mux.HandleFunc("POST /api/sessions/{id}/clear", a.handleClearSession)
 
 	// Durable agent instances. Lifecycle request endpoints record intent;
 	// explicit start/resume endpoints resolve launch policy into sessions.

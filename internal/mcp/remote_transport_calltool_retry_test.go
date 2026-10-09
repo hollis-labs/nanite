@@ -50,7 +50,7 @@ func TestIsProvablyUnsent(t *testing.T) {
 // stdioFixtureTransport registers a stdio server backed by this test binary
 // re-exec'd as a real MCP server (stdio_fixture_test.go), on a fresh
 // single-server pool, and returns the remoteTransport wired to it. Mirrors
-// remote_transport_sse_test.go's sseTransport helper, for the stdio kind.
+// remote_transport_streamable_test.go's streamableTransport helper, for the stdio kind.
 func stdioFixtureTransport(t *testing.T, extraEnv map[string]string) *remoteTransport {
 	t.Helper()
 	exe, err := os.Executable()

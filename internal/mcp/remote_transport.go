@@ -23,15 +23,13 @@ const (
 // ListTools/CallTool call when the caller's own context carries none.
 // stdio keeps its historical 30s (a local process either answers in
 // milliseconds or is wedged; StdioTransport's old default). streamable_http
-// and sse keep their historical 60s (StreamableClientTransport's own POST
-// plus, for sse, the standalone GET stream's per-call read). A caller that
+// keeps its historical 60s safety net. A caller that
 // supplies its own deadline is always respected in full, even past these --
 // unlike HTTPTransport's old client.Timeout, which silently cut off a
 // caller's longer deadline at a hardcoded 60s.
 var defaultCallTimeout = map[string]time.Duration{
 	gmcpclient.TransportStdio: 30 * time.Second,
 	gmcpclient.TransportHTTP:  60 * time.Second,
-	gmcpclient.TransportSSE:   60 * time.Second,
 }
 
 // remoteTransport adapts a server registered on Manager's shared
@@ -46,7 +44,7 @@ var defaultCallTimeout = map[string]time.Duration{
 type remoteTransport struct {
 	pool *gmcpclient.Pool
 	name string
-	kind string // one of gmcpclient.TransportStdio/TransportHTTP/TransportSSE
+	kind string // one of gmcpclient.TransportStdio/TransportHTTP
 }
 
 func newRemoteTransport(pool *gmcpclient.Pool, name, kind string) *remoteTransport {

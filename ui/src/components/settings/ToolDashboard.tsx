@@ -1,61 +1,85 @@
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  RefreshCw,
-  Server,
-  Wrench,
-  Search,
   Activity,
   AlertCircle,
-  Loader2,
-  Plus,
-  Pencil,
-  Trash2,
-  Upload,
-  Download,
   CheckCircle2,
+  Download,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Server,
   SlidersHorizontal,
   ToggleLeft,
   ToggleRight,
-} from 'lucide-react'
+  Trash2,
+  Upload,
+  Wrench,
+} from "lucide-react";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
-import { Skeleton } from '@/components/ui/skeleton'
-import { api } from '@/lib/api'
-import type { ToolDefinition, DiscoveryDiff, ToolSelection, ServerInfo, MCPServerConfig, ToolLoadItem } from '@/lib/types'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
+import type {
+  DiscoveryDiff,
+  MCPServerConfig,
+  ServerInfo,
+  ToolDefinition,
+  ToolLoadItem,
+  ToolSelection,
+} from "@/lib/types";
 
 // --- Server Form Types ---
 
 interface ServerFormData {
-  name: string
-  transport_type: 'stdio' | 'sse'
-  command: string
-  url: string
-  args: string    // comma-separated for display
-  env: string     // newline-separated KEY=VALUE for display
-  enabled: boolean
+  name: string;
+  transport_type: MCPServerConfig["transport_type"];
+  command: string;
+  url: string;
+  args: string; // comma-separated for display
+  env: string; // newline-separated KEY=VALUE for display
+  enabled: boolean;
 }
 
 const emptyForm: ServerFormData = {
-  name: '',
-  transport_type: 'stdio',
-  command: '',
-  url: '',
-  args: '',
-  env: '',
+  name: "",
+  transport_type: "stdio",
+  command: "",
+  url: "",
+  args: "",
+  env: "",
   enabled: true,
-}
+};
 
 function formToPayload(form: ServerFormData) {
   const args = form.args.trim()
-    ? form.args.split(',').map(a => a.trim()).filter(Boolean)
-    : []
+    ? form.args
+        .split(",")
+        .map((a) => a.trim())
+        .filter(Boolean)
+    : [];
   const env = form.env.trim()
-    ? form.env.split('\n').map(e => e.trim()).filter(Boolean)
-    : []
+    ? form.env
+        .split("\n")
+        .map((e) => e.trim())
+        .filter(Boolean)
+    : [];
   return {
     name: form.name.trim(),
     transport_type: form.transport_type,
@@ -64,21 +88,25 @@ function formToPayload(form: ServerFormData) {
     args: JSON.stringify(args),
     env: JSON.stringify(env),
     enabled: form.enabled,
-  }
+  };
 }
 
 function configToForm(cfg: MCPServerConfig): ServerFormData {
-  let args = ''
+  let args = "";
   try {
-    const parsed = JSON.parse(cfg.args || '[]')
-    if (Array.isArray(parsed)) args = parsed.join(', ')
-  } catch { /* ignore */ }
+    const parsed = JSON.parse(cfg.args || "[]");
+    if (Array.isArray(parsed)) args = parsed.join(", ");
+  } catch {
+    /* ignore */
+  }
 
-  let env = ''
+  let env = "";
   try {
-    const parsed = JSON.parse(cfg.env || '[]')
-    if (Array.isArray(parsed)) env = parsed.join('\n')
-  } catch { /* ignore */ }
+    const parsed = JSON.parse(cfg.env || "[]");
+    if (Array.isArray(parsed)) env = parsed.join("\n");
+  } catch {
+    /* ignore */
+  }
 
   return {
     name: cfg.name,
@@ -88,255 +116,272 @@ function configToForm(cfg: MCPServerConfig): ServerFormData {
     args,
     env,
     enabled: cfg.enabled,
-  }
+  };
 }
 
 // --- Main Component ---
 
-interface ToolDashboardProps {}
-
-export function ToolDashboard({}: ToolDashboardProps) {
-  const [selectedTool, setSelectedTool] = useState<ToolDefinition | null>(null)
-  const [filterServer, setFilterServer] = useState<string>('')
-  const [intentQuery, setIntentQuery] = useState('')
-  const [refreshResult, setRefreshResult] = useState<DiscoveryDiff | null>(null)
+export function ToolDashboard() {
+  const [selectedTool, setSelectedTool] = useState<ToolDefinition | null>(null);
+  const [filterServer, setFilterServer] = useState<string>("");
+  const [intentQuery, setIntentQuery] = useState("");
+  const [refreshResult, setRefreshResult] = useState<DiscoveryDiff | null>(null);
 
   // Server form state
-  const [showServerForm, setShowServerForm] = useState(false)
-  const [editingServer, setEditingServer] = useState<string | null>(null) // name of server being edited
-  const [serverForm, setServerForm] = useState<ServerFormData>(emptyForm)
-  const [serverFormError, setServerFormError] = useState<string | null>(null)
+  const [showServerForm, setShowServerForm] = useState(false);
+  const [editingServer, setEditingServer] = useState<string | null>(null); // name of server being edited
+  const [serverForm, setServerForm] = useState<ServerFormData>(emptyForm);
+  const [serverFormError, setServerFormError] = useState<string | null>(null);
 
   // Delete confirmation state
-  const [deletingServer, setDeletingServer] = useState<string | null>(null)
+  const [deletingServer, setDeletingServer] = useState<string | null>(null);
 
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
   // Data queries
-  const { data: servers = [] as ServerInfo[], isLoading: serversLoading } = useQuery({
-    queryKey: ['tool-servers'],
+  const { data: connectedServers = [] as ServerInfo[], isLoading: serversLoading } = useQuery({
+    queryKey: ["tool-servers"],
     queryFn: api.fetchToolServers,
-  })
+  });
 
   const { data: mcpConfigs = [] as MCPServerConfig[] } = useQuery({
-    queryKey: ['mcp-servers'],
+    queryKey: ["mcp-servers"],
     queryFn: api.listMCPServers,
-  })
+  });
 
   const { data: tools = [] as ToolDefinition[], isLoading: toolsLoading } = useQuery({
-    queryKey: ['tools'],
+    queryKey: ["tools"],
     queryFn: api.fetchTools,
-  })
+  });
 
   const { data: allToolsWithLoad = [] as ToolLoadItem[], isLoading: loadPrefsLoading } = useQuery({
-    queryKey: ['tools-with-load-type'],
+    queryKey: ["tools-with-load-type"],
     queryFn: api.fetchAllToolsWithLoadType,
-  })
+  });
 
   const loadPrefMutation = useMutation({
     mutationFn: (updates: Record<string, string>) => api.updateToolLoadPreferences(updates),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tools-with-load-type'] })
+      queryClient.invalidateQueries({ queryKey: ["tools-with-load-type"] });
     },
-  })
+  });
+
+  // Refused or disabled persisted configurations must remain available to migrate.
+  const connectedNames = new Set(connectedServers.map((server) => server.name));
+  const servers = [
+    ...connectedServers,
+    ...mcpConfigs
+      .filter((cfg) => !connectedNames.has(cfg.name))
+      .map((cfg) => ({
+        name: cfg.name,
+        tool_count: 0,
+        connected: false,
+      })),
+  ];
 
   // Build a lookup of user-managed server names
-  const managedServerNames = new Set(mcpConfigs.map(c => c.name))
+  const managedServerNames = new Set(mcpConfigs.map((c) => c.name));
 
   // Mutations
   const refreshMutation = useMutation({
     mutationFn: api.refreshTools,
     onSuccess: (diff: DiscoveryDiff) => {
-      setRefreshResult(diff)
-      queryClient.invalidateQueries({ queryKey: ['tools'] })
-      queryClient.invalidateQueries({ queryKey: ['tool-servers'] })
-      setTimeout(() => setRefreshResult(null), 5000)
+      setRefreshResult(diff);
+      queryClient.invalidateQueries({ queryKey: ["tools"] });
+      queryClient.invalidateQueries({ queryKey: ["tool-servers"] });
+      setTimeout(() => setRefreshResult(null), 5000);
     },
-  })
+  });
 
   const addServerMutation = useMutation({
     mutationFn: (data: ReturnType<typeof formToPayload>) => api.addMCPServer(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['mcp-servers'] })
-      queryClient.invalidateQueries({ queryKey: ['tool-servers'] })
-      queryClient.invalidateQueries({ queryKey: ['tools'] })
-      closeServerForm()
+      queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
+      queryClient.invalidateQueries({ queryKey: ["tool-servers"] });
+      queryClient.invalidateQueries({ queryKey: ["tools"] });
+      closeServerForm();
     },
     onError: (err: Error) => {
-      setServerFormError(err.message)
+      setServerFormError(err.message);
     },
-  })
+  });
 
   const updateServerMutation = useMutation({
     mutationFn: ({ name, data }: { name: string; data: ReturnType<typeof formToPayload> }) =>
       api.updateMCPServer(name, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['mcp-servers'] })
-      queryClient.invalidateQueries({ queryKey: ['tool-servers'] })
-      queryClient.invalidateQueries({ queryKey: ['tools'] })
-      closeServerForm()
+      queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
+      queryClient.invalidateQueries({ queryKey: ["tool-servers"] });
+      queryClient.invalidateQueries({ queryKey: ["tools"] });
+      closeServerForm();
     },
     onError: (err: Error) => {
-      setServerFormError(err.message)
+      setServerFormError(err.message);
     },
-  })
+  });
 
   const deleteServerMutation = useMutation({
     mutationFn: (name: string) => api.deleteMCPServer(name),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['mcp-servers'] })
-      queryClient.invalidateQueries({ queryKey: ['tool-servers'] })
-      queryClient.invalidateQueries({ queryKey: ['tools'] })
-      setDeletingServer(null)
+      queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
+      queryClient.invalidateQueries({ queryKey: ["tool-servers"] });
+      queryClient.invalidateQueries({ queryKey: ["tools"] });
+      setDeletingServer(null);
     },
-  })
+  });
 
   // Import/Export state
-  const [showImportDialog, setShowImportDialog] = useState(false)
-  const [importText, setImportText] = useState('')
-  const [importError, setImportError] = useState<string | null>(null)
-  const [importResult, setImportResult] = useState<{ created: string[]; skipped: string[] } | null>(null)
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<{ created: string[]; skipped: string[] } | null>(
+    null,
+  );
 
   const importMutation = useMutation({
     mutationFn: (json: string) => api.importMCPServers(json),
     onSuccess: (result) => {
-      setImportResult(result)
-      setImportError(null)
-      queryClient.invalidateQueries({ queryKey: ['mcp-servers'] })
-      queryClient.invalidateQueries({ queryKey: ['tool-servers'] })
-      queryClient.invalidateQueries({ queryKey: ['tools'] })
+      setImportResult(result);
+      setImportError(null);
+      queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
+      queryClient.invalidateQueries({ queryKey: ["tool-servers"] });
+      queryClient.invalidateQueries({ queryKey: ["tools"] });
     },
     onError: (err: Error) => {
-      setImportError(err.message)
+      setImportError(err.message);
     },
-  })
+  });
 
   const handleImportSubmit = () => {
-    setImportError(null)
-    setImportResult(null)
+    setImportError(null);
+    setImportResult(null);
     if (!importText.trim()) {
-      setImportError('Paste or upload a .mcp.json file')
-      return
+      setImportError("Paste or upload a .mcp.json file");
+      return;
     }
-    importMutation.mutate(importText)
-  }
+    importMutation.mutate(importText);
+  };
 
   const closeImportDialog = () => {
-    setShowImportDialog(false)
-    setImportText('')
-    setImportError(null)
-    setImportResult(null)
-  }
+    setShowImportDialog(false);
+    setImportText("");
+    setImportError(null);
+    setImportResult(null);
+  };
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
     reader.onload = () => {
-      setImportText(reader.result as string)
-      setImportError(null)
-      setImportResult(null)
-    }
-    reader.readAsText(file)
-    e.target.value = '' // reset so same file can be re-selected
-  }
+      setImportText(reader.result as string);
+      setImportError(null);
+      setImportResult(null);
+    };
+    reader.readAsText(file);
+    e.target.value = ""; // reset so same file can be re-selected
+  };
 
   const handleExport = async () => {
     try {
-      const json = await api.exportMCPServers()
-      const blob = new Blob([json], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = '.mcp.json'
-      a.click()
-      URL.revokeObjectURL(url)
+      const json = await api.exportMCPServers();
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = ".mcp.json";
+      a.click();
+      URL.revokeObjectURL(url);
     } catch {
       // silent — unlikely to fail
     }
-  }
+  };
 
   const intentTestMutation = useMutation<ToolSelection[], Error, string>({
     mutationFn: api.selectTools,
-  })
+  });
 
   // Note: auto-refresh on session switch is handled globally by useToolRefresh in AppShell.
 
   const handleRefresh = () => {
-    refreshMutation.mutate()
-  }
+    refreshMutation.mutate();
+  };
 
   const handleIntentTest = () => {
     if (intentQuery.trim()) {
-      intentTestMutation.mutate(intentQuery.trim())
+      intentTestMutation.mutate(intentQuery.trim());
     }
-  }
+  };
 
   const openAddForm = () => {
-    setServerForm(emptyForm)
-    setEditingServer(null)
-    setServerFormError(null)
-    setShowServerForm(true)
-  }
+    setServerForm(emptyForm);
+    setEditingServer(null);
+    setServerFormError(null);
+    setShowServerForm(true);
+  };
 
   const openEditForm = (name: string) => {
-    const cfg = mcpConfigs.find(c => c.name === name)
+    const cfg = mcpConfigs.find((c) => c.name === name);
     if (cfg) {
-      setServerForm(configToForm(cfg))
-      setEditingServer(name)
-      setServerFormError(null)
-      setShowServerForm(true)
+      setServerForm(configToForm(cfg));
+      setEditingServer(name);
+      setServerFormError(null);
+      setShowServerForm(true);
     }
-  }
+  };
 
   const closeServerForm = () => {
-    setShowServerForm(false)
-    setEditingServer(null)
-    setServerForm(emptyForm)
-    setServerFormError(null)
-  }
+    setShowServerForm(false);
+    setEditingServer(null);
+    setServerForm(emptyForm);
+    setServerFormError(null);
+  };
 
   const handleServerFormSubmit = () => {
-    setServerFormError(null)
+    setServerFormError(null);
 
     if (!serverForm.name.trim()) {
-      setServerFormError('Name is required')
-      return
+      setServerFormError("Name is required");
+      return;
     }
 
-    if (serverForm.transport_type === 'stdio' && !serverForm.command.trim()) {
-      setServerFormError('Command is required for stdio transport')
-      return
+    if (serverForm.transport_type === "stdio" && !serverForm.command.trim()) {
+      setServerFormError("Command is required for stdio transport");
+      return;
     }
 
-    if (serverForm.transport_type === 'sse' && !serverForm.url.trim()) {
-      setServerFormError('URL is required for SSE transport')
-      return
+    if (serverForm.transport_type !== "stdio" && !serverForm.url.trim()) {
+      setServerFormError("URL is required for HTTP transport");
+      return;
     }
 
-    const payload = formToPayload(serverForm)
+    const payload = formToPayload(serverForm);
 
     if (editingServer) {
-      updateServerMutation.mutate({ name: editingServer, data: payload })
+      updateServerMutation.mutate({ name: editingServer, data: payload });
     } else {
-      addServerMutation.mutate(payload)
+      addServerMutation.mutate(payload);
     }
-  }
+  };
 
-  const isFormSubmitting = addServerMutation.isPending || updateServerMutation.isPending
+  const isFormSubmitting = addServerMutation.isPending || updateServerMutation.isPending;
 
   // Filter tools by server
   const filteredTools = filterServer
-    ? tools.filter(tool => tool.name.includes(filterServer))
-    : tools
+    ? tools.filter((tool) => tool.name.includes(filterServer))
+    : tools;
 
-  const [activeTab, setActiveTab] = useState<'servers' | 'tools' | 'loading'>('servers')
-  const [toolSearch, setToolSearch] = useState('')
-  const [loadSearch, setLoadSearch] = useState('')
+  const [activeTab, setActiveTab] = useState<"servers" | "tools" | "loading">("servers");
+  const [toolSearch, setToolSearch] = useState("");
+  const [loadSearch, setLoadSearch] = useState("");
 
   const searchedTools = toolSearch
-    ? filteredTools.filter(t => t.name.toLowerCase().includes(toolSearch.toLowerCase()) || t.description?.toLowerCase().includes(toolSearch.toLowerCase()))
-    : filteredTools
+    ? filteredTools.filter(
+        (t) =>
+          t.name.toLowerCase().includes(toolSearch.toLowerCase()) ||
+          t.description?.toLowerCase().includes(toolSearch.toLowerCase()),
+      )
+    : filteredTools;
 
   return (
     <div className="space-y-4">
@@ -345,11 +390,12 @@ export function ToolDashboard({}: ToolDashboardProps) {
         {/* Tabs */}
         <div className="flex items-center gap-1 bg-surface/50 rounded-lg p-0.5">
           <button
-            onClick={() => setActiveTab('servers')}
+            type="button"
+            onClick={() => setActiveTab("servers")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              activeTab === 'servers'
-                ? 'bg-bg-elevated text-fg shadow-sm'
-                : 'text-fg-muted hover:text-fg-secondary'
+              activeTab === "servers"
+                ? "bg-bg-elevated text-fg shadow-sm"
+                : "text-fg-muted hover:text-fg-secondary"
             }`}
           >
             <Server className="w-3.5 h-3.5" />
@@ -357,11 +403,12 @@ export function ToolDashboard({}: ToolDashboardProps) {
             <span className="text-[11px] text-fg-faint tabular-nums">{servers.length}</span>
           </button>
           <button
-            onClick={() => setActiveTab('tools')}
+            type="button"
+            onClick={() => setActiveTab("tools")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              activeTab === 'tools'
-                ? 'bg-bg-elevated text-fg shadow-sm'
-                : 'text-fg-muted hover:text-fg-secondary'
+              activeTab === "tools"
+                ? "bg-bg-elevated text-fg shadow-sm"
+                : "text-fg-muted hover:text-fg-secondary"
             }`}
           >
             <Wrench className="w-3.5 h-3.5" />
@@ -369,11 +416,12 @@ export function ToolDashboard({}: ToolDashboardProps) {
             <span className="text-[11px] text-fg-faint tabular-nums">{tools.length}</span>
           </button>
           <button
-            onClick={() => setActiveTab('loading')}
+            type="button"
+            onClick={() => setActiveTab("loading")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              activeTab === 'loading'
-                ? 'bg-bg-elevated text-fg shadow-sm'
-                : 'text-fg-muted hover:text-fg-secondary'
+              activeTab === "loading"
+                ? "bg-bg-elevated text-fg shadow-sm"
+                : "text-fg-muted hover:text-fg-secondary"
             }`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -399,14 +447,15 @@ export function ToolDashboard({}: ToolDashboardProps) {
 
         {refreshResult && (
           <span className="text-[11px] text-fg-muted">
-            +{(refreshResult.added ?? []).length} -{(refreshResult.removed ?? []).length} ({refreshResult.total} total)
+            +{(refreshResult.added ?? []).length} -{(refreshResult.removed ?? []).length} (
+            {refreshResult.total} total)
           </span>
         )}
 
         <div className="flex-1" />
 
         {/* Tab-specific controls */}
-        {activeTab === 'servers' && (
+        {activeTab === "servers" && (
           <div className="flex items-center gap-1.5">
             <Button
               variant="ghost"
@@ -427,18 +476,14 @@ export function ToolDashboard({}: ToolDashboardProps) {
               <Download className="w-3.5 h-3.5" />
               Export
             </Button>
-            <Button
-              size="sm"
-              onClick={openAddForm}
-              className="gap-1.5"
-            >
+            <Button size="sm" onClick={openAddForm} className="gap-1.5">
               <Plus className="w-3.5 h-3.5" />
               Add Server
             </Button>
           </div>
         )}
 
-        {activeTab === 'loading' && (
+        {activeTab === "loading" && (
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-faint pointer-events-none" />
@@ -453,7 +498,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
           </div>
         )}
 
-        {activeTab === 'tools' && (
+        {activeTab === "tools" && (
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-faint pointer-events-none" />
@@ -471,8 +516,10 @@ export function ToolDashboard({}: ToolDashboardProps) {
               className="appearance-none px-3 pr-8 py-1.5 bg-surface/50 border border-border rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
             >
               <option value="">All servers</option>
-              {servers.map(server => (
-                <option key={server.name} value={server.name}>{server.name}</option>
+              {servers.map((server) => (
+                <option key={server.name} value={server.name}>
+                  {server.name}
+                </option>
               ))}
             </select>
           </div>
@@ -480,12 +527,15 @@ export function ToolDashboard({}: ToolDashboardProps) {
       </div>
 
       {/* Servers tab */}
-      {activeTab === 'servers' && (
+      {activeTab === "servers" && (
         <div className="grid gap-3 grid-cols-2">
           {serversLoading && (
             <>
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm overflow-hidden">
+              {["first", "second", "third", "fourth"].map((slot) => (
+                <div
+                  key={slot}
+                  className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm overflow-hidden"
+                >
                   <div className="px-3.5 py-3 flex items-center gap-2.5">
                     <Skeleton className="size-9 rounded-lg" />
                     <div className="flex flex-col gap-1.5 flex-1">
@@ -505,62 +555,91 @@ export function ToolDashboard({}: ToolDashboardProps) {
             <div className="col-span-2">
               <Empty className="py-12">
                 <EmptyHeader>
-                  <EmptyMedia variant="icon"><Server /></EmptyMedia>
+                  <EmptyMedia variant="icon">
+                    <Server />
+                  </EmptyMedia>
                   <EmptyTitle className="text-sm">No MCP servers connected</EmptyTitle>
-                  <EmptyDescription className="text-xs">Add a server to discover tools</EmptyDescription>
+                  <EmptyDescription className="text-xs">
+                    Add a server to discover tools
+                  </EmptyDescription>
                 </EmptyHeader>
               </Empty>
             </div>
           )}
 
-          {servers.map(server => {
-            const isManaged = managedServerNames.has(server.name)
-            const cfg = isManaged ? mcpConfigs.find(c => c.name === server.name) : null
+          {servers.map((server) => {
+            const isManaged = managedServerNames.has(server.name);
+            const cfg = isManaged ? mcpConfigs.find((c) => c.name === server.name) : null;
             return (
               <div
                 key={server.name}
                 className={`rounded-xl border overflow-hidden transition-all cursor-pointer border-l-2 group ${
                   server.connected
-                    ? 'border-border-subtle bg-bg-elevated hover:border-border border-l-status-ok'
-                    : 'border-border bg-bg/30 opacity-45 border-l-fg-faint'
+                    ? "border-border-subtle bg-bg-elevated hover:border-border border-l-status-ok"
+                    : "border-border bg-bg/30 opacity-45 border-l-fg-faint"
                 }`}
-                onClick={() => {
-                  setFilterServer(server.name)
-                  setActiveTab('tools')
-                }}
               >
                 {/* Header */}
                 <div className="flex items-center gap-2.5 px-3.5 py-3">
-                  <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 transition-colors ${
-                    server.connected ? 'bg-surface text-fg-secondary group-hover:text-fg' : 'bg-surface text-fg-muted'
-                  }`}>
-                    <Server className="w-4 h-4" />
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-fg truncate">{server.name}</span>
-                      {server.connected && <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />}
+                  <button
+                    type="button"
+                    className="flex items-center gap-2.5 flex-1 min-w-0 text-left"
+                    onClick={() => {
+                      setFilterServer(server.name);
+                      setActiveTab("tools");
+                    }}
+                  >
+                    <span
+                      className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 transition-colors ${
+                        server.connected
+                          ? "bg-surface text-fg-secondary group-hover:text-fg"
+                          : "bg-surface text-fg-muted"
+                      }`}
+                    >
+                      <Server className="w-4 h-4" />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-fg truncate">
+                          {server.name}
+                        </span>
+                        {server.connected && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[11px] text-fg-muted">{server.tool_count} tools</span>
+                        {!isManaged && (
+                          <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-surface border border-border-subtle text-fg-secondary uppercase tracking-wide leading-none">
+                            built-in
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-[11px] text-fg-muted">{server.tool_count} tools</span>
-                      {!isManaged && (
-                        <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-surface border border-border-subtle text-fg-secondary uppercase tracking-wide leading-none">built-in</span>
-                      )}
-                    </div>
-                  </div>
+                  </button>
                   {isManaged && (
                     <div className="flex items-center gap-0.5 shrink-0">
                       <button
-                        onClick={(e) => { e.stopPropagation(); openEditForm(server.name) }}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditForm(server.name);
+                        }}
                         className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
                       >
                         <Pencil className="w-3.5 h-3.5" />
+                        <span className="sr-only">Edit {server.name}</span>
                       </button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); setDeletingServer(server.name) }}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeletingServer(server.name);
+                        }}
                         className="p-1.5 rounded text-fg-faint hover:text-danger hover:bg-surface transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
+                        <span className="sr-only">Delete {server.name}</span>
                       </button>
                     </div>
                   )}
@@ -569,34 +648,45 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 {/* Detail footer */}
                 <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40 flex items-center gap-3">
                   <span className="text-[11px] text-fg-muted capitalize">
-                    {cfg?.transport_type?.toUpperCase() ?? 'Built-in'}
+                    {cfg?.transport_type === "sse"
+                      ? "Legacy SSE (unsupported)"
+                      : cfg?.transport_type === "streamable"
+                        ? "Streamable HTTP"
+                        : (cfg?.transport_type?.toUpperCase() ?? "Built-in")}
                   </span>
                   {cfg?.command && (
                     <>
                       <div className="w-px h-3.5 bg-border shrink-0" />
-                      <code className="text-[11px] text-fg-secondary font-mono truncate">{cfg.command}</code>
+                      <code className="text-[11px] text-fg-secondary font-mono truncate">
+                        {cfg.command}
+                      </code>
                     </>
                   )}
                   {cfg?.url && (
                     <>
                       <div className="w-px h-3.5 bg-border shrink-0" />
-                      <code className="text-[11px] text-fg-secondary font-mono truncate">{cfg.url}</code>
+                      <code className="text-[11px] text-fg-secondary font-mono truncate">
+                        {cfg.url}
+                      </code>
                     </>
                   )}
                 </div>
               </div>
-            )
+            );
           })}
         </div>
       )}
 
       {/* Tools tab */}
-      {activeTab === 'tools' && (
+      {activeTab === "tools" && (
         <div className="grid gap-3 grid-cols-2">
           {toolsLoading && (
             <>
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm overflow-hidden">
+              {["first", "second", "third", "fourth"].map((slot) => (
+                <div
+                  key={slot}
+                  className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm overflow-hidden"
+                >
                   <div className="px-3.5 py-3 flex items-center gap-2.5">
                     <Skeleton className="size-9 rounded-lg" />
                     <div className="flex flex-col gap-1.5 flex-1">
@@ -616,19 +706,27 @@ export function ToolDashboard({}: ToolDashboardProps) {
             <div className="col-span-2">
               <Empty className="py-12">
                 <EmptyHeader>
-                  <EmptyMedia variant="icon"><Wrench /></EmptyMedia>
+                  <EmptyMedia variant="icon">
+                    <Wrench />
+                  </EmptyMedia>
                   <EmptyTitle className="text-sm">
-                    {toolSearch || filterServer ? 'No tools match your filter' : 'No tools available'}
+                    {toolSearch || filterServer
+                      ? "No tools match your filter"
+                      : "No tools available"}
                   </EmptyTitle>
                   <EmptyDescription className="text-xs">
                     {toolSearch || filterServer
-                      ? 'Try adjusting your search or filter criteria.'
-                      : 'Connect a server to discover tools.'}
+                      ? "Try adjusting your search or filter criteria."
+                      : "Connect a server to discover tools."}
                   </EmptyDescription>
                 </EmptyHeader>
                 {(toolSearch || filterServer) && (
                   <button
-                    onClick={() => { setToolSearch(''); setFilterServer('') }}
+                    type="button"
+                    onClick={() => {
+                      setToolSearch("");
+                      setFilterServer("");
+                    }}
                     className="text-xs text-primary hover:text-primary-hover mt-2 transition-colors"
                   >
                     Clear filters
@@ -638,12 +736,13 @@ export function ToolDashboard({}: ToolDashboardProps) {
             </div>
           )}
 
-          {searchedTools.map(tool => {
-            const serverName = tool.name.includes('mcp_') ? tool.name.split('__')[1] : undefined
+          {searchedTools.map((tool) => {
+            const serverName = tool.name.includes("mcp_") ? tool.name.split("__")[1] : undefined;
             return (
-              <div
+              <button
+                type="button"
                 key={tool.name}
-                className="rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden transition-all cursor-pointer hover:shadow-md"
+                className="text-left rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden transition-all cursor-pointer hover:shadow-md"
                 onClick={() => setSelectedTool(tool)}
               >
                 {/* Header */}
@@ -652,7 +751,9 @@ export function ToolDashboard({}: ToolDashboardProps) {
                     <Wrench className="w-4 h-4" />
                   </span>
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm font-semibold text-fg truncate block">{tool.name.split('__').pop()}</span>
+                    <span className="text-sm font-semibold text-fg truncate block">
+                      {tool.name.split("__").pop()}
+                    </span>
                     {serverName && (
                       <span className="text-[11px] text-fg-muted truncate block">{serverName}</span>
                     )}
@@ -662,26 +763,29 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 {/* Detail footer */}
                 <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40">
                   <p className="text-[11px] text-fg-muted line-clamp-2">
-                    {tool.description || 'No description'}
+                    {tool.description || "No description"}
                   </p>
                 </div>
-              </div>
-            )
+              </button>
+            );
           })}
         </div>
       )}
 
       {/* Load Preferences tab */}
-      {activeTab === 'loading' && (
+      {activeTab === "loading" && (
         <div className="space-y-3">
           <p className="text-xs text-fg-muted">
-            Control which tools load automatically vs. on-demand. <strong className="text-fg-secondary">Auto</strong> tools are available in every request. <strong className="text-fg-secondary">Opt-in</strong> tools are only loaded when explicitly needed.
+            Control which tools load automatically vs. on-demand.{" "}
+            <strong className="text-fg-secondary">Auto</strong> tools are available in every
+            request. <strong className="text-fg-secondary">Opt-in</strong> tools are only loaded
+            when explicitly needed.
           </p>
 
           {loadPrefsLoading && (
             <div className="space-y-2">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full rounded-lg" />
+              {["first", "second", "third", "fourth", "fifth", "sixth"].map((slot) => (
+                <Skeleton key={slot} className="h-12 w-full rounded-lg" />
               ))}
             </div>
           )}
@@ -689,97 +793,118 @@ export function ToolDashboard({}: ToolDashboardProps) {
           {!loadPrefsLoading && allToolsWithLoad.length === 0 && (
             <Empty className="py-12">
               <EmptyHeader>
-                <EmptyMedia variant="icon"><SlidersHorizontal /></EmptyMedia>
+                <EmptyMedia variant="icon">
+                  <SlidersHorizontal />
+                </EmptyMedia>
                 <EmptyTitle className="text-sm">No tools discovered</EmptyTitle>
-                <EmptyDescription className="text-xs">Connect a server and refresh to see tools here.</EmptyDescription>
+                <EmptyDescription className="text-xs">
+                  Connect a server and refresh to see tools here.
+                </EmptyDescription>
               </EmptyHeader>
             </Empty>
           )}
 
-          {!loadPrefsLoading && allToolsWithLoad.length > 0 && (() => {
-            const searched = loadSearch
-              ? allToolsWithLoad.filter(t =>
-                  t.name.toLowerCase().includes(loadSearch.toLowerCase()) ||
-                  t.description?.toLowerCase().includes(loadSearch.toLowerCase())
-                )
-              : allToolsWithLoad
+          {!loadPrefsLoading &&
+            allToolsWithLoad.length > 0 &&
+            (() => {
+              const searched = loadSearch
+                ? allToolsWithLoad.filter(
+                    (t) =>
+                      t.name.toLowerCase().includes(loadSearch.toLowerCase()) ||
+                      t.description?.toLowerCase().includes(loadSearch.toLowerCase()),
+                  )
+                : allToolsWithLoad;
 
-            // Group by server
-            const grouped = new Map<string, ToolLoadItem[]>()
-            for (const tool of searched) {
-              const server = tool.name.includes('__') ? tool.name.split('__')[1] : '_builtin'
-              const list = grouped.get(server) || []
-              list.push(tool)
-              grouped.set(server, list)
-            }
+              // Group by server
+              const grouped = new Map<string, ToolLoadItem[]>();
+              for (const tool of searched) {
+                const server = tool.name.includes("__") ? tool.name.split("__")[1] : "_builtin";
+                const list = grouped.get(server) || [];
+                list.push(tool);
+                grouped.set(server, list);
+              }
 
-            return (
-              <div className="space-y-4">
-                {Array.from(grouped.entries()).map(([server, serverTools]) => (
-                  <div key={server}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Server className="w-3 h-3 text-fg-faint" />
-                      <span className="text-xs font-medium text-fg-secondary">{server === '_builtin' ? 'Built-in' : server}</span>
-                      <span className="text-[10px] text-fg-faint tabular-nums">{serverTools.length}</span>
-                    </div>
-                    <div className="rounded-lg border border-border-subtle overflow-hidden divide-y divide-border/50">
-                      {serverTools.map(tool => {
-                        const shortName = tool.name.split('__').pop() || tool.name
-                        const isAuto = tool.load_type === 'auto'
-                        const hasUserOverride = tool.load_type_source === 'user'
-                        return (
-                          <div
-                            key={tool.name}
-                            className="flex items-center gap-3 px-3.5 py-2.5 bg-bg-elevated hover:bg-bg-elevated transition-colors"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-fg truncate">{shortName}</span>
-                                {hasUserOverride && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 leading-none">override</span>
+              return (
+                <div className="space-y-4">
+                  {Array.from(grouped.entries()).map(([server, serverTools]) => (
+                    <div key={server}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Server className="w-3 h-3 text-fg-faint" />
+                        <span className="text-xs font-medium text-fg-secondary">
+                          {server === "_builtin" ? "Built-in" : server}
+                        </span>
+                        <span className="text-[10px] text-fg-faint tabular-nums">
+                          {serverTools.length}
+                        </span>
+                      </div>
+                      <div className="rounded-lg border border-border-subtle overflow-hidden divide-y divide-border/50">
+                        {serverTools.map((tool) => {
+                          const shortName = tool.name.split("__").pop() || tool.name;
+                          const isAuto = tool.load_type === "auto";
+                          const hasUserOverride = tool.load_type_source === "user";
+                          return (
+                            <div
+                              key={tool.name}
+                              className="flex items-center gap-3 px-3.5 py-2.5 bg-bg-elevated hover:bg-bg-elevated transition-colors"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium text-fg truncate">
+                                    {shortName}
+                                  </span>
+                                  {hasUserOverride && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 leading-none">
+                                      override
+                                    </span>
+                                  )}
+                                </div>
+                                {tool.description && (
+                                  <p className="text-[11px] text-fg-muted truncate mt-0.5">
+                                    {tool.description}
+                                  </p>
                                 )}
                               </div>
-                              {tool.description && (
-                                <p className="text-[11px] text-fg-muted truncate mt-0.5">{tool.description}</p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newType = isAuto ? "opt-in" : "auto";
+                                  loadPrefMutation.mutate({ [tool.name]: newType });
+                                }}
+                                disabled={loadPrefMutation.isPending}
+                                className="flex items-center gap-1.5 shrink-0 group"
+                                title={isAuto ? "Click to set opt-in" : "Click to set auto"}
+                              >
+                                {isAuto ? (
+                                  <ToggleRight className="w-5 h-5 text-success group-hover:text-success transition-colors" />
+                                ) : (
+                                  <ToggleLeft className="w-5 h-5 text-fg-faint group-hover:text-fg-muted transition-colors" />
+                                )}
+                                <span
+                                  className={`text-[11px] font-medium w-10 ${isAuto ? "text-success" : "text-fg-faint"}`}
+                                >
+                                  {isAuto ? "Auto" : "Opt-in"}
+                                </span>
+                              </button>
+                              {hasUserOverride && (
+                                <button
+                                  type="button"
+                                  onClick={() => loadPrefMutation.mutate({ [tool.name]: "" })}
+                                  disabled={loadPrefMutation.isPending}
+                                  className="text-[10px] text-fg-faint hover:text-fg-muted transition-colors"
+                                  title="Remove override (use default)"
+                                >
+                                  reset
+                                </button>
                               )}
                             </div>
-                            <button
-                              onClick={() => {
-                                const newType = isAuto ? 'opt-in' : 'auto'
-                                loadPrefMutation.mutate({ [tool.name]: newType })
-                              }}
-                              disabled={loadPrefMutation.isPending}
-                              className="flex items-center gap-1.5 shrink-0 group"
-                              title={isAuto ? 'Click to set opt-in' : 'Click to set auto'}
-                            >
-                              {isAuto ? (
-                                <ToggleRight className="w-5 h-5 text-success group-hover:text-success transition-colors" />
-                              ) : (
-                                <ToggleLeft className="w-5 h-5 text-fg-faint group-hover:text-fg-muted transition-colors" />
-                              )}
-                              <span className={`text-[11px] font-medium w-10 ${isAuto ? 'text-success' : 'text-fg-faint'}`}>
-                                {isAuto ? 'Auto' : 'Opt-in'}
-                              </span>
-                            </button>
-                            {hasUserOverride && (
-                              <button
-                                onClick={() => loadPrefMutation.mutate({ [tool.name]: '' })}
-                                disabled={loadPrefMutation.isPending}
-                                className="text-[10px] text-fg-faint hover:text-fg-muted transition-colors"
-                                title="Remove override (use default)"
-                              >
-                                reset
-                              </button>
-                            )}
-                          </div>
-                        )
-                      })}
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )
-          })()}
+                  ))}
+                </div>
+              );
+            })()}
         </div>
       )}
 
@@ -793,23 +918,29 @@ export function ToolDashboard({}: ToolDashboardProps) {
             onChange={(e) => setIntentQuery(e.target.value)}
             placeholder="Test tool selection by intent..."
             className="w-full bg-surface/50 border border-border rounded-lg pl-3 pr-16 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary"
-            onKeyDown={(e) => { if (e.key === 'Enter') handleIntentTest() }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleIntentTest();
+            }}
           />
           <button
+            type="button"
             onClick={handleIntentTest}
             disabled={!intentQuery.trim() || intentTestMutation.isPending}
             className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2 py-0.5 text-[11px] font-medium text-fg-secondary hover:text-fg bg-bg-elevated border border-border-subtle rounded-md disabled:opacity-40 transition-colors"
           >
-            {intentTestMutation.isPending ? 'Testing...' : 'Test'}
+            {intentTestMutation.isPending ? "Testing..." : "Test"}
           </button>
         </div>
       </div>
 
       {intentTestMutation.data && intentTestMutation.data.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {intentTestMutation.data.map((tool, index) => (
-            <span key={index} className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none font-mono">
-              {tool.name.split('__').pop()}
+          {intentTestMutation.data.map((tool) => (
+            <span
+              key={tool.name}
+              className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none font-mono"
+            >
+              {tool.name.split("__").pop()}
             </span>
           ))}
         </div>
@@ -830,7 +961,9 @@ export function ToolDashboard({}: ToolDashboardProps) {
               <Wrench className="w-5 h-5 text-fg-secondary" />
               <DialogTitle>Tool Details</DialogTitle>
             </div>
-            <DialogDescription className="sr-only">Detailed information about the selected tool</DialogDescription>
+            <DialogDescription className="sr-only">
+              Detailed information about the selected tool
+            </DialogDescription>
           </DialogHeader>
 
           {selectedTool && (
@@ -845,14 +978,16 @@ export function ToolDashboard({}: ToolDashboardProps) {
               <div>
                 <h4 className="text-sm font-medium text-fg-secondary mb-2">Description</h4>
                 <p className="text-sm text-fg-secondary leading-relaxed">
-                  {selectedTool.description || 'No description available'}
+                  {selectedTool.description || "No description available"}
                 </p>
               </div>
 
               <div>
                 <h4 className="text-sm font-medium text-fg-secondary mb-2">Server</h4>
                 <p className="text-sm text-fg-secondary">
-                  {selectedTool.name.includes('mcp_') ? selectedTool.name.split('__')[1] : 'Unknown server'}
+                  {selectedTool.name.includes("mcp_")
+                    ? selectedTool.name.split("__")[1]
+                    : "Unknown server"}
                 </p>
               </div>
 
@@ -860,29 +995,22 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 <h4 className="text-sm font-medium text-fg-secondary mb-2">Input Schema</h4>
                 <div className="bg-bg-elevated rounded-xl border border-border-subtle shadow-sm p-4 overflow-auto">
                   <pre className="text-sm text-fg-secondary font-mono whitespace-pre-wrap">
-                    {selectedTool.input_schema ?
-                      JSON.stringify(selectedTool.input_schema, null, 2) :
-                      'No schema available'
-                    }
+                    {selectedTool.input_schema
+                      ? JSON.stringify(selectedTool.input_schema, null, 2)
+                      : "No schema available"}
                   </pre>
                 </div>
               </div>
 
               <div>
                 <h4 className="text-sm font-medium text-fg-secondary mb-2">Referenced by Skills</h4>
-                <div className="text-sm text-fg-muted">
-                  Skills integration coming soon...
-                </div>
+                <div className="text-sm text-fg-muted">Skills integration coming soon...</div>
               </div>
             </div>
           )}
 
           <DialogFooter className="px-5 pb-5 border-t border-border-subtle pt-4">
-            <Button
-              onClick={() => setSelectedTool(null)}
-              variant="outline"
-              className="w-full"
-            >
+            <Button onClick={() => setSelectedTool(null)} variant="outline" className="w-full">
               Close
             </Button>
           </DialogFooter>
@@ -895,21 +1023,27 @@ export function ToolDashboard({}: ToolDashboardProps) {
           <DialogHeader className="px-5 pt-5">
             <div className="flex items-center gap-2">
               <Server className="w-5 h-5 text-fg-secondary" />
-              <DialogTitle>
-                {editingServer ? 'Edit MCP Server' : 'Add MCP Server'}
-              </DialogTitle>
+              <DialogTitle>{editingServer ? "Edit MCP Server" : "Add MCP Server"}</DialogTitle>
             </div>
-            <DialogDescription className="sr-only">Configure an MCP server connection</DialogDescription>
+            <DialogDescription className="sr-only">
+              Configure an MCP server connection
+            </DialogDescription>
           </DialogHeader>
 
           <div className="flex-1 overflow-auto px-5 py-4 space-y-4">
             {/* Name */}
             <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-1">Name</label>
+              <label
+                htmlFor="mcp-server-name"
+                className="block text-sm font-medium text-fg-secondary mb-1"
+              >
+                Name
+              </label>
               <input
+                id="mcp-server-name"
                 type="text"
                 value={serverForm.name}
-                onChange={(e) => setServerForm(f => ({ ...f, name: e.target.value }))}
+                onChange={(e) => setServerForm((f) => ({ ...f, name: e.target.value }))}
                 disabled={!!editingServer}
                 placeholder="my-server"
                 className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
@@ -921,53 +1055,104 @@ export function ToolDashboard({}: ToolDashboardProps) {
 
             {/* Transport Type */}
             <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-1">Transport Type</label>
+              <label
+                htmlFor="mcp-server-transport_type"
+                className="block text-sm font-medium text-fg-secondary mb-1"
+              >
+                Transport Type
+              </label>
               <select
+                id="mcp-server-transport_type"
                 value={serverForm.transport_type}
-                onChange={(e) => setServerForm(f => ({ ...f, transport_type: e.target.value as 'stdio' | 'sse' }))}
+                onChange={(e) =>
+                  setServerForm((f) => ({
+                    ...f,
+                    transport_type: e.target.value as MCPServerConfig["transport_type"],
+                  }))
+                }
                 className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 <option value="stdio">stdio (subprocess)</option>
-                <option value="sse">SSE / HTTP</option>
+                <option value="streamable">Streamable HTTP</option>
+                {editingServer && serverForm.transport_type === "sse" && (
+                  <option value="sse">Legacy SSE (unsupported)</option>
+                )}
               </select>
             </div>
 
             {/* Command (stdio only) */}
-            {serverForm.transport_type === 'stdio' && (
+            {serverForm.transport_type === "stdio" && (
               <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-1">Command</label>
+                <label
+                  htmlFor="mcp-server-command"
+                  className="block text-sm font-medium text-fg-secondary mb-1"
+                >
+                  Command
+                </label>
                 <input
+                  id="mcp-server-command"
                   type="text"
                   value={serverForm.command}
-                  onChange={(e) => setServerForm(f => ({ ...f, command: e.target.value }))}
+                  onChange={(e) => setServerForm((f) => ({ ...f, command: e.target.value }))}
                   placeholder="/path/to/binary"
                   className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
             )}
 
-            {/* URL (sse only) */}
-            {serverForm.transport_type === 'sse' && (
+            {/* HTTP endpoint, including retained legacy configurations */}
+            {serverForm.transport_type !== "stdio" && (
               <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-1">URL</label>
+                <label
+                  htmlFor="mcp-server-url"
+                  className="block text-sm font-medium text-fg-secondary mb-1"
+                >
+                  URL
+                </label>
                 <input
+                  id="mcp-server-url"
                   type="text"
                   value={serverForm.url}
-                  onChange={(e) => setServerForm(f => ({ ...f, url: e.target.value }))}
-                  placeholder="http://localhost:8080"
+                  onChange={(e) => setServerForm((f) => ({ ...f, url: e.target.value }))}
+                  placeholder="Verified Streamable HTTP endpoint"
                   className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
             )}
 
-            {/* Args (stdio only) */}
-            {serverForm.transport_type === 'stdio' && (
-              <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-1">Arguments</label>
+            {serverForm.transport_type !== "stdio" && (
+              <p className="text-xs text-fg-muted">
+                Legacy SSE and /sse endpoints are unsupported. Verify the server's Streamable HTTP
+                endpoint before selecting Streamable HTTP and updating the URL. The saved URL is
+                preserved until you change it. Disable a legacy server to retain its configuration.
+              </p>
+            )}
+
+            {editingServer && (
+              <label className="flex items-center gap-2 text-sm text-fg-secondary">
                 <input
+                  type="checkbox"
+                  checked={serverForm.enabled}
+                  onChange={(e) => setServerForm((f) => ({ ...f, enabled: e.target.checked }))}
+                />
+                Enabled
+              </label>
+            )}
+
+            {/* Args (stdio only) */}
+            {serverForm.transport_type === "stdio" && (
+              <div>
+                <label
+                  htmlFor="mcp-server-args"
+                  className="block text-sm font-medium text-fg-secondary mb-1"
+                >
+                  Arguments
+                </label>
+                <input
+                  id="mcp-server-args"
                   type="text"
                   value={serverForm.args}
-                  onChange={(e) => setServerForm(f => ({ ...f, args: e.target.value }))}
+                  onChange={(e) => setServerForm((f) => ({ ...f, args: e.target.value }))}
                   placeholder="mcp, --flag, value"
                   className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary"
                 />
@@ -977,15 +1162,23 @@ export function ToolDashboard({}: ToolDashboardProps) {
 
             {/* Env */}
             <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-1">Environment Variables</label>
+              <label
+                htmlFor="mcp-server-env"
+                className="block text-sm font-medium text-fg-secondary mb-1"
+              >
+                Environment Variables
+              </label>
               <textarea
+                id="mcp-server-env"
                 value={serverForm.env}
-                onChange={(e) => setServerForm(f => ({ ...f, env: e.target.value }))}
+                onChange={(e) => setServerForm((f) => ({ ...f, env: e.target.value }))}
                 placeholder={"KEY=value\nANOTHER_KEY=value"}
                 rows={3}
                 className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary font-mono text-sm"
               />
-              <p className="text-xs text-fg-muted mt-1">One KEY=VALUE per line. A value shown as •••••••• keeps the saved value.</p>
+              <p className="text-xs text-fg-muted mt-1">
+                One KEY=VALUE per line. A value shown as •••••••• keeps the saved value.
+              </p>
             </div>
 
             {/* Error */}
@@ -1001,17 +1194,13 @@ export function ToolDashboard({}: ToolDashboardProps) {
             <Button onClick={closeServerForm} variant="outline" className="flex-1">
               Cancel
             </Button>
-            <Button
-              onClick={handleServerFormSubmit}
-              disabled={isFormSubmitting}
-              className="flex-1"
-            >
+            <Button onClick={handleServerFormSubmit} disabled={isFormSubmitting} className="flex-1">
               {isFormSubmitting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : editingServer ? (
-                'Save Changes'
+                "Save Changes"
               ) : (
-                'Add Server'
+                "Add Server"
               )}
             </Button>
           </DialogFooter>
@@ -1030,16 +1219,13 @@ export function ToolDashboard({}: ToolDashboardProps) {
           </DialogHeader>
           <div className="px-5 py-4">
             <p className="text-fg-secondary text-sm">
-              Are you sure you want to delete <span className="font-medium text-fg">{deletingServer}</span>?
-              This will disconnect the server and remove its configuration.
+              Are you sure you want to delete{" "}
+              <span className="font-medium text-fg">{deletingServer}</span>? This will disconnect
+              the server and remove its configuration.
             </p>
           </div>
           <DialogFooter className="px-5 pb-5">
-            <Button
-              onClick={() => setDeletingServer(null)}
-              variant="outline"
-              className="flex-1"
-            >
+            <Button onClick={() => setDeletingServer(null)} variant="outline" className="flex-1">
               Cancel
             </Button>
             <Button
@@ -1051,7 +1237,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
               {deleteServerMutation.isPending ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
-                'Delete'
+                "Delete"
               )}
             </Button>
           </DialogFooter>
@@ -1067,7 +1253,8 @@ export function ToolDashboard({}: ToolDashboardProps) {
               <DialogTitle>Import .mcp.json</DialogTitle>
             </div>
             <DialogDescription className="text-xs text-fg-muted mt-1">
-              Paste a Claude Code <code className="font-mono">.mcp.json</code> config or upload a file. Existing servers with the same name will be skipped.
+              Paste a Claude Code <code className="font-mono">.mcp.json</code> config or upload a
+              file. Existing servers with the same name will be skipped.
             </DialogDescription>
           </DialogHeader>
 
@@ -1089,8 +1276,14 @@ export function ToolDashboard({}: ToolDashboardProps) {
             {/* Text area */}
             <textarea
               value={importText}
-              onChange={(e) => { setImportText(e.target.value); setImportError(null); setImportResult(null) }}
-              placeholder={'{\n  "mcpServers": {\n    "my-server": {\n      "command": "/path/to/binary",\n      "args": ["--flag"],\n      "env": { "KEY": "value" }\n    }\n  }\n}'}
+              onChange={(e) => {
+                setImportText(e.target.value);
+                setImportError(null);
+                setImportResult(null);
+              }}
+              placeholder={
+                '{\n  "mcpServers": {\n    "my-server": {\n      "command": "/path/to/binary",\n      "args": ["--flag"],\n      "env": { "KEY": "value" }\n    }\n  }\n}'
+              }
               rows={10}
               className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary font-mono text-xs leading-relaxed"
             />
@@ -1108,16 +1301,23 @@ export function ToolDashboard({}: ToolDashboardProps) {
               <div className="px-3 py-2 rounded-md bg-success/20 border border-success/50 text-sm text-success space-y-1">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                  <span>{importResult.created?.length ?? 0} created, {importResult.skipped?.length ?? 0} skipped</span>
+                  <span>
+                    {importResult.created?.length ?? 0} created, {importResult.skipped?.length ?? 0}{" "}
+                    skipped
+                  </span>
                 </div>
                 {(importResult.created?.length ?? 0) > 0 && (
                   <div className="text-xs text-success/80 pl-6">
-                    {importResult.created.map(n => <div key={n}>+ {n}</div>)}
+                    {importResult.created.map((n) => (
+                      <div key={n}>+ {n}</div>
+                    ))}
                   </div>
                 )}
                 {(importResult.skipped?.length ?? 0) > 0 && (
                   <div className="text-xs text-fg-muted pl-6">
-                    {importResult.skipped.map(n => <div key={n}>~ {n} (exists)</div>)}
+                    {importResult.skipped.map((n) => (
+                      <div key={n}>~ {n} (exists)</div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -1126,7 +1326,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
 
           <DialogFooter className="px-5 pb-5 border-t border-border-subtle pt-4 flex gap-3">
             <Button onClick={closeImportDialog} variant="outline" className="flex-1">
-              {importResult ? 'Done' : 'Cancel'}
+              {importResult ? "Done" : "Cancel"}
             </Button>
             {!importResult && (
               <Button
@@ -1134,16 +1334,12 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 disabled={importMutation.isPending || !importText.trim()}
                 className="flex-1"
               >
-                {importMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  'Import'
-                )}
+                {importMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Import"}
               </Button>
             )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
-  )
+  );
 }

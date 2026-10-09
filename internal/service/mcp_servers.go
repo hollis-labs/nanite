@@ -58,21 +58,20 @@ var ErrMCPServerExists = errors.New("server with this name already exists")
 // MCPServerValidationError reports a config the rules reject. Its message is
 // meant for the caller.
 type MCPServerValidationError struct {
-	Msg string
+	Msg   string
+	Cause error
 }
 
 func (e *MCPServerValidationError) Error() string { return e.Msg }
+func (e *MCPServerValidationError) Unwrap() error { return e.Cause }
 
-// TransportTypeError is the message for an unrecognized transport_type. It
-// names all three because "sse" and "streamable" are easy to pick wrongly:
-// "sse" is the 2024-11-05 HTTP+SSE transport, "streamable" is JSON-RPC over
-// POST — which is what a gateway-fronted /mcp URL speaks.
-const TransportTypeError = "transport_type must be 'stdio', 'sse', or 'streamable'"
+// TransportTypeError names the supported choices for new operational configs.
+const TransportTypeError = mcpconfig.TransportTypeError
 
-// ValidTransportType reports whether t is stdio, sse or streamable.
+// ValidTransportType reports whether t is stdio or streamable.
 func ValidTransportType(t string) bool {
 	switch t {
-	case store.TransportStdio, store.TransportSSE, store.TransportStreamable:
+	case store.TransportStdio, store.TransportStreamable:
 		return true
 	default:
 		return false
@@ -103,8 +102,8 @@ func (s *MCPServerService) Create(ctx context.Context, cfg *store.MCPServerConfi
 	if cfg.TransportType == "" {
 		cfg.TransportType = store.TransportStdio
 	}
-	if !ValidTransportType(cfg.TransportType) {
-		return &MCPServerValidationError{Msg: TransportTypeError}
+	if err := mcpconfig.ValidateTransport(cfg.TransportType, cfg.URL); err != nil {
+		return &MCPServerValidationError{Msg: err.Error(), Cause: err}
 	}
 
 	existing, _ := s.store.GetMCPServer(ctx, cfg.Name)
@@ -186,8 +185,14 @@ func (s *MCPServerService) Update(ctx context.Context, existing *store.MCPServer
 		row.Headers = MergeRedactedHeaders(*patch.Headers, existing.Headers)
 	}
 
-	if !ValidTransportType(row.TransportType) {
-		return nil, &MCPServerValidationError{Msg: TransportTypeError}
+	// A retained legacy row can be quarantined without guessing its new URL.
+	// Re-enabling it, or creating a new legacy choice, still requires migration.
+	if err := mcpconfig.ValidateTransport(row.TransportType, row.URL); err != nil {
+		quarantinedLegacy := errors.Is(err, mcpconfig.ErrLegacySSE) && !row.Enabled &&
+			row.TransportType == existing.TransportType && row.URL == existing.URL
+		if !quarantinedLegacy {
+			return nil, &MCPServerValidationError{Msg: err.Error(), Cause: err}
+		}
 	}
 
 	if err := s.store.UpdateMCPServer(ctx, &row); err != nil {

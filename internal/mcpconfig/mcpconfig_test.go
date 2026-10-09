@@ -287,7 +287,6 @@ func TestRemoteTransportSurvivesExportImportRoundTrip(t *testing.T) {
 	defer s.Close(context.Background())
 
 	want := map[string]string{
-		"gateway-sse":        store.TransportSSE,
 		"gateway-streamable": store.TransportStreamable,
 	}
 	for name, transport := range want {

@@ -1984,7 +1984,8 @@ export interface ToolSelection {
 export interface MCPServerConfig {
   id: string;
   name: string;
-  transport_type: "stdio" | "sse";
+  // Legacy SSE remains readable for inspection and explicit migration.
+  transport_type: "stdio" | "streamable" | "sse";
   command: string;
   url: string;
   args: string;

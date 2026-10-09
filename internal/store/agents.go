@@ -454,6 +454,9 @@ func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
 }
 
 func createAgent(ctx context.Context, db agentConfigDB, a *AgentProfile) error {
+	if err := checkProfileIngestionRetired(ctx, db, a.ID, a.Slug); err != nil {
+		return err
+	}
 	if a.Slug == a2a.UserSentinel {
 		return fmt.Errorf("agent slug %q is reserved (messaging user sentinel)", a.Slug)
 	}
@@ -645,6 +648,9 @@ func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
 }
 
 func updateAgent(ctx context.Context, db agentConfigDB, a *AgentProfile) error {
+	if err := checkProfileIngestionRetired(ctx, db, a.ID, a.Slug); err != nil {
+		return err
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Recompute hash; bump version if content changed.

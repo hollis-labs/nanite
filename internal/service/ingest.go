@@ -81,6 +81,10 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools m
 		}
 		considered++
 		if err := upsertAgentDef(st, def); err != nil {
+			if errors.Is(err, store.ErrProfileIngestionRetired) {
+				slog.Info("service: agent seed suppressed by retirement", "slug", def.Slug)
+				continue
+			}
 			slog.Warn("service: auto-ingest agent", "slug", def.Slug, "err", err)
 			failures = append(failures, fmt.Sprintf("%s: %v", def.Slug, err))
 			continue
@@ -178,6 +182,13 @@ func unknownDeclaredTools(def *agentpkg.Definition, knownTools map[string]bool) 
 // and capability children untouched. A source transition syncs once for
 // historical migrations such as builtin -> internal.
 func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
+	retired, err := st.ProfileIngestionRetired(context.Background(), def.ID, def.Slug)
+	if err != nil {
+		return fmt.Errorf("check retired profile ingestion: %w", err)
+	}
+	if retired {
+		return store.ErrProfileIngestionRetired
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// H1 trust: user/plugin-dropped files are untrusted until promoted.

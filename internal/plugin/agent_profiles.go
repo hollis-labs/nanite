@@ -413,6 +413,14 @@ func registerManifestAgentProfiles(host *Host, pluginID string, entries []AgentP
 // describes. See registerManifestAgentProfiles for the entrypoint and this
 // file's package doc comment for the overall design.
 func applyPluginAgentProfile(ctx context.Context, host *Host, st *store.Store, pluginID string, doc *PluginAgentProfileDocument) error {
+	retired, err := st.ProfileIngestionRetired(ctx, "", doc.Agent.Slug)
+	if err != nil {
+		return fmt.Errorf("check retired plugin profile: %w", err)
+	}
+	if retired {
+		host.logger.Info("plugin agent profile suppressed by retirement", "plugin", pluginID, "slug", doc.Agent.Slug)
+		return nil
+	}
 	role, err := resolveOrCreatePluginRole(st, pluginID, doc.Role)
 	if err != nil {
 		return fmt.Errorf("role %q: %w", doc.Role.Slug, err)

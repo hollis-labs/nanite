@@ -5,6 +5,15 @@ on:
     paths:
       - 'internal/store/agents.go'
       - 'internal/store/profile_retirement*.go'
+      - 'internal/store/protected_profile_retirement*.go'
+      - 'internal/store/profile_ingestion_retirements.go'
+      - 'internal/store/migrations/176_profile_ingestion_retirements.sql'
+      - 'internal/service/ingest.go'
+      - 'internal/service/protected_profile_retirement*.go'
+      - 'internal/plugin/agent_profiles.go'
+      - 'internal/plugin/protected_profile_retirement*.go'
+      - 'internal/server/protected_profile_retirement*.go'
+      - 'internal/api/protected_profile_retirement*.go'
       - 'internal/service/agent_config*.go'
       - 'internal/service/definition_resolver*.go'
       - 'internal/service/logical_agent_provision*.go'
@@ -20,6 +29,15 @@ on:
     paths:
       - 'internal/store/agents.go'
       - 'internal/store/profile_retirement*.go'
+      - 'internal/store/protected_profile_retirement*.go'
+      - 'internal/store/profile_ingestion_retirements.go'
+      - 'internal/store/migrations/176_profile_ingestion_retirements.sql'
+      - 'internal/service/ingest.go'
+      - 'internal/service/protected_profile_retirement*.go'
+      - 'internal/plugin/agent_profiles.go'
+      - 'internal/plugin/protected_profile_retirement*.go'
+      - 'internal/server/protected_profile_retirement*.go'
+      - 'internal/api/protected_profile_retirement*.go'
       - 'internal/service/agent_config*.go'
       - 'internal/service/definition_resolver*.go'
       - 'internal/service/logical_agent_provision*.go'
@@ -60,9 +78,9 @@ jobs:
           echo "TMPDIR=$fixture_root" >> "$GITHUB_ENV"
           echo "GOTMPDIR=$fixture_root" >> "$GITHUB_ENV"
       - name: Vet affected packages
-        run: go vet ./internal/store ./internal/service ./internal/api
+        run: go vet ./internal/store ./internal/service ./internal/api ./internal/plugin ./internal/server
       - name: Exercise private profile workflow boundaries
         run: >-
-          go test -race -count=20 -timeout=5m
-          ./internal/store ./internal/service ./internal/api
+          go test -race -count=20 -timeout=10m
+          ./internal/store ./internal/service ./internal/api ./internal/plugin ./internal/server
           -run '^(TestProfileRetirement|TestLogicalGeneralChatProvision)'

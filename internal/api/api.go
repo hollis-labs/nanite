@@ -171,6 +171,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/{id}/retry", a.handleRetryStream)
 
 	// Agents
+	a.registerProtectedProfileRetirementRoutes(mux)
 	a.registerLogicalAgentProvisionRoutes(mux)
 	a.registerProfileRetirementRoutes(mux)
 	mux.HandleFunc("GET /api/agents", a.handleListAgents)

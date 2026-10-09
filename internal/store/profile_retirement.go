@@ -159,6 +159,13 @@ func profileRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string) (Prof
 	if !retirementEditable(profile) {
 		return ProfileRetirementExport{}, ErrProfileRetirementProtected
 	}
+	return profileRetirementSnapshotData(ctx, tx, profile)
+}
+
+// Callers decide the supported retirement authority before sharing the exact
+// typed dependency snapshot. Editable retirement retains its original guard.
+func profileRetirementSnapshotData(ctx context.Context, tx *sql.Tx, profile *AgentProfile) (ProfileRetirementExport, error) {
+	id := profile.ID
 	out := ProfileRetirementExport{SchemaVersion: profileExportSchemaVersion, ProfileID: profile.ID, Slug: profile.Slug, Revision: profile.Revision, Tables: map[string]ProfileExportTable{}}
 	// Discover declared children so cascading records are exported as well as
 	// the explicit cleanup list. Schema identifiers come only from SQLite.

@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	"github.com/hollis-labs/plugin-sdk/manifest"
-	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 )
 
 func alwaysShipFixture(t *testing.T) (pluginapi.Block, sdkprocess.CapabilityRequest, []manifest.Tool) {

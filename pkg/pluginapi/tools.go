@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/hollis-labs/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 )
 
 // Tool effects are reviewed declarations, not runtime guarantees or grants.

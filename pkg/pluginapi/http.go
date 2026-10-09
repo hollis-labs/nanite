@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/hollis-labs/plugin-sdk/manifest"
-	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 )
 
 // MaxHTTPBody bounds buffered requests and responses. Streaming remains a

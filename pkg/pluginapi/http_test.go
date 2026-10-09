@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
+	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 )
 
 func TestHandleHTTPPreservesSubtreePathAndQuery(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
+	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 )
 
 func contextScope() pluginapi.ContextScope {

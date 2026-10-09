@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/hollis-labs/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 )
 
 const CapabilityDurableWake = "durable_agent.wake"

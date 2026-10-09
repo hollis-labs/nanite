@@ -1,13 +1,15 @@
 package pluginapi_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	"github.com/hollis-labs/plugin-sdk/manifest"
-	"github.com/hollis-labs/plugin-sdk/subprocess"
 )
 
 func block() pluginapi.Block {
@@ -29,7 +31,18 @@ func TestPublicBlockInSharedGeneratedManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := manifest.Manifest{SchemaVersion: manifest.SchemaVersion, ID: "hollis.bookmarks", Name: "Bookmarks", Version: "0.1.0", Protocol: subprocess.ProtocolVersion, Runtime: manifest.Runtime,
-		Entrypoint: manifest.Entrypoint{Command: "bin/bookmarks"}, Hosts: map[string]manifest.HostRange{"nanite": {Min: pluginapi.Version}}, Nanite: raw}
+		Server: manifest.Server{Runtime: "binary", Engines: map[string]manifest.HostRange{"binary": {Min: "0.0.0"}}, Entry: "bin/bookmarks"}, UI: &manifest.UI{Bundle: "ui/index.js", Isolation: "main-origin"}, Hosts: map[string]manifest.HostRange{"nanite": {Min: pluginapi.Version}}, Nanite: raw}
+	for _, file := range []struct {
+		path, body string
+		executable bool
+	}{{"bin/bookmarks", "bookmarks fixture executable", true}, {"ui/index.js", "export const BookmarksTab = null;", false}} {
+		sum := sha256.Sum256([]byte(file.body))
+		m.Artifact.Files = append(m.Artifact.Files, manifest.ArtifactFile{Path: file.path, SHA256: hex.EncodeToString(sum[:]), Executable: file.executable})
+	}
+	m.Artifact.TreeSHA256, err = manifest.TreeDigest(m.Artifact.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var encoded strings.Builder
 	if err := manifest.Encode(&encoded, m); err != nil {
 		t.Fatal(err)

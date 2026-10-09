@@ -7,8 +7,8 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	"github.com/hollis-labs/plugin-sdk/manifest"
-	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 )
 
 const ContextProtocol = 1

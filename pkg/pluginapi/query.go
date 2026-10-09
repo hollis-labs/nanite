@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 )
 
 // QueryProtocol versions the read-only query wire independently of UI registration.

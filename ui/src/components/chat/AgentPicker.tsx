@@ -1,62 +1,76 @@
-import { useState, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Search, User, Plus } from 'lucide-react'
-import { Skeleton } from '@/components/ui/skeleton'
-import { api } from '@/lib/api'
-import { useAppStore } from '@/stores/useAppStore'
-import { SourceBadge } from '@/components/agents/SourceBadge'
-import { TagPills } from '@/components/agents/TagPills'
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, Search, User, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { SourceBadge } from "@/components/agents/SourceBadge";
+import { TagPills } from "@/components/agents/TagPills";
+import { Skeleton } from "@/components/ui/skeleton";
+import { isSelectableAgent } from "@/lib/agent-visibility";
+import { api } from "@/lib/api";
+import { useAppStore } from "@/stores/useAppStore";
 
 interface AgentPickerProps {
-  sessionId: string
-  existingAgentIds: string[]
-  onClose: () => void
+  sessionId: string;
+  existingAgentIds: string[];
+  onClose: () => void;
 }
 
 export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPickerProps) {
-  const [search, setSearch] = useState('')
-  const queryClient = useQueryClient()
-  const configVersion = useAppStore((s) => s.configVersion)
+  const [search, setSearch] = useState("");
+  const searchInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    searchInput.current?.focus();
+  }, []);
+  const queryClient = useQueryClient();
+  const configVersion = useAppStore((s) => s.configVersion);
 
   const { data: agents = [], isLoading } = useQuery({
-    queryKey: ['agents', configVersion],
+    queryKey: ["agents", configVersion],
     queryFn: () => api.listAgents(),
-  })
+  });
 
   const addMutation = useMutation({
-    mutationFn: (agentId: string) => api.addSessionAgent(sessionId, agentId, 'participant'),
+    mutationFn: (agentId: string) => api.addSessionAgent(sessionId, agentId, "participant"),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['session-agents', sessionId] })
-      onClose()
+      void queryClient.invalidateQueries({ queryKey: ["session-agents", sessionId] });
+      onClose();
     },
-  })
+  });
 
-  const handleAdd = useCallback((agentId: string) => {
-    addMutation.mutate(agentId)
-  }, [addMutation])
+  const handleAdd = useCallback(
+    (agentId: string) => {
+      addMutation.mutate(agentId);
+    },
+    [addMutation],
+  );
 
-  const filteredAgents = agents.filter((a) => {
-    if (a.status === 'disabled') return false
-    if (existingAgentIds.includes(a.id)) return false
-    if (!search) return true
-    const q = search.toLowerCase()
-    if (a.name.toLowerCase().includes(q) || a.slug.toLowerCase().includes(q)) return true
+  const filteredAgents = agents.filter(isSelectableAgent).filter((a) => {
+    if (existingAgentIds.includes(a.id)) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    if (a.name.toLowerCase().includes(q) || a.slug.toLowerCase().includes(q)) return true;
     try {
-      const tags: string[] = JSON.parse(a.tags || '[]')
-      return tags.some((t) => t.toLowerCase().includes(q))
+      const tags: string[] = JSON.parse(a.tags || "[]");
+      return tags.some((t) => t.toLowerCase().includes(q));
     } catch {
-      return false
+      return false;
     }
-  })
+  });
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <button
+        type="button"
+        aria-label="Close agent picker"
+        className="absolute inset-0 bg-black/60"
+        onClick={onClose}
+      />
       <div className="relative w-full max-w-sm bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <h2 className="text-sm font-semibold text-fg">Add Agent</h2>
           <button
+            type="button"
+            aria-label="Close"
             onClick={onClose}
             className="p-1 rounded text-fg-muted hover:text-fg-secondary hover:bg-surface transition-colors"
           >
@@ -74,7 +88,7 @@ export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPicke
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search agents..."
               className="flex-1 text-sm bg-transparent text-fg placeholder-fg-faint outline-none"
-              autoFocus
+              ref={searchInput}
             />
           </div>
         </div>
@@ -83,8 +97,8 @@ export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPicke
         <div className="flex-1 overflow-y-auto p-3 space-y-1 max-h-64">
           {isLoading ? (
             <div className="space-y-1 p-1">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 p-2">
+              {["first", "second", "third"].map((id) => (
+                <div key={id} className="flex items-center gap-3 p-2">
                   <Skeleton className="w-8 h-8 rounded-full" />
                   <div className="flex-1 space-y-1.5">
                     <Skeleton className="h-3.5 w-24" />
@@ -95,11 +109,12 @@ export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPicke
             </div>
           ) : filteredAgents.length === 0 ? (
             <p className="text-sm text-fg-muted text-center py-4">
-              {search ? 'No matching agents' : 'No agents available'}
+              {search ? "No matching agents" : "No agents available"}
             </p>
           ) : (
             filteredAgents.map((agent) => (
               <button
+                type="button"
                 key={agent.id}
                 onClick={() => handleAdd(agent.id)}
                 disabled={addMutation.isPending}
@@ -118,7 +133,9 @@ export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPicke
                     <SourceBadge source={agent.source} />
                   </div>
                   {agent.description && (
-                    <span className="text-xs text-fg-muted truncate block">{agent.description}</span>
+                    <span className="text-xs text-fg-muted truncate block">
+                      {agent.description}
+                    </span>
                   )}
                   <TagPills tags={agent.tags} className="mt-0.5" />
                 </div>
@@ -129,5 +146,5 @@ export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPicke
         </div>
       </div>
     </div>
-  )
+  );
 }

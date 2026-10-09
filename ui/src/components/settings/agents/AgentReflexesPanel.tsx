@@ -10,7 +10,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { cloneElement, isValidElement, type ReactNode, useId, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -276,7 +276,9 @@ export function AgentReflexesPanel({
         {reflexesQuery.error ? (
           <PanelError message={`Failed to load reflexes: ${errorMessage(reflexesQuery.error)}`} />
         ) : null}
-        {!reflexesQuery.isLoading && !reflexesQuery.error && (reflexesQuery.data?.length ?? 0) === 0 ? (
+        {!reflexesQuery.isLoading &&
+        !reflexesQuery.error &&
+        (reflexesQuery.data?.length ?? 0) === 0 ? (
           <PanelMessage>No reflexes configured for this agent yet.</PanelMessage>
         ) : null}
         {inherited.map((row) => (
@@ -358,7 +360,10 @@ export function AgentReflexesPanel({
                 className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
                 value={editor.trigger_kind}
                 onChange={(event) =>
-                  setEditor({ ...editor, trigger_kind: event.target.value as AgentReflexTriggerKind })
+                  setEditor({
+                    ...editor,
+                    trigger_kind: event.target.value as AgentReflexTriggerKind,
+                  })
                 }
               >
                 {TRIGGER_KIND_OPTIONS.map((option) => (
@@ -506,7 +511,9 @@ export function AgentReflexesPanel({
             message={`Failed to load pending reflexes: ${errorMessage(pendingQuery.error)}`}
           />
         ) : null}
-        {!pendingQuery.isLoading && !pendingQuery.error && (pendingQuery.data?.length ?? 0) === 0 ? (
+        {!pendingQuery.isLoading &&
+        !pendingQuery.error &&
+        (pendingQuery.data?.length ?? 0) === 0 ? (
           <PanelMessage>No pending reflex proposals for this agent.</PanelMessage>
         ) : null}
         {(pendingQuery.data ?? []).map((row) => (
@@ -543,7 +550,9 @@ function ReflexRowCard({
             <span className="text-[11px] text-fg-muted">P{row.priority}</span>
           </div>
           <div className="mt-1 text-xs text-fg-muted">
-            {inherited ? `Class base: ${row.class_tag || "shared"}` : `Agent scoped: ${row.agent_id}`}
+            {inherited
+              ? `Class base: ${row.class_tag || "shared"}`
+              : `Agent scoped: ${row.agent_id}`}
           </div>
         </div>
         {actions}
@@ -621,6 +630,8 @@ function PendingReflexCard({
 }
 
 function ValidationCard({ result }: { result: ValidateReflexResponse }) {
+  const matched = result.matched ?? result.fired;
+  const supported = result.evaluation_supported !== false;
   return (
     <div className="rounded-lg border border-border-subtle bg-surface/40 px-3 py-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -634,12 +645,17 @@ function ValidationCard({ result }: { result: ValidateReflexResponse }) {
         </span>
         <span
           className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-            result.fired ? "bg-sky-500/10 text-sky-700" : "bg-surface text-fg-muted"
+            matched && supported ? "bg-sky-500/10 text-sky-700" : "bg-surface text-fg-muted"
           }`}
         >
-          {result.fired ? "Would fire" : "Would not fire"}
+          {!supported
+            ? "Trigger not evaluated"
+            : matched
+              ? "Trigger matches"
+              : "Trigger does not match"}
         </span>
         <span className="text-[11px] text-fg-muted">State source: {result.state_source}</span>
+        <span className="text-[11px] text-fg-muted">No action executed</span>
       </div>
       {result.errors.length > 0 ? (
         <ul className="mt-2 space-y-1 text-xs text-danger">
@@ -681,10 +697,14 @@ function SectionCard({
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
+  const generatedId = useId();
+  const child = isValidElement<{ id?: string }>(children) ? children : null;
+  const controlId = child?.props.id ?? generatedId;
+  const control = child ? cloneElement(child, { id: controlId }) : children;
   return (
-    <label className="block space-y-1.5">
+    <label htmlFor={controlId} className="block space-y-1.5">
       <span className="text-xs font-medium text-fg-secondary">{label}</span>
-      {children}
+      {control}
     </label>
   );
 }

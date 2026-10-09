@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
@@ -23,6 +24,32 @@ type providerCatalogWriter interface {
 	Get(name string) (providercatalog.Entry, bool)
 	Add(e providercatalog.Entry)
 	Remove(name string) bool
+}
+
+// ProviderCredentialStoreError exposes safe recovery guidance without returning
+// the backend's error text (which may include credentials or host details).
+// Unwrap retains the original cause for internal error classification.
+type ProviderCredentialStoreError struct {
+	Operation           string
+	EnvironmentVariable string
+	Cause               error
+}
+
+func (e *ProviderCredentialStoreError) Error() string {
+	guidance := "configure an OS credential store, or use this provider's supported deployment credential configuration"
+	if e.EnvironmentVariable != "" {
+		guidance = "set " + e.EnvironmentVariable + " in the service environment and restart Nanite"
+	}
+	return fmt.Sprintf("could not %s the provider credential: OS credential store unavailable; %s. The credential update could not be confirmed; the running provider was not changed", e.Operation, guidance)
+}
+func (e *ProviderCredentialStoreError) Unwrap() error { return e.Cause }
+
+func credentialStoreError(id, operation string, cause error) error {
+	env := ""
+	if spec, ok := APIProviderSpecByID(id); ok {
+		env = spec.EnvKey
+	}
+	return &ProviderCredentialStoreError{Operation: operation, EnvironmentVariable: env, Cause: cause}
 }
 
 // APIKeyResult is what SetAPIKey reports back.
@@ -66,11 +93,16 @@ func (s *ProviderConfigService) SetAPIKey(ctx context.Context, id, key string) (
 	s.keyMu.Lock()
 	defer s.keyMu.Unlock()
 
+	if err := ctx.Err(); err != nil {
+		return APIKeyResult{}, err
+	}
 	keyName := secrets.ProviderKeyName(id)
 	if key == "" {
-		s.deleteSecret(keyName)
+		if err := s.deleteSecret(keyName); err != nil {
+			return APIKeyResult{}, credentialStoreError(id, "clear", err)
+		}
 	} else if err := s.setSecret(keyName, key); err != nil {
-		return APIKeyResult{}, err
+		return APIKeyResult{}, credentialStoreError(id, "save", err)
 	}
 	result := APIKeyResult{HasKey: key != ""}
 

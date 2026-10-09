@@ -77,3 +77,25 @@ func TestGetDoesNotLogSecretValue(t *testing.T) {
 		t.Fatalf("secret value appeared in logs: %s", logs.String())
 	}
 }
+
+func TestDeleteChecked_ReportsUnavailableAndAllowsMissing(t *testing.T) {
+	keyring.MockInit()
+	t.Cleanup(keyring.MockInit)
+	if err := DeleteChecked("missing"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Set("retained", "fixture-credential"); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteChecked("retained"); err != nil {
+		t.Fatal(err)
+	}
+	if got := Get("retained"); got != "" {
+		t.Fatal("successful delete did not remove credential")
+	}
+	cause := errors.New("credential service unavailable")
+	keyring.MockInitWithError(cause)
+	if err := DeleteChecked("retained"); !errors.Is(err, cause) {
+		t.Fatalf("deletion failure hidden: %v", err)
+	}
+}

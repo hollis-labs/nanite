@@ -1122,6 +1122,10 @@ export interface ValidateReflexRequest {
 }
 
 export interface ValidateReflexResponse {
+  /** Legacy fired is a trigger-match alias, never an executed action. */
+  matched?: boolean;
+  evaluation_supported?: boolean;
+  action_executed?: false;
   valid: boolean;
   errors: string[];
   fired: boolean;

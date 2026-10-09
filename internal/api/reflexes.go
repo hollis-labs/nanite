@@ -283,18 +283,31 @@ func (a *API) handleValidateReflex(w http.ResponseWriter, r *http.Request) {
 		Status:      store.ReflexStatusActive,
 	}
 	errs := a.Services.Reflexes.ValidateDefinition(r.Context(), row)
+	matched, supported := false, false
+	if len(errs) == 0 {
+		matched, supported = evaluateReflexPreview(req.TriggerKind, req.TriggerSpec, req.State)
+	}
 	a.jsonResp(w, http.StatusOK, map[string]any{
-		"valid":        len(errs) == 0,
-		"errors":       errs,
-		"fired":        len(errs) == 0 && evaluatesSimpleReflex(req.TriggerSpec, req.State),
-		"state_source": stateSource(req.State),
+		"valid":  len(errs) == 0,
+		"errors": errs,
+		// fired is a compatibility alias for matched, never action execution.
+		"fired":                matched,
+		"matched":              matched,
+		"evaluation_supported": supported,
+		"action_executed":      false,
+		"state_source":         stateSource(req.State),
 		"state_summary": map[string]any{
 			"messages": messageCount(req.State),
 		},
 	})
 }
 
-func evaluatesSimpleReflex(triggerSpec string, state map[string]any) bool {
+// This read-only preview supports the legacy tool_calls_window equality
+// predicate. It does not dispatch actions or simulate runtime lifecycle gates.
+func evaluateReflexPreview(triggerKind, triggerSpec string, state map[string]any) (bool, bool) {
+	if triggerKind != store.ReflexTriggerPredicate {
+		return false, false
+	}
 	var spec struct {
 		Kind   string  `json:"kind"`
 		Window int     `json:"window"`
@@ -302,26 +315,26 @@ func evaluatesSimpleReflex(triggerSpec string, state map[string]any) bool {
 		Value  float64 `json:"value"`
 	}
 	if err := json.Unmarshal([]byte(triggerSpec), &spec); err != nil {
-		return false
+		return false, false
 	}
 	if spec.Kind != "tool_calls_window" || spec.Op != "=" || spec.Window <= 0 {
-		return false
+		return false, false
 	}
 	messages, ok := state["messages"].([]any)
 	if !ok || len(messages) < spec.Window {
-		return false
+		return false, true
 	}
 	start := len(messages) - spec.Window
 	for _, raw := range messages[start:] {
 		msg, ok := raw.(map[string]any)
 		if !ok {
-			return false
+			return false, true
 		}
 		if msg["tool_calls"] != spec.Value {
-			return false
+			return false, true
 		}
 	}
-	return true
+	return true, true
 }
 
 func stateSource(state map[string]any) string {

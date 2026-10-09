@@ -51,6 +51,18 @@ func (c *Container) CompactSession(ctx context.Context, sessionID string) (*Manu
 		return nil, err
 	}
 
+	// A context service may finish assembly as cancellation arrives. Refuse
+	// before starting any new handoff or compaction effects in that case.
+	if cancelErr := ctx.Err(); cancelErr != nil {
+		return nil, cancelErr
+	}
+	if c.CompactionHandoffs != nil {
+		if _, handoffErr := ensureGlass4Handoff(c.CompactionHandoffs, session, result.Messages); handoffErr != nil {
+			slog.Warn("service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
+				"session_id", sessionID, "err", handoffErr)
+		}
+	}
+
 	summarizer := BuildSummarizer(c.Providers, c.ProviderDefaults, settings)
 	mode := ClassifyCompactionMode(agent)
 	pipeline := &ctxpkg.CompactionPipeline{
@@ -94,6 +106,20 @@ func (c *Container) CompactSession(ctx context.Context, sessionID string) (*Manu
 		}
 	}
 
+	// Match automatic compaction: inject only after a successful pipeline,
+	// with savings measured before the continuity slot is added.
+	handoffEvents := make(chan chat.StreamEvent, 1)
+	if c.CompactionHandoffs != nil {
+		if _, handoffErr := InjectGlass4HandoffSlot(c.CompactionHandoffs, result.Window, sessionID, handoffEvents); handoffErr != nil {
+			slog.Warn("service: glass-4 handoff inject failed (non-fatal)",
+				"session_id", sessionID, "err", handoffErr)
+		}
+	}
+	result.Messages = pipeline.ConversationMessages
+	result.Blocks = result.Window.Assemble()
+	result.NeedsCompaction = result.Window.NeedsCompaction()
+	result.SystemPrompt = rebuildLegacySystemPrompt(result.Window)
+
 	if c.Events != nil {
 		c.Events.EmitPostCompact(ctx, sessionID, tokensSaved, stages)
 	}
@@ -115,6 +141,12 @@ func (c *Container) CompactSession(ctx context.Context, sessionID string) (*Manu
 		} else {
 			evt := <-envCh
 			c.Streams.BroadcastSessionStreamEvent(sessionID, evt)
+		}
+	}
+	close(handoffEvents)
+	if c.Streams != nil {
+		for event := range handoffEvents {
+			c.Streams.BroadcastSessionStreamEvent(sessionID, event)
 		}
 	}
 

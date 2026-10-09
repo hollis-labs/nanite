@@ -145,6 +145,27 @@ func TestCompactCharacterization_ResponseEventsBroadcastAndRecord(t *testing.T) 
 		t.Fatalf("slot_changed = %+v (tokens_saved %d)", slot, resp.TokensSaved)
 	}
 
+	// The new continuity event follows the established conversation event;
+	// its key identifies the actual stash written by the wired Container.
+	select {
+	case ev = <-sub:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no handoff_loaded broadcast")
+	}
+	var handoffEvent struct {
+		CacheKey string `json:"cache_key"`
+	}
+	if ev.Type != "handoff_loaded" {
+		t.Fatalf("continuity event type = %q", ev.Type)
+	}
+	if decodeErr := json.Unmarshal([]byte(ev.Data), &handoffEvent); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	payload, stashID, handoffErr := service.ReadLatestGlass4Handoff(a.store, sid)
+	if handoffErr != nil || payload == nil || stashID != handoffEvent.CacheKey {
+		t.Fatalf("continuity event/stash mismatch: %+v, %q, %v", payload, stashID, handoffErr)
+	}
+
 	// The compaction is recorded for the session.
 	ce, err := a.store.GetLatestCompactionEvent(context.Background(), sid)
 	if err != nil || ce == nil || ce.SummaryMode != "general" || !reflect.DeepEqual(ce.StagesApplied, []string{"drop_enrichment"}) {

@@ -22,6 +22,7 @@ var (
 
 const ProfileExportMaxBytes = 16 << 20
 const profileExportMaxRows = 10000
+const profileExportSchemaVersion = 2
 
 // ProfileRetirementExport contains a consistent, private export of the profile
 // and its affected relational records. It is data, never an import or grant.
@@ -33,9 +34,43 @@ type ProfileRetirementExport struct {
 	Tables        map[string]ProfileExportTable `json:"tables"`
 }
 
+// ProfileExportTable rows contain typed SQLite cells. TEXT and BLOB values are base64-encoded
+// bytes so even invalid UTF-8 text survives without JSON replacement.
 type ProfileExportTable struct {
 	Columns []string          `json:"columns"`
 	Rows    []json.RawMessage `json:"rows"`
+}
+
+// Keep SQLite storage classes distinct: plain JSON conflates BLOB with TEXT
+// and INTEGER with REAL. That would let changed state pass the deletion guard.
+type profileExportCell struct {
+	Type  string `json:"type"`
+	Value any    `json:"value"`
+}
+
+func encodeProfileExportRow(values []any) (json.RawMessage, error) {
+	cells := make([]profileExportCell, len(values))
+	for i, value := range values {
+		switch v := value.(type) {
+		case nil:
+			cells[i] = profileExportCell{Type: "null"}
+		case int64:
+			cells[i] = profileExportCell{Type: "integer", Value: v}
+		case float64:
+			cells[i] = profileExportCell{Type: "real", Value: v}
+		case string:
+			cells[i] = profileExportCell{Type: "text", Value: []byte(v)}
+		case []byte:
+			// A zero-length BLOB is distinct from NULL, including a nil slice
+			// returned by the driver for an empty BLOB.
+			data := make([]byte, len(v))
+			copy(data, v)
+			cells[i] = profileExportCell{Type: "blob", Value: data}
+		default:
+			return nil, ErrProfileRetirementSchema
+		}
+	}
+	return json.Marshal(cells)
 }
 
 func (e ProfileRetirementExport) Digest() (string, error) {
@@ -124,7 +159,7 @@ func profileRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string) (Prof
 	if !retirementEditable(profile) {
 		return ProfileRetirementExport{}, ErrProfileRetirementProtected
 	}
-	out := ProfileRetirementExport{SchemaVersion: 1, ProfileID: profile.ID, Slug: profile.Slug, Revision: profile.Revision, Tables: map[string]ProfileExportTable{}}
+	out := ProfileRetirementExport{SchemaVersion: profileExportSchemaVersion, ProfileID: profile.ID, Slug: profile.Slug, Revision: profile.Revision, Tables: map[string]ProfileExportTable{}}
 	// Discover declared children so cascading records are exported as well as
 	// the explicit cleanup list. Schema identifiers come only from SQLite.
 	rows, err := tx.QueryContext(ctx, "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -221,7 +256,7 @@ func profileRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string) (Prof
 			args[i] = id
 		}
 		// #nosec G202 -- schema-derived identifiers are quoted; the profile ID is bound for every predicate.
-		rs, queryErr := tx.QueryContext(ctx, "SELECT * FROM "+quoteRetirementName(table)+" WHERE ("+strings.Join(predicatesForTable, ") OR (")+") LIMIT 10001", args...)
+		rs, queryErr := tx.QueryContext(ctx, "SELECT * FROM "+quoteRetirementName(table)+" LIMIT 0")
 		if queryErr != nil {
 			return out, queryErr
 		}
@@ -229,6 +264,21 @@ func profileRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string) (Prof
 		if columnsErr != nil {
 			_ = rs.Close()
 			return out, columnsErr
+		}
+		if closeErr := rs.Close(); closeErr != nil {
+			return out, closeErr
+		}
+		// Expression columns expose raw SQLite storage classes. Direct columns
+		// with DATETIME/BOOLEAN declarations can be converted by the driver to
+		// time.Time/bool, losing the original text or integer representation.
+		expressions := make([]string, len(cols))
+		for i, col := range cols {
+			expressions[i] = "CASE WHEN 1 THEN " + quoteRetirementName(col) + " END"
+		}
+		// #nosec G202 -- schema-derived identifiers are quoted; profile IDs are bound.
+		rs, queryErr = tx.QueryContext(ctx, "SELECT "+strings.Join(expressions, ",")+" FROM "+quoteRetirementName(table)+" WHERE ("+strings.Join(predicatesForTable, ") OR (")+") LIMIT 10001", args...)
+		if queryErr != nil {
+			return out, queryErr
 		}
 		exported := ProfileExportTable{Columns: cols, Rows: []json.RawMessage{}}
 		for rs.Next() {
@@ -241,7 +291,7 @@ func profileRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string) (Prof
 				_ = rs.Close()
 				return out, scanErr
 			}
-			encoded, encodeErr := json.Marshal(values)
+			encoded, encodeErr := encodeProfileExportRow(values)
 			if encodeErr != nil {
 				_ = rs.Close()
 				return out, encodeErr

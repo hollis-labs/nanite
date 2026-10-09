@@ -205,3 +205,50 @@ func TestProfileRetirementRefusesSymlinkArchive(t *testing.T) {
 		t.Fatal("archive followed symlink", err)
 	}
 }
+
+func TestProfileRetirementOldExportFormatRequiresFreshExport(t *testing.T) {
+	svc, st, root := newAgentConfigTestService(t)
+	ctx := t.Context()
+	p, err := svc.Create(&store.AgentProfile{Name: "Test", Slug: "old-export", SystemPrompt: "x"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := svc.ExportEditableProfile(ctx, p.Profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, "profile-retirements", receipt.ExportID+".json")
+	data, err := os.ReadFile(file) // #nosec G304 -- owner-private fixture export, not caller input.
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archive profileRetirementArchive
+	if err = json.Unmarshal(data, &archive); err != nil {
+		t.Fatal(err)
+	}
+	archive.Export.SchemaVersion = 1
+	archive.Receipt.Digest, err = archive.Export.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err = json.Marshal(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.RetireEditableProfile(ctx, p.Profile.ID, receipt.ExportID, archive.Receipt.Digest); !errors.Is(err, store.ErrProfileRetirementConflict) {
+		t.Fatal("old format admitted", err)
+	}
+	if _, err = st.GetAgent(ctx, p.Profile.ID); err != nil {
+		t.Fatal("old-format refusal deleted profile", err)
+	}
+	fresh, err := svc.ExportEditableProfile(ctx, p.Profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := svc.RetireEditableProfile(ctx, p.Profile.ID, fresh.ExportID, fresh.Digest); err != nil || !result.Retired {
+		t.Fatal("fresh format refused", result, err)
+	}
+}

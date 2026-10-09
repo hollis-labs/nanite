@@ -16,11 +16,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	"github.com/hollis-labs/nanite/pkg/pluginapi"
 	sharedcatalog "github.com/hollis-labs/plugins-catalog"
 
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
@@ -77,16 +79,43 @@ func addCatalogSource(t *testing.T, cs *catalogTestState, srv *httptest.Server) 
 	return src
 }
 
-func minimalCatalogPluginManifest(id string) string {
-	return fmt.Sprintf(`{"schema_version":2,"id":%q,"name":"Test Plugin","version":"1.0.0","description":"test plugin","license":"MIT","runtime":"subprocess","protocol":1,"entrypoint":{"command":"plugin"},"hosts":{"nanite":{"min":"0.1.0"}},"nanite":{}}`, id)
+func minimalCatalogPluginManifest(t *testing.T, id string, extra ...map[string]string) string {
+	t.Helper()
+	files := []manifest.ArtifactFile{}
+	contentsByPath := map[string]string{"bin/plugin": catalogExecutable, "README.md": "hello"}
+	for _, additions := range extra {
+		for path, contents := range additions {
+			contentsByPath[path] = contents
+		}
+	}
+	for path, contents := range contentsByPath {
+		digest := sha256.Sum256([]byte(contents))
+		files = append(files, manifest.ArtifactFile{Path: path, SHA256: hex.EncodeToString(digest[:]), Executable: strings.HasPrefix(path, "bin/")})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	tree, err := manifest.TreeDigest(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration := manifest.Manifest{SchemaVersion: 2, ID: id, Name: "Test Plugin", Version: "1.0.0", Description: "test plugin", License: "MIT", Runtime: "subprocess", Protocol: 2, Server: manifest.Server{Runtime: "binary", Engines: map[string]manifest.HostRange{"binary": {Min: "0.0.0"}}, Entry: "bin/plugin"}, Artifact: manifest.Artifact{Files: files, TreeSHA256: tree}, Hosts: map[string]manifest.HostRange{"nanite": {Min: pluginapi.Version}}, Nanite: json.RawMessage(`{}`)}
+	var out strings.Builder
+	if err := manifest.Encode(&out, declaration); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
 }
+
+const catalogExecutable = "#!/bin/sh\n"
 
 func catalogInstallFixture(t *testing.T, id, url, checksum string, size int64) string {
 	t.Helper()
 	doc := sharedcatalog.Document{SchemaVersion: 2, CatalogVersion: "0.1.0", GeneratedAt: "2026-10-01T00:00:00Z", Plugins: []sharedcatalog.Plugin{}}
 	if id != "" {
-		digest := sha256.Sum256([]byte(minimalCatalogPluginManifest(id)))
-		doc.Plugins = append(doc.Plugins, sharedcatalog.Plugin{ID: id, Name: "Test Plugin", Version: "1.0.0", Hosts: map[string]manifest.HostRange{"nanite": {Min: "0.1.0"}}, Source: sharedcatalog.Source{Type: "git", Repo: "https://github.com/example/plugins", Tag: "v1.0.0"}, Archives: []sharedcatalog.Archive{{Platform: runtime.GOOS + "-" + runtime.GOARCH, URL: url, SHA256: checksum, Size: size}}, ManifestSHA256: hex.EncodeToString(digest[:]), Directory: sharedcatalog.Directory{Status: "active"}})
+		digest := sha256.Sum256([]byte(minimalCatalogPluginManifest(t, id)))
+		doc.Plugins = append(doc.Plugins, sharedcatalog.Plugin{ID: id, Name: "Test Plugin", Version: "1.0.0", Source: sharedcatalog.Source{Type: "git", Repo: "https://github.com/example/plugins", Tag: "v1.0.0"}, Archives: []sharedcatalog.Archive{{Platform: runtime.GOOS + "-" + runtime.GOARCH, URL: url, SHA256: checksum, Size: size}}, ManifestSHA256: hex.EncodeToString(digest[:]), Directory: sharedcatalog.Directory{Status: "active"}})
+		if err := json.Unmarshal([]byte(`{"nanite":{"min":"0.1.0"}}`), &doc.Plugins[0].Hosts); err != nil {
+			t.Fatal(err)
+		}
 	}
 	raw, err := json.Marshal(doc)
 	if err != nil {
@@ -151,14 +180,19 @@ func buildTarGzArchive(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	for name := range files {
 		if filepath.Base(name) == "plugin.yaml" {
-			files[filepath.Join(filepath.Dir(name), "plugin")] = "#!/bin/sh\n"
+			files[filepath.Join(filepath.Dir(name), "bin/plugin")] = catalogExecutable
+			files[filepath.Join(filepath.Dir(name), "README.md")] = "hello"
 		}
 	}
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	for name, content := range files {
-		if err := tw.WriteHeader(&tar.Header{Name: name, Size: int64(len(content)), Mode: 0755}); err != nil {
+		mode := int64(0644)
+		if strings.Contains("/"+name, "/bin/") {
+			mode = 0755
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: name, Size: int64(len(content)), Mode: mode}); err != nil {
 			t.Fatalf("tar header %s: %v", name, err)
 		}
 		if _, err := tw.Write([]byte(content)); err != nil {
@@ -180,14 +214,19 @@ func buildZipArchive(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	for name := range files {
 		if filepath.Base(name) == "plugin.yaml" {
-			files[filepath.Join(filepath.Dir(name), "plugin")] = "#!/bin/sh\n"
+			files[filepath.Join(filepath.Dir(name), "bin/plugin")] = catalogExecutable
+			files[filepath.Join(filepath.Dir(name), "README.md")] = "hello"
 		}
 	}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for name, content := range files {
 		header := &zip.FileHeader{Name: name, Method: zip.Deflate}
-		header.SetMode(0755)
+		mode := os.FileMode(0644)
+		if strings.Contains("/"+name, "/bin/") {
+			mode = 0755
+		}
+		header.SetMode(mode)
 		w, err := zw.CreateHeader(header)
 		if err != nil {
 			t.Fatalf("zip create %s: %v", name, err)
@@ -209,7 +248,8 @@ func buildZipArchive(t *testing.T, files map[string]string) []byte {
 func TestHandleCatalogInstall_PathTraversal(t *testing.T) {
 	cs, pluginsDir := setupCatalogTestState(t)
 
-	catalogYAML := catalogInstallFixture(t, "../../etc/passwd", "https://example.invalid/x.tar.gz", strings.Repeat("a", 64), 123)
+	catalogYAML := catalogInstallFixture(t, "traversal-fixture", "https://example.invalid/x.tar.gz", strings.Repeat("a", 64), 123)
+	catalogYAML = strings.Replace(catalogYAML, `"id":"traversal-fixture"`, `"id":"../../etc/passwd"`, 1)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/catalog.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(catalogYAML)) })
 	srv := httptest.NewTLSServer(mux)
@@ -257,7 +297,7 @@ func TestHandleCatalogInstall_PathTraversal(t *testing.T) {
 func TestHandleCatalogInstall_Success_TarGz(t *testing.T) {
 	cs, pluginsDir := setupCatalogTestState(t)
 
-	archive := buildTarGzArchive(t, map[string]string{"plugin.yaml": minimalCatalogPluginManifest("testplug")})
+	archive := buildTarGzArchive(t, map[string]string{"plugin.yaml": minimalCatalogPluginManifest(t, "testplug")})
 	sum := sha256.Sum256(archive)
 	shaHex := hex.EncodeToString(sum[:])
 
@@ -311,7 +351,7 @@ func TestHandleCatalogInstall_Success_TarGz(t *testing.T) {
 func TestHandleCatalogInstall_Success_Zip(t *testing.T) {
 	cs, pluginsDir := setupCatalogTestState(t)
 
-	archive := buildZipArchive(t, map[string]string{"plugin.yaml": minimalCatalogPluginManifest("zipplug")})
+	archive := buildZipArchive(t, map[string]string{"plugin.yaml": minimalCatalogPluginManifest(t, "zipplug")})
 	sum := sha256.Sum256(archive)
 	shaHex := hex.EncodeToString(sum[:])
 
@@ -367,7 +407,7 @@ func TestHandleCatalogInstall_Success_WrapperDirectory(t *testing.T) {
 	// flattens, not just the manifest) live inside a single wrapper
 	// directory rather than at the archive root.
 	archive := buildZipArchive(t, map[string]string{
-		"wrapplug-main/plugin.yaml": minimalCatalogPluginManifest("wrapplug"),
+		"wrapplug-main/plugin.yaml": minimalCatalogPluginManifest(t, "wrapplug"),
 		"wrapplug-main/README.md":   "hello",
 	})
 	sum := sha256.Sum256(archive)
@@ -490,7 +530,7 @@ func TestHandleCatalogInstall_NotFound(t *testing.T) {
 func TestHandleCatalogInstall_WrongChecksum(t *testing.T) {
 	cs, pluginsDir := setupCatalogTestState(t)
 
-	archive := buildTarGzArchive(t, map[string]string{"plugin.yaml": minimalCatalogPluginManifest("testplug")})
+	archive := buildTarGzArchive(t, map[string]string{"plugin.yaml": minimalCatalogPluginManifest(t, "testplug")})
 	shaHex := strings.Repeat("0", 64)
 
 	mux := http.NewServeMux()

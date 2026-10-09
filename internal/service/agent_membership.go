@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	svcerr "github.com/hollis-labs/go-svcerr"
+	svcerr "github.com/hollis-labs/libs/util/svcerr"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 

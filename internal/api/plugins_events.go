@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	ssekit "github.com/hollis-labs/go-ssekit"
+	ssekit "github.com/hollis-labs/libs/ui-go/ssekit"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 )
 

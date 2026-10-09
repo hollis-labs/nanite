@@ -3,6 +3,8 @@ package plugin
 import (
 	"runtime"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+
 	sharedcatalog "github.com/hollis-labs/plugins-catalog"
 )
 
@@ -20,7 +22,7 @@ func DecodeCatalog(raw []byte) (*CatalogFile, error) {
 		if !ok {
 			continue
 		}
-		if rangeErr := CheckHostRange(hostRange); rangeErr != nil {
+		if rangeErr := CheckHostRange(manifest.HostRange{Min: hostRange.Min, Max: hostRange.Max}); rangeErr != nil {
 			continue
 		}
 		if idErr := ValidatePluginID(declaration.ID); idErr != nil {

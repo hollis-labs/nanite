@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/plugin"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // Host runtime event types stored alongside mailbox events in session_events.

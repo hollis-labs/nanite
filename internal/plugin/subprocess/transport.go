@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
-	pluginhost "github.com/hollis-labs/plugin-host"
+	pluginhost "github.com/hollis-labs/libs/plugin-mcp/plugin-host"
 )
 
 var ErrSubprocessGone = pluginhost.ErrGone
@@ -20,7 +21,9 @@ type Transport struct {
 	conn      *pluginhost.Conn
 	current   func() *pluginhost.Conn
 	secrets   []string
+	secretMu  sync.RWMutex
 	callLimit time.Duration
+	dispatch  func(context.Context) (*pluginhost.Conn, context.Context, func(), error)
 }
 
 func NewTransport(r io.Reader, w io.Writer) *Transport {
@@ -56,10 +59,12 @@ func (t *Transport) Close() error {
 }
 
 func (t *Transport) Call(ctx context.Context, method string, params any) (*RPCResponse, error) {
-	conn, err := t.connection()
+	conn, permitted, release, err := t.acquireDispatch(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
+	ctx = permitted
 	limit := t.callLimit
 	if limit <= 0 {
 		limit = MaxCallDuration
@@ -68,17 +73,29 @@ func (t *Transport) Call(ctx context.Context, method string, params any) (*RPCRe
 	defer cancel()
 	result, err := conn.Call(ctx, method, params)
 	if err != nil {
-		return nil, redactPluginError(err, t.secrets)
+		return nil, redactPluginError(err, t.secretValues())
 	}
 	return &RPCResponse{JSONRPC: "2.0", Result: result}, nil
 }
 
 func (t *Transport) Notify(method string, params any) error {
-	conn, err := t.connection()
+	conn, ctx, release, err := t.acquireDispatch(context.Background())
 	if err != nil {
 		return err
 	}
+	defer release()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return conn.Notify(method, params)
+}
+
+func (t *Transport) acquireDispatch(ctx context.Context) (*pluginhost.Conn, context.Context, func(), error) {
+	if t != nil && t.dispatch != nil {
+		return t.dispatch(ctx)
+	}
+	conn, err := t.connection()
+	return conn, ctx, func() {}, err
 }
 
 func CallResult[T any](t *Transport, ctx context.Context, method string, params any) (*T, error) {
@@ -109,4 +126,18 @@ func redactPluginError(err error, values []string) error {
 		return err
 	}
 	return redactedPluginError{cause: err, message: message}
+}
+
+func (t *Transport) addSecrets(values []string) {
+	if t == nil {
+		return
+	}
+	t.secretMu.Lock()
+	defer t.secretMu.Unlock()
+	t.secrets = append(t.secrets, values...)
+}
+func (t *Transport) secretValues() []string {
+	t.secretMu.RLock()
+	defer t.secretMu.RUnlock()
+	return append([]string(nil), t.secrets...)
 }

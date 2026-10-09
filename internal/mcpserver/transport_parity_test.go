@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	svcerr "github.com/hollis-labs/go-svcerr"
-	tp "github.com/hollis-labs/go-transportparity"
+	svcerr "github.com/hollis-labs/libs/util/svcerr"
+	tp "github.com/hollis-labs/libs/util/transportparity"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/selftools"

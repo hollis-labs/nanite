@@ -8,11 +8,11 @@ import (
 	"net/url"
 	"strings"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 )
 
 // HTTP-stream cause + error-class constants synthesized when the chat

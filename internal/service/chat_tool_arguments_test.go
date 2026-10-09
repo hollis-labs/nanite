@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/tool"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // D-35: the executor persists redacted, bounded arguments for every executed

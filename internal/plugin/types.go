@@ -6,7 +6,7 @@ import (
 
 // Re-export Nanite-specific UI plugin types so existing callers in this
 // package keep compiling with unqualified names after the Phase 2 Track I
-// split: universal types moved to github.com/hollis-labs/plugin-sdk, while
+// split: universal types moved to github.com/hollis-labs/libs/plugin-mcp/plugin-sdk, while
 // host-specific UI types moved to github.com/hollis-labs/nanite/pkg/plugin.
 type UISlotName = naniteplugin.UISlotName
 type UISlotEntry = naniteplugin.UISlotEntry

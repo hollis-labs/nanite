@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/hollis-labs/go-safefs/atomicfile"
+	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
 )
 
 const (

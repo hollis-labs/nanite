@@ -13,9 +13,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/hollis-labs/go-egress-proxy/egress"
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/interception/egress"
 )
 
 // A2APushNotifier handles best-effort push notification delivery for A2A task

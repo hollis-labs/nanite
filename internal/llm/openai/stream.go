@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/llm/toolargs"
 	"github.com/hollis-labs/nanite/internal/usagecost"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 	sdk "github.com/openai/openai-go/v3"
 )
 

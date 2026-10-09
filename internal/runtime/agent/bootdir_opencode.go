@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 
-	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/agentlaunch"
+	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
 )
 
 // opencodeLayout plants opencode's config-dir shape:
@@ -28,7 +28,7 @@ import (
 // surfaced via OPENCODE_CONFIG_DIR=<bootDir>.
 //
 // TASKS/agent-host-acp/04: the bootdir file-set is declared as a
-// plant.Spec (github.com/hollis-labs/go-agent-wrapper/plant) and planted
+// plant.PlantSpec (github.com/hollis-labs/substrate/harness/agentlaunch/planting) and planted
 // through opencodePlanter, which implements plant.Planter — see
 // bootdir_plant.go for why Nanite uses go-agent-wrapper's Planter
 // contract rather than agentkit/agentlaunch/providerplant.Plant.
@@ -42,12 +42,14 @@ type opencodeLayout struct{}
 // every other planted file, so plantConfig.providerSettingsPath is left
 // empty here. See bootdir_plant.go's plantSpec for the shared write
 // routine.
-type opencodePlanter struct{}
+type opencodePlanter struct {
+	authorize agentlaunch.ArtifactAuthorizer
+}
 
 var _ plant.Planter = opencodePlanter{}
 
-func (opencodePlanter) Plant(ctx context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
-	return plantSpec(ctx, bootDir, spec, plantConfig{provider: "opencode"})
+func (p opencodePlanter) Plant(ctx context.Context, bootDir string, spec plant.PlantSpec) (plant.PlantResult, error) {
+	return plantSpec(ctx, bootDir, spec, plantConfig{provider: "opencode", authorize: p.authorize})
 }
 
 // opencodeAgentMD renders the agents/<slug>.md system-prompt body.
@@ -92,25 +94,25 @@ func opencodeJSON(slug string) (string, error) {
 }
 
 // opencodePlantSpec assembles the full opencode bootdir file-set as a
-// plant.Spec.
-func opencodePlantSpec(params SetupParams) (plant.Spec, error) {
+// plant.PlantSpec.
+func opencodePlantSpec(params SetupParams) (plant.PlantSpec, error) {
 	// CW-20260910-0015: opencode's extension point is a JS plugin entry,
 	// not a command hook declared in a settings file — a different
 	// mechanism entirely, which go-providers' capability matrix records
 	// as FeatureHooks: unsupported. See bootdir_hooks.go's header.
 	if len(params.Hooks) > 0 {
-		return plant.Spec{}, hooksUnsupportedError("opencode",
+		return plant.PlantSpec{}, hooksUnsupportedError("opencode",
 			"opencode extends through JS plugin entry points, not command hooks")
 	}
 	slug := agentSlug(params)
 
 	agentsJSONBody, err := opencodeAgentsJSON(params, slug)
 	if err != nil {
-		return plant.Spec{}, err
+		return plant.PlantSpec{}, err
 	}
 	opencodeJSONBody, err := opencodeJSON(slug)
 	if err != nil {
-		return plant.Spec{}, err
+		return plant.PlantSpec{}, err
 	}
 
 	files := map[string][]byte{
@@ -130,7 +132,7 @@ func opencodePlantSpec(params SetupParams) (plant.Spec, error) {
 	// skills.
 	skillFiles, err := skillFilesForProvider(context.Background(), "opencode", params)
 	if err != nil {
-		return plant.Spec{}, err
+		return plant.PlantSpec{}, err
 	}
 	for relPath, content := range skillFiles {
 		files[relPath] = content
@@ -138,54 +140,47 @@ func opencodePlantSpec(params SetupParams) (plant.Spec, error) {
 
 	mcp, err := mcpConfigBytes(params)
 	if err != nil {
-		return plant.Spec{}, err
+		return plant.PlantSpec{}, err
 	}
 
-	return plant.Spec{Files: files, MCPConfig: mcp}, nil
+	return plant.PlantSpec{Files: files, MCPConfig: mcp}, nil
 }
 
 func (l opencodeLayout) Setup(params SetupParams) (string, error) {
-	bootDir, err := makeBootDir("opencode", params)
+	bootDir, authorize, seal, err := makeAuthorizedBootDir("opencode", params)
 	if err != nil {
 		return "", err
 	}
-	if _, err := l.Populate(bootDir, params); err != nil {
-		_ = os.RemoveAll(bootDir)
-		return "", err
+	defer seal()
+	result, err := l.populateInactive(bootDir, params, authorize)
+	bootArtifactEvidence.Store(bootDir, result)
+	if err != nil {
+		return "", &BootArtifactFailure{BootDir: bootDir, Result: result, Cause: err}
 	}
 	return bootDir, nil
 }
 
-// Populate writes the opencode boot-dir shape into bootDir. Idempotent.
-//
-// Layout.Populate has no context.Context parameter (see bootdir.go
-// and claudeLayout.Populate's comment for why opencodePlanter.Plant is
-// called with context.Background() here).
-func (opencodeLayout) Populate(bootDir string, params SetupParams) (plant.Result, error) {
+// Populate refuses refresh of an existing bound root under the published
+// inactive-only artifact contract. Setup uses its private custody port instead.
+func (opencodeLayout) Populate(bootDir string, params SetupParams) (plant.PlantResult, error) {
+	return plant.PlantResult{}, &ArtifactRefreshUnavailable{Provider: "opencode", Operation: "populate bound root"}
+}
+
+func (opencodeLayout) populateInactive(bootDir string, params SetupParams, authorize agentlaunch.ArtifactAuthorizer) (plant.PlantResult, error) {
 	if params.AgentProfile == nil {
-		return plant.Result{}, fmt.Errorf("agent: opencodeLayout.Populate: AgentProfile is required")
+		return plant.PlantResult{}, fmt.Errorf("agent: opencodeLayout.Populate: AgentProfile is required")
 	}
 	spec, err := opencodePlantSpec(params)
 	if err != nil {
-		return plant.Result{}, err
+		return plant.PlantResult{}, err
 	}
-	return opencodePlanter{}.Plant(context.Background(), bootDir, spec)
+	return (opencodePlanter{authorize: authorize}).Plant(context.Background(), bootDir, spec)
 }
 
-// RegenerateSystemPromptSlot rewrites only agents/<slug>.md, leaving the
-// rest of the sandbox dir intact.
+// RegenerateSystemPromptSlot retains the binding and returns typed unavailable
+// until a provider acknowledged, fenced active-update contract is implemented.
 func (opencodeLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParams) error {
-	if params.AgentProfile == nil {
-		return fmt.Errorf("agent: opencodeLayout.RegenerateSystemPromptSlot: AgentProfile is required")
-	}
-	slug := agentSlug(params)
-	spec := plant.Spec{
-		Files: map[string][]byte{
-			fmt.Sprintf("agents/%s.md", slug): []byte(opencodeAgentMD(params)),
-		},
-	}
-	_, err := opencodePlanter{}.Plant(context.Background(), bootDir, spec)
-	return err
+	return &ArtifactRefreshUnavailable{Provider: "opencode", Operation: "refresh system prompt"}
 }
 
 // AmendEnv injects OPENCODE_CONFIG_DIR=<bootDir>, and points XDG_CONFIG_HOME

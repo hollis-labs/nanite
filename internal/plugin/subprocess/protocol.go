@@ -1,6 +1,6 @@
 package subprocess
 
-// The JSON-RPC wire protocol lives in github.com/hollis-labs/plugin-sdk/subprocess
+// The JSON-RPC wire protocol lives in github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess
 // as of Track C.3. This file re-exports the types and constants under their
 // original names so the rest of the nanite host code continues to reference
 // them unqualified (RPCRequest / RPCResponse / MethodInit / ErrCodeNotFound / ...).
@@ -9,7 +9,7 @@ package subprocess
 // in plugin-sdk; host-specific typed representations go in nanite/pkg/plugin.
 
 import (
-	sdksub "github.com/hollis-labs/plugin-sdk/subprocess"
+	sdksub "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 )
 
 // --- Wire primitives (type aliases) ---

@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
-	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // StreamManager owns the concurrent state for message streams, SSE

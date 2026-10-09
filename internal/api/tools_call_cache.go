@@ -6,12 +6,12 @@ import (
 	"strings"
 	"sync"
 
-	toolresult "github.com/hollis-labs/go-toolresult"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/truncate"
 	"github.com/hollis-labs/nanite/pkg/models"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
 )
 
 // CW-20260929-0011 / D-38: a CLI-launched agent's self-tool calls reach the

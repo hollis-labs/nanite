@@ -22,8 +22,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	"github.com/hollis-labs/plugin-sdk/manifest"
 )
 
 type Spec struct{ PluginID, Feature, SourceID, Table string }

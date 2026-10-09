@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 // CW-20261001-0020: a native CLI agent's cwd stays its boot dir, so the

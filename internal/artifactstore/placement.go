@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/go-safefs/pathsafe"
+	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 )
 
 // DefaultStorageDir is the root used when no artifact storage root is configured.

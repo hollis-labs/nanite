@@ -37,10 +37,11 @@ func createTestPlugin(t *testing.T, dir, name string) string {
 	t.Helper()
 	pluginDir := filepath.Join(dir, name)
 	os.MkdirAll(pluginDir, 0755)
-	manifest := minimalCatalogPluginManifest(name)
+	manifest := minimalCatalogPluginManifest(t, name)
 	os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(manifest), 0644)
-	os.WriteFile(filepath.Join(pluginDir, "plugin"), []byte("#!/bin/sh\n"), 0755) // #nosec G306 -- executable fixture in t.TempDir requires the owner execute bit.
-	os.WriteFile(filepath.Join(pluginDir, "README.md"), []byte("# "+name), 0644)
+	os.MkdirAll(filepath.Join(pluginDir, "bin"), 0700)
+	os.WriteFile(filepath.Join(pluginDir, "bin/plugin"), []byte("#!/bin/sh\n"), 0755) // #nosec G306 -- executable fixture in t.TempDir requires the owner execute bit.
+	os.WriteFile(filepath.Join(pluginDir, "README.md"), []byte("hello"), 0600)
 	return pluginDir
 }
 
@@ -66,6 +67,17 @@ func TestHandleInstallLocal(t *testing.T) {
 	}
 	staleBody, _ := json.Marshal(map[string]string{"path": filepath.Join(srcDir, "test-local-plugin"), "approved_digest": digest})
 	stale := httptest.NewRecorder()
+	mux.ServeHTTP(stale, httptest.NewRequest(http.MethodPost, "/api/plugins/install-local", bytes.NewReader(staleBody)))
+	if stale.Code != http.StatusBadRequest {
+		t.Fatalf("tampered inventory accepted: %d %s", stale.Code, stale.Body.String())
+	}
+	// A publisher must declare the replacement bytes before the host can offer
+	// a fresh review. The previous receipt cannot authorize this declaration.
+	updated := minimalCatalogPluginManifest(t, "test-local-plugin", map[string]string{"README.md": "changed after preview"})
+	if err := os.WriteFile(filepath.Join(srcDir, "test-local-plugin", "plugin.yaml"), []byte(updated), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stale = httptest.NewRecorder()
 	mux.ServeHTTP(stale, httptest.NewRequest(http.MethodPost, "/api/plugins/install-local", bytes.NewReader(staleBody)))
 	refreshed := assertInstallReview(t, stale, pluginsDir, "")
 	if refreshed == digest {
@@ -195,15 +207,18 @@ func TestHandleInstallArchive_TarGz(t *testing.T) {
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 
-	manifest := minimalCatalogPluginManifest("archive-plugin")
+	manifest := minimalCatalogPluginManifest(t, "archive-plugin", map[string]string{"data.txt": "hello from archive"})
 	// Directory entry.
 	tw.WriteHeader(&tar.Header{Name: "archive-plugin/", Typeflag: tar.TypeDir, Mode: 0755})
 	// plugin.yaml
 	tw.WriteHeader(&tar.Header{Name: "archive-plugin/plugin.yaml", Size: int64(len(manifest)), Mode: 0644})
 	tw.Write([]byte(manifest))
 	executable := "#!/bin/sh\n"
-	tw.WriteHeader(&tar.Header{Name: "archive-plugin/plugin", Size: int64(len(executable)), Mode: 0755})
+	tw.WriteHeader(&tar.Header{Name: "archive-plugin/bin/plugin", Size: int64(len(executable)), Mode: 0755})
 	tw.Write([]byte(executable))
+	readme := "hello"
+	tw.WriteHeader(&tar.Header{Name: "archive-plugin/README.md", Size: int64(len(readme)), Mode: 0644})
+	tw.Write([]byte(readme))
 	// A data file.
 	data := "hello from archive"
 	tw.WriteHeader(&tar.Header{Name: "archive-plugin/data.txt", Size: int64(len(data)), Mode: 0644})

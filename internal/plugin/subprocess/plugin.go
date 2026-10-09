@@ -10,12 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/capability"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/version"
-	"github.com/hollis-labs/plugin-sdk"
 )
 
 // validatePluginID applies the shared identity rule before assembling host
@@ -134,7 +135,25 @@ func NewSubprocessPluginForTest(id string, transport *Transport) *SubprocessPlug
 
 // AcceptedReviewDigest pins declarations to the acceptance that launched this
 // child; replacing a receipt cannot authorize an older running manager.
-func (sp *SubprocessPlugin) AcceptedReviewDigest() string { return sp.mgr.cfg.ReviewDigest }
+func (sp *SubprocessPlugin) AcceptedReviewDigest() string {
+	if sp.mgr == nil {
+		return ""
+	}
+	return sp.mgr.cfg.ReviewDigest
+}
+
+func (sp *SubprocessPlugin) Incarnation() capability.RuntimeIdentity {
+	if sp.mgr == nil {
+		return capability.RuntimeIdentity{}
+	}
+	return sp.mgr.Incarnation()
+}
+
+func (sp *SubprocessPlugin) SetLifecycleObserver(changed func()) {
+	if sp.mgr != nil {
+		sp.mgr.SetLifecycleObserver(changed)
+	}
+}
 
 func (sp *SubprocessPlugin) ID() string {
 	sp.mu.RLock()
@@ -185,7 +204,9 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) (loadErr error) {
 	if err != nil {
 		return fmt.Errorf("build init params: %w", err)
 	}
-	initParams.Granted = append([]string(nil), sp.mgr.cfg.Granted...)
+	if len(sp.mgr.cfg.Granted) > 0 && sp.mgr.cfg.IssueGrants == nil {
+		return fmt.Errorf("protocol 2 grant issuance policy is unavailable for reviewed capabilities")
+	}
 	initParams.Identity = append(json.RawMessage(nil), sp.mgr.cfg.Identity...)
 	transport, err := sp.mgr.Start(host.Context(), *initParams)
 	if err != nil {
@@ -753,5 +774,25 @@ func mapRPCError(err error) error {
 		return plugin.ErrCancelled
 	default:
 		return err
+	}
+}
+
+func (sp *SubprocessPlugin) Directory() string { return sp.pluginDir }
+func (sp *SubprocessPlugin) CurrentGrants() capability.GrantSet {
+	if sp.mgr == nil {
+		return nil
+	}
+	return sp.mgr.CurrentGrants()
+}
+func (sp *SubprocessPlugin) RenewGrants(ctx context.Context, grants capability.GrantSet) error {
+	if sp.mgr == nil {
+		return ErrGrantLeaseEnded
+	}
+	return sp.mgr.RenewGrants(ctx, grants)
+}
+
+func (sp *SubprocessPlugin) RevokeIncarnation(owner capability.RuntimeIdentity) {
+	if sp.mgr != nil {
+		sp.mgr.RevokeIncarnation(owner)
 	}
 }

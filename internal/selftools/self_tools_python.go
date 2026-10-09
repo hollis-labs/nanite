@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/mcp"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 // pythonSandboxDefaultTimeLimitSec is the default CPU/wall-clock cap.

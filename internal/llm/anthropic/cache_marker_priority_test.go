@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // TestCacheMarkerPriority_UniversalSlotFirst_LoadBearing is the

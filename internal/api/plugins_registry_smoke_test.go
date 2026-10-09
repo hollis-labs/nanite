@@ -29,7 +29,7 @@ func TestPluginsRegistryLiveBrowserSmoke(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "ui.js"), []byte(`export function LiveCard() { return "Loaded from Nanite"; }`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	writeAPIPluginBundle(t, directory, "browser-live", "Live browser fixture", pluginapi.Block{UI: pluginapi.UI{Bundle: "ui.js", ReactVersion: "^19.0.0"}, Registers: pluginapi.Registrations{Envelopes: []pluginapi.Envelope{{Type: "browser-live-card", Component: "LiveCard", Version: 1, Schema: "schema.json"}}}})
+	writeAPIPluginBundle(t, directory, "browser-live", "Live browser fixture", pluginapi.Block{UI: pluginapi.UI{Bundle: "ui/index.js", ReactVersion: "^19.0.0"}, Registers: pluginapi.Registrations{Envelopes: []pluginapi.Envelope{{Type: "browser-live-card", Component: "LiveCard", Version: 1, Schema: "schema.json"}}}})
 	mux := http.NewServeMux()
 	host := naniteplugin.NewHost(mux, naniteplugin.NewLogger("test"))
 	discovered, err := naniteplugin.DiscoverPlugins(root)

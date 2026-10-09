@@ -8,10 +8,10 @@ import (
 	"strings"
 	"sync"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/describer"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // MaxSelectedTools is the maximum number of tools returned by SelectTools.

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/agentimport"
 	"github.com/hollis-labs/nanite/internal/store"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func TestAgentInstallGrants_DeclaredToolsAndSyncPreservesRevocation(t *testing.T) {

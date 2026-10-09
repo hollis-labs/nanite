@@ -1,5 +1,5 @@
 import { ArrowLeft, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,7 +24,7 @@ interface MemoryDetailProps {
 }
 
 const ORIGIN_OPTIONS: MemoryOrigin[] = ["user", "feedback", "project", "reference", "observation"];
-const SCOPE_OPTIONS: MemoryScope[] = ["session", "project", "user"];
+const SCOPE_OPTIONS: MemoryScope[] = ["app", "session", "project", "user"];
 const STATUS_OPTIONS: MemoryStatus[] = ["draft", "reviewed", "canonical", "deprecated"];
 
 function statusPillClass(status: MemoryStatus, active: boolean): string {
@@ -49,6 +49,7 @@ const selectClass =
 const labelClass = "text-xs uppercase tracking-wider text-fg-muted font-medium";
 
 export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
+  const formId = useId();
   const isCreate = memoryKey === null;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tagInput, setTagInput] = useState("");
@@ -58,13 +59,15 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
   const [body, setBody] = useState("");
   const [origin, setOrigin] = useState<MemoryOrigin>("user");
   const [confidence, setConfidence] = useState(0.8);
-  const [scope, setScope] = useState<MemoryScope>("user");
+  const [scope, setScope] = useState<MemoryScope>("app");
   const [status, setStatus] = useState<MemoryStatus>("draft");
   const [tags, setTags] = useState<string[]>([]);
 
   // Fetch memories list to find the one being edited
   const { data } = useMemories({ limit: 1000 });
   const memory: Memory | undefined = data?.memories.find((m) => m.key === memoryKey);
+
+  const editable = isCreate || memory?.editable === true;
 
   // Hydrate form when memory loads
   useEffect(() => {
@@ -84,6 +87,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
   const statusMutation = useUpdateMemoryStatus();
 
   const handleSave = useCallback(() => {
+    if (!editable) return;
     // The list endpoint deliberately returns full editable rows. Always send
     // the actual form value so an explicit clear is distinct from an older
     // projected client omitting body (which the server treats as unchanged).
@@ -94,6 +98,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
       updateMutation.mutate({ key: memoryKey, data }, { onSuccess: onBack });
     }
   }, [
+    editable,
     isCreate,
     memoryKey,
     summary,
@@ -109,17 +114,17 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
 
   const handleStatusClick = useCallback(
     (s: MemoryStatus) => {
-      if (!memoryKey) return;
+      if (!memoryKey || !editable) return;
       setStatus(s);
       statusMutation.mutate({ key: memoryKey, status: s });
     },
-    [memoryKey, statusMutation],
+    [memoryKey, editable, statusMutation],
   );
 
   const handleDeleteConfirm = useCallback(() => {
-    if (!memoryKey) return;
+    if (!memoryKey || !editable) return;
     deleteMutation.mutate(memoryKey, { onSuccess: onBack });
-  }, [memoryKey, deleteMutation, onBack]);
+  }, [memoryKey, editable, deleteMutation, onBack]);
 
   const handleTagKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -153,9 +158,9 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
           <ArrowLeft className="size-4" />
         </button>
         <span className="text-sm font-medium text-fg flex-1">
-          {isCreate ? "New Memory" : "Edit Memory"}
+          {isCreate ? "New Memory" : editable ? "Edit Memory" : "View Memory"}
         </span>
-        {!isCreate && (
+        {!isCreate && editable && (
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
@@ -165,138 +170,171 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
             Delete
           </button>
         )}
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={isSaving || !summary.trim()}
-          className="flex items-center gap-1 text-xs font-medium px-3 py-1 rounded-md bg-primary text-white hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isSaving ? "Saving…" : "Save"}
-        </button>
+        {editable && (
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving || !summary.trim()}
+            className="flex items-center gap-1 text-xs font-medium px-3 py-1 rounded-md bg-primary text-white hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSaving ? "Saving…" : "Save"}
+          </button>
+        )}
       </div>
 
       {/* Form */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* Summary */}
-        <div className="space-y-1">
-          <label className={labelClass}>Summary *</label>
-          <input
-            type="text"
-            value={summary}
-            onChange={(e) => setSummary(e.target.value)}
-            placeholder="Short summary of this memory"
-            className={inputClass}
-          />
-        </div>
-
-        {/* Body */}
-        <div className="space-y-1">
-          <label className={labelClass}>Body</label>
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder="Optional extended content…"
-            rows={4}
-            className={`${inputClass} resize-none`}
-          />
-        </div>
-
-        {/* Origin + Confidence row */}
-        <div className="grid grid-cols-2 gap-3">
+        {!editable && <p className="text-sm text-fg-muted">This retained memory is read-only.</p>}
+        {isCreate && (
+          <p className="text-sm text-fg-muted">Nanite stores this as app memory for your user.</p>
+        )}
+        <fieldset disabled={!editable} className="contents">
+          {/* Summary */}
           <div className="space-y-1">
-            <label className={labelClass}>Origin</label>
+            <label htmlFor={`${formId}-summary`} className={labelClass}>
+              Summary *
+            </label>
+            <input
+              id={`${formId}-summary`}
+              disabled={!editable}
+              type="text"
+              value={summary}
+              onChange={(e) => setSummary(e.target.value)}
+              placeholder="Short summary of this memory"
+              className={inputClass}
+            />
+          </div>
+
+          {/* Body */}
+          <div className="space-y-1">
+            <label htmlFor={`${formId}-body`} className={labelClass}>
+              Body
+            </label>
+            <textarea
+              id={`${formId}-body`}
+              disabled={!editable}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Optional extended content…"
+              rows={4}
+              className={`${inputClass} resize-none`}
+            />
+          </div>
+
+          {/* Origin + Confidence row */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label htmlFor={`${formId}-origin`} className={labelClass}>
+                Origin
+              </label>
+              <select
+                id={`${formId}-origin`}
+                value={origin}
+                disabled={!editable}
+                onChange={(e) => setOrigin(e.target.value as MemoryOrigin)}
+                className={selectClass}
+              >
+                {ORIGIN_OPTIONS.map((o) => (
+                  <option key={o} value={o}>
+                    {o.charAt(0).toUpperCase() + o.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor={`${formId}-confidence`} className={labelClass}>
+                Confidence
+              </label>
+              <input
+                id={`${formId}-confidence`}
+                disabled={!editable}
+                type="number"
+                value={confidence}
+                onChange={(e) => setConfidence(parseFloat(e.target.value))}
+                min={0}
+                max={1}
+                step={0.05}
+                className={inputClass}
+              />
+            </div>
+          </div>
+
+          {/* Scope */}
+          <div className="space-y-1">
+            <label htmlFor={`${formId}-scope`} className={labelClass}>
+              Scope
+            </label>
             <select
-              value={origin}
-              onChange={(e) => setOrigin(e.target.value as MemoryOrigin)}
-              className={selectClass}
+              id={`${formId}-scope`}
+              value={scope}
+              onChange={(e) => setScope(e.target.value as MemoryScope)}
+              disabled
+              className={`${selectClass} disabled:opacity-50 disabled:cursor-not-allowed`}
             >
-              {ORIGIN_OPTIONS.map((o) => (
-                <option key={o} value={o}>
-                  {o.charAt(0).toUpperCase() + o.slice(1)}
+              {SCOPE_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
                 </option>
               ))}
             </select>
           </div>
 
-          <div className="space-y-1">
-            <label className={labelClass}>Confidence</label>
-            <input
-              type="number"
-              value={confidence}
-              onChange={(e) => setConfidence(parseFloat(e.target.value))}
-              min={0}
-              max={1}
-              step={0.05}
-              className={inputClass}
-            />
-          </div>
-        </div>
+          {/* Status pills — edit mode only */}
+          {!isCreate && (
+            <div className="space-y-1.5">
+              <p className={labelClass}>Status</p>
+              <div className="flex flex-wrap gap-1.5">
+                {STATUS_OPTIONS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    disabled={!editable}
+                    onClick={() => handleStatusClick(s)}
+                    className={`text-xs px-2.5 py-1 rounded-md font-medium ${statusPillClass(s, status === s)}`}
+                  >
+                    {s.charAt(0).toUpperCase() + s.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-        {/* Scope */}
-        <div className="space-y-1">
-          <label className={labelClass}>Scope</label>
-          <select
-            value={scope}
-            onChange={(e) => setScope(e.target.value as MemoryScope)}
-            disabled={!isCreate}
-            className={`${selectClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-          >
-            {SCOPE_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Status pills — edit mode only */}
-        {!isCreate && (
+          {/* Tags */}
           <div className="space-y-1.5">
-            <label className={labelClass}>Status</label>
-            <div className="flex flex-wrap gap-1.5">
-              {STATUS_OPTIONS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => handleStatusClick(s)}
-                  className={`text-xs px-2.5 py-1 rounded-md font-medium ${statusPillClass(s, status === s)}`}
+            <label htmlFor={`${formId}-tags`} className={labelClass}>
+              Tags
+            </label>
+            <div className="flex flex-wrap gap-1.5 mb-1.5">
+              {tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-md bg-surface text-fg-secondary"
                 >
-                  {s.charAt(0).toUpperCase() + s.slice(1)}
-                </button>
+                  {tag}
+                  <button
+                    type="button"
+                    disabled={!editable}
+                    onClick={() => removeTag(tag)}
+                    className="text-fg-faint hover:text-fg-muted transition-colors leading-none"
+                  >
+                    ×
+                  </button>
+                </span>
               ))}
             </div>
+            <input
+              id={`${formId}-tags`}
+              disabled={!editable}
+              type="text"
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={handleTagKeyDown}
+              placeholder="Type a tag and press Enter"
+              className={`${inputClass} border-dashed`}
+            />
           </div>
-        )}
-
-        {/* Tags */}
-        <div className="space-y-1.5">
-          <label className={labelClass}>Tags</label>
-          <div className="flex flex-wrap gap-1.5 mb-1.5">
-            {tags.map((tag) => (
-              <span
-                key={tag}
-                className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-md bg-surface text-fg-secondary"
-              >
-                {tag}
-                <button
-                  type="button"
-                  onClick={() => removeTag(tag)}
-                  className="text-fg-faint hover:text-fg-muted transition-colors leading-none"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-          <input
-            type="text"
-            value={tagInput}
-            onChange={(e) => setTagInput(e.target.value)}
-            onKeyDown={handleTagKeyDown}
-            placeholder="Type a tag and press Enter"
-            className={`${inputClass} border-dashed`}
-          />
-        </div>
+        </fieldset>
 
         {/* Read-only metadata footer — edit mode only */}
         {!isCreate && memory && (

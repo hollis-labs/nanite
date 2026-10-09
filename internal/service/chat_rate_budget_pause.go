@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/nanite/internal/chat"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 )
 
 // rate_budget_pause is the SSE stream event emitted when a chat turn cannot

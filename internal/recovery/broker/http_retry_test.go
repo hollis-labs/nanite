@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/nanite/internal/runtime/agent"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 )
 
 // fakeHTTPRetry captures Retry calls and lets tests script the response.

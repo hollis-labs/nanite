@@ -14,21 +14,18 @@ import (
 	"github.com/hollis-labs/substrate/agent/runloop"
 	agentturn "github.com/hollis-labs/substrate/agent/turn"
 
-	hooks "github.com/hollis-labs/go-hooks"
-
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/pkg/models"
 
 	"github.com/google/uuid"
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	feotel "github.com/hollis-labs/go-otel"
-	toolresult "github.com/hollis-labs/go-toolresult"
+	feotel "github.com/hollis-labs/libs/util/otel"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	ledger "github.com/hollis-labs/go-usage-ledger"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/effort"
@@ -39,6 +36,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ledger "github.com/hollis-labs/substrate/llm-core/usageledger"
 )
 
 type generationLifecycle struct {
@@ -1466,7 +1464,7 @@ streamLoop:
 			if run.loop.harness != nil {
 				mode = run.loop.harness.Values.WriteClaimGuard
 			}
-			stop := hooks.StopInput{LastAssistantMessage: turnText}
+			stop := turnText
 			facts := s.writeClaimFactsFor(ctx, sessionID, run.loop, false)
 			out, decision := writeClaimHook(mode, stop, facts)
 			if decision.Reason == wcUnbackedClaim {

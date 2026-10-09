@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	chatstream "github.com/hollis-labs/go-chatstream"
-	"github.com/hollis-labs/go-providers/provider/events"
+	chatstream "github.com/hollis-labs/libs/ui-go/chatstream"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/adapters/provider/events"
 )
 
 func TestAgentEventBridgeToolResultOutcomes(t *testing.T) {

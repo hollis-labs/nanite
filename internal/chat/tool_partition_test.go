@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // G-HOT-SWAP-DEAD activation tests. Every assertion targets one of the

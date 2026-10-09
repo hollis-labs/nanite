@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-safefs/pathsafe"
+	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 )
 
 // Phase 4c.6 (CW-20260508-0002): TestPopulate_* tests removed. The

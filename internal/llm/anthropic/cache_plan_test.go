@@ -4,9 +4,9 @@ import (
 	"reflect"
 	"testing"
 
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // TestCachePlan_AllSourcesWithinBudget: system + tools + 2x recent_message,

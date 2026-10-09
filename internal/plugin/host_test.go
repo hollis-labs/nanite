@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/plugin-sdk"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 )
 
 // TestPlugin implements the plugin.Plugin interface for testing

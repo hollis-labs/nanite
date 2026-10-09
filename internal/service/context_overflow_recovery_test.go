@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // fakeEventEmitter captures EmitPreCompact and EmitPostCompact calls for

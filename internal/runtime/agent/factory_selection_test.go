@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/hollis-labs/go-agent-wrapper/adapters"
-	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/substrate/harness/adapters"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 func TestSelectNativeAdapter_PreservesNaniteLaunchPolicy(t *testing.T) {

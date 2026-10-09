@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/hollis-labs/go-envelopes"
+	"github.com/hollis-labs/libs/ui-go/envelopes"
 )
 
 // envelopeRegistry is the shared go-envelopes Registry installed at the

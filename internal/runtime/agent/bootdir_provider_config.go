@@ -3,7 +3,7 @@ package agent
 import (
 	"fmt"
 
-	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 // bootdir_provider_config.go sources the headless-agent CONFIG files

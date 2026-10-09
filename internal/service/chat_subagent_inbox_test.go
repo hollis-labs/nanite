@@ -15,12 +15,12 @@ import (
 	"sync"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // fakeSubagentInbox is a small hand-rolled fake for SubagentResultInbox,

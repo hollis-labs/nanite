@@ -16,12 +16,12 @@ import (
 )
 
 const (
-	messagingModule       = "github.com/hollis-labs/go-messaging"
-	messagingVersion      = "v0.7.0"
-	mailboxImport         = messagingModule + "/mailbox"
+	messagingModule       = "github.com/hollis-labs/substrate/mesh"
+	messagingVersion      = "v0.1.0"
+	mailboxImport         = messagingModule + "/messaging/mailbox"
 	legacyMessagingImport = "github.com/hollis-labs/nanite/internal/messaging"
-	messagingModuleSum    = "h1:VDvodrSgeYbH3ElwoTXWU7VjsPjUeHgXke4ADKLbzZI="
-	messagingGoModSum     = "h1:KLv+81DP4Zktb4/ZnCg5dlzxjaI3u9jAm/tWOZxqHq0="
+	messagingModuleSum    = "h1:CkUvYdoXSGVcSlXhVgc+0AYzyhXdd49c+AV47z0XvOs="
+	messagingGoModSum     = "h1:akUYHGaDVmF2Gwyr784nk8HuNr0KBsl1x97ApvTxcAM="
 )
 
 func TestMessagingDependencyBoundary(t *testing.T) {
@@ -61,7 +61,7 @@ func TestMessagingDependencyBoundary(t *testing.T) {
 		t.Fatalf("messaging dependency boundary failed:\n- %s", strings.Join(violations, "\n- "))
 	}
 	if productionImports == 0 {
-		t.Fatal("messaging boundary found no production go-messaging/mailbox consumers")
+		t.Fatal("messaging boundary found no production mesh/messaging/mailbox consumers")
 	}
 }
 
@@ -178,7 +178,7 @@ func validateMessagingModule(data []byte) []string {
 				version = fields[index+1]
 			}
 			if version != messagingVersion {
-				violations = append(violations, fmt.Sprintf("go-messaging must resolve exactly to %s, got %s", messagingVersion, version))
+				violations = append(violations, fmt.Sprintf("substrate/mesh must resolve exactly to %s, got %s", messagingVersion, version))
 			}
 		}
 	}
@@ -186,7 +186,7 @@ func validateMessagingModule(data []byte) []string {
 		violations = append(violations, "read go.mod: "+err.Error())
 	}
 	if found != 1 {
-		violations = append(violations, fmt.Sprintf("go.mod must contain exactly one go-messaging requirement, found %d", found))
+		violations = append(violations, fmt.Sprintf("go.mod must contain exactly one substrate/mesh requirement, found %d", found))
 	}
 	sort.Strings(violations)
 	return compactStrings(violations)

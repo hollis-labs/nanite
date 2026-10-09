@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/plugin-sdk"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 )
 
 // fakeHost implements plugin.Host for testing SubprocessPlugin.registerManifest.
@@ -74,11 +74,12 @@ func TestSubprocessPlugin_LoadLifecycle(t *testing.T) {
 	handlers := map[string]func(json.RawMessage) (any, *RPCError){
 		MethodInit: func(params json.RawMessage) (any, *RPCError) {
 			return &InitResult{
-				ID:          "test-plugin",
-				Name:        "Test Plugin",
-				Version:     "1.0.0",
-				Description: "A test subprocess plugin",
-				Protocol:    ProtocolVersion,
+				ID:                 "test-plugin",
+				Name:               "Test Plugin",
+				Version:            "1.0.0",
+				Description:        "A test subprocess plugin",
+				Protocol:           ProtocolVersion,
+				CapabilityContract: 1,
 			}, nil
 		},
 		MethodLoad: func(_ json.RawMessage) (any, *RPCError) {
@@ -123,11 +124,9 @@ func TestSubprocessPlugin_LoadLifecycle(t *testing.T) {
 
 	// Perform init handshake.
 	ctx := context.Background()
-	initResult, err := CallResult[InitResult](transport, ctx, MethodInit, &InitParams{
-		PluginDir: sp.pluginDir,
-		Config:    sp.config,
-		HostInfo:  HostInfo{Version: "test", Protocol: ProtocolVersion},
-	})
+	init := validDirectInit(t, "test-plugin")
+	init.Config = sp.config
+	initResult, err := CallResult[InitResult](transport, ctx, MethodInit, &init)
 	if err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -215,12 +214,12 @@ func TestSubprocessPlugin_InitRejectsWrongProtocol(t *testing.T) {
 	handlers := map[string]func(json.RawMessage) (any, *RPCError){
 		MethodInit: func(params json.RawMessage) (any, *RPCError) {
 			// Deliberately wrong: one higher than the host's.
-			return &InitResult{
-				ID:          "test-plugin",
-				Name:        "Test Plugin",
-				Version:     "1.0.0",
-				Description: "Reports mismatched protocol version",
-				Protocol:    ProtocolVersion + 1,
+			return map[string]any{
+				"id":          "test-plugin",
+				"name":        "Test Plugin",
+				"version":     "1.0.0",
+				"description": "Reports mismatched protocol version",
+				"protocol":    ProtocolVersion + 1, "capability_contract": 1,
 			}, nil
 		},
 	}
@@ -234,26 +233,12 @@ func TestSubprocessPlugin_InitRejectsWrongProtocol(t *testing.T) {
 	transport := NewTransport(pluginToHostR, hostToPluginW)
 	ctx := context.Background()
 
-	initResult, err := CallResult[InitResult](transport, ctx, MethodInit, &InitParams{
-		PluginDir: "/tmp/test-plugin",
-		Config:    map[string]string{},
-		HostInfo:  HostInfo{Version: "test", Protocol: ProtocolVersion},
-	})
-	if err != nil {
-		t.Fatalf("init RPC failed: %v", err)
-	}
-
-	// The gate the fix introduces must reject this.
-	checkErr := checkProtocolVersion(initResult.Protocol)
-	if checkErr == nil {
-		t.Fatalf("expected protocol-version mismatch error, got nil (got=%d want=%d)", initResult.Protocol, ProtocolVersion)
-	}
-	if !strings.Contains(checkErr.Error(), "protocol version mismatch") {
-		t.Errorf("expected error message to mention 'protocol version mismatch', got %q", checkErr.Error())
+	init := validDirectInit(t, "test-plugin")
+	if _, err := CallResult[InitResult](transport, ctx, MethodInit, &init); err == nil || !strings.Contains(err.Error(), "protocol_mismatch") {
+		t.Fatalf("wrong protocol reply passed the released SDK decoder: %v", err)
 	}
 }
 
-// TestMapRPCError verifies JSON-RPC error codes map to plugin.Error types.
 func TestMapRPCError(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -400,4 +385,18 @@ func TestBuildInitParams_NoID(t *testing.T) {
 	if ip.LogLevel == "" {
 		t.Error("LogLevel should still be populated without pluginID")
 	}
+}
+
+func validDirectInit(t *testing.T, id string) InitParams {
+	t.Helper()
+	init := fixtureInit(t)
+	owner, err := NewOwnerIncarnation(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	init.Incarnation = owner
+	init.Config = map[string]string{}
+	init.LogLevel = "info"
+	init.CapabilityContract = 1
+	return init
 }

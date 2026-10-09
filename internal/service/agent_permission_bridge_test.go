@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/chat"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 func TestBuildAgentDependencies_ACPApprovalUsesExistingSessionStream(t *testing.T) {

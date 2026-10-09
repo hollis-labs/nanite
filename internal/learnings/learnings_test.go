@@ -41,7 +41,7 @@ func (s *stubStore) Recall(_ context.Context, opts memory.RecallOpts) ([]memory.
 // memory_key, not in the namespace; /learnings is the type segment.
 func TestNamespace_ToolUse(t *testing.T) {
 	got := Namespace(ScopeToolUse, "alice", "card_show")
-	want := "user/alice/memory/learnings"
+	want := "app/nanite/memory/learnings"
 	if got != want {
 		t.Errorf("Namespace tool_use mismatch: got %q want %q", got, want)
 	}
@@ -51,7 +51,7 @@ func TestNamespace_ToolUse(t *testing.T) {
 // Tesseract's project-scoped typed-memory form.
 func TestNamespace_Project(t *testing.T) {
 	got := Namespace(ScopeProject, "alice", "nanite")
-	want := "user/alice/project/nanite/memory/learnings"
+	want := "project/nanite/memory/learnings"
 	if got != want {
 		t.Errorf("Namespace project mismatch: got %q want %q", got, want)
 	}
@@ -61,7 +61,7 @@ func TestNamespace_Project(t *testing.T) {
 // Tesseract's session-scoped typed-memory form.
 func TestNamespace_Session(t *testing.T) {
 	got := Namespace(ScopeSession, "alice", "sess-9")
-	want := "user/alice/session/sess-9/memory/learnings"
+	want := "session/sess-9/memory/learnings"
 	if got != want {
 		t.Errorf("Namespace session mismatch: got %q want %q", got, want)
 	}
@@ -71,7 +71,7 @@ func TestNamespace_Session(t *testing.T) {
 // "default" namespace root, matching the rest of the memory layer.
 func TestNamespace_DefaultUser(t *testing.T) {
 	got := Namespace(ScopeProject, "", "PRJ-1")
-	want := "user/default/project/prj-1/memory/learnings"
+	want := "project/prj-1/memory/learnings"
 	if got != want {
 		t.Errorf("Namespace default user mismatch: got %q want %q", got, want)
 	}
@@ -87,9 +87,9 @@ func TestNamespace_SubjectSanitization(t *testing.T) {
 		in    string
 		want  string
 	}{
-		{ScopeProject, "My Project", "user/default/project/my_project/memory/learnings"},
-		{ScopeSession, "-leading-dash-", "user/default/session/leading-dash/memory/learnings"},
-		{ScopeProject, "!!!", "user/default/project/_/memory/learnings"},
+		{ScopeProject, "My Project", "project/my_project/memory/learnings"},
+		{ScopeSession, "-leading-dash-", "session/leading-dash/memory/learnings"},
+		{ScopeProject, "!!!", "project/_/memory/learnings"},
 	}
 	for _, c := range cases {
 		got := Namespace(c.scope, "", c.in)
@@ -165,7 +165,7 @@ func TestCapture_HappyPath_ToolUse(t *testing.T) {
 	if out == nil {
 		t.Fatal("Capture returned nil outcome on success")
 	}
-	if out.Namespace != "user/alice/memory/learnings" {
+	if out.Namespace != "app/nanite/memory/learnings" {
 		t.Errorf("namespace mismatch: %s", out.Namespace)
 	}
 	if out.MemoryID == "" {
@@ -298,7 +298,7 @@ func TestCapture_ProjectScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "user/default/project/nanite/memory/learnings"
+	want := "project/nanite/memory/learnings"
 	if out.Namespace != want {
 		t.Errorf("project namespace = %q, want %q", out.Namespace, want)
 	}
@@ -316,7 +316,7 @@ func TestCapture_SessionScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "user/default/session/sess-9/memory/learnings"
+	want := "session/sess-9/memory/learnings"
 	if out.Namespace != want {
 		t.Errorf("session namespace = %q, want %q", out.Namespace, want)
 	}
@@ -341,7 +341,7 @@ func TestRecallByToolName_HappyPath(t *testing.T) {
 	if !strings.Contains(hints[0].Summary, "report-card") {
 		t.Errorf("first hint should be the report-card lesson, got: %s", hints[0].Summary)
 	}
-	wantNS := "user/alice/memory/learnings"
+	wantNS := "app/nanite/memory/learnings"
 	if store.recallOpts.Namespaces[0] != wantNS {
 		t.Errorf("recall namespace = %q, want %q", store.recallOpts.Namespaces[0], wantNS)
 	}
@@ -438,4 +438,14 @@ func TestSystemPromptBlock_EmptyReturnsBlank(t *testing.T) {
 	if SystemPromptBlock("card_show", nil) != "" {
 		t.Error("empty hints should render an empty block")
 	}
+}
+
+func (s *stubStore) StoreAppForUser(ctx context.Context, user string, m memory.Memory) error {
+	if !memory.AppMemoryAccessible(user, m.Namespace, m.MemoryKey) {
+		return errors.New("foreign app key")
+	}
+	return s.Store(ctx, m)
+}
+func (s *stubStore) RecallAppForUser(ctx context.Context, user string, opts memory.RecallOpts) ([]memory.Memory, error) {
+	return s.Recall(ctx, opts)
 }

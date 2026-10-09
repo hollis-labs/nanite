@@ -9,31 +9,12 @@ import (
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 )
 
-// agentBootDirAdapter satisfies recovery.BootDirOps by re-running the
-// per-provider sandbox-dir population logic that agent.Boot uses on
-// initial setup. The adapter keeps an in-memory registry of
-// sessionID → (bootDir, Options) populated by Track at boot time so
-// Repopulate / RegenerateCLAUDEMD can rebuild the same SetupParams the
-// original Boot composed without re-rolling a fresh $TMPDIR path.
-//
-// Lifecycle:
-//
-//   - Track is called by chat-side callers right after a successful
-//     agent.Boot — both the initial boot and broker-dispatched
-//     replacements (adoptReplacementSession). Track overwrites any
-//     prior entry so a relaunched session's new bootDir / Options
-//     replace the failed session's stale entry without an explicit
-//     Untrack.
-//   - Untrack is called when the chat session is archived (CloseAgentSession)
-//     so the registry doesn't leak past the session's natural end.
-//   - Repopulate / RegenerateCLAUDEMD are called by the recovery broker
-//     during remediation. They look up the registered entry, recompute
-//     the SetupParams via runtimeagent.ResolveBootdirParams, and
-//     dispatch to the layout's Populate / RegenerateSystemPromptSlot.
-//
-// Concurrency: sync.Map keeps Track + lookups race-free. The adapter
-// itself is stateless beyond the registry — Repopulate / RegenerateCLAUDEMD
-// don't mutate the entry they read.
+// agentBootDirAdapter preserves the binding and boot options recorded at launch
+// for recovery diagnostics. Current Harness authority permits fresh private
+// roots only: bound-root refresh returns typed unavailable, propagated through
+// the broker, until a fenced binding transition exists. Track replaces the
+// recorded binding on a real relaunch; Untrack removes archived sessions.
+// Concurrent Track/lookups use sync.Map and never mutate bound artifacts.
 type agentBootDirAdapter struct {
 	deps *runtimeagent.Dependencies
 
@@ -89,16 +70,9 @@ func (a *agentBootDirAdapter) Untrack(sessionID string) {
 	a.entries.Delete(sessionID)
 }
 
-// Repopulate satisfies recovery.BootDirOps. Rewrites the full
-// per-session sandbox dir (CLAUDE.md / agent-context.md /
-// envelope-schema.md / .mcp.json + provider-specific files) by
-// dispatching to the per-provider Layout.Populate against the existing
-// bootDir. Idempotent — Layout.Populate uses atomicfile.WriteFile +
-// os.MkdirAll throughout.
-//
-// Returns an error when sessionID is unknown (no Track entry — broker
-// is asking about a session this adapter never saw) or when the
-// re-resolution / write step fails.
+// Repopulate resolves the tracked provider and preserves its typed bound-root
+// refusal. Unknown sessions, canceled requests and failed resolution retain
+// their own errors; no recovery fallback writes into the active root.
 func (a *agentBootDirAdapter) Repopulate(ctx context.Context, sessionID string) error {
 	if a == nil {
 		return errors.New("agent_bootdir_adapter: nil receiver")
@@ -125,13 +99,8 @@ func (a *agentBootDirAdapter) Repopulate(ctx context.Context, sessionID string) 
 	return nil
 }
 
-// RegenerateCLAUDEMD satisfies recovery.BootDirOps. Rewrites only the
-// per-provider system-prompt-bearing slot (CLAUDE.md for claude,
-// AGENTS.md for codex, agents/<slug>.md for opencode), leaving the rest
-// of the sandbox intact.
-//
-// Returns an error when sessionID is unknown or when the re-resolution
-// / write step fails.
+// RegenerateCLAUDEMD requests a system-slot refresh through the provider seam.
+// Its current typed unavailable result leaves the existing binding unchanged.
 func (a *agentBootDirAdapter) RegenerateCLAUDEMD(ctx context.Context, sessionID string) error {
 	if a == nil {
 		return errors.New("agent_bootdir_adapter: nil receiver")

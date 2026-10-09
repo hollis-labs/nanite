@@ -36,6 +36,38 @@ The init identity must match the manifest before calls reach the child. Data
 and cache roots stay outside the installed bundle. Load acknowledgments retain
 skipped declarations without sending a second load call.
 
+
+### Host grant descriptors and lifetime
+
+Protocol 2 grants are issued by the host from the actual accepted review.
+Nanite names its descriptors `host.nanite.readonly.query`,
+`host.nanite.context.source`, `host.nanite.context.always_ship`,
+`host.nanite.reflex.seed`, `host.nanite.durable_agent.wake`,
+`host.nanite.ssh_agent` and `host.nanite.docker_socket`, with descriptor schema
+version 1 and audience `nanite`. Manifest capability names remain unchanged.
+Raw `Grant.Scope` carries the corresponding strict `pluginapi` DTO; it is not
+an assertion that these fields implement the shared normalized
+`capability.Scope` vocabulary. In particular, `all_sessions` retains its
+current-workspace meaning and always-ship retains its aggregate byte ceiling.
+The two environment descriptors enumerate only their host-allowlisted keys;
+no declaration supplies arbitrary environment access.
+
+The host policy uses a 24-hour grant lifetime by default. A positive Go duration
+in `NANITE_PLUGIN_GRANT_LIFETIME` changes that lifetime without writing settings.
+The policy revision binds the lifetime and accepted review. Each dispatch
+revalidates that review and revision, and expiry or revocation cancels active
+permits and fences the child. Unload, disconnect and replacement terminate the
+old incarnation; there is no authority inherited from browser metadata or
+plugin-requested grants.
+
+Host-initiated renewal requires the same grant IDs, names, scopes, audience,
+policy revision and runtime identity while the old lease is live. The host
+commits only after the negotiated child renewal method acknowledges the exact
+update. Missing negotiated support refuses renewal before dispatch; uncertain, failed or late acknowledgment
+fences the owner rather than retrying or reviving expired authority. Already
+running calls keep their old deadline and can be canceled conservatively by
+replacement.
+
 The nested module has its own CI gate because the application's root Go test
 pattern excludes nested modules. Changes to the application loader and its
 security boundary must be verified separately when it adopts the contract.
@@ -78,16 +110,21 @@ pins supervised restarts to the original review. Transport calls always apply
 the host deadline, even when callers supplied a longer one; request and response
 frames have independent caps. `SECURITY.md` documents the execution boundary.
 
-The browser endpoint uses `plugin-sdk/registry.Response` at protocol 1:
-`plugins` describes bundles/runtime dependencies, and `contributions` maps
-host-defined kinds and keys to explicit module exports. Nanite stores grouping,
+The browser endpoint uses `plugin-sdk/registry.Response` at registry version 2.
+A process-owned host instance, monotonic live-owner generation and registry
+revision identify each snapshot. Only running, accepted owners contribute.
+`plugins` describes bundle bytes/runtime dependencies; `contributions` maps
+owner-qualified kinds and keys to explicit module exports. Nanite stores grouping,
 priority, labels, props and schema URLs in opaque contribution metadata. Slot
 keys include the slot name so IDs in separate groups cannot collide. Browser
 reconciliation, module caching, stylesheet ownership and subscriptions belong
 to `@hollis-labs/plugin-registry`; Nanite supplies core-name refusal and React
 render policy. A manifest change reconciles against already loaded modules.
-Bundle cache tokens use the accepted bundle digest; stylesheet URLs carry it
-too. Slot renderers pass the owner and entry ID rather than guessing from an
+The JavaScript bundle version is the SHA-256 of its actual approved artifact
+bytes, rather than the digest of the full directory. Stylesheet URLs carry the
+same bundle version. Exact React range declarations remain app metadata and
+are checked against the running React version before activation; malformed or
+unsupported ranges refuse activation. Slot renderers pass the owner and entry ID rather than guessing from an
 export name shared by several plugins.
 
 The optional live browser fixture runs `TestPluginsRegistryLiveBrowserSmoke`
@@ -121,7 +158,7 @@ IDs or `all_sessions` in the current workspace. `include_content` additionally
 authorizes captured context text. CLI and GUI approvals show this metadata and
 its upgrade diff. Unknown fields and malformed scopes refuse review.
 
-After checking accepted bytes, `BeforeSpawn` binds a random connection token;
+After checking accepted bytes, the incarnation Init factory binds a fresh random connection token;
 init delivers its grant under `identity.nanite_host_query`. The core
 `GET /api/plugin-host/query/{resource}` route authenticates this bearer token,
 checks the approved scope, and calls fixed service projections. Plugins cannot
@@ -130,8 +167,9 @@ responses to 1 MiB and reads to 30 seconds. Session metadata and metric error
 text, debug snapshots and resolved configuration are excluded. Slot reads use
 only inspector captures; they never assemble context or invoke resolvers.
 
-The host retains token hashes and copied scopes. A supervised restart preserves
-the original accepted grant. Failed initialization, unload, permanent supervisor
+The host retains token hashes and copied scopes. A supervised restart rechecks
+the accepted bytes and policy, then issues fresh grant IDs and credentials for
+its new incarnation; the accepted authority is unchanged. Failed initialization, unload, permanent supervisor
 failure and host shutdown revoke it; revocation cancels active read leases.
 Optional query requests are omitted from init grants when the host URL is
 unavailable, while required requests refuse startup. This route's authority is

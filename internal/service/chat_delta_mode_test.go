@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // waitForDelta returns the first delta event on consumer, failing the test if

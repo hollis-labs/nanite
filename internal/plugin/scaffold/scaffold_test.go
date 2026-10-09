@@ -2,11 +2,16 @@ package scaffold
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"gopkg.in/yaml.v3"
@@ -57,7 +62,7 @@ func TestRun_Subprocess_FileTree(t *testing.T) {
 	}
 }
 
-func TestRun_Subprocess_ManifestValid(t *testing.T) {
+func TestRun_Subprocess_UnbuiltDraftCannotInstall(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "foo")
 
@@ -75,12 +80,15 @@ func TestRun_Subprocess_ManifestValid(t *testing.T) {
 		t.Fatalf("read plugin.yaml: %v", err)
 	}
 
-	parsed, err := hostplugin.DecodeManifest(bytes.NewReader(yamlBytes))
-	if err != nil {
-		t.Fatalf("shared manifest: %v", err)
+	if _, err := hostplugin.DecodeManifest(bytes.NewReader(yamlBytes)); err == nil {
+		t.Fatal("unbuilt scaffold accepted without an artifact inventory")
 	}
-	if parsed.UI.Entry != "ui/dist/index.js" || parsed.UI.ShadcnVersion == "" || parsed.Shared == nil {
-		t.Fatalf("UI declaration: %+v", parsed.UI)
+	var draft manifest.Manifest
+	if err := json.Unmarshal(yamlBytes, &draft); err != nil {
+		t.Fatal(err)
+	}
+	if draft.Server.Entry != "bin/foo" || draft.Protocol != 2 || draft.UI == nil || draft.UI.Bundle != "ui/dist/index.js" {
+		t.Fatalf("unexpected draft declaration: %+v", draft)
 	}
 
 }
@@ -110,6 +118,69 @@ func TestRun_Subprocess_ViteExternalsIncludeSharedPrimitives(t *testing.T) {
 		if !strings.Contains(string(vite), needle) {
 			t.Errorf("vite.config.ts missing external %s", needle)
 		}
+	}
+}
+
+func TestGeneratedManifestInventoriesBytesAndRefusesSymlinks(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	if err := Run(Options{Kind: KindSubprocess, Name: "foo", OutputDir: source}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	generator := filepath.Join(root, "generator")
+	// #nosec G204 -- literal Go build arguments target this private generated fixture.
+	build := exec.CommandContext(ctx, "go", "build", "-mod=mod", "-o", generator, ".")
+	build.Dir = source
+	build.Env = append(os.Environ(), "GOWORK=off")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build generated plugin: %v\n%s", err, output)
+	}
+	bundle := filepath.Join(root, "bundle")
+	for _, dir := range []string{"bin", "ui/dist", "envelopes"} {
+		if err := os.MkdirAll(filepath.Join(bundle, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, body := range map[string]string{"bin/foo": "binary bytes", "ui/dist/index.js": "UI bytes", "envelopes/example.schema.json": `{ "type": "object" }`} {
+		mode := os.FileMode(0o600)
+		if name == "bin/foo" {
+			mode = 0o700
+		}
+		if err := os.WriteFile(filepath.Join(bundle, name), []byte(body), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	generate := func() ([]byte, error) {
+		// #nosec G204 -- executes only the generator built above in this private test root.
+		return exec.CommandContext(ctx, generator, "--manifest", bundle, "bin/foo").CombinedOutput()
+	}
+	encoded, err := generate()
+	if err != nil {
+		t.Fatalf("generate completed bundle: %v\n%s", err, encoded)
+	}
+	declaration, err := manifest.Decode(bytes.NewReader(encoded))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundle, manifest.Filename), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := declaration.VerifyBundle(bundle); err != nil {
+		t.Fatalf("generated inventory does not verify: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(bundle, "ui/dist/index.js"), []byte("changed UI"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := declaration.VerifyBundle(bundle); err == nil {
+		t.Fatal("changed bundle bytes passed the generated inventory")
+	}
+	if err := os.Symlink(filepath.Join(bundle, "bin/foo"), filepath.Join(bundle, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := generate(); err == nil {
+		t.Fatalf("symlink accepted: %s", output)
 	}
 }
 
@@ -149,7 +220,7 @@ func TestRun_Subprocess_MainGoReferencesSDK(t *testing.T) {
 		t.Fatalf("read main.go: %v", err)
 	}
 	src := string(main)
-	if !strings.Contains(src, `"github.com/hollis-labs/plugin-sdk/subprocess"`) {
+	if !strings.Contains(src, `"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"`) {
 		t.Errorf("main.go missing plugin-sdk subprocess import")
 	}
 	if !strings.Contains(src, "subprocess.Serve") {
@@ -166,8 +237,8 @@ func TestRun_Subprocess_MainGoReferencesSDK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	if !strings.Contains(string(gomod), "github.com/hollis-labs/plugin-sdk v0.6.0") {
-		t.Errorf("go.mod missing plugin-sdk v0.6.0 pin:\n%s", gomod)
+	if !strings.Contains(string(gomod), "github.com/hollis-labs/libs/plugin-mcp v0.2.0") {
+		t.Errorf("go.mod missing published plugin-mcp v0.2.0 pin:\n%s", gomod)
 	}
 }
 

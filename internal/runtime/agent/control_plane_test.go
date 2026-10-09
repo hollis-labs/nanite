@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
-	"github.com/hollis-labs/go-agent-wrapper/wrapper"
-	"github.com/hollis-labs/go-sandbox/sandbox"
+	"github.com/hollis-labs/substrate/harness/adapters/wrapper"
+	"github.com/hollis-labs/substrate/harness/sandbox"
+	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 )
 
 func mkdirs(t *testing.T, root string, rel ...string) {

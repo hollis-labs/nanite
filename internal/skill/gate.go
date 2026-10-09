@@ -194,8 +194,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/go-sandbox/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/sandbox"
 )
 
 // AgentKnownSkillStore is the narrow slice of *store.Store's API Gate

@@ -7,16 +7,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/plugin/plugintest"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	"github.com/hollis-labs/plugin-sdk/manifest"
-	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
 )
 
 type apiSubprocessFixture struct {
@@ -26,7 +28,7 @@ type apiSubprocessFixture struct {
 
 func (p *apiSubprocessFixture) Init(_ context.Context, params sdkprocess.InitParams) (sdkprocess.InitResult, error) {
 	p.identity = append(json.RawMessage(nil), params.Identity...)
-	return sdkprocess.InitResult{ID: p.id, Name: p.name, Version: "1.0.0", Protocol: 1}, nil
+	return sdkprocess.InitResult{ID: p.id, Name: p.name, Version: "1.0.0", Protocol: sdkprocess.ProtocolVersion, CapabilityContract: 1}, nil
 }
 func (p *apiSubprocessFixture) Load(context.Context) (sdkprocess.LoadResult, error) {
 	return sdkprocess.LoadResult{}, nil
@@ -83,7 +85,10 @@ func TestAPISubprocessChild(t *testing.T) {
 
 func writeAPIPluginBundle(t *testing.T, dir, id, name string, block pluginapi.Block) string {
 	t.Helper()
-	binary := filepath.Join(dir, "plugin")
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "bin/test-plugin")
 	if _, err := os.Stat(binary); os.IsNotExist(err) {
 		executable, err := os.Executable()
 		if err != nil {
@@ -107,6 +112,56 @@ func writeAPIPluginBundle(t *testing.T, dir, id, name string, block pluginapi.Bl
 			t.Fatal(closeErr)
 		}
 	}
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+	launcher := "#!/bin/sh\nexec \"$(dirname \"$0\")/test-plugin\" '-test.run=^TestAPISubprocessChild$' -- --nanite-plugin-child " + quote(id) + " " + quote(name) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "bin/plugin"), []byte(launcher), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if chmodErr := os.Chmod(filepath.Join(dir, "bin/plugin"), 0700); chmodErr != nil { // #nosec G302 -- private child launcher requires owner execution.
+		t.Fatal(chmodErr)
+	}
+	if block.UI.Bundle != "" {
+		exports := map[string]bool{}
+		for _, item := range block.Registers.Envelopes {
+			exports[item.Component] = true
+		}
+		for _, item := range block.Registers.Slots {
+			exports[item.Component] = true
+		}
+		for _, item := range block.Registers.Panels {
+			exports[item.Component] = true
+		}
+		names := make([]string, 0, len(exports))
+		for name := range exports {
+			if name != "" {
+				names = append(names, name)
+			}
+		}
+		sort.Strings(names)
+		var js strings.Builder
+		for _, name := range names {
+			js.WriteString("export function " + name + "() { return null; }\n")
+		}
+		if js.Len() == 0 {
+			js.WriteString("export {};\n")
+		}
+		file := filepath.Join(dir, block.UI.Bundle)
+		if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(js.String()), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if block.UI.Stylesheet != "" {
+			file := filepath.Join(dir, block.UI.Stylesheet)
+			if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(file, []byte("/* fixture stylesheet */\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	for _, envelope := range block.Registers.Envelopes {
 		if envelope.Schema != "" {
 			path := filepath.Join(dir, envelope.Schema)
@@ -122,7 +177,10 @@ func writeAPIPluginBundle(t *testing.T, dir, id, name string, block pluginapi.Bl
 	if err != nil {
 		t.Fatal(err)
 	}
-	declaration := manifest.Manifest{SchemaVersion: 2, ID: id, Name: name, Version: "1.0.0", Protocol: 1, Runtime: "subprocess", Entrypoint: manifest.Entrypoint{Command: "plugin", Args: []string{"-test.run=^TestAPISubprocessChild$", "--", "--nanite-plugin-child", id, name}}, Hosts: map[string]manifest.HostRange{"nanite": {Min: "0.1.0"}}, Nanite: ext}
+	declaration := manifest.Manifest{SchemaVersion: 2, ID: id, Name: name, Version: "1.0.0", Protocol: sdkprocess.ProtocolVersion, Runtime: "subprocess", Server: manifest.Server{Runtime: "binary", Engines: map[string]manifest.HostRange{"binary": {Min: "0.0.0"}}, Entry: "bin/plugin"}, Hosts: map[string]manifest.HostRange{"nanite": {Min: pluginapi.Version}}, Nanite: ext}
+	if block.UI.Bundle != "" {
+		declaration.UI = &manifest.UI{Bundle: block.UI.Bundle, Stylesheet: block.UI.Stylesheet, Isolation: "main-origin"}
+	}
 	if len(block.Registers.ReflexSeeds) > 0 {
 		scope := pluginapi.ReflexScope{}
 		agents := map[string]bool{}
@@ -136,6 +194,7 @@ func writeAPIPluginBundle(t *testing.T, dir, id, name string, block pluginapi.Bl
 		metadata, _ := json.Marshal(scope)
 		declaration.Capabilities = append(declaration.Capabilities, sdkprocess.CapabilityRequest{Name: pluginapi.CapabilityReflexSeed, Metadata: metadata})
 	}
+	plugintest.Inventory(t, &declaration, dir)
 	var raw strings.Builder
 	if checkErr := manifest.Encode(&raw, declaration); checkErr != nil {
 		t.Fatal(checkErr)
@@ -193,7 +252,7 @@ func TestRunPluginLoadIntoHost_RollbackUsesPluginID(t *testing.T) {
 	}
 	pms := &pluginManagerState{pluginHost: host}
 	dir := t.TempDir()
-	block := pluginapi.Block{UI: pluginapi.UI{Bundle: "ui.js"}, Registers: pluginapi.Registrations{Envelopes: []pluginapi.Envelope{{Type: "already-owned", Component: "Card", Version: 1, Schema: "schema.json"}}}}
+	block := pluginapi.Block{UI: pluginapi.UI{Bundle: "ui/index.js"}, Registers: pluginapi.Registrations{Envelopes: []pluginapi.Envelope{{Type: "already-owned", Component: "Card", Version: 1, Schema: "schema.json"}}}}
 	path := writeAPIPluginBundle(t, dir, "rollback-id", "Rollback Display Name", block)
 	if pms.runPluginLoadIntoHost(path, dir) {
 		t.Fatal("collision load succeeded")

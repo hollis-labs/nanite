@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 )
 
 // Standard meta keys the chat composition root populates on the

@@ -9,8 +9,8 @@ import (
 
 	"github.com/hollis-labs/substrate/agent/approval"
 
-	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/store"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 func TestAgentV1ApprovalResponseRepetitionAndOwnership(t *testing.T) {

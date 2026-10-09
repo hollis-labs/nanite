@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	workflowcompile "github.com/hollis-labs/go-workflow/compile"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/stepkind"
-	"github.com/hollis-labs/go-workflow/values"
-	"github.com/hollis-labs/go-workflow/verification"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/workflow/verification"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"

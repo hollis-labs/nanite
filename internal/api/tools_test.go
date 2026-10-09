@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/toolclient"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // TestHandleListAgentTools_DBBackedAgentUsesAgentTools is the Done-means

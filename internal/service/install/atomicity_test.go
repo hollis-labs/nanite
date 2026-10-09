@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-safefs/atomicfile"
+	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
 )
 
 // TestAtomicWriteFile_NoPartialFileOnRenameFailure drives

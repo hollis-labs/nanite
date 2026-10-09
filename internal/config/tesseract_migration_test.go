@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/hollis-labs/go-sqlite/sqlitekit"
+	"github.com/hollis-labs/libs/util/sqlite/sqlitekit"
 	"github.com/hollis-labs/tesseract"
 	tesseractMemory "github.com/hollis-labs/tesseract/memory"
 )
@@ -25,12 +25,13 @@ func TestMigrateLegacyTesseractDataContinuityRestartAndIdempotence(t *testing.T)
 	}
 	namespace := "user/migration/memory/notes"
 	if _, writeErr := legacy.MemoryStore().WriteRevision(ctx, tesseractMemory.WriteInput{
+		Actor:  "user", // Historical user data in this private migration fixture.
 		Domain: tesseractMemory.DomainMemory, Namespace: namespace, MemoryKey: "continuity",
 		Status:  tesseractMemory.StatusReviewed,
 		Author:  tesseractMemory.Author{AgentID: "migration-test", AgentVersion: "1"},
 		Trigger: tesseractMemory.TriggerManual, SessionID: "migration-test",
-		Origin: tesseractMemory.OriginUser, Confidence: 0.9,
-		Payload: tesseractMemory.Payload{Summary: "survives migration", Body: "full body"},
+		DerivedFrom: tesseractMemory.DerivedFromUser, Confidence: 0.9,
+		Summary: "survives migration", Body: "full body",
 	}); writeErr != nil {
 		_ = legacy.Close()
 		t.Fatalf("seed legacy: %v", writeErr)
@@ -556,12 +557,13 @@ func TestMigrateLegacyTesseractDataAcceptsInitializedCurrentStoreWithoutLegacySo
 		t.Fatalf("open current Tesseract: %v", err)
 	}
 	if _, writeErr := instance.MemoryStore().WriteRevision(ctx, tesseractMemory.WriteInput{
+		Actor:  "user", // Historical user data in this private migration fixture.
 		Domain: tesseractMemory.DomainMemory, Namespace: "user/current/memory/notes", MemoryKey: "preserve",
 		Status:  tesseractMemory.StatusReviewed,
 		Author:  tesseractMemory.Author{AgentID: "migration-test", AgentVersion: "1"},
 		Trigger: tesseractMemory.TriggerManual, SessionID: "migration-test",
-		Origin: tesseractMemory.OriginUser, Confidence: 0.9,
-		Payload: tesseractMemory.Payload{Summary: "keep current", Body: "PRESERVE-CURRENT"},
+		DerivedFrom: tesseractMemory.DerivedFromUser, Confidence: 0.9,
+		Summary: "keep current", Body: "PRESERVE-CURRENT",
 	}); writeErr != nil {
 		_ = instance.Close()
 		t.Fatalf("seed current Tesseract: %v", writeErr)
@@ -621,12 +623,13 @@ func TestMigrateLegacyTesseractDataSerializesCompetingMigrations(t *testing.T) {
 				t.Fatalf("seed source %s: %v", source.marker, err)
 			}
 			if _, err := instance.MemoryStore().WriteRevision(context.Background(), tesseractMemory.WriteInput{
+				Actor:  "user", // Historical user data in this private migration fixture.
 				Domain: tesseractMemory.DomainMemory, Namespace: "user/competing/memory/notes", MemoryKey: "winner",
 				Status:  tesseractMemory.StatusReviewed,
 				Author:  tesseractMemory.Author{AgentID: "migration-test", AgentVersion: "1"},
 				Trigger: tesseractMemory.TriggerManual, SessionID: "migration-test",
-				Origin: tesseractMemory.OriginUser, Confidence: 0.9,
-				Payload: tesseractMemory.Payload{Summary: "winner", Body: "memory-" + source.marker},
+				DerivedFrom: tesseractMemory.DerivedFromUser, Confidence: 0.9,
+				Summary: "winner", Body: "memory-" + source.marker,
 			}); err != nil {
 				_ = instance.Close()
 				t.Fatalf("write source %s: %v", source.marker, err)

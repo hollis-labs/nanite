@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/storetest"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 // TASKS/skills/05's "Fix required" section (fresh reviewer, 2026-08-21):

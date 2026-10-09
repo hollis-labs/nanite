@@ -9,15 +9,16 @@ const memoryListResponse = {
   memories: [
     {
       key: "encoded-path-key",
-      memory_key: "review_summary",
-      namespace: "user/default/memory/notes",
+      memory_key: "u_64656661756c74.review_summary",
+      namespace: "app/nanite/memory/notes",
+      editable: true,
       summary: "Review summary",
       body: "PRESERVE-ME",
       origin: "user",
       trigger: "manual",
       confidence: 0.8,
       tags: [],
-      scope: "user",
+      scope: "app",
       session_id: "manual:nanite",
       revision_id: "revision-1",
       status: "draft",
@@ -75,6 +76,34 @@ describe("memory editing", () => {
         body: "PRESERVE-ME",
       });
     });
+  });
+
+  it("retains legacy memories as read-only without write controls", async () => {
+    const response = {
+      ...memoryListResponse,
+      memories: memoryListResponse.memories.map((m) => ({
+        ...m,
+        namespace: "user/default/memory/notes",
+        editable: false,
+        scope: "user",
+      })),
+    };
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify(response), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderWithClient(<MemoryDetail memoryKey="encoded-path-key" onBack={() => {}} />);
+    const body = await screen.findByDisplayValue("PRESERVE-ME");
+    expect(body.matches(":disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method && init.method !== "GET")).toBe(
+      false,
+    );
   });
 
   it("opens an item with the API's path-safe key", async () => {

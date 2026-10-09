@@ -1,7 +1,7 @@
 # One build stage, because the UI build needs Go.
 #
 # ui/package.json's `prebuild` runs scripts/generate-envelope-types.mjs, and
-# that spawns `go run github.com/hollis-labs/go-envelopes/cmd/envelopes-export`
+# that spawns `go run github.com/hollis-labs/libs/ui-go/envelopes/cmd/envelopes-export`
 # (scripts/lib/envelope-catalog.mjs) to read the envelope catalog. A node-only
 # stage cannot satisfy it — the previous split ui-build stage failed with
 # "Cannot find module '/app/scripts/generate-plugin-imports.mjs'" because the

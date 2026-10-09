@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/go-safefs/pathsafe"
 	"github.com/hollis-labs/nanite/internal/artifactstore"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 )
 
 // DefaultArtifactsStorageDir matches config.DefaultAppConfig().Artifacts.StorageDir.

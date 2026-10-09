@@ -3,7 +3,7 @@ package broker
 import (
 	"time"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 )
 
 // FailureEvent is the broker's input. Aggregates the lib-side ExitError

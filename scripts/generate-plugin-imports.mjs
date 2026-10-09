@@ -77,8 +77,9 @@ export function generateOutput(entries, source) {
 // Source: ${source.module}@${source.moduleVersion}; manifest ${source.manifestDigest}.
 // Runtime plugin envelopes are registered dynamically via plugin-loader.ts.
 // Run \`npm run generate:plugins\` to regenerate.
-import { lazy } from "react";
+
 import type { ComponentType } from "react";
+import { lazy } from "react";
 import { getDynamicEnvelope } from "@/lib/plugin-loader";
 
 // biome-ignore lint/suspicious/noExplicitAny: plugin envelope components have varied props

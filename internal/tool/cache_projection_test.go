@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	toolresult "github.com/hollis-labs/go-toolresult"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
 )
 
 func TestResultProjection_Availability(t *testing.T) {

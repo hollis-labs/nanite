@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	localdaemon "github.com/hollis-labs/go-localdaemon"
+	localdaemon "github.com/hollis-labs/libs/util/localdaemon"
 )
 
 func TestPollHealthUntilReady_DeadChildFailsFast(t *testing.T) {

@@ -1,7 +1,7 @@
 package agentworkflow
 
 import (
-	llmtypes "github.com/hollis-labs/go-llm-types"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // StepKind identifies which of the three step kinds (design doc, "Built-in

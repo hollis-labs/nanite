@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/hollis-labs/plugin-sdk"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 )
 
 // captureConsumer records every envelope batch handed to Deliver so the test

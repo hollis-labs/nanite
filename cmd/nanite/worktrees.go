@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/hollis-labs/go-worktree"
+	"github.com/hollis-labs/libs/util/worktree"
 )
 
 func newWorkerWorktreeManager(baseDir string) (*worktree.Manager, error) {

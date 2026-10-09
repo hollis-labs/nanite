@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	goplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // stubMCPRegistrar records per-plugin server tracking without a real

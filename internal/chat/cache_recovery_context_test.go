@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func TestEnforceTokenBudget_KeepsCacheNavigation(t *testing.T) {

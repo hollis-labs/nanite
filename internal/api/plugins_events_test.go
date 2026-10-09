@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
+	goplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
-	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // TestPluginsEvents_LoadUnloadCycle drives a plugin through LoadPlugin and

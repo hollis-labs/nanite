@@ -1,9 +1,29 @@
-# Tesseract v0.10 migration
+# Tesseract embedding and memory migration
 
-Nanite consumes the immutable `github.com/hollis-labs/tesseract` `v0.10.0`
-release. The tag resolves to commit
-`90dbe0cac065e6ed21305a5e13e5f16543c69206`; do not add a `replace` directive,
-branch pin, or pseudo-version.
+Nanite consumes the immutable `github.com/hollis-labs/tesseract` `v0.11.0`
+release and its published embedding and queue contracts. Do not add a `replace`
+directive, branch pin, or pseudo-version. The earlier daemon cutover below
+remains useful for installations upgrading from the pre-Tesseract layout.
+
+## App-owned memory writes
+
+GUI notes and tool-use lessons are written by the trusted Nanite host assembler
+with actor `app:nanite` and client ID `nanite`, under
+`app/nanite/memory/{type}`. This identifies the app honestly; it is not a
+verified human principal. Generic request metadata, origin fields and tool
+arguments cannot select that identity or authorize writes to protected `user/*`.
+
+The app binds each key to the host-selected user ID with an encoded prefix.
+List, recall, revision, mutation and reinforcement paths enforce that prefix;
+user tags are descriptive and do not grant access. Filtered app lists paginate
+after filtering, and cursor-budget recall refuses when it cannot preserve that
+boundary. The single-user editor binds writes to the default user. It reads
+retained user memories without making them editable and performs no backfill.
+
+Automation writes to `project/{project_id}/memory/{type}` or
+`session/{session_id}/memory/{type}` with agent authority. Reads also include
+the corresponding retained legacy default-user namespaces. Existing rows are
+not renamed or replayed, and namespace changes grant no tools or capabilities.
 
 ## What v0.10.0 changed for Nanite
 
@@ -48,17 +68,17 @@ The embedded root is `*tesseract.Tesseract`, opened with explicit stable
 Tesseract's public memory package for ranking, paging, projection, hydration,
 and reinforcement; its SQLite schema is not an integration API.
 
-Memory writes require one of these typed namespace shapes:
+The writable namespace shapes are:
 
 ```text
-user/{user_id}/memory/{type}
-user/{user_id}/project/{project_id}/memory/{type}
-user/{user_id}/session/{session_id}/memory/{type}
+app/nanite/memory/{type}
+project/{project_id}/memory/{type}
+session/{session_id}/memory/{type}
 ```
 
 Nanite defaults ordinary memories to `notes` and captured tool lessons to
-`learnings`. The flat `user/{id}/memory` form remains a cross-type recall
-prefix and must not be used for writes.
+`learnings`. Retained `user/{user_id}/memory/{type}` rows remain readable.
+Cross-type prefixes are read selectors, not write namespaces.
 
 Recall defaults to `payload_mode=summary`. A missing body under `keys` or
 `summary` is withheld, not empty. Hydrate selected revisions by ID. Scores are

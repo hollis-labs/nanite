@@ -8,7 +8,7 @@
 --
 -- Does NOT touch `agent_broker_decisions` (migration 058). That table
 -- belongs to a separate, still-live system (the Agent Broker,
--- github.com/hollis-labs/agentkit/broker, wired in
+-- github.com/hollis-labs/substrate/harness/broker, wired in
 -- internal/service/chat_broker_dispatch.go) that is not retired by any
 -- currently-scheduled Phase 0 task — see this task's own file (Context
 -- section) and TASKS/ESCALATIONS.md's "Item 23" entry. It gets its own

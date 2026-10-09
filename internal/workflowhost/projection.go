@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
 )
 
 const (

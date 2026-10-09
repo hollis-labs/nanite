@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/hollis-labs/go-agent-wrapper/acp"
+	"github.com/hollis-labs/substrate/harness/adapters/acp"
 )
 
 // SessionManager is Nanite's single binding registry from runtime IDs to the

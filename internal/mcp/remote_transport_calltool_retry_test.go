@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	gmcpclient "github.com/hollis-labs/go-mcp/client"
-	"github.com/hollis-labs/go-safefs/pathsafe"
+	gmcpclient "github.com/hollis-labs/libs/plugin-mcp/go-mcp/client"
+	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

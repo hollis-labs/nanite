@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/go-egress-proxy/egress"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/substrate/harness/interception/egress"
 )
 
 // ProxyResolver resolves a hostname to IP addresses. Tests replace this to

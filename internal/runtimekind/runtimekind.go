@@ -21,7 +21,7 @@ package runtimekind
 import (
 	"strings"
 
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 )
 
 // Kind is a normalized runtime-kind token.

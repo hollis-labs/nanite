@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	sdksub "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
-	sdksub "github.com/hollis-labs/plugin-sdk/subprocess"
 )
 
 // newPipedTransport returns a real subprocess.Transport connected to a
@@ -102,10 +102,12 @@ func TestPluginMCPTransport_ListAndCall(t *testing.T) {
 			if p.Server != "echo-srv" || p.Tool != "echo" {
 				return nil, &subprocess.RPCError{Code: subprocess.ErrCodeInvalidParams, Message: "unknown tool"}
 			}
+			if p.Arguments["fail"] == true {
+				return sdksub.MCPCallResult{Content: json.RawMessage(`[]`), IsError: true}, nil
+			}
 			text, _ := p.Arguments["text"].(string)
-			return ToolResult{
-				Content: []ToolContent{{Type: "text", Text: "echoed: " + text}},
-			}, nil
+			content, _ := json.Marshal([]ToolContent{{Type: "text", Text: "echoed: " + text}})
+			return sdksub.MCPCallResult{Content: content}, nil
 		default:
 			return nil, &subprocess.RPCError{Code: subprocess.ErrCodeMethodNotFound, Message: method}
 		}
@@ -151,6 +153,10 @@ func TestPluginMCPTransport_ListAndCall(t *testing.T) {
 	}
 	if out != "echoed: hi" {
 		t.Fatalf("unexpected result: %q", out)
+	}
+	result, callErr := NewPluginMCPTransport(transport, "echo-srv").CallTool(ctx, "echo", map[string]any{"fail": true})
+	if callErr != nil || !result.IsError || len(result.Content) != 0 {
+		t.Fatal("empty authoritative error lost", result, callErr)
 	}
 }
 

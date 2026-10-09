@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	goplugin "github.com/hollis-labs/plugin-sdk"
-	sdkmanifest "github.com/hollis-labs/plugin-sdk/manifest"
+	goplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	sdkmanifest "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"

@@ -17,10 +17,10 @@ import (
 	"sync"
 	"testing"
 
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // --- fixtures ---

@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/selftools"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // TestNormalizeToolInputSchemas_SourceMapInvariance verifies that

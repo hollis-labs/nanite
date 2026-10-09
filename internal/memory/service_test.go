@@ -16,7 +16,7 @@ func TestMemoryRecallManifestDescribesReturnedRows(t *testing.T) {
 	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
 	svc := NewService(instance.MemoryStore())
-	namespace := UserNamespace("manifest")
+	namespace := ProjectNamespace("manifest", "notes")
 	storeTestMemory(t, svc, namespace, "zero", "zero confidence", "withheld body", 0)
 
 	const byteBudget = 400
@@ -139,7 +139,7 @@ func TestMemoryRecallPagedProjectedAndNullableScores(t *testing.T) {
 	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
 	svc := NewService(instance.MemoryStore())
-	namespace := UserNamespace("paged")
+	namespace := ProjectNamespace("paged", "notes")
 	for _, key := range []string{"one", "two", "three"} {
 		storeTestMemory(t, svc, namespace, key, "summary "+key, "body "+key, 0.8)
 	}
@@ -202,7 +202,7 @@ func TestMemoryRecallLexicalScoreIsNullable(t *testing.T) {
 	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
 	svc := NewService(instance.MemoryStore())
-	namespace := UserNamespace("lexical", "decisions")
+	namespace := ProjectNamespace("lexical", "decisions")
 	storeTestMemory(t, svc, namespace, "ticket", "Fix CW-20260904-0058 migration", "details", 0.9)
 
 	results, err := svc.Recall(context.Background(), RecallOpts{
@@ -221,7 +221,7 @@ func TestMemoryEstimateOnlyMatchesManifestAndWithholdsRows(t *testing.T) {
 	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
 	svc := NewService(instance.MemoryStore())
-	namespace := UserNamespace("estimate")
+	namespace := ProjectNamespace("estimate", "notes")
 	storeTestMemory(t, svc, namespace, "one", "estimate one", "body", 0.8)
 
 	page, err := svc.RecallPage(context.Background(), RecallOpts{
@@ -249,7 +249,7 @@ func TestMemoryHydrateAndTouchLifecycle(t *testing.T) {
 	defer cleanup()
 	svc := NewService(instance.MemoryStore())
 	ctx := context.Background()
-	namespace := UserNamespace("lifecycle")
+	namespace := ProjectNamespace("lifecycle", "notes")
 	storeTestMemory(t, svc, namespace, "selected", "selected summary", "selected body", 0.8)
 	storeTestMemory(t, svc, namespace, "ignored", "ignored summary", "ignored body", 0.7)
 
@@ -295,7 +295,7 @@ func TestMemoryRecallOffsetUsesPublicPageAndTotal(t *testing.T) {
 	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
 	svc := NewService(instance.MemoryStore())
-	namespace := UserNamespace("offset")
+	namespace := ProjectNamespace("offset", "notes")
 	for _, key := range []string{"one", "two", "three"} {
 		storeTestMemory(t, svc, namespace, key, "needle "+key, "body", 0.8)
 	}
@@ -314,8 +314,12 @@ func TestMemoryReadPrefixSpansTypedNamespaces(t *testing.T) {
 	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
 	svc := NewService(instance.MemoryStore())
-	storeTestMemory(t, svc, UserNamespace("prefix", "notes"), "note", "shared", "body", 0.8)
-	storeTestMemory(t, svc, UserNamespace("prefix", "decisions"), "decision", "shared", "body", 0.8)
+	if _, err := instance.MemoryStore().WriteRevision(context.Background(), tesseractMemory.WriteInput{Domain: tesseractMemory.DomainMemory, Namespace: UserNamespace("prefix", "notes"), Actor: "user", MemoryKey: "note", Summary: "shared", Body: "body", Confidence: 0.8, Status: tesseractMemory.StatusReviewed, Author: tesseractMemory.Author{AgentID: "fixture", AgentVersion: "1"}, Trigger: tesseractMemory.TriggerExplicit, SessionID: "fixture", DerivedFrom: tesseractMemory.DerivedFromUser}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := instance.MemoryStore().WriteRevision(context.Background(), tesseractMemory.WriteInput{Domain: tesseractMemory.DomainMemory, Namespace: UserNamespace("prefix", "decisions"), Actor: "user", MemoryKey: "decision", Summary: "shared", Body: "body", Confidence: 0.8, Status: tesseractMemory.StatusReviewed, Author: tesseractMemory.Author{AgentID: "fixture", AgentVersion: "1"}, Trigger: tesseractMemory.TriggerExplicit, SessionID: "fixture", DerivedFrom: tesseractMemory.DerivedFromUser}); err != nil {
+		t.Fatal(err)
+	}
 
 	page, err := svc.RecallPage(context.Background(), RecallOpts{
 		Namespaces: []string{UserMemoryPrefix("prefix")}, Ranking: RankingChronological, Limit: 10,
@@ -329,11 +333,40 @@ func TestMemoryReadPrefixSpansTypedNamespaces(t *testing.T) {
 	}
 }
 
+func TestCanonicalRecallRetainsLegacyProjectAndSessionRows(t *testing.T) {
+	instance, cleanup := newTestTesseract(t)
+	defer cleanup()
+	svc := NewService(instance.MemoryStore())
+	for _, namespace := range []string{ProjectNamespace("migration", "notes"), SessionNamespace("migration", "notes")} {
+		legacy := "user/default/" + namespace
+		if _, err := instance.MemoryStore().WriteRevision(context.Background(), tesseractMemory.WriteInput{
+			Domain: tesseractMemory.DomainMemory, Namespace: legacy, Actor: "user", MemoryKey: "retained",
+			Summary: "retained row", Body: "legacy body", Confidence: 0.8, Status: tesseractMemory.StatusReviewed,
+			Author:  tesseractMemory.Author{AgentID: "migration-fixture", AgentVersion: "1"},
+			Trigger: tesseractMemory.TriggerExplicit, SessionID: "fixture", DerivedFrom: tesseractMemory.DerivedFromUser,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		storeTestMemory(t, svc, namespace, "current", "current row", "current body", 0.8)
+		rows, err := svc.Recall(context.Background(), RecallOpts{Namespaces: []string{namespace}, Ranking: RankingChronological, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := map[string]bool{}
+		for _, row := range rows {
+			found[row.Namespace+":"+row.MemoryKey] = true
+		}
+		if !found[legacy+":retained"] || !found[namespace+":current"] {
+			t.Fatalf("canonical recall lost original namespace or a retained row: %+v", rows)
+		}
+	}
+}
+
 func TestMemoryGetDeprecateAndExtraction(t *testing.T) {
 	instance, cleanup := newTestTesseract(t)
 	defer cleanup()
 	svc := NewService(instance.MemoryStore())
-	namespace := UserNamespace("get")
+	namespace := ProjectNamespace("get", "notes")
 	storeTestMemory(t, svc, namespace, "to_deprecate", "A test memory", "body", 0.8)
 	memory, err := svc.Get(context.Background(), namespace, "to_deprecate")
 	if err != nil || memory.Summary != "A test memory" {
@@ -371,25 +404,25 @@ func TestMemorySignalsAndNamespaces(t *testing.T) {
 	if HasMemorySignal("Can you help me parse JSON?") {
 		t.Error("ordinary request triggered a memory signal")
 	}
-	if got := SessionNamespace("abc"); got != "user/default/session/abc/memory/notes" {
+	if got := SessionNamespace("abc"); got != "session/abc/memory/notes" {
 		t.Errorf("session namespace = %q", got)
 	}
-	if got := ProjectNamespace("nanite", "decisions"); got != "user/default/project/nanite/memory/decisions" {
+	if got := ProjectNamespace("nanite", "decisions"); got != "project/nanite/memory/decisions" {
 		t.Errorf("project namespace = %q", got)
 	}
 	if got := UserNamespace("chrispian"); got != "user/chrispian/memory/notes" {
 		t.Errorf("user namespace = %q", got)
 	}
-	if got := SessionMemoryPrefix("abc"); got != "user/default/session/abc/memory" {
+	if got := SessionMemoryPrefix("abc"); got != "session/abc/memory" {
 		t.Errorf("session prefix = %q", got)
 	}
-	if got := ProjectMemoryPrefix("nanite"); got != "user/default/project/nanite/memory" {
+	if got := ProjectMemoryPrefix("nanite"); got != "project/nanite/memory" {
 		t.Errorf("project prefix = %q", got)
 	}
 	if got := UserMemoryPrefix("chrispian"); got != "user/chrispian/memory" {
 		t.Errorf("user prefix = %q", got)
 	}
-	if got := AllNaniteNamespaces(); len(got) != 1 || got[0] != "user/default/memory" {
+	if got := AllNaniteNamespaces(); len(got) != 2 || got[0] != "user/default/memory" || got[1] != "app/nanite/memory" {
 		t.Errorf("read prefixes = %v", got)
 	}
 }
@@ -411,10 +444,10 @@ func TestMemoryServiceNilStoreAndValidation(t *testing.T) {
 }
 
 func TestMapOriginAndTrigger(t *testing.T) {
-	if got := mapOrigin(""); got != tesseractMemory.OriginObservation {
+	if got := mapDerivedFrom(""); got != tesseractMemory.DerivedFromObservation {
 		t.Errorf("default origin = %q", got)
 	}
-	if got := mapOrigin("feedback"); got != tesseractMemory.OriginFeedback {
+	if got := mapDerivedFrom("feedback"); got != tesseractMemory.DerivedFromFeedback {
 		t.Errorf("feedback origin = %q", got)
 	}
 	if got := mapTrigger(""); got != tesseractMemory.TriggerManual {
@@ -422,5 +455,23 @@ func TestMapOriginAndTrigger(t *testing.T) {
 	}
 	if got := mapTrigger("post_compact"); got != tesseractMemory.TriggerPostCompact {
 		t.Errorf("post-compact trigger = %q", got)
+	}
+}
+
+func TestAgentMemoryWriteDoesNotAcquireUserAuthorityFromMetadata(t *testing.T) {
+	instance, cleanup := newTestTesseract(t)
+	defer cleanup()
+	svc := NewService(instance.MemoryStore())
+	namespace := UserNamespace("protected")
+	err := svc.Store(context.Background(), Memory{Namespace: namespace, MemoryKey: "no_grant", Summary: "request metadata", Origin: "user", Trigger: "explicit", Status: "reviewed", SessionID: "fixture"})
+	if err == nil {
+		t.Fatal("user origin/explicit trigger granted protected write authority")
+	}
+	page, readErr := svc.RecallPage(context.Background(), RecallOpts{Namespaces: []string{namespace}})
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if page.Manifest == nil || page.Manifest.ResultsTotal != 0 {
+		t.Fatal("refused write created a revision", page)
 	}
 }

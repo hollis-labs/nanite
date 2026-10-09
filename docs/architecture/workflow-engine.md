@@ -1,6 +1,6 @@
 # Agent Workflows engine boundary
 
-Nanite embeds `github.com/hollis-labs/go-workflow` at the exact version in
+Nanite embeds `github.com/hollis-labs/libs/workflow` at the exact version in
 `go.mod`. That library is the only Agent Workflows sequencer. It owns graph and
 plan compilation, validation, deterministic transitions and events, waits,
 retries, fan-out, dynamic calls, compensation, verification, memoization, and

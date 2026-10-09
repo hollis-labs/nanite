@@ -9,15 +9,15 @@
 //     production, tests substitute an in-memory stub. The mcp/transport
 //     packages never touch Tesseract directly — only through this package.
 //
-//  2. Namespaces obey Tesseract v0.9's typed memory contract. Learnings use
+//  2. Namespaces obey Tesseract v0.11's typed memory contract. Learnings use
 //     the built-in `learnings` type and carry tool/scope identity in tags and
 //     memory_key:
 //
-//     tool_use → user/<user>/memory/learnings (tag: tool:<tool>)
-//     project  → user/<user>/project/<id>/memory/learnings
-//     session  → user/<user>/session/<id>/memory/learnings
+//     tool_use → app/nanite/memory/learnings (immutable user key; tag: tool:<tool>)
+//     project  → project/<id>/memory/learnings
+//     session  → session/<id>/memory/learnings
 //
-//     Recall by tool name combines the user namespace with a
+//     Recall by tool name combines app and legacy user namespaces with a
 //     tag-filter on `tool:<tool>`, so per-tool isolation still works
 //     end-to-end. This is documented loudly because it is the single
 //     surprise in this layer.
@@ -116,6 +116,8 @@ func ScopeRequiresSubject(s Scope) bool {
 // means a switch to a different backend stays a one-file change.
 type LearningStore interface {
 	Store(ctx context.Context, m memory.Memory) error
+	StoreAppForUser(ctx context.Context, user string, m memory.Memory) error
+	RecallAppForUser(ctx context.Context, user string, opts memory.RecallOpts) ([]memory.Memory, error)
 	Recall(ctx context.Context, opts memory.RecallOpts) ([]memory.Memory, error)
 }
 
@@ -213,6 +215,9 @@ func (r *Recorder) Capture(ctx context.Context, in CaptureInput) (*CaptureOutcom
 	}
 	namespace := Namespace(in.Scope, user, in.Subject)
 	memoryKey := DeriveMemoryKey(in.Scope, in.Subject, hint)
+	if in.Scope == ScopeToolUse {
+		memoryKey = memory.AppMemoryKey(user, memoryKey)
+	}
 
 	// Tool-use scope rides the user namespace, so the tool identity
 	// has to live in tags for recall to bucket correctly. Other scopes
@@ -237,7 +242,11 @@ func (r *Recorder) Capture(ctx context.Context, in CaptureInput) (*CaptureOutcom
 		Status:     DefaultStatus,
 	}
 
-	if err := r.store.Store(ctx, mem); err != nil {
+	store := func() error { return r.store.Store(ctx, mem) }
+	if in.Scope == ScopeToolUse {
+		store = func() error { return r.store.StoreAppForUser(ctx, user, mem) }
+	}
+	if err := store(); err != nil {
 		return nil, fmt.Errorf("learnings: store: %w", err)
 	}
 	return &CaptureOutcome{
@@ -279,8 +288,8 @@ type Hint struct {
 //
 // userID empty falls back to DefaultUserID.
 //
-// Implementation note: tool_use entries land in the user-scoped
-// typed learnings namespace (see package doc), so
+// Implementation note: new tool_use entries land in app-owned
+// typed learnings namespaces with immutable user keys, while legacy user reads remain. The
 // the tool identity is reconstructed from a `tool:<name>` tag. We pull
 // a generous slice from Tesseract and tag-filter client-side because
 // memory.RecallOpts.Tags is an OR filter (matches any tag), not a
@@ -297,13 +306,13 @@ func (r *Recaller) RecallByToolName(ctx context.Context, userID, toolName string
 	ns := Namespace(ScopeToolUse, user, toolName)
 	toolTag := "tool:" + SanitizeSubject(toolName)
 	opts := memory.RecallOpts{
-		Namespaces:    []string{ns},
+		Namespaces:    []string{ns, memory.UserNamespace(user, "learnings")},
 		Ranking:       memory.RankingActivation,
 		Limit:         recallFetchLimit,
 		Tags:          []string{toolTag},
 		MinConfidence: RecallSimilarityThreshold,
 	}
-	mems, err := r.store.Recall(ctx, opts)
+	mems, err := r.store.RecallAppForUser(ctx, user, opts)
 	if err != nil || len(mems) == 0 {
 		return nil
 	}
@@ -313,7 +322,7 @@ func (r *Recaller) RecallByToolName(ctx context.Context, userID, toolName string
 		// against the broad user namespace can surface other entries
 		// that share *any* of the requested tags (Tesseract's filter is
 		// permissive). Re-check.
-		if !hasTag(m.Tags, "learning") || !hasTag(m.Tags, toolTag) {
+		if !memory.AppMemoryAccessible(user, m.Namespace, m.MemoryKey) || !hasTag(m.Tags, "learning") || !hasTag(m.Tags, toolTag) {
 			continue
 		}
 		hints = append(hints, Hint{
@@ -354,11 +363,11 @@ func hasTag(tags []string, target string) bool {
 // CaptureOutcome and so tests can assert on the exact path without
 // reimplementing the formatter.
 //
-// Shape (Tesseract v0.9 typed-memory namespace policy):
+// Shape (Tesseract v0.11 typed-memory namespace policy):
 //
-//	tool_use → user/<user>/memory/learnings
-//	project  → user/<user>/project/<subject>/memory/learnings
-//	session  → user/<user>/session/<subject>/memory/learnings
+//	tool_use → app/nanite/memory/learnings (immutable user key)
+//	project  → project/<subject>/memory/learnings
+//	session  → session/<subject>/memory/learnings
 func Namespace(scope Scope, userID, subject string) string {
 	if userID == "" {
 		userID = DefaultUserID
@@ -366,13 +375,13 @@ func Namespace(scope Scope, userID, subject string) string {
 	subject = SanitizeSubject(subject)
 	switch scope {
 	case ScopeProject:
-		return fmt.Sprintf("user/%s/project/%s/memory/learnings", userID, subject)
+		return fmt.Sprintf("project/%s/memory/learnings", subject)
 	case ScopeSession:
-		return fmt.Sprintf("user/%s/session/%s/memory/learnings", userID, subject)
+		return fmt.Sprintf("session/%s/memory/learnings", subject)
 	case ScopeToolUse:
 		fallthrough
 	default:
-		return fmt.Sprintf("user/%s/memory/learnings", userID)
+		return memory.AppNamespace("learnings")
 	}
 }
 

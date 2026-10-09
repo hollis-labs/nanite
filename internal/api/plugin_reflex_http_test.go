@@ -152,7 +152,7 @@ func TestPluginReflexHTTPApprovedSDKLifecycle(t *testing.T) {
 	if checkErr := host.RegisterEnvelope(naniteplugin.EnvelopeRegistryEntry{Type: "occupied-seed-test", PluginID: "other", Component: "Other"}); checkErr != nil {
 		t.Fatal(checkErr)
 	}
-	block.UI = pluginapi.UI{Bundle: "ui.js"}
+	block.UI = pluginapi.UI{Bundle: "ui/index.js"}
 	block.Registers.Envelopes = []pluginapi.Envelope{{Type: "occupied-seed-test", Component: "Card", Version: 1, Schema: "schema.json"}}
 	path = writeAPIPluginBundle(t, dir, "nanite.feature", "Feature", block)
 	if pms.runPluginLoadIntoHost(path, dir) {

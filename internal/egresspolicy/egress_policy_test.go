@@ -13,7 +13,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/hollis-labs/go-egress-proxy/egress"
+	"github.com/hollis-labs/substrate/harness/interception/egress"
 )
 
 func TestResolveAndPinRejectsAnyDeniedDNSAnswer(t *testing.T) {

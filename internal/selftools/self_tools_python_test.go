@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	permissionlib "github.com/hollis-labs/go-permission"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 // skipIfNoPython3 skips the test if python3 is not on PATH.

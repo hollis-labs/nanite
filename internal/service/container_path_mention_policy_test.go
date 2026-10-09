@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	permissionlib "github.com/hollis-labs/go-permission"
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/storetest"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 // CW-20261001-0232: the container installs the policy that confines a mention

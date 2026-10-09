@@ -37,6 +37,7 @@ func ownershipAllowance(count int, rationale string) agentOwnershipAllowance {
 }
 
 var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowance{
+	ownershipSymbol("internal/runtime/agent/bootdir_authority.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"): ownershipAllowance(4, "Retain exact complete/partial materialization results as custody evidence"),
 	// Boot constructs exactly one wrapper and passes only wrapper-owned launch
 	// DTOs. It never constructs the child runtime or protocol client itself.
 	ownershipSymbol("internal/runtime/agent/agent.go", agentWrapperModule+"/wrapper", "Wrapper"):            ownershipAllowance(1, "Nanite stores the wrapper handle returned by Boot"),
@@ -48,10 +49,10 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 
 	// Session is a thin wrapper facade plus recovery translation; lifecycle
 	// calls stay on wrapper.Wrapper and ACP/agentkit types stay diagnostic-only.
-	ownershipSymbol("internal/runtime/agent/manager.go", agentWrapperModule+"/wrapper", "ErrTurnCancelUnsupported"):    ownershipAllowance(1, "Nanite re-exports wrapper's honest native cancel ceiling"),
-	ownershipSymbol("internal/runtime/agent/manager.go", agentWrapperModule+"/acp", "LifecycleError"):                  ownershipAllowance(1, "Recovery preserves wrapper's classified ACP error"),
-	ownershipSymbol("internal/runtime/agent/manager.go", agentWrapperModule+"/acp", "StateProcessing"):                 ownershipAllowance(1, "Takeover waits on wrapper-reported ACP state"),
-	ownershipSymbol("internal/runtime/agent/manager.go", "github.com/hollis-labs/agentkit/agentsessions", "ExitError"): ownershipAllowance(2, "Legacy recovery error translation only; no agentkit session ownership"),
+	ownershipSymbol("internal/runtime/agent/manager.go", agentWrapperModule+"/wrapper", "ErrTurnCancelUnsupported"):                      ownershipAllowance(1, "Nanite re-exports wrapper's honest native cancel ceiling"),
+	ownershipSymbol("internal/runtime/agent/manager.go", agentWrapperModule+"/acp", "LifecycleError"):                                    ownershipAllowance(1, "Recovery preserves wrapper's classified ACP error"),
+	ownershipSymbol("internal/runtime/agent/manager.go", agentWrapperModule+"/acp", "StateProcessing"):                                   ownershipAllowance(1, "Takeover waits on wrapper-reported ACP state"),
+	ownershipSymbol("internal/runtime/agent/manager.go", "github.com/hollis-labs/substrate/harness/adapters/agentsessions", "ExitError"): ownershipAllowance(2, "Legacy recovery error translation only; no agentkit session ownership"),
 
 	// SessionManager owns only Nanite runtime-ID bindings. The one shared ACP
 	// manager is injected into every wrapper; wrapper sessions remain its data.
@@ -72,29 +73,29 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 	ownershipSymbol("internal/runtime/agent/approval_bridge.go", agentWrapperModule+"/acp", "SelectPermissionOption"):               ownershipAllowance(1, "Return an exact provider option ID"),
 
 	// Dependency and selection DTOs are Nanite composition inputs.
-	ownershipSymbol("internal/runtime/agent/deps.go", agentWrapperModule+"/adapters", "Transport"):                  ownershipAllowance(1, "ACP adapter factory input DTO"),
-	ownershipSymbol("internal/runtime/agent/deps.go", agentWrapperModule+"/adapters", "Adapter"):                    ownershipAllowance(1, "ACP adapter factory output interface"),
-	ownershipSymbol("internal/runtime/agent/deps.go", "github.com/hollis-labs/agentkit/agentsessions", "ExitError"): ownershipAllowance(4, "Recovery and telemetry compatibility DTO only"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters", "Transport"):           ownershipAllowance(1, "Pass the configured ACP transport to shipped adapters"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/adapters", "Adapter"):             ownershipAllowance(1, "Return an adapter for wrapper ownership"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "Transport"):               ownershipAllowance(1, "Return the configured ACP transport DTO"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "TransportTCP"):            ownershipAllowance(1, "Copilot TCP profile selection"),
-	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule+"/adapters", "TransportStdio"):          ownershipAllowance(1, "Default ACP transport selection"),
+	ownershipSymbol("internal/runtime/agent/deps.go", agentWrapperModule, "Transport"):                                                ownershipAllowance(1, "ACP adapter factory input DTO"),
+	ownershipSymbol("internal/runtime/agent/deps.go", agentWrapperModule, "Adapter"):                                                  ownershipAllowance(1, "ACP adapter factory output interface"),
+	ownershipSymbol("internal/runtime/agent/deps.go", "github.com/hollis-labs/substrate/harness/adapters/agentsessions", "ExitError"): ownershipAllowance(4, "Recovery and telemetry compatibility DTO only"),
+	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule, "Transport"):                                         ownershipAllowance(1, "Pass the configured ACP transport to shipped adapters"),
+	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule, "Adapter"):                                           ownershipAllowance(1, "Return an adapter for wrapper ownership"),
+	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule, "Transport"):                                             ownershipAllowance(1, "Return the configured ACP transport DTO"),
+	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule, "TransportTCP"):                                          ownershipAllowance(1, "Copilot TCP profile selection"),
+	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule, "TransportStdio"):                                        ownershipAllowance(1, "Default ACP transport selection"),
 
 	// CW-20260930-0113 (Sprint 4 piece 3): every adapter, native or ACP, is
 	// chosen by go-agent-wrapper's registry-driven launch.Select. Nanite
 	// supplies only the selection DTO (registry runtime id, mode, developer
 	// flag, extra argv) and reads launch.Supported to answer "can this
 	// runtime launch"; it constructs no adapter or client itself.
-	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/launch", "Select"):           ownershipAllowance(2, "Registry-driven adapter selection (native and ACP)"),
-	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/launch", "Selection"):        ownershipAllowance(2, "Nanite compiles the launch selection DTO"),
-	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/launch", "Supported"):        ownershipAllowance(1, "Read which runtime/mode pairs the wrapper can launch"),
-	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/adapters", "Adapter"):        ownershipAllowance(1, "Return the selected adapter for wrapper ownership"),
-	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/adapters", "Transport"):      ownershipAllowance(1, "Map a profile's ACP transport onto a mode"),
-	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/adapters", "TransportTCP"):   ownershipAllowance(2, "Copilot daemon transport and the ACP factory seam"),
-	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/adapters", "TransportStdio"): ownershipAllowance(1, "Default ACP transport for the factory seam"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/launch", "Select"):              ownershipAllowance(1, "ACP adapter by registry runtime and ACP mode"),
-	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/launch", "Selection"):           ownershipAllowance(1, "Nanite compiles the ACP launch selection DTO"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/launch", "Select"):    ownershipAllowance(2, "Registry-driven adapter selection (native and ACP)"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/launch", "Selection"): ownershipAllowance(2, "Nanite compiles the launch selection DTO"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule+"/launch", "Supported"): ownershipAllowance(1, "Read which runtime/mode pairs the wrapper can launch"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule, "Adapter"):             ownershipAllowance(1, "Return the selected adapter for wrapper ownership"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule, "Transport"):           ownershipAllowance(1, "Map a profile's ACP transport onto a mode"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule, "TransportTCP"):        ownershipAllowance(2, "Copilot daemon transport and the ACP factory seam"),
+	ownershipSymbol("internal/runtime/agent/runtime_select.go", agentWrapperModule, "TransportStdio"):      ownershipAllowance(1, "Default ACP transport for the factory seam"),
+	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/launch", "Select"):       ownershipAllowance(1, "ACP adapter by registry runtime and ACP mode"),
+	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule+"/launch", "Selection"):    ownershipAllowance(1, "Nanite compiles the ACP launch selection DTO"),
 
 	// Boot-dir planting is Nanite-owned content compilation expressed only in
 	// wrapper's destination-agnostic DTOs; no process/session control is exposed.
@@ -120,31 +121,31 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 	//     session surface, and Nanite still decides every destination path
 	//     and mode itself (bootDirArtifactTree) rather than accepting
 	//     wrapper's legacy per-field conventions.
-	ownershipSymbol("internal/runtime/agent/bootdir.go", agentWrapperModule+"/plant", "Result"):              ownershipAllowance(3, "Layout.Populate surfaces the materialization result"),
-	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", agentWrapperModule+"/plant", "Planter"):      ownershipAllowance(1, "Claude boot-content planter conformance"),
-	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", agentWrapperModule+"/plant", "Spec"):         ownershipAllowance(9, "Compile Claude boot-content DTOs"),
-	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", agentWrapperModule+"/plant", "Result"):       ownershipAllowance(4, "Return planted-content metadata"),
-	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", agentWrapperModule+"/plant", "Planter"):       ownershipAllowance(1, "Codex boot-content planter conformance"),
-	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", agentWrapperModule+"/plant", "Spec"):          ownershipAllowance(7, "Compile Codex boot-content DTOs"),
-	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", agentWrapperModule+"/plant", "Result"):        ownershipAllowance(4, "Return planted-content metadata"),
-	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", agentWrapperModule+"/plant", "Planter"):    ownershipAllowance(1, "OpenCode boot-content planter conformance"),
-	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", agentWrapperModule+"/plant", "Spec"):       ownershipAllowance(9, "Compile OpenCode boot-content DTOs"),
-	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", agentWrapperModule+"/plant", "Result"):     ownershipAllowance(4, "Return planted-content metadata"),
-	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", agentWrapperModule+"/plant", "Spec"):          ownershipAllowance(3, "Consume the destination-agnostic planting DTO"),
-	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", agentWrapperModule+"/plant", "Result"):        ownershipAllowance(5, "Return exact planting outcomes"),
-	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", agentWrapperModule+"/plant", "SharedPlanter"): ownershipAllowance(1, "Write through agentkit's shared materialization engine"),
-	ownershipSymbol("internal/runtime/agent/skill_plant.go", agentWrapperModule+"/plant", "Spec"):            ownershipAllowance(1, "Plant mid-session skill grants through the same engine-owned path"),
+	ownershipSymbol("internal/runtime/agent/bootdir.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"):          ownershipAllowance(3, "Layout.Populate surfaces the materialization result"),
+	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "Planter"):       ownershipAllowance(1, "Claude boot-content planter conformance"),
+	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantSpec"):     ownershipAllowance(8, "Compile Claude boot-content DTOs"),
+	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"):   ownershipAllowance(6, "Return planted-content metadata"),
+	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "Planter"):        ownershipAllowance(1, "Codex boot-content planter conformance"),
+	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantSpec"):      ownershipAllowance(6, "Compile Codex boot-content DTOs"),
+	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"):    ownershipAllowance(6, "Return planted-content metadata"),
+	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "Planter"):     ownershipAllowance(1, "OpenCode boot-content planter conformance"),
+	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantSpec"):   ownershipAllowance(8, "Compile OpenCode boot-content DTOs"),
+	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"): ownershipAllowance(6, "Return planted-content metadata"),
+	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantSpec"):      ownershipAllowance(3, "Consume the destination-agnostic planting DTO"),
+	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"):    ownershipAllowance(6, "Return exact planting outcomes"),
+	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "SharedPlanter"):  ownershipAllowance(1, "Write through agentkit's shared materialization engine"),
 }
 
 const (
-	agentWrapperModule    = "github.com/hollis-labs/go-agent-wrapper"
-	agentWrapperVersion   = "v0.25.6"
-	agentWrapperSum       = "h1:rDJfcnxxvacp4I9usMYDh/ejKfLwHP6EVl8azc/Hrm8="
-	agentWrapperGoModSum  = "h1:+lZU7sGOnOFAXc+i2TnoRt60/neBH8+0351Mm8j3R1k="
-	runtimeEventsModule   = "github.com/hollis-labs/go-runtime-events"
-	runtimeEventsVersion  = "v0.2.1"
-	runtimeEventsSum      = "h1:ik7AxHU5pPLvNXPIfYYC10czm3zoueKrPvsD2bFrISs="
-	runtimeEventsGoModSum = "h1:+4cNkz4YKLfhCtve9FjMRKOp/0SokwjJ5vGfZ0/mHRk="
+	agentWrapperReleaseModule = "github.com/hollis-labs/substrate/harness"
+	agentWrapperModule        = "github.com/hollis-labs/substrate/harness/adapters"
+	agentWrapperVersion       = "v0.3.1"
+	agentWrapperSum           = "h1:SgSikCp1S4ZTp923Q7ohPTosN/4CYmX2lCqQ4e+bde8="
+	agentWrapperGoModSum      = "h1:BCteU5BGFnLujwOQJK1USbwu35YoNLpr+oe0/3ZD+sU="
+	agentCoreModule           = "github.com/hollis-labs/substrate/agent"
+	agentCoreVersion          = "v0.3.0"
+	agentCoreSum              = "h1:8muMrgQjTgr8tK2ZmArvV4iqvz7b+r04p1GI8NVG74c="
+	agentCoreGoModSum         = "h1:MT9wc4hfLHJsbTv8myyicXZpY88wf7jeXPS71HhUY/Y="
 )
 
 func TestAgentWrapperDependencyBoundary(t *testing.T) {
@@ -178,10 +179,10 @@ func TestAgentWrapperDependencyBoundary(t *testing.T) {
 }
 
 func TestAgentWrapperDependencyValidatorsRejectMutants(t *testing.T) {
-	if violations := validateAgentWrapperModules([]byte("module example.com/host\nrequire " + agentWrapperModule + " v0.8.1\nrequire " + runtimeEventsModule + " " + runtimeEventsVersion + "\n")); len(violations) == 0 {
+	if violations := validateAgentWrapperModules([]byte("module example.com/host\nrequire " + agentWrapperReleaseModule + " v0.8.1\nrequire " + agentCoreModule + " " + agentCoreVersion + "\n")); len(violations) == 0 {
 		t.Fatal("wrong wrapper module version was accepted")
 	}
-	if violations := validateAgentWrapperModules([]byte("module example.com/host\nrequire " + agentWrapperModule + " " + agentWrapperVersion + "\nrequire " + runtimeEventsModule + " " + runtimeEventsVersion + "\nreplace " + agentWrapperModule + " => ../wrapper\n")); len(violations) == 0 {
+	if violations := validateAgentWrapperModules([]byte("module example.com/host\nrequire " + agentWrapperReleaseModule + " " + agentWrapperVersion + "\nrequire " + agentCoreModule + " " + agentCoreVersion + "\nreplace " + agentWrapperReleaseModule + " => ../wrapper\n")); len(violations) == 0 {
 		t.Fatal("local wrapper replace was accepted")
 	}
 }
@@ -210,7 +211,7 @@ func start(ctx context.Context) { _ = process.CommandContext(ctx, "agent") }`,
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
 )
 func start(ctx context.Context) {
     client := protocol.NewClient()
@@ -224,7 +225,7 @@ func start(ctx context.Context) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
 )
 func prompt(ctx context.Context, client protocol.Client) {
     _ = client.Prompt(ctx, "hello")
@@ -235,7 +236,7 @@ func prompt(ctx context.Context, client protocol.Client) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
 )
 func prompt(ctx context.Context) {
     client := protocol.NewClient()
@@ -248,7 +249,7 @@ func prompt(ctx context.Context) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
 )
 func prompt(ctx context.Context, client protocol.Client) {
     var alias = client
@@ -260,7 +261,7 @@ func prompt(ctx context.Context, client protocol.Client) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
 )
 func cancel(ctx context.Context, client protocol.Client) {
     var alias any
@@ -273,7 +274,7 @@ func cancel(ctx context.Context, client protocol.Client) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
 )
 type holder struct { client protocol.Client }
 func closeClient(ctx context.Context, value *holder) {
@@ -286,7 +287,7 @@ func closeClient(ctx context.Context, value *holder) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
 )
 var client protocol.Client
 var third = second
@@ -301,7 +302,7 @@ func prompt(ctx context.Context) {
 			source: `package agent
 import (
     "context"
-    bridge "github.com/hollis-labs/go-agent-wrapper/adapters/claudeacp"
+    bridge "github.com/hollis-labs/substrate/harness/adapters/claudeacp"
 )
 func start(ctx context.Context) {
     client := bridge.NewClient()
@@ -311,13 +312,13 @@ func start(ctx context.Context) {
 		},
 		"direct agentkit manager": {
 			source: `package agent
-import sessions "github.com/hollis-labs/agentkit/agentsessions"
+import sessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 var manager = sessions.NewManager(nil)`,
 			want: []string{"agentsessions.NewManager"},
 		},
 		"blank ACP import": {
 			source: `package agent
-import _ "github.com/hollis-labs/go-agent-wrapper/acp"`,
+import _ "github.com/hollis-labs/substrate/harness/adapters/acp"`,
 			want: []string{"blank import has no reviewed Agent Host symbol use"},
 		},
 		"dot os StartProcess": {
@@ -355,7 +356,7 @@ func TestAgentOwnershipGuardDoesNotTaintUnrelatedIdentifiers(t *testing.T) {
 	files := fstest.MapFS{productionPath: {Data: []byte(`package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
 )
 type holder struct { client protocol.Client }
 type unrelated struct { client string }
@@ -378,7 +379,7 @@ func TestAgentOwnershipGuardDoesNotMergeShadowedHolderTypes(t *testing.T) {
 	files := fstest.MapFS{productionPath: {Data: []byte(`package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/go-agent-wrapper/acp"
+    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
 )
 type promptLike struct{}
 func (promptLike) Prompt(context.Context, string) error { return nil }
@@ -409,14 +410,14 @@ func TestAgentOwnershipGuardRejectsAllowanceOveruse(t *testing.T) {
 		symbol: ownershipAllowance(1, "test allowance must remain exact"),
 	}
 	files := fstest.MapFS{productionPath: {Data: []byte(`package agent
-import host "github.com/hollis-labs/go-agent-wrapper/wrapper"
+import host "github.com/hollis-labs/substrate/harness/adapters/wrapper"
 var first = host.New
 var second = host.New`)}}
 	violations, err := scanAgentOwnership(files, "internal/runtime/agent", allowed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsViolation(violations, "expected github.com/hollis-labs/go-agent-wrapper/wrapper.New exactly 1 time(s), found 2") {
+	if !containsViolation(violations, "expected github.com/hollis-labs/substrate/harness/adapters/wrapper.New exactly 1 time(s), found 2") {
 		t.Fatalf("exact allowance silently broadened:\n- %s", strings.Join(violations, "\n- "))
 	}
 }
@@ -469,7 +470,7 @@ func containsViolation(violations []string, fragment string) bool {
 }
 
 func validateAgentWrapperModules(data []byte) []string {
-	want := map[string]string{agentWrapperModule: agentWrapperVersion, runtimeEventsModule: runtimeEventsVersion}
+	want := map[string]string{agentWrapperReleaseModule: agentWrapperVersion, agentCoreModule: agentCoreVersion}
 	found := make(map[string]int)
 	var violations []string
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
@@ -515,10 +516,10 @@ func validateAgentWrapperModules(data []byte) []string {
 
 func validateAgentWrapperSums(data []byte) []string {
 	want := map[string]string{
-		agentWrapperModule + " " + agentWrapperVersion:               agentWrapperSum,
-		agentWrapperModule + " " + agentWrapperVersion + "/go.mod":   agentWrapperGoModSum,
-		runtimeEventsModule + " " + runtimeEventsVersion:             runtimeEventsSum,
-		runtimeEventsModule + " " + runtimeEventsVersion + "/go.mod": runtimeEventsGoModSum,
+		agentWrapperReleaseModule + " " + agentWrapperVersion:             agentWrapperSum,
+		agentWrapperReleaseModule + " " + agentWrapperVersion + "/go.mod": agentWrapperGoModSum,
+		agentCoreModule + " " + agentCoreVersion:                          agentCoreSum,
+		agentCoreModule + " " + agentCoreVersion + "/go.mod":              agentCoreGoModSum,
 	}
 	found := make(map[string]int)
 	var violations []string
@@ -678,7 +679,14 @@ func inspectAgentOwnership(fileSet *token.FileSet, path string, file *ast.File, 
 }
 
 func guardedOwnershipImport(importPath string) bool {
-	return importPath == agentWrapperModule || strings.HasPrefix(importPath, agentWrapperModule+"/") || importPath == "github.com/hollis-labs/agentkit/agentsessions"
+	// Normalized events, provider DTOs and registry IDs were independent of the
+	// former wrapper module. Their relocation does not transfer process ownership.
+	for _, dto := range []string{"/runtimeevents", "/provider", "/registry"} {
+		if importPath == agentWrapperModule+dto || strings.HasPrefix(importPath, agentWrapperModule+dto+"/") {
+			return false
+		}
+	}
+	return importPath == agentWrapperModule || strings.HasPrefix(importPath, agentWrapperModule+"/") || importPath == "github.com/hollis-labs/substrate/harness/agentlaunch/planting" || importPath == "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 }
 
 var directACPClientLifecycleMethods = map[string]bool{
@@ -895,7 +903,7 @@ func isDirectACPClientType(expression ast.Expr, aliases map[string]string) bool 
 			return false
 		}
 		importPath := aliases[ident.Name]
-		return value.Sel.Name == "Client" && (importPath == agentWrapperModule+"/acp" || strings.HasPrefix(importPath, agentWrapperModule+"/adapters/"))
+		return value.Sel.Name == "Client" && (importPath == agentWrapperModule+"/acp" || strings.HasPrefix(importPath, agentWrapperModule+"/"))
 	default:
 		return false
 	}
@@ -916,5 +924,5 @@ func isDirectACPClientConstructor(expression ast.Expr, aliases map[string]string
 	}
 	importPath := aliases[ident.Name]
 	return (importPath == agentWrapperModule+"/acp" && strings.HasPrefix(selector.Sel.Name, "New")) ||
-		(strings.HasPrefix(importPath, agentWrapperModule+"/adapters/") && selector.Sel.Name == "NewClient")
+		(strings.HasPrefix(importPath, agentWrapperModule+"/") && selector.Sel.Name == "NewClient")
 }

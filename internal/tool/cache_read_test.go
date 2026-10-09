@@ -7,7 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	toolresult "github.com/hollis-labs/go-toolresult"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
 )
 
 func TestResultPreview_TaskFieldsAndCommentEnds(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"sync"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/store"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // fakeAgentProfiles is the test substitute for the AgentProfiles

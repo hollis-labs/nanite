@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // devToolPrefix is the namespace covered by the trust-agent notify-pause

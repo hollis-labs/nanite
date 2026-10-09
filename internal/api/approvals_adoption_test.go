@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/service"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 func respondApprovalForTest(a *testAPI, session, requestID, decision, scope string) int {

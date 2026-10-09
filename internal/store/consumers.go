@@ -117,7 +117,7 @@ func (s *Store) UpdateConsumer(ctx context.Context, c *Consumer) error {
 }
 
 // DeleteConsumer removes a consumer by ID. This codebase runs with
-// PRAGMA foreign_keys=1 (see github.com/hollis-labs/go-sqlite/sqlitekit),
+// PRAGMA foreign_keys=1 (see github.com/hollis-labs/libs/util/sqlite/sqlitekit),
 // so deleting a consumer that is still referenced by any
 // agent_profiles.consumer_id row fails with a FOREIGN KEY constraint
 // error -- callers must nullify those rows first (via UpdateAgent) before

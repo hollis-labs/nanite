@@ -1,6 +1,6 @@
 # Service errors and transport parity
 
-Service error categories use `github.com/hollis-labs/go-svcerr`. Services
+Service error categories use `github.com/hollis-labs/libs/util/svcerr`. Services
 choose an explicit code and safe message; a wrapped store error remains a
 server-side cause. Missing rows are identified through `errors.Is` against
 `sql.ErrNoRows` or domain absence sentinels, never by matching error text. An
@@ -41,6 +41,6 @@ own contracts.
 
 Transport parity assertions belong at the real HTTP and MCP doors, including
 request decoding, discovery and error serialization. The test-only
-`github.com/hollis-labs/go-transportparity` library supplies those assertions.
+`github.com/hollis-labs/libs/util/transportparity` library supplies those assertions.
 A paired operation must preserve validation, resource absence, permission and
 field semantics across doors; generated timestamps need not match.

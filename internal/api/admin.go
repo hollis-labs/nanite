@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/hollis-labs/go-envelopes/admin"
-	"github.com/hollis-labs/go-envelopes/admin/adminhttp"
+	"github.com/hollis-labs/libs/ui-go/envelopes/admin"
+	"github.com/hollis-labs/libs/ui-go/envelopes/admin/adminhttp"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/service"
 )

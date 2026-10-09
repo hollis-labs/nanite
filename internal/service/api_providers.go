@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
 	"github.com/hollis-labs/nanite/internal/secrets"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 )
 
 // Key sources reported by ResolveAPIKey.

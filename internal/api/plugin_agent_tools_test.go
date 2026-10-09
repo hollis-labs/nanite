@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/service"
@@ -15,7 +16,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	"github.com/hollis-labs/plugin-sdk/manifest"
 )
 
 func TestPluginAgentToolsRealReviewedChildAndPermissions(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	ssekit "github.com/hollis-labs/go-ssekit"
-	goplugin "github.com/hollis-labs/plugin-sdk"
+	goplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	ssekit "github.com/hollis-labs/libs/ui-go/ssekit"
 )
 
 // handleUnifiedEvents provides a single multiplexed SSE connection (/api/events)

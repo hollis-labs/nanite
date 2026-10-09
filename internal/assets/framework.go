@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/go-safefs/atomicfile"
-	"github.com/hollis-labs/go-safefs/pathsafe"
+	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
+	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 )
 
 //go:embed all:framework manifests/*.json

@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	ssekit "github.com/hollis-labs/go-ssekit"
+	ssekit "github.com/hollis-labs/libs/ui-go/ssekit"
 )
 
 // newSSEWriter keeps Nanite's response headers while delegating framing,

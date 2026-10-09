@@ -7,8 +7,8 @@ import (
 
 	"github.com/hollis-labs/nanite/pkg/models"
 
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )

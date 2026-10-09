@@ -2,22 +2,20 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-agent-wrapper/plant"
-	"github.com/hollis-labs/go-materialize/materialize"
 	"github.com/hollis-labs/nanite/internal/store"
+	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
+	"github.com/hollis-labs/substrate/harness/workspace/materialize"
 )
 
-// CW-20260930-0113: agentkit v0.7.0 moved the materialization manifest from
-// .agentkit/materialize-manifest.json to .materialize/manifest.json with no
-// migration. A boot dir planted before the move is stale. Every re-plant
-// path that touches an existing dir — crash-recovery Populate, the
-// system-prompt slot regen, a mid-session skill plant — must neither refuse
-// it nor wipe what a session needs to resume.
+// Historical roots retain their resume files and legacy manifest. The current
+// inactive-only contract refuses replanting instead of guessing custody or
+// deleting the manifest produced by an earlier operation.
 
 // resumeState is what a provider or Nanite writes into a live boot dir
 // outside the planter, and what a resumed session or durable agent reads
@@ -86,25 +84,25 @@ func prePlantedBootDir(t *testing.T, l upgradeLayout) (string, SetupParams) {
 	return bootDir, params
 }
 
-func TestBootDirManifestUpgrade_ReplantNeitherRefusesNorWipes(t *testing.T) {
+func TestBootDirManifestUpgrade_RefusesWithoutWiping(t *testing.T) {
 	for _, l := range upgradeLayouts {
 		populate := func(t *testing.T, bootDir string, params SetupParams) {
 			t.Helper()
-			if _, err := l.layout.Populate(bootDir, params); err != nil {
+			if _, err := l.layout.Populate(bootDir, params); !errors.Is(err, ErrArtifactRefreshUnavailable) {
 				t.Fatalf("Populate: %v", err)
 			}
 		}
 		slot := func(t *testing.T, bootDir string, params SetupParams) {
 			t.Helper()
-			if err := l.layout.RegenerateSystemPromptSlot(bootDir, params); err != nil {
+			if err := l.layout.RegenerateSystemPromptSlot(bootDir, params); !errors.Is(err, ErrArtifactRefreshUnavailable) {
 				t.Fatalf("RegenerateSystemPromptSlot: %v", err)
 			}
 		}
 		// The write PlantAgentSkillFiles makes, minus the skill resolution.
 		skill := func(t *testing.T, bootDir string, _ SetupParams) {
 			t.Helper()
-			spec := plant.Spec{Files: map[string][]byte{l.skillPath: []byte("skill body")}}
-			if _, err := plantSpec(context.Background(), bootDir, spec, plantConfig{provider: l.name}); err != nil {
+			spec := plant.PlantSpec{Files: map[string][]byte{l.skillPath: []byte("skill body")}}
+			if _, err := plantSpec(context.Background(), bootDir, spec, plantConfig{provider: l.name}); !errors.Is(err, ErrArtifactRefreshUnavailable) {
 				t.Fatalf("mid-session skill plant: %v", err)
 			}
 		}
@@ -131,7 +129,7 @@ func TestBootDirManifestUpgrade_ReplantNeitherRefusesNorWipes(t *testing.T) {
 					}
 				}
 				prompt, err := os.ReadFile(filepath.Join(bootDir, l.promptFile)) //nolint:gosec // reads a file this test planted into its temp boot dir
-				if err != nil || !strings.Contains(string(prompt), "prompt v2") {
+				if err != nil || !strings.Contains(string(prompt), "prompt v1") {
 					t.Errorf("%s was not re-planted with the new prompt (err %v)", l.promptFile, err)
 				}
 				if _, err := os.Stat(filepath.Join(bootDir, legacyManifestRelPath)); err != nil {
@@ -154,7 +152,7 @@ func TestBootDirManifestUpgrade_CurrentDirKeepsManifest(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(bootDir) })
-	if err := (claudeLayout{}).RegenerateSystemPromptSlot(bootDir, params); err != nil {
+	if err := (claudeLayout{}).RegenerateSystemPromptSlot(bootDir, params); !errors.Is(err, ErrArtifactRefreshUnavailable) {
 		t.Fatalf("RegenerateSystemPromptSlot: %v", err)
 	}
 	if _, err := os.Stat(materialize.ManifestPath(bootDir)); err != nil {

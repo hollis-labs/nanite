@@ -1,153 +1,12 @@
 package agent
 
-// skill_plant.go — TASKS/skills/10
-// (TASKS/skills/10-cli-hosted-native-skill-delivery-boot-dir-planting.md):
-// docs/engineering/architecture/20-skills.md's "Delivery" section — CLI-
-// hosted agents (Claude/Codex/OpenCode) get a granted skill's vendored
-// package copied into the agent's own native skill location inside its
-// boot dir, so the agent's own native skill mechanism can pick it up
-// unmodified. Nanite's job stops at planting real files at the path the
-// runtime already expects — no Nanite-specific rendering, no self-tool,
-// nothing added to composeSystemPrompt/ResolveSystemPrompt for this
-// delivery path.
-//
-// # Reuse, not reimplementation
-//
-// bootdir_plant.go's plantSpec is the existing, already-production
-// primitive for "build a map[relPath][]byte, then write it through the
-// shared path-safety gate and the shared materialization engine" — this
-// file only builds that map for a skill's vendored file tree; it never
-// touches the filesystem itself and never bypasses plantSpec's
-// agentlaunch.ValidateBootDirRelPath gate.
-//
-// # Why this package can't import internal/skill
-//
-// internal/skill/resolver.go already imports this package
-// (runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent",
-// for ResolveContextBlocks) — importing internal/skill back from here
-// would cycle. SkillCatalogStore/SkillGrantStore below are therefore this
-// package's own, identically-shaped local interfaces rather than a reuse
-// of internal/skill/resolver.go's SkillIndexStore or
-// internal/skill/gate.go's AgentKnownSkillStore — *store.Store satisfies
-// all of them without any adapter code.
-//
-// # The trust check this file applies before planting
-//
-// Mirrors internal/skill/gate.go's Gate.authorize check exactly (task 09's
-// own execution-time gate), applied here to the planting operation instead
-// of the execution operation: a skill is plantable only when its
-// agent_known_skills grant row has a non-empty ApprovedContentHash (a bare,
-// ungranted assignment — store.AgentKnownSkill.IsBareAssignment — is never
-// plantable) AND that hash still matches the skill catalog row's current
-// ContentHash (a stale approval, from before a since-superseded
-// re-install/re-sync, is never plantable either — planting an old approval
-// against new vendored content would be exactly the trust-boundary bypass
-// task 09 was built to prevent on the execution side). Gate.authorize does
-// not additionally check store.Skill.Enabled, so neither does
-// ResolvePlantableSkills below — the two checks stay in lockstep by
-// design, per this task's own instruction to mirror task 09's logic.
-//
-// # Per-provider native conventions (What-to-do item 3)
-//
-// Investigated directly rather than assumed identical across providers:
-//
-//   - Claude Code: real, documented native skill mechanism —
-//     .claude/skills/<slug>/SKILL.md, auto-discovered from cwd. Nanite's
-//     claude boot dir IS cwd (claudeLayout.SpawnWorkdir), so
-//     "<bootDir>/.claude/skills/<slug>/..." is the correct, unambiguous
-//     destination.
-//   - OpenCode: also a real, documented native skill mechanism, but with
-//     two candidate destination conventions and genuine published-doc
-//     ambiguity about which one Nanite's own OPENCODE_CONFIG_DIR env
-//     amendment (opencodeLayout.AmendEnv) actually reaches:
-//     project-local ".opencode/skills/<name>/SKILL.md" (relative to cwd),
-//     and a custom-config-dir convention docs describe as "search[ing]
-//     ...just like the standard .opencode directory... should follow the
-//     same structure" (which — per that same doc's own subdirectory list,
-//     "agents/, commands/, modes/, plugins/, skills/, tools/, and
-//     themes/" — plausibly includes "skills/" directly under the custom
-//     dir, though the prose enumerating what a custom config dir searches
-//     names only "agents, commands, modes, and plugins" and doesn't
-//     explicitly re-list skills). Given real ambiguity and zero
-//     functional cost to covering both (extra, unused files are inert;
-//     nothing else in opencodePlantSpec's Files map uses either
-//     top-level name), this file plants BOTH candidate destinations —
-//     opencodeSkillDestPrefixes below. opencodeLayout.SpawnWorkdir's own
-//     doc comment already establishes that real chat sessions call it
-//     with projectDir="" today, so cwd == bootDir in practice, making the
-//     project-local ".opencode/skills/" destination land in the same real
-//     directory as the config-dir-relative "skills/" destination for
-//     every live session this ships against.
-//   - Codex: NO native skill mechanism, confirmed by (1) go-providers'
-//     CodexAdapter.BootDirSpec having no skills-related planted file or
-//     env amendment at all (bootdir_codex.go, vendored go-providers
-//     v0.24.0), (2) a direct read of the OpenAI Codex CLI's own
-//     docs/config.md reference (github.com/openai/codex) turning up zero
-//     mentions of "skill"/"skills" anywhere, and (3) the CLI's README
-//     likewise. This is a legitimate, documented terminal outcome per
-//     20-skills.md's own Context ("they may not have an equivalent
-//     native-skill mechanism at all... that provider simply gets no skill
-//     planting") — codexPlantSpec deliberately has no skill-files
-//     contribution, and skillFilesForProvider below returns (nil, nil)
-//     for "codex" rather than guessing at a path.
-//
-// # Path-traversal guard on the skill slug (TASKS/skills/10 Fix required)
-//
-// store.Skill.Slug carries NO format validation anywhere in the codebase
-// (confirmed across internal/api/skills.go, internal/skill/parser.go,
-// internal/skillinstall/validate.go, and the skills-table migration —
-// UNIQUE only, no CHECK) and IS REST-settable today via POST /api/skills.
-// claudeSkillDestPrefixes/opencodeSkillDestPrefixes below build each
-// skill's destination via path.Join(providerRoot, slug); because
-// path.Join calls path.Clean internally, a slug containing ".." segments
-// can cancel out part or all of providerRoot itself —
-// path.Join(".claude/skills", "../..") == "." would otherwise land a
-// vendored file at the exact boot-dir key claudePlantSpec uses for the
-// agent's own real system prompt, silently overwriting it with zero
-// error. ValidateBootDirRelPath (the gate bootDirArtifactTree applies)
-// can't catch this downstream: by the time it inspects the already-
-// path.Clean'd result, no ".." segments remain in it to reject.
-//
-// skillDestPrefixSafe below closes this at the one place it can actually
-// be caught: compare the real (cleaned) path.Join result against the
-// literal, UNCLEANED string concatenation providerRoot+"/"+slug. A slug
-// with no "."/".." segments produces byte-identical strings on both
-// sides. Any slug that cancels part or all of providerRoot diverges the
-// two — the cleaned join loses components the literal concatenation
-// still has — which this function treats as an escape attempt and
-// refuses. claudeSkillDestPrefixes/opencodeSkillDestPrefixes below run
-// every candidate destination through this check and report
-// (nil, false) — "unsafe, don't plant this skill anywhere" — the moment
-// any one of them fails, rather than partially planting a skill at only
-// its safe destinations. SkillPlantFiles' caller (skillFilesForProvider)
-// treats a false as "skip this skill entirely," logging a warning
-// identifying the skill slug and agent — never a silent redirect to some
-// other "sanitized" path.
-//
-// # Additive-only; no removal-on-revoke (documented scope boundary)
-//
-// Every write in this codebase's boot-dir mechanism (Populate, plantSpec)
-// is additive/idempotent-by-overwrite — none of them ever delete a
-// previously-planted file that's no longer needed. Nanite never sets
-// materialize.ReconcilePolicy.RemoveOwned, which is what keeps that true
-// now that the shared engine — which CAN prune owned entries — does the
-// writing. This file follows the same convention: a skill that stops
-// being plantable (ungranted, or a stale re-approval) simply stops being
-// included in a future plant/replant call's map, and its previously
-// planted files are left on disk in the boot dir rather than actively
-// removed. This is a real,
-// deliberate scope boundary (not a Done-means gap): this task's own
-// Done-means only requires that an unapproved/stale skill "is not
-// planted" (verified as "the current plant/replant call omits it," which
-// this achieves) and that a newly-granted skill "appears... without a
-// full session restart" (also achieved, via PlantAgentSkillFiles below) —
-// it does not require active removal of a since-revoked skill's stale
-// files from an already-running session's boot dir. A CLI agent's own
-// native skill mechanism re-reads its skill directory on each turn, not
-// once at process start, so a stale planted-but-revoked skill remains
-// technically invocable by the agent's own runtime until the boot dir
-// itself is torn down — a real, narrow residual-trust window, logged here
-// rather than silently left undiscoverable.
+// Skill source resolution preserves catalog hash approval and provider-native
+// paths. Fresh private Setup includes the resolved tree in its materialization.
+// PlantAgentSkillFiles against an existing bound root returns typed unavailable
+// when there are files to refresh; no-grant and unsupported-provider empty
+// trees remain no-ops. A later grant requires a fresh boot until a fenced
+// provider reload/binding contract exists. Previously planted files remain in
+// the old binding; this source change performs no live removal or backfill.
 
 import (
 	"context"
@@ -155,7 +14,6 @@ import (
 	"log/slog"
 	"path"
 
-	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -354,7 +212,7 @@ func opencodeSkillDestPrefixes(slug string) ([]string, bool) {
 	return []string{configRelative, projectLocal}, true
 }
 
-// skillFilesForProvider returns providerName's plant.Spec-ready
+// skillFilesForProvider returns providerName's plant.PlantSpec-ready
 // map[relPath][]byte for params.AgentProfile's plantable skill set, or
 // (nil, nil) when the provider has no native skill mechanism (codex —
 // see package doc) or params carries no skill wiring (SkillGrants /
@@ -437,24 +295,8 @@ func PlantAgentSkillFiles(ctx context.Context, deps *Dependencies, bootDir, prov
 	if err != nil {
 		return err
 	}
-	// CW-20260910-0020: planted through the same plantSpec path the
-	// provider Planters use, NOT a direct write loop. This is a
-	// correctness requirement, not tidiness: the shared materialization
-	// engine refuses any desired path that exists on disk but is absent
-	// from its manifest ("destination path is unowned"), and refuses the
-	// whole plant rather than that one entry. A skill written here
-	// outside the manifest would therefore make the NEXT full
-	// Populate — i.e. crash-recovery Repopulate, which plants the skill
-	// set again as part of the provider's own Spec.Files — fail outright.
-	//
-	// Routing through plantSpec keeps the EntryID convention identical
-	// ("nanite:file:<relPath>") whether a skill was planted at boot or
-	// granted mid-session, so the two agree on ownership instead of
-	// colliding. plantConfig carries only the provider name: skills have
-	// no ProviderSettings destination and no mode overrides, so every
-	// entry lands at the default file mode, exactly as before.
-	if _, err := plantSpec(ctx, bootDir, plant.Spec{Files: files}, plantConfig{provider: providerName}); err != nil {
-		return err
+	if len(files) == 0 {
+		return nil
 	}
-	return nil
+	return &ArtifactRefreshUnavailable{Provider: providerName, Operation: "refresh skill files"}
 }

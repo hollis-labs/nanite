@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/hollis-labs/go-agent-wrapper/acp"
-	permissionlib "github.com/hollis-labs/go-permission"
+	"github.com/hollis-labs/substrate/harness/adapters/acp"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 // bestEffortPermissionResponder adapts a provider-originated ACP

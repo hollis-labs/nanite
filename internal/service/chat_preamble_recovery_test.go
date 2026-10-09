@@ -7,9 +7,9 @@ import (
 
 	"github.com/hollis-labs/substrate/agent/runloop"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	feotel "github.com/hollis-labs/go-otel"
+	feotel "github.com/hollis-labs/libs/util/otel"
 	"github.com/hollis-labs/nanite/internal/chat"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func TestConsumeProviderIteration_PromissoryPreambleSelfHealingRecovery(t *testing.T) {

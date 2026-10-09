@@ -6,7 +6,7 @@ import (
 
 	"github.com/hollis-labs/substrate/agent/approval"
 
-	permissionlib "github.com/hollis-labs/go-permission"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 func (a *API) handleAgentV1ApprovalResponse(w http.ResponseWriter, r *http.Request) {

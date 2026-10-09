@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-agent-wrapper/acp"
-	permissionlib "github.com/hollis-labs/go-permission"
+	"github.com/hollis-labs/substrate/harness/adapters/acp"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 func TestBestEffortPermissionResponder_NilDependenciesKeepWrapperDefault(t *testing.T) {

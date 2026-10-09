@@ -3,7 +3,7 @@ package plugin
 import (
 	"fmt"
 
-	"github.com/hollis-labs/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 )
 
 // ValidatePluginID applies the shared identity rule at filesystem boundaries.

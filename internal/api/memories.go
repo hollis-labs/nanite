@@ -59,6 +59,8 @@ func (a *API) handleListMemories(w http.ResponseWriter, r *http.Request) {
 		}
 	case "user":
 		namespaces = []string{memory.UserMemoryPrefix("default")}
+	case "app":
+		namespaces = []string{memory.AppMemoryPrefix()}
 	default:
 		namespaces = memory.AllNaniteNamespaces()
 	}
@@ -112,11 +114,12 @@ func (a *API) handleListMemories(w http.ResponseWriter, r *http.Request) {
 	// Add computed key to each memory for client use.
 	type memoryWithKey struct {
 		memory.Memory
-		Key string `json:"key"`
+		Key      string `json:"key"`
+		Editable bool   `json:"editable"`
 	}
 	out := make([]memoryWithKey, len(memories))
 	for i, m := range memories {
-		out[i] = memoryWithKey{Memory: m, Key: memoryKeyEncode(m.Namespace, m.MemoryKey)}
+		out[i] = memoryWithKey{Memory: m, Key: memoryKeyEncode(m.Namespace, m.MemoryKey), Editable: strings.HasPrefix(m.Namespace, memory.AppMemoryPrefix()+"/") && memory.AppMemoryAccessible("default", m.Namespace, m.MemoryKey)}
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]any{
@@ -156,23 +159,15 @@ func (a *API) handleCreateMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve namespace from scope or explicit override.
+	// GUI writes are app-authored. The single-user host selects default; a
+	// request's scope, origin or trigger never supplies a human principal.
 	ns := req.Namespace
 	if ns == "" {
-		switch req.Scope {
-		case "session":
-			if req.SessionID != "" {
-				ns = memory.SessionNamespace(req.SessionID)
-			} else {
-				ns = memory.UserNamespace("default")
-			}
-		case "project":
-			ns = memory.UserNamespace("default")
-		case "user", "":
-			ns = memory.UserNamespace("default")
-		default:
-			ns = memory.UserNamespace("default")
-		}
+		ns = memory.AppNamespace()
+	}
+	if !strings.HasPrefix(ns, memory.AppMemoryPrefix()+"/") {
+		a.errorResp(w, http.StatusForbidden, "GUI writes require app-owned memory; retained user memory is read-only")
+		return
 	}
 
 	// Generate a memory key if not provided.
@@ -182,6 +177,7 @@ func (a *API) handleCreateMemory(w http.ResponseWriter, r *http.Request) {
 		memKey = derivedKey(req.Summary)
 	}
 
+	memKey = memory.AppMemoryKey("default", memKey)
 	origin := req.Origin
 	if origin == "" {
 		origin = "user"
@@ -205,7 +201,7 @@ func (a *API) handleCreateMemory(w http.ResponseWriter, r *http.Request) {
 		Status:     "draft",
 	}
 
-	if err := a.Services.Memory.Store(r.Context(), m); err != nil {
+	if err := a.Services.Memory.StoreAppForUser(r.Context(), "default", m); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "store failed: "+err.Error())
 		return
 	}
@@ -246,6 +242,10 @@ func (a *API) handleUpdateMemory(w http.ResponseWriter, r *http.Request) {
 	ns, memKey, ok := memoryKeyDecode(r.PathValue("key"))
 	if !ok {
 		a.errorResp(w, http.StatusBadRequest, "invalid memory key")
+		return
+	}
+	if !strings.HasPrefix(ns, memory.AppMemoryPrefix()+"/") || !memory.AppMemoryAccessible("default", ns, memKey) {
+		a.errorResp(w, http.StatusForbidden, "GUI writes require this user's app memory; retained namespaces are read-only")
 		return
 	}
 
@@ -293,8 +293,8 @@ func (a *API) handleUpdateMemory(w http.ResponseWriter, r *http.Request) {
 		updated.Tags = current.Tags
 	}
 
-	if err := a.Services.Memory.Store(r.Context(), updated); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "update failed: "+err.Error())
+	if storeErr := a.Services.Memory.StoreAppForUser(r.Context(), "default", updated); storeErr != nil {
+		a.errorResp(w, http.StatusInternalServerError, "update failed: "+storeErr.Error())
 		return
 	}
 
@@ -323,6 +323,10 @@ func (a *API) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	ns, memKey, ok := memoryKeyDecode(r.PathValue("key"))
 	if !ok {
 		a.errorResp(w, http.StatusBadRequest, "invalid memory key")
+		return
+	}
+	if !strings.HasPrefix(ns, memory.AppMemoryPrefix()+"/") || !memory.AppMemoryAccessible("default", ns, memKey) {
+		a.errorResp(w, http.StatusForbidden, "GUI writes require this user's app memory; retained namespaces are read-only")
 		return
 	}
 
@@ -368,6 +372,10 @@ func (a *API) handleUpdateMemoryStatus(w http.ResponseWriter, r *http.Request) {
 	ns, memKey, ok := memoryKeyDecode(r.PathValue("key"))
 	if !ok {
 		a.errorResp(w, http.StatusBadRequest, "invalid memory key")
+		return
+	}
+	if !strings.HasPrefix(ns, memory.AppMemoryPrefix()+"/") || !memory.AppMemoryAccessible("default", ns, memKey) {
+		a.errorResp(w, http.StatusForbidden, "GUI writes require this user's app memory; retained namespaces are read-only")
 		return
 	}
 
@@ -421,8 +429,8 @@ func (a *API) handleUpdateMemoryStatus(w http.ResponseWriter, r *http.Request) {
 		Status:     req.Status,
 	}
 
-	if err := a.Services.Memory.Store(r.Context(), updated); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "status update failed: "+err.Error())
+	if storeErr := a.Services.Memory.StoreAppForUser(r.Context(), "default", updated); storeErr != nil {
+		a.errorResp(w, http.StatusInternalServerError, "status update failed: "+storeErr.Error())
 		return
 	}
 

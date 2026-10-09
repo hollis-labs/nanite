@@ -7,14 +7,18 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	sdksub "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 )
 
 // mockPlugin reads JSON-RPC requests from r and writes responses to w.
 // It handles the core protocol methods for testing.
 func mockPlugin(r io.Reader, w io.Writer, handlers map[string]func(json.RawMessage) (any, *RPCError)) {
 	reader := bufio.NewReader(r)
+	var writerMu sync.Mutex
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
@@ -24,33 +28,37 @@ func mockPlugin(r io.Reader, w io.Writer, handlers map[string]func(json.RawMessa
 		if err := json.Unmarshal(line, &req); err != nil {
 			continue
 		}
-		if req.ID == 0 {
+		if req.ID == (sdksub.RPCID{}) {
 			continue // notification, no response needed
 		}
 
-		handler, ok := handlers[req.Method]
-		var resp RPCResponse
-		resp.JSONRPC = "2.0"
-		resp.ID = req.ID
+		go func(req RPCRequest) {
+			handler, ok := handlers[req.Method]
+			var resp RPCResponse
+			resp.JSONRPC = "2.0"
+			resp.ID = req.ID
 
-		if !ok {
-			resp.Error = &RPCError{Code: ErrCodeMethodNotFound, Message: "method not found: " + req.Method}
-		} else {
-			var rawParams json.RawMessage
-			if req.Params != nil {
-				rawParams, _ = json.Marshal(req.Params)
-			}
-			result, rpcErr := handler(rawParams)
-			if rpcErr != nil {
-				resp.Error = rpcErr
+			if !ok {
+				resp.Error = &RPCError{Code: ErrCodeMethodNotFound, Message: "method not found: " + req.Method}
 			} else {
-				resp.Result, _ = json.Marshal(result)
+				var rawParams json.RawMessage
+				if req.Params != nil {
+					rawParams, _ = json.Marshal(req.Params)
+				}
+				result, rpcErr := handler(rawParams)
+				if rpcErr != nil {
+					resp.Error = rpcErr
+				} else {
+					resp.Result, _ = json.Marshal(result)
+				}
 			}
-		}
 
-		data, _ := json.Marshal(resp)
-		data = append(data, '\n')
-		w.Write(data)
+			data, _ := json.Marshal(resp)
+			data = append(data, '\n')
+			writerMu.Lock()
+			_, _ = w.Write(data)
+			writerMu.Unlock()
+		}(req)
 	}
 }
 
@@ -193,8 +201,8 @@ func TestTransport_Notify(t *testing.T) {
 	if err := json.Unmarshal(data, &req); err != nil {
 		t.Fatalf("unmarshal notification: %v", err)
 	}
-	if req.ID != 0 {
-		t.Errorf("notification should have ID=0, got %d", req.ID)
+	if req.ID != (sdksub.RPCID{}) {
+		t.Errorf("notification should have no ID, got %v", req.ID)
 	}
 	if req.Method != "event/handle" {
 		t.Errorf("expected method event/handle, got %q", req.Method)

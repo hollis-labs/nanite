@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func newKnownToolsTestStore(t *testing.T) *store.Store {

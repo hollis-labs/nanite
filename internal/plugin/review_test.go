@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	"github.com/hollis-labs/nanite/internal/plugin/plugintest"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/zalando/go-keyring"
 )
@@ -25,6 +27,16 @@ func reviewBundle(t *testing.T) (string, string) {
 	}
 	if checkErr := os.WriteFile(filepath.Join(directory, "asset.txt"), []byte("original"), 0600); checkErr != nil {
 		t.Fatal(checkErr)
+	}
+	if err := os.MkdirAll(filepath.Join(directory, "bin"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if writeErr := os.WriteFile(filepath.Join(directory, "bin/plugin"), []byte(sharedFixtureExecutable), 0600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	// #nosec G302 -- this private fixture requires owner execution; no group/world access.
+	if modeErr := os.Chmod(filepath.Join(directory, "bin/plugin"), 0700); modeErr != nil {
+		t.Fatal(modeErr)
 	}
 	return root, directory
 }
@@ -186,6 +198,28 @@ func TestApprovalRollbackRestoresReceiptAndPinsOldManager(t *testing.T) {
 		t.Fatal(checkErr)
 	}
 	if checkErr := os.WriteFile(filepath.Join(directory, "asset.txt"), []byte("upgrade"), 0600); checkErr != nil {
+		t.Fatal(checkErr)
+	}
+	manifestPath := filepath.Join(directory, "plugin.yaml")
+	confined, openErr := os.OpenRoot(directory)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	t.Cleanup(func() { _ = confined.Close() })
+	manifestBytes, err := confined.ReadFile("plugin.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration, err := manifest.Decode(strings.NewReader(string(manifestBytes)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugintest.Inventory(t, &declaration, directory)
+	var encoded strings.Builder
+	if checkErr := manifest.Encode(&encoded, declaration); checkErr != nil {
+		t.Fatal(checkErr)
+	}
+	if checkErr := os.WriteFile(manifestPath, []byte(encoded.String()), 0600); checkErr != nil {
 		t.Fatal(checkErr)
 	}
 	updated, err := BuildInstallReview(ctx, directory)

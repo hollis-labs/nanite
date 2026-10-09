@@ -31,7 +31,7 @@ func TestMemoryCreateListAndEditPreserveFullBody(t *testing.T) {
 		t.Fatalf("POST /api/memories = %d, want 201; body=%s", created.Code, created.Body.String())
 	}
 
-	list := httptest.NewRequest(http.MethodGet, "/api/memories?scope=user", nil)
+	list := httptest.NewRequest(http.MethodGet, "/api/memories?scope=app", nil)
 	listed := httptest.NewRecorder()
 	mux.ServeHTTP(listed, list)
 	if listed.Code != http.StatusOK {
@@ -50,8 +50,8 @@ func TestMemoryCreateListAndEditPreserveFullBody(t *testing.T) {
 		t.Fatalf("listed memories = %d, want 1", len(response.Memories))
 	}
 	got := response.Memories[0]
-	if got.MemoryKey != "review_summary" {
-		t.Fatalf("derived memory key = %q, want v0.9-valid review_summary", got.MemoryKey)
+	if got.MemoryKey != memory.AppMemoryKey("default", "review_summary") {
+		t.Fatalf("derived memory key = %q, want app-owned default-user review_summary", got.MemoryKey)
 	}
 	if got.Body != "PRESERVE-ME" {
 		t.Fatalf("listed body = %q, want full editable body", got.Body)
@@ -70,7 +70,7 @@ func TestMemoryCreateListAndEditPreserveFullBody(t *testing.T) {
 	if updated.Code != http.StatusOK {
 		t.Fatalf("PUT /api/memories/{key} = %d, want 200; body=%s", updated.Code, updated.Body.String())
 	}
-	stored, err := a.Services.Memory.Get(t.Context(), memory.UserNamespace("default"), "review_summary")
+	stored, err := a.Services.Memory.Get(t.Context(), memory.AppNamespace(), memory.AppMemoryKey("default", "review_summary"))
 	if err != nil {
 		t.Fatalf("get updated memory: %v", err)
 	}
@@ -94,14 +94,14 @@ func TestListMemoriesUnavailableWithoutEmbeddedFacade(t *testing.T) {
 func TestListMemories_FiltersBeforePaginationAndReturnsTrueTotal(t *testing.T) {
 	a, mux := newTestAPI(t)
 	ctx := context.Background()
-	namespace := memory.UserNamespace("default")
+	namespace := memory.AppNamespace()
 
 	// These share the requested status and rank ahead of the matching rows,
 	// but do not match q. More than 500 proves the list path cannot rely on
 	// Tesseract Recall's finite candidate cap before applying text search.
 	for i := 0; i < 505; i++ {
-		if err := a.Services.Memory.Store(ctx, memory.Memory{
-			Namespace: namespace, MemoryKey: fmt.Sprintf("reviewed_nonmatch_%d", i),
+		if err := a.Services.Memory.StoreAppForUser(ctx, "default", memory.Memory{
+			Namespace: namespace, MemoryKey: memory.AppMemoryKey("default", fmt.Sprintf("reviewed_nonmatch_%d", i)),
 			Summary: "unrelated high-ranked record", Origin: "user", Trigger: "manual",
 			Confidence: 1, SessionID: "pagination-test", Status: "reviewed",
 		}); err != nil {
@@ -109,23 +109,23 @@ func TestListMemories_FiltersBeforePaginationAndReturnsTrueTotal(t *testing.T) {
 		}
 	}
 	for i := 0; i < 4; i++ {
-		if err := a.Services.Memory.Store(ctx, memory.Memory{
-			Namespace: namespace, MemoryKey: fmt.Sprintf("reviewed_%d", i),
+		if err := a.Services.Memory.StoreAppForUser(ctx, "default", memory.Memory{
+			Namespace: namespace, MemoryKey: memory.AppMemoryKey("default", fmt.Sprintf("reviewed_%d", i)),
 			Summary: fmt.Sprintf("needle reviewed record %d", i), Origin: "observation", Trigger: "manual",
 			Confidence: 0.2, SessionID: "pagination-test", Status: "reviewed",
 		}); err != nil {
 			t.Fatalf("store reviewed %d: %v", i, err)
 		}
 	}
-	if err := a.Services.Memory.Store(ctx, memory.Memory{
-		Namespace: namespace, MemoryKey: "unicode_case_match",
+	if err := a.Services.Memory.StoreAppForUser(ctx, "default", memory.Memory{
+		Namespace: namespace, MemoryKey: memory.AppMemoryKey("default", "unicode_case_match"),
 		Summary: "CAFÉ migration", Origin: "observation", Trigger: "manual",
 		Confidence: 0.2, SessionID: "pagination-test", Status: "reviewed",
 	}); err != nil {
 		t.Fatalf("store Unicode match: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/memories?scope=user&status=reviewed&q=needle&limit=2&offset=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/memories?scope=app&status=reviewed&q=needle&limit=2&offset=1", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -152,7 +152,7 @@ func TestListMemories_FiltersBeforePaginationAndReturnsTrueTotal(t *testing.T) {
 
 	// Status-only paging beyond Tesseract's 500-result recall cap must still
 	// return a full page from the 510 matching current revisions.
-	req = httptest.NewRequest(http.MethodGet, "/api/memories?scope=user&status=reviewed&limit=3&offset=500", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/memories?scope=app&status=reviewed&limit=3&offset=500", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -171,7 +171,7 @@ func TestListMemories_FiltersBeforePaginationAndReturnsTrueTotal(t *testing.T) {
 
 	// Page and total share the same Go Unicode case-folding predicate. SQLite
 	// LOWER is ASCII-only and previously counted this uppercase É differently.
-	req = httptest.NewRequest(http.MethodGet, "/api/memories?scope=user&status=reviewed&q=caf%C3%A9&limit=10", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/memories?scope=app&status=reviewed&q=caf%C3%A9&limit=10", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -184,7 +184,34 @@ func TestListMemories_FiltersBeforePaginationAndReturnsTrueTotal(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("decode Unicode response: %v", err)
 	}
-	if response.Total != 1 || len(response.Memories) != 1 || response.Memories[0].MemoryKey != "unicode_case_match" {
+	if response.Total != 1 || len(response.Memories) != 1 || response.Memories[0].MemoryKey != memory.AppMemoryKey("default", "unicode_case_match") {
 		t.Fatalf("Unicode search page: total=%d memories=%+v", response.Total, response.Memories)
+	}
+}
+
+func TestGUIMemoryCannotClaimUserAuthorityOrReadAnotherAppUser(t *testing.T) {
+	a, mux := newTestAPI(t)
+	ctx := context.Background()
+	ns := memory.AppNamespace()
+	key := memory.AppMemoryKey("alice", "private")
+	if err := a.Services.Memory.StoreAppForUser(ctx, "alice", memory.Memory{Namespace: ns, MemoryKey: key, Summary: "alice private", Confidence: 1}); err != nil {
+		t.Fatal(err)
+	}
+	list := httptest.NewRecorder()
+	mux.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/memories?scope=user", nil))
+	if list.Code != http.StatusOK || strings.Contains(list.Body.String(), "alice private") {
+		t.Fatalf("foreign app memory leaked: %d %s", list.Code, list.Body.String())
+	}
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(method, "/api/memories/"+memoryKeyEncode(ns, key), strings.NewReader(`{"summary":"changed"}`)))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("foreign app write accepted: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/memories", strings.NewReader(`{"namespace":"user/default/memory/notes","summary":"spoof","origin":"user","scope":"user"}`)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("protected write accepted: %d %s", rec.Code, rec.Body.String())
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/hollis-labs/go-envelopes"
+	"github.com/hollis-labs/libs/ui-go/envelopes"
 )
 
 // SetupForTesting builds a registry with core types + orphan schemas and

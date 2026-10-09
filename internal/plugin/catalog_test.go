@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/plugin-sdk/manifest"
 	sharedcatalog "github.com/hollis-labs/plugins-catalog"
 )
 
@@ -22,11 +21,13 @@ func catalogFixture(t *testing.T, ids ...string) []byte {
 	for _, id := range ids {
 		doc.Plugins = append(doc.Plugins, sharedcatalog.Plugin{
 			ID: id, Name: "Display " + id, Version: "1.0.0",
-			Hosts:          map[string]manifest.HostRange{"nanite": {Min: "0.1.0"}},
 			Source:         sharedcatalog.Source{Type: "git", Repo: "https://github.com/example/plugins", Tag: "v1.0.0"},
 			Archives:       []sharedcatalog.Archive{{Platform: runtime.GOOS + "-" + runtime.GOARCH, URL: "https://example.com/plugin.tar.gz", SHA256: strings.Repeat("a", 64), Size: 123}},
 			ManifestSHA256: strings.Repeat("b", 64), Directory: sharedcatalog.Directory{Status: "active"},
 		})
+		if err := json.Unmarshal([]byte(`{"nanite":{"min":"0.1.0"}}`), &doc.Plugins[len(doc.Plugins)-1].Hosts); err != nil {
+			t.Fatal(err)
+		}
 	}
 	raw, err := json.Marshal(doc)
 	if err != nil {
@@ -138,7 +139,10 @@ func TestDecodeCatalog_PlatformAndHostSelection(t *testing.T) {
 	if err != nil || len(decoded.Plugins) != 1 || decoded.Plugins[0].Available || decoded.Plugins[0].ArchiveURL != "" {
 		t.Fatalf("unsupported platform: %+v %v", decoded, err)
 	}
-	doc.Plugins[0].Hosts = map[string]manifest.HostRange{"cerberus": {Min: "0.1.0"}}
+	if decodeErr := json.Unmarshal([]byte(`{"cerberus":{"min":"0.1.0"}}`), &doc.Plugins[0].Hosts); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	delete(doc.Plugins[0].Hosts, "nanite")
 	raw, _ = json.Marshal(doc)
 	decoded, err = DecodeCatalog(raw)
 	if err != nil || len(decoded.Plugins) != 0 {

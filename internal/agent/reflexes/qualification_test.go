@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	shared "github.com/hollis-labs/go-reflexes"
 	"github.com/hollis-labs/nanite/internal/store"
+	shared "github.com/hollis-labs/substrate/agent/reflexes"
 )
 
 var qualificationNow = time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)

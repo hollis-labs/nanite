@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-egress-proxy/egress"
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
+	"github.com/hollis-labs/substrate/harness/interception/egress"
 )
 
 func allowLocalHTTPWebhookTest(notifier *A2APushNotifier) {

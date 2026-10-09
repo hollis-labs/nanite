@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/hollis-labs/go-sandbox/sandbox"
+	"github.com/hollis-labs/substrate/harness/sandbox"
 )
 
 // errLoopbackSandboxUnavailable reports a host on which a loopback-granted

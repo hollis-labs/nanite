@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,14 +13,26 @@ import (
 
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
 
+	goplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/registry"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
-	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 func TestPluginPanelUpdatesInvalidateRegistryCache(t *testing.T) {
 	host := naniteplugin.NewHost(http.NewServeMux(), naniteplugin.NewLogger("test"))
 	mux := http.NewServeMux()
-	registerPluginsRegistryRoute(mux, host, t.TempDir())
+	root := t.TempDir()
+	pluginDir := filepath.Join(root, "docs-plugin")
+	if err := os.Mkdir(pluginDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := writeAPIPluginBundle(t, pluginDir, "docs-plugin", "Docs", pluginapi.Block{UI: pluginapi.UI{Bundle: "ui/index.js"}, Registers: pluginapi.Registrations{Panels: []pluginapi.Panel{{ID: "docs", Title: "Docs", Component: "First"}}}})
+	state := &pluginManagerState{pluginHost: host}
+	if !state.runPluginLoadIntoHost(path, pluginDir) {
+		t.Fatal("fixture load failed")
+	}
+	t.Cleanup(func() { _ = host.UnloadPlugin("docs-plugin") })
+	registerPluginsRegistryRoute(mux, host, root)
 	read := func() RegistryResponse {
 		t.Helper()
 		rec := httptest.NewRecorder()
@@ -36,17 +50,17 @@ func TestPluginPanelUpdatesInvalidateRegistryCache(t *testing.T) {
 	if err := host.RegisterPanel(naniteplugin.PanelEntry{ID: "docs", PluginID: "docs-plugin", Component: "First"}); err != nil {
 		t.Fatal(err)
 	}
-	if actual := read().Contributions["panel"]["docs"].Export; actual != "First" {
+	if actual := read().Contributions["panel"][registry.QualifiedKey("docs-plugin", "docs")].Component.Export; actual != "First" {
 		t.Fatalf("export = %q", actual)
 	}
 	if err := host.RegisterPanel(naniteplugin.PanelEntry{ID: "docs", PluginID: "docs-plugin", Component: "Second"}); err != nil {
 		t.Fatal(err)
 	}
-	if actual := read().Contributions["panel"]["docs"].Export; actual != "Second" {
+	if actual := read().Contributions["panel"][registry.QualifiedKey("docs-plugin", "docs")].Component.Export; actual != "Second" {
 		t.Fatalf("export = %q", actual)
 	}
 	host.UnregisterPluginPanels("docs-plugin")
-	if _, present := read().Contributions["panel"]["docs"]; present {
+	if _, present := read().Contributions["panel"][registry.QualifiedKey("docs-plugin", "docs")]; present {
 		t.Fatal("removed panel remained cached")
 	}
 }
@@ -116,32 +130,32 @@ func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 		t.Fatal(buildErr)
 	}
 
-	env, ok := resp.Contributions["envelope"]["synth-card"]
+	env, ok := resp.Contributions["envelope"][registry.QualifiedKey(pluginID, "synth-card")]
 	if !ok {
 		t.Fatalf("envelopes['synth-card'] missing; got %+v", resp.Contributions["envelope"])
 	}
-	if env.Export != "SynthCard" || env.PluginID != pluginID {
+	if env.Component.Export != "SynthCard" || env.OwnerID != pluginID {
 		t.Errorf("envelope fields wrong: %+v", env)
 	}
 	var envelopeMeta RegistryEnvelopeEntry
-	if err := json.Unmarshal(env.Meta, &envelopeMeta); err != nil {
-		t.Fatal(err)
+	if decodeErr := json.Unmarshal(env.Metadata, &envelopeMeta); decodeErr != nil {
+		t.Fatal(decodeErr)
 	}
 	if envelopeMeta.SchemaURL == "" {
 		t.Error("schema_url should be populated when manifest includes a schema path")
 	}
 
-	slotEntry, ok := resp.Contributions["slot"]["composer-toolbar/synth-slot-entry"]
-	if !ok || slotEntry.Export != "SynthToolbarButton" || slotEntry.PluginID != pluginID {
+	slotEntry, ok := resp.Contributions["slot"][registry.QualifiedKey(pluginID, "slot-"+hex.EncodeToString([]byte("composer-toolbar/synth-slot-entry")))]
+	if !ok || slotEntry.Component.Export != "SynthToolbarButton" || slotEntry.OwnerID != pluginID {
 		t.Fatalf("slot contribution: %+v", slotEntry)
 	}
 
-	panel, ok := resp.Contributions["panel"]["synth-panel"]
-	if !ok || panel.Export != "SynthPanel" || panel.PluginID != pluginID {
+	panel, ok := resp.Contributions["panel"][registry.QualifiedKey(pluginID, "synth-panel")]
+	if !ok || panel.Component.Export != "SynthPanel" || panel.OwnerID != pluginID {
 		t.Fatalf("panel = %+v", panel)
 	}
 	var panelMeta RegistryPanelEntry
-	if decodeErr := json.Unmarshal(panel.Meta, &panelMeta); decodeErr != nil {
+	if decodeErr := json.Unmarshal(panel.Metadata, &panelMeta); decodeErr != nil {
 		t.Fatal(decodeErr)
 	}
 	if panelMeta.Title != "Synthetic panel" || panelMeta.Icon != "file-text" || panelMeta.Order != 120 || !panelMeta.DefaultVisible {
@@ -160,11 +174,38 @@ func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 	if !strings.HasPrefix(pl.StylesheetURL, wantSheet+"?v=") {
 		t.Errorf("stylesheet_url mismatch: got %q want %q", pl.StylesheetURL, wantSheet)
 	}
-	if pl.Runtime == nil || pl.Runtime.Name != "react" || pl.Runtime.Version != "^19.0.0" {
-		t.Errorf("react_version mismatch: got %q", pl.Runtime)
+	if len(pl.Runtime) != 0 {
+		t.Fatalf("caret range was misrepresented as SDK inclusive bounds: %+v", pl.Runtime)
 	}
-	if pl.BundleVersion == "" {
-		t.Fatal("reviewed bundle requires cache version")
+	var metadata map[string]any
+	if decodeErr := json.Unmarshal(panel.Metadata, &metadata); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if metadata["react_range"] != "^19.0.0" {
+		t.Fatalf("range lost: %+v", metadata)
+	}
+	bundleRoot, openErr := os.OpenRoot(pluginPath)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	t.Cleanup(func() {
+		if closeErr := bundleRoot.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	})
+	js, err := bundleRoot.ReadFile("ui/dist/index.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(js)
+	if pl.BundleVersion != "sha256:"+hex.EncodeToString(digest[:]) {
+		t.Fatalf("bundle digest does not identify actual JavaScript bytes: %q", pl.BundleVersion)
+	}
+	if resp.HostInstance == "" || pl.OwnerGeneration == "" || resp.RegistryVersion != registry.RegistryVersion {
+		t.Fatalf("missing actual lifecycle identity: %+v", resp)
+	}
+	if err := resp.Validate(); err != nil {
+		t.Fatal(err)
 	}
 
 	// End-to-end: exercise the HTTP handler before and after UnloadPlugin to
@@ -202,13 +243,13 @@ func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 	if _, ok := after.Plugins[pluginID]; ok {
 		t.Errorf("plugin %q should be gone from registry after unload", pluginID)
 	}
-	if _, present := after.Contributions["panel"]["synth-panel"]; present {
+	if _, present := after.Contributions["panel"][registry.QualifiedKey(pluginID, "synth-panel")]; present {
 		t.Fatal("panel remained after unload")
 	}
-	if _, ok := after.Contributions["envelope"]["synth-card"]; ok {
+	if _, ok := after.Contributions["envelope"][registry.QualifiedKey(pluginID, "synth-card")]; ok {
 		t.Errorf("envelope 'synth-card' should be gone after unload")
 	}
-	if _, ok := after.Contributions["slot"]["composer-toolbar/synth-slot-entry"]; ok {
+	if _, ok := after.Contributions["slot"][registry.QualifiedKey(pluginID, "slot-"+hex.EncodeToString([]byte("composer-toolbar/synth-slot-entry")))]; ok {
 		t.Errorf("slot 'composer-toolbar' should be empty after unload: %+v", after.Contributions["slot"])
 	}
 }

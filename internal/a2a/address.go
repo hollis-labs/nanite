@@ -5,7 +5,7 @@ import (
 	"encoding/base32"
 	"strings"
 
-	messaging "github.com/hollis-labs/go-messaging"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging"
 )
 
 // ── Canonical Address Derivation ─────────────────────────────────────────────

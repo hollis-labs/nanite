@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	gmcpclient "github.com/hollis-labs/go-mcp/client"
+	gmcpclient "github.com/hollis-labs/libs/plugin-mcp/go-mcp/client"
 
 	"github.com/hollis-labs/nanite/internal/mcpconfig"
 	"github.com/hollis-labs/nanite/internal/store"

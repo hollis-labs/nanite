@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tool/intent"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 // toolCacheOverrideStore is an ephemeral, per-process map of session ID →

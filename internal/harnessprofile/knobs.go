@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	agentcontracts "github.com/hollis-labs/agent-contracts-leaf"
+	agentcontracts "github.com/hollis-labs/substrate/llm-core/contracts"
 )
 
 // Computed defaults. They reproduce the values the chat loop compiled in before

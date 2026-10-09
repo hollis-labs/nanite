@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-safefs/atomicfile"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
+	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // staleResumeFastExitWindow is how soon after a --resume cold-boot a runtime

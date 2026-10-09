@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 	nplugin "github.com/hollis-labs/nanite/internal/plugin"
-	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // CommandArg defines a single argument for a slash command (mirrors plugin.CommandArg).

@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	gmcpserver "github.com/hollis-labs/go-mcp/server"
+	gmcpserver "github.com/hollis-labs/libs/plugin-mcp/go-mcp/server"
 )
 
 // runAsFixtureServerEnv, when set in this test binary's own environment,

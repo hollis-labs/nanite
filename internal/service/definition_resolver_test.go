@@ -13,9 +13,9 @@ import (
 
 	"github.com/hollis-labs/substrate/agent/approval"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/store"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 

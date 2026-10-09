@@ -11,8 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/hollis-labs/go-apppaths/paths"
-
+	paths "github.com/hollis-labs/libs/util/apppaths"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"

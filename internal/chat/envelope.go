@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/hollis-labs/go-envelopes"
+	"github.com/hollis-labs/libs/ui-go/envelopes"
 )
 
 // envelopeRegistry is the shared go-envelopes Registry, installed at composition
@@ -46,7 +46,7 @@ type EnvelopeError struct {
 }
 
 // registeredTypes is the set of envelope types the frontend can render.
-// Populated at startup from the external github.com/hollis-labs/go-envelopes
+// Populated at startup from the external github.com/hollis-labs/libs/ui-go/envelopes
 // module (via envelopes.LoadCore) and passed to InitCoreTypes;
 // plugins add entries at runtime via RegisterEnvelopeType.
 // Protected by registeredTypesMu for concurrent access.
@@ -74,7 +74,7 @@ func UnregisterEnvelopeType(envelopeType string) {
 }
 
 // InitCoreTypes populates the registry with core envelope types loaded from
-// the external github.com/hollis-labs/go-envelopes module's embedded manifest
+// the external github.com/hollis-labs/libs/ui-go/envelopes module's embedded manifest
 // (via envelopes.LoadCore). Called once at startup before plugins load.
 func InitCoreTypes(types []string) {
 	registeredTypesMu.Lock()

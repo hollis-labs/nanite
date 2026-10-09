@@ -2,6 +2,7 @@ package contextbroker
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,9 +34,9 @@ func newTestMemoryServiceAndRoot(t *testing.T) (*memory.Service, *tesseract.Tess
 // match. Returns the memory key so tests can reference it.
 func seedTestMemory(t *testing.T, svc *memory.Service, namespace, summary, body string, confidence float64) {
 	t.Helper()
-	err := svc.Store(context.Background(), memory.Memory{
+	err := svc.StoreAppForUser(context.Background(), "default", memory.Memory{
 		Namespace:  namespace,
-		MemoryKey:  "auto_recall_test_seed",
+		MemoryKey:  memory.AppMemoryKey("default", "auto_recall_test_seed"),
 		Summary:    summary,
 		Body:       body,
 		Origin:     "observation",
@@ -51,7 +52,7 @@ func seedTestMemory(t *testing.T, svc *memory.Service, namespace, summary, body 
 
 func TestMemorySource_Skip_WhenAutoRecallExplicitlyFalse(t *testing.T) {
 	svc := newTestMemoryService(t)
-	seedTestMemory(t, svc, memory.UserNamespace("default"),
+	seedTestMemory(t, svc, memory.AppNamespace(),
 		"any summary", "body about widgets", 0.9)
 
 	src := NewMemorySource(svc)
@@ -74,7 +75,7 @@ func TestMemorySource_Skip_WhenAutoRecallExplicitlyFalse(t *testing.T) {
 
 func TestMemorySource_Default_WhenAutoRecallNil(t *testing.T) {
 	svc := newTestMemoryService(t)
-	seedTestMemory(t, svc, memory.UserNamespace("default"),
+	seedTestMemory(t, svc, memory.AppNamespace(),
 		"widgets-doc", "body about widgets", 0.9)
 
 	src := NewMemorySource(svc)
@@ -96,11 +97,11 @@ func TestMemorySource_Default_WhenAutoRecallNil(t *testing.T) {
 
 func TestMemorySource_HonorsLimitOverride(t *testing.T) {
 	svc := newTestMemoryService(t)
-	ns := memory.UserNamespace("default")
+	ns := memory.AppNamespace()
 	for i := 0; i < 5; i++ {
-		err := svc.Store(context.Background(), memory.Memory{
+		err := svc.StoreAppForUser(context.Background(), "default", memory.Memory{
 			Namespace:  ns,
-			MemoryKey:  "auto_recall_limit_test_" + string(rune('a'+i)),
+			MemoryKey:  memory.AppMemoryKey("default", "auto_recall_limit_test_"+string(rune('a'+i))),
 			Summary:    "widget topic " + string(rune('a'+i)),
 			Body:       "body about widgets",
 			Origin:     "observation",
@@ -135,7 +136,7 @@ func TestMemorySource_HonorsLimitOverride(t *testing.T) {
 
 func TestMemorySource_TimeoutShortCircuits(t *testing.T) {
 	svc := newTestMemoryService(t)
-	seedTestMemory(t, svc, memory.UserNamespace("default"),
+	seedTestMemory(t, svc, memory.AppNamespace(),
 		"widgets-doc", "body about widgets", 0.9)
 
 	src := NewMemorySource(svc)
@@ -165,7 +166,7 @@ func TestMemorySource_MinConfidenceZeroIsHonored(t *testing.T) {
 	// the literal zero as "use the default" and the seed below (confidence
 	// 0.1) was filtered out.
 	svc := newTestMemoryService(t)
-	seedTestMemory(t, svc, memory.UserNamespace("default"),
+	seedTestMemory(t, svc, memory.AppNamespace(),
 		"low-confidence widget", "body about widgets", 0.1)
 
 	src := NewMemorySource(svc)
@@ -189,10 +190,10 @@ func TestMemorySource_MinConfidenceZeroIsHonored(t *testing.T) {
 
 func TestMemorySourceTouchesOnlyReturnedResults(t *testing.T) {
 	svc, root := newTestMemoryServiceAndRoot(t)
-	namespace := memory.UserNamespace("default")
+	namespace := memory.AppNamespace()
 	for _, key := range []string{"selected", "not_returned"} {
-		if err := svc.Store(context.Background(), memory.Memory{
-			Namespace: namespace, MemoryKey: key, Summary: "widget " + key,
+		if err := svc.StoreAppForUser(context.Background(), "default", memory.Memory{
+			Namespace: namespace, MemoryKey: memory.AppMemoryKey("default", key), Summary: "widget " + key,
 			Body: "widget details", Origin: "observation", Trigger: "manual",
 			Confidence: 0.9, SessionID: "test-session", Status: "canonical",
 		}); err != nil {
@@ -227,5 +228,20 @@ func TestMemorySource_NilService_ReturnsError(t *testing.T) {
 	_, err := src.Fetch(context.Background(), Intent{}, 5000)
 	if err == nil {
 		t.Fatal("expected error for nil memory.Service")
+	}
+}
+
+func TestMemorySourceAppRecallRetainsHostUserBoundary(t *testing.T) {
+	svc := newTestMemoryService(t)
+	for _, user := range []string{"alice", "bob"} {
+		if err := svc.StoreAppForUser(context.Background(), user, memory.Memory{Namespace: memory.AppNamespace(), MemoryKey: memory.AppMemoryKey(user, "same"), Summary: "widget " + user, Body: "widget private " + user, Confidence: 0.9, Status: "canonical", Origin: "observation", Trigger: "manual"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source := NewMemorySource(svc)
+	source.UserID = "alice"
+	items, err := source.Fetch(context.Background(), Intent{QueryText: "widget"}, 5000)
+	if err != nil || len(items) != 1 || !strings.Contains(items[0].Content, "alice") || strings.Contains(items[0].Content, "bob") {
+		t.Fatal("host-user recall boundary lost", items, err)
 	}
 }

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/go-worktree"
+	"github.com/hollis-labs/libs/util/worktree"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 

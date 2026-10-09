@@ -2,7 +2,7 @@
 // `nanite plugin new` command. Two kinds are supported:
 //
 //   - KindSubprocess: out-of-process plugins that speak JSON-RPC over
-//     stdio via plugin-sdk v0.6.0. The generated directory is a
+//     stdio via libs/plugin-mcp v0.2.0 protocol 2. The generated directory is a
 //     stand-alone Go module + vite UI project with a working Makefile
 //     that produces catalog-installable archives (the BLG-20260414-008
 //     ui/ vs ui/dist/ mismatch is fixed in the generated Makefile and
@@ -32,8 +32,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	"github.com/hollis-labs/plugin-sdk/manifest"
 )
 
 // pluginIDPattern mirrors the v1 manifest schema's id regex so scaffold
@@ -130,14 +130,16 @@ func Run(opts Options) error {
 	}
 
 	if opts.Kind == KindSubprocess {
-		block, err := pluginapi.EncodeBlock(pluginapi.Block{LoadType: "opt-in", UI: pluginapi.UI{Bundle: "ui/dist/index.js", ReactVersion: "^18.0.0", ShadcnVersion: "^1.0.0"}, Registers: pluginapi.Registrations{Envelopes: []pluginapi.Envelope{{Type: data.EnvelopeType, Component: data.EnvelopeComponent, Version: 1, Schema: "envelopes/example.schema.json"}}, Commands: []pluginapi.Command{{Name: data.Name, Description: "Echo the provided arguments"}}}})
+		block, err := pluginapi.EncodeBlock(pluginapi.Block{LoadType: "opt-in", UI: pluginapi.UI{Bundle: "ui/dist/index.js", ReactVersion: "^19.2.0", ShadcnVersion: "^1.0.0"}, Registers: pluginapi.Registrations{Envelopes: []pluginapi.Envelope{{Type: data.EnvelopeType, Component: data.EnvelopeComponent, Version: 1, Schema: "envelopes/example.schema.json"}}, Commands: []pluginapi.Command{{Name: data.Name, Description: "Echo the provided arguments"}}}})
 		if err != nil {
 			return err
 		}
 		data.NaniteBlock = string(block)
-		common := manifest.Manifest{SchemaVersion: 2, ID: data.Name, Name: data.DisplayName, Version: "0.1.0", Description: data.Description, License: "MIT", Runtime: "subprocess", Protocol: 1, Entrypoint: manifest.Entrypoint{Command: data.Name}, Hosts: map[string]manifest.HostRange{"nanite": {Min: pluginapi.Version}}, Nanite: block, Tools: []manifest.Tool{{Name: "echo", Description: "Echo text", InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`), Effect: "read"}}}
+		common := manifest.Manifest{SchemaVersion: 2, ID: data.Name, Name: data.DisplayName, Version: "0.1.0", Description: data.Description, License: "MIT", Runtime: "subprocess", Protocol: 2, Server: manifest.Server{Runtime: "binary", Engines: map[string]manifest.HostRange{"binary": {Min: "0.0.0"}}, Entry: "bin/" + data.Name}, UI: &manifest.UI{Bundle: "ui/dist/index.js", Isolation: "main-origin"}, Hosts: map[string]manifest.HostRange{"nanite": {Min: pluginapi.Version}}, Nanite: block, Tools: []manifest.Tool{{Name: "echo", Description: "Echo text", InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`), Effect: "read"}}}
 		var encoded strings.Builder
-		if err := manifest.Encode(&encoded, common); err != nil {
+		// This is an unbuilt draft. The generated build command inventories
+		// actual compiled files before producing an installable manifest.
+		if err := json.NewEncoder(&encoded).Encode(common); err != nil {
 			return err
 		}
 		data.SharedManifest = encoded.String()

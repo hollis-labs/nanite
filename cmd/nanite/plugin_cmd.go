@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/go-apppaths/paths"
-	fplugin "github.com/hollis-labs/plugin-sdk"
+	fplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	paths "github.com/hollis-labs/libs/util/apppaths"
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"

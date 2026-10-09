@@ -3,8 +3,8 @@ package reflexes
 import (
 	"time"
 
-	shared "github.com/hollis-labs/go-reflexes"
 	"github.com/hollis-labs/nanite/internal/store"
+	shared "github.com/hollis-labs/substrate/agent/reflexes"
 )
 
 // DefaultReflexCooldown is the least-specific cooldown in the cascade.

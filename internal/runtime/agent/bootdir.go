@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/hollis-labs/go-agent-wrapper/plant"
-	"github.com/hollis-labs/go-providers/registry"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/adapters/registry"
+	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
 )
 
 // Layout abstracts per-provider boot-dir population. Each provider's
@@ -23,28 +23,13 @@ type Layout interface {
 	// resulting boot dir; the caller defers cleanup to session stop.
 	Setup(params SetupParams) (string, error)
 
-	// Populate writes the per-provider files into an existing boot dir.
-	// Idempotent — the shared materialization engine reconciles against
-	// its own manifest, so an unchanged tree is reported unchanged rather
-	// than rewritten. Used by recovery.BootDirOps.Repopulate to rewrite a
-	// partially-truncated sandbox dir without re-rolling the $TMPDIR path.
-	// The caller is responsible for owning bootDir's lifecycle (cleanup
-	// on terminal-failure remains with Setup).
-	//
-	// CW-20260910-0020: returns the plant.Result so callers can reach
-	// Result.Handle — the shared engine's manifest, ownership and
-	// per-entry change data — instead of that data being discarded at the
-	// planting boundary, which was the original intent behind
-	// CW-20260910-0006. RegenerateSystemPromptSlot deliberately does NOT
-	// return one: it rewrites a single known slot as targeted watchdog
-	// remediation, and no caller has a use for a one-entry manifest.
-	Populate(bootDir string, params SetupParams) (plant.Result, error)
+	// Populate retains an existing bound root and returns typed unavailable.
+	// Saved ownership metadata and between-turn timing do not prove that a
+	// provider has stopped reading its binding. Fresh Setup has a custody port.
+	Populate(bootDir string, params SetupParams) (plant.PlantResult, error)
 
-	// RegenerateSystemPromptSlot rewrites only the system-prompt-bearing
-	// file in bootDir (CLAUDE.md for claude, AGENTS.md for codex,
-	// agents/<slug>.md for opencode), leaving the rest of the sandbox
-	// intact. Used by recovery.BootDirOps.RegenerateCLAUDEMD when a
-	// watchdog_kill suggests a stuck agent that needs a fresh prompt.
+	// RegenerateSystemPromptSlot returns typed unavailable without changing
+	// the current instructions or binding under the inactive-only contract.
 	RegenerateSystemPromptSlot(bootDir string, params SetupParams) error
 
 	// AmendEnv merges provider-specific env additions onto the base env
@@ -62,7 +47,7 @@ type Layout interface {
 
 	// BootPrompt returns the system-prompt payload threaded into
 	// legacy layout consumers. Boot uses the planted instruction file;
-	// subsequent slot regeneration writes to <bootDir>/CLAUDE.md.
+	// slot regeneration requires a fresh binding under the custody contract.
 	BootPrompt(profile *store.AgentProfile, opts Options) string
 
 	// BootMode returns the boot-prompt delivery mode threaded into
@@ -417,8 +402,8 @@ func (u unsupportedLayout) Setup(SetupParams) (string, error) {
 	return "", fmt.Errorf("agent: bootdir for provider %q is not yet implemented (awaiting go-providers BootDirSpec coverage)", u.name)
 }
 
-func (u unsupportedLayout) Populate(string, SetupParams) (plant.Result, error) {
-	return plant.Result{}, fmt.Errorf("agent: bootdir Populate for provider %q is not yet implemented", u.name)
+func (u unsupportedLayout) Populate(string, SetupParams) (plant.PlantResult, error) {
+	return plant.PlantResult{}, fmt.Errorf("agent: bootdir Populate for provider %q is not yet implemented", u.name)
 }
 
 func (u unsupportedLayout) RegenerateSystemPromptSlot(string, SetupParams) error {

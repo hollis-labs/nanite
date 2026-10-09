@@ -3,8 +3,8 @@ package agent
 import (
 	"fmt"
 
-	"github.com/hollis-labs/go-agent-wrapper/adapters"
-	"github.com/hollis-labs/go-agent-wrapper/launch"
+	"github.com/hollis-labs/substrate/harness/adapters"
+	"github.com/hollis-labs/substrate/harness/adapters/launch"
 )
 
 // newACPAdapter selects the shipped protocol adapter through

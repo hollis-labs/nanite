@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	goplugin "github.com/hollis-labs/plugin-sdk"
+	goplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )
@@ -229,7 +229,7 @@ func TestApplyManifestRegistrations_Crud_Subprocess(t *testing.T) {
 					case subprocess.MethodCRUDUpdate:
 						result = subprocess.CRUDResult{Data: json.RawMessage(`{"id":"` + params.ID + `","name":"updated"}`)}
 					case subprocess.MethodCRUDDelete:
-						result = json.RawMessage(`null`)
+						result = json.RawMessage(`{"deleted":true}`)
 					default:
 						result = map[string]any{}
 					}

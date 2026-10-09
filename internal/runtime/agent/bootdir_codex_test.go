@@ -274,7 +274,7 @@ func TestCodexLayout_AuthJSON_LinksHostLogin(t *testing.T) {
 
 	// A re-plant (crash-recovery Populate) keeps the link and never writes
 	// through it: auth.json is outside the materialize engine's tree.
-	if _, err := (codexLayout{}).Populate(bootDir, SetupParams{SessionID: "s-auth", AgentProfile: &store.AgentProfile{Name: "codex-auth", Slug: "codex-auth"}}); err != nil {
+	if _, err := (codexLayout{}).Populate(bootDir, SetupParams{SessionID: "s-auth", AgentProfile: &store.AgentProfile{Name: "codex-auth", Slug: "codex-auth"}}); !errors.Is(err, ErrArtifactRefreshUnavailable) {
 		t.Fatalf("re-Populate: %v", err)
 	}
 	assertAuthLink(t, bootDir, hostAuth)

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	ssekit "github.com/hollis-labs/go-ssekit"
+	ssekit "github.com/hollis-labs/libs/ui-go/ssekit"
 )
 
 func (a *API) handlePresenceStream(w http.ResponseWriter, r *http.Request) {

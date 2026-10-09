@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go/option"
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // Complete implements llmcontracts.Provider.Complete. Non-streaming

@@ -12,13 +12,13 @@ import (
 	"sync/atomic"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-modelsdev/modelsdev"
-	feotel "github.com/hollis-labs/go-otel"
-	ledger "github.com/hollis-labs/go-usage-ledger"
+	feotel "github.com/hollis-labs/libs/util/otel"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/usagecost"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	"github.com/hollis-labs/substrate/llm-core/modelsdev"
+	ledger "github.com/hollis-labs/substrate/llm-core/usageledger"
 )
 
 func TestConsumeProviderUsageKeepsUnknownAcrossCalls(t *testing.T) {

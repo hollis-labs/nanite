@@ -1,7 +1,7 @@
 package plugin
 
 import (
-	pluginsdk "github.com/hollis-labs/plugin-sdk"
+	pluginsdk "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 )
 
 // SubscribeEvents creates a buffered channel that receives all emitted events.

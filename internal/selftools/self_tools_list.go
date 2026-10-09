@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/mcp"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // naniteToolListDefinition is the cheap discovery primitive (SP6 —

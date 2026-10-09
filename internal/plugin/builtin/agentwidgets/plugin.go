@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/plugin-sdk"
 	"gopkg.in/yaml.v3"
 )
 

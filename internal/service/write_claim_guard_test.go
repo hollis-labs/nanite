@@ -6,12 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	hooks "github.com/hollis-labs/go-hooks"
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/internal/writeclaim"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 const (
@@ -26,7 +25,7 @@ func claim(id string) string {
 // ---- the hook itself -------------------------------------------------------
 
 func TestWriteClaimHookDecisions(t *testing.T) {
-	stop := func(msg string) hooks.StopInput { return hooks.StopInput{LastAssistantMessage: msg} }
+	stop := func(msg string) string { return msg }
 	none := writeClaimFacts{}
 
 	// A backed claim, no claim at all, and a disabled guard all allow.
@@ -55,27 +54,29 @@ func TestWriteClaimHookDecisions(t *testing.T) {
 		if wantFired := tc.want == wcUnbackedClaim; d.Fired != wantFired {
 			t.Errorf("%s: fired = %v", name, d.Fired)
 		}
-		if !d.Fired && out.Decision != hooks.DecisionAllow {
+		if !d.Fired && out.Decision != permissionlib.DecisionAllow {
 			t.Errorf("%s: an unfired guard returned %q", name, out.Decision)
 		}
 	}
 
 	// What each mode does when it fires.
 	deny, d := writeClaimHook(harnessprofile.GuardDeny, stop(claim(invented)), none)
-	if deny.Decision != hooks.DecisionDeny || deny.Continue == nil || *deny.Continue || deny.StopReason == "" || !strings.Contains(deny.Reason, invented) || len(d.Finding.Ungrounded) != 1 {
+	if deny.Decision != permissionlib.DecisionDeny || deny.Continue == nil || *deny.Continue || deny.StopReason == "" || !strings.Contains(deny.Reason, invented) || len(d.Finding.Ungrounded) != 1 {
 		t.Errorf("deny output = %+v", deny)
 	}
 	warn, _ := writeClaimHook(harnessprofile.GuardWarn, stop(claim(invented)), none)
-	if warn.Decision != hooks.DecisionAllow || warn.SystemMessage == "" || warn.Continue != nil {
+	if warn.Decision != permissionlib.DecisionAllow || warn.SystemMessage == "" || warn.Continue != nil {
 		t.Errorf("warn output = %+v", warn)
 	}
 	ask, _ := writeClaimHook(harnessprofile.GuardAsk, stop(claim(invented)), none)
-	if ask.Decision != hooks.DecisionAsk || ask.Continue != nil {
+	if ask.Decision != permissionlib.DecisionAsk || ask.Continue != nil {
 		t.Errorf("ask output = %+v", ask)
 	}
-	for _, o := range []hooks.Output{deny, warn, ask} {
-		if err := o.Validate(); err != nil {
-			t.Errorf("output does not validate: %v", err)
+	for _, o := range []writeClaimHookResult{deny, warn, ask} {
+		switch o.Decision {
+		case permissionlib.DecisionAllow, permissionlib.DecisionDeny, permissionlib.DecisionAsk:
+		default:
+			t.Errorf("invalid guard decision: %q", o.Decision)
 		}
 	}
 }

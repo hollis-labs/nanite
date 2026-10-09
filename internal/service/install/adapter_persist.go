@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/hollis-labs/go-safefs/atomicfile"
+	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
 )
 
 // loadProjectConfig reads and parses the project's .nanite/config.yaml

@@ -8,9 +8,9 @@ package service
 // the conversion logic lives here.
 
 import (
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // recordInspectorSlots builds a []inspector.SlotSnapshot from the

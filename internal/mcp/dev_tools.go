@@ -16,12 +16,12 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/truncate"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 
-	"github.com/hollis-labs/go-safefs/pathsafe"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
+	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 )
 
 // agentExecFunc is the type of sandbox.AgentExec. It is stored as a package

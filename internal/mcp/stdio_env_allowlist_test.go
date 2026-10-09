@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	gmcpclient "github.com/hollis-labs/go-mcp/client"
+	gmcpclient "github.com/hollis-labs/libs/plugin-mcp/go-mcp/client"
 )
 
 // buildStdioEnv resolves and flattens a stdio server's env exactly the way

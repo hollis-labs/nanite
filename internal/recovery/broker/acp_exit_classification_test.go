@@ -17,7 +17,7 @@ package broker
 import (
 	"testing"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 )
 
 // acpUnclassifiedExit is the exact *agentsessions.ExitError shape

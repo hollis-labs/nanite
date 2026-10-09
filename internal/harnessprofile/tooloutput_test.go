@@ -3,7 +3,7 @@ package harnessprofile
 import (
 	"testing"
 
-	agentcontracts "github.com/hollis-labs/agent-contracts-leaf"
+	agentcontracts "github.com/hollis-labs/substrate/llm-core/contracts"
 )
 
 func vals(t *testing.T, in Inputs) Values {

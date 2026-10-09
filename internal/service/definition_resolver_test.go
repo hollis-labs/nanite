@@ -82,9 +82,15 @@ func TestChatDefinitionUnsupportedSemantics(t *testing.T) {
 		}
 	}
 	d := *base.Definition
+	d.Extensions = map[string]agentdef.Extension{"com.hollislabs.nanite/native-policy": {Version: "1", Area: "harness_profile", Mandatory: true, Data: map[string]any{"permission_profile": "read-only"}}}
+	cfg, err := MapChatDefinition(VerifiedDefinition{base.Ref, &d})
+	if err != nil || cfg.PermissionProfile != "read-only" {
+		t.Fatal(cfg, err)
+	}
+	d = *base.Definition
 	d.HarnessProfile.Permissions.Profile = "read-only"
 	d.Extensions = map[string]agentdef.Extension{"example.org/optional": {Version: "1", Area: "behavior", Data: map[string]any{"model": "unauthorized", "grant": "write"}}}
-	cfg, err := MapChatDefinition(VerifiedDefinition{base.Ref, &d})
+	cfg, err = MapChatDefinition(VerifiedDefinition{base.Ref, &d})
 	if err != nil || cfg.Model != (ModelSelection{}) || cfg.PermissionProfile != "read-only" {
 		t.Fatal(cfg, err)
 	}

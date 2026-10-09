@@ -58,7 +58,7 @@ func (s *AgentConfigService) ProvisionGeneralChat(ctx context.Context, host *Cog
 	if digest != req.DefinitionRef.SemanticDigest {
 		return nil, ErrDefinitionDigestMismatch
 	}
-	cfg, err := MapChatDefinition(verified)
+	cfg, err := mapRetainedProfileDefinition(verified)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,13 @@ func (s *AgentConfigService) ProvisionGeneralChat(ctx context.Context, host *Cog
 	if cfg.PermissionProfile != "default" {
 		return nil, ErrUnsupportedDefinition
 	}
-	model, err := host.Models.AuthorizeModel(ctx, req.DefinitionRef, req.ModelSelection)
+	modelSelection := req.ModelSelection
+	if modelSelection == nil {
+		modelSelection = cfg.RequestedModel
+	} else if cfg.RequestedModel != nil && *cfg.RequestedModel != *req.ModelSelection {
+		return nil, ErrUnsupportedModel
+	}
+	model, err := host.Models.AuthorizeModel(ctx, req.DefinitionRef, modelSelection)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +93,23 @@ func (s *AgentConfigService) ProvisionGeneralChat(ctx context.Context, host *Cog
 	saved, err := s.CreateWithAssignments(ctx, profile, nil, AgentAssignments{})
 	if err != nil {
 		return nil, err
+	}
+	if policy, ok, err := definitionReflexPolicy(verified.Definition); err != nil {
+		return nil, err
+	} else if ok {
+		reflexes := NewReflexService(s.store)
+		for _, def := range policy.Reflexes {
+			row, rowErr := def.storeRow(saved.Profile.ID)
+			if rowErr != nil {
+				return nil, rowErr
+			}
+			if errs := reflexes.ValidateDefinition(ctx, row); len(errs) > 0 {
+				return nil, &ReflexValidationError{Errors: errs}
+			}
+			if _, insertErr := s.store.InsertAgentReflex(ctx, row); insertErr != nil {
+				return nil, insertErr
+			}
+		}
 	}
 	return &ProvisionGeneralChatResult{Agent: saved, DefinitionRef: req.DefinitionRef}, nil
 }

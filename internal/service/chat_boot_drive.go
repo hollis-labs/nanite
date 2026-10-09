@@ -27,7 +27,7 @@ import (
 // CW-20260525-0001 Slice 3 follow-up.
 const staleResumeFastExitWindow = 5 * time.Second
 
-// driveBootSession is the long-lived-PTY counterpart to provider.StreamChat
+// driveBootSession is the headless CLI counterpart to provider.StreamChat
 // for CLI agents. Called from chat_generate.go's per-iteration provider call
 // site when chat.IsCLIProvider(providerName) is true.
 //

@@ -137,24 +137,24 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	)
 	defer span.End()
 
-	// CW-20260420-0032: PTY observability — track whether a pty_turn_start
+	// CW-20260420-0032: CLI observability — track whether a cli_turn_start
 	// was emitted so the deferred closer can emit the matching terminal event
-	// (pty_turn_complete or pty_turn_failed). ptyTurnStarted is set to true
-	// once we emit pty_turn_start; ptyTurnSucceeded is set to true only when
-	// we reach the stream_end path. The defer emits pty_turn_failed for all
+	// (cli_turn_complete or cli_turn_failed). cliTurnStarted is set to true
+	// once we emit cli_turn_start; cliTurnSucceeded is set to true only when
+	// we reach the stream_end path. The defer emits cli_turn_failed for all
 	// other exits (early return, context cancellation, error).
 	defer func() {
-		if !lifecycle.ptyTurnStarted || s.sessionEventWriter == nil {
+		if !lifecycle.cliTurnStarted || s.sessionEventWriter == nil {
 			return
 		}
-		eventType := EventPTYTurnFailed
-		if lifecycle.ptyTurnSucceeded {
-			eventType = EventPTYTurnComplete
+		eventType := EventCLITurnFailed
+		if lifecycle.cliTurnSucceeded {
+			eventType = EventCLITurnComplete
 		}
 		payload := fmt.Sprintf(`{"message_id":%q,"provider":%q,"duration_ms":%d}`,
-			assistantMsgID, lifecycle.ptyProviderName, time.Since(lifecycle.startTime).Milliseconds())
+			assistantMsgID, lifecycle.cliProviderName, time.Since(lifecycle.startTime).Milliseconds())
 		s.sessionEventWriter.WriteSessionEvent(
-			context.Background(), sessionID, eventType, lifecycle.ptyProviderName, payload)
+			context.Background(), sessionID, eventType, "cli", payload)
 	}()
 
 	// CW-20260418-0043 diagnostic — track iteration reached for the defer log.
@@ -1277,7 +1277,7 @@ func captureEnvelopeData(result string, pending []string) []string {
 // deleted. CLI agents now spawn through internal/runtime/agent.Boot via
 // driveBootSession (chat_boot_drive.go); sandbox planting moved to the
 // per-provider bootdir layouts in internal/runtime/agent/bootdir_*.go,
-// process tracking moved into the lib's PTY supervisor (IdleKill /
+// process tracking moved into the lib's CLI supervisor (IdleKill /
 // RestartOnCrash), --resume threading moved into Boot.OnSessionID +
 // store.SetAgentRuntimeProviderSessionID, and the cli_session_id
 // session-metadata field is no longer written. retryEnvelopeCorrection

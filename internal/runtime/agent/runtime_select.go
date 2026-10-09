@@ -44,6 +44,8 @@ var nativeModes = map[runtimes.ID]runtimes.Mode{
 // carry.
 var errUnknownRuntime = errors.New("agent: no such runtime in the registry")
 
+var errTerminalLaunchUnsupported = errors.New("agent: interactive terminal launches are unsupported; use Tachyon")
+
 // resolveRuntime maps a Nanite provider name, including the legacy pty-/sub-
 // prefixes and registry aliases (claude-code, agy), to its registry runtime.
 func resolveRuntime(providerName string) (registry.Descriptor, bool) {
@@ -66,6 +68,9 @@ func selectRuntime(providerName string, profile *store.AgentProfile) (RuntimeSel
 	}
 	if mode, ok := nativeModes[d.ID]; ok {
 		return RuntimeSelection{Runtime: d.ID, Mode: mode}, nil
+	}
+	if d.DefaultMode == runtimes.ModePTY {
+		return RuntimeSelection{}, errTerminalLaunchUnsupported
 	}
 	return RuntimeSelection{Runtime: d.ID, Mode: d.DefaultMode}, nil
 }
@@ -124,6 +129,9 @@ func LaunchError(providerName string) error {
 }
 
 func launchSupported(sel RuntimeSelection) bool {
+	if sel.Mode == runtimes.ModePTY {
+		return false
+	}
 	for _, k := range launch.Supported() {
 		if k.Runtime == sel.Runtime && k.Mode == sel.Mode {
 			return true
@@ -143,6 +151,9 @@ func launchSupported(sel RuntimeSelection) bool {
 // and the allow rule for the planted server (claudeMCPAllowArgs) ahead of
 // workRootArgs, so the variadic --add-dir stays last.
 func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir string) (adapters.Adapter, error) {
+	if sel.Mode == runtimes.ModePTY {
+		return nil, errTerminalLaunchUnsupported
+	}
 	if sel.ACP() {
 		if deps.ACPAdapterFactory != nil {
 			transport := adapters.TransportStdio

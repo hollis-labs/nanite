@@ -15,7 +15,7 @@ type ExecutionMetrics struct {
 	SessionID           string  `json:"session_id"`
 	MessageID           string  `json:"message_id"`
 	Provider            string  `json:"provider"`
-	Adapter             string  `json:"adapter"` // "http", "pty", "sub"
+	Adapter             string  `json:"adapter"` // "http" or "cli"; old rows may contain "pty" or "sub"
 	Model               string  `json:"model"`
 	AgentID             string  `json:"agent_id"`
 	AgentSlug           string  `json:"agent_slug"`

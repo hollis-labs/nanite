@@ -86,7 +86,7 @@ var jobIDTagEncoding = base64.RawURLEncoding.Strict()
 const SenderAgentID = "background-job"
 
 // NewService constructs a Service. backend is the dispatch backend
-// (PTY, mux, etc.); messenger delivers completion envelopes. Both
+// (shell jobs, mux, etc.); messenger delivers completion envelopes. Both
 // are required for production wiring; nil values surface as Submit
 // errors rather than panics.
 func NewService(backend Backend, messenger Messenger) *Service {

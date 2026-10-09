@@ -33,7 +33,7 @@ var errBootStreamFailure = errors.New("subagent: boot session emitted error even
 //   - everything else (EventToolUse, EventUsage, EventSessionID): ignored.
 //
 // Returns summary, envelope (always valid JSON; "{}" today since the
-// long-lived PTY surface does not yet emit a structured envelope through
+// long-lived CLI surface does not yet emit a structured envelope through
 // llmtypes.StreamEvent), and a non-nil error if the stream emitted an
 // error event. Channel close without EventDone is treated as a clean drain.
 func drainBootSession(ch <-chan llmtypes.StreamEvent) (summary string, envelope string, err error) {

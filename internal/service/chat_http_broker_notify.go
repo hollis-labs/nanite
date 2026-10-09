@@ -166,7 +166,7 @@ func (s *chatServiceImpl) notifyRecoveryBrokerForHTTPStreamError(
 	// it holds regardless of caller. The unconditional skip here is gone:
 	// HTTP-provider stream errors reach the broker like any other
 	// session's failure — classified, breadcrumbed, and (when
-	// appropriate) retried through the new path. CLI/PTY-backed sessions
+	// appropriate) retried through the new path. CLI-backed sessions
 	// (claude, codex, opencode) are unaffected — they still resolve to
 	// the AgentBoot branch inside DispatchRetry exactly as before.
 	cause, errorClass := classifyHTTPStreamError(streamErr)

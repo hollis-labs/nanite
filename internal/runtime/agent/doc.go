@@ -11,13 +11,11 @@
 //     decisions.nanite.architecture.cli_pty_long_lived_default
 //     decisions.portfolio.architecture.agent_boot_pattern
 //
-// The package replaces three previous spawn paths:
-//   - internal/service/subagent_runner.go  (-> ModeSubagent)
-//   - internal/background/pty.go           (-> ModeBackground)
-//   - internal/service/chat_generate.go    (provider.StreamChat per turn -> ModeLongLived PTY + SendInput)
+// Chat and subagent callers use Boot for headless CLI agent sessions.
+// Ordinary background shell jobs have their own pipe-based ShellJobBackend.
 //
 // Boot() is the only public entry point. Callers describe intent through
 // Options.Mode; the package owns boot-dir / workspace-dir materialization,
-// env composition, runtime selection (PTY vs subprocess-per-turn), supervisor
+// env composition, runtime selection (stdio, subprocess-per-turn or ACP), supervisor
 // wiring, and DB persistence.
 package agent

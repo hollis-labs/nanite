@@ -194,7 +194,7 @@ func (claudeLayout) AmendEnv(base map[string]string, _ string) map[string]string
 // names as something a host does not own.
 func (claudeLayout) SpawnWorkdir(bootDir, _ string) string { return bootDir }
 
-// BootPrompt is the system prompt payload for the PTY runtime.
+// BootPrompt is the system prompt content for legacy layout consumers.
 // Sourced from resolveBootPrompt (prompt.go), which honors
 // Options.BootPromptOverride (CW-20260514-0048) and falls back to
 // composeSystemPrompt(role, profile, mode) otherwise.
@@ -208,8 +208,8 @@ func (claudeLayout) BootPrompt(profile *store.AgentProfile, opts Options) string
 	return resolveBootPrompt(profile, opts)
 }
 
-// BootMode is "stdin" for PTY claude; the runtime writes the boot prompt
-// onto the master PTY at process start.
+// BootMode is a legacy layout hint. Boot does not consume it: Claude
+// reads the planted CLAUDE.md and receives NDJSON-framed turns over stdio.
 //
 // Nanite-owned, unchanged by TASKS/agent-host-acp/04: boot-prompt
 // delivery mode is lifecycle policy, not file-planting — see

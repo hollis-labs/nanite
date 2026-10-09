@@ -28,7 +28,7 @@ type Mode int
 
 const (
 	// ModeLongLived stays alive across turns. Default for chat sessions; the
-	// PTY runtime is selected when the adapter advertises Caps.PTY=true.
+	// runtime is selected explicitly as headless stdio, subprocess or ACP.
 	// Caller drives turns explicitly via Session.SendInput.
 	ModeLongLived Mode = iota
 
@@ -319,8 +319,8 @@ func effectiveProvider(opts Options, profile *store.AgentProfile) string {
 }
 
 // Boot resolves the agent profile, materializes the workspace and ephemeral
-// boot dir, composes env + system prompt, selects a runtime (PTY for chat
-// sessions with PTY-capable adapters; subprocess-per-turn elsewhere), wires
+// boot dir, composes env + system prompt, selects a headless runtime (streaming stdio,
+// subprocess-per-turn or ACP), wires
 // sandbox gates per Mode, persists the runtime row, and starts the runtime
 // via go-agent-wrapper. Native and ACP launches deliberately share this one
 // lifecycle path: only boot-profile compilation, sandbox inputs, recovery

@@ -61,13 +61,13 @@ type Layout interface {
 	SpawnWorkdir(bootDir, projectDir string) string
 
 	// BootPrompt returns the system-prompt payload threaded into
-	// agentsessions.StartOptions.BootPrompt. PTY claude consumes this on
-	// process start; subsequent slot regeneration writes to <bootDir>/CLAUDE.md.
+	// legacy layout consumers. Boot uses the planted instruction file;
+	// subsequent slot regeneration writes to <bootDir>/CLAUDE.md.
 	BootPrompt(profile *store.AgentProfile, opts Options) string
 
 	// BootMode returns the boot-prompt delivery mode threaded into
-	// agentsessions.StartOptions.BootMode. PTY runtimes use "stdin"; legacy
-	// subprocess-per-turn paths use the empty string (first-turn delivery).
+	// legacy layout consumers. Boot does not consult this hint;
+	// native headless runtimes use planted files and framed turn input.
 	BootMode() string
 }
 
@@ -80,7 +80,7 @@ func LayoutFor(provider string) Layout {
 
 // HasBootdirLayout reports whether provider (after CLI-alias
 // normalization) has a real, implemented bootdir Layout — claude, codex,
-// and opencode, the CLI/PTY-supervised runtimes agent.Boot can actually
+// and opencode, the headless CLI runtimes agent.Boot can actually
 // materialize a boot dir for. Everything else, including every plain HTTP
 // API provider (anthropic, openai, gemini-api, openrouter, ...) and every
 // CLI tool without a Layout yet (gemini, copilot, aider, junie), resolves

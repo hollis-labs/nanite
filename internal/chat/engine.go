@@ -262,7 +262,7 @@ type PresenceEvent struct {
 }
 
 // IsCLIProvider returns true if the provider name is any CLI adapter variant
-// (PTY bridge or subprocess bridge).
+// (headless stdio or subprocess runtime).
 //
 // Phase 2 item 01 (TASKS/phase-2/01-wire-runtime-kind-routing.md):
 // agent_profiles.runtime_kind ("cli" | "api") is now the authoritative
@@ -284,20 +284,12 @@ type PresenceEvent struct {
 // agent happens to be bound to the session (that whole mechanism is
 // retired in full by TASKS/phase-2/04-retire-boot-profile-catalog.md, at
 // which point this fallback becomes dead and should be deleted); and (2)
-// telemetry/UI-presence gates elsewhere in chat_generate.go (PTY
-// tool-pending broadcasts, the pty_turn_start observability event) that
+// telemetry/UI-presence gates elsewhere in chat_generate.go (CLI
+// tool-pending broadcasts, the cli_turn_start observability event) that
 // run strictly downstream of the already-decided route and merely mirror
 // it for logging, not for deciding it.
 func IsCLIProvider(name string) bool {
 	return name == "pty" || strings.HasPrefix(name, "pty-") || strings.HasPrefix(name, "sub-")
-}
-
-// IsPTYProvider returns true if the provider name is any PTY adapter variant.
-// Same post-decision, non-routing status as IsCLIProvider above — used only
-// for downstream telemetry/observability gating in chat_generate.go, not for
-// deciding CLI-vs-API routing (that's runtime_kind's job as of Phase 2 item 01).
-func IsPTYProvider(name string) bool {
-	return name == "pty" || strings.HasPrefix(name, "pty-")
 }
 
 // NormalizeCLIProvider maps a dropdown / session-side CLI provider name to
@@ -313,7 +305,7 @@ func IsPTYProvider(name string) bool {
 //   - "pty-claude"       → "claude"
 //   - "pty-codex"        → "codex"
 //   - "pty-opencode"     → "opencode"
-//   - "pty-<x>"          → "<x>"      (general PTY prefix strip)
+//   - "pty-<x>"          → "<x>"      (legacy CLI prefix strip)
 //   - "sub-<x>"          → "<x>"      (general subprocess prefix strip)
 //   - anything else      → unchanged
 //
@@ -326,9 +318,7 @@ func IsPTYProvider(name string) bool {
 //
 //   - runtime/agent bootdir.go's layout dispatch (which CLI adapter —
 //     claude/codex/opencode — not whether to use one)
-//   - runtime/agent factory.go's normalizeProviderName (kept warm for
-//     future PTY-capable adapters; shouldUsePTY itself decides nothing
-//     CLI-vs-API, see that function's own doc comment)
+//   - runtime/agent runtime_select.go's explicit headless launch selection
 //   - service/agent_deps.go's stripRegistryPrefix (which delegates here)
 //
 // so these string-shape sites can't drift from each other when a new CLI

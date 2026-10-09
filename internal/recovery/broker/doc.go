@@ -1,5 +1,5 @@
 // Package broker is the in-process subagent recovery broker for nanite's
-// CLI/PTY agent sessions. It classifies whole-session failures (process
+// CLI agent sessions. It classifies whole-session failures (process
 // crashes, sandbox dir write failures, MCP transport drops, etc.),
 // attempts automated remediation, dispatches a replacement session
 // preserving lineage, and emits user-facing status via the existing chat

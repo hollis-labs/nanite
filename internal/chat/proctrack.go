@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// ProcessTracker tracks CLI processes spawned by PTY/subprocess bridges,
+// ProcessTracker tracks CLI processes spawned by runtime adapters,
 // keyed by session ID. When a session is archived or the engine shuts down,
 // tracked processes are killed.
 type ProcessTracker struct {

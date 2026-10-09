@@ -42,9 +42,9 @@ import (
 
 type generationLifecycle struct {
 	startTime        time.Time
-	ptyTurnStarted   bool
-	ptyTurnSucceeded bool
-	ptyProviderName  string
+	cliTurnStarted   bool
+	cliTurnSucceeded bool
+	cliProviderName  string
 }
 
 func (s *chatServiceImpl) settleToolTurn(
@@ -233,20 +233,20 @@ func (s *chatServiceImpl) initializeRun(
 		s.events.EmitSessionStart(ctx, sessionID, agent.ID, model, "default")
 	}
 
-	// CW-20260420-0032: PTY observability — emit pty_turn_start so
+	// CW-20260420-0032: CLI observability — emit cli_turn_start so
 	// session_diagnose can reconstruct what happened. The deferred
-	// closer emits pty_turn_complete or pty_turn_failed when the function
-	// returns. Only emitted for PTY-provider sessions; API-path sessions
+	// closer emits cli_turn_complete or cli_turn_failed when the function
+	// returns. Only emitted for CLI-runtime sessions; API-path sessions
 	// already have sufficient observability via event_log + execution_metrics.
-	if chat.IsPTYProvider(providerName) && s.sessionEventWriter != nil {
-		lifecycle.ptyTurnStarted = true
-		lifecycle.ptyProviderName = providerName
+	if setup.provider == nil && s.sessionEventWriter != nil {
+		lifecycle.cliTurnStarted = true
+		lifecycle.cliProviderName = providerName
 		startPayload := fmt.Sprintf(`{"message_id":%q,"provider":%q,"agent_id":%q,"model":%q}`,
 			assistantMsgID, providerName, agent.ID, model)
 		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		startCancel = cancel
 		s.sessionEventWriter.WriteSessionEvent(
-			startCtx, sessionID, EventPTYTurnStart, providerName, startPayload)
+			startCtx, sessionID, EventCLITurnStart, "cli", startPayload)
 	}
 
 	// Emit agent.loaded plugin event (fire-and-forget).
@@ -1389,7 +1389,7 @@ streamLoop:
 		return consumeProviderIterationResult{directive: runloop.Retry}
 	}
 
-	// Resolve remaining PTY tool presence.
+	// Resolve remaining CLI tool presence.
 	if lastPTYToolPending != "" && chat.IsCLIProvider(providerName) {
 		s.streams.BroadcastPresence(chat.PresenceEvent{
 			Type: "tool_resolved", SessionID: sessionID, AgentID: agent.ID,
@@ -1796,10 +1796,8 @@ func (s *chatServiceImpl) finalizeRun(
 
 	// Record execution metrics.
 	adapterType := "http"
-	if chat.IsPTYProvider(providerName) {
-		adapterType = "pty"
-	} else if strings.HasPrefix(providerName, "sub-") {
-		adapterType = "sub"
+	if setup.provider == nil {
+		adapterType = "cli"
 	}
 	metrics := &store.ExecutionMetrics{
 		SessionID: sessionID, MessageID: assistantMsgID,
@@ -1832,9 +1830,9 @@ func (s *chatServiceImpl) finalizeRun(
 		slog.Warn("chat-service: failed to record execution metrics", "err", err)
 	}
 
-	// CW-20260420-0032: mark the PTY turn as successful so the deferred
-	// closer emits pty_turn_complete instead of pty_turn_failed.
-	lifecycle.ptyTurnSucceeded = true
+	// CW-20260420-0032: mark the CLI turn as successful so the deferred
+	// closer emits cli_turn_complete instead of cli_turn_failed.
+	lifecycle.cliTurnSucceeded = true
 
 	// Stream end.
 	if isCognitiveTurn(ctx) {

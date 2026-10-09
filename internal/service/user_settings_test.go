@@ -179,3 +179,48 @@ func TestAgentCapabilitiesListAlwaysAllowedToolNames(t *testing.T) {
 func (f *fakeUserSettingsStore) GetAdminPreferences(context.Context) (*store.AdminPreferences, error) {
 	return nil, errors.New("settings unavailable")
 }
+
+func TestUserSettingsFreshInstallDeveloperModeOffAndOptInSurvivesReopen(t *testing.T) {
+	t.Setenv("NANITE_DEVMODE", "")
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "fresh.db")
+	st, err := store.New(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close(ctx) })
+	if seedErr := st.Seed(ctx); seedErr != nil {
+		t.Fatal(seedErr)
+	}
+	settings, err := st.GetUserSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.DeveloperMode || NewUserSettingsService(st).DevModeEnabled(ctx) {
+		t.Fatal("fresh fully migrated/seeded install enabled developer mode")
+	}
+	if closeErr := st.Close(ctx); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	st, err = store.New(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if NewUserSettingsService(st).DevModeEnabled(ctx) {
+		t.Fatal("reopen enabled developer mode without opt-in")
+	}
+	settings.DeveloperMode = true
+	if updateErr := st.UpdateUserSettings(ctx, settings); updateErr != nil {
+		t.Fatal(updateErr)
+	}
+	if closeErr := st.Close(ctx); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	st, err = store.New(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !NewUserSettingsService(st).DevModeEnabled(ctx) {
+		t.Fatal("reopen discarded stored developer-mode opt-in")
+	}
+}

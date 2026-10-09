@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +15,25 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+func TestSelectAdapter_RefusesInteractiveTerminalBeforeFactory(t *testing.T) {
+	selection := RuntimeSelection{Runtime: runtimes.Claude, Mode: runtimes.ModePTY}
+	called := false
+	deps := &Dependencies{NativeCLIAdapter: func(runtimes.ID) provider.CLIAdapter {
+		called = true
+		return provider.NewClaudeAdapter()
+	}}
+	adapter, err := selectAdapter(deps, selection, t.TempDir(), t.TempDir())
+	if adapter != nil || !errors.Is(err, errTerminalLaunchUnsupported) {
+		t.Fatalf("selectAdapter terminal = %v, %v", adapter, err)
+	}
+	if called {
+		t.Fatal("terminal refusal invoked the host CLI factory")
+	}
+	if launchSupported(selection) {
+		t.Fatal("terminal advertised as a Nanite launch")
+	}
+}
 
 // selectNativeAdapter drives the production selection path (selectRuntime
 // + selectAdapter) with cli as the host adapter through the

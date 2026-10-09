@@ -1429,12 +1429,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	slog.Info("service container: subagent service enabled (real chat-engine runner + status sink + approval handler + H1 trust)")
 
 	// G1 (CW-20260420-0016): background-job service. Async, non-session-
-	// bound dispatch for long-running tasks. Backend = PTY MVP (D2);
+	// bound dispatch for long-running tasks. Backend = shell-job runner (D2);
 	// agent-mux swap (D3) is a wiring change behind the same Backend
 	// interface. Result envelopes ride the messaging service back to the
 	// originating session as channel=inbox notifications.
-	backgroundSvc := background.NewService(background.NewPTYBackend(), messagingSvc)
-	slog.Info("service container: background-job service enabled (PTY backend)")
+	backgroundSvc := background.NewService(background.NewShellJobBackend(), messagingSvc)
+	slog.Info("service container: background-job service enabled (shell-job backend)")
 
 	// G4 (CW-20260420-0018): elicitation service — MCP elicitation/create
 	// mid-tool user prompts. The emitter persists an elicitation-prompt

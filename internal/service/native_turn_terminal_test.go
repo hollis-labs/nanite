@@ -279,9 +279,12 @@ func newNativeCLIFixture(t *testing.T, tc nativeCLICase) *characterizationFixtur
 
 // runNativeCLITurn runs one chat turn for tc and returns the fixture and the
 // turn stream's events. It fails if the stream stays open.
-func runNativeCLITurn(t *testing.T, tc nativeCLICase) (*characterizationFixture, []chat.StreamEvent) {
+func runNativeCLITurn(t *testing.T, tc nativeCLICase, configure ...func(*characterizationFixture)) (*characterizationFixture, []chat.StreamEvent) {
 	t.Helper()
 	f := newNativeCLIFixture(t, tc)
+	for _, fn := range configure {
+		fn(f)
+	}
 	ctx := context.Background()
 
 	producer := f.svc.streams.CreateStream(nativeCLIMessageID, f.session)

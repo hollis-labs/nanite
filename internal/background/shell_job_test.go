@@ -11,13 +11,13 @@ import (
 	"time"
 )
 
-// PTY tests rely on /bin/sh being available. nanite is Unix-only;
+// Shell-job tests rely on /bin/sh being available. nanite is Unix-only;
 // skip on Windows defensively in case someone tries to run them via
 // cross-build CI.
 func skipIfWindows(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("PTYBackend requires Unix process-group semantics")
+		t.Skip("ShellJobBackend requires Unix process-group semantics")
 	}
 }
 
@@ -56,7 +56,7 @@ func (c *captureCompletion) wait(t *testing.T, timeout time.Duration) BackendCom
 
 // reapAll cancels every job tracked by b. Used as a t.Cleanup so a
 // failing test doesn't leak processes.
-func reapAll(b *PTYBackend) {
+func reapAll(b *ShellJobBackend) {
 	b.mu.Lock()
 	ids := make([]string, 0, len(b.jobs))
 	for id := range b.jobs {
@@ -68,16 +68,16 @@ func reapAll(b *PTYBackend) {
 	}
 }
 
-func TestPTYBackend_SuccessCapturesOutput(t *testing.T) {
+func TestShellJobBackend_SuccessCapturesOutput(t *testing.T) {
 	skipIfWindows(t)
 	t.Parallel()
 
-	be := NewPTYBackend()
+	be := NewShellJobBackend()
 	t.Cleanup(func() { reapAll(be) })
 
 	cap := newCapture()
 	req := JobRequest{
-		Task:                 "echo hello-pty",
+		Task:                 "if [ -t 0 ] || [ -t 1 ] || [ -t 2 ]; then exit 33; fi; echo hello-shell-job; echo stderr-shell-job >&2",
 		Budget:               JobBudget{WallClockSeconds: 5, MaxOutputBytes: DefaultMaxOutputBytes},
 		OriginatingSessionID: "s",
 		OriginatingAgentID:   "a",
@@ -90,8 +90,11 @@ func TestPTYBackend_SuccessCapturesOutput(t *testing.T) {
 	if got.Status != StatusSucceeded {
 		t.Fatalf("status = %s; want succeeded", got.Status)
 	}
-	if !strings.Contains(got.Output, "hello-pty") {
-		t.Fatalf("output = %q; want contains hello-pty", got.Output)
+	if !strings.Contains(got.Output, "hello-shell-job") {
+		t.Fatalf("output = %q; want contains hello-shell-job", got.Output)
+	}
+	if !strings.Contains(got.Output, "stderr-shell-job") {
+		t.Fatalf("stderr was not captured: %q", got.Output)
 	}
 	if got.OutputTruncated {
 		t.Fatalf("output unexpectedly truncated")
@@ -101,11 +104,11 @@ func TestPTYBackend_SuccessCapturesOutput(t *testing.T) {
 	}
 }
 
-func TestPTYBackend_NonZeroExitReportsFailed(t *testing.T) {
+func TestShellJobBackend_NonZeroExitReportsFailed(t *testing.T) {
 	skipIfWindows(t)
 	t.Parallel()
 
-	be := NewPTYBackend()
+	be := NewShellJobBackend()
 	t.Cleanup(func() { reapAll(be) })
 
 	cap := newCapture()
@@ -127,11 +130,11 @@ func TestPTYBackend_NonZeroExitReportsFailed(t *testing.T) {
 	}
 }
 
-func TestPTYBackend_CancelKillsProcessGroup(t *testing.T) {
+func TestShellJobBackend_CancelKillsProcessGroup(t *testing.T) {
 	skipIfWindows(t)
 	t.Parallel()
 
-	be := NewPTYBackend()
+	be := NewShellJobBackend()
 	t.Cleanup(func() { reapAll(be) })
 
 	cap := newCapture()
@@ -187,30 +190,30 @@ func TestPTYBackend_CancelKillsProcessGroup(t *testing.T) {
 	}
 }
 
-func TestPTYBackend_CancelUnknownIsIdempotent(t *testing.T) {
+func TestShellJobBackend_CancelUnknownIsIdempotent(t *testing.T) {
 	skipIfWindows(t)
 	t.Parallel()
-	be := NewPTYBackend()
+	be := NewShellJobBackend()
 	if err := be.Cancel("nope"); err != nil {
 		t.Fatalf("Cancel(unknown) = %v; want nil", err)
 	}
 }
 
-func TestPTYBackend_StatusUnknown(t *testing.T) {
+func TestShellJobBackend_StatusUnknown(t *testing.T) {
 	skipIfWindows(t)
 	t.Parallel()
-	be := NewPTYBackend()
+	be := NewShellJobBackend()
 	_, err := be.Status("nope")
 	if err == nil {
 		t.Fatal("expected ErrUnknownJob")
 	}
 }
 
-func TestPTYBackend_OutputTruncatedAtMaxBytes(t *testing.T) {
+func TestShellJobBackend_OutputTruncatedAtMaxBytes(t *testing.T) {
 	skipIfWindows(t)
 	t.Parallel()
 
-	be := NewPTYBackend()
+	be := NewShellJobBackend()
 	t.Cleanup(func() { reapAll(be) })
 
 	cap := newCapture()
@@ -233,19 +236,19 @@ func TestPTYBackend_OutputTruncatedAtMaxBytes(t *testing.T) {
 	}
 }
 
-// TestPTYBackend_LongRunningJobLifecycle is the acceptance scenario
+// TestShellJobBackend_LongRunningJobLifecycle is the acceptance scenario
 // from the ticket: run a long-running job and verify the result
 // envelope arrives with the captured output. The ticket nominally
 // wants 2 minutes; we use 5s here so race-CI stays fast — same
 // lifecycle, smaller wall-clock budget. Run with -short to skip.
-func TestPTYBackend_LongRunningJobLifecycle(t *testing.T) {
+func TestShellJobBackend_LongRunningJobLifecycle(t *testing.T) {
 	skipIfWindows(t)
 	if testing.Short() {
 		t.Skip("skipping long-running job test in -short mode")
 	}
 	t.Parallel()
 
-	be := NewPTYBackend()
+	be := NewShellJobBackend()
 	t.Cleanup(func() { reapAll(be) })
 
 	cap := newCapture()
@@ -273,14 +276,14 @@ func TestPTYBackend_LongRunningJobLifecycle(t *testing.T) {
 	}
 }
 
-// TestPTYBackend_WallClockBudgetCancels verifies the wall-clock
+// TestShellJobBackend_WallClockBudgetCancels verifies the wall-clock
 // guard fires when the job exceeds Budget.WallClockSeconds, and the
 // completion envelope reports canceled.
-func TestPTYBackend_WallClockBudgetCancels(t *testing.T) {
+func TestShellJobBackend_WallClockBudgetCancels(t *testing.T) {
 	skipIfWindows(t)
 	t.Parallel()
 
-	be := NewPTYBackend()
+	be := NewShellJobBackend()
 	t.Cleanup(func() { reapAll(be) })
 
 	cap := newCapture()
@@ -300,15 +303,21 @@ func TestPTYBackend_WallClockBudgetCancels(t *testing.T) {
 	}
 }
 
-// TestPTYBackend_NoOrphanZombies verifies that after job completion
+// TestShellJobBackend_NoOrphanZombies verifies that after job completion
 // the child PID is fully reaped — Wait was called, no <defunct>
 // state remains. We probe by sending signal 0 to the PID; ESRCH
 // means the kernel has cleaned up.
-func TestPTYBackend_NoOrphanZombies(t *testing.T) {
+func TestShellJobBackend_NoOrphanZombies(t *testing.T) {
 	skipIfWindows(t)
 	t.Parallel()
 
-	be := NewPTYBackend()
+	// Capture the launched command directly: the active-job record may be
+	// removed before Start's caller resumes when the child exits quickly.
+	var child *exec.Cmd
+	be := newShellJobBackendForTest(func(ctx context.Context, req JobRequest) *exec.Cmd {
+		child = defaultCommandFactory(ctx, req)
+		return child
+	})
 	t.Cleanup(func() { reapAll(be) })
 
 	cap := newCapture()
@@ -321,9 +330,7 @@ func TestPTYBackend_NoOrphanZombies(t *testing.T) {
 	if err := be.Start(context.Background(), "job-z", req, cap.callback); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	be.mu.Lock()
-	pid := be.jobs["job-z"].cmd.Process.Pid
-	be.mu.Unlock()
+	pid := child.Process.Pid
 	cap.wait(t, 5*time.Second)
 
 	// The process should be reaped even though the backend's process
@@ -335,11 +342,11 @@ func TestPTYBackend_NoOrphanZombies(t *testing.T) {
 	}
 }
 
-func TestPTYBackend_RemovesCompletedJobRecord(t *testing.T) {
+func TestShellJobBackend_RemovesCompletedJobRecord(t *testing.T) {
 	skipIfWindows(t)
 	t.Parallel()
 
-	be := NewPTYBackend()
+	be := NewShellJobBackend()
 	cap := newCapture()
 	req := JobRequest{
 		Task:                 "true",
@@ -381,6 +388,3 @@ func TestDefaultCommandFactory_BuildsShInvocation(t *testing.T) {
 		t.Fatalf("cmd.Args = %v; want [..., -c, echo x]", cmd.Args)
 	}
 }
-
-// silence unused; the import is kept for potential future tests.
-var _ = exec.ErrNotFound

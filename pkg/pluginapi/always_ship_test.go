@@ -1,13 +1,15 @@
 package pluginapi_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	"github.com/hollis-labs/plugin-sdk/manifest"
-	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
 )
 
 func alwaysShipFixture(t *testing.T) (pluginapi.Block, sdkprocess.CapabilityRequest, []manifest.Tool) {
@@ -27,7 +29,13 @@ func TestAlwaysShipSharedManifestAndSessionAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := manifest.Manifest{SchemaVersion: manifest.SchemaVersion, ID: "nanite.pins", Name: "Pins", Version: "0.2.0", Protocol: sdkprocess.ProtocolVersion, Runtime: manifest.Runtime,
-		Entrypoint: manifest.Entrypoint{Command: "bin/pins"}, Hosts: map[string]manifest.HostRange{"nanite": {Min: pluginapi.Version}}, Nanite: raw, Capabilities: []sdkprocess.CapabilityRequest{capability}, Tools: tools}
+		Server: manifest.Server{Runtime: "binary", Engines: map[string]manifest.HostRange{"binary": {Min: "0.0.0"}}, Entry: "bin/pins"}, Hosts: map[string]manifest.HostRange{"nanite": {Min: pluginapi.Version}}, Nanite: raw, Capabilities: []sdkprocess.CapabilityRequest{capability}, Tools: tools}
+	sum := sha256.Sum256([]byte("pins fixture executable"))
+	m.Artifact.Files = []manifest.ArtifactFile{{Path: "bin/pins", SHA256: hex.EncodeToString(sum[:]), Executable: true}}
+	m.Artifact.TreeSHA256, err = manifest.TreeDigest(m.Artifact.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var encoded strings.Builder
 	if err = manifest.Encode(&encoded, m); err != nil {
 		t.Fatal(err)

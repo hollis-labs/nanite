@@ -3,8 +3,13 @@
 An independently versioned public Go module for subprocess plugin authors:
 
 ```sh
-go get github.com/hollis-labs/nanite/pkg/pluginapi
+go get github.com/hollis-labs/nanite/pkg/pluginapi@v0.2.0
 ```
+
+Version 0.2 uses the published `github.com/hollis-labs/libs/plugin-mcp/plugin-sdk`
+Go types and subprocess protocol 2. Its Go signatures no longer accept the
+retired standalone SDK types. The host still reviews declarations and issues
+grants; changing an import or declaring a capability grants no authority.
 
 `Block` is the `nanite` object in a shared `plugin-sdk/manifest.Manifest`.
 `EncodeBlock` validates it and produces the raw JSON value assigned to

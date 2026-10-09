@@ -631,53 +631,8 @@ func (s *Store) DeleteAgent(ctx context.Context, slug string) error {
 	}
 	defer rollbackUnlessCommitted(tx)
 
-	cleanups := []string{
-		"DELETE FROM session_agents WHERE agent_id = ?",
-		"DELETE FROM agent_projects WHERE agent_id = ?",
-		// Per-agent capability/runtime children (migrations 068/070/074/085).
-		// These declare FKs to agent_profiles(id); clean them explicitly so a
-		// managed-agent delete leaves no orphaned reflexes, known tools/skills,
-		// procedures, knowledge seeds, or schedules.
-		"DELETE FROM agent_known_tools WHERE agent_id = ?",
-		"DELETE FROM agent_known_skills WHERE agent_id = ?",
-		// Phase 1 item 04 (migration 116): agent_tools/
-		// agent_dispatch_tool_allowlist both already declare
-		// ON DELETE CASCADE agent_profiles(id) FKs, so these two lines are
-		// belt-and-suspenders, matching this list's existing style of
-		// explicitly clearing agent_projects even though migration 113 gave
-		// that a real cascade FK too.
-		"DELETE FROM agent_tools WHERE agent_id = ?",
-		"DELETE FROM agent_dispatch_tool_allowlist WHERE agent_id = ?",
-		"DELETE FROM agent_tools_legacy_backfill WHERE agent_id = ?",
-		"DELETE FROM agent_procedures WHERE agent_id = ?",
-		"DELETE FROM agent_knowledge_seed WHERE agent_id = ?",
-		"DELETE FROM agent_log WHERE agent_id = ?",
-		"DELETE FROM agent_schedules WHERE agent_id = ?",
-		"DELETE FROM agent_reflexes WHERE agent_id = ?",
-		// pending_reflexes.target_agent_id references the profile (migration
-		// 074, no cascade) — clear it or the final delete fails under
-		// foreign_keys=ON. (pending_reflexes has no agent_id column.)
-		"DELETE FROM pending_reflexes WHERE target_agent_id = ?",
-		// durable_agent_instances.profile_id references the profile
-		// (migration 080, no cascade; 081/082 only add columns). Removing the
-		// instances cascades their instance_id children (sessions, events).
-		// Deleting the managed profile is a permanent operator action, so its
-		// durable instances go with it.
-		"DELETE FROM durable_agent_instances WHERE profile_id = ?",
-	}
-	for _, q := range cleanups {
-		if _, err := tx.ExecContext(ctx, q, agent.ID); err != nil {
-			return fmt.Errorf("cleanup agent references (%s): %w", q, err)
-		}
-	}
-
-	// Nullify agent_id on messages (preserve messages, just unlink the agent).
-	if _, err := tx.ExecContext(ctx, "UPDATE messages SET agent_id = NULL WHERE agent_id = ?", agent.ID); err != nil {
-		return fmt.Errorf("nullify messages for agent %s: %w", slug, err)
-	}
-
-	if _, err := tx.ExecContext(ctx, "DELETE FROM agent_profiles WHERE id = ?", agent.ID); err != nil {
-		return fmt.Errorf("delete agent %s: %w", slug, err)
+	if err := deleteAgentTx(ctx, tx, agent); err != nil {
+		return err
 	}
 
 	return tx.Commit()

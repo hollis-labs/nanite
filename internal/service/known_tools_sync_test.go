@@ -90,3 +90,19 @@ func TestSyncKnownTools_SeedsAlwaysIncludedDefaults(t *testing.T) {
 		t.Fatalf("expected at least 3 always-included seed rows, got %d: %+v", len(list), list)
 	}
 }
+
+func TestSyncKnownTools_CanceledRefreshReportsErrorAndPreservesCatalog(t *testing.T) {
+	st := newKnownToolsTestStore(t)
+	ctx := context.Background()
+	SyncKnownTools(ctx, st, []llmtypes.ToolDefinition{{Name: "previous_tool"}}, nil)
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	result := SyncKnownTools(canceled, st, []llmtypes.ToolDefinition{{Name: "new_tool"}}, nil)
+	if result.Err == nil {
+		t.Fatal("canceled publication reported success")
+	}
+	previous, err := st.GetKnownToolByName(ctx, "previous_tool")
+	if err != nil || previous.Status != "available" {
+		t.Fatalf("failed publication retired last catalog: %+v %v", previous, err)
+	}
+}

@@ -211,3 +211,37 @@ func (s *Store) ListAgentDispatchToolNames(ctx context.Context, agentID string) 
 	}
 	return out, rows.Err()
 }
+
+// InitialAgentToolGrant is one resolved catalog grant from an operator's
+// installation declaration. Request metadata is never an input here.
+type InitialAgentToolGrant struct {
+	ToolID     string
+	GrantedVia string
+}
+
+// InitializeAgentToolGrants snapshots installation grants exactly once. The
+// marker and grants commit together, including an intentionally empty grant
+// set. Subsequent imports or boot backfills cannot restore revoked grants.
+func (s *Store) InitializeAgentToolGrants(ctx context.Context, agentID string, grants []InitialAgentToolGrant) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin initial tool grants: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // Commit or the original write error owns the result.
+	result, err := tx.ExecContext(ctx, `INSERT INTO agent_tools_legacy_backfill (agent_id, created_at) VALUES (?, ?) ON CONFLICT(agent_id) DO NOTHING`, agentID, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("mark initial tool grants: %w", err)
+	}
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read initial tool grant marker: %w", err)
+	}
+	if inserted != 0 {
+		for _, grant := range grants {
+			if err := grantAgentTool(ctx, tx, agentID, grant.ToolID, grant.GrantedVia); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}

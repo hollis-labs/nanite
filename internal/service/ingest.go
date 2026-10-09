@@ -334,6 +334,10 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 //     ingest; (1) still records it regardless, preserving today's
 //     tolerant behavior for that table.
 func seedRoleToolsFromIngest(ctx context.Context, st *store.Store, agentID string, tools []string) {
+	seedRoleToolRoster(ctx, st, agentID, tools, true)
+}
+
+func seedRoleToolRoster(ctx context.Context, st *store.Store, agentID string, tools []string, grant bool) {
 	for i, name := range tools {
 		if name == "" {
 			continue
@@ -348,6 +352,9 @@ func seedRoleToolsFromIngest(ctx context.Context, st *store.Store, agentID strin
 			slog.Warn("service: seed role tool (ingest)", "agent_id", agentID, "tool", name, "err", err)
 		}
 
+		if !grant {
+			continue
+		}
 		known, err := st.GetKnownToolByName(ctx, name)
 		if err != nil {
 			if !errors.Is(err, store.ErrKnownToolNotFound) {

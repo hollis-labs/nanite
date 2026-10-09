@@ -984,7 +984,7 @@ func filterToolsByAgentTools(ctx context.Context, st *store.Store, agentID strin
 		return nil
 	}
 	if len(granted) == 0 {
-		slog.Debug("service/tool: zero agent_tools grants", "agent", agentID)
+		slog.Info("service/tool: zero agent_tools grants", "agent", agentID)
 		return nil
 	}
 	grantedSet := make(map[string]bool, len(granted))

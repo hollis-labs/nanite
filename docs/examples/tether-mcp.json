@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "tether-mux": {
+      "command": "tether",
+      "args": ["mcp", "--proxy", "--no-discover", "--servers", "torque"],
+      "env": {
+        "TETHER_MCP_TOOLS": "[\"torque_task_get\",\"torque_task_list\"]"
+      }
+    }
+  }
+}

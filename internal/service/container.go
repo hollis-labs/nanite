@@ -74,6 +74,7 @@ import (
 // Container holds all service instances and shared subsystems. It is the
 // single wiring point — created once in main.go and passed to the API layer.
 type Container struct {
+	discoverMCP   func(context.Context) (*mcp.DiscoveryDiff, error)
 	PluginQueries *PluginQueryService
 
 	// HarnessProfiles selects and resolves named harness profiles; used by the
@@ -618,7 +619,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// treated as "nothing is known" (which would flag every entry).
 	var knownTools map[string]bool
 	if cfg.ToolClient != nil {
-		catalog := cfg.ToolClient.ListTools()
+		catalog := cfg.ToolClient.GetAllToolsUnfiltered()
 		// request_tools has no registration anywhere in the builtin/MCP
 		// catalog ToolClient.ListTools() draws from — it's a meta-tool
 		// synthesized ad hoc by SelectForAgent (progressive discovery and
@@ -643,6 +644,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// seedRoleToolsFromIngest call needs known_tools rows to already
 		// exist so it can resolve roleTools: names to real grants).
 		syncResult := SyncKnownTools(context.Background(), cfg.Store, catalog, cfg.ToolClient.IsBuiltinTool)
+		if syncResult.Err != nil {
+			slog.Warn("service container: incomplete known_tools catalog sync", "err", syncResult.Err)
+		}
 		slog.Info("service container: synced known_tools catalog",
 			"upserted", syncResult.Upserted, "marked_unavailable", syncResult.MarkedUnavailable)
 	}
@@ -1544,7 +1548,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	slog.Info("service container: all services wired")
 
+	discoverMCP := newMCPDiscoverySync(cfg.Store, cfg.MCP, cfg.ToolClient)
 	container := &Container{
+		discoverMCP:         discoverMCP,
 		Sessions:            sessions,
 		CognitiveViews:      cognitiveViews,
 		Agents:              agents,
@@ -1611,7 +1617,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Loops:               NewLoopService(cfg.Store),
 		Schedules:           NewScheduleService(cfg.Store),
 		Settings:            newUserSettingsWithToolLoads(cfg.Store, cfg.MCP),
-		MCPServers:          newContainerMCPServerService(cfg.Store, cfg.MCP),
+		MCPServers:          newContainerMCPServerService(cfg.Store, cfg.MCP, discoverMCP),
 		Roles:               NewRoleService(cfg.Store),
 		Projects:            NewProjectService(cfg.Store, cfg.Store),
 		DrawerCards:         NewDrawerCardService(cfg.Store),
@@ -1651,20 +1657,23 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 // newContainerMCPServerService wires MCPServerService to the store and, when
 // there is one, the MCP manager. A nil manager leaves registration and
 // discovery unwired rather than holding a typed nil.
-func newContainerMCPServerService(st *store.Store, m *mcp.Manager) *MCPServerService {
+func newContainerMCPServerService(st *store.Store, m *mcp.Manager, discover func(context.Context) (*mcp.DiscoveryDiff, error)) *MCPServerService {
 	if m == nil {
 		return NewMCPServerService(st, nil, nil)
 	}
 	return NewMCPServerService(st, m, func(ctx context.Context) error {
-		_, err := m.AutoDiscover(ctx, st)
+		_, err := discover(ctx)
 		return err
 	})
 }
 
-// DiscoverMCPTools runs MCP tool discovery and syncs discovered tools into
-// the skills table. The caller checks MCP for nil first.
+// DiscoverMCPTools refreshes discovery and the grantable known_tools catalog.
+// Authored skills and existing agent grants are unchanged.
 func (c *Container) DiscoverMCPTools(ctx context.Context) (*mcp.DiscoveryDiff, error) {
-	return c.MCP.AutoDiscover(ctx, c.store)
+	if c.discoverMCP == nil {
+		return nil, errors.New("MCP discovery is not configured")
+	}
+	return c.discoverMCP(ctx)
 }
 
 // ResolveSessionHarness resolves the harness profile a session runs under,

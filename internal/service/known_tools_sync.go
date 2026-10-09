@@ -10,6 +10,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
@@ -20,6 +21,7 @@ import (
 type KnownToolsSyncResult struct {
 	Upserted          int // rows inserted or refreshed (source/status/description)
 	MarkedUnavailable int // previously-available rows no longer in the live catalog
+	Err               error
 }
 
 // SyncKnownTools upserts one known_tools row per tool in catalog (keyed by
@@ -29,10 +31,8 @@ type KnownToolsSyncResult struct {
 // server disconnects"). isBuiltin classifies each tool's source; nil-safe
 // (every tool is classified "mcp" when isBuiltin is nil).
 //
-// Called once at container startup, after the ToolClient's builtin
-// registration + MCP AutoDiscover have both already run (mirroring the
-// existing knownTools map[string]bool construction in container.go used by
-// AutoIngestAgents' unknown-tool-reference check).
+// Called at startup and after MCP discovery. Refreshes publish the unfiltered
+// catalog without changing existing operator grants.
 func SyncKnownTools(ctx context.Context, st *store.Store, catalog []llmtypes.ToolDefinition, isBuiltin func(name string) bool) KnownToolsSyncResult {
 	var result KnownToolsSyncResult
 	names := make([]string, 0, len(catalog))
@@ -46,6 +46,7 @@ func SyncKnownTools(ctx context.Context, st *store.Store, catalog []llmtypes.Too
 			source = "builtin"
 		}
 		if _, err := st.UpsertKnownTool(ctx, t.Name, source, "available", t.Description); err != nil {
+			result.Err = errors.Join(result.Err, err)
 			slog.Warn("service: sync known_tools upsert", "tool", t.Name, "err", err)
 			continue
 		}
@@ -63,8 +64,12 @@ func SyncKnownTools(ctx context.Context, st *store.Store, catalog []llmtypes.Too
 		}
 	}
 
+	if result.Err != nil {
+		return result
+	}
 	marked, err := st.MarkKnownToolsUnavailableExcept(ctx, names)
 	if err != nil {
+		result.Err = errors.Join(result.Err, err)
 		slog.Warn("service: sync known_tools mark-unavailable", "err", err)
 	} else {
 		result.MarkedUnavailable = marked

@@ -26,7 +26,7 @@ func extractText(result *condmcp.ToolResult) string {
 
 // convertEnvelopeMarkers replaces <!--ENVELOPE_DATA:{...}:ENVELOPE_DATA-->
 // markers with ```nanite-envelope fenced blocks so the engine's
-// ParseEnvelopes() can extract them from streamed PTY output.
+// ParseEnvelopes() can extract them from streamed CLI output.
 //
 // The delimiter scan itself delegates to chat.ReplaceEnvelopeMarkers, the
 // shared marker-extraction machinery three independent hand-scans (this

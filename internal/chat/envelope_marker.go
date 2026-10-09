@@ -50,7 +50,7 @@ func ExtractEnvelopeMarker(text string) (json string, ok bool) {
 // marker — opening delimiter through closing delimiter — with
 // replace(payload)'s return value. Used by callers that need to transform
 // every marker occurrence in place rather than just read the first one out
-// (internal/mcpserver/handlers.go's PTY-output marker-to-fenced-block
+// (internal/mcpserver/handlers.go's CLI-output marker-to-fenced-block
 // conversion is the one real caller today). Text with no markers is
 // returned unchanged.
 func ReplaceEnvelopeMarkers(text string, replace func(payload string) string) string {

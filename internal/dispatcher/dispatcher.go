@@ -60,7 +60,7 @@ const (
 	// async, non-session-bound, agent-driven. Reserved by the
 	// dispatcher seam (CW-20260512-0020 framing absorbed by
 	// CW-20260512-0121); the shell-flavored variant continues to use
-	// internal/background's PTY backend and does NOT route through
+	// internal/background's shell-job backend and does NOT route through
 	// Dispatcher.Run. When the agent-flavored caller lands, it stamps
 	// this and goes through the same broker pipeline as Chat /
 	// Subagent — that is the architectural answer to "shell vs agent".

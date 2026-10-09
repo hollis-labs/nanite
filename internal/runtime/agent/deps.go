@@ -123,7 +123,7 @@ type Dependencies struct {
 	// protects nothing.
 	ControlPlane ControlPlane
 
-	// Telemetry receives PTY restart and lifecycle observability events.
+	// Telemetry receives runtime restart and lifecycle observability events.
 	Telemetry Telemetry
 
 	// LiveSessions, when non-nil, lets orphansweep.RuntimeReaper.SweepOnce
@@ -323,13 +323,13 @@ type MCPConfig struct {
 // Telemetry is the observability sink. The production composition root
 // wires this against nanite's existing OpenTelemetry plumbing.
 type Telemetry interface {
-	RecordPTYRestart(sessionID string, attempt int, prevExit *agentsessions.ExitError)
+	RecordRuntimeRestart(sessionID string, attempt int, prevExit *agentsessions.ExitError)
 }
 
 // noopTelemetry is the test-friendly default when no observability is wired.
 type noopTelemetry struct{}
 
-func (noopTelemetry) RecordPTYRestart(string, int, *agentsessions.ExitError) {}
+func (noopTelemetry) RecordRuntimeRestart(string, int, *agentsessions.ExitError) {}
 
 // Compile-time interface compliance assertions.
 var _ Telemetry = noopTelemetry{}

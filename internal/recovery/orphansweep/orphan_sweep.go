@@ -226,7 +226,7 @@ func pidAlive(pid int) bool {
 // RuntimeReaper periodically sweeps agent_runtime for rows whose
 // underlying process has died — either because the service was restarted
 // (pre-restart rows orphan-en-masse) or because a long-lived session's
-// PTY/child exited without persisting a terminal state.
+// CLI child exited without persisting a terminal state.
 //
 // Pairs with the subagent reaper (internal/subagent.Reaper) but operates
 // on a different table: that one sweeps subagent_runs for budget /

@@ -27,7 +27,7 @@ var ErrTurnCancelUnsupported = wrapper.ErrTurnCancelUnsupported
 // "Streaming Input Mode" user message before it reaches the runtime.
 // The runtime writes SendInput bytes to the child's stdin verbatim
 // (+'\n'); claude parses each line as JSON, so raw text would crash
-// its input parser (c207/c208). Non-streaming runtimes (PTY, codex/
+// its input parser (c207/c208). Non-streaming runtimes (codex/
 // opencode subprocess-per-turn) receive the payload unchanged.
 //
 // Routes through go-agent-wrapper for both native and ACP protocols.

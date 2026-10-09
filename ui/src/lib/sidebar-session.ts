@@ -47,14 +47,18 @@ const CLI_PROVIDER_ALIASES = new Set([
   "pty",
   "pty-claude",
   "pty-codex",
+  "claude",
+  "claude-code",
   "codex",
   "opencode",
+  "copilot",
+  "pi",
+  "agy",
+  "antigravity",
 ]);
 const MAX_VISIBLE_TREE_DEPTH = 2;
 
-export function buildSidebarSessionTree(
-  sessions: Session[],
-): SidebarSessionTreeRow[] {
+export function buildSidebarSessionTree(sessions: Session[]): SidebarSessionTreeRow[] {
   const byID = new Map(sessions.map((session) => [session.id, session]));
   const childrenByParent = new Map<string, Session[]>();
   const topLevel: Session[] = [];
@@ -130,12 +134,8 @@ export function buildSidebarSessionTreeSections(
   };
 
   return {
-    pinnedRows: rows.filter(
-      (row) => row.session.is_pinned || hasPinnedAncestor(row.session),
-    ),
-    unpinnedRows: rows.filter(
-      (row) => !row.session.is_pinned && !hasPinnedAncestor(row.session),
-    ),
+    pinnedRows: rows.filter((row) => row.session.is_pinned || hasPinnedAncestor(row.session)),
+    unpinnedRows: rows.filter((row) => !row.session.is_pinned && !hasPinnedAncestor(row.session)),
   };
 }
 
@@ -146,10 +146,7 @@ export function deriveSidebarSessionKind(session: Session): SidebarSessionKind {
   ) {
     return "durable";
   }
-  if (
-    isBootProfileProvider(session.provider) ||
-    isCLIProviderAlias(session.provider)
-  ) {
+  if (isBootProfileProvider(session.provider) || isCLIProviderAlias(session.provider)) {
     return "cli";
   }
   return "api";
@@ -159,8 +156,7 @@ export function deriveSidebarActivityState(
   session: Session,
   presence: SidebarPresenceMaps,
 ): SidebarActivitySummary {
-  if (isArchivedStatus(session.status))
-    return { state: "archived", label: "Archived" };
+  if (isArchivedStatus(session.status)) return { state: "archived", label: "Archived" };
   if (session.halted_at) return { state: "halted", label: "Halted" };
   if (isStoppedStatus(session.status, session.runtime_state)) {
     return { state: "stopped", label: "Stopped" };
@@ -183,9 +179,7 @@ export function deriveSidebarActivityState(
   return { state: "idle", label: "Idle" };
 }
 
-export function deriveSidebarSessionSummary(
-  session: Session,
-): SidebarSessionSummary {
+export function deriveSidebarSessionSummary(session: Session): SidebarSessionSummary {
   const kind = deriveSidebarSessionKind(session);
   if (kind === "durable") {
     return {
@@ -210,10 +204,7 @@ export function deriveSidebarSessionSummary(
   };
 }
 
-export function compactProviderModelLabel(
-  provider: string,
-  model: string,
-): string {
+export function compactProviderModelLabel(provider: string, model: string): string {
   const cleanProvider = humanizeProvider(provider);
   const cleanModel = humanizeModel(model);
   if (cleanProvider && cleanModel) return `${cleanProvider} / ${cleanModel}`;
@@ -221,8 +212,7 @@ export function compactProviderModelLabel(
 }
 
 function durableMetadataLabel(session: Session): string {
-  if (session.context_id)
-    return `durable / ${compactIdentifier(session.context_id)}`;
+  if (session.context_id) return `durable / ${compactIdentifier(session.context_id)}`;
   return compactProviderModelLabel(session.provider, session.model);
 }
 
@@ -237,11 +227,7 @@ function cliMetadataLabel(session: Session): string {
 
 function inferredRuntimeLabel(provider: string): string {
   if (provider === "pty-claude" || provider === "pty") return "stdio";
-  if (
-    provider === "codex" ||
-    provider === "opencode" ||
-    provider.startsWith("sub-")
-  ) {
+  if (provider === "codex" || provider === "opencode" || provider.startsWith("sub-")) {
     return "subprocess";
   }
   if (provider === "pty-codex") return "subprocess";
@@ -249,17 +235,12 @@ function inferredRuntimeLabel(provider: string): string {
 }
 
 function isBootProfileProvider(provider: string): boolean {
-  return (
-    provider.startsWith("bootprofile:") &&
-    provider.length > "bootprofile:".length
-  );
+  return provider.startsWith("bootprofile:") && provider.length > "bootprofile:".length;
 }
 
-function isCLIProviderAlias(provider: string): boolean {
+export function isCLIProviderAlias(provider: string): boolean {
   return (
-    CLI_PROVIDER_ALIASES.has(provider) ||
-    provider.startsWith("pty-") ||
-    provider.startsWith("sub-")
+    CLI_PROVIDER_ALIASES.has(provider) || provider.startsWith("pty-") || provider.startsWith("sub-")
   );
 }
 
@@ -267,17 +248,11 @@ function isArchivedStatus(status: string): boolean {
   return status === "archived";
 }
 
-function isStoppedStatus(
-  status: string,
-  runtimeState?: string | null,
-): boolean {
+function isStoppedStatus(status: string, runtimeState?: string | null): boolean {
   return status === "stopped" || status === "done" || runtimeState === "done";
 }
 
-function isFailureStatus(
-  status: string,
-  runtimeState?: string | null,
-): boolean {
+function isFailureStatus(status: string, runtimeState?: string | null): boolean {
   return (
     status === "failed" ||
     status === "halted" ||
@@ -288,11 +263,7 @@ function isFailureStatus(
 }
 
 function isResidentRuntimeOnline(runtimeState?: string | null): boolean {
-  return (
-    runtimeState === "running" ||
-    runtimeState === "launching" ||
-    runtimeState === "starting"
-  );
+  return runtimeState === "running" || runtimeState === "launching" || runtimeState === "starting";
 }
 
 function humanizeProvider(provider: string): string {

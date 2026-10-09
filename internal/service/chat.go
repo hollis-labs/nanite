@@ -132,7 +132,7 @@ type ChatServiceConfig struct {
 	ProcessTracker *chat.ProcessTracker
 
 	// SessionEventWriter writes lifecycle rows to session_events for
-	// diagnostic reconstruction. nil = PTY observability disabled.
+	// diagnostic reconstruction. nil = CLI observability disabled.
 	SessionEventWriter SessionEventWriter
 
 	// SubagentInbox reads/acks kind=subagent_result agent_messages for
@@ -188,8 +188,8 @@ type ChatServiceConfig struct {
 
 	// AgentDeps is the agent-runtime composition root (Phase 4c.1 of the
 	// agent-boot adoption). Threaded through here so HandleMessage can
-	// gate the long-lived PTY path on the session's CLIAdapter capabilities
-	// (Caps.PTY=true). nil = the legacy chat-harness path is taken
+	// drive headless CLI sessions through the runtime's explicit mode
+	// selection. nil = the legacy chat-harness path is taken
 	// universally; useful for tests and bootstrapping configurations that
 	// haven't wired the runtime yet.
 	AgentDeps *runtimeagent.Dependencies
@@ -305,7 +305,7 @@ type chatServiceImpl struct {
 	agentDeps *runtimeagent.Dependencies
 
 	// activeSessions tracks long-lived runtime sessions keyed by chat
-	// session id (Phase 4c). First HandleMessage call for a CLI-PTY-capable
+	// session id (Phase 4c). First HandleMessage call for a headless CLI
 	// session boots the runtime; subsequent calls SendInput on the existing
 	// session. Map values are *runtimeagent.Session.
 	activeSessionsOnce sync.Once
@@ -1792,7 +1792,7 @@ func (s *chatServiceImpl) SetWorkers(w *worker.Manager) {
 // CloseAgentSession stops + drops any long-lived runtime session bound to
 // the supplied chat session id. Phase 4c.8 (CW-20260508-0002): wired as the
 // SessionService archive hook so closing a chat session releases the
-// underlying claude-code (or other CLI) PTY process immediately instead of
+// underlying claude-code (or other CLI) process immediately instead of
 // waiting for the IdleKill=15min supervisor timeout.
 //
 // Idempotent. nil-safe when the runtime is not wired (no-op).

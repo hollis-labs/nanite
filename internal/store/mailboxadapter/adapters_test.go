@@ -184,12 +184,12 @@ func TestSessionEvents_RecentReturnsNewestPageInStableChronologicalOrder(t *test
 func TestSessionEvents_WritesNaniteRuntimeVocabularyBesideMailboxEvents(t *testing.T) {
 	st := newTestStore(t)
 	components := New(st)
-	components.Events.WriteSessionEvent(t.Context(), "session-1", "pty_turn_start", "pty", `{"provider":"codex"}`)
+	components.Events.WriteSessionEvent(t.Context(), "session-1", "cli_turn_start", "cli", `{"provider":"codex"}`)
 	events, err := components.Service.SessionEvents(t.Context(), "session-1", 10)
 	if err != nil {
 		t.Fatalf("SessionEvents: %v", err)
 	}
-	if len(events) != 1 || events[0].EventType != "pty_turn_start" || events[0].Channel != "pty" || events[0].EnvelopePointerJSON != `{"provider":"codex"}` {
+	if len(events) != 1 || events[0].EventType != "cli_turn_start" || events[0].Channel != "cli" || events[0].EnvelopePointerJSON != `{"provider":"codex"}` {
 		t.Fatalf("runtime event = %+v", events)
 	}
 }

@@ -1,6 +1,6 @@
-// Package background — PTY backend.
+// Package background — shell-job backend.
 //
-// PTYBackend is the D2 short-term dispatch backend: each Submit
+// ShellJobBackend is the D2 short-term dispatch backend: each Submit
 // launches a detached child process in a new process group, captures
 // stdout+stderr to a bounded buffer, and reports completion via the
 // CompletionFunc callback.
@@ -34,7 +34,7 @@ import (
 	"time"
 )
 
-// killGracePeriod is how long PTYBackend waits between SIGTERM and
+// killGracePeriod is how long ShellJobBackend waits between SIGTERM and
 // SIGKILL when canceling a job. Long enough for a well-behaved
 // child to flush output and exit cleanly; short enough that a
 // Cancel call returns within the test budget (1s upper bound for
@@ -57,25 +57,20 @@ func defaultCommandFactory(ctx context.Context, req JobRequest) *exec.Cmd {
 	return cmd
 }
 
-// PTYBackend implements Backend by launching detached shell
-// subprocesses. Despite the name, this MVP does NOT allocate a real
-// PTY (creack/pty would be the lever to add later if interactive
-// stdin became a requirement); it uses standard pipes for output
-// capture. The "PTY" naming is preserved from the ticket's D2
-// language — the backend swap to agent-mux (D3) replaces this whole
-// file rather than the type name.
-type PTYBackend struct {
+// ShellJobBackend implements Backend using detached shell subprocesses and
+// standard pipes for stdout/stderr. It never allocates an interactive terminal.
+type ShellJobBackend struct {
 	// commandFactory builds the *exec.Cmd. Tests inject a stub.
 	commandFactory commandFactory
 
 	mu   sync.Mutex
-	jobs map[string]*ptyJob
+	jobs map[string]*shellJob
 }
 
-// ptyJob holds the per-job state PTYBackend tracks: the running
+// shellJob holds the per-job state ShellJobBackend tracks: the running
 // *exec.Cmd, its process group id, the cancel function used to
 // short-circuit Wait, and the current lifecycle status.
-type ptyJob struct {
+type shellJob struct {
 	cmd    *exec.Cmd
 	pgid   int
 	cancel context.CancelFunc
@@ -92,30 +87,30 @@ type ptyJob struct {
 	canceled bool
 }
 
-// NewPTYBackend returns a PTYBackend wired with the production
-// commandFactory. Tests use newPTYBackendForTest to inject a stub
+// NewShellJobBackend returns a ShellJobBackend wired with the production
+// commandFactory. Tests use newShellJobBackendForTest to inject a stub
 // factory.
-func NewPTYBackend() *PTYBackend {
-	return &PTYBackend{
+func NewShellJobBackend() *ShellJobBackend {
+	return &ShellJobBackend{
 		commandFactory: defaultCommandFactory,
-		jobs:           make(map[string]*ptyJob),
+		jobs:           make(map[string]*shellJob),
 	}
 }
 
-// newPTYBackendForTest is the test seam. Not exported.
-func newPTYBackendForTest(factory commandFactory) *PTYBackend {
-	return &PTYBackend{
+// newShellJobBackendForTest is the test seam. Not exported.
+func newShellJobBackendForTest(factory commandFactory) *ShellJobBackend {
+	return &ShellJobBackend{
 		commandFactory: factory,
-		jobs:           make(map[string]*ptyJob),
+		jobs:           make(map[string]*shellJob),
 	}
 }
 
 // Start launches a child process for jobID. Spawns a reaper
 // goroutine that Wait()s the child, captures output, and invokes
 // onComplete exactly once.
-func (b *PTYBackend) Start(ctx context.Context, jobID string, req JobRequest, onComplete CompletionFunc) error {
+func (b *ShellJobBackend) Start(ctx context.Context, jobID string, req JobRequest, onComplete CompletionFunc) error {
 	if onComplete == nil {
-		return errors.New("background.pty: onComplete is required")
+		return errors.New("background.shell_job: onComplete is required")
 	}
 
 	// Per-job ctx so Cancel can interrupt the running child without
@@ -129,18 +124,18 @@ func (b *PTYBackend) Start(ctx context.Context, jobID string, req JobRequest, on
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return fmt.Errorf("background.pty: stdout pipe: %w", err)
+		return fmt.Errorf("background.shell_job: stdout pipe: %w", err)
 	}
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()
-		return fmt.Errorf("background.pty: stderr pipe: %w", err)
+		return fmt.Errorf("background.shell_job: stderr pipe: %w", err)
 	}
 
 	startedAt := time.Now().UTC()
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return fmt.Errorf("background.pty: start: %w", err)
+		return fmt.Errorf("background.shell_job: start: %w", err)
 	}
 
 	// Stamp the pgid; required for the kill-process-group path on
@@ -148,7 +143,7 @@ func (b *PTYBackend) Start(ctx context.Context, jobID string, req JobRequest, on
 	// SysProcAttr.Setpgid put the child into its own group.
 	pgid := cmd.Process.Pid
 
-	job := &ptyJob{
+	job := &shellJob{
 		cmd:    cmd,
 		pgid:   pgid,
 		cancel: cancel,
@@ -166,7 +161,7 @@ func (b *PTYBackend) Start(ctx context.Context, jobID string, req JobRequest, on
 	wallClockTimer := time.AfterFunc(
 		time.Duration(req.Budget.WallClockSeconds)*time.Second,
 		func() {
-			slog.Warn("background.pty: wall-clock budget exceeded",
+			slog.Warn("background.shell_job: wall-clock budget exceeded",
 				"job_id", jobID, "budget_seconds", req.Budget.WallClockSeconds)
 			_ = b.Cancel(jobID)
 		},
@@ -220,11 +215,11 @@ func (b *PTYBackend) Start(ctx context.Context, jobID string, req JobRequest, on
 	return nil
 }
 
-// Status returns the lifecycle state of a running job. PTYBackend removes
+// Status returns the lifecycle state of a running job. ShellJobBackend removes
 // its process record as the job completes; retained terminal status
 // and explicit expiry semantics belong to Service, the caller-facing source
 // of truth. ErrUnknownJob therefore means this backend has no active record.
-func (b *PTYBackend) Status(jobID string) (JobStatus, error) {
+func (b *ShellJobBackend) Status(jobID string) (JobStatus, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	job, ok := b.jobs[jobID]
@@ -239,7 +234,7 @@ func (b *PTYBackend) Status(jobID string) (JobStatus, error) {
 // first, then SIGKILL after killGracePeriod if the process is still
 // alive. Either way, the reaper observes the death and fires
 // onComplete with StatusCanceled.
-func (b *PTYBackend) Cancel(jobID string) error {
+func (b *ShellJobBackend) Cancel(jobID string) error {
 	b.mu.Lock()
 	job, ok := b.jobs[jobID]
 	if !ok {

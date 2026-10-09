@@ -660,19 +660,19 @@ func marshalMeta(m map[string]any) string {
 
 // --- Telemetry ---
 
-// agentTelemetry forwards PTY restart events to slog. The shape matches
+// agentTelemetry forwards runtime restart events to slog. The shape matches
 // runtimeagent.Telemetry so the production root can drop in an OTEL-backed
 // implementation without re-wiring the deps.
 type agentTelemetry struct{}
 
-func (agentTelemetry) RecordPTYRestart(sessionID string, attempt int, prevExit *agentsessions.ExitError) {
+func (agentTelemetry) RecordRuntimeRestart(sessionID string, attempt int, prevExit *agentsessions.ExitError) {
 	exit := -1
 	reason := ""
 	if prevExit != nil {
 		exit = prevExit.Code
 		reason = prevExit.Error()
 	}
-	slog.Warn("agent_runtime: pty restart",
+	slog.Warn("agent_runtime: runtime restart",
 		"session_id", sessionID,
 		"attempt", attempt,
 		"prev_exit", exit,

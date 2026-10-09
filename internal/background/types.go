@@ -3,7 +3,7 @@
 // should not block the originating session.
 //
 // This is a background COMMAND/PROCESS runner, not an agent dispatcher.
-// The MVP backend (PTYBackend, D2) runs each job's JobRequest.Task as a
+// The MVP backend (ShellJobBackend, D2) runs each job's JobRequest.Task as a
 // detached `/bin/sh -c` invocation. A future agent-dispatch backend
 // (D3, agent-mux) is anticipated behind the Backend interface but is
 // not wired today — see the decision pins below.
@@ -19,7 +19,7 @@
 //
 //   - D1 — Hadron is NOT the dispatch primitive. Zero `hadron` imports
 //     in this package. Re-violating is an explicit blocker.
-//   - D2 — Short-term dispatch is a detached PTY session (see pty.go).
+//   - D2 — Short-term dispatch is a detached shell job (see shell_job.go).
 //     This is the MVP that ships in P9.
 //   - D3 — Long-term dispatch swaps to agent-mux behind the Backend
 //     interface defined here. Activation is a separate ticket; this
@@ -98,7 +98,7 @@ const (
 // JobRequest is the caller-supplied input to Submit.
 type JobRequest struct {
 	// Agent is currently UNUSED — no backend reads it. It is NOT an
-	// agent-dispatch hook: the PTYBackend (the only backend today)
+	// agent-dispatch hook: the ShellJobBackend (the only backend today)
 	// runs Task as a shell command and ignores Agent entirely. The
 	// field is retained for API/wire compatibility and as an optional
 	// labeling hint for callers; wiring an agent-dispatch backend
@@ -106,7 +106,7 @@ type JobRequest struct {
 	// Setting this field does not change how a job runs.
 	Agent string
 	// Task is the shell command line the backend executes. The
-	// PTYBackend runs it via `/bin/sh -c <Task>` (see pty.go,
+	// ShellJobBackend runs it via `/bin/sh -c <Task>` (see shell_job.go,
 	// defaultCommandFactory) and captures stdout+stderr. It is a
 	// command string, not an agent prompt.
 	Task string
@@ -140,7 +140,7 @@ type JobResult struct {
 // Backend is the dispatch surface Service uses to actually run jobs.
 // Two implementations are anticipated:
 //
-//   - PTYBackend (this package, pty.go)   — short-term MVP (D2).
+//   - ShellJobBackend (this package, shell_job.go)   — short-term MVP (D2).
 //   - mux backend (separate package)      — long-term (D3); not in
 //     this ticket. The interface stays narrow so that swap is a
 //     wiring change, not an API change.

@@ -12,9 +12,9 @@ import (
 // Mailbox mutation event names live in go-messaging/mailbox; provider,
 // compaction, and harness lifecycle vocabulary remains owned by Nanite.
 const (
-	EventPTYTurnStart    = "pty_turn_start"
-	EventPTYTurnComplete = "pty_turn_complete"
-	EventPTYTurnFailed   = "pty_turn_failed"
+	EventCLITurnStart    = "cli_turn_start"
+	EventCLITurnComplete = "cli_turn_complete"
+	EventCLITurnFailed   = "cli_turn_failed"
 
 	EventContextPreCompact  = "context_pre_compact"
 	EventContextPostCompact = "context_post_compact"

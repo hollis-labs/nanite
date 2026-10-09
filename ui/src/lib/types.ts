@@ -87,7 +87,6 @@ export const RUNTIME_KINDS = [
   "subprocess-per-turn",
   "jsonrpc-stdio",
   "http-sse",
-  "pty",
 ] as const;
 export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 

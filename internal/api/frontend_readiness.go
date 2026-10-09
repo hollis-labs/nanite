@@ -421,7 +421,6 @@ func runtimeKindOptions() []runtimeKindOption {
 		{Value: string(runtimekind.SubprocessPerTurn), Label: "Subprocess per turn", ManagedAutomation: true, ProductSupported: true},
 		{Value: string(runtimekind.JSONRPCStdio), Label: "JSON-RPC stdio", ManagedAutomation: true, ProductSupported: true},
 		{Value: string(runtimekind.HTTPSSE), Label: "HTTP/SSE", ManagedAutomation: true, ProductSupported: false},
-		{Value: string(runtimekind.PTY), Label: "PTY", ManagedAutomation: false, ProductSupported: false, Description: "Raw terminal/TUI path, not a managed start-surface option."},
 	}
 }
 

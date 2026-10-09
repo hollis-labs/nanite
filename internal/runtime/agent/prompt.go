@@ -17,7 +17,7 @@ import (
 //  3. modeFraming(mode)    — long-lived / one-shot / subagent etc. tail
 //     framing when material.
 //
-// For ModeLongLived sessions the prompt is set ONCE at PTY start (claude
+// For ModeLongLived sessions the prompt is planted at CLI launch (claude
 // does not accept --system-prompt on resume); slot changes thereafter
 // regenerate <bootDir>/CLAUDE.md and rely on claude's context-recovery
 // re-read.

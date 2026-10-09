@@ -23,6 +23,7 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	feotel "github.com/hollis-labs/go-otel"
+	toolresult "github.com/hollis-labs/go-toolresult"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -588,6 +589,12 @@ func (s *chatServiceImpl) requestProviderIteration(
 		s.persistPartialAssistantCanceled(sessionID, assistantMsgID, agentID, run.fullContent.String())
 		return requestProviderIterationResult{directive: runloop.Terminate}
 	}
+
+	var cache *toolresult.Cache
+	if s.resultCache != nil {
+		cache = s.resultCache.Results
+	}
+	run.chatMessages = chat.ReconcileCachedResults(ctx, cache, sessionID, run.chatMessages)
 
 	// Token budget enforcement.
 	// Thread the per-model context window into EnforceTokenBudget so that

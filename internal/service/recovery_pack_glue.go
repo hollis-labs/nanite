@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	toolresult "github.com/hollis-labs/go-toolresult"
 	"github.com/hollis-labs/nanite/internal/recovery/pack"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/tool"
 )
 
 // CW-20260525-0001 Slice 1 — CLI session auto-recovery after daemon restart.
@@ -72,6 +74,11 @@ func (s *chatServiceImpl) buildSessionRecoveryPrefix(sessionID string, session *
 	if !pack.ShouldBuildRecoveryPack(true, len(history)) {
 		return ""
 	}
+	projection := s.resultProjection(sessionID)
+	for i := range history {
+		history[i].Content = projection.Text(pack.MessagePlainText(history[i].Content))
+	}
+
 	const reason = "host service restart (cold boot with prior history)"
 	packPath := ""
 	if strings.TrimSpace(bootDir) != "" {
@@ -84,6 +91,9 @@ func (s *chatServiceImpl) buildSessionRecoveryPrefix(sessionID string, session *
 		History:  history,
 		PackPath: packPath,
 	})
+	if notices := projection.Notices(); notices != "" {
+		built = notices + "\n\n" + built
+	}
 	if packPath != "" {
 		if err := os.WriteFile(packPath, []byte(built+"\n"), 0o644); err != nil {
 			slog.Warn("recovery: write pack file failed", "session_id", sessionID, "path", packPath, "err", err)
@@ -141,6 +151,30 @@ func recoveryPackPlantedMetadata(sessionID, reason, packPath string, msgs, histo
 // the normal user payload; otherwise it is the normal payload.
 func (s *chatServiceImpl) composeBootPayload(sessionID string, session *store.Session, agent *store.AgentProfile, bootDir string, slotResult *SlotAssemblyResult, userContent string, shouldRecover bool) string {
 	base := composeUserPayload(slotResult, userContent)
+	// Provider-side history cannot be rewritten. Send corrections even on a hot
+	// turn, and reconcile a quoted pointer in the new payload as well.
+	projection := s.resultProjection(sessionID)
+	if s.store != nil && s.resultCache != nil {
+		// Only working history participates; /clear must not reintroduce old IDs.
+		if history, err := listWorkingMessages(context.Background(), s.store, sessionID, 200); err == nil {
+			for _, msg := range history {
+				projection.Text(pack.MessagePlainText(msg.Content))
+			}
+		}
+	}
+	if slotResult != nil {
+		for _, msg := range slotResult.Messages {
+			projection.Text(msg.Content)
+			for _, block := range msg.ContentBlocks {
+				projection.Text(block.Content)
+				projection.Text(block.Text)
+			}
+		}
+	}
+	base = projection.Text(base)
+	if s.resultCache != nil {
+		base = "<cached-result-availability>\nAll cache pointers in prior provider history are historical references, not current recovery promises. Only a successful current-session fetch/search establishes body availability. Cached bodies expire after their recorded expires_at and may have been purged; results above the per-result storage cap have no full cached body. Treat any fetch/search unavailable response as explicit degradation, not tool execution failure or proof of omitted content. A fresh source query still requires current tool permission.\n" + projection.Notices() + "\n</cached-result-availability>\n\n" + base
+	}
 	if !shouldRecover {
 		return base
 	}
@@ -149,4 +183,12 @@ func (s *chatServiceImpl) composeBootPayload(sessionID string, session *store.Se
 		return base
 	}
 	return prefix + "\n\n" + base
+}
+
+func (s *chatServiceImpl) resultProjection(sessionID string) *tool.ResultProjection {
+	var cache *toolresult.Cache
+	if s.resultCache != nil {
+		cache = s.resultCache.Results
+	}
+	return tool.NewResultProjection(context.Background(), cache, sessionID)
 }

@@ -271,7 +271,13 @@ func TestAgentWriteFailureParityLogsCauses(t *testing.T) {
 				method, path, tool = http.MethodPut, "/api/agents/write-target", "agent_update"
 				args = map[string]any{"id": "write-target", "name": "Changed"}
 			}
-			a := httpOutcome(t, h, method, path, args)
+			restArgs := map[string]any{}
+			for key, value := range args {
+				if key != "id" {
+					restArgs[key] = value
+				}
+			}
+			a := httpOutcome(t, h, method, path, restArgs)
 			b := mcpOutcome(t, cs, tool, args)
 			if a.Category != svcerr.CodeInternal || b.Category != svcerr.CodeInternal {
 				t.Fatalf("want internal: %s / %s", a, b)

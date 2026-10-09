@@ -70,7 +70,7 @@ func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 // agentView decorates a stored profile with database ownership metadata for
-// the GUI. Revision remains empty for wire compatibility. nil-safe when AgentConfig is unset
+// the GUI. Revision identifies the complete persisted profile. nil-safe when AgentConfig is unset
 // (lightweight test setups) — it falls back to source-only classification.
 func (a *API) agentView(p store.AgentProfile) AgentProfileView {
 	var class agentpkg.ManageClass
@@ -232,7 +232,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	original := *existing
 
 	var req UpdateAgentRequest
-	if err := a.decode(r, &req); err != nil {
+	if err = decodeAgentObject(r, &req, true); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
@@ -257,6 +257,12 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.DefaultModel != nil {
 		existing.DefaultModel = *req.DefaultModel
+	}
+	if req.DefaultProvider != nil {
+		existing.DefaultProvider = *req.DefaultProvider
+	}
+	if req.RuntimeKind != nil {
+		existing.RuntimeKind = *req.RuntimeKind
 	}
 	if req.MCPServers != nil {
 		existing.MCPServers = *req.MCPServers
@@ -319,6 +325,15 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		existing.TetherURN = *req.TetherURN
 	}
 
+	for _, field := range []struct {
+		name  string
+		value *string
+	}{{"name", req.Name}, {"slug", req.Slug}, {"system_prompt", req.SystemPrompt}} {
+		if field.value != nil && strings.TrimSpace(*field.value) == "" {
+			a.errorResp(w, http.StatusBadRequest, field.name+" must not be empty")
+			return
+		}
+	}
 	// Validate agent config before persisting.
 	if vr := agentvalidation.ValidateAgentConfig(existing); !vr.OK() {
 		a.jsonResp(w, http.StatusBadRequest, map[string]any{

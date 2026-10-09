@@ -153,6 +153,8 @@ type UpdateAgentRequest struct {
 	Description     *string `json:"description"`
 	Modes           *string `json:"modes"`
 	DefaultModel    *string `json:"default_model"`
+	DefaultProvider *string `json:"default_provider"`
+	RuntimeKind     *string `json:"runtime_kind"`
 	MCPServers      *string `json:"mcp_servers"`
 	ToolPermissions *string `json:"tool_permissions"`
 	CanExecute      *bool   `json:"can_execute"`
@@ -187,8 +189,8 @@ type UpdateAgentRequest struct {
 	// "native protocol," a pointer to a non-empty value sets it.
 	Protocol  *string `json:"protocol"`
 	Transport *string `json:"transport"`
-	// Revision is accepted for wire compatibility with older clients and is
-	// ignored now that updates are database-backed.
+	// Revision optionally requires the current opaque full-row revision.
+	// A stale precondition fails with409; omitted fields still remain unchanged.
 	Revision string `json:"revision"`
 }
 
@@ -264,7 +266,7 @@ type AgentProfileView struct {
 	// CopyToManaged reports whether a read-only agent can be forked into the
 	// managed layer ("make editable").
 	CopyToManaged bool `json:"copy_to_managed"`
-	// Revision is retained for wire compatibility and is always empty.
+	// Revision is the opaque persisted profile/assignment identity.
 	Revision string `json:"revision"`
 	// Persisted reports whether a real agent_profiles DB row backs this
 	// profile. Database list/get results are always persisted.

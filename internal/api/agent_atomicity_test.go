@@ -124,10 +124,48 @@ func TestAgentWritesAtomic(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				// Assignments are now merged into the initial INSERT, rather
+				// than written through a later UPDATE. Faults must follow the
+				// actual row mutation while preserving the rollback intent.
+				if method == "POST" {
+					switch failure {
+					case "assignment write":
+						trigger = `BEFORE INSERT ON agent_profiles WHEN NEW.role_id IS NOT NULL`
+					case "protocol write":
+						trigger = `BEFORE INSERT ON agent_profiles WHEN NEW.protocol IS NOT NULL`
+					case "saved read":
+						if _, err := st.DB.ExecContext(t.Context(), `DROP TRIGGER fail_atomic_write`); err != nil {
+							t.Fatal(err)
+						}
+						if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER fail_atomic_write AFTER INSERT ON agent_profiles BEGIN UPDATE agent_profiles SET tether_managed='invalid-bool' WHERE id=NEW.id; END`); err != nil {
+							t.Fatal(err)
+						}
+					case "foreign key during write":
+						if _, err := st.DB.ExecContext(t.Context(), `DROP TRIGGER fail_atomic_write`); err != nil {
+							t.Fatal(err)
+						}
+						if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER fail_atomic_write AFTER INSERT ON agent_profiles BEGIN UPDATE agent_profiles SET role_id='missing-after-validation' WHERE id=NEW.id; END`); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
 				if trigger != "" {
 					if _, err := st.DB.ExecContext(t.Context(), "CREATE TRIGGER fail_atomic_write "+trigger+" BEGIN SELECT RAISE(ABORT,'write_secret private agent query'); END"); err != nil {
 						t.Fatal(err)
 					}
+				}
+				if method == "PUT" && failure == "grant write" {
+					// A rejecting grant trigger proves an ordinary profile edit
+					// does not attempt to replay declarations into grants.
+					changed := atomicAgentRequest(t, h, method, path, body, 200)
+					names, err := st.ListAgentToolNames(t.Context(), changed.ID)
+					if err != nil || len(names) != 0 {
+						t.Fatalf("profile edit changed grants: %v, %v", names, err)
+					}
+					if changed.SystemPrompt != "fixture" || changed.Revision == before.Revision {
+						t.Fatal("edit did not commit profile/history")
+					}
+					return
 				}
 				atomicAgentRequest(t, h, method, path, body, want)
 				var children int
@@ -193,7 +231,11 @@ func TestAgentWritesAtomic(t *testing.T) {
 					t.Fatalf("corrected update changed identity: %s -> %s", before.ID, saved.ID)
 				}
 				var granted int
-				if grantErr := st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_tools WHERE agent_id=? AND tool_id=?`, saved.ID, toolID).Scan(&granted); grantErr != nil || granted != 1 {
+				wantGrants := 1
+				if method == "PUT" {
+					wantGrants = 0
+				}
+				if grantErr := st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_tools WHERE agent_id=? AND tool_id=?`, saved.ID, toolID).Scan(&granted); grantErr != nil || granted != wantGrants {
 					t.Fatalf("corrected retry grant count=%d err=%v", granted, grantErr)
 				}
 				known, err := st.ListAgentKnownTools(t.Context(), saved.ID)

@@ -146,7 +146,7 @@ func TestServiceErrorRoutesAssignmentsKeepValidationSeparateFromWriteFailure(t *
 	st, h := serviceErrorRoutes(t)
 	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Invalid Role","slug":"invalid-role","system_prompt":"fixture","role_id":"missing"}`, 400)
 	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Invalid Protocol","slug":"invalid-protocol","system_prompt":"fixture","protocol":"made-up"}`, 400)
-	if _, err := st.DB.Exec(`CREATE TRIGGER fail_assignment_write BEFORE UPDATE OF role_id ON agent_profiles BEGIN SELECT RAISE(ABORT, 'write_secret SQLITE_BUSY private assignment query'); END`); err != nil {
+	if _, err := st.DB.Exec(`CREATE TRIGGER fail_assignment_write BEFORE INSERT ON agent_profiles BEGIN SELECT RAISE(ABORT, 'write_secret SQLITE_BUSY private assignment query'); END`); err != nil {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer

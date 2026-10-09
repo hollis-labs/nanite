@@ -408,7 +408,7 @@ func TestMCPServers_Precedence(t *testing.T) {
 		{"create bad body", "POST", "/api/mcp-servers", `not json`, 400, "invalid request body"},
 		{"create no name", "POST", "/api/mcp-servers", `{"transport_type":"grpc"}`, 400, "name is required"},
 		{"create bad transport", "POST", "/api/mcp-servers", `{"name":"p","transport_type":"grpc"}`, 400, service.TransportTypeError},
-		{"create", "POST", "/api/mcp-servers", `{"name":"p","transport_type":"sse","url":"http://127.0.0.1:1/sse"}`, 201, ""},
+		{"create", "POST", "/api/mcp-servers", `{"name":"p","transport_type":"streamable","url":"http://127.0.0.1:1/mcp"}`, 201, ""},
 		{"create duplicate", "POST", "/api/mcp-servers", `{"name":"p"}`, 409, "server with this name already exists"},
 		{"update missing beats bad body", "PUT", "/api/mcp-servers/nope", `not json`, 404, "server not found"},
 		{"update bad body", "PUT", "/api/mcp-servers/p", `not json`, 400, "invalid request body"},
@@ -428,8 +428,8 @@ func TestMCPServers_Precedence(t *testing.T) {
 	}
 
 	// An empty transport keeps the stored one on update and means stdio on create.
-	w := mcpDo(mux, "PUT", "/api/mcp-servers/p", `{"url":"http://127.0.0.1:2/sse"}`)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"transport_type":"sse"`) {
+	w := mcpDo(mux, "PUT", "/api/mcp-servers/p", `{"url":"http://127.0.0.1:2/mcp"}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"transport_type":"streamable"`) {
 		t.Fatalf("update with empty transport: %d %s", w.Code, w.Body.String())
 	}
 	w = mcpDo(mux, "POST", "/api/mcp-servers", `{"name":"q","command":"true"}`)

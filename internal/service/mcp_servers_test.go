@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/mcpconfig"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -137,18 +138,65 @@ func TestMCPServerService_CreateIgnoresDuplicateLookupError(t *testing.T) {
 	assertEvents(t, f, "store.create x", "add x", "discover")
 }
 
+func TestMCPServerService_RefusesLegacyBeforeEffects(t *testing.T) {
+	f := newMCPFakes()
+	svc := f.service()
+	ctx := context.Background()
+	for _, cfg := range []*store.MCPServerConfig{
+		{Name: "legacy", TransportType: store.TransportSSE, URL: "http://gateway.invalid/sse"},
+		{Name: "legacy-url", TransportType: store.TransportStreamable, URL: "http://gateway.invalid/servers/x/sse"},
+	} {
+		if err := svc.Create(ctx, cfg); !errors.Is(err, mcpconfig.ErrLegacySSE) {
+			t.Fatalf("Create cause: %v", err)
+		}
+		assertEvents(t, f)
+	}
+	existing := store.MCPServerConfig{Name: "legacy", TransportType: store.TransportSSE, URL: "http://gateway.invalid/servers/x/sse", Enabled: true, Headers: `{"Authorization":"Bearer retained"}`}
+	f.rows[existing.Name] = existing
+	if _, err := svc.Update(ctx, &existing, MCPServerPatch{}); !errors.Is(err, mcpconfig.ErrLegacySSE) {
+		t.Fatalf("Update cause: %v", err)
+	}
+	assertEvents(t, f)
+	if !reflect.DeepEqual(f.rows[existing.Name], existing) {
+		t.Fatal("refusal changed retained config")
+	}
+	off := false
+	quarantined, err := svc.Update(ctx, &existing, MCPServerPatch{Enabled: &off})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEvents(t, f, "store.update legacy", "remove legacy", "discover")
+	if quarantined.Enabled || quarantined.URL != existing.URL || quarantined.Headers != existing.Headers {
+		t.Fatal("quarantine rewrote retained config")
+	}
+	on := true
+	if _, operationErr := svc.Update(ctx, quarantined, MCPServerPatch{Enabled: &on}); !errors.Is(operationErr, mcpconfig.ErrLegacySSE) {
+		t.Fatalf("legacy reactivation: %v", operationErr)
+	}
+	assertEvents(t, f)
+	kind := store.TransportStreamable
+	endpoint := "http://gateway.invalid/servers/x/mcp"
+	if _, operationErr := svc.Update(ctx, quarantined, MCPServerPatch{Enabled: &on, TransportType: &kind, URL: &endpoint}); operationErr != nil {
+		t.Fatal(operationErr)
+	}
+	assertEvents(t, f, "store.update legacy", "remove legacy", "add legacy", "discover")
+	if !strings.Contains(f.remote[existing.Name], "retained") {
+		t.Fatal("explicit migration lost retained auth header")
+	}
+}
+
 func TestMCPServerService_UpdateSequencing(t *testing.T) {
 	ctx := context.Background()
 	f := newMCPFakes()
 	existing := store.MCPServerConfig{
-		Name: "remote", TransportType: store.TransportSSE, Enabled: true,
+		Name: "remote", TransportType: store.TransportStreamable, Enabled: true,
 		Headers: `{"Authorization":"Bearer real-token"}`,
 	}
 	f.rows["remote"] = existing
 	svc := f.service()
 
 	// Placeholder header and empty transport: the registrar gets the stored
-	// token, and the transport stays sse.
+	// token, and the transport stays streamable.
 	placeholder := `{"Authorization":"` + RedactedHeaderValue + `"}`
 	empty := ""
 	row, err := svc.Update(ctx, &existing, MCPServerPatch{TransportType: &empty, Headers: &placeholder})
@@ -156,8 +204,8 @@ func TestMCPServerService_UpdateSequencing(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 	assertEvents(t, f, "store.update remote", "remove remote", "add remote", "discover")
-	if row.TransportType != store.TransportSSE {
-		t.Fatalf("transport = %q, want the stored sse", row.TransportType)
+	if row.TransportType != store.TransportStreamable {
+		t.Fatalf("transport = %q, want the stored streamable", row.TransportType)
 	}
 	if !strings.Contains(f.remote["remote"], "real-token") || !strings.Contains(f.rows["remote"].Headers, "real-token") {
 		t.Fatalf("stored token not carried forward: registered %q, stored %q", f.remote["remote"], f.rows["remote"].Headers)
@@ -271,7 +319,7 @@ func TestMCPServerService_EmptyPatchKeepsEveryField(t *testing.T) {
 			t.Fatalf("store.MCPServerConfig.%s has kind %s; teach this test about it", rv.Type().Field(i).Name, f.Kind())
 		}
 	}
-	existing.TransportType = store.TransportSSE
+	existing.TransportType = store.TransportStreamable
 	existing.Headers = `{"Authorization":"Bearer real-token"}`
 
 	f := newMCPFakes()
@@ -303,5 +351,24 @@ func TestMCPServerService_ExportRedactsEnv(t *testing.T) {
 	}
 	if f.rows["s"].Env != `["TOKEN=real","DEBUG=1"]` {
 		t.Fatalf("export changed the stored env: %s", f.rows["s"].Env)
+	}
+}
+
+func TestMCPServerService_QuarantineLegacyEndpointWithoutRewrite(t *testing.T) {
+	for _, kind := range []string{store.TransportSSE, store.TransportStreamable} {
+		t.Run(kind, func(t *testing.T) {
+			f := newMCPFakes()
+			existing := store.MCPServerConfig{Name: "legacy", TransportType: kind, URL: "http://gateway.invalid/servers/x/sse", Enabled: true}
+			f.rows[existing.Name] = existing
+			off := false
+			row, err := f.service().Update(context.Background(), &existing, MCPServerPatch{Enabled: &off})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row.Enabled || row.URL != existing.URL || row.TransportType != existing.TransportType {
+				t.Fatal("quarantine rewrote protocol or endpoint")
+			}
+			assertEvents(t, f, "store.update legacy", "remove legacy", "discover")
+		})
 	}
 }

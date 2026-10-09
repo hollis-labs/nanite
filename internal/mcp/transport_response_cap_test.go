@@ -14,17 +14,17 @@ import (
 // interface assertion reaching a registered remoteTransport, and that
 // transport forwarding into the pool's connection — still works end to end.
 
-// TestAddSSEServerFromConfig_ResponseCapReachesTheConnection proves the tier
+// TestAddHTTPServerFromConfig_ResponseCapReachesTheConnection proves the tier
 // cap set at registration time actually bounds what the underlying
-// go-mcp/client connection will accept, using the SSE fixture server shared
-// with remote_transport_sse_test.go.
-func TestAddSSEServerFromConfig_ResponseCapReachesTheConnection(t *testing.T) {
-	ts := newSSETestServer(t)
+// go-mcp/client connection will accept, using the Streamable fixture server shared
+// with remote_transport_streamable_test.go.
+func TestAddHTTPServerFromConfig_ResponseCapReachesTheConnection(t *testing.T) {
+	ts := newStreamableTestServer(t)
 	m := NewManager()
 	t.Cleanup(m.Close)
 
-	if err := m.AddSSEServerFromConfig("probe", ts.URL, "", TierThirdPartyHTTP); err != nil {
-		t.Fatalf("AddSSEServerFromConfig: %v", err)
+	if err := m.AddHTTPServerFromConfig("probe", ts.URL+"/mcp", "", TierThirdPartyHTTP); err != nil {
+		t.Fatalf("AddHTTPServerFromConfig: %v", err)
 	}
 
 	m.mu.RLock()

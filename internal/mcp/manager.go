@@ -18,6 +18,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/mcpconfig"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/version"
@@ -66,8 +67,8 @@ type Manager struct {
 	mu                     sync.RWMutex
 
 	// pool is the shared go-mcp/client connection pool backing every
-	// stdio/http/sse server this manager registers (AddStdioServer,
-	// AddHTTPServer*, AddSSEServerFromConfig). remoteTransport (see
+	// stdio/http server this manager registers (AddStdioServer,
+	// AddHTTPServer*). remoteTransport (see
 	// remote_transport.go) is the MCPTransport adapter wrapping it. Plugin
 	// servers (AddPluginServer) and builtins bypass the pool entirely —
 	// they never held an external MCP connection to begin with.
@@ -97,7 +98,7 @@ func NewManager() *Manager {
 			// cannot distinguish "the request never arrived" from "the
 			// reply did not come back", the same reasoning the former SSE
 			// transport already applied. Disabling the Pool's own retry
-			// keeps that policy uniform across stdio/http/sse instead of
+			// keeps that policy uniform across stdio/http instead of
 			// applying it to CallTool only for the kinds that used to have
 			// hand-rolled retry logic.
 			gmcpclient.WithRetries(0),
@@ -142,7 +143,7 @@ func (m *Manager) AddServer(name string, transport MCPTransport, tier TrustTier)
 	m.serverTiers[name] = tier
 
 	// Tighten the transport's response cap to the tier ceiling when the
-	// transport opts in via the SetMaxResponseBytes interface (HTTPTransport
+	// transport opts in via the SetMaxResponseBytes interface (remoteTransport
 	// and StdioTransport do; in-process built-ins don't need to).
 	if setter, ok := transport.(interface{ SetMaxResponseBytes(int) }); ok {
 		setter.SetMaxResponseBytes(LimitsFor(tier).MaxResultBytes)
@@ -273,10 +274,21 @@ func (m *Manager) AddHTTPServer(name, url string, tier TrustTier) error {
 // remoteTransport, rolling the pool registration back if AddServer rejects
 // it (empty name, nil transport is never nil here, or a duplicate name).
 func (m *Manager) registerRemoteServer(name string, cfg gmcpclient.ServerConfig, tier TrustTier) error {
+	kind, ok := normalizeStoredTransport(cfg.Transport)
+	if !ok {
+		if cfg.Transport == gmcpclient.TransportSSE {
+			return mcpconfig.ErrLegacySSE
+		}
+		return fmt.Errorf("unsupported MCP transport %q", cfg.Transport)
+	}
+	if kind == gmcpclient.TransportHTTP {
+		if err := mcpconfig.ValidateTransport(store.TransportStreamable, cfg.URL); err != nil {
+			return err
+		}
+	}
 	if err := m.pool.Register(name, cfg); err != nil {
 		return err
 	}
-	kind, _ := normalizeStoredTransport(cfg.Transport)
 	if err := m.AddServer(name, newRemoteTransport(m.pool, name, kind), tier); err != nil {
 		_ = m.pool.Deregister(name)
 		return err
@@ -295,8 +307,6 @@ func normalizeStoredTransport(transport string) (string, bool) {
 		return gmcpclient.TransportStdio, true
 	case gmcpclient.TransportHTTP:
 		return gmcpclient.TransportHTTP, true
-	case gmcpclient.TransportSSE:
-		return gmcpclient.TransportSSE, true
 	default:
 		return gmcpclient.TransportHTTP, false
 	}
@@ -348,17 +358,16 @@ func ParseHeaderJSON(raw string) (map[string]string, error) {
 // call: two paths that each decide which transport a stored row means is how
 // AddHTTPServerWithHeaders came to sit uncalled for months.
 //
-// store.TransportSSE is the real HTTP+SSE client, which is the only transport
-// that reaches an identity-scoped tool behind some MCP gateways — their /sse
-// path forwards X-Forwarded-User-Email upstream and their /mcp path strips it.
-// store.TransportStreamable is the JSON-RPC POST client, which is what /mcp
-// speaks. An unrecognized value is an error rather than a silent default: a
-// row nobody can register is visible, a row registered against the wrong
-// protocol is not.
+// Only Streamable HTTP is operational. Legacy rows are refused before pool
+// registration; their URL is never rewritten and there is no SSE fallback.
 func (m *Manager) AddRemoteServerFromConfig(name, transportType, url, headerJSON string, tier TrustTier) error {
+	if transportType != store.TransportStreamable && transportType != store.TransportSSE {
+		return fmt.Errorf("mcp: %q: unknown remote transport type %q", name, transportType)
+	}
+	if err := mcpconfig.ValidateTransport(transportType, url); err != nil {
+		return err
+	}
 	switch transportType {
-	case store.TransportSSE:
-		return m.AddSSEServerFromConfig(name, url, headerJSON, tier)
 	case store.TransportStreamable:
 		return m.AddHTTPServerFromConfig(name, url, headerJSON, tier)
 	default:
@@ -366,37 +375,10 @@ func (m *Manager) AddRemoteServerFromConfig(name, transportType, url, headerJSON
 	}
 }
 
-// AddSSEServerFromConfig registers an HTTP+SSE MCP server, with static headers
-// when the stored config carries any. Headers are not optional here the way
-// they are for HTTP: the reason to reach for this transport at all is that it
-// is the one that carries them.
-//
-// Header values are NOT logged — only their key set — so a Bearer token and a
-// forwarded user identity don't leak into structured logs.
+// AddSSEServerFromConfig refuses legacy callers without registering or dialing.
+// Retained configurations require an explicitly verified Streamable endpoint.
 func (m *Manager) AddSSEServerFromConfig(name, url, headerJSON string, tier TrustTier) error {
-	headers, err := ParseHeaderJSON(headerJSON)
-	if err != nil {
-		slog.Warn("mcp: ignoring unusable headers", "name", name, "err", err)
-	}
-	if err := m.registerRemoteServer(name, gmcpclient.ServerConfig{
-		Transport: gmcpclient.TransportSSE,
-		URL:       url,
-		Headers:   headers,
-		// No TimeoutSeconds: the former SSETransport deliberately left the
-		// underlying http.Client.Timeout unset because the stream is
-		// long-lived by design, relying on per-call context deadlines
-		// instead (see defaultCallTimeout in remote_transport.go).
-	}, tier); err != nil {
-		return err
-	}
-	headerKeys := make([]string, 0, len(headers))
-	for k := range headers {
-		headerKeys = append(headerKeys, k)
-	}
-	sort.Strings(headerKeys)
-	slog.Info("mcp: server using SSE transport",
-		"name", name, "url", url, "tier", string(tier), "header_keys", headerKeys)
-	return nil
+	return mcpconfig.ErrLegacySSE
 }
 
 // AddHTTPServerFromConfig registers an HTTP MCP server, with static headers
@@ -417,7 +399,7 @@ func (m *Manager) AddHTTPServerFromConfig(name, url, headerJSON string, tier Tru
 
 // AddHTTPServerWithHeaders registers an HTTP-based MCP server that requires
 // static headers (auth, routing) on every request. The headers map is copied
-// inside NewHTTPTransportWithHeaders. Same error contract as AddHTTPServer.
+// by the shared client pool. Same error contract as AddHTTPServer.
 //
 // Header values are NOT logged — only their key set — so a Bearer token doesn't
 // leak into structured logs. CW-20260501-0005 sub-ticket 2.

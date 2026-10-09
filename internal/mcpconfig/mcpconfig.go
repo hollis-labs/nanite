@@ -20,11 +20,9 @@ type ClaudeCodeConfig struct {
 
 // ServerEntry represents a single MCP server in the .mcp.json format.
 type ServerEntry struct {
-	// Type is the .mcp.json transport discriminator: "stdio", "sse", or
-	// "http". It only has to be read for a URL entry, where "sse" and "http"
-	// are two different wire protocols — without it an exported SSE server
-	// would come back from a re-import as a JSON-RPC POST client, pointed at
-	// an endpoint that does not speak it.
+	// Type is "stdio" or "http" for imported operational configurations.
+	// Export preserves "sse" on legacy rows for inspection and explicit migration;
+	// importing that discriminator is refused without guessing a replacement URL.
 	Type string `json:"type,omitempty"`
 
 	// stdio transport
@@ -53,6 +51,30 @@ func Parse(data []byte) (*ClaudeCodeConfig, error) {
 	if cfg.MCPServers == nil {
 		return nil, fmt.Errorf("parse mcp config: missing mcpServers key")
 	}
+	// Validate the whole payload before Import creates any rows. An unknown
+	// URL transport must not silently become HTTP, nor may a legacy endpoint
+	// be persisted as a newly usable configuration.
+	for name, entry := range cfg.MCPServers {
+		transport := store.TransportStdio
+		switch entry.Type {
+		case store.TransportSSE:
+			transport = store.TransportSSE
+		case "", "http", store.TransportStdio:
+			if entry.URL != "" {
+				if entry.Type == store.TransportStdio {
+					return nil, fmt.Errorf("parse mcp config: server %q: stdio cannot specify a URL", name)
+				}
+				transport = store.TransportStreamable
+			} else if entry.Type == "http" {
+				return nil, fmt.Errorf("parse mcp config: server %q: http requires a URL", name)
+			}
+		default:
+			return nil, fmt.Errorf("parse mcp config: server %q: type must be 'stdio' or 'http'", name)
+		}
+		if err := ValidateTransport(transport, entry.URL); err != nil {
+			return nil, fmt.Errorf("parse mcp config: server %q: %w", name, err)
+		}
+	}
 	return &cfg, nil
 }
 
@@ -66,10 +88,9 @@ func ToStoreConfigs(cfg *ClaudeCodeConfig) []store.MCPServerConfig {
 		}
 
 		if entry.URL != "" {
-			// A URL entry with no type is JSON-RPC over POST. That is what
-			// this importer has always produced, and .mcp.json's own default
-			// for a bare URL: only an explicit "sse" asks for the 2024-11-05
-			// HTTP+SSE transport.
+			// Parsed URL entries use the official Streamable HTTP transport.
+			// Preserve an explicit legacy discriminator if this projection is
+			// called directly; runtime registration refuses it as well.
 			sc.TransportType = store.TransportStreamable
 			if entry.Type == store.TransportSSE {
 				sc.TransportType = store.TransportSSE
@@ -170,7 +191,7 @@ func Export(ctx context.Context, s ExportStore) (*ClaudeCodeConfig, error) {
 			entry.Type = store.TransportSSE
 			entry.URL = sc.URL
 		case store.TransportStreamable:
-			entry.Type = "http" // .mcp.json's name for JSON-RPC over POST
+			entry.Type = "http" // .mcp.json's Streamable HTTP discriminator
 			entry.URL = sc.URL
 		default: // stdio
 			entry.Command = sc.Command

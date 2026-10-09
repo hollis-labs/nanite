@@ -21,15 +21,10 @@ const (
 
 // Transport-type values for MCPServerConfig.TransportType.
 //
-// TransportSSE and TransportStreamable are BOTH remote HTTP transports and the
-// distinction is which wire protocol the URL speaks, not whether it is
-// "streaming": TransportSSE is the 2024-11-05 HTTP+SSE transport (a long-lived
-// GET plus POSTs to an announced endpoint), TransportStreamable is plain
-// JSON-RPC over POST.
-//
-// Until migration 161, "sse" named the POST client — the field had been a
-// misnomer since it was written. It now means what it says, and migration 161
-// rewrites the rows that relied on the old meaning to "streamable".
+// TransportStreamable selects official SDK Streamable HTTP; TransportStdio
+// selects a subprocess. TransportSSE is retained solely to read/export old rows
+// and refuse their activation with explicit migration guidance. No migration
+// rewrites a legacy endpoint or grants a transport access to additional tools.
 const (
 	TransportStdio      = "stdio"
 	TransportSSE        = "sse"
